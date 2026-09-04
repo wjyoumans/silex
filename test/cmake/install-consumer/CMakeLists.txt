@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(SilexInstallConsumer LANGUAGES CXX)
 
-find_package(Silex 0.1.0 EXACT CONFIG REQUIRED)
+find_package(Silex 0.1.1 EXACT CONFIG REQUIRED)
 
 set(_silex_incompatible_source "${CMAKE_CURRENT_BINARY_DIR}/incompatible-source")
 set(_silex_incompatible_build "${CMAKE_CURRENT_BINARY_DIR}/incompatible-build")
@@ -22,7 +22,7 @@ execute_process(
     ERROR_QUIET)
 if(_silex_incompatible_result EQUAL 0)
     message(FATAL_ERROR
-        "Silex 0.1.0 incorrectly accepted an incompatible 0.0.9 request")
+        "Silex 0.1.1 incorrectly accepted an incompatible 0.0.9 request")
 endif()
 
 add_executable(silex-install-consumer main.cpp)

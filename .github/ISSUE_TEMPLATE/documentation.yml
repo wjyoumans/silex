@@ -12,7 +12,7 @@ body:
     attributes:
       label: Relevant page or section
       description: Link the published page or give the repository path and section heading.
-      placeholder: "https://wjyoumans.github.io/silex/0.1.0/getting_started.html"
+      placeholder: "https://wjyoumans.github.io/silex/0.1.1/getting_started.html"
     validations:
       required: true
   - type: dropdown
@@ -21,7 +21,7 @@ body:
       label: Documentation version
       description: Select the documentation version where you found the problem.
       options:
-        - "0.1.0 (stable)"
+        - "0.1.1 (stable)"
         - "Development (dev)"
         - "Repository source (main)"
         - "Other or unsure"

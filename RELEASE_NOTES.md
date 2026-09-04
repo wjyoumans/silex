@@ -1,12 +1,12 @@
-# Silex 0.1.0 release notes
+# Silex 0.1.1 release notes
 
 **Released: 2026-09-03**
 
-Silex 0.1.0 is the first public development-foundation release of the native
+Silex 0.1.1 is the first public development-foundation release of the native
 C++ library. The release is identified by the public
-[`0.1.0` tag](https://github.com/wjyoumans/silex/releases/tag/0.1.0), and its
+[`0.1.1` tag](https://github.com/wjyoumans/silex/releases/tag/0.1.1), and its
 versioned documentation is available at
-<https://wjyoumans.github.io/silex/0.1.0/>.
+<https://wjyoumans.github.io/silex/0.1.1/>.
 
 ## Highlights
 
@@ -23,7 +23,7 @@ number fields over `QQ`, backed by FLINT. The initial public foundation includes
   inputs.
 
 The exact qualified platform, package, and mathematical presentations are in
-the [0.1.0 support matrix](https://wjyoumans.github.io/silex/0.1.0/support_matrix.html).
+the [0.1.1 support matrix](https://wjyoumans.github.io/silex/0.1.1/support_matrix.html).
 The qualified stack is Linux x86_64 with GCC 16, Clang 22, FLINT 3.6, and
 CMake 4.4. CMake 3.20 and FLINT 3.0.0 are declared minima, not qualified
 version ranges.
@@ -70,7 +70,7 @@ Consumers should rebuild against the exact version they use. This release does
 not claim production or long-term-support readiness. See [SUPPORT.md](SUPPORT.md)
 and [SECURITY.md](SECURITY.md) for the best-effort latest-release policies.
 
-## Deferred beyond 0.1.0
+## Deferred beyond 0.1.1
 
 - blanket higher-degree or unlisted quadratic paired class/unit completion;
 - optional-backend installed-package qualification;
@@ -83,6 +83,6 @@ and [SECURITY.md](SECURITY.md) for the best-effort latest-release policies.
 
 Silex is distributed under [GPL-3.0-or-later](LICENSE). Project notices are in
 [NOTICE.md](NOTICE.md). Algorithm lineage and source anchors are documented in
-the [public manual](https://wjyoumans.github.io/silex/0.1.0/algorithms_and_sources.html),
+the [public manual](https://wjyoumans.github.io/silex/0.1.1/algorithms_and_sources.html),
 and third-party attribution and compatible license obligations are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

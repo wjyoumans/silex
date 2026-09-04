@@ -49,7 +49,7 @@ Use direct Sphinx for a channel/version override:
 
 .. code-block:: console
 
-   SILEX_DOCS_RELEASE=0.1.0 SILEX_DOCS_CHANNEL=dev \
+   SILEX_DOCS_RELEASE=0.1.1 SILEX_DOCS_CHANNEL=dev \
      sphinx-build -n -W --keep-going -b html docs build/docs/html
 
 Compiled examples are the executable source of truth for tutorial code.  When

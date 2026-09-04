@@ -1,10 +1,10 @@
-Silex 0.1.0
+Silex 0.1.1
 ===========
 
 This page was built for Silex |silex-release| on the |docs-channel|
 documentation channel.
 
-Silex 0.1.0 is the initial public release.  It provides a native
+Silex 0.1.1 is the initial public release.  It provides a native
 C++20 library for exact algebraic number theory over absolute simple number
 fields over ``QQ``, backed by FLINT.  Highlights include fields, elements,
 orders, ideals, residue arithmetic, exact lattices, finite presentations,
@@ -12,7 +12,7 @@ compact elements, explicit class/unit proof metadata, a failure-atomic paired
 class/unit transaction, and S-class/S-unit publication from proven ordinary
 inputs.
 
-The :doc:`../support_matrix` is the authoritative 0.1.0 platform, package,
+The :doc:`../support_matrix` is the authoritative 0.1.1 platform, package,
 mathematical-support, and limitations contract.  The default FLINT-backed
 configuration is the qualified installed package; optional fplll and flatter
 configurations remain source-tree development options.
@@ -96,10 +96,10 @@ Compatibility and limitations
 
 The 0.x line promises neither source compatibility nor binary ABI
 compatibility.  Consumers should rebuild against the exact Silex release they
-use.  Version 0.1.0 does not claim production or long-term-support readiness,
+use.  Version 0.1.1 does not claim production or long-term-support readiness,
 blanket higher-degree class/unit completion, unconditional GRH proofs,
 installed optional-backend qualification, or C/Python/Sage bindings.
 
 The repository also ships the
-:download:`0.1.0 release notes <../../RELEASE_NOTES.md>`.  The canonical public
-release is identified by the published ``0.1.0`` tag.
+:download:`0.1.1 release notes <../../RELEASE_NOTES.md>`.  The canonical public
+release is identified by the published ``0.1.1`` tag.

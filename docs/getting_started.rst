@@ -213,7 +213,7 @@ published version and channel explicitly:
 
 .. code-block:: console
 
-   SILEX_DOCS_RELEASE=0.1.0 SILEX_DOCS_CHANNEL=stable \
+   SILEX_DOCS_RELEASE=0.1.1 SILEX_DOCS_CHANNEL=stable \
      sphinx-build -n -W --keep-going -b html docs build/docs/html
 
 Use :doc:`reference/module_map` to map installed headers to the conceptual API

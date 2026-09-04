@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/wjyoumans/silex/actions/workflows/ci.yml/badge.svg)](https://github.com/wjyoumans/silex/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/wjyoumans/silex?sort=semver)](https://github.com/wjyoumans/silex/releases/latest)
-[![Documentation](https://img.shields.io/badge/docs-0.1.0-blue)](https://wjyoumans.github.io/silex/0.1.0/)
+[![Documentation](https://img.shields.io/badge/docs-0.1.1-blue)](https://wjyoumans.github.io/silex/0.1.1/)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
 Silex is a native C++20 library for computational algebraic number theory. It
@@ -10,10 +10,10 @@ provides domain objects and algorithms over FLINT-backed exact arithmetic.
 This project is unrelated to the website builder and other software projects
 that also use the name Silex.
 
-Version 0.1.0 is the first public development-foundation release. The 0.x API
+Version 0.1.1 is the first public development-foundation release. The 0.x API
 and object layout may change without source- or binary-compatibility guarantees;
 consumers should rebuild against the exact version they use. See the
-[0.1.0 support matrix](https://wjyoumans.github.io/silex/0.1.0/support_matrix.html)
+[0.1.1 support matrix](https://wjyoumans.github.io/silex/0.1.1/support_matrix.html)
 for the qualified platform, package configuration, mathematical scope, and
 limitations.
 
@@ -39,7 +39,7 @@ GPT-5.6, under the direction and review of William Youmans.
 ## Documentation
 
 - [Documentation home](https://wjyoumans.github.io/silex/)
-- [Stable 0.1.0 documentation](https://wjyoumans.github.io/silex/0.1.0/)
+- [Stable 0.1.1 documentation](https://wjyoumans.github.io/silex/0.1.1/)
 - [Development documentation](https://wjyoumans.github.io/silex/dev/)
 - [Release notes](RELEASE_NOTES.md)
 
@@ -79,7 +79,7 @@ cmake --install build/install --prefix "$PWD/build/install-prefix"
 The installed package exports `Silex::silex`:
 
 ```cmake
-find_package(Silex 0.1.0 EXACT CONFIG REQUIRED)
+find_package(Silex 0.1.1 EXACT CONFIG REQUIRED)
 target_link_libraries(my_program PRIVATE Silex::silex)
 ```
 
@@ -95,9 +95,9 @@ int main() {
 }
 ```
 
-The supported 0.1.0 package is the default FLINT-backed configuration. fplll
+The supported 0.1.1 package is the default FLINT-backed configuration. fplll
 and flatter remain source-tree development options; their installed-package
-configurations are not qualified for 0.1.0.
+configurations are not qualified for 0.1.1.
 
 ## Development
 

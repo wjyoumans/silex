@@ -98,7 +98,7 @@ overhead is measured, and the default FLINT path remains available.  An
 explicit request for an unimplemented backend must fail configuration rather
 than create a no-op build.
 
-Installed optional-backend packages are not qualified for 0.1.0.  A source
+Installed optional-backend packages are not qualified for 0.1.1.  A source
 tree or experimental package must provide the required dependency through
 pkg-config, ``CMAKE_PREFIX_PATH``, or the documented backend root variables.
 

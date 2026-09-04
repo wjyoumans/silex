@@ -15,7 +15,7 @@ upstream behavior, current Silex behavior and tests, then the contracts of the
 FLINT primitives in use.  A source translation does not automatically define
 the public C++ API.
 
-The 0.1.0 foundation was imported from a historical Silex native-library tree.
+The 0.1.1 foundation was imported from a historical Silex native-library tree.
 SHA ``7fdce40f30abbb08e024253347efba0d4e5fcc5a`` is a private archival anchor,
 not an object in the public repository and not a public reproducibility claim.
 Retained translations and adaptations require ``GPL-3.0-or-later``

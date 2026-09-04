@@ -21,7 +21,7 @@ runtime-controlled because it is the user-facing channel and is cheap when
 disabled.  Google Benchmark is a separate build surface; see
 :doc:`benchmarking`.
 
-The 0.1.0 implementation has callback hooks rather than mandatory logging or
+The 0.1.1 implementation has callback hooks rather than mandatory logging or
 profiling dependencies.  spdlog and Tracy are not implemented backends, and
 explicit requests for their unsupported CMake options fail configuration.
 Optional-backend types must not enter installed headers.

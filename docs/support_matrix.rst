@@ -1,8 +1,8 @@
-0.1.0 Support Matrix
+0.1.1 Support Matrix
 ====================
 
 This page is the authoritative support and limitations contract for the tagged
-Silex 0.1.0 release.  "Qualified" below means that the exact configuration or
+Silex 0.1.1 release.  "Qualified" below means that the exact configuration or
 mathematical presentation was part of the release-candidate validation.  It
 does not turn a bounded algorithm into a total one, and callers must still
 handle ``false`` returns without reading unpublished output.
@@ -15,7 +15,7 @@ Qualified native stack
    :widths: 24 28 48
 
    * - Component
-     - Qualified for 0.1.0
+     - Qualified for 0.1.1
      - Boundary
    * - Operating system and architecture
      - Linux x86_64
@@ -38,11 +38,11 @@ Qualified native stack
    * - Optional backends
      - None
      - fplll and flatter remain source-tree development options.  Their
-       installed-package configurations are not supported for 0.1.0.
+       installed-package configurations are not supported for 0.1.1.
 
-The 0.1.0 qualification used GCC 16.1.1, Clang 22.1.8, FLINT 3.6.0, and CMake
+The 0.1.1 qualification used GCC 16.1.1, Clang 22.1.8, FLINT 3.6.0, and CMake
 4.4.2.  The table deliberately states major/minor support while
-:doc:`releases/0.1.0` records the exact patch versions, avoiding any
+:doc:`releases/0.1.1` records the exact patch versions, avoiding any
 implication that untested intervening versions were qualified.
 
 Public mathematical boundary
@@ -75,7 +75,7 @@ Paired class/unit qualification
 
 ``OrderUnitGroup::compute_with_class_group`` accepts only explicit ``proven``
 or ``grh`` requests and requires a maximal absolute order.  The following
-presentations are the conservative 0.1.0 completion matrix under the shipped
+presentations are the conservative 0.1.1 completion matrix under the shipped
 test resource settings:
 
 .. list-table::
@@ -104,7 +104,7 @@ two discriminant ``-3`` presentations above are both regression fixtures for
 that parent/presentation boundary.
 
 Higher-degree paired computation and unlisted quadratic presentations remain
-available as fail-closed best effort, but they have no 0.1.0 completion or
+available as fail-closed best effort, but they have no 0.1.1 completion or
 compatibility guarantee.  Higher-degree native fixtures remain correctness
 regressions for the implemented routes; they do not establish blanket cubic,
 quartic, quintic, or general-degree support.  Nonmaximal paired orders and
@@ -130,7 +130,7 @@ explicit regression presentations: ``QQ``; maximal real-quadratic orders for
 ``x^2 - 2``, ``x^2 - 5``, and ``x^2 - 17345``; the maximal order for
 ``x^2 + 1``; and the equation and maximal orders exercised for ``x^2 + 3``.
 Other rank-zero and quadratic inputs may use the same exact source-backed
-implementation, but are not blanket completion guarantees for 0.1.0.
+implementation, but are not blanket completion guarantees for 0.1.1.
 
 S-class and S-unit publication is supported for a maximal absolute order from
 already ``proven`` ordinary class- and unit-group inputs for that same order,
@@ -140,7 +140,7 @@ paired class/unit completion matrix.
 Unsupported or deferred
 -----------------------
 
-The following are outside the 0.1.0 support contract:
+The following are outside the 0.1.1 support contract:
 
 * source compatibility across 0.x versions and binary ABI compatibility;
 * relative fields, ray class groups, class fields, and general Galois groups;

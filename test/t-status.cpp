@@ -10,10 +10,10 @@ int main() {
     assert(std::strcmp(silex::status_message(silex::Status::not_implemented),
                        "not implemented") == 0);
     assert(silex::version_string() != nullptr);
-    assert(std::strcmp(silex::version_string(), "0.1.0") == 0);
+    assert(std::strcmp(silex::version_string(), "0.1.1") == 0);
     assert(silex::version_major() == 0);
     assert(silex::version_minor() == 1);
-    assert(silex::version_patch() == 0);
+    assert(silex::version_patch() == 1);
     assert(silex::required_flint_version() != nullptr);
     assert(silex::flint_compile_time_version() != nullptr);
     assert(silex::flint_runtime_version() != nullptr);

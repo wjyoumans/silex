@@ -86,7 +86,7 @@ supported roots of unity, lower regulator bounds, supplied-unit log matrices,
 supplied-unit subgroup regulators, supplied-unit independence checks, and
 exact continued-fraction fundamental units for the explicit and canonical
 polynomial-defined ``x^2-d`` real-quadratic routes.  See
-:doc:`../support_matrix` for the presentations qualified for 0.1.0.
+:doc:`../support_matrix` for the presentations qualified for 0.1.1.
 
 Next Steps
 ----------

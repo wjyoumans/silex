@@ -60,7 +60,7 @@ runtime dependencies of the native Silex library.
 Historical Silex import
 -----------------------
 
-The 0.1.0 foundation was imported from a historical native-library tree.  SHA
+The 0.1.1 foundation was imported from a historical native-library tree.  SHA
 ``7fdce40f30abbb08e024253347efba0d4e5fcc5a`` is retained as a **private
 archival anchor** for that import audit.  The object is not part of the public
 repository history and is not a public reproducibility reference.  Publicly

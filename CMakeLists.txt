@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(Silex
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "Native C++20 library for computational algebraic number theory"
     HOMEPAGE_URL "https://github.com/wjyoumans/silex"
     LANGUAGES CXX)

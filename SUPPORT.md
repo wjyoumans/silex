@@ -7,8 +7,8 @@ support commitment.
 
 Before asking for help:
 
-1. Read the [stable documentation](https://wjyoumans.github.io/silex/0.1.0/)
-   and [0.1.0 support matrix](https://wjyoumans.github.io/silex/0.1.0/support_matrix.html).
+1. Read the [stable documentation](https://wjyoumans.github.io/silex/0.1.1/)
+   and [0.1.1 support matrix](https://wjyoumans.github.io/silex/0.1.1/support_matrix.html).
 2. Check the [release notes](RELEASE_NOTES.md) and search existing
    [issues](https://github.com/wjyoumans/silex/issues) and
    [discussions](https://github.com/wjyoumans/silex/discussions).

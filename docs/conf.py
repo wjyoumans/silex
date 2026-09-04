@@ -9,7 +9,7 @@ project = "Silex"
 copyright = "2026, William Youmans and contributors"
 author = "William Youmans and contributors"
 
-release = os.environ.get("SILEX_DOCS_RELEASE", "0.1.0")
+release = os.environ.get("SILEX_DOCS_RELEASE", "0.1.1")
 version_parts = release.split(".")
 version = ".".join(version_parts[:2]) if len(version_parts) >= 2 else release
 
