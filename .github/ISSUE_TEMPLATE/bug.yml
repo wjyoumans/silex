@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible defect in a supported Silex configuration.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve Silex. Do not include sensitive data or vulnerability details; report security issues privately through SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Silex version
+      description: Give the release, tag, or full commit hash.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, architecture, compiler, CMake, FLINT, and relevant build options.
+      placeholder: "Linux x86_64; GCC 16; CMake 4.4; FLINT 3.6; default options"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide exact commands and the smallest source or input that reproduces the problem.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include complete diagnostics, status values, and logs where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add mathematical inputs, source references, or other information that may help investigation.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and discussions for this problem.
+          required: true
+        - label: I checked the support matrix and reproduced this with the latest release where possible.
+          required: true
+        - label: This report contains no secrets, private data, or embargoed vulnerability details.
+          required: true

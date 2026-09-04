@@ -1,0 +1,25 @@
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.gcda
+*.gcno
+.DS_Store
+.vscode/
+.idea/
+
+# Local agent-instruction link
+.agents
+
+# Local Codex/session state
+.codex/

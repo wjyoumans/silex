@@ -1,0 +1,47 @@
+name: native-ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  default:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    steps:
+      - name: Install native dependencies
+        run: >-
+          pacman -Syu --noconfirm
+          benchmark cmake gcc git flint make ninja pkgconf python
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Trust checkout for repository audits
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install pinned documentation dependencies
+        run: |
+          python -m venv .venv-docs
+          .venv-docs/bin/python -m pip install \
+            --disable-pip-version-check -r docs/requirements.txt
+          echo "$PWD/.venv-docs/bin" >> "$GITHUB_PATH"
+      - name: Configure
+        run: >-
+          cmake -S . -B build/ci -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSILEX_BUILD_TESTS=ON
+          -DSILEX_BUILD_RELEASE_TESTS=ON
+          -DSILEX_BUILD_EXAMPLES=ON
+          -DSILEX_BUILD_BENCHMARKS=ON
+          -DSILEX_ENABLE_WERROR=ON
+      - name: Build
+        run: cmake --build build/ci --parallel 2
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure
+      - name: Configure documentation
+        run: cmake --preset docs
+      - name: Build documentation
+        run: cmake --build --preset docs
+      - name: Check documentation links
+        run: cmake --build --preset docs-linkcheck

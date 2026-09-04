@@ -1,0 +1,54 @@
+name: Documentation issue
+description: Report incorrect, unclear, or missing Silex documentation.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve the Silex documentation. Report suspected vulnerabilities privately according to the security policy.
+  - type: input
+    id: page
+    attributes:
+      label: Relevant page or section
+      description: Link the published page or give the repository path and section heading.
+      placeholder: "https://wjyoumans.github.io/silex/0.1.0/getting_started.html"
+    validations:
+      required: true
+  - type: dropdown
+    id: version
+    attributes:
+      label: Documentation version
+      description: Select the documentation version where you found the problem.
+      options:
+        - "0.1.0 (stable)"
+        - "Development (dev)"
+        - "Repository source (main)"
+        - "Other or unsure"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Explain what is incorrect, unclear, missing, or difficult to follow.
+    validations:
+      required: true
+  - type: textarea
+    id: correction
+    attributes:
+      label: Proposed correction
+      description: Describe the wording, example, link, or structural change that would resolve the problem.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and discussions for this documentation problem.
+          required: true
+        - label: I identified the affected page and documentation version as precisely as possible.
+          required: true
+        - label: This report contains no secrets, private data, or embargoed vulnerability details.
+          required: true

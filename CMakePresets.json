@@ -1,0 +1,222 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default",
+      "description": "Default test build.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "SILEX_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "description": "Debug test build.",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "werror",
+      "displayName": "Warnings As Errors",
+      "description": "Debug test build with warnings treated as errors.",
+      "inherits": "debug",
+      "cacheVariables": {
+        "SILEX_ENABLE_WERROR": "ON"
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "displayName": "ASan/UBSan",
+      "description": "Debug test build with AddressSanitizer and UndefinedBehaviorSanitizer.",
+      "inherits": "debug",
+      "cacheVariables": {
+        "SILEX_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "diagnostics",
+      "displayName": "Diagnostics",
+      "description": "Debug test build with debug checks and profiling facades enabled.",
+      "inherits": "debug",
+      "cacheVariables": {
+        "SILEX_ENABLE_DEBUG_CHECKS": "ON",
+        "SILEX_ENABLE_PROFILING": "ON"
+      }
+    },
+    {
+      "name": "benchmarks",
+      "displayName": "Benchmarks",
+      "description": "Release build with required Google Benchmark targets enabled.",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SILEX_BUILD_BENCHMARK_ADAPTERS": "ON",
+        "SILEX_BUILD_BENCHMARKS": "ON",
+        "SILEX_BUILD_RELEASE_TESTS": "ON",
+        "SILEX_ENABLE_LOGGING": "OFF",
+        "SILEX_ENABLE_DEBUG_CHECKS": "OFF",
+        "SILEX_ENABLE_PROFILING": "OFF",
+        "SILEX_ENABLE_SANITIZERS": "OFF",
+        "SILEX_ENABLE_FRAME_POINTERS": "OFF"
+      }
+    },
+    {
+      "name": "docs",
+      "displayName": "Documentation",
+      "description": "Strict Sphinx documentation build.",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SILEX_BUILD_TESTS": "OFF",
+        "SILEX_BUILD_RELEASE_TESTS": "OFF",
+        "SILEX_BUILD_EXAMPLES": "OFF",
+        "SILEX_BUILD_DOCS": "ON",
+        "SILEX_DOCS_CHANNEL": "dev"
+      }
+    },
+    {
+      "name": "profile-release",
+      "displayName": "Profile Release",
+      "description": "RelWithDebInfo build with benchmarks, profiling facade, and frame pointers enabled.",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "SILEX_BUILD_BENCHMARK_ADAPTERS": "ON",
+        "SILEX_BUILD_BENCHMARKS": "ON",
+        "SILEX_ENABLE_PROFILING": "ON",
+        "SILEX_ENABLE_FRAME_POINTERS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "werror",
+      "configurePreset": "werror"
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan"
+    },
+    {
+      "name": "diagnostics",
+      "configurePreset": "diagnostics"
+    },
+    {
+      "name": "benchmarks",
+      "configurePreset": "benchmarks",
+      "configuration": "Release"
+    },
+    {
+      "name": "benchmark-targets",
+      "configurePreset": "benchmarks",
+      "configuration": "Release",
+      "targets": [
+        "benchmarks"
+      ]
+    },
+    {
+      "name": "docs",
+      "configurePreset": "docs",
+      "configuration": "Release",
+      "targets": [
+        "docs-html"
+      ]
+    },
+    {
+      "name": "docs-linkcheck",
+      "configurePreset": "docs",
+      "configuration": "Release",
+      "targets": [
+        "docs-linkcheck"
+      ]
+    },
+    {
+      "name": "profile-release",
+      "configurePreset": "profile-release",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "profile-release-benchmark-targets",
+      "configurePreset": "profile-release",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "benchmarks"
+      ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "werror",
+      "configurePreset": "werror",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1"
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "diagnostics",
+      "configurePreset": "diagnostics",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "benchmarks",
+      "configurePreset": "benchmarks",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "profile-release",
+      "configurePreset": "profile-release",
+      "configuration": "RelWithDebInfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

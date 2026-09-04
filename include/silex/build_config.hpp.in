@@ -1,0 +1,15 @@
+#pragma once
+
+namespace silex::build_config {
+
+inline constexpr const char version[] = "@PROJECT_VERSION@";
+inline constexpr int version_major = @PROJECT_VERSION_MAJOR@;
+inline constexpr int version_minor = @PROJECT_VERSION_MINOR@;
+inline constexpr int version_patch = @PROJECT_VERSION_PATCH@;
+inline constexpr const char required_flint_version[] = "@SILEX_REQUIRED_FLINT_VERSION@";
+inline constexpr const char flint_pkgconfig_version[] = "@FLINT_VERSION@";
+inline constexpr bool have_flint = true;
+inline constexpr bool have_fplll = @SILEX_HAVE_FPLLL@ != 0;
+inline constexpr bool have_flatter = @SILEX_HAVE_FLATTER@ != 0;
+
+}  // namespace silex::build_config

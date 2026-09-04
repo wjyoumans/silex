@@ -1,0 +1,140 @@
+name: documentation-pages
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+env:
+  STABLE_VERSION: "0.1.0"
+
+jobs:
+  build:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Check out development documentation
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Read development version
+        id: development-version
+        shell: bash
+        run: |
+          release="$(awk '$1 == "VERSION" { print $2; exit }' CMakeLists.txt)"
+          if [[ ! "$release" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not read a three-component project version" >&2
+            exit 1
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Detect stable tag
+        id: stable
+        shell: bash
+        run: |
+          if git rev-parse --verify --quiet \
+              "refs/tags/${STABLE_VERSION}^{commit}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install development documentation dependencies
+        run: |
+          python -m venv .venv-docs-dev
+          .venv-docs-dev/bin/python -m pip install \
+            --disable-pip-version-check -r docs/requirements.txt
+
+      - name: Build development documentation
+        env:
+          SILEX_DOCS_RELEASE: ${{ steps.development-version.outputs.release }}
+          SILEX_DOCS_CHANNEL: dev
+        run: >-
+          .venv-docs-dev/bin/sphinx-build
+          -n -W --keep-going -d build/doctrees/dev -b html
+          docs build/pages/dev
+
+      - name: Check out stable documentation
+        if: steps.stable.outputs.exists == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ env.STABLE_VERSION }}
+          path: stable-source
+
+      - name: Install stable documentation dependencies
+        if: steps.stable.outputs.exists == 'true'
+        run: |
+          python -m venv .venv-docs-stable
+          .venv-docs-stable/bin/python -m pip install \
+            --disable-pip-version-check \
+            -r stable-source/docs/requirements.txt
+
+      - name: Build stable documentation
+        if: steps.stable.outputs.exists == 'true'
+        env:
+          SILEX_DOCS_RELEASE: ${{ env.STABLE_VERSION }}
+          SILEX_DOCS_CHANNEL: stable
+        run: >-
+          .venv-docs-stable/bin/sphinx-build
+          -n -W --keep-going -d build/doctrees/stable -b html
+          stable-source/docs build/pages/${STABLE_VERSION}
+
+      - name: Add the root redirect
+        shell: bash
+        run: |
+          if [[ "${{ steps.stable.outputs.exists }}" == "true" ]]; then
+            target="${STABLE_VERSION}/"
+          else
+            target="dev/"
+          fi
+          printf '%s\n' \
+            '<!doctype html>' \
+            '<html lang="en">' \
+            '  <head>' \
+            '    <meta charset="utf-8">' \
+            "    <meta http-equiv=\"refresh\" content=\"0; url=${target}\">" \
+            '    <title>Silex documentation</title>' \
+            '  </head>' \
+            "  <body><a href=\"${target}\">Silex documentation</a></body>" \
+            '</html>' \
+            > build/pages/index.html
+          touch build/pages/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload documentation artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: build/pages
+          include-hidden-files: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a source-backed capability or improvement for Silex.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Public contributions are welcome. Substantial mathematical or API work should be discussed before implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe the mathematical or engineering need and who it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+      description: Describe the desired public behavior without assuming a particular implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Mathematical or technical sources
+      description: Link authoritative algorithms, specifications, or reference implementations when applicable.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe current workarounds or narrower approaches.
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Contribution interest
+      description: Would you be interested in working on this after scope is agreed?
+      options:
+        - "Yes"
+        - "Maybe, with guidance"
+        - "No"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and discussions for this request.
+          required: true
+        - label: I reviewed the current support matrix and deferred scope.
+          required: true

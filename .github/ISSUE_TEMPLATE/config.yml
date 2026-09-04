@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage and design questions
+    url: https://github.com/wjyoumans/silex/discussions
+    about: Ask and answer non-bug questions in GitHub Discussions.
+  - name: Security reports
+    url: https://github.com/wjyoumans/silex/security/advisories/new
+    about: Report suspected vulnerabilities privately; do not open a public issue.
+  - name: Support policy
+    url: https://github.com/wjyoumans/silex/blob/main/SUPPORT.md
+    about: Review supported versions and the information needed for help.

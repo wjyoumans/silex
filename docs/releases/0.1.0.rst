@@ -1,0 +1,105 @@
+Silex 0.1.0
+===========
+
+This page was built for Silex |silex-release| on the |docs-channel|
+documentation channel.
+
+Silex 0.1.0 is the initial public release.  It provides a native
+C++20 library for exact algebraic number theory over absolute simple number
+fields over ``QQ``, backed by FLINT.  Highlights include fields, elements,
+orders, ideals, residue arithmetic, exact lattices, finite presentations,
+compact elements, explicit class/unit proof metadata, a failure-atomic paired
+class/unit transaction, and S-class/S-unit publication from proven ordinary
+inputs.
+
+The :doc:`../support_matrix` is the authoritative 0.1.0 platform, package,
+mathematical-support, and limitations contract.  The default FLINT-backed
+configuration is the qualified installed package; optional fplll and flatter
+configurations remain source-tree development options.
+
+AI-assisted development disclosure
+-----------------------------------
+
+Silex and its companion repositories, `Silex Bench
+<https://github.com/wjyoumans/silex-bench>`_ and `Silex Devtools
+<https://github.com/wjyoumans/silex-devtools>`_, were built almost entirely
+with OpenAI Codex, initially using GPT-5.5 and later GPT-5.6, under the
+direction and review of William Youmans.  Silex Bench provides
+correctness-gated cross-implementation comparisons and performance campaigns;
+these supplement rather than replace Silex's native tests.  Silex Devtools
+provides the maintained Codex implementation, performance, review, and release
+workflows.
+
+Release-candidate qualification record
+--------------------------------------
+
+The release candidate was validated on 2026-09-03 with the following exact
+environment.  Declared package minima are separate from this qualification
+record.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 62
+
+   * - Component
+     - Recorded value
+   * - Host
+     - Linux x86_64
+   * - C++ compilers
+     - GCC 16.1.1 and Clang 22.1.8
+   * - CMake
+     - 4.4.2
+   * - Python
+     - 3.13.15 for CTest tools; 3.14.6 for Sphinx
+   * - FLINT
+     - 3.6.0
+   * - Sphinx
+     - 9.1.0
+
+The default build/test gate was:
+
+.. code-block:: console
+
+   cmake --preset default
+   cmake --build --preset default
+   ctest --preset default
+
+The recorded result is **67 of 67 tests passing**.  The benchmark-enabled
+Release gate, including the benchmark inventory audit and one-iteration
+semantic rows, was:
+
+.. code-block:: console
+
+   cmake --preset benchmarks
+   cmake --build --preset benchmarks
+   ctest --preset benchmarks
+
+The recorded result is **92 of 92 tests passing**.  Documentation validation
+uses the pinned dependency and strict HTML/link-check presets:
+
+.. code-block:: console
+
+   python3 -m pip install -r docs/requirements.txt
+   cmake --preset docs
+   cmake --build --preset docs
+   cmake --build --preset docs-linkcheck
+
+These commands and counts are the release-candidate record, not a general
+claim about every platform.  The final commit object and tag object identifiers
+belong in the immutable GitHub Release metadata: embedding the document's own
+final identifiers in the tracked document would be self-referential.  See
+:doc:`../development/benchmarking` for the semantic and timing-evidence
+policy.
+
+Compatibility and limitations
+------------------------------
+
+The 0.x line promises neither source compatibility nor binary ABI
+compatibility.  Consumers should rebuild against the exact Silex release they
+use.  Version 0.1.0 does not claim production or long-term-support readiness,
+blanket higher-degree class/unit completion, unconditional GRH proofs,
+installed optional-backend qualification, or C/Python/Sage bindings.
+
+The repository also ships the
+:download:`0.1.0 release notes <../../RELEASE_NOTES.md>`.  The canonical public
+release is identified by the published ``0.1.0`` tag.

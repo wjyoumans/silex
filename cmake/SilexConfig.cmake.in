@@ -1,0 +1,63 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(PkgConfig REQUIRED)
+if(NOT TARGET PkgConfig::FLINT)
+    pkg_check_modules(FLINT REQUIRED IMPORTED_TARGET flint>=@SILEX_REQUIRED_FLINT_VERSION@)
+endif()
+if(@SILEX_HAVE_FPLLL@ AND NOT TARGET SilexExternal::fplll)
+    pkg_check_modules(Silex_FPLLL QUIET IMPORTED_TARGET fplll)
+    if(TARGET PkgConfig::Silex_FPLLL)
+        add_library(SilexExternal::fplll INTERFACE IMPORTED)
+        set_target_properties(SilexExternal::fplll PROPERTIES
+            INTERFACE_LINK_LIBRARIES PkgConfig::Silex_FPLLL)
+    else()
+        find_path(Silex_FPLLL_INCLUDE_DIR
+            NAMES fplll/wrapper.h
+            HINTS ${Silex_FPLLL_ROOT} ENV SILEX_FPLLL_ROOT
+            PATH_SUFFIXES include)
+        find_library(Silex_FPLLL_LIBRARY
+            NAMES fplll
+            HINTS ${Silex_FPLLL_ROOT} ENV SILEX_FPLLL_ROOT
+            PATH_SUFFIXES lib lib64)
+        if(NOT Silex_FPLLL_INCLUDE_DIR OR NOT Silex_FPLLL_LIBRARY)
+            set(Silex_FOUND FALSE)
+            set(Silex_NOT_FOUND_MESSAGE
+                "Silex was built with fplll, but its headers or library were not found")
+            return()
+        endif()
+        add_library(SilexExternal::fplll UNKNOWN IMPORTED)
+        set_target_properties(SilexExternal::fplll PROPERTIES
+            IMPORTED_LOCATION "${Silex_FPLLL_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${Silex_FPLLL_INCLUDE_DIR}"
+            INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${Silex_FPLLL_INCLUDE_DIR}")
+    endif()
+endif()
+if(@SILEX_HAVE_FLATTER@ AND NOT TARGET SilexExternal::flatter)
+    find_path(Silex_FLATTER_INCLUDE_DIR
+        NAMES flatter/problems.h
+        HINTS ${Silex_FLATTER_ROOT} ENV SILEX_FLATTER_ROOT
+        PATH_SUFFIXES include)
+    find_library(Silex_FLATTER_LIBRARY
+        NAMES flatter
+        HINTS ${Silex_FLATTER_ROOT} ENV SILEX_FLATTER_ROOT
+        PATH_SUFFIXES lib lib64 build/lib)
+    if(NOT Silex_FLATTER_INCLUDE_DIR OR
+       NOT EXISTS "${Silex_FLATTER_INCLUDE_DIR}/flatter/data/lattice.h" OR
+       NOT Silex_FLATTER_LIBRARY)
+        set(Silex_FOUND FALSE)
+        set(Silex_NOT_FOUND_MESSAGE
+            "Silex was built with flatter, but its headers or library were not found")
+        return()
+    endif()
+    add_library(SilexExternal::flatter UNKNOWN IMPORTED)
+    set_target_properties(SilexExternal::flatter PROPERTIES
+        IMPORTED_LOCATION "${Silex_FLATTER_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Silex_FLATTER_INCLUDE_DIR}"
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${Silex_FLATTER_INCLUDE_DIR}")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/SilexTargets.cmake")
+
+check_required_components(Silex)

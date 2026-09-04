@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use Silex in research, please cite the software using this metadata."
+title: "Silex: A native C++ library for computational algebraic number theory"
+type: software
+authors:
+  - family-names: "Youmans"
+    given-names: "William"
+version: 0.1.0
+date-released: "2026-09-03"
+url: "https://wjyoumans.github.io/silex/"
+repository-code: "https://github.com/wjyoumans/silex"
+license: "GPL-3.0-or-later"
+abstract: >-
+  A native C++20 library for computational algebraic number theory over
+  FLINT-backed exact arithmetic.
+keywords:
+  - "algebraic number theory"
+  - "computer algebra"
+  - "C++"
+  - "FLINT"
