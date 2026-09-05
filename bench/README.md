@@ -79,6 +79,14 @@ Current targets:
 - `b-silex-nf_fac_elt_compact_reconstruction`: coordinate-bound, direct, and
   bounded-CRT compact reconstruction.
 - `b-silex-nf_idl`: ideal factor-over-base operations.
+- `b-silex-nf_idl_multiply`: exact integral ideal products at degrees
+  2, 3, 4, 6, 8, and 12. The second row argument selects scalar (0),
+  principal (1), mixed (2), general HNF (3), square (4), or nonmaximal
+  quadratic (5) inputs. Setup and exhaustive lattice verification are outside
+  timing; presentation extraction is included in each public-operation call.
+- `b-silex-nf_idl_two_generator`: noninstalled component rows for extraction
+  (second argument 0), multiplication with a supplied verified presentation
+  (1), and deliberately exhausted basis-only search (2).
 - `b-silex-nf_prime_idl`: prime-ideal reduction and valuation operations.
 - `b-silex-zeta_bf_linear_factor_count`: finite-field linear-factor kernels.
 - `b-silex-zeta_bf_prime_scratch`: per-prime zeta scratch kernels.

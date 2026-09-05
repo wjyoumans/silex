@@ -3,8 +3,12 @@
 #include <silex/ideal.hpp>
 
 #include "test_support.hpp"
+#include "ideal_product_fixtures.hpp"
+#include "../src/ideal/two_generator_internal.hpp"
 
 #include <cassert>
+#include <cstdio>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -1920,9 +1924,198 @@ int test_keeps_parent_order_alive() {
     return 0;
 }
 
+int test_two_generator_search_contracts() {
+    silex::Order original;
+    silex::Ideal original_left, original_right;
+    assert(silex::test::ideal_product::fixture(original, original_left, original_right, 3, 3));
+    sflint::FmpqMat basis(3, 3), transform(3, 3), changed(3, 3);
+    assert(original.get_basis(sflint::FmpqMatRef(basis)));
+    const slong entries[3][3] = {{7, 5, -21}, {-3, -2, 9}, {-4, -4, 13}};
+    for (slong i = 0; i < 3; ++i)
+        for (slong j = 0; j < 3; ++j)
+            fmpq_set_si(fmpq_mat_entry(transform.raw(), i, j), entries[i][j], 1);
+    sflint::Fmpq determinant;
+    fmpq_mat_det(determinant.raw(), transform.raw());
+    assert(fmpq_is_one(determinant.raw()));
+    fmpq_mat_mul(changed.raw(), transform.raw(), basis.raw());
+    silex::Order order = silex::Order::from_basis(*original.parent(), sflint::FmpqMatConstRef(changed));
+    assert(order.is_defined());
+    // Unimodular change of the already established maximal order.
+    order.set_maximality(true);
+    sflint::FmpqPoly polynomial;
+    silex::test::ideal_product::polynomial(polynomial, 3);
+    silex::Ideal left(order), right(order), rebuilt(order), expected(order), actual(order);
+    assert(silex::test::ideal_product::evaluation_ideal(left, polynomial, 2));
+    assert(silex::test::ideal_product::evaluation_ideal(right, polynomial, 3));
+    silex::OrderElement beta(order);
+    assert(beta.set_si(7));
+    sflint::Fmpz minimum;
+    fmpz_set_si(minimum.raw(), 99);
+    silex::detail::TwoGeneratorSearchReport report;
+    silex::detail::TwoGeneratorSearchOptions options;
+    options.random_trials = 0;
+    assert(!silex::detail::ideal_two_generator(sflint::FmpzRef(minimum), beta, left, options, &report));
+    assert(report.basis_trials > 0 && report.random_trials == 0 && !report.verified);
+    assert(beta.equal_si(7) && fmpz_equal_si(minimum.raw(), 99));
+    sflint::FmpzMat preserved(3, 3), snapshot(3, 3);
+    fmpz_mat_one(preserved.raw());
+    fmpz_mat_set(snapshot.raw(), preserved.raw());
+    assert(!silex::detail::try_ideal_product_hnf(sflint::FmpzMatRef(preserved), left, left, options));
+    assert(fmpz_mat_equal(preserved.raw(), snapshot.raw()));
+    options.random_trials = 32;
+    assert(silex::detail::ideal_two_generator(sflint::FmpzRef(minimum), beta, left, options, &report));
+    assert(report.verified && report.random_trials > 0 && report.random_trials <= 32);
+    assert(fmpz_equal_si(minimum.raw(), 6));
+    assert(silex::detail::set_known_two_generator_ideal(rebuilt, sflint::FmpzConstRef(minimum), beta));
+    assert(rebuilt.equal(left));
+    assert(silex::test::ideal_product::exhaustive_product(expected, left, right));
+    assert(actual.multiply(left, right) && actual.equal(expected));
+    assert(actual.known_principal_generator() == nullptr);
+    assert(right.multiply(left, right) && right.equal(expected));
+
+    // The parent check precedes search and publication.
+    silex::OrderElement wrong_parent(original);
+    assert(wrong_parent.set_si(9));
+    assert(!silex::detail::ideal_two_generator(sflint::FmpzRef(minimum), wrong_parent, left));
+    assert(wrong_parent.equal_si(9) && fmpz_equal_si(minimum.raw(), 6));
+    options.random_trials = 33;
+    assert(!silex::detail::ideal_two_generator(sflint::FmpzRef(minimum), beta, left, options));
+    assert(rebuilt.equal(left));
+    return 0;
+}
+
+int test_general_product_contents_and_fallback() {
+    for (slong kind : {3, 5}) {
+        silex::Order order;
+        silex::Ideal left, right;
+        assert(silex::test::ideal_product::fixture(order, left, right, 2, kind));
+        silex::Ideal expected(order), scaled_left(order), scaled_right(order), result(order);
+        assert(silex::test::ideal_product::exhaustive_product(expected, left, right));
+        sflint::FmpzMat h(2, 2), k(2, 2), expected_hnf(2, 2);
+        assert(left.get_hnf(sflint::FmpzMatRef(h)));
+        assert(right.get_hnf(sflint::FmpzMatRef(k)));
+        assert(expected.get_hnf(sflint::FmpzMatRef(expected_hnf)));
+        sflint::Fmpz content;
+        fmpz_one(content.raw());
+        fmpz_mul_2exp(content.raw(), content.raw(), 80);
+        fmpz_add_ui(content.raw(), content.raw(), 7);
+        fmpz_mat_scalar_mul_fmpz(h.raw(), h.raw(), content.raw());
+        fmpz_mat_scalar_mul_si(k.raw(), k.raw(), 3);
+        assert(scaled_left.set_hnf(sflint::FmpzMatConstRef(h)));
+        assert(scaled_right.set_hnf(sflint::FmpzMatConstRef(k)));
+        fmpz_mul_ui(content.raw(), content.raw(), 3);
+        fmpz_mat_scalar_mul_fmpz(expected_hnf.raw(), expected_hnf.raw(), content.raw());
+        assert(expected.set_hnf(sflint::FmpzMatConstRef(expected_hnf)));
+        assert(result.multiply(scaled_left, scaled_right) && result.equal(expected));
+        assert(scaled_right.multiply(scaled_left, scaled_right) && scaled_right.equal(expected));
+
+        silex::FractionalIdeal a(order), b(order), product(order), rational_expected(order);
+        sflint::Fmpz denominator;
+        fmpz_set_ui(denominator.raw(), 6);
+        assert(a.set_integral_den(left, sflint::FmpzConstRef(denominator)));
+        fmpz_set_ui(denominator.raw(), 10);
+        assert(b.set_integral_den(right, sflint::FmpzConstRef(denominator)));
+        assert(silex::test::ideal_product::exhaustive_product(expected, left, right));
+        fmpz_set_ui(denominator.raw(), 60);
+        assert(rational_expected.set_integral_den(expected, sflint::FmpzConstRef(denominator)));
+        assert(product.multiply(a, b) && product.equal(rational_expected));
+        assert(a.multiply(a, b) && a.equal(rational_expected));
+    }
+    return 0;
+}
+
+int test_nonprincipal_product_and_associativity() {
+    sflint::FmpqPoly f;
+    poly_x2_minus(f, -5);
+    silex::NumberField field = field_by_polynomial(f);
+    silex::Order equation = silex::Order::equation_order(field), order(field);
+    assert(order.maximal_order(equation));
+    silex::Element theta(field), shifted(field);
+    silex::OrderElement beta(order), two(order);
+    sflint::Fmpz p;
+    fmpz_set_ui(p.raw(), 2);
+    assert(theta.gen() && shifted.add_si(theta, 1) && beta.set_element(shifted));
+    silex::Ideal ideal(order), square(order), expected(order), left(order), right(order);
+    // (2, 1+theta) in discriminant -20 has norm 2 and is nonprincipal:
+    // a^2+5b^2=2 has no integral solutions. Its square is (2).
+    assert(silex::detail::set_known_two_generator_ideal(ideal, sflint::FmpzConstRef(p), beta));
+    sflint::Fmpz norm;
+    assert(ideal.norm(sflint::FmpzRef(norm)) && fmpz_equal_ui(norm.raw(), 2));
+    assert(two.set_si(2) && expected.set_principal(two));
+    assert(square.multiply(ideal, ideal) && square.equal(expected));
+    assert(left.multiply(square, ideal));
+    assert(right.multiply(ideal, square) && right.equal(left));
+    assert(square.set(ideal) && square.multiply(square, square) && square.equal(expected));
+    return 0;
+}
+
+// Noninstalled differential-test output, in the common polynomial power basis.
+int dump_product_fixtures() {
+    for (slong degree : {2, 3, 4, 6, 8, 12}) {
+        for (slong kind = 0; kind < 5; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            silex::Ideal product(order);
+            assert(product.multiply(left, right));
+            sflint::FmpzMat h(degree, degree);
+            sflint::FmpqMat basis(degree, degree), rows(degree, degree), coordinates(degree, degree);
+            assert(product.get_hnf(sflint::FmpzMatRef(h)));
+            assert(order.get_basis(sflint::FmpqMatRef(basis)));
+            fmpq_mat_set_fmpz_mat(rows.raw(), h.raw());
+            fmpq_mat_mul(coordinates.raw(), rows.raw(), basis.raw());
+            std::printf("%ld %ld [", degree, kind);
+            for (slong i = 0; i < degree; ++i) {
+                if (i) std::printf(";");
+                for (slong j = 0; j < degree; ++j) {
+                    if (j) std::printf(",");
+                    fmpq_print(fmpq_mat_entry(coordinates.raw(), i, j));
+                }
+            }
+            std::printf("]\n");
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--dump-product-fixtures")
+        return dump_product_fixtures();
+    assert(argc == 1);
+    assert(test_two_generator_search_contracts() == 0);
+    assert(test_general_product_contents_and_fallback() == 0);
+    assert(test_nonprincipal_product_and_associativity() == 0);
+    for (slong degree : {2, 3, 4, 6, 8, 12}) {
+        for (slong kind = 0; kind < 5; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            silex::Ideal expected(order), product(order), reversed(order);
+            assert(silex::test::ideal_product::exhaustive_product(expected, left, right));
+            assert(product.multiply(left, right));
+            if (!product.equal(expected)) {
+                std::fprintf(stderr, "product mismatch: degree=%ld kind=%ld\n", degree, kind);
+                sflint::FmpzMat actual(degree, degree), wanted(degree, degree);
+                assert(product.get_hnf(sflint::FmpzMatRef(actual)));
+                assert(expected.get_hnf(sflint::FmpzMatRef(wanted)));
+                fmpz_mat_print_pretty(actual.raw());
+                fmpz_mat_print_pretty(wanted.raw());
+                std::fflush(stdout);
+            }
+            assert(product.equal(expected));
+            assert(reversed.multiply(right, left));
+            assert(reversed.equal(expected));
+            if (kind == 4) {
+                assert(reversed.set(left));
+                assert(reversed.multiply(reversed, reversed));
+                assert(reversed.equal(expected));
+            }
+            assert(left.multiply(left, right));
+            assert(left.equal(expected));
+        }
+    }
     assert(test_degree_one_integral_arithmetic() == 0);
     assert(test_integral_arithmetic_nongalois_cubic() == 0);
     assert(test_integral_cubic_swap_and_self_set() == 0);

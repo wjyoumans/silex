@@ -9,6 +9,8 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/lat.hpp>
 
+#include "two_generator_internal.hpp"
+
 #include <utility>
 #include <vector>
 
@@ -39,26 +41,10 @@ void copy_row(flint::FmpzMatRef out,
     }
 }
 
-bool order_element_multiplication_matrix(
-        flint::FmpzMatRef out,
-        Order& order,
-        const OrderElement& element) noexcept {
-    const Order* element_parent = element.parent();
-    const slong n = order.degree();
-    if (element_parent == nullptr ||
-        !element_parent->has_same_data(order) ||
-        !fmpz_mat_shape(out, n, n)) {
-        return false;
-    }
-
-    flint::FmpzMat element_coords(1, n);
-    flint::FmpzMat multiplication_table(n * n, n);
-    if (!element.get_coordinates(flint::FmpzMatRef(element_coords)) ||
-        !order.multiplication_table(
-                flint::FmpzMatRef(multiplication_table))) {
-        return false;
-    }
-
+void multiplication_from_coordinates(
+        flint::FmpzMatRef out, flint::FmpzMatConstRef element_coords,
+        flint::FmpzMatConstRef multiplication_table) noexcept {
+    const slong n = fmpz_mat_ncols(out.raw());
     fmpz_mat_zero(out.raw());
     for (slong basis_index = 0; basis_index < n; ++basis_index) {
         for (slong coeff_index = 0; coeff_index < n; ++coeff_index) {
@@ -77,6 +63,23 @@ bool order_element_multiplication_matrix(
             }
         }
     }
+}
+
+bool order_element_multiplication_matrix(
+        flint::FmpzMatRef out,
+        Order& order,
+        const OrderElement& element) noexcept {
+    const Order* element_parent = element.parent();
+    const slong n = order.degree();
+    if (element_parent == nullptr ||
+        !element_parent->has_same_data(order) ||
+        !fmpz_mat_shape(out, n, n)) return false;
+    flint::FmpzMat element_coords(1, n);
+    flint::FmpzMat multiplication_table(n * n, n);
+    if (!element.get_coordinates(flint::FmpzMatRef(element_coords)) ||
+        !order.multiplication_table(flint::FmpzMatRef(multiplication_table))) return false;
+    multiplication_from_coordinates(out, flint::FmpzMatConstRef(element_coords),
+                                    flint::FmpzMatConstRef(multiplication_table));
     return true;
 }
 
@@ -844,6 +847,20 @@ bool Ideal::multiply(const Ideal& left, const Ideal& right) noexcept {
         return set(left);
     }
 
+    if (!parent_.is_maximal() && !left.has_principal_generator_ &&
+        !right.has_principal_generator_) return multiply_generic(left, right);
+    flint::FmpzMat fast_hnf(parent_.degree(), parent_.degree());
+    if (detail::try_ideal_product_hnf(flint::FmpzMatRef(fast_hnf), left, right)) {
+        Ideal candidate(parent_);
+        if (candidate.set_hnf_direct(flint::FmpzMatConstRef(fast_hnf))) {
+            swap(candidate);
+            return true;
+        }
+    }
+    return multiply_generic(left, right);
+}
+
+bool Ideal::multiply_generic(const Ideal& left, const Ideal& right) noexcept {
     const slong n = parent_.degree();
     Ideal candidate(parent_);
     OrderElement product(parent_);
@@ -985,6 +1002,252 @@ bool Ideal::set_known_ideal_rows(flint::FmpzMatConstRef rows) noexcept {
 
 namespace detail {
 
+namespace {
+
+class IdealSearchRandom {
+public:
+    IdealSearchRandom() noexcept {
+        flint_rand_init(state_);
+        flint_rand_set_seed(state_, 0x53494c45UL, 0x58UL);
+    }
+    ~IdealSearchRandom() noexcept { flint_rand_clear(state_); }
+    IdealSearchRandom(const IdealSearchRandom&) = delete;
+    IdealSearchRandom& operator=(const IdealSearchRandom&) = delete;
+    void coefficient(fmpz_t out, const fmpz_t modulus) noexcept {
+        fmpz_randm(out, state_, modulus);
+    }
+private:
+    flint_rand_t state_;
+};
+
+bool scalar_hnf(flint::FmpzMatConstRef h) noexcept {
+    const slong n = fmpz_mat_nrows(h.raw());
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            if (i == j) {
+                if (!fmpz_equal(fmpz_mat_entry(h.raw(), i, j),
+                                fmpz_mat_entry(h.raw(), 0, 0))) return false;
+            } else if (!fmpz_is_zero(fmpz_mat_entry(h.raw(), i, j))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void primitive_hnf(flint::FmpzMat& h, flint::Fmpz& content) noexcept {
+    fmpz_zero(content.raw());
+    for (slong i = 0; i < fmpz_mat_nrows(h.raw()); ++i) {
+        for (slong j = 0; j < fmpz_mat_ncols(h.raw()); ++j) {
+            fmpz_gcd(content.raw(), content.raw(), fmpz_mat_entry(h.raw(), i, j));
+        }
+    }
+    fmpz_mat_scalar_divexact_fmpz(h.raw(), h.raw(), content.raw());
+}
+
+bool ideal_minimum(flint::Fmpz& minimum, flint::FmpzMatConstRef coordinates,
+                   flint::FmpzMatConstRef h) noexcept {
+    // Source: assure_has_minimum solves in the ideal basis when 1 is not the
+    // first order-basis element. Here H is row HNF, so solve H^t x = [1]_O^t.
+    const slong n = fmpz_mat_ncols(h.raw());
+    flint::FmpzMat transposed(n, n), rhs(n, 1), solution(n, 1);
+    flint::Fmpz denominator, common;
+    fmpz_mat_transpose(transposed.raw(), h.raw());
+    fmpz_mat_transpose(rhs.raw(), coordinates.raw());
+    if (!fmpz_mat_solve(solution.raw(), denominator.raw(), transposed.raw(), rhs.raw())) {
+        return false;
+    }
+    fmpz_set(common.raw(), denominator.raw());
+    for (slong i = 0; i < n; ++i) {
+        fmpz_gcd(common.raw(), common.raw(), fmpz_mat_entry(solution.raw(), i, 0));
+    }
+    fmpz_divexact(minimum.raw(), denominator.raw(), common.raw());
+    fmpz_abs(minimum.raw(), minimum.raw());
+    return fmpz_sgn(minimum.raw()) > 0;
+}
+
+void two_generator_rows(flint::FmpzMat& rows, flint::FmpzMatConstRef h,
+                        flint::FmpzConstRef scalar,
+                        flint::FmpzMatConstRef multiplication) noexcept {
+    const slong n = fmpz_mat_ncols(h.raw());
+    flint::FmpzMatWindow scalar_rows(rows, 0, 0, n, n);
+    flint::FmpzMatWindow element_rows(rows, n, 0, 2 * n, n);
+    fmpz_mat_scalar_mul_fmpz(scalar_rows.raw(), h.raw(), scalar.raw());
+    fmpz_mat_mul(element_rows.raw(), h.raw(), multiplication.raw());
+}
+
+bool extract_two_generator(flint::FmpzMat& coordinates,
+                           flint::FmpzMat& multiplication,
+                           Order& order, flint::FmpzMatConstRef h,
+                           const flint::Fmpz& minimum,
+                           const TwoGeneratorSearchOptions& options,
+                           TwoGeneratorSearchReport& report) noexcept {
+    // Source: base4.c:get_random_a / ok_elt. Reduce multiplication matrices
+    // modulo a, and accept only HNF([a I; M_beta]) == H. Unlike the source's
+    // unbounded loop, exhaustion returns to the exact basis-product algorithm.
+    const slong n = order.degree();
+    flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n), reduced(2 * n, n);
+    flint::FmpzMat table(n * n, n);
+    if (!order.multiplication_table(flint::FmpzMatRef(table))) return false;
+    std::vector<flint::FmpzMat> basis_rows;
+    std::vector<flint::FmpzMat> basis_matrices;
+    const auto verifies = [&]() noexcept {
+        fmpz_mat_zero(rows.raw());
+        for (slong i = 0; i < n; ++i) {
+            fmpz_set(fmpz_mat_entry(rows.raw(), i, i), minimum.raw());
+            copy_row(flint::FmpzMatRef(rows), n + i,
+                     flint::FmpzMatConstRef(matrix), i);
+        }
+        fmpz_mat_hnf(reduced.raw(), rows.raw());
+        flint::FmpzMatConstWindow top(reduced, 0, 0, n, n);
+        return fmpz_mat_equal(top.raw(), h.raw()) != 0;
+    };
+    const auto publish = [&]() noexcept {
+        // Modular matrices certify the presentation only. Entrywise reduction
+        // does not preserve the action on the other ideal in a product.
+        multiplication_from_coordinates(flint::FmpzMatRef(matrix),
+                flint::FmpzMatConstRef(row), flint::FmpzMatConstRef(table));
+        coordinates.swap(row);
+        multiplication.swap(matrix);
+        report.verified = true;
+        return true;
+    };
+    for (slong i = 0; i < n; ++i) {
+        copy_row(flint::FmpzMatRef(row), 0, h, i);
+        multiplication_from_coordinates(flint::FmpzMatRef(matrix),
+                flint::FmpzMatConstRef(row), flint::FmpzMatConstRef(table));
+        fmpz_mat_scalar_mod_fmpz(matrix.raw(), matrix.raw(), minimum.raw());
+        if (fmpz_mat_is_zero(matrix.raw())) continue;
+        if (options.basis_candidates) {
+            ++report.basis_trials;
+            if (verifies()) return publish();
+        }
+        basis_rows.emplace_back(1, n);
+        basis_matrices.emplace_back(n, n);
+        fmpz_mat_set(basis_rows.back().raw(), row.raw());
+        fmpz_mat_set(basis_matrices.back().raw(), matrix.raw());
+    }
+    if (basis_rows.empty()) {
+        // The scalar ideal (a) has the valid presentation (a, 0).
+        fmpz_mat_zero(row.raw());
+        fmpz_mat_zero(matrix.raw());
+        return verifies() && publish();
+    }
+    IdealSearchRandom random;
+    flint::Fmpz coefficient;
+    for (slong trial = 0; trial < options.random_trials; ++trial) {
+        ++report.random_trials;
+        fmpz_mat_zero(row.raw());
+        fmpz_mat_zero(matrix.raw());
+        for (std::size_t k = 0; k < basis_rows.size(); ++k) {
+            random.coefficient(coefficient.raw(), minimum.raw());
+            for (slong j = 0; j < n; ++j) {
+                fmpz_addmul(fmpz_mat_entry(row.raw(), 0, j), coefficient.raw(),
+                            fmpz_mat_entry(basis_rows[k].raw(), 0, j));
+                for (slong i = 0; i < n; ++i) {
+                    fmpz_addmul(fmpz_mat_entry(matrix.raw(), i, j), coefficient.raw(),
+                                fmpz_mat_entry(basis_matrices[k].raw(), i, j));
+                }
+            }
+        }
+        fmpz_mat_scalar_mod_fmpz(row.raw(), row.raw(), minimum.raw());
+        fmpz_mat_scalar_mod_fmpz(matrix.raw(), matrix.raw(), minimum.raw());
+        if (!fmpz_mat_is_zero(matrix.raw()) && verifies()) return publish();
+    }
+    return false;
+}
+
+}  // namespace
+
+bool ideal_two_generator(flint::FmpzRef scalar, OrderElement& element,
+                         const Ideal& ideal,
+                         const TwoGeneratorSearchOptions& options,
+                         TwoGeneratorSearchReport* output_report) noexcept {
+    TwoGeneratorSearchReport report;
+    if (output_report != nullptr) *output_report = report;
+    const Order* parent = ideal.parent();
+    if (scalar.raw() == nullptr || parent == nullptr || !ideal.has_hnf() ||
+        !parent->is_maximal() || element.parent() == nullptr ||
+        !element.parent()->has_same_data(*parent) || options.random_trials < 0 ||
+        options.random_trials > 32) return false;
+    Order order(*parent);
+    const slong n = order.degree();
+    flint::FmpzMat h(n, n), row(1, n), matrix(n, n);
+    flint::Fmpz minimum;
+    OrderElement one(order);
+    if (!ideal.get_hnf(flint::FmpzMatRef(h)) ||
+        !one.one() || !one.get_coordinates(flint::FmpzMatRef(row)) ||
+        !ideal_minimum(minimum, flint::FmpzMatConstRef(row), flint::FmpzMatConstRef(h))) return false;
+    const bool found = extract_two_generator(row, matrix, order,
+            flint::FmpzMatConstRef(h), minimum, options, report);
+    if (output_report != nullptr) *output_report = report;
+    OrderElement candidate(order);
+    if (!found || !candidate.set_coordinates(flint::FmpzMatConstRef(row))) return false;
+    fmpz_set(scalar.raw(), minimum.raw());
+    element.swap(candidate);
+    return true;
+}
+
+bool try_ideal_product_hnf(flint::FmpzMatRef out, const Ideal& left,
+                           const Ideal& right,
+                           const TwoGeneratorSearchOptions& options,
+                           TwoGeneratorSearchReport* output_report) noexcept {
+    TwoGeneratorSearchReport report;
+    if (output_report != nullptr) *output_report = report;
+    const Order* parent = left.parent();
+    if (parent == nullptr || right.parent() == nullptr ||
+        !parent->has_same_data(*right.parent()) || !left.has_hnf() || !right.has_hnf() ||
+        !fmpz_mat_shape(out, parent->degree(), parent->degree()) ||
+        options.random_trials < 0 || options.random_trials > 32) return false;
+    const slong n = parent->degree();
+    flint::FmpzMat h(n, n), k(n, n), result(n, n);
+    if (!left.get_hnf(flint::FmpzMatRef(h)) || !right.get_hnf(flint::FmpzMatRef(k))) return false;
+    if (scalar_hnf(flint::FmpzMatConstRef(h))) {
+        fmpz_mat_scalar_mul_fmpz(result.raw(), k.raw(), fmpz_mat_entry(h.raw(), 0, 0));
+    } else if (scalar_hnf(flint::FmpzMatConstRef(k))) {
+        fmpz_mat_scalar_mul_fmpz(result.raw(), h.raw(), fmpz_mat_entry(k.raw(), 0, 0));
+    } else if (left.known_principal_generator() != nullptr ||
+               right.known_principal_generator() != nullptr) {
+        const bool use_left = left.known_principal_generator() != nullptr;
+        const OrderElement* generator = use_left ? left.known_principal_generator()
+                                                : right.known_principal_generator();
+        Element multiplier(*parent->parent());
+        Ideal product(*parent);
+        if (!generator->get_element(multiplier) ||
+            !multiply_integral_ideal_by_element(product, use_left ? right : left, multiplier) ||
+            !product.get_hnf(flint::FmpzMatRef(result))) return false;
+    } else {
+        if (!parent->is_maximal()) return false;
+        Order order(*parent);
+        flint::Fmpz ch, ck, mh, mk;
+        primitive_hnf(h, ch);
+        primitive_hnf(k, ck);
+        flint::FmpzMat one_coordinates(1, n);
+        OrderElement one(order);
+        if (!one.one() || !one.get_coordinates(flint::FmpzMatRef(one_coordinates)) ||
+            !ideal_minimum(mh, flint::FmpzMatConstRef(one_coordinates), flint::FmpzMatConstRef(h)) ||
+            !ideal_minimum(mk, flint::FmpzMatConstRef(one_coordinates), flint::FmpzMatConstRef(k))) return false;
+        if (fmpz_cmp(mh.raw(), mk.raw()) < 0) {
+            h.swap(k);
+            mh.swap(mk);
+        }
+        // Extract from k (the smaller minimum; right wins ties).
+        flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n), reduced(2 * n, n);
+        const bool found = extract_two_generator(row, matrix, order,
+                flint::FmpzMatConstRef(k), mk, options, report);
+        if (output_report != nullptr) *output_report = report;
+        if (!found) return false;
+        two_generator_rows(rows, flint::FmpzMatConstRef(h),
+                           flint::FmpzConstRef(mk), flint::FmpzMatConstRef(matrix));
+        fmpz_mat_hnf(reduced.raw(), rows.raw());
+        flint::FmpzMatConstWindow top(reduced, 0, 0, n, n);
+        fmpz_mul(ch.raw(), ch.raw(), ck.raw());
+        fmpz_mat_scalar_mul_fmpz(result.raw(), top.raw(), ch.raw());
+    }
+    fmpz_mat_set(out.raw(), result.raw());
+    return true;
+}
+
 bool set_known_two_generator_ideal(
         Ideal& out,
         flint::FmpzConstRef scalar_generator,
@@ -1060,12 +1323,8 @@ bool multiply_integral_ideal_by_two_generator(
         return false;
     }
 
-    flint::FmpzMatWindow scalar_rows(rows, 0, 0, n, n);
-    flint::FmpzMatWindow element_rows(rows, n, 0, 2 * n, n);
-    fmpz_mat_scalar_mul_fmpz(scalar_rows.raw(), ideal.hnf_.raw(),
-                             scalar_generator.raw());
-    fmpz_mat_mul(element_rows.raw(), ideal.hnf_.raw(),
-                 element_multiplication.raw());
+    two_generator_rows(rows, flint::FmpzMatConstRef(ideal.hnf_),
+                       scalar_generator, flint::FmpzMatConstRef(element_multiplication));
 
     Ideal candidate(out.parent_);
     if (!candidate.set_known_ideal_rows(flint::FmpzMatConstRef(rows))) {

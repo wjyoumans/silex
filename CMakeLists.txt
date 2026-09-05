@@ -811,6 +811,12 @@ if(SILEX_BUILD_TESTS)
     silex_apply_target_warnings(t-silex-ideal)
     add_test(NAME silex-ideal COMMAND t-silex-ideal)
     list(APPEND SILEX_TEST_NAMES silex-ideal)
+    add_test(NAME silex-ideal-product-reference
+        COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/test/test_ideal_product_reference.py
+            --exe $<TARGET_FILE:t-silex-ideal>
+            --fixtures ${PROJECT_SOURCE_DIR}/test/data/ideal_product_lattices.json)
+    list(APPEND SILEX_TEST_NAMES silex-ideal-product-reference)
 
     add_executable(t-silex-prime-ideal test/t-prime-ideal.cpp)
     target_link_libraries(t-silex-prime-ideal PRIVATE Silex::silex)

@@ -81,6 +81,31 @@ product, inverse, colon, and normalized numerator/denominator storage.  PARI
 anchors.  Output is published only after validation, so documented failures
 preserve prior caller state.
 
+General ideal multiplication uses PARI 2.17.3
+``src/basemath/base4.c:idealmul_aux``, ``idealmulelt``,
+``get_random_a``, ``ok_elt``, ``idealHNF_mul`` and ``idealHNF_mul_two``
+for scalar/principal handling, content removal, verified two-generator
+extraction and multiplication.  Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Ideal/Ideal.jl:assure_has_minimum`` supplies the
+coordinate-solve treatment of order bases whose first element is not one.
+Silex uses row HNF throughout, so upstream column indices are not copied.
+
+The extraction checks equality of the complete ideal lattice, not merely
+norm equality.  Reduced multiplication matrices are used only during search;
+the exact multiplication matrix is reconstructed before forming the product.
+Search tries basis generators and at most 32 reproducibly seeded random
+combinations.  This finite budget is a Silex resource-policy deviation from
+the upstream unbounded search, not a completeness claim.  Exhaustion falls
+back to the original exhaustive basis-product algorithm.  General extraction
+requires a known maximal order; scalar and known-principal arithmetic retain
+their existing order scope.  Witnesses are operation-local, with no new
+public cache, normalization, certification or failure-publication contract.
+The fixed general-product lattices in ``test/data/ideal_product_lattices.json``
+were checked in a common polynomial power basis against PARI/GP 2.17.4;
+representative quadratic, cubic and quartic products were also checked with
+Hecke v0.39.19.  These executable comparison versions are distinct from the
+algorithm-source versions above.
+
 Local algebra and relations
 ---------------------------
 

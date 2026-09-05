@@ -36,6 +36,8 @@ EXPECTED_TARGETS = {
     "b-silex-nf_fac_elt",
     "b-silex-nf_fac_elt_compact_reconstruction",
     "b-silex-nf_idl",
+    "b-silex-nf_idl_multiply",
+    "b-silex-nf_idl_two_generator",
     "b-silex-nf_ord_maximal_order",
     "b-silex-nf_ord_pmaximal_overorder",
     "b-silex-nf_prime_idl",

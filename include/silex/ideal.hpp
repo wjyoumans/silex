@@ -79,6 +79,7 @@ public:
     bool multiplier_ring(Order& out) const noexcept;
 
 private:
+    bool multiply_generic(const Ideal& left, const Ideal& right) noexcept;
     bool set_hnf_direct(flint::FmpzMatConstRef hnf) noexcept;
     bool set_rows(flint::FmpzMatConstRef rows) noexcept;
     bool set_known_ideal_rows(flint::FmpzMatConstRef rows) noexcept;

@@ -33,6 +33,11 @@ remain available from the corresponding PARI/GP source distribution.
 PARI/GP is a source-lineage and comparison baseline; Silex does not require a
 PARI/GP runtime for its native library.
 
+The general ideal-product path adapts `base4.c` scalar/principal dispatch,
+content removal, `get_random_a`/`ok_elt` generator verification, and
+`idealHNF_mul_two`. The finite search budget and exact fallback are Silex
+policy; the detailed algorithm map records these deviations.
+
 ## Hecke.jl
 
 Selected behavior and algorithm lineage use two fixed public Hecke.jl sources:
@@ -47,6 +52,9 @@ Selected behavior and algorithm lineage use two fixed public Hecke.jl sources:
 
 Hecke.jl is a source and comparison baseline, not a native-library runtime
 dependency.
+
+The arbitrary-order-basis ideal minimum calculation follows v0.38.6
+`src/NumFieldOrd/NfOrd/Ideal/Ideal.jl:assure_has_minimum`.
 
 Unless otherwise specified in a file, Hecke is licensed under the BSD 2-Clause
 "Simplified" License.
