@@ -1,5 +1,7 @@
 #include <silex/lat.hpp>
 
+#include "lll_internal.hpp"
+
 #include <silex/diagnostics.hpp>
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arb_mat.hpp>
@@ -828,6 +830,41 @@ bool Lat::saturate(Lat& out, flint::FmpzConstRef p) const noexcept {
     return true;
 }
 
+detail::LllRoute detail::reduce_normalized_basis(flint::FmpzMatRef reduced,
+        flint::FmpzMatConstRef input, LllTestFailure failure) noexcept {
+    const slong rows = fmpz_mat_nrows(input.raw());
+    const slong cols = fmpz_mat_ncols(input.raw());
+    flint::FmpzMat transform(rows, rows);
+    flint::FmpzLll config;
+    fmpz_mat_set(reduced.raw(), input.raw());
+    bool eligible = rows >= 2 && rows <= 14 && cols <= 14;
+    if (eligible) {
+        const slong bits = fmpz_mat_max_bits(input.raw());
+        eligible = bits >= -250 && bits <= 250;
+    }
+    if (eligible) {
+        // Same initial phase as the default knapsack wrapper. Its return
+        // value is a status, not a certificate (nor a rank with no removal).
+        int status = fmpz_lll_d_with_removal_knapsack(
+                reduced.raw(), transform.raw(), nullptr, config.raw());
+        if (failure != LllTestFailure::none) {
+            // Exercise restoration after mutation, not just early rejection.
+            fmpz_mat_zero(reduced.raw());
+            if (failure == LllTestFailure::reducer) {
+                status = -1;
+            }
+        }
+        if (status != -1 && fmpz_mat_is_reduced(reduced.raw(),
+                    config.raw()->delta, config.raw()->eta)) {
+            return LllRoute::certified;
+        }
+        fmpz_mat_set(reduced.raw(), input.raw());
+        fmpz_mat_zero(transform.raw());
+    }
+    fmpz_lll(reduced.raw(), transform.raw(), config.raw());
+    return eligible ? LllRoute::fallback : LllRoute::ineligible;
+}
+
 bool Lat::lll_reduce(Lat& out) const noexcept {
     Lat hnf_lattice(ambient_dim_);
     Lat tmp(ambient_dim_);
@@ -843,11 +880,7 @@ bool Lat::lll_reduce(Lat& out) const noexcept {
 
     flint::FmpzMat reduced(flint::fmpz_mat_nrows(hnf_lattice.basis_),
             flint::fmpz_mat_ncols(hnf_lattice.basis_));
-    flint::FmpzMat transform(r, r);
-    fmpz_mat_set(reduced.raw(), hnf_lattice.basis_.raw());
-
-    silex::flint::FmpzLll config;
-    fmpz_lll(reduced.raw(), transform.raw(), config.raw());
+    detail::reduce_normalized_basis(reduced, hnf_lattice.basis_);
     tmp.set_basis_direct(reduced.raw(), false);
 
     out.swap(tmp);

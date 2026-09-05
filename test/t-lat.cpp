@@ -9,6 +9,7 @@
 #include "lat/fplll_backend_internal.hpp"
 #include "lat/flatter_backend_internal.hpp"
 #include "lll_reference.hpp"
+#include "lat/lll_internal.hpp"
 
 #include <type_traits>
 #include <utility>
@@ -1115,12 +1116,51 @@ int test_native_cpp_raii_call_sites() {
 
 }  // namespace
 
+int test_lll_certified_routes() {
+    using namespace silex::lat::detail;
+    for (const slong rows : {1, 4, 14, 15}) {
+        for (const slong cols : {rows, rows + 1}) {
+            for (const slong bits : {16, 250, 251, 512}) {
+                silex::flint::FmpzMat input(rows, cols), expected(rows, cols);
+                silex::flint::FmpzMat reduced(rows, cols), transform(rows, rows);
+                silex::flint::FmpzLll config;
+                for (slong i = 0; i < rows; ++i) {
+                    fmpz_one(fmpz_mat_entry(input.raw(), i, i));
+                    fmpz_mul_2exp(fmpz_mat_entry(input.raw(), i, i),
+                            fmpz_mat_entry(input.raw(), i, i), bits - 1);
+                    if (i + 1 < cols) {
+                        set_entry_si(input.raw(), i, i + 1, 7);
+                    }
+                }
+                fmpz_mat_set(expected.raw(), input.raw());
+                fmpz_lll(expected.raw(), transform.raw(), config.raw());
+                const bool eligible = rows >= 2 && rows <= 14 &&
+                        cols <= 14 && bits <= 250;
+                for (const auto failure : {LllTestFailure::none,
+                             LllTestFailure::reducer, LllTestFailure::certification}) {
+                    const auto route = reduce_normalized_basis(reduced, input, failure);
+                    const auto expected_route = !eligible ? LllRoute::ineligible
+                            : failure == LllTestFailure::none ? LllRoute::certified
+                                                             : LllRoute::fallback;
+                    if (route != expected_route ||
+                        !fmpz_mat_equal(reduced.raw(), expected.raw()) ||
+                        !silex::test::rational_lll_reduced(reduced)) {
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 int main() {
     return test_init_set_swap_basis() != 0 || test_hnf_and_transform() != 0 ||
                    test_contains() != 0 || test_sum_intersection_index() != 0 ||
                    test_saturate() != 0 || test_lll_reduce() != 0 ||
                    test_lll_basis_only_contract() != 0 ||
                    test_lll_certifier_boundaries() != 0 ||
+                   test_lll_certified_routes() != 0 ||
                    test_fplll_row_transform_boundary() != 0 ||
                    test_fplll_column_image_transform_boundary() != 0 ||
                    test_fplll_bounded_bkz_row_transform_boundary() != 0 ||

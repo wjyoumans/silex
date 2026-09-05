@@ -78,6 +78,24 @@ bases.  FLINT's ``src/fmpz_mat/is_reduced.c`` implements the latter using
 rigorous ball arithmetic with rational fallback; this is distinct from the
 ``src/fmpz_lll/is_reduced_mpfr.c`` checker.
 
+``Lat::lll_reduce`` first normalizes to full-row-rank HNF.  For 2--14 rows,
+at most 14 columns, and coefficients of at most 250 bits in absolute value,
+it tries ``fmpz_lll_d_with_removal_knapsack`` with no removal bound and accepts
+only after ``fmpz_mat_is_reduced`` certifies the result with the unchanged
+default parameters.  The reducer's status is not a reducedness certificate
+or a rank.  A failed reduction or certificate restores the original HNF
+before calling the original ``fmpz_lll`` path; ineligible inputs use that path
+directly.  The existing zero-initialized transformation argument is retained.
+This is Silex-specific routing, not FLINT's default checker order.  The source
+anchors are FLINT ``src/fmpz_lll/wrapper_with_removal_knapsack.c`` (first phase
+and mandatory certification) and ``lll_with_removal_ulll.c`` (the 250-bit
+truncation boundary), inspected at revision
+``b574c48f46ca505d6d48dd843c0fe95e1199ecdc``.  PARI 2.17.3
+``src/basemath/lll.c:ZM_lll_norms`` likewise retains provable reduction after
+its fast phases unless certification is explicitly disabled; Silex does not
+disable it.  Tests force both rejection routes after scratch mutation and
+require exact agreement with the original path.
+
 Number fields, orders, and ideals
 ---------------------------------
 
