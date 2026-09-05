@@ -526,6 +526,96 @@ int test_lll_reduce() {
     return 0;
 }
 
+bool lll_basis_only_contract(const silex::flint::FmpzMat& input) {
+    const slong columns = fmpz_mat_ncols(input.raw());
+    silex::lat::Lat lattice(columns), normalized(columns), reduced(columns);
+    if (!lattice.set_basis(input) || !lattice.hnf(normalized)) {
+        return false;
+    }
+    const slong rank = normalized.nrows();
+    silex::flint::FmpzMat legacy(rank, columns), tracked(rank, columns),
+            untracked(rank, columns), zero(rank, rank), transform(rank, rank),
+            product(rank, columns), canonical(rank, columns);
+    fmpz_mat_set(legacy.raw(), normalized.raw_basis());
+    fmpz_mat_set(tracked.raw(), normalized.raw_basis());
+    fmpz_mat_set(untracked.raw(), normalized.raw_basis());
+    silex::flint::FmpzLll config;
+    if (rank != 0) {
+        fmpz_mat_one(transform.raw());
+        fmpz_lll(legacy.raw(), zero.raw(), config.raw());
+        fmpz_lll(tracked.raw(), transform.raw(), config.raw());
+        fmpz_lll(untracked.raw(), nullptr, config.raw());
+        silex::flint::Fmpz determinant;
+        fmpz_mat_det(determinant.raw(), transform.raw());
+        fmpz_mat_mul(product.raw(), transform.raw(), normalized.raw_basis());
+        if (!fmpz_mat_equal(product.raw(), tracked.raw()) ||
+            !fmpz_is_pm1(determinant.raw()) ||
+            !fmpz_mat_is_zero(zero.raw()) ||
+            !fmpz_mat_is_reduced(untracked.raw(),
+                    config.raw()->delta, config.raw()->eta)) {
+            return false;
+        }
+    }
+    fmpz_mat_hnf(canonical.raw(), untracked.raw());
+    if (!fmpz_mat_equal(legacy.raw(), tracked.raw()) ||
+        !fmpz_mat_equal(legacy.raw(), untracked.raw()) ||
+        !fmpz_mat_equal(canonical.raw(), normalized.raw_basis()) ||
+        !lattice.lll_reduce(reduced) || reduced.nrows() != rank ||
+        reduced.ambient_dim() != columns ||
+        !fmpz_mat_equal(reduced.raw_basis(), legacy.raw()) ||
+        !lattice.lll_reduce(lattice) || lattice.nrows() != rank ||
+        lattice.ambient_dim() != columns ||
+        !fmpz_mat_equal(lattice.raw_basis(), legacy.raw())) {
+        return false;
+    }
+    return true;
+}
+
+int test_lll_basis_only_contract() {
+    for (slong columns : {0, 3}) {
+        silex::flint::FmpzMat empty(0, columns), zero(4, columns);
+        if (!lll_basis_only_contract(empty) || !lll_basis_only_contract(zero)) {
+            return 1;
+        }
+    }
+    silex::flint::FmpzMat dependent(4, 5);
+    for (slong col = 0; col < 5; ++col) {
+        set_entry_si(dependent.raw(), 0, col, (col % 2 ? -1 : 1) * (col + 2));
+        fmpz_mul_si(fmpz_mat_entry(dependent.raw(), 1, col),
+                fmpz_mat_entry(dependent.raw(), 0, col), -3);
+    }
+    if (!lll_basis_only_contract(dependent)) {
+        return 1;
+    }
+    set_entry_si(dependent.raw(), 2, 3, 7);
+    if (!lll_basis_only_contract(dependent)) {
+        return 1;
+    }
+
+    // Exercise both sides of the upstream truncation threshold, on full-rank
+    // HNF input so normalization cannot remove the large coefficients.
+    for (slong bits : {16, 249, 250, 251, 512}) {
+        for (slong dimension : {3, 4, 5, 14}) {
+            silex::flint::FmpzMat basis(dimension + 1, dimension);
+            for (slong row = 0; row < dimension; ++row) {
+                fmpz* diagonal = fmpz_mat_entry(basis.raw(), row, row);
+                fmpz_one(diagonal);
+                fmpz_mul_2exp(diagonal, diagonal, bits - 1);
+                fmpz_add_ui(diagonal, diagonal, 101 + 2 * row);
+                for (slong col = row + 1; col < dimension; ++col) {
+                    fmpz* entry = fmpz_mat_entry(basis.raw(), row, col);
+                    fmpz_tdiv_q_ui(entry, diagonal, row + 2);
+                    fmpz_add_ui(entry, entry, (row + 1) * (col + 1));
+                }
+            }
+            if (!lll_basis_only_contract(basis)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 int test_fplll_row_transform_boundary() {
     constexpr slong rows = 3;
     constexpr slong cols = 9;
@@ -983,6 +1073,7 @@ int main() {
     return test_init_set_swap_basis() != 0 || test_hnf_and_transform() != 0 ||
                    test_contains() != 0 || test_sum_intersection_index() != 0 ||
                    test_saturate() != 0 || test_lll_reduce() != 0 ||
+                   test_lll_basis_only_contract() != 0 ||
                    test_fplll_row_transform_boundary() != 0 ||
                    test_fplll_column_image_transform_boundary() != 0 ||
                    test_fplll_bounded_bkz_row_transform_boundary() != 0 ||

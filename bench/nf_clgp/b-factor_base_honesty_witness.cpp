@@ -4,6 +4,7 @@
 #include <silex/factor_base.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_lll.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/ideal.hpp>
 #include <silex/ideal_factorization.hpp>
@@ -678,6 +679,93 @@ bool validate_batch(WitnessBatch& batch,
     return true;
 }
 
+void benchmark_honesty_lattices(benchmark::State& state,
+                                HonestyWorkload workload) {
+    silex::bench_contract::initialize(state);
+    WitnessBatch batch;
+    if (!build_witness_batch(batch, workload) || !validate_batch(batch, workload) ||
+        batch.searched_primes.empty()) {
+        silex::bench_contract::fail(state, "honesty lattice setup failed",
+                silex::bench_contract::FailureReason::setup);
+        return;
+    }
+    const auto& order = batch.field.maximal_order;
+    const slong n = order.degree();
+    std::vector<silex::lat::Lat> inputs, outputs;
+    std::vector<sflint::FmpzMat> expected;
+    for (const auto& prime : batch.searched_primes) {
+        silex::Ideal ideal(order);
+        sflint::FmpzMat hnf(n, n), reference(n, n), tracked(n, n),
+                untracked(n, n), zero(n, n), transform(n, n), product(n, n),
+                canonical(n, n);
+        inputs.emplace_back(n);
+        outputs.emplace_back(n);
+        if (!prime.get_ideal(ideal) || !ideal.get_hnf(sflint::FmpzMatRef(hnf)) ||
+            !inputs.back().set_basis(hnf) || inputs.back().nrows() != n) {
+            silex::bench_contract::fail(state, "honesty lattice input failed",
+                    silex::bench_contract::FailureReason::setup);
+            return;
+        }
+        fmpz_mat_set(reference.raw(), hnf.raw());
+        fmpz_mat_set(tracked.raw(), hnf.raw());
+        fmpz_mat_set(untracked.raw(), hnf.raw());
+        fmpz_mat_one(transform.raw());
+        sflint::FmpzLll config;
+        fmpz_lll(reference.raw(), zero.raw(), config.raw());
+        fmpz_lll(tracked.raw(), transform.raw(), config.raw());
+        fmpz_lll(untracked.raw(), nullptr, config.raw());
+        fmpz_mat_mul(product.raw(), transform.raw(), hnf.raw());
+        fmpz_mat_hnf(canonical.raw(), untracked.raw());
+        sflint::Fmpz determinant;
+        fmpz_mat_det(determinant.raw(), transform.raw());
+        if (!fmpz_mat_equal(reference.raw(), tracked.raw()) ||
+            !fmpz_mat_equal(reference.raw(), untracked.raw()) ||
+            !fmpz_mat_equal(product.raw(), tracked.raw()) ||
+            !fmpz_is_pm1(determinant.raw()) ||
+            !fmpz_mat_equal(canonical.raw(), hnf.raw()) ||
+            !fmpz_mat_is_reduced(untracked.raw(),
+                    config.raw()->delta, config.raw()->eta)) {
+            silex::bench_contract::fail(state, "honesty lattice reference mismatch",
+                    silex::bench_contract::FailureReason::invariant);
+            return;
+        }
+        expected.push_back(std::move(reference));
+    }
+    bool operation_ok = true;
+    for (auto _ : state) {
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const bool ok = inputs[i].lll_reduce(outputs[i]);
+            operation_ok = ok && operation_ok;
+            benchmark::DoNotOptimize(outputs[i].nrows());
+        }
+    }
+    benchmark::ClobberMemory();
+    if (!operation_ok) {
+        silex::bench_contract::fail(state, "honesty lattice reduction failed",
+                silex::bench_contract::FailureReason::operation);
+        return;
+    }
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        if (outputs[i].ambient_dim() != n ||
+            !fmpz_mat_equal(outputs[i].raw_basis(), expected[i].raw())) {
+            silex::bench_contract::fail(state, "honesty lattice output mismatch",
+                    silex::bench_contract::FailureReason::invariant);
+            return;
+        }
+    }
+    state.counters["lattices"] = static_cast<double>(inputs.size());
+    state.counters["degree"] = static_cast<double>(n);
+    silex::bench_contract::succeed(state);
+}
+
+void BM_honesty_lattice_quartic(benchmark::State& state) {
+    benchmark_honesty_lattices(state, HonestyWorkload::quartic);
+}
+
+void BM_honesty_lattice_quintic(benchmark::State& state) {
+    benchmark_honesty_lattices(state, HonestyWorkload::quintic);
+}
+
 enum class WitnessPredicate {
     full_factorization,
     prebuilt_required_prime,
@@ -975,6 +1063,8 @@ BENCHMARK(BM_honesty_scalar_selected_quartic);
 BENCHMARK(BM_honesty_scalar_selected_quintic);
 BENCHMARK(BM_honesty_search_selected_quartic);
 BENCHMARK(BM_honesty_search_selected_quintic);
+BENCHMARK(BM_honesty_lattice_quartic);
+BENCHMARK(BM_honesty_lattice_quintic);
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--dump-witness-fixtures")

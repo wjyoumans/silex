@@ -69,6 +69,15 @@ order-element path as a control. Setup checks each scalar against the exact
 scalar kernel and reference classifications; positive and failure cases are
 covered by the native factor-base honesty test.
 
+`BM_honesty_lattice_*` times a batch of `Lat::lll_reduce` calls on all searched
+prime ideals from the same quartic/quintic fixtures. Field construction,
+decomposition, input preparation, witness validation, and reference checks
+are outside timing. Each reduced basis must equal the same-build reference
+with a zero transformation argument, an identity-initialized transformation,
+and no transformation argument. Setup also checks the unimodular row identity,
+canonical HNF, and reducedness independently. The `lattices` counter records
+the number of reductions per batch; these are not per-lattice timing rows.
+
 The `silex-class-unit-instance` executable is a source-tree development tool.
 It is built when tests are enabled or
 `SILEX_BUILD_BENCHMARK_ADAPTERS=ON`, and is not part of the installed package.
