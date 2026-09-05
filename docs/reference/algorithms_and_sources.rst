@@ -158,6 +158,17 @@ was checked against PARI/GP 2.17.4 full ideal factorization using exact
 prime-ideal lattices in a common polynomial power basis.  The executable
 oracle version is distinct from the algorithm-source version above.
 
+The noninstalled integral-scalar predicate additionally follows
+``src/basemath/base4.c:Q_nffactor`` and ``prV_e_muls`` from PARI 2.17.3:
+``v_P(m) = e_P v_p(m)`` for a nonzero integer ``m``.  Factoring ``abs(m)``
+suffices; at each rational prime dividing it, the sum of ``e_P f_P`` over
+the retained ideals and the required ideal must equal the field degree.
+The required ideal must have valuation exactly one.  This is exact support
+accounting, not a norm-only comparison of arbitrary ideals.  The predicate
+requires a known maximal order and reports unsupported evaluations separately
+from negative classifications.  It is initially available for differential
+validation without changing the production search route.
+
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in
 ``Buchall_param`` publish the trivial class group, regulator one, torsion

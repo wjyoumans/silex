@@ -61,6 +61,14 @@ coverage rather than a transient investigation target.
 
 ## Noninstalled adapter
 
+The honesty witness target includes `BM_honesty_scalar_selected_*` and
+`BM_honesty_search_selected_*` rows. They respectively time the frozen scalar
+prefix and the mixed scalar/enumerated batch through the search representation
+boundary. The existing `BM_honesty_selected_*` rows retain the general
+order-element path as a control. Setup checks each scalar against the exact
+scalar kernel and reference classifications; positive and failure cases are
+covered by the native factor-base honesty test.
+
 The `silex-class-unit-instance` executable is a source-tree development tool.
 It is built when tests are enabled or
 `SILEX_BUILD_BENCHMARK_ADAPTERS=ON`, and is not part of the installed package.

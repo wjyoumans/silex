@@ -645,6 +645,13 @@ bool validate_batch(WitnessBatch& batch,
         }
         const bool expected_matches =
                 expected_candidate_match(contract, i);
+        if (candidate.kind == WitnessCandidateKind::scalar) {
+            bool scalar_matches = !expected_matches;
+            if (!silex::detail::scalar_factor_over_base_with_required_prime(
+                        scalar_matches, sflint::FmpzConstRef(candidate.scalar),
+                        batch.base, candidate.required_prime) ||
+                scalar_matches != expected_matches) return false;
+        }
         if (candidate.kind == WitnessCandidateKind::scalar &&
             silex::detail::relation_search::factor_base_scalar_witness(
                     batch.base, candidate.required_prime,

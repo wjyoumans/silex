@@ -41,5 +41,14 @@ bool order_element_factor_over_base_with_required_prime(
         const PrimeIdeal& required_prime,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
 
+// Evaluation success is separate from classification. Requires a nonzero
+// integral scalar and a known maximal order; input objects are not modified.
+bool scalar_factor_over_base_with_required_prime(
+        bool& matches,
+        flint::FmpzConstRef scalar,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept;
+
 }  // namespace detail
 }  // namespace silex

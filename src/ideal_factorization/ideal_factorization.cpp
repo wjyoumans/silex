@@ -283,10 +283,72 @@ bool factor_base_accounts_for_order_element_rational_valuation(
     return true;
 }
 
-// Source factor-generation, factor-admission, and prime-division logic retains
-// the element while factoring its norm and evaluating prime-ideal
-// valuations.  Keep that representation boundary while using Silex/FLINT
-// primitives for the exact operations.
+bool scalar_factor_over_base_with_required_prime_direct(
+        bool& matches,
+        flint::FmpzConstRef scalar,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime) noexcept {
+    matches = false;
+    const Order* order = base.parent();
+    const slong degree = order == nullptr ? 0 : order->degree();
+    if (order == nullptr || order->parent() == nullptr || degree <= 0 ||
+        !order->is_maximal() || flint::fmpz_is_zero(scalar) ||
+        !same_order_parent(required_prime.parent(), order) ||
+        !required_prime.has_prime_data() || base.contains(required_prime) ||
+        required_prime.ramification_index() <= 0 ||
+        required_prime.residue_degree() <= 0 ||
+        required_prime.ramification_index() > degree / required_prime.residue_degree()) {
+        return false;
+    }
+
+    // Source: base4.c:Q_nffactor/prV_e_muls gives v_P(m)=e_P*v_p(m).
+    // buch2.c:divide_p_elt/can_factor requires complete norm accounting.
+    // Cancel the positive v_q(m) at each q: sum(e_P*f_P) must be degree.
+    if (required_prime.ramification_index() != 1) return true;
+    flint::Fmpz required_p, q, absolute;
+    if (!required_prime.rational_prime(flint::FmpzRef(required_p))) return false;
+    flint::fmpz_abs(absolute, scalar);
+    flint::FmpzFactor factors;
+    flint::fmpz_factor(flint::FmpzFactorRef(factors), flint::FmpzConstRef(absolute));
+    bool required_seen = false;
+    for (slong i = 0; i < flint::fmpz_factor_num(flint::FmpzFactorConstRef(factors)); ++i) {
+        flint::fmpz_factor_get_fmpz(q, flint::FmpzFactorConstRef(factors), i);
+        slong remaining = degree;
+        if (flint::fmpz_equal(flint::FmpzConstRef(q), flint::FmpzConstRef(required_p))) {
+            required_seen = true;
+            if (flint::fmpz_factor_exp(flint::FmpzFactorConstRef(factors), i) != 1)
+                return true;
+            remaining -= required_prime.residue_degree();
+        }
+        slong block = -1;
+        if (base.rational_prime_block_index_for_prime(block, flint::FmpzConstRef(q))) {
+            flint::Fmpz block_p, factor_p;
+            slong length = 0;
+            if (!base.rational_prime_block_data(block_p, length, block) ||
+                !flint::fmpz_equal(flint::FmpzConstRef(block_p), flint::FmpzConstRef(q)))
+                return false;
+            for (slong offset = 0; offset < length; ++offset) {
+                slong index = -1;
+                if (!base.rational_prime_block_index(index, block, offset)) return false;
+                const PrimeIdeal* prime = base.prime_at(index);
+                if (prime == nullptr || !same_order_parent(prime->parent(), order) ||
+                    !prime->has_prime_data() || !prime->rational_prime(factor_p) ||
+                    !flint::fmpz_equal(flint::FmpzConstRef(factor_p), flint::FmpzConstRef(q)))
+                    return false;
+                const slong e = prime->ramification_index();
+                const slong f = prime->residue_degree();
+                if (e <= 0 || f <= 0 || e > remaining / f) return false;
+                remaining -= e * f;
+            }
+        }
+        if (remaining != 0) return true;
+    }
+    matches = required_seen;
+    return true;
+}
+
+// Retain the element while factoring its norm and evaluating prime-ideal
+// valuations, using the source factor-generation and prime-division logic.
 bool order_element_factor_over_base_with_required_prime_direct(
         bool& matches,
         const OrderElement& element,
@@ -918,6 +980,34 @@ bool ideal_factor_over_base_with_required_prime(
     }
     matches = direct_matches;
     return true;
+}
+
+bool scalar_factor_over_base_with_required_prime(
+        bool& matches,
+        flint::FmpzConstRef scalar,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                        "ideal.scalar_required_prime");
+    const bool ok = scalar_factor_over_base_with_required_prime_direct(
+            matches, scalar, base, required_prime);
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    const auto agrees_with_reference = [&]() noexcept {
+        if (!ok) return true; // Unsupported evaluations belong to the caller's fallback.
+        const Order& order = *base.parent();
+        Element ambient(*order.parent());
+        OrderElement element(order);
+        Ideal principal(order);
+        return ambient.set_fmpz(scalar) && element.set_element(ambient) &&
+               principal.set_principal(element) &&
+               required_prime_factorization_matches_reference(
+                       ok, matches, principal, base, required_prime);
+    };
+    SILEX_DEBUG_CHECK(diagnostics, DiagnosticsModule::ideal, DebugLevel::expensive,
+                     "scalar required-prime differential", agrees_with_reference());
+#endif
+    return ok;
 }
 
 bool order_element_factor_over_base_with_required_prime(
