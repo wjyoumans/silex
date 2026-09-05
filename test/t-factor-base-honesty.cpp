@@ -443,6 +443,16 @@ int test_selected_witness_edge_cases() {
     assert(ramified.ramification_index() == 2 && inert.residue_degree() == 2);
     silex::OrderElement alpha(order);
     silex::Ideal principal(order);
+    silex::DiagnosticsContext diagnostics;
+    diagnostics.debug_level = silex::DebugLevel::expensive;
+    diagnostics.debug_modules = silex::diagnostics_all_modules;
+    slong debug_failures = 0;
+    diagnostics.debug_failure_user = &debug_failures;
+    diagnostics.debug_failure_callback = [](
+            void* user, silex::DiagnosticsModule, silex::DebugLevel,
+            const char*, const char*, int, const char*, const char*) noexcept {
+        ++*static_cast<slong*>(user);
+    };
     const auto check = [&](const silex::FactorBase& fb,
                            const silex::PrimeIdeal& required, bool expected) {
         assert(principal.set_principal(alpha));
@@ -452,8 +462,9 @@ int test_selected_witness_edge_cases() {
         for (Mode mode : {Mode::selected, Mode::full_factorization, Mode::order_element_direct}) {
             search::FactorBaseWitnessAudit audit;
             assert(search::factor_base_principal_witness(fb, required, alpha, mode,
-                                                        nullptr, &audit) == expected);
-            if (mode == Mode::order_element_direct) assert(!audit.used_reference);
+                                                        &diagnostics, &audit) == expected);
+            assert(debug_failures == 0);
+            if (mode != Mode::full_factorization) assert(!audit.used_reference);
             if (mode == Mode::full_factorization) assert(audit.used_reference);
         }
     };
@@ -628,6 +639,46 @@ int test_ideal_transforms_preserve_principal_witness() {
                 reduced_reconstructed, large, reduction_back_multiplier) ||
         !reduced_reconstructed.equal(original)) {
         return 1;
+    }
+    return 0;
+}
+
+int test_legacy_scan_predicate_equivalence() {
+    namespace search = silex::detail::relation_search;
+    using Mode = search::FactorBaseWitnessPredicate;
+    for (slong fixture = 0; fixture < 4; ++fixture) {
+        FieldSetup setup = fixture == 0 ? cubic_x3_minus_2()
+                : fixture == 1 ? truncated_decomposition_counterexample_fixture()
+                : fixture == 2 ? quintic_lower_interval_fixture()
+                               : ramified_last_fixture();
+        sflint::Fmpz active, required;
+        sflint::fmpz_set_ui(active, fixture == 1 ? 1 : 7);
+        sflint::fmpz_set_ui(required, fixture == 1 ? 2 : 9);
+        silex::FactorBase base(setup.maximal_order);
+        if (fixture != 1 && !base.build_relation_completion_base(
+                sflint::FmpzConstRef(active))) return 1;
+        bool expected_honest = false;
+        search::FactorBaseHonestyScanAudit expected;
+        const bool expected_ok = search::factor_base_honesty_check(
+                expected_honest, base, sflint::FmpzConstRef(active),
+                sflint::FmpzConstRef(required), nullptr, UWORD(42), false,
+                128, nullptr, &expected, Mode::full_factorization);
+        for (Mode mode : {Mode::selected, Mode::order_element_direct}) {
+            bool honest = !expected_honest;
+            search::FactorBaseHonestyScanAudit audit;
+            const bool ok = search::factor_base_honesty_check(
+                    honest, base, sflint::FmpzConstRef(active),
+                    sflint::FmpzConstRef(required), nullptr, UWORD(42), false,
+                    128, nullptr, &audit, mode);
+            if (ok != expected_ok || honest != expected_honest ||
+                audit.rational_prime_checks != expected.rational_prime_checks ||
+                audit.checks_at_or_below_active_bound != expected.checks_at_or_below_active_bound ||
+                audit.witness_targets != expected.witness_targets ||
+                audit.witnessed_targets != expected.witnessed_targets ||
+                audit.final_random_state != expected.final_random_state) return 1;
+        }
+        if (fixture == 1 && (!expected_ok || expected_honest ||
+                expected.witness_targets != 2 || expected.witnessed_targets != 1)) return 1;
     }
     return 0;
 }
@@ -902,6 +953,7 @@ int test_scan_detects_lower_interval_omissions_and_fails_closed() {
 int main() {
     assert(test_selected_witness_edge_cases() == 0);
     assert(test_witness_partial_rational_prime_blocks() == 0);
+    assert(test_legacy_scan_predicate_equivalence() == 0);
     return test_proof_targets_require_complete_decomposition() != 0 ||
                    test_required_prime_predicates_match_full_factorization() !=
                            0 ||

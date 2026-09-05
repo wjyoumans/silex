@@ -138,6 +138,26 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+The legacy factor-base honesty search tests principal witnesses directly in
+order coordinates.  PARI 2.17.3
+``src/basemath/buch2.c:divide_p_elt`` and ``can_factor`` supply the exact
+norm-accounting criterion: the required prime has valuation one, and
+residue-degree-weighted valuations over that prime and the factor base
+account for the entire absolute norm.  Missing primes, including other
+primes above the same rational prime, cannot be discarded.  A completed
+negative classification is final; unsupported or failed direct evaluation
+falls back to the existing full ideal factorization predicate.
+
+This routing change preserves Silex's scalar/lattice candidate search,
+random draws, bounds, proof-target selection, and certification labels.
+It does not select the separate T2 witness search.  The noninstalled
+reference selector and scan audit support differential tests without a
+public option or persistent cache.  Frozen quartic and quintic benchmark
+batches contain 672 and 3937 candidates respectively; each classification
+was checked against PARI/GP 2.17.4 full ideal factorization using exact
+prime-ideal lattices in a common polynomial power basis.  The executable
+oracle version is distinct from the algorithm-source version above.
+
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in
 ``Buchall_param`` publish the trivial class group, regulator one, torsion

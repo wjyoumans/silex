@@ -60,17 +60,6 @@ bool full_factorization_has_principal_witness(
     return prime_exponent == 1;
 }
 
-bool factor_base_prime_has_order_element_witness(
-        const FactorBase& base,
-        const PrimeIdeal& prime,
-        const OrderElement& generator,
-        const DiagnosticsContext* diagnostics) noexcept {
-    bool matches = false;
-    return detail::order_element_factor_over_base_with_required_prime(
-                   matches, generator, base, prime, diagnostics) &&
-           matches;
-}
-
 enum class RequiredPrimeWitnessSearchResult {
     found,
     exhausted,
@@ -109,8 +98,7 @@ bool factor_base_principal_witness(
         !same_order_parent(prime.parent(), order) || !prime.has_prime_data() ||
         base.contains(prime) || generator.equal_si(0)) return false;
     if (predicate == FactorBaseWitnessPredicate::selected) {
-        // Remain on the reference until the isolated experiment is accepted.
-        predicate = FactorBaseWitnessPredicate::full_factorization;
+        predicate = FactorBaseWitnessPredicate::order_element_direct;
     }
     if (predicate == FactorBaseWitnessPredicate::order_element_direct) {
         // Source: buch2.c:divide_p_elt/can_factor account for the complete
@@ -403,7 +391,7 @@ bool factor_base_prime_has_principal_witness(
         const FactorBase& base,
         const PrimeIdeal& prime,
         const Element& alpha,
-        bool use_direct_required_prime_witness,
+        FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
     if (order == nullptr || order->parent() == nullptr ||
@@ -418,14 +406,8 @@ bool factor_base_prime_has_principal_witness(
         return false;
     }
 
-    if (use_direct_required_prime_witness) {
-        return factor_base_prime_has_order_element_witness(
-                base, prime, generator, diagnostics);
-    }
-
-    Ideal principal(*order);
-    return principal.is_defined() && principal.set_principal(generator) &&
-           full_factorization_has_principal_witness(base, prime, principal);
+    return factor_base_principal_witness(
+            base, prime, generator, predicate, diagnostics);
 }
 
 struct PrimeReductionVisitContext {
@@ -434,7 +416,7 @@ struct PrimeReductionVisitContext {
     const Order* order = nullptr;
     flint::FmpzMat* basis = nullptr;
     const DiagnosticsContext* diagnostics = nullptr;
-    bool use_direct_required_prime_witness = false;
+    FactorBaseWitnessPredicate predicate = FactorBaseWitnessPredicate::selected;
     bool found = false;
     bool failed = false;
 };
@@ -460,21 +442,9 @@ int visit_prime_reduction_candidate(const fmpz_mat_t coefficients, void* user) {
         return 0;
     }
 
-    bool found = false;
-    if (visit->use_direct_required_prime_witness) {
-        found = factor_base_prime_has_order_element_witness(
-                *visit->base, *visit->prime, order_element,
-                visit->diagnostics);
-    } else {
-        Element alpha(*visit->order->parent());
-        if (!alpha.is_defined() || !order_element.get_element(alpha)) {
-            visit->failed = true;
-            return 0;
-        }
-        found = factor_base_prime_has_principal_witness(
-                *visit->base, *visit->prime, alpha, false,
-                visit->diagnostics);
-    }
+    const bool found = factor_base_principal_witness(
+            *visit->base, *visit->prime, order_element, visit->predicate,
+            visit->diagnostics);
 
     if (found) {
         visit->found = true;
@@ -488,7 +458,7 @@ bool factor_base_reduces_prime_by_ideal_lattice_search(
         const PrimeIdeal& prime,
         const Ideal& ideal,
         slong radius,
-        bool use_direct_required_prime_witness,
+        FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
     if (order == nullptr || order->parent() == nullptr ||
@@ -539,8 +509,7 @@ bool factor_base_reduces_prime_by_ideal_lattice_search(
     visit.order = order;
     visit.basis = &basis;
     visit.diagnostics = diagnostics;
-    visit.use_direct_required_prime_witness =
-            use_direct_required_prime_witness;
+    visit.predicate = predicate;
     for (slong tries = 0; tries < 4 && !visit.found && !visit.failed;
          ++tries) {
         flint::arb_set_fmpz(bound_sq, max_diag);
@@ -562,7 +531,7 @@ bool factor_base_reduces_prime_by_ideal_lattice_search(
 bool factor_base_reduces_prime_by_lattice_search(const FactorBase& base,
                                                  const PrimeIdeal& prime,
                                                  slong radius,
-                                                 bool use_direct_required_prime_witness,
+                                                 FactorBaseWitnessPredicate predicate,
                                                  const DiagnosticsContext*
                                                          diagnostics)
         noexcept {
@@ -575,14 +544,14 @@ bool factor_base_reduces_prime_by_lattice_search(const FactorBase& base,
     return ideal.is_defined() && prime.get_ideal(ideal) &&
            factor_base_reduces_prime_by_ideal_lattice_search(
                    base, prime, ideal, radius,
-                   use_direct_required_prime_witness, diagnostics);
+                   predicate, diagnostics);
 }
 
 bool factor_base_reduces_prime_by_twisted_lattice_search(
         const FactorBase& base,
         const PrimeIdeal& prime,
         slong radius,
-        bool use_direct_required_prime_witness,
+        FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
     if (order == nullptr || !same_order_parent(prime.parent(), order) ||
@@ -612,7 +581,7 @@ bool factor_base_reduces_prime_by_twisted_lattice_search(
         }
         if (factor_base_reduces_prime_by_ideal_lattice_search(
                     base, prime, product, radius,
-                    use_direct_required_prime_witness, diagnostics)) {
+                    predicate, diagnostics)) {
             return true;
         }
     }
@@ -623,7 +592,7 @@ bool factor_base_reduces_prime_by_principal_search(
         const FactorBase& base,
         const PrimeIdeal& prime,
         slong radius,
-        bool use_direct_required_prime_witness,
+        FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
     if (order == nullptr || order->parent() == nullptr ||
@@ -645,7 +614,7 @@ bool factor_base_reduces_prime_by_principal_search(
         alpha.set_si(flint::fmpz_get_si(
                 flint::FmpzConstRef(rational_prime))) &&
         factor_base_prime_has_principal_witness(
-                base, prime, alpha, use_direct_required_prime_witness,
+                base, prime, alpha, predicate,
                 diagnostics)) {
         return true;
     }
@@ -666,17 +635,17 @@ bool factor_base_reduces_prime_by_principal_search(
         }
         if (factor_base_prime_has_principal_witness(
                     base, prime, alpha,
-                    use_direct_required_prime_witness, diagnostics)) {
+                    predicate, diagnostics)) {
             return true;
         }
     }
 
     return factor_base_reduces_prime_by_lattice_search(
                    base, prime, radius,
-                   use_direct_required_prime_witness, diagnostics) ||
+                   predicate, diagnostics) ||
            factor_base_reduces_prime_by_twisted_lattice_search(
                    base, prime, radius,
-                   use_direct_required_prime_witness, diagnostics);
+                   predicate, diagnostics);
 }
 
 bool factor_base_reduces_prime_by_random_subfactor_base_search(
@@ -685,7 +654,7 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
         const SubfactorBaseSchedule* subfactor_base_schedule,
         slong radius,
         ulong& random_state,
-        bool use_direct_required_prime_witness,
+        FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
     if (order == nullptr || !same_order_parent(prime.parent(), order) ||
@@ -738,7 +707,7 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
 
         if (factor_base_reduces_prime_by_ideal_lattice_search(
                     base, prime, current, radius,
-                    use_direct_required_prime_witness, diagnostics)) {
+                    predicate, diagnostics)) {
             return true;
         }
     }
@@ -757,7 +726,9 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                            detail::OrderMinkowskiEmbeddingCache*
                                                    embedding_cache,
                                            const DiagnosticsContext*
-                                                   diagnostics) noexcept {
+                                                   diagnostics,
+                                           FactorBaseWitnessPredicate predicate,
+                                           FactorBaseHonestyScanAudit* audit) noexcept {
     honest = false;
     const Order* order = base.parent();
     if (order == nullptr || !flint::fmpz_is_prime(p) ||
@@ -784,6 +755,7 @@ bool factor_base_honest_for_rational_prime(bool& honest,
         if (base.contains(*prime)) {
             continue;
         }
+        if (audit != nullptr) ++audit->witness_targets;
         if (use_direct_required_prime_witness) {
             const RequiredPrimeWitnessSearchResult result =
                     find_required_prime_witness(
@@ -794,20 +766,23 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                 return false;
             }
             if (result == RequiredPrimeWitnessSearchResult::found) {
+                if (audit != nullptr) ++audit->witnessed_targets;
                 continue;
             }
             return true;
         }
         if (factor_base_reduces_prime_by_principal_search(
                     base, *prime, kFactorBaseHonestySearchRadius,
-                    use_direct_required_prime_witness, diagnostics)) {
+                    predicate, diagnostics)) {
+            if (audit != nullptr) ++audit->witnessed_targets;
             continue;
         }
         if (factor_base_reduces_prime_by_random_subfactor_base_search(
                     base, *prime, subfactor_base_schedule,
                     kFactorBaseHonestySearchRadius,
-                    random_state, use_direct_required_prime_witness,
+                    random_state, predicate,
                     diagnostics)) {
+            if (audit != nullptr) ++audit->witnessed_targets;
             continue;
         }
         return true;
@@ -829,11 +804,13 @@ bool factor_base_honesty_check(bool& honest,
                                bool use_direct_required_prime_witness,
                                slong ideal_reduction_precision,
                                const DiagnosticsContext* diagnostics,
-                               FactorBaseHonestyScanAudit* audit)
+                               FactorBaseHonestyScanAudit* audit,
+                               FactorBaseWitnessPredicate predicate)
         noexcept {
     honest = false;
     if (audit != nullptr) {
         *audit = FactorBaseHonestyScanAudit{};
+        audit->final_random_state = random_seed;
     }
     if (base.parent() == nullptr || flint::fmpz_sgn(active_bound) < 0 ||
         flint::fmpz_sgn(required_bound) < 0) {
@@ -857,12 +834,14 @@ bool factor_base_honesty_check(bool& honest,
             }
         }
         bool prime_honest = false;
-        if (!factor_base_honest_for_rational_prime(
+        const bool checked = factor_base_honest_for_rational_prime(
                     prime_honest, base, flint::FmpzConstRef(p),
                     required_bound, subfactor_base_schedule, random_state,
                     use_direct_required_prime_witness,
                     ideal_reduction_precision, &embedding_cache,
-                    diagnostics)) {
+                    diagnostics, predicate, audit);
+        if (audit != nullptr) audit->final_random_state = random_state;
+        if (!checked) {
             return false;
         }
         if (!prime_honest) {
