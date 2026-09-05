@@ -53,6 +53,20 @@ short-vector enumeration.  FLINT HNF/SNF and exact solve contracts are the
 baseline for canonical operations; optional fplll and flatter integrations
 remain backend comparisons rather than mathematical authorities.
 
+The LLL reference checks compare FLINT's optional transformation argument in
+three forms: a zero matrix, an identity-initialized matrix, and a null pointer.
+They check the unimodular row identity, canonical HNF, independent reducedness,
+and identical reduced bases within the same build.  This is a regression gate,
+not a promise of a canonical reduced basis across backend versions.  PARI
+2.17.3 ``src/basemath/lll.c:ZM_lll_norms`` omits transformation tracking for
+``LLL_INPLACE``, as used by ``src/basemath/buch2.c:SPLIT``; this supplies the
+basis-only source precedent.  FLINT's ``src/fmpz_lll/lll.c``,
+``lll_with_removal_ulll.c``, and ``test/t-lll.c`` establish the optional
+transformation boundary, including retention of internal truncation
+transformations.  Native tests cover both sides of the 250-bit truncation
+threshold and the honesty-search benchmarks check every searched prime-ideal
+lattice in their fixed quartic and quintic fixtures.
+
 Number fields, orders, and ideals
 ---------------------------------
 
