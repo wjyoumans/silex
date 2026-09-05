@@ -8,6 +8,7 @@
 
 #include "lat/fplll_backend_internal.hpp"
 #include "lat/flatter_backend_internal.hpp"
+#include "lll_reference.hpp"
 
 #include <type_traits>
 #include <utility>
@@ -551,6 +552,7 @@ bool lll_basis_only_contract(const silex::flint::FmpzMat& input) {
         if (!fmpz_mat_equal(product.raw(), tracked.raw()) ||
             !fmpz_is_pm1(determinant.raw()) ||
             !fmpz_mat_is_zero(zero.raw()) ||
+            !silex::test::rational_lll_reduced(untracked) ||
             !fmpz_mat_is_reduced(untracked.raw(),
                     config.raw()->delta, config.raw()->eta)) {
             return false;
@@ -595,7 +597,7 @@ int test_lll_basis_only_contract() {
     // Exercise both sides of the upstream truncation threshold, on full-rank
     // HNF input so normalization cannot remove the large coefficients.
     for (slong bits : {16, 249, 250, 251, 512}) {
-        for (slong dimension : {3, 4, 5, 14}) {
+        for (slong dimension : {3, 4, 5, 14, 15}) {
             silex::flint::FmpzMat basis(dimension + 1, dimension);
             for (slong row = 0; row < dimension; ++row) {
                 fmpz* diagonal = fmpz_mat_entry(basis.raw(), row, row);
@@ -614,6 +616,50 @@ int test_lll_basis_only_contract() {
         }
     }
     return 0;
+}
+
+int test_lll_certifier_boundaries() {
+    silex::flint::FmpzMat basis(2, 2);
+    silex::flint::Fmpz scale, cutoff, value;
+    silex::flint::Fmpq parameter;
+    silex::flint::FmpzLll config;
+    fmpz_one(scale.raw());
+    fmpz_mul_2exp(scale.raw(), scale.raw(), 60);
+    auto agrees = [&](bool expected) {
+        return silex::test::rational_lll_reduced(basis) == expected &&
+               (fmpz_mat_is_reduced(basis.raw(), 0.99, 0.51) != 0) == expected &&
+               (fmpz_lll_is_reduced(basis.raw(), config.raw(), 120) != 0) == expected;
+    };
+    silex::test::exact_binary_parameter(parameter, 0.51);
+    fmpz_mul(cutoff.raw(), fmpq_numref(parameter.raw()), scale.raw());
+    fmpz_divexact(cutoff.raw(), cutoff.raw(), fmpq_denref(parameter.raw()));
+    for (slong offset : {-1, 0, 1}) {
+        fmpz_mat_zero(basis.raw());
+        fmpz_set(fmpz_mat_entry(basis.raw(), 0, 0), scale.raw());
+        fmpz_set(fmpz_mat_entry(basis.raw(), 1, 1), scale.raw());
+        fmpz_add_si(value.raw(), cutoff.raw(), offset);
+        for (int sign : {-1, 1}) {
+            fmpz_mul_si(fmpz_mat_entry(basis.raw(), 1, 0), value.raw(), sign);
+            if (!agrees(offset <= 0)) return 1;
+        }
+    }
+    silex::test::exact_binary_parameter(parameter, 0.99);
+    fmpz_mul(cutoff.raw(), scale.raw(), scale.raw());
+    fmpz_mul(cutoff.raw(), cutoff.raw(), fmpq_numref(parameter.raw()));
+    fmpz_divexact(cutoff.raw(), cutoff.raw(), fmpq_denref(parameter.raw()));
+    fmpz_sqrt(cutoff.raw(), cutoff.raw());
+    for (slong offset : {0, 1}) {
+        fmpz_mat_zero(basis.raw());
+        fmpz_set(fmpz_mat_entry(basis.raw(), 0, 0), scale.raw());
+        fmpz_add_ui(fmpz_mat_entry(basis.raw(), 1, 1), cutoff.raw(), offset);
+        if (!agrees(offset == 1)) return 1;
+    }
+    // A nearly parallel input with a large cancellation in Gram-Schmidt.
+    fmpz_set(fmpz_mat_entry(basis.raw(), 1, 0), scale.raw());
+    fmpz_one(fmpz_mat_entry(basis.raw(), 1, 1));
+    if (!agrees(false)) return 1;
+    fmpz_lll(basis.raw(), nullptr, config.raw());
+    return agrees(true) ? 0 : 1;
 }
 
 int test_fplll_row_transform_boundary() {
@@ -1074,6 +1120,7 @@ int main() {
                    test_contains() != 0 || test_sum_intersection_index() != 0 ||
                    test_saturate() != 0 || test_lll_reduce() != 0 ||
                    test_lll_basis_only_contract() != 0 ||
+                   test_lll_certifier_boundaries() != 0 ||
                    test_fplll_row_transform_boundary() != 0 ||
                    test_fplll_column_image_transform_boundary() != 0 ||
                    test_fplll_bounded_bkz_row_transform_boundary() != 0 ||

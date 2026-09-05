@@ -7,6 +7,7 @@
 #include "lat/flatter_backend_internal.hpp"
 #include "lat/fplll_backend_internal.hpp"
 #include "benchmark_contract.hpp"
+#include "../../test/lll_reference.hpp"
 
 #include <algorithm>
 #include <array>
@@ -395,10 +396,88 @@ void BM_native_ideal_hnf_degree14_fplll_bkz(benchmark::State& state) {
     silex::bench_contract::succeed(state);
 }
 
+void BM_lat_lll_certifier(benchmark::State& state) {
+    silex::bench_contract::initialize(state);
+    const slong n = state.range(0);
+    const bool alternate = state.range(1) != 0;
+    silex::flint::FmpzMat basis(n, n);
+    if (n == 14) {
+        basis = native_degree14_ideal_hnf_basis();
+    } else {
+        for (slong i = 0; i < n; ++i) {
+            set_entry_si(basis.raw(), i, i, i == n - 1 ? 97 : 1);
+            if (i < n - 1) set_entry_si(basis.raw(), i, n - 1, ((i + 1) * 37) % 97);
+        }
+    }
+    silex::flint::FmpzLll config;
+    fmpz_lll(basis.raw(), nullptr, config.raw());
+    if (!silex::test::rational_lll_reduced(basis) ||
+        !fmpz_mat_is_reduced(basis.raw(), config.raw()->delta, config.raw()->eta) ||
+        !fmpz_lll_is_reduced(basis.raw(), config.raw(), 120)) {
+        silex::bench_contract::fail(state, "certifier reference mismatch",
+                silex::bench_contract::FailureReason::invariant);
+        return;
+    }
+    bool valid = true;
+    for (auto _ : state) {
+        int result = alternate
+                ? fmpz_mat_is_reduced(basis.raw(), config.raw()->delta, config.raw()->eta)
+                : fmpz_lll_is_reduced(basis.raw(), config.raw(), 120);
+        valid = (result != 0) && valid;
+        benchmark::DoNotOptimize(result);
+    }
+    if (!valid) {
+        silex::bench_contract::fail(state, "reduced basis was not certified",
+                silex::bench_contract::FailureReason::invariant);
+        return;
+    }
+    silex::bench_contract::succeed(state);
+}
+
+void BM_lat_lll_guard_boundary(benchmark::State& state) {
+    silex::bench_contract::initialize(state);
+    const slong n = state.range(0), bits = state.range(1);
+    silex::flint::FmpzMat basis(n, n), reference(n, n), transform(n, n);
+    for (slong i = 0; i < n; ++i) {
+        auto* diagonal = fmpz_mat_entry(basis.raw(), i, i);
+        fmpz_one(diagonal);
+        fmpz_mul_2exp(diagonal, diagonal, bits - 1);
+        fmpz_add_ui(diagonal, diagonal, 101 + 2 * i);
+        for (slong j = i + 1; j < n; ++j) {
+            fmpz_tdiv_q_ui(fmpz_mat_entry(basis.raw(), i, j), diagonal, i + 2);
+        }
+    }
+    silex::lat::Lat input(n), output(n);
+    if (!input.set_basis(basis)) {
+        silex::bench_contract::fail(state, "boundary lattice setup failed",
+                silex::bench_contract::FailureReason::setup);
+        return;
+    }
+    fmpz_mat_set(reference.raw(), basis.raw());
+    silex::flint::FmpzLll config;
+    fmpz_lll(reference.raw(), transform.raw(), config.raw());
+    bool valid = silex::test::rational_lll_reduced(reference);
+    for (auto _ : state) {
+        const bool ok = input.lll_reduce(output);
+        valid = ok && valid;
+        benchmark::DoNotOptimize(output.nrows());
+    }
+    if (!valid || !fmpz_mat_equal(output.raw_basis(), reference.raw())) {
+        silex::bench_contract::fail(state, "boundary lattice reference mismatch",
+                silex::bench_contract::FailureReason::invariant);
+        return;
+    }
+    silex::bench_contract::succeed(state);
+}
+
 }  // namespace
 
 BENCHMARK(BM_lat_lll);
 BENCHMARK(BM_lat_lll_hnf_degree14);
+BENCHMARK(BM_lat_lll_certifier)->Args({4, 0})->Args({4, 1})
+    ->Args({5, 0})->Args({5, 1})->Args({14, 0})->Args({14, 1});
+BENCHMARK(BM_lat_lll_guard_boundary)->Args({14, 16})->Args({15, 16})
+    ->Args({4, 250})->Args({4, 251});
 BENCHMARK(BM_native_ideal_hnf_degree14_flint);
 BENCHMARK(BM_native_ideal_hnf_degree14_fplll);
 BENCHMARK(BM_native_ideal_hnf_degree14_flatter_rhf_1_02);

@@ -146,7 +146,12 @@ silex_benchmark_release_rows(b-silex-lat_hnf
 silex_benchmark_release_rows(b-silex-lat_lll
     BM_lat_lll
     BM_lat_lll_hnf_degree14
-    BM_native_ideal_hnf_degree14_flint)
+    BM_native_ideal_hnf_degree14_flint
+    BM_lat_lll_certifier/4/0 BM_lat_lll_certifier/4/1
+    BM_lat_lll_certifier/5/0 BM_lat_lll_certifier/5/1
+    BM_lat_lll_certifier/14/0 BM_lat_lll_certifier/14/1
+    BM_lat_lll_guard_boundary/14/16 BM_lat_lll_guard_boundary/15/16
+    BM_lat_lll_guard_boundary/4/250 BM_lat_lll_guard_boundary/4/251)
 silex_benchmark_excluded_rows(b-silex-lat_lll
     "requires the optional fplll backend"
     BM_native_ideal_hnf_degree14_fplll

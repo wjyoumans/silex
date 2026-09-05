@@ -67,6 +67,17 @@ transformations.  Native tests cover both sides of the 250-bit truncation
 threshold and the honesty-search benchmarks check every searched prime-ideal
 lattice in their fixed quartic and quintic fixtures.
 
+The independent test-only rational Gram--Schmidt oracle follows the
+size-reduction and Lovasz inequalities in section 1.2.2 of Damien Stehle's
+`Floating-Point LLL: Theoretical and Practical Aspects
+<https://perso.ens-lyon.fr/damien.stehle/downloads/LLL25.pdf>`_
+(author's chapter manuscript).  Parameters are converted from binary doubles
+exactly, not replaced by decimal fractions.  Certifier benchmarks separately
+measure ``fmpz_lll_is_reduced`` and ``fmpz_mat_is_reduced`` on prebuilt reduced
+bases.  FLINT's ``src/fmpz_mat/is_reduced.c`` implements the latter using
+rigorous ball arithmetic with rational fallback; this is distinct from the
+``src/fmpz_lll/is_reduced_mpfr.c`` checker.
+
 Number fields, orders, and ideals
 ---------------------------------
 

@@ -15,6 +15,7 @@
 #include <silex/prime_ideal.hpp>
 
 #include "benchmark_contract.hpp"
+#include "../../test/lll_reference.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/relation_candidate_internal.hpp"
@@ -723,6 +724,7 @@ void benchmark_honesty_lattices(benchmark::State& state,
             !fmpz_mat_equal(product.raw(), tracked.raw()) ||
             !fmpz_is_pm1(determinant.raw()) ||
             !fmpz_mat_equal(canonical.raw(), hnf.raw()) ||
+            !silex::test::rational_lll_reduced(untracked) ||
             !fmpz_mat_is_reduced(untracked.raw(),
                     config.raw()->delta, config.raw()->eta)) {
             silex::bench_contract::fail(state, "honesty lattice reference mismatch",
