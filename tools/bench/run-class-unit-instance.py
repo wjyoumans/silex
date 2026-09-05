@@ -20,10 +20,9 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 
 def find_field(manifest: dict[str, Any], field_id: str) -> dict[str, Any] | None:
-    for collection in ("fields", "benchmark_warmups"):
-        for row in manifest.get(collection, []):
-            if row.get("id") == field_id:
-                return row
+    for row in manifest.get("fields", []):
+        if row.get("id") == field_id:
+            return row
     return None
 
 
@@ -64,9 +63,6 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=root / "test/data/class_unit_fields.json")
     parser.add_argument("--field-id", help="field id from the manifest")
     parser.add_argument("--coeffs", help="low-to-high coefficients")
-    warmup = parser.add_mutually_exclusive_group()
-    warmup.add_argument("--warmup-field-id", help="unmeasured warmup field id")
-    warmup.add_argument("--warmup-coeffs", help="unmeasured low-to-high coefficients")
     parser.add_argument("--mode", choices=["proven", "grh"])
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--precision", type=int)
@@ -126,18 +122,6 @@ def main() -> int:
         if expecting_success and args.expect_unit_rank is None and field_row.get("expected_unit_rank") is not None:
             args.expect_unit_rank = int(field_row["expected_unit_rank"])
 
-    if args.warmup_field_id:
-        try:
-            if manifest is None:
-                manifest = load_manifest(args.manifest)
-            warmup_row = find_field(manifest, args.warmup_field_id)
-            if warmup_row is None:
-                raise ValueError(f"unknown warmup field id: {args.warmup_field_id}")
-            args.warmup_coeffs = coeffs_from_field(warmup_row)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            write_result({"success": False, "error": str(exc)}, args.out)
-            return 2
-
     if args.coeffs is None:
         write_result(
             {"success": False, "error": "missing --coeffs or --field-id"},
@@ -163,7 +147,6 @@ def main() -> int:
         return 2
 
     cmd = [str(exe), "--coeffs", args.coeffs, "--mode", args.mode]
-    add_optional_arg(cmd, "--warmup-coeffs", args.warmup_coeffs)
     add_optional_arg(cmd, "--precision", args.precision)
     add_optional_arg(cmd, "--max-candidates", args.max_candidates)
     add_optional_arg(cmd, "--max-relations", args.max_relations)

@@ -154,7 +154,6 @@ struct ProfileCollector {
 
 struct Options {
     std::vector<slong> coefficients;
-    std::vector<slong> warmup_coefficients;
     std::string mode = "proven";
     slong precision = 128;
     slong max_candidates = -1;
@@ -462,7 +461,6 @@ void print_usage(std::ostream& out) {
         << "\n"
         << "Options:\n"
         << "  --mode proven|grh\n"
-        << "  --warmup-coeffs c0,c1,...,1\n"
         << "  --precision N\n"
         << "  --max-candidates N\n"
         << "  --max-relations N\n"
@@ -513,13 +511,6 @@ bool parse_options(int argc,
         if (take_value(i, argc, argv, arg, "--coeffs", value)) {
             if (!parse_coefficients(value, options.coefficients)) {
                 error = "invalid --coeffs value";
-                return false;
-            }
-            continue;
-        }
-        if (take_value(i, argc, argv, arg, "--warmup-coeffs", value)) {
-            if (!parse_coefficients(value, options.warmup_coefficients)) {
-                error = "invalid --warmup-coeffs value";
                 return false;
             }
             continue;
@@ -640,21 +631,6 @@ bool parse_options(int argc,
     }
     if (options.coefficients.back() != 1) {
         error = "only monic input is supported by this diagnostic runner";
-        return false;
-    }
-    if (!options.warmup_coefficients.empty() &&
-        options.warmup_coefficients.back() != 1) {
-        error = "only monic warmup input is supported by this diagnostic runner";
-        return false;
-    }
-    if (!options.warmup_coefficients.empty() &&
-        options.warmup_coefficients.size() != options.coefficients.size()) {
-        error = "warmup and target degrees differ";
-        return false;
-    }
-    if (!options.warmup_coefficients.empty() &&
-        options.warmup_coefficients == options.coefficients) {
-        error = "warmup and target polynomials must differ";
         return false;
     }
     if (options.mode != "proven" && options.mode != "grh") {
@@ -1089,56 +1065,6 @@ bool audit_sunit_membership(
     return true;
 }
 
-bool run_warmup(const Options& input_options) noexcept {
-    if (input_options.warmup_coefficients.empty()) {
-        return true;
-    }
-
-    Options options = input_options;
-    options.coefficients = input_options.warmup_coefficients;
-    options.warmup_coefficients.clear();
-    options.expect_class_order.reset();
-    options.expect_unit_rank.reset();
-    options.expect_success.reset();
-    options.s_prime_selectors.clear();
-    options.compute_sunit = false;
-    options.logging = false;
-    options.trace = false;
-    options.verbose = false;
-    options.profiling = false;
-
-    sflint::FmpqPoly polynomial;
-    if (!set_polynomial(polynomial, options.coefficients)) {
-        return false;
-    }
-    silex::NumberField field = silex::NumberField::by_polynomial(
-            sflint::FmpqPolyConstRef(polynomial));
-    silex::Order equation_order = field.is_defined()
-            ? silex::Order::equation_order(field)
-            : silex::Order{};
-    silex::Order maximal_order(field);
-    if (!equation_order.is_defined() ||
-        !maximal_order.maximal_order(equation_order)) {
-        return false;
-    }
-
-    sflint::Fmpz factor_base_bound;
-    silex::ClassGroupComputeOptions compute_options;
-    if (!configure_compute_options(compute_options, factor_base_bound,
-                                   maximal_order, options)) {
-        return false;
-    }
-
-    silex::ClassGroupContext class_group;
-    silex::OrderUnitGroup units;
-    silex::detail::ClassUnitTransactionReport audit;
-    audit.reset();
-    return compute_class_unit_from_options(
-            units, class_group, maximal_order,
-            sflint::FmpzConstRef(factor_base_bound), compute_options,
-            options.precision, options, audit);
-}
-
 int print_error_json(const std::string& error, int exit_code) {
     std::cout << "{\n  \"success\": false,\n  \"error\": ";
     write_json_string(std::cout, error);
@@ -1400,24 +1326,6 @@ int main(int argc, char** argv) {
         return print_error_json(parse_error, 2);
     }
 
-    if (input_options.marked_protocol && !read_protocol_phase()) {
-        return print_error_json(
-                "marked protocol missing warmup phase input", 5);
-    }
-
-    if (!run_warmup(input_options)) {
-        return print_error_json("warmup_computation_failed", 3);
-    }
-
-    if (input_options.marked_protocol) {
-        emit_protocol_marker(ready_marker);
-        if (!read_protocol_phase(&target_nonce, target_nonce_bytes) ||
-            !protocol_nonce_is_valid(target_nonce)) {
-            return print_error_json(
-                    "marked protocol target nonce is invalid", 5);
-        }
-    }
-
     sflint::FmpqPoly polynomial;
     if (!set_polynomial(polynomial, input_options.coefficients)) {
         return print_error_json("failed to construct polynomial", 2);
@@ -1448,9 +1356,7 @@ int main(int argc, char** argv) {
         profile_collector.configure(diagnostics);
     }
 
-    const std::clock_t process_cpu_start = std::clock();
-    const auto start = std::chrono::steady_clock::now();
-    const auto field_setup_start = start;
+    const auto field_setup_start = std::chrono::steady_clock::now();
 
     silex::NumberField field =
             silex::NumberField::by_polynomial(
@@ -1476,11 +1382,25 @@ int main(int argc, char** argv) {
         compute_options.diagnostics = &diagnostics;
     }
 
+    if (input_options.marked_protocol) {
+        if (!options_defined) {
+            return print_error_json("target preparation failed", 4);
+        }
+        emit_protocol_marker(ready_marker);
+        if (!read_protocol_phase(&target_nonce, target_nonce_bytes) ||
+            !protocol_nonce_is_valid(target_nonce)) {
+            return print_error_json(
+                    "marked protocol target nonce is invalid", 5);
+        }
+    }
+
     silex::ClassGroupContext class_group;
     silex::OrderUnitGroup units;
     silex::detail::ClassUnitTransactionReport transaction_report;
     transaction_report.reset();
     bool compute_success = false;
+    const std::clock_t target_cpu_start = std::clock();
+    const auto target_wall_start = std::chrono::steady_clock::now();
     const auto class_unit_start = std::chrono::steady_clock::now();
     if (options_defined) {
         compute_success = compute_class_unit_from_options(
@@ -1493,6 +1413,14 @@ int main(int argc, char** argv) {
         transaction_report.failure_reason = "input_or_options_unavailable";
     }
     const auto class_unit_end = std::chrono::steady_clock::now();
+    auto target_wall_end = class_unit_end;
+    std::clock_t target_cpu_end = static_cast<std::clock_t>(-1);
+    if (!input_options.compute_sunit) {
+        target_cpu_end = std::clock();
+        if (input_options.marked_protocol) {
+            emit_protocol_marker(target_done_marker, target_nonce);
+        }
+    }
 
     std::vector<silex::PrimeIdeal> selected_primes;
     std::vector<SelectedPrimeDescriptor> selected_prime_descriptors;
@@ -1527,6 +1455,15 @@ int main(int argc, char** argv) {
                 sunit_options);
     }
     const auto sunit_end = std::chrono::steady_clock::now();
+
+    if (input_options.compute_sunit) {
+        target_wall_end = sunit_end;
+        target_cpu_end = std::clock();
+        if (input_options.marked_protocol) {
+            emit_protocol_marker(target_done_marker, target_nonce);
+        }
+    }
+
     const auto membership_start = sunit_end;
     if (input_options.compute_sunit && sunit_success) {
         membership_success = audit_sunit_membership(
@@ -1535,24 +1472,24 @@ int main(int argc, char** argv) {
     }
     const auto membership_end = std::chrono::steady_clock::now();
 
-    const auto end = membership_end;
-    const std::clock_t process_cpu_end = std::clock();
     const bool overall_success =
             compute_success &&
             (!input_options.compute_sunit ||
              (prime_selection_success && sunit_success &&
               membership_success));
-    const double elapsed_ms =
-            std::chrono::duration<double, std::milli>(end - start).count();
-    const bool have_process_cpu_time =
-            process_cpu_start != static_cast<std::clock_t>(-1) &&
-            process_cpu_end != static_cast<std::clock_t>(-1) &&
-            process_cpu_end >= process_cpu_start;
-    const double process_cpu_ms = have_process_cpu_time
+    const bool have_target_cpu_time =
+            target_cpu_start != static_cast<std::clock_t>(-1) &&
+            target_cpu_end != static_cast<std::clock_t>(-1) &&
+            target_cpu_end >= target_cpu_start;
+    const double target_cpu_ms = have_target_cpu_time
             ? 1000.0 * static_cast<double>(
-                               process_cpu_end - process_cpu_start) /
+                               target_cpu_end - target_cpu_start) /
                       static_cast<double>(CLOCKS_PER_SEC)
             : 0.0;
+    const double target_wall_ms =
+            std::chrono::duration<double, std::milli>(
+                    target_wall_end - target_wall_start)
+                    .count();
     const double field_setup_ms =
             std::chrono::duration<double, std::milli>(
                     field_setup_end - field_setup_start)
@@ -1576,6 +1513,9 @@ int main(int argc, char** argv) {
             std::chrono::duration<double, std::milli>(
                     membership_end - membership_start)
                     .count();
+    const double elapsed_ms = field_setup_ms + maximal_order_ms +
+                              class_unit_ms + prime_selection_ms +
+                              sunit_ms + membership_ms;
     sflint::Fmpz maximal_order_discriminant;
     const bool have_maximal_order_discriminant =
             maximal_defined && maximal_order.discriminant(
@@ -1600,12 +1540,9 @@ int main(int argc, char** argv) {
             expectation_passed(input_options, overall_success, class_group,
                                units);
 
-    if (input_options.marked_protocol) {
-        emit_protocol_marker(target_done_marker, target_nonce);
-        if (!read_protocol_phase()) {
+    if (input_options.marked_protocol && !read_protocol_phase()) {
             return print_error_json(
                     "marked protocol missing final phase input", 5);
-        }
     }
 
     std::cout << "{\n";
@@ -1617,17 +1554,27 @@ int main(int argc, char** argv) {
     std::cout << "  \"elapsed_ms\": " << elapsed_ms << ",\n";
     std::cout << "  \"measurement_timing\": {\n";
     std::cout << "    \"algorithm_clock\": \"std_clock_process_cpu\",\n";
-    std::cout << "    \"algorithm_scope\": \"post_warmup_target\",\n";
+    std::cout << "    \"algorithm_scope\": ";
+    write_json_string(
+            std::cout,
+            input_options.compute_sunit
+                    ? "class_unit+s_prime_selection+sunit"
+                    : "class_unit_transaction_only");
+    std::cout << ",\n";
     std::cout << "    \"component_clock\": \"steady_clock\",\n";
-    std::cout << "    \"warmup_excluded\": true,\n";
+    std::cout << "    \"preparation_scope\": "
+                 "\"field_construction+equation_order+maximal_order+"
+                 "compute_options\",\n";
+    std::cout << "    \"preparation_excluded\": true,\n";
+    std::cout << "    \"finalization_excluded\": true,\n";
     std::cout << "    \"target_cpu_ms\": ";
-    if (have_process_cpu_time) {
-        std::cout << process_cpu_ms;
+    if (have_target_cpu_time) {
+        std::cout << target_cpu_ms;
     } else {
         std::cout << "null";
     }
     std::cout << ",\n";
-    std::cout << "    \"target_wall_ms\": " << elapsed_ms << "\n";
+    std::cout << "    \"target_wall_ms\": " << target_wall_ms << "\n";
     std::cout << "  },\n";
     std::cout << "  \"component_timing_ms\": {\n";
     std::cout << "    \"field_setup\": " << field_setup_ms << ",\n";
@@ -1641,19 +1588,6 @@ int main(int argc, char** argv) {
                   << ",\n";
     }
     std::cout << "    \"total\": " << elapsed_ms << "\n";
-    std::cout << "  },\n";
-    std::cout << "  \"warmup\": {\n";
-    std::cout << "    \"used\": "
-              << json_bool(!input_options.warmup_coefficients.empty())
-              << ",\n";
-    std::cout << "    \"degree\": ";
-    if (input_options.warmup_coefficients.empty()) {
-        std::cout << "null\n";
-    } else {
-        std::cout << static_cast<long long>(
-                             input_options.warmup_coefficients.size() - 1)
-                  << "\n";
-    }
     std::cout << "  },\n";
     std::cout << "  \"mode\": ";
     write_json_string(std::cout, input_options.mode);

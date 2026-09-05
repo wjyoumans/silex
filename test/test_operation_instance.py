@@ -15,9 +15,9 @@ if not __debug__:
     )
 
 SCOPES = {
-    "maximal_order": "field_construction+equation_order+maximal_order",
-    "ideal_multiply": "ideal_multiply_only",
-    "element_square_root": "element_is_square_with_root_only",
+    "maximal_order": "maximal_order_only",
+    "ideal_multiply": "ideal_multiplication_only",
+    "element_square_root": "number_field_element_is_square_only",
 }
 READY_MARKER = "__SILEX_BENCH_SILEX_READY__"
 TARGET_DONE_MARKER = "__SILEX_BENCH_SILEX_TARGET_DONE__"
@@ -29,7 +29,6 @@ def run_instance(
     coefficients: str,
     operation: str,
     *,
-    warmup_coefficients: str | None = None,
     expected_returncode: int = 0,
 ) -> dict[str, Any]:
     command = [
@@ -39,8 +38,6 @@ def run_instance(
         "--operation",
         operation,
     ]
-    if warmup_coefficients is not None:
-        command.extend(["--warmup-coeffs", warmup_coefficients])
     completed = subprocess.run(
         command,
         check=False,
@@ -62,8 +59,6 @@ def run_marked_instance(
     executable: Path,
     coefficients: str,
     operation: str,
-    *,
-    warmup_coefficients: str | None = None,
 ) -> dict[str, Any]:
     command = [
         str(executable),
@@ -73,8 +68,6 @@ def run_marked_instance(
         operation,
         "--marked-protocol",
     ]
-    if warmup_coefficients is not None:
-        command.extend(["--warmup-coeffs", warmup_coefficients])
     process = subprocess.Popen(
         command,
         text=True,
@@ -84,8 +77,6 @@ def run_marked_instance(
     )
     assert process.stdin is not None
     assert process.stdout is not None
-    process.stdin.write("run-warmup\n")
-    process.stdin.flush()
     assert process.stdout.readline().strip() == READY_MARKER
     process.stdin.write(TARGET_NONCE + "\n")
     process.stdin.flush()
@@ -104,7 +95,7 @@ def assert_invalid_marked_nonce(executable: Path) -> None:
             "--operation=maximal_order",
             "--marked-protocol",
         ],
-        input=f"run-warmup\n{'A' * 32}\n",
+        input=f"{'A' * 32}\n",
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -137,10 +128,35 @@ def check_common(payload: dict[str, Any], operation: str) -> None:
     assert payload["target_wall_ms"] >= 0.0
 
 
+def assert_marked_phase_failures(executable: Path) -> None:
+    for operation in SCOPES:
+        for supplied, done in (("", False), ("a" * 33 + "\n", False),
+                               (TARGET_NONCE + "\n", True)):
+            completed = subprocess.run(
+                [str(executable), "--coeffs=-5,0,1", f"--operation={operation}",
+                 "--marked-protocol"], input=supplied, text=True,
+                capture_output=True, timeout=20.0,
+            )
+            assert completed.returncode == 5
+            lines = completed.stdout.splitlines()
+            assert lines.pop(0) == READY_MARKER
+            if done:
+                assert lines.pop(0) == f"{TARGET_DONE_MARKER}:{TARGET_NONCE}"
+            else:
+                assert TARGET_DONE_MARKER not in completed.stdout
+            payload = json.loads("\n".join(lines))
+            assert payload["success"] is False
+            assert payload["error"] == (
+                "marked protocol missing final phase input" if done
+                else "marked protocol target nonce is invalid")
+            assert (payload["target_cpu_ms"] is not None) == done
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
     args = parser.parse_args()
+    assert_marked_phase_failures(args.exe)
 
     fields = [
         ("-5,0,1", ["-5", "0", "1"], "5"),
@@ -154,7 +170,7 @@ def main() -> int:
         assert maximal["ideal_norm"] is None
         assert maximal["root_found"] is None
         assert maximal["root_verified"] is None
-        assert maximal["warmup"] == {"used": False, "degree": None}
+        assert "warmup" not in maximal
 
         ideal = run_instance(args.exe, coefficients, "ideal_multiply")
         check_common(ideal, "ideal_multiply")
@@ -172,51 +188,59 @@ def main() -> int:
         assert square_root["root_found"] is True
         assert square_root["root_verified"] is True
 
-    warmed = run_instance(
+    # The maximal-order marked protocol reaches READY only after field and
+    # equation-order preparation, then brackets the maximal-order call itself.
+    marked_maximal = run_marked_instance(
         args.exe,
         "-5,0,1",
-        "ideal_multiply",
-        warmup_coefficients="47,0,1",
+        "maximal_order",
     )
-    check_common(warmed, "ideal_multiply")
-    assert warmed["warmup"] == {"used": True, "degree": 2}
+    check_common(marked_maximal, "maximal_order")
+    assert marked_maximal["coefficients_low_to_high"] == ["-5", "0", "1"]
+    assert marked_maximal["maximal_order_discriminant"] == "5"
+    assert marked_maximal["ideal_norm"] is None
+    assert marked_maximal["root_found"] is None
+    assert marked_maximal["root_verified"] is None
+    assert "warmup" not in marked_maximal
 
     marked = run_marked_instance(
         args.exe,
         "-5,0,1",
         "ideal_multiply",
-        warmup_coefficients="47,0,1",
     )
     check_common(marked, "ideal_multiply")
     assert marked["ideal_norm"] == "36"
-    assert marked["warmup"] == {"used": True, "degree": 2}
+    assert "warmup" not in marked
+
+    marked_square_root = run_marked_instance(
+        args.exe,
+        "-5,0,1",
+        "element_square_root",
+    )
+    check_common(marked_square_root, "element_square_root")
+    assert marked_square_root["root_found"] is True
+    assert marked_square_root["root_verified"] is True
     assert_invalid_marked_nonce(args.exe)
 
-    repeated_warmup = run_instance(
-        args.exe,
-        "-5,0,1",
-        "maximal_order",
-        warmup_coefficients="-5,0,1",
-        expected_returncode=2,
+    removed_warmup = subprocess.run(
+        [
+            str(args.exe),
+            "--coeffs=-5,0,1",
+            "--operation=maximal_order",
+            "--warmup-coeffs=47,0,1",
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=20.0,
     )
-    assert repeated_warmup["success"] is False
-    assert repeated_warmup["error"] == (
-        "--warmup-coeffs must define a distinct field"
-    )
-    assert repeated_warmup["target_cpu_ms"] is None
-    assert repeated_warmup["target_wall_ms"] is None
-
-    wrong_degree = run_instance(
-        args.exe,
-        "-5,0,1",
-        "maximal_order",
-        warmup_coefficients="-2,0,0,1",
-        expected_returncode=2,
-    )
-    assert wrong_degree["success"] is False
-    assert wrong_degree["error"] == (
-        "--warmup-coeffs must have the same degree as --coeffs"
-    )
+    assert removed_warmup.returncode == 2
+    removed_payload = json.loads(removed_warmup.stdout)
+    assert removed_payload["success"] is False
+    assert removed_payload["error"] == "unknown argument: --warmup-coeffs=47,0,1"
+    assert removed_payload["target_cpu_ms"] is None
+    assert removed_payload["target_wall_ms"] is None
     return 0
 
 

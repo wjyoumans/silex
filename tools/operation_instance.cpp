@@ -32,7 +32,6 @@ enum class Operation {
 
 struct Options {
     std::vector<std::string> coefficients;
-    std::vector<std::string> warmup_coefficients;
     Operation operation = Operation::unknown;
     bool marked_protocol = false;
 };
@@ -45,6 +44,7 @@ constexpr std::size_t target_nonce_bytes = 32;
 
 struct OperationResult {
     bool success = false;
+    bool protocol_failure = false;
     std::string error;
     std::optional<double> target_cpu_ms;
     std::optional<double> target_wall_ms;
@@ -143,11 +143,11 @@ const char* operation_name(Operation operation) noexcept {
 const char* timing_scope(Operation operation) noexcept {
     switch (operation) {
     case Operation::maximal_order:
-        return "field_construction+equation_order+maximal_order";
+        return "maximal_order_only";
     case Operation::ideal_multiply:
-        return "ideal_multiply_only";
+        return "ideal_multiplication_only";
     case Operation::element_square_root:
-        return "element_is_square_with_root_only";
+        return "number_field_element_is_square_only";
     case Operation::unknown:
         break;
     }
@@ -251,19 +251,6 @@ bool parse_options(int argc,
             have_coefficients = true;
             continue;
         }
-        if (argument == "--warmup-coeffs" ||
-            argument.starts_with("--warmup-coeffs=")) {
-            if (!take_value(i, argc, argv, argument, "--warmup-coeffs",
-                            value, error) ||
-                !parse_coefficients(value, options.warmup_coefficients)) {
-                if (error.empty()) {
-                    error = "invalid --warmup-coeffs value; expected "
-                            "low-to-high monic integer coefficients";
-                }
-                return false;
-            }
-            continue;
-        }
         if (argument == "--operation" ||
             argument.starts_with("--operation=")) {
             if (!take_value(i, argc, argv, argument, "--operation", value,
@@ -293,17 +280,6 @@ bool parse_options(int argc,
     if (!have_operation) {
         error = "missing --operation";
         return false;
-    }
-    if (!options.warmup_coefficients.empty()) {
-        if (options.warmup_coefficients.size() !=
-            options.coefficients.size()) {
-            error = "--warmup-coeffs must have the same degree as --coeffs";
-            return false;
-        }
-        if (options.warmup_coefficients == options.coefficients) {
-            error = "--warmup-coeffs must define a distinct field";
-            return false;
-        }
     }
     return true;
 }
@@ -367,18 +343,47 @@ bool setup_maximal_order(const std::vector<std::string>& coefficients,
     return true;
 }
 
+bool begin_protocol_target(bool marked_protocol,
+                           std::string& target_nonce,
+                           OperationResult& result);
+
+bool finish_protocol_target(bool marked_protocol,
+                            std::string_view target_nonce,
+                            OperationResult& result);
+
 OperationResult run_maximal_order(
-        const std::vector<std::string>& coefficients) {
+        const std::vector<std::string>& coefficients,
+        bool marked_protocol) {
     OperationResult result;
     silex::NumberField field;
-    silex::Order maximal_order;
+    std::string target_nonce;
+
+    if (!setup_field(coefficients, field, result.error)) {
+        return result;
+    }
+    silex::Order equation_order = silex::Order::equation_order(field);
+    if (!equation_order.is_defined()) {
+        result.error = "failed to construct equation order";
+        return result;
+    }
+    silex::Order maximal_order(field);
+    if (!maximal_order.is_defined()) {
+        result.error = "failed to allocate maximal order";
+        return result;
+    }
+
+    if (!begin_protocol_target(marked_protocol, target_nonce, result)) {
+        return result;
+    }
 
     const TargetTimer timer;
-    const bool constructed =
-            setup_maximal_order(coefficients, field, maximal_order,
-                                result.error);
+    const bool constructed = maximal_order.maximal_order(equation_order);
     timer.finish(result);
+    if (!finish_protocol_target(marked_protocol, target_nonce, result)) {
+        return result;
+    }
     if (!constructed) {
+        result.error = "failed to construct maximal order";
         return result;
     }
 
@@ -399,7 +404,8 @@ OperationResult run_maximal_order(
 }
 
 OperationResult run_ideal_multiply(
-        const std::vector<std::string>& coefficients) {
+        const std::vector<std::string>& coefficients,
+        bool marked_protocol) {
     OperationResult result;
     silex::NumberField field;
     silex::Order maximal_order;
@@ -421,9 +427,17 @@ OperationResult run_ideal_multiply(
         return result;
     }
 
+    std::string target_nonce;
+    if (!begin_protocol_target(marked_protocol, target_nonce, result)) {
+        return result;
+    }
+
     const TargetTimer timer;
     const bool multiplied = product.multiply(left, right);
     timer.finish(result);
+    if (!finish_protocol_target(marked_protocol, target_nonce, result)) {
+        return result;
+    }
     if (!multiplied) {
         result.error = "ideal multiplication failed";
         return result;
@@ -445,7 +459,8 @@ OperationResult run_ideal_multiply(
 }
 
 OperationResult run_element_square_root(
-        const std::vector<std::string>& coefficients) {
+        const std::vector<std::string>& coefficients,
+        bool marked_protocol) {
     OperationResult result;
     silex::NumberField field;
     if (!setup_field(coefficients, field, result.error)) {
@@ -465,10 +480,18 @@ OperationResult run_element_square_root(
         return result;
     }
 
+    std::string target_nonce;
+    if (!begin_protocol_target(marked_protocol, target_nonce, result)) {
+        return result;
+    }
+
     bool root_found = false;
     const TargetTimer timer;
     const bool completed = square.is_square(root_found, root);
     timer.finish(result);
+    if (!finish_protocol_target(marked_protocol, target_nonce, result)) {
+        return result;
+    }
     result.root_found = root_found;
     result.root_verified =
             completed && root_found && check.multiply(root, root) &&
@@ -491,14 +514,15 @@ OperationResult run_element_square_root(
 
 OperationResult run_operation(
         Operation operation,
-        const std::vector<std::string>& coefficients) {
+        const std::vector<std::string>& coefficients,
+        bool marked_protocol) {
     switch (operation) {
     case Operation::maximal_order:
-        return run_maximal_order(coefficients);
+        return run_maximal_order(coefficients, marked_protocol);
     case Operation::ideal_multiply:
-        return run_ideal_multiply(coefficients);
+        return run_ideal_multiply(coefficients, marked_protocol);
     case Operation::element_square_root:
-        return run_element_square_root(coefficients);
+        return run_element_square_root(coefficients, marked_protocol);
     case Operation::unknown:
         break;
     }
@@ -586,20 +610,7 @@ void write_result(const Options& options, const OperationResult& result) {
         }
         write_json_string(std::cout, options.coefficients[i]);
     }
-    std::cout << "],\n";
-    std::cout << "  \"warmup\": {\n";
-    std::cout << "    \"used\": "
-              << (options.warmup_coefficients.empty() ? "false" : "true")
-              << ",\n";
-    std::cout << "    \"degree\": ";
-    if (options.warmup_coefficients.empty()) {
-        std::cout << "null\n";
-    } else {
-        std::cout << static_cast<unsigned long long>(
-                             options.warmup_coefficients.size() - 1)
-                  << "\n";
-    }
-    std::cout << "  }\n";
+    std::cout << "]\n";
     std::cout << "}\n";
 }
 
@@ -647,12 +658,43 @@ void emit_protocol_marker(const char* marker,
     std::cout.flush();
 }
 
+bool begin_protocol_target(bool marked_protocol,
+                           std::string& target_nonce,
+                           OperationResult& result) {
+    if (!marked_protocol) {
+        return true;
+    }
+    emit_protocol_marker(ready_marker);
+    if (!read_protocol_phase(&target_nonce, target_nonce_bytes) ||
+        !protocol_nonce_is_valid(target_nonce)) {
+        result.error = "marked protocol target nonce is invalid";
+        result.protocol_failure = true;
+        return false;
+    }
+    return true;
+}
+
+bool finish_protocol_target(bool marked_protocol,
+                            std::string_view target_nonce,
+                            OperationResult& result) {
+    if (!marked_protocol) {
+        return true;
+    }
+    emit_protocol_marker(target_done_marker, target_nonce);
+    if (!read_protocol_phase()) {
+        result.success = false;
+        result.error = "marked protocol missing final phase input";
+        result.protocol_failure = true;
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     Options options;
     std::string error;
-    std::string target_nonce;
     if (!parse_options(argc, argv, options, error)) {
         OperationResult result;
         result.error = std::move(error);
@@ -660,47 +702,11 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    if (options.marked_protocol && !read_protocol_phase()) {
-        OperationResult result;
-        result.error = "marked protocol missing warmup phase input";
-        write_result(options, result);
+    OperationResult result = run_operation(
+            options.operation, options.coefficients, options.marked_protocol);
+    write_result(options, result);
+    if (result.protocol_failure) {
         return 5;
     }
-
-    if (!options.warmup_coefficients.empty()) {
-        OperationResult warmup =
-                run_operation(options.operation, options.warmup_coefficients);
-        if (!warmup.success) {
-            OperationResult result;
-            result.error = "warmup failed: ";
-            result.error += warmup.error;
-            write_result(options, result);
-            return 3;
-        }
-    }
-
-    if (options.marked_protocol) {
-        emit_protocol_marker(ready_marker);
-        if (!read_protocol_phase(&target_nonce, target_nonce_bytes) ||
-            !protocol_nonce_is_valid(target_nonce)) {
-            OperationResult result;
-            result.error = "marked protocol target nonce is invalid";
-            write_result(options, result);
-            return 5;
-        }
-    }
-
-    OperationResult result =
-            run_operation(options.operation, options.coefficients);
-    if (options.marked_protocol) {
-        emit_protocol_marker(target_done_marker, target_nonce);
-        if (!read_protocol_phase()) {
-            OperationResult protocol_result;
-            protocol_result.error = "marked protocol missing final phase input";
-            write_result(options, protocol_result);
-            return 5;
-        }
-    }
-    write_result(options, result);
     return result.success ? 0 : 4;
 }

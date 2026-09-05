@@ -50,8 +50,6 @@ def run_marked_json(cmd: list[str], root: Path) -> dict[str, object]:
     )
     assert process.stdin is not None
     assert process.stdout is not None
-    process.stdin.write("run-warmup\n")
-    process.stdin.flush()
     assert process.stdout.readline().strip() == READY_MARKER
     process.stdin.write(TARGET_NONCE + "\n")
     process.stdin.flush()
@@ -68,7 +66,7 @@ def assert_invalid_marked_nonce(cmd: list[str], root: Path) -> None:
     completed = subprocess.run(
         [*cmd, "--marked-protocol"],
         cwd=root,
-        input=f"run-warmup\n{'A' * 32}\n",
+        input=f"{'A' * 32}\n",
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -96,6 +94,27 @@ def assert_rejected(cmd: list[str], root: Path) -> None:
     assert completed.returncode != 0
 
 
+def assert_marked_phase_failures(exe: Path, root: Path) -> None:
+    for supplied, done in (("", False), ("a" * 33 + "\n", False),
+                           (TARGET_NONCE + "\n", True)):
+        completed = subprocess.run(
+            [str(exe), "--coeffs=-5,0,1", "--mode=proven", "--marked-protocol"],
+            input=supplied, text=True, capture_output=True, cwd=root, timeout=30.0,
+        )
+        assert completed.returncode == 5
+        lines = completed.stdout.splitlines()
+        assert lines.pop(0) == READY_MARKER
+        if done:
+            assert lines.pop(0) == f"{TARGET_DONE_MARKER}:{TARGET_NONCE}"
+        else:
+            assert TARGET_DONE_MARKER not in completed.stdout
+        payload = json.loads("\n".join(lines))
+        assert payload["success"] is False
+        assert payload["error"] == (
+            "marked protocol missing final phase input" if done
+            else "marked protocol target nonce is invalid")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
@@ -103,6 +122,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
+    assert_marked_phase_failures(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
 
@@ -219,14 +239,38 @@ def main() -> int:
             str(args.exe),
             "--coeffs=-5,0,1",
             "--mode=proven",
-            "--warmup-coeffs=2,2,1",
         ],
         root,
     )
     assert marked_instance["success"] is True
     assert marked_instance["engine_thread_count"] == 1
-    assert marked_instance["warmup"] == {"used": True, "degree": 2}
+    assert "warmup" not in marked_instance
+    assert marked_instance["measurement_timing"] == {
+        "algorithm_clock": "std_clock_process_cpu",
+        "algorithm_scope": "class_unit_transaction_only",
+        "component_clock": "steady_clock",
+        "preparation_scope": (
+            "field_construction+equation_order+maximal_order+compute_options"
+        ),
+        "preparation_excluded": True,
+        "finalization_excluded": True,
+        "target_cpu_ms": marked_instance["measurement_timing"][
+            "target_cpu_ms"
+        ],
+        "target_wall_ms": marked_instance["measurement_timing"][
+            "target_wall_ms"
+        ],
+    }
     assert_invalid_marked_nonce(
+        [
+            str(args.exe),
+            "--coeffs=-5,0,1",
+            "--mode=proven",
+        ],
+        root,
+    )
+
+    assert_rejected(
         [
             str(args.exe),
             "--coeffs=-5,0,1",
@@ -246,14 +290,13 @@ def main() -> int:
             str(args.manifest),
             "--field-id",
             "real_quadratic_5_proven",
-            "--warmup-coeffs=2,2,1",
             "--timeout",
             "20",
         ],
         root,
     )
     assert instance["success"] is True
-    assert instance["warmup"] == {"used": True, "degree": 2}
+    assert "warmup" not in instance
     assert instance["component_timing_ms"]["total"] > 0.0
     assert instance["measurement_timing"]["algorithm_clock"] == (
         "std_clock_process_cpu"
@@ -263,7 +306,7 @@ def main() -> int:
     assert instance["signature"] == [2, 0]
     assert instance["maximal_order_discriminant"] == "5"
 
-    implicit_instance = run_json(
+    assert_rejected(
         [
             sys.executable,
             str(instance_script),
@@ -274,12 +317,9 @@ def main() -> int:
             "--field-id",
             "real_quadratic_5_proven",
             "--warmup-coeffs=2,2,1",
-            "--timeout",
-            "20",
         ],
         root,
     )
-    assert implicit_instance["success"] is True
     return 0
 
 
