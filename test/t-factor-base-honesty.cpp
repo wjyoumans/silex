@@ -512,6 +512,88 @@ int test_selected_witness_edge_cases() {
     return 0;
 }
 
+void check_scalar_reference(const silex::FactorBase& base,
+                            const silex::PrimeIdeal& prime,
+                            sflint::FmpzConstRef scalar) {
+    namespace search = silex::detail::relation_search;
+    using Mode = search::FactorBaseWitnessPredicate;
+    silex::Element ambient(*base.parent()->parent());
+    silex::OrderElement element(*base.parent());
+    silex::Ideal principal(*base.parent());
+    assert(ambient.set_fmpz(scalar) && element.set_element(ambient));
+    assert(principal.set_principal(element));
+    bool expected = false;
+    assert(full_factorization_required_prime_result(expected, principal, base, prime));
+    for (Mode mode : {Mode::selected, Mode::order_element_direct, Mode::full_factorization}) {
+        search::FactorBaseWitnessAudit audit;
+        assert(search::factor_base_scalar_witness(base, prime, scalar, mode,
+                                                   nullptr, &audit) == expected);
+        if (mode == Mode::full_factorization) assert(audit.used_reference);
+    }
+}
+
+int test_scalar_witness_reference_cases() {
+    namespace search = silex::detail::relation_search;
+    silex::NumberField field = quadratic_x2_minus_2();
+    silex::Order order = silex::test::equation_order(field);
+    silex::FactorBase empty(order), complete(order), reordered(order);
+    sflint::Fmpz scalar, bound;
+    sflint::fmpz_set_ui(bound, 7);
+    assert(complete.build(sflint::FmpzConstRef(bound)));
+    assert(reordered.build_lll_relation_base(sflint::FmpzConstRef(bound)));
+    silex::PrimeIdeal inert(order), split(order), ramified(order);
+    assert(first_prime_above(inert, order, 11));
+    assert(first_prime_above(split, order, 7));
+    assert(first_prime_above(ramified, order, 2));
+    for (slong value : {-143, -121, -22, -11, -7, -2, -1, 1, 2, 7, 11, 22, 121, 143}) {
+        sflint::fmpz_set_si(scalar, value);
+        for (const auto* base : {&empty, &complete, &reordered})
+            check_scalar_reference(*base, inert, sflint::FmpzConstRef(scalar));
+        check_scalar_reference(empty, split, sflint::FmpzConstRef(scalar));
+        check_scalar_reference(empty, ramified, sflint::FmpzConstRef(scalar));
+    }
+    fmpz_set_ui(scalar.raw(), 11);
+    fmpz_mul_2exp(scalar.raw(), scalar.raw(), 160);
+    check_scalar_reference(complete, inert, sflint::FmpzConstRef(scalar));
+    fmpz_neg(scalar.raw(), scalar.raw());
+    check_scalar_reference(reordered, inert, sflint::FmpzConstRef(scalar));
+    sflint::fmpz_zero(scalar);
+    assert(!search::factor_base_scalar_witness(empty, inert, sflint::FmpzConstRef(scalar)));
+    sflint::fmpz_set_ui(scalar, 11);
+    silex::FactorBase undefined;
+    silex::PrimeIdeal invalid(order);
+    FieldSetup other = cubic_x3_minus_2();
+    silex::PrimeIdeal wrong(other.maximal_order);
+    assert(first_prime_above(wrong, other.maximal_order, 11));
+    assert(!search::factor_base_scalar_witness(undefined, inert, sflint::FmpzConstRef(scalar)));
+    assert(!search::factor_base_scalar_witness(empty, invalid, sflint::FmpzConstRef(scalar)));
+    assert(!search::factor_base_scalar_witness(empty, wrong, sflint::FmpzConstRef(scalar)));
+    assert(!search::factor_base_scalar_witness(complete, split, sflint::FmpzConstRef(scalar)));
+    order.set_maximality(false);
+    search::FactorBaseWitnessAudit audit;
+    assert(!search::factor_base_scalar_witness(empty, inert, sflint::FmpzConstRef(scalar),
+            search::FactorBaseWitnessPredicate::selected, nullptr, &audit));
+    assert(audit.used_reference && !audit.used_scalar_direct);
+
+    // Same maximal lattice in a basis whose first vector is not one.
+    silex::Order permuted(field);
+    sflint::FmpqMat basis(2, 2);
+    fmpq_one(fmpq_mat_entry(basis.raw(), 0, 1));
+    fmpq_one(fmpq_mat_entry(basis.raw(), 1, 0));
+    assert(permuted.set_basis(sflint::FmpqMatConstRef(basis)));
+    permuted.set_maximality(true);
+    silex::FactorBase permuted_base(permuted);
+    sflint::fmpz_set_ui(bound, 2);
+    assert(permuted_base.build(sflint::FmpzConstRef(bound)));
+    silex::PrimeIdeal permuted_inert(permuted);
+    assert(first_prime_above(permuted_inert, permuted, 11));
+    for (slong value : {-121, -22, 11, 22, 121, 143}) {
+        sflint::fmpz_set_si(scalar, value);
+        check_scalar_reference(permuted_base, permuted_inert, sflint::FmpzConstRef(scalar));
+    }
+    return 0;
+}
+
 int test_witness_partial_rational_prime_blocks() {
     namespace search = silex::detail::relation_search;
     using Mode = search::FactorBaseWitnessPredicate;
@@ -544,6 +626,7 @@ int test_witness_partial_rational_prime_blocks() {
         bool reference = false;
         assert(full_factorization_required_prime_result(reference, principal, partial, *required));
         assert(reference == !multiple_omissions);
+        check_scalar_reference(partial, *required, sflint::FmpzConstRef(p));
         search::FactorBaseWitnessAudit audit;
         assert(search::factor_base_principal_witness(partial, *required, alpha,
                 Mode::order_element_direct, nullptr, &audit) == reference);
@@ -951,6 +1034,7 @@ int test_scan_detects_lower_interval_omissions_and_fails_closed() {
 }  // namespace
 
 int main() {
+    assert(test_scalar_witness_reference_cases() == 0);
     assert(test_selected_witness_edge_cases() == 0);
     assert(test_witness_partial_rational_prime_blocks() == 0);
     assert(test_legacy_scan_predicate_equivalence() == 0);

@@ -116,6 +116,29 @@ bool factor_base_principal_witness(
            full_factorization_has_principal_witness(base, prime, principal);
 }
 
+bool factor_base_scalar_witness(
+        const FactorBase& base,
+        const PrimeIdeal& prime,
+        flint::FmpzConstRef scalar,
+        FactorBaseWitnessPredicate predicate,
+        const DiagnosticsContext* diagnostics,
+        FactorBaseWitnessAudit* audit) noexcept {
+    if (audit != nullptr) *audit = FactorBaseWitnessAudit{};
+    const Order* order = base.parent();
+    if (order == nullptr || order->parent() == nullptr ||
+        !same_order_parent(prime.parent(), order) ||
+        !prime.has_prime_data() || base.contains(prime) ||
+        flint::fmpz_is_zero(scalar)) return false;
+
+    // Reference representation boundary; production routing is unchanged.
+    Element alpha(*order->parent());
+    OrderElement generator(*order);
+    return alpha.is_defined() && generator.is_defined() &&
+           alpha.set_fmpz(scalar) && generator.set_element(alpha) &&
+           factor_base_principal_witness(
+                   base, prime, generator, predicate, diagnostics, audit);
+}
+
 bool factor_base_honesty_primitive_part(
         Ideal& ideal,
         Element& back_multiplier) noexcept {

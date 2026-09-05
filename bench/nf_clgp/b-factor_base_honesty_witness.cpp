@@ -195,6 +195,7 @@ struct WitnessCandidate {
           kind(candidate_kind) {}
 
     silex::Element scalar_element;
+    sflint::Fmpz scalar;
     silex::OrderElement order_element;
     silex::Ideal ideal;
     silex::PrimeIdeal required_prime;
@@ -302,6 +303,7 @@ bool append_scalar_candidate(std::vector<WitnessCandidate>& candidates,
                              const silex::PrimeIdeal& required_prime,
                              slong scalar) noexcept {
     WitnessCandidate candidate(order, WitnessCandidateKind::scalar);
+    sflint::fmpz_set_si(candidate.scalar, scalar);
     if (!candidate.ideal.is_defined() ||
         !candidate.required_prime.is_defined() ||
         !candidate.scalar_element.is_defined() ||
@@ -643,6 +645,12 @@ bool validate_batch(WitnessBatch& batch,
         }
         const bool expected_matches =
                 expected_candidate_match(contract, i);
+        if (candidate.kind == WitnessCandidateKind::scalar &&
+            silex::detail::relation_search::factor_base_scalar_witness(
+                    batch.base, candidate.required_prime,
+                    sflint::FmpzConstRef(candidate.scalar)) != expected_matches) {
+            return false;
+        }
         if (ideal_matches != expected_matches ||
             materializing_matches != expected_matches ||
             element_matches != expected_matches ||
@@ -669,6 +677,7 @@ enum class WitnessPredicate {
     current_materializing,
     order_element_direct,
     production_selected,
+    search_selected,
 };
 
 void benchmark_witness_batch(benchmark::State& state,
@@ -702,6 +711,15 @@ void benchmark_witness_batch(benchmark::State& state,
             const WitnessCandidate& candidate = batch.candidates[i];
             bool candidate_matches = false;
             switch (predicate) {
+                case WitnessPredicate::search_selected:
+                    candidate_matches = candidate.kind == WitnessCandidateKind::scalar
+                            ? silex::detail::relation_search::factor_base_scalar_witness(
+                                      batch.base, candidate.required_prime,
+                                      sflint::FmpzConstRef(candidate.scalar))
+                            : silex::detail::relation_search::factor_base_principal_witness(
+                                      batch.base, candidate.required_prime,
+                                      candidate.order_element);
+                    break;
                 case WitnessPredicate::production_selected:
                     candidate_matches = silex::detail::relation_search::
                             factor_base_principal_witness(
@@ -796,6 +814,23 @@ void benchmark_witness_batch(benchmark::State& state,
                                             : batch.candidates.size());
     benchmark::ClobberMemory();
     silex::bench_contract::succeed(state);
+}
+
+void BM_honesty_scalar_selected_quartic(benchmark::State& state) {
+    benchmark_witness_batch(state, HonestyWorkload::quartic,
+                            WitnessPredicate::search_selected, true);
+}
+void BM_honesty_scalar_selected_quintic(benchmark::State& state) {
+    benchmark_witness_batch(state, HonestyWorkload::quintic,
+                            WitnessPredicate::search_selected, true);
+}
+void BM_honesty_search_selected_quartic(benchmark::State& state) {
+    benchmark_witness_batch(state, HonestyWorkload::quartic,
+                            WitnessPredicate::search_selected, false);
+}
+void BM_honesty_search_selected_quintic(benchmark::State& state) {
+    benchmark_witness_batch(state, HonestyWorkload::quintic,
+                            WitnessPredicate::search_selected, false);
 }
 
 void BM_honesty_scalar_full_factor_quartic(benchmark::State& state) {
@@ -929,6 +964,10 @@ BENCHMARK(BM_honesty_current_materializing_quintic);
 BENCHMARK(BM_honesty_order_element_direct_quintic);
 BENCHMARK(BM_honesty_selected_quartic);
 BENCHMARK(BM_honesty_selected_quintic);
+BENCHMARK(BM_honesty_scalar_selected_quartic);
+BENCHMARK(BM_honesty_scalar_selected_quintic);
+BENCHMARK(BM_honesty_search_selected_quartic);
+BENCHMARK(BM_honesty_search_selected_quintic);
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--dump-witness-fixtures")

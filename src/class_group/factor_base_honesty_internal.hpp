@@ -13,7 +13,16 @@ enum class FactorBaseWitnessPredicate {
 
 struct FactorBaseWitnessAudit {
     bool used_reference = false;
+    bool used_scalar_direct = false;
 };
+
+bool factor_base_scalar_witness(
+        const FactorBase& base,
+        const PrimeIdeal& prime,
+        flint::FmpzConstRef scalar,
+        FactorBaseWitnessPredicate predicate = FactorBaseWitnessPredicate::selected,
+        const DiagnosticsContext* diagnostics = nullptr,
+        FactorBaseWitnessAudit* audit = nullptr) noexcept;
 
 bool factor_base_principal_witness(
         const FactorBase& base,
