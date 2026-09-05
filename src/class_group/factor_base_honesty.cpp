@@ -130,7 +130,17 @@ bool factor_base_scalar_witness(
         !prime.has_prime_data() || base.contains(prime) ||
         flint::fmpz_is_zero(scalar)) return false;
 
-    // Reference representation boundary; production routing is unchanged.
+    if (predicate == FactorBaseWitnessPredicate::selected) {
+        bool matches = false;
+        if (detail::scalar_factor_over_base_with_required_prime(
+                    matches, scalar, base, prime, diagnostics)) {
+            if (audit != nullptr) audit->used_scalar_direct = true;
+            return matches;
+        }
+        // A completed negative is final; only failed evaluations fall back.
+        predicate = FactorBaseWitnessPredicate::order_element_direct;
+    }
+    // Keep the general representation boundary for reference and fallback.
     Element alpha(*order->parent());
     OrderElement generator(*order);
     return alpha.is_defined() && generator.is_defined() &&
@@ -410,29 +420,6 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
     return RequiredPrimeWitnessSearchResult::exhausted;
 }
 
-bool factor_base_prime_has_principal_witness(
-        const FactorBase& base,
-        const PrimeIdeal& prime,
-        const Element& alpha,
-        FactorBaseWitnessPredicate predicate,
-        const DiagnosticsContext* diagnostics) noexcept {
-    const Order* order = base.parent();
-    if (order == nullptr || order->parent() == nullptr ||
-        !same_order_parent(prime.parent(), order) ||
-        !alpha.has_parent(*order->parent()) ||
-        base.contains(prime)) {
-        return false;
-    }
-
-    OrderElement generator(*order);
-    if (!generator.is_defined() || !generator.set_element(alpha)) {
-        return false;
-    }
-
-    return factor_base_principal_witness(
-            base, prime, generator, predicate, diagnostics);
-}
-
 struct PrimeReductionVisitContext {
     const FactorBase* base = nullptr;
     const PrimeIdeal* prime = nullptr;
@@ -626,18 +613,15 @@ bool factor_base_reduces_prime_by_principal_search(
         radius = 0;
     }
 
-    Element alpha(*order->parent());
+    flint::Fmpz scalar;
     flint::Fmpz rational_prime;
-    if (!alpha.is_defined() ||
-        !prime.rational_prime(flint::FmpzRef(rational_prime))) {
+    if (!prime.rational_prime(flint::FmpzRef(rational_prime))) {
         return false;
     }
 
     if (flint::fmpz_fits_si(flint::FmpzConstRef(rational_prime)) &&
-        alpha.set_si(flint::fmpz_get_si(
-                flint::FmpzConstRef(rational_prime))) &&
-        factor_base_prime_has_principal_witness(
-                base, prime, alpha, predicate,
+        factor_base_scalar_witness(
+                base, prime, flint::FmpzConstRef(rational_prime), predicate,
                 diagnostics)) {
         return true;
     }
@@ -653,11 +637,9 @@ bool factor_base_reduces_prime_by_principal_search(
              k == rational_prime_si)) {
             continue;
         }
-        if (!alpha.set_si(k)) {
-            return false;
-        }
-        if (factor_base_prime_has_principal_witness(
-                    base, prime, alpha,
+        flint::fmpz_set_si(scalar, k);
+        if (factor_base_scalar_witness(
+                    base, prime, flint::FmpzConstRef(scalar),
                     predicate, diagnostics)) {
             return true;
         }

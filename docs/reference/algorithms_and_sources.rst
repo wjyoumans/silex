@@ -166,8 +166,13 @@ the retained ideals and the required ideal must equal the field degree.
 The required ideal must have valuation exactly one.  This is exact support
 accounting, not a norm-only comparison of arbitrary ideals.  The predicate
 requires a known maximal order and reports unsupported evaluations separately
-from negative classifications.  It is initially available for differential
-validation without changing the production search route.
+from negative classifications.  The legacy search uses it only for candidates
+already known to be integral scalars.  Failed evaluations fall back through
+the general order-element predicate and its full-factorization fallback;
+completed negative classifications do not fall back.  The scalar helper's
+arbitrary-precision input does not enlarge the search: the initial rational
+prime retains its machine-integer eligibility check, and the scalar loop,
+candidate order, bounds, random draws, and non-scalar path are unchanged.
 
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in

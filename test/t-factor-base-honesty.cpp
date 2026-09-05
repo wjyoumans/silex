@@ -543,6 +543,7 @@ void check_scalar_reference(const silex::FactorBase& base,
         assert(search::factor_base_scalar_witness(base, prime, scalar, mode,
                                                    &diagnostics, &audit) == expected);
         assert(failures == 0);
+        assert(audit.used_scalar_direct == (mode == Mode::selected));
         if (mode == Mode::full_factorization) assert(audit.used_reference);
     }
 }
