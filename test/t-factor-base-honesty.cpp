@@ -17,6 +17,7 @@
 #include <silex/prime_ideal.hpp>
 
 #include <array>
+#include <cassert>
 #include <vector>
 
 namespace {
@@ -426,6 +427,120 @@ int test_required_prime_predicates_match_full_factorization() {
     return 0;
 }
 
+int test_selected_witness_edge_cases() {
+    namespace search = silex::detail::relation_search;
+    using Mode = search::FactorBaseWitnessPredicate;
+    silex::NumberField field = quadratic_x2_minus_2();
+    silex::Order order = silex::test::equation_order(field);
+    silex::FactorBase empty(order), base(order);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_ui(bound, 2);
+    assert(base.build(sflint::FmpzConstRef(bound)));
+    silex::PrimeIdeal ramified(order), inert(order), split(order);
+    assert(first_prime_above(ramified, order, 2));
+    assert(first_prime_above(inert, order, 11));
+    assert(first_prime_above(split, order, 7));
+    assert(ramified.ramification_index() == 2 && inert.residue_degree() == 2);
+    silex::OrderElement alpha(order);
+    silex::Ideal principal(order);
+    const auto check = [&](const silex::FactorBase& fb,
+                           const silex::PrimeIdeal& required, bool expected) {
+        assert(principal.set_principal(alpha));
+        bool reference = !expected;
+        assert(full_factorization_required_prime_result(reference, principal, fb, required));
+        assert(reference == expected);
+        for (Mode mode : {Mode::selected, Mode::full_factorization, Mode::order_element_direct}) {
+            search::FactorBaseWitnessAudit audit;
+            assert(search::factor_base_principal_witness(fb, required, alpha, mode,
+                                                        nullptr, &audit) == expected);
+            if (mode == Mode::order_element_direct) assert(!audit.used_reference);
+            if (mode == Mode::full_factorization) assert(audit.used_reference);
+        }
+    };
+    for (slong scalar : {1, -1, 11, -11, 121, 13}) {
+        assert(alpha.set_si(scalar));
+        check(empty, inert, scalar == 11 || scalar == -11);
+    }
+    assert(alpha.set_si(7));
+    check(empty, split, false); // The other prime above 7 is missing from the base.
+    assert(alpha.set_si(2));
+    check(empty, ramified, false); // v_P(2)=2, not one.
+    sflint::FmpzMat coordinates(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 1), 1);
+    assert(alpha.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+    check(empty, ramified, true); // (theta)=P in Z[sqrt(2)].
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 0), 1);
+    assert(alpha.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+    check(empty, inert, false); // A non-scalar unit has no required-prime support.
+    fmpz_set_ui(fmpz_mat_entry(coordinates.raw(), 0, 0), 11);
+    fmpz_mul_2exp(fmpz_mat_entry(coordinates.raw(), 0, 0),
+                  fmpz_mat_entry(coordinates.raw(), 0, 0), 80);
+    fmpz_zero(fmpz_mat_entry(coordinates.raw(), 0, 1));
+    assert(alpha.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+    check(base, inert, true);
+
+    assert(alpha.set_si(0));
+    assert(!search::factor_base_principal_witness(empty, inert, alpha));
+    assert(alpha.set_si(11));
+    search::FactorBaseWitnessAudit audit;
+    silex::OrderElement undefined;
+    assert(!search::factor_base_principal_witness(empty, inert, undefined));
+    FieldSetup other = cubic_x3_minus_2();
+    silex::OrderElement wrong_parent(other.maximal_order);
+    assert(wrong_parent.set_si(11));
+    assert(!search::factor_base_principal_witness(empty, inert, wrong_parent));
+    assert(!search::factor_base_principal_witness(base, ramified, alpha));
+    assert(!search::factor_base_principal_witness(empty, inert, alpha, static_cast<Mode>(99)));
+    // Unsupported direct scope must use the reference, not grant a proof.
+    order.set_maximality(false);
+    const bool fallback = search::factor_base_principal_witness(
+            empty, inert, alpha, Mode::order_element_direct, nullptr, &audit);
+    assert(audit.used_reference);
+    assert(fallback == search::factor_base_principal_witness(
+            empty, inert, alpha, Mode::full_factorization));
+    return 0;
+}
+
+int test_witness_partial_rational_prime_blocks() {
+    namespace search = silex::detail::relation_search;
+    using Mode = search::FactorBaseWitnessPredicate;
+    for (bool multiple_omissions : {false, true}) {
+        FieldSetup setup = multiple_omissions ? quintic_lower_interval_fixture()
+                                              : truncated_decomposition_counterexample_fixture();
+        const auto& order = setup.maximal_order;
+        sflint::Fmpz p;
+        sflint::fmpz_set_ui(p, multiple_omissions ? 3 : 2);
+        silex::FactorBase partial(order);
+        assert(partial.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(p)));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+        const silex::PrimeIdeal* required = nullptr;
+        slong omitted = 0;
+        for (slong i = 0; i < primes.size(); ++i) {
+            const auto* prime = primes.at(i);
+            assert(prime != nullptr);
+            if (!partial.contains(*prime)) {
+                assert(prime->residue_degree() == 2 && prime->ramification_index() == 1);
+                required = prime;
+                ++omitted;
+            }
+        }
+        assert(required != nullptr && omitted == (multiple_omissions ? 2 : 1));
+        silex::OrderElement alpha(order);
+        silex::Ideal principal(order);
+        assert(alpha.set_si(multiple_omissions ? 3 : 2));
+        assert(principal.set_principal(alpha));
+        bool reference = false;
+        assert(full_factorization_required_prime_result(reference, principal, partial, *required));
+        assert(reference == !multiple_omissions);
+        search::FactorBaseWitnessAudit audit;
+        assert(search::factor_base_principal_witness(partial, *required, alpha,
+                Mode::order_element_direct, nullptr, &audit) == reference);
+        assert(!audit.used_reference);
+    }
+    return 0;
+}
+
 int test_ideal_transforms_preserve_principal_witness() {
     FieldSetup setup = cubic_x3_minus_2();
     const silex::Order& order = setup.maximal_order;
@@ -785,6 +900,8 @@ int test_scan_detects_lower_interval_omissions_and_fails_closed() {
 }  // namespace
 
 int main() {
+    assert(test_selected_witness_edge_cases() == 0);
+    assert(test_witness_partial_rational_prime_blocks() == 0);
     return test_proof_targets_require_complete_decomposition() != 0 ||
                    test_required_prime_predicates_match_full_factorization() !=
                            0 ||

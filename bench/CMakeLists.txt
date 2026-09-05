@@ -256,7 +256,9 @@ silex_benchmark_release_rows(b-silex-nf_clgp_factor_base_honesty
     BM_honesty_current_materializing_quartic
     BM_honesty_order_element_direct_quartic
     BM_honesty_current_materializing_quintic
-    BM_honesty_order_element_direct_quintic)
+    BM_honesty_order_element_direct_quintic
+    BM_honesty_selected_quartic
+    BM_honesty_selected_quintic)
 silex_benchmark_release_rows(b-silex-nf_fac_elt
     BM_nf_elt_is_square_quadratic
     BM_nf_elt_is_power_quadratic_square

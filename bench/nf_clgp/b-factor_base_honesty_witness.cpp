@@ -15,6 +15,7 @@
 
 #include "benchmark_contract.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
+#include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/relation_candidate_internal.hpp"
 #include "class_group/relation_factor_base_plan_internal.hpp"
 #include "ideal_factorization/ideal_factorization_internal.hpp"
@@ -27,6 +28,8 @@
 #include <cstdint>
 #include <utility>
 #include <vector>
+#include <cstdio>
+#include <string_view>
 
 namespace {
 namespace sflint = silex::flint;
@@ -665,6 +668,7 @@ enum class WitnessPredicate {
     prebuilt_required_prime,
     current_materializing,
     order_element_direct,
+    production_selected,
 };
 
 void benchmark_witness_batch(benchmark::State& state,
@@ -698,6 +702,12 @@ void benchmark_witness_batch(benchmark::State& state,
             const WitnessCandidate& candidate = batch.candidates[i];
             bool candidate_matches = false;
             switch (predicate) {
+                case WitnessPredicate::production_selected:
+                    candidate_matches = silex::detail::relation_search::
+                            factor_base_principal_witness(
+                                    batch.base, candidate.required_prime,
+                                    candidate.order_element);
+                    break;
                 case WitnessPredicate::full_factorization:
                     if (!full_factorization_has_principal_witness(
                                 candidate_matches, batch.base, candidate)) {
@@ -741,6 +751,13 @@ void benchmark_witness_batch(benchmark::State& state,
                         return;
                     }
                     break;
+            }
+            if (candidate_matches != expected_candidate_match(
+                        witness_pattern_contract(workload), i)) {
+                silex::bench_contract::fail(
+                        state, "timed candidate classification differs",
+                        silex::bench_contract::FailureReason::reference_mismatch);
+                return;
             }
             matches += candidate_matches ? 1 : 0;
         }
@@ -823,6 +840,83 @@ void BM_honesty_order_element_direct_quintic(benchmark::State& state) {
                             WitnessPredicate::order_element_direct, false);
 }
 
+void BM_honesty_selected_quartic(benchmark::State& state) {
+    benchmark_witness_batch(state, HonestyWorkload::quartic,
+                            WitnessPredicate::production_selected, false);
+}
+
+void BM_honesty_selected_quintic(benchmark::State& state) {
+    benchmark_witness_batch(state, HonestyWorkload::quintic,
+                            WitnessPredicate::production_selected, false);
+}
+
+// Source-neutral, noninstalled development-oracle output in the power basis.
+bool print_prime_rows(const silex::PrimeIdeal& prime, const silex::Order& order) {
+    const slong n = order.degree();
+    silex::Ideal ideal(order);
+    sflint::FmpzMat h(n, n);
+    sflint::FmpqMat basis(n, n), rational_h(n, n), rows(n, n);
+    if (!prime.get_ideal(ideal) || !ideal.get_hnf(sflint::FmpzMatRef(h)) ||
+        !order.get_basis(sflint::FmpqMatRef(basis))) return false;
+    fmpq_mat_set_fmpz_mat(rational_h.raw(), h.raw());
+    fmpq_mat_mul(rows.raw(), rational_h.raw(), basis.raw());
+    std::printf("[");
+    for (slong i = 0; i < n; ++i) {
+        std::printf(i ? ",[" : "[");
+        for (slong j = 0; j < n; ++j) {
+            std::printf(j ? ",\"" : "\"");
+            fmpq_print(fmpq_mat_entry(rows.raw(), i, j));
+            std::printf("\"");
+        }
+        std::printf("]");
+    }
+    std::printf("]");
+    return true;
+}
+
+int dump_witness_fixtures() {
+    for (HonestyWorkload workload : {HonestyWorkload::quartic, HonestyWorkload::quintic}) {
+        WitnessBatch batch;
+        if (!build_witness_batch(batch, workload) || !validate_batch(batch, workload)) return 1;
+        const silex::Order& order = batch.field.maximal_order;
+        const slong n = order.degree();
+        sflint::FmpqPoly polynomial;
+        sflint::Fmpq coefficient;
+        set_workload_polynomial(polynomial, workload);
+        std::printf("{\"kind\":\"field\",\"degree\":%ld,\"polynomial\":[", n);
+        for (slong j = 0; j <= n; ++j) {
+            std::printf(j ? ",\"" : "\"");
+            fmpq_poly_get_coeff_fmpq(coefficient.raw(), polynomial.raw(), j);
+            fmpq_print(coefficient.raw());
+            std::printf("\"");
+        }
+        std::printf("],\"base\":[");
+        for (slong j = 0; j < batch.base.length(); ++j) {
+            if (j) std::printf(",");
+            if (!print_prime_rows(*batch.base.prime_at(j), order)) return 1;
+        }
+        std::printf("]}\n");
+        for (std::size_t i = 0; i < batch.candidates.size(); ++i) {
+            const WitnessCandidate& candidate = batch.candidates[i];
+            silex::Element element(batch.field.field);
+            if (!candidate.order_element.get_element(element) ||
+                !element.get_fmpq_poly(sflint::FmpqPolyRef(polynomial))) return 1;
+            std::printf("{\"kind\":\"candidate\",\"degree\":%ld,\"index\":%zu,\"element\":[", n, i);
+            for (slong j = 0; j < n; ++j) {
+                std::printf(j ? ",\"" : "\"");
+                fmpq_poly_get_coeff_fmpq(coefficient.raw(), polynomial.raw(), j);
+                fmpq_print(coefficient.raw());
+                std::printf("\"");
+            }
+            std::printf("],\"prime\":");
+            if (!print_prime_rows(candidate.required_prime, order)) return 1;
+            std::printf(",\"expected\":%s}\n", expected_candidate_match(
+                    witness_pattern_contract(workload), i) ? "true" : "false");
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 BENCHMARK(BM_honesty_scalar_full_factor_quartic);
@@ -833,5 +927,15 @@ BENCHMARK(BM_honesty_current_materializing_quartic);
 BENCHMARK(BM_honesty_order_element_direct_quartic);
 BENCHMARK(BM_honesty_current_materializing_quintic);
 BENCHMARK(BM_honesty_order_element_direct_quintic);
+BENCHMARK(BM_honesty_selected_quartic);
+BENCHMARK(BM_honesty_selected_quintic);
 
-BENCHMARK_MAIN();
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--dump-witness-fixtures")
+        return dump_witness_fixtures();
+    benchmark::Initialize(&argc, argv);
+    if (benchmark::ReportUnrecognizedArguments(argc, argv)) return 1;
+    benchmark::RunSpecifiedBenchmarks();
+    benchmark::Shutdown();
+    return 0;
+}

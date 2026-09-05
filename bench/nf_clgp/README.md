@@ -18,6 +18,15 @@ Private diagnostic counters must remain in separately named internal targets.
 They must use existing internal boundaries, publish no production result, and
 remain outside the stable API and default CTest suite.
 
+The internal `b-silex-nf_clgp_factor_base_honesty` target compares exact
+witness predicates on frozen quartic and quintic batches (672 and 3937
+candidates). `BM_honesty_selected_*` measures the selected predicate, including
+its fallback. Every timed candidate must match its frozen classification,
+not merely the final match count. The `--dump-witness-fixtures` development
+mode emits source-neutral JSON lines containing polynomial coefficients,
+factor-base and required-prime lattices in the polynomial power basis, and
+each candidate's expected classification for an independent exact oracle.
+
 ## Reproduce a field
 
 Run an exact failing or slow field with a process timeout before promoting it

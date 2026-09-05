@@ -96,6 +96,38 @@ bool multiply_back_multiplier(
 
 }  // namespace
 
+bool factor_base_principal_witness(
+        const FactorBase& base,
+        const PrimeIdeal& prime,
+        const OrderElement& generator,
+        FactorBaseWitnessPredicate predicate,
+        const DiagnosticsContext* diagnostics,
+        FactorBaseWitnessAudit* audit) noexcept {
+    if (audit != nullptr) *audit = FactorBaseWitnessAudit{};
+    const Order* order = base.parent();
+    if (order == nullptr || !same_order_parent(generator.parent(), order) ||
+        !same_order_parent(prime.parent(), order) || !prime.has_prime_data() ||
+        base.contains(prime) || generator.equal_si(0)) return false;
+    if (predicate == FactorBaseWitnessPredicate::selected) {
+        // Remain on the reference until the isolated experiment is accepted.
+        predicate = FactorBaseWitnessPredicate::full_factorization;
+    }
+    if (predicate == FactorBaseWitnessPredicate::order_element_direct) {
+        // Source: buch2.c:divide_p_elt/can_factor account for the complete
+        // norm using residue-degree-weighted prime valuations. Only evaluation
+        // failure falls back; a completed negative classification is final.
+        bool matches = false;
+        if (detail::order_element_factor_over_base_with_required_prime(
+                    matches, generator, base, prime, diagnostics)) return matches;
+    } else if (predicate != FactorBaseWitnessPredicate::full_factorization) {
+        return false;
+    }
+    if (audit != nullptr) audit->used_reference = true;
+    Ideal principal(*order);
+    return principal.is_defined() && principal.set_principal(generator) &&
+           full_factorization_has_principal_witness(base, prime, principal);
+}
+
 bool factor_base_honesty_primitive_part(
         Ideal& ideal,
         Element& back_multiplier) noexcept {

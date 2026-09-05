@@ -4,6 +4,25 @@
 
 namespace silex::detail::relation_search {
 
+// Noninstalled predicate selection, independent of witness search strategy.
+enum class FactorBaseWitnessPredicate {
+    selected,
+    full_factorization,
+    order_element_direct,
+};
+
+struct FactorBaseWitnessAudit {
+    bool used_reference = false;
+};
+
+bool factor_base_principal_witness(
+        const FactorBase& base,
+        const PrimeIdeal& prime,
+        const OrderElement& generator,
+        FactorBaseWitnessPredicate predicate = FactorBaseWitnessPredicate::selected,
+        const DiagnosticsContext* diagnostics = nullptr,
+        FactorBaseWitnessAudit* audit = nullptr) noexcept;
+
 struct FactorBaseHonestyScanAudit {
     slong rational_prime_checks = 0;
     slong checks_at_or_below_active_bound = 0;
