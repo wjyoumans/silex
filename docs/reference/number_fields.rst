@@ -104,21 +104,30 @@ Homomorphisms and Automorphisms
 
 ``silex::FieldHom`` stores value-like domain and codomain field handles, a
 certified generator image, and explicit application methods.  Its field
-accessors return borrowed pointers to those stored handles.  Construction
-checks the defining polynomial exactly before accepting the generator image.
+accessors return borrowed pointers to those stored handles.  Parent-only
+construction leaves the generator image unset; ``set_generator_image`` checks
+the defining polynomial exactly before accepting the image.
 The identity and isomorphism predicates are data queries; they do not imply a
 full automorphism-group enumeration.
 
 ``silex::OrderHom`` combines a field homomorphism with source and target
 ``Order`` handles.  It certifies that source-basis images land in the target
-order and stores the integer image matrix used by order-homomorphism
-application.
+order and stores the integer image matrix.  Its ``apply`` method applies the
+certified field homomorphism.
 
 ``silex::FieldAutomorphism`` is the current finite automorphism wrapper.  It
 supports identity and quadratic conjugation constructors, optional certified
 endomorphism storage through ``FieldHom``, application to elements, and
 homomorphism extraction.  General automorphism lists/groups and cyclotomic
 metadata remain future source-backed work.
+
+The maps retain their field/order handles, keeping parent data alive when the
+original local handles go out of scope.  Pointers returned by their parent
+accessors are borrowed views of the map's stored handles; do not retain them
+across mutation or destruction of that map.  Compare field parent identity
+with ``NumberField::has_same_data``, rather than accessor pointer addresses.
+Two separate constructions from the same polynomial create distinct parents;
+copying a field handle preserves its parent identity.
 
 Low-level FLINT interop remains available through ``flint_field_ref()`` and
 ``raw_flint_field()`` for bridge code and parity tests.  Ordinary user code
@@ -128,6 +137,69 @@ On an undefined field both accessors expose a null ``nf_struct`` pointer
 (``flint_field_ref().raw()`` and ``raw_flint_field()`` return ``nullptr``).
 Modifying the ``nf_t`` behind a defined field bypasses the construction
 checks and is not supported.
+
+.. _field-maps-walkthrough:
+
+Compiled Field-Map Walkthrough
+------------------------------
+
+The program :download:`field_maps.cpp <../../examples/field_maps.cpp>` follows
+the existing cases in ``test/t-hom.cpp`` and ``test/t-aut.cpp``.  Every fallible
+operation is checked before its output is used, with a nonzero exit on failure.
+Build and run it with:
+
+.. code-block:: console
+
+   cmake --preset default
+   cmake --build --preset default --target example-field-maps
+   ./build/default/examples/example-field-maps
+   ctest --preset default -R '^silex-example-field-maps$'
+
+First construct two distinct parents for ``Q(sqrt(2))``.  A copied handle
+shares the first parent's data:
+
+.. literalinclude:: ../../examples/field_maps.cpp
+   :language: cpp
+   :start-after: // field-maps-parents-begin
+   :end-before: // field-maps-parents-end
+   :dedent: 4
+
+Certify the image of the first generator in the second field.  The resulting
+map is an isomorphism, but ``is_identity()`` is false because the parents are
+distinct.  Rejecting the nonroot ``1`` preserves the previously certified
+image.  Application takes an input in the domain and an output in the
+codomain.  The same-parent map that fixes the generator is the identity.
+The private ``set_linear`` helper used in these excerpts sets an element from
+an exact polynomial with the given constant and linear coefficients; ``fail``
+prints a diagnostic and returns a nonzero exit code.
+
+.. literalinclude:: ../../examples/field_maps.cpp
+   :language: cpp
+   :start-after: // field-maps-hom-begin
+   :end-before: // field-maps-hom-end
+   :dedent: 4
+
+The automorphism wrapper supplies identity and quadratic conjugation.  Here
+conjugation sends ``theta_K`` to ``-theta_K`` and ``3 + 4*theta_K`` to
+``3 - 4*theta_K``.  Applying it twice recovers the original element; extracting
+its ``FieldHom`` gives the same image:
+
+.. literalinclude:: ../../examples/field_maps.cpp
+   :language: cpp
+   :start-after: // field-maps-aut-begin
+   :end-before: // field-maps-aut-end
+   :dedent: 4
+
+Finally, certify that conjugation maps the equation order to itself.  Each
+row of the exported integer matrix gives the target-basis coordinates of a
+source-basis image.  For the basis ``(1, theta_K)``, this is ``diag(1, -1)``.
+The owned ``FmpzMat`` overload resizes its output on success:
+
+.. literalinclude:: ../../examples/field_maps.cpp
+   :language: cpp
+   :start-after: // field-maps-order-begin
+   :end-before: // field-maps-order-end
+   :dedent: 4
 
 Minimal Example
 ---------------
@@ -226,6 +298,7 @@ Examples
 --------
 
 See ``examples/element_arithmetic_basics.cpp`` for exact element arithmetic,
+``examples/field_maps.cpp`` for certified field and order maps,
 ``examples/log_unit_lattice.cpp`` for embeddings and log unit lattices,
 ``examples/field_order_ideal_basics.cpp`` for the field/order/ideal path, and
 ``examples/real_quadratic_order_units.cpp`` for an exact continued-fraction

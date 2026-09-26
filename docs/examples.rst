@@ -27,6 +27,12 @@ Current examples:
    Exact ``Element`` arithmetic in a quadratic field, including trace/norm,
    multiplication, inversion, and signed integer powers through named methods.
 
+:download:`field_maps.cpp <../examples/field_maps.cpp>`
+   Exact generator-image certification, an isomorphism between separately
+   constructed quadratic parents, same-parent identity, quadratic conjugation
+   and its involution, and an integral order image matrix. See the
+   :ref:`field-maps-walkthrough` for excerpts from the compiled program.
+
 :download:`log_unit_lattice.cpp <../examples/log_unit_lattice.cpp>`
    Embeddings, logarithmic unit matrices, regulator computation, and
    independence checks.

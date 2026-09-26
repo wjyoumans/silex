@@ -22,6 +22,10 @@ owned-return helper.
   principal fractional ideal from an ambient `Element`.
 - `element_arithmetic_basics.cpp`: exact `Element` arithmetic, trace/norm,
   inversion, and signed-power calls in a quadratic field.
+- `field_maps.cpp`: certified `FieldHom` images between distinct quadratic
+  parents, same-parent identity, quadratic `FieldAutomorphism` conjugation
+  and its involution, and an integral `OrderHom` image matrix. Build target
+  `example-field-maps`; CTest name `silex-example-field-maps`.
 - `log_unit_lattice.cpp`: embeddings, logarithmic unit matrices, regulator
   computation, and independence checks.
 - `local_relation_basics.cpp`: prime decomposition, copied factor-base primes,

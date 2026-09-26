@@ -10,6 +10,10 @@ add_executable(example-element-arithmetic-basics element_arithmetic_basics.cpp)
 target_link_libraries(example-element-arithmetic-basics PRIVATE Silex::silex)
 silex_apply_target_warnings(example-element-arithmetic-basics)
 
+add_executable(example-field-maps field_maps.cpp)
+target_link_libraries(example-field-maps PRIVATE Silex::silex)
+silex_apply_target_warnings(example-field-maps)
+
 add_executable(example-class-unit-computation class_unit_computation.cpp)
 target_link_libraries(example-class-unit-computation PRIVATE Silex::silex)
 silex_apply_target_warnings(example-class-unit-computation)
@@ -61,6 +65,10 @@ if(SILEX_BUILD_TESTS)
         COMMAND example-element-arithmetic-basics)
     list(APPEND SILEX_EXAMPLE_TEST_NAMES
         silex-example-element-arithmetic-basics)
+    add_test(NAME silex-example-field-maps
+        COMMAND example-field-maps)
+    list(APPEND SILEX_EXAMPLE_TEST_NAMES
+        silex-example-field-maps)
     add_test(NAME silex-example-class-unit-computation
         COMMAND example-class-unit-computation)
     list(APPEND SILEX_EXAMPLE_TEST_NAMES
