@@ -521,24 +521,29 @@ if(SILEX_BUILD_TESTS)
             "Could not extract documentation C++ snippets:\n"
             "${SILEX_DOC_SNIPPET_OUTPUT}${SILEX_DOC_SNIPPET_ERROR}")
     endif()
+    message(STATUS "${SILEX_DOC_SNIPPET_OUTPUT}")
     file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/doc-snippets.txt
         SILEX_DOC_SNIPPET_SOURCES)
-    if(SILEX_DOC_SNIPPET_SOURCES)
-        add_library(silex-doc-snippets OBJECT EXCLUDE_FROM_ALL
-            ${SILEX_DOC_SNIPPET_SOURCES})
-        target_link_libraries(silex-doc-snippets PRIVATE Silex::silex)
-        silex_apply_target_warnings(silex-doc-snippets)
-        if(NOT MSVC)
-            # Snippets show calls whose results the prose discusses but the
-            # fragment does not use.
-            target_compile_options(silex-doc-snippets PRIVATE
-                -Wno-unused-variable -Wno-unused-but-set-variable)
-        endif()
-        add_test(NAME silex-doc-snippets
-            COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
-                    --target silex-doc-snippets --config $<CONFIG>)
-        list(APPEND SILEX_TEST_NAMES silex-doc-snippets)
+    if(NOT SILEX_DOC_SNIPPET_SOURCES)
+        message(FATAL_ERROR
+            "extract_doc_snippets found no C++ code blocks under "
+            "${CMAKE_CURRENT_SOURCE_DIR}/docs; the silex-doc-snippets gate "
+            "would silently disappear. Check --root and the docs/ layout.")
     endif()
+    add_library(silex-doc-snippets OBJECT EXCLUDE_FROM_ALL
+        ${SILEX_DOC_SNIPPET_SOURCES})
+    target_link_libraries(silex-doc-snippets PRIVATE Silex::silex)
+    silex_apply_target_warnings(silex-doc-snippets)
+    if(NOT MSVC)
+        # Snippets show calls whose results the prose discusses but the
+        # fragment does not use.
+        target_compile_options(silex-doc-snippets PRIVATE
+            -Wno-unused-variable -Wno-unused-but-set-variable)
+    endif()
+    add_test(NAME silex-doc-snippets
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                --target silex-doc-snippets --config $<CONFIG>)
+    list(APPEND SILEX_TEST_NAMES silex-doc-snippets)
 
     add_executable(t-silex-status test/t-status.cpp)
     target_link_libraries(t-silex-status PRIVATE Silex::silex)

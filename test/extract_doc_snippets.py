@@ -54,10 +54,12 @@ def extract_blocks(path: Path) -> list[Block]:
         i += 1
         while i < len(lines) and OPTION.match(lines[i]):
             i += 1
+        break_index: int | None = None
         body: list[tuple[int, str]] = []
         while i < len(lines):
             line = lines[i]
             if line.strip() and indentation(line) <= directive_indent:
+                break_index = i
                 break
             body.append((i + 1, line))
             i += 1
@@ -66,6 +68,17 @@ def extract_blocks(path: Path) -> list[Block]:
         while body and not body[-1][1].strip():
             body.pop()
         if not body:
+            candidate = lines[break_index] if break_index is not None else ""
+            leading = candidate[:len(candidate) - len(candidate.lstrip())]
+            if candidate.strip() and "\t" in leading:
+                raise ValueError(
+                    f"{path}:{break_index + 1}: code block body is "
+                    "tab-indented; indent it with spaces so it dedents "
+                    "past the directive")
+            if candidate.strip():
+                raise ValueError(
+                    f"{path}:{break_index + 1}: code block body is not "
+                    "indented past the directive")
             raise ValueError(f"{path}: empty C++ code block")
         content_indent = min(indentation(text) for _, text in body
                              if text.strip())
@@ -105,6 +118,11 @@ def render(rel: Path, blocks: list[Block]) -> str:
         for line in block.lines:
             out.append("" if INCLUDE.match(line) else line)
     out.append("}" * len(blocks))
+    # The last block left #line pointing at the .rst source; reset it to the
+    # generated file before the trailer so diagnostics on these lines (and
+    # any the compiler attributes to the closing brace) point here, not at
+    # a stale .rst location.
+    out.append(f'#line {len(out) + 2} "{unit_name(rel)}.cpp"')
     out.append("    return true;")
     out.append("}")
     out.append("")
