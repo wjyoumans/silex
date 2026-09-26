@@ -192,6 +192,38 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+Saturation-backed class-group proof follows Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_class_group_proof``: verify generation
+up to the Minkowski-type bound, then saturate at every prime dividing the
+candidate class order.  Once the factor base generates the class group, the
+full relation lattice contains the computed one with index ``h_cand / h``,
+which divides ``h_cand``; the relations are complete exactly when they are
+saturated at every prime ``p | h_cand``.  Silex therefore publishes a
+saturation-backed ``proven`` only when all of the following hold: verified
+generation up to the bound, with every prime ideal up to the bound in the
+factor base; proven units and regulator; and a verified ``ell``-local proof
+for every prime ``p`` dividing ``h_cand``.  The required primes are derived
+from the published presentation; an index-bound request proves the union of
+the primes up to its bound and the prime divisors of ``h_cand``.
+
+The ``ell``-local test takes the Smith-invariant ``beta`` rows (compact power
+witnesses of invariant generators whose invariant ``ell`` divides), the free
+units, and the torsion generator when ``ell`` divides the torsion order, and
+requires their ``ell``-th-power characters at degree-one primes ``q`` with
+``ell | q - 1`` to reach full rank modulo ``ell``.  This row choice follows
+PARI 2.17.3 ``src/basemath/buch3.c:check_prime`` and ``primecertify`` (the
+``bnfcertify`` local check); the torsion row matches Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl:compute_candidates_for_saturate``,
+which adds the torsion generator when ``ell`` divides the torsion order.
+Where Hecke would enlarge the relations with ``saturate!`` and repeat, Silex
+fails closed: an ``ell`` whose local test does not reach full rank within the
+auxiliary-prime bound is recorded as ``unavailable`` and does not promote.
+Each certification entry point is transactional; a failed call restores all
+class-group certification metadata, including the unit and regulator proof
+statuses.  A successful ``try_prove_relation_saturation_with_units`` call
+means only that its ``ell`` verified; the relation-saturation status becomes
+``verified`` only once every ``p | h_cand`` is covered.
+
 The legacy factor-base honesty search tests principal witnesses directly in
 order coordinates.  PARI 2.17.3
 ``src/basemath/buch2.c:divide_p_elt`` and ``can_factor`` supply the exact

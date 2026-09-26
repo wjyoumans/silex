@@ -119,7 +119,13 @@ The coarse class-group mode is promoted to ``proven`` only when the relevant
 source-backed gate has verified the components it needs.  For example, a
 bounded relation search may produce a usable finite presentation while still
 reporting ``CertificationMode::unknown`` if the proof records are
-``not_checked`` or ``unavailable``.
+``not_checked`` or ``unavailable``.  The saturation route needs verified
+factor-base generation, proven units and regulator, and a verified
+``ell``-local proof for every prime dividing the candidate class order; a
+single verified ``ell`` does not complete it.  A failed certification call
+leaves all class-group certification metadata unchanged, including the unit
+and regulator proof statuses.  See :doc:`algorithms_and_sources` for the
+source anchors.
 
 For ``OrderUnitGroup``, use ``certification_status()`` for the coarse mode and
 ``unit_proof_record_count()``, ``unit_proof_record()``,

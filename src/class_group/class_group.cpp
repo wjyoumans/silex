@@ -7170,14 +7170,15 @@ bool ClassGroupContext::relation_saturation_ell_verified_(
     return false;
 }
 
-// Class-group proof by saturation (see docs/reference/algorithms_and_sources
-// for the source anchor): once the factor base is known to generate the class
-// group, the full relation lattice contains the computed one with index
-// h_cand / h, which divides the candidate order h_cand.  The relations are
-// therefore complete exactly when they are saturated at every prime
-// p | h_cand.  A saturation proof covers the candidate only when every such p
-// carries a verified ell-record backed by a verified local proof; the set of
-// required primes is derived from the published presentation alone.
+// Class-group proof by saturation (source anchor: "Class groups and order
+// units" in docs/reference/algorithms_and_sources.rst): once the factor base
+// is known to generate the class group, the full relation lattice contains
+// the computed one with index h_cand / h, which divides the candidate order
+// h_cand.  The relations are therefore complete exactly when they are
+// saturated at every prime p | h_cand.  A saturation proof covers the
+// candidate only when every such p carries a verified ell-record backed by a
+// verified local proof; the set of required primes is derived from the
+// published presentation alone.
 bool ClassGroupContext::relation_saturation_covers_class_order_()
         const noexcept {
     flint::Fmpz class_order;
