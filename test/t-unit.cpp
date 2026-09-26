@@ -1,6 +1,7 @@
 #include <silex/unit.hpp>
 
 #include "test_support.hpp"
+#include "unit/unit_internal.hpp"
 
 #include <cassert>
 #include <vector>
@@ -350,18 +351,312 @@ int test_roots_of_unity() {
     return 0;
 }
 
+silex::NumberField integer_polynomial_field(const slong* coefficients,
+                                            slong length) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i < length; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// |value - reference| < 2^-90, with reference a decimal string from GP.
+bool arb_near_decimal(const sflint::Arb& value, const char* reference) noexcept {
+    sflint::Arb expected;
+    sflint::Arb difference;
+    sflint::Arf upper;
+    if (::arb_set_str(expected.raw(), reference, 256) != 0) {
+        return false;
+    }
+    ::arb_sub(difference.raw(), value.raw(), expected.raw(), 256);
+    ::arb_abs(difference.raw(), difference.raw());
+    ::arb_get_ubound_arf(upper.raw(), difference.raw(), 256);
+    return ::arf_is_finite(upper.raw()) != 0 &&
+           ::arf_cmp_2exp_si(upper.raw(), -90) < 0;
+}
+
+// The bound is an exact point equal to the lower endpoint of an enclosure
+// of ten_thousandths / 10^4: at most that value and within 2^-50 of it.
+bool arb_is_lower_point_of(const sflint::Arb& value,
+                           ulong ten_thousandths) noexcept {
+    sflint::Arb expected;
+    sflint::Arb difference;
+    ::arb_set_ui(expected.raw(), ten_thousandths);
+    ::arb_div_ui(expected.raw(), expected.raw(), 10000, 256);
+    ::arb_sub(difference.raw(), expected.raw(), value.raw(), 256);
+    sflint::Arf lower;
+    sflint::Arf upper;
+    ::arb_get_lbound_arf(lower.raw(), difference.raw(), 256);
+    ::arb_get_ubound_arf(upper.raw(), difference.raw(), 256);
+    return ::arb_is_exact(value.raw()) != 0 &&
+           ::arf_sgn(lower.raw()) >= 0 &&
+           ::arf_cmp_2exp_si(upper.raw(), -50) < 0;
+}
+
+// floor(regulator / bound) for a GP regulator string and an exact bound.
+slong floor_regulator_quotient(const char* regulator,
+                               const sflint::Arb& bound) noexcept {
+    sflint::Arb value;
+    sflint::Arf upper;
+    sflint::Fmpz result;
+    if (::arb_set_str(value.raw(), regulator, 256) != 0) {
+        return -1;
+    }
+    ::arb_div(value.raw(), value.raw(), bound.raw(), 256);
+    ::arb_get_ubound_arf(upper.raw(), value.raw(), 256);
+    ::arf_get_fmpz(result.raw(), upper.raw(), ARF_RND_FLOOR);
+    return ::fmpz_get_si(result.raw());
+}
+
 int test_lower_regulator_bound() {
     silex::NumberField real_quadratic = quadratic_field(2);
     sflint::Arb bound;
     assert(silex::unit_lower_regulator_bound(sflint::ArbRef(bound),
                                              real_quadratic, 128));
     assert(sflint::arb_is_positive(bound));
+    // Friedman 1989 Table 6, (r1, r2) = (2, 0): R >= 0.48.  With
+    // R(Q(sqrt2)) = log(1 + sqrt2) = 0.8813... the index bound is one.
+    assert(arb_is_lower_point_of(bound, 4800));
 
     sflint::Arb sentinel;
     sflint::arb_set_si(sflint::ArbRef(sentinel), 123);
     assert(!silex::unit_lower_regulator_bound(sflint::ArbRef(sentinel),
                                               real_quadratic, 0));
     assert(sflint::arb_contains_si(sentinel, 123));
+
+    // Unit rank zero: still a positive bound (R = 1 by convention), which
+    // no unit-index caller consumes.
+    silex::NumberField rational = degree_one_field();
+    assert(silex::unit_lower_regulator_bound(sflint::ArbRef(bound), rational,
+                                             128));
+    assert(sflint::arb_is_positive(bound));
+    silex::NumberField gaussian = generic_x2_plus_one_field();
+    assert(silex::unit_lower_regulator_bound(sflint::ArbRef(bound), gaussian,
+                                             128));
+    assert(sflint::arb_is_positive(bound));
+    return 0;
+}
+
+// Each regulator lower bound term against GP 2.17 (\p 40), e.g.
+//   zl(r1,r2,g) = log((1+g)*(1+2*g)/2) + (r1+r2)*lngamma(1+g)
+//       + r2*lngamma(3/2+g) - (r1+r2)*log(2) - r2*log(Pi)/2
+//       - (1+g)*((r1+r2)*psi((1+g)/2) + r2*psi(1+g/2) + 2/g + 1/(1+g));
+//   Z(r1,r2,w) = w/50*exp((46*r1+10*r2)/100);
+//   F(r1,r2,w) = w*31/10000*exp((241*(r1+2*r2)+497*r1)/1000);
+//   S(r1,r2,w,g) = w*exp(zl(r1,r2,g));
+int test_lower_regulator_bound_terms() {
+    sflint::Fmpz two;
+    sflint::Fmpz ten;
+    ::fmpz_set_ui(two.raw(), 2);
+    ::fmpz_set_ui(ten.raw(), 10);
+    const sflint::FmpzConstRef w2(two.raw());
+    const sflint::FmpzConstRef w10(ten.raw());
+    sflint::Arb value;
+
+    // Friedman 1989 Theorem B.
+    assert(silex::detail::regulator_lower_bound_friedman_minimum(
+            sflint::ArbRef(value), 128));
+    assert(arb_near_decimal(value, "0.2052"));
+
+    // Zimmert 1981 Korollar (i): R >= 0.02 w exp(0.46 r1 + 0.1 r2).
+    assert(silex::detail::regulator_lower_bound_zimmert_corollary(
+            sflint::ArbRef(value), 3, 0, w2, 128));
+    assert(arb_near_decimal(value,
+                            "0.1589960650997899247563667112375822200772"));
+    assert(silex::detail::regulator_lower_bound_zimmert_corollary(
+            sflint::ArbRef(value), 2, 1, w2, 128));
+    assert(arb_near_decimal(value,
+                            "0.1109277905585719166719679910858177542534"));
+    assert(silex::detail::regulator_lower_bound_zimmert_corollary(
+            sflint::ArbRef(value), 3, 1, w2, 128));
+    assert(arb_near_decimal(value,
+                            "0.1757178272367502674293515057326898228977"));
+    assert(silex::detail::regulator_lower_bound_zimmert_corollary(
+            sflint::ArbRef(value), 0, 2, w10, 128));
+    assert(arb_near_decimal(value,
+                            "0.2442805516320339667842143989279348340615"));
+
+    // Friedman 1989 p. 620 Corollary: R/w > 0.0031 exp(0.241 n + 0.497 r1).
+    assert(silex::detail::regulator_lower_bound_friedman_corollary(
+            sflint::ArbRef(value), 3, 0, w2, 128));
+    assert(arb_near_decimal(value,
+                            "0.05674396414638643833575044923010525274285"));
+    assert(silex::detail::regulator_lower_bound_friedman_corollary(
+            sflint::ArbRef(value), 2, 1, w2, 128));
+    assert(arb_near_decimal(value,
+                            "0.04392788412136035000632128871714391496935"));
+    assert(silex::detail::regulator_lower_bound_friedman_corollary(
+            sflint::ArbRef(value), 8, 0, w2, 128));
+    assert(arb_near_decimal(value,
+                            "2.272303359991809705171606228068175887917"));
+    assert(silex::detail::regulator_lower_bound_friedman_corollary(
+            sflint::ArbRef(value), 0, 2, w10, 128));
+    assert(arb_near_decimal(value,
+                            "0.08128708960401178432231306997820516539408"));
+
+    // Zimmert 1981 Satz 3 at gamma = 1 and gamma = 3/5.
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 3, 0, w2, 1, 1, 128));
+    assert(arb_near_decimal(value,
+                            "0.1613163261295697741200235837340640423589"));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 2, 1, w2, 1, 1, 128));
+    assert(arb_near_decimal(value,
+                            "0.1124720982727918166884165012387947991104"));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 0, 3, w2, 1, 1, 128));
+    assert(arb_near_decimal(value,
+                            "0.05467360953127803854474959348325015224870"));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 0, 2, w10, 1, 1, 128));
+    assert(arb_near_decimal(value,
+                            "0.2471998004427213873853834918008501855207"));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 8, 0, w2, 3, 5, 128));
+    assert(arb_near_decimal(value,
+                            "2.296361101036429348993838953587253457251"));
+
+    // At gamma = 1, R/w >= 0.0202138 exp(0.461284 r1 + 0.100622 r2); the
+    // printed Korollar (i) constants are these rounded down.
+    sflint::Arb base;
+    sflint::Arb step;
+    sflint::Arb ratio;
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(base), 3, 0, w2, 1, 1, 128));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(step), 4, 0, w2, 1, 1, 128));
+    ::arb_div(ratio.raw(), step.raw(), base.raw(), 128);
+    ::arb_log(ratio.raw(), ratio.raw(), 128);
+    assert(arb_near_decimal(ratio,
+                            "0.4612841492431204117957920587066282940088"));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(step), 3, 1, w2, 1, 1, 128));
+    ::arb_div(ratio.raw(), step.raw(), base.raw(), 128);
+    ::arb_log(ratio.raw(), ratio.raw(), 128);
+    assert(arb_near_decimal(ratio,
+                            "0.1006221288341864432385257187103119968916"));
+
+    // Zimmert Tabelle 2 (p. 375) lists lower bounds for 2R/w, rounded down,
+    // at his chosen gamma: (3,0) 0.2129 at 1.58, (2,1) 0.1306 at 1.37,
+    // (3,1) 0.1809 at 1.09.  With w = 2 these are bounds for R.
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 3, 0, w2, 158, 100, 128));
+    assert(arb_near_decimal(value,
+                            "0.2129474323813426813568508772937398306256"));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 2, 1, w2, 137, 100, 128));
+    assert(arb_near_decimal(value,
+                            "0.1306738533620172259551575231187187248846"));
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 3, 1, w2, 109, 100, 128));
+    assert(arb_near_decimal(value,
+                            "0.1809380062002522306708648373948250271538"));
+
+    // Friedman 1989 Table 6 (p. 621).
+    assert(silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 3, 0, 128));
+    assert(arb_near_decimal(value, "0.52"));
+    assert(silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 2, 1, 128));
+    assert(arb_near_decimal(value, "0.36"));
+    assert(silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 3, 1, 128));
+    assert(arb_near_decimal(value, "0.62"));
+    assert(silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 6, 0, 128));
+    assert(arb_near_decimal(value, "3.22"));
+    assert(silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 0, 9, 128));
+    assert(arb_near_decimal(value, "0.47"));
+    // (0,3) is 0.27 except for three sextics; capped at 0.2052.
+    assert(silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 0, 3, 128));
+    assert(arb_near_decimal(value, "0.2052"));
+    // Signatures outside the table, and rank-zero entries, are absent.
+    sflint::arb_set_si(sflint::ArbRef(value), 123);
+    assert(!silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 8, 0, 128));
+    assert(!silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 2, 6, 128));
+    assert(!silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 1, 0, 128));
+    assert(!silex::detail::regulator_lower_bound_friedman_table6(
+            sflint::ArbRef(value), 0, 1, 128));
+    assert(sflint::arb_contains_si(value, 123));
+
+    // Invalid inputs.
+    assert(!silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(value), 3, 0, w2, 0, 1, 128));
+    assert(!silex::detail::regulator_lower_bound_zimmert_corollary(
+            sflint::ArbRef(value), 0, 0, w2, 128));
+    assert(!silex::detail::regulator_lower_bound_friedman_corollary(
+            sflint::ArbRef(value), 3, 0, w2, 0));
+    assert(sflint::arb_contains_si(value, 123));
+    return 0;
+}
+
+int test_lower_regulator_bound_maximum() {
+    sflint::Fmpz two;
+    ::fmpz_set_ui(two.raw(), 2);
+    const sflint::FmpzConstRef w2(two.raw());
+    sflint::Arb value;
+
+    // Signatures in Friedman's Table 6: the table entry dominates.
+    assert(silex::detail::regulator_lower_bound_from_signature(
+            sflint::ArbRef(value), 3, 0, w2, 256));
+    assert(arb_is_lower_point_of(value, 5200));
+    assert(silex::detail::regulator_lower_bound_from_signature(
+            sflint::ArbRef(value), 2, 1, w2, 256));
+    assert(arb_is_lower_point_of(value, 3600));
+    assert(silex::detail::regulator_lower_bound_from_signature(
+            sflint::ArbRef(value), 3, 1, w2, 256));
+    assert(arb_is_lower_point_of(value, 6200));
+    assert(silex::detail::regulator_lower_bound_from_signature(
+            sflint::ArbRef(value), 0, 3, w2, 256));
+    assert(arb_is_lower_point_of(value, 2052));
+
+    // (8,0) is not in the table; Satz 3 at gamma = 3/5 is the best of the
+    // fixed set (GP: 2.29636...), above Friedman's corollary (2.27230...).
+    assert(silex::detail::regulator_lower_bound_from_signature(
+            sflint::ArbRef(value), 8, 0, w2, 256));
+    sflint::Arb satz3;
+    assert(silex::detail::regulator_lower_bound_zimmert_satz3(
+            sflint::ArbRef(satz3), 8, 0, w2, 3, 5, 64));
+    sflint::Arf expected;
+    ::arb_get_lbound_arf(expected.raw(), satz3.raw(), 64);
+    assert(::arb_is_exact(value.raw()) != 0);
+    assert(::arf_equal(arb_midref(value.raw()), expected.raw()) != 0);
+
+    // The five T-029 fields (GP 2.17 bnfinit(f, 1); w = 2 and
+    // bnfcertify = 1 for each).  Index bound floor(R / R_lower) uses
+    // Friedman Table 6: (3,0) 0.52, (2,1) 0.36, (3,1) 0.62.
+    struct T029Field {
+        slong coefficients[6];
+        slong length;
+        ulong table_entry;
+        const char* regulator;
+        slong index_bound;
+    };
+    const T029Field fields[] = {
+            {{-1, -8, -4, 1}, 4, 5200,
+             "12.68082022713452093603368239737775544244", 24},
+            {{-3, 2, 1, 4, 1}, 5, 3600,
+             "14.46098754389304356185892633589732684899", 40},
+            {{3, -3, -3, -4, 1}, 5, 3600, "49.8132070223", 138},
+            {{4, 1, 3, -8, 1}, 5, 3600, "28.9150416062", 80},
+            {{3, -3, -3, -6, -7, 1}, 6, 6200, "734.654033002", 1184},
+    };
+    for (const T029Field& entry : fields) {
+        silex::NumberField field =
+                integer_polynomial_field(entry.coefficients, entry.length);
+        assert(silex::unit_lower_regulator_bound(sflint::ArbRef(value), field,
+                                                 256));
+        assert(arb_is_lower_point_of(value, entry.table_entry));
+        assert(floor_regulator_quotient(entry.regulator, value) ==
+               entry.index_bound);
+    }
     return 0;
 }
 
@@ -442,6 +737,8 @@ int main() {
     test_quadratic_fundamental_unit();
     test_roots_of_unity();
     test_lower_regulator_bound();
+    test_lower_regulator_bound_terms();
+    test_lower_regulator_bound_maximum();
     test_log_matrix_regulator_and_independence();
     return 0;
 }

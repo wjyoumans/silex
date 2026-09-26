@@ -804,6 +804,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-unit test/t-unit.cpp)
     target_link_libraries(t-silex-unit PRIVATE Silex::silex)
+    target_include_directories(t-silex-unit PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-unit)
     add_test(NAME silex-unit COMMAND t-silex-unit)
     list(APPEND SILEX_TEST_NAMES silex-unit)

@@ -1,6 +1,7 @@
 #include <silex/unit.hpp>
 
 #include "../element/element_internal.hpp"
+#include "unit_internal.hpp"
 
 #include <flint/arb_mat.h>
 
@@ -174,43 +175,24 @@ bool unit_lower_regulator_bound(flint::ArbRef out,
         return false;
     }
 
+    // Every bound used here increases with w, so it is valid for any
+    // w <= w_K.  For an order O in K, O^x is a finite-index subgroup of
+    // O_K^x, so Reg(O) >= R_K and a lower bound for R_K bounds Reg(O); w is
+    // therefore the root-of-unity count of the field, not of the order.  If
+    // it cannot be computed, w = 2 (every number field contains -1) keeps
+    // the bound valid.
     flint::Fmpz roots_order;
     if (!root_of_unity_order(flint::FmpzRef(roots_order), field)) {
         fmpz_set_ui(roots_order.raw(), 2);
     }
 
-    flint::Arb t;
-    flint::Arb u;
-    flint::Arb zimmert;
-    flint::Arb floor;
-    flint::Arb candidate;
-    flint::Arf lower;
-
-    arb_set_si(t.raw(), sig.r1());
-    arb_mul_ui(t.raw(), t.raw(), 46, precision);
-    arb_set_si(u.raw(), sig.r2());
-    arb_add(t.raw(), t.raw(), u.raw(), precision);
-    arb_div_ui(t.raw(), t.raw(), 100, precision);
-    arb_exp(t.raw(), t.raw(), precision);
-
-    arb_set_fmpz(zimmert.raw(), roots_order.raw());
-    arb_mul(zimmert.raw(), zimmert.raw(), t.raw(), precision);
-    arb_mul_ui(zimmert.raw(), zimmert.raw(), 4, precision);
-    arb_div_ui(zimmert.raw(), zimmert.raw(), 100, precision);
-
-    arb_set_ui(floor.raw(), 54);
-    arb_div_ui(floor.raw(), floor.raw(), 1000, precision);
-    arb_max(candidate.raw(), zimmert.raw(), floor.raw(), precision);
-    if (arb_is_finite(candidate.raw()) == 0) {
+    flint::Arb bound;
+    if (!detail::regulator_lower_bound_from_signature(
+                flint::ArbRef(bound), sig.r1(), sig.r2(),
+                flint::FmpzConstRef(roots_order.raw()), precision)) {
         return false;
     }
-
-    arb_get_lbound_arf(lower.raw(), candidate.raw(), precision);
-    if (arf_is_finite(lower.raw()) == 0 || arf_sgn(lower.raw()) <= 0) {
-        return false;
-    }
-
-    arb_set_arf(out.raw(), lower.raw());
+    arb_set(out.raw(), bound.raw());
     return true;
 }
 
@@ -636,5 +618,306 @@ bool units_independent(bool& independent,
     }
     return false;
 }
+
+namespace detail {
+namespace {
+
+// Working precision for the signature bounds.  The bounds are lower bounds
+// only, so a lower endpoint computed at 64 bits loses at most a relative
+// 2^-60 or so against a tighter evaluation and stays rigorous at any
+// precision; capping it keeps the Satz 3 special-function evaluations cheap
+// for callers that ask for several hundred bits.
+constexpr slong kRegulatorBoundPrecision = 64;
+
+bool valid_signature_bound_input(slong r1,
+                                 slong r2,
+                                 flint::FmpzConstRef w,
+                                 slong precision) noexcept {
+    return r1 >= 0 && r2 >= 0 && r1 + r2 >= 1 && precision > 0 &&
+           fmpz_sgn(w.raw()) > 0;
+}
+
+bool finish_bound(flint::ArbRef out, const flint::Arb& value) noexcept {
+    if (arb_is_finite(value.raw()) == 0 || arb_is_positive(value.raw()) == 0) {
+        return false;
+    }
+    arb_set(out.raw(), value.raw());
+    return true;
+}
+
+// Friedman 1989, Table 6 "Lower bounds for the regulator" (p. 621), valid
+// for all fields of the given signature.  Entries are in units of 10^-4 and
+// are the rounded-down values printed in the table.  The table also lists
+// (r1, r2) = (1, 0) and (0, 1) with value 1, the conventional regulator of Q
+// and of imaginary quadratic fields; those have unit rank zero and are not
+// used.  The (0, 3) entry is 0.27 "with the three exceptions
+// D_K = -10051, -10571 and -12167" (note b), whose regulators are 0.2052,
+// 0.2132 and 0.2372 (Theorem B, p. 599), so it is capped at 0.2052 here.
+struct SignatureRegulatorBound {
+    slong r1;
+    slong r2;
+    ulong ten_thousandths;
+};
+
+constexpr SignatureRegulatorBound kFriedmanTable6[] = {
+        {0, 2, 3000},  {0, 3, 2052},  {0, 4, 2960},  {0, 5, 2500},
+        {0, 6, 3000},  {0, 7, 4800},  {0, 8, 8200},  {0, 9, 4700},
+        {1, 1, 2800},  {1, 2, 2600},  {1, 3, 3700},  {1, 4, 2600},
+        {1, 5, 3900},  {1, 6, 6200},  {1, 7, 10500}, {1, 8, 6100},
+        {2, 0, 4800},  {2, 1, 3600},  {2, 2, 4700},  {2, 3, 3600},
+        {2, 4, 5200},  {2, 5, 3000},  {3, 0, 5200},  {3, 1, 6200},
+        {3, 2, 8600},  {3, 3, 6500},  {3, 4, 3900},  {4, 0, 8200},
+        {4, 1, 12300}, {4, 2, 3100},  {5, 0, 16000}, {5, 1, 4000},
+        {6, 0, 32200}, {7, 0, 10800},
+};
+
+// Rational gamma values at which Zimmert Satz 3 is evaluated.  Every
+// gamma > 0 gives a valid bound; this fixed set is within about 6% of the
+// optimum over gamma for every signature of degree at most 20 (GP scan with
+// step 0.02 on [0.05, 5]).
+struct RationalGamma {
+    slong numerator;
+    slong denominator;
+};
+
+constexpr RationalGamma kZimmertSatz3Gammas[] = {
+        {1, 10}, {3, 20}, {1, 5}, {3, 10}, {2, 5}, {1, 2}, {3, 5}, {4, 5},
+        {1, 1},  {6, 5},  {7, 5}, {8, 5},  {2, 1}, {5, 2}, {3, 1},
+};
+
+void raise_lower_bound(flint::Arf& best,
+                       bool& have_best,
+                       const flint::Arb& candidate,
+                       slong precision) noexcept {
+    flint::Arf lower;
+    arb_get_lbound_arf(lower.raw(), candidate.raw(), precision);
+    if (arf_is_finite(lower.raw()) == 0 || arf_sgn(lower.raw()) <= 0) {
+        return;
+    }
+    if (!have_best || arf_cmp(lower.raw(), best.raw()) > 0) {
+        arf_set(best.raw(), lower.raw());
+        have_best = true;
+    }
+}
+
+}  // namespace
+
+bool regulator_lower_bound_friedman_minimum(flint::ArbRef out,
+                                            slong precision) noexcept {
+    if (precision <= 0) {
+        return false;
+    }
+    // Theorem B: the smallest regulator of all number fields is that of the
+    // totally complex sextic field of discriminant -10051, 0.2052 to four
+    // places (GP 2.17: 0.20521646...), so R >= 0.2052 for every field.
+    flint::Arb value;
+    arb_set_ui(value.raw(), 2052);
+    arb_div_ui(value.raw(), value.raw(), 10000, precision);
+    return finish_bound(out, value);
+}
+
+bool regulator_lower_bound_zimmert_corollary(flint::ArbRef out,
+                                             slong r1,
+                                             slong r2,
+                                             flint::FmpzConstRef w,
+                                             slong precision) noexcept {
+    if (!valid_signature_bound_input(r1, r2, w, precision)) {
+        return false;
+    }
+    flint::Arb exponent;
+    flint::Arb term;
+    arb_set_si(exponent.raw(), r1);
+    arb_mul_ui(exponent.raw(), exponent.raw(), 46, precision);
+    arb_set_si(term.raw(), r2);
+    arb_mul_ui(term.raw(), term.raw(), 10, precision);
+    arb_add(exponent.raw(), exponent.raw(), term.raw(), precision);
+    arb_div_ui(exponent.raw(), exponent.raw(), 100, precision);
+
+    flint::Arb value;
+    arb_exp(value.raw(), exponent.raw(), precision);
+    arb_mul_fmpz(value.raw(), value.raw(), w.raw(), precision);
+    arb_div_ui(value.raw(), value.raw(), 50, precision);
+    return finish_bound(out, value);
+}
+
+bool regulator_lower_bound_friedman_corollary(flint::ArbRef out,
+                                              slong r1,
+                                              slong r2,
+                                              flint::FmpzConstRef w,
+                                              slong precision) noexcept {
+    if (!valid_signature_bound_input(r1, r2, w, precision)) {
+        return false;
+    }
+    flint::Arb exponent;
+    flint::Arb term;
+    arb_set_si(exponent.raw(), r1);
+    arb_mul_ui(exponent.raw(), exponent.raw(), 241 + 497, precision);
+    arb_set_si(term.raw(), r2);
+    arb_mul_ui(term.raw(), term.raw(), 2 * 241, precision);
+    arb_add(exponent.raw(), exponent.raw(), term.raw(), precision);
+    arb_div_ui(exponent.raw(), exponent.raw(), 1000, precision);
+
+    flint::Arb value;
+    arb_exp(value.raw(), exponent.raw(), precision);
+    arb_mul_fmpz(value.raw(), value.raw(), w.raw(), precision);
+    arb_mul_ui(value.raw(), value.raw(), 31, precision);
+    arb_div_ui(value.raw(), value.raw(), 10000, precision);
+    return finish_bound(out, value);
+}
+
+bool regulator_lower_bound_zimmert_satz3(flint::ArbRef out,
+                                         slong r1,
+                                         slong r2,
+                                         flint::FmpzConstRef w,
+                                         slong gamma_numerator,
+                                         slong gamma_denominator,
+                                         slong precision) noexcept {
+    if (!valid_signature_bound_input(r1, r2, w, precision) ||
+        gamma_numerator <= 0 || gamma_denominator <= 0) {
+        return false;
+    }
+
+    // R/w >= (1+g)(1+2g)/2 * Gamma(1+g)^(r1+r2) * Gamma(3/2+g)^r2
+    //        * 2^(-r1-r2) * pi^(-r2/2)
+    //        * exp{(-1-g)[(r1+r2) psi((1+g)/2) + r2 psi(1+g/2)
+    //                     + 2/g + 1/(1+g)]},
+    // evaluated as the exponential of its logarithm.
+    flint::Arb g;
+    flint::Arb one_plus_g;
+    flint::Arb a;
+    flint::Arb b;
+    flint::Arb x;
+    flint::Arb y;
+    flint::Arb log_bound;
+    flint::Arb bracket;
+
+    arb_set_si(g.raw(), gamma_numerator);
+    arb_div_si(g.raw(), g.raw(), gamma_denominator, precision);
+    arb_add_ui(one_plus_g.raw(), g.raw(), 1, precision);
+    arb_set_si(a.raw(), r1 + r2);
+    arb_set_si(b.raw(), r2);
+
+    // log((1+g)(1+2g)/2)
+    arb_mul_2exp_si(x.raw(), g.raw(), 1);
+    arb_add_ui(x.raw(), x.raw(), 1, precision);
+    arb_mul(x.raw(), x.raw(), one_plus_g.raw(), precision);
+    arb_mul_2exp_si(x.raw(), x.raw(), -1);
+    arb_log(log_bound.raw(), x.raw(), precision);
+
+    // (r1+r2) log Gamma(1+g)
+    arb_lgamma(x.raw(), one_plus_g.raw(), precision);
+    arb_addmul(log_bound.raw(), a.raw(), x.raw(), precision);
+
+    // r2 log Gamma(3/2+g)
+    arb_set_ui(x.raw(), 3);
+    arb_mul_2exp_si(x.raw(), x.raw(), -1);
+    arb_add(x.raw(), x.raw(), g.raw(), precision);
+    arb_lgamma(y.raw(), x.raw(), precision);
+    arb_addmul(log_bound.raw(), b.raw(), y.raw(), precision);
+
+    // -(r1+r2) log 2
+    arb_const_log2(x.raw(), precision);
+    arb_submul(log_bound.raw(), a.raw(), x.raw(), precision);
+
+    // -(r2/2) log pi
+    arb_const_pi(x.raw(), precision);
+    arb_log(x.raw(), x.raw(), precision);
+    arb_mul_2exp_si(x.raw(), x.raw(), -1);
+    arb_submul(log_bound.raw(), b.raw(), x.raw(), precision);
+
+    // (r1+r2) psi((1+g)/2)
+    arb_mul_2exp_si(x.raw(), one_plus_g.raw(), -1);
+    arb_digamma(y.raw(), x.raw(), precision);
+    arb_mul(bracket.raw(), a.raw(), y.raw(), precision);
+
+    // + r2 psi(1+g/2)
+    arb_mul_2exp_si(x.raw(), g.raw(), -1);
+    arb_add_ui(x.raw(), x.raw(), 1, precision);
+    arb_digamma(y.raw(), x.raw(), precision);
+    arb_addmul(bracket.raw(), b.raw(), y.raw(), precision);
+
+    // + 2/g + 1/(1+g)
+    arb_set_ui(x.raw(), 2);
+    arb_div(x.raw(), x.raw(), g.raw(), precision);
+    arb_add(bracket.raw(), bracket.raw(), x.raw(), precision);
+    arb_inv(x.raw(), one_plus_g.raw(), precision);
+    arb_add(bracket.raw(), bracket.raw(), x.raw(), precision);
+
+    // -(1+g) [ ... ]
+    arb_submul(log_bound.raw(), one_plus_g.raw(), bracket.raw(), precision);
+
+    flint::Arb value;
+    arb_exp(value.raw(), log_bound.raw(), precision);
+    arb_mul_fmpz(value.raw(), value.raw(), w.raw(), precision);
+    return finish_bound(out, value);
+}
+
+bool regulator_lower_bound_friedman_table6(flint::ArbRef out,
+                                           slong r1,
+                                           slong r2,
+                                           slong precision) noexcept {
+    if (precision <= 0) {
+        return false;
+    }
+    for (const SignatureRegulatorBound& entry : kFriedmanTable6) {
+        if (entry.r1 == r1 && entry.r2 == r2) {
+            flint::Arb value;
+            arb_set_ui(value.raw(), entry.ten_thousandths);
+            arb_div_ui(value.raw(), value.raw(), 10000, precision);
+            return finish_bound(out, value);
+        }
+    }
+    return false;
+}
+
+bool regulator_lower_bound_from_signature(flint::ArbRef out,
+                                          slong r1,
+                                          slong r2,
+                                          flint::FmpzConstRef w,
+                                          slong precision) noexcept {
+    if (!valid_signature_bound_input(r1, r2, w, precision)) {
+        return false;
+    }
+    const slong prec = precision < kRegulatorBoundPrecision
+                               ? precision
+                               : kRegulatorBoundPrecision;
+
+    flint::Arf best;
+    bool have_best = false;
+    flint::Arb term;
+
+    if (regulator_lower_bound_friedman_minimum(flint::ArbRef(term), prec)) {
+        raise_lower_bound(best, have_best, term, prec);
+    }
+    if (regulator_lower_bound_zimmert_corollary(flint::ArbRef(term), r1, r2,
+                                                w, prec)) {
+        raise_lower_bound(best, have_best, term, prec);
+    }
+    if (regulator_lower_bound_friedman_corollary(flint::ArbRef(term), r1, r2,
+                                                 w, prec)) {
+        raise_lower_bound(best, have_best, term, prec);
+    }
+    for (const RationalGamma& gamma : kZimmertSatz3Gammas) {
+        if (regulator_lower_bound_zimmert_satz3(
+                    flint::ArbRef(term), r1, r2, w, gamma.numerator,
+                    gamma.denominator, prec)) {
+            raise_lower_bound(best, have_best, term, prec);
+        }
+    }
+    // Table 6 covers only fields of positive unit rank.
+    if (r1 + r2 >= 2 &&
+        regulator_lower_bound_friedman_table6(flint::ArbRef(term), r1, r2,
+                                              prec)) {
+        raise_lower_bound(best, have_best, term, prec);
+    }
+
+    if (!have_best) {
+        return false;
+    }
+    arb_set_arf(out.raw(), best.raw());
+    return true;
+}
+
+}  // namespace detail
 
 }  // namespace silex

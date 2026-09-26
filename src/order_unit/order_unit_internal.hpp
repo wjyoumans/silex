@@ -177,6 +177,16 @@ bool compact_regulator_from_log_matrix(flint::ArbRef out,
                                        slong places,
                                        slong precision) noexcept;
 bool arb_radius_lt_2exp(const flint::Arb& value, slong exponent) noexcept;
+// floor of the upper endpoint of subgroup_regulator / regulator_lower_bound,
+// an upper bound for the unit index when regulator_lower_bound is a proven
+// lower bound for the regulator.  Fails, leaving out unchanged, when either
+// input is not finite and positive or when that upper endpoint is below one,
+// which contradicts the lower bound.
+bool unit_index_bound_from_regulator_quotient(
+        flint::FmpzRef out,
+        flint::ArbConstRef subgroup_regulator,
+        flint::ArbConstRef regulator_lower_bound,
+        slong precision) noexcept;
 bool class_regulator_index_bound_from_candidate_product(
         flint::FmpzRef out,
         flint::ArbConstRef candidate_class_regulator_product,

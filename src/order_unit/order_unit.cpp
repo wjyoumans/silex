@@ -261,6 +261,48 @@ bool arb_radius_lt_2exp(const flint::Arb& value, slong exponent) noexcept {
     return mag_cmp_2exp_si(arb_radref(value.raw()), exponent) < 0;
 }
 
+bool unit_index_bound_from_regulator_quotient(
+        flint::FmpzRef out,
+        flint::ArbConstRef subgroup_regulator,
+        flint::ArbConstRef regulator_lower_bound,
+        slong precision) noexcept {
+    if (precision <= 0 || !flint::arb_is_finite(subgroup_regulator) ||
+        !flint::arb_is_positive(subgroup_regulator) ||
+        !flint::arb_is_finite(regulator_lower_bound) ||
+        !flint::arb_is_positive(regulator_lower_bound)) {
+        return false;
+    }
+
+    flint::Arb quotient;
+    flint::Arf upper;
+    flint::Fmpz candidate;
+    ::arb_div(quotient.raw(), subgroup_regulator.raw(),
+              regulator_lower_bound.raw(), precision);
+    if (!flint::arb_is_finite(quotient) ||
+        !flint::arb_is_positive(quotient)) {
+        return false;
+    }
+
+    flint::arb_get_ubound_arf(upper, quotient, precision);
+    if (!flint::arf_is_finite(upper)) {
+        return false;
+    }
+
+    // The index [O^x : G] is a positive integer with
+    //     [O^x : G] = R_G / Reg(O) <= R_G / R_K <= R_G / R_lower,
+    // so it is at most the floor of the upper endpoint of the quotient; see
+    // the unit-proof section of docs/reference/algorithms_and_sources.rst.
+    // An upper endpoint below one contradicts R_K >= R_lower, so the bound
+    // fails closed instead of reporting index one.
+    flint::arf_get_fmpz(candidate, upper, ARF_RND_FLOOR);
+    if (flint::fmpz_sgn(flint::FmpzConstRef(candidate)) <= 0) {
+        return false;
+    }
+
+    flint::fmpz_set(out, flint::FmpzConstRef(candidate));
+    return true;
+}
+
 bool class_regulator_index_bound_from_candidate_product(
         flint::FmpzRef out,
         flint::ArbConstRef candidate_class_regulator_product,
@@ -1027,33 +1069,14 @@ bool OrderUnitGroup::regulator_index_bound(flint::FmpzRef out,
     }
 
     flint::Arb lower;
-    flint::Arb quotient;
-    flint::Arf upper;
-    flint::Fmpz candidate;
     if (!unit_lower_regulator_bound(flint::ArbRef(lower), *field,
-                                    precision) ||
-        !flint::arb_is_positive(lower)) {
+                                    precision)) {
         return false;
     }
 
-    flint::arb_div(quotient, regulator_, lower, precision);
-    if (!flint::arb_is_finite(quotient) ||
-        !flint::arb_is_positive(quotient)) {
-        return false;
-    }
-
-    flint::arb_get_ubound_arf(upper, quotient, precision);
-    if (!flint::arf_is_finite(upper)) {
-        return false;
-    }
-
-    flint::arf_get_fmpz(candidate, upper, ARF_RND_CEIL);
-    if (flint::fmpz_sgn(flint::FmpzConstRef(candidate)) <= 0) {
-        flint::fmpz_one(flint::FmpzRef(candidate));
-    }
-
-    flint::fmpz_set(out, flint::FmpzConstRef(candidate));
-    return true;
+    return detail::unit_index_bound_from_regulator_quotient(
+            out, flint::ArbConstRef(regulator_), flint::ArbConstRef(lower),
+            precision);
 }
 
 namespace detail {

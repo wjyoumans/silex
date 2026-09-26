@@ -1949,8 +1949,12 @@ int test_relation_kernel_units_index_bounded_cubic_rank_target() {
             sflint::FmpzConstRef(aux_max), 2));
 
     sflint::Fmpz index_bound;
+    // GP: K = bnfinit(x^3-2*x-5, 1) has K.reg = 2.35861..., h = 2 and
+    // signature (1, 1); the refined group has regulator 9.43444... (index 4),
+    // and the Friedman 1989 Table 6 bound R >= 0.28 for signature (1, 1)
+    // gives floor(9.43444... / 0.28) = 33.
     assert(refined.regulator_index_bound(sflint::FmpzRef(index_bound), 128));
-    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(index_bound), 74));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(index_bound), 33));
 
     return 0;
 }
@@ -3066,8 +3070,10 @@ int test_regulator_index_bound() {
     silex::EmbeddingContext embeddings(field);
     silex::OrderUnitGroup full;
     assert(full.compute(order));
+    // floor(log(1 + sqrt2) / 0.48) = floor(1.836...) = 1, with 0.48 the
+    // Friedman 1989 Table 6 bound for signature (2, 0).
     assert(full.regulator_index_bound(sflint::FmpzRef(bound), 160));
-    assert(sflint::fmpz_sgn(sflint::FmpzConstRef(bound)) > 0);
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(bound), 1));
 
     silex::Element epsilon(field);
     silex::Element epsilon2(field);
@@ -3082,7 +3088,8 @@ int test_regulator_index_bound() {
     sflint::Fmpz subgroup_bound;
     assert(subgroup.regulator_index_bound(sflint::FmpzRef(subgroup_bound),
                                           160));
-    assert(fmpz_cmp(subgroup_bound.raw(), bound.raw()) >= 0);
+    // floor(2 log(1 + sqrt2) / 0.48) = floor(3.672...) = 3.
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(subgroup_bound), 3));
 
     sflint::Fmpz sentinel;
     assert(set_fmpz_si(sentinel, 42));
@@ -3191,6 +3198,70 @@ int test_class_regulator_index_bound_interval_boundary() {
             sflint::ArbConstRef(candidate_product),
             sflint::ArbConstRef(narrow_analytic_product), 128, nullptr));
     assert(sflint::fmpz_equal_si(bound, 2));
+
+    return 0;
+}
+
+// The unit index bound is the floor of the upper endpoint of R_G / R_lower,
+// and fails closed when that endpoint is below one (decision 2026-09-26).
+int test_unit_index_bound_from_regulator_quotient() {
+    sflint::Arb regulator;
+    sflint::Arb lower;
+    sflint::Fmpz bound;
+
+    // 7 / 2: floor(3.5) = 3.
+    sflint::arb_set_si(regulator, 7);
+    sflint::arb_set_si(lower, 2);
+    assert(silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(regulator),
+            sflint::ArbConstRef(lower), 128));
+    assert(sflint::fmpz_equal_si(bound, 3));
+
+    // An exact quotient of one gives one.
+    sflint::arb_set_si(regulator, 2);
+    assert(silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(regulator),
+            sflint::ArbConstRef(lower), 128));
+    assert(sflint::fmpz_equal_si(bound, 1));
+
+    // An enclosure 1 +/- 1/2 of the quotient has upper endpoint 3/2, so the
+    // bound is floor(3/2) = 1.
+    sflint::Fmpq half;
+    sflint::fmpq_set_si(half, 1, 2);
+    sflint::Arb error;
+    sflint::arb_set_fmpq(error, half, 128);
+    sflint::arb_set_si(regulator, 2);
+    sflint::arb_add_error(regulator, error);
+    sflint::arb_set_si(lower, 2);
+    assert(silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(regulator),
+            sflint::ArbConstRef(lower), 128));
+    assert(sflint::fmpz_equal_si(bound, 1));
+
+    // A subgroup regulator below the regulator lower bound (1 / 2 < 1)
+    // contradicts the lower bound: fail closed, output unchanged.
+    assert(set_fmpz_si(bound, 42));
+    sflint::arb_set_si(regulator, 1);
+    assert(!silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(regulator),
+            sflint::ArbConstRef(lower), 128));
+    assert(sflint::fmpz_equal_si(bound, 42));
+
+    // Non-positive inputs and a nonpositive precision fail.
+    sflint::arb_set_si(regulator, 0);
+    assert(!silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(regulator),
+            sflint::ArbConstRef(lower), 128));
+    sflint::arb_set_si(regulator, 7);
+    sflint::arb_set_si(lower, 0);
+    assert(!silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(regulator),
+            sflint::ArbConstRef(lower), 128));
+    sflint::arb_set_si(lower, 2);
+    assert(!silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(regulator),
+            sflint::ArbConstRef(lower), 0));
+    assert(sflint::fmpz_equal_si(bound, 42));
 
     return 0;
 }
@@ -3611,8 +3682,10 @@ int test_prove_index_bound() {
     assert(!changed);
     assert(proved.certification_status() == silex::CertificationMode::proven);
     assert(check_first_free_generator(proved, epsilon));
-    assert(has_unit_proof_record(proved, 2, silex::ProofState::verified,
-                                 false));
+    // log(1 + sqrt2) = 0.8813... and the Friedman 1989 Table 6 bound
+    // R >= 0.48 for signature (2, 0) give the index bound
+    // floor(0.8813... / 0.48) = 1, so no ell-local proof is needed.
+    assert(proved.unit_proof_record_count() == 0);
 
     silex::Element epsilon2(field);
     assert(epsilon2.multiply(epsilon, epsilon));
@@ -3636,8 +3709,12 @@ int test_prove_index_bound() {
     assert(restarted.certification_status() ==
            silex::CertificationMode::proven);
     assert(check_first_free_generator_square(restarted, epsilon2));
-    assert(has_unit_proof_record(restarted, 2, silex::ProofState::verified,
-                                 false));
+    // The square subgroup has index bound 3; the 2-local step adjoins the
+    // square root and restarts, and the restarted full group has index
+    // bound 1, so the only record is the 2-local step that changed it.
+    assert(restarted.unit_proof_record_count() == 1);
+    assert(has_unit_proof_record(restarted, 2, silex::ProofState::unavailable,
+                                 true));
 
     silex::OrderUnitGroup restart_limited(order);
     status = silex::ProofState::not_checked;
@@ -3934,10 +4011,12 @@ int test_prove_index_bound_maximal_quadratic_sqrt5_control() {
 // x^3 - 4x^2 - 8x - 1 (discriminant 2213, totally real, Z[theta] maximal):
 // GP 2.17 `K = bnfinit(x^3-4*x^2-8*x-1, 1)` gives the fundamental units
 // theta and -4 theta^2 - theta + 6, class number one, and bnfcertify(K) = 1.
-// The regulator index bound is 40, and below q = 1000 there is only one
-// usable degree-one prime q = 1 mod 31, so the 31-local proof needs more
-// auxiliary primes than the bounded pre-scan draws.  The proof must continue
-// past that bound (reference `saturate!` scan) and verify every ell <= 40.
+// The regulator is 12.6808..., and the Friedman 1989 Table 6 bound for
+// signature (3, 0) is R >= 0.52, so the regulator index bound is
+// floor(12.6808... / 0.52) = 24.  With the pre-scan bound 200, ell = 13, 17
+// and 19 each have a single degree-one prime q = 1 mod ell below the bound,
+// so the unit-rank-two local proof must continue past the pre-scan
+// (reference `saturate!` scan) and still verify every ell <= 24.
 int test_prove_index_bound_cubic2213_past_prescan_bound() {
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
@@ -3971,7 +4050,7 @@ int test_prove_index_bound_cubic2213_past_prescan_bound() {
 
     sflint::Fmpz index_bound;
     assert(start.regulator_index_bound(sflint::FmpzRef(index_bound), 256));
-    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(index_bound), 31) >= 0);
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(index_bound), 24));
 
     // The validation proof uses this pre-scan bound (kComputeProofAuxMax).
     sflint::Fmpz aux_bound;
@@ -3979,8 +4058,9 @@ int test_prove_index_bound_cubic2213_past_prescan_bound() {
 
     // GP, f = x^3 - 4x^2 - 8x - 1:
     //     forprime(q=2, 1000, if(q%31==1 && #polrootsmod(f,q), print(q)))
-    // prints only 683, so one character cannot settle rank two.  The public
-    // bounded local proof stays bounded by aux_bound and is unavailable.
+    // prints only 683 (one root), so one character cannot settle rank two.
+    // The public bounded local proof stays bounded by aux_bound and is
+    // unavailable.
     sflint::Fmpz ell31;
     assert(set_fmpz_si(ell31, 31));
     silex::OrderUnitGroup local(order);
@@ -3993,24 +4073,116 @@ int test_prove_index_bound_cubic2213_past_prescan_bound() {
     assert(!changed);
     assert(!local.unit_proof_verified(sflint::FmpzConstRef(ell31)));
 
+    silex::OrderUnitGroup validated(order);
+    status = silex::ProofState::not_checked;
+    changed = true;
+    assert(validated.prove_index_bound(status, changed, start, 1,
+                                       sflint::FmpzConstRef(aux_bound), 2,
+                                       embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(!changed);
+    assert(validated.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(has_unit_proof_record(validated, 23, silex::ProofState::verified,
+                                 false));
+    assert(!has_unit_proof_record(validated, 29, silex::ProofState::verified,
+                                  false));
+
+    // GP: forprime(ell=13, 19, forprime(q=2, 200,
+    //         if(q%ell==1 && #polrootsmod(f,q), print(ell, " ", q))))
+    // prints 13 157, 17 137 and 19 191, each with one root: the pre-scan
+    // below 200 yields one character for each of these ell.
+    sflint::Fmpz small_aux_bound;
+    assert(set_fmpz_si(small_aux_bound, 200));
     silex::OrderUnitGroup proved(order);
     status = silex::ProofState::not_checked;
     changed = true;
+    assert(proved.prove_index_bound(status, changed, start, 1,
+                                    sflint::FmpzConstRef(small_aux_bound), 2,
+                                    embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(!changed);
+    assert(proved.certification_status() == silex::CertificationMode::proven);
+    const slong kProvedElls[] = {2, 3, 5, 7, 11, 13, 17, 19, 23};
+    for (slong ell : kProvedElls) {
+        assert(has_unit_proof_record(proved, ell, silex::ProofState::verified,
+                                     false));
+    }
+    assert(!has_unit_proof_record(proved, 29, silex::ProofState::verified,
+                                  false));
+    // GP: \p 110; K.reg
+    assert(regulator_contains(
+            proved,
+            "12.68082022713452093603368239737775544244960210761943928030154"
+            "4077156925247307418251826663747356303483"));
+    return 0;
+}
+
+// x^4 + 4x^3 + x^2 + 2x - 3 (discriminant -70640, signature (2, 1), Z[theta]
+// maximal): GP 2.17 `K = bnfinit(f, 1)` gives class number one, w = 2,
+// bnfcertify(K) = 1 and K.reg = 14.46098754389304356...; the units
+// theta^3 + 4 theta^2 - 2 and -theta^3 - 5 theta^2 - 6 theta - 7 have norm 1
+// and their log-embedding determinant equals K.reg, so they are fundamental.
+// The Friedman 1989 Table 6 bound for signature (2, 1) is R >= 0.36, and
+// floor(14.46098... / 0.36) = floor(40.169...) = 40.  GP:
+//     forprime(q=2, 1000, if(q%31==1 && #polrootsmod(f,q), print(q)))
+// prints only 311 (one root), so the 31-local proof of this rank-two group
+// must continue past the pre-scan bound 1000.
+int test_prove_index_bound_quartic70640() {
+    silex::NumberField field = quartic_field(4, 1, 2, -3);
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+
+    sflint::FmpqPoly first_poly;
+    sflint::fmpq_poly_set_coeff_si(first_poly, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(first_poly, 2, 4);
+    sflint::fmpq_poly_set_coeff_si(first_poly, 0, -2);
+    sflint::FmpqPoly second_poly;
+    sflint::fmpq_poly_set_coeff_si(second_poly, 3, -1);
+    sflint::fmpq_poly_set_coeff_si(second_poly, 2, -5);
+    sflint::fmpq_poly_set_coeff_si(second_poly, 1, -6);
+    sflint::fmpq_poly_set_coeff_si(second_poly, 0, -7);
+    silex::Element first(field);
+    silex::Element second(field);
+    assert(first.set_fmpq_poly(sflint::FmpqPolyConstRef(first_poly)));
+    assert(second.set_fmpq_poly(sflint::FmpqPolyConstRef(second_poly)));
+    silex::FactoredElement generators[] = {silex::FactoredElement(field),
+                                           silex::FactoredElement(field)};
+    assert(generators[0].set_element(first));
+    assert(generators[1].set_element(second));
+    silex::OrderUnitGroup start(order);
+    assert(start.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 256));
+    assert(start.free_rank() == 2);
+
+    sflint::Fmpz index_bound;
+    assert(start.regulator_index_bound(sflint::FmpzRef(index_bound), 256));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(index_bound), 40));
+
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 1000));
+    silex::OrderUnitGroup proved(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = true;
     assert(proved.prove_index_bound(status, changed, start, 1,
                                     sflint::FmpzConstRef(aux_bound), 2,
                                     embeddings, 256));
     assert(status == silex::ProofState::verified);
     assert(!changed);
     assert(proved.certification_status() == silex::CertificationMode::proven);
-    assert(has_unit_proof_record(proved, 31, silex::ProofState::verified,
-                                 false));
-    assert(has_unit_proof_record(proved, 37, silex::ProofState::verified,
-                                 false));
+    const slong kProvedElls[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
+    for (slong ell : kProvedElls) {
+        assert(has_unit_proof_record(proved, ell, silex::ProofState::verified,
+                                     false));
+    }
+    assert(!has_unit_proof_record(proved, 41, silex::ProofState::verified,
+                                  false));
     // GP: \p 110; K.reg
     assert(regulator_contains(
             proved,
-            "12.68082022713452093603368239737775544244960210761943928030154"
-            "4077156925247307418251826663747356303483"));
+            "14.46098754389304356185892633589732684899498168515774627523333"
+            "6609135104418249234251372768481728608544835148228"));
     return 0;
 }
 
@@ -4099,11 +4271,15 @@ int test_saturate_index_bounded() {
     assert(saturated.saturate_index_bounded(
             changed, stable, group, embeddings, 1,
             sflint::FmpzConstRef(aux_bound), 3, 128));
+    // The square subgroup has index bound floor(2 log(1 + sqrt2) / 0.48) = 3
+    // (Friedman 1989 Table 6, signature (2, 0)).  The 2-local pass adjoins
+    // the square root and the 3-local pass is stable, so the result is the
+    // full unit group, whose index bound 1 certifies it.
     assert(changed);
-    assert(!stable);
+    assert(stable);
     assert(check_first_free_generator_square(saturated, epsilon2));
     assert(saturated.certification_status() ==
-           silex::CertificationMode::unknown);
+           silex::CertificationMode::proven);
 
     silex::OrderUnitGroup zero_pass(order);
     changed = true;
@@ -4118,13 +4294,40 @@ int test_saturate_index_bounded() {
     silex::FactoredElement primitive(field);
     assert(primitive.set_element(epsilon));
     silex::FactoredElement primitive_generators[] = {std::move(primitive)};
+    silex::OrderUnitGroup primitive_group(order);
+    assert(primitive_group.set_units(order,
+                                     silex::FactoredElementSpan(
+                                             primitive_generators, 1),
+                                     embeddings, 128));
+    silex::Element epsilon3(field);
+    assert(epsilon3.multiply(epsilon2, epsilon));
+    silex::FactoredElement cube(field);
+    assert(cube.set_element(epsilon3));
+    silex::FactoredElement cube_generators[] = {std::move(cube)};
     silex::OrderUnitGroup no_progress(order);
     assert(no_progress.set_units(order,
-                                 silex::FactoredElementSpan(
-                                         primitive_generators, 1),
+                                 silex::FactoredElementSpan(cube_generators,
+                                                            1),
                                  embeddings, 128));
     silex::OrderUnitGroup preserved(order);
-    assert(preserved.set(no_progress));
+    assert(preserved.set(primitive_group));
+    // The full group has index bound floor(log(1 + sqrt2) / 0.48) = 1, so
+    // no ell-local pass runs and the group is certified unchanged.
+    silex::OrderUnitGroup certified(order);
+    changed = true;
+    stable = false;
+    assert(certified.saturate_index_bounded(
+            changed, stable, primitive_group, embeddings, 1,
+            sflint::FmpzConstRef(aux_bound), 3, 128));
+    assert(!changed);
+    assert(stable);
+    assert(check_first_free_generator(certified, epsilon));
+    assert(certified.certification_status() ==
+           silex::CertificationMode::proven);
+
+    // The cube subgroup has index bound floor(3 log(1 + sqrt2) / 0.48) = 5.
+    // With auxiliary bound 2 the 2-local pass finds no prime and nothing has
+    // changed, so the call fails and preserves the destination.
     assert(set_fmpz_si(aux_bound, 2));
     changed = true;
     stable = false;
@@ -4194,20 +4397,37 @@ int test_saturate_index_bounded_adaptive() {
     assert(adaptive.saturate_index_bounded_adaptive(
             changed, stable, group, embeddings, 1,
             sflint::FmpzConstRef(start), sflint::FmpzConstRef(max), 3, 128));
+    // Index bound 3 for the square subgroup (see
+    // test_saturate_index_bounded): the first round adjoins the square root
+    // and is stable, and the full group is certified.
     assert(changed);
-    assert(!stable);
+    assert(stable);
     assert(check_first_free_generator_square(adaptive, epsilon2));
+    assert(adaptive.certification_status() ==
+           silex::CertificationMode::proven);
 
     silex::FactoredElement primitive(field);
     assert(primitive.set_element(epsilon));
     silex::FactoredElement primitive_generators[] = {std::move(primitive)};
+    silex::OrderUnitGroup primitive_group(order);
+    assert(primitive_group.set_units(order,
+                                     silex::FactoredElementSpan(
+                                             primitive_generators, 1),
+                                     embeddings, 128));
+    silex::Element epsilon3(field);
+    assert(epsilon3.multiply(epsilon2, epsilon));
+    silex::FactoredElement cube(field);
+    assert(cube.set_element(epsilon3));
+    silex::FactoredElement cube_generators[] = {std::move(cube)};
     silex::OrderUnitGroup no_progress(order);
     assert(no_progress.set_units(order,
-                                 silex::FactoredElementSpan(
-                                         primitive_generators, 1),
+                                 silex::FactoredElementSpan(cube_generators,
+                                                            1),
                                  embeddings, 128));
     silex::OrderUnitGroup preserved(order);
-    assert(preserved.set(no_progress));
+    assert(preserved.set(primitive_group));
+    // The cube subgroup has index bound floor(3 log(1 + sqrt2) / 0.48) = 5;
+    // with auxiliary bounds capped at 2 no pass makes progress.
     assert(set_fmpz_si(start, 2));
     assert(set_fmpz_si(max, 2));
     changed = true;
@@ -4841,6 +5061,7 @@ int main() {
     test_regulator_index_bound();
     test_class_regulator_index_bound();
     test_class_regulator_index_bound_interval_boundary();
+    test_unit_index_bound_from_regulator_quotient();
     test_class_unit_regulator_certification();
     test_cached_torsion_never_reaches_proven();
     test_prove_index_bound();
@@ -4848,6 +5069,7 @@ int main() {
     test_adjoin_dependent_relation_nonmaximal_root();
     test_prove_index_bound_maximal_quadratic_sqrt5_control();
     test_prove_index_bound_cubic2213_past_prescan_bound();
+    test_prove_index_bound_quartic70640();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
     test_saturate_index_bounded();
     test_saturate_index_bounded_adaptive();
