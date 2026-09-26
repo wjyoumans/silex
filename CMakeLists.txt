@@ -499,6 +499,47 @@ if(SILEX_BUILD_TESTS)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test/data/sunit_fields.json)
     list(APPEND SILEX_TEST_NAMES silex-sunit-instance-protocol)
 
+    # Every C++ code block in the Sphinx sources is extracted at configure
+    # time and compiled against the headers by the silex-doc-snippets test.
+    # Editing or adding a .rst file reconfigures, which regenerates them.
+    file(GLOB_RECURSE SILEX_DOC_RST_SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/docs/*.rst)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/extract_doc_snippets.py
+        ${SILEX_DOC_RST_SOURCES})
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test/extract_doc_snippets.py
+                --root ${CMAKE_CURRENT_SOURCE_DIR}
+                --output-dir ${CMAKE_CURRENT_BINARY_DIR}/doc-snippets
+                --list-file ${CMAKE_CURRENT_BINARY_DIR}/doc-snippets.txt
+        RESULT_VARIABLE SILEX_DOC_SNIPPET_RESULT
+        OUTPUT_VARIABLE SILEX_DOC_SNIPPET_OUTPUT
+        ERROR_VARIABLE SILEX_DOC_SNIPPET_ERROR)
+    if(NOT SILEX_DOC_SNIPPET_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Could not extract documentation C++ snippets:\n"
+            "${SILEX_DOC_SNIPPET_OUTPUT}${SILEX_DOC_SNIPPET_ERROR}")
+    endif()
+    file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/doc-snippets.txt
+        SILEX_DOC_SNIPPET_SOURCES)
+    if(SILEX_DOC_SNIPPET_SOURCES)
+        add_library(silex-doc-snippets OBJECT EXCLUDE_FROM_ALL
+            ${SILEX_DOC_SNIPPET_SOURCES})
+        target_link_libraries(silex-doc-snippets PRIVATE Silex::silex)
+        silex_apply_target_warnings(silex-doc-snippets)
+        if(NOT MSVC)
+            # Snippets show calls whose results the prose discusses but the
+            # fragment does not use.
+            target_compile_options(silex-doc-snippets PRIVATE
+                -Wno-unused-variable -Wno-unused-but-set-variable)
+        endif()
+        add_test(NAME silex-doc-snippets
+            COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                    --target silex-doc-snippets --config $<CONFIG>)
+        list(APPEND SILEX_TEST_NAMES silex-doc-snippets)
+    endif()
+
     add_executable(t-silex-status test/t-status.cpp)
     target_link_libraries(t-silex-status PRIVATE Silex::silex)
     silex_apply_target_warnings(t-silex-status)
