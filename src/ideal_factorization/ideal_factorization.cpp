@@ -628,29 +628,209 @@ bool ideal_factor_over_base_direct(flint::FmpzMatRef exponents,
     return true;
 }
 
-bool set_element_fmpz(Element& out, flint::FmpzConstRef value) noexcept {
-    if (!out.is_defined()) {
+bool checked_add(slong& out, slong left, slong right) noexcept {
+    if ((right > 0 && left > std::numeric_limits<slong>::max() - right) ||
+        (right < 0 && left < std::numeric_limits<slong>::min() - right)) {
         return false;
     }
-
-    flint::FmpqPoly polynomial;
-    flint::Fmpq coefficient;
-    fmpq_set_fmpz(coefficient.raw(), value.raw());
-    flint::fmpq_poly_set_coeff_fmpq(polynomial, 0, coefficient);
-    return out.set_fmpq_poly(flint::FmpqPolyConstRef(polynomial));
+    out = left + right;
+    return true;
 }
 
-bool set_principal_fmpz(Ideal& out, flint::FmpzConstRef value) noexcept {
-    const Order* parent = out.parent();
-    if (parent == nullptr || parent->parent() == nullptr) {
+bool checked_mul_nonneg(slong& out, slong left, slong right) noexcept {
+    if (left < 0 || right < 0 ||
+        (left != 0 && right > std::numeric_limits<slong>::max() / left)) {
         return false;
     }
+    out = left * right;
+    return true;
+}
 
-    Element element(*parent->parent());
-    OrderElement order_element(*parent);
-    return set_element_fmpz(element, value) &&
-           order_element.set_element(element) &&
-           out.set_principal(order_element);
+slong strip_rational_prime(flint::Fmpz& value, const flint::Fmpz& p) noexcept {
+    slong count = 0;
+    while (fmpz_divisible(value.raw(), p.raw()) != 0) {
+        fmpz_divexact(value.raw(), value.raw(), p.raw());
+        ++count;
+    }
+    return count;
+}
+
+// v_P(N / d) = v_P(N) - e(P/p) v_p(d) for P above p.
+bool fractional_prime_valuation(slong& out,
+                                const PrimeIdeal& prime,
+                                const Ideal& numerator,
+                                slong denominator_vp,
+                                const DiagnosticsContext* diagnostics) noexcept {
+    slong numerator_valuation = -1;
+    slong denominator_valuation = 0;
+    if (!prime.valuation(numerator_valuation, numerator, diagnostics) ||
+        numerator_valuation < 0 || prime.ramification_index() <= 0 ||
+        !checked_mul_nonneg(denominator_valuation, prime.ramification_index(),
+                            denominator_vp)) {
+        return false;
+    }
+    out = numerator_valuation - denominator_valuation;
+    return true;
+}
+
+// Factors I = N / d over the base from valuations of I itself, so a base
+// with an incomplete rational-prime block still accepts, for example,
+// I = P^{-1} over {P}.  Per rational prime p the exact norm identity
+// sum_{P | p} f(P) v_P(I) = v_p(N(I)) is checked over the base primes.
+// It proves v_P(I) = 0 at the non-base P | p when p does not divide d
+// (then every v_P(I) = v_P(N) >= 0) or when the base holds every prime
+// above p (sum e(P) f(P) = n).  Otherwise the non-base valuations can
+// cancel in the norm, so they are computed from the decomposition of p.
+// The stored denominator is minimal (set_integral_den removes
+// gcd(content(N), d)), so a prime p | d has some P | p with v_P(I) < 0 and
+// a p | d without a base block leaves I nonsmooth.
+bool fractional_ideal_factor_over_base_direct(
+        flint::FmpzMatRef exponents,
+        bool& smooth,
+        const Ideal& numerator,
+        flint::FmpzConstRef denominator,
+        const FactorBase& base,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                        "ideal.frac_factor_over_base_direct");
+    const Order* parent = numerator.parent();
+    if (parent == nullptr || !same_order_parent(base.parent(), parent) ||
+        !numerator.has_hnf() || !parent->is_maximal() ||
+        fmpz_sgn(denominator.raw()) <= 0 ||
+        flint::fmpz_mat_nrows(exponents) != 1 ||
+        flint::fmpz_mat_ncols(exponents) != base.length()) {
+        return false;
+    }
+    const slong degree = parent->degree();
+
+    flint::Fmpz remaining_norm;
+    flint::Fmpz remaining_denominator;
+    if (!numerator.norm(flint::FmpzRef(remaining_norm))) {
+        return false;
+    }
+    fmpz_set(remaining_denominator.raw(), denominator.raw());
+    flint::fmpz_mat_zero(exponents);
+
+    flint::Fmpz p;
+    bool is_smooth = true;
+    for (slong block_index = 0;
+         block_index < base.rational_prime_block_count() &&
+         (fmpz_is_one(remaining_norm.raw()) == 0 ||
+          fmpz_is_one(remaining_denominator.raw()) == 0);
+         ++block_index) {
+        slong length = 0;
+        if (!base.rational_prime_block_data(flint::FmpzRef(p), length,
+                                            block_index)) {
+            return false;
+        }
+
+        const slong numerator_vp = strip_rational_prime(remaining_norm, p);
+        const slong denominator_vp =
+                strip_rational_prime(remaining_denominator, p);
+        if (numerator_vp == 0 && denominator_vp == 0) {
+            continue;
+        }
+
+        // v_p(N(I)) = v_p(N(N)) - n v_p(d).
+        slong denominator_norm_vp = 0;
+        if (!checked_mul_nonneg(denominator_norm_vp, degree,
+                                denominator_vp)) {
+            return false;
+        }
+        const slong target = numerator_vp - denominator_norm_vp;
+
+        slong accounted = 0;
+        slong covered_degree = 0;
+        for (slong offset = 0; offset < length; ++offset) {
+            slong index = -1;
+            if (!base.rational_prime_block_index(index, block_index,
+                                                 offset)) {
+                return false;
+            }
+            const PrimeIdeal* prime = base.prime_at(index);
+            if (prime == nullptr || prime->residue_degree() <= 0) {
+                return false;
+            }
+
+            slong valuation = 0;
+            {
+                SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                                    "ideal.frac_factor_over_base_valuation");
+                if (!fractional_prime_valuation(valuation, *prime, numerator,
+                                                denominator_vp,
+                                                diagnostics)) {
+                    return false;
+                }
+            }
+            slong local_degree = 0;
+            if (!checked_mul_nonneg(local_degree, prime->ramification_index(),
+                                    prime->residue_degree()) ||
+                !checked_add(covered_degree, covered_degree, local_degree)) {
+                return false;
+            }
+            if (valuation == 0) {
+                continue;
+            }
+            fmpz_set_si(flint::fmpz_mat_entry(exponents, 0, index).raw(),
+                        valuation);
+            const slong magnitude = valuation < 0 ? -valuation : valuation;
+            slong contribution = 0;
+            if (!checked_mul_nonneg(contribution, magnitude,
+                                    prime->residue_degree()) ||
+                !checked_add(accounted, accounted,
+                             valuation < 0 ? -contribution : contribution)) {
+                return false;
+            }
+        }
+
+        if (denominator_vp == 0 || covered_degree == degree) {
+            if (accounted != target) {
+                is_smooth = false;
+                break;
+            }
+            continue;
+        }
+
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                            "ideal.frac_factor_over_base_incomplete_block");
+        PrimeIdealList decomposed;
+        if (!decompose_prime(decomposed, *parent, flint::FmpzConstRef(p), 0,
+                             diagnostics)) {
+            return false;
+        }
+        for (slong i = 0; i < decomposed.size() && is_smooth; ++i) {
+            const PrimeIdeal* prime = decomposed.at(i);
+            if (prime == nullptr) {
+                return false;
+            }
+            if (base.contains(*prime)) {
+                continue;
+            }
+            slong valuation = 0;
+            if (!fractional_prime_valuation(valuation, *prime, numerator,
+                                            denominator_vp, diagnostics)) {
+                return false;
+            }
+            if (valuation != 0) {
+                is_smooth = false;
+            }
+        }
+        if (!is_smooth) {
+            break;
+        }
+        if (accounted != target) {
+            // Every prime above p was valued; the norm identity must hold.
+            return false;
+        }
+    }
+
+    if (is_smooth && (fmpz_is_one(remaining_norm.raw()) == 0 ||
+                      fmpz_is_one(remaining_denominator.raw()) == 0)) {
+        is_smooth = false;
+    }
+
+    smooth = is_smooth;
+    return true;
 }
 
 }  // namespace
@@ -1080,31 +1260,21 @@ bool ideal_factor_over_base(flint::FmpzMatRef exponents,
     }
 
     Ideal numerator(*ideal.parent());
-    Ideal denominator_ideal(*ideal.parent());
     flint::Fmpz denominator;
-    flint::FmpzMat numerator_row(1, base.length());
-    flint::FmpzMat denominator_row(1, base.length());
-    flint::FmpzMat candidate(1, base.length());
-
-    if (!ideal.get_integral_den(numerator, flint::FmpzRef(denominator)) ||
-        !ideal_factor_over_base(flint::FmpzMatRef(numerator_row),
-                                numerator, base, diagnostics)) {
+    if (!ideal.get_integral_den(numerator, flint::FmpzRef(denominator))) {
         return false;
     }
-
     if (fmpz_is_one(denominator.raw()) != 0) {
-        flint::fmpz_mat_zero(flint::FmpzMatRef(denominator_row));
-    } else if (!set_principal_fmpz(denominator_ideal,
-                                  flint::FmpzConstRef(denominator)) ||
-               !ideal_factor_over_base(flint::FmpzMatRef(denominator_row),
-                                       denominator_ideal, base, diagnostics)) {
-        return false;
+        return ideal_factor_over_base(exponents, numerator, base, diagnostics);
     }
 
-    for (slong i = 0; i < base.length(); ++i) {
-        fmpz_sub(flint::fmpz_mat_entry(candidate, 0, i).raw(),
-                 flint::fmpz_mat_entry(numerator_row, 0, i).raw(),
-                 flint::fmpz_mat_entry(denominator_row, 0, i).raw());
+    bool smooth = false;
+    flint::FmpzMat candidate(1, base.length());
+    if (!fractional_ideal_factor_over_base_direct(
+                flint::FmpzMatRef(candidate), smooth, numerator,
+                flint::FmpzConstRef(denominator), base, diagnostics) ||
+        !smooth) {
+        return false;
     }
 
     flint::fmpz_mat_set(exponents, flint::FmpzMatConstRef(candidate));

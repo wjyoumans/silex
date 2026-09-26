@@ -590,6 +590,266 @@ int test_fractional_factor_over_base_quadratic() {
     return 0;
 }
 
+silex::NumberField field_from_coefficients(const slong* coefficients,
+                                           slong length) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i < length; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+bool set_prime_power(silex::FractionalIdeal& out,
+                     const silex::PrimeIdeal& prime,
+                     slong exponent) noexcept {
+    const silex::Order* order = prime.parent();
+    if (order == nullptr) {
+        return false;
+    }
+    silex::Ideal integral(*order);
+    silex::FractionalIdeal fractional(*order);
+    sflint::Fmpz power;
+    sflint::fmpz_set_si(sflint::FmpzRef(power), exponent);
+    return prime.get_ideal(integral) && fractional.set_integral(integral) &&
+           out.pow_fmpz(fractional, sflint::FmpzConstRef(power));
+}
+
+bool multiply_prime_power(silex::FractionalIdeal& inout,
+                          const silex::PrimeIdeal& prime,
+                          slong exponent) noexcept {
+    const silex::Order* order = prime.parent();
+    if (order == nullptr) {
+        return false;
+    }
+    silex::FractionalIdeal factor(*order);
+    return set_prime_power(factor, prime, exponent) &&
+           inout.multiply(inout, factor);
+}
+
+// Primes above `rational_prime` with residue degree `residue_degree`, in
+// decomposition order.
+slong primes_above_with_degree(silex::PrimeIdeal* out,
+                               slong capacity,
+                               const silex::Order& order,
+                               slong rational_prime,
+                               slong residue_degree) noexcept {
+    sflint::Fmpz p;
+    sflint::fmpz_set_si(sflint::FmpzRef(p), rational_prime);
+    silex::PrimeIdealList primes;
+    if (!silex::decompose_prime(primes, order, sflint::FmpzConstRef(p))) {
+        return -1;
+    }
+    slong count = 0;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        if (prime == nullptr) {
+            return -1;
+        }
+        if (prime->residue_degree() != residue_degree) {
+            continue;
+        }
+        if (count < capacity && !out[count].set(*prime)) {
+            return -1;
+        }
+        ++count;
+    }
+    return count;
+}
+
+// Every base entry other than the listed (prime, exponent) pairs is zero.
+bool row_is(const sflint::FmpzMat& row,
+            const silex::FactorBase& base,
+            const silex::PrimeIdeal* primes,
+            const slong* exponents,
+            slong count) noexcept {
+    if (sflint::fmpz_mat_nrows(row) != 1 ||
+        sflint::fmpz_mat_ncols(row) != base.length()) {
+        return false;
+    }
+    for (slong i = 0; i < base.length(); ++i) {
+        const silex::PrimeIdeal* base_prime = base.prime_at(i);
+        if (base_prime == nullptr) {
+            return false;
+        }
+        slong expected = 0;
+        for (slong j = 0; j < count; ++j) {
+            if (base_prime->equal(primes[j])) {
+                expected = exponents[j];
+            }
+        }
+        if (!sflint::fmpz_equal_si(sflint::fmpz_mat_entry(row, 0, i),
+                                   expected)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void fill_row(sflint::FmpzMat& row, slong value) noexcept {
+    for (slong i = 0; i < sflint::fmpz_mat_ncols(row); ++i) {
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, i), value);
+    }
+}
+
+bool row_is_filled(const sflint::FmpzMat& row, slong value) noexcept {
+    for (slong i = 0; i < sflint::fmpz_mat_ncols(row); ++i) {
+        if (!sflint::fmpz_equal_si(sflint::fmpz_mat_entry(row, 0, i),
+                                   value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Q(2^(1/3)): 5 = P Q with f(P) = 1 and f(Q) = 2.  The norm-bounded base at
+// 5 keeps P and drops Q, so its block above 5 is incomplete.
+int test_fractional_factor_over_incomplete_block() {
+    const slong coefficients[] = {-2, 0, 0, 1};
+    silex::NumberField field = field_from_coefficients(coefficients, 4);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    silex::PrimeIdeal p_prime(order);
+    silex::PrimeIdeal q_prime(order);
+    assert(primes_above_with_degree(&p_prime, 1, order, 5, 1) == 1);
+    assert(primes_above_with_degree(&q_prime, 1, order, 5, 2) == 1);
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    silex::FactorBase partial(order);
+    silex::FactorBase full(order);
+    assert(partial.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(full.build(sflint::FmpzConstRef(bound)));
+    assert(partial.contains(p_prime) && !partial.contains(q_prime));
+    assert(full.contains(p_prime) && full.contains(q_prime));
+
+    silex::FractionalIdeal ideal(order);
+    sflint::FmpzMat row(1, partial.length());
+    sflint::FmpzMat full_row(1, full.length());
+
+    // P^{-1} = Q / 5: the numerator Q is outside the base, but P^{-1} is
+    // smooth over {P}.
+    assert(set_prime_power(ideal, p_prime, -1));
+    assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
+                                         partial));
+    const slong minus_one[] = {-1};
+    assert(row_is(row, partial, &p_prime, minus_one, 1));
+    assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(full_row), ideal,
+                                         full));
+    assert(row_is(full_row, full, &p_prime, minus_one, 1));
+
+    // P^2 Q^{-1} is smooth over the complete base and not over {P}.
+    assert(set_prime_power(ideal, p_prime, 2));
+    assert(multiply_prime_power(ideal, q_prime, -1));
+    const silex::PrimeIdeal mixed_primes[] = {std::move(p_prime),
+                                              std::move(q_prime)};
+    const slong mixed_exponents[] = {2, -1};
+    assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(full_row), ideal,
+                                         full));
+    assert(row_is(full_row, full, mixed_primes, mixed_exponents, 2));
+    fill_row(row, 7);
+    assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
+                                          partial));
+    assert(row_is_filled(row, 7));
+
+    // Q^{-1} and P / 7 are not smooth over {P}; the output is unchanged.
+    assert(set_prime_power(ideal, mixed_primes[1], -1));
+    assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
+                                          partial));
+    assert(row_is_filled(row, 7));
+    assert(set_fractional_principal(ideal, 1, 7));
+    assert(multiply_prime_power(ideal, mixed_primes[0], 1));
+    assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
+                                          partial));
+    assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(full_row), ideal,
+                                          full));
+    assert(row_is_filled(row, 7));
+
+    // 2 P^{-1} / 3 is smooth over both bases.
+    assert(set_fractional_principal(ideal, 2, 3));
+    assert(multiply_prime_power(ideal, mixed_primes[0], -1));
+    assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
+                                         partial));
+    silex::Ideal integral(order);
+    silex::IdealFactorization two(order);
+    silex::IdealFactorization three(order);
+    assert(set_rational_principal(integral, 2) && two.factor(integral));
+    assert(set_rational_principal(integral, 3) && three.factor(integral));
+    for (slong i = 0; i < partial.length(); ++i) {
+        const silex::PrimeIdeal* prime = partial.prime_at(i);
+        assert(prime != nullptr);
+        slong expected = exponent_of_prime(two, *prime) -
+                         exponent_of_prime(three, *prime);
+        if (prime->equal(mixed_primes[0])) {
+            expected -= 1;
+        }
+        assert(sflint::fmpz_equal_si(sflint::fmpz_mat_entry(row, 0, i),
+                                     expected));
+    }
+
+    return 0;
+}
+
+// x^5 - 2x^4 - 2x^3 - x^2 - 2 has Z[x] maximal and 3 = P Q R with
+// f(P) = 1 and f(Q) = f(R) = 2.  Over the norm-bounded base at 3 the block
+// above 3 is {P}.  Q R^{-1} has norm 1 and v_P = 0, so norm accounting
+// alone would accept it; the non-base valuations must reject it.
+int test_fractional_factor_over_base_cancelling_nonbase_primes() {
+    const slong coefficients[] = {-2, 0, -1, -2, -2, 1};
+    silex::NumberField field = field_from_coefficients(coefficients, 6);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    silex::PrimeIdeal p_prime(order);
+    silex::PrimeIdeal pair[2] = {silex::PrimeIdeal(order),
+                                 silex::PrimeIdeal(order)};
+    assert(primes_above_with_degree(&p_prime, 1, order, 3, 1) == 1);
+    assert(primes_above_with_degree(pair, 2, order, 3, 2) == 2);
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 3));
+    silex::FactorBase partial(order);
+    silex::FactorBase full(order);
+    assert(partial.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(full.build(sflint::FmpzConstRef(bound)));
+    assert(partial.contains(p_prime));
+    assert(!partial.contains(pair[0]) && !partial.contains(pair[1]));
+    assert(full.contains(pair[0]) && full.contains(pair[1]));
+
+    silex::FractionalIdeal ideal(order);
+    sflint::FmpzMat row(1, partial.length());
+    sflint::FmpzMat full_row(1, full.length());
+    assert(set_prime_power(ideal, pair[0], 1));
+    assert(multiply_prime_power(ideal, pair[1], -1));
+
+    fill_row(row, 7);
+    assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
+                                          partial));
+    assert(row_is_filled(row, 7));
+
+    const slong exponents[] = {1, -1};
+    assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(full_row), ideal,
+                                         full));
+    assert(row_is(full_row, full, pair, exponents, 2));
+
+    // P^{-1} Q^0 R^0 remains smooth over {P}.
+    assert(set_prime_power(ideal, p_prime, -1));
+    const slong minus_one[] = {-1};
+    assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
+                                         partial));
+    assert(row_is(row, partial, &p_prime, minus_one, 1));
+
+    return 0;
+}
+
 silex::IdealFactorization local_ideal_factorization() {
     silex::NumberField field = degree_one_field();
     silex::Order order = silex::test::equation_order(field);
@@ -637,6 +897,8 @@ int main() {
     assert(test_factor_over_base_parent_failure_preserves_outputs() == 0);
     assert(test_fractional_factor_over_base_degree_one() == 0);
     assert(test_fractional_factor_over_base_quadratic() == 0);
+    assert(test_fractional_factor_over_incomplete_block() == 0);
+    assert(test_fractional_factor_over_base_cancelling_nonbase_primes() == 0);
     assert(test_keeps_parent_order_alive() == 0);
     return 0;
 }
