@@ -1535,6 +1535,23 @@ bool adjoin_verified_dependent_relation(bool& changed,
         return out.set(group);
     }
 
+    // The new basis is built from `root` and the old generators and is
+    // installed without the per-generator unit check.  The root is an
+    // e-th root in the field of a product of order units times a root of
+    // unity, hence a unit of O_K; in a non-maximal order it may still lie
+    // outside O, and then it must not be adjoined.
+    if (!order->is_maximal()) {
+        Element expanded(*field);
+        if (!expanded.is_defined() || !root.evaluate(expanded) ||
+            !evaluated_is_order_unit(*order, expanded)) {
+            SILEX_PROFILE_EVENT(group.diagnostics(),
+                                DiagnosticsModule::unit_group,
+                                "unit_group.dependent_relation_root_outside_order");
+            changed = false;
+            return out.set(group);
+        }
+    }
+
     std::vector<FactoredElement> generators;
     if (!relation_basis(generators, group, root,
                         flint::FmpzMatConstRef(relation),

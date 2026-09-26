@@ -354,6 +354,27 @@ bool rational_prime_divides_order_discriminant(
     return flint::fmpz_divisible(discriminant, q);
 }
 
+// `kernel_row_root` returns an l-th root in the field.  A root of a unit is
+// integral, so in the maximal order it is always an order unit.  In a
+// non-maximal order O it may lie in O_K \ O (phi in Z[sqrt5]), and adjoining
+// it through the trusted unit setter would publish a group that is not a
+// subgroup of O^x.  Only a root that is an exact unit of O may be adjoined.
+// A failed membership computation reports "not in O", so the caller never
+// adjoins an unchecked root.
+bool saturation_root_is_order_unit(const Order& order,
+                                   const FactoredElement& root) noexcept {
+    if (order.is_maximal()) {
+        return true;
+    }
+    const NumberField* field = order.parent();
+    if (field == nullptr) {
+        return false;
+    }
+    Element expanded(*field);
+    return expanded.is_defined() && root.evaluate(expanded) &&
+           detail::evaluated_is_order_unit(order, expanded);
+}
+
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
 slong log_slong_from_fmpz(flint::FmpzConstRef value) noexcept {
     return flint::fmpz_fits_si(value) ? flint::fmpz_get_si(value) : -1;
@@ -867,6 +888,15 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
 
     detail::CompactFieldModulusCache field_modulus_cache;
     bool saw_candidate = false;
+    // A kernel row whose l-th root lies in O_K but not in the order O stays
+    // in the residue-character kernel: at every degree-one prime p of O not
+    // dividing disc(O) the root reduces into O/p, so the row remains an l-th
+    // power there.  More primes cannot remove it, and the characters cannot
+    // tell it from a row whose root lies in O, so this proof cannot certify
+    // l-saturation of the group in O^x.  Other rows may still give roots in
+    // O, so keep scanning, but never report `verified` or retry with a
+    // larger threshold once such a row was seen.
+    bool saw_root_outside_order = false;
     for (slong row = 0; row < flint::fmpz_mat_nrows(kernel); ++row) {
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.stable_relation_saturation.row_inspected");
@@ -898,11 +928,21 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
             SILEX_PROFILE_EVENT(
                     out.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_relation_saturation.root_not_power");
-            step.status = StableRelationSaturationStatus::wasted_non_power;
+            step.status = saw_root_outside_order
+                                  ? StableRelationSaturationStatus::unavailable
+                                  : StableRelationSaturationStatus::
+                                            wasted_non_power;
             return true;
         }
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.stable_relation_saturation.root_power");
+        if (!saturation_root_is_order_unit(*order, root)) {
+            SILEX_PROFILE_EVENT(
+                    out.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_relation_saturation.root_outside_order");
+            saw_root_outside_order = true;
+            continue;
+        }
 
         flint::FmpzMat relation(1, rank);
         for (slong i = 0; i < rank; ++i) {
@@ -945,8 +985,9 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
             saw_candidate
                     ? "unit_group.stable_relation_saturation.exhausted_candidates"
                     : "unit_group.stable_relation_saturation.no_candidate");
-    step.status = saw_candidate ? StableRelationSaturationStatus::wasted_non_power
-                                : StableRelationSaturationStatus::unavailable;
+    step.status = saw_candidate && !saw_root_outside_order
+                          ? StableRelationSaturationStatus::wasted_non_power
+                          : StableRelationSaturationStatus::unavailable;
     return true;
 }
 
@@ -1320,6 +1361,16 @@ bool saturate_row_with_cache(
     }
     SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.saturation_row_root_power");
+    if (!saturation_root_is_order_unit(*order, root)) {
+        // The row gives no l-th root in O, so it does not enlarge the group
+        // inside O^x.  This is not a proof that the row is not an l-th power
+        // in O^x modulo torsion; proof callers only certify from an empty
+        // residue-character kernel, which such a row never produces.
+        SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.saturation_row_root_outside_order");
+        changed = false;
+        return out.set(group);
+    }
 
     flint::FmpzMat relation(1, rank);
     for (slong i = 0; i < rank; ++i) {
