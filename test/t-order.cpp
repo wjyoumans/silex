@@ -289,6 +289,16 @@ int test_explicit_basis_index_and_table() {
     return 0;
 }
 
+int test_undefined_order_quadratic_conductor() {
+    silex::Order undefined;
+    assert(!undefined.is_defined());
+    sflint::Fmpz conductor;
+    sflint::fmpz_set_si(sflint::FmpzRef(conductor), 17);
+    assert(!undefined.quadratic_conductor(sflint::FmpzRef(conductor)));
+    assert(sflint::fmpz_equal_si(conductor, 17));
+    return 0;
+}
+
 int test_failure_preserves_order() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 2);
@@ -376,6 +386,11 @@ int test_move_clear_and_redefine() {
     assert(!source.is_defined());
     assert(source.parent() == nullptr);
     assert(source.degree() == 0);
+    sflint::Fmpz moved_from_conductor;
+    sflint::fmpz_set_si(sflint::FmpzRef(moved_from_conductor), 17);
+    assert(!source.quadratic_conductor(
+            sflint::FmpzRef(moved_from_conductor)));
+    assert(sflint::fmpz_equal_si(moved_from_conductor, 17));
 
     silex::Order assigned;
     assigned = std::move(moved);
@@ -670,6 +685,7 @@ int main() {
     assert(test_quadratic_equation_order() == 0);
     assert(test_cubic_equation_order() == 0);
     assert(test_explicit_basis_index_and_table() == 0);
+    assert(test_undefined_order_quadratic_conductor() == 0);
     assert(test_failure_preserves_order() == 0);
     assert(test_copy_and_swap() == 0);
     assert(test_move_clear_and_redefine() == 0);

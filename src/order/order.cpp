@@ -1270,8 +1270,11 @@ bool Order::maximal_order(const Order& input) noexcept {
 }
 
 bool Order::quadratic_conductor(flint::FmpzRef out) const noexcept {
+    if (!is_defined()) {
+        return false;
+    }
     const auto* quadratic = std::get_if<QuadraticOrderData>(&data_->specialization_);
-    if (!is_defined() || quadratic == nullptr) {
+    if (quadratic == nullptr) {
         return false;
     }
     fmpz_set(out.raw(), quadratic->conductor.raw());
