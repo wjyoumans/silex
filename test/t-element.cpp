@@ -6,6 +6,7 @@
 #include "test_support.hpp"
 
 #include <cassert>
+#include <initializer_list>
 #include <utility>
 
 namespace sflint = silex::flint;
@@ -94,8 +95,8 @@ void test_power_skips_primes_dividing_exponent() noexcept {
 // Regression: a huge exponent must not build the dense residue polynomial
 // y^n - a.  For these inputs the lifted candidates have norm other than +-1,
 // so the norm pre-check also rejects them without forming candidate^n in K.
-// This does not bound verification for candidates of norm +-1 (units); that
-// remains a known gap.  1 + 5*theta has norm -49, so it is not a 2^40-th
+// Candidates of norm +-1 (units) are bounded by the height pre-check; see
+// test_power_huge_exponent_unit_candidates.  1 + 5*theta has norm -49, so it is not a 2^40-th
 // power.  Unsupported is acceptable; a definite answer must be false.
 void test_power_huge_exponent_is_bounded() noexcept {
     silex::NumberField field = sqrt_two_field();
@@ -153,6 +154,154 @@ void test_power_disproof_at_prime_dividing_exponent() noexcept {
         assert(!is_power);
         assert(root.equal_si(7));
     }
+}
+
+silex::NumberField field_from_coefficients(
+        std::initializer_list<slong> coefficients) noexcept {
+    sflint::FmpqPoly polynomial;
+    slong i = 0;
+    for (slong c : coefficients) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i++, c);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+silex::Element element_from_coefficients(
+        const silex::NumberField& field,
+        std::initializer_list<slong> coefficients) noexcept {
+    sflint::FmpqPoly polynomial;
+    slong i = 0;
+    for (slong c : coefficients) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i++, c);
+    }
+    silex::Element element(field);
+    assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    return element;
+}
+
+// Any definite answer must be correct; a failed query leaves root unchanged.
+void assert_power_answer_consistent(const silex::Element& value,
+                                    const sflint::Fmpz& exponent,
+                                    bool expected_power) noexcept {
+    const silex::NumberField& field = *value.parent();
+    silex::Element root(field);
+    assert(root.set_si(7));
+    bool is_power = !expected_power;
+    if (value.is_power(is_power, root, sflint::FmpzConstRef(exponent))) {
+        assert(is_power == expected_power);
+        if (is_power) {
+            silex::Element check(field);
+            assert(check.pow_fmpz(root, sflint::FmpzConstRef(exponent)));
+            assert(check.equal(value));
+        } else {
+            assert(root.equal_si(7));
+        }
+    } else {
+        assert(root.equal_si(7));
+    }
+}
+
+// Regression (T-027): a lifted candidate of norm +-1 passes the norm
+// pre-check, and verifying it formed candidate^n for n near 2^40 or 2^60,
+// which did not finish.  The height pre-check (n log M(P_c) <= log M(P_a) + 1)
+// now rejects such candidates before powering.  None of these units is an
+// n-th power; the calls must return promptly, unsupported or false.
+void test_power_huge_exponent_unit_candidates() noexcept {
+    sflint::Fmpz two_40;
+    sflint::fmpz_one(sflint::FmpzRef(two_40));
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(two_40),
+                          sflint::FmpzConstRef(two_40), 40);
+    sflint::Fmpz three_25;
+    sflint::fmpz_set_si(sflint::FmpzRef(three_25), 847288609443);
+    // 1 + 24 * 5^24
+    sflint::Fmpz one_plus_24_five_24;
+    sflint::fmpz_set_si(sflint::FmpzRef(one_plus_24_five_24),
+                        1430511474609375001);
+
+    silex::NumberField sqrt_two = sqrt_two_field();
+    assert_power_answer_consistent(
+            element_from_coefficients(sqrt_two, {1, 1}),
+            one_plus_24_five_24, false);
+    assert_power_answer_consistent(
+            element_from_coefficients(sqrt_two, {-3, -2}), two_40, false);
+    assert_power_answer_consistent(
+            element_from_coefficients(sqrt_two, {-3, 2}), two_40, false);
+
+    silex::NumberField sqrt_three = field_from_coefficients({-3, 0, 1});
+    assert_power_answer_consistent(
+            element_from_coefficients(sqrt_three, {2, 1}), two_40, false);
+    assert_power_answer_consistent(
+            element_from_coefficients(sqrt_three, {2, -1}), two_40, false);
+
+    silex::NumberField golden = field_from_coefficients({-1, -1, 1});
+    for (auto coefficients : {std::pair<slong, slong>{-3, 2},
+                              std::pair<slong, slong>{-1, -2},
+                              std::pair<slong, slong>{1, 2},
+                              std::pair<slong, slong>{3, -2}}) {
+        assert_power_answer_consistent(
+                element_from_coefficients(
+                        golden, {coefficients.first, coefficients.second}),
+                three_25, false);
+    }
+}
+
+// The height pre-check must keep genuine roots: units, roots of unity (Mahler
+// measure 1, where binary powering stays cheap for huge n) and a non-integral
+// element of norm 1.
+void test_power_height_check_keeps_roots() noexcept {
+    silex::NumberField golden = field_from_coefficients({-1, -1, 1});
+    silex::Element phi = element_from_coefficients(golden, {0, 1});
+    for (slong n : {3, 27, 243, 729}) {
+        sflint::Fmpz exponent;
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+        silex::Element power(golden);
+        assert(power.pow_fmpz(phi, sflint::FmpzConstRef(exponent)));
+        silex::Element root(golden);
+        bool is_power = false;
+        assert(power.is_power(is_power, root,
+                              sflint::FmpzConstRef(exponent)));
+        assert(is_power);
+        silex::Element check(golden);
+        assert(check.pow_fmpz(root, sflint::FmpzConstRef(exponent)));
+        assert(check.equal(power));
+    }
+
+    // In Q(i): i = i^n for n = 1 (mod 4), including n = 1 + 4 * 5^25.
+    silex::NumberField gaussian = imaginary_quadratic_field();
+    silex::Element i_unit = element_from_coefficients(gaussian, {0, 1});
+    for (slong n : {slong{5}, slong{13}, slong{1192092895507812501}}) {
+        sflint::Fmpz exponent;
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+        assert_power_answer_consistent(i_unit, exponent, true);
+    }
+    // -1 is not a 2^40-th power in Q(i).
+    sflint::Fmpz two_40;
+    sflint::fmpz_one(sflint::FmpzRef(two_40));
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(two_40),
+                          sflint::FmpzConstRef(two_40), 40);
+    assert_power_answer_consistent(
+            element_from_coefficients(gaussian, {-1}), two_40, false);
+
+    // (3 + 4i)/5 has norm 1 but is not integral; its cube is a cube, and
+    // itself is not a (2^40 + 1)-th power.
+    silex::Element fraction(gaussian);
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, 3);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, 4);
+        ::fmpq_poly_scalar_div_si(polynomial.raw(), polynomial.raw(), 5);
+        assert(fraction.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    }
+    sflint::Fmpz three;
+    sflint::fmpz_set_si(sflint::FmpzRef(three), 3);
+    silex::Element cube(gaussian);
+    assert(cube.pow_fmpz(fraction, sflint::FmpzConstRef(three)));
+    assert_power_answer_consistent(cube, three, true);
+    sflint::Fmpz two_40_plus_one;
+    sflint::fmpz_add_ui(sflint::FmpzRef(two_40_plus_one),
+                        sflint::FmpzConstRef(two_40), 1);
+    assert_power_answer_consistent(fraction, two_40_plus_one, false);
 }
 
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
@@ -262,6 +411,8 @@ int main() {
     test_power_skips_primes_dividing_exponent();
     test_power_huge_exponent_is_bounded();
     test_power_disproof_at_prime_dividing_exponent();
+    test_power_huge_exponent_unit_candidates();
+    test_power_height_check_keeps_roots();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 

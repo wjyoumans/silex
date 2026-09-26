@@ -14,6 +14,7 @@
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/flint/fmpz_poly.hpp>
 
+#include <flint/fmpz_vec.h>
 #include <flint/fq_poly.h>
 #include <flint/fq_poly_factor.h>
 
@@ -1746,10 +1747,13 @@ bool reconstruct_power_root_candidate(
 // lowest terms and max(|r|^n, s^n) >= 2^n, so N(input) must have a numerator
 // or denominator of at least n + 1 bits.  This avoids forming candidate^n for
 // huge n unless the input is itself that large.  A candidate of norm 0 or
-// +-1 passes after the cheap sign/zero comparison.
-bool norm_admits_power_root(const Element& candidate,
+// +-1 passes after the cheap sign/zero comparison; unit_norm reports the
+// +-1 case, which the norm cannot bound.
+bool norm_admits_power_root(bool& unit_norm,
+                            const Element& candidate,
                             const Element& input,
                             flint::FmpzConstRef exponent) noexcept {
+    unit_norm = false;
     flint::Fmpq candidate_norm;
     flint::Fmpq input_norm;
     if (!candidate.norm(flint::FmpqRef(candidate_norm)) ||
@@ -1765,6 +1769,7 @@ bool norm_admits_power_root(const Element& candidate,
         return fmpz_is_zero(input_num) != 0;
     }
     if (fmpz_is_one(candidate_den) != 0 && fmpz_is_pm1(candidate_num) != 0) {
+        unit_norm = true;
         if (fmpz_is_one(input_den) == 0 || fmpz_is_pm1(input_num) == 0) {
             return false;
         }
@@ -1788,6 +1793,117 @@ bool norm_admits_power_root(const Element& candidate,
     return fmpz_equal(powered.raw(), input_num) != 0;
 }
 
+flint_bitcnt_t element_coefficient_bits(const Element& element) noexcept {
+    flint::FmpqPoly polynomial;
+    if (!element.get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
+        return 0;
+    }
+    flint_bitcnt_t bits = fmpz_bits(polynomial.raw()->den);
+    const slong length = fmpq_poly_length(polynomial.raw());
+    for (slong i = 0; i < length; ++i) {
+        bits = std::max(bits, fmpz_bits(polynomial.raw()->coeffs + i));
+    }
+    return bits;
+}
+
+// Enclosure of log M(P), where P is the primitive integral characteristic
+// polynomial of element over Q and M is the Mahler measure:
+//   log M(P) = log |lc(P)| + sum_{i=1}^{d} log max(1, |sigma_i(element)|),
+// with sigma_1, ..., sigma_d the complex embeddings of the parent field
+// Since P is a power of the primitive minimal polynomial, log M(P) =
+// d * h(element) for the absolute logarithmic Weil height h (Bombieri and
+// Gubler, Heights in Diophantine Geometry, ch. 1, sections 1.5-1.6).
+bool log_mahler_measure_enclosure(flint::Arb& out,
+                                  EmbeddingContext& embeddings,
+                                  const Element& element,
+                                  slong precision) noexcept {
+    const NumberField* parent = element.parent();
+    if (parent == nullptr) {
+        return false;
+    }
+    const slong degree = parent->degree();
+    const nf_struct* raw_field = parent->raw_flint_field();
+    if (raw_field == nullptr || degree <= 0) {
+        return false;
+    }
+
+    // The characteristic polynomial chi is monic in Q[x]; FLINT stores it as
+    // an integral numerator over den with gcd(content(numerator), den) = 1,
+    // so lc of the primitive part is den / content(numerator).
+    flint::FmpqMat matrix(degree, degree);
+    flint::FmpqPoly characteristic;
+    multiplication_matrix(matrix.raw(), raw_field, degree,
+                          element.raw_flint_element());
+    fmpq_mat_charpoly(characteristic.raw(), matrix.raw());
+    if (fmpq_poly_degree(characteristic.raw()) != degree) {
+        return false;
+    }
+    flint::Fmpz content;
+    flint::Fmpz leading;
+    _fmpz_vec_content(content.raw(), characteristic.raw()->coeffs,
+                      degree + 1);
+    if (fmpz_is_zero(content.raw()) != 0) {
+        return false;
+    }
+    fmpz_divexact(leading.raw(), characteristic.raw()->den, content.raw());
+
+    flint::AcbVec values(degree);
+    if (!embeddings.evaluate_all(flint::AcbVecRef(values), element,
+                                 precision)) {
+        return false;
+    }
+
+    flint::Arb one;
+    flint::Arb absolute;
+    flint::Arb term;
+    flint::arb_one(one);
+    flint::arb_log_fmpz(out, flint::FmpzConstRef(leading), precision);
+    for (slong i = 0; i < degree; ++i) {
+        flint::acb_abs(absolute, values.data() + i, precision);
+        arb_max(term.raw(), absolute.raw(), one.raw(), precision);
+        flint::arb_log(term, term, precision);
+        flint::arb_add(out, out, term, precision);
+    }
+    return flint::arb_is_finite(out);
+}
+
+// Necessary condition for candidate^n == input from the height: if
+// c^n = a then h(a) = n h(c) (ibid., section 1.5), so with both
+// characteristic polynomials of degree d = [K : Q],
+// n log M(P_c) = log M(P_a).  The candidate is rejected only when certified
+// enclosures prove n log M(P_c) > log M(P_a) + 1, so a true root is never
+// rejected; the slack of 1 only absorbs enclosure radii.  When the test
+// passes, c^n has height at most that of the input plus 1/d, so forming it
+// costs no more than the input's own size; a root of unity c (M(P_c) = 1)
+// always passes and binary powering keeps its coefficients bounded.  A
+// failure to compute an enclosure leaves the candidate to exact
+// verification.
+bool height_admits_power_root(const Element& candidate,
+                              const Element& input,
+                              flint::FmpzConstRef exponent) noexcept {
+    const NumberField* parent = input.parent();
+    if (parent == nullptr) {
+        return true;
+    }
+    const slong precision =
+            128 + static_cast<slong>(
+                          std::max(element_coefficient_bits(candidate),
+                                   element_coefficient_bits(input)));
+    EmbeddingContext embeddings(*parent);
+    flint::Arb candidate_log;
+    flint::Arb input_log;
+    if (!embeddings.refine(precision) ||
+        !log_mahler_measure_enclosure(candidate_log, embeddings, candidate,
+                                      precision) ||
+        !log_mahler_measure_enclosure(input_log, embeddings, input,
+                                      precision)) {
+        return true;
+    }
+    flint::arb_mul_fmpz(candidate_log, candidate_log, exponent, precision);
+    flint::arb_add_ui(input_log, input_log, 1, precision);
+    return arb_gt(candidate_log.raw(), input_log.raw()) == 0;
+}
+
 bool verify_power_root(const Element& candidate,
                              const Element& input,
                              flint::FmpzConstRef exponent,
@@ -1800,10 +1916,20 @@ bool verify_power_root(const Element& candidate,
         return false;
     }
 
-    if (!norm_admits_power_root(candidate, input, exponent)) {
+    bool unit_norm = false;
+    if (!norm_admits_power_root(unit_norm, candidate, input, exponent)) {
         SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
                             "element.power_hensel_verify.norm_reject");
         return false;
+    }
+    if (unit_norm) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                            "element.power_hensel_verify_height");
+        if (!height_admits_power_root(candidate, input, exponent)) {
+            SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                                "element.power_hensel_verify.height_reject");
+            return false;
+        }
     }
 
     Element check(*parent);
