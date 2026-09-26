@@ -3931,6 +3931,72 @@ int test_prove_index_bound_maximal_quadratic_sqrt5_control() {
     return 0;
 }
 
+// x^3 - 4x^2 - 8x - 1 (discriminant 2213, totally real, Z[theta] maximal):
+// GP 2.17 `K = bnfinit(x^3-4*x^2-8*x-1, 1)` gives the fundamental units
+// theta and -4 theta^2 - theta + 6, class number one, and bnfcertify(K) = 1.
+// The regulator index bound is 40, and below q = 1000 there is only one
+// usable degree-one prime q = 1 mod 31, so the 31-local proof needs more
+// auxiliary primes than the bounded pre-scan draws.  The proof must continue
+// past that bound (reference `saturate!` scan) and verify every ell <= 40.
+int test_prove_index_bound_cubic2213_past_prescan_bound() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, -4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -8);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+
+    sflint::FmpqPoly theta_poly;
+    sflint::fmpq_poly_set_coeff_si(theta_poly, 1, 1);
+    sflint::FmpqPoly second_poly;
+    sflint::fmpq_poly_set_coeff_si(second_poly, 2, -4);
+    sflint::fmpq_poly_set_coeff_si(second_poly, 1, -1);
+    sflint::fmpq_poly_set_coeff_si(second_poly, 0, 6);
+    silex::Element theta(field);
+    silex::Element second(field);
+    assert(theta.set_fmpq_poly(sflint::FmpqPolyConstRef(theta_poly)));
+    assert(second.set_fmpq_poly(sflint::FmpqPolyConstRef(second_poly)));
+    silex::FactoredElement generators[] = {silex::FactoredElement(field),
+                                           silex::FactoredElement(field)};
+    assert(generators[0].set_element(theta));
+    assert(generators[1].set_element(second));
+    silex::OrderUnitGroup start(order);
+    assert(start.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 256));
+    assert(start.free_rank() == 2);
+
+    sflint::Fmpz index_bound;
+    assert(start.regulator_index_bound(sflint::FmpzRef(index_bound), 256));
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(index_bound), 31) >= 0);
+
+    // The validation proof uses this pre-scan bound (kComputeProofAuxMax).
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 1000));
+    silex::OrderUnitGroup proved(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = true;
+    assert(proved.prove_index_bound(status, changed, start, 1,
+                                    sflint::FmpzConstRef(aux_bound), 2,
+                                    embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(!changed);
+    assert(proved.certification_status() == silex::CertificationMode::proven);
+    assert(has_unit_proof_record(proved, 31, silex::ProofState::verified,
+                                 false));
+    assert(has_unit_proof_record(proved, 37, silex::ProofState::verified,
+                                 false));
+    // GP: \p 110; K.reg
+    assert(regulator_contains(
+            proved,
+            "12.68082022713452093603368239737775544244960210761943928030154"
+            "4077156925247307418251826663747356303483"));
+    return 0;
+}
+
 // Z[3 sqrt2] = Z[sqrt18], the equation order of x^2 - 18, has index 3 in
 // Z[sqrt2].  Its unit group is <-1, 17 + 4 sqrt18> = <-1, (1 + sqrt2)^4>,
 // of index 4 in Z[sqrt2]^x; reference GP 2.17.4 session:
@@ -4764,6 +4830,7 @@ int main() {
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();
     test_adjoin_dependent_relation_nonmaximal_root();
     test_prove_index_bound_maximal_quadratic_sqrt5_control();
+    test_prove_index_bound_cubic2213_past_prescan_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
     test_saturate_index_bounded();
     test_saturate_index_bounded_adaptive();
