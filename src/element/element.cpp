@@ -1193,6 +1193,17 @@ struct ResiduePowerData {
     bool may_be_power = false;
 };
 
+// True when the rational prime p divides the exponent n > 0.  The pure-root
+// Hensel and residue-disproof paths must skip such primes, where y^n - a is
+// inseparable modulo p.
+bool prime_divides_exponent(const fmpz_t prime, slong exponent) noexcept {
+    if (exponent <= 0 || fmpz_sgn(prime) <= 0 ||
+        fmpz_abs_fits_ui(prime) == 0) {
+        return false;
+    }
+    return static_cast<ulong>(exponent) % fmpz_get_ui(prime) == 0;
+}
+
 bool fq_power_data(ResiduePowerData& out,
                         const flint::Fq& value,
                         const flint::FqCtx& field,
@@ -1330,7 +1341,7 @@ ResiduePowerStatus residue_field_power_inverse_roots(
     inverse_roots.clear();
     if (exponent <= 1 ||
         fmpz_mod_poly_degree(modulus.raw(), ctx.raw()) <= 0 ||
-        fmpz_fdiv_ui(prime, static_cast<ulong>(exponent)) == 0) {
+        prime_divides_exponent(prime, exponent)) {
         return ResiduePowerStatus::unsupported;
     }
 
@@ -1356,7 +1367,8 @@ ResiduePowerStatus residue_field_power_inverse_roots(
     fq_set_fmpz_mod_poly(value.raw(), reduced.raw(), field.raw());
     // reference Fq_ispower first tests a^((#F_q - 1)/gcd(#F_q - 1, n)) == 1.
     // Use that as an exact disproof, then use the unique-root branch from
-    // reference gen_Shanks_sqrtn only when gcd(n, #F_q - 1) = 1.
+    // reference gen_Shanks_sqrtn when gcd(n, #F_q - 1) = 1, and otherwise
+    // its Bezout reduction to a gcd(n, #F_q - 1)-th root below.
     ResiduePowerData power_data;
     if (!fq_power_data(power_data, value, field, exponent)) {
         return ResiduePowerStatus::unsupported;
@@ -1373,12 +1385,49 @@ ResiduePowerStatus residue_field_power_inverse_roots(
         return ResiduePowerStatus::power;
     }
 
-    fq_neg(negative_value.raw(), value.raw(), field.raw());
+    // Reduce y^n = a to y^g = a^u with g = gcd(n, #F_q - 1) and
+    // n*u + (#F_q - 1)*v = g, following the Bezout step of reference
+    // gen_Shanks_sqrtn.  Let m = #F_q - 1.  Since a^(m/g) = 1 was checked
+    // above and F_q^* is cyclic, a = w^g for some w.  If y^n = a then
+    // y^g = y^(n*u + m*v) = a^u.  Conversely, if y^g = a^u then
+    // y^n = (a^u)^(n/g) = w^(n*u) = w^(g - m*v) = w^g = a.  So both
+    // polynomials have the same roots in F_q, and the dense polynomial has
+    // degree g <= n instead of n.
+    flint::Fmpz bezout_exponent;
+    flint::Fmpz bezout_group_coefficient;
+    flint::Fmpz bezout_gcd;
+    fmpz_xgcd(bezout_gcd.raw(), bezout_exponent.raw(),
+              bezout_group_coefficient.raw(), power_data.exponent.raw(),
+              power_data.group_order.raw());
+    if (!fmpz_equal(bezout_gcd.raw(), power_data.gcd.raw()) ||
+        fmpz_fits_si(bezout_gcd.raw()) == 0) {
+        return ResiduePowerStatus::unsupported;
+    }
+    // Resource bound only: y^g - a^u has exactly g roots in F_q, and every
+    // root is lifted by the caller.  Exceeding it leaves the caller in the
+    // unsupported/fail-closed state.
+    constexpr slong max_reduced_root_degree = slong{1} << 16;
+    const slong reduced_degree = fmpz_get_si(bezout_gcd.raw());
+    if (reduced_degree < 1 || reduced_degree > max_reduced_root_degree) {
+        return ResiduePowerStatus::unsupported;
+    }
+    fmpz_mod(bezout_exponent.raw(), bezout_exponent.raw(),
+             power_data.group_order.raw());
+
+    flint::Fq reduced_value(field);
+    if (!reduced_value.is_initialized()) {
+        return ResiduePowerStatus::unsupported;
+    }
+    flint::fq_pow(reduced_value, value, flint::FmpzConstRef(bezout_exponent),
+                  field);
+
+    fq_neg(negative_value.raw(), reduced_value.raw(), field.raw());
     fq_one(one.raw(), field.raw());
 
     FqPoly polynomial(field.raw());
     fq_poly_set_coeff(polynomial.raw(), 0, negative_value.raw(), field.raw());
-    fq_poly_set_coeff(polynomial.raw(), exponent, one.raw(), field.raw());
+    fq_poly_set_coeff(polynomial.raw(), reduced_degree, one.raw(),
+                      field.raw());
 
     FqPolyFactor roots(field.raw());
     fq_poly_roots(roots.raw(), polynomial.raw(), 0, field.raw());
@@ -1413,6 +1462,12 @@ ResiduePowerStatus residue_field_power_inverse_roots(
         fq_neg(root.raw(), constant.raw(), field.raw());
         fq_mul(root.raw(), root.raw(), inverse_leading.raw(), field.raw());
         if (fq_is_zero(root.raw(), field.raw()) != 0) {
+            return ResiduePowerStatus::unsupported;
+        }
+        // Check the reduction above: every root must satisfy y^n = a.
+        flint::fq_pow(root_power, root,
+                      flint::FmpzConstRef(power_data.exponent), field);
+        if (!flint::fq_equal(root_power, value, field)) {
             return ResiduePowerStatus::unsupported;
         }
 
@@ -1676,6 +1731,55 @@ bool reconstruct_power_root_candidate(
     return true;
 }
 
+// Necessary condition for candidate^n == input from multiplicativity of the
+// norm: N(candidate)^n == N(input).  It only rejects candidates, so a
+// rejection leaves the caller in its unsupported state.  When
+// N(candidate) = r/s in lowest terms has max(|r|, s) >= 2, r^n/s^n is in
+// lowest terms and max(|r|^n, s^n) >= 2^n, so N(input) must have a numerator
+// or denominator of at least n + 1 bits.  This avoids forming candidate^n for
+// huge n unless the input is itself that large.  A candidate of norm 0 or
+// +-1 passes after the cheap sign/zero comparison.
+bool norm_admits_power_root(const Element& candidate,
+                            const Element& input,
+                            flint::FmpzConstRef exponent) noexcept {
+    flint::Fmpq candidate_norm;
+    flint::Fmpq input_norm;
+    if (!candidate.norm(flint::FmpqRef(candidate_norm)) ||
+        !input.norm(flint::FmpqRef(input_norm))) {
+        return false;
+    }
+
+    const fmpz* candidate_num = fmpq_numref(candidate_norm.raw());
+    const fmpz* candidate_den = fmpq_denref(candidate_norm.raw());
+    const fmpz* input_num = fmpq_numref(input_norm.raw());
+    const fmpz* input_den = fmpq_denref(input_norm.raw());
+    if (fmpz_is_zero(candidate_num) != 0) {
+        return fmpz_is_zero(input_num) != 0;
+    }
+    if (fmpz_is_one(candidate_den) != 0 && fmpz_is_pm1(candidate_num) != 0) {
+        if (fmpz_is_one(input_den) == 0 || fmpz_is_pm1(input_num) == 0) {
+            return false;
+        }
+        const bool negative =
+                fmpz_sgn(candidate_num) < 0 && fmpz_is_odd(exponent.raw()) != 0;
+        return (fmpz_sgn(input_num) < 0) == negative;
+    }
+
+    const flint_bitcnt_t input_bits =
+            std::max(fmpz_bits(input_num), fmpz_bits(input_den));
+    if (fmpz_cmp_ui(exponent.raw(), input_bits) >= 0) {
+        return false;
+    }
+    const ulong power = fmpz_get_ui(exponent.raw());
+    flint::Fmpz powered;
+    fmpz_pow_ui(powered.raw(), candidate_den, power);
+    if (!fmpz_equal(powered.raw(), input_den)) {
+        return false;
+    }
+    fmpz_pow_ui(powered.raw(), candidate_num, power);
+    return fmpz_equal(powered.raw(), input_num) != 0;
+}
+
 bool verify_power_root(const Element& candidate,
                              const Element& input,
                              flint::FmpzConstRef exponent,
@@ -1685,6 +1789,12 @@ bool verify_power_root(const Element& candidate,
     const NumberField* parent = input.parent();
     if (parent == nullptr || !candidate.has_parent(*parent) ||
         fmpz_sgn(exponent.raw()) <= 0) {
+        return false;
+    }
+
+    if (!norm_admits_power_root(candidate, input, exponent)) {
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                            "element.power_hensel_verify.norm_reject");
         return false;
     }
 
@@ -1821,7 +1931,7 @@ bool try_pure_power_root_at_prime(
     const NumberField* parent = input.parent();
     if (parent == nullptr || factor.context() == nullptr || exponent <= 1 ||
         !fmpq_poly_is_monic_integral(raw_field->pol) ||
-        fmpz_fdiv_ui(prime.raw(), static_cast<ulong>(exponent)) == 0) {
+        prime_divides_exponent(prime.raw(), exponent)) {
         return false;
     }
 
@@ -2058,7 +2168,7 @@ bool pure_power_hensel_root(bool& is_power,
     constexpr slong max_prime_attempts = 256;
     for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
         fmpz_nextprime(prime.raw(), prime.raw(), 1);
-        if (fmpz_fdiv_ui(prime.raw(), static_cast<ulong>(exponent)) == 0) {
+        if (prime_divides_exponent(prime.raw(), exponent)) {
             continue;
         }
         flint::FmpzModCtx ctx(prime.raw());
@@ -2180,7 +2290,7 @@ bool pure_power_residue_disproves(bool& is_power,
     constexpr slong max_prime_attempts = 256;
     for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
         fmpz_nextprime(prime.raw(), prime.raw(), 1);
-        if (fmpz_fdiv_ui(prime.raw(), static_cast<ulong>(exponent)) == 0) {
+        if (prime_divides_exponent(prime.raw(), exponent)) {
             continue;
         }
         flint::FmpzModCtx ctx(prime.raw());

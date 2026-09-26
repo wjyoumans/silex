@@ -55,6 +55,79 @@ silex::NumberField imaginary_quadratic_field() noexcept {
     return silex::test::quadratic_field(-1);
 }
 
+silex::NumberField sqrt_two_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -2);
+
+    return silex::test::field_by_polynomial(
+        sflint::FmpqPolyConstRef(polynomial));
+}
+
+// Regression: the Hensel and residue-disproof prime loops must skip primes
+// p with p | n.  They previously skipped only p with n | p, so exponents
+// such as 10, 15 and 20 selected p = 5 and fell back to unsupported.
+void test_power_skips_primes_dividing_exponent() noexcept {
+    silex::NumberField field = sqrt_two_field();
+    silex::Element theta(field);
+    silex::Element base(field);
+    assert(theta.gen());
+    assert(base.add_si(theta, 1));
+
+    for (slong n : {2, 3, 5, 6, 7, 10, 14, 15, 20, 21}) {
+        sflint::Fmpz exponent;
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+        silex::Element power(field);
+        silex::Element root(field);
+        silex::Element check(field);
+        assert(power.pow_fmpz(base, sflint::FmpzConstRef(exponent)));
+
+        bool is_power = false;
+        assert(power.is_power(is_power, root,
+                              sflint::FmpzConstRef(exponent)));
+        assert(is_power);
+        assert(check.pow_fmpz(root, sflint::FmpzConstRef(exponent)));
+        assert(check.equal(power));
+    }
+}
+
+// Regression: a huge exponent must neither build the dense residue polynomial
+// y^n - a nor raise a lifted candidate to the n-th power in K.  1 + 5*theta
+// has norm -49, so it is not a 2^40-th power.  Unsupported is acceptable;
+// a definite answer must be false.
+void test_power_huge_exponent_is_bounded() noexcept {
+    silex::NumberField field = sqrt_two_field();
+    silex::Element value(field);
+    silex::Element root(field);
+    sflint::FmpqPoly one_plus_five_theta;
+    sflint::fmpq_poly_set_coeff_si(one_plus_five_theta, 0, 1);
+    sflint::fmpq_poly_set_coeff_si(one_plus_five_theta, 1, 5);
+    assert(value.set_fmpq_poly(
+            sflint::FmpqPolyConstRef(one_plus_five_theta)));
+    assert(root.set_si(7));
+
+    sflint::Fmpz exponent;
+    sflint::fmpz_one(sflint::FmpzRef(exponent));
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(exponent),
+                          sflint::FmpzConstRef(exponent), 40);
+    bool is_power = true;
+    if (value.is_power(is_power, root, sflint::FmpzConstRef(exponent))) {
+        assert(!is_power);
+    }
+    assert(root.equal_si(7));
+
+    // The fundamental unit 1 + theta is not a 2^40-th power either.
+    sflint::FmpqPoly one_plus_theta;
+    sflint::fmpq_poly_set_coeff_si(one_plus_theta, 0, 1);
+    sflint::fmpq_poly_set_coeff_si(one_plus_theta, 1, 1);
+    assert(value.set_fmpq_poly(sflint::FmpqPolyConstRef(one_plus_theta)));
+    is_power = true;
+    if (value.is_power(is_power, root, sflint::FmpzConstRef(exponent))) {
+        assert(!is_power);
+    }
+    assert(root.equal_si(7));
+}
+
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
     sflint::FmpqPoly polynomial;
     sflint::Fmpq coefficient;
@@ -159,6 +232,8 @@ void test_invert_zero_divisors() noexcept {
 
 int main() {
     test_invert_zero_divisors();
+    test_power_skips_primes_dividing_exponent();
+    test_power_huge_exponent_is_bounded();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 
