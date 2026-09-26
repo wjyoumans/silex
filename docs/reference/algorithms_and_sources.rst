@@ -287,20 +287,43 @@ and doubles ``stable`` after a candidate that is not.  Silex multiplies
 ``stable`` by the current kernel dimension instead of the number of input
 elements; the stopping rule decides only when candidates are tested, never
 whether ``ell`` is verified.  Silex first scans the primes
-``q <= aux_bound`` (the caller's bound; 1000 in class/unit validation) and,
-when that pre-scan leaves a nonempty kernel without adjoining a root, or when
-``ell >= aux_bound``, continues with the Hecke scan.  The auxiliary bound is
-therefore not a proof parameter; a unit proof record stores it as the
-pre-scan bound of the call, not as the largest prime used.  Hecke starts its
-scan at ``next_prime(2^60)``; Silex starts at ``q = ell + 1``, which changes
-only which valid characters are used.  Roots are adjoined only after the
-exact order-unit check described below.  By the Chebotarev density theorem,
-a kernel element that is not an ``ell``-th power in ``K`` is cut by a
-positive density of such primes, so with a correct index bound the loop ends;
-for a non-maximal order it may instead stop at a root outside the order, as
-described below.
-Silex adds one resource guard: a single scan examines at most ``2^16`` primes
-``q``, and reaching it records the ``ell``-local proof as ``unavailable``.
+``q <= aux_bound`` (the caller's bound; 1000 in class/unit validation) and
+continues with the Hecke scan when that pre-scan selects no usable prime,
+when it leaves a nonempty kernel without adjoining a root, or when
+``ell >= aux_bound``.  The auxiliary bound is therefore not a proof
+parameter; a unit proof record stores it as the pre-scan bound of the call,
+not as the largest prime used.  Hecke starts its scan at
+``next_prime(2^60)``; Silex starts at ``q = ell + 1``, which changes only
+which valid characters are used.  Roots are adjoined only after the exact
+order-unit check described below.
+
+Termination needs only that the supplied subgroup ``U`` has full rank, so
+that ``[O^x : U]`` is finite; it does not depend on the index bound being
+correct.  For ``ell`` not dividing the torsion order ``w``, a kernel element
+that is not an ``ell``-th power in ``K`` is cut by a positive density of the
+primes ``q`` by the Chebotarev density theorem, and each adjoined root
+multiplies the index of the subgroup by ``ell``, which can happen only
+finitely often.  For a non-maximal order the scan may instead stop at a root
+outside the order, as described below.  When ``ell`` divides ``w`` (always
+for ``ell = 2``, since ``w`` is even), the characters also cover the torsion
+generator, so the kernel has one column more than the free rank.  The root
+step accepts only kernel rows over the free generators, so it cannot adjoin a
+root of a torsion-twisted row: when such a scan stops at its stability
+threshold with a nonempty kernel, the ``ell``-local proof fails closed as
+``unavailable`` rather than continuing.
+
+Silex adds one resource guard: a single scan examines at most ``2^16``
+rational primes ``q``, and reaching it records the ``ell``-local proof as
+``unavailable``.  The guard now also bounds the scans for
+``ell >= aux_bound``, which previously ran until the machine-word range of
+``q`` was exhausted.  A scan counts at most ``d`` degree-one primes per
+``q`` in a field of degree ``d``, so once the doubled stability threshold
+exceeds ``d * 2^16`` a scan can end only with an empty kernel or at the
+guard.  One ``ell`` therefore runs at most ``17 + log2 d`` scans that end
+without adjoining a root, plus one scan per adjoined root, and adjoined roots
+are bounded by the ``ell``-part of the finite index ``[O^x : U]`` (and by the
+caller's restart limit).  In total one ``ell`` examines at most about
+``(17 + log2 d + log_ell [O^x : U]) * 2^16`` primes ``q``.
 
 Residue-character ``ell``-saturation of unit subgroups of a non-maximal order
 ``O`` is a Silex extension; neither primary source applies this proof to

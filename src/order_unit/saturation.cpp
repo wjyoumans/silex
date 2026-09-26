@@ -467,11 +467,16 @@ enum class ProofPrimeScanResult {
 // Resource guard, not a proof parameter: the most rational primes
 // q = 1 mod ell that one `select_stable_proof_primes` scan examines.  The
 // reference `compute_candidates_for_saturate` iterates `PrimesSet` without an
-// upper end; by Chebotarev every nonpower keeps being cut by further
-// degree-one primes, so a scan that reaches this count stops and the
-// ell-local proof fails closed as `unavailable`.  It also bounds the
-// `saturate!` doubling of the stability threshold, since each doubled
-// threshold needs more characters than the previous scan gathered.
+// upper end; a scan that reaches this count stops and the ell-local proof
+// fails closed as `unavailable`.  The guard is per scan.  A scan counts at
+// most d degree-one primes per q (d = field degree), so once the doubled
+// `saturate!` stability threshold exceeds d * 2^16 a scan can end only with
+// an empty kernel or at the guard: one ell runs at most 17 + log2 d scans
+// that adjoin no root.  Scans that adjoin a root are bounded by the ell-part
+// of the finite index [O^x : U] (and by the caller's restart limit), so one
+// ell examines at most about (17 + log2 d + log_ell [O^x : U]) * 2^16 primes.
+// This also bounds the ell >= aux_bound scans, which previously ran to the
+// end of the machine-word range of q.
 inline constexpr slong kStableProofMaxAuxPrimes = slong{1} << 16;
 
 bool select_stable_proof_primes(
