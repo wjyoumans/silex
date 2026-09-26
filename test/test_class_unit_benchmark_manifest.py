@@ -66,17 +66,20 @@ def main() -> int:
     assert "source-neutral" in manifest["fixture_contract"]
     fields = manifest["fields"]
     assert isinstance(fields, list)
-    assert len(fields) == 17
+    assert len(fields) == 22
     assert len({row["id"] for row in fields}) == len(fields)
     assert all(row["expected_success"] is True for row in fields)
     assert all(row["mode"] in {"proven", "grh"} for row in fields)
 
     proven = [row for row in fields if row["status"] == "must_pass_fast"]
     grh = [row for row in fields if row["status"] == "grh_certification"]
-    assert len(proven) == 12
+    assert len(proven) == 17
     assert len(grh) == 5
     assert all(row["mode"] == "proven" for row in proven)
     assert all(row["mode"] == "grh" for row in grh)
+    assert all(row["timeout_seconds"] == 20 for row in proven)
+    # Preserve the existing GRH fixtures; their protocol uses a 20s override.
+    assert all(row["timeout_seconds"] == 10 for row in grh)
     assert {row["id"] for row in proven} == {
         "real_quadratic_5_proven",
         "imaginary_quadratic_47_proven",
@@ -90,7 +93,35 @@ def main() -> int:
         "quartic_disc35019_proven",
         "quartic_disc1412343_proven",
         "quintic_disc401370255_proven",
+        "degree_one_proven",
+        "imaginary_quadratic_disc3_proven",
+        "imaginary_quadratic_disc3_alternate_proven",
+        "imaginary_quadratic_disc4_proven",
+        "real_quadratic_210_proven",
     }
+    additions = {
+        "degree_one_proven": ([0, 1], 1, [], 0, [1, 0], "1"),
+        "imaginary_quadratic_disc3_proven": (
+            [3, 0, 1], 1, [], 0, [0, 1], "-3"
+        ),
+        "imaginary_quadratic_disc3_alternate_proven": (
+            [1, -1, 1], 1, [], 0, [0, 1], "-3"
+        ),
+        "imaginary_quadratic_disc4_proven": (
+            [1, 0, 1], 1, [], 0, [0, 1], "-4"
+        ),
+        "real_quadratic_210_proven": (
+            [-210, 0, 1], 4, [2, 2], 1, [2, 0], "840"
+        ),
+    }
+    by_id = {row["id"]: row for row in proven}
+    for field_id, expected in additions.items():
+        row = by_id[field_id]
+        assert tuple(row[key] for key in (
+            "coefficients_low_to_high", "expected_class_order",
+            "expected_class_invariants", "expected_unit_rank",
+            "expected_signature", "maximal_order_discriminant",
+        )) == expected
     assert {tuple(row["coefficients_low_to_high"]) for row in grh} == {
         (34, 0, 1),
         (46, 0, 1),

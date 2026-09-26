@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test the class/unit adapter and its marked benchmark protocol."""
+"""Replay the fixed class/unit inventory and marked adapter protocol."""
 
 from __future__ import annotations
 
@@ -131,9 +131,18 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "must_pass_fast"
     ]
-    assert len(proven_rows) == 12
+    assert len(manifest["fields"]) == 22
+    assert len(proven_rows) == 17
+    exact_rows = {
+        "degree_one_proven",
+        "imaginary_quadratic_disc3_proven",
+        "imaginary_quadratic_disc3_alternate_proven",
+        "imaginary_quadratic_disc4_proven",
+        "imaginary_quadratic_47_proven",
+    }
     proven_instances: dict[str, dict[str, object]] = {}
     for row in proven_rows:
+        assert row["timeout_seconds"] == 20
         proven_instance = run_json(
             [
                 sys.executable,
@@ -149,6 +158,10 @@ def main() -> int:
         )
         assert proven_instance["success"] is True
         assert proven_instance["final_result_published"] is True
+        assert proven_instance["field_defined"] is True
+        assert proven_instance["maximal_order_defined"] is True
+        assert proven_instance["class_group"]["has_presentation"] is True
+        assert proven_instance["unit_group"]["is_set"] is True
         assert proven_instance["certification_status"] == "proven"
         assert proven_instance["class_group_proof_status"] == "proven"
         assert proven_instance["unit_group_proof_status"] == "proven"
@@ -158,7 +171,8 @@ def main() -> int:
         ] == "verified"
         assert proven_instance["class_group"][
             "relation_saturation_status"
-        ] == "verified"
+        ] == ("not_checked" if row["id"] == "real_quadratic_210_proven"
+              else "verified")
         assert proven_instance["class_group"]["unit_proof_status"] == (
             "verified"
         )
@@ -171,10 +185,37 @@ def main() -> int:
         assert proven_instance["unit_group"]["free_rank"] == row[
             "expected_unit_rank"
         ]
+        assert proven_instance["class_group"]["certification"] == "proven"
+        assert proven_instance["unit_group"]["certification"] == "proven"
+        r1, r2 = proven_instance["signature"]
+        assert r1 + 2 * r2 == len(row["coefficients_low_to_high"]) - 1
+        assert r1 + r2 - 1 == row["expected_unit_rank"]
+        if "expected_signature" in row:
+            assert proven_instance["signature"] == row["expected_signature"]
+            assert proven_instance["maximal_order_discriminant"] == row[
+                "maximal_order_discriminant"
+            ]
+        if row["expected_class_order"] == 1:
+            assert proven_instance["class_group"]["invariants"] == []
         if "expected_class_invariants" in row:
             assert proven_instance["class_group"]["invariants"] == [
                 str(value) for value in row["expected_class_invariants"]
             ]
+        if row["id"] in exact_rows:
+            # Exact completion needs no analytic or BF receipt.
+            for component in (
+                "analytic_class_regulator_status", "zeta_bf_proof_status"
+            ):
+                assert proven_instance["class_group"][component] == "not_checked"
+        if row["id"] == "real_quadratic_210_proven":
+            # The canonical Dirichlet index-one gate certifies this pair
+            # without a relation-saturation or BF proof attempt.
+            assert proven_instance["class_group"][
+                "analytic_class_regulator_status"
+            ] == "verified"
+            assert proven_instance["class_group"][
+                "zeta_bf_proof_status"
+            ] == "not_checked"
         proven_instances[row["id"]] = proven_instance
 
     default_instance = proven_instances["real_quadratic_5_proven"]

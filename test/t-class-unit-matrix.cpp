@@ -879,6 +879,66 @@ bool order_element_has_exact_order(const silex::OrderElement& generator,
     return power.equal_si(1);
 }
 
+bool check_class_ideal_witnesses(
+        const silex::ClassGroupContext& group,
+        const FieldSetup& setup) noexcept {
+    const slong count = group.invariant_count();
+    sflint::FmpzMat coordinates(1, count);
+    for (slong i = 0; i < count; ++i) {
+        sflint::Fmpz invariant;
+        silex::FractionalIdeal generator(setup.maximal_order);
+        silex::FractionalIdeal power(setup.maximal_order);
+        silex::FractionalIdeal principal(setup.maximal_order);
+        silex::FactoredElement witness(setup.field);
+        silex::Element expanded(setup.field);
+        if (!group.invariant(sflint::FmpzRef(invariant), i) ||
+            !group.invariant_generator(generator, i) ||
+            !silex::same_order_parent(generator.parent(),
+                                       &setup.maximal_order) ||
+            !group.invariant_generator_power_witness(witness, i) ||
+            witness.parent() == nullptr ||
+            !witness.parent()->has_same_data(setup.field) ||
+            !witness.evaluate(expanded) ||
+            !principal.set_principal(expanded) ||
+            !power.pow_fmpz(generator, sflint::FmpzConstRef(invariant)) ||
+            !principal.equal(power) ||
+            !group.ideal_class_coordinates(
+                    sflint::FmpzMatRef(coordinates), generator)) {
+            return false;
+        }
+        for (slong j = 0; j < count; ++j) {
+            if (!sflint::fmpz_equal_si(
+                        sflint::fmpz_mat_entry(coordinates, 0, j),
+                        i == j ? 1 : 0)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool check_free_unit_witnesses(const silex::OrderUnitGroup& units,
+                               const FieldSetup& setup) noexcept {
+    silex::FractionalIdeal one(setup.maximal_order);
+    if (!one.one()) {
+        return false;
+    }
+    for (slong i = 0; i < units.free_rank(); ++i) {
+        silex::FactoredElement generator(setup.field);
+        silex::Element expanded(setup.field);
+        silex::FractionalIdeal principal(setup.maximal_order);
+        if (!units.free_generator(generator, i) ||
+            generator.parent() == nullptr ||
+            !generator.parent()->has_same_data(setup.field) ||
+            !generator.evaluate(expanded) ||
+            !principal.set_principal(expanded) ||
+            !principal.equal(one)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool check_class_unit_pair(const char* name,
                            const FieldSetup& setup,
                            silex::CertificationMode requested,
@@ -886,9 +946,10 @@ bool check_class_unit_pair(const char* name,
                            slong expected_unit_rank,
                            const slong* expected_invariants = nullptr,
                            slong expected_invariant_count = -1,
-                           slong expected_torsion_order = 0,
+                           slong expected_torsion_order = 2,
                            bool expect_exact_proof_metadata = false,
-                           bool expect_honesty_checkpoint = false)
+                           bool expect_honesty_checkpoint = false,
+                           bool expect_dirichlet_proof_metadata = false)
         noexcept {
     sflint::Fmpz factor_base_bound;
     silex::ClassGroupComputeOptions options;
@@ -946,11 +1007,17 @@ bool check_class_unit_pair(const char* name,
         std::cerr << name << ": unexpected unit rank\n";
         return false;
     }
+    if (!check_class_ideal_witnesses(class_group, setup) ||
+        !check_free_unit_witnesses(units, setup)) {
+        std::cerr << name << ": invalid exact ideal/unit witness\n";
+        return false;
+    }
 
     sflint::Fmpz class_order;
     if (!class_group.order(sflint::FmpzRef(class_order)) ||
         !sflint::fmpz_equal_si(sflint::FmpzConstRef(class_order),
-                               expected_class_order)) {
+                               expected_class_order) ||
+        (expected_class_order == 1 && class_group.invariant_count() != 0)) {
         std::cerr << name << ": unexpected class order\n";
         return false;
     }
@@ -975,6 +1042,28 @@ bool check_class_unit_pair(const char* name,
     if (class_group.certification_status() != requested ||
         units.certification_status() != requested) {
         std::cerr << name << ": wrong certification labels\n";
+        return false;
+    }
+    if (requested == silex::CertificationMode::proven &&
+        (class_group.factor_base_generation_status() !=
+                 silex::ProofState::verified ||
+         class_group.relation_saturation_status() !=
+                 (expect_dirichlet_proof_metadata
+                          ? silex::ProofState::not_checked
+                          : silex::ProofState::verified) ||
+         class_group.unit_proof_status() != silex::ProofState::verified ||
+         class_group.regulator_proof_status() !=
+                 silex::ProofState::verified)) {
+        std::cerr << name << ": missing proven component receipt\n";
+        return false;
+    }
+    if (expect_dirichlet_proof_metadata &&
+        (class_group.analytic_class_regulator_status() !=
+                 silex::ProofState::verified ||
+         class_group.zeta_bf_proof_status() !=
+                 silex::ProofState::not_checked ||
+         class_group.relation_saturation_record_count() != 0)) {
+        std::cerr << name << ": unexpected Dirichlet proof metadata\n";
         return false;
     }
     if (expect_honesty_checkpoint) {
@@ -1009,10 +1098,14 @@ bool check_class_unit_pair(const char* name,
                     sflint::FmpzConstRef(torsion_order),
                     expected_torsion_order) ||
             !units.torsion_generator(torsion_generator) ||
+            !silex::same_order_parent(torsion_generator.parent(),
+                                       &setup.maximal_order) ||
             !order_element_has_exact_order(
                     torsion_generator, expected_torsion_order) ||
             !units.regulator(sflint::ArbRef(regulator)) ||
-            !sflint::arb_is_one(regulator)) {
+            !sflint::arb_is_finite(regulator) ||
+            !sflint::arb_is_positive(regulator) ||
+            (expected_unit_rank == 0 && !sflint::arb_is_one(regulator))) {
             std::cerr << name << ": unexpected torsion subgroup\n";
             return false;
         }
@@ -1133,7 +1226,7 @@ bool check_candidate_boundary_and_proven_pair(
     return check_class_unit_pair(
             name, setup, silex::CertificationMode::proven,
             expected_class_order, expected_unit_rank, expected_invariants,
-            expected_invariant_count, 0, false, true);
+            expected_invariant_count, 2, false, true);
 }
 
 bool check_zero_resource_failure_atomicity(
@@ -1590,7 +1683,7 @@ int test_release_target_proven_transactions() {
     if (!check_class_unit_pair(
                 "degree-one release-target proven transaction",
                 degree_one_setup, silex::CertificationMode::proven, 1, 0,
-                nullptr, 0)) {
+                nullptr, 0, 2, true)) {
         return 1;
     }
 
@@ -1609,7 +1702,7 @@ int test_release_target_proven_transactions() {
                 "real quadratic 210 release-target proven transaction",
                 real_quadratic_210_setup,
                 silex::CertificationMode::proven, 4, 1,
-                real_quadratic_210_invariants, 2)) {
+                real_quadratic_210_invariants, 2, 2, false, false, true)) {
         return 1;
     }
 
@@ -1707,6 +1800,7 @@ int test_higher_degree_completion_boundaries() {
     const slong quartic_disc1412343[] = {4, 1, 3, -8};
     const slong quartic_disc6067408[] = {7, 2, -3, -8};
     const slong quartic_x4_minus_x_minus_1[] = {-1, -1, 0, 0};
+    const slong quartic_x4_plus_1[] = {1, 0, 0, 0};
     const slong quintic[] = {-1, -1, 0, 0, 0};
     const slong quintic_disc11119[] = {1, -3, 1, 1, -2};
     const slong quintic_disc401370255[] = {3, -3, -3, -6, -7};
@@ -1725,7 +1819,7 @@ int test_higher_degree_completion_boundaries() {
     if (!check_class_unit_pair(
                 "nontrivial cubic proven completion regression",
                 cubic_nontrivial_setup, silex::CertificationMode::proven, 2,
-                1, cubic_nontrivial_invariants, 1, 0, false, true)) {
+                1, cubic_nontrivial_invariants, 1, 2, false, true)) {
         return 1;
     }
 
@@ -1734,7 +1828,7 @@ int test_higher_degree_completion_boundaries() {
     if (!check_class_unit_pair(
                 "deterministic random cubic proven completion regression",
                 cubic_seeded_h4_setup, silex::CertificationMode::proven, 1,
-                1, nullptr, -1, 0, false, true)) {
+                1, nullptr, -1, 2, false, true)) {
         return 1;
     }
 
@@ -1758,6 +1852,14 @@ int test_higher_degree_completion_boundaries() {
     if (!check_candidate_boundary_and_proven_pair(
                 "quartic proven completion regression", quartic_setup, 1,
                 1, 1)) {
+        return 1;
+    }
+
+    FieldSetup quartic_x4_plus_1_setup =
+            setup_from_coefficients(quartic_x4_plus_1, 4);
+    if (!check_class_unit_pair(
+                "quartic x^4 + 1 torsion replay", quartic_x4_plus_1_setup,
+                silex::CertificationMode::proven, 1, 1, nullptr, 0, 8)) {
         return 1;
     }
 
