@@ -21,6 +21,7 @@ class Order;
 
 namespace detail {
 struct OrderData;
+class OrderAccess;
 bool order_minkowski_embedding_rows(
         flint::ArbMatRef out,
         const Order& order,
@@ -97,9 +98,11 @@ public:
     slong degree() const noexcept;
     bool has_basis() const noexcept;
     bool is_equation_order() const noexcept;
+    // Maximality is only ever computed, never asserted: it is known after
+    // maximal_order(), for quadratic orders with conductor metadata, and in
+    // degree one.  There is deliberately no public setter.
     bool maximality_known() const noexcept;
     bool is_maximal() const noexcept;
-    void set_maximality(bool is_maximal) noexcept;
 
     bool set_basis(flint::FmpqMatConstRef basis) noexcept;
     bool get_basis(flint::FmpqMatRef out) const noexcept;
@@ -120,9 +123,11 @@ public:
 private:
     bool set_quadratic_metadata(flint::FmpzConstRef conductor) noexcept;
     bool set_quadratic_order(flint::FmpzConstRef conductor) noexcept;
+    void record_maximality(bool is_maximal) noexcept;
     void clear_maximality() noexcept;
 
     friend class Ideal;
+    friend class detail::OrderAccess;
     friend bool order_index(flint::FmpzRef out,
                             const Order& suborder,
                             const Order& overorder) noexcept;

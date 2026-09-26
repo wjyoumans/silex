@@ -433,7 +433,7 @@ int test_class_group_bound() {
 
     silex::NumberField cubic = cubic_field();
     silex::Order cubic_order = silex::test::equation_order(cubic);
-    cubic_order.set_maximality(true);
+    cubic_order = silex::test::verified_maximal_order(cubic_order);
     assert(set_fmpz_si(bound, 99));
     assert(silex::factor_base_class_group_bound(
             sflint::FmpzRef(bound), cubic_order));
@@ -447,8 +447,11 @@ int test_failure_preserves_output() {
     silex::Order rational_order = silex::test::equation_order(rational);
 
     silex::NumberField quadratic = quadratic_field(2);
-    silex::Order nonmax_order = silex::test::equation_order(quadratic);
-    nonmax_order.set_maximality(false);
+    sflint::Fmpz conductor;
+    assert(set_fmpz_si(conductor, 2));
+    silex::Order nonmax_order = silex::Order::quadratic_order(
+            quadratic, sflint::FmpzConstRef(conductor));
+    assert(nonmax_order.maximality_known() && !nonmax_order.is_maximal());
 
     silex::FactorBase base(rational_order);
     silex::FactorBase nonmax_base(nonmax_order);

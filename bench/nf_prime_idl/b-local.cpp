@@ -36,17 +36,15 @@ bool define_maximal_quadratic(silex::NumberField& field,
            maximal_order.maximal_order(equation_order);
 }
 
-bool define_marked_equation_quadratic(silex::NumberField& field,
-                                      silex::Order& order,
-                                      slong radicand) noexcept {
+// The equation order of Q(sqrt(radicand)) for a radicand whose equation order
+// is maximal; the quadratic backend computes maximality from the conductor.
+bool define_maximal_equation_quadratic(silex::NumberField& field,
+                                       silex::Order& order,
+                                       slong radicand) noexcept {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, radicand);
-    if (!field.define_by_polynomial(sflint::FmpqPolyConstRef(polynomial)) ||
-        !order.define_equation_order(field)) {
-        return false;
-    }
-    order.set_maximality(true);
-    return true;
+    return field.define_by_polynomial(sflint::FmpqPolyConstRef(polynomial)) &&
+           order.define_equation_order(field) && order.is_maximal();
 }
 
 bool set_one_plus_theta_over_two(silex::Element& element) noexcept {
@@ -189,7 +187,7 @@ void BM_prime_ideal_valuation_order_element_quadratic_split(
 
     silex::NumberField field;
     silex::Order order(field);
-    if (!define_marked_equation_quadratic(field, order, 2)) {
+    if (!define_maximal_equation_quadratic(field, order, 2)) {
         contract::fail(state, "equation order setup failed",
                        contract::FailureReason::setup);
         return;

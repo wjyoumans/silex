@@ -1,6 +1,7 @@
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
 #include "ideal_factorization/ideal_factorization_internal.hpp"
+#include "order/order_internal.hpp"
 #include "test_support.hpp"
 
 #include <silex/class_group.hpp>
@@ -503,7 +504,9 @@ int test_selected_witness_edge_cases() {
     assert(!search::factor_base_principal_witness(base, ramified, alpha));
     assert(!search::factor_base_principal_witness(empty, inert, alpha, static_cast<Mode>(99)));
     // Unsupported direct scope must use the reference, not grant a proof.
-    order.set_maximality(false);
+    // The public API cannot withdraw maximality, so the internal hook builds
+    // that state.
+    silex::detail::OrderAccess::set_maximality_unchecked(order, false);
     const bool fallback = search::factor_base_principal_witness(
             empty, inert, alpha, Mode::order_element_direct, nullptr, &audit);
     assert(audit.used_reference);
@@ -597,7 +600,8 @@ int test_scalar_witness_reference_cases() {
     assert(!search::factor_base_scalar_witness(empty, invalid, sflint::FmpzConstRef(scalar)));
     assert(!search::factor_base_scalar_witness(empty, wrong, sflint::FmpzConstRef(scalar)));
     assert(!search::factor_base_scalar_witness(complete, split, sflint::FmpzConstRef(scalar)));
-    order.set_maximality(false);
+    // Withdrawn maximality (internal hook; unreachable publicly) must refuse.
+    silex::detail::OrderAccess::set_maximality_unchecked(order, false);
     assert(!silex::detail::scalar_factor_over_base_with_required_prime(
             invalid_matches, sflint::FmpzConstRef(scalar), empty, inert));
     search::FactorBaseWitnessAudit audit;
@@ -611,7 +615,7 @@ int test_scalar_witness_reference_cases() {
     fmpq_one(fmpq_mat_entry(basis.raw(), 0, 1));
     fmpq_one(fmpq_mat_entry(basis.raw(), 1, 0));
     assert(permuted.set_basis(sflint::FmpqMatConstRef(basis)));
-    permuted.set_maximality(true);
+    permuted = silex::test::verified_maximal_order(permuted);
     silex::FactorBase permuted_base(permuted);
     sflint::fmpz_set_ui(bound, 2);
     assert(permuted_base.build(sflint::FmpzConstRef(bound)));

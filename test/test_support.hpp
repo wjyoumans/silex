@@ -4,6 +4,7 @@
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
 
+#include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_poly.hpp>
@@ -78,6 +79,23 @@ inline Order equation_order(const NumberField& parent) noexcept {
     Order order = Order::equation_order(parent);
     assert(order.is_defined());
     return order;
+}
+
+// Returns `order` with computed maximality.  Order has no public maximality
+// setter, so a fixture that already names the maximal order (for example in a
+// permuted basis) runs it through Order::maximal_order.  The assertions check
+// that `order` was maximal and that the result keeps its exact basis, so the
+// fixture is unchanged apart from the computed maximality flag.
+inline Order verified_maximal_order(const Order& order) noexcept {
+    assert(order.is_defined() && order.parent() != nullptr);
+    Order maximal(*order.parent());
+    assert(maximal.maximal_order(order));
+    assert(maximal.maximality_known() && maximal.is_maximal());
+    const auto input_basis = order.basis();
+    const auto output_basis = maximal.basis();
+    assert(input_basis.has_value() && output_basis.has_value());
+    assert(flint::fmpq_mat_equal(*input_basis, *output_basis));
+    return maximal;
 }
 
 }  // namespace silex::test

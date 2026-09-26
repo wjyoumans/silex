@@ -824,7 +824,7 @@ bool Order::is_maximal() const noexcept {
     return is_defined() && data_->maximality_is_known_ && data_->maximal_;
 }
 
-void Order::set_maximality(bool is_maximal_value) noexcept {
+void Order::record_maximality(bool is_maximal_value) noexcept {
     if (!is_defined()) {
         return;
     }
@@ -1146,7 +1146,7 @@ bool Order::pmaximal_overorder(const Order& input,
         if (!candidate.set(input)) {
             return false;
         }
-        candidate.set_maximality(true);
+        candidate.record_maximality(true);
         swap(candidate);
         return true;
     }
@@ -1217,7 +1217,7 @@ bool Order::maximal_order(const Order& input) noexcept {
         if (!candidate.set(input)) {
             return false;
         }
-        candidate.set_maximality(true);
+        candidate.record_maximality(true);
         swap(candidate);
         return true;
     }
@@ -1264,7 +1264,7 @@ bool Order::maximal_order(const Order& input) noexcept {
     if (!candidate.set(current)) {
         return false;
     }
-    candidate.set_maximality(true);
+    candidate.record_maximality(true);
     swap(candidate);
     return true;
 }

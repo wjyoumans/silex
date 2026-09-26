@@ -126,10 +126,15 @@ inline bool random_search_fixture(Order& order, Ideal& ideal) noexcept {
         for (slong j = 0; j < 3; ++j)
             fmpq_set_si(fmpq_mat_entry(u.raw(), i, j), entries[i][j], 1);
     fmpq_mat_mul(changed.raw(), u.raw(), basis.raw());
-    order = Order::from_basis(*original.parent(), flint::FmpqMatConstRef(changed));
-    if (!order.is_defined()) return false;
-    // det(u)=1: the order is unchanged by this basis replacement.
-    order.set_maximality(true);
+    // det(u)=1: the order is unchanged by this basis replacement.  Order has
+    // no public maximality setter, so maximality is recomputed; for an
+    // already maximal input the result keeps the replacement basis.
+    Order replaced = Order::from_basis(*original.parent(), flint::FmpqMatConstRef(changed));
+    if (!replaced.is_defined() || !order.define(*original.parent()) ||
+        !order.maximal_order(replaced) || !order.is_maximal()) return false;
+    flint::FmpqMat kept(3, 3);
+    if (!order.get_basis(flint::FmpqMatRef(kept)) ||
+        fmpq_mat_equal(kept.raw(), changed.raw()) == 0) return false;
     flint::FmpqPoly f;
     polynomial(f, 3);
     return ideal.define(order) && evaluation_ideal(ideal, f, 2);

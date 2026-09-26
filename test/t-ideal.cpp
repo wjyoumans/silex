@@ -1938,10 +1938,11 @@ int test_two_generator_search_contracts() {
     fmpq_mat_det(determinant.raw(), transform.raw());
     assert(fmpq_is_one(determinant.raw()));
     fmpq_mat_mul(changed.raw(), transform.raw(), basis.raw());
-    silex::Order order = silex::Order::from_basis(*original.parent(), sflint::FmpqMatConstRef(changed));
-    assert(order.is_defined());
-    // Unimodular change of the already established maximal order.
-    order.set_maximality(true);
+    silex::Order changed_order = silex::Order::from_basis(*original.parent(), sflint::FmpqMatConstRef(changed));
+    assert(changed_order.is_defined());
+    // Unimodular change of the already established maximal order; maximality
+    // is recomputed, and the basis is kept.
+    silex::Order order = silex::test::verified_maximal_order(changed_order);
     sflint::FmpqPoly polynomial;
     silex::test::ideal_product::polynomial(polynomial, 3);
     silex::Ideal left(order), right(order), rebuilt(order), expected(order), actual(order);

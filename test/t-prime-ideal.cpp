@@ -887,7 +887,7 @@ int test_valuation_order_element_split_repeated() {
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 7));
@@ -955,7 +955,7 @@ int test_valuation_order_element_ramified_unique_prime_norm() {
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 2));
@@ -999,7 +999,7 @@ int test_valuation_order_element_ramified_split_coordinate_matrix() {
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 23));
@@ -1089,7 +1089,7 @@ int test_valuation_fractional_element_and_factored() {
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 2));
@@ -1170,7 +1170,7 @@ int test_extended_valuation_failure_preserves_output() {
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 2));
@@ -1197,9 +1197,10 @@ int test_extended_valuation_failure_preserves_output() {
     sflint::FmpqPoly other_polynomial;
     poly_x2_minus(other_polynomial, 5);
     silex::NumberField other_field;
-    silex::Order other_order;
-    other_order = order_by_polynomial(other_field, other_polynomial);
-    other_order.set_maximality(true);
+    silex::Order other_equation =
+            order_by_polynomial(other_field, other_polynomial);
+    silex::Order other_order(other_field);
+    assert(other_order.maximal_order(other_equation));
 
     silex::Element other_element(other_field);
     assert(other_element.set_si(2));
@@ -1235,14 +1236,14 @@ int test_extended_valuation_failure_preserves_output() {
     return 0;
 }
 
-int test_valuation_marked_quadratic() {
+int test_valuation_maximal_quadratic() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 2);
 
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 3));
@@ -1299,7 +1300,7 @@ int test_cubic_mixed_decomposition() {
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 5));
@@ -1332,7 +1333,7 @@ int test_residue_degree_limited_decomposition() {
     silex::NumberField field;
     silex::Order order;
     order = order_by_polynomial(field, polynomial);
-    order.set_maximality(true);
+    order = silex::test::verified_maximal_order(order);
 
     sflint::Fmpz p;
     assert(set_fmpz_si(p, 5));
@@ -1918,7 +1919,7 @@ int main() {
     assert(test_valuation_order_element_ramified_nonunique_containment() == 0);
     assert(test_valuation_fractional_element_and_factored() == 0);
     assert(test_extended_valuation_failure_preserves_output() == 0);
-    assert(test_valuation_marked_quadratic() == 0);
+    assert(test_valuation_maximal_quadratic() == 0);
     assert(test_valuation_unmarked_failure_preserves_output() == 0);
     assert(test_cubic_mixed_decomposition() == 0);
     assert(test_residue_degree_limited_decomposition() == 0);

@@ -33,6 +33,18 @@ Each factory returns an undefined ``Order`` on invalid input.  Mutating
 scratch-object helpers; ordinary public examples and tests use factories
 except when mutation/failure behavior is what the test covers.
 
+Maximality is computed, never asserted.  ``Order::maximality_known()`` and
+``Order::is_maximal()`` report a flag that only Silex sets: ``maximal_order``
+sets it on its result, quadratic orders carry it through their conductor
+metadata, and degree-one orders are maximal.  Every other order, including
+one built with ``from_basis`` for a lattice that happens to be maximal,
+reports unknown maximality.  There is no public setter; Silex 0.1.1 had
+``Order::set_maximality``, which is removed.  Routines that need the maximal
+order, among them class groups, factor bases, and S-units, trust this flag and
+refuse orders that are not known maximal, so an order built another way must
+first go through ``maximal_order``.  The flag lives in the shared order data
+and is visible through every handle to it.
+
 ``Order::basis()`` and ``Order::coordinates(element)`` are owned-return
 convenience forms of the output-buffer APIs.  They return ``std::nullopt`` on
 the same domain and definition failures as the buffer forms.

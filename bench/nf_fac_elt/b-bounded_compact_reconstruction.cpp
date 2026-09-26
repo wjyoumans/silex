@@ -521,13 +521,15 @@ class BoundBasisFixture {
             fmpq_swap(fmpq_mat_entry(basis.raw(), 0, column),
                       fmpq_mat_entry(basis.raw(), 1, column));
         }
-        order_ = silex::Order::from_basis(
+        // Order has no public maximality setter: recompute maximality in
+        // setup.  For an already maximal input the result keeps this basis.
+        const silex::Order reordered = silex::Order::from_basis(
                 field_, sflint::FmpqMatConstRef(basis));
-        if (!order_.is_defined()) {
-            return false;
-        }
-        order_.set_maximality(true);
-        return true;
+        sflint::FmpqMat kept(maximal_order_.degree(), maximal_order_.degree());
+        return reordered.is_defined() && order_.define(field_) &&
+               order_.maximal_order(reordered) && order_.is_maximal() &&
+               order_.get_basis(sflint::FmpqMatRef(kept)) &&
+               sflint::fmpq_mat_equal(kept, basis);
     }
 
     bool add_quadratic_unit() noexcept {

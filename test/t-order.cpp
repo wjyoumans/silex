@@ -237,8 +237,6 @@ int test_explicit_basis_index_and_table() {
     sflint::Fmpz conductor;
     assert(suborder.quadratic_conductor(sflint::FmpzRef(conductor)));
     assert(sflint::fmpz_equal_si(conductor, 2));
-    suborder.set_maximality(false);
-    assert(suborder.maximality_known());
     assert(!suborder.is_maximal());
 
     sflint::FmpqMat got(2, 2);
@@ -619,7 +617,8 @@ int test_maximal_order_failure_preserves_output() {
     silex::Order generic_order = silex::test::equation_order(generic_field);
 
     silex::Order out = silex::test::equation_order(quadratic);
-    out.set_maximality(false);
+    assert(out.maximality_known());
+    assert(!out.is_maximal());
 
     sflint::Fmpz p;
     sflint::fmpz_set_ui(p, 1);
@@ -642,7 +641,6 @@ int test_maximal_order_failure_preserves_output() {
     assert(!wrong_parent.has_basis());
 
     silex::Order generic_out = silex::test::equation_order(generic_field);
-    generic_out.set_maximality(false);
     assert(generic_out.maximal_order(generic_order));
     assert(generic_out.maximality_known());
     assert(generic_out.is_maximal());
@@ -678,6 +676,62 @@ int test_order_keeps_parent_alive() {
     return 0;
 }
 
+// Maximality is computed, never asserted (T-030).  Order has no accessible
+// member that marks or withdraws maximality; each concept must be false.
+template <typename T>
+concept can_set_maximality = requires(T& order, bool value) {
+    order.set_maximality(value);
+};
+template <typename T>
+concept can_record_maximality = requires(T& order, bool value) {
+    order.record_maximality(value);
+};
+template <typename T>
+concept can_clear_maximality = requires(T& order) {
+    order.clear_maximality();
+};
+static_assert(!can_set_maximality<silex::Order>);
+static_assert(!can_record_maximality<silex::Order>);
+static_assert(!can_clear_maximality<silex::Order>);
+
+// The T-014 review probe began by labelling Z[sqrt(5)] maximal, which let a
+// unit-index proof accept 2 + sqrt(5) as fundamental.  Through the public API
+// the equation order stays non-maximal in every handle and copy, and the only
+// maximal label comes from computing the maximal order, which is strictly
+// larger.
+int test_maximality_is_only_computed() {
+    silex::NumberField field = quadratic_field(5);
+    silex::Order equation = silex::test::equation_order(field);
+    assert(equation.maximality_known());
+    assert(!equation.is_maximal());
+
+    silex::Order shared = equation;
+    silex::Order copied;
+    assert(copied.set(equation));
+    assert(!shared.is_maximal());
+    assert(!copied.is_maximal());
+
+    // The same lattice through an explicit, non-canonical basis carries no
+    // maximality label.
+    sflint::FmpqMat basis(2, 2);
+    mat_entry_si(basis, 0, 1, 1);
+    mat_entry_si(basis, 1, 0, 1);
+    silex::Order permuted =
+            silex::Order::from_basis(field, sflint::FmpqMatConstRef(basis));
+    assert(permuted.is_defined());
+    assert(!permuted.is_maximal());
+
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(permuted));
+    assert(maximal.is_maximal());
+    sflint::Fmpz index;
+    assert(silex::order_index(sflint::FmpzRef(index), equation, maximal));
+    assert(sflint::fmpz_equal_si(index, 2));
+    assert(!equation.is_maximal());
+    assert(!permuted.is_maximal());
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -693,5 +747,6 @@ int main() {
     assert(test_polynomial_quadratic_and_generic_global_maximal_orders() == 0);
     assert(test_maximal_order_failure_preserves_output() == 0);
     assert(test_order_keeps_parent_alive() == 0);
+    assert(test_maximality_is_only_computed() == 0);
     return 0;
 }

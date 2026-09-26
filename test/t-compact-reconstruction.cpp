@@ -495,10 +495,11 @@ int test_coordinate_bound_supports_reordered_basis() {
         fmpq_swap(fmpq_mat_entry(basis.raw(), 0, column),
                   fmpq_mat_entry(basis.raw(), 1, column));
     }
-    silex::Order reordered =
+    silex::Order reordered_basis =
             silex::Order::from_basis(field, sflint::FmpqMatConstRef(basis));
-    assert(reordered.is_defined());
-    reordered.set_maximality(true);
+    assert(reordered_basis.is_defined());
+    silex::Order reordered =
+            silex::test::verified_maximal_order(reordered_basis);
     assert(!basis_begins_with_one(reordered));
 
     silex::Element theta(field);
