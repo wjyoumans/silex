@@ -465,8 +465,8 @@ enum class ProofPrimeScanResult {
 };
 
 // Resource guard, not a proof parameter: the most rational primes
-// q = 1 mod ell that one `select_stable_proof_primes` scan examines.  Hecke
-// v0.38.6 `compute_candidates_for_saturate` iterates `PrimesSet` without an
+// q = 1 mod ell that one `select_stable_proof_primes` scan examines.  The
+// reference `compute_candidates_for_saturate` iterates `PrimesSet` without an
 // upper end; by Chebotarev every nonpower keeps being cut by further
 // degree-one primes, so a scan that reaches this count stops and the
 // ell-local proof fails closed as `unavailable`.  It also bounds the
@@ -624,13 +624,14 @@ bool select_stable_proof_primes(
     };
 
     // reference RelSaturate.compute_candidates_for_saturate scans q = 1 mod p
-    // and stops after the candidate kernel remains stable for 3.5 times its
-    // current dimension (`saturate!` passes stable = 3.5 and doubles it after
-    // a candidate that is not a p-th power).  Hecke starts its `PrimesSet`
-    // at `p_start` = next_prime(2^60); this scan starts at q = ell + 1.  Any
-    // degree-one prime q = 1 mod ell not dividing disc(O) gives a valid
-    // character, so the start changes which primes are used, not the proof
-    // condition (an empty kernel).  No auxiliary bound limits the scan;
+    // and stops once the kernel dimension has stayed the same for more than
+    // `stable` times the number of input elements (`saturate!` passes
+    // stable = 3.5 and doubles it after a candidate that is not a p-th
+    // power).  This scan multiplies by the current kernel dimension instead,
+    // and starts at q = ell + 1 where the reference `PrimesSet` starts at
+    // `p_start` = next_prime(2^60).  Any degree-one prime q = 1 mod ell not
+    // dividing disc(O) gives a valid character, so neither choice changes the
+    // proof condition (an empty kernel).  No auxiliary bound limits the scan;
     // only the kStableProofMaxAuxPrimes resource guard does.
     slong examined_primes = 0;
     auto process_prime_q =
@@ -2492,7 +2493,7 @@ bool OrderUnitGroup::prove_local_saturated_(
         // The pre-scan over q <= aux_bound ended with a nonempty character
         // kernel and adjoined no root (its kernel rows were not l-th powers,
         // or their roots could not be decided).  The bound limits only this
-        // pre-scan, not the proof: continue with the Hecke `saturate!` scan
+        // pre-scan, not the proof: continue with the reference `saturate!` scan
         // (`run_stable_fallback`), which keeps drawing degree-one primes
         // above q = 1 mod ell until the kernel is empty or stable.
         SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,

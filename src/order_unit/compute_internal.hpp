@@ -16,6 +16,10 @@ inline constexpr slong kDefaultComputePrecision = 160;
 inline constexpr slong kComputeSatAuxTarget = 1;
 inline constexpr slong kComputeSatAuxStart = 2;
 inline constexpr slong kComputeSatAuxMax = 31;
+// Upper end of the bounded auxiliary-prime pre-scan in prove_index_bound.  It
+// is not a proof limit: an ell < kComputeProofAuxMax whose pre-scan leaves a
+// nonempty character kernel continues with the unbounded reference `saturate!`
+// scan, and every ell >= kComputeProofAuxMax uses that scan directly.
 inline constexpr slong kComputeProofAuxMax = 1000;
 inline constexpr slong kComputeProofRetryAuxMax = 127;
 inline constexpr slong kComputeSatMaxPasses = 2;
