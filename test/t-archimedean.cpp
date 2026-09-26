@@ -42,6 +42,38 @@ silex::NumberField field_by_polynomial(sflint::FmpqPoly& polynomial) noexcept {
             sflint::FmpqPolyConstRef(polynomial));
 }
 
+// White-box helper: returns a defined field whose FLINT context has been
+// replaced by one for the non-squarefree polynomial x^2.  NumberField
+// construction rejects x^2, so this is the only way to keep the internal
+// non-squarefree failure paths covered.  The field starts as the generic
+// (non-quadratic-backend) field defined by x^2 - x - 1 so that no quadratic
+// backend data disagrees with the installed polynomial.
+silex::NumberField nonsquarefree_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::generic);
+
+    sflint::FmpqPoly square;
+    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
+    nf_struct* raw = field.raw_flint_field();
+    assert(raw != nullptr);
+    nf_clear(raw);
+    nf_init(raw, square.raw());
+    assert(field.degree() == 2);
+    return field;
+}
+
+void check_square_rejected() noexcept {
+    sflint::FmpqPoly square;
+    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
+    assert(!silex::NumberField::by_polynomial(
+            sflint::FmpqPolyConstRef(square)).is_defined());
+}
+
 bool contains_si(const arb_t value, slong expected) noexcept {
     return sflint::arb_contains_si(value, expected);
 }
@@ -306,12 +338,38 @@ int test_minkowski_embedding() {
     return 0;
 }
 
-int test_nonsquarefree_failure() {
-    sflint::FmpqPoly polynomial;
-    sflint::fmpq_poly_zero(polynomial);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+int test_undefined_field_failure() {
+    check_square_rejected();
 
-    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::NumberField undefined;
+    silex::EmbeddingContext embeddings(undefined);
+    silex::Element theta(undefined);
+    assert(!theta.gen());
+
+    sflint::Arb out;
+    sflint::arb_set_si(out, 123);
+    assert(!archimedean_absolute(sflint::ArbRef(out), embeddings, theta,
+                                 0, silex::ArchAbsMode::plain, 80));
+    assert(contains_si(out, 123));
+
+    sflint::ArbVec logs(1);
+    sflint::arb_set_si(logs.data() + 0, 123);
+    assert(!logarithmic_embedding(sflint::ArbVecRef(logs), embeddings,
+                                  theta, silex::LogEmbeddingMode::plain, 80));
+    assert(contains_si(logs.data() + 0, 123));
+
+    sflint::ArbMat row(1, 2);
+    sflint::arb_set_si(sflint::arb_mat_entry_ref(row, 0, 0), 123);
+    sflint::arb_set_si(sflint::arb_mat_entry_ref(row, 0, 1), 456);
+    assert(!minkowski_embedding(sflint::ArbMatRef(row), embeddings, theta,
+                                silex::MinkowskiEmbeddingMode::plain, 80));
+    assert(contains_si(sflint::arb_mat_entry_ref(row, 0, 0), 123));
+    assert(contains_si(sflint::arb_mat_entry_ref(row, 0, 1), 456));
+    return 0;
+}
+
+int test_nonsquarefree_failure() {
+    silex::NumberField field = nonsquarefree_field();
     silex::EmbeddingContext embeddings(field);
     silex::Element theta(field);
     assert(theta.gen());
@@ -345,6 +403,7 @@ int main() {
     assert(test_absolute_quadratic_and_cubic() == 0);
     assert(test_log_embedding() == 0);
     assert(test_minkowski_embedding() == 0);
+    assert(test_undefined_field_failure() == 0);
     assert(test_nonsquarefree_failure() == 0);
     return 0;
 }

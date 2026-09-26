@@ -35,6 +35,38 @@ silex::NumberField field_by_polynomial(sflint::FmpqPoly& polynomial) noexcept {
             sflint::FmpqPolyConstRef(polynomial));
 }
 
+// White-box helper: returns a defined field whose FLINT context has been
+// replaced by one for the non-squarefree polynomial x^2.  NumberField
+// construction rejects x^2, so this is the only way to keep the internal
+// non-squarefree failure paths covered.  The field starts as the generic
+// (non-quadratic-backend) field defined by x^2 - x - 1 so that no quadratic
+// backend data disagrees with the installed polynomial.
+silex::NumberField nonsquarefree_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::generic);
+
+    sflint::FmpqPoly square;
+    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
+    nf_struct* raw = field.raw_flint_field();
+    assert(raw != nullptr);
+    nf_clear(raw);
+    nf_init(raw, square.raw());
+    assert(field.degree() == 2);
+    return field;
+}
+
+void check_square_rejected() noexcept {
+    sflint::FmpqPoly square;
+    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
+    assert(!silex::NumberField::by_polynomial(
+            sflint::FmpqPolyConstRef(square)).is_defined());
+}
+
 }  // namespace
 
 int main() {
@@ -104,10 +136,20 @@ int main() {
     assert(sig.r2() == 1);
     assert(is_totally_complex(field));
 
+    check_square_rejected();
+    silex::NumberField undefined;
     sig.set(2, 0);
-    sflint::fmpq_poly_zero(polynomial);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
-    field = field_by_polynomial(polynomial);
+    assert(!signature(sig, undefined));
+    assert(sig.r1() == 2);
+    assert(sig.r2() == 0);
+    assert(!sig.compute(undefined));
+    assert(sig.r1() == 2);
+    assert(sig.r2() == 0);
+    assert(!is_totally_real(undefined));
+    assert(!is_totally_complex(undefined));
+
+    sig.set(2, 0);
+    field = nonsquarefree_field();
     assert(!signature(sig, field));
     assert(sig.r1() == 2);
     assert(sig.r2() == 0);

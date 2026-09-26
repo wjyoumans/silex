@@ -36,6 +36,38 @@ silex::NumberField field_by_polynomial(sflint::FmpqPoly& polynomial) noexcept {
             sflint::FmpqPolyConstRef(polynomial));
 }
 
+// White-box helper: returns a defined field whose FLINT context has been
+// replaced by one for the non-squarefree polynomial x^2.  NumberField
+// construction rejects x^2, so this is the only way to keep the internal
+// non-squarefree failure paths covered.  The field starts as the generic
+// (non-quadratic-backend) field defined by x^2 - x - 1 so that no quadratic
+// backend data disagrees with the installed polynomial.
+silex::NumberField nonsquarefree_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::generic);
+
+    sflint::FmpqPoly square;
+    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
+    nf_struct* raw = field.raw_flint_field();
+    assert(raw != nullptr);
+    nf_clear(raw);
+    nf_init(raw, square.raw());
+    assert(field.degree() == 2);
+    return field;
+}
+
+void check_square_rejected() noexcept {
+    sflint::FmpqPoly square;
+    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
+    assert(!silex::NumberField::by_polynomial(
+            sflint::FmpqPolyConstRef(square)).is_defined());
+}
+
 bool contains_si(const acb_t value, slong expected) noexcept {
     return sflint::arb_contains_si(sflint::acb_realref_ptr(value), expected) &&
            sflint::arb_contains_zero(sflint::acb_imagref_ptr(value));
@@ -225,12 +257,37 @@ int test_cubic_trace_norm() {
     return 0;
 }
 
-int test_failure_preserves_output() {
-    sflint::FmpqPoly polynomial;
-    sflint::fmpq_poly_zero(polynomial);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+int test_undefined_field_failure() {
+    check_square_rejected();
 
-    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::NumberField undefined;
+    silex::EmbeddingContext embeddings(undefined);
+    assert(!embeddings.is_defined());
+    assert(!embeddings.refine(64));
+    assert(!embeddings.is_set());
+
+    silex::Element theta(undefined);
+    assert(!theta.gen());
+
+    sflint::Acb out;
+    sflint::acb_set_si(out, -123);
+    assert(!embeddings.evaluate(sflint::AcbRef(out), theta, 0, 64));
+    assert(sflint::acb_equal_si(out, -123));
+
+    sflint::AcbVec values(2);
+    sflint::acb_set_si(values.data() + 0, -55);
+    sflint::acb_set_si(values.data() + 1, -66);
+    assert(!embeddings.evaluate_all(sflint::AcbVecRef(values), theta, 64));
+    assert(sflint::acb_equal_si(values.data() + 0, -55));
+    assert(sflint::acb_equal_si(values.data() + 1, -66));
+
+    assert(!embeddings.get_root(sflint::AcbRef(out), 0));
+    assert(sflint::acb_equal_si(out, -123));
+    return 0;
+}
+
+int test_failure_preserves_output() {
+    silex::NumberField field = nonsquarefree_field();
 
     silex::EmbeddingContext embeddings(field);
     assert(!embeddings.refine(64));
@@ -349,6 +406,7 @@ int main() {
     assert(test_quadratic_real() == 0);
     assert(test_quadratic_complex() == 0);
     assert(test_cubic_trace_norm() == 0);
+    assert(test_undefined_field_failure() == 0);
     assert(test_failure_preserves_output() == 0);
     assert(test_move_swap_and_clear() == 0);
     assert(test_define_failure_preserves_context() == 0);
