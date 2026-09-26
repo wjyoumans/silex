@@ -272,6 +272,24 @@ internal constructor.  It accepts a root only when ``f(r) = 0 mod q`` and
 Theorem 4.8.13); this is the same condition as the degree-one fast path of
 ``decompose_prime``.
 
+Residue-character ``ell``-saturation of unit subgroups of a non-maximal order
+``O`` is a Silex extension; neither primary source applies this proof to
+non-maximal orders.  Its soundness argument: for a maximal ideal ``P`` of
+``O`` with ``O/P = F_q`` and ``q = 1 mod ell``, reduction ``O -> O/P`` is a
+ring homomorphism, so an ``ell``-th power in ``O^x`` maps to an ``ell``-th
+power in ``F_q^x``.  An empty character kernel for a subgroup ``U`` whose
+torsion lies in ``U`` therefore gives ``U ∩ (O^x)^ell = U^ell``.  An
+``ell``-th root found for a kernel row is computed in the field and is
+adjoined only after an exact ``O``-unit check.  When the root lies in
+``O_K \ O``, the step fails closed with status ``unavailable``: the root still
+reduces into ``O/P`` at the primes the proof uses, so such a row never leaves
+the kernel, and the characters cannot distinguish it from a row whose root
+lies in ``O``.  The source-backed alternative is the exact sequence
+``1 -> O^x -> O_K^x -> (O_K/f)^x / (O/f)^x`` for the conductor ``f``, so
+that ``O^x`` is the kernel of the map from ``O_K^x``, used by Hecke v0.38.6
+``_unit_group_non_maximal`` (``PicardGroup.jl`` under
+``src/NumFieldOrd/NfOrd``); it is a planned follow-up.
+
 The legacy factor-base honesty search tests principal witnesses directly in
 order coordinates.  PARI 2.17.3
 ``src/basemath/buch2.c:divide_p_elt`` and ``can_factor`` supply the exact
