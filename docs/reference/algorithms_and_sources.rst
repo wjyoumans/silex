@@ -99,13 +99,24 @@ require exact agreement with the original path.
 Number fields, orders, and ideals
 ---------------------------------
 
-``src/number_field` and ``src/element`` retain established Silex behavior for
+``src/number_field`` and ``src/element`` retain established Silex behavior for
 validated field construction, the polynomial generator, exact arithmetic,
 trace, norm, conjugation, roots, and failure preservation.  PARI
 ``src/basemath/quad.c``, ``base1.c``, and ``base2.c`` are source anchors for
 quadratic normalization, generic field data, and local data.  The natural
 integral generator of a quadratic maximal order is kept distinct from the
 field's polynomial generator.
+
+Field construction requires a defining polynomial that is irreducible over
+``Q``.  The check factors the primitive integral multiple of the polynomial
+with FLINT ``fmpz_poly_factor`` (``src/fmpz_poly_factor``), which returns the
+content separately and the remaining factors as primitive irreducible
+polynomials with multiplicities; by Gauss's lemma the polynomial is
+irreducible over ``Q`` exactly when that list is one factor of multiplicity
+one.  ``Element::invert`` also rejects zero divisors exactly: through the
+zero norm (FLINT ``nf_elem_norm``) in the quadratic representation, and in the
+generic representation through the gcd of the same ``fmpq_poly_xgcd`` call
+that FLINT's generic ``_nf_elem_inv`` branch (``src/nf_elem/inv.c``) makes.
 
 ``src/order`` implements validated order bases, trace forms, discriminants,
 multiplication tables, indices, p-maximal overorders, and global maximal-order
