@@ -445,12 +445,16 @@ private:
             flint::FmpzConstRef ell) noexcept;
     bool mark_relation_saturation_(flint::FmpzConstRef ell,
                                    ProofState status) noexcept;
-    bool complete_relation_saturation_proof_(
-            flint::FmpzConstRef ell) noexcept;
-    bool complete_relation_saturation_proof_(
-            const std::vector<flint::Fmpz>& required_ells) noexcept;
+    bool relation_saturation_ell_verified_(
+            flint::FmpzConstRef ell) const noexcept;
+    bool relation_saturation_covers_class_order_() const noexcept;
     bool relation_saturation_proof_complete_() const noexcept;
-    bool quadratic_completeness_verified_() const noexcept;
+    struct CertificationSnapshot_;
+    class CertificationTransaction_;
+    void save_certification_state_(
+            CertificationSnapshot_& out) const noexcept;
+    void restore_certification_state_(
+            CertificationSnapshot_& saved) noexcept;
     bool ensure_private_storage_() noexcept;
     Order parent_;
     FactorBase base_;

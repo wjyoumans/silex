@@ -1680,13 +1680,16 @@ int test_relation_saturation_proof_with_units_degree_one() {
     assert(context.unit_proof_status() == silex::ProofState::verified);
     assert(context.regulator_proof_status() == silex::ProofState::verified);
 
+    // A failed ell-local proof leaves the certification metadata unchanged.
     assert(set_fmpz_si(aux_bound, 2));
     assert(!context.try_prove_relation_saturation_with_units(
             units, sflint::FmpzConstRef(ell),
             sflint::FmpzConstRef(aux_bound)));
     assert(context.relation_saturation_status() ==
-           silex::ProofState::unavailable);
+           silex::ProofState::not_checked);
     assert(context.relation_saturation_record_count() == 0);
+    assert(context.unit_proof_status() == silex::ProofState::verified);
+    assert(context.regulator_proof_status() == silex::ProofState::verified);
 
     assert(set_fmpz_si(aux_bound, 31));
     assert(context.try_prove_relation_saturation_with_units(
@@ -1847,7 +1850,7 @@ int test_relation_saturation_index_bound_with_units_degree_one() {
                             units, sflint::FmpzConstRef(index_bound),
                             sflint::FmpzConstRef(aux_bound)));
     assert(unavailable_context.relation_saturation_status() ==
-           silex::ProofState::unavailable);
+           silex::ProofState::not_checked);
     assert(unavailable_context.relation_saturation_record_count() == 0);
     assert(unavailable_context.certification_status() ==
            silex::CertificationMode::unknown);
@@ -1875,6 +1878,153 @@ int test_relation_saturation_index_bound_with_units_degree_one() {
     assert(status == silex::ProofState::verified);
     assert(proven_context.try_certify_with_units(
             units, silex::CertificationMode::proven, 80));
+
+    return 0;
+}
+
+// Q(sqrt(-23)) has class number 3.  With the factor base of the primes above
+// 2 and the relations 2 and ((3 + sqrt(-23))/2)^k, the candidate order is 3k.
+// For k = 3 the candidate 9 is unsaturated at 3, so no sequence of saturation
+// proofs that omits ell = 3 may certify it.
+void prepare_minus_23_candidate(silex::ClassGroupContext& context,
+                                const silex::Order& maximal,
+                                slong beta_power,
+                                slong expected_order) noexcept {
+    const silex::NumberField* field = maximal.parent();
+    assert(field != nullptr);
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                maximal));
+    context = silex::ClassGroupContext(maximal);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Element two(*field);
+    silex::Element half(*field);
+    silex::Element beta(*field);
+    silex::Element beta_power_element(*field);
+    assert(two.set_si(2));
+    assert(half.set_si_over_si(1, 2));
+    assert(beta.gen());
+    assert(beta.add_si(beta, 3));
+    assert(beta.multiply(beta, half));
+    sflint::Fmpz exponent;
+    assert(set_fmpz_si(exponent, beta_power));
+    assert(beta_power_element.pow_fmpz(beta, sflint::FmpzConstRef(exponent)));
+
+    silex::Relation two_relation(*base);
+    assert(two_relation.set_generator(two));
+    assert(context.append_relation(two_relation));
+    silex::Relation beta_relation(*base);
+    assert(beta_relation.set_generator(beta_power_element));
+    assert(context.append_relation(beta_relation));
+    assert(context.publish_presentation());
+
+    sflint::Fmpz order_out;
+    assert(context.order(sflint::FmpzRef(order_out)));
+    assert(sflint::fmpz_equal_si(order_out, expected_order));
+
+    sflint::Fmpz required_bound;
+    assert(context.factor_base_generation_bound(
+            sflint::FmpzRef(required_bound)));
+    assert(context.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(required_bound)));
+}
+
+int test_saturation_promotion_requires_every_class_order_prime() {
+    silex::NumberField field = quadratic_field(-23);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(maximal));
+    assert(units.certification_status() == silex::CertificationMode::proven);
+
+    sflint::Fmpz ell;
+    sflint::Fmpz aux_bound;
+    sflint::Fmpz index_bound;
+    assert(set_fmpz_si(aux_bound, 200));
+
+    // A failed proven request leaves every proof status untouched.
+    silex::ClassGroupContext context;
+    prepare_minus_23_candidate(context, maximal, 3, 9);
+    assert(!context.try_certify_with_units(
+            units, silex::CertificationMode::proven, 128));
+    assert(context.certification_status() ==
+           silex::CertificationMode::unknown);
+    assert(context.unit_proof_status() == silex::ProofState::not_checked);
+    assert(context.regulator_proof_status() ==
+           silex::ProofState::not_checked);
+    assert(context.analytic_class_regulator_status() ==
+           silex::ProofState::not_checked);
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+
+    assert(context.try_certify_with_units(
+            units, silex::CertificationMode::unknown, 128));
+    assert(context.unit_proof_status() == silex::ProofState::verified);
+
+    // The candidate is not saturated at 3.
+    assert(set_fmpz_si(ell, 3));
+    assert(!context.try_prove_relation_saturation_with_units(
+            units, sflint::FmpzConstRef(ell),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+    assert(context.relation_saturation_record_count() == 0);
+
+    // Saturation at 2 is provable but does not cover 3 | h_cand = 9.
+    assert(set_fmpz_si(ell, 2));
+    assert(context.try_prove_relation_saturation_with_units(
+            units, sflint::FmpzConstRef(ell),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(context.relation_saturation_record_count() == 1);
+    assert(context.relation_saturation_status() !=
+           silex::ProofState::verified);
+    assert(context.certification_status() ==
+           silex::CertificationMode::unknown);
+
+    assert(!context.try_certify_with_units(
+            units, silex::CertificationMode::proven, 128));
+    assert(context.certification_status() ==
+           silex::CertificationMode::unknown);
+    assert(context.relation_saturation_record_count() == 1);
+    assert(context.unit_proof_status() == silex::ProofState::verified);
+
+    // A supplied index bound below 3 does not drop the prime 3 | h_cand.
+    silex::ClassGroupContext bounded;
+    prepare_minus_23_candidate(bounded, maximal, 3, 9);
+    assert(bounded.try_certify_with_units(
+            units, silex::CertificationMode::unknown, 128));
+    assert(set_fmpz_si(index_bound, 2));
+    assert(!bounded.try_prove_relation_saturation_index_bound_with_units(
+            units, sflint::FmpzConstRef(index_bound),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(bounded.certification_status() ==
+           silex::CertificationMode::unknown);
+    assert(bounded.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+    assert(bounded.relation_saturation_record_count() == 0);
+    assert(!bounded.try_certify_with_units(
+            units, silex::CertificationMode::proven, 128));
+    assert(bounded.certification_status() ==
+           silex::CertificationMode::unknown);
+
+    // The true class group h = 3 is certified by saturation at 2 and 3.
+    silex::ClassGroupContext exact;
+    prepare_minus_23_candidate(exact, maximal, 1, 3);
+    assert(exact.try_certify_with_units(
+            units, silex::CertificationMode::unknown, 128));
+    assert(exact.try_prove_relation_saturation_index_bound_with_units(
+            units, sflint::FmpzConstRef(index_bound),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(exact.certification_status() == silex::CertificationMode::proven);
+    assert(exact.relation_saturation_status() == silex::ProofState::verified);
+    assert(exact.relation_saturation_record_count() == 2);
+    assert(exact.analytic_class_regulator_status() ==
+           silex::ProofState::not_checked);
 
     return 0;
 }
@@ -1917,9 +2067,10 @@ int test_relation_saturation_index_bound_checks_nondivisor_primes() {
     assert(!context.try_prove_relation_saturation_index_bound_with_units(
             units, sflint::FmpzConstRef(index_bound),
             sflint::FmpzConstRef(aux_bound)));
+    // The failed bound leaves the verified ell=5 record untouched.
     assert(context.relation_saturation_status() ==
-           silex::ProofState::unavailable);
-    assert(context.relation_saturation_record_count() == 0);
+           silex::ProofState::verified);
+    assert(context.relation_saturation_record_count() == 1);
 
     return 0;
 }
@@ -2029,9 +2180,9 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
             units, sflint::ArbConstRef(analytic_hR),
             sflint::FmpzConstRef(aux_bound), 128));
     assert(unavailable_context.unit_proof_status() ==
-           silex::ProofState::verified);
+           silex::ProofState::not_checked);
     assert(unavailable_context.regulator_proof_status() ==
-           silex::ProofState::verified);
+           silex::ProofState::not_checked);
     assert(unavailable_context.relation_saturation_status() ==
            silex::ProofState::not_checked);
     assert(unavailable_context.relation_saturation_record_count() == 0);
@@ -2070,9 +2221,9 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
             units, sflint::ArbConstRef(analytic_hR),
             sflint::FmpzConstRef(aux_bound), 128));
     assert(nontrivial_bound_context.unit_proof_status() ==
-           silex::ProofState::verified);
+           silex::ProofState::not_checked);
     assert(nontrivial_bound_context.regulator_proof_status() ==
-           silex::ProofState::verified);
+           silex::ProofState::not_checked);
     assert(nontrivial_bound_context.relation_saturation_status() ==
            silex::ProofState::not_checked);
     assert(nontrivial_bound_context.relation_saturation_record_count() == 0);
@@ -2259,6 +2410,7 @@ int main() {
     test_relation_saturation_bounded_append_with_units_degree_one();
     test_relation_saturation_index_bound_with_units_degree_one();
     test_relation_saturation_index_bound_checks_nondivisor_primes();
+    test_saturation_promotion_requires_every_class_order_prime();
     test_analytic_class_unit_proof_requires_factor_base_generation();
     test_relation_saturation_analytic_index_bound_with_units_degree_one();
     test_compute_candidate_preserves_on_failure();

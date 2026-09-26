@@ -4281,6 +4281,60 @@ bool compact_infinite_reduction(
 
 }  // namespace
 
+struct ClassGroupContext::CertificationSnapshot_ {
+    CertificationMode certification = CertificationMode::unknown;
+    flint::Fmpz factor_base_generation_checked_bound;
+    ProofState factor_base_generation_checked_status =
+            ProofState::not_checked;
+    std::vector<detail::FactorBaseGenerationRecord>
+            factor_base_generation_records;
+    ProofState relation_saturation_status = ProofState::not_checked;
+    std::vector<detail::RelationSaturationRecord>
+            relation_saturation_records;
+    std::vector<detail::RelationSaturationProofRecord>
+            relation_saturation_proof_records;
+    ProofState analytic_class_regulator_status = ProofState::not_checked;
+    ProofState zeta_bf_status = ProofState::not_checked;
+    ulong zeta_bf_cutoff = 0;
+    ulong zeta_bf_max_cutoff = 0;
+    slong zeta_bf_requested_precision = 0;
+    slong zeta_bf_work_precision = 0;
+    flint::Arb zeta_bf_error_bound;
+    ProofState unit_proof_status = ProofState::not_checked;
+    ProofState regulator_proof_status = ProofState::not_checked;
+};
+
+// Restores every certification field on scope exit unless finish() is
+// given a successful result, so a failed certification attempt leaves the
+// published proof metadata exactly as it found it.
+class ClassGroupContext::CertificationTransaction_ {
+public:
+    explicit CertificationTransaction_(ClassGroupContext& context) noexcept
+            : context_(context) {
+        context_.save_certification_state_(saved_);
+    }
+
+    ~CertificationTransaction_() noexcept {
+        if (!committed_) {
+            context_.restore_certification_state_(saved_);
+        }
+    }
+
+    CertificationTransaction_(const CertificationTransaction_&) = delete;
+    CertificationTransaction_& operator=(const CertificationTransaction_&) =
+            delete;
+
+    bool finish(bool succeeded) noexcept {
+        committed_ = succeeded;
+        return succeeded;
+    }
+
+private:
+    ClassGroupContext& context_;
+    CertificationSnapshot_ saved_;
+    bool committed_ = false;
+};
+
 namespace detail {
 
 class ClassGroupRelationAccess {
@@ -4420,20 +4474,23 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
         ulong max_cutoff,
         slong requested_precision,
         slong work_precision) noexcept {
+    ClassGroupContext::CertificationTransaction_ transaction(context);
     flint::Fmpz required_bound;
     if (!context.factor_base_generation_bound(flint::FmpzRef(required_bound)) ||
         !context.check_factor_base_generation_bound(
-                flint::FmpzConstRef(required_bound))) {
+                flint::FmpzConstRef(required_bound)) ||
+        !context.record_analytic_class_unit_regulator_(
+                units, analytic_class_regulator_product,
+                requested_precision) ||
+        !context.record_zeta_bf_audit_(error_bound, cutoff, max_cutoff,
+                                       requested_precision,
+                                       work_precision) ||
+        !context.try_promote_proven_certification_()) {
         return false;
     }
-    if (!context.record_analytic_class_unit_regulator_(
-                units, analytic_class_regulator_product, requested_precision)) {
-        return false;
-    }
-    return context.record_zeta_bf_audit_(error_bound, cutoff, max_cutoff,
-                                         requested_precision,
-                                         work_precision) &&
-           context.try_promote_proven_certification_();
+
+    units.mark_certification_proven_();
+    return transaction.finish(true);
 }
 
 bool ClassGroupCertificationAccess::record_factor_base_honesty_proof(
@@ -7098,67 +7155,146 @@ bool ClassGroupContext::mark_relation_saturation_(
     return true;
 }
 
-bool ClassGroupContext::complete_relation_saturation_proof_(
-        flint::FmpzConstRef ell) noexcept {
-    if (!flint::fmpz_is_prime(ell)) {
-        return false;
-    }
-
-    std::vector<flint::Fmpz> required_ells;
-    required_ells.emplace_back();
-    flint::fmpz_set(flint::FmpzRef(required_ells.back()), ell);
-    return complete_relation_saturation_proof_(required_ells);
-}
-
-bool ClassGroupContext::complete_relation_saturation_proof_(
-        const std::vector<flint::Fmpz>& required_ells) noexcept {
-    if (!ensure_private_storage_() || required_ells.empty()) {
-        return false;
-    }
-
-    private_storage_->relation_saturation_records.clear();
-    for (const flint::Fmpz& ell : required_ells) {
-        if (!flint::fmpz_is_prime(flint::FmpzConstRef(ell)) ||
-            !relation_saturation_proof_verified_(flint::FmpzConstRef(ell))) {
-            relation_saturation_status_ = ProofState::unavailable;
-            return true;
-        }
-    }
-
-    for (const flint::Fmpz& ell : required_ells) {
-        if (!mark_relation_saturation_verified_(flint::FmpzConstRef(ell))) {
-            relation_saturation_status_ = ProofState::unavailable;
-            private_storage_->relation_saturation_records.clear();
-            return true;
-        }
-    }
-
-    relation_saturation_status_ = ProofState::verified;
-    return true;
-}
-
-bool ClassGroupContext::relation_saturation_proof_complete_()
-        const noexcept {
+bool ClassGroupContext::relation_saturation_ell_verified_(
+        flint::FmpzConstRef ell) const noexcept {
     if (private_storage_ == nullptr ||
-        relation_saturation_status_ != ProofState::verified ||
-        private_storage_->relation_saturation_records.empty()) {
+        !relation_saturation_proof_verified_(ell)) {
         return false;
     }
-
     for (const detail::RelationSaturationRecord& record :
          private_storage_->relation_saturation_records) {
-        if (record.status != ProofState::verified ||
-            !relation_saturation_proof_verified_(
-                    flint::FmpzConstRef(record.ell))) {
+        if (flint::fmpz_equal(flint::FmpzConstRef(record.ell), ell)) {
+            return record.status == ProofState::verified;
+        }
+    }
+    return false;
+}
+
+// Class-group proof by saturation (see docs/reference/algorithms_and_sources
+// for the source anchor): once the factor base is known to generate the class
+// group, the full relation lattice contains the computed one with index
+// h_cand / h, which divides the candidate order h_cand.  The relations are
+// therefore complete exactly when they are saturated at every prime
+// p | h_cand.  A saturation proof covers the candidate only when every such p
+// carries a verified ell-record backed by a verified local proof; the set of
+// required primes is derived from the published presentation alone.
+bool ClassGroupContext::relation_saturation_covers_class_order_()
+        const noexcept {
+    flint::Fmpz class_order;
+    if (!has_presentation() || !order(flint::FmpzRef(class_order)) ||
+        flint::fmpz_sgn(flint::FmpzConstRef(class_order)) <= 0) {
+        return false;
+    }
+    if (flint::fmpz_is_one(flint::FmpzConstRef(class_order))) {
+        return true;
+    }
+
+    flint::FmpzFactor factorization;
+    flint::fmpz_factor(flint::FmpzFactorRef(factorization),
+                       flint::FmpzConstRef(class_order));
+    flint::Fmpz p;
+    for (slong i = 0;
+         i < flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
+         ++i) {
+        flint::fmpz_factor_get_fmpz(
+                flint::FmpzRef(p),
+                flint::FmpzFactorConstRef(factorization), i);
+        if (!relation_saturation_ell_verified_(flint::FmpzConstRef(p))) {
             return false;
         }
     }
     return true;
 }
 
-bool ClassGroupContext::quadratic_completeness_verified_() const noexcept {
-    return parent_.degree() == 2 &&
-           relation_saturation_status_ == ProofState::verified;
+bool ClassGroupContext::relation_saturation_proof_complete_()
+        const noexcept {
+    return relation_saturation_status_ == ProofState::verified &&
+           relation_saturation_covers_class_order_();
+}
+
+void ClassGroupContext::save_certification_state_(
+        CertificationSnapshot_& out) const noexcept {
+    out.certification = certification_;
+    flint::fmpz_set(
+            flint::FmpzRef(out.factor_base_generation_checked_bound),
+            flint::FmpzConstRef(factor_base_generation_checked_bound_));
+    out.factor_base_generation_checked_status =
+            factor_base_generation_checked_status_;
+    out.relation_saturation_status = relation_saturation_status_;
+    out.analytic_class_regulator_status = analytic_class_regulator_status_;
+    out.zeta_bf_status = zeta_bf_status_;
+    out.zeta_bf_cutoff = zeta_bf_cutoff_;
+    out.zeta_bf_max_cutoff = zeta_bf_max_cutoff_;
+    out.zeta_bf_requested_precision = zeta_bf_requested_precision_;
+    out.zeta_bf_work_precision = zeta_bf_work_precision_;
+    flint::arb_set(flint::ArbRef(out.zeta_bf_error_bound),
+                   flint::ArbConstRef(zeta_bf_error_bound_));
+    out.unit_proof_status = unit_proof_status_;
+    out.regulator_proof_status = regulator_proof_status_;
+
+    out.factor_base_generation_records.clear();
+    out.relation_saturation_records.clear();
+    out.relation_saturation_proof_records.clear();
+    if (private_storage_ == nullptr) {
+        return;
+    }
+    for (const detail::FactorBaseGenerationRecord& record :
+         private_storage_->factor_base_generation_records) {
+        out.factor_base_generation_records.emplace_back();
+        flint::fmpz_set(
+                flint::FmpzRef(out.factor_base_generation_records.back().p),
+                flint::FmpzConstRef(record.p));
+        out.factor_base_generation_records.back().status = record.status;
+    }
+    for (const detail::RelationSaturationRecord& record :
+         private_storage_->relation_saturation_records) {
+        out.relation_saturation_records.emplace_back();
+        flint::fmpz_set(
+                flint::FmpzRef(out.relation_saturation_records.back().ell),
+                flint::FmpzConstRef(record.ell));
+        out.relation_saturation_records.back().status = record.status;
+    }
+    for (const detail::RelationSaturationProofRecord& record :
+         private_storage_->relation_saturation_proof_records) {
+        out.relation_saturation_proof_records.emplace_back();
+        detail::RelationSaturationProofRecord& copy =
+                out.relation_saturation_proof_records.back();
+        flint::fmpz_set(flint::FmpzRef(copy.ell),
+                        flint::FmpzConstRef(record.ell));
+        copy.status = record.status;
+        copy.rank = record.rank;
+        copy.target_rank = record.target_rank;
+        copy.local_primes = record.local_primes;
+    }
+}
+
+void ClassGroupContext::restore_certification_state_(
+        CertificationSnapshot_& saved) noexcept {
+    certification_ = saved.certification;
+    factor_base_generation_checked_bound_.swap(
+            saved.factor_base_generation_checked_bound);
+    factor_base_generation_checked_status_ =
+            saved.factor_base_generation_checked_status;
+    relation_saturation_status_ = saved.relation_saturation_status;
+    analytic_class_regulator_status_ = saved.analytic_class_regulator_status;
+    zeta_bf_status_ = saved.zeta_bf_status;
+    zeta_bf_cutoff_ = saved.zeta_bf_cutoff;
+    zeta_bf_max_cutoff_ = saved.zeta_bf_max_cutoff;
+    zeta_bf_requested_precision_ = saved.zeta_bf_requested_precision;
+    zeta_bf_work_precision_ = saved.zeta_bf_work_precision;
+    zeta_bf_error_bound_.swap(saved.zeta_bf_error_bound);
+    unit_proof_status_ = saved.unit_proof_status;
+    regulator_proof_status_ = saved.regulator_proof_status;
+
+    if (private_storage_ == nullptr) {
+        return;
+    }
+    private_storage_->factor_base_generation_records.swap(
+            saved.factor_base_generation_records);
+    private_storage_->relation_saturation_records.swap(
+            saved.relation_saturation_records);
+    private_storage_->relation_saturation_proof_records.swap(
+            saved.relation_saturation_proof_records);
 }
 
 bool append_factor_base_generation_record(
@@ -9096,6 +9232,7 @@ ProofState ClassGroupContext::regulator_proof_status() const noexcept {
 
 bool ClassGroupContext::try_certify_trivial_quotient(
         CertificationMode requested) noexcept {
+    CertificationTransaction_ transaction(*this);
     if (requested != CertificationMode::proven || !has_presentation() ||
         !parent_.is_maximal() ||
         unit_proof_status_ != ProofState::verified ||
@@ -9128,7 +9265,7 @@ bool ClassGroupContext::try_certify_trivial_quotient(
         unit_proof_status_ == ProofState::verified &&
         regulator_proof_status_ == ProofState::verified) {
         certification_ = CertificationMode::proven;
-        return true;
+        return transaction.finish(true);
     }
 
     return false;
@@ -9136,6 +9273,7 @@ bool ClassGroupContext::try_certify_trivial_quotient(
 
 bool ClassGroupContext::try_certify_quadratic(
         CertificationMode requested) noexcept {
+    CertificationTransaction_ transaction(*this);
     if (requested != CertificationMode::proven || !has_presentation() ||
         !parent_.is_maximal() ||
         factor_base_generation_status_ != ProofState::verified) {
@@ -9150,15 +9288,16 @@ bool ClassGroupContext::try_certify_quadratic(
 
     if (flint::fmpz_sgn(flint::FmpzConstRef(discriminant)) < 0) {
         flint::Fmpz exact_order;
-        return detail::ClassGroupCertificationAccess::
-                exact_imaginary_quadratic_class_order_for_run(
-                        flint::FmpzRef(exact_order), *this,
-                        flint::FmpzConstRef(discriminant)) &&
-               detail::ClassGroupCertificationAccess::
-                       try_certify_imaginary_quadratic_from_exact_order(
-                               *this, requested,
-                               flint::FmpzConstRef(discriminant),
-                               flint::FmpzConstRef(exact_order));
+        return transaction.finish(
+                detail::ClassGroupCertificationAccess::
+                        exact_imaginary_quadratic_class_order_for_run(
+                                flint::FmpzRef(exact_order), *this,
+                                flint::FmpzConstRef(discriminant)) &&
+                detail::ClassGroupCertificationAccess::
+                        try_certify_imaginary_quadratic_from_exact_order(
+                                *this, requested,
+                                flint::FmpzConstRef(discriminant),
+                                flint::FmpzConstRef(exact_order)));
     }
 
     flint::Fmpz required_bound;
@@ -9175,7 +9314,7 @@ bool ClassGroupContext::try_certify_quadratic(
     relation_saturation_status_ = ProofState::verified;
     unit_proof_status_ = ProofState::verified;
     regulator_proof_status_ = ProofState::verified;
-    return true;
+    return transaction.finish(true);
 }
 
 bool ClassGroupContext::try_certify_with_units(
@@ -9205,19 +9344,20 @@ bool ClassGroupContext::try_certify_with_units(
         return requested != CertificationMode::proven;
     }
 
+    CertificationTransaction_ transaction(*this);
     unit_proof_status_ = ProofState::verified;
     regulator_proof_status_ = ProofState::verified;
 
     if (requested != CertificationMode::proven) {
-        return true;
+        return transaction.finish(true);
     }
 
     if (try_promote_proven_certification_()) {
-        return true;
+        return transaction.finish(true);
     }
 
     if (try_certify_trivial_quotient(requested)) {
-        return true;
+        return transaction.finish(true);
     }
 
     flint::Arb analytic_hR;
@@ -9253,16 +9393,16 @@ bool ClassGroupContext::try_certify_with_units(
 
         if (try_certify_analytic_class_regulator_(
                     units, flint::ArbConstRef(analytic_hR), precision)) {
-            return record_zeta_bf_audit_(
+            return transaction.finish(record_zeta_bf_audit_(
                     flint::ArbConstRef(error_bound), cutoff,
-                    zeta_bf_max_cutoff, precision, work_precision);
+                    zeta_bf_max_cutoff, precision, work_precision));
         }
         if (try_analytic_index_bound_with_units(
                     units, flint::ArbConstRef(analytic_hR),
                     flint::FmpzConstRef(aux_bound), precision)) {
-            return record_zeta_bf_audit_(
+            return transaction.finish(record_zeta_bf_audit_(
                     flint::ArbConstRef(error_bound), cutoff,
-                    zeta_bf_max_cutoff, precision, work_precision);
+                    zeta_bf_max_cutoff, precision, work_precision));
         }
         return false;
     }
@@ -9271,12 +9411,12 @@ bool ClassGroupContext::try_certify_with_units(
                                       parent_, precision)) {
         if (try_certify_analytic_class_regulator_(
                     units, flint::ArbConstRef(analytic_hR), precision)) {
-            return true;
+            return transaction.finish(true);
         }
         if (try_analytic_index_bound_with_units(
                     units, flint::ArbConstRef(analytic_hR),
                     flint::FmpzConstRef(aux_bound), precision)) {
-            return true;
+            return transaction.finish(true);
         }
     }
 
@@ -9383,7 +9523,6 @@ bool ClassGroupContext::try_promote_proven_certification_() noexcept {
     const bool factor_base_backed_proof =
             factor_base_verified && unit_regulator_verified &&
             (analytic_class_regulator_status_ == ProofState::verified ||
-             quadratic_completeness_verified_() ||
              relation_saturation_proof_complete_());
     if (!has_presentation() || !factor_base_backed_proof) {
         return false;
@@ -9432,12 +9571,15 @@ bool ClassGroupContext::try_certify_analytic_class_unit_regulator_(
         OrderUnitGroup& units,
         flint::ArbConstRef analytic_hR,
         slong precision) noexcept {
+    CertificationTransaction_ transaction(*this);
     if (!record_analytic_class_unit_regulator_(units, analytic_hR,
-                                               precision)) {
+                                               precision) ||
+        !try_promote_proven_certification_()) {
         return false;
     }
 
-    return try_promote_proven_certification_();
+    units.mark_certification_proven_();
+    return transaction.finish(true);
 }
 
 bool ClassGroupContext::record_analytic_class_unit_regulator_(
@@ -9466,7 +9608,6 @@ bool ClassGroupContext::record_analytic_class_unit_regulator_(
         return false;
     }
 
-    units.mark_certification_proven_();
     analytic_class_regulator_status_ = ProofState::verified;
     unit_proof_status_ = ProofState::verified;
     regulator_proof_status_ = ProofState::verified;
@@ -9509,6 +9650,7 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
         slong precision) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.try_certify_class_unit_with_zeta_bf");
+    CertificationTransaction_ transaction(*this);
     if (!has_presentation() || precision <= 0 ||
         max_cutoff == 0) {
         return false;
@@ -9537,13 +9679,15 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
     }
 
     if (!record_analytic_class_unit_regulator_(
-                units, flint::ArbConstRef(analytic_hR), precision)) {
+                units, flint::ArbConstRef(analytic_hR), precision) ||
+        !record_zeta_bf_audit_(flint::ArbConstRef(error_bound), cutoff,
+                               max_cutoff, precision, work_precision) ||
+        !try_promote_proven_certification_()) {
         return false;
     }
 
-    return record_zeta_bf_audit_(flint::ArbConstRef(error_bound), cutoff,
-                                 max_cutoff, precision, work_precision) &&
-           try_promote_proven_certification_();
+    units.mark_certification_proven_();
+    return transaction.finish(true);
 }
 
 bool ClassGroupContext::record_zeta_bf_audit_(
@@ -9574,11 +9718,20 @@ bool ClassGroupContext::try_prove_relation_saturation_with_units(
     SILEX_PROFILE_SCOPE(
             diagnostics_, DiagnosticsModule::class_group,
             "class_group.try_prove_relation_saturation_with_units");
+    CertificationTransaction_ transaction(*this);
     if (!prove_relation_saturation_dlog_ell_(units, ell, aux_prime_bound) ||
-        !complete_relation_saturation_proof_(ell)) {
+        !relation_saturation_proof_verified_(ell) ||
+        !mark_relation_saturation_verified_(ell)) {
         return false;
     }
-    return relation_saturation_status_ == ProofState::verified;
+
+    // One ell-local proof adds to the verified ell-records of the current
+    // presentation.  The saturation status is complete only once those
+    // records cover every prime dividing the candidate class order.
+    if (relation_saturation_covers_class_order_()) {
+        relation_saturation_status_ = ProofState::verified;
+    }
+    return transaction.finish(true);
 }
 
 bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units(
@@ -9588,15 +9741,23 @@ bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units(
     SILEX_PROFILE_SCOPE(
             diagnostics_, DiagnosticsModule::class_group,
             "class_group.try_prove_relation_saturation_index_bound");
+    CertificationTransaction_ transaction(*this);
+    flint::Fmpz class_order;
     if (!has_presentation() ||
         flint::fmpz_cmp_ui(index_bound, 1) <= 0 ||
         flint::fmpz_cmp_ui(aux_prime_bound, 2) < 0 ||
         !units.is_set() || !same_order_parent(units.parent(), &parent_) ||
         units.certification_status() != CertificationMode::proven ||
-        !relation_saturation_proof_prereqs_verified_()) {
+        !relation_saturation_proof_prereqs_verified_() ||
+        !order(flint::FmpzRef(class_order)) ||
+        flint::fmpz_sgn(flint::FmpzConstRef(class_order)) <= 0) {
         return false;
     }
 
+    // The primes to prove are every prime up to the supplied index bound
+    // together with every prime dividing the candidate class order.  A
+    // supplied bound can only add primes; it never removes a prime p | h_cand
+    // required by the saturation proof of the class group.
     std::vector<flint::Fmpz> required_ells;
     flint::Fmpz ell;
     flint::fmpz_one(flint::FmpzRef(ell));
@@ -9606,19 +9767,45 @@ bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units(
         required_ells.emplace_back();
         flint::fmpz_set(flint::FmpzRef(required_ells.back()),
                         flint::FmpzConstRef(ell));
-        (void) prove_relation_saturation_dlog_ell_(
-                units, flint::FmpzConstRef(required_ells.back()),
-                aux_prime_bound);
         flint::fmpz_nextprime(flint::FmpzRef(ell),
                               flint::FmpzConstRef(ell), true);
     }
-
-    if (!complete_relation_saturation_proof_(required_ells) ||
-        relation_saturation_status_ != ProofState::verified) {
-        return false;
+    if (!flint::fmpz_is_one(flint::FmpzConstRef(class_order))) {
+        flint::FmpzFactor factorization;
+        flint::fmpz_factor(flint::FmpzFactorRef(factorization),
+                           flint::FmpzConstRef(class_order));
+        for (slong i = 0;
+             i < flint::fmpz_factor_num(
+                         flint::FmpzFactorConstRef(factorization));
+             ++i) {
+            flint::fmpz_factor_get_fmpz(
+                    flint::FmpzRef(ell),
+                    flint::FmpzFactorConstRef(factorization), i);
+            if (flint::fmpz_cmp(flint::FmpzConstRef(ell), index_bound) <= 0) {
+                continue;
+            }
+            required_ells.emplace_back();
+            flint::fmpz_set(flint::FmpzRef(required_ells.back()),
+                            flint::FmpzConstRef(ell));
+        }
     }
 
-    return try_promote_proven_certification_();
+    for (const flint::Fmpz& required : required_ells) {
+        if (!prove_relation_saturation_dlog_ell_(
+                    units, flint::FmpzConstRef(required), aux_prime_bound) ||
+            !relation_saturation_proof_verified_(
+                    flint::FmpzConstRef(required)) ||
+            !mark_relation_saturation_verified_(
+                    flint::FmpzConstRef(required))) {
+            return false;
+        }
+    }
+
+    if (!relation_saturation_covers_class_order_()) {
+        return false;
+    }
+    relation_saturation_status_ = ProofState::verified;
+    return transaction.finish(try_promote_proven_certification_());
 }
 
 bool ClassGroupContext::try_analytic_index_bound_with_units(
@@ -9628,6 +9815,7 @@ bool ClassGroupContext::try_analytic_index_bound_with_units(
         slong precision) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.try_analytic_index_bound_with_units");
+    CertificationTransaction_ transaction(*this);
     if (!has_presentation() ||
         !parent_.is_maximal() || precision <= 0 ||
         !flint::arb_is_finite(analytic_class_regulator_product) ||
@@ -9668,7 +9856,7 @@ bool ClassGroupContext::try_analytic_index_bound_with_units(
     private_storage_->relation_saturation_records.clear();
     relation_saturation_status_ = ProofState::verified;
     analytic_class_regulator_status_ = ProofState::verified;
-    return try_promote_proven_certification_();
+    return transaction.finish(try_promote_proven_certification_());
 }
 
 bool ClassGroupContext::relation_row_refines_(
