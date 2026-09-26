@@ -88,6 +88,32 @@ silex::ResidueField degree_one_residue_field(slong characteristic) noexcept {
     return residue_field;
 }
 
+silex::ResidueField quadratic_residue_field_25() noexcept {
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 2);
+    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::Order order = silex::test::equation_order(field);
+
+    sflint::Fmpz p;
+    fmpz_set_si(p, 5);
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 1);
+    const silex::PrimeIdeal* prime = primes.at(0);
+    assert(prime != nullptr);
+
+    silex::ResidueField residue_field;
+    assert(residue_field.set_prime(*prime));
+    assert(residue_field.degree() == 2);
+    sflint::FmpzPoly modulus;
+    assert(residue_field.modulus(sflint::FmpzPolyRef(modulus)));
+    assert(fmpz_poly_degree(modulus.raw()) == 2);
+    assert(fmpz_poly_coeff_is_si(modulus, 2, 1));
+    assert(fmpz_poly_coeff_is_si(modulus, 1, 0));
+    assert(fmpz_poly_coeff_is_si(modulus, 0, 3));
+    return residue_field;
+}
+
 silex::ResidueFieldElement local_residue_field_element() noexcept {
     silex::ResidueField residue_field = degree_one_residue_field(5);
     silex::ResidueFieldElement element(residue_field);
@@ -639,6 +665,192 @@ int test_multiplicative_quadratic() {
     return 0;
 }
 
+void check_quotient_logs_mod_three(const silex::ResidueField& residue_field,
+                                  const silex::ResidueField& foreign_field,
+                                  slong characteristic,
+                                  slong cardinality,
+                                  slong primary_order) noexcept {
+    sflint::Fmpz value;
+    assert(residue_field.characteristic(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, characteristic));
+    assert(residue_field.cardinality(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, cardinality));
+    assert(foreign_field.characteristic(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, characteristic));
+    assert(foreign_field.cardinality(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, cardinality));
+    assert(!foreign_field.equal(residue_field));
+
+    sflint::Fmpz ell;
+    fmpz_set_si(ell, 3);
+    silex::ResidueFieldQuotientLog cache(residue_field);
+    assert(cache.set_ell(sflint::FmpzConstRef(ell)));
+    silex::ResidueFieldElement generator(residue_field);
+    silex::ResidueFieldElement quotient_generator(residue_field);
+    assert(cache.generator(generator));
+    assert(generator.multiplicative_order(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, primary_order));
+    assert(cache.quotient_generator(quotient_generator));
+    assert(quotient_generator.multiplicative_order(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 3));
+
+    silex::ResidueFieldElement power(residue_field);
+    sflint::Fmpz exponent;
+    fmpz_set_si(exponent, primary_order / 3);
+    assert(power.pow_fmpz(generator, sflint::FmpzConstRef(exponent)));
+    assert(power.equal(quotient_generator));
+
+    // The stateless map uses a full multiplicative generator and therefore
+    // has its own normalization, independent of the cached primary generator.
+    silex::ResidueFieldElement full_generator(residue_field);
+    silex::ResidueFieldElement stateless_generator(residue_field);
+    assert(residue_field.multiplicative_generator(full_generator));
+    assert(full_generator.multiplicative_order(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, cardinality - 1));
+    sflint::Fmpz projection_exponent;
+    fmpz_set_si(projection_exponent, (cardinality - 1) / 3);
+    assert(stateless_generator.pow_fmpz(
+            full_generator, sflint::FmpzConstRef(projection_exponent)));
+    assert(stateless_generator.multiplicative_order(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 3));
+
+    const auto cached_log = [&cache, &ell](
+            const silex::ResidueFieldElement& element) noexcept {
+        sflint::Fmpz log;
+        assert(cache.apply(sflint::FmpzRef(log), element));
+        assert(sflint::fmpz_sgn(sflint::FmpzConstRef(log)) >= 0);
+        assert(sflint::fmpz_cmp(sflint::FmpzConstRef(log),
+                               sflint::FmpzConstRef(ell)) < 0);
+        return sflint::fmpz_get_si(sflint::FmpzConstRef(log));
+    };
+    const auto stateless_log = [&ell](
+            const silex::ResidueFieldElement& element) noexcept {
+        sflint::Fmpz log;
+        assert(element.quotient_log_mod_prime(sflint::FmpzRef(log),
+                                             sflint::FmpzConstRef(ell)));
+        assert(sflint::fmpz_sgn(sflint::FmpzConstRef(log)) >= 0);
+        assert(sflint::fmpz_cmp(sflint::FmpzConstRef(log),
+                               sflint::FmpzConstRef(ell)) < 0);
+        return sflint::fmpz_get_si(sflint::FmpzConstRef(log));
+    };
+
+    // For q - 1 = c * 3^v, the defining projection gives L(generator) = c
+    // modulo 3.  The cofactors are 2, 2, and 8 for F7, F19, and F25.
+    assert((cardinality - 1) / primary_order % 3 == 2);
+    assert(cached_log(generator) == 2);
+    assert(stateless_log(full_generator) == 1);
+
+    // Enumerate constants in F7/F19 and a + b*theta in F25, theta^2 = 2.
+    const auto set_nonzero = [characteristic, cardinality](
+            silex::ResidueFieldElement& element, slong index) noexcept {
+        assert(index > 0 && index < cardinality);
+        sflint::FmpzPoly input;
+        zpoly_set_coeff_si(input, 0, index % characteristic);
+        zpoly_set_coeff_si(input, 1, index / characteristic);
+        assert(element.set_polynomial(sflint::FmpzPolyConstRef(input)));
+        assert(!element.is_zero());
+    };
+    silex::ResidueFieldElement x(residue_field);
+    silex::ResidueFieldElement y(residue_field);
+    silex::ResidueFieldElement product(residue_field);
+    silex::ResidueFieldElement inverse(residue_field);
+    silex::ResidueFieldElement image(residue_field);
+    silex::ResidueFieldElement one(residue_field);
+    assert(one.one());
+    slong kernel_size = 0;
+    for (slong i = 1; i < cardinality; ++i) {
+        set_nonzero(x, i);
+        const slong log_x = cached_log(x);
+        const slong stateless_log_x = stateless_log(x);
+        assert(image.pow_fmpz(x, sflint::FmpzConstRef(projection_exponent)));
+        fmpz_set_si(exponent, log_x);
+        assert(power.pow_fmpz(quotient_generator,
+                              sflint::FmpzConstRef(exponent)));
+        assert(power.equal(image));
+        fmpz_set_si(exponent, stateless_log_x);
+        assert(power.pow_fmpz(stateless_generator,
+                              sflint::FmpzConstRef(exponent)));
+        assert(power.equal(image));
+        assert((log_x == 0) == (stateless_log_x == 0));
+        assert((log_x == 0) == image.equal(one));
+        if (log_x == 0) {
+            ++kernel_size;
+        }
+
+        assert(inverse.invert(x));
+        assert(cached_log(inverse) == (3 - log_x) % 3);
+        assert(stateless_log(inverse) == (3 - stateless_log_x) % 3);
+        for (slong j = 1; j < cardinality; ++j) {
+            set_nonzero(y, j);
+            assert(product.multiply(x, y));
+            assert(cached_log(product) == (log_x + cached_log(y)) % 3);
+            assert(stateless_log(product) ==
+                   (stateless_log_x + stateless_log(y)) % 3);
+        }
+    }
+    assert(kernel_size == (cardinality - 1) / 3);
+
+    const auto check_cache_preserved = [&]() noexcept {
+        assert(cache.is_set());
+        assert(cache.parent() != nullptr);
+        assert(cache.parent()->equal(residue_field));
+        assert(cache.ell(sflint::FmpzRef(value)));
+        assert(sflint::fmpz_equal_si(value, 3));
+        assert(cache.generator(power));
+        assert(power.equal(generator));
+        assert(cache.quotient_generator(power));
+        assert(power.equal(quotient_generator));
+        assert(cached_log(generator) == 2);
+    };
+    silex::ResidueFieldElement zero(residue_field);
+    assert(zero.zero());
+    fmpz_set_si(value, 77);
+    assert(!cache.apply(sflint::FmpzRef(value), zero));
+    assert(sflint::fmpz_equal_si(value, 77));
+    assert(!zero.quotient_log_mod_prime(sflint::FmpzRef(value),
+                                       sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_equal_si(value, 77));
+    check_cache_preserved();
+
+    silex::ResidueFieldElement foreign(foreign_field);
+    assert(foreign.one());
+    fmpz_set_si(value, 77);
+    assert(!cache.apply(sflint::FmpzRef(value), foreign));
+    assert(sflint::fmpz_equal_si(value, 77));
+    check_cache_preserved();
+
+    const slong invalid_ells[] = {9, 5};
+    for (slong invalid_ell : invalid_ells) {
+        sflint::Fmpz bad_ell;
+        fmpz_set_si(bad_ell, invalid_ell);
+        fmpz_set_si(value, 77);
+        assert(!generator.quotient_log_mod_prime(sflint::FmpzRef(value),
+                                                sflint::FmpzConstRef(bad_ell)));
+        assert(sflint::fmpz_equal_si(value, 77));
+        assert(!cache.set_ell(sflint::FmpzConstRef(bad_ell)));
+        check_cache_preserved();
+    }
+}
+
+int test_quotient_logs_mod_three() {
+    const slong characteristics[] = {7, 19};
+    for (slong characteristic : characteristics) {
+        silex::ResidueField residue_field =
+                degree_one_residue_field(characteristic);
+        silex::ResidueField foreign_field =
+                degree_one_residue_field(characteristic);
+        assert(residue_field.degree() == 1);
+        check_quotient_logs_mod_three(residue_field, foreign_field,
+                                      characteristic, characteristic,
+                                      characteristic == 19 ? 9 : 3);
+    }
+
+    silex::ResidueField residue_field = quadratic_residue_field_25();
+    silex::ResidueField foreign_field = quadratic_residue_field_25();
+    check_quotient_logs_mod_three(residue_field, foreign_field, 5, 25, 3);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -649,5 +861,6 @@ int main() {
     assert(test_failure_preserves_output() == 0);
     assert(test_multiplicative_degree_one() == 0);
     assert(test_multiplicative_quadratic() == 0);
+    assert(test_quotient_logs_mod_three() == 0);
     return 0;
 }

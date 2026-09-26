@@ -312,6 +312,293 @@ int test_default_pair_sunit_round_trips_and_outside_support() {
     return 0;
 }
 
+struct SUnitSourceProofs {
+    silex::ProofState relation_saturation = silex::ProofState::not_checked;
+    silex::ProofState units = silex::ProofState::not_checked;
+    silex::ProofState regulator = silex::ProofState::not_checked;
+};
+
+void assert_split_prime_publication(
+        const silex::SClassGroup& s_class_group,
+        const silex::SUnitGroup& s_unit_group,
+        const SUnitSourceProofs& source_proofs,
+        const sflint::FmpzMat* prime_hnfs,
+        bool reversed) noexcept {
+    const silex::Order* order = s_unit_group.parent();
+    assert(order != nullptr && order->parent() != nullptr);
+    assert(silex::same_order_parent(s_class_group.parent(), order));
+    assert(s_class_group.is_defined() && s_unit_group.is_defined());
+    assert(s_class_group.selected_prime_count() == 2);
+    assert(s_unit_group.selected_prime_count() == 2);
+    assert(s_class_group.invariant_count() == 0);
+    sflint::Fmpz class_order;
+    assert(s_class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_is_one(class_order));
+    assert(s_unit_group.ordinary_free_rank() == 1);
+    assert(s_unit_group.nonunit_rank() == 2);
+    assert(s_unit_group.free_rank() == 3);
+    assert(s_unit_group.generator_count() == 4);
+
+    assert(s_class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(s_class_group.source_class_certification() ==
+           silex::CertificationMode::proven);
+    assert(s_class_group.proof_status() == silex::ProofState::verified);
+    assert(s_unit_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(s_unit_group.source_class_certification() ==
+           silex::CertificationMode::proven);
+    assert(s_unit_group.source_unit_certification() ==
+           silex::CertificationMode::proven);
+    assert(s_unit_group.source_relation_saturation_status() ==
+           source_proofs.relation_saturation);
+    assert(s_unit_group.source_unit_proof_status() == source_proofs.units);
+    assert(s_unit_group.source_regulator_proof_status() ==
+           source_proofs.regulator);
+    assert(s_unit_group.proof_status() == silex::ProofState::verified);
+    assert(s_unit_group.regulator_proof_status() ==
+           silex::ProofState::verified);
+    assert(s_unit_group.regulator_precision() == 192);
+
+    sflint::FmpzMat valuations(2, 2);
+    sflint::Fmpz index;
+    assert(s_unit_group.nonunit_valuation_matrix(
+            sflint::FmpzMatRef(valuations)));
+    sflint::fmpz_mat_det(sflint::FmpzRef(index), valuations);
+    sflint::fmpz_abs(sflint::FmpzRef(index), sflint::FmpzConstRef(index));
+    assert(sflint::fmpz_is_one(index));
+
+    for (slong j = 0; j < 2; ++j) {
+        silex::PrimeIdeal class_prime(*order);
+        silex::PrimeIdeal unit_prime(*order);
+        silex::Ideal ideal(*order);
+        sflint::FmpzMat hnf(2, 2);
+        assert(s_class_group.selected_prime(class_prime, j));
+        assert(s_unit_group.selected_prime(unit_prime, j));
+        assert(silex::same_order_parent(unit_prime.parent(), order));
+        assert(class_prime.equal(unit_prime));
+        assert(unit_prime.get_ideal(ideal));
+        assert(ideal.get_hnf(sflint::FmpzMatRef(hnf)));
+        assert(sflint::fmpz_mat_equal(hnf, prime_hnfs[reversed ? 1 - j : j]));
+
+        for (slong i = 0; i < 2; ++i) {
+            silex::FactoredElement generator(*order->parent());
+            silex::Element expanded(*order->parent());
+            sflint::FmpzMat row(1, 2);
+            assert(s_unit_group.nonunit_generator(generator, i));
+            assert(generator.evaluate(expanded));
+            assert(s_unit_group.nonunit_valuation_row(
+                    sflint::FmpzMatRef(row), i));
+            slong compact_valuation = 0;
+            slong expanded_valuation = 0;
+            assert(unit_prime.valuation(compact_valuation, generator,
+                                         nullptr));
+            assert(unit_prime.valuation(expanded_valuation, expanded,
+                                         nullptr));
+            assert(compact_valuation == expanded_valuation);
+            assert(sflint::fmpz_equal_si(
+                    sflint::fmpz_mat_entry(valuations, i, j),
+                    expanded_valuation));
+            assert(sflint::fmpz_equal_si(
+                    sflint::fmpz_mat_entry(row, 0, j), expanded_valuation));
+        }
+    }
+}
+
+void assert_mixed_sunit_round_trips(
+        silex::Element& expanded,
+        const silex::SUnitGroup& group,
+        silex::EmbeddingContext& embeddings) noexcept {
+    const slong ordinary[] = {2};
+    const slong nonunit[] = {-2, 3};
+    silex::SUnitCoordinates input = coordinates(group, 1, ordinary, nonunit);
+    silex::FactoredElement compact(*expanded.parent());
+    silex::Element evaluated(*expanded.parent());
+    assert(group.image(compact, input));
+    assert(group.image(expanded, input));
+    assert(compact.evaluate(evaluated));
+    assert(evaluated.equal(expanded));
+
+    silex::SUnitCoordinates recovered;
+    silex::SUnitMembershipResult membership;
+    assert(group.preimage(membership, recovered, compact, embeddings, 16,
+                           512));
+    assert(membership.success);
+    assert(membership.outcome == silex::SUnitMembershipOutcome::verified);
+    assert(membership.stage == silex::SUnitMembershipStage::none);
+    assert_coordinates_equal(recovered, 1, ordinary, 1, nonunit, 2);
+
+    silex::SUnitCoordinates expanded_coordinates;
+    silex::SUnitMembershipResult expanded_membership;
+    assert(group.preimage(expanded_membership, expanded_coordinates,
+                           expanded, embeddings, 16, 512));
+    assert(expanded_membership.success);
+    assert(expanded_membership.outcome ==
+           silex::SUnitMembershipOutcome::verified);
+    assert(expanded_membership.stage == silex::SUnitMembershipStage::none);
+    assert_coordinates_equal(expanded_coordinates, 1, ordinary, 1, nonunit,
+                              2);
+}
+
+int test_split_prime_order_lifetime_and_failed_publication() {
+    silex::SClassGroup s_class_groups[2];
+    silex::SUnitGroup s_unit_groups[2];
+    SUnitSourceProofs source_proofs;
+    // These snapshots retain no field, order, or selected-prime handles.
+    sflint::FmpzMat prime_hnfs[] = {
+            sflint::FmpzMat(2, 2), sflint::FmpzMat(2, 2)};
+    sflint::FmpzMat valuation_matrices[] = {
+            sflint::FmpzMat(2, 2), sflint::FmpzMat(2, 2)};
+    sflint::FmpqPoly image_polynomials[2];
+    sflint::Arb regulators[2];
+    {
+        ProvenQuadraticFixture fixture = proven_quadratic(5);
+        source_proofs = {fixture.class_group.relation_saturation_status(),
+                         fixture.class_group.unit_proof_status(),
+                         fixture.class_group.regulator_proof_status()};
+        sflint::Fmpz p;
+        sflint::fmpz_set_si(sflint::FmpzRef(p), 11);
+        silex::PrimeIdealList decomposition;
+        assert(silex::decompose_prime(
+                decomposition, fixture.order, sflint::FmpzConstRef(p)));
+        assert(decomposition.size() == 2);
+        assert(decomposition.at(0) != nullptr &&
+               decomposition.at(1) != nullptr);
+        assert(!decomposition.at(0)->equal(*decomposition.at(1)));
+        for (slong j = 0; j < 2; ++j) {
+            silex::Ideal ideal(fixture.order);
+            sflint::Fmpz norm;
+            assert(decomposition.at(j)->get_ideal(ideal));
+            assert(ideal.get_hnf(sflint::FmpzMatRef(prime_hnfs[j])));
+            assert(decomposition.at(j)->norm(sflint::FmpzRef(norm)));
+            assert(sflint::fmpz_equal_si(norm, 11));
+        }
+
+        silex::SUnitComputeOptions options;
+        options.regulator_precision = 192;
+        options.diagnostics = nullptr;
+        assert(fixture.class_group.diagnostics() == nullptr);
+        silex::SUnitComputeResult result;
+        for (slong order_index = 0; order_index < 2; ++order_index) {
+            std::vector<silex::PrimeIdeal> selected;
+            for (slong j = 0; j < 2; ++j) {
+                selected.emplace_back(fixture.order);
+                assert(selected.back().set(*decomposition.at(
+                        order_index == 0 ? j : 1 - j)));
+            }
+            auto& s_class_group = s_class_groups[order_index];
+            auto& s_unit_group = s_unit_groups[order_index];
+            assert(silex::compute_sunit_groups(
+                    result, s_class_group, s_unit_group, fixture.class_group,
+                    fixture.units,
+                    silex::PrimeIdealSpan(selected.data(), selected.size()),
+                    options));
+            assert(result.success);
+            assert(result.stage == silex::SUnitComputeStage::none);
+            assert(result.selected_index == -1);
+            for (slong j = 0; j < 2; ++j) {
+                silex::PrimeIdeal published(fixture.order);
+                assert(s_class_group.selected_prime(published, j));
+                assert(published.equal(selected[j]));
+                assert(s_unit_group.selected_prime(published, j));
+                assert(published.equal(selected[j]));
+            }
+            assert_split_prime_publication(s_class_group, s_unit_group,
+                                            source_proofs, prime_hnfs,
+                                            order_index != 0);
+            assert_regulator_formula(fixture, s_class_group, s_unit_group,
+                                     selected, 192);
+            silex::Element value(fixture.field);
+            assert_mixed_sunit_round_trips(value, s_unit_group,
+                                           fixture.embeddings);
+            assert(value.get_fmpq_poly(
+                    sflint::FmpqPolyRef(image_polynomials[order_index])));
+            assert(s_unit_group.nonunit_valuation_matrix(
+                    sflint::FmpzMatRef(valuation_matrices[order_index])));
+            assert(s_unit_group.regulator(
+                    sflint::ArbRef(regulators[order_index])));
+        }
+
+        const silex::NumberField foreign_field =
+                silex::test::field_by_polynomial(sflint::FmpqPolyConstRef(
+                        fixture.field.raw_flint_field()->pol));
+        assert(!foreign_field.has_same_data(fixture.field));
+        assert(::fmpq_poly_equal(foreign_field.raw_flint_field()->pol,
+                                 fixture.field.raw_flint_field()->pol));
+        const silex::Order foreign_equation =
+                silex::test::equation_order(foreign_field);
+        silex::Order foreign_order(foreign_field);
+        assert(foreign_order.maximal_order(foreign_equation));
+        assert(!foreign_order.has_same_data(fixture.order));
+        std::vector<silex::PrimeIdeal> foreign_selected =
+                first_prime_above(foreign_order, 11);
+        std::vector<silex::PrimeIdeal> invalid_selected;
+        invalid_selected.emplace_back(fixture.order);
+        assert(invalid_selected.back().set(*decomposition.at(0)));
+        invalid_selected.emplace_back(foreign_order);
+        assert(invalid_selected.back().set(foreign_selected[0]));
+        for (slong order_index = 0; order_index < 2; ++order_index) {
+            assert(!silex::compute_sunit_groups(
+                    result, s_class_groups[order_index],
+                    s_unit_groups[order_index], fixture.class_group,
+                    fixture.units,
+                    silex::PrimeIdealSpan(invalid_selected.data(),
+                                          invalid_selected.size()),
+                    options));
+            assert(!result.success);
+            assert(result.stage == silex::SUnitComputeStage::input_validation);
+            assert(result.selected_index == 1);
+        }
+    }
+
+    // Only the publications keep the original mathematical parents alive.
+    const silex::Order* retained_order = s_unit_groups[0].parent();
+    assert(retained_order != nullptr && retained_order->parent() != nullptr);
+    const silex::NumberField& retained_field = *retained_order->parent();
+    silex::EmbeddingContext embeddings(retained_field);
+    for (slong order_index = 0; order_index < 2; ++order_index) {
+        auto& s_class_group = s_class_groups[order_index];
+        auto& s_unit_group = s_unit_groups[order_index];
+        assert(silex::same_order_parent(s_unit_group.parent(), retained_order));
+        assert_split_prime_publication(s_class_group, s_unit_group,
+                                        source_proofs, prime_hnfs,
+                                        order_index != 0);
+        sflint::FmpzMat valuations(2, 2);
+        sflint::Arb regulator;
+        assert(s_unit_group.nonunit_valuation_matrix(
+                sflint::FmpzMatRef(valuations)));
+        assert(sflint::fmpz_mat_equal(valuations,
+                                      valuation_matrices[order_index]));
+        assert(s_unit_group.regulator(sflint::ArbRef(regulator)));
+        assert(::arb_equal(regulator.raw(), regulators[order_index].raw()));
+        silex::Element value(retained_field);
+        silex::Element expected(retained_field);
+        assert_mixed_sunit_round_trips(value, s_unit_group, embeddings);
+        assert(expected.set_fmpq_poly(
+                sflint::FmpqPolyConstRef(image_polynomials[order_index])));
+        assert(value.equal(expected));
+
+        // Obtain the other basis's coordinates; generators need not permute.
+        const auto& other = s_unit_groups[1 - order_index];
+        silex::SUnitCoordinates other_coordinates;
+        silex::SUnitMembershipResult membership;
+        assert(other.preimage(membership, other_coordinates, value,
+                               embeddings, 16, 512));
+        assert(membership.success);
+        assert(membership.outcome == silex::SUnitMembershipOutcome::verified);
+        assert(membership.stage == silex::SUnitMembershipStage::none);
+        silex::FactoredElement compact(retained_field);
+        silex::Element expanded(retained_field);
+        silex::Element evaluated(retained_field);
+        assert(other.image(compact, other_coordinates));
+        assert(other.image(expanded, other_coordinates));
+        assert(compact.evaluate(evaluated));
+        assert(evaluated.equal(value));
+        assert(expanded.equal(value));
+    }
+    return 0;
+}
+
 int test_rank_zero_nonunit_and_nontrivial_s_class() {
     ProvenQuadraticFixture killed = proven_quadratic(-5);
     std::vector<silex::PrimeIdeal> selected =
@@ -409,6 +696,7 @@ int test_fail_closed_preserves_publication() {
 int main() {
     assert(test_empty_s_publication_and_regulator() == 0);
     assert(test_default_pair_sunit_round_trips_and_outside_support() == 0);
+    assert(test_split_prime_order_lifetime_and_failed_publication() == 0);
     assert(test_rank_zero_nonunit_and_nontrivial_s_class() == 0);
     assert(test_fail_closed_preserves_publication() == 0);
     return 0;
