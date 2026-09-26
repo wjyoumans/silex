@@ -189,8 +189,11 @@ case returns failure (unsupported) and leaves the caller's root unchanged.
   ``src/basemath/bb_group.c:gen_Shanks_sqrtn`` (lines 899-953): the Bezout
   exponent of ``n`` modulo ``q - 1`` gives the unique root when
   ``gcd(n, q - 1) = 1``, and otherwise ``y^n = a`` is reduced to
-  ``y^g = a^u`` with ``g = gcd(n, q - 1)`` and ``n u + (q - 1) v = g``, which
-  has the same roots in ``F_q``.
+  ``y^g = a^u`` with ``g = gcd(n, q - 1)`` and ``n u + (q - 1) v = g``.  For
+  an ``a`` that passed the residue test above, the two equations have the
+  same roots in ``F_q``.  Without that test they can differ: for ``q = 11``,
+  ``n = 6``, ``g = 2`` and ``u = 2``, every ``a`` solves ``y^2 = a^2``, but
+  not every ``a`` is a sixth power.
 
 Two Silex pre-filters run before the exact check ``c^n == a`` and only reject
 candidates, so a rejection leaves the query unsupported and never changes a
@@ -207,12 +210,17 @@ Silex accepts ``n`` up to ``2^63 - 1`` and must not form ``c^n`` blindly.
   characteristic polynomial of ``x`` over ``Q`` and ``M`` is its Mahler
   measure, ``log M(P_x) = log |lc(P_x)| + sum_i log max(1, |sigma_i(x)|)``
   over the ``[K : Q]`` complex embeddings (Bombieri and Gubler, *Heights in
-  Diophantine Geometry*, chapter 1, sections 1.5 and 1.6).  The leading
-  coefficient accounts for non-integral candidates.  A candidate is rejected
-  only when Arb enclosures prove ``n log M(P_c) > log M(P_a) + 1``.  A
-  passing candidate has ``c^n`` of height at most that of ``a`` plus a
-  constant, and a root of unity (``M(P_c) = 1``) always passes; binary
-  powering keeps its coefficients bounded, so ``c^n`` stays cheap.
+  Diophantine Geometry*, sections 1.5 and 1.6).  The leading coefficient
+  accounts for non-integral candidates.  A candidate is rejected only when
+  Arb enclosures prove ``n log M(P_c) > log M(P_a) + 1``.  A passing
+  candidate therefore has ``h(c^n) <= h(a) + (1 + r)/d``, where
+  ``d = [K : Q]`` and ``r`` is the sum of the widths (twice the radii) of
+  the two enclosures ``n log M(P_c)`` and ``log M(P_a)``.
+  A root of unity (``M(P_c) = 1``) always passes, and binary powering keeps
+  its coefficients bounded, so ``c^n`` stays cheap.  The working precision
+  is 128 bits plus the largest coefficient bit size of ``c``, ``a`` and the
+  defining polynomial.  If the enclosures are too wide to decide, the
+  candidate goes on to the exact check.
 
 Embedding root contexts
 -----------------------
