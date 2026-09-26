@@ -5,6 +5,7 @@
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_ring.hpp>
 
+#include "prime_ideal/prime_ideal_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -13,6 +14,7 @@
 
 namespace {
 namespace sflint = silex::flint;
+using PrimeIdealAccess = silex::detail::PrimeIdealAccess;
 
 void poly_x(sflint::FmpqPoly& polynomial) noexcept {
     sflint::fmpq_poly_zero(polynomial);
@@ -295,6 +297,50 @@ int test_degree_one() {
     return 0;
 }
 
+// The internal degree-one constructor must not trust its root: on
+// x^2 - 2, (7, theta - 1) is the unit ideal because 1 - 2 = -1 is not 0 mod 7,
+// and at p = 2 the reduction x^2 is not squarefree (2 is ramified), so
+// (2, theta) is not a degree-one prime with e = 1.  Both fail and preserve the
+// output; the true root 3 (9 - 2 = 7) still builds the prime of norm 7.
+int test_degree_one_prime_from_root_rejects_non_roots() {
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 2);
+
+    silex::NumberField field;
+    silex::Order order;
+    order = order_by_polynomial(field, polynomial);
+
+    sflint::Fmpz p;
+    sflint::Fmpz root;
+    silex::PrimeIdeal prime(order);
+
+    assert(set_fmpz_si(p, 7));
+    assert(set_fmpz_si(root, 1));
+    assert(!PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
+            prime, order, sflint::FmpzConstRef(p),
+            sflint::FmpzConstRef(root)));
+    assert(!prime.has_prime_data());
+
+    assert(set_fmpz_si(p, 2));
+    assert(set_fmpz_si(root, 0));
+    assert(!PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
+            prime, order, sflint::FmpzConstRef(p),
+            sflint::FmpzConstRef(root)));
+    assert(!prime.has_prime_data());
+
+    assert(set_fmpz_si(p, 7));
+    assert(set_fmpz_si(root, 3));
+    assert(PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
+            prime, order, sflint::FmpzConstRef(p),
+            sflint::FmpzConstRef(root)));
+    sflint::Fmpz norm;
+    assert(prime.norm(sflint::FmpzRef(norm)));
+    assert(sflint::fmpz_equal_si(norm, 7));
+    assert(prime.residue_degree() == 1);
+
+    return 0;
+}
+
 int test_degree_one_prime_from_root_matches_decomposition() {
     sflint::FmpqPoly polynomial;
     poly_x4_minus_x_minus_1(polynomial);
@@ -318,7 +364,7 @@ int test_degree_one_prime_from_root_matches_decomposition() {
         sflint::Fmpz root;
         assert(degree_one_root_from_residue_polynomial(root, *prime));
         silex::PrimeIdeal reconstructed(order);
-        assert(silex::detail::set_degree_one_prime_ideal_from_root(
+        assert(PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
                 reconstructed, order, sflint::FmpzConstRef(p),
                 sflint::FmpzConstRef(root)));
         assert(reconstructed.equal(*prime));
@@ -518,7 +564,7 @@ int test_explicit_maximal_order_decomposition() {
         fmpz_mod(theta_root.raw(), theta_root.raw(), p.raw());
 
         silex::PrimeIdeal reconstructed(maximal_order);
-        assert(silex::detail::set_degree_one_prime_ideal_from_root(
+        assert(PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
                 reconstructed, maximal_order, sflint::FmpzConstRef(p),
                 sflint::FmpzConstRef(theta_root)));
         assert(reconstructed.equal(*split_prime));
@@ -598,7 +644,7 @@ int test_split_index_prime_uses_integral_quadratic_generator() {
     sflint::Fmpz theta_root;
     assert(set_fmpz_si(theta_root, 1));
     silex::PrimeIdeal from_theta_root(maximal);
-    assert(!silex::detail::set_degree_one_prime_ideal_from_root(
+    assert(!PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
             from_theta_root, maximal, sflint::FmpzConstRef(p),
             sflint::FmpzConstRef(theta_root)));
 
@@ -1853,6 +1899,7 @@ int test_quadratic_backend_omega_reduce_unchanged() {
 int main() {
     assert(test_degree_one() == 0);
     assert(test_degree_one_prime_from_root_matches_decomposition() == 0);
+    assert(test_degree_one_prime_from_root_rejects_non_roots() == 0);
     assert(test_invalid_prime_failure_preserves_output() == 0);
     assert(test_unsupported_order_failure_preserves_output() == 0);
     assert(test_quadratic_splitting_types() == 0);

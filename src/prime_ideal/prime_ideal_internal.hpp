@@ -53,4 +53,28 @@ public:
             const DiagnosticsContext* diagnostics) noexcept;
 };
 
+// Noninstalled prime-ideal hooks that take caller-supplied data.
+class PrimeIdealAccess {
+public:
+    // Builds the degree-one prime (p, theta - root) of an equation or
+    // maximal order.  It checks that f(root) = 0 mod p and that the defining
+    // polynomial f is squarefree mod p (so p does not divide the index of
+    // Z[theta] and Dedekind-Kummer applies); otherwise it fails and leaves
+    // `out` unchanged.
+    static bool set_degree_one_prime_ideal_from_root(
+            PrimeIdeal& out,
+            const Order& order,
+            flint::FmpzConstRef p,
+            flint::FmpzConstRef root) noexcept;
+
+    // `norm_vp` must be the exact p-adic valuation of the absolute norm of
+    // `element`; the result is wrong otherwise.
+    static bool prime_ideal_valuation_with_norm_vp(
+            slong& out,
+            const PrimeIdeal& prime,
+            const OrderElement& element,
+            slong norm_vp,
+            const DiagnosticsContext* diagnostics = nullptr) noexcept;
+};
+
 }  // namespace silex::detail

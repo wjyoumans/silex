@@ -51,10 +51,23 @@ class-regulator product from the zeta function, and
 ``try_prove_relation_saturation_with_units`` runs its own ``ell``-local test.
 Gates that would trust caller-supplied proof data, such as an analytic
 class-regulator product, a saturation index bound, or an exact generator
-norm, are internal to the library and not part of the installed API.  A
-caller who has an ``hR`` value of their own can compare it with
+norm, are internal to the library and not part of the installed API.  The
+same holds for the unit-group hooks that install trusted generators or cached
+torsion and for the prime-ideal hooks that take a supplied residue root or
+norm valuation.  Before a class/unit gate marks a unit group proven, it also
+checks that the group's torsion is the torsion subgroup Silex computes for
+the order, so the analytic test on the free part cannot certify wrong
+torsion.  A caller who has an ``hR`` value of their own can compare it with
 ``OrderUnitGroup::class_regulator_index_bound``, which reports a bound but
 does not publish certification.
+
+The installed headers still declare a few low-level ideal construction
+shortcuts in ``silex::detail`` (``set_known_two_generator_ideal``,
+``multiply_integral_ideal_by_two_generator``,
+``multiply_integral_ideal_by_element``, and ``set_integral_ideal_known_hnf``)
+that accept caller-supplied generators or HNF data without re-deriving them.
+They set no certification label and are not proof gates; they are not part of
+the supported API.
 
 Paired Class/Unit Transaction
 -----------------------------

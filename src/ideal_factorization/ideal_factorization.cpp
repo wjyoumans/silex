@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "ideal_factorization_internal.hpp"
+#include "../prime_ideal/prime_ideal_internal.hpp"
 
 namespace silex {
 namespace {
@@ -242,7 +243,7 @@ bool factor_base_order_element_rational_valuation(
         }
 
         slong valuation = -1;
-        if (!detail::prime_ideal_valuation_with_norm_vp(
+        if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
                     valuation, *prime, element, norm_valuation, diagnostics) ||
             valuation < 0) {
             return false;
@@ -411,7 +412,7 @@ bool order_element_factor_over_base_with_required_prime_direct(
                     flint::FmpzConstRef(required_rational_prime))) {
             required_prime_seen = true;
             slong required_valuation = -1;
-            if (!detail::prime_ideal_valuation_with_norm_vp(
+            if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
                         required_valuation, required_prime, element,
                         norm_valuation, diagnostics)) {
                 return false;
@@ -900,7 +901,7 @@ bool order_element_factor_over_base_with_one_large_prime(
             }
 
             slong valuation = -1;
-            if (!prime_ideal_valuation_with_norm_vp(
+            if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
                         valuation, *prime, element, norm_valuation,
                         diagnostics) ||
                 valuation < 0 || prime->residue_degree() <= 0) {

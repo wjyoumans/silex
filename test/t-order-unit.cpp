@@ -3323,6 +3323,13 @@ int test_class_unit_regulator_certification() {
                silex::ProofState::verified);
         assert(units.certification_status() ==
                silex::CertificationMode::proven);
+        // Q(sqrt 2) has class number 1 and torsion {+1, -1}.
+        sflint::Fmpz class_order;
+        assert(class_group.order(sflint::FmpzRef(class_order)));
+        assert(sflint::fmpz_equal_si(class_order, 1));
+        sflint::Fmpz torsion_order;
+        assert(units.torsion_order(sflint::FmpzRef(torsion_order)));
+        assert(sflint::fmpz_equal_si(torsion_order, 2));
         sflint::Arb regulator;
         assert(units.regulator(sflint::ArbRef(regulator)));
         sflint::Arb lower;
@@ -3344,6 +3351,18 @@ int test_class_unit_regulator_certification() {
         sflint::Arb zeta_hR;
         assert(silex::zeta_class_regulator_product(sflint::ArbRef(zeta_hR),
                                                    order, 256));
+        // h = 1, so the zeta value is R = log(1 + sqrt(2)) =
+        // 0.8813735870195430252...: it overlaps an independent Arb
+        // evaluation and lies inside 0.881373587019543 +/- 1e-15.
+        sflint::Arb reference;
+        ::arb_sqrt_ui(reference.raw(), 2, 256);
+        ::arb_add_ui(reference.raw(), reference.raw(), 1, 256);
+        ::arb_log(reference.raw(), reference.raw(), 256);
+        assert(::arb_overlaps(zeta_hR.raw(), reference.raw()) != 0);
+        sflint::Arb decimal_window;
+        assert(::arb_set_str(decimal_window.raw(),
+                             "0.881373587019543 +/- 1e-15", 256) == 0);
+        assert(::arb_contains(decimal_window.raw(), zeta_hR.raw()) != 0);
         assert(CertificationAccess::try_certify_class_unit_with_units(
                 class_group, units, sflint::ArbConstRef(zeta_hR), 256));
         assert(class_group.certification_status() ==
@@ -3387,6 +3406,158 @@ int test_class_unit_regulator_certification() {
                silex::ProofState::not_checked);
         assert(units.certification_status() ==
                silex::CertificationMode::unknown);
+    }
+
+    // Negative with proven-labelled units: mark <3 + 2 sqrt(2)> proven
+    // through the internal access class, so the unit label cannot be what
+    // blocks certification.  The analytic index test (ratio 2) must reject
+    // it on both the public zeta gate and the internal gate.
+    {
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units(order);
+        assert(real_quadratic_two_candidate(class_group, order));
+        assert(real_quadratic_two_units(units, order, embeddings, epsilon2));
+        silex::detail::OrderUnitGroupAccess::mark_certification_proven(units);
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(silex::detail::order_unit_torsion_is_computed(units));
+
+        assert(!class_group.try_certify_class_unit_with_zeta(units, 256));
+        sflint::Arb zeta_hR;
+        assert(silex::zeta_class_regulator_product(sflint::ArbRef(zeta_hR),
+                                                   order, 256));
+        assert(!CertificationAccess::try_certify_class_unit_with_units(
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.regulator_proof_status() ==
+               silex::ProofState::not_checked);
+    }
+
+    return 0;
+}
+
+// Cached torsion handed to the internal unit setter must never reach a
+// proven label.  The setter rejects any cached pair that is not a cyclic
+// group of exactly that order in the order, on both the trusted and the
+// validating path; and proven publication recomputes torsion, so an
+// under-claimed but well-formed pair (Q(i): w = 2 instead of 4) is still
+// rejected by the class/unit gates.
+int test_cached_torsion_never_reaches_proven() {
+    using OrderUnitGroupAccess = silex::detail::OrderUnitGroupAccess;
+
+    {
+        silex::NumberField field = quadratic_field(2);
+        silex::Order order;
+        order = silex::test::equation_order(field);
+        silex::EmbeddingContext embeddings(field);
+        silex::Element epsilon(field);
+        assert(set_real_quadratic_unit(epsilon));
+        silex::FactoredElement generator(field);
+        assert(generator.set_element(epsilon));
+        silex::FactoredElement generators[] = {std::move(generator)};
+
+        silex::Element theta(field);
+        assert(theta.gen());
+        struct FakeTorsion {
+            slong order;
+            slong generator;  // 0 means sqrt(2)
+        };
+        const FakeTorsion fakes[] = {
+                {1, 1},   // w = 1: odd, and -1 is always torsion
+                {6, -1},  // no element of order 6 in Q(sqrt 2)
+                {8, 0},   // sqrt(2) is not a root of unity
+                {4, -1},  // -1 has order 2, not 4
+        };
+        for (const FakeTorsion& fake : fakes) {
+            sflint::Fmpz torsion_order;
+            assert(set_fmpz_si(torsion_order, fake.order));
+            silex::OrderElement torsion_generator(order);
+            if (fake.generator == 0) {
+                assert(torsion_generator.set_element(theta));
+            } else {
+                assert(torsion_generator.set_si(fake.generator));
+            }
+            for (const bool trusted : {true, false}) {
+                silex::OrderUnitGroup units(order);
+                assert(!OrderUnitGroupAccess::set_units(
+                        units, order,
+                        silex::FactoredElementSpan(generators, 1),
+                        embeddings, 256, trusted, &torsion_order,
+                        &torsion_generator));
+                assert(!units.is_set());
+            }
+        }
+
+        // The honest cached pair (2, -1) is accepted.
+        sflint::Fmpz torsion_order;
+        assert(set_fmpz_si(torsion_order, 2));
+        silex::OrderElement torsion_generator(order);
+        assert(torsion_generator.set_si(-1));
+        silex::OrderUnitGroup units(order);
+        assert(OrderUnitGroupAccess::set_units(
+                units, order, silex::FactoredElementSpan(generators, 1),
+                embeddings, 256, true, &torsion_order, &torsion_generator));
+        assert(silex::detail::order_unit_torsion_is_computed(units));
+    }
+
+    {
+        silex::NumberField field = quadratic_field(-1);
+        silex::Order order;
+        order = silex::test::equation_order(field);
+        assert(order.is_maximal());
+        silex::EmbeddingContext embeddings(field);
+
+        sflint::Fmpz bound;
+        assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                    order));
+        if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+            sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+        }
+        silex::ClassGroupCandidateOptions options;
+        options.max_candidates = 256;
+        options.max_relations = 48;
+
+        // Under-claimed torsion: w = 2 with generator -1 passes the setter's
+        // shape check but is not the torsion of Z[i] (w = 4).
+        sflint::Fmpz torsion_order;
+        assert(set_fmpz_si(torsion_order, 2));
+        silex::OrderElement torsion_generator(order);
+        assert(torsion_generator.set_si(-1));
+        silex::OrderUnitGroup under(order);
+        assert(OrderUnitGroupAccess::set_units(
+                under, order, silex::FactoredElementSpan(), embeddings, 256,
+                true, &torsion_order, &torsion_generator));
+        assert(!silex::detail::order_unit_torsion_is_computed(under));
+
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), options));
+        assert(!class_group.try_certify_class_unit_with_zeta(under, 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(under.certification_status() ==
+               silex::CertificationMode::unknown);
+
+        // Control: the same gate certifies the torsion Silex computes.
+        silex::OrderUnitGroup computed(order);
+        assert(computed.set_units(order, silex::FactoredElementSpan(),
+                                  embeddings, 256));
+        assert(silex::detail::order_unit_torsion_is_computed(computed));
+        sflint::Fmpz computed_order;
+        assert(computed.torsion_order(sflint::FmpzRef(computed_order)));
+        assert(sflint::fmpz_equal_si(computed_order, 4));
+        assert(class_group.try_certify_class_unit_with_zeta(computed, 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(computed.certification_status() ==
+               silex::CertificationMode::proven);
     }
 
     return 0;
@@ -4280,6 +4451,7 @@ int main() {
     test_class_regulator_index_bound();
     test_class_regulator_index_bound_interval_boundary();
     test_class_unit_regulator_certification();
+    test_cached_torsion_never_reaches_proven();
     test_prove_index_bound();
     test_saturate_index_bounded();
     test_saturate_index_bounded_adaptive();

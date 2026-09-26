@@ -2,6 +2,7 @@
 #include "relation_unit_internal.hpp"
 
 #include "../class_group/class_group_internal.hpp"
+#include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <cstdio>
 #include <limits>
@@ -1193,7 +1194,7 @@ bool select_saturation_proof_kernel_direct_degree_one(
                         "unit_group.proof_selector_scan.direct_dlog_column_unavailable");
                 PrimeIdeal fallback_prime(*order);
                 if (!fallback_prime.is_defined() ||
-                    !detail::set_degree_one_prime_ideal_from_root(
+                    !detail::PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
                             fallback_prime, *order, flint::FmpzConstRef(p),
                             flint::FmpzConstRef(root))) {
                     return false;
@@ -1606,7 +1607,7 @@ bool OrderUnitGroup::select_saturation_proof_primes(
 
             local_primes.emplace_back(*order);
             if (!local_primes.back().is_defined() ||
-                !detail::set_degree_one_prime_ideal_from_root(
+                !detail::PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
                         local_primes.back(), *order, q,
                         flint::FmpzConstRef(root))) {
                 used_direct = false;

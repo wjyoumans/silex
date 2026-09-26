@@ -822,6 +822,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-prime-ideal test/t-prime-ideal.cpp)
     target_link_libraries(t-silex-prime-ideal PRIVATE Silex::silex)
+    target_include_directories(t-silex-prime-ideal PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-prime-ideal)
     add_test(NAME silex-prime-ideal COMMAND t-silex-prime-ideal)
     list(APPEND SILEX_TEST_NAMES silex-prime-ideal)

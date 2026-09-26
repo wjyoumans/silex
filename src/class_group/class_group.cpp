@@ -4591,7 +4591,8 @@ bool ClassGroupCertificationAccess::
     }
 
     if (requested == CertificationMode::proven &&
-        flint::fmpz_is_one(flint::FmpzConstRef(index))) {
+        flint::fmpz_is_one(flint::FmpzConstRef(index)) &&
+        detail::order_unit_torsion_is_computed(units)) {
         context.certification_ = CertificationMode::proven;
         context.relation_saturation_status_ = ProofState::verified;
         context.unit_proof_status_ = ProofState::verified;
@@ -9626,6 +9627,12 @@ bool ClassGroupContext::record_analytic_class_unit_regulator_(
     if (!has_presentation() ||
         !parent_.is_maximal() || precision <= 0 || !units.is_set() ||
         !same_order_parent(units.parent(), &parent_)) {
+        return false;
+    }
+    // The analytic index test covers only the free part.  The published
+    // unit group is proven only if its torsion is the torsion Silex computes
+    // for the order, never a cached or supplied value.
+    if (!detail::order_unit_torsion_is_computed(units)) {
         return false;
     }
 

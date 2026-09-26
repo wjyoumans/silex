@@ -240,7 +240,10 @@ for every prime ``p`` dividing ``h_cand``.  The required primes are derived
 from the published presentation; the internal index-bound gate proves the
 union of the primes up to its bound and the prime divisors of ``h_cand``.
 Gates that accept a supplied index bound or analytic class-regulator product
-are not installed; public certification uses only values Silex computes.
+are not installed; public certification uses only values Silex computes or
+verifies itself, and proven unit publication through the class/unit gates
+re-derives the torsion subgroup of the order rather than trusting a stored
+one.
 
 The ``ell``-local test takes the Smith-invariant ``beta`` rows (compact power
 witnesses of invariant generators whose invariant ``ell`` divides), the free
@@ -259,6 +262,15 @@ class-group certification metadata, including the unit and regulator proof
 statuses.  A successful ``try_prove_relation_saturation_with_units`` call
 means only that its ``ell`` verified; the relation-saturation status becomes
 ``verified`` only once every ``p | h_cand`` is covered.
+
+The order-unit saturation proofs build degree-one primes ``(q, theta - r)``
+from roots ``r`` of the defining polynomial ``f`` modulo ``q`` with an
+internal constructor.  It accepts a root only when ``f(r) = 0 mod q`` and
+``f`` is squarefree modulo ``q``, the Dedekind-Kummer hypothesis under which
+``(q, theta - r)`` is a prime of residue degree and ramification index one
+(Cohen, *A Course in Computational Algebraic Number Theory*, GTM 138,
+Theorem 4.8.13); this is the same condition as the degree-one fast path of
+``decompose_prime``.
 
 The legacy factor-base honesty search tests principal witnesses directly in
 order coordinates.  PARI 2.17.3

@@ -1058,7 +1058,7 @@ bool OrderUnitGroup::regulator_index_bound(flint::FmpzRef out,
 
 namespace detail {
 
-bool order_unit_group_set_units_internal(
+bool OrderUnitGroupAccess::set_units(
         OrderUnitGroup& out,
         const Order& order,
         FactoredElementSpan generators,
@@ -1098,11 +1098,19 @@ bool order_unit_group_set_units_internal(
                             "unit_group.set_units_torsion");
         if (cached_torsion_order != nullptr &&
             cached_torsion_generator != nullptr) {
+            // -1 lies in every order, so the torsion order is even; and the
+            // generator must have exactly the cached order.  This rejects a
+            // cached pair that is not a cyclic group of roots of unity of
+            // that order in the order.
             const Order* torsion_parent = cached_torsion_generator->parent();
             if (torsion_parent == nullptr ||
                 !torsion_parent->has_same_data(order) ||
                 flint::fmpz_sgn(flint::FmpzConstRef(
                         *cached_torsion_order)) <= 0 ||
+                ::fmpz_is_even(cached_torsion_order->raw()) == 0 ||
+                !order_element_has_exact_order(
+                        *cached_torsion_generator, order,
+                        flint::FmpzConstRef(*cached_torsion_order)) ||
                 !candidate.torsion_generator_.set(
                         *cached_torsion_generator)) {
                 SILEX_LOG(out.diagnostics(), DiagnosticsModule::unit_group,
@@ -1203,6 +1211,68 @@ bool order_unit_group_set_units_internal(
 
     out.swap(candidate);
     return true;
+}
+
+bool order_element_has_exact_order(const OrderElement& generator,
+                                   const Order& order,
+                                   flint::FmpzConstRef torsion_order) noexcept {
+    const Order* generator_parent = generator.parent();
+    const NumberField* field = order.parent();
+    if (generator_parent == nullptr || field == nullptr ||
+        !generator_parent->has_same_data(order) ||
+        flint::fmpz_sgn(torsion_order) <= 0 ||
+        !flint::fmpz_fits_si(torsion_order)) {
+        return false;
+    }
+
+    const slong w = flint::fmpz_get_si(torsion_order);
+    Element value(*field);
+    Element power(*field);
+    if (!value.is_defined() || !power.is_defined() ||
+        !generator.get_element(value) ||
+        !compute_power(power, value, w) || !power.equal_si(1)) {
+        return false;
+    }
+
+    // Exact order w: no proper power g^(w/q), q a prime divisor of w, is 1.
+    slong rest = w;
+    for (slong q = 2; rest > 1; ++q) {
+        if (q > rest / q) {
+            q = rest;
+        }
+        if (rest % q != 0) {
+            continue;
+        }
+        while (rest % q == 0) {
+            rest /= q;
+        }
+        if (!compute_power(power, value, w / q) || power.equal_si(1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool order_unit_torsion_is_computed(const OrderUnitGroup& units) noexcept {
+    const Order* order = units.parent();
+    if (!units.is_set() || order == nullptr) {
+        return false;
+    }
+
+    flint::Fmpz computed_order;
+    OrderElement computed_generator(*order);
+    flint::Fmpz stored_order;
+    OrderElement stored_generator(*order);
+    return computed_generator.is_defined() && stored_generator.is_defined() &&
+           rank_zero_torsion(flint::FmpzRef(computed_order),
+                             computed_generator, *order) &&
+           units.torsion_order(flint::FmpzRef(stored_order)) &&
+           flint::fmpz_equal(flint::FmpzConstRef(stored_order),
+                             flint::FmpzConstRef(computed_order)) &&
+           units.torsion_generator(stored_generator) &&
+           order_element_has_exact_order(
+                   stored_generator, *order,
+                   flint::FmpzConstRef(computed_order));
 }
 
 }  // namespace detail

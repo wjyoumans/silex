@@ -21,20 +21,11 @@ class PrimeIdealList;
 namespace detail {
 
 class MaximalQuadraticPrimeAccess;
-bool set_degree_one_prime_ideal_from_root(PrimeIdeal& out,
-                                          const Order& order,
-                                          flint::FmpzConstRef p,
-                                          flint::FmpzConstRef root) noexcept;
+class PrimeIdealAccess;
 const flint::FmpzPoly* residue_polynomial_ptr(
         const PrimeIdeal& prime) noexcept;
 const flint::Fmpz* linear_residue_root_ptr(
         const PrimeIdeal& prime) noexcept;
-bool prime_ideal_valuation_with_norm_vp(
-        slong& out,
-        const PrimeIdeal& prime,
-        const OrderElement& element,
-        slong norm_vp,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
 
 }  // namespace detail
 
@@ -147,21 +138,13 @@ private:
                                 slong max_residue_degree,
                                 const DiagnosticsContext* diagnostics) noexcept;
     friend class detail::MaximalQuadraticPrimeAccess;
-    friend bool detail::set_degree_one_prime_ideal_from_root(
-            PrimeIdeal& out,
-            const Order& order,
-            flint::FmpzConstRef p,
-            flint::FmpzConstRef root) noexcept;
+    // Hooks that trust a caller-supplied residue root or norm valuation are
+    // reachable only through the noninstalled detail::PrimeIdealAccess.
+    friend class detail::PrimeIdealAccess;
     friend const flint::FmpzPoly* detail::residue_polynomial_ptr(
             const PrimeIdeal& prime) noexcept;
     friend const flint::Fmpz* detail::linear_residue_root_ptr(
             const PrimeIdeal& prime) noexcept;
-    friend bool detail::prime_ideal_valuation_with_norm_vp(
-            slong& out,
-            const PrimeIdeal& prime,
-            const OrderElement& element,
-            slong norm_vp,
-            const DiagnosticsContext* diagnostics) noexcept;
 
     Order parent_;
     flint::Fmpz p_;

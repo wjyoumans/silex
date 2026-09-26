@@ -2727,7 +2727,7 @@ bool PrimeIdeal::valuation(
 
 namespace detail {
 
-bool prime_ideal_valuation_with_norm_vp(
+bool PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
         slong& out,
         const PrimeIdeal& prime,
         const OrderElement& element,
@@ -3479,16 +3479,42 @@ bool MaximalQuadraticPrimeAccess::set_first_degree_one_prime(
     return true;
 }
 
-bool set_degree_one_prime_ideal_from_root(PrimeIdeal& out,
-                                          const Order& order,
-                                          flint::FmpzConstRef p,
-                                          flint::FmpzConstRef root) noexcept {
+bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
+        PrimeIdeal& out,
+        const Order& order,
+        flint::FmpzConstRef p,
+        flint::FmpzConstRef root) noexcept {
     if (!out.is_defined() || !same_order_parent(out.parent(), &order) ||
         !order.has_basis() || order.parent() == nullptr ||
         (!order.is_equation_order() && !order.is_maximal()) ||
         fmpz_is_prime(p.raw()) == 0 ||
         !fmpq_poly_is_monic_integral(order.parent()->raw_flint_field()->pol)) {
         return false;
+    }
+
+    {
+        // (p, theta - r) is a degree-one prime with e = 1 only when r is a
+        // root of f mod p and p does not divide the index [O_K : Z[theta]];
+        // f squarefree mod p gives both p unramified in Z[theta] and the
+        // Dedekind-Kummer hypothesis (Cohen, GTM 138, Thm. 4.8.13).  This is
+        // the same condition as the degree-one fast path of decompose_prime.
+        flint::FmpzModCtx check_ctx(p.raw());
+        flint::FmpzModPoly reduced(check_ctx);
+        flint::Fmpz value;
+        flint::Fmpz reduced_root;
+        if (!reduced.is_initialized()) {
+            return false;
+        }
+        fmpq_poly_get_fmpz_mod_poly(reduced,
+                                    order.parent()->raw_flint_field()->pol,
+                                    check_ctx);
+        fmpz_mod(reduced_root.raw(), root.raw(), p.raw());
+        fmpz_mod_poly_evaluate_fmpz(value.raw(), reduced.raw(),
+                                    reduced_root.raw(), check_ctx.raw());
+        if (!fmpz_is_zero(value.raw()) ||
+            fmpz_mod_poly_is_squarefree(reduced.raw(), check_ctx.raw()) == 0) {
+            return false;
+        }
     }
 
     const NumberField* field = order.parent();

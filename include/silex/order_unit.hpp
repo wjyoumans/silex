@@ -90,15 +90,7 @@ struct UnitProofRecordData {
     bool changed = false;
 };
 
-bool order_unit_group_set_units_internal(
-        OrderUnitGroup& out,
-        const Order& order,
-        FactoredElementSpan generators,
-        EmbeddingContext& embeddings,
-        slong precision,
-        bool trusted,
-        const flint::Fmpz* cached_torsion_order = nullptr,
-        const OrderElement* cached_torsion_generator = nullptr) noexcept;
+class OrderUnitGroupAccess;
 
 }  // namespace detail
 
@@ -284,15 +276,9 @@ private:
 
     void mark_certification_proven_() noexcept;
 
-    friend bool detail::order_unit_group_set_units_internal(
-            OrderUnitGroup& out,
-            const Order& order,
-            FactoredElementSpan generators,
-            EmbeddingContext& embeddings,
-            slong precision,
-            bool trusted,
-            const flint::Fmpz* cached_torsion_order,
-            const OrderElement* cached_torsion_generator) noexcept;
+    // Internal unit-installation hooks (trusted generators, cached torsion)
+    // are reachable only through the noninstalled detail::OrderUnitGroupAccess.
+    friend class detail::OrderUnitGroupAccess;
     bool mark_unit_proof(flint::FmpzConstRef ell,
                          ProofState status,
                          flint::FmpzConstRef aux_prime_bound,

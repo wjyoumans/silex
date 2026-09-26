@@ -1,6 +1,7 @@
 #include <silex/relation.hpp>
 
 #include "relation_internal.hpp"
+#include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/abelian_group.hpp>
 #include <silex/flint/fmpz_factor.hpp>
@@ -705,7 +706,7 @@ bool factor_integral_data_over_base_by_residue_screen(
                                 false);
                     }
                     has_valuation =
-                            detail::prime_ideal_valuation_with_norm_vp(
+                            detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
                                     valuation, *prime, integral_alpha,
                                     block_vp, diagnostics);
                 }

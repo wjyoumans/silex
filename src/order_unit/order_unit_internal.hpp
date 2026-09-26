@@ -110,6 +110,62 @@ bool ordinary_unit_coordinates(
 bool compute_power(Element& out,
                    const Element& base,
                    slong exponent) noexcept;
+
+// Noninstalled unit-installation hook.  `trusted` skips the per-generator
+// unit check for internal routes whose generators are already known units.
+// Cached torsion (both pointers or neither) replaces the torsion
+// recomputation; it is accepted only when `cached_torsion_order` is a
+// positive even integer and `cached_torsion_generator` is an element of
+// `order` of exactly that multiplicative order.  The installed group always
+// publishes unknown certification; proven publication re-derives torsion
+// (see order_unit_torsion_is_computed).
+class OrderUnitGroupAccess {
+public:
+    static bool set_units(
+            OrderUnitGroup& out,
+            const Order& order,
+            FactoredElementSpan generators,
+            EmbeddingContext& embeddings,
+            slong precision,
+            bool trusted,
+            const flint::Fmpz* cached_torsion_order,
+            const OrderElement* cached_torsion_generator) noexcept;
+
+    // Marks a set group proven without any check.  Internal proof routes
+    // call this only after their own proof succeeds; tests use it to build a
+    // proven-labelled group whose later rejection must come from the
+    // class-group gate itself.
+    static void mark_certification_proven(OrderUnitGroup& units) noexcept {
+        units.mark_certification_proven_();
+    }
+};
+
+inline bool order_unit_group_set_units_internal(
+        OrderUnitGroup& out,
+        const Order& order,
+        FactoredElementSpan generators,
+        EmbeddingContext& embeddings,
+        slong precision,
+        bool trusted,
+        const flint::Fmpz* cached_torsion_order = nullptr,
+        const OrderElement* cached_torsion_generator = nullptr) noexcept {
+    return OrderUnitGroupAccess::set_units(
+            out, order, generators, embeddings, precision, trusted,
+            cached_torsion_order, cached_torsion_generator);
+}
+
+// True when `generator` lies in `order` and has multiplicative order exactly
+// `torsion_order` (a positive integer fitting in slong).
+bool order_element_has_exact_order(const OrderElement& generator,
+                                   const Order& order,
+                                   flint::FmpzConstRef torsion_order) noexcept;
+
+// True when the torsion stored in `units` is the torsion subgroup of its
+// order as Silex computes it (rank_zero_torsion): the stored order equals the
+// computed order and the stored generator has exactly that order.  Proven
+// unit publication calls this so that it never relies on torsion data that
+// was supplied rather than computed.
+bool order_unit_torsion_is_computed(const OrderUnitGroup& units) noexcept;
 bool compact_places(slong& places, EmbeddingContext& embeddings) noexcept;
 bool compact_log_matrix(flint::ArbMat& out,
                         EmbeddingContext& embeddings,
