@@ -641,6 +641,7 @@ int test_maximal_order_failure_preserves_output() {
     assert(!wrong_parent.has_basis());
 
     silex::Order generic_out = silex::test::equation_order(generic_field);
+    assert(!generic_out.maximality_known());
     assert(generic_out.maximal_order(generic_order));
     assert(generic_out.maximality_known());
     assert(generic_out.is_maximal());
@@ -729,6 +730,27 @@ int test_maximality_is_only_computed() {
     assert(sflint::fmpz_equal_si(index, 2));
     assert(!equation.is_maximal());
     assert(!permuted.is_maximal());
+
+    // A quadratic basis in conductor form carries computed maximality.
+    sflint::FmpqMat conductor_form(2, 2);
+    mat_entry_si(conductor_form, 0, 0, 1);
+    mat_entry_frac_si(conductor_form, 1, 0, 1, 2);
+    mat_entry_frac_si(conductor_form, 1, 1, 1, 2);
+    silex::Order recognised = silex::Order::from_basis(
+            field, sflint::FmpqMatConstRef(conductor_form));
+    assert(recognised.maximality_known());
+    assert(recognised.is_maximal());
+
+    // In degree one only the identity basis carries the flag.
+    sflint::FmpqPoly linear;
+    poly_x(linear);
+    silex::NumberField rational = field_by_polynomial(linear);
+    sflint::FmpqMat negated(1, 1);
+    mat_entry_si(negated, 0, 0, -1);
+    silex::Order negated_order = silex::Order::from_basis(
+            rational, sflint::FmpqMatConstRef(negated));
+    assert(negated_order.is_defined());
+    assert(!negated_order.maximality_known());
     return 0;
 }
 

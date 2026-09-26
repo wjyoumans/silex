@@ -99,8 +99,10 @@ public:
     bool has_basis() const noexcept;
     bool is_equation_order() const noexcept;
     // Maximality is only ever computed, never asserted: it is known after
-    // maximal_order(), for quadratic orders with conductor metadata, and in
-    // degree one.  There is deliberately no public setter.
+    // maximal_order(), for quadratic orders whose basis is recognised in
+    // conductor form, and for degree-one orders with the identity basis.  There is deliberately no public setter.  Names in
+    // silex::detail (including detail::OrderAccess) are internal to Silex and
+    // its tests, not a supported entry point.
     bool maximality_known() const noexcept;
     bool is_maximal() const noexcept;
 

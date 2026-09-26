@@ -34,11 +34,21 @@ scratch-object helpers; ordinary public examples and tests use factories
 except when mutation/failure behavior is what the test covers.
 
 Maximality is computed, never asserted.  ``Order::maximality_known()`` and
-``Order::is_maximal()`` report a flag that only Silex sets: ``maximal_order``
-sets it on its result, quadratic orders carry it through their conductor
-metadata, and degree-one orders are maximal.  Every other order, including
-one built with ``from_basis`` for a lattice that happens to be maximal,
-reports unknown maximality.  There is no public setter; Silex 0.1.1 had
+``Order::is_maximal()`` report a flag that only Silex sets, and only for
+these constructions:
+
+- results of ``maximal_order``, which are known maximal;
+- quadratic-backend orders whose basis Silex recognises in conductor form
+  (``quadratic_order``, the quadratic equation order, and ``from_basis`` or
+  ``set_basis`` with a basis in that form), which are maximal exactly when the
+  conductor is 1; this includes quadratic ``pmaximal_overorder`` results;
+- degree-one orders with the identity basis, and degree-one results of
+  ``maximal_order`` or ``pmaximal_overorder``, which are maximal.
+
+Every other order reports unknown maximality, even when its lattice is
+maximal: for example a quadratic order given by a permuted basis, a
+degree-one order with basis ``[[-1]]``, or a generic ``pmaximal_overorder``
+result.  There is no public setter; Silex 0.1.1 had
 ``Order::set_maximality``, which is removed.  Routines that need the maximal
 order, among them class groups, factor bases, and S-units, trust this flag and
 refuse orders that are not known maximal, so an order built another way must
