@@ -932,6 +932,9 @@ bool subtract_rational_denominator_row(
                         static_cast<ulong>(exponent));
         }
 
+        // The numerator was factored smooth, so v_Q(N) = 0 at any prime Q
+        // over p outside the base, and v_Q(alpha) = -e_Q v_p(d) < 0.  An
+        // incomplete block over a denominator prime is therefore nonsmooth.
         if (block_degree != parent->degree()) {
             SILEX_RELATION_PROFILE_EVENT(
                     diagnostics,
@@ -967,10 +970,17 @@ bool factor_nonintegral_element_over_base_by_denominator_split(
         const DiagnosticsContext* diagnostics) noexcept {
     // reference `class_group_add_relation` and `_factor!` include the order
     // denominator in the nonintegral smoothness filter, then factor the
-    // element valuations.  For maximal equation orders, this guarded native
-    // slice uses the equivalent numerator row minus the rational denominator
-    // ideal row, matching the existing C fractional-ideal factorization
-    // without materializing the full fractional principal ideal.
+    // element valuations.  For maximal equation orders, write alpha = N/d
+    // with d the minimal rational denominator; then v_P(alpha) = v_P(N) -
+    // v_P(d) at every prime P, so the row is the numerator row minus the row
+    // of dO, without materializing the fractional principal ideal.  The
+    // numerator is factored first.  Its screen reports nonsmooth only for a
+    // norm prime q with no base primes above it.  If q does not divide d,
+    // some Q over q has v_Q(alpha) = v_Q(N) > 0; if q divides d, minimality
+    // of d gives some Q over q with v_Q(alpha) < 0.  Either way alpha is not
+    // smooth.  A numerator the screen cannot account for, such as one
+    // divisible by a missing prime of an incomplete block, is unsupported
+    // and goes to the fractional-ideal fallback.
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::relation,
                         "relation.factor_over_base_nonintegral_element");
     status = ElementFactorOverBaseStatus::unsupported;
