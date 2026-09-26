@@ -226,6 +226,12 @@ public:
                              flint::FmpzConstRef ell,
                              EmbeddingContext& embeddings,
                              slong precision) noexcept;
+    // In the bounded saturation passes, stable=true means only that a pass
+    // over the selected residue-character kernel adjoined no root.  It does
+    // not mean the subgroup is saturated: kernel rows that are not l-th
+    // powers, or whose l-th root is not a unit of this order, are skipped.
+    // Saturation is certified only by a proof route that records a verified
+    // unit-proof status, such as prove_local_saturated or prove_index_bound.
     bool saturate_bounded(bool& changed,
                           bool& stable,
                           const OrderUnitGroup& group,

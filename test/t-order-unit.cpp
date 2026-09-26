@@ -3699,15 +3699,15 @@ bool first_free_generator_is_pm_unit_power_pm1(
     return false;
 }
 
-bool regulator_is_near(const silex::OrderUnitGroup& group,
-                       double expected) noexcept {
+// True when the regulator ball contains `expected`, a 100-digit decimal
+// read at 1024 bits (its conversion error is far below the ball radius).
+bool regulator_contains(const silex::OrderUnitGroup& group,
+                        const char* expected) noexcept {
     sflint::Arb regulator;
-    if (!group.regulator(sflint::ArbRef(regulator))) {
-        return false;
-    }
-    const double mid = ::arf_get_d(arb_midref(regulator.raw()), ARF_RND_NEAR);
-    const double diff = mid - expected;
-    return diff < 1e-9 && diff > -1e-9;
+    sflint::Arb reference;
+    return group.regulator(sflint::ArbRef(regulator)) &&
+           ::arb_set_str(reference.raw(), expected, 1024) == 0 &&
+           ::arb_contains(regulator.raw(), reference.raw()) != 0;
 }
 
 bool set_single_unit_group(silex::OrderUnitGroup& out,
@@ -3735,7 +3735,7 @@ void assert_nonmaximal_proof_fails_closed(
         const silex::Order& order,
         const silex::OrderUnitGroup& start,
         const silex::Element& expected_generator,
-        double expected_regulator,
+        const char* expected_regulator,
         slong aux_bound_value,
         silex::EmbeddingContext& embeddings) {
     sflint::Fmpz aux_bound;
@@ -3753,7 +3753,7 @@ void assert_nonmaximal_proof_fails_closed(
     assert(check_first_free_generator_is_order_unit(proved, order));
     assert(first_free_generator_is_pm_unit_power_pm1(proved,
                                                      expected_generator));
-    assert(regulator_is_near(proved, expected_regulator));
+    assert(regulator_contains(proved, expected_regulator));
     sflint::Fmpz torsion_order;
     assert(proved.torsion_order(sflint::FmpzRef(torsion_order)));
     assert(sflint::fmpz_equal_si(torsion_order, 2));
@@ -3772,7 +3772,10 @@ int test_prove_index_bound_nonmaximal_quadratic_sqrt5() {
     silex::Order equation = silex::test::equation_order(field);
     assert(!equation.is_maximal());
     silex::EmbeddingContext embeddings(field);
-    constexpr double kLogFundamental = 1.4436354751788103;
+    // GP: \p 100; quadregulator(20)
+    const char* const kLogFundamental =
+            "1.443635475178810342493276740273105269405553003156981558983054"
+            "506520491602824665323236028287368170425";
 
     silex::Element order_unit(field);  // 2 + sqrt5 = phi^3
     assert(set_quadratic_coeffs(order_unit, 2, 1, 1, 1));
@@ -3838,6 +3841,56 @@ int test_prove_index_bound_nonmaximal_quadratic_sqrt5() {
     return 0;
 }
 
+// Detail-level check of the dependent-relation adjoin.  With the group
+// <2 + sqrt5> of Z[sqrt5] and the relation row (-1, 3), i.e.
+// root^3 = 2 + sqrt5, the root phi lies outside the order and must not be
+// adjoined; the in-order square root 2 + sqrt5 of <9 + 4 sqrt5> still is.
+int test_adjoin_dependent_relation_nonmaximal_root() {
+    silex::NumberField field = quadratic_field(5);
+    silex::Order equation = silex::test::equation_order(field);
+    assert(!equation.is_maximal());
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element phi(field);
+    assert(set_quadratic_coeffs(phi, 1, 2, 1, 2));
+    silex::Element order_unit(field);  // 2 + sqrt5 = phi^3
+    assert(set_quadratic_coeffs(order_unit, 2, 1, 1, 1));
+    silex::Element order_unit2(field);
+    assert(order_unit2.multiply(order_unit, order_unit));
+
+    silex::OrderUnitGroup group(equation);
+    assert(set_single_unit_group(group, equation, order_unit, embeddings));
+    silex::FactoredElement root(field);
+    assert(root.set_element(phi));
+    sflint::FmpzMat rel(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(rel, 0, 0), -1);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(rel, 0, 1), 3);
+
+    silex::OrderUnitGroup out(equation);
+    bool changed = true;
+    assert(silex::detail::adjoin_verified_dependent_relation(
+            changed, out, group, root, sflint::FmpzMatConstRef(rel), 0,
+            embeddings, 256));
+    assert(!changed);
+    assert(check_first_free_generator(out, order_unit));
+
+    silex::OrderUnitGroup square_group(equation);
+    assert(set_single_unit_group(square_group, equation, order_unit2,
+                                 embeddings));
+    silex::FactoredElement square_root(field);
+    assert(square_root.set_element(order_unit));
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(rel, 0, 1), 2);
+    silex::OrderUnitGroup square_out(equation);
+    changed = false;
+    assert(silex::detail::adjoin_verified_dependent_relation(
+            changed, square_out, square_group, square_root,
+            sflint::FmpzMatConstRef(rel), 0, embeddings, 256));
+    assert(changed);
+    assert(check_first_free_generator_is_order_unit(square_out, equation));
+    assert(first_free_generator_is_pm_unit_power_pm1(square_out, order_unit));
+    return 0;
+}
+
 // Control: in the maximal order Z[phi] the same proof adjoins phi and
 // proves the group with regulator log(phi).
 int test_prove_index_bound_maximal_quadratic_sqrt5_control() {
@@ -3870,7 +3923,11 @@ int test_prove_index_bound_maximal_quadratic_sqrt5_control() {
     assert(changed);
     assert(proved.certification_status() == silex::CertificationMode::proven);
     assert(first_free_generator_is_pm_unit_power_pm1(proved, phi));
-    assert(regulator_is_near(proved, 0.48121182505960345));
+    // GP: \p 100; quadregulator(5)
+    assert(regulator_contains(
+            proved,
+            "0.481211825059603447497758913424368423135184334385660519661018"
+            "1688401638676082217744120094291227234750"));
     return 0;
 }
 
@@ -3889,7 +3946,10 @@ int test_prove_index_bound_nonmaximal_quadratic_sqrt18() {
             sflint::FmpzPolyConstRef(polynomial));
     silex::Order equation = silex::test::equation_order(field);
     silex::EmbeddingContext embeddings(field);
-    constexpr double kLogFundamental = 3.5254943480781721;
+    // GP: \p 100; quadregulator(72)
+    const char* const kLogFundamental =
+            "3.525494348078172100930437299919169236112641313046541643013182"
+            "434613508736888104351334827567641024171";
 
     silex::Element order_unit(field);  // 17 + 4 sqrt18 = (1 + sqrt2)^4
     assert(set_quadratic_coeffs(order_unit, 17, 1, 4, 1));
@@ -4702,6 +4762,7 @@ int main() {
     test_cached_torsion_never_reaches_proven();
     test_prove_index_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();
+    test_adjoin_dependent_relation_nonmaximal_root();
     test_prove_index_bound_maximal_quadratic_sqrt5_control();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
     test_saturate_index_bounded();
