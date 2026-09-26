@@ -115,6 +115,8 @@ def main() -> int:
     root = args.root.resolve()
     checked_paths = iter_existing(root, [
         "src/**/*.cpp",
+        "src/**/*.hpp",
+        "src/**/*.inc",
         "include/silex/**/*.hpp",
         "include/silex/**/*.h",
     ])
