@@ -874,12 +874,16 @@ int test_compute_with_class_group_quintic_proven() {
     // The native reference-style unit extraction can certify this pair without
     // preserving the older incidental surplus of five kernel rows.
     assert(class_group.relation_kernel_unit_count() >= units.free_rank());
-    assert(class_group.analytic_class_regulator_status() ==
-           silex::ProofState::verified);
+    // A degree-five hR comes only from Belabas-Friedman, which assumes GRH,
+    // so `proven` is reached by generation, proven units, and relation
+    // saturation at every prime dividing h_cand; no analytic check is
+    // recorded as the proof.
+    assert(class_group.analytic_class_regulator_certification() !=
+           silex::CertificationMode::proven);
     assert(class_group.factor_base_generation_checked_status() ==
            silex::ProofState::verified);
-    assert(class_group.relation_saturation_status() !=
-           silex::ProofState::unavailable);
+    assert(class_group.relation_saturation_status() ==
+           silex::ProofState::verified);
     assert(class_group.unit_proof_status() == silex::ProofState::verified);
     assert(class_group.regulator_proof_status() ==
            silex::ProofState::verified);
@@ -3388,6 +3392,9 @@ int test_class_unit_regulator_certification() {
                silex::CertificationMode::proven);
         assert(class_group.analytic_class_regulator_status() ==
                silex::ProofState::verified);
+        // The quadratic L(1, chi) route is unconditional.
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::proven);
         assert(class_group.unit_proof_status() ==
                silex::ProofState::verified);
         assert(class_group.regulator_proof_status() ==
@@ -3628,6 +3635,122 @@ int test_cached_torsion_never_reaches_proven() {
         assert(class_group.certification_status() ==
                silex::CertificationMode::proven);
         assert(computed.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    return 0;
+}
+
+// Belabas-Friedman (2015, Theorem 1) bounds the truncation error of its hR
+// evaluation only under GRH for zeta_K and zeta_Q.  For degree >= 3 that is
+// the only analytic hR, so it may never publish `proven`: the gates fail
+// closed, and a check that is recorded carries the `grh` label.
+int test_belabas_friedman_class_regulator_is_grh_conditional() {
+    using CertificationAccess =
+            silex::detail::ClassGroupCertificationAccess;
+
+    // x^3 - x - 1: h = 1, unit rank 1, and the root theta is a fundamental
+    // unit (theta (theta^2 - 1) = 1; R = log theta = 0.2812...).
+    silex::NumberField field = cubic_field(-1, -1);
+    silex::Order equation;
+    equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+    silex::EmbeddingContext embeddings(field);
+
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+
+    silex::Element theta(field);
+    assert(theta.gen());
+
+    // Unproven units and a candidate class group: before this rule the
+    // zeta gates published `proven` from the Belabas-Friedman hR (index
+    // one).  They now fail closed and leave both objects unchanged.
+    {
+        silex::ClassGroupCandidateOptions options;
+        options.max_candidates = 5000;
+        options.max_relations = 500;
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), options));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        silex::OrderUnitGroup units(order);
+        silex::FactoredElement generator(field);
+        assert(generator.set_element(theta));
+        silex::FactoredElement generators[] = {std::move(generator)};
+        assert(units.set_units(order,
+                               silex::FactoredElementSpan(generators, 1),
+                               embeddings, 256));
+        assert(units.certification_status() ==
+               silex::CertificationMode::unknown);
+
+        sflint::Arb zeta_hR;
+        assert(silex::zeta_class_regulator_product(sflint::ArbRef(zeta_hR),
+                                                   order, 256));
+
+        assert(!class_group.try_certify_class_unit_with_zeta(units, 256));
+        assert(!class_group.try_certify_class_unit_with_zeta_bf(units, 20000,
+                                                                256));
+        assert(!CertificationAccess::try_certify_class_unit_with_units(
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+        assert(!class_group.try_certify_with_units(
+                units, silex::CertificationMode::proven, 256, 20000));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.zeta_bf_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(units.certification_status() ==
+               silex::CertificationMode::unknown);
+    }
+
+    // A `proven` request succeeds only through generation, proven units,
+    // and relation saturation at every p | h_cand.  A Belabas-Friedman
+    // audit recorded afterwards is labelled `grh`; it does not replace the
+    // saturation proof.
+    {
+        silex::ClassGroupComputeOptions options;
+        options.max_candidates = 5000;
+        options.max_relations = 500;
+        options.zeta_bf_max_cutoff = 20000;
+        options.requested_certification = silex::CertificationMode::proven;
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units;
+        assert(units.compute_with_class_group(class_group, order,
+                                              sflint::FmpzConstRef(bound),
+                                              options, 128));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_certification() !=
+               silex::CertificationMode::proven);
+
+        assert(class_group.try_certify_class_unit_with_zeta_bf(units, 20000,
+                                                               128));
+        assert(class_group.zeta_bf_proof_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::grh);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(class_group.certification_status() ==
                silex::CertificationMode::proven);
     }
 
@@ -5063,6 +5186,7 @@ int main() {
     test_class_regulator_index_bound_interval_boundary();
     test_unit_index_bound_from_regulator_quotient();
     test_class_unit_regulator_certification();
+    test_belabas_friedman_class_regulator_is_grh_conditional();
     test_cached_torsion_never_reaches_proven();
     test_prove_index_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();

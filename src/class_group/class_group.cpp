@@ -4295,6 +4295,7 @@ struct ClassGroupContext::CertificationSnapshot_ {
     std::vector<detail::RelationSaturationProofRecord>
             relation_saturation_proof_records;
     ProofState analytic_class_regulator_status = ProofState::not_checked;
+    bool analytic_class_regulator_assumes_grh = false;
     ProofState zeta_bf_status = ProofState::not_checked;
     ulong zeta_bf_cutoff = 0;
     ulong zeta_bf_max_cutoff = 0;
@@ -4476,13 +4477,16 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
         slong requested_precision,
         slong work_precision) noexcept {
     ClassGroupContext::CertificationTransaction_ transaction(context);
+    // Belabas-Friedman is unconditional only in degree one, where the
+    // residue is exactly one; otherwise its error bound assumes GRH.
+    const bool hr_unconditional = context.parent_.degree() == 1;
     flint::Fmpz required_bound;
     if (!context.factor_base_generation_bound(flint::FmpzRef(required_bound)) ||
         !context.check_factor_base_generation_bound(
                 flint::FmpzConstRef(required_bound)) ||
         !context.record_analytic_class_unit_regulator_(
                 units, analytic_class_regulator_product,
-                requested_precision) ||
+                requested_precision, hr_unconditional) ||
         !context.record_zeta_bf_audit_(error_bound, cutoff, max_cutoff,
                                        requested_precision,
                                        work_precision) ||
@@ -4490,7 +4494,9 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
         return false;
     }
 
-    units.mark_certification_proven_();
+    if (hr_unconditional) {
+        units.mark_certification_proven_();
+    }
     return transaction.finish(true);
 }
 
@@ -4499,8 +4505,22 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_units(
         OrderUnitGroup& units,
         flint::ArbConstRef analytic_class_regulator_product,
         slong precision) noexcept {
+    return try_certify_class_unit_with_units(
+            context, units, analytic_class_regulator_product, precision,
+            true);
+}
+
+bool ClassGroupCertificationAccess::try_certify_class_unit_with_units(
+        ClassGroupContext& context,
+        OrderUnitGroup& units,
+        flint::ArbConstRef analytic_class_regulator_product,
+        slong precision,
+        bool hr_unconditional) noexcept {
     return context.try_certify_class_unit_with_units_(
-            units, analytic_class_regulator_product, precision);
+            units, analytic_class_regulator_product, precision,
+            hr_unconditional &&
+                    detail::zeta_unconditional_route_available(
+                            context.parent_));
 }
 
 bool ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
@@ -4509,9 +4529,33 @@ bool ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
         flint::ArbConstRef analytic_class_regulator_product,
         flint::FmpzConstRef aux_prime_bound,
         slong precision) noexcept {
+    return try_analytic_index_bound_with_units(
+            context, units, analytic_class_regulator_product,
+            aux_prime_bound, precision, true);
+}
+
+bool ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
+        ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        flint::ArbConstRef analytic_class_regulator_product,
+        flint::FmpzConstRef aux_prime_bound,
+        slong precision,
+        bool hr_unconditional) noexcept {
     return context.try_analytic_index_bound_with_units_(
             units, analytic_class_regulator_product, aux_prime_bound,
-            precision);
+            precision,
+            hr_unconditional &&
+                    detail::zeta_unconditional_route_available(
+                            context.parent_));
+}
+
+bool ClassGroupCertificationAccess::
+        try_prove_class_order_saturation_with_units(
+                ClassGroupContext& context,
+                const OrderUnitGroup& units,
+                flint::FmpzConstRef aux_prime_bound) noexcept {
+    return context.try_prove_class_order_saturation_with_units_(
+            units, aux_prime_bound);
 }
 
 bool ClassGroupCertificationAccess::
@@ -7006,6 +7050,7 @@ void ClassGroupContext::reset_certification_metadata_() noexcept {
         private_storage_->relation_saturation_proof_records.clear();
     }
     analytic_class_regulator_status_ = ProofState::not_checked;
+    analytic_class_regulator_assumes_grh_ = false;
     zeta_bf_status_ = ProofState::not_checked;
     zeta_bf_cutoff_ = 0;
     zeta_bf_max_cutoff_ = 0;
@@ -7255,6 +7300,8 @@ void ClassGroupContext::save_certification_state_(
             factor_base_generation_checked_status_;
     out.relation_saturation_status = relation_saturation_status_;
     out.analytic_class_regulator_status = analytic_class_regulator_status_;
+    out.analytic_class_regulator_assumes_grh =
+            analytic_class_regulator_assumes_grh_;
     out.zeta_bf_status = zeta_bf_status_;
     out.zeta_bf_cutoff = zeta_bf_cutoff_;
     out.zeta_bf_max_cutoff = zeta_bf_max_cutoff_;
@@ -7310,6 +7357,8 @@ void ClassGroupContext::restore_certification_state_(
             saved.factor_base_generation_checked_status;
     relation_saturation_status_ = saved.relation_saturation_status;
     analytic_class_regulator_status_ = saved.analytic_class_regulator_status;
+    analytic_class_regulator_assumes_grh_ =
+            saved.analytic_class_regulator_assumes_grh;
     zeta_bf_status_ = saved.zeta_bf_status;
     zeta_bf_cutoff_ = saved.zeta_bf_cutoff;
     zeta_bf_max_cutoff_ = saved.zeta_bf_max_cutoff;
@@ -7583,6 +7632,8 @@ void ClassGroupContext::swap(ClassGroupContext& other) noexcept {
               other.relation_saturation_status_);
     std::swap(analytic_class_regulator_status_,
               other.analytic_class_regulator_status_);
+    std::swap(analytic_class_regulator_assumes_grh_,
+              other.analytic_class_regulator_assumes_grh_);
     std::swap(zeta_bf_status_, other.zeta_bf_status_);
     std::swap(zeta_bf_cutoff_, other.zeta_bf_cutoff_);
     std::swap(zeta_bf_max_cutoff_, other.zeta_bf_max_cutoff_);
@@ -7628,6 +7679,7 @@ void ClassGroupContext::clear() noexcept {
     factor_base_generation_checked_status_ = ProofState::not_checked;
     relation_saturation_status_ = ProofState::not_checked;
     analytic_class_regulator_status_ = ProofState::not_checked;
+    analytic_class_regulator_assumes_grh_ = false;
     zeta_bf_status_ = ProofState::not_checked;
     zeta_bf_cutoff_ = 0;
     zeta_bf_max_cutoff_ = 0;
@@ -9183,6 +9235,16 @@ ProofState ClassGroupContext::analytic_class_regulator_status()
                               : ProofState::not_checked;
 }
 
+CertificationMode ClassGroupContext::analytic_class_regulator_certification()
+        const noexcept {
+    if (!has_presentation() ||
+        analytic_class_regulator_status_ != ProofState::verified) {
+        return CertificationMode::unknown;
+    }
+    return analytic_class_regulator_assumes_grh_ ? CertificationMode::grh
+                                                 : CertificationMode::proven;
+}
+
 ProofState ClassGroupContext::zeta_bf_proof_status() const noexcept {
     return has_presentation() ? zeta_bf_status_
                               : ProofState::not_checked;
@@ -9395,64 +9457,40 @@ bool ClassGroupContext::try_certify_with_units(
         return transaction.finish(true);
     }
 
-    flint::Arb analytic_hR;
     flint::Fmpz aux_bound;
     flint::fmpz_set_si(flint::FmpzRef(aux_bound), kAnalyticProofAuxPrimeBound);
-    if (zeta_bf_max_cutoff != 0 && parent_.degree() > 2) {
-        slong rank = -1;
-        if (relation_saturation_status_ != ProofState::verified &&
-            parent_.parent() != nullptr &&
-            unit_rank(rank, *parent_.parent()) && rank == 1 &&
-            zeta_class_regulator_product(flint::ArbRef(analytic_hR),
-                                          parent_, precision)) {
-            SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::class_group,
-                                "class_group.pre_bf_analytic_index_bound");
-            (void) try_analytic_index_bound_with_units_(
-                    units, flint::ArbConstRef(analytic_hR),
-                    flint::FmpzConstRef(aux_bound), precision);
-        }
 
-        flint::Arb error_bound;
-        ulong cutoff = 0;
-        slong work_precision = 0;
-        {
-            SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
-                                "class_group.zeta_bf_audit");
-            if (!zeta_class_regulator_product_bf_audit(
-                        flint::ArbRef(analytic_hR),
-                        flint::ArbRef(error_bound), cutoff, work_precision,
-                        parent_, zeta_bf_max_cutoff, precision)) {
-                return false;
+    // An analytic hR proves the class/unit pair only when it is
+    // unconditional: degree one, or the quadratic L(1, chi) route.  Every
+    // other zeta route, including the Belabas-Friedman evaluation selected
+    // by `zeta_bf_max_cutoff`, assumes GRH for zeta_K and zeta_Q
+    // (Belabas-Friedman 2015, Theorem 1) and cannot support `proven`, so it
+    // is not evaluated here.
+    (void) zeta_bf_max_cutoff;
+    if (detail::zeta_unconditional_route_available(parent_)) {
+        flint::Arb analytic_hR;
+        bool hr_unconditional = false;
+        if (detail::zeta_class_regulator_product_with_diagnostics(
+                    flint::ArbRef(analytic_hR), parent_, precision,
+                    diagnostics_, nullptr, nullptr, &hr_unconditional) &&
+            hr_unconditional) {
+            if (try_certify_analytic_class_regulator_(
+                        units, flint::ArbConstRef(analytic_hR), precision,
+                        true)) {
+                return transaction.finish(true);
+            }
+            if (try_analytic_index_bound_with_units_(
+                        units, flint::ArbConstRef(analytic_hR),
+                        flint::FmpzConstRef(aux_bound), precision, true)) {
+                return transaction.finish(true);
             }
         }
-
-        if (try_certify_analytic_class_regulator_(
-                    units, flint::ArbConstRef(analytic_hR), precision)) {
-            return transaction.finish(record_zeta_bf_audit_(
-                    flint::ArbConstRef(error_bound), cutoff,
-                    zeta_bf_max_cutoff, precision, work_precision));
-        }
-        if (try_analytic_index_bound_with_units_(
-                    units, flint::ArbConstRef(analytic_hR),
-                    flint::FmpzConstRef(aux_bound), precision)) {
-            return transaction.finish(record_zeta_bf_audit_(
-                    flint::ArbConstRef(error_bound), cutoff,
-                    zeta_bf_max_cutoff, precision, work_precision));
-        }
-        return false;
     }
 
-    if (zeta_class_regulator_product(flint::ArbRef(analytic_hR),
-                                      parent_, precision)) {
-        if (try_certify_analytic_class_regulator_(
-                    units, flint::ArbConstRef(analytic_hR), precision)) {
-            return transaction.finish(true);
-        }
-        if (try_analytic_index_bound_with_units_(
-                    units, flint::ArbConstRef(analytic_hR),
-                    flint::FmpzConstRef(aux_bound), precision)) {
-            return transaction.finish(true);
-        }
+    // Unconditional class-group proof by saturation at every p | h_cand.
+    if (try_prove_class_order_saturation_with_units_(
+                units, flint::FmpzConstRef(aux_bound))) {
+        return transaction.finish(true);
     }
 
     return false;
@@ -9555,9 +9593,14 @@ bool ClassGroupContext::try_promote_proven_certification_() noexcept {
     const bool factor_base_verified =
             factor_base_generation_status_ == ProofState::verified &&
             factor_base_generation_checked_status_ == ProofState::verified;
+    // A Belabas-Friedman analytic check assumes GRH and never promotes to
+    // `proven`; the saturation route is unconditional.
+    const bool unconditional_analytic_check =
+            analytic_class_regulator_status_ == ProofState::verified &&
+            !analytic_class_regulator_assumes_grh_;
     const bool factor_base_backed_proof =
             factor_base_verified && unit_regulator_verified &&
-            (analytic_class_regulator_status_ == ProofState::verified ||
+            (unconditional_analytic_check ||
              relation_saturation_proof_complete_());
     if (!has_presentation() || !factor_base_backed_proof) {
         return false;
@@ -9570,10 +9613,11 @@ bool ClassGroupContext::try_promote_proven_certification_() noexcept {
 bool ClassGroupContext::try_certify_analytic_class_regulator_(
         const OrderUnitGroup& units,
         flint::ArbConstRef analytic_hR,
-        slong precision) noexcept {
+        slong precision,
+        bool hr_unconditional) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.try_certify_analytic_class_regulator");
-    if (!has_presentation() ||
+    if (!hr_unconditional || !has_presentation() ||
         !parent_.is_maximal() || precision <= 0 || !units.is_set() ||
         !same_order_parent(units.parent(), &parent_) ||
         units.certification_status() != CertificationMode::proven) {
@@ -9597,6 +9641,7 @@ bool ClassGroupContext::try_certify_analytic_class_regulator_(
     }
 
     analytic_class_regulator_status_ = ProofState::verified;
+    analytic_class_regulator_assumes_grh_ = false;
     unit_proof_status_ = ProofState::verified;
     regulator_proof_status_ = ProofState::verified;
     return try_promote_proven_certification_();
@@ -9605,22 +9650,29 @@ bool ClassGroupContext::try_certify_analytic_class_regulator_(
 bool ClassGroupContext::try_certify_analytic_class_unit_regulator_(
         OrderUnitGroup& units,
         flint::ArbConstRef analytic_hR,
-        slong precision) noexcept {
+        slong precision,
+        bool hr_unconditional) noexcept {
     CertificationTransaction_ transaction(*this);
     if (!record_analytic_class_unit_regulator_(units, analytic_hR,
-                                               precision) ||
+                                               precision, hr_unconditional) ||
         !try_promote_proven_certification_()) {
         return false;
     }
 
-    units.mark_certification_proven_();
+    // Only an unconditional hR proves the unit index; with a GRH hR the
+    // promotion above came from saturation, which already required proven
+    // units.
+    if (hr_unconditional) {
+        units.mark_certification_proven_();
+    }
     return transaction.finish(true);
 }
 
 bool ClassGroupContext::record_analytic_class_unit_regulator_(
         OrderUnitGroup& units,
         flint::ArbConstRef analytic_hR,
-        slong precision) noexcept {
+        slong precision,
+        bool hr_unconditional) noexcept {
     SILEX_PROFILE_SCOPE(
             diagnostics_, DiagnosticsModule::class_group,
             "class_group.record_analytic_class_unit_regulator");
@@ -9649,22 +9701,31 @@ bool ClassGroupContext::record_analytic_class_unit_regulator_(
         return false;
     }
 
+    // The analytic index-one test proves the unit and regulator only when hR
+    // is unconditional.  A GRH-conditional check is recorded as such and
+    // leaves the unit proof to an unconditional unit proof.
     analytic_class_regulator_status_ = ProofState::verified;
-    unit_proof_status_ = ProofState::verified;
-    regulator_proof_status_ = ProofState::verified;
+    analytic_class_regulator_assumes_grh_ = !hr_unconditional;
+    if (hr_unconditional ||
+        units.certification_status() == CertificationMode::proven) {
+        unit_proof_status_ = ProofState::verified;
+        regulator_proof_status_ = ProofState::verified;
+    }
     return true;
 }
 
 bool ClassGroupContext::try_certify_class_unit_with_units_(
         OrderUnitGroup& units,
         flint::ArbConstRef analytic_class_regulator_product,
-        slong precision) noexcept {
+        slong precision,
+        bool hr_unconditional) noexcept {
     if (!flint::arb_is_finite(analytic_class_regulator_product) ||
         !flint::arb_is_positive(analytic_class_regulator_product)) {
         return false;
     }
     return try_certify_analytic_class_unit_regulator_(
-            units, analytic_class_regulator_product, precision);
+            units, analytic_class_regulator_product, precision,
+            hr_unconditional);
 }
 
 bool ClassGroupContext::try_certify_class_unit_with_zeta(
@@ -9677,12 +9738,15 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta(
     }
 
     flint::Arb analytic_hR;
-    if (!zeta_class_regulator_product(flint::ArbRef(analytic_hR),
-                                      parent_, precision)) {
+    bool hr_unconditional = false;
+    if (!detail::zeta_class_regulator_product_with_diagnostics(
+                flint::ArbRef(analytic_hR), parent_, precision, diagnostics_,
+                nullptr, nullptr, &hr_unconditional)) {
         return false;
     }
     return try_certify_analytic_class_unit_regulator_(
-            units, flint::ArbConstRef(analytic_hR), precision);
+            units, flint::ArbConstRef(analytic_hR), precision,
+            hr_unconditional);
 }
 
 bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
@@ -9719,15 +9783,20 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
         return false;
     }
 
+    // Belabas-Friedman is unconditional only in degree one (hR = 1).
+    const bool hr_unconditional = parent_.degree() == 1;
     if (!record_analytic_class_unit_regulator_(
-                units, flint::ArbConstRef(analytic_hR), precision) ||
+                units, flint::ArbConstRef(analytic_hR), precision,
+                hr_unconditional) ||
         !record_zeta_bf_audit_(flint::ArbConstRef(error_bound), cutoff,
                                max_cutoff, precision, work_precision) ||
         !try_promote_proven_certification_()) {
         return false;
     }
 
-    units.mark_certification_proven_();
+    if (hr_unconditional) {
+        units.mark_certification_proven_();
+    }
     return transaction.finish(true);
 }
 
@@ -9742,7 +9811,10 @@ bool ClassGroupContext::record_zeta_bf_audit_(
         return false;
     }
 
+    // Belabas-Friedman Theorem 1 assumes GRH for zeta_K and zeta_Q; only the
+    // degree-one residue (exactly one) is unconditional.
     analytic_class_regulator_status_ = ProofState::verified;
+    analytic_class_regulator_assumes_grh_ = parent_.degree() != 1;
     zeta_bf_status_ = ProofState::verified;
     zeta_bf_cutoff_ = cutoff;
     zeta_bf_max_cutoff_ = max_cutoff;
@@ -9853,11 +9925,13 @@ bool ClassGroupContext::try_analytic_index_bound_with_units_(
         const OrderUnitGroup& units,
         flint::ArbConstRef analytic_class_regulator_product,
         flint::FmpzConstRef aux_prime_bound,
-        slong precision) noexcept {
+        slong precision,
+        bool hr_unconditional) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.try_analytic_index_bound_with_units");
     CertificationTransaction_ transaction(*this);
-    if (!has_presentation() ||
+    // Index one from a GRH-conditional hR is not a saturation proof.
+    if (!hr_unconditional || !has_presentation() ||
         !parent_.is_maximal() || precision <= 0 ||
         !flint::arb_is_finite(analytic_class_regulator_product) ||
         !flint::arb_is_positive(analytic_class_regulator_product) ||
@@ -9897,6 +9971,68 @@ bool ClassGroupContext::try_analytic_index_bound_with_units_(
     private_storage_->relation_saturation_records.clear();
     relation_saturation_status_ = ProofState::verified;
     analytic_class_regulator_status_ = ProofState::verified;
+    analytic_class_regulator_assumes_grh_ = false;
+    return transaction.finish(try_promote_proven_certification_());
+}
+
+// Class-group proof by saturation (source anchor: "Class groups and order
+// units" in docs/reference/algorithms_and_sources.rst; the reference
+// class-group proof): with factor-base generation checked and the unit
+// group proven, the relations are complete once they are saturated at every
+// prime p | h_cand.  No analytic hR is used, so the result is unconditional.
+bool ClassGroupContext::try_prove_class_order_saturation_with_units_(
+        const OrderUnitGroup& units,
+        flint::FmpzConstRef aux_prime_bound) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
+                        "class_group.try_prove_class_order_saturation");
+    CertificationTransaction_ transaction(*this);
+    flint::Fmpz required_bound;
+    flint::Fmpz class_order;
+    if (!has_presentation() || !parent_.is_maximal() ||
+        flint::fmpz_cmp_ui(aux_prime_bound, 2) < 0 ||
+        !units.is_set() || !same_order_parent(units.parent(), &parent_) ||
+        units.certification_status() != CertificationMode::proven ||
+        !factor_base_generation_bound(flint::FmpzRef(required_bound)) ||
+        !check_factor_base_generation_bound(
+                flint::FmpzConstRef(required_bound)) ||
+        !order(flint::FmpzRef(class_order)) ||
+        flint::fmpz_sgn(flint::FmpzConstRef(class_order)) <= 0) {
+        return false;
+    }
+    unit_proof_status_ = ProofState::verified;
+    regulator_proof_status_ = ProofState::verified;
+
+    if (!flint::fmpz_is_one(flint::FmpzConstRef(class_order))) {
+        flint::FmpzFactor factorization;
+        flint::fmpz_factor(flint::FmpzFactorRef(factorization),
+                           flint::FmpzConstRef(class_order));
+        flint::Fmpz ell;
+        for (slong i = 0;
+             i < flint::fmpz_factor_num(
+                         flint::FmpzFactorConstRef(factorization));
+             ++i) {
+            flint::fmpz_factor_get_fmpz(
+                    flint::FmpzRef(ell),
+                    flint::FmpzFactorConstRef(factorization), i);
+            if (relation_saturation_ell_verified_(
+                        flint::FmpzConstRef(ell))) {
+                continue;
+            }
+            if (!prove_relation_saturation_dlog_ell_(
+                        units, flint::FmpzConstRef(ell), aux_prime_bound) ||
+                !relation_saturation_proof_verified_(
+                        flint::FmpzConstRef(ell)) ||
+                !mark_relation_saturation_verified_(
+                        flint::FmpzConstRef(ell))) {
+                return false;
+            }
+        }
+    }
+
+    if (!relation_saturation_covers_class_order_()) {
+        return false;
+    }
+    relation_saturation_status_ = ProofState::verified;
     return transaction.finish(try_promote_proven_certification_());
 }
 

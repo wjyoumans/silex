@@ -74,10 +74,11 @@ bool analytic_class_regulator_product_for_validation(
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
-        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept {
+        ZetaBfResidueDegreeCache* residue_degree_cache,
+        bool* unconditional) noexcept {
     return detail::zeta_class_regulator_product_with_diagnostics(
             out, order, precision, diagnostics, residue_degree_base,
-            residue_degree_cache);
+            residue_degree_cache, unconditional);
 }
 
 bool bf_class_regulator_product_for_validation(
@@ -577,7 +578,10 @@ bool try_certify_candidate_with_zeta(ClassGroupContext& class_group,
                             try_certify_class_unit_with_units(
                                     class_group, units,
                                     analytic_cache.zeta_validation_value(),
-                                    precision)) {
+                                    precision, false)) {
+                    // The validation enclosure is a Belabas-Friedman value
+                    // (GRH-conditional): the gate publishes `proven` only
+                    // when saturation has already been proven.
                     return true;
                 }
             }
@@ -698,7 +702,8 @@ bool try_validate_candidate_pair_after_progress(
     relation_saturation_aux_bound(aux_bound, options);
     if (ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
                 class_group, units, analytic_cache.value(),
-                flint::FmpzConstRef(aux_bound), precision)) {
+                flint::FmpzConstRef(aux_bound), precision,
+                analytic_cache.value_unconditional())) {
         return true;
     }
 
@@ -709,8 +714,65 @@ bool try_validate_candidate_pair_after_progress(
 
     return ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
             class_group, units, analytic_cache.value(),
-            flint::FmpzConstRef(retry_aux_bound), precision);
+            flint::FmpzConstRef(retry_aux_bound), precision,
+            analytic_cache.value_unconditional());
 }
+
+namespace {
+
+bool try_prove_candidate_pair_by_saturation(
+        ClassGroupContext& class_group,
+        OrderUnitGroup& units,
+        const Order& order,
+        const ClassGroupComputeOptions& options,
+        EmbeddingContext& embeddings,
+        slong precision) noexcept {
+    const DiagnosticsContext* diagnostics =
+            options.diagnostics != nullptr ? options.diagnostics
+                                           : class_group.diagnostics();
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.validation_saturation_proof");
+    if (options.requested_certification != CertificationMode::proven ||
+        !units.is_set() || !same_order_parent(units.parent(), &order) ||
+        !class_group.has_presentation()) {
+        return false;
+    }
+
+    // A GRH-conditional (Belabas-Friedman) analytic index-one result only
+    // selects this candidate.  The proof is unconditional: the unit group is
+    // proven from the regulator lower bound and unit saturation, and the
+    // class group from relation saturation at every p | h_cand.
+    if (units.certification_status() != CertificationMode::proven) {
+        OrderUnitGroup proven(order);
+        proven.set_diagnostics(units.diagnostics());
+        ProofState status = ProofState::not_checked;
+        bool proof_changed = false;
+        flint::Fmpz proof_aux_bound;
+        flint::fmpz_set_si(flint::FmpzRef(proof_aux_bound),
+                           kComputeProofAuxMax);
+        if (!proven.is_defined() ||
+            !proven.prove_index_bound(
+                    status, proof_changed, units, kComputeSatAuxTarget,
+                    flint::FmpzConstRef(proof_aux_bound),
+                    kComputeSatMaxPasses, embeddings, precision) ||
+            status != ProofState::verified ||
+            proven.certification_status() != CertificationMode::proven) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.validation_saturation_proof.units_unavailable");
+            return false;
+        }
+        units.swap(proven);
+    }
+
+    flint::Fmpz aux_bound;
+    flint::fmpz_set_si(flint::FmpzRef(aux_bound), kComputeProofAuxMax);
+    return ClassGroupCertificationAccess::
+            try_prove_class_order_saturation_with_units(
+                    class_group, units, flint::FmpzConstRef(aux_bound));
+}
+
+}  // namespace
 
 const char* validation_recompute_profile_label(
         ValidationRecomputeCause cause) noexcept {
@@ -950,10 +1012,12 @@ bool complete_requested_proven_relation_saturation(
         return true;
     }
     constexpr ulong kAnalyticProofSkipMinBfCutoff = 1024;
+    // Only an unconditional analytic proof may stand in for relation
+    // saturation; a Belabas-Friedman check assumes GRH.
     if (class_group.certification_status() == CertificationMode::proven &&
         units.certification_status() == CertificationMode::proven &&
-        class_group.analytic_class_regulator_status() ==
-                ProofState::verified &&
+        class_group.analytic_class_regulator_certification() ==
+                CertificationMode::proven &&
         class_group.factor_base_generation_checked_status() !=
                 ProofState::verified &&
         (analytic_cache.has_bf_audit(options.zeta_bf_max_cutoff, precision) ||
@@ -1048,7 +1112,16 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
             if (ClassGroupCertificationAccess::
                         try_certify_class_unit_with_units(
                                 class_group, units, analytic_cache.value(),
-                                precision)) {
+                                precision,
+                                analytic_cache.value_unconditional())) {
+                summary.outcome = ValidateRefineOutcome::proven;
+                return true;
+            }
+            // A GRH-conditional index one cannot publish `proven`; prove
+            // the pair unconditionally by unit proof and saturation.
+            if (try_prove_candidate_pair_by_saturation(
+                        class_group, units, order, options, embeddings,
+                        precision)) {
                 summary.outcome = ValidateRefineOutcome::proven;
                 return true;
             }

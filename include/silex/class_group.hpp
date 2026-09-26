@@ -163,7 +163,23 @@ public:
     bool check_factor_base_generation_bound(
             flint::FmpzConstRef required_bound) noexcept;
     ProofState relation_saturation_status() const noexcept;
+    // `verified` once an analytic class-regulator check (hR from the zeta
+    // function) has passed for the current presentation.  The check is
+    // unconditional only for degree one and for the quadratic L(1, chi)
+    // route; a Belabas-Friedman hR (every degree >= 3 field, and a degree-two
+    // field outside the explicit quadratic backend) assumes GRH.  Use
+    // analytic_class_regulator_certification() to read which one was used.
     ProofState analytic_class_regulator_status() const noexcept;
+    // `proven` for an unconditional analytic check, `grh` for a
+    // Belabas-Friedman (GRH-conditional) check, and `unknown` when no
+    // analytic check is recorded.  A GRH-conditional check never makes the
+    // class group or the units `proven`: a `proven` label then requires
+    // factor-base generation, proven units, and verified relation saturation
+    // at every prime dividing the candidate class number.
+    CertificationMode analytic_class_regulator_certification() const noexcept;
+    // Audit of a Belabas-Friedman hR evaluation.  Its error bound is valid
+    // under GRH for zeta_K and zeta_Q (Belabas-Friedman 2015, Theorem 1), so
+    // it is a GRH-conditional record, not an unconditional proof.
     ProofState zeta_bf_proof_status() const noexcept;
     bool zeta_bf_proof_record(ulong& cutoff,
                               ulong& max_cutoff,
@@ -182,6 +198,11 @@ public:
     ProofState regulator_proof_status() const noexcept;
     bool try_certify_quadratic(CertificationMode requested) noexcept;
     bool try_certify_trivial_quotient(CertificationMode requested) noexcept;
+    // A `proven` request succeeds through factor-base generation and proven
+    // units plus either an unconditional analytic hR (degree one or the
+    // quadratic L(1, chi) route) or verified relation saturation at every
+    // prime dividing the candidate class number.  A Belabas-Friedman hR,
+    // which assumes GRH, is never used to publish `proven`.
     bool try_certify_with_units(const OrderUnitGroup& units,
                                 CertificationMode requested,
                                 slong precision) noexcept;
@@ -189,6 +210,12 @@ public:
                                 CertificationMode requested,
                                 slong precision,
                                 ulong zeta_bf_max_cutoff) noexcept;
+    // Publish `proven` for the class group and units from an analytic hR
+    // only when that hR is unconditional (degree one or the quadratic
+    // L(1, chi) route).  With a Belabas-Friedman hR, which assumes GRH, they
+    // succeed only if relation saturation has already been proven at every
+    // prime dividing the candidate class number; otherwise they fail and
+    // leave both objects unchanged.
     bool try_certify_class_unit_with_zeta(OrderUnitGroup& units,
                                           slong precision) noexcept;
     bool try_certify_class_unit_with_zeta_bf(OrderUnitGroup& units,
@@ -268,7 +295,8 @@ private:
     bool try_certify_class_unit_with_units_(
             OrderUnitGroup& units,
             flint::ArbConstRef analytic_class_regulator_product,
-            slong precision) noexcept;
+            slong precision,
+            bool hr_unconditional) noexcept;
     bool try_prove_relation_saturation_index_bound_with_units_(
             const OrderUnitGroup& units,
             flint::FmpzConstRef index_bound,
@@ -277,7 +305,11 @@ private:
             const OrderUnitGroup& units,
             flint::ArbConstRef analytic_class_regulator_product,
             flint::FmpzConstRef aux_prime_bound,
-            slong precision) noexcept;
+            slong precision,
+            bool hr_unconditional) noexcept;
+    bool try_prove_class_order_saturation_with_units_(
+            const OrderUnitGroup& units,
+            flint::FmpzConstRef aux_prime_bound) noexcept;
     bool prove_relation_saturation_dlog_ell_(
             const OrderUnitGroup& units,
             flint::FmpzConstRef ell,
@@ -286,15 +318,18 @@ private:
     bool try_certify_analytic_class_regulator_(
             const OrderUnitGroup& units,
             flint::ArbConstRef analytic_hR,
-            slong precision) noexcept;
+            slong precision,
+            bool hr_unconditional) noexcept;
     bool record_analytic_class_unit_regulator_(
             OrderUnitGroup& units,
             flint::ArbConstRef analytic_hR,
-            slong precision) noexcept;
+            slong precision,
+            bool hr_unconditional) noexcept;
     bool try_certify_analytic_class_unit_regulator_(
             OrderUnitGroup& units,
             flint::ArbConstRef analytic_hR,
-            slong precision) noexcept;
+            slong precision,
+            bool hr_unconditional) noexcept;
     bool record_zeta_bf_audit_(flint::ArbConstRef error_bound,
                                ulong cutoff,
                                ulong max_cutoff,
@@ -484,6 +519,9 @@ private:
             ProofState::not_checked;
     ProofState relation_saturation_status_ = ProofState::not_checked;
     ProofState analytic_class_regulator_status_ = ProofState::not_checked;
+    // True when the recorded analytic check used a Belabas-Friedman hR,
+    // whose error bound assumes GRH.
+    bool analytic_class_regulator_assumes_grh_ = false;
     ProofState zeta_bf_status_ = ProofState::not_checked;
     ulong zeta_bf_cutoff_ = 0;
     ulong zeta_bf_max_cutoff_ = 0;

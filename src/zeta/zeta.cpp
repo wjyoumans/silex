@@ -226,13 +226,14 @@ bool find_quadratic_character(flint::DirichletChar& out,
     return false;
 }
 
-bool quadratic_residue(flint::Arb& out,
-                       const Order& order,
-                       slong precision) noexcept {
+// Preconditions of the unconditional quadratic route: a maximal order of an
+// explicit quadratic-backend field whose discriminant fits a ulong modulus.
+bool quadratic_residue_modulus(ulong& modulus,
+                               flint::Fmpz& discriminant,
+                               const Order& order) noexcept {
     const NumberField* field = order.parent();
     if (field == nullptr ||
-        field->backend_kind() != NumberFieldBackendKind::quadratic ||
-        precision <= 0) {
+        field->backend_kind() != NumberFieldBackendKind::quadratic) {
         return false;
     }
 
@@ -242,7 +243,6 @@ bool quadratic_residue(flint::Arb& out,
         return false;
     }
 
-    flint::Fmpz discriminant;
     flint::Fmpz abs_discriminant;
     if (!order.discriminant(flint::FmpzRef(discriminant))) {
         return false;
@@ -253,9 +253,17 @@ bool quadratic_residue(flint::Arb& out,
         return false;
     }
 
-    const ulong modulus =
-            flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
-    if (modulus == 0) {
+    modulus = flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
+    return modulus != 0;
+}
+
+bool quadratic_residue(flint::Arb& out,
+                       const Order& order,
+                       slong precision) noexcept {
+    ulong modulus = 0;
+    flint::Fmpz discriminant;
+    if (precision <= 0 ||
+        !quadratic_residue_modulus(modulus, discriminant, order)) {
         return false;
     }
 
@@ -2119,24 +2127,34 @@ bool bf_log_residue_default(flint::ArbRef out,
 
 }  // namespace
 
+// `unconditional`, when given, reports the route that produced the residue:
+// true for degree one and for the quadratic L(1, chi) route, both of which
+// are unconditional, and false for the Belabas-Friedman fallback, whose
+// error bound assumes GRH (Belabas-Friedman 2015, Theorem 1).
 bool zeta_residue_impl(flint::ArbRef out,
                        const Order& order,
                        slong precision,
                        const DiagnosticsContext* diagnostics,
                        const FactorBase* residue_degree_base = nullptr,
                        detail::ZetaBfResidueDegreeCache*
-                               residue_degree_cache = nullptr)
+                               residue_degree_cache = nullptr,
+                       bool* unconditional = nullptr)
         noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.residue");
+    if (unconditional != nullptr) {
+        *unconditional = false;
+    }
     if (!supported_order(order, precision)) {
         return false;
     }
 
     flint::Arb result;
+    bool route_unconditional = true;
     if (order.degree() == 1) {
         flint::arb_one(result);
     } else if (!quadratic_residue(result, order, precision)) {
+        route_unconditional = false;
         flint::Arb log_residue;
         if (!bf_log_residue_default(flint::ArbRef(log_residue),
                                     order, precision, diagnostics,
@@ -2152,6 +2170,9 @@ bool zeta_residue_impl(flint::ArbRef out,
     }
 
     flint::arb_set(out, flint::ArbConstRef(result));
+    if (unconditional != nullptr) {
+        *unconditional = route_unconditional;
+    }
     return true;
 }
 
@@ -2301,22 +2322,27 @@ bool zeta_class_regulator_product_impl(
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base = nullptr,
-        detail::ZetaBfResidueDegreeCache* residue_degree_cache = nullptr)
+        detail::ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
+        bool* unconditional = nullptr)
         noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.class_regulator_product");
+    if (unconditional != nullptr) {
+        *unconditional = false;
+    }
     if (!supported_order(order, precision)) {
         return false;
     }
 
     flint::Arb result;
+    bool route_unconditional = true;
     if (order.degree() == 1) {
         flint::arb_one(result);
     } else {
         flint::Arb residue;
         if (!zeta_residue_impl(flint::ArbRef(residue), order, precision,
                                diagnostics, residue_degree_base,
-                               residue_degree_cache) ||
+                               residue_degree_cache, &route_unconditional) ||
             !class_regulator_product_from_residue(
                     flint::ArbRef(result), order, flint::ArbConstRef(residue),
                     precision, diagnostics)) {
@@ -2325,6 +2351,9 @@ bool zeta_class_regulator_product_impl(
     }
 
     flint::arb_set(out, flint::ArbConstRef(result));
+    if (unconditional != nullptr) {
+        *unconditional = route_unconditional;
+    }
     return true;
 }
 
@@ -2454,11 +2483,25 @@ bool zeta_class_regulator_product_with_diagnostics(
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
-        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept {
+        ZetaBfResidueDegreeCache* residue_degree_cache,
+        bool* unconditional) noexcept {
     return zeta_class_regulator_product_impl(out, order, precision,
                                             diagnostics,
                                             residue_degree_base,
-                                            residue_degree_cache);
+                                            residue_degree_cache,
+                                            unconditional);
+}
+
+bool zeta_unconditional_route_available(const Order& order) noexcept {
+    if (!order.has_basis() || !order.is_maximal()) {
+        return false;
+    }
+    if (order.degree() == 1) {
+        return true;
+    }
+    ulong modulus = 0;
+    flint::Fmpz discriminant;
+    return quadratic_residue_modulus(modulus, discriminant, order);
 }
 
 bool zeta_class_regulator_product_bf_audit_with_diagnostics(

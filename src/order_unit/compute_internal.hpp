@@ -75,13 +75,16 @@ const char* validate_refine_outcome_name(ValidateRefineOutcome outcome)
 const char* validate_refine_outcome_profile_label(
         ValidateRefineOutcome outcome) noexcept;
 
+// `unconditional` reports whether the product came from an unconditional
+// route (see zeta_class_regulator_product_with_diagnostics).
 bool analytic_class_regulator_product_for_validation(
         flint::ArbRef out,
         const Order& order,
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
-        ZetaBfResidueDegreeCache* residue_degree_cache = nullptr) noexcept;
+        ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
+        bool* unconditional = nullptr) noexcept;
 
 bool bf_class_regulator_product_for_validation(
         flint::ArbRef out,
@@ -145,11 +148,13 @@ public:
             return false;
         }
 
+        value_unconditional_ = false;
         valid_ = analytic_class_regulator_product_for_validation(
                          flint::ArbRef(value_), order, precision, diagnostics,
                          residue_degree_base,
                          cache_bf_residue_degrees ? &bf_residue_degree_cache_
-                                                  : nullptr)
+                                                  : nullptr,
+                         &value_unconditional_)
                 ? 1
                 : -1;
         precision_ = precision;
@@ -163,6 +168,9 @@ public:
         flint::arb_set(flint::ArbRef(value_), value);
         precision_ = precision;
         valid_ = 1;
+        // A seeded value (a Belabas-Friedman audit or a route estimate) is
+        // never an unconditional hR.
+        value_unconditional_ = false;
         validation_active_ = false;
     }
 
@@ -170,6 +178,13 @@ public:
         return validation_active_
                 ? flint::ArbConstRef(validation_value_)
                 : flint::ArbConstRef(value_);
+    }
+
+    // True only when value() is an unconditional hR: degree one or the
+    // quadratic L(1, chi) route.  Belabas-Friedman values, including the
+    // validation enclosure, assume GRH and report false.
+    bool value_unconditional() const noexcept {
+        return !validation_active_ && valid_ > 0 && value_unconditional_;
     }
 
     bool ensure_validation(
@@ -317,6 +332,7 @@ private:
     flint::Arb value_;
     slong precision_ = 0;
     int valid_ = 0;
+    bool value_unconditional_ = false;
     flint::Arb bf_value_;
     flint::Arb bf_error_bound_;
     ulong bf_cutoff_ = 0;
