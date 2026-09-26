@@ -30,6 +30,10 @@ These instructions govern automated work in this repository.
 - Use one writing task, one repository, and one Git worktree unless the user
   explicitly requests a different workflow. Reviewers are read-only unless
   given a separate correction task.
+- Parallel agents each own a separate worktree and task branch. Never edit,
+  reset, or commit in another task's worktree or on `main` unless you are the
+  integrating session. Development orchestration and task tracking live outside
+  this repository.
 - Keep commits focused and validated. Stage explicit paths; never use broad
   staging commands such as `git add .`.
 - Do not create remotes, push, tag, publish, rewrite history, or destructively
@@ -66,28 +70,29 @@ These instructions govern automated work in this repository.
 
 ## Verification
 
-Triage performance impact before editing any runtime implementation,
-installed inline or template code, backend routing, or performance-affecting
-build option. Record the starting commit and dirty state, affected symbols and
-callers, and one of these classifications:
+Classify performance impact before editing runtime implementation, installed
+inline or template code, backend routing, or performance-affecting build
+options. Scale the evidence to the classification:
 
-- no runtime effect, with a concrete rationale;
-- localized runtime path, requiring an affected native microbenchmark and an
-  unaffected control;
-- algorithm, routing, or shared infrastructure, requiring an affected
-  microbenchmark, the smallest representative end-to-end row, and a control;
-  or
-- optimization or performance claim, requiring the preceding coverage plus
-  controlled repeated measurement and profiling evidence.
+- **No runtime effect** (tests, docs, examples, noninstalled tools): state the
+  concrete reason in the handoff. No timing is needed.
+- **Runtime change without a performance claim** (features, fixes,
+  refactors): run the affected native benchmark rows once as a semantic gate,
+  then do a quick baseline/candidate comparison of the affected rows and one
+  unaffected control. Escalate to the full comparison below if the quick
+  comparison suggests a slowdown.
+- **Optimization or performance claim**, or a change to shared hot paths
+  (arithmetic kernels, relation search, linear algebra, LLL, backend routing):
+  profile first, then run the full comparison.
 
-Build or preserve the baseline before implementation. Compare separate fresh
-Release build trees with identical compiler, dependency, and build settings.
-Run correctness checks and a one-iteration semantic benchmark gate before
-timing. Preserve raw repetition rows and metadata; routine comparisons require
-at least nine repetitions. A repeatable slowdown outside control drift blocks
-the change unless the tradeoff is explicitly accepted. An inconclusive result
-is not a pass, and there is no repository-wide percentage threshold. See
-`docs/development/benchmarking.rst` for the native workflow.
+The full comparison uses separate fresh Release build trees with identical
+compiler, dependency, and build settings, a committed baseline, correctness
+checks and a one-iteration semantic gate before timing, at least nine
+repetitions of the affected rows and a control, and preserved raw rows and
+metadata. A repeatable slowdown outside control drift blocks the change unless
+the tradeoff is explicitly accepted. An inconclusive result is not a pass, and
+there is no repository-wide percentage threshold. See
+`docs/development/benchmarking.rst` and `tools/bench/native-benchmark.py`.
 
 Run checks proportional to the change. For ordinary native changes, start with:
 
@@ -135,8 +140,8 @@ headers, exports, or dependencies change.
 
 Performance claims require a reproducible benchmark command, raw
 machine-readable output, comparable baseline and candidate metadata, and the
-selected controls. Do not run final CPU-pinned measurements while other
-CPU-intensive work is active.
+selected controls. Do not run timing measurements that support a claim while
+other CPU-intensive work, including other agents' builds and tests, is active.
 
 ## Completion evidence
 

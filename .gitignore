@@ -23,3 +23,6 @@ compile_commands.json
 
 # Local Codex/session state
 .codex/
+
+# Local Claude Code session state
+.claude/

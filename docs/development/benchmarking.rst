@@ -9,26 +9,25 @@ Impact classification
 ---------------------
 
 Before editing runtime implementation, installed inline/template code, backend
-routing, or performance-affecting flags, record the starting commit and dirty
-state, affected symbols and callers, then classify the change:
+routing, or performance-affecting flags, classify the change and scale the
+evidence to it:
 
 ``no runtime effect``
-   Give a concrete rationale; do not time unrelated code.
+   Tests, documentation, examples, and noninstalled tools.  Give a concrete
+   rationale; do not time unrelated code.
 
-``localized runtime path``
-   Select one affected native microbenchmark and one unaffected control.
+``runtime change without a performance claim``
+   Run the affected rows once through ``gate``, then make a quick
+   baseline/candidate comparison of the affected rows and one unaffected
+   control.  Escalate to a full comparison if it suggests a slowdown.
 
-``algorithm, routing, or shared infrastructure``
-   Add the smallest representative end-to-end row to the affected row and
-   control.
+``optimization, performance claim, or shared hot path``
+   Profile first, then run the full comparison below with the affected rows,
+   the smallest representative end-to-end row, and a control.
 
-``optimization or performance claim``
-   Use the preceding coverage plus controlled repeated timing and profiling.
-
-Build or preserve the baseline before implementation.  Baseline and candidate
-must use separate fresh Release trees with the same compiler, dependencies,
-options, and filters.  Use ``profile-release`` for attribution and
-``benchmarks`` for timing.
+Baseline and candidate must use separate fresh Release trees with the same
+compiler, dependencies, options, and filters.  Use ``profile-release`` for
+attribution and ``benchmarks`` for timing.
 
 Semantic release gate
 ---------------------
