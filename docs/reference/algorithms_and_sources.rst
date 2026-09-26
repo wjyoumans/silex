@@ -160,6 +160,40 @@ representative quadratic, cubic and quartic products were also checked with
 Hecke v0.39.19.  These executable comparison versions are distinct from the
 algorithm-source versions above.
 
+Embedding root contexts
+-----------------------
+
+``src/embedding`` stores certified complex roots of the defining polynomial
+for archimedean evaluation.  Hecke v0.38.6 ``src/Misc/acb_root_ctx.jl``
+(``_roots!``) is the source: it refines by calling FLINT
+``acb_poly_find_roots`` with the previous roots as initial approximations,
+doubling the working precision, and accepts the result once all roots are
+isolated, accurate enough, and pass ``acb_poly_validate_real_roots``.  The
+first isolation, and the fallback, use FLINT
+``arb_fmpz_poly_complex_roots``.  The signature comes from FLINT
+``fmpz_poly_signature`` and is computed when the context is defined.
+
+Silex deviates from the source in three intentional ways:
+
+* No re-sort after refinement.  Hecke re-sorts with FLINT
+  ``_acb_vec_sort_pretty``, whose ``acb_cmp_pretty`` comparator orders by
+  ``|Im|`` only when the difference is resolved and otherwise by real part,
+  so place indices can change with precision.  Silex matches each refined
+  ball to the previous ball it overlaps and requires the match to be
+  one-to-one.  Because both vectors isolate the roots with pairwise disjoint
+  balls, a new ball that overlaps exactly one previous ball encloses the same
+  root.  Place order is therefore fixed once roots are set, which cached
+  logarithmic embeddings rely on.
+* A precision cap on refinement from previous roots.  Hecke doubles up to
+  ``2^22`` bits and then raises an error.  Silex stops that loop at eight times
+  the requested precision and falls back to FLINT's certified isolation.  The
+  factor is a tuning constant, not a correctness condition.
+* A retrying fallback.  When a full isolation does not yet match the previous
+  balls one-to-one, Silex isolates again at double the precision.  This
+  terminates because each root is at positive distance from the closed
+  previous balls that do not contain it.  Refinement fails only when the
+  working precision would overflow, or for a non-squarefree polynomial.
+
 Local algebra and relations
 ---------------------------
 
