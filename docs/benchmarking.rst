@@ -9,14 +9,18 @@ required only when ``SILEX_BUILD_BENCHMARKS=ON``.
 Build and verify
 ----------------
 
-Configure the Release benchmark tree, build its registered targets, and run
-the semantic suite with:
+Configure the Release benchmark tree, build all of its targets, and run the
+semantic suite with:
 
 .. code-block:: console
 
    cmake --preset benchmarks
-   cmake --build --preset benchmark-targets
+   cmake --build --preset benchmarks
    ctest --preset benchmarks
+
+The ``benchmark-targets`` build preset builds only the benchmark executables.
+It is enough for timing runs, but it leaves the test executables unbuilt, so
+use the full ``benchmarks`` build preset before ``ctest --preset benchmarks``.
 
 Configuration fails if Google Benchmark is unavailable.  The generated
 manifest classifies every registered row as release-semantic or records an
