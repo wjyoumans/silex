@@ -938,6 +938,70 @@ int test_split_prime_order_lifetime_and_failed_publication() {
                     sflint::ArbRef(regulators[order_index])));
         }
 
+        // Explicit multi-prime coordinate samples for the rank-2 nonunit
+        // basis: isolated generator axes and mixed-sign combinations,
+        // checked in both selected-prime orderings and, for the mixed
+        // samples, transported across the other ordering's independent
+        // basis (same field value, independently computed coordinates).
+        const slong isolated_torsion[] = {0, 1, 0, 1};
+        const slong isolated_ordinary[][1] = {{0}, {0}, {0}, {0}};
+        const slong isolated_nonunit[][2] = {
+                {1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+        const slong mixed_torsion[] = {0, 1};
+        const slong mixed_ordinary[][1] = {{-2}, {3}};
+        const slong mixed_nonunit[][2] = {{4, -3}, {-5, 2}};
+        for (slong order_index = 0; order_index < 2; ++order_index) {
+            auto& s_unit_group = s_unit_groups[order_index];
+            for (slong sample = 0; sample < 4; ++sample) {
+                silex::SUnitCoordinates input = coordinates(
+                        s_unit_group, isolated_torsion[sample],
+                        isolated_ordinary[sample], isolated_nonunit[sample]);
+                silex::FactoredElement compact(fixture.field);
+                assert(s_unit_group.image(compact, input));
+                silex::SUnitCoordinates recovered;
+                silex::SUnitMembershipResult membership;
+                assert(s_unit_group.preimage(membership, recovered, compact,
+                                             fixture.embeddings, 16, 512));
+                assert(membership.success &&
+                       membership.outcome ==
+                               silex::SUnitMembershipOutcome::verified);
+                assert_coordinates_equal(recovered, isolated_torsion[sample],
+                                         isolated_ordinary[sample], 1,
+                                         isolated_nonunit[sample], 2);
+            }
+            for (slong sample = 0; sample < 2; ++sample) {
+                silex::SUnitCoordinates input = coordinates(
+                        s_unit_group, mixed_torsion[sample],
+                        mixed_ordinary[sample], mixed_nonunit[sample]);
+                silex::Element expanded(fixture.field);
+                assert(s_unit_group.image(expanded, input));
+                silex::SUnitCoordinates recovered;
+                silex::SUnitMembershipResult membership;
+                assert(s_unit_group.preimage(membership, recovered, expanded,
+                                             fixture.embeddings, 16, 512));
+                assert(membership.success &&
+                       membership.outcome ==
+                               silex::SUnitMembershipOutcome::verified);
+                assert_coordinates_equal(recovered, mixed_torsion[sample],
+                                         mixed_ordinary[sample], 1,
+                                         mixed_nonunit[sample], 2);
+
+                // Cross-basis transport: the other ordering's independently
+                // computed basis must reproduce the same field value.
+                auto& other = s_unit_groups[1 - order_index];
+                silex::SUnitCoordinates transported;
+                silex::SUnitMembershipResult transported_membership;
+                assert(other.preimage(transported_membership, transported,
+                                      expanded, fixture.embeddings, 16, 512));
+                assert(transported_membership.success &&
+                       transported_membership.outcome ==
+                               silex::SUnitMembershipOutcome::verified);
+                silex::Element transported_value(fixture.field);
+                assert(other.image(transported_value, transported));
+                assert(transported_value.equal(expanded));
+            }
+        }
+
         const silex::NumberField foreign_field =
                 silex::test::field_by_polynomial(sflint::FmpqPolyConstRef(
                         fixture.field.raw_flint_field()->pol));
@@ -967,6 +1031,30 @@ int test_split_prime_order_lifetime_and_failed_publication() {
             assert(!result.success);
             assert(result.stage == silex::SUnitComputeStage::input_validation);
             assert(result.selected_index == 1);
+        }
+
+        // A correctly-selected multi-prime span still fails closed when the
+        // supplied ordinary unit group belongs to a different order: the
+        // check on ordinary_units's parent precedes selected-prime copying,
+        // so no per-index diagnostic is produced.
+        ProvenFixture mismatched = proven_quadratic(-3);
+        assert(!mismatched.order.has_same_data(fixture.order));
+        for (slong order_index = 0; order_index < 2; ++order_index) {
+            std::vector<silex::PrimeIdeal> selected;
+            for (slong j = 0; j < 2; ++j) {
+                selected.emplace_back(fixture.order);
+                assert(selected.back().set(*decomposition.at(
+                        order_index == 0 ? j : 1 - j)));
+            }
+            assert(!silex::compute_sunit_groups(
+                    result, s_class_groups[order_index],
+                    s_unit_groups[order_index], fixture.class_group,
+                    mismatched.units,
+                    silex::PrimeIdealSpan(selected.data(), selected.size()),
+                    options));
+            assert(!result.success);
+            assert(result.stage == silex::SUnitComputeStage::input_validation);
+            assert(result.selected_index == -1);
         }
     }
 
