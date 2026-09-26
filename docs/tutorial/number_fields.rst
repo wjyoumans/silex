@@ -76,7 +76,7 @@ archimedean data:
 
    silex::flint::ArbVec logs(K.degree());
    if (!silex::logarithmic_embedding(
-           logs, embeddings, theta,
+           silex::flint::ArbVecRef(logs), embeddings, theta,
            silex::LogEmbeddingMode::plain, 128)) {
        return false;
    }

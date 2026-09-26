@@ -156,7 +156,8 @@ Minimal Example
 
    silex::flint::ArbVec logs(K.degree());
    const bool logs_ok = silex::logarithmic_embedding(
-           logs, embeddings, theta, silex::LogEmbeddingMode::plain, 128);
+           silex::flint::ArbVecRef(logs), embeddings, theta,
+           silex::LogEmbeddingMode::plain, 128);
 
 Field/Order/Ideal Walkthrough
 -----------------------------
