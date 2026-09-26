@@ -477,6 +477,72 @@ int test_nonintegral_equation_relation_denominator_split() {
     return 0;
 }
 
+// In Q(2^(1/3)) with the maximal equation order Z[x], 5 = P Q with
+// N(P) = 5 and N(Q) = 25, so a norm bound of 5 gives an incomplete block
+// {P} over 5.  The element 1/(2 + x) = (4 - 2x + x^2)/10 has
+// (1/(2 + x)) = P2^-1 P^-1, which is smooth, although its numerator
+// 4 - 2x + x^2 generates P2^2 Q and is not.  The element (3 - x)/5 has
+// ((3 - x)/5) = P^2 / (P Q) = P Q^-1, which is not smooth.
+int test_nonintegral_relation_incomplete_denominator_block() {
+    silex::NumberField field = cubic_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+    assert(order.is_equation_order());
+
+    silex::FactorBase base(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    assert(base.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(bound)));
+    assert(base.length() == 3);
+
+    silex::Relation beta_relation(base);
+    silex::Element beta(field);
+    assert(set_linear_rational(beta, 2, 1, 1, 1));
+    assert(beta_relation.set_generator(beta));
+
+    silex::Relation relation(base);
+    silex::Element alpha(field);
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::Fmpq coefficient;
+        sflint::fmpq_set_si(coefficient, 2, 5);
+        sflint::fmpq_poly_set_coeff_fmpq(polynomial, 0, coefficient);
+        sflint::fmpq_set_si(coefficient, -1, 5);
+        sflint::fmpq_poly_set_coeff_fmpq(polynomial, 1, coefficient);
+        sflint::fmpq_set_si(coefficient, 1, 10);
+        sflint::fmpq_poly_set_coeff_fmpq(polynomial, 2, coefficient);
+        assert(alpha.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    }
+    assert(relation.set_generator(alpha));
+
+    sflint::FmpzMat beta_row(1, base.length());
+    sflint::FmpzMat alpha_row(1, base.length());
+    assert(beta_relation.exponents(sflint::FmpzMatRef(beta_row)));
+    assert(relation.exponents(sflint::FmpzMatRef(alpha_row)));
+    slong beta_row_sum = 0;
+    for (slong i = 0; i < base.length(); ++i) {
+        slong beta_entry = 0;
+        while (!mat_entry_is_si(beta_row, 0, i, beta_entry)) {
+            assert(beta_entry < 8);
+            ++beta_entry;
+        }
+        assert(mat_entry_is_si(alpha_row, 0, i, -beta_entry));
+        beta_row_sum += beta_entry;
+    }
+    assert(beta_row_sum == 2);
+
+    assert(set_linear_rational(alpha, 3, 5, -1, 5));
+    assert(!relation.set_generator(alpha));
+    sflint::FmpzMat unchanged_row(1, base.length());
+    assert(relation.exponents(sflint::FmpzMatRef(unchanged_row)));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(unchanged_row),
+                                  sflint::FmpzMatConstRef(alpha_row)));
+
+    return 0;
+}
+
 int test_half_integral_quadratic_relation_fallback() {
     {
         silex::NumberField field = quadratic_field(-47);
@@ -842,6 +908,7 @@ int main() {
     assert(test_quadratic_relation() == 0);
     assert(test_repeated_residue_valuation_relation() == 0);
     assert(test_nonintegral_equation_relation_denominator_split() == 0);
+    assert(test_nonintegral_relation_incomplete_denominator_block() == 0);
     assert(test_half_integral_quadratic_relation_fallback() == 0);
     assert(test_generic_cubic_relation() == 0);
     assert(test_relation_matrix() == 0);
