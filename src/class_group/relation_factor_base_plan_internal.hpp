@@ -53,5 +53,16 @@ bool next_relation_factor_base_bound(
         flint::FmpzConstRef current,
         flint::FmpzConstRef limit) noexcept;
 
+bool quadratic_prime_is_bad(flint::FmpzConstRef discriminant,
+                            flint::FmpzConstRef rational_prime) noexcept;
+
+bool quadratic_nth_suitable_ideal_bound(
+        flint::Fmpz& out,
+        flint::FmpzConstRef discriminant,
+        slong count) noexcept;
+
+bool quadratic_working_bound_floor(slong& out,
+                                   flint::FmpzConstRef discriminant) noexcept;
+
 }  // namespace relation_search
 }  // namespace silex::detail

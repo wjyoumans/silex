@@ -594,10 +594,19 @@ bool compute_quadratic_analytic_bound(
     return true;
 }
 
+}  // namespace
+
+// reference buch1.c:is_bad (2.17.3, lines 364-374).  For p = 2 the residue
+// is |D| mod 16, because kernel/none/level1.h:mod16 reads the low word of the
+// sign-magnitude integer; the 8 - r flip for D < 0 is then applied to that
+// residue.  For odd p the test is p^2 | D.
 bool quadratic_prime_is_bad(flint::FmpzConstRef discriminant,
                             flint::FmpzConstRef rational_prime) noexcept {
     if (flint::fmpz_equal_si(rational_prime, 2)) {
-        ulong residue = ::fmpz_fdiv_ui(discriminant.raw(), UWORD(16)) >> 1U;
+        flint::Fmpz magnitude;
+        flint::fmpz_abs(flint::FmpzRef(magnitude), discriminant);
+        ulong residue =
+                ::fmpz_fdiv_ui(magnitude.raw(), UWORD(16)) >> 1U;
         if (residue != 0 && flint::fmpz_sgn(discriminant) < 0) {
             residue = 8U - residue;
         }
@@ -610,6 +619,10 @@ bool quadratic_prime_is_bad(flint::FmpzConstRef discriminant,
                                 flint::FmpzConstRef(square));
 }
 
+// reference buch1.c:nthidealquad (2.17.3, lines 377-386).  Its loop is
+// "while ((p = next prime) && n > 0)", which advances p once more after the
+// n-th suitable prime is counted, so the result is the prime that follows
+// the n-th prime p with !is_bad(D, p) and kronecker(D, p) >= 0.
 bool quadratic_nth_suitable_ideal_bound(
         flint::Fmpz& out,
         flint::FmpzConstRef discriminant,
@@ -619,9 +632,12 @@ bool quadratic_nth_suitable_ideal_bound(
     }
     flint::Fmpz rational_prime;
     flint::fmpz_one(flint::FmpzRef(rational_prime));
-    while (count > 0) {
+    for (;;) {
         flint::fmpz_nextprime(flint::FmpzRef(rational_prime),
                               flint::FmpzConstRef(rational_prime));
+        if (count == 0) {
+            break;
+        }
         if (!quadratic_prime_is_bad(
                     discriminant, flint::FmpzConstRef(rational_prime)) &&
             flint::fmpz_kronecker(
@@ -635,7 +651,29 @@ bool quadratic_nth_suitable_ideal_bound(
     return true;
 }
 
-}  // namespace
+// reference buch1.c:Buchquad_i (2.17.3, lines 1000-1004 and 1057):
+// drc = |D| as a double, LOGD = log(drc),
+// cp = (ulong)exp(sqrt(LOGD * log(LOGD) / 8.0)), raised to 20 if smaller,
+// and the factor-base bound LIMC is raised to cp when below it.  That
+// routine serves both signs of D, but Silex routes real quadratic orders
+// through the generic plan (buch2.c:Buchall_param, which has no such floor),
+// so only the imaginary quadratic plan applies it.
+bool quadratic_working_bound_floor(slong& out,
+                                   flint::FmpzConstRef discriminant) noexcept {
+    flint::Fmpz magnitude;
+    flint::fmpz_abs(flint::FmpzRef(magnitude), discriminant);
+    const double log_discriminant =
+            std::log(flint::fmpz_get_d(flint::FmpzConstRef(magnitude)));
+    const double raw = std::exp(std::sqrt(
+            log_discriminant * std::log(log_discriminant) / 8.0));
+    if (!std::isfinite(raw) || raw < 0.0 ||
+        raw >= static_cast<double>(std::numeric_limits<slong>::max())) {
+        return false;
+    }
+    const slong floor_value = static_cast<slong>(raw);
+    out = floor_value < 20 ? 20 : floor_value;
+    return true;
+}
 
 bool build_relation_factor_base_plan(
         RelationFactorBasePlan& out,
@@ -778,6 +816,11 @@ bool build_maximal_imaginary_quadratic_factor_base_plan(
                 nth_ideal_bound, flint::FmpzConstRef(discriminant), 2)) {
         return false;
     }
+    slong bound_floor = 0;
+    if (!quadratic_working_bound_floor(
+                bound_floor, flint::FmpzConstRef(discriminant))) {
+        return false;
+    }
 
     RelationFactorBasePlan next;
     if (flint::fmpz_cmp(flint::FmpzConstRef(analytic_bound),
@@ -787,6 +830,9 @@ bool build_maximal_imaginary_quadratic_factor_base_plan(
     } else {
         flint::fmpz_set(flint::FmpzRef(next.working_bound),
                         flint::FmpzConstRef(nth_ideal_bound));
+    }
+    if (::fmpz_cmp_si(next.working_bound.raw(), bound_floor) < 0) {
+        flint::fmpz_set_si(flint::FmpzRef(next.working_bound), bound_floor);
     }
     next.order = order;
     next.valid = true;

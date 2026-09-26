@@ -384,6 +384,111 @@ int test_discriminant_minus_three_exact_plan() {
     return 0;
 }
 
+// Expected values come from the reference implementation itself: a C
+// harness containing verbatim copies of the static routines is_bad and
+// nthidealquad from src/basemath/buch1.c:364-386 of the 2.17.3 release,
+// compiled against the installed 2.17.4 library (whose mod16, kroiu, and
+// forprime iterator it calls) and run on each discriminant below.  Two
+// behaviors of the reference are pinned: the 2-adic test reads |D| mod 16
+// (mod16 reads the low word of the sign-magnitude integer), and the loop
+// "while ((p = next prime) && n > 0)" advances p once more after the n-th
+// suitable prime, so the returned value is the prime that follows it.
+struct QuadraticNthIdealCase {
+    slong discriminant;
+    bool two_is_bad;
+    slong second_bound;
+};
+
+int test_quadratic_nth_suitable_ideal_matches_reference() {
+    constexpr std::array<QuadraticNthIdealCase, 26> cases = {{
+            {-3, false, 11},   {-4, false, 7},    {-7, false, 11},
+            {-8, false, 5},    {-15, true, 7},    {-20, false, 5},
+            {-23, false, 5},   {-24, false, 5},   {-47, true, 11},
+            {-71, false, 5},   {-84, false, 5},   {-120, false, 5},
+            {-212, false, 5},  {-228, false, 5},  {-260, false, 5},
+            {5, true, 13},     {8, false, 11},    {12, false, 5},
+            {13, false, 17},   {17, true, 19},    {21, true, 7},
+            {24, false, 5},    {40, false, 5},    {41, false, 7},
+            {60, false, 5},    {229, true, 7},
+    }};
+    sflint::Fmpz discriminant;
+    sflint::Fmpz two;
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(two), 2);
+    for (const QuadraticNthIdealCase& row : cases) {
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), row.discriminant);
+        if (silex::detail::relation_search::quadratic_prime_is_bad(
+                    sflint::FmpzConstRef(discriminant),
+                    sflint::FmpzConstRef(two)) != row.two_is_bad ||
+            !silex::detail::relation_search::
+                    quadratic_nth_suitable_ideal_bound(
+                            bound, sflint::FmpzConstRef(discriminant), 2) ||
+            !sflint::fmpz_equal_si(sflint::FmpzConstRef(bound),
+                                   row.second_bound)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Expected floors come from the reference expressions of
+// buch1.c:Buchquad_i (2.17.3, lines 1000-1004) evaluated by a C harness
+// linked against the installed 2.17.4 library: drc = fabs(gtodouble(D)),
+// LOGD = log(drc), cp = (ulong)exp(sqrt(LOGD * log(LOGD) / 8.0)), and
+// cp = 20 when smaller.  Unfloored values: -5e10 -> 23.131,
+// -1e12 -> 29.540, -4e18 -> 88.694, -(2^63 - 1) -> 93.724.
+int test_quadratic_working_bound_floor_matches_reference() {
+    struct FloorCase {
+        slong discriminant;
+        slong floor_value;
+    };
+    constexpr std::array<FloorCase, 8> cases = {{
+            {-3, 20},
+            {-4, 20},
+            {-1000, 20},
+            {-100000000, 20},
+            {-50000000000, 23},
+            {-1000000000000, 29},
+            {-4000000000000000000, 88},
+            {-9223372036854775807, 93},
+    }};
+    sflint::Fmpz discriminant;
+    for (const FloorCase& row : cases) {
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), row.discriminant);
+        slong value = 0;
+        if (!silex::detail::relation_search::quadratic_working_bound_floor(
+                    value, sflint::FmpzConstRef(discriminant)) ||
+            value != row.floor_value) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// D = -4 has a single split prime (5) below the generic restart limit 7, so
+// its imaginary quadratic plan exists only because the working bound starts
+// at the reference floor 20.
+int test_discriminant_minus_four_plan_uses_floor() {
+    FieldSetup setup;
+    setup.field = silex::test::quadratic_field(-1);
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    if (!setup.maximal_order.maximal_order(equation_order)) {
+        return 1;
+    }
+    silex::detail::RelationFactorBasePlan plan;
+    return silex::detail::relation_search::
+                           build_maximal_imaginary_quadratic_factor_base_plan(
+                                   plan, setup.maximal_order, nullptr) &&
+                           plan.valid &&
+                           sflint::fmpz_equal_si(
+                                   sflint::FmpzConstRef(plan.working_bound),
+                                   20)
+                   ? 0
+                   : 1;
+}
+
 }  // namespace
 
 int main() {
@@ -391,7 +496,11 @@ int main() {
                    test_degree_one_and_failed_build_preservation() != 0 ||
                    test_producer_cache_matches_fresh_bf_evaluation() != 0 ||
                    test_restart_bound_progression() != 0 ||
-                   test_discriminant_minus_three_exact_plan() != 0
+                   test_discriminant_minus_three_exact_plan() != 0 ||
+                   test_quadratic_nth_suitable_ideal_matches_reference() != 0 ||
+                   test_quadratic_working_bound_floor_matches_reference() !=
+                           0 ||
+                   test_discriminant_minus_four_plan_uses_floor() != 0
             ? 1
             : 0;
 }
