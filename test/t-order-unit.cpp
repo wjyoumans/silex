@@ -4,6 +4,8 @@
 #include <silex/factor_base.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/arf.hpp>
+#include <silex/flint/fmpq.hpp>
+#include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/ideal.hpp>
 #include <silex/prime_ideal.hpp>
@@ -15,6 +17,9 @@
 #include "order_unit/relation_unit_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "test_support.hpp"
+
+#include <flint/fmpq_poly.h>
+#include <flint/ulong_extras.h>
 
 #include <cassert>
 #include <limits>
@@ -2326,6 +2331,221 @@ int test_residue_dlog_proof_kernel_torsion() {
     return 0;
 }
 
+// Independent oracle for the residue_dlog_proof_kernel regression below:
+// evaluate an ambient element's alpha-polynomial at alpha = s mod q and take
+// its Legendre symbol, written additively (0 for a square, 1 otherwise).
+slong legendre_bit_at_alpha(const silex::Element& element,
+                            slong s,
+                            slong q) noexcept {
+    sflint::FmpqPoly polynomial;
+    assert(element.get_fmpq_poly(sflint::FmpqPolyRef(polynomial)));
+    slong value = 0;
+    for (slong i = fmpq_poly_degree(polynomial.raw()); i >= 0; --i) {
+        sflint::Fmpq coefficient;
+        fmpq_poly_get_coeff_fmpq(coefficient.raw(), polynomial.raw(), i);
+        const slong numerator = static_cast<slong>(
+                fmpz_fdiv_ui(fmpq_numref(coefficient.raw()),
+                             static_cast<ulong>(q)));
+        const slong denominator = static_cast<slong>(
+                fmpz_fdiv_ui(fmpq_denref(coefficient.raw()),
+                             static_cast<ulong>(q)));
+        assert(denominator != 0);
+        const slong inverse = static_cast<slong>(n_invmod(
+                static_cast<ulong>(denominator), static_cast<ulong>(q)));
+        value = (value * s + numerator * inverse) % q;
+    }
+    assert(value != 0);
+    return n_jacobi(static_cast<ulong>(value), static_cast<ulong>(q)) == 1
+            ? 0
+            : 1;
+}
+
+// Returns whether the mod-2 row space of `kernel` is exactly the set of
+// vectors v in F_2^2 with v . column = 0 for every oracle column.
+bool kernel_matches_oracle(const sflint::FmpzMat& kernel,
+                           const std::vector<std::pair<slong, slong>>& columns)
+        noexcept {
+    if (sflint::fmpz_mat_ncols(kernel) != 2) {
+        return false;
+    }
+    bool in_span[4] = {false, false, false, false};
+    const slong rows = sflint::fmpz_mat_nrows(kernel);
+    if (rows > 2) {
+        return false;
+    }
+    for (slong mask = 0; mask < (slong(1) << rows); ++mask) {
+        slong a = 0;
+        slong b = 0;
+        for (slong r = 0; r < rows; ++r) {
+            if ((mask >> r) & 1) {
+                a += static_cast<slong>(fmpz_fdiv_ui(
+                        fmpz_mat_entry(kernel.raw(), r, 0), 2));
+                b += static_cast<slong>(fmpz_fdiv_ui(
+                        fmpz_mat_entry(kernel.raw(), r, 1), 2));
+            }
+        }
+        in_span[2 * (a % 2) + (b % 2)] = true;
+    }
+    for (slong a = 0; a < 2; ++a) {
+        for (slong b = 0; b < 2; ++b) {
+            bool expected = true;
+            for (const auto& column : columns) {
+                expected = expected &&
+                           (a * column.first + b * column.second) % 2 == 0;
+            }
+            if (in_span[2 * a + b] != expected) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+int test_residue_dlog_proof_kernel_nonpower_basis_order() {
+    // x^2 - 12 stays on the generic backend; its maximal order [1, alpha/2]
+    // is not a power basis.  epsilon = 2 + alpha/2 is the fundamental unit,
+    // and the subgroup <-1, epsilon^2> is not 2-saturated.  The residue
+    // images of epsilon^2 are squares at every degree-one prime, so the
+    // proof kernel at the primes over 23 and 37 must contain (1, 0).
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -12);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::generic);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(!order.is_equation_order());
+
+    silex::Element epsilon_squared(field);
+    {
+        sflint::FmpqPoly unit;
+        sflint::fmpq_poly_set_coeff_si(unit, 0, 7);
+        sflint::fmpq_poly_set_coeff_si(unit, 1, 2);
+        assert(epsilon_squared.set_fmpq_poly(sflint::FmpqPolyConstRef(unit)));
+    }
+    silex::FactoredElement generator(field);
+    assert(generator.set_element(epsilon_squared));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup group(order);
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 1),
+                           embeddings, 128));
+    assert(group.free_rank() == 1);
+
+    silex::FactoredElement free_generator(field);
+    silex::Element free_value(field);
+    silex::Element minus_one(field);
+    silex::Element alpha(field);
+    assert(alpha.gen());
+    assert(group.free_generator(free_generator, 0));
+    assert(free_generator.evaluate(free_value));
+    assert(minus_one.set_si(-1));
+
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(ell, 2));
+    std::vector<silex::PrimeIdeal> all_primes;
+    std::vector<std::pair<slong, slong>> all_columns;
+    for (const slong q : {23, 37}) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, q));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+        assert(primes.size() == 2);
+        std::vector<silex::PrimeIdeal> over_q;
+        std::vector<std::pair<slong, slong>> q_columns;
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            assert(prime->residue_degree() == 1);
+
+            // Find alpha mod P from ideal membership alone: alpha - s in P.
+            silex::Ideal ideal(order);
+            assert(prime->get_ideal(ideal));
+            slong s = -1;
+            for (slong t = 0; t < q; ++t) {
+                if ((t * t - 12) % q != 0) {
+                    continue;
+                }
+                silex::Element difference(field);
+                silex::OrderElement difference_order(order);
+                assert(difference.add_si(alpha, -t));
+                assert(difference_order.set_element(difference));
+                if (ideal.contains(difference_order)) {
+                    assert(s == -1);
+                    s = t;
+                }
+            }
+            assert(s >= 0);
+
+            const std::pair<slong, slong> column{
+                    legendre_bit_at_alpha(free_value, s, q),
+                    legendre_bit_at_alpha(minus_one, s, q)};
+            // epsilon^2 is a square in K, so its image is a square.
+            assert(column.first == 0);
+
+            // The residue-field column and the direct degree-one evaluation
+            // column agree with the oracle.
+            sflint::FmpzMat via_residue_field(2, 1);
+            sflint::FmpzMat via_direct(2, 1);
+            assert(silex::detail::residue_dlog_proof_matrix(
+                    via_residue_field, group, *prime,
+                    sflint::FmpzConstRef(ell)));
+            assert(silex::detail::saturation_proof_prime_column_direct_degree_one(
+                    via_direct, group, *prime, sflint::FmpzConstRef(ell)));
+            assert(sflint::fmpz_mat_nrows(via_residue_field) == 2);
+            assert(sflint::fmpz_mat_nrows(via_direct) == 2);
+            assert(static_cast<slong>(fmpz_fdiv_ui(
+                           fmpz_mat_entry(via_residue_field.raw(), 0, 0), 2)) ==
+                   column.first);
+            assert(static_cast<slong>(fmpz_fdiv_ui(
+                           fmpz_mat_entry(via_residue_field.raw(), 1, 0), 2)) ==
+                   column.second);
+            assert(fmpz_mat_equal(via_residue_field.raw(),
+                                  via_direct.raw()) != 0);
+
+            std::vector<silex::PrimeIdeal> single;
+            single.emplace_back(order);
+            assert(single.back().set(*prime));
+            sflint::FmpzMat kernel(0, 0);
+            assert(group.residue_dlog_proof_kernel(
+                    kernel, silex::PrimeIdealSpan(single.data(), 1),
+                    sflint::FmpzConstRef(ell)));
+            assert(kernel_matches_oracle(kernel, {column}));
+
+            over_q.emplace_back(order);
+            assert(over_q.back().set(*prime));
+            all_primes.emplace_back(order);
+            assert(all_primes.back().set(*prime));
+            q_columns.push_back(column);
+            all_columns.push_back(column);
+        }
+
+        sflint::FmpzMat kernel(0, 0);
+        assert(group.residue_dlog_proof_kernel(
+                kernel, silex::PrimeIdealSpan(over_q.data(), over_q.size()),
+                sflint::FmpzConstRef(ell)));
+        assert(kernel_matches_oracle(kernel, q_columns));
+    }
+
+    sflint::FmpzMat kernel(0, 0);
+    assert(group.residue_dlog_proof_kernel(
+            kernel, silex::PrimeIdealSpan(all_primes.data(), all_primes.size()),
+            sflint::FmpzConstRef(ell)));
+    assert(kernel_matches_oracle(kernel, all_columns));
+    // (1, 0), the epsilon^2 exponent vector, lies in the kernel.
+    bool contains_unit_vector = false;
+    for (slong r = 0; r < sflint::fmpz_mat_nrows(kernel); ++r) {
+        contains_unit_vector =
+                contains_unit_vector ||
+                (fmpz_fdiv_ui(fmpz_mat_entry(kernel.raw(), r, 0), 2) == 1 &&
+                 fmpz_fdiv_ui(fmpz_mat_entry(kernel.raw(), r, 1), 2) == 0);
+    }
+    assert(contains_unit_vector);
+    return 0;
+}
+
 int test_rank_one_degree_one_root_image_matches_prime_ideal() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order = silex::test::equation_order(field);
@@ -3898,6 +4118,7 @@ int main() {
     test_saturate_row_rank_zero_and_failures();
     test_residue_dlog_kernel_real_quadratic();
     test_residue_dlog_proof_kernel_torsion();
+    test_residue_dlog_proof_kernel_nonpower_basis_order();
     test_rank_one_degree_one_root_image_matches_prime_ideal();
     test_direct_degree_one_proof_column_matches_residue_field();
     test_direct_degree_one_residue_dlog_matrix_matches_residue_field();

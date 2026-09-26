@@ -63,6 +63,16 @@ public:
     bool rational_prime(flint::FmpzRef out) const noexcept;
     bool get_ideal(Ideal& out) const noexcept;
     bool kummer_generator_coordinates(flint::FmpzMatRef out) const noexcept;
+    // Residue-polynomial variable convention (current, per backend): on a
+    // maximal quadratic-backend order with basis [1, omega], the residue
+    // polynomial g and reduce() outputs are polynomials in the integral
+    // generator omega; otherwise they are polynomials in the NumberField
+    // generator alpha.  O/P is F_p[x]/(g) with x the image of that
+    // generator.  reduce() maps order coordinates to that variable through
+    // the order basis matrix (never as power-basis coefficients) and returns
+    // false when the stored polynomial is unavailable, when the element is
+    // not in the order, or, on the alpha convention, when p divides the order
+    // basis denominator [O : Z[alpha]].  Coefficients are reduced to [0, p).
     bool residue_polynomial(flint::FmpzPolyRef out) const noexcept;
     bool norm(flint::FmpzRef out) const noexcept;
     slong ramification_index() const noexcept;

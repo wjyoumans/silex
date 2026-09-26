@@ -1,4 +1,5 @@
 #include <silex/factored_element.hpp>
+#include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_field.hpp>
@@ -6,6 +7,8 @@
 #include "test_support.hpp"
 
 #include <cassert>
+#include <utility>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -851,6 +854,199 @@ int test_quotient_logs_mod_three() {
     return 0;
 }
 
+void element_linear_over(silex::Element& out,
+                         slong constant,
+                         slong alpha,
+                         slong denominator) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, constant);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, alpha);
+    fmpq_poly_scalar_div_si(polynomial.raw(), polynomial.raw(), denominator);
+    assert(out.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+}
+
+slong residue_constant(const silex::ResidueFieldElement& element) noexcept {
+    sflint::FmpzPoly output;
+    assert(element.get_polynomial(sflint::FmpzPolyRef(output)));
+    assert(fmpz_poly_degree(output.raw()) <= 0);
+    return fmpz_poly_get_coeff_si(output.raw(), 0);
+}
+
+int test_generic_nonpower_basis_set_element() {
+    // x^2 - 12 on the generic backend: the maximal order [1, alpha/2] is not
+    // a power basis, and the residue polynomial is stored in alpha.
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 12);
+
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::generic);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!maximal.is_equation_order());
+
+    silex::Element alpha(field);
+    silex::Element half_alpha(field);
+    silex::Element third_alpha(field);
+    silex::Element alpha_over_p(field);
+    silex::Element epsilon(field);
+    silex::Element epsilon_squared(field);
+    assert(alpha.gen());
+    element_linear_over(half_alpha, 0, 1, 2);
+    element_linear_over(third_alpha, 0, 1, 3);
+    element_linear_over(alpha_over_p, 0, 1, 11);
+    element_linear_over(epsilon, 4, 1, 2);  // 2 + alpha/2
+    assert(epsilon_squared.multiply(epsilon, epsilon));
+
+    silex::OrderElement half_order(maximal);
+    assert(half_order.set_element(half_alpha));
+
+    sflint::Fmpz p;
+    fmpz_set_si(p, 11);
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 2);
+
+    bool saw_plus_one = false;
+    bool saw_minus_one = false;
+    for (slong i = 0; i < primes.size(); ++i) {
+        silex::ResidueField residue_field;
+        assert(residue_field.set_prime(*primes.at(i)));
+        assert(residue_field.degree() == 1);
+
+        silex::ResidueFieldElement image(residue_field);
+        assert(image.set_element(alpha));
+        const slong root = residue_constant(image);
+        assert(root == 1 || root == 10);
+        const bool plus = root == 1;
+        saw_plus_one = saw_plus_one || plus;
+        saw_minus_one = saw_minus_one || !plus;
+
+        assert(image.set_element(half_alpha));
+        assert(residue_constant(image) == (plus ? 6 : 5));
+        assert(image.set_order_element(half_order));
+        assert(residue_constant(image) == (plus ? 6 : 5));
+
+        // Denominators prime to p are inverted: 1/3 = 4, -1/3 = 7 mod 11.
+        assert(image.set_element(third_alpha));
+        assert(residue_constant(image) == (plus ? 4 : 7));
+
+        // epsilon = 2 + alpha/2 -> 8 or 7; epsilon^2 = 7 + 2 alpha -> 9 or 5.
+        assert(image.set_element(epsilon));
+        assert(residue_constant(image) == (plus ? 8 : 7));
+        assert(image.set_element(epsilon_squared));
+        assert(residue_constant(image) == (plus ? 9 : 5));
+
+        // A denominator divisible by p fails and preserves the output.
+        assert(!image.set_element(alpha_over_p));
+        assert(residue_constant(image) == (plus ? 9 : 5));
+    }
+    assert(saw_plus_one && saw_minus_one);
+    return 0;
+}
+
+void poly_cubic_disc1724(sflint::FmpqPoly& polynomial) noexcept {
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, -3);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 2);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -8);
+}
+
+int test_set_element_homomorphism_on_index_maximal_order() {
+    // Cubic field with [O : Z[alpha]] = 2; check that set_element is
+    // multiplicative and additive, including elements with denominators
+    // prime to p, at every prime above p not dividing the index.
+    sflint::FmpqPoly polynomial;
+    poly_cubic_disc1724(polynomial);
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    sflint::Fmpz index;
+    assert(silex::order_index(sflint::FmpzRef(index), equation, maximal));
+    assert(sflint::fmpz_equal_si(index, 2));
+
+    sflint::FmpqMat basis(3, 3);
+    assert(maximal.get_basis(sflint::FmpqMatRef(basis)));
+    std::vector<silex::Element> elements;
+    for (slong i = 0; i < 3; ++i) {
+        sflint::FmpqPoly row;
+        for (slong j = 0; j < 3; ++j) {
+            fmpq_poly_set_coeff_fmpq(row.raw(), j,
+                                     fmpq_mat_entry(basis.raw(), i, j));
+        }
+        elements.emplace_back(field);
+        assert(elements.back().set_fmpq_poly(sflint::FmpqPolyConstRef(row)));
+    }
+    {
+        silex::Element mixed(field);
+        silex::Element scaled(field);
+        assert(mixed.add(elements[1], elements[2]));
+        assert(scaled.scalar_div_si(mixed, 3));
+        elements.push_back(std::move(scaled));
+        silex::Element shifted(field);
+        silex::Element two(field);
+        assert(two.set_si(2));
+        assert(shifted.subtract(elements[2], two));
+        elements.push_back(std::move(shifted));
+    }
+
+    const slong rational_primes[] = {3, 5, 7, 11, 13};
+    slong checked = 0;
+    for (const slong q : rational_primes) {
+        sflint::Fmpz p;
+        fmpz_set_si(p, q);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, maximal,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            silex::ResidueField residue_field;
+            assert(residue_field.set_prime(*primes.at(i)));
+            silex::ResidueFieldElement left_image(residue_field);
+            silex::ResidueFieldElement right_image(residue_field);
+            silex::ResidueFieldElement combined_image(residue_field);
+            silex::ResidueFieldElement expected(residue_field);
+            for (const silex::Element& left : elements) {
+                if (q == 3 && &left == &elements[3]) {
+                    assert(!left_image.set_element(left));
+                    continue;
+                }
+                assert(left_image.set_element(left));
+                silex::OrderElement left_order(maximal);
+                if (left_order.set_element(left)) {
+                    silex::ResidueFieldElement order_image(residue_field);
+                    assert(order_image.set_order_element(left_order));
+                    assert(order_image.equal(left_image));
+                }
+                for (const silex::Element& right : elements) {
+                    if (q == 3 && &right == &elements[3]) {
+                        continue;
+                    }
+                    silex::Element product(field);
+                    silex::Element sum(field);
+                    assert(product.multiply(left, right));
+                    assert(sum.add(left, right));
+                    assert(right_image.set_element(right));
+
+                    assert(combined_image.set_element(product));
+                    assert(expected.multiply(left_image, right_image));
+                    assert(combined_image.equal(expected));
+
+                    assert(combined_image.set_element(sum));
+                    assert(expected.add(left_image, right_image));
+                    assert(combined_image.equal(expected));
+                }
+            }
+            ++checked;
+        }
+    }
+    assert(checked >= 5);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -862,5 +1058,7 @@ int main() {
     assert(test_multiplicative_degree_one() == 0);
     assert(test_multiplicative_quadratic() == 0);
     assert(test_quotient_logs_mod_three() == 0);
+    assert(test_generic_nonpower_basis_set_element() == 0);
+    assert(test_set_element_homomorphism_on_index_maximal_order() == 0);
     return 0;
 }

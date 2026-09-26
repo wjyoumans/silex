@@ -321,27 +321,6 @@ bool order_element_set_fmpz(OrderElement& out,
            out.set_element(element);
 }
 
-bool fmpq_mat_entries_are_integral(const fmpq_mat_t matrix) noexcept {
-    for (slong i = 0; i < fmpq_mat_nrows(matrix); ++i) {
-        for (slong j = 0; j < fmpq_mat_ncols(matrix); ++j) {
-            if (fmpz_is_one(fmpq_mat_entry_den(matrix, i, j)) == 0) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-void integral_coords_to_poly(flint::FmpzPoly& out,
-                             const fmpq_mat_t coordinates) noexcept {
-    fmpz_poly_zero(out.raw());
-    const slong cols = fmpq_mat_ncols(coordinates);
-    for (slong j = 0; j < cols; ++j) {
-        fmpz_poly_set_coeff_fmpz(out.raw(), j,
-                                 fmpq_mat_entry_num(coordinates, 0, j));
-    }
-}
-
 void integral_coords_to_poly(flint::FmpzPoly& out,
                              const fmpz_mat_t coordinates) noexcept {
     fmpz_poly_zero(out.raw());
@@ -2544,20 +2523,26 @@ bool PrimeIdeal::reduce(flint::FmpzPolyRef out,
         return false;
     }
 
+    // The input is in the order; map it to the residue-polynomial variable
+    // (alpha, or omega on the direct maximal-quadratic path) before reducing.
     Element ambient(*parent_.parent());
-    flint::FmpqMat coordinates(1, parent_.degree());
     flint::FmpzPoly input;
+    flint::Fmpz denominator;
+    flint::Fmpz denominator_inverse;
     flint::FmpzPoly result;
     if (!element.get_element(ambient) ||
-        !parent_.coordinates(flint::FmpqMatRef(coordinates), ambient) ||
-        !fmpq_mat_entries_are_integral(coordinates.raw())) {
-        return false;
-    }
-
-    integral_coords_to_poly(input, coordinates.raw());
-    if (!reduce_poly_mod_residue(result, input, residue_poly_,
+        !detail::residue_variable_numerator(input, denominator, *this,
+                                            ambient) ||
+        fmpz_invmod(denominator_inverse.raw(), denominator.raw(),
+                    p_.raw()) == 0 ||
+        !reduce_poly_mod_residue(result, input, residue_poly_,
                                  flint::FmpzConstRef(p_))) {
         return false;
+    }
+    if (!fmpz_is_one(denominator_inverse.raw())) {
+        fmpz_poly_scalar_mul_fmpz(result.raw(), result.raw(),
+                                  denominator_inverse.raw());
+        fmpz_poly_scalar_mod_fmpz(result.raw(), result.raw(), p_.raw());
     }
     fmpz_poly_set(out.raw(), result.raw());
     return true;
@@ -3215,6 +3200,101 @@ const flint::Fmpz* linear_residue_root_ptr(
     return prime.has_prime_data() && prime.has_linear_residue_root_
             ? &prime.linear_residue_root_
             : nullptr;
+}
+
+bool residue_polynomial_uses_quadratic_integral_generator(
+        const Order& order) noexcept {
+    // Same selection as decompose_prime's direct maximal-quadratic branch and
+    // set_degree_one_prime_ideal_from_root: those store residue polynomials
+    // in reference's integral generator omega (`quadgen`/`quadpoly`).
+    const NumberField* field = order.parent();
+    flint::Fmpz radicand;
+    flint::Fmpz conductor;
+    return field != nullptr && order.degree() == 2 && order.is_maximal() &&
+           field->backend_kind() == NumberFieldBackendKind::quadratic &&
+           field->quadratic_radicand(flint::FmpzRef(radicand)) &&
+           order.quadratic_conductor(flint::FmpzRef(conductor)) &&
+           flint::fmpz_is_one(conductor);
+}
+
+bool residue_variable_numerator(flint::FmpzPoly& numerator,
+                                flint::Fmpz& denominator,
+                                const PrimeIdeal& prime,
+                                const Element& element) noexcept {
+    // Source trace: reference `base2.c:modprinit`, `p \nmid index`
+    // branch.  For p not dividing [O : Z[alpha]] and P = (p, g(alpha)),
+    // O/P = F_p[x]/(g) with alpha -> x; the projection maps each order basis
+    // vector to its alpha-polynomial (`nf_get_zkprimpart`) reduced mod
+    // (p, g), times the inverse of the basis denominator `nf_get_zkden`.
+    // Order coordinates are therefore mapped to the alpha-polynomial through
+    // the order basis matrix before reduction; they are coefficients of that
+    // polynomial only for a power-basis order.  The direct maximal-quadratic
+    // path factors omega's minimal polynomial, so its [1, omega] coordinates
+    // already are the omega-polynomial.  Denominators divisible by p fail
+    // here (no anti-uniformizer step as in `base2.c:Rg_to_ff`).
+    const Order* order = prime.parent();
+    flint::Fmpz p;
+    if (order == nullptr || order->parent() == nullptr ||
+        !element.has_parent(*order->parent()) ||
+        !prime.rational_prime(flint::FmpzRef(p))) {
+        return false;
+    }
+
+    if (residue_polynomial_uses_quadratic_integral_generator(*order)) {
+        flint::FmpqMat coordinates(1, order->degree());
+        if (!order->coordinates(flint::FmpqMatRef(coordinates), element)) {
+            return false;
+        }
+        fmpz_one(denominator.raw());
+        for (slong j = 0; j < order->degree(); ++j) {
+            fmpz_lcm(denominator.raw(), denominator.raw(),
+                     fmpq_mat_entry_den(coordinates.raw(), 0, j));
+        }
+        if (fmpz_divisible(denominator.raw(), p.raw()) != 0) {
+            return false;
+        }
+        flint::Fmpz scale;
+        flint::Fmpz coefficient;
+        fmpz_poly_zero(numerator.raw());
+        for (slong j = 0; j < order->degree(); ++j) {
+            fmpz_divexact(scale.raw(), denominator.raw(),
+                          fmpq_mat_entry_den(coordinates.raw(), 0, j));
+            fmpz_mul(coefficient.raw(),
+                     fmpq_mat_entry_num(coordinates.raw(), 0, j),
+                     scale.raw());
+            fmpz_poly_set_coeff_fmpz(numerator.raw(), j, coefficient.raw());
+        }
+        return true;
+    }
+
+    if (!order->is_equation_order()) {
+        // The alpha-polynomial reduction is defined on O only when O lies in
+        // the p-local alpha-power lattice, i.e. p does not divide the
+        // denominator of the order basis matrix.
+        flint::FmpqMat basis(order->degree(), order->degree());
+        if (!order->get_basis(flint::FmpqMatRef(basis))) {
+            return false;
+        }
+        for (slong i = 0; i < order->degree(); ++i) {
+            for (slong j = 0; j < order->degree(); ++j) {
+                if (fmpz_divisible(fmpq_mat_entry_den(basis.raw(), i, j),
+                                   p.raw()) != 0) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    flint::FmpqPoly polynomial;
+    if (!element.get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
+        return false;
+    }
+    fmpz_set(denominator.raw(), fmpq_poly_denref(polynomial.raw()));
+    if (fmpz_divisible(denominator.raw(), p.raw()) != 0) {
+        return false;
+    }
+    fmpq_poly_get_numerator(numerator.raw(), polynomial.raw());
+    return true;
 }
 
 bool MaximalQuadraticPrimeAccess::set_from_integral_generator_factor(

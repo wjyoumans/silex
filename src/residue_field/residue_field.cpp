@@ -1,17 +1,16 @@
 #include <silex/residue_field.hpp>
 
 #include "residue_field_internal.hpp"
+#include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/flint/fmpz_factor.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
-#include <silex/flint/fmpq_mat.hpp>
 
 #include <flint/fmpz_factor.h>
 #include <flint/fmpz_mod_poly.h>
 #include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
-#include <flint/fmpq_mat.h>
 #include <flint/nmod.h>
 #include <flint/ulong_extras.h>
 
@@ -28,31 +27,6 @@ bool reduce_polynomial(flint::FmpzModPoly& out,
     fmpz_mod_poly_set_fmpz_poly(input.raw(), polynomial.raw(), ctx.raw());
     fmpz_mod_poly_rem(out.raw(), input.raw(), modulus.raw(), ctx.raw());
     return true;
-}
-
-void row_denominator_lcm(flint::Fmpz& out,
-                         const flint::FmpqMat& row) noexcept {
-    fmpz_one(out.raw());
-    for (slong j = 0; j < fmpq_mat_ncols(row.raw()); ++j) {
-        fmpz_lcm(out.raw(), out.raw(),
-                 fmpq_mat_entry_den(row.raw(), 0, j));
-    }
-}
-
-void row_scale_to_polynomial(flint::FmpzPoly& out,
-                             const flint::FmpqMat& row,
-                             const flint::Fmpz& denominator) noexcept {
-    flint::Fmpz quotient;
-    flint::Fmpz coefficient;
-
-    fmpz_poly_zero(out.raw());
-    for (slong j = 0; j < fmpq_mat_ncols(row.raw()); ++j) {
-        fmpz_divexact(quotient.raw(), denominator.raw(),
-                      fmpq_mat_entry_den(row.raw(), 0, j));
-        fmpz_mul(coefficient.raw(), fmpq_mat_entry_num(row.raw(), 0, j),
-                 quotient.raw());
-        fmpz_poly_set_coeff_fmpz(out.raw(), j, coefficient.raw());
-    }
 }
 
 bool set_residue_field_element_from_index(
@@ -444,25 +418,22 @@ bool ResidueFieldElement::set_element(const Element& element) noexcept {
         return false;
     }
 
-    const Order* order = parent_.parent_order();
-    flint::FmpqMat coordinates(1, order->degree());
+    // Map the element to the stored residue polynomial's variable (alpha, or
+    // omega on the direct maximal-quadratic path) through the order basis,
+    // not by reading order coordinates as power-basis coefficients.
+    flint::FmpzPoly scaled;
     flint::Fmpz denominator;
     flint::Fmpz denominator_inverse;
-    flint::FmpzPoly scaled;
     flint::FmpzModPoly reduced(parent_.ctx_);
 
-    if (!order->coordinates(flint::FmpqMatRef(coordinates), element)) {
-        return false;
-    }
-
-    row_denominator_lcm(denominator, coordinates);
-    if (fmpz_divisible(denominator.raw(), parent_.p_.raw()) != 0 ||
+    if (!detail::residue_variable_numerator(scaled, denominator,
+                                            parent_.prime_, element) ||
+        fmpz_divisible(denominator.raw(), parent_.p_.raw()) != 0 ||
         fmpz_invmod(denominator_inverse.raw(), denominator.raw(),
                     parent_.p_.raw()) == 0) {
         return false;
     }
 
-    row_scale_to_polynomial(scaled, coordinates, denominator);
     reduce_polynomial(reduced, flint::FmpzPolyConstRef(scaled),
                       parent_.ctx_, parent_.modulus_);
     fmpz_mod_poly_scalar_mul_fmpz(reduced.raw(), reduced.raw(),

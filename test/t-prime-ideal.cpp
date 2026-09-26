@@ -1,4 +1,5 @@
 #include <silex/flint/fmpq_mat.hpp>
+#include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/prime_ideal.hpp>
@@ -8,6 +9,7 @@
 
 #include <cassert>
 #include <utility>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -1531,6 +1533,321 @@ int test_keeps_parent_order_alive() {
     return 0;
 }
 
+// Residue maps on maximal orders whose basis is not a power basis.  The
+// generic backend stores residue polynomials in the field generator alpha,
+// so order coordinates must be mapped back through the order basis before
+// reducing modulo (p, residue polynomial).
+
+void element_alpha_over(silex::Element& out, slong numerator_constant,
+                        slong numerator_alpha, slong denominator) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, numerator_constant);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, numerator_alpha);
+    fmpq_poly_scalar_div_si(polynomial.raw(), polynomial.raw(), denominator);
+    assert(out.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+}
+
+bool reduced_is_constant(const sflint::FmpzPoly& polynomial,
+                         slong value) noexcept {
+    return fmpz_poly_degree(polynomial.raw()) <= 0 &&
+           fmpz_poly_coeff_is_si(polynomial, 0, value);
+}
+
+int test_generic_nonpower_basis_reduce_quadratic() {
+    // x^2 - 12 is not on the quadratic backend (12 is not squarefree).  Its
+    // maximal order has basis [1, alpha/2], index 2 over Z[alpha].
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 12);
+
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::generic);
+
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(maximal.is_maximal());
+    assert(!maximal.is_equation_order());
+    sflint::Fmpz index;
+    assert(silex::order_index(sflint::FmpzRef(index), equation, maximal));
+    assert(sflint::fmpz_equal_si(index, 2));
+
+    silex::Element alpha(field);
+    silex::Element half_alpha(field);
+    silex::Element third_alpha(field);
+    assert(alpha.gen());
+    element_alpha_over(half_alpha, 0, 1, 2);
+    element_alpha_over(third_alpha, 0, 1, 3);
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, 11));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 2);
+
+    bool saw_plus_one = false;
+    bool saw_minus_one = false;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        assert(prime != nullptr);
+        assert(prime->residue_degree() == 1);
+
+        sflint::FmpzPoly residue_polynomial;
+        assert(prime->residue_polynomial(
+                sflint::FmpzPolyRef(residue_polynomial)));
+        assert(fmpz_poly_degree(residue_polynomial.raw()) == 1);
+
+        sflint::FmpzPoly reduced_alpha;
+        sflint::FmpzPoly reduced_half;
+        assert(prime->reduce(sflint::FmpzPolyRef(reduced_alpha), alpha));
+        assert(prime->reduce(sflint::FmpzPolyRef(reduced_half), half_alpha));
+
+        // alpha/2 is the second order basis vector: coordinates (0, 1).
+        silex::OrderElement half_order(maximal);
+        sflint::FmpzMat coordinates(1, 2);
+        fmpz_one(fmpz_mat_entry(coordinates.raw(), 0, 1));
+        assert(half_order.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+        sflint::FmpzPoly reduced_half_order;
+        assert(prime->reduce(sflint::FmpzPolyRef(reduced_half_order),
+                             half_order));
+        assert(fmpz_poly_equal(reduced_half_order.raw(),
+                               reduced_half.raw()) != 0);
+
+        if (reduced_is_constant(reduced_alpha, 1)) {
+            // P = (11, alpha - 1): alpha/2 -> 1/2 = 6 mod 11.
+            assert(fmpz_poly_coeff_is_si(residue_polynomial, 1, 1));
+            assert(fmpz_poly_coeff_is_si(residue_polynomial, 0, 10));
+            assert(reduced_is_constant(reduced_half, 6));
+            saw_plus_one = true;
+        } else {
+            // P = (11, alpha + 1): alpha -> 10, alpha/2 -> -1/2 = 5.
+            assert(reduced_is_constant(reduced_alpha, 10));
+            assert(reduced_is_constant(reduced_half, 5));
+            saw_minus_one = true;
+        }
+
+        // Only integral elements reduce through PrimeIdeal::reduce.
+        sflint::FmpzPoly untouched;
+        fmpz_poly_set_si(untouched.raw(), 77);
+        assert(!prime->reduce(sflint::FmpzPolyRef(untouched), third_alpha));
+        assert(reduced_is_constant(untouched, 77));
+    }
+    assert(saw_plus_one && saw_minus_one);
+
+    // Primes dividing the index carry no alpha residue polynomial, so the
+    // alpha-polynomial reduction is unavailable there.
+    assert(set_fmpz_si(p, 2));
+    silex::PrimeIdealList primes2;
+    assert(silex::decompose_prime(primes2, maximal, sflint::FmpzConstRef(p)));
+    for (slong i = 0; i < primes2.size(); ++i) {
+        sflint::FmpzPoly reduced;
+        assert(!primes2.at(i)->reduce(sflint::FmpzPolyRef(reduced), alpha));
+    }
+
+    return 0;
+}
+
+void poly_mulmod_prime(sflint::FmpzPoly& out,
+                       const sflint::FmpzPoly& left,
+                       const sflint::FmpzPoly& right,
+                       const sflint::FmpzPoly& modulus,
+                       const sflint::Fmpz& p) noexcept {
+    sflint::FmpzPoly product;
+    fmpz_poly_mul(product.raw(), left.raw(), right.raw());
+    fmpz_poly_rem(out.raw(), product.raw(), modulus.raw());
+    fmpz_poly_scalar_mod_fmpz(out.raw(), out.raw(), p.raw());
+}
+
+void poly_addmod_prime(sflint::FmpzPoly& out,
+                       const sflint::FmpzPoly& left,
+                       const sflint::FmpzPoly& right,
+                       const sflint::Fmpz& p) noexcept {
+    fmpz_poly_add(out.raw(), left.raw(), right.raw());
+    fmpz_poly_scalar_mod_fmpz(out.raw(), out.raw(), p.raw());
+}
+
+// Checks that PrimeIdeal::reduce is a ring homomorphism O -> O/P on a
+// maximal order with index > 1, at every prime above each listed p.
+// Returns the number of primes checked.
+slong check_reduce_homomorphism(const silex::Order& maximal,
+                                const slong* rational_primes,
+                                slong prime_count) noexcept {
+    const slong n = maximal.degree();
+    static const slong coordinate_rows[][5] = {
+            {1, 0, 0, 0, 0},  {0, 1, 0, 0, 0},  {0, 0, 1, 0, 0},
+            {0, 0, 0, 1, 0},  {2, -1, 3, 1, 0}, {-3, 2, 0, 5, 0},
+            {1, 4, -2, -1, 0}, {0, 3, 1, 2, 0},
+    };
+    std::vector<silex::OrderElement> elements;
+    for (const auto& row : coordinate_rows) {
+        sflint::FmpzMat coordinates(1, n);
+        bool nonzero = false;
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set_si(fmpz_mat_entry(coordinates.raw(), 0, j), row[j]);
+            nonzero = nonzero || row[j] != 0;
+        }
+        if (!nonzero) {
+            continue;
+        }
+        elements.emplace_back(maximal);
+        assert(elements.back().set_coordinates(
+                sflint::FmpzMatConstRef(coordinates)));
+    }
+
+    slong checked = 0;
+    for (slong k = 0; k < prime_count; ++k) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, rational_primes[k]));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, maximal,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            sflint::FmpzPoly modulus;
+            assert(prime->residue_polynomial(sflint::FmpzPolyRef(modulus)));
+
+            silex::OrderElement one(maximal);
+            sflint::FmpzPoly reduced_one;
+            assert(one.one());
+            assert(prime->reduce(sflint::FmpzPolyRef(reduced_one), one));
+            assert(reduced_is_constant(reduced_one, 1));
+
+            // p is in P, and a generator of P reduces to zero.
+            silex::OrderElement p_element(maximal);
+            sflint::FmpzPoly reduced_p;
+            assert(p_element.set_si(rational_primes[k]));
+            assert(prime->reduce(sflint::FmpzPolyRef(reduced_p), p_element));
+            assert(fmpz_poly_is_zero(reduced_p.raw()) != 0);
+
+            for (const silex::OrderElement& left : elements) {
+                sflint::FmpzPoly reduced_left;
+                assert(prime->reduce(sflint::FmpzPolyRef(reduced_left), left));
+                silex::Element left_element(*maximal.parent());
+                sflint::FmpzPoly reduced_left_element;
+                assert(left.get_element(left_element));
+                assert(prime->reduce(sflint::FmpzPolyRef(reduced_left_element),
+                                     left_element));
+                assert(fmpz_poly_equal(reduced_left.raw(),
+                                       reduced_left_element.raw()) != 0);
+                for (const silex::OrderElement& right : elements) {
+                    silex::OrderElement product(maximal);
+                    silex::OrderElement sum(maximal);
+                    assert(product.multiply(left, right));
+                    assert(sum.add(left, right));
+
+                    sflint::FmpzPoly reduced_right;
+                    sflint::FmpzPoly reduced_product;
+                    sflint::FmpzPoly reduced_sum;
+                    sflint::FmpzPoly expected;
+                    assert(prime->reduce(sflint::FmpzPolyRef(reduced_right),
+                                         right));
+                    assert(prime->reduce(
+                            sflint::FmpzPolyRef(reduced_product), product));
+                    assert(prime->reduce(sflint::FmpzPolyRef(reduced_sum),
+                                         sum));
+
+                    poly_mulmod_prime(expected, reduced_left, reduced_right,
+                                      modulus, p);
+                    assert(fmpz_poly_equal(expected.raw(),
+                                           reduced_product.raw()) != 0);
+                    poly_addmod_prime(expected, reduced_left, reduced_right,
+                                      p);
+                    assert(fmpz_poly_equal(expected.raw(),
+                                           reduced_sum.raw()) != 0);
+                }
+            }
+            ++checked;
+        }
+    }
+    return checked;
+}
+
+int test_reduce_homomorphism_on_index_maximal_orders() {
+    {
+        // Cubic, [O : Z[alpha]] = 2.
+        sflint::FmpqPoly polynomial;
+        poly_cubic_disc1724(polynomial);
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        assert(field.backend_kind() ==
+               silex::NumberFieldBackendKind::generic);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        sflint::Fmpz index;
+        assert(silex::order_index(sflint::FmpzRef(index), equation, maximal));
+        assert(sflint::fmpz_equal_si(index, 2));
+
+        const slong primes[] = {3, 5, 7, 11, 13, 431};
+        assert(check_reduce_homomorphism(maximal, primes, 6) >= 6);
+    }
+    {
+        // Quartic, [O : Z[alpha]] = 3.
+        sflint::FmpqPoly polynomial;
+        poly_index3_quartic(polynomial);
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        sflint::Fmpz index;
+        assert(silex::order_index(sflint::FmpzRef(index), equation, maximal));
+        assert(sflint::fmpz_equal_si(index, 3));
+
+        const slong primes[] = {2, 5, 7, 11, 13, 17};
+        assert(check_reduce_homomorphism(maximal, primes, 6) >= 6);
+    }
+    return 0;
+}
+
+int test_quadratic_backend_omega_reduce_unchanged() {
+    // The direct maximal-quadratic path keeps residue polynomials in the
+    // integral generator omega = (1 + theta)/2, and reduce() returns
+    // omega-polynomials; theta = 2 omega - 1.
+    silex::NumberField field = silex::test::quadratic_field(5);
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::quadratic);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::Element theta(field);
+    silex::Element omega(field);
+    assert(theta.gen());
+    element_alpha_over(omega, 1, 1, 2);
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, 11));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 2);
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        assert(prime != nullptr);
+        sflint::Fmpz omega_root;
+        assert(degree_one_root_from_residue_polynomial(omega_root, *prime));
+        const slong root = static_cast<slong>(fmpz_get_si(omega_root.raw()));
+
+        sflint::FmpzPoly reduced;
+        assert(prime->reduce(sflint::FmpzPolyRef(reduced), omega));
+        assert(reduced_is_constant(reduced, root));
+        assert(prime->reduce(sflint::FmpzPolyRef(reduced), theta));
+        assert(reduced_is_constant(reduced, ((2 * root - 1) % 11 + 11) % 11));
+    }
+
+    // A degree-two residue field: omega itself reduces to the variable x.
+    assert(set_fmpz_si(p, 7));
+    silex::PrimeIdealList inert;
+    assert(silex::decompose_prime(inert, maximal, sflint::FmpzConstRef(p)));
+    assert(inert.size() == 1);
+    sflint::FmpzPoly reduced;
+    assert(inert.at(0)->reduce(sflint::FmpzPolyRef(reduced), omega));
+    assert(fmpz_poly_degree(reduced.raw()) == 1);
+    assert(fmpz_poly_coeff_is_si(reduced, 1, 1));
+    assert(fmpz_poly_coeff_is_si(reduced, 0, 0));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1563,5 +1880,8 @@ int main() {
     assert(test_residue_ring_prime_relation() == 0);
     assert(test_move_clear_and_redefine() == 0);
     assert(test_keeps_parent_order_alive() == 0);
+    assert(test_generic_nonpower_basis_reduce_quadratic() == 0);
+    assert(test_reduce_homomorphism_on_index_maximal_orders() == 0);
+    assert(test_quadratic_backend_omega_reduce_unchanged() == 0);
     return 0;
 }
