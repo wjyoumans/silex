@@ -13,11 +13,10 @@ legal files are authoritative for license terms.
 Development process disclosure
 ------------------------------
 
-Silex and its companion repositories, `Silex Bench
-<https://github.com/wjyoumans/silex-bench>`_ and `Silex Devtools
-<https://github.com/wjyoumans/silex-devtools>`_, were built almost entirely
-with OpenAI Codex, initially using GPT-5.5 and later GPT-5.6, under the
-direction and review of William Youmans.  This development-process disclosure
+Silex and its companion repository, `Silex Bench
+<https://github.com/wjyoumans/silex-bench>`_, were built almost entirely with
+OpenAI Codex, initially using GPT-5.5 and later GPT-5.6, and are now developed
+with Anthropic Claude, under human direction and review.  This development-process disclosure
 is separate from the licenses, copyright notices, and upstream source
 attribution recorded below.
 

@@ -51,10 +51,8 @@ for its correctness, mathematical source basis, licensing and attribution,
 tests, and performance evidence. A declaration of the tool or model and prompt
 transcripts are not required.
 
-[Silex Devtools](https://github.com/wjyoumans/silex-devtools) provides the
-recommended Codex workflows for implementation, performance work, review, and
-release validation. It is optional, and this repository's [AGENTS.md](AGENTS.md)
-remains authoritative. [Silex Bench](https://github.com/wjyoumans/silex-bench)
+This repository's [AGENTS.md](AGENTS.md) governs automated and AI-assisted
+work. [Silex Bench](https://github.com/wjyoumans/silex-bench)
 provides cross-implementation correctness and performance evidence where it is
 useful; that evidence supplements rather than replaces focused native tests.
 

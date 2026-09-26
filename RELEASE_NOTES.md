@@ -30,17 +30,12 @@ version ranges.
 
 ## AI-assisted development disclosure
 
-Silex and its companion repositories, Silex Bench and Silex Devtools, were
-built almost entirely with OpenAI Codex, initially using GPT-5.5 and later
-GPT-5.6, under the direction and review of William Youmans.
+Silex and its companion repository, Silex Bench, were built almost entirely
+with OpenAI Codex, initially using GPT-5.5 and later GPT-5.6, under human
+direction and review.
 
-The companion repositories are:
-
-- [Silex Bench](https://github.com/wjyoumans/silex-bench), for
-  correctness-gated cross-implementation comparisons and performance
-  campaigns; and
-- [Silex Devtools](https://github.com/wjyoumans/silex-devtools), for the
-  maintained Codex implementation, performance, review, and release workflows.
+[Silex Bench](https://github.com/wjyoumans/silex-bench) provides
+correctness-gated cross-implementation comparisons and performance campaigns.
 
 Comparative checks supplement rather than replace Silex's native tests.
 
