@@ -1,8 +1,11 @@
 #include <silex/number_field.hpp>
 
 #include <flint/fmpz_factor.h>
+#include <flint/fmpz_poly_factor.h>
 
 #include <silex/flint/fmpz_factor.hpp>
+#include <silex/flint/fmpz_poly.hpp>
+#include <silex/flint/fmpz_poly_factor.hpp>
 
 #include <utility>
 
@@ -22,6 +25,26 @@ namespace {
 
 bool degree_is_positive(flint::FmpqPolyConstRef polynomial) noexcept {
     return fmpq_poly_degree(polynomial.raw()) >= 1;
+}
+
+// Irreducibility over Q of a polynomial of positive degree.  By Gauss's
+// lemma this is irreducibility over Z of its primitive part.  FLINT's
+// fmpz_poly_factor returns the content (with sign) separately and the
+// remaining factors as primitive irreducible polynomials of positive degree
+// with multiplicities, so the input is irreducible exactly when that list is
+// a single factor of multiplicity one.  Degree-one polynomials are
+// irreducible and need no factorization.
+bool is_irreducible_over_q(flint::FmpqPolyConstRef polynomial) noexcept {
+    if (fmpq_poly_degree(polynomial.raw()) == 1) {
+        return true;
+    }
+
+    flint::FmpzPoly numerator;
+    fmpq_poly_get_numerator(numerator.raw(), polynomial.raw());
+
+    flint::FmpzPolyFactor factorization;
+    fmpz_poly_factor(factorization.raw(), numerator.raw());
+    return factorization.raw()->num == 1 && factorization.raw()->exp[0] == 1;
 }
 
 bool is_squarefree_nonzero(flint::FmpzConstRef value) noexcept {
@@ -77,6 +100,14 @@ std::shared_ptr<detail::NumberFieldData> make_field_data(
         return {};
     }
     return next;
+}
+
+// Empty FLINT field context viewed by flint_field_ref() on an undefined
+// NumberField, so the returned reference's raw() is nullptr, matching
+// raw_flint_field().  It is never defined or mutated.
+flint::Nf& undefined_flint_field() noexcept {
+    static flint::Nf empty;
+    return empty;
 }
 
 void set_quadratic_backend(
@@ -146,7 +177,7 @@ NumberField NumberField::quadratic(flint::FmpzConstRef radicand) noexcept {
 }
 
 bool NumberField::define_by_polynomial(flint::FmpqPolyConstRef polynomial) noexcept {
-    if (!degree_is_positive(polynomial)) {
+    if (!degree_is_positive(polynomial) || !is_irreducible_over_q(polynomial)) {
         return false;
     }
 
@@ -222,11 +253,12 @@ bool NumberField::quadratic_radicand(flint::FmpzRef out) const noexcept {
 }
 
 flint::NfRef NumberField::flint_field_ref() noexcept {
-    return flint::NfRef(data_->field);
+    return flint::NfRef(is_defined() ? data_->field : undefined_flint_field());
 }
 
 flint::NfConstRef NumberField::flint_field_ref() const noexcept {
-    return flint::NfConstRef(data_->field);
+    return flint::NfConstRef(is_defined() ? data_->field
+                                          : undefined_flint_field());
 }
 
 nf_struct* NumberField::raw_flint_field() noexcept {

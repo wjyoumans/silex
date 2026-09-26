@@ -37,6 +37,9 @@ public:
     bool set(const NumberField& other) noexcept;
 
     // Preferred public construction. Invalid input returns an undefined field.
+    // A defining polynomial must have positive degree and be irreducible over
+    // Q; it may be nonmonic or have rational coefficients. Reducible input,
+    // including non-squarefree input, is invalid.
     // Exact monic integral x^2-d inputs with squarefree nonsquare d retain
     // their supplied polynomial/generator and use the quadratic backend.
     static NumberField by_polynomial(
@@ -47,6 +50,8 @@ public:
 
     // Compatibility/scratch-object construction helpers. Prefer factories in
     // ordinary user code unless mutation/failure preservation is required.
+    // They apply the same validity rules as the factories and return false,
+    // leaving this object unchanged, on invalid input.
     bool define_by_polynomial(flint::FmpqPolyConstRef polynomial) noexcept;
     bool define_by_polynomial(flint::FmpzPolyConstRef polynomial) noexcept;
     bool define_quadratic(flint::FmpzConstRef radicand) noexcept;
@@ -59,6 +64,8 @@ public:
 
     // Low-level FLINT interop for bridge code, parity tests, and direct FLINT
     // call sites. Ordinary users should prefer NumberField domain operations.
+    // On an undefined field, flint_field_ref().raw() and raw_flint_field()
+    // return nullptr.
     flint::NfRef flint_field_ref() noexcept;
     flint::NfConstRef flint_field_ref() const noexcept;
     nf_struct* raw_flint_field() noexcept;

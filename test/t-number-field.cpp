@@ -36,9 +36,140 @@ bool set_one_plus_theta(silex::Element& element) noexcept {
     return element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial));
 }
 
+void set_integral_coefficients(sflint::FmpqPoly& polynomial,
+                               const slong* coefficients,
+                               slong length) noexcept {
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i < length; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+}
+
+// Every construction path must reject `polynomial`, and a failed mutating
+// definition must leave a previously defined field unchanged.
+void check_rejected(const sflint::FmpqPoly& polynomial) noexcept {
+    assert(!silex::NumberField::by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial)).is_defined());
+
+    silex::NumberField fresh;
+    assert(!fresh.define_by_polynomial(sflint::FmpqPolyConstRef(polynomial)));
+    assert(!fresh.is_defined());
+    assert(fresh.raw_flint_field() == nullptr);
+
+    sflint::FmpqPoly previous;
+    set_quadratic_polynomial(previous);
+    silex::NumberField defined = silex::NumberField::by_polynomial(
+            sflint::FmpqPolyConstRef(previous));
+    assert(defined.is_defined());
+    assert(!defined.define_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial)));
+    assert(defined.is_defined());
+    assert(defined.degree() == 2);
+    assert(fmpq_poly_equal(defined.raw_flint_field()->pol, previous.raw()) != 0);
+
+    // Integral overload, on the primitive integral multiple of the input.
+    sflint::FmpzPoly integral;
+    fmpq_poly_get_numerator(integral.raw(), polynomial.raw());
+    assert(!silex::NumberField::by_polynomial(
+            sflint::FmpzPolyConstRef(integral)).is_defined());
+    assert(!defined.define_by_polynomial(sflint::FmpzPolyConstRef(integral)));
+    assert(defined.is_defined());
+    assert(fmpq_poly_equal(defined.raw_flint_field()->pol, previous.raw()) != 0);
+}
+
+void test_reducible_polynomials_rejected() noexcept {
+    sflint::FmpqPoly polynomial;
+
+    // x^2 - 4 = (x - 2)(x + 2).
+    const slong difference_of_squares[] = {-4, 0, 1};
+    set_integral_coefficients(polynomial, difference_of_squares, 3);
+    check_rejected(polynomial);
+
+    // 2x^2 - 8 = 2(x - 2)(x + 2): reducible with nontrivial content.
+    const slong scaled_difference[] = {-8, 0, 2};
+    set_integral_coefficients(polynomial, scaled_difference, 3);
+    check_rejected(polynomial);
+
+    // x^2 = x * x: not squarefree.
+    const slong square[] = {0, 0, 1};
+    set_integral_coefficients(polynomial, square, 3);
+    check_rejected(polynomial);
+
+    // (x^2 + 1)(x - 3).
+    const slong split_cubic[] = {-3, 1, -3, 1};
+    set_integral_coefficients(polynomial, split_cubic, 4);
+    check_rejected(polynomial);
+
+    // x^3: not squarefree.
+    const slong cube[] = {0, 0, 0, 1};
+    set_integral_coefficients(polynomial, cube, 4);
+    check_rejected(polynomial);
+
+    // (x^2 - 2)^2: squarefree part irreducible, but not squarefree.
+    const slong repeated_quadratic[] = {4, 0, -4, 0, 1};
+    set_integral_coefficients(polynomial, repeated_quadratic, 5);
+    check_rejected(polynomial);
+
+    // (x^2 + 1)(x^2 + 2): no rational root, still reducible.
+    const slong quartic_product[] = {2, 0, 3, 0, 1};
+    set_integral_coefficients(polynomial, quartic_product, 5);
+    check_rejected(polynomial);
+
+    // Nonmonic, nonintegral: (2x - 1)(x^2 + 2) / 3
+    //   = 2/3 x^3 - 1/3 x^2 + 4/3 x - 2/3.
+    const slong nonmonic_product[] = {-2, 4, -1, 2};
+    set_integral_coefficients(polynomial, nonmonic_product, 4);
+    sflint::fmpq_poly_scalar_div_ui(polynomial, polynomial, 3);
+    check_rejected(polynomial);
+
+    // Irreducible nonmonic, nonintegral cubic 1/2 x^3 + 1/3 x + 5/7; its
+    // primitive integral multiple 21x^3 + 14x + 30 is 2-Eisenstein.
+    sflint::FmpqPoly irreducible;
+    sflint::Fmpq coefficient;
+    sflint::fmpq_set_si(coefficient, 1, 2);
+    sflint::fmpq_poly_set_coeff_fmpq(irreducible, 3, coefficient);
+    sflint::fmpq_set_si(coefficient, 1, 3);
+    sflint::fmpq_poly_set_coeff_fmpq(irreducible, 1, coefficient);
+    sflint::fmpq_set_si(coefficient, 5, 7);
+    sflint::fmpq_poly_set_coeff_fmpq(irreducible, 0, coefficient);
+    silex::NumberField cubic = silex::NumberField::by_polynomial(
+            sflint::FmpqPolyConstRef(irreducible));
+    assert(cubic.is_defined());
+    assert(cubic.degree() == 3);
+    assert(cubic.backend_kind() == silex::NumberFieldBackendKind::generic);
+    assert(fmpq_poly_equal(cubic.raw_flint_field()->pol, irreducible.raw()) != 0);
+
+    // Linear polynomials are always irreducible, including nonmonic ones.
+    sflint::FmpqPoly linear;
+    sflint::fmpq_poly_set_coeff_si(linear, 1, 3);
+    sflint::fmpq_poly_set_coeff_si(linear, 0, 2);
+    silex::NumberField rational = silex::NumberField::by_polynomial(
+            sflint::FmpqPolyConstRef(linear));
+    assert(rational.is_defined());
+    assert(rational.degree() == 1);
+}
+
+void test_undefined_flint_field_ref() noexcept {
+    silex::NumberField undefined;
+    assert(undefined.flint_field_ref().raw() == nullptr);
+    const silex::NumberField& const_undefined = undefined;
+    assert(const_undefined.flint_field_ref().raw() == nullptr);
+
+    sflint::Fmpz radicand;
+    sflint::fmpz_set_si(radicand, 5);
+    silex::NumberField defined =
+            silex::NumberField::quadratic(sflint::FmpzConstRef(radicand));
+    assert(defined.flint_field_ref().raw() == defined.raw_flint_field());
+    defined.clear();
+    assert(defined.flint_field_ref().raw() == nullptr);
+}
+
 }  // namespace
 
 int main() {
+    test_reducible_polynomials_rejected();
+    test_undefined_flint_field_ref();
+
     silex::NumberField empty;
     assert(!empty.is_defined());
     assert(empty.degree() == 0);
