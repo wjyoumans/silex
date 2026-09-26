@@ -76,6 +76,10 @@ product helpers for:
   Dirichlet ``L(1, chi_D)`` support;
 * higher-degree maximal orders through the Belabas-Friedman fallback.
 
+Only the first two routes are unconditional.  The Belabas-Friedman error
+bound (Belabas and Friedman 2015, Theorem 1) assumes GRH for the Dedekind zeta
+function, so a value from the fallback is GRH-conditional.
+
 The public helpers include both direct value-only calls and explicit
 Belabas-Friedman audit calls:
 
@@ -95,7 +99,7 @@ Each audit API has an explicit output-buffer form and an owned-return
    The computed Arb ball value.
 
 ``error_bound``
-   The certified error-bound Arb ball.
+   The Arb error-bound ball; it is valid under GRH.
 
 ``cutoff``
    The final Belabas-Friedman cutoff used by the computation.
@@ -116,7 +120,9 @@ class-group certificate.  Class-group certification consumes analytic values
 through explicit proof gates, records the BF metadata on the
 ``ClassGroupContext`` when that path is used, and publishes
 ``CertificationMode::proven`` only if the required class/unit proof components
-verify.
+verify.  Because the BF error bound assumes GRH, a BF value never supplies one
+of those components: for degree three and higher, ``proven`` requires
+relation saturation at every prime dividing the candidate class order.
 
 Use zeta/BF APIs directly when you need the analytic value and audit metadata.
 Use ``ClassGroupContext`` and ``OrderUnitGroup`` certification metadata when

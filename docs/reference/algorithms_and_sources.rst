@@ -307,6 +307,24 @@ verifies itself, and proven unit publication through the class/unit gates
 re-derives the torsion subgroup of the order rather than trusting a stored
 one.
 
+An analytic ``hR`` proves a class/unit pair only when it is unconditional.
+Silex has two unconditional routes: degree one, where the residue is exactly
+one, and maximal orders of explicit quadratic-backend fields, where the
+residue comes from FLINT Dirichlet ``L(1, chi_D)``.  Every other ``hR`` comes
+from the Belabas--Friedman evaluation (K. Belabas and E. Friedman,
+"Computing the residue of the Dedekind zeta function", *Math. Comp.* 84
+(2015), 357--369, Theorem 1), whose truncation-error bound assumes GRH.  Such
+an ``hR`` is therefore at most ``grh`` evidence: the analytic check is
+recorded with ``analytic_class_regulator_certification() == grh``, it never
+marks units, the regulator, or relation saturation as proven, and it never
+promotes a result to ``proven``.  For degree three and higher a ``proven``
+request succeeds only through the saturation route above (generation, proven
+units, and saturation at every ``p | h_cand``, as in Hecke's
+``_class_group_proof``) and otherwise fails closed.  Inside the paired
+transaction a Belabas--Friedman index-one check only selects the candidate
+pair to prove; the unit group is then proven from the regulator lower bound
+and unit saturation, and the class group by saturation.
+
 The ``ell``-local test takes the Smith-invariant ``beta`` rows (compact power
 witnesses of invariant generators whose invariant ``ell`` divides), the free
 units, and the torsion generator when ``ell`` divides the torsion order, and
@@ -522,7 +540,9 @@ formal-product and compact-power baselines.  Exact expansion is explicit and
 is not a hidden side effect of structural operations.
 
 ``src/zeta`` follows the PARI analytic class-regulator and
-Belabas--Friedman-style bounds used by the class/unit proof consumers.  Arb
+Belabas--Friedman-style bounds used by the class/unit proof consumers.  The
+Belabas--Friedman error bound assumes GRH; see "Class groups and order units"
+for how certification consumes it.  Arb
 balls preserve explicit precision and error information; an inconclusive
 interval does not become a proof by heuristic rounding.
 

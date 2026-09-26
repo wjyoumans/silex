@@ -107,7 +107,11 @@ Higher-degree paired computation and unlisted quadratic presentations remain
 available as fail-closed best effort, but they have no 0.1.1 completion or
 compatibility guarantee.  Higher-degree native fixtures remain correctness
 regressions for the implemented routes; they do not establish blanket cubic,
-quartic, quintic, or general-degree support.  Nonmaximal paired orders and
+quartic, quintic, or general-degree support.  For degree three and higher,
+the only analytic ``hR`` is the Belabas-Friedman value, which assumes GRH, so
+a ``proven`` request succeeds only through factor-base generation, proven
+units, and relation saturation at every prime dividing the candidate class
+order; otherwise it fails closed.  Nonmaximal paired orders and
 paired ``unknown`` or ``heuristic`` requests are rejected without replacing
 existing outputs.
 

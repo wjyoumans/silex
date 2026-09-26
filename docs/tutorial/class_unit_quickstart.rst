@@ -119,7 +119,7 @@ Next Steps
 - Read :doc:`../support_matrix` for the qualified platform and exact paired
   class/unit presentations.
 - Read :doc:`../reference/factored_zeta` for compact/factored elements and
-  Belabas-Friedman zeta audit records used by proof drivers.
+  Belabas-Friedman zeta audit records, which are GRH-conditional.
 - Run ``example-class-unit-computation`` for the paired class/unit workflow.
 - Run ``example-relation-kernel-order-units`` and
   ``example-supplied-order-units`` for lower-level unit-publication paths.

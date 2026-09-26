@@ -49,6 +49,11 @@ The public proof gates certify only from data that Silex computes itself.
 ``try_certify_class_unit_with_zeta_bf`` evaluate the analytic
 class-regulator product from the zeta function, and
 ``try_prove_relation_saturation_with_units`` runs its own ``ell``-local test.
+The analytic product is unconditional only for degree one and for the
+quadratic ``L(1, chi)`` route.  Otherwise it is a Belabas-Friedman value whose
+error bound assumes GRH, and these gates then publish ``proven`` only when
+relation saturation at every prime dividing the candidate class order is
+already proven; they never use that value to mark units proven.
 Gates that would trust caller-supplied proof data, such as an analytic
 class-regulator product, a saturation index bound, or an exact generator
 norm, are internal to the library and not part of the installed API.  The
@@ -135,10 +140,14 @@ The class-group proof metadata is deliberately componentized:
 - relation-saturation records audit the ``ell``-local saturation checks;
 - unit and regulator proof statuses record the paired class/unit inputs used
   by the certification gate;
-- analytic class-regulator status records whether the analytic index-bound
-  gate verified the finite presentation;
-- BF zeta proof records keep the cutoff, maximum cutoff, requested precision,
-  working precision, and error bound used by the Belabas-Friedman proof path.
+- analytic class-regulator status records whether an analytic ``hR`` check
+  passed for the finite presentation, and
+  ``analytic_class_regulator_certification()`` reports whether that check was
+  unconditional (``proven``) or used a Belabas-Friedman ``hR`` and so assumes
+  GRH (``grh``); a ``grh`` check never contributes to a ``proven`` label;
+- BF zeta audit records keep the cutoff, maximum cutoff, requested precision,
+  working precision, and error bound of a Belabas-Friedman evaluation.  The
+  error bound is valid under GRH, so the record is GRH-conditional evidence.
 
 The coarse class-group mode is promoted to ``proven`` only when the relevant
 source-backed gate has verified the components it needs.  For example, a
