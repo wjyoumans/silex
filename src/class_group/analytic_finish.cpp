@@ -396,6 +396,7 @@ static AnalyticQuotientDecision bad_check_quotient(flint::ArbConstRef quotient,
     return AnalyticQuotientDecision::finished;
 }
 
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
 static const char* bad_check_decision_name(AnalyticQuotientDecision decision)
         noexcept {
     switch (decision) {
@@ -408,6 +409,7 @@ static const char* bad_check_decision_name(AnalyticQuotientDecision decision)
     }
     return "unknown";
 }
+#endif
 
 static void log_analytic_finish_check(
         const DiagnosticsContext* diagnostics,

@@ -167,6 +167,7 @@ bool relation_row_already_known_with_cache(
     return true;
 }
 
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
 bool append_trace_detail(char* buffer,
                          std::size_t size,
                          std::size_t& used,
@@ -245,6 +246,7 @@ void append_relation_row_trace_detail(char* detail,
     append_relation_row_trace_detail(detail, size, used,
                                      flint::FmpzMatConstRef(row));
 }
+#endif
 
 void log_relation_admission_trace(const DiagnosticsContext* diagnostics,
                                  const char* outcome,
