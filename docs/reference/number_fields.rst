@@ -85,8 +85,9 @@ defined, so it is available before the first ``refine``.  Roots are stored with
 the real places first, then each complex place as its root with positive
 imaginary part followed by the conjugate.  Place indices are fixed once roots
 are set: each refinement matches the new root balls to the previous ones by
-overlap, and ``refine`` fails and leaves the context unchanged if that matching
-is not one-to-one.  Archimedean
+overlap, isolating at higher precision until the match is one-to-one.
+``refine`` fails, leaving the context unchanged, only for a non-squarefree
+defining polynomial or when the working precision would overflow.  Archimedean
 helpers compute absolute values, logarithmic embeddings, and Minkowski
 embeddings from an
 ``EmbeddingContext`` and ``Element``.

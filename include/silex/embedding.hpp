@@ -30,8 +30,10 @@ class EmbeddingLogCache;
 // positive imaginary part followed by its conjugate.  signature() is available
 // as soon as the context is defined, before any refine().  Once roots are set,
 // refine() keeps each root at its index: refined roots are matched to the
-// previous ones by ball overlap, and refine() fails, leaving the context
-// unchanged, if that matching is not a bijection.
+// previous ones by ball overlap, isolating at higher precision until the match
+// is one-to-one.  As before, refine() fails only for a non-squarefree defining
+// polynomial or when the working precision would overflow, and then leaves the
+// context unchanged.
 class EmbeddingContext {
 public:
     EmbeddingContext() noexcept = default;

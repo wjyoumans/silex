@@ -10,6 +10,8 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_poly.hpp>
 
+#include "embedding_internal.hpp"
+
 #include <new>
 #include <utility>
 #include <vector>
@@ -116,7 +118,7 @@ void zero_certified_real_imaginary_parts(acb_ptr roots, slong degree) noexcept {
 // previous ball, the root inside roots[j] (which lies in some previous ball)
 // must lie in previous[i], so both balls enclose the same root.  The matching
 // is accepted only when it is a bijection; otherwise this returns false and
-// the caller refines further or reports failure.
+// the caller retries at higher precision.
 //
 // This replaces re-sorting with FLINT _acb_vec_sort_pretty after a refine.
 // That comparator orders by |Im| and falls back to the real part only when
@@ -268,6 +270,54 @@ RootRefinementStatus refine_roots_from_initial(
 }
 
 }  // namespace
+
+namespace detail {
+
+bool isolate_roots_in_previous_order(acb_ptr roots,
+                                     acb_srcptr previous,
+                                     const fmpz_poly_t numerator,
+                                     slong degree,
+                                     slong num_real,
+                                     slong precision,
+                                     const DiagnosticsContext* diagnostics,
+                                     slong* attempts) noexcept {
+    if (attempts != nullptr) {
+        *attempts = 0;
+    }
+    if (degree <= 0 || precision <= 0) {
+        return false;
+    }
+
+    flint::AcbVec scratch(degree);
+    for (slong work_precision = precision;;) {
+        {
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                                "element.embedding.refine.full_roots");
+            arb_fmpz_poly_complex_roots(roots, numerator, 0, work_precision);
+        }
+        if (attempts != nullptr) {
+            ++*attempts;
+        }
+        // FLINT returns its own sorted order; map it back to the published
+        // place order.  An ambiguous match means some new ball is wider than
+        // the gap between previous balls, so isolate again more precisely.
+        if (restore_previous_root_order(roots, previous, scratch.data(),
+                                        degree, num_real)) {
+            return true;
+        }
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                            "element.embedding.refine.full_roots_order_retry");
+        if (work_precision > (COEFF_MAX / 2)) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.embedding.refine.full_roots_precision_overflow");
+            return false;
+        }
+        work_precision *= 2;
+    }
+}
+
+}  // namespace detail
 
 class EmbeddingLogCache {
 public:
@@ -453,6 +503,8 @@ bool EmbeddingContext::refine(
     // define() stores the signature; a context without one has a defining
     // polynomial whose roots cannot be isolated.
     if (sig_.degree() != degree_) {
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                            "element.embedding.refine.no_signature");
         return false;
     }
 
@@ -478,24 +530,18 @@ bool EmbeddingContext::refine(
                         : "element.embedding.refine.full_roots_initial");
         flint::FmpzPoly numerator;
         fmpq_poly_get_numerator(numerator.raw(), parent_.raw_flint_field()->pol);
-        {
+        if (roots_are_set_) {
+            // Keep the published place order.
+            if (!detail::isolate_roots_in_previous_order(
+                        next_roots.data(), roots_.data(), numerator.raw(),
+                        degree_, sig_.r1(), precision, diagnostics)) {
+                return false;
+            }
+        } else {
             SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                                 "element.embedding.refine.full_roots");
             arb_fmpz_poly_complex_roots(next_roots.data(), numerator.raw(), 0,
                                         precision);
-        }
-        // FLINT returns its own sorted order.  Once roots are published, keep
-        // their place order; fail rather than guess if the match is ambiguous.
-        if (roots_are_set_) {
-            flint::AcbVec scratch(degree_);
-            if (!restore_previous_root_order(next_roots.data(), roots_.data(),
-                                             scratch.data(), degree_,
-                                             sig_.r1())) {
-                SILEX_PROFILE_EVENT(
-                        diagnostics, DiagnosticsModule::element,
-                        "element.embedding.refine.full_roots_order_failure");
-                return false;
-            }
         }
     }
 

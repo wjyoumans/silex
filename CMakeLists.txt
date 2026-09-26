@@ -744,6 +744,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-embedding test/t-embedding.cpp)
     target_link_libraries(t-silex-embedding PRIVATE Silex::silex)
+    target_include_directories(t-silex-embedding PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-embedding)
     add_test(NAME silex-embedding COMMAND t-silex-embedding)
     list(APPEND SILEX_TEST_NAMES silex-embedding)

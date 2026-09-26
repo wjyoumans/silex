@@ -6,9 +6,12 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/number_field.hpp>
 
+#include "embedding/embedding_internal.hpp"
 #include "test_support.hpp"
 
 #include <flint/acb.h>
+#include <flint/arb.h>
+#include <flint/arb_fmpz_poly.h>
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
 
@@ -114,44 +117,6 @@ bool satisfies_x3_minus(
     sflint::acb_pow_ui(value, sflint::AcbConstRef(root), 3, precision);
     sflint::acb_sub_si(value, value, a, precision);
     return sflint::acb_contains_zero(value);
-}
-
-// Degree-4 field with two conjugate pairs whose imaginary parts agree to
-// about 300 bits:
-//
-//     f = (x^2 + 2x + 2)(x^2 - 8x + 17) - 2^-300 x
-//       = x^4 - 6x^3 + 3x^2 + (18 - 2^-300)x + 34.
-//
-// The unperturbed roots are A = -1 +/- i and B = 4 +/- i.  To first order the
-// perturbation moves a root r by 2^-300 r / f0'(r), which gives
-// |Im A| - |Im B| ~ +4.9e-92 (about 2^-302), so the pair with the smaller
-// real part has the larger modulus of its imaginary part.
-//
-// FLINT's _acb_vec_sort_pretty (acb/vec_sort_pretty.c, acb_cmp_pretty) orders
-// by |Im| and falls back to the real part only when the |Im| difference ball
-// contains zero.  With roots accurate to about 64 bits the difference is
-// unresolved and A sorts first; with roots accurate to 512 bits it is resolved
-// and B sorts first.  The pre-T-022 refine path re-sorted the refined roots
-// with that comparator, so a 64 -> 512 refine swapped the two complex places.
-// test_place_order_stable_across_refine checks the comparator flip directly,
-// and this test failed on the pre-T-022 embedding code.
-silex::NumberField close_imaginary_pairs_field() noexcept {
-    sflint::FmpqPoly polynomial;
-    sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 3, -6);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 3);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 34);
-
-    fmpq_t linear;
-    fmpq_init(linear);
-    fmpz_one(fmpq_denref(linear));
-    fmpz_mul_2exp(fmpq_denref(linear), fmpq_denref(linear), 300);
-    fmpz_mul_si(fmpq_numref(linear), fmpq_denref(linear), 18);
-    fmpz_sub_ui(fmpq_numref(linear), fmpq_numref(linear), 1);
-    ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), 1, linear);
-    fmpq_clear(linear);
-
-    return field_by_polynomial(polynomial);
 }
 
 // Real quadratic field with two roots 1 +/- sqrt(3) 2^-500.  Rounding the
@@ -508,7 +473,7 @@ int test_signature_before_refine() {
     assert(embeddings.signature().r1() == 1);
     assert(embeddings.signature().r2() == 1);
 
-    silex::EmbeddingContext quartic(close_imaginary_pairs_field());
+    silex::EmbeddingContext quartic(silex::test::close_imaginary_pairs_field());
     assert(!quartic.is_set());
     assert(quartic.signature().r1() == 0);
     assert(quartic.signature().r2() == 2);
@@ -532,7 +497,7 @@ int test_signature_before_refine() {
 }
 
 int test_place_order_stable_across_refine() {
-    silex::NumberField field = close_imaginary_pairs_field();
+    silex::NumberField field = silex::test::close_imaginary_pairs_field();
     silex::EmbeddingContext embeddings(field);
     assert(embeddings.refine(64));
 
@@ -623,14 +588,93 @@ int test_refine_precision_cap() {
     }
 
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
-    // Working precisions 128, 256, 512 and 1024 = 8 * 128 are tried from the
-    // previous roots; the uncapped loop would go on to 2048.
+    // At most the working precisions 128, 256, 512 and 1024 = 8 * 128 are
+    // tried from the previous roots.  With FLINT 3.6.0 all four fail (the
+    // uncapped loop would go on to 2048) and the refine falls back to full
+    // isolation; the exact count depends on FLINT, the upper bound does not.
     assert(counters.events > 0);
-    assert(counters.find_roots == 4);
-    assert(counters.full_roots_fallback == 1);
+    assert(counters.find_roots >= 1);
+    assert(counters.find_roots <= 4);
+    assert(counters.full_roots_fallback >= 1);
 #else
     assert(counters.events == 0);
 #endif
+    return 0;
+}
+
+// White-box test of the full-isolation fallback retry.  The previous roots of
+// x^2 - 2 are replaced by disjoint balls that nearly touch:
+//
+//     B0 = [m +/- 3/2], m <= sqrt(2) - eps - 3/2
+//                                           contains -sqrt(2), ends at or
+//                                           below sqrt(2) - eps,
+//     B1 = [sqrt(2) +/- eps/4]              contains sqrt(2),
+//
+// with eps = 2^-400.  A 64-bit isolation of sqrt(2) has radius far above eps,
+// so it overlaps both B0 and B1 and the first match is not unique.  The
+// fallback must retry at higher precision instead of failing, and must return
+// the roots in the order of B0, B1.
+int test_full_isolation_retries_ambiguous_match() {
+    const slong eps_exp = -400;
+    const slong wide_precision = 1024;
+    sflint::AcbVec previous(2);
+
+    sflint::Arb sqrt2;
+    ::arb_sqrt_ui(sqrt2.raw(), 2, wide_precision);
+
+    sflint::Arb eps;
+    ::arb_one(eps.raw());
+    ::arb_mul_2exp_si(eps.raw(), eps.raw(), eps_exp);
+
+    // B0: radius 3/2 (exact) and midpoint a lower bound for
+    // sqrt(2) - eps - 3/2, so B0 ends at or below sqrt(2) - eps and still
+    // reaches below -sqrt(2).
+    arb_ptr b0 = acb_realref(previous.data() + 0);
+    sflint::Arb b0_mid;
+    ::arb_sub(b0_mid.raw(), sqrt2.raw(), eps.raw(), wide_precision);
+    ::arb_sub_ui(b0_mid.raw(), b0_mid.raw(), 1, wide_precision);
+    sflint::Arb half;
+    ::arb_set_d(half.raw(), 0.5);
+    ::arb_sub(b0_mid.raw(), b0_mid.raw(), half.raw(), wide_precision);
+    ::arb_get_lbound_arf(arb_midref(b0), b0_mid.raw(), wide_precision);
+    ::mag_set_ui_2exp_si(arb_radref(b0), 3, -1);
+    ::arb_zero(acb_imagref(previous.data() + 0));
+
+    // B1: sqrt(2) with radius eps/4.
+    arb_ptr b1 = acb_realref(previous.data() + 1);
+    ::arb_set(b1, sqrt2.raw());
+    ::mag_one(arb_radref(b1));
+    ::mag_mul_2exp_si(arb_radref(b1), arb_radref(b1), eps_exp - 2);
+    ::arb_zero(acb_imagref(previous.data() + 1));
+
+    // Preconditions: disjoint, each contains its root.
+    sflint::Arb minus_sqrt2;
+    ::arb_neg(minus_sqrt2.raw(), sqrt2.raw());
+    assert(::arb_overlaps(b0, b1) == 0);
+    assert(::arb_contains(b0, minus_sqrt2.raw()) != 0);
+    assert(::arb_contains(b1, sqrt2.raw()) != 0);
+
+    sflint::FmpzPoly numerator;
+    ::fmpz_poly_set_coeff_si(numerator.raw(), 2, 1);
+    ::fmpz_poly_set_coeff_si(numerator.raw(), 0, -2);
+
+    // The first isolation alone overlaps both previous balls.
+    sflint::AcbVec first(2);
+    ::arb_fmpz_poly_complex_roots(first.data(), numerator.raw(), 0, 64);
+    assert(::acb_overlaps(first.data() + 1, previous.data() + 0) != 0);
+    assert(::acb_overlaps(first.data() + 1, previous.data() + 1) != 0);
+
+    sflint::AcbVec roots(2);
+    slong attempts = 0;
+    assert(silex::detail::isolate_roots_in_previous_order(
+            roots.data(), previous.data(), numerator.raw(), 2, 2, 64,
+            nullptr, &attempts));
+    assert(attempts > 1);
+    assert(::arb_contains(acb_realref(roots.data() + 0),
+                          minus_sqrt2.raw()) != 0);
+    assert(::arb_contains(acb_realref(roots.data() + 1), sqrt2.raw()) != 0);
+    assert(::acb_overlaps(roots.data() + 0, previous.data() + 1) == 0);
+    assert(::acb_overlaps(roots.data() + 1, previous.data() + 0) == 0);
     return 0;
 }
 
@@ -648,5 +692,6 @@ int main() {
     assert(test_signature_before_refine() == 0);
     assert(test_place_order_stable_across_refine() == 0);
     assert(test_refine_precision_cap() == 0);
+    assert(test_full_isolation_retries_ambiguous_match() == 0);
     return 0;
 }

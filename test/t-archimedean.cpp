@@ -7,9 +7,6 @@
 
 #include "test_support.hpp"
 
-#include <flint/fmpq.h>
-#include <flint/fmpq_poly.h>
-
 #include <cassert>
 
 namespace sflint = silex::flint;
@@ -43,29 +40,6 @@ void element_one_plus_theta(silex::Element& element) noexcept {
 silex::NumberField field_by_polynomial(sflint::FmpqPoly& polynomial) noexcept {
     return silex::test::field_by_polynomial(
             sflint::FmpqPolyConstRef(polynomial));
-}
-
-// f = (x^2 + 2x + 2)(x^2 - 8x + 17) - 2^-300 x.  Its two conjugate pairs,
-// near -1 +/- i and 4 +/- i, have |Im| differing by about 2^-302, so FLINT's
-// non-rigorous _acb_vec_sort_pretty orders them by real part at 64 bits and
-// by |Im| at 512 bits.  See close_imaginary_pairs_field in t-embedding.cpp.
-silex::NumberField close_imaginary_pairs_field() noexcept {
-    sflint::FmpqPoly polynomial;
-    sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 3, -6);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 3);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 34);
-
-    fmpq_t linear;
-    fmpq_init(linear);
-    fmpz_one(fmpq_denref(linear));
-    fmpz_mul_2exp(fmpq_denref(linear), fmpq_denref(linear), 300);
-    fmpz_mul_si(fmpq_numref(linear), fmpq_denref(linear), 18);
-    fmpz_sub_ui(fmpq_numref(linear), fmpq_numref(linear), 1);
-    ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), 1, linear);
-    fmpq_clear(linear);
-
-    return field_by_polynomial(polynomial);
 }
 
 bool log_vectors_overlap(const sflint::ArbVec& left,
@@ -436,7 +410,7 @@ int test_nonsquarefree_failure() {
 }
 
 int test_log_embedding_stable_across_refine() {
-    silex::NumberField field = close_imaginary_pairs_field();
+    silex::NumberField field = silex::test::close_imaginary_pairs_field();
 
     silex::Element theta(field);
     assert(theta.gen());
