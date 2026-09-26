@@ -63,9 +63,102 @@ void set_rational(silex::Element& element, slong numerator, ulong denominator) n
     assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
 }
 
+// Replaces the FLINT context behind an already-defined field with a context
+// for `reducible`, bypassing NumberField construction checks.  The public
+// constructors reject reducible polynomials, so this white-box path is the
+// only way to exercise Element::invert's own zero-divisor guard.
+void reinitialize_flint_field(silex::NumberField& field,
+                              const sflint::FmpqPoly& reducible) noexcept {
+    nf_struct* raw = field.raw_flint_field();
+    assert(raw != nullptr);
+    nf_clear(raw);
+    nf_init(raw, reducible.raw());
+}
+
+void check_invert_rejects_zero_divisor(silex::NumberField field,
+                                       const sflint::FmpqPoly& reducible,
+                                       slong root) noexcept {
+    reinitialize_flint_field(field, reducible);
+
+    silex::Element zero_divisor(field);
+    silex::Element theta(field);
+    silex::Element out(field);
+    assert(theta.gen());
+    assert(zero_divisor.add_si(theta, -root));
+    assert(!zero_divisor.equal_si(0));
+
+    assert(out.set_si(7));
+    assert(!out.invert(zero_divisor));
+    assert(out.equal_si(7));
+
+    sflint::Fmpz exponent;
+    sflint::fmpz_set_si(exponent, -1);
+    assert(!out.pow_fmpz(zero_divisor, sflint::FmpzConstRef(exponent)));
+    assert(out.equal_si(7));
+}
+
+void check_invert_round_trip(const silex::NumberField& field) noexcept {
+    silex::Element theta(field);
+    silex::Element value(field);
+    silex::Element inverse(field);
+    silex::Element product(field);
+    assert(theta.gen());
+    assert(value.add_si(theta, 1));
+    assert(inverse.invert(value));
+    assert(product.multiply(value, inverse));
+    assert(product.equal_si(1));
+    assert(value.invert(value));
+    assert(value.equal(inverse));
+}
+
+void test_invert_zero_divisors() noexcept {
+    // Nonmonic, nonintegral irreducible cubic (numerator 21x^3 + 14x + 30 is
+    // 2-Eisenstein), plus the quadratic and linear representations.
+    sflint::FmpqPoly nonmonic;
+    sflint::Fmpq coefficient;
+    sflint::fmpq_set_si(coefficient, 1, 2);
+    sflint::fmpq_poly_set_coeff_fmpq(nonmonic, 3, coefficient);
+    sflint::fmpq_set_si(coefficient, 1, 3);
+    sflint::fmpq_poly_set_coeff_fmpq(nonmonic, 1, coefficient);
+    sflint::fmpq_set_si(coefficient, 5, 7);
+    sflint::fmpq_poly_set_coeff_fmpq(nonmonic, 0, coefficient);
+    check_invert_round_trip(silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(nonmonic)));
+    check_invert_round_trip(cubic_field());
+    check_invert_round_trip(quadratic_field());
+    check_invert_round_trip(imaginary_quadratic_field());
+    check_invert_round_trip(degree_one_field());
+
+    // Quadratic representation: x^2 - 4, zero divisor theta - 2.
+    sflint::FmpqPoly quadratic_reducible;
+    sflint::fmpq_poly_set_coeff_si(quadratic_reducible, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(quadratic_reducible, 0, -4);
+    check_invert_rejects_zero_divisor(
+            quadratic_field(), quadratic_reducible, 2);
+
+    // Generic representation: (x^2 + 1)(x - 3), zero divisor theta - 3.
+    sflint::FmpqPoly cubic_reducible;
+    sflint::fmpq_poly_set_coeff_si(cubic_reducible, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(cubic_reducible, 2, -3);
+    sflint::fmpq_poly_set_coeff_si(cubic_reducible, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(cubic_reducible, 0, -3);
+    check_invert_rejects_zero_divisor(cubic_field(), cubic_reducible, 3);
+
+    // Nonmonic generic representation: 2(x - 1)(x^2 + 2), zero divisor
+    // theta - 1.
+    sflint::FmpqPoly nonmonic_reducible;
+    sflint::fmpq_poly_set_coeff_si(nonmonic_reducible, 3, 2);
+    sflint::fmpq_poly_set_coeff_si(nonmonic_reducible, 2, -2);
+    sflint::fmpq_poly_set_coeff_si(nonmonic_reducible, 1, 4);
+    sflint::fmpq_poly_set_coeff_si(nonmonic_reducible, 0, -4);
+    check_invert_rejects_zero_divisor(silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(nonmonic)), nonmonic_reducible, 1);
+}
+
 }  // namespace
 
 int main() {
+    test_invert_zero_divisors();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 

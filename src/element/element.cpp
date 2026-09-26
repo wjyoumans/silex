@@ -2481,9 +2481,38 @@ bool Element::invert(const Element& input) noexcept {
         return false;
     }
 
+    // NumberField construction only accepts irreducible defining
+    // polynomials, so every nonzero element is invertible.  A zero divisor is
+    // still rejected here, exactly and per FLINT representation, rather than
+    // letting nf_elem_inv return a non-inverse.  Linear fields are Q, where
+    // nonzero already implies invertible.
+    const nf_struct* field = parent_.raw_flint_field();
     Element tmp(parent_);
-    nf_elem_inv(tmp.value_.raw(), input.value_.raw(),
-                parent_.raw_flint_field());
+    if ((field->flag & NF_LINEAR) != 0) {
+        nf_elem_inv(tmp.value_.raw(), input.value_.raw(), field);
+    } else if ((field->flag & NF_QUADRATIC) != 0) {
+        // A quadratic element is a zero divisor exactly when its norm, the
+        // resultant with the defining polynomial, vanishes.  The quadratic
+        // norm is a constant number of fmpz operations.
+        flint::Fmpq norm;
+        nf_elem_norm(norm.raw(), input.value_.raw(), field);
+        if (fmpq_is_zero(norm.raw()) != 0) {
+            return false;
+        }
+        nf_elem_inv(tmp.value_.raw(), input.value_.raw(), field);
+    } else {
+        // The generic branch of FLINT's _nf_elem_inv (nf_elem/inv.c) computes
+        // the Bezout cofactor of fmpq_poly_xgcd and discards the monic gcd.
+        // Perform the same call and keep the gcd, which is 1 exactly when the
+        // element is invertible.
+        flint::FmpqPoly gcd;
+        flint::FmpqPoly cofactor;
+        fmpq_poly_xgcd(gcd.raw(), NF_ELEM(tmp.value_.raw()), cofactor.raw(),
+                       NF_ELEM(input.value_.raw()), field->pol);
+        if (fmpq_poly_is_one(gcd.raw()) == 0) {
+            return false;
+        }
+    }
     swap(tmp);
     return true;
 }

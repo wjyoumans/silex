@@ -29,14 +29,26 @@ User code should construct fields with factories:
     Construct the source-backed quadratic field ``Q(sqrt(d))`` when the
     radicand is valid.
 
-Each factory returns an undefined ``NumberField`` on invalid input.  Call
-``is_defined()`` before building dependent objects when input validity is not
-already known.
+A defining polynomial must have positive degree and be irreducible over
+``Q``.  It may be nonmonic and may have rational coefficients; the stored
+polynomial and generator are the ones supplied.  Construction checks
+irreducibility exactly, by factoring the primitive integral multiple of the
+polynomial with FLINT ``fmpz_poly_factor``, so reducible input, including
+input that is not squarefree such as ``x^3``, is rejected rather than
+producing a ring with zero divisors.  This is a one-time cost at
+construction.  ``NumberField::quadratic`` accepts only squarefree nonsquare
+radicands ``d``, for which ``x^2 - d`` is irreducible.
+
+Each factory returns an undefined ``NumberField`` on invalid input, including
+a constant or reducible polynomial.  Call ``is_defined()`` before building
+dependent objects when input validity is not already known.
 
 The mutating ``define_by_polynomial`` and ``define_quadratic`` methods remain
-available as compatibility and scratch-object helpers.  They are tested for
-failure-preservation behavior, but they are not the preferred construction
-style for ordinary public code.
+available as compatibility and scratch-object helpers.  They apply the same
+validity rules, return ``false`` on invalid input, and leave the object
+unchanged, so a previously defined field stays defined and an undefined field
+stays undefined.  They are not the preferred construction style for ordinary
+public code.
 
 .. code-block:: cpp
 
@@ -59,6 +71,9 @@ operations are explicit named methods such as ``add``, ``multiply``,
 ``trace``, ``norm``, ``conjugate``, ``is_square``, and ``is_power``.  Methods
 return ``false`` on domain mismatch, undefined parents, unsupported exact root
 cases, or invalid inputs, and leave documented outputs unchanged on failure.
+``invert`` fails on zero; because defining polynomials are irreducible, every
+other element is invertible.  ``invert`` still verifies exactly that its input
+is not a zero divisor and fails, leaving the output unchanged, if it is.
 ``Element::to_fmpq_poly`` is the owned-return convenience form of
 ``get_fmpq_poly`` and returns ``std::nullopt`` when the element is undefined.
 
@@ -101,6 +116,10 @@ Low-level FLINT interop remains available through ``flint_field_ref()`` and
 ``raw_flint_field()`` for bridge code and parity tests.  Ordinary user code
 should prefer the domain operations above and should not inspect the
 underlying ``nf_t`` unless it is deliberately crossing into FLINT-level code.
+On an undefined field both accessors expose a null ``nf_struct`` pointer
+(``flint_field_ref().raw()`` and ``raw_flint_field()`` return ``nullptr``).
+Modifying the ``nf_t`` behind a defined field bypasses the construction
+checks and is not supported.
 
 Minimal Example
 ---------------
