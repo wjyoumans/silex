@@ -44,6 +44,18 @@ zeta cutoff, requested certification, and diagnostics.  Its proof request is
 not accepted by ``compute_candidate``.  Proven status is published only by
 the paired transaction or by a separate explicit source-backed proof gate.
 
+The public proof gates certify only from data that Silex computes itself.
+``try_certify_with_units``, ``try_certify_class_unit_with_zeta``, and
+``try_certify_class_unit_with_zeta_bf`` evaluate the analytic
+class-regulator product from the zeta function, and
+``try_prove_relation_saturation_with_units`` runs its own ``ell``-local test.
+Gates that would trust caller-supplied proof data, such as an analytic
+class-regulator product, a saturation index bound, or an exact generator
+norm, are internal to the library and not part of the installed API.  A
+caller who has an ``hR`` value of their own can compare it with
+``OrderUnitGroup::class_regulator_index_bound``, which reports a bound but
+does not publish certification.
+
 Paired Class/Unit Transaction
 -----------------------------
 

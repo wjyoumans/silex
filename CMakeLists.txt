@@ -844,6 +844,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-relation test/t-relation.cpp)
     target_link_libraries(t-silex-relation PRIVATE Silex::silex)
+    target_include_directories(t-silex-relation PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-relation)
     add_test(NAME silex-relation COMMAND t-silex-relation)
     list(APPEND SILEX_TEST_NAMES silex-relation)

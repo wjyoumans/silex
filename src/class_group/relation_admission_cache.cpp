@@ -5,6 +5,7 @@
 
 #include "relation_admission_cache_internal.hpp"
 #include "../factor_base/factor_base_internal.hpp"
+#include "../relation/relation_internal.hpp"
 
 #include <cstdarg>
 #include <cstddef>
@@ -796,7 +797,7 @@ bool try_admit_deferred_integral_relation(
     }
 
     const flint::FmpzMatConstRef relation_row =
-            detail::pending_relation_exponents_ref(relation);
+            detail::RelationAccess::pending_relation_exponents_ref(relation);
     if (flint::fmpz_mat_nrows(relation_row) != 1 ||
         flint::fmpz_mat_ncols(relation_row) != relation.length()) {
         return false;
@@ -885,8 +886,10 @@ bool try_admit_deferred_integral_relation(
         return true;
     }
 
-    if (!detail::commit_relation_generator_from_integral_coordinates(
-                relation, integral_coordinates, context.diagnostics())) {
+    if (!detail::RelationAccess::
+                commit_relation_generator_from_integral_coordinates(
+                        relation, integral_coordinates,
+                        context.diagnostics())) {
         return false;
     }
 

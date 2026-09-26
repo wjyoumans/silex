@@ -5,6 +5,7 @@
 #include "compact_reconstruction_bound_internal.hpp"
 #include "relation_unit_internal.hpp"
 #include "order_unit_internal.hpp"
+#include "../class_group/class_group_certification_internal.hpp"
 #include "../class_group/class_group_internal.hpp"
 #include "../class_group/relation_saturation_internal.hpp"
 #include "../factored_element/compact_reconstruction_internal.hpp"
@@ -3489,10 +3490,10 @@ bool OrderUnitGroup::compute_with_class_group(
                                     options.zeta_bf_max_cutoff != 0)) {
                     return false;
                 }
-                return candidate_class_group
-                        .try_certify_class_unit_with_units(
-                                candidate_units, analytic_cache.value(),
-                                precision);
+                return detail::ClassGroupCertificationAccess::
+                        try_certify_class_unit_with_units(
+                                candidate_class_group, candidate_units,
+                                analytic_cache.value(), precision);
             };
 
             const bool try_quadratic_rank_one_unit_proof =

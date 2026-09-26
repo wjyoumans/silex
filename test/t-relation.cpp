@@ -3,6 +3,7 @@
 #include <silex/order_element.hpp>
 #include <silex/relation.hpp>
 
+#include "relation/relation_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -10,6 +11,28 @@
 
 namespace {
 namespace sflint = silex::flint;
+using RelationAccess = silex::detail::RelationAccess;
+
+// Setting a relation from a caller-supplied norm or row is internal; the
+// public Relation only factors generators itself.  A requires-expression
+// reports false for a private or absent member.
+template <typename R>
+constexpr bool has_public_relation_set_generator_with_norm =
+        requires(R& relation,
+                 const silex::Element& generator,
+                 const sflint::Fmpq& norm) {
+            relation.set_generator_with_norm(generator,
+                                             sflint::FmpqConstRef(norm));
+        };
+
+template <typename R>
+constexpr bool has_public_relation_set_generator =
+        requires(R& relation, const silex::Element& generator) {
+            relation.set_generator(generator);
+        };
+
+static_assert(has_public_relation_set_generator<silex::Relation>);
+static_assert(!has_public_relation_set_generator_with_norm<silex::Relation>);
 
 void poly_x(sflint::FmpqPoly& polynomial) noexcept {
     sflint::fmpq_poly_zero(polynomial);
@@ -246,7 +269,7 @@ int test_known_row_reuses_defined_relation() {
 
     assert(alpha.set_si(2));
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, 0), 1);
-    assert(silex::detail::set_relation_from_known_row(
+    assert(RelationAccess::set_relation_from_known_row(
             relation, base, alpha, sflint::FmpzMatConstRef(row)));
     assert(relation.generator(generator));
     assert(generator.equal_si(2));
@@ -254,7 +277,7 @@ int test_known_row_reuses_defined_relation() {
 
     assert(alpha.set_si(4));
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, 0), 2);
-    assert(silex::detail::set_relation_from_known_row(
+    assert(RelationAccess::set_relation_from_known_row(
             relation, base, alpha, sflint::FmpzMatConstRef(row)));
     assert(relation.generator(generator));
     assert(generator.equal_si(4));
@@ -279,14 +302,14 @@ int test_set_generator_with_norm() {
 
     assert(alpha.set_si(4));
     assert(alpha.norm(sflint::FmpqRef(norm)));
-    assert(relation.set_generator_with_norm(alpha,
-                                            sflint::FmpqConstRef(norm)));
+    assert(RelationAccess::set_generator_with_norm(
+            relation, alpha, sflint::FmpqConstRef(norm)));
     assert(relation_row_is_si(relation, 0, 2));
 
     assert(alpha.set_si(3));
     assert(alpha.norm(sflint::FmpqRef(norm)));
-    assert(!relation.set_generator_with_norm(alpha,
-                                             sflint::FmpqConstRef(norm)));
+    assert(!RelationAccess::set_generator_with_norm(
+            relation, alpha, sflint::FmpqConstRef(norm)));
     assert(relation_row_is_si(relation, 0, 2));
 
     return 0;
@@ -319,14 +342,14 @@ int test_set_generator_with_integral_coordinates_and_norm() {
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 1), 0);
     assert(set_element_from_order_coordinates(alpha, order, coordinates));
     assert(alpha.norm(sflint::FmpqRef(norm)));
-    assert(normal.set_generator_with_norm(alpha,
-                                          sflint::FmpqConstRef(norm)));
-    assert(silex::detail::set_relation_from_integral_coordinates_and_norm(
+    assert(RelationAccess::set_generator_with_norm(
+            normal, alpha, sflint::FmpqConstRef(norm)));
+    assert(RelationAccess::set_relation_from_integral_coordinates_and_norm(
             coordinate_relation, alpha,
             sflint::FmpzMatConstRef(coordinates),
             sflint::FmpqConstRef(norm)));
     sflint::fmpz_poly_set_coeff_si(coordinate_polynomial, 0, 2);
-    assert(silex::detail::set_relation_from_integral_coordinates_and_norm(
+    assert(RelationAccess::set_relation_from_integral_coordinates_and_norm(
             polynomial_relation, alpha,
             sflint::FmpzMatConstRef(coordinates),
             sflint::FmpqConstRef(norm), &coordinate_polynomial));
@@ -346,14 +369,14 @@ int test_set_generator_with_integral_coordinates_and_norm() {
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0), 3);
     assert(set_element_from_order_coordinates(alpha, order, coordinates));
     assert(alpha.norm(sflint::FmpqRef(norm)));
-    assert(!silex::detail::set_relation_from_integral_coordinates_and_norm(
+    assert(!RelationAccess::set_relation_from_integral_coordinates_and_norm(
             coordinate_relation, alpha,
             sflint::FmpzMatConstRef(coordinates),
             sflint::FmpqConstRef(norm)));
     assert(relation_row_is_si(coordinate_relation, 0, 2));
 
     sflint::FmpzMat bad_coordinates(2, 2);
-    assert(!silex::detail::set_relation_from_integral_coordinates_and_norm(
+    assert(!RelationAccess::set_relation_from_integral_coordinates_and_norm(
             coordinate_relation, alpha,
             sflint::FmpzMatConstRef(bad_coordinates),
             sflint::FmpqConstRef(norm)));

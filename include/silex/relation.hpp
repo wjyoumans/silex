@@ -19,51 +19,7 @@ class FiniteAbelianGroup;
 class Relation;
 
 namespace detail {
-
-bool set_relation_from_known_row(Relation& out,
-                                 const FactorBase& base,
-                                 const Element& generator,
-                                 flint::FmpzMatConstRef row) noexcept;
-
-bool set_relation_from_integral_coordinates_and_norm(
-        Relation& out,
-        const Element& generator,
-        flint::FmpzMatConstRef integral_coordinates,
-        flint::FmpqConstRef norm,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
-
-bool set_relation_from_integral_coordinates_and_norm(
-        Relation& out,
-        const Element& generator,
-        flint::FmpzMatConstRef integral_coordinates,
-        flint::FmpqConstRef norm,
-        const flint::FmpzPoly* integral_coordinate_polynomial,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
-
-bool set_relation_from_integral_coordinates_and_norm(
-        Relation& out,
-        flint::FmpzMatConstRef integral_coordinates,
-        flint::FmpqConstRef norm,
-        const flint::FmpzPoly* integral_coordinate_polynomial = nullptr,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
-
-bool factor_relation_row_from_integral_coordinates_and_norm(
-        Relation& out,
-        bool& handled,
-        bool& smooth,
-        flint::FmpzMatConstRef integral_coordinates,
-        flint::FmpqConstRef norm,
-        const flint::FmpzPoly* integral_coordinate_polynomial = nullptr,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
-
-bool commit_relation_generator_from_integral_coordinates(
-        Relation& out,
-        flint::FmpzMatConstRef integral_coordinates,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
-
-flint::FmpzMatConstRef pending_relation_exponents_ref(
-        const Relation& relation) noexcept;
-
+class RelationAccess;
 }  // namespace detail
 
 class Relation {
@@ -92,12 +48,6 @@ public:
     bool set_generator(const Element& alpha,
                        const DiagnosticsContext* diagnostics = nullptr)
             noexcept;
-    // `norm` must be the exact field norm of `alpha`; hot relation-search
-    // loops use this to avoid recomputing a norm they already screened.
-    bool set_generator_with_norm(
-            const Element& alpha,
-            flint::FmpqConstRef norm,
-            const DiagnosticsContext* diagnostics = nullptr) noexcept;
     bool generator(Element& out) const noexcept;
     bool exponents(flint::FmpzMatRef out) const noexcept;
     // Borrowed exponent-row view; valid while this relation object is alive.
@@ -117,44 +67,9 @@ private:
     flint::FmpzMat scratch_exponents_{0, 0};
     bool has_relation_ = false;
 
-    friend bool detail::set_relation_from_known_row(
-            Relation& out,
-            const FactorBase& base,
-            const Element& generator,
-            flint::FmpzMatConstRef row) noexcept;
-    friend bool detail::set_relation_from_integral_coordinates_and_norm(
-            Relation& out,
-            const Element& generator,
-            flint::FmpzMatConstRef integral_coordinates,
-            flint::FmpqConstRef norm,
-            const DiagnosticsContext* diagnostics) noexcept;
-    friend bool detail::set_relation_from_integral_coordinates_and_norm(
-            Relation& out,
-            const Element& generator,
-            flint::FmpzMatConstRef integral_coordinates,
-            flint::FmpqConstRef norm,
-            const flint::FmpzPoly* integral_coordinate_polynomial,
-            const DiagnosticsContext* diagnostics) noexcept;
-    friend bool detail::set_relation_from_integral_coordinates_and_norm(
-            Relation& out,
-            flint::FmpzMatConstRef integral_coordinates,
-            flint::FmpqConstRef norm,
-            const flint::FmpzPoly* integral_coordinate_polynomial,
-            const DiagnosticsContext* diagnostics) noexcept;
-    friend bool detail::factor_relation_row_from_integral_coordinates_and_norm(
-            Relation& out,
-            bool& handled,
-            bool& smooth,
-            flint::FmpzMatConstRef integral_coordinates,
-            flint::FmpqConstRef norm,
-            const flint::FmpzPoly* integral_coordinate_polynomial,
-            const DiagnosticsContext* diagnostics) noexcept;
-    friend bool detail::commit_relation_generator_from_integral_coordinates(
-            Relation& out,
-            flint::FmpzMatConstRef integral_coordinates,
-            const DiagnosticsContext* diagnostics) noexcept;
-    friend flint::FmpzMatConstRef detail::pending_relation_exponents_ref(
-            const Relation& relation) noexcept;
+    // Internal relation-search hooks (caller-supplied norms and rows) are
+    // reachable only through the noninstalled detail::RelationAccess.
+    friend class detail::RelationAccess;
 };
 
 class RelationMatrix {

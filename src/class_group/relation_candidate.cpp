@@ -6,6 +6,7 @@
 #include "relation_admission_cache_internal.hpp"
 #include "relation_candidate_internal.hpp"
 #include "relation_search_internal.hpp"
+#include "../relation/relation_internal.hpp"
 
 #include <utility>
 
@@ -306,9 +307,10 @@ bool try_generator_relation(ClassGroupContext& context,
                         flint::FmpqConstRef(known_norm),
                         known_integral_coordinate_polynomial, source);
     } else if (known_norm != nullptr) {
-        ok = context.try_append_generator_relation_with_norm(
-                candidate_partial_throttle, alpha,
-                flint::FmpqConstRef(known_norm), source);
+        ok = detail::ClassGroupRelationSearchAccess::
+                try_append_generator_relation_with_norm(
+                        context, candidate_partial_throttle, alpha,
+                        flint::FmpqConstRef(known_norm), source);
     } else {
         ok = context.try_append_generator_relation(
                 candidate_partial_throttle, alpha, source);
@@ -611,7 +613,7 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                 if (can_defer_integral_alpha) {
                     bool handled = false;
                     bool smooth = false;
-                    if (!detail::
+                    if (!detail::RelationAccess::
                                 factor_relation_row_from_integral_coordinates_and_norm(
                                         *relation, handled, smooth,
                                         flint::FmpzMatConstRef(coordinates),
@@ -628,7 +630,8 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                             return false;
                         }
                         relation_set =
-                                detail::set_relation_from_integral_coordinates_and_norm(
+                                detail::RelationAccess::
+                                        set_relation_from_integral_coordinates_and_norm(
                                         *relation, alpha,
                                         flint::FmpzMatConstRef(coordinates),
                                         flint::FmpqConstRef(known_norm),
@@ -637,7 +640,8 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                 } else if (known_norm != nullptr &&
                            flint::fmpz_is_one(den)) {
                     relation_set =
-                            detail::set_relation_from_integral_coordinates_and_norm(
+                            detail::RelationAccess::
+                                    set_relation_from_integral_coordinates_and_norm(
                                     *relation, alpha,
                                     flint::FmpzMatConstRef(coordinates),
                                     flint::FmpqConstRef(known_norm),
@@ -645,8 +649,8 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                 } else {
                     relation_set = known_norm == nullptr
                             ? relation->set_generator(alpha, diagnostics)
-                            : relation->set_generator_with_norm(
-                                      alpha,
+                            : detail::RelationAccess::set_generator_with_norm(
+                                      *relation, alpha,
                                       flint::FmpqConstRef(known_norm),
                                       diagnostics);
                 }

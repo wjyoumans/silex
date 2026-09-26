@@ -573,9 +573,11 @@ bool try_certify_candidate_with_zeta(ClassGroupContext& class_group,
                             flint::FmpzRef(required_bound)) &&
                     class_group.check_factor_base_generation_bound(
                             flint::FmpzConstRef(required_bound)) &&
-                    class_group.try_certify_class_unit_with_units(
-                            units, analytic_cache.zeta_validation_value(),
-                            precision)) {
+                    ClassGroupCertificationAccess::
+                            try_certify_class_unit_with_units(
+                                    class_group, units,
+                                    analytic_cache.zeta_validation_value(),
+                                    precision)) {
                     return true;
                 }
             }
@@ -694,9 +696,9 @@ bool try_validate_candidate_pair_after_progress(
 
     flint::Fmpz aux_bound;
     relation_saturation_aux_bound(aux_bound, options);
-    if (class_group.try_analytic_index_bound_with_units(
-                units, analytic_cache.value(), flint::FmpzConstRef(aux_bound),
-                precision)) {
+    if (ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
+                class_group, units, analytic_cache.value(),
+                flint::FmpzConstRef(aux_bound), precision)) {
         return true;
     }
 
@@ -705,9 +707,9 @@ bool try_validate_candidate_pair_after_progress(
         return false;
     }
 
-    return class_group.try_analytic_index_bound_with_units(
-            units, analytic_cache.value(), flint::FmpzConstRef(retry_aux_bound),
-            precision);
+    return ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
+            class_group, units, analytic_cache.value(),
+            flint::FmpzConstRef(retry_aux_bound), precision);
 }
 
 const char* validation_recompute_profile_label(
@@ -1043,8 +1045,10 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
             // analytic index-one result above; try to publish through the
             // class/unit certification helper before reporting publication
             // failure.
-            if (class_group.try_certify_class_unit_with_units(
-                        units, analytic_cache.value(), precision)) {
+            if (ClassGroupCertificationAccess::
+                        try_certify_class_unit_with_units(
+                                class_group, units, analytic_cache.value(),
+                                precision)) {
                 summary.outcome = ValidateRefineOutcome::proven;
                 return true;
             }

@@ -80,6 +80,10 @@ Relations
 supplied generator factors smoothly over the copied factor base.  On success
 it copies the generator and materializes the exponent row; on failure it
 leaves the previous relation unchanged.
+The exponent row is always computed by Silex from the generator's own norm
+and factorization.  The installed API has no entry point that accepts a
+caller-supplied norm or exponent row; the relation-search hooks that reuse
+already screened norms and rows are internal to the library.
 
 ``silex::RelationMatrix`` owns rows, copied generators, and one copied
 factor-base handle.  It appends same-base relations, materializes dense rows,

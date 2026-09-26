@@ -1,5 +1,7 @@
 #include <silex/relation.hpp>
 
+#include "relation_internal.hpp"
+
 #include <silex/abelian_group.hpp>
 #include <silex/flint/fmpz_factor.hpp>
 #include <silex/flint/fmpq_poly.hpp>
@@ -1058,10 +1060,11 @@ bool factor_nonintegral_element_over_base_by_denominator_split(
 
 namespace detail {
 
-bool set_relation_from_known_row(Relation& out,
-                                 const FactorBase& base,
-                                 const Element& generator,
-                                 flint::FmpzMatConstRef row) noexcept {
+bool RelationAccess::set_relation_from_known_row(
+        Relation& out,
+        const FactorBase& base,
+        const Element& generator,
+        flint::FmpzMatConstRef row) noexcept {
     if (!valid_base(base) || base.parent() == nullptr ||
         base.parent()->parent() == nullptr ||
         !generator.has_parent(*base.parent()->parent()) ||
@@ -1092,7 +1095,7 @@ bool set_relation_from_known_row(Relation& out,
     return true;
 }
 
-bool set_relation_from_integral_coordinates_and_norm(
+bool RelationAccess::set_relation_from_integral_coordinates_and_norm(
         Relation& out,
         const Element& generator,
         flint::FmpzMatConstRef integral_coordinates,
@@ -1102,7 +1105,7 @@ bool set_relation_from_integral_coordinates_and_norm(
             out, generator, integral_coordinates, norm, nullptr, diagnostics);
 }
 
-bool set_relation_from_integral_coordinates_and_norm(
+bool RelationAccess::set_relation_from_integral_coordinates_and_norm(
         Relation& out,
         const Element& generator,
         flint::FmpzMatConstRef integral_coordinates,
@@ -1117,7 +1120,7 @@ bool set_relation_from_integral_coordinates_and_norm(
                                   diagnostics);
 }
 
-bool set_relation_from_integral_coordinates_and_norm(
+bool RelationAccess::set_relation_from_integral_coordinates_and_norm(
         Relation& out,
         flint::FmpzMatConstRef integral_coordinates,
         flint::FmpqConstRef norm,
@@ -1193,7 +1196,7 @@ bool set_relation_from_integral_coordinates_and_norm(
     return true;
 }
 
-bool factor_relation_row_from_integral_coordinates_and_norm(
+bool RelationAccess::factor_relation_row_from_integral_coordinates_and_norm(
         Relation& out,
         bool& handled,
         bool& smooth,
@@ -1233,7 +1236,7 @@ bool factor_relation_row_from_integral_coordinates_and_norm(
     return true;
 }
 
-bool commit_relation_generator_from_integral_coordinates(
+bool RelationAccess::commit_relation_generator_from_integral_coordinates(
         Relation& out,
         flint::FmpzMatConstRef integral_coordinates,
         const DiagnosticsContext* diagnostics) noexcept {
@@ -1265,9 +1268,18 @@ bool commit_relation_generator_from_integral_coordinates(
     return true;
 }
 
-flint::FmpzMatConstRef pending_relation_exponents_ref(
+flint::FmpzMatConstRef RelationAccess::pending_relation_exponents_ref(
         const Relation& relation) noexcept {
     return flint::FmpzMatConstRef(relation.scratch_exponents_);
+}
+
+bool RelationAccess::set_generator_with_norm(
+        Relation& out,
+        const Element& alpha,
+        flint::FmpqConstRef norm,
+        const DiagnosticsContext* diagnostics) noexcept {
+    return out.set_generator_impl(alpha, norm.raw(), nullptr, nullptr,
+                                  diagnostics);
 }
 
 }  // namespace detail
@@ -1385,14 +1397,6 @@ bool Relation::set_generator(
         const Element& alpha,
         const DiagnosticsContext* diagnostics) noexcept {
     return set_generator_impl(alpha, nullptr, nullptr, nullptr, diagnostics);
-}
-
-bool Relation::set_generator_with_norm(
-        const Element& alpha,
-        flint::FmpqConstRef norm,
-        const DiagnosticsContext* diagnostics) noexcept {
-    return set_generator_impl(alpha, norm.raw(), nullptr, nullptr,
-                              diagnostics);
 }
 
 bool Relation::set_generator_impl(

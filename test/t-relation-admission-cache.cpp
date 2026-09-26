@@ -3,6 +3,7 @@
 #include <silex/relation.hpp>
 
 #include "class_group/relation_admission_cache_internal.hpp"
+#include "relation/relation_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -11,6 +12,7 @@
 
 namespace {
 namespace sflint = silex::flint;
+using RelationAccess = silex::detail::RelationAccess;
 
 constexpr ulong kAdmissionModulus = UWORD(27449);
 
@@ -70,7 +72,7 @@ bool set_prime_power_relation(silex::Relation& relation,
     sflint::fmpz_set_ui(
             sflint::fmpz_mat_entry(row, 0, column), exponent);
     return generator.set_fmpz(sflint::FmpzConstRef(generator_value)) &&
-           silex::detail::set_relation_from_known_row(
+           RelationAccess::set_relation_from_known_row(
                    relation, base, generator,
                    sflint::FmpzMatConstRef(row));
 }
@@ -88,7 +90,7 @@ bool prepare_pending_integral_relation(silex::Relation& relation,
     sflint::fmpq_set_si(norm, value, 1);
     bool handled = false;
     bool smooth = false;
-    return silex::detail::factor_relation_row_from_integral_coordinates_and_norm(
+    return RelationAccess::factor_relation_row_from_integral_coordinates_and_norm(
                    relation, handled, smooth,
                    sflint::FmpzMatConstRef(coordinates),
                    sflint::FmpqConstRef(norm)) &&

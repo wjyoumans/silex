@@ -133,13 +133,6 @@ public:
             const Element& generator,
             ClassGroupRelationSource source =
                     ClassGroupRelationSource::Supplied) noexcept;
-    // `norm` must be the exact field norm of `generator`.
-    bool try_append_generator_relation_with_norm(
-            bool& partial_throttle_exit,
-            const Element& generator,
-            flint::FmpqConstRef norm,
-            ClassGroupRelationSource source =
-                    ClassGroupRelationSource::Supplied) noexcept;
     slong relation_count() const noexcept;
     slong relation_rank() const noexcept;
     slong skipped_dependent_relation_count() const noexcept;
@@ -196,10 +189,6 @@ public:
                                 CertificationMode requested,
                                 slong precision,
                                 ulong zeta_bf_max_cutoff) noexcept;
-    bool try_certify_class_unit_with_units(
-            OrderUnitGroup& units,
-            flint::ArbConstRef analytic_class_regulator_product,
-            slong precision) noexcept;
     bool try_certify_class_unit_with_zeta(OrderUnitGroup& units,
                                           slong precision) noexcept;
     bool try_certify_class_unit_with_zeta_bf(OrderUnitGroup& units,
@@ -209,15 +198,6 @@ public:
             const OrderUnitGroup& units,
             flint::FmpzConstRef ell,
             flint::FmpzConstRef aux_prime_bound) noexcept;
-    bool try_prove_relation_saturation_index_bound_with_units(
-            const OrderUnitGroup& units,
-            flint::FmpzConstRef index_bound,
-            flint::FmpzConstRef aux_prime_bound) noexcept;
-    bool try_analytic_index_bound_with_units(
-            const OrderUnitGroup& units,
-            flint::ArbConstRef analytic_class_regulator_product,
-            flint::FmpzConstRef aux_prime_bound,
-            slong precision) noexcept;
     bool saturate_relations_bounded_with_units(
             bool& changed,
             bool& saturated,
@@ -276,6 +256,28 @@ private:
         failed
     };
 
+    // Gates that trust caller-supplied proof data (an analytic hR, an index
+    // bound, or an exact norm).  They are reachable only through the
+    // noninstalled detail access classes; the public API certifies only from
+    // data it computes itself.
+    bool try_append_generator_relation_with_norm_(
+            bool& partial_throttle_exit,
+            const Element& generator,
+            flint::FmpqConstRef norm,
+            ClassGroupRelationSource source) noexcept;
+    bool try_certify_class_unit_with_units_(
+            OrderUnitGroup& units,
+            flint::ArbConstRef analytic_class_regulator_product,
+            slong precision) noexcept;
+    bool try_prove_relation_saturation_index_bound_with_units_(
+            const OrderUnitGroup& units,
+            flint::FmpzConstRef index_bound,
+            flint::FmpzConstRef aux_prime_bound) noexcept;
+    bool try_analytic_index_bound_with_units_(
+            const OrderUnitGroup& units,
+            flint::ArbConstRef analytic_class_regulator_product,
+            flint::FmpzConstRef aux_prime_bound,
+            slong precision) noexcept;
     bool prove_relation_saturation_dlog_ell_(
             const OrderUnitGroup& units,
             flint::FmpzConstRef ell,

@@ -341,6 +341,18 @@ public:
                 integral_coordinate_polynomial, source);
     }
 
+    // `norm` must be the exact field norm of `generator`.
+    static bool try_append_generator_relation_with_norm(
+            ClassGroupContext& context,
+            bool& partial_throttle_exit,
+            const Element& generator,
+            flint::FmpqConstRef norm,
+            ClassGroupRelationSource source =
+                    ClassGroupRelationSource::Supplied) noexcept {
+        return context.try_append_generator_relation_with_norm_(
+                partial_throttle_exit, generator, norm, source);
+    }
+
     static ReducedIdealLatticeCache* native_post_finite_reduced_lattices(
             ClassGroupContext& context) noexcept {
         return context.private_storage_ == nullptr

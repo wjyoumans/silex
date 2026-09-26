@@ -13,6 +13,7 @@
 #include <silex/signature.hpp>
 #include <silex/zeta.hpp>
 
+#include "class_group/class_group_certification_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/relation_unit_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
@@ -3194,50 +3195,199 @@ int test_class_regulator_index_bound_interval_boundary() {
     return 0;
 }
 
+// Gates that trust a caller-supplied analytic class-regulator product,
+// saturation index bound, or exact norm are internal.  A requires-expression
+// reports false for a private member, so these fail to compile if any of the
+// gates becomes public again.
+template <typename Context>
+constexpr bool has_public_class_unit_with_units_gate =
+        requires(Context& context,
+                 silex::OrderUnitGroup& units,
+                 const sflint::Arb& analytic_hR) {
+            context.try_certify_class_unit_with_units(
+                    units, sflint::ArbConstRef(analytic_hR), slong{1});
+        };
+
+template <typename Context>
+constexpr bool has_public_analytic_index_bound_gate =
+        requires(Context& context,
+                 const silex::OrderUnitGroup& units,
+                 const sflint::Arb& analytic_hR,
+                 const sflint::Fmpz& aux_bound) {
+            context.try_analytic_index_bound_with_units(
+                    units, sflint::ArbConstRef(analytic_hR),
+                    sflint::FmpzConstRef(aux_bound), slong{1});
+        };
+
+template <typename Context>
+constexpr bool has_public_saturation_index_bound_gate =
+        requires(Context& context,
+                 const silex::OrderUnitGroup& units,
+                 const sflint::Fmpz& index_bound,
+                 const sflint::Fmpz& aux_bound) {
+            context.try_prove_relation_saturation_index_bound_with_units(
+                    units, sflint::FmpzConstRef(index_bound),
+                    sflint::FmpzConstRef(aux_bound));
+        };
+
+template <typename Context>
+constexpr bool has_public_generator_with_norm_gate =
+        requires(Context& context,
+                 bool& partial_throttle_exit,
+                 const silex::Element& generator,
+                 const sflint::Fmpq& norm) {
+            context.try_append_generator_relation_with_norm(
+                    partial_throttle_exit, generator,
+                    sflint::FmpqConstRef(norm));
+        };
+
+// Control: the zeta gate, which computes hR itself, stays public.
+template <typename Context>
+constexpr bool has_public_class_unit_with_zeta_gate =
+        requires(Context& context, silex::OrderUnitGroup& units) {
+            context.try_certify_class_unit_with_zeta(units, slong{1});
+        };
+
+static_assert(
+        has_public_class_unit_with_zeta_gate<silex::ClassGroupContext>);
+static_assert(
+        !has_public_class_unit_with_units_gate<silex::ClassGroupContext>);
+static_assert(
+        !has_public_analytic_index_bound_gate<silex::ClassGroupContext>);
+static_assert(
+        !has_public_saturation_index_bound_gate<silex::ClassGroupContext>);
+static_assert(
+        !has_public_generator_with_norm_gate<silex::ClassGroupContext>);
+
+bool real_quadratic_two_candidate(silex::ClassGroupContext& out,
+                                  const silex::Order& order) noexcept {
+    sflint::Fmpz bound;
+    silex::ClassGroupCandidateOptions options;
+    options.max_candidates = 256;
+    options.max_relations = 48;
+    return set_fmpz_si(bound, 2) &&
+           out.compute_candidate(order, sflint::FmpzConstRef(bound),
+                                 options) &&
+           out.has_presentation() &&
+           out.certification_status() == silex::CertificationMode::unknown;
+}
+
+bool real_quadratic_two_units(silex::OrderUnitGroup& out,
+                              const silex::Order& order,
+                              silex::EmbeddingContext& embeddings,
+                              const silex::Element& unit) noexcept {
+    const silex::NumberField* field = order.parent();
+    if (field == nullptr) {
+        return false;
+    }
+    silex::FactoredElement generator(*field);
+    if (!generator.set_element(unit)) {
+        return false;
+    }
+    silex::FactoredElement generators[] = {std::move(generator)};
+    return out.set_units(order, silex::FactoredElementSpan(generators, 1),
+                         embeddings, 256) &&
+           out.certification_status() == silex::CertificationMode::unknown;
+}
+
 int test_class_unit_regulator_certification() {
+    using CertificationAccess =
+            silex::detail::ClassGroupCertificationAccess;
+
     silex::NumberField field = quadratic_field(2);
     silex::Order order;
     order = silex::test::equation_order(field);
     assert(order.is_maximal());
-
-    sflint::Fmpz bound;
-    assert(set_fmpz_si(bound, 2));
-
-    silex::ClassGroupCandidateOptions options;
-    options.max_candidates = 256;
-    options.max_relations = 48;
-
-    silex::ClassGroupContext class_group;
-    assert(class_group.compute_candidate(order, sflint::FmpzConstRef(bound),
-                                         options));
-    assert(class_group.has_presentation());
-    assert(class_group.certification_status() ==
-           silex::CertificationMode::unknown);
-
     silex::EmbeddingContext embeddings(field);
-    silex::Element epsilon(field);
-    assert(set_real_quadratic_unit(epsilon));
-    silex::FactoredElement generator(field);
-    assert(generator.set_element(epsilon));
-    silex::FactoredElement generators[] = {std::move(generator)};
-    silex::OrderUnitGroup units(order);
-    assert(units.set_units(order, silex::FactoredElementSpan(generators, 1),
-                           embeddings, 256));
-    assert(units.certification_status() == silex::CertificationMode::unknown);
 
-    sflint::Arb analytic_hR;
-    assert(units.class_regulator_product(sflint::ArbRef(analytic_hR),
-                                         class_group, 256));
-    assert(class_group.try_certify_class_unit_with_units(
-            units, sflint::ArbConstRef(analytic_hR), 256));
-    assert(class_group.certification_status() ==
-           silex::CertificationMode::proven);
-    assert(class_group.analytic_class_regulator_status() ==
-           silex::ProofState::verified);
-    assert(class_group.unit_proof_status() == silex::ProofState::verified);
-    assert(class_group.regulator_proof_status() ==
-           silex::ProofState::verified);
-    assert(units.certification_status() == silex::CertificationMode::proven);
+    silex::Element epsilon(field);
+    silex::Element epsilon2(field);
+    assert(set_real_quadratic_unit(epsilon));
+    assert(epsilon2.multiply(epsilon, epsilon));
+
+    // Public route: the zeta gate computes hR itself and certifies the
+    // fundamental unit 1 + sqrt(2), R = log(1 + sqrt(2)) = 0.88137...
+    {
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units(order);
+        assert(real_quadratic_two_candidate(class_group, order));
+        assert(real_quadratic_two_units(units, order, embeddings, epsilon));
+        assert(class_group.try_certify_class_unit_with_zeta(units, 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::verified);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::verified);
+        assert(class_group.regulator_proof_status() ==
+               silex::ProofState::verified);
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+        sflint::Arb regulator;
+        assert(units.regulator(sflint::ArbRef(regulator)));
+        sflint::Arb lower;
+        sflint::Arb upper;
+        sflint::arb_set_d(lower, 0.8813);
+        sflint::arb_set_d(upper, 0.8814);
+        assert(sflint::arb_gt(regulator, lower));
+        assert(sflint::arb_lt(regulator, upper));
+    }
+
+    // Internal gate: the access-class entry point certifies when it is fed
+    // the independently computed zeta value of hR, as the internal
+    // validation and compute routes do.
+    {
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units(order);
+        assert(real_quadratic_two_candidate(class_group, order));
+        assert(real_quadratic_two_units(units, order, embeddings, epsilon));
+        sflint::Arb zeta_hR;
+        assert(silex::zeta_class_regulator_product(sflint::ArbRef(zeta_hR),
+                                                   order, 256));
+        assert(CertificationAccess::try_certify_class_unit_with_units(
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    // Negative: the index-two subgroup <3 + 2 sqrt(2)> has regulator
+    // 2 log(1 + sqrt(2)) = 1.7627...  Its own hR can no longer be passed to
+    // a public gate (see the static_asserts above), and every public route
+    // that remains computes hR itself and rejects the subgroup.
+    {
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units(order);
+        assert(real_quadratic_two_candidate(class_group, order));
+        assert(real_quadratic_two_units(units, order, embeddings, epsilon2));
+
+        assert(!class_group.try_certify_class_unit_with_zeta(units, 256));
+        assert(!class_group.try_certify_with_units(
+                units, silex::CertificationMode::proven, 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(units.certification_status() ==
+               silex::CertificationMode::unknown);
+
+        // The internal gate, fed the zeta value rather than the subgroup's
+        // own product, also rejects it and leaves both objects unchanged.
+        sflint::Arb zeta_hR;
+        assert(silex::zeta_class_regulator_product(sflint::ArbRef(zeta_hR),
+                                                   order, 256));
+        assert(!CertificationAccess::try_certify_class_unit_with_units(
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::not_checked);
+        assert(units.certification_status() ==
+               silex::CertificationMode::unknown);
+    }
 
     return 0;
 }

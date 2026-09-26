@@ -33,6 +33,7 @@
 #include "../order_unit/relation_unit_internal.hpp"
 #include "../order_unit/order_unit_internal.hpp"
 #include "../order/order_internal.hpp"
+#include "../relation/relation_internal.hpp"
 #include "../residue_field/residue_field_internal.hpp"
 #include "../zeta/zeta_internal.hpp"
 
@@ -4493,6 +4494,36 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
     return transaction.finish(true);
 }
 
+bool ClassGroupCertificationAccess::try_certify_class_unit_with_units(
+        ClassGroupContext& context,
+        OrderUnitGroup& units,
+        flint::ArbConstRef analytic_class_regulator_product,
+        slong precision) noexcept {
+    return context.try_certify_class_unit_with_units_(
+            units, analytic_class_regulator_product, precision);
+}
+
+bool ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
+        ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        flint::ArbConstRef analytic_class_regulator_product,
+        flint::FmpzConstRef aux_prime_bound,
+        slong precision) noexcept {
+    return context.try_analytic_index_bound_with_units_(
+            units, analytic_class_regulator_product, aux_prime_bound,
+            precision);
+}
+
+bool ClassGroupCertificationAccess::
+        try_prove_relation_saturation_index_bound_with_units(
+                ClassGroupContext& context,
+                const OrderUnitGroup& units,
+                flint::FmpzConstRef index_bound,
+                flint::FmpzConstRef aux_prime_bound) noexcept {
+    return context.try_prove_relation_saturation_index_bound_with_units_(
+            units, index_bound, aux_prime_bound);
+}
+
 bool ClassGroupCertificationAccess::record_factor_base_honesty_proof(
         ClassGroupContext& context,
         flint::FmpzConstRef required_bound) noexcept {
@@ -6296,8 +6327,8 @@ bool simplified_saturation_context(
         Relation relation(*candidate_base);
         if (!relation.is_defined() ||
             !relations[static_cast<std::size_t>(i)].evaluate(generator) ||
-            !set_relation_from_known_row(relation, *candidate_base, generator,
-                                         row.const_ref()) ||
+            !detail::RelationAccess::set_relation_from_known_row(
+                    relation, *candidate_base, generator, row.const_ref()) ||
             !ClassGroupRelationAccess::append_saturation_relation_keep(
                     candidate, relation)) {
             return false;
@@ -6326,7 +6357,7 @@ bool simplified_saturation_context(
             relation_generator = &generator;
         }
         if (!relation.is_defined() ||
-            !set_relation_from_known_row(
+            !detail::RelationAccess::set_relation_from_known_row(
                     relation, *candidate_base, *relation_generator,
                     flint::FmpzMatConstRef(zero_row)) ||
             !ClassGroupRelationAccess::append_saturation_relation_keep(
@@ -6631,7 +6662,7 @@ bool saturation_process_candidates_once(
         Relation relation(*append_base);
         if (!generator.is_defined() || !relation.is_defined() ||
             !root.evaluate(generator) ||
-            !set_relation_from_known_row(
+            !detail::RelationAccess::set_relation_from_known_row(
                     relation, *append_base, generator,
                     flint::FmpzMatConstRef(divided_row))) {
             return false;
@@ -8309,7 +8340,7 @@ bool ClassGroupContext::try_append_generator_relation(
                                          generator_relation_policy_);
 }
 
-bool ClassGroupContext::try_append_generator_relation_with_norm(
+bool ClassGroupContext::try_append_generator_relation_with_norm_(
         bool& partial_throttle_exit,
         const Element& generator,
         flint::FmpqConstRef norm,
@@ -8330,7 +8361,8 @@ bool ClassGroupContext::try_append_generator_relation_with_norm(
     }
     Relation& relation = generator_relation_scratch_;
 
-    if (!relation.set_generator_with_norm(generator, norm, diagnostics_)) {
+    if (!detail::RelationAccess::set_generator_with_norm(
+                relation, generator, norm, diagnostics_)) {
         if (!private_storage_->use_partial_relations &&
             !private_storage_->partial_relations_configured &&
             source != ClassGroupRelationSource::Supplied) {
@@ -8385,9 +8417,10 @@ bool ClassGroupContext::try_append_integral_generator_relation_(
     }
     Relation& relation = generator_relation_scratch_;
 
-    if (!detail::set_relation_from_integral_coordinates_and_norm(
-                relation, generator, integral_coordinates, norm,
-                integral_coordinate_polynomial, diagnostics_)) {
+    if (!detail::RelationAccess::
+                set_relation_from_integral_coordinates_and_norm(
+                        relation, generator, integral_coordinates, norm,
+                        integral_coordinate_polynomial, diagnostics_)) {
         if (!private_storage_->use_partial_relations &&
             !private_storage_->partial_relations_configured &&
             source != ClassGroupRelationSource::Supplied) {
@@ -8566,7 +8599,7 @@ bool ClassGroupContext::try_partial_relation_(
             }
 
             if (have_matched_row) {
-                if (!detail::set_relation_from_known_row(
+                if (!detail::RelationAccess::set_relation_from_known_row(
                             relation, base_, quotient,
                             flint::FmpzMatConstRef(matched_row))) {
                     return false;
@@ -9373,7 +9406,7 @@ bool ClassGroupContext::try_certify_with_units(
                                           parent_, precision)) {
             SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::class_group,
                                 "class_group.pre_bf_analytic_index_bound");
-            (void) try_analytic_index_bound_with_units(
+            (void) try_analytic_index_bound_with_units_(
                     units, flint::ArbConstRef(analytic_hR),
                     flint::FmpzConstRef(aux_bound), precision);
         }
@@ -9398,7 +9431,7 @@ bool ClassGroupContext::try_certify_with_units(
                     flint::ArbConstRef(error_bound), cutoff,
                     zeta_bf_max_cutoff, precision, work_precision));
         }
-        if (try_analytic_index_bound_with_units(
+        if (try_analytic_index_bound_with_units_(
                     units, flint::ArbConstRef(analytic_hR),
                     flint::FmpzConstRef(aux_bound), precision)) {
             return transaction.finish(record_zeta_bf_audit_(
@@ -9414,7 +9447,7 @@ bool ClassGroupContext::try_certify_with_units(
                     units, flint::ArbConstRef(analytic_hR), precision)) {
             return transaction.finish(true);
         }
-        if (try_analytic_index_bound_with_units(
+        if (try_analytic_index_bound_with_units_(
                     units, flint::ArbConstRef(analytic_hR),
                     flint::FmpzConstRef(aux_bound), precision)) {
             return transaction.finish(true);
@@ -9615,7 +9648,7 @@ bool ClassGroupContext::record_analytic_class_unit_regulator_(
     return true;
 }
 
-bool ClassGroupContext::try_certify_class_unit_with_units(
+bool ClassGroupContext::try_certify_class_unit_with_units_(
         OrderUnitGroup& units,
         flint::ArbConstRef analytic_class_regulator_product,
         slong precision) noexcept {
@@ -9735,7 +9768,7 @@ bool ClassGroupContext::try_prove_relation_saturation_with_units(
     return transaction.finish(true);
 }
 
-bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units(
+bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units_(
         const OrderUnitGroup& units,
         flint::FmpzConstRef index_bound,
         flint::FmpzConstRef aux_prime_bound) noexcept {
@@ -9809,7 +9842,7 @@ bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units(
     return transaction.finish(try_promote_proven_certification_());
 }
 
-bool ClassGroupContext::try_analytic_index_bound_with_units(
+bool ClassGroupContext::try_analytic_index_bound_with_units_(
         const OrderUnitGroup& units,
         flint::ArbConstRef analytic_class_regulator_product,
         flint::FmpzConstRef aux_prime_bound,

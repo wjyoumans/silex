@@ -8,6 +8,7 @@
 #include "class_group_certification_internal.hpp"
 #include "factor_base_honesty_internal.hpp"
 #include "../factor_base/factor_base_internal.hpp"
+#include "../relation/relation_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 #include "relation_search_internal.hpp"
 
@@ -1169,7 +1170,7 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                         flint::FmpzMatConstRef(row),
                         flint::FmpzConstRef(discriminant),
                         active_diagnostics) ||
-                !detail::set_relation_from_known_row(
+                !detail::RelationAccess::set_relation_from_known_row(
                         relation, base_, generator,
                         flint::FmpzMatConstRef(row)) ||
                 !append_relation_with_outcome_(
@@ -1246,7 +1247,7 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
         Relation relation(base_);
         RelationAppendOutcome outcome = RelationAppendOutcome::none;
         return relation.is_defined() &&
-               detail::set_relation_from_known_row(
+               detail::RelationAccess::set_relation_from_known_row(
                        relation, base_, generator, row) &&
                append_relation_with_outcome_(
                        outcome, relation, source, DependentRelationPolicy::keep);

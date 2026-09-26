@@ -237,8 +237,10 @@ saturation-backed ``proven`` only when all of the following hold: verified
 generation up to the bound, with every prime ideal up to the bound in the
 factor base; proven units and regulator; and a verified ``ell``-local proof
 for every prime ``p`` dividing ``h_cand``.  The required primes are derived
-from the published presentation; an index-bound request proves the union of
-the primes up to its bound and the prime divisors of ``h_cand``.
+from the published presentation; the internal index-bound gate proves the
+union of the primes up to its bound and the prime divisors of ``h_cand``.
+Gates that accept a supplied index bound or analytic class-regulator product
+are not installed; public certification uses only values Silex computes.
 
 The ``ell``-local test takes the Smith-invariant ``beta`` rows (compact power
 witnesses of invariant generators whose invariant ``ell`` divides), the free
