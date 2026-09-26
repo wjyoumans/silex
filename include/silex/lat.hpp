@@ -62,6 +62,18 @@ public:
     bool index(flint::FmpzRef index, const Lat& sublattice) const noexcept;
     bool saturate(Lat& out, flint::FmpzConstRef p) const noexcept;
     bool lll_reduce(Lat& out) const noexcept;
+    // Calls `callback` once for each nonzero coefficient row x with
+    // ||x * B||^2 <= bound_sq, where B is the stored basis (not its HNF).
+    // Coefficients are limited to |x_i| <= max_coord; max_coord < 0 means no
+    // cap.  The zero row is never reported.  A callback return of 0 stops the
+    // enumeration and the call returns true.  Rows are routed to a
+    // double-precision kernel (at most 32 rows and max_coord <= 10000, or an
+    // uncapped coordinate bound within 10000) or to an Arb kernel.  The double
+    // kernel works on Arb midpoints with small fixed slack, so it may report
+    // rows slightly past the bound and does not certify completeness.
+    // Returns false for invalid arguments, dependent rows (a singular Gram
+    // matrix), or a precision failure; a false return can follow
+    // callbacks already delivered, but no row is delivered twice.
     bool enum_short_vectors_arb(flint::ArbConstRef bound_sq,
             slong max_coord,
             slong prec,

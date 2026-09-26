@@ -97,6 +97,45 @@ returns a noncanonical reduced search basis spanning the same lattice.
 ``enum_short_vectors_arb`` enumerates coefficient rows bounded by an Arb
 squared norm and calls a user callback with borrowed coefficient storage.
 
+Short-Vector Enumeration
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+``enum_short_vectors_arb(bound_sq, max_coord, prec, callback, user)`` calls
+``callback`` with a ``1 x nrows()`` coefficient row ``x`` for each nonzero
+``x`` with :math:`\lVert xB\rVert^2 \le` ``bound_sq``, where :math:`B` is the
+stored basis.  Coefficients are relative to the stored basis, not to its HNF.
+Enumeration is a witness search:
+
+* ``max_coord`` limits every coefficient to ``|x_i| <= max_coord``; a negative
+  value means no cap.
+* The zero row is never reported, and no row is reported twice in one call.
+* A callback return of ``0`` stops the enumeration, and the call returns
+  ``true``.
+* Dependent basis rows make the Gram matrix singular, and the call returns
+  ``false`` without calling ``callback``.  A negative ``bound_sq`` or an
+  empty basis returns ``true`` without calling it.  A null bound or callback,
+  or ``prec < 2``, returns ``false``.
+* A ``false`` return can follow callbacks already delivered, for example after
+  an Arb precision failure.  Increase ``prec`` to retry; a retry calls
+  ``callback`` again for rows it already received.
+
+The Gram matrix :math:`G = BB^T` and its Cholesky factor are computed in Arb
+at ``prec``.  Bases with at most 32 rows whose Cholesky midpoints fit the
+double range then use a double-precision route when
+``0 <= max_coord <= 10000``, or when ``max_coord`` is negative and the
+Fincke--Pohst coordinate bound :math:`\sqrt{b\,(G^{-1})_{ii}}` with
+:math:`b` = ``bound_sq``, evaluated in double precision, is at most 10000 for
+every coordinate.  That route
+enumerates in double arithmetic on the Arb midpoints, widens each coordinate
+interval by ``1e-9`` and the bound by a relative ``2^-40``, so it can report
+rows whose squared norm is slightly above ``bound_sq`` and its completeness is
+not certified.  Other inputs use the Arb route, which encloses each
+coordinate interval with ball arithmetic and returns ``false`` when a partial
+norm or pivot is undecided at ``prec``.  It reports a candidate unless its
+squared norm is certainly above ``bound_sq``, so it too can report rows
+slightly past the bound.  The double route never falls back to the Arb route after it has delivered a
+callback.
+
 Implementation Lineage
 ----------------------
 
