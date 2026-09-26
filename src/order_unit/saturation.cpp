@@ -354,27 +354,6 @@ bool rational_prime_divides_order_discriminant(
     return flint::fmpz_divisible(discriminant, q);
 }
 
-// `kernel_row_root` returns an l-th root in the field.  A root of a unit is
-// integral, so in the maximal order it is always an order unit.  In a
-// non-maximal order O it may lie in O_K \ O (phi in Z[sqrt5]), and adjoining
-// it through the trusted unit setter would publish a group that is not a
-// subgroup of O^x.  Only a root that is an exact unit of O may be adjoined.
-// A failed membership computation reports "not in O", so the caller never
-// adjoins an unchecked root.
-bool saturation_root_is_order_unit(const Order& order,
-                                   const FactoredElement& root) noexcept {
-    if (order.is_maximal()) {
-        return true;
-    }
-    const NumberField* field = order.parent();
-    if (field == nullptr) {
-        return false;
-    }
-    Element expanded(*field);
-    return expanded.is_defined() && root.evaluate(expanded) &&
-           detail::evaluated_is_order_unit(order, expanded);
-}
-
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
 slong log_slong_from_fmpz(flint::FmpzConstRef value) noexcept {
     return flint::fmpz_fits_si(value) ? flint::fmpz_get_si(value) : -1;
@@ -936,7 +915,7 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
         }
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.stable_relation_saturation.root_power");
-        if (!saturation_root_is_order_unit(*order, root)) {
+        if (!detail::adjoinable_root_is_order_unit(*order, root)) {
             SILEX_PROFILE_EVENT(
                     out.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_relation_saturation.root_outside_order");
@@ -1361,7 +1340,7 @@ bool saturate_row_with_cache(
     }
     SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.saturation_row_root_power");
-    if (!saturation_root_is_order_unit(*order, root)) {
+    if (!detail::adjoinable_root_is_order_unit(*order, root)) {
         // The row gives no l-th root in O, so it does not enlarge the group
         // inside O^x.  This is not a proof that the row is not an l-th power
         // in O^x modulo torsion; proof callers only certify from an empty

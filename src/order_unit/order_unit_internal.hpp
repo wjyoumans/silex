@@ -298,6 +298,15 @@ bool regulator_ubound_lt(const flint::Arb& left,
                          slong precision) noexcept;
 bool evaluated_is_order_unit(const Order& order,
                              const Element& value) noexcept;
+// True when an l-th root found in the field may be adjoined to a unit
+// group of `order`: always for a known-maximal order (a root of a unit is
+// integral), otherwise only when `root` evaluates to an exact unit of
+// `order`.  In a non-maximal order O a root may lie in O_K \ O (phi in
+// Z[sqrt5]); adjoining it through the trusted unit setter would publish a
+// group that is not a subgroup of O^x.  A failed membership computation
+// returns false, so callers never adjoin an unchecked root.
+bool adjoinable_root_is_order_unit(const Order& order,
+                                   const FactoredElement& root) noexcept;
 
 bool validate_relation_kernel_inputs(const Order& order,
                                      const ClassGroupContext& class_group,

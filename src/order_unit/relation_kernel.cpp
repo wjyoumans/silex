@@ -897,6 +897,20 @@ bool kernel_row_product(FactoredElement& product,
     return true;
 }
 
+bool adjoinable_root_is_order_unit(const Order& order,
+                                   const FactoredElement& root) noexcept {
+    if (order.is_maximal()) {
+        return true;
+    }
+    const NumberField* field = order.parent();
+    if (field == nullptr) {
+        return false;
+    }
+    Element expanded(*field);
+    return expanded.is_defined() && root.evaluate(expanded) &&
+           evaluated_is_order_unit(order, expanded);
+}
+
 bool kernel_row_root(bool& is_power,
                      FactoredElement& root,
                      const OrderUnitGroup& group,
@@ -1540,16 +1554,11 @@ bool adjoin_verified_dependent_relation(bool& changed,
     // e-th root in the field of a product of order units times a root of
     // unity, hence a unit of O_K; in a non-maximal order it may still lie
     // outside O, and then it must not be adjoined.
-    if (!order->is_maximal()) {
-        Element expanded(*field);
-        if (!expanded.is_defined() || !root.evaluate(expanded) ||
-            !evaluated_is_order_unit(*order, expanded)) {
-            SILEX_PROFILE_EVENT(group.diagnostics(),
-                                DiagnosticsModule::unit_group,
-                                "unit_group.dependent_relation_root_outside_order");
-            changed = false;
-            return out.set(group);
-        }
+    if (!adjoinable_root_is_order_unit(*order, root)) {
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.dependent_relation_root_outside_order");
+        changed = false;
+        return out.set(group);
     }
 
     std::vector<FactoredElement> generators;
