@@ -160,6 +160,60 @@ representative quadratic, cubic and quartic products were also checked with
 Hecke v0.39.19.  These executable comparison versions are distinct from the
 algorithm-source versions above.
 
+Element powers and roots
+------------------------
+
+``Element::is_power`` and ``Element::is_square`` answer rational constants
+exactly, route quadratic squares through the radicand, and otherwise use a
+private port of the pure-power Hensel root finder for monic integral fields of
+degree less than 10.  A definite ``true`` is published only after the lifted
+candidate ``c`` satisfies ``c^n == a`` exactly; every unported or unverified
+case returns failure (unsupported) and leaves the caller's root unchanged.
+
+* Hensel lifting follows Hecke v0.38.6
+  ``src/NumFieldOrd/NfOrd/Hensel.jl:_roots_hensel`` (lines 57-232, with
+  ``ispure = true`` and ``is_normal = true``), its lifting loop and exact
+  candidate check (lines 612-622), and the Friedrich-Fieker lifting exponent
+  ``_lifting_expo`` (lines 674-756), with the equation order in place of
+  ``any_order(K)``.
+* Hecke skips a prime when the reduction of ``y^n - a`` is not squarefree
+  (``Hensel.jl`` lines 153-155).  Since ``y^n - a`` is inseparable modulo
+  ``p`` whenever ``p | n``, Silex skips every prime ``p | n`` for lifting
+  directly.  The residue-field membership disproof below is valid at every
+  good prime, including ``p | n``, so it is not skipped there.
+* The residue test follows PARI 2.17.3
+  ``src/basemath/FpX.c:Fq_ispower`` (lines 2509-2523): ``a`` is an ``n``-th
+  power in ``F_q^*`` exactly when ``a^((q - 1)/gcd(q - 1, n)) = 1``.  A failed
+  test at a good prime proves that ``a`` is not an ``n``-th power in ``K``.
+* Residue roots follow PARI 2.17.3
+  ``src/basemath/bb_group.c:gen_Shanks_sqrtn`` (lines 899-953): the Bezout
+  exponent of ``n`` modulo ``q - 1`` gives the unique root when
+  ``gcd(n, q - 1) = 1``, and otherwise ``y^n = a`` is reduced to
+  ``y^g = a^u`` with ``g = gcd(n, q - 1)`` and ``n u + (q - 1) v = g``, which
+  has the same roots in ``F_q``.
+
+Two Silex pre-filters run before the exact check ``c^n == a`` and only reject
+candidates, so a rejection leaves the query unsupported and never changes a
+definite answer.  Neither is in the upstream sources: Hecke's polynomial
+degree ``n`` is a machine integer bounded by the polynomial it builds, while
+Silex accepts ``n`` up to ``2^63 - 1`` and must not form ``c^n`` blindly.
+
+* Norm filter: ``N(c)^n = N(a)`` by multiplicativity of the norm.  When
+  ``N(c)`` is not ``0`` or ``+-1``, the comparison needs ``n`` below the bit
+  size of ``N(a)``, so ``c^n`` is formed only for inputs at least that large.
+* Height filter, for candidates of norm ``+-1``: if ``c^n = a`` then
+  ``h(a) = n h(c)`` for the absolute logarithmic Weil height, so
+  ``n log M(P_c) = log M(P_a)``, where ``P_x`` is the primitive integral
+  characteristic polynomial of ``x`` over ``Q`` and ``M`` is its Mahler
+  measure, ``log M(P_x) = log |lc(P_x)| + sum_i log max(1, |sigma_i(x)|)``
+  over the ``[K : Q]`` complex embeddings (Bombieri and Gubler, *Heights in
+  Diophantine Geometry*, chapter 1, sections 1.5 and 1.6).  The leading
+  coefficient accounts for non-integral candidates.  A candidate is rejected
+  only when Arb enclosures prove ``n log M(P_c) > log M(P_a) + 1``.  A
+  passing candidate has ``c^n`` of height at most that of ``a`` plus a
+  constant, and a root of unity (``M(P_c) = 1``) always passes; binary
+  powering keeps its coefficients bounded, so ``c^n`` stays cheap.
+
 Embedding root contexts
 -----------------------
 
