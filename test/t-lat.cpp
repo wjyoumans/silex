@@ -11,8 +11,11 @@
 #include "lll_reference.hpp"
 #include "lat/lll_internal.hpp"
 
+#include <algorithm>
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -996,6 +999,293 @@ int test_short_vector_enum() {
     return 0;
 }
 
+// Route selection in Lat::enum_short_vectors_arb is internal; these tests pick
+// the route through its documented inputs.  The double route requires at most
+// 32 rows and max_coord <= 10000 (or, with no cap, a coordinate bound within
+// 10000); max_coord = 10001 or 33 rows forces the Arb route.
+constexpr slong enum_double_route_cap = 10000;
+constexpr slong enum_arb_route_cap = 10001;
+
+struct EnumCollector {
+    std::vector<std::string> vectors;
+    slong abort_after = 0;
+};
+
+int enum_collect_callback(const fmpz_mat_t coeffs, void* user) {
+    auto* collector = static_cast<EnumCollector*>(user);
+    std::string key;
+    for (slong j = 0; j < fmpz_mat_ncols(coeffs); ++j) {
+        char* text = fmpz_get_str(nullptr, 10, fmpz_mat_entry(coeffs, 0, j));
+        key += text;
+        key += ',';
+        flint_free(text);
+    }
+    collector->vectors.push_back(key);
+    return collector->abort_after > 0 &&
+                    static_cast<slong>(collector->vectors.size()) >=
+                            collector->abort_after
+            ? 0
+            : 1;
+}
+
+bool enum_collect(const silex::lat::Lat& lattice,
+        slong bound_si,
+        slong max_coord,
+        slong prec,
+        EnumCollector& collector) {
+    silex::flint::Arb bound;
+    arb_set_si(bound.raw(), bound_si);
+    return lattice.enum_short_vectors_arb(bound, max_coord, prec,
+            enum_collect_callback, &collector);
+}
+
+bool enum_all_distinct(std::vector<std::string> vectors) {
+    std::sort(vectors.begin(), vectors.end());
+    return std::adjacent_find(vectors.begin(), vectors.end()) == vectors.end();
+}
+
+std::vector<std::string> enum_sorted(std::vector<std::string> vectors) {
+    std::sort(vectors.begin(), vectors.end());
+    return vectors;
+}
+
+// Exact reference: every nonzero coefficient row in [-radius, radius]^r whose
+// exact squared norm is at most bound_si.  The caller picks radius at least
+// the Fincke--Pohst coordinate bound so the box holds every solution.
+std::vector<std::string> enum_brute_force(const fmpz_mat_t basis,
+        slong bound_si,
+        slong radius) {
+    const slong rows = fmpz_mat_nrows(basis);
+    const slong cols = fmpz_mat_ncols(basis);
+    std::vector<slong> coeffs(static_cast<std::size_t>(rows), -radius);
+    std::vector<std::string> out;
+    silex::flint::Fmpz norm;
+    silex::flint::Fmpz entry;
+    for (;;) {
+        bool nonzero = false;
+        fmpz_zero(norm.raw());
+        for (slong j = 0; j < cols; ++j) {
+            fmpz_zero(entry.raw());
+            for (slong i = 0; i < rows; ++i) {
+                fmpz_addmul_si(entry.raw(), fmpz_mat_entry(basis, i, j),
+                        coeffs[static_cast<std::size_t>(i)]);
+            }
+            fmpz_addmul(norm.raw(), entry.raw(), entry.raw());
+        }
+        std::string key;
+        for (slong i = 0; i < rows; ++i) {
+            nonzero = nonzero || coeffs[static_cast<std::size_t>(i)] != 0;
+            key += std::to_string(coeffs[static_cast<std::size_t>(i)]);
+            key += ',';
+        }
+        if (nonzero && fmpz_cmp_si(norm.raw(), bound_si) <= 0) {
+            out.push_back(key);
+        }
+
+        slong position = 0;
+        while (position < rows &&
+                coeffs[static_cast<std::size_t>(position)] == radius) {
+            coeffs[static_cast<std::size_t>(position)] = -radius;
+            ++position;
+        }
+        if (position == rows) {
+            break;
+        }
+        ++coeffs[static_cast<std::size_t>(position)];
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// T-001 review finding F1: a double-route range failure after callbacks used
+// to restart on the Arb route and deliver the same vectors again.
+int test_short_vector_enum_no_duplicate_restart() {
+    silex::flint::FmpzMat basis(3, 3);
+    fmpz_one(fmpz_mat_entry(basis.raw(), 0, 0));
+    fmpz_one(fmpz_mat_entry(basis.raw(), 1, 1));
+    fmpz_one(fmpz_mat_entry(basis.raw(), 2, 2));
+    fmpz_set_str(fmpz_mat_entry(basis.raw(), 2, 1), "10000000000000000000", 10);
+    silex::lat::Lat lattice(3);
+    if (!lattice.set_basis(basis)) {
+        return 1;
+    }
+
+    const std::vector<std::string> capped = {
+            "-1,0,0,", "0,-1,0,", "0,1,0,", "1,0,0,"};
+    for (const slong max_coord :
+            {slong(1), enum_double_route_cap, enum_arb_route_cap}) {
+        EnumCollector collector;
+        if (!enum_collect(lattice, 1, max_coord, 128, collector) ||
+            enum_sorted(collector.vectors) != capped) {
+            return 1;
+        }
+    }
+
+    const std::vector<std::string> uncapped = {"-1,0,0,", "0,-1,0,",
+            "0,-10000000000000000000,1,", "0,1,0,",
+            "0,10000000000000000000,-1,", "1,0,0,"};
+    EnumCollector collector;
+    if (!enum_collect(lattice, 1, -1, 128, collector) ||
+        enum_sorted(collector.vectors) != uncapped) {
+        return 1;
+    }
+    return 0;
+}
+
+int test_short_vector_enum_arb_route() {
+    // Vector set, including the capped boundary, on a skewed basis.
+    silex::flint::FmpzMat skew(2, 2);
+    set_entry_si(skew.raw(), 0, 0, 3);
+    set_entry_si(skew.raw(), 1, 0, 1);
+    set_entry_si(skew.raw(), 1, 1, 2);
+    silex::lat::Lat skew_lattice(2);
+    if (!skew_lattice.set_basis(skew)) {
+        return 1;
+    }
+    EnumCollector collector;
+    if (!enum_collect(skew_lattice, 9, enum_arb_route_cap, 128, collector) ||
+        !enum_all_distinct(collector.vectors) ||
+        enum_sorted(collector.vectors) != enum_brute_force(skew.raw(), 9, 4)) {
+        return 1;
+    }
+
+    // A callback return of 0 aborts and the call still succeeds.
+    silex::flint::FmpzMat z2(2, 2);
+    set_entry_si(z2.raw(), 0, 0, 1);
+    set_entry_si(z2.raw(), 1, 1, 1);
+    silex::lat::Lat z2_lattice(2);
+    if (!z2_lattice.set_basis(z2)) {
+        return 1;
+    }
+    collector = {};
+    collector.abort_after = 3;
+    if (!enum_collect(z2_lattice, 100, enum_arb_route_cap, 128, collector) ||
+        collector.vectors.size() != 3) {
+        return 1;
+    }
+
+    // max_coord clamps coefficients on the Arb route.
+    silex::flint::FmpzMat z1(1, 1);
+    set_entry_si(z1.raw(), 0, 0, 1);
+    silex::lat::Lat z1_lattice(1);
+    if (!z1_lattice.set_basis(z1)) {
+        return 1;
+    }
+    EnumCounter counter;
+    silex::flint::Arb bound;
+    arb_set_si(bound.raw(), 10005 * 10005);
+    if (!z1_lattice.enum_short_vectors_arb(bound, enum_arb_route_cap, 128,
+                enum_count_callback, &counter) ||
+        counter.count != 2 * enum_arb_route_cap ||
+        counter.max_abs_coord != enum_arb_route_cap) {
+        return 1;
+    }
+
+    // More than 32 rows takes the Arb route with or without a cap.
+    const slong rows = 33;
+    silex::flint::FmpzMat identity(rows, rows);
+    for (slong i = 0; i < rows; ++i) {
+        fmpz_one(fmpz_mat_entry(identity.raw(), i, i));
+    }
+    silex::lat::Lat wide(rows);
+    if (!wide.set_basis(identity)) {
+        return 1;
+    }
+    for (const slong max_coord : {slong(-1), slong(1)}) {
+        collector = {};
+        if (!enum_collect(wide, 1, max_coord, 128, collector) ||
+            collector.vectors.size() != static_cast<std::size_t>(2 * rows) ||
+            !enum_all_distinct(collector.vectors)) {
+            return 1;
+        }
+    }
+
+    // Precision failure: at 8 bits the Arb route cannot decide the vectors
+    // whose squared norm equals the bound and reports failure.  The double
+    // route ignores prec after the Cholesky step and succeeds on the same
+    // lattice, which also confirms the two caps select different routes.
+    silex::flint::FmpzMat shear(2, 2);
+    set_entry_si(shear.raw(), 0, 0, 1);
+    set_entry_si(shear.raw(), 0, 1, 1);
+    set_entry_si(shear.raw(), 1, 1, 1);
+    silex::lat::Lat shear_lattice(2);
+    if (!shear_lattice.set_basis(shear)) {
+        return 1;
+    }
+    collector = {};
+    if (enum_collect(shear_lattice, 2, enum_arb_route_cap, 8, collector)) {
+        return 1;
+    }
+    collector = {};
+    if (!enum_collect(shear_lattice, 2, enum_double_route_cap, 8, collector) ||
+        enum_sorted(collector.vectors) != enum_brute_force(shear.raw(), 2, 3)) {
+        return 1;
+    }
+
+    // Dependent rows make the Gram matrix singular: failure, no callbacks.
+    silex::flint::FmpzMat dependent(2, 2);
+    set_entry_si(dependent.raw(), 0, 0, 1);
+    set_entry_si(dependent.raw(), 1, 0, 2);
+    silex::lat::Lat dependent_lattice(2);
+    if (!dependent_lattice.set_basis(dependent)) {
+        return 1;
+    }
+    for (const slong max_coord : {enum_double_route_cap, enum_arb_route_cap}) {
+        collector = {};
+        if (enum_collect(dependent_lattice, 4, max_coord, 128, collector) ||
+            !collector.vectors.empty()) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The double and Arb routes must report the same coefficient rows on inputs
+// that both accept, and both must match an exact brute-force reference.
+int test_short_vector_enum_cross_route() {
+    struct Case {
+        slong rows;
+        slong entries[16];
+        slong bound;
+        slong radius;
+    };
+    const Case cases[] = {
+            {2, {3, 0, 1, 2}, 20, 6},
+            {3, {2, 1, 0, 1, 3, 1, 0, 1, 4}, 30, 8},
+            {3, {1, 1, 1, 0, 2, 1, 1, 0, 3}, 12, 8},
+            {4, {2, 0, 1, 0, 1, 3, 0, 1, 0, 1, 2, 1, 1, 0, 0, 3}, 16, 6},
+    };
+    for (const Case& test_case : cases) {
+        silex::flint::FmpzMat basis(test_case.rows, test_case.rows);
+        for (slong i = 0; i < test_case.rows; ++i) {
+            for (slong j = 0; j < test_case.rows; ++j) {
+                set_entry_si(basis.raw(), i, j,
+                        test_case.entries[i * test_case.rows + j]);
+            }
+        }
+        silex::lat::Lat lattice(test_case.rows);
+        if (!lattice.set_basis(basis)) {
+            return 1;
+        }
+        const std::vector<std::string> expected =
+                enum_brute_force(basis.raw(), test_case.bound, test_case.radius);
+        if (expected.empty()) {
+            return 1;
+        }
+        for (const slong max_coord :
+                {slong(-1), enum_double_route_cap, enum_arb_route_cap}) {
+            EnumCollector collector;
+            if (!enum_collect(lattice, test_case.bound, max_coord, 128,
+                        collector) ||
+                !enum_all_distinct(collector.vectors) ||
+                enum_sorted(collector.vectors) != expected) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 int test_lat_check() {
     silex::lat::Lat lattice(2);
     fmpz_mat_t basis;
@@ -1166,7 +1456,11 @@ int main() {
                    test_fplll_bounded_bkz_row_transform_boundary() != 0 ||
                    test_flatter_full_rank_column_transform_boundary() != 0 ||
                    test_flatter_wide_transform_boundary() != 0 ||
-                   test_short_vector_enum() != 0 || test_lat_check() != 0 ||
+                   test_short_vector_enum() != 0 ||
+                   test_short_vector_enum_no_duplicate_restart() != 0 ||
+                   test_short_vector_enum_arb_route() != 0 ||
+                   test_short_vector_enum_cross_route() != 0 ||
+                   test_lat_check() != 0 ||
                    test_native_cpp_raii_call_sites() != 0
                ? 1
                : 0;

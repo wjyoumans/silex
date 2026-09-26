@@ -26,6 +26,19 @@ constexpr slong lat_enum_double_max_dim = 32;
 constexpr slong lat_enum_double_max_coord = WORD(10000);
 constexpr double lat_enum_double_min_diag = 1e-150;
 constexpr double lat_enum_double_max_entry = 1e150;
+// Integers of larger magnitude are not all exactly representable as doubles,
+// so the double route cannot hold such a coefficient in its partial vector.
+constexpr double lat_enum_double_max_exact = 9007199254740992.0;  // 2^53
+
+// Outcome of the double-precision enumeration route.  `ineligible` means no
+// callback was delivered and the Arb route may run from the start; `failed`
+// means the route stopped after delivering callbacks, so restarting on the
+// Arb route would deliver those vectors again.
+enum class EnumDoubleResult {
+    ineligible,
+    completed,
+    failed,
+};
 
 struct EnumStateArb {
     arb_mat_struct* cholesky = nullptr;
@@ -47,6 +60,7 @@ struct EnumStateDouble {
     double bound = 0.0;
     slong max_coord = -1;
     bool aborted_by_callback = false;
+    bool delivered = false;
     ShortVectorCallback callback = nullptr;
     void* user = nullptr;
 };
@@ -289,25 +303,32 @@ bool enum_recurse_double(EnumStateDouble& state,
 
     const double center = -delta / diag;
     const double half_width = std::sqrt(remaining) / diag;
-    const double lower_d = center - half_width - 1e-9;
-    const double upper_d = center + half_width + 1e-9;
+    double lower_d = center - half_width - 1e-9;
+    double upper_d = center + half_width + 1e-9;
 
-    if (lower_d < static_cast<double>(WORD_MIN + 1) ||
-        upper_d > static_cast<double>(WORD_MAX - 1)) {
+    // Apply the coordinate cap before the range check: a capped interval is
+    // representable even when the uncapped interval is not.
+    if (state.max_coord >= 0) {
+        const double cap = static_cast<double>(state.max_coord);
+        if (lower_d < -cap) {
+            lower_d = -cap;
+        }
+        if (upper_d > cap) {
+            upper_d = cap;
+        }
+    }
+
+    if (lower_d > upper_d) {
+        return true;
+    }
+    // Negated comparison so that a NaN endpoint also fails.
+    if (!(lower_d >= -lat_enum_double_max_exact &&
+                upper_d <= lat_enum_double_max_exact)) {
         return false;
     }
 
-    slong lower = static_cast<slong>(std::ceil(lower_d));
-    slong upper = static_cast<slong>(std::floor(upper_d));
-    if (state.max_coord >= 0) {
-        if (lower < -state.max_coord) {
-            lower = -state.max_coord;
-        }
-        if (upper > state.max_coord) {
-            upper = state.max_coord;
-        }
-    }
-
+    const slong lower = static_cast<slong>(std::ceil(lower_d));
+    const slong upper = static_cast<slong>(std::floor(upper_d));
     if (lower > upper) {
         return true;
     }
@@ -351,9 +372,12 @@ bool enum_recurse_double(EnumStateDouble& state,
                         break;
                     }
                 }
-                if (nonzero && state.callback(state.coeffs, state.user) == 0) {
-                    state.aborted_by_callback = true;
-                    return true;
+                if (nonzero) {
+                    state.delivered = true;
+                    if (state.callback(state.coeffs, state.user) == 0) {
+                        state.aborted_by_callback = true;
+                        return true;
+                    }
                 }
             } else {
                 if (!enum_recurse_double(state, coordinate - 1,
@@ -405,7 +429,45 @@ bool enum_downconvert_cholesky(double* out,
     return ok;
 }
 
-bool enum_dispatch_double(const arb_mat_t cholesky,
+// Routing check for uncapped enumeration.  With G = L L^T and x G x^T <= B,
+// writing y = x L gives x_i = <y, column i of L^{-1}>, so Cauchy--Schwarz
+// bounds |x_i| by sqrt(B) * ||column i of L^{-1}||, i.e. sqrt(B (G^{-1})_ii)
+// (the Fincke--Pohst coordinate bound; U. Fincke and M. Pohst, Math. Comp. 44
+// (1985); H. Cohen, GTM 138, section 2.7.3).  The bound is evaluated in double
+// arithmetic and only selects a route: an uncapped call takes the double route
+// only when every coefficient it can reach stays within the same limit that
+// capped calls are held to.
+bool enum_double_coordinates_bounded(const double* cholesky,
+        slong dimension,
+        double bound) noexcept {
+    std::vector<double> inverse(
+            static_cast<std::size_t>(dimension * dimension), 0.0);
+    const double root = std::sqrt(bound);
+    const double limit = static_cast<double>(lat_enum_double_max_coord);
+
+    for (slong j = 0; j < dimension; ++j) {
+        const double pivot = 1.0 / cholesky[j * dimension + j];
+        inverse[static_cast<std::size_t>(j * dimension + j)] = pivot;
+        double norm_sq = pivot * pivot;
+        for (slong i = j + 1; i < dimension; ++i) {
+            double sum = 0.0;
+            for (slong k = j; k < i; ++k) {
+                sum += cholesky[i * dimension + k] *
+                       inverse[static_cast<std::size_t>(k * dimension + j)];
+            }
+            const double value = -sum / cholesky[i * dimension + i];
+            inverse[static_cast<std::size_t>(i * dimension + j)] = value;
+            norm_sq += value * value;
+        }
+        // Negated comparison so that an overflow to inf or NaN is ineligible.
+        if (!(root * std::sqrt(norm_sq) <= limit)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+EnumDoubleResult enum_dispatch_double(const arb_mat_t cholesky,
         const arb_t bound_sq,
         slong dimension,
         slong max_coord,
@@ -413,29 +475,34 @@ bool enum_dispatch_double(const arb_mat_t cholesky,
         ShortVectorCallback callback,
         void* user) noexcept {
     if (dimension > lat_enum_double_max_dim ||
-        (max_coord >= 0 && max_coord > lat_enum_double_max_coord)) {
-        return false;
+        max_coord > lat_enum_double_max_coord) {
+        return EnumDoubleResult::ineligible;
     }
 
     std::vector<double> cholesky_d(
             static_cast<std::size_t>(dimension * dimension), 0.0);
 
     if (!enum_downconvert_cholesky(cholesky_d.data(), cholesky, dimension)) {
-        return false;
+        return EnumDoubleResult::ineligible;
     }
 
     flint::Arf upper_bound;
     flint::arb_get_ubound_arf(upper_bound, bound_sq, prec);
     if (flint::arf_is_nan(upper_bound) || flint::arf_is_inf(upper_bound)) {
-        return false;
+        return EnumDoubleResult::ineligible;
     }
 
     double bound = flint::arf_get_d(upper_bound, ARF_RND_UP);
     if (!std::isfinite(bound) || bound < 0.0) {
-        return false;
+        return EnumDoubleResult::ineligible;
     }
 
     bound *= 1.0 + std::ldexp(1.0, -40);
+
+    if (max_coord < 0 &&
+        !enum_double_coordinates_bounded(cholesky_d.data(), dimension, bound)) {
+        return EnumDoubleResult::ineligible;
+    }
 
     std::vector<double> partial(static_cast<std::size_t>(dimension), 0.0);
 
@@ -451,7 +518,11 @@ bool enum_dispatch_double(const arb_mat_t cholesky,
     state.callback = callback;
     state.user = user;
 
-    return enum_recurse_double(state, dimension - 1, 0.0);
+    if (enum_recurse_double(state, dimension - 1, 0.0)) {
+        return EnumDoubleResult::completed;
+    }
+    return state.delivered ? EnumDoubleResult::failed
+                           : EnumDoubleResult::ineligible;
 }
 
 bool append_p_division_generators(fmpz_mat_t out,
@@ -930,9 +1001,14 @@ bool Lat::enum_short_vectors_arb(flint::ArbConstRef bound_sq,
         return false;
     }
 
-    if (enum_dispatch_double(cholesky.raw(), bound_sq.raw(), row_count, max_coord,
-                prec, callback, user)) {
+    const EnumDoubleResult double_result = enum_dispatch_double(cholesky.raw(),
+            bound_sq.raw(), row_count, max_coord, prec, callback, user);
+    if (double_result == EnumDoubleResult::completed) {
         return true;
+    }
+    if (double_result == EnumDoubleResult::failed) {
+        // Never restart on the Arb route after callbacks were delivered.
+        return false;
     }
 
     flint::FmpzMat coeffs(1, row_count);
