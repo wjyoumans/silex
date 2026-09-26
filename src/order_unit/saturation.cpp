@@ -461,7 +461,18 @@ enum class ProofPrimeScanResult {
     keep_scanning,
     done,
     failed,
+    exhausted,
 };
+
+// Resource guard, not a proof parameter: the most rational primes
+// q = 1 mod ell that one `select_stable_proof_primes` scan examines.  Hecke
+// v0.38.6 `compute_candidates_for_saturate` iterates `PrimesSet` without an
+// upper end; by Chebotarev every nonpower keeps being cut by further
+// degree-one primes, so a scan that reaches this count stops and the
+// ell-local proof fails closed as `unavailable`.  It also bounds the
+// `saturate!` doubling of the stability threshold, since each doubled
+// threshold needs more characters than the previous scan gathered.
+inline constexpr slong kStableProofMaxAuxPrimes = slong{1} << 16;
 
 bool select_stable_proof_primes(
         slong& local_prime_count,
@@ -614,10 +625,23 @@ bool select_stable_proof_primes(
 
     // reference RelSaturate.compute_candidates_for_saturate scans q = 1 mod p
     // and stops after the candidate kernel remains stable for 3.5 times its
-    // current dimension. This avoids treating the old auxiliary bound as a
-    // proof condition without introducing a local cap.
+    // current dimension (`saturate!` passes stable = 3.5 and doubles it after
+    // a candidate that is not a p-th power).  Hecke starts its `PrimesSet`
+    // at `p_start` = next_prime(2^60); this scan starts at q = ell + 1.  Any
+    // degree-one prime q = 1 mod ell not dividing disc(O) gives a valid
+    // character, so the start changes which primes are used, not the proof
+    // condition (an empty kernel).  No auxiliary bound limits the scan;
+    // only the kStableProofMaxAuxPrimes resource guard does.
+    slong examined_primes = 0;
     auto process_prime_q =
             [&](flint::FmpzConstRef q) noexcept -> ProofPrimeScanResult {
+        if (examined_primes >= kStableProofMaxAuxPrimes) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.resource_limit");
+            return ProofPrimeScanResult::exhausted;
+        }
+        ++examined_primes;
         SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.stable_scan.candidate_q");
         if (rational_prime_divides_order_discriminant(
@@ -765,7 +789,8 @@ bool select_stable_proof_primes(
                     if (result == ProofPrimeScanResult::done) {
                         return true;
                     }
-                    if (result == ProofPrimeScanResult::failed) {
+                    if (result == ProofPrimeScanResult::failed ||
+                        result == ProofPrimeScanResult::exhausted) {
                         return false;
                     }
                 }
@@ -794,7 +819,8 @@ bool select_stable_proof_primes(
                 if (result == ProofPrimeScanResult::done) {
                     return true;
                 }
-                if (result == ProofPrimeScanResult::failed) {
+                if (result == ProofPrimeScanResult::failed ||
+                    result == ProofPrimeScanResult::exhausted) {
                     return false;
                 }
             }
@@ -2457,11 +2483,24 @@ bool OrderUnitGroup::prove_local_saturated_(
                 ell, embeddings, precision);
     }
 
+    if (pass_ok && pass_changed) {
+        return publish(pass_result, ProofState::unavailable,
+                       local_prime_count, true);
+    }
+
+    if (!certified && use_stable_proof_fallback) {
+        // The pre-scan over q <= aux_bound ended with a nonempty character
+        // kernel and adjoined no root (its kernel rows were not l-th powers,
+        // or their roots could not be decided).  The bound limits only this
+        // pre-scan, not the proof: continue with the Hecke `saturate!` scan
+        // (`run_stable_fallback`), which keeps drawing degree-one primes
+        // above q = 1 mod ell until the kernel is empty or stable.
+        SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
+                            "unit_group.proof_prescan_stable_fallback");
+        return run_stable_fallback();
+    }
+
     if (pass_ok) {
-        if (pass_changed) {
-            return publish(pass_result, ProofState::unavailable,
-                           local_prime_count, true);
-        }
         return publish(pass_result,
                        certified ? ProofState::verified
                                  : ProofState::unavailable,
