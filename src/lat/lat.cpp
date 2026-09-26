@@ -33,7 +33,10 @@ constexpr double lat_enum_double_max_exact = 9007199254740992.0;  // 2^53
 // Outcome of the double-precision enumeration route.  `ineligible` means no
 // callback was delivered and the Arb route may run from the start; `failed`
 // means the route stopped after delivering callbacks, so restarting on the
-// Arb route would deliver those vectors again.
+// Arb route would deliver those vectors again.  `failed` is defensive: for
+// current inputs it is unreachable through the public API, because capped
+// intervals are clamped to at most 10000 and uncapped calls are prechecked
+// against the same limit before any callback.
 enum class EnumDoubleResult {
     ineligible,
     completed,
@@ -327,18 +330,22 @@ bool enum_recurse_double(EnumStateDouble& state,
         return false;
     }
 
+    // Both endpoints are within 2^53 here, so these conversions are exact.
     const slong lower = static_cast<slong>(std::ceil(lower_d));
     const slong upper = static_cast<slong>(std::floor(upper_d));
     if (lower > upper) {
         return true;
     }
 
-    slong center_coord = static_cast<slong>(std::floor(center + 0.5));
-    if (center_coord < lower) {
-        center_coord = lower;
-    }
-    if (center_coord > upper) {
+    // The center itself is not range-checked (a capped interval can be clamped
+    // while its center is far outside the slong range), so clamp it in double
+    // before converting.  A NaN center selects the lower endpoint.
+    const double rounded_center = std::floor(center + 0.5);
+    slong center_coord = lower;
+    if (rounded_center >= static_cast<double>(upper)) {
         center_coord = upper;
+    } else if (rounded_center > static_cast<double>(lower)) {
+        center_coord = static_cast<slong>(rounded_center);
     }
 
     const slong max_offset =

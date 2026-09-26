@@ -1050,10 +1050,11 @@ std::vector<std::string> enum_sorted(std::vector<std::string> vectors) {
 }
 
 // Exact reference: every nonzero coefficient row in [-radius, radius]^r whose
-// exact squared norm is at most bound_si.  The caller picks radius at least
-// the Fincke--Pohst coordinate bound so the box holds every solution.
+// exact squared norm is at most bound.  The caller picks radius at least
+// the Fincke--Pohst coordinate bound (or the enumeration's max_coord) so the
+// box holds every solution.
 std::vector<std::string> enum_brute_force(const fmpz_mat_t basis,
-        slong bound_si,
+        const fmpz_t bound,
         slong radius) {
     const slong rows = fmpz_mat_nrows(basis);
     const slong cols = fmpz_mat_ncols(basis);
@@ -1078,7 +1079,7 @@ std::vector<std::string> enum_brute_force(const fmpz_mat_t basis,
             key += std::to_string(coeffs[static_cast<std::size_t>(i)]);
             key += ',';
         }
-        if (nonzero && fmpz_cmp_si(norm.raw(), bound_si) <= 0) {
+        if (nonzero && fmpz_cmp(norm.raw(), bound) <= 0) {
             out.push_back(key);
         }
 
@@ -1095,6 +1096,14 @@ std::vector<std::string> enum_brute_force(const fmpz_mat_t basis,
     }
     std::sort(out.begin(), out.end());
     return out;
+}
+
+std::vector<std::string> enum_brute_force(const fmpz_mat_t basis,
+        slong bound_si,
+        slong radius) {
+    silex::flint::Fmpz bound;
+    fmpz_set_si(bound.raw(), bound_si);
+    return enum_brute_force(basis, bound.raw(), radius);
 }
 
 // T-001 review finding F1: a double-route range failure after callbacks used
@@ -1117,6 +1126,32 @@ int test_short_vector_enum_no_duplicate_restart() {
         EnumCollector collector;
         if (!enum_collect(lattice, 1, max_coord, 128, collector) ||
             enum_sorted(collector.vectors) != capped) {
+            return 1;
+        }
+    }
+
+    // A capped call whose uncapped coordinate interval is far outside the
+    // slong range: the interval center (about 1e19 here) must be clamped in
+    // double before any integer conversion (T-019 review B1).  The double
+    // route's 2^-40 relative bound slack admits extra rows at this size, so
+    // require a duplicate-free superset of the exact set.
+    {
+        silex::flint::Fmpz huge;
+        fmpz_set_str(huge.raw(), "100000000000000000000000000000000000000", 10);
+        silex::flint::Arb huge_bound;
+        arb_set_fmpz(huge_bound.raw(), huge.raw());
+        EnumCollector collector;
+        if (!lattice.enum_short_vectors_arb(huge_bound, 1, 256,
+                    enum_collect_callback, &collector) ||
+            !enum_all_distinct(collector.vectors)) {
+            return 1;
+        }
+        const std::vector<std::string> found = enum_sorted(collector.vectors);
+        const std::vector<std::string> exact =
+                enum_brute_force(basis.raw(), huge.raw(), 1);
+        if (exact.empty() ||
+            !std::includes(found.begin(), found.end(), exact.begin(),
+                    exact.end())) {
             return 1;
         }
     }
