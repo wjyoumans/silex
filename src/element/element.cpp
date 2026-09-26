@@ -1193,9 +1193,9 @@ struct ResiduePowerData {
     bool may_be_power = false;
 };
 
-// True when the rational prime p divides the exponent n > 0.  The pure-root
-// Hensel and residue-disproof paths must skip such primes, where y^n - a is
-// inseparable modulo p.
+// True when the rational prime p divides the exponent n > 0.  Hensel lifting
+// of y^n - a must not use such primes, where y^n - a is inseparable modulo p;
+// the residue-field membership disproof remains valid there.
 bool prime_divides_exponent(const fmpz_t prime, slong exponent) noexcept {
     if (exponent <= 0 || fmpz_sgn(prime) <= 0 ||
         fmpz_abs_fits_ui(prime) == 0) {
@@ -1340,8 +1340,7 @@ ResiduePowerStatus residue_field_power_inverse_roots(
                         "element.power_residue_inverse_roots");
     inverse_roots.clear();
     if (exponent <= 1 ||
-        fmpz_mod_poly_degree(modulus.raw(), ctx.raw()) <= 0 ||
-        prime_divides_exponent(prime, exponent)) {
+        fmpz_mod_poly_degree(modulus.raw(), ctx.raw()) <= 0) {
         return ResiduePowerStatus::unsupported;
     }
 
@@ -1378,6 +1377,13 @@ ResiduePowerStatus residue_field_power_inverse_roots(
                 diagnostics, DiagnosticsModule::element,
                 "element.power_residue_inverse_roots.fq_ispower_disproof");
         return ResiduePowerStatus::nonpower;
+    }
+    // The disproof above holds at every good prime, including p | n.  Residue
+    // roots are only needed for Hensel lifting, which requires p not dividing
+    // n (y^n - a is inseparable modulo p otherwise).  Report unsupported so
+    // the prime loops move on to the next factor or prime.
+    if (prime_divides_exponent(prime, exponent)) {
+        return ResiduePowerStatus::unsupported;
     }
     if (fq_unique_power_inverse_root(
                 inverse_roots, value, field, power_data, modulus, ctx,
@@ -1432,7 +1438,9 @@ ResiduePowerStatus residue_field_power_inverse_roots(
     FqPolyFactor roots(field.raw());
     fq_poly_roots(roots.raw(), polynomial.raw(), 0, field.raw());
     if (roots.raw()->num == 0) {
-        return ResiduePowerStatus::nonpower;
+        // Unreachable: y^g - a^u has g distinct roots in F_q once the
+        // membership test passed.  Never turn an anomaly into a disproof.
+        return ResiduePowerStatus::unsupported;
     }
 
     for (slong i = 0; i < roots.raw()->num; ++i) {
@@ -2168,9 +2176,6 @@ bool pure_power_hensel_root(bool& is_power,
     constexpr slong max_prime_attempts = 256;
     for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
         fmpz_nextprime(prime.raw(), prime.raw(), 1);
-        if (prime_divides_exponent(prime.raw(), exponent)) {
-            continue;
-        }
         flint::FmpzModCtx ctx(prime.raw());
         if (ctx.raw() == nullptr) {
             return false;
@@ -2290,9 +2295,6 @@ bool pure_power_residue_disproves(bool& is_power,
     constexpr slong max_prime_attempts = 256;
     for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
         fmpz_nextprime(prime.raw(), prime.raw(), 1);
-        if (prime_divides_exponent(prime.raw(), exponent)) {
-            continue;
-        }
         flint::FmpzModCtx ctx(prime.raw());
         if (ctx.raw() == nullptr) {
             return false;

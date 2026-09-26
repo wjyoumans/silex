@@ -91,10 +91,12 @@ void test_power_skips_primes_dividing_exponent() noexcept {
     }
 }
 
-// Regression: a huge exponent must neither build the dense residue polynomial
-// y^n - a nor raise a lifted candidate to the n-th power in K.  1 + 5*theta
-// has norm -49, so it is not a 2^40-th power.  Unsupported is acceptable;
-// a definite answer must be false.
+// Regression: a huge exponent must not build the dense residue polynomial
+// y^n - a.  For these inputs the lifted candidates have norm other than +-1,
+// so the norm pre-check also rejects them without forming candidate^n in K.
+// This does not bound verification for candidates of norm +-1 (units); that
+// remains a known gap.  1 + 5*theta has norm -49, so it is not a 2^40-th
+// power.  Unsupported is acceptable; a definite answer must be false.
 void test_power_huge_exponent_is_bounded() noexcept {
     silex::NumberField field = sqrt_two_field();
     silex::Element value(field);
@@ -126,6 +128,31 @@ void test_power_huge_exponent_is_bounded() noexcept {
         assert(!is_power);
     }
     assert(root.equal_si(7));
+}
+
+// Regression: the residue-field membership disproof is valid at primes
+// p | n.  In Q(sqrt 2), -theta is not a 10th power: at p = 5 (inert),
+// (-theta)^((25 - 1)/gcd(10, 24)) = theta^12 = 2^6 = 4 != 1 in F_25.  Skipping
+// p = 5 would reach p = 7 first, where no disproof exists.
+void test_power_disproof_at_prime_dividing_exponent() noexcept {
+    silex::NumberField field = sqrt_two_field();
+    sflint::Fmpz exponent;
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), 10);
+
+    for (slong constant : {0, -3}) {
+        silex::Element value(field);
+        silex::Element root(field);
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, constant);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+        assert(value.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+        assert(root.set_si(7));
+        bool is_power = true;
+        assert(value.is_power(is_power, root,
+                              sflint::FmpzConstRef(exponent)));
+        assert(!is_power);
+        assert(root.equal_si(7));
+    }
 }
 
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
@@ -234,6 +261,7 @@ int main() {
     test_invert_zero_divisors();
     test_power_skips_primes_dividing_exponent();
     test_power_huge_exponent_is_bounded();
+    test_power_disproof_at_prime_dividing_exponent();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 
