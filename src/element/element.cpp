@@ -1793,17 +1793,22 @@ bool norm_admits_power_root(bool& unit_norm,
     return fmpz_equal(powered.raw(), input_num) != 0;
 }
 
+flint_bitcnt_t fmpq_poly_coefficient_bits(
+        const fmpq_poly_struct* polynomial) noexcept {
+    flint_bitcnt_t bits = fmpz_bits(polynomial->den);
+    const slong length = fmpq_poly_length(polynomial);
+    for (slong i = 0; i < length; ++i) {
+        bits = std::max(bits, fmpz_bits(polynomial->coeffs + i));
+    }
+    return bits;
+}
+
 flint_bitcnt_t element_coefficient_bits(const Element& element) noexcept {
     flint::FmpqPoly polynomial;
     if (!element.get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
         return 0;
     }
-    flint_bitcnt_t bits = fmpz_bits(polynomial.raw()->den);
-    const slong length = fmpq_poly_length(polynomial.raw());
-    for (slong i = 0; i < length; ++i) {
-        bits = std::max(bits, fmpz_bits(polynomial.raw()->coeffs + i));
-    }
-    return bits;
+    return fmpq_poly_coefficient_bits(polynomial.raw());
 }
 
 // Enclosure of log M(P), where P is the primitive integral characteristic
@@ -1812,7 +1817,7 @@ flint_bitcnt_t element_coefficient_bits(const Element& element) noexcept {
 // with sigma_1, ..., sigma_d the complex embeddings of the parent field
 // Since P is a power of the primitive minimal polynomial, log M(P) =
 // d * h(element) for the absolute logarithmic Weil height h (Bombieri and
-// Gubler, Heights in Diophantine Geometry, ch. 1, sections 1.5-1.6).
+// Gubler, Heights in Diophantine Geometry, sections 1.5-1.6).
 bool log_mahler_measure_enclosure(flint::Arb& out,
                                   EmbeddingContext& embeddings,
                                   const Element& element,
@@ -1872,23 +1877,28 @@ bool log_mahler_measure_enclosure(flint::Arb& out,
 // characteristic polynomials of degree d = [K : Q],
 // n log M(P_c) = log M(P_a).  The candidate is rejected only when certified
 // enclosures prove n log M(P_c) > log M(P_a) + 1, so a true root is never
-// rejected; the slack of 1 only absorbs enclosure radii.  When the test
-// passes, c^n has height at most that of the input plus 1/d, so forming it
-// costs no more than the input's own size; a root of unity c (M(P_c) = 1)
-// always passes and binary powering keeps its coefficients bounded.  A
-// failure to compute an enclosure leaves the candidate to exact
-// verification.
+// rejected.  When the test passes, h(c^n) <= h(a) + (1 + r)/d, with r the
+// total width of the two enclosures, so forming c^n costs about as much as
+// the input's own size; a root of unity c (M(P_c) = 1) always passes and
+// binary powering keeps its coefficients bounded.  A failure to compute an
+// enclosure, or a comparison the enclosures cannot decide, leaves the
+// candidate to exact verification.  The working precision grows with the
+// coefficient sizes of c, a and the defining polynomial; it affects only
+// whether the comparison is decisive, never whether a rejection is sound.
 bool height_admits_power_root(const Element& candidate,
                               const Element& input,
                               flint::FmpzConstRef exponent) noexcept {
     const NumberField* parent = input.parent();
-    if (parent == nullptr) {
+    const nf_struct* raw_field =
+            parent == nullptr ? nullptr : parent->raw_flint_field();
+    if (raw_field == nullptr) {
         return true;
     }
     const slong precision =
-            128 + static_cast<slong>(
+            128 + static_cast<slong>(std::max(
+                          fmpq_poly_coefficient_bits(raw_field->pol),
                           std::max(element_coefficient_bits(candidate),
-                                   element_coefficient_bits(input)));
+                                   element_coefficient_bits(input))));
     EmbeddingContext embeddings(*parent);
     flint::Arb candidate_log;
     flint::Arb input_log;
