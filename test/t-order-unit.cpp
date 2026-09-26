@@ -3976,9 +3976,26 @@ int test_prove_index_bound_cubic2213_past_prescan_bound() {
     // The validation proof uses this pre-scan bound (kComputeProofAuxMax).
     sflint::Fmpz aux_bound;
     assert(set_fmpz_si(aux_bound, 1000));
-    silex::OrderUnitGroup proved(order);
+
+    // GP, f = x^3 - 4x^2 - 8x - 1:
+    //     forprime(q=2, 1000, if(q%31==1 && #polrootsmod(f,q), print(q)))
+    // prints only 683, so one character cannot settle rank two.  The public
+    // bounded local proof stays bounded by aux_bound and is unavailable.
+    sflint::Fmpz ell31;
+    assert(set_fmpz_si(ell31, 31));
+    silex::OrderUnitGroup local(order);
     silex::ProofState status = silex::ProofState::not_checked;
     bool changed = true;
+    assert(local.prove_local_saturated(
+            status, changed, start, sflint::FmpzConstRef(ell31), 1,
+            sflint::FmpzConstRef(aux_bound), embeddings, 256));
+    assert(status == silex::ProofState::unavailable);
+    assert(!changed);
+    assert(!local.unit_proof_verified(sflint::FmpzConstRef(ell31)));
+
+    silex::OrderUnitGroup proved(order);
+    status = silex::ProofState::not_checked;
+    changed = true;
     assert(proved.prove_index_bound(status, changed, start, 1,
                                     sflint::FmpzConstRef(aux_bound), 2,
                                     embeddings, 256));
