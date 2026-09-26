@@ -297,6 +297,56 @@ not as the largest prime used.  Hecke starts its scan at
 which valid characters are used.  Roots are adjoined only after the exact
 order-unit check described below.
 
+The index bound comes from ``unit_lower_regulator_bound``.  For a subgroup
+``G`` of full rank in ``O^x``, with ``O`` an order of the field ``K``,
+``[O^x : G] = R_G / Reg(O) <= R_G / R_K``.  So any proven lower bound
+``R_lower <= R_K`` gives ``[O^x : G] <= floor(R_G / R_lower)``.
+``OrderUnitGroup::regulator_index_bound`` takes the floor of the rigorous
+upper endpoint of the Arb quotient, following Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_unit_group_proof``
+(``floor(tent_reg / low_reg)``).  If that upper endpoint is below one, the
+inputs contradict ``R_K >= R_lower``, and the bound fails closed instead of
+reporting index one.  ``R_lower`` is the largest lower endpoint of the
+following proven bounds.  ``r1`` and ``r2`` are the numbers of real and
+complex places, ``n = r1 + 2 r2``, and ``w`` is the number of roots of unity
+of ``K``:
+
+* E. Friedman, "Analytic formulas for the regulator of a number field",
+  *Invent. Math.* 98 (1989), 599--622, Theorem B (p. 599): ``R >= 0.2052``
+  for every number field.  The minimum is the regulator 0.20521... of the
+  sextic field of discriminant ``-10051``.
+* H. Zimmert, "Ideale kleiner Norm in Idealklassen und eine
+  Regulatorabschätzung", *Invent. Math.* 62 (1981), 367--380, Korollar (i)
+  (p. 375): ``2R/w >= 0.04 exp(0.46 r1 + 0.1 r2)``, used as
+  ``R >= 0.02 w exp(0.46 r1 + 0.1 r2)``.
+* Friedman 1989, Corollary on p. 620:
+  ``R/w > 0.0031 exp(0.241 n + 0.497 r1)``.
+* Zimmert 1981, Satz 3 (p. 374), which holds for every ``gamma > 0``:
+  ``R/w >= (1+gamma)(1+2 gamma)/2 * Gamma(1+gamma)^(r1+r2) *
+  Gamma(3/2+gamma)^r2 * 2^(-r1-r2) * pi^(-r2/2) *
+  exp{(-1-gamma)[(r1+r2) psi((1+gamma)/2) + r2 psi(1+gamma/2) + 2/gamma +
+  1/(1+gamma)]}``.  Silex evaluates it with Arb at 15 fixed rational values
+  of ``gamma`` between 1/10 and 3.  For every signature of degree at most 20,
+  the best of these is within 6% of the optimum over ``gamma``.
+* Friedman 1989, Table 6 (p. 621): per-signature lower bounds for the
+  signatures of positive unit rank that it lists, transcribed exactly.  The
+  ``(r1, r2) = (0, 3)`` entry 0.27 excludes three fields (note b:
+  ``D_K = -10051, -10571, -12167``).  Theorem B gives their regulators
+  0.2052, 0.2132 and 0.2372, so Silex uses 0.2052 for ``(0, 3)``.
+
+All of these bounds increase with ``w``.  For an order ``O``, ``O^x`` has
+finite index in ``O_K^x``, so ``Reg(O) >= R_K``, and the field's ``w`` is the
+right value to use.  If ``w`` cannot be computed, Silex uses ``w = 2``.  The
+terms are evaluated at a working precision of at most 64 bits; the result is
+an exact lower endpoint, so this only makes the bound slightly weaker.
+
+Hecke's ``lower_regulator_bound``
+(``src/NumFieldOrd/NfOrd/Unit/Regulator.jl``) uses
+``max(0.054, 0.04 w exp(0.46 r1 + 0.01 r2))``.  That does not match
+Zimmert's Korollar: it keeps Zimmert's 0.04 for ``2R/w`` and also multiplies
+by ``w``, and it uses ``0.01 r2`` where Zimmert has ``0.1 r2``.  No source
+proves the Hecke value, so Silex does not use it.
+
 Termination needs only that the supplied subgroup ``U`` has full rank, so
 that ``[O^x : U]`` is finite; it does not depend on the index bound being
 correct.  For ``ell`` not dividing the torsion order ``w``, a kernel element
