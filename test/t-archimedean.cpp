@@ -7,6 +7,9 @@
 
 #include "test_support.hpp"
 
+#include <flint/fmpq.h>
+#include <flint/fmpq_poly.h>
+
 #include <cassert>
 
 namespace sflint = silex::flint;
@@ -40,6 +43,42 @@ void element_one_plus_theta(silex::Element& element) noexcept {
 silex::NumberField field_by_polynomial(sflint::FmpqPoly& polynomial) noexcept {
     return silex::test::field_by_polynomial(
             sflint::FmpqPolyConstRef(polynomial));
+}
+
+// f = (x^2 + 2x + 2)(x^2 - 8x + 17) - 2^-300 x.  Its two conjugate pairs,
+// near -1 +/- i and 4 +/- i, have |Im| differing by about 2^-302, so FLINT's
+// non-rigorous _acb_vec_sort_pretty orders them by real part at 64 bits and
+// by |Im| at 512 bits.  See close_imaginary_pairs_field in t-embedding.cpp.
+silex::NumberField close_imaginary_pairs_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, -6);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 3);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 34);
+
+    fmpq_t linear;
+    fmpq_init(linear);
+    fmpz_one(fmpq_denref(linear));
+    fmpz_mul_2exp(fmpq_denref(linear), fmpq_denref(linear), 300);
+    fmpz_mul_si(fmpq_numref(linear), fmpq_denref(linear), 18);
+    fmpz_sub_ui(fmpq_numref(linear), fmpq_numref(linear), 1);
+    ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), 1, linear);
+    fmpq_clear(linear);
+
+    return field_by_polynomial(polynomial);
+}
+
+bool log_vectors_overlap(const sflint::ArbVec& left,
+                         const sflint::ArbVec& right) noexcept {
+    if (left.length() != right.length()) {
+        return false;
+    }
+    for (slong i = 0; i < left.length(); ++i) {
+        if (::arb_overlaps(left.data() + i, right.data() + i) == 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // White-box helper: returns a defined field whose FLINT context has been
@@ -396,12 +435,62 @@ int test_nonsquarefree_failure() {
     return 0;
 }
 
+int test_log_embedding_stable_across_refine() {
+    silex::NumberField field = close_imaginary_pairs_field();
+
+    silex::Element theta(field);
+    assert(theta.gen());
+    silex::Element theta_plus_one(field);
+    element_one_plus_theta(theta_plus_one);
+
+    // Reference values from a context that is never refined past 64 bits.
+    silex::EmbeddingContext reference(field);
+    sflint::ArbVec theta_ref(2);
+    sflint::ArbVec shifted_ref(2);
+    assert(logarithmic_embedding(sflint::ArbVecRef(theta_ref), reference,
+                                 theta, silex::LogEmbeddingMode::plain, 64));
+    assert(logarithmic_embedding(sflint::ArbVecRef(shifted_ref), reference,
+                                 theta_plus_one,
+                                 silex::LogEmbeddingMode::plain, 64));
+    // The two places are distinguishable: |-1 + i| != |4 + i|.
+    assert(::arb_overlaps(theta_ref.data() + 0, theta_ref.data() + 1) == 0);
+    assert(::arb_overlaps(shifted_ref.data() + 0, shifted_ref.data() + 1) ==
+           0);
+
+    silex::EmbeddingContext embeddings(field);
+    sflint::ArbVec before(2);
+    assert(logarithmic_embedding(sflint::ArbVecRef(before), embeddings, theta,
+                                 silex::LogEmbeddingMode::plain, 64));
+    assert(log_vectors_overlap(before, theta_ref));
+
+    assert(embeddings.refine(512));
+
+    // theta was cached at 64 bits under the pre-refine place order; theta + 1
+    // is computed fresh from the refined roots.  Both must use one order.
+    sflint::ArbVec cached(2);
+    sflint::ArbVec fresh(2);
+    assert(logarithmic_embedding(sflint::ArbVecRef(cached), embeddings, theta,
+                                 silex::LogEmbeddingMode::plain, 64));
+    assert(logarithmic_embedding(sflint::ArbVecRef(fresh), embeddings,
+                                 theta_plus_one,
+                                 silex::LogEmbeddingMode::plain, 64));
+    assert(log_vectors_overlap(cached, theta_ref));
+    assert(log_vectors_overlap(fresh, shifted_ref));
+
+    sflint::ArbVec high(2);
+    assert(logarithmic_embedding(sflint::ArbVecRef(high), embeddings, theta,
+                                 silex::LogEmbeddingMode::plain, 512));
+    assert(log_vectors_overlap(high, theta_ref));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     assert(test_absolute_degree_one() == 0);
     assert(test_absolute_quadratic_and_cubic() == 0);
     assert(test_log_embedding() == 0);
+    assert(test_log_embedding_stable_across_refine() == 0);
     assert(test_minkowski_embedding() == 0);
     assert(test_undefined_field_failure() == 0);
     assert(test_nonsquarefree_failure() == 0);

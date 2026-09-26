@@ -26,7 +26,7 @@ enum class RootRefinementStatus {
     real_root_validation,
     root_isolation,
     root_pairing,
-    precision_overflow
+    precision_cap
 };
 
 void profile_root_refinement_failure(
@@ -63,10 +63,10 @@ void profile_root_refinement_failure(
                 diagnostics, DiagnosticsModule::element,
                 "element.embedding.refine_from_initial.failure.root_pairing");
         break;
-    case RootRefinementStatus::precision_overflow:
+    case RootRefinementStatus::precision_cap:
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::element,
-                "element.embedding.refine_from_initial.failure.precision_overflow");
+                "element.embedding.refine_from_initial.failure.precision_cap");
         break;
     case RootRefinementStatus::success:
         break;
@@ -106,45 +106,86 @@ void zero_certified_real_imaginary_parts(acb_ptr roots, slong degree) noexcept {
     }
 }
 
-bool sort_and_pair_roots(acb_ptr roots, acb_ptr scratch, slong degree) noexcept {
-    _acb_vec_sort_pretty(roots, degree);
-
-    slong num_real = 0;
-    for (slong i = 0; i < degree; ++i) {
-        if (acb_is_real(roots + i) != 0) {
-            ++num_real;
-        }
-    }
-
-    if (degree == num_real) {
-        return true;
-    }
-
-    slong positive_complex = 0;
-    for (slong i = num_real; i < degree; ++i) {
-        if (arb_is_positive(acb_imagref(roots + i)) != 0) {
-            acb_swap(scratch + positive_complex, roots + i);
-            ++positive_complex;
-        }
-    }
-
-    const slong expected_complex_pairs = (degree - num_real) / 2;
-    if (positive_complex != expected_complex_pairs) {
+// Writes the certified roots in `roots` back in the place order of
+// `previous`, the roots stored before this refinement, and restores the
+// conjugate-pair layout: real places first, then for each complex place the
+// root with positive imaginary part followed by its conjugate.
+//
+// Both vectors hold pairwise disjoint balls, each containing exactly one root
+// of the defining polynomial.  If roots[j] overlaps previous[i] and no other
+// previous ball, the root inside roots[j] (which lies in some previous ball)
+// must lie in previous[i], so both balls enclose the same root.  The matching
+// is accepted only when it is a bijection; otherwise this returns false and
+// the caller refines further or reports failure.
+//
+// This replaces re-sorting with FLINT _acb_vec_sort_pretty after a refine.
+// That comparator orders by |Im| and falls back to the real part only when
+// the |Im| difference ball contains zero, so two conjugate pairs with nearly
+// equal |Im| can sort differently at different precisions.  Place indices
+// must stay fixed once published because cached logarithmic embeddings are
+// served across refinements.
+bool restore_previous_root_order(acb_ptr roots,
+                                 acb_srcptr previous,
+                                 acb_ptr scratch,
+                                 slong degree,
+                                 slong num_real) noexcept {
+    if (num_real < 0 || num_real > degree || (degree - num_real) % 2 != 0) {
         return false;
     }
+    for (slong i = 0; i < degree; ++i) {
+        slong matches = 0;
+        for (slong j = 0; j < degree; ++j) {
+            if (acb_overlaps(roots + j, previous + i) != 0) {
+                ++matches;
+            }
+        }
+        if (matches != 1) {
+            return false;
+        }
+    }
+    for (slong j = 0; j < degree; ++j) {
+        slong match = -1;
+        for (slong i = 0; i < degree; ++i) {
+            if (acb_overlaps(roots + j, previous + i) != 0) {
+                if (match >= 0) {
+                    return false;
+                }
+                match = i;
+            }
+        }
+        if (match < 0) {
+            return false;
+        }
+        acb_set(scratch + match, roots + j);
+    }
 
-    for (slong i = 0; i < expected_complex_pairs; ++i) {
-        acb_swap(roots + num_real + 2 * i, scratch + i);
-        acb_conj(roots + num_real + 2 * i + 1,
-                 roots + num_real + 2 * i);
+    for (slong i = 0; i < num_real; ++i) {
+        if (acb_is_real(scratch + i) == 0) {
+            return false;
+        }
+    }
+    for (slong i = num_real; i < degree; i += 2) {
+        if (arb_is_positive(acb_imagref(scratch + i)) == 0) {
+            return false;
+        }
+        acb_conj(scratch + i + 1, scratch + i);
+    }
+    for (slong i = 0; i < degree; ++i) {
+        acb_swap(roots + i, scratch + i);
     }
     return true;
 }
 
+// Largest working precision tried from the previous roots, as a multiple of
+// the requested precision, before falling back to full isolation.
+constexpr slong refine_work_precision_factor = 8;
+
 RootRefinementStatus refine_roots_from_initial(
         acb_ptr roots,
+        acb_srcptr previous,
         const fmpq_poly_t polynomial,
         slong degree,
+        slong num_real,
         slong precision,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
@@ -158,6 +199,10 @@ RootRefinementStatus refine_roots_from_initial(
     flint::AcbPoly complex_polynomial;
     flint::AcbVec scratch(degree);
     RootRefinementStatus last_failure = RootRefinementStatus::invalid_input;
+    const slong max_work_precision =
+            precision <= COEFF_MAX / refine_work_precision_factor
+                    ? precision * refine_work_precision_factor
+                    : COEFF_MAX;
 
     for (slong work_precision = precision; work_precision > 0;) {
         acb_poly_set_fmpq_poly(complex_polynomial.raw(), polynomial,
@@ -165,7 +210,9 @@ RootRefinementStatus refine_roots_from_initial(
 
         // Source trace: reference Misc/acb_root_ctx.jl::_roots! refines roots by
         // calling FLINT acb_poly_find_roots with the previous root vector as
-        // initial approximations, then validates and sorts the result.
+        // initial approximations, then validates the result.  Unlike the
+        // reference, which re-sorts with _acb_vec_sort_pretty, the refined
+        // roots are matched back to the previous place order (T-022).
         const slong max_iterations =
                 FLINT_MIN(FLINT_MAX(degree, work_precision / 4),
                           work_precision);
@@ -194,7 +241,9 @@ RootRefinementStatus refine_roots_from_initial(
             if (!roots_are_isolated(roots, degree)) {
                 last_failure = RootRefinementStatus::root_isolation;
                 profile_root_refinement_failure(diagnostics, last_failure);
-            } else if (!sort_and_pair_roots(roots, scratch.data(), degree)) {
+            } else if (!restore_previous_root_order(roots, previous,
+                                                    scratch.data(), degree,
+                                                    num_real)) {
                 last_failure = RootRefinementStatus::root_pairing;
                 profile_root_refinement_failure(diagnostics, last_failure);
             } else {
@@ -205,10 +254,13 @@ RootRefinementStatus refine_roots_from_initial(
             }
         }
 
-        if (work_precision > (COEFF_MAX / 2)) {
+        // The reference doubles up to 2^22 bits.  Cap the attempts from the
+        // previous roots at a small multiple of the requested precision; the
+        // caller then falls back to full isolation.
+        if (work_precision > max_work_precision / 2) {
             profile_root_refinement_failure(
-                    diagnostics, RootRefinementStatus::precision_overflow);
-            return RootRefinementStatus::precision_overflow;
+                    diagnostics, RootRefinementStatus::precision_cap);
+            return RootRefinementStatus::precision_cap;
         }
         work_precision *= 2;
     }
@@ -343,6 +395,14 @@ bool EmbeddingContext::define(const NumberField& parent) noexcept {
     next.parent_ = parent;
     next.degree_ = parent.degree();
     next.roots_ = flint::AcbVec(next.degree_);
+    // The signature depends only on the defining polynomial, so it is known
+    // before any root is computed.  It stays (0, 0) when it cannot be
+    // computed, which only happens for a non-squarefree polynomial installed
+    // behind the NumberField's back; refine() then fails.
+    Signature sig;
+    if (silex::signature(sig, parent) && sig.degree() == next.degree_) {
+        next.sig_ = sig;
+    }
 
     swap(next);
     return true;
@@ -390,13 +450,10 @@ bool EmbeddingContext::refine(
         return true;
     }
 
-    Signature next_sig;
-    {
-        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                            "element.embedding.refine.signature");
-        if (!silex::signature(next_sig, parent_)) {
-            return false;
-        }
+    // define() stores the signature; a context without one has a defining
+    // polynomial whose roots cannot be isolated.
+    if (sig_.degree() != degree_) {
+        return false;
     }
 
     flint::AcbVec next_roots(degree_);
@@ -407,8 +464,9 @@ bool EmbeddingContext::refine(
                 "element.embedding.refine.previous_roots_available");
         next_roots.set_from(flint::AcbVecConstRef(roots_));
         const RootRefinementStatus refine_status = refine_roots_from_initial(
-                next_roots.data(), parent_.raw_flint_field()->pol, degree_,
-                precision, diagnostics);
+                next_roots.data(), roots_.data(),
+                parent_.raw_flint_field()->pol, degree_, sig_.r1(), precision,
+                diagnostics);
         roots_refined = refine_status == RootRefinementStatus::success;
     }
 
@@ -426,11 +484,23 @@ bool EmbeddingContext::refine(
             arb_fmpz_poly_complex_roots(next_roots.data(), numerator.raw(), 0,
                                         precision);
         }
+        // FLINT returns its own sorted order.  Once roots are published, keep
+        // their place order; fail rather than guess if the match is ambiguous.
+        if (roots_are_set_) {
+            flint::AcbVec scratch(degree_);
+            if (!restore_previous_root_order(next_roots.data(), roots_.data(),
+                                             scratch.data(), degree_,
+                                             sig_.r1())) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::element,
+                        "element.embedding.refine.full_roots_order_failure");
+                return false;
+            }
+        }
     }
 
     roots_.set_from(flint::AcbVecConstRef(next_roots));
     evaluation_tree_.clear();
-    sig_ = next_sig;
     prec_ = precision;
     roots_are_set_ = true;
     return true;

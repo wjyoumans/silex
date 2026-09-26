@@ -1,3 +1,4 @@
+#include <silex/diagnostics.hpp>
 #include <silex/embedding.hpp>
 #include <silex/flint/acb.hpp>
 #include <silex/flint/arb.hpp>
@@ -7,7 +8,12 @@
 
 #include "test_support.hpp"
 
+#include <flint/acb.h>
+#include <flint/fmpq.h>
+#include <flint/fmpq_poly.h>
+
 #include <cassert>
+#include <cstring>
 #include <utility>
 
 namespace sflint = silex::flint;
@@ -108,6 +114,95 @@ bool satisfies_x3_minus(
     sflint::acb_pow_ui(value, sflint::AcbConstRef(root), 3, precision);
     sflint::acb_sub_si(value, value, a, precision);
     return sflint::acb_contains_zero(value);
+}
+
+// Degree-4 field with two conjugate pairs whose imaginary parts agree to
+// about 300 bits:
+//
+//     f = (x^2 + 2x + 2)(x^2 - 8x + 17) - 2^-300 x
+//       = x^4 - 6x^3 + 3x^2 + (18 - 2^-300)x + 34.
+//
+// The unperturbed roots are A = -1 +/- i and B = 4 +/- i.  To first order the
+// perturbation moves a root r by 2^-300 r / f0'(r), which gives
+// |Im A| - |Im B| ~ +4.9e-92 (about 2^-302), so the pair with the smaller
+// real part has the larger modulus of its imaginary part.
+//
+// FLINT's _acb_vec_sort_pretty (acb/vec_sort_pretty.c, acb_cmp_pretty) orders
+// by |Im| and falls back to the real part only when the |Im| difference ball
+// contains zero.  With roots accurate to about 64 bits the difference is
+// unresolved and A sorts first; with roots accurate to 512 bits it is resolved
+// and B sorts first.  The pre-T-022 refine path re-sorted the refined roots
+// with that comparator, so a 64 -> 512 refine swapped the two complex places.
+// test_place_order_stable_across_refine checks the comparator flip directly,
+// and this test failed on the pre-T-022 embedding code.
+silex::NumberField close_imaginary_pairs_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, -6);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 3);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 34);
+
+    fmpq_t linear;
+    fmpq_init(linear);
+    fmpz_one(fmpq_denref(linear));
+    fmpz_mul_2exp(fmpq_denref(linear), fmpq_denref(linear), 300);
+    fmpz_mul_si(fmpq_numref(linear), fmpq_denref(linear), 18);
+    fmpz_sub_ui(fmpq_numref(linear), fmpq_numref(linear), 1);
+    ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), 1, linear);
+    fmpq_clear(linear);
+
+    return field_by_polynomial(polynomial);
+}
+
+// Real quadratic field with two roots 1 +/- sqrt(3) 2^-500.  Rounding the
+// constant coefficient 1 - 3 * 2^-1000 to fewer than about 1000 bits merges
+// the roots, so refining from 64 to 128 bits cannot isolate them from the
+// previous approximations until the working precision reaches 2048 bits
+// (checked with acb_poly_find_roots on FLINT 3.6.0).  That is beyond the 8x
+// refine cap, so the refine must fall back to full isolation.
+silex::NumberField close_real_roots_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -2);
+
+    fmpq_t constant;
+    fmpq_init(constant);
+    fmpz_one(fmpq_denref(constant));
+    fmpz_mul_2exp(fmpq_denref(constant), fmpq_denref(constant), 1000);
+    fmpz_sub_ui(fmpq_numref(constant), fmpq_denref(constant), 3);
+    ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), 0, constant);
+    fmpq_clear(constant);
+
+    return field_by_polynomial(polynomial);
+}
+
+struct RefineProfileCounters {
+    slong find_roots = 0;
+    slong full_roots_fallback = 0;
+    slong events = 0;
+};
+
+void refine_profile_callback(void* user,
+                             silex::DiagnosticsModule,
+                             silex::ProfileEvent event,
+                             const char*,
+                             const char* label) noexcept {
+    RefineProfileCounters* counters =
+            static_cast<RefineProfileCounters*>(user);
+    ++counters->events;
+    if (label == nullptr) {
+        return;
+    }
+    if (event == silex::ProfileEvent::begin_scope &&
+        std::strcmp(label,
+                    "element.embedding.refine_from_initial.find_roots") == 0) {
+        ++counters->find_roots;
+    }
+    if (event == silex::ProfileEvent::event &&
+        std::strcmp(label, "element.embedding.refine.full_roots_fallback") ==
+                0) {
+        ++counters->full_roots_fallback;
+    }
 }
 
 int test_degree_one() {
@@ -399,6 +494,146 @@ int test_define_failure_preserves_context() {
     return 0;
 }
 
+int test_signature_before_refine() {
+    sflint::FmpqPoly polynomial;
+    poly_x3_minus(polynomial, 2);
+    silex::NumberField cubic = field_by_polynomial(polynomial);
+
+    silex::EmbeddingContext embeddings(cubic);
+    assert(embeddings.is_defined());
+    assert(!embeddings.is_set());
+    assert(embeddings.signature().r1() == 1);
+    assert(embeddings.signature().r2() == 1);
+    assert(embeddings.refine(64));
+    assert(embeddings.signature().r1() == 1);
+    assert(embeddings.signature().r2() == 1);
+
+    silex::EmbeddingContext quartic(close_imaginary_pairs_field());
+    assert(!quartic.is_set());
+    assert(quartic.signature().r1() == 0);
+    assert(quartic.signature().r2() == 2);
+
+    silex::EmbeddingContext deferred;
+    assert(deferred.signature().degree() == 0);
+    assert(deferred.define(cubic));
+    assert(!deferred.is_set());
+    assert(deferred.signature().r1() == 1);
+    assert(deferred.signature().r2() == 1);
+
+    // The signature is recomputed for the new parent on redefinition.
+    poly_x2_minus(polynomial, -1);
+    assert(deferred.define(field_by_polynomial(polynomial)));
+    assert(deferred.signature().r1() == 0);
+    assert(deferred.signature().r2() == 1);
+
+    silex::EmbeddingContext undefined;
+    assert(undefined.signature().degree() == 0);
+    return 0;
+}
+
+int test_place_order_stable_across_refine() {
+    silex::NumberField field = close_imaginary_pairs_field();
+    silex::EmbeddingContext embeddings(field);
+    assert(embeddings.refine(64));
+
+    sflint::AcbVec low(4);
+    for (slong i = 0; i < 4; ++i) {
+        assert(embeddings.get_root(sflint::AcbRef(low.data() + i), i));
+    }
+
+    assert(embeddings.refine(512));
+    assert(embeddings.precision() == 512);
+    assert(embeddings.signature().r1() == 0);
+    assert(embeddings.signature().r2() == 2);
+
+    sflint::AcbVec high(4);
+    for (slong i = 0; i < 4; ++i) {
+        assert(embeddings.get_root(sflint::AcbRef(high.data() + i), i));
+        assert(::acb_rel_accuracy_bits(high.data() + i) >= 512);
+        // Place i still refers to the same complex root.
+        assert(::acb_overlaps(high.data() + i, low.data() + i) != 0);
+        for (slong j = 0; j < 4; ++j) {
+            if (j != i) {
+                assert(::acb_overlaps(high.data() + i, low.data() + j) == 0);
+            }
+        }
+    }
+    // Complex places keep the positive-imaginary root first and its conjugate
+    // second.
+    for (slong pair = 0; pair < 2; ++pair) {
+        acb_srcptr positive = high.data() + 2 * pair;
+        acb_srcptr negative = high.data() + 2 * pair + 1;
+        assert(::arb_is_positive(acb_imagref(positive)) != 0);
+        sflint::Acb conjugate;
+        ::acb_conj(conjugate.raw(), positive);
+        assert(::acb_equal(conjugate.raw(), negative) != 0);
+    }
+
+    // The input really is adversarial for the naive comparator: sorting the
+    // 64-bit and 512-bit root vectors with _acb_vec_sort_pretty puts
+    // different conjugate pairs first.
+    sflint::AcbVec low_sorted(4);
+    sflint::AcbVec high_sorted(4);
+    ::_acb_vec_set(low_sorted.data(), low.data(), 4);
+    ::_acb_vec_set(high_sorted.data(), high.data(), 4);
+    ::_acb_vec_sort_pretty(low_sorted.data(), 4);
+    ::_acb_vec_sort_pretty(high_sorted.data(), 4);
+    assert(::arb_is_negative(acb_realref(low_sorted.data() + 0)) != 0);
+    assert(::arb_is_positive(acb_realref(high_sorted.data() + 0)) != 0);
+
+    // A further refine keeps the order as well.
+    assert(embeddings.refine(2048));
+    for (slong i = 0; i < 4; ++i) {
+        sflint::Acb root;
+        assert(embeddings.get_root(sflint::AcbRef(root), i));
+        assert(::acb_overlaps(root.raw(), low.data() + i) != 0);
+    }
+    return 0;
+}
+
+int test_refine_precision_cap() {
+    silex::NumberField field = close_real_roots_field();
+    silex::EmbeddingContext embeddings(field);
+    assert(embeddings.signature().r1() == 2);
+    assert(embeddings.refine(64));
+
+    sflint::AcbVec low(2);
+    for (slong i = 0; i < 2; ++i) {
+        assert(embeddings.get_root(sflint::AcbRef(low.data() + i), i));
+    }
+    assert(::acb_overlaps(low.data() + 0, low.data() + 1) == 0);
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    RefineProfileCounters counters;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::element),
+            refine_profile_callback, &counters);
+
+    assert(embeddings.refine(128, &diagnostics));
+    assert(embeddings.precision() == 128);
+    for (slong i = 0; i < 2; ++i) {
+        sflint::Acb root;
+        assert(embeddings.get_root(sflint::AcbRef(root), i));
+        assert(::acb_rel_accuracy_bits(root.raw()) >= 128);
+        assert(::arb_is_zero(acb_imagref(root.raw())) != 0);
+        assert(::acb_overlaps(root.raw(), low.data() + i) != 0);
+        assert(::acb_overlaps(root.raw(), low.data() + (1 - i)) == 0);
+    }
+
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // Working precisions 128, 256, 512 and 1024 = 8 * 128 are tried from the
+    // previous roots; the uncapped loop would go on to 2048.
+    assert(counters.events > 0);
+    assert(counters.find_roots == 4);
+    assert(counters.full_roots_fallback == 1);
+#else
+    assert(counters.events == 0);
+#endif
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -410,5 +645,8 @@ int main() {
     assert(test_failure_preserves_output() == 0);
     assert(test_move_swap_and_clear() == 0);
     assert(test_define_failure_preserves_context() == 0);
+    assert(test_signature_before_refine() == 0);
+    assert(test_place_order_stable_across_refine() == 0);
+    assert(test_refine_precision_cap() == 0);
     return 0;
 }

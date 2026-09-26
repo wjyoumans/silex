@@ -79,7 +79,14 @@ is not a zero divisor and fails, leaving the output unchanged, if it is.
 
 ``silex::Signature`` is a value object for real and complex place counts.
 ``EmbeddingContext`` stores certified complex roots and a ``NumberField``
-parent handle, then refines the roots to requested precision.  Archimedean
+parent handle, then refines the roots to requested precision.  Its
+``signature()`` is computed from the defining polynomial when the context is
+defined, so it is available before the first ``refine``.  Roots are stored with
+the real places first, then each complex place as its root with positive
+imaginary part followed by the conjugate.  Place indices are fixed once roots
+are set: each refinement matches the new root balls to the previous ones by
+overlap, and ``refine`` fails and leaves the context unchanged if that matching
+is not one-to-one.  Archimedean
 helpers compute absolute values, logarithmic embeddings, and Minkowski
 embeddings from an
 ``EmbeddingContext`` and ``Element``.

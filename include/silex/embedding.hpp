@@ -24,6 +24,14 @@ enum class LogEmbeddingMode {
 
 class EmbeddingLogCache;
 
+// Certified complex roots of a number field's defining polynomial.
+//
+// Roots are stored real places first, then each complex place as the root with
+// positive imaginary part followed by its conjugate.  signature() is available
+// as soon as the context is defined, before any refine().  Once roots are set,
+// refine() keeps each root at its index: refined roots are matched to the
+// previous ones by ball overlap, and refine() fails, leaving the context
+// unchanged, if that matching is not a bijection.
 class EmbeddingContext {
 public:
     EmbeddingContext() noexcept = default;
