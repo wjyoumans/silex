@@ -272,6 +272,36 @@ internal constructor.  It accepts a root only when ``f(r) = 0 mod q`` and
 Theorem 4.8.13); this is the same condition as the degree-one fast path of
 ``decompose_prime``.
 
+The unconditional unit proof ``OrderUnitGroup::prove_index_bound`` bounds the
+index of the supplied full-rank subgroup from a regulator lower bound, then
+proves ``ell``-saturation for every prime ``ell`` up to that index bound.  An
+``ell`` is verified only when the ``ell``-th-power characters at degree-one
+primes ``q = 1 mod ell``, not dividing the order discriminant, have an empty
+common kernel.  The auxiliary-prime search follows Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``: ``compute_candidates_for_saturate``
+iterates the primes ``q = 1 mod ell`` (``PrimesSet`` with no upper end) and
+stops when the kernel is empty or its dimension has stayed the same for more
+than ``stable`` times the number of input elements; ``saturate!`` starts at
+``stable = 3.5``, adjoins candidates that are ``ell``-th powers and repeats,
+and doubles ``stable`` after a candidate that is not.  Silex multiplies
+``stable`` by the current kernel dimension instead of the number of input
+elements; the stopping rule decides only when candidates are tested, never
+whether ``ell`` is verified.  Silex first scans the primes
+``q <= aux_bound`` (the caller's bound; 1000 in class/unit validation) and,
+when that pre-scan leaves a nonempty kernel without adjoining a root, or when
+``ell >= aux_bound``, continues with the Hecke scan.  The auxiliary bound is
+therefore not a proof parameter; a unit proof record stores it as the
+pre-scan bound of the call, not as the largest prime used.  Hecke starts its
+scan at ``next_prime(2^60)``; Silex starts at ``q = ell + 1``, which changes
+only which valid characters are used.  Roots are adjoined only after the
+exact order-unit check described below.  By the Chebotarev density theorem,
+a kernel element that is not an ``ell``-th power in ``K`` is cut by a
+positive density of such primes, so with a correct index bound the loop ends;
+for a non-maximal order it may instead stop at a root outside the order, as
+described below.
+Silex adds one resource guard: a single scan examines at most ``2^16`` primes
+``q``, and reaching it records the ``ell``-local proof as ``unavailable``.
+
 Residue-character ``ell``-saturation of unit subgroups of a non-maximal order
 ``O`` is a Silex extension; neither primary source applies this proof to
 non-maximal orders.  Its soundness argument: for a maximal ideal ``P`` of
