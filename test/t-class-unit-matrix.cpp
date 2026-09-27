@@ -2174,14 +2174,19 @@ int test_real_quadratic_grh_record_and_later_promotion() {
 
 }  // namespace
 
-// Decision 2026-09-27 "T-053 GRH-mode analytic record; GRH generation": a
-// grh request of positive unit rank is accepted only after factor-base
-// generation is verified to the Minkowski-type bound, and it fails closed
-// otherwise.  The GRH-sized factor base cannot become verified during the
-// continuation, so the transaction must fail at once rather than extend
-// relations until a resource cap; the default (uncapped) resource options
-// are used on purpose.  The pair is left wholly unset.  The proven control
-// shows that the failure is the grh coverage rule, not an unusable field.
+// grh mode never uses GRH for factor-base generation: a grh request of
+// positive unit rank is accepted only by the analytic index-one test, and
+// that test reports index one only after factor-base generation is verified
+// to the Minkowski-type bound (factor_base_class_group_bound; see
+// docs/reference/algorithms_and_sources.rst, "Class groups and order
+// units").  Without that coverage the index-one acceptance can never pass,
+// so a grh request whose GRH-sized factor base falls short must fail closed
+// at once rather than extend relations until a resource cap; the default
+// (uncapped) resource options are used on purpose below
+// (max_relations = WORD_MAX), so a regression here would show up as a
+// ctest timeout rather than a failed assertion.  The pair is left wholly
+// unset.  The proven control shows that the failure is the grh coverage
+// rule, not an unusable field.
 // x^3 + x + 200: D = -1080004, class group Z/2 (GP 2.17
 // bnfinit(x^3 + x + 200, 1)); x^2 - 100003: D = 400012, h = 1 (GP 2.17
 // quadclassunit(400012)).
@@ -2190,14 +2195,23 @@ int test_grh_unverified_generation_fails_closed() {
         const char* name;
         std::vector<slong> coefficients;
         ulong proven_class_order;
+        // The grh policy's selected (GRH-heuristic) factor-base bound for
+        // this exact field, as independently recorded by the CLI-driven
+        // `assert_fail_closed_inputs` in test_class_unit_instance.py (its
+        // `factor_base_bound`).  Checked below against the Minkowski-type
+        // bound computed here, so that a change to either bound's sizing
+        // cannot silently turn this into a no-op regression test.
+        ulong grh_selected_factor_base_bound;
     };
     const Row rows[] = {
             {"grh cubic x^3 + x + 200 without Minkowski coverage",
              {200, 1, 0},
-             2},
+             2,
+             100},
             {"grh real quadratic x^2 - 100003 without Minkowski coverage",
              {-100003, 0},
-             1},
+             1,
+             100},
     };
 
     for (const Row& row : rows) {
@@ -2212,6 +2226,12 @@ int test_grh_unverified_generation_fails_closed() {
             std::cerr << row.name << ": options unavailable\n";
             return 1;
         }
+        // Precondition: the Minkowski-type bound must exceed the grh
+        // policy's selected bound, or factor-base generation would verify
+        // and the guard below would have nothing to catch.
+        assert(sflint::fmpz_cmp_ui(
+                       sflint::FmpzConstRef(factor_base_bound),
+                       row.grh_selected_factor_base_bound) > 0);
         options.max_candidates = WORD_MAX;
         options.max_relations = WORD_MAX;
 

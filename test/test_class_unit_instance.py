@@ -130,10 +130,12 @@ def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
         assert instance["maximal_order_defined"] is False
         assert instance["failure_reason"] == "input_or_options_unavailable"
 
-    # grh mode needs factor-base generation verified to the Minkowski-type
-    # bound (decision 2026-09-27, "T-053 GRH-mode analytic record; GRH
-    # generation"). These fields' GRH-sized factor base does not reach it,
-    # so the request fails closed instead of extending relations without
+    # grh mode never uses GRH for factor-base generation: a grh request of
+    # positive unit rank is accepted only after factor-base generation is
+    # verified to the Minkowski-type bound (factor_base_class_group_bound).
+    # Without that coverage the index-one acceptance can never pass, so
+    # these fields' GRH-sized factor base, which does not reach the bound,
+    # makes the request fail closed instead of extending relations without
     # end. x^3 + x + 200: |D| = 1080004, bound 100 < 463. x^2 - 100003:
     # D = 400012, bound 100 < 316.
     for coeffs, used, requested in (
@@ -153,6 +155,31 @@ def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
         assert instance["requested_factor_base_bound"] == requested
 
 
+def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
+    # The equality boundary of the coverage rule checked above:
+    # record_factor_base_generation_ (src/class_group/class_group.cpp)
+    # verifies with `>=`, so a GRH-sized factor base that reaches the
+    # Minkowski-type bound exactly (not just strictly above it) still lets
+    # the grh request succeed. x^2 - 40001: 40001 = 13 * 17 * 181 is
+    # squarefree and 1 mod 4, so D = 40001 and the real-quadratic branch of
+    # factor_base_class_group_bound gives floor(sqrt(40001) / 2) = 100,
+    # exactly the grh policy's selected bound here. h = 32, class group
+    # Z/16 x Z/2 (GP 2.17 quadclassunit(40001)).
+    instance = run_json(
+        [str(exe), "--coeffs", "-40001,0,1", "--mode", "grh"], root
+    )
+    assert instance["success"] is True
+    assert instance["final_result_published"] is True
+    assert instance["certification_status"] == "grh"
+    assert instance["factor_base_bound"] == "100"
+    assert instance["requested_factor_base_bound"] == "100"
+    assert instance["class_group"]["factor_base_generation_status"] == (
+        "verified"
+    )
+    assert instance["class_group"]["order"] == "32"
+    assert instance["class_group"]["invariants"] == ["2", "16"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
@@ -162,6 +189,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     assert_marked_phase_failures(args.exe, root)
     assert_fail_closed_inputs(args.exe, root)
+    assert_grh_minkowski_equality_boundary(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
 
