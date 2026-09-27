@@ -269,32 +269,81 @@ bool compute_class_unit_from_options(
         sflint::FmpzConstRef factor_base_bound,
         const silex::ClassGroupComputeOptions& compute_options,
         slong precision,
-        const Options& options,
         silex::detail::ClassUnitTransactionReport& audit) noexcept {
-    if (!silex::detail::compute_class_unit_transaction(
-                units, class_group, order, factor_base_bound,
-                compute_options, precision, audit)) {
-        return false;
+    return silex::detail::compute_class_unit_transaction(
+            units, class_group, order, factor_base_bound, compute_options,
+            precision, audit);
+}
+
+// Outcome of an optional, post-hoc `--zeta-bf-audit` (see
+// run_zeta_bf_audit_if_requested below). Recorded in the JSON output
+// (`zeta_bf_audit`) so a skipped or failed audit is distinguishable from one
+// that was never requested.
+struct ZetaBfAuditOutcome {
+    bool requested = false;
+    bool ran = false;
+    bool succeeded = false;
+    const char* skip_reason = nullptr;
+    bool wall_ms_recorded = false;
+    double wall_ms = 0.0;
+};
+
+// A post-hoc Belabas-Friedman analytic hR audit (source: K. Belabas and
+// E. Friedman, "Computing the residue of the Dedekind zeta function", Math.
+// Comp. 84 (2015), 357-369, Theorem 1; its truncation-error bound assumes
+// GRH outside degree one and the quadratic L(1, chi) route -- see
+// docs/reference/algorithms_and_sources.rst:403-406).
+//
+// ClassGroupContext::try_certify_class_unit_with_zeta_bf's own contract
+// (include/silex/class_group.hpp) is: it only *records the check* without
+// touching the certification already published when `units` is already
+// proven AND relation saturation is already proven at every prime dividing
+// the candidate class number -- but in degree one (and on the quadratic
+// L(1, chi) route) its underlying hR is unconditional, so it publishes
+// `proven` outright regardless of what was requested. That degree-one case
+// can turn a `grh`-requested, `grh`-published transaction into one where
+// `class_group.certification`/`unit_group.certification` read `proven`
+// while the top-level `certification_status` (taken from the transaction
+// report before this audit ever runs) still reads `grh`, mismatching within
+// one JSON document.
+//
+// To keep this call's only visible effect being "add an
+// analytic_class_regulator_* record", it is only made when the transaction
+// itself already published `proven` for both the class group and the
+// units. That is exactly the case the header's "already proven" contract
+// describes, so the call is then guaranteed to leave both certifications at
+// `proven` (no change) and add only the GRH-conditional analytic record.
+// Equivalently, this only runs the audit for `requested_certification ==
+// proven`.
+ZetaBfAuditOutcome run_zeta_bf_audit_if_requested(
+        silex::ClassGroupContext& class_group,
+        silex::OrderUnitGroup& units,
+        const silex::detail::ClassUnitTransactionReport& transaction_report,
+        const silex::ClassGroupComputeOptions& compute_options,
+        slong precision,
+        bool zeta_bf_audit_requested) noexcept {
+    ZetaBfAuditOutcome outcome;
+    outcome.requested = zeta_bf_audit_requested;
+    if (!zeta_bf_audit_requested) {
+        return outcome;
     }
-    if (options.zeta_bf_audit) {
-        // A post-hoc Belabas-Friedman analytic hR audit (source: K. Belabas
-        // and E. Friedman, "Computing the residue of the Dedekind zeta
-        // function", Math. Comp. 84 (2015), 357-369, Theorem 1; its
-        // truncation-error bound assumes GRH outside degree one and the
-        // quadratic L(1, chi) route -- see
-        // docs/reference/algorithms_and_sources.rst:403-406).
-        // ClassGroupContext::try_certify_class_unit_with_zeta_bf only
-        // records the check when `units` is already proven and leaves both
-        // objects unchanged otherwise (include/silex/class_group.hpp), so
-        // this call cannot weaken or change the certification already
-        // published by the transaction above -- it can only additionally
-        // populate `analytic_class_regulator_status`/
-        // `analytic_class_regulator_certification` with the check's own
-        // (possibly GRH-conditional) result.
-        (void) class_group.try_certify_class_unit_with_zeta_bf(
-                units, compute_options.zeta_bf_max_cutoff, precision);
+    if (transaction_report.class_group_certification !=
+                silex::CertificationMode::proven ||
+        transaction_report.unit_group_certification !=
+                silex::CertificationMode::proven) {
+        outcome.skip_reason = "transaction_certification_not_proven";
+        return outcome;
     }
-    return true;
+    const auto audit_start = std::chrono::steady_clock::now();
+    outcome.succeeded = class_group.try_certify_class_unit_with_zeta_bf(
+            units, compute_options.zeta_bf_max_cutoff, precision);
+    const auto audit_end = std::chrono::steady_clock::now();
+    outcome.ran = true;
+    outcome.wall_ms_recorded = true;
+    outcome.wall_ms = std::chrono::duration<double, std::milli>(
+                               audit_end - audit_start)
+                               .count();
+    return outcome;
 }
 
 std::string fmpz_string(sflint::FmpzConstRef value) {
@@ -495,11 +544,13 @@ void print_usage(std::ostream& out) {
         << "  --s-prime-witness P:INDEX:SELECTION_INDEX:BETA0,...,BETAn "
            "(repeatable; complete manifest witness order)\n"
         << "  --marked-protocol\n"
-        << "  --zeta-bf-audit (post-hoc Belabas-Friedman analytic hR audit "
-           "after a successful compute; ClassGroup::"
-           "try_certify_class_unit_with_zeta_bf records the check's own "
+        << "  --zeta-bf-audit (post-hoc Belabas-Friedman analytic hR audit, "
+           "run only when the transaction already published `proven` for "
+           "both the class group and the units; records the check's own "
            "GRH dependence in analytic_class_regulator_certification "
-           "without changing certification_status)\n"
+           "without changing an already-`proven` certification; skipped "
+           "and reported as such in the `zeta_bf_audit` JSON object "
+           "otherwise, e.g. for a `grh`-mode run)\n"
         << "  --log --trace --verbose --profile\n";
 }
 
@@ -1437,12 +1488,16 @@ int main(int argc, char** argv) {
         compute_success = compute_class_unit_from_options(
                 units, class_group, maximal_order,
                 sflint::FmpzConstRef(factor_base_bound), compute_options,
-                input_options.precision, input_options, transaction_report);
+                input_options.precision, transaction_report);
     } else {
         transaction_report.failure_stage =
                 silex::detail::ClassUnitStage::factor_base_bound;
         transaction_report.failure_reason = "input_or_options_unavailable";
     }
+    // Timing is captured here, before any `--zeta-bf-audit` runs, so the
+    // audit's own time is excluded from `class_unit_ms` and (outside a
+    // `--compute-sunit` run) from `target_wall_ms`/`target_cpu_ms`. It is
+    // reported on its own via `zeta_bf_audit.wall_ms` instead.
     const auto class_unit_end = std::chrono::steady_clock::now();
     auto target_wall_end = class_unit_end;
     std::clock_t target_cpu_end = static_cast<std::clock_t>(-1);
@@ -1452,6 +1507,21 @@ int main(int argc, char** argv) {
             emit_protocol_marker(target_done_marker, target_nonce);
         }
     }
+
+    ZetaBfAuditOutcome zeta_bf_audit_outcome;
+    if (compute_success) {
+        zeta_bf_audit_outcome = run_zeta_bf_audit_if_requested(
+                class_group, units, transaction_report, compute_options,
+                input_options.precision, input_options.zeta_bf_audit);
+    } else if (input_options.zeta_bf_audit) {
+        zeta_bf_audit_outcome.requested = true;
+        zeta_bf_audit_outcome.skip_reason = "transaction_failed";
+    }
+    // Every later phase's own start point is taken here, after the audit,
+    // so the audit's wall time is not attributed to `s_prime_selection`
+    // either (it would otherwise fall inside a stored `class_unit_end`
+    // start marker used below).
+    const auto post_audit = std::chrono::steady_clock::now();
 
     std::vector<silex::PrimeIdeal> selected_primes;
     std::vector<SelectedPrimeDescriptor> selected_prime_descriptors;
@@ -1463,7 +1533,7 @@ int main(int argc, char** argv) {
     bool prime_selection_success = false;
     bool sunit_success = false;
     bool membership_success = false;
-    const auto prime_selection_start = class_unit_end;
+    const auto prime_selection_start = post_audit;
     if (input_options.compute_sunit && compute_success) {
         prime_selection_success = build_selected_primes(
                 selected_primes, selected_prime_descriptors,
@@ -1740,6 +1810,34 @@ int main(int argc, char** argv) {
     write_json_string(
             std::cout,
             certification_name(compute_options.requested_certification));
+    std::cout << "\n";
+    std::cout << "  },\n";
+
+    std::cout << "  \"zeta_bf_audit\": {\n";
+    std::cout << "    \"requested\": "
+              << json_bool(zeta_bf_audit_outcome.requested) << ",\n";
+    std::cout << "    \"ran\": " << json_bool(zeta_bf_audit_outcome.ran)
+              << ",\n";
+    std::cout << "    \"succeeded\": ";
+    if (zeta_bf_audit_outcome.ran) {
+        std::cout << json_bool(zeta_bf_audit_outcome.succeeded);
+    } else {
+        std::cout << "null";
+    }
+    std::cout << ",\n";
+    std::cout << "    \"skip_reason\": ";
+    if (zeta_bf_audit_outcome.skip_reason != nullptr) {
+        write_json_string(std::cout, zeta_bf_audit_outcome.skip_reason);
+    } else {
+        std::cout << "null";
+    }
+    std::cout << ",\n";
+    std::cout << "    \"wall_ms\": ";
+    if (zeta_bf_audit_outcome.wall_ms_recorded) {
+        std::cout << zeta_bf_audit_outcome.wall_ms;
+    } else {
+        std::cout << "null";
+    }
     std::cout << "\n";
     std::cout << "  },\n";
 

@@ -276,34 +276,29 @@ def main() -> int:
             str(value) for value in row["expected_class_invariants"]
         ]
         assert grh_instance["unit_group"]["free_rank"] == 0
-        # GRH runs report the analytic hR's GRH dependence too, even when
-        # the `grh` label came from the factor-base bound rather than the
-        # analytic check itself.
-        assert "analytic_class_regulator_certification" in (
-            grh_instance["class_group"]
-        )
-        if grh_instance["class_group"][
+        # A `grh` request accepts the GRH-conditional index-one bound in
+        # `try_validate_refine_loop` without ever calling the certify helper
+        # that records `analytic_class_regulator_status`/`_certification`
+        # (src/order_unit/validation.cpp); this is a known library gap (see
+        # notes/reviews/T-044-reviewer.md, "GRH-mode gap"), not something
+        # this task changes. Every `grh_certification` row therefore leaves
+        # the analytic check itself unrecorded here; its `grh` label comes
+        # from the GRH-dependent factor-base bound instead, not from
+        # `analytic_class_regulator_status`/`_certification`. Pinning this
+        # as `not_checked`/`unknown` means a future fix to that gap shows up
+        # as a test change here.
+        assert grh_instance["class_group"][
             "analytic_class_regulator_status"
-        ] == "not_checked":
-            assert grh_instance["class_group"][
-                "analytic_class_regulator_certification"
-            ] == "unknown"
-        else:
-            assert grh_instance["class_group"][
-                "analytic_class_regulator_certification"
-            ] == "grh"
+        ] == "not_checked"
+        assert grh_instance["class_group"][
+            "analytic_class_regulator_certification"
+        ] == "unknown"
 
-    # Every row above leaves `analytic_class_regulator_status` at
-    # `not_checked`: the default `proven` transaction settles a trivial or
-    # small class group by unconditional relation saturation alone, and a
-    # `grh` request accepts the GRH-conditional index-one bound without ever
-    # recording the analytic check itself (its `grh` label comes from the
-    # GRH-dependent factor-base bound, not from `analytic_class_regulator_
-    # status`/`_certification`).  So the `else` branch above -- an actually
-    # GRH-conditional (`"grh"`-valued) analytic hR check -- is exercised by
-    # a dedicated fixture row instead: `--zeta-bf-audit` (tools/class_unit_
-    # instance.cpp) runs ClassGroupContext::try_certify_class_unit_with_
-    # zeta_bf(...) post-hoc, mirroring test/t-order-unit.cpp's
+    # An actually GRH-conditional (`"grh"`-valued) analytic hR check is
+    # exercised by a dedicated fixture row instead: `--zeta-bf-audit`
+    # (tools/class_unit_instance.cpp) runs ClassGroupContext::
+    # try_certify_class_unit_with_zeta_bf(...) post-hoc, mirroring
+    # test/t-order-unit.cpp's
     # test_belabas_friedman_class_regulator_is_grh_conditional (a `proven`
     # request settles a nontrivial-degree field by saturation, then a
     # Belabas-Friedman audit recorded afterward is labelled `grh` without
@@ -357,6 +352,16 @@ def main() -> int:
         assert analytic_instance["class_group"][
             "zeta_bf_proof_status"
         ] == "verified"
+        # The audit's outcome is visible on its own: it ran and succeeded,
+        # distinct from "not requested" or "requested but skipped/failed".
+        assert analytic_instance["zeta_bf_audit"] == {
+            "requested": True,
+            "ran": True,
+            "succeeded": True,
+            "skip_reason": None,
+            "wall_ms": analytic_instance["zeta_bf_audit"]["wall_ms"],
+        }
+        assert analytic_instance["zeta_bf_audit"]["wall_ms"] >= 0.0
 
         # Without `--zeta-bf-audit` the same field settles by saturation
         # alone and never exercises the analytic check (regression check
@@ -379,6 +384,90 @@ def main() -> int:
         assert unaudited_instance["class_group"][
             "analytic_class_regulator_certification"
         ] == "unknown"
+        assert unaudited_instance["zeta_bf_audit"] == {
+            "requested": False,
+            "ran": False,
+            "succeeded": None,
+            "skip_reason": None,
+            "wall_ms": None,
+        }
+
+        # `--zeta-bf-audit` must not change published certification labels
+        # when the transaction itself did not publish `proven` for both the
+        # class group and the units. `try_certify_class_unit_with_zeta_bf`'s
+        # own hR is unconditional in degree one (and on the quadratic
+        # L(1, chi) route), so it would otherwise publish `proven` outright
+        # even for a `grh`-requested run, mismatching the top-level
+        # `certification_status` (already fixed by the transaction, before
+        # any audit runs). Checked here on this row's own higher-degree
+        # field under `--mode grh` (regression for T-044 round-2 blocker
+        # B1); the degree-one case is checked separately below.
+        grh_audited_instance = run_json(
+            [
+                str(args.exe),
+                "--coeffs",
+                coeffs,
+                "--mode",
+                "grh",
+                "--zeta-bf-audit",
+            ],
+            root,
+        )
+        assert grh_audited_instance["success"] is True
+        assert grh_audited_instance["certification_status"] == "grh"
+        assert grh_audited_instance["class_group"]["certification"] == "grh"
+        assert grh_audited_instance["unit_group"]["certification"] == "grh"
+        assert grh_audited_instance["zeta_bf_audit"] == {
+            "requested": True,
+            "ran": False,
+            "succeeded": None,
+            "skip_reason": "transaction_certification_not_proven",
+            "wall_ms": None,
+        }
+
+    degree_one_rows = [
+        row
+        for row in manifest["fields"]
+        if row["id"] == "degree_one_proven"
+    ]
+    assert len(degree_one_rows) == 1
+    for row in degree_one_rows:
+        coeffs = ",".join(
+            str(value) for value in row["coefficients_low_to_high"]
+        )
+        # Degree one is exactly the case where the Belabas-Friedman hR is
+        # unconditional, so `try_certify_class_unit_with_zeta_bf` publishes
+        # `proven` outright rather than only recording a check. Gating the
+        # audit on the transaction having already published `proven` for
+        # both objects (B1) means a `grh`-requested degree-one run keeps its
+        # `grh` labels even with `--zeta-bf-audit`.
+        degree_one_grh_audited = run_json(
+            [
+                str(args.exe),
+                "--coeffs",
+                coeffs,
+                "--mode",
+                "grh",
+                "--zeta-bf-audit",
+            ],
+            root,
+        )
+        assert degree_one_grh_audited["success"] is True
+        assert degree_one_grh_audited["degree"] == 1
+        assert degree_one_grh_audited["certification_status"] == "grh"
+        assert degree_one_grh_audited["class_group"]["certification"] == (
+            "grh"
+        )
+        assert degree_one_grh_audited["unit_group"]["certification"] == (
+            "grh"
+        )
+        assert degree_one_grh_audited["zeta_bf_audit"] == {
+            "requested": True,
+            "ran": False,
+            "succeeded": None,
+            "skip_reason": "transaction_certification_not_proven",
+            "wall_ms": None,
+        }
 
     for removed_option in (
         "--coordinate-radius=2",
