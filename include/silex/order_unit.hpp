@@ -217,9 +217,24 @@ public:
     bool residue_dlog_kernel(flint::FmpzMat& out,
                              PrimeIdealSpan primes,
                              flint::FmpzConstRef ell) const noexcept;
+    // residue_dlog_proof_kernel returns the same kernel as
+    // residue_dlog_kernel: the same width and column order, with one
+    // residue character per prime applied to every column.  The two differ
+    // only in how each prime's column is evaluated (residue_dlog_kernel
+    // tries a direct degree-one evaluation first, residue_dlog_proof_kernel
+    // always uses the residue-field quotient log).  The kernel of a column
+    // does not depend on which nontrivial character mod ell is chosen, so
+    // whenever both calls succeed they publish the same matrix.
     bool residue_dlog_proof_kernel(flint::FmpzMat& out,
                                    PrimeIdealSpan primes,
                                    flint::FmpzConstRef ell) const noexcept;
+    // select_saturation_primes tests each prime on the free generators
+    // only, while the bounded saturation passes test primes with the
+    // torsion column included when ell | w.  Both require q = 1 mod ell
+    // (q the residue field size) and a residue character on the free
+    // generators.  The torsion generator is a unit modulo every prime, so
+    // the extra column rejects no prime and the two select the same primes.
+    // If either acceptance test changes, keep them in agreement.
     bool select_saturation_primes(PrimeIdealList& out,
                                   flint::FmpzConstRef ell,
                                   slong target_len,

@@ -384,6 +384,8 @@ bool residue_dlog_character_column(flint::FmpzMat& out,
                                    const OrderUnitGroup& group,
                                    const PrimeIdeal& prime,
                                    flint::FmpzConstRef ell) noexcept;
+// Same kernel as residue_dlog_kernel (see OrderUnitGroup in the public
+// header); each column always uses the residue-field quotient log.
 bool residue_dlog_proof_kernel(flint::FmpzMat& out,
                                const OrderUnitGroup& group,
                                PrimeIdealSpan primes,
