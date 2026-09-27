@@ -4,7 +4,8 @@ Unreleased
 This page was built for Silex |silex-release| on the |docs-channel|
 documentation channel.
 
-It lists user-visible changes merged since the latest tagged release.  They
+It records user-visible changes since the development workflow moved to task
+branches; earlier post-0.1.1 changes are not yet listed here.  Listed entries
 are available on the ``dev`` channel and become the next release's notes when
 that release is prepared.
 

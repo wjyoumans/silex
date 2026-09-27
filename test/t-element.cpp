@@ -397,12 +397,16 @@ void test_power_non_integral_unit_norm_roots() noexcept {
     assert_power_of_root_found(element_from_fraction(sqrt_five, {1, 1}, 2),
                                7);
 
-    // A rational radicand.  1/8 is rational, so its power-basis coordinates
-    // are (1/8, 0) and its primitive characteristic polynomial over Q(i) is
-    // (8x - 1)^2 = 64x^2 - 16x + 1 (content 1), giving lc = 64 = 4^3: the
-    // pre-filter's leading-coefficient rule applies even to a value whose
-    // minimal polynomial has degree 1, not just the field degree.
-    assert_power_of_root_found(element_from_fraction(gaussian, {1}, 8), 3);
+    // A rational radicand whose root is not rational, so the rational
+    // shortcut in is_power_rational_constant cannot decide it and the query
+    // falls through to the leading-coefficient code.  -1/4 is rational, but
+    // a rational 4th power is nonnegative, so is_power_rational_constant
+    // finds no rational 4th root and does not settle the query; the true
+    // root, (1 + i)/2, is irrational.  Its primitive characteristic
+    // polynomial over Q(i) is (4x + 1)^2 = 16x^2 + 8x + 1 (content 1),
+    // giving lc = 16 = 2^4 and bits = 5 > 4, so the pre-filter passes and
+    // primitive_characteristic_leading_coefficient runs.
+    assert_power_of_root_found(element_from_fraction(gaussian, {1, 1}, 2), 4);
 
     // A non-integral root of non-unit norm: N((1 + 2i)/3) = 5/9, not +-1.
     // This exercises the norm-based verification in verify_power_root after
@@ -432,19 +436,30 @@ void test_power_non_integral_unit_norm_roots() noexcept {
     sflint::fmpz_set_si(sflint::FmpzRef(exponent), 3);
     assert_power_answer_consistent(square, exponent, false);
 
-    // A non-power that passes the leading-coefficient pre-filter, exercising
-    // the rescaled residue disproof rather than an early unsupported return
-    // from the filter itself.  i * (3 + 4i)/25 = (-4 + 3i)/25
-    // = i * ((2 + i)/5)^2.  Its primitive characteristic polynomial is
-    // 25x^2 + 8x + 1 (content 1), so lc = 25, a square; the filter cannot
-    // reject it before rescaling.  It is not a square in Q(i): i * b^2 = c^2
-    // for nonzero b would force i = (c/b)^2, and i is not a square in Q(i)
-    // (a square root of i generates the degree-4 field Q(zeta_8)).  Any
-    // definite answer must be false; a rejected pre-filter elsewhere stays
-    // unsupported (a project decision, not tested here).
-    sflint::fmpz_set_si(sflint::FmpzRef(exponent), 2);
-    assert_power_answer_consistent(
-            element_from_fraction(gaussian, {-4, 3}, 25), exponent, false);
+    // A non-power that passes the leading-coefficient pre-filter at n = 3,
+    // exercising the rescaled residue disproof (pure_power_hensel_prime_
+    // search's definite-false return) rather than an early unsupported
+    // return from the filter, or (at n = 2, in a quadratic-backend field)
+    // the quadratic formula in is_square_quadratic, which never reaches the
+    // Hensel path at all.  (-9 + 13i)/125 = (1 + i) * ((2 + i)/5)^3.  Its
+    // primitive characteristic polynomial is 125x^2 + 18x + 2 (content 1),
+    // so lc = 125 = 5^3 and bits = 7 > 3: the filter cannot reject it before
+    // rescaling.  It is not a cube in Q(i): N(1 + i) = 2 is not a cube, so
+    // 1 + i is not a cube, and a cube is a cube of a cube only if its
+    // factor is; ((2 + i)/5)^3 is manifestly a cube, so a itself is a cube
+    // only if 1 + i is.  The answer must be a definite false.
+    {
+        silex::Element non_power =
+                element_from_fraction(gaussian, {-9, 13}, 125);
+        silex::Element root(gaussian);
+        assert(root.set_si(7));
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), 3);
+        bool is_power = true;
+        assert(non_power.is_power(is_power, root,
+                                  sflint::FmpzConstRef(exponent)));
+        assert(!is_power);
+        assert(root.equal_si(7));
+    }
 }
 
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {

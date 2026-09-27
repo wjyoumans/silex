@@ -212,8 +212,8 @@ case returns failure (unsupported) and leaves the caller's root unchanged.
   ``d`` from a maximal order, when known, only gives a smaller denominator
   and is not a correctness difference.
 
-Three Silex pre-filters run before the exact check ``c^n == a`` and only
-reject candidates, so a rejection leaves the query unsupported and never
+Three Silex pre-filters run before the lift or the exact check ``c^n == a``
+and only reject, so a rejection leaves the query unsupported and never
 changes a definite answer.  None is in the upstream sources: Hecke's
 polynomial degree ``n`` is a machine integer bounded by the polynomial it
 builds, while Silex accepts ``n`` up to ``2^63 - 1`` and must not form
