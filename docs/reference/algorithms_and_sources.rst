@@ -406,6 +406,21 @@ not as the largest prime used.  Hecke starts its scan at
 which valid characters are used.  Roots are adjoined only after the exact
 order-unit check described below.
 
+When ``ell`` divides the torsion order, the candidates include the torsion
+generator ``zeta``, as in Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``: ``compute_candidates_for_saturate``
+(lines 130--137) appends ``zeta`` to the input units, and ``saturate!``
+(lines 380--395) tests ``prod u_j^(e_j) * zeta^(e_t)`` for every candidate
+kernel vector.  Silex tests the same products from the torsion-extended
+character kernel, so a unit that is an ``ell``-th power only up to torsion,
+such as ``-(3 + 2 sqrt2) = -(1 + sqrt2)^2`` at ``ell = 2``, is enlarged
+instead of failing closed.  An exact root ``r`` with
+``r^ell = prod u_j^(e_j) * zeta^(e_t)`` satisfies ``r^ell = prod u_j^(e_j)``
+modulo torsion, so the new free basis uses only the free exponents.  The
+pre-scan tests the free-exponent kernel first and then the kernel vectors with
+``e_t != 0 mod ell``.  Verification still requires an empty
+torsion-extended kernel.
+
 The index bound comes from ``unit_lower_regulator_bound``.  For a subgroup
 ``G`` of full rank in ``O^x``, with ``O`` an order of the field ``K``,
 ``[O^x : G] = R_G / Reg(O) <= R_G / R_K``.  So any proven lower bound

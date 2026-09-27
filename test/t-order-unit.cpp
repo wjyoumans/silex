@@ -4593,6 +4593,79 @@ int test_prove_index_bound_quartic70640() {
 //     quadregulator(72)  \\ 3.5254943480781721009...
 // The square root 3 + 2 sqrt2 = 3 + (2/3) sqrt18 of the fundamental unit is
 // not in the order and must not be adjoined.
+// u = -(3 + 2 sqrt2) = -eps^2, eps = 1 + sqrt2, is a square in Q(sqrt2)
+// only up to torsion: u * (-1) = eps^2.  Every residue character of order 2
+// takes the same value on u and on -1, so the 2-saturation candidates must
+// include the torsion generator, as reference
+// `compute_candidates_for_saturate` and `saturate!` do (see
+// docs/reference/algorithms_and_sources.rst); the candidate u * (-1) has
+// the root +/-eps.  A candidate set without torsion never adjoins that root
+// and fails closed.
+int test_prove_torsion_twisted_saturation_root() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+    silex::Element epsilon(field);
+    silex::Element twisted(field);
+    assert(set_real_quadratic_unit(epsilon));
+    assert(twisted.multiply(epsilon, epsilon));
+    assert(twisted.negate(twisted));
+    silex::OrderUnitGroup start(order);
+    assert(set_single_unit_group(start, order, twisted, embeddings));
+
+    sflint::Fmpz ell;
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(ell, 2));
+    assert(set_fmpz_si(aux_bound, 31));
+
+    // Bounded pre-scan route of the public l-local proof.
+    silex::OrderUnitGroup local(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = false;
+    assert(local.prove_local_saturated(
+            status, changed, start, sflint::FmpzConstRef(ell), 1,
+            sflint::FmpzConstRef(aux_bound), embeddings, 256));
+    assert(status == silex::ProofState::unavailable);
+    assert(changed);
+    assert(first_free_generator_is_pm_unit_power_pm1(local, epsilon));
+
+    silex::OrderUnitGroup local_again(order);
+    status = silex::ProofState::not_checked;
+    changed = true;
+    assert(local_again.prove_local_saturated(
+            status, changed, local, sflint::FmpzConstRef(ell), 1,
+            sflint::FmpzConstRef(aux_bound), embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(!changed);
+
+    // Index-bound proof through the pre-scan (aux_bound 31) and directly
+    // through the reference-stable scan (aux_bound 2 <= ell).
+    const slong aux_bounds[] = {31, 2};
+    for (slong bound : aux_bounds) {
+        assert(set_fmpz_si(aux_bound, bound));
+        silex::OrderUnitGroup proved(order);
+        status = silex::ProofState::not_checked;
+        changed = false;
+        assert(proved.prove_index_bound(status, changed, start, 1,
+                                        sflint::FmpzConstRef(aux_bound), 4,
+                                        embeddings, 256));
+        assert(status == silex::ProofState::verified);
+        assert(changed);
+        assert(proved.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(first_free_generator_is_pm_unit_power_pm1(proved, epsilon));
+        assert(regulator_contains(
+                proved,
+                "0.8813735870195430252326093249797923090281603282616354107532"
+                "956086533771842220260878337068919102560"));
+        sflint::Fmpz torsion_order;
+        assert(proved.torsion_order(sflint::FmpzRef(torsion_order)));
+        assert(sflint::fmpz_equal_si(torsion_order, 2));
+    }
+
+    return 0;
+}
+
 int test_prove_index_bound_nonmaximal_quadratic_sqrt18() {
     sflint::FmpzPoly polynomial;
     ::fmpz_poly_set_coeff_si(polynomial.raw(), 2, 1);
@@ -5473,6 +5546,7 @@ int main() {
     test_prove_index_bound_maximal_quadratic_sqrt5_control();
     test_prove_index_bound_cubic2213_past_prescan_bound();
     test_prove_index_bound_quartic70640();
+    test_prove_torsion_twisted_saturation_root();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
     test_saturate_index_bounded();
     test_saturate_index_bounded_adaptive();

@@ -911,8 +911,14 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
     for (slong row = 0; row < flint::fmpz_mat_nrows(kernel); ++row) {
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.stable_relation_saturation.row_inspected");
+        // The kernel has the proof width: the free exponents and, when l
+        // divides the torsion order, the torsion exponent.  Reference
+        // `saturate!` forms every candidate as prod R[j]^e[j] * zeta^e[end];
+        // a row whose free part alone is divisible by l still carries a
+        // torsion factor and is tested like any other row.
         if (detail::kernel_row_divisible(
-                    flint::FmpzMatConstRef(kernel), row, rank, ell)) {
+                    flint::FmpzMatConstRef(kernel), row,
+                    flint::fmpz_mat_ncols(kernel), ell)) {
             SILEX_PROFILE_EVENT(
                     out.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_relation_saturation.row_divisible_skipped");
@@ -1340,12 +1346,18 @@ bool saturate_row_with_cache(
         !same_order_parent(out.parent(), order) ||
         !embedding_has_parent(embeddings, field) || precision <= 0 ||
         row < 0 || row >= flint::fmpz_mat_nrows(kernel_rows) ||
-        flint::fmpz_mat_ncols(kernel_rows) != rank ||
         !flint::fmpz_is_prime(ell) || !flint::fmpz_fits_si(ell)) {
         return false;
     }
+    bool has_torsion_column = false;
+    if (!detail::kernel_rows_torsion_column(has_torsion_column, group,
+                                            kernel_rows, ell)) {
+        return false;
+    }
 
-    if (detail::kernel_row_divisible(kernel_rows, row, rank, ell)) {
+    if (detail::kernel_row_divisible(kernel_rows, row,
+                                     flint::fmpz_mat_ncols(kernel_rows),
+                                     ell)) {
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.saturation_row_divisible_skipped");
         changed = false;
@@ -1427,6 +1439,11 @@ bool OrderUnitGroup::saturate_row(bool& changed,
                                   flint::FmpzConstRef ell,
                                   EmbeddingContext& embeddings,
                                   slong precision) noexcept {
+    // The public row API keeps its free-rank kernel width; torsion-extended
+    // proof-kernel rows are internal to the proof routes.
+    if (flint::fmpz_mat_ncols(kernel_rows) != group.free_rank()) {
+        return false;
+    }
     return saturate_row_with_cache(*this, changed, group, kernel_rows, row,
                                    ell, embeddings, precision, nullptr);
 }
@@ -1957,8 +1974,12 @@ bool OrderUnitGroup::saturate_local_with_kernel_(
     if (!is_defined() || !group.is_set() ||
         !same_order_parent(parent(), order) ||
         !embedding_has_parent(embeddings, field) ||
-        flint::fmpz_mat_ncols(kernel) != group.free_rank() ||
         !flint::fmpz_is_prime(ell) || precision <= 0) {
+        return false;
+    }
+    bool has_torsion_column = false;
+    if (!detail::kernel_rows_torsion_column(has_torsion_column, group,
+                                            kernel, ell)) {
         return false;
     }
 
@@ -2487,6 +2508,52 @@ bool OrderUnitGroup::prove_local_saturated_(
                 PrimeIdealSpan(first_prime,
                                static_cast<std::size_t>(primes.size())),
                 ell, embeddings, precision);
+    }
+
+    const slong free_rank = working.free_rank();
+    if (pass_ok && !pass_changed &&
+        flint::fmpz_mat_ncols(kernel) == free_rank + 1) {
+        // l divides the torsion order, so the proof kernel carries the
+        // torsion exponent t.  Reference `compute_candidates_for_saturate`
+        // and `saturate!` take candidates prod u_i^{e_i} * zeta^t from this
+        // torsion-extended kernel.  The free-width pass above covers t = 0;
+        // try the rows with t != 0 mod l, whose l-th roots (a unit that is
+        // an l-th power only up to torsion, e.g. -(3 + 2 sqrt2) at l = 2)
+        // the free-width kernel cannot see.
+        slong twisted_rows = 0;
+        for (slong row = 0; row < flint::fmpz_mat_nrows(kernel); ++row) {
+            if (fmpz_divisible(flint::fmpz_mat_entry(kernel, row, free_rank)
+                                       .raw(),
+                               ell.raw()) == 0) {
+                ++twisted_rows;
+            }
+        }
+        if (twisted_rows > 0) {
+            flint::FmpzMat twisted_kernel(twisted_rows, free_rank + 1);
+            slong next = 0;
+            for (slong row = 0; row < flint::fmpz_mat_nrows(kernel); ++row) {
+                if (fmpz_divisible(
+                            flint::fmpz_mat_entry(kernel, row, free_rank)
+                                    .raw(),
+                            ell.raw()) != 0) {
+                    continue;
+                }
+                for (slong col = 0; col <= free_rank; ++col) {
+                    flint::fmpz_set(
+                            flint::fmpz_mat_entry(twisted_kernel, next, col),
+                            flint::FmpzConstRef(
+                                    flint::fmpz_mat_entry(kernel, row, col)
+                                            .raw()));
+                }
+                ++next;
+            }
+            SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
+                                "unit_group.proof_torsion_twisted_kernel");
+            pass_ok = pass_result.saturate_local_with_kernel_(
+                    pass_changed, working,
+                    flint::FmpzMatConstRef(twisted_kernel), ell, embeddings,
+                    precision);
+        }
     }
 
     if (pass_ok && pass_changed) {

@@ -868,6 +868,28 @@ bool kernel_row_divisible(flint::FmpzMatConstRef kernel_rows,
     return true;
 }
 
+bool kernel_rows_torsion_column(bool& has_torsion_column,
+                                const OrderUnitGroup& group,
+                                flint::FmpzMatConstRef kernel_rows,
+                                flint::FmpzConstRef ell) noexcept {
+    has_torsion_column = false;
+    const slong rank = group.free_rank();
+    const slong columns = flint::fmpz_mat_ncols(kernel_rows);
+    if (!group.is_set() || rank < 0) {
+        return false;
+    }
+    if (columns == rank) {
+        return true;
+    }
+    slong proof_rank = 0;
+    if (columns != rank + 1 ||
+        !dlog_proof_rank(proof_rank, group, ell) || proof_rank != columns) {
+        return false;
+    }
+    has_torsion_column = true;
+    return true;
+}
+
 bool kernel_row_product(FactoredElement& product,
                         const OrderUnitGroup& group,
                         flint::FmpzMatConstRef kernel_rows,
@@ -875,10 +897,11 @@ bool kernel_row_product(FactoredElement& product,
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     const slong rank = group.free_rank();
+    const slong columns = flint::fmpz_mat_ncols(kernel_rows);
     if (!group.is_set() || field == nullptr || product.parent() == nullptr ||
         !product.parent()->has_same_data(*field) ||
         row < 0 || row >= flint::fmpz_mat_nrows(kernel_rows) ||
-        flint::fmpz_mat_ncols(kernel_rows) != rank) {
+        (columns != rank && columns != rank + 1)) {
         return false;
     }
 
@@ -892,6 +915,24 @@ bool kernel_row_product(FactoredElement& product,
                     product, generator,
                     flint::fmpz_mat_entry(kernel_rows, row, i))) {
             return false;
+        }
+    }
+    if (columns == rank + 1) {
+        // Torsion coordinate of a proof-kernel row (see
+        // residue_dlog_proof_matrix): multiply by zeta^t, as reference
+        // `saturate!` adds zeta with the last candidate coordinate.
+        flint::FmpzConstRef exponent =
+                flint::fmpz_mat_entry(kernel_rows, row, rank);
+        if (!flint::fmpz_is_zero(exponent)) {
+            OrderElement torsion(*order);
+            Element torsion_value(*field);
+            FactoredElement torsion_factor(*field);
+            if (!group.torsion_generator(torsion) ||
+                !torsion.get_element(torsion_value) ||
+                !torsion_factor.set_element(torsion_value) ||
+                !compact_multiply_power(product, torsion_factor, exponent)) {
+                return false;
+            }
         }
     }
     return true;
@@ -923,8 +964,12 @@ bool kernel_row_root(bool& is_power,
     if (!group.is_set() || field == nullptr || root.parent() == nullptr ||
         !root.parent()->has_same_data(*field) ||
         row < 0 || row >= flint::fmpz_mat_nrows(kernel_rows) ||
-        flint::fmpz_mat_ncols(kernel_rows) != group.free_rank() ||
         !flint::fmpz_is_prime(ell) || !flint::fmpz_fits_si(ell)) {
+        return false;
+    }
+    bool has_torsion_column = false;
+    if (!kernel_rows_torsion_column(has_torsion_column, group, kernel_rows,
+                                    ell)) {
         return false;
     }
 

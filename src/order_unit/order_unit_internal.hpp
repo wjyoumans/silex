@@ -340,6 +340,20 @@ bool kernel_row_divisible(flint::FmpzMatConstRef kernel_rows,
                           slong row,
                           slong len,
                           flint::FmpzConstRef ell) noexcept;
+// Kernel rows have either free_rank() columns (exponents of the free
+// generators) or, when l divides the torsion order, free_rank() + 1 columns
+// whose last entry is the exponent t of the torsion generator zeta, as in
+// residue_dlog_proof_kernel.  Sets `has_torsion_column` and returns false
+// for any other width.  kernel_row_root takes the l-th root of
+// prod u_i^{e_i} * zeta^t, the candidate set of reference
+// `compute_candidates_for_saturate`, so a
+// unit that is an l-th power only up to torsion is found.  Modulo torsion
+// the root r still satisfies r^l = prod u_i^{e_i}, so relation_basis takes
+// only the first free_rank() entries of such a row.
+bool kernel_rows_torsion_column(bool& has_torsion_column,
+                                const OrderUnitGroup& group,
+                                flint::FmpzMatConstRef kernel_rows,
+                                flint::FmpzConstRef ell) noexcept;
 bool kernel_row_root(bool& is_power,
                      FactoredElement& root,
                      const OrderUnitGroup& group,
