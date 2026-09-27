@@ -19,6 +19,30 @@ struct ZetaBfResidueDegreeCacheEntry {
     std::size_t length = 0;
 };
 
+// Caches, per prime `p`, the residue degrees of the primes of an order above
+// `p` (used by the Belabas-Friedman per-prime term in `bf_term`).  Entries
+// are keyed only by `p`: there is no order (or computation) identity stored
+// alongside them.
+//
+// Decision (2026-09-26): the cache intentionally carries no order key.  Each
+// order, and each computation that needs one, must own and pass its own
+// `ZetaBfResidueDegreeCache` instance; callers must never reuse one cache
+// across two different orders.  The two owning callers already follow this
+// by pairing the cache with an explicit order and checking it before reuse:
+//
+// - `RelationFactorBasePlan`
+//   (class_group/relation_factor_base_plan_internal.hpp) stores its `Order`
+//   next to the cache, and `relation_factor_base_plan_residue_degrees`
+//   returns the cache only when that order matches.
+// - `AnalyticClassRegulatorCache` (order_unit/compute_internal.hpp) tracks
+//   the order it last cached for and resets the cache whenever a different
+//   order is seen (`reset_for_order_if_needed_`).
+//
+// The analytic-finish and validation paths (class_group/analytic_finish.cpp,
+// order_unit/validation.cpp) only forward a cache pointer already owned this
+// way; they do not own one themselves.  A caller that needs to cache residue
+// degrees for more than one order must construct one
+// `ZetaBfResidueDegreeCache` per order.
 struct ZetaBfResidueDegreeCache {
     std::vector<ZetaBfResidueDegreeCacheEntry> entries;
     std::vector<slong> residue_degrees;

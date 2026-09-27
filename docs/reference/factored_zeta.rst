@@ -109,6 +109,23 @@ Each audit API has an explicit output-buffer form and an owned-return
 ``work_precision``
    The Arb working precision selected by the computation.
 
+Each audit API, both the output-buffer and owned-return forms, publishes
+``value``, ``error_bound``, ``cutoff``, and ``work_precision`` together only
+after the computation fully succeeds.  On any failure, an output-buffer call
+leaves every one of its output arguments unchanged, and an owned-return call
+returns ``std::nullopt``.  This holds even for a degenerate call that passes
+the same ``Arb`` for ``out`` and ``error_bound``: every audit API writes
+``out`` last, so that Arb ends up holding the value, not the error bound.
+
+The BF audit APIs treat ``max_cutoff`` as an upper bound on the internal
+Belabas-Friedman cutoff, rounded up to the nearest positive multiple of 9 (the
+step the internal cutoff search advances by); a cap that is already a
+multiple of 9 is used as given. Near ``UWORD_MAX`` the rounded-up value would
+overflow, so the rounding saturates at the largest multiple of 9 representable
+in a ``ulong`` instead of wrapping. Passing ``UWORD_MAX`` (or any cap within 9
+of it) therefore behaves as "no practical cap": the audit runs until it either
+reaches its Belabas-Friedman target or exhausts the working-precision budget.
+
 ``examples/maximal_order_zeta.cpp`` is the minimal compiled example.  It
 constructs a cubic maximal order, reads the order index and discriminant, and
 prints the owned BF audit record returned by
