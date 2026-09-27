@@ -2076,13 +2076,14 @@ bool pure_power_hensel_step(
 }
 
 // Lifts a root of y^n = input, where input = power_input * d^n and
-// root_scale = 1/d (d = 1 when power_input is used as is), and verifies the
-// scaled candidate against power_input.  See pure_power_hensel_root.
+// root_scale = 1/d (nullptr when power_input is used as is, i.e. d = 1), and
+// verifies the scaled candidate against power_input.  See
+// pure_power_hensel_root.
 bool try_pure_power_root_at_prime(
         Element& root,
         const Element& input,
         const Element& power_input,
-        const Element& root_scale,
+        const Element* root_scale,
         const flint::FmpqPoly& element_polynomial,
         const nf_struct* raw_field,
         const flint::Fmpz& prime,
@@ -2108,8 +2109,8 @@ bool try_pure_power_root_at_prime(
                 root, input, element_polynomial, raw_field, prime, factor,
                 prime_ctx, diagnostics)) {
         // root^2 == input == power_input * d^2 exactly, so (root / d)^2 ==
-        // power_input.
-        return root.multiply(root, root_scale);
+        // power_input.  Skip the multiply entirely when d = 1.
+        return root_scale == nullptr || root.multiply(root, *root_scale);
     }
 
     if (inverse_roots.empty()) {
@@ -2129,7 +2130,9 @@ bool try_pure_power_root_at_prime(
             !denominator.set_fmpq_poly(
                     flint::FmpqPolyConstRef(derivative_polynomial)) ||
             !inverse_denominator.invert(denominator) ||
-            !inverse_denominator.multiply(inverse_denominator, root_scale)) {
+            (root_scale != nullptr &&
+             !inverse_denominator.multiply(inverse_denominator,
+                                           *root_scale))) {
             return false;
         }
     }
@@ -2340,12 +2343,14 @@ bool pure_power_hensel_root(bool& is_power,
     // of a.  Since (y / d)^n = a exactly when y^n = a d^n, a residue disproof
     // for a d^n disproves a.  Silex rescales only when a is not an algebraic
     // integer, since otherwise every root is integral and already
-    // reconstructible.
-    Element radicand(*parent);
-    Element root_scale(*parent);
-    if (!radicand.set(input) || !root_scale.one()) {
-        return false;
-    }
+    // reconstructible.  `radicand` and `root_scale` default to the unscaled
+    // input and no scale (nullptr means "scale by 1"), so the integral path
+    // (the common case) pays no extra Element construction, copy, or
+    // multiply-by-one.
+    const Element* radicand = &input;
+    const Element* root_scale = nullptr;
+    Element scaled_radicand;
+    Element scale;
     if (fmpz_is_one(element_polynomial.raw()->den) == 0) {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "element.power_hensel_denominator");
@@ -2379,17 +2384,20 @@ bool pure_power_hensel_root(bool& is_power,
             fmpq_poly_set_coeff_fmpq(inverse_scale.raw(), 0,
                                      inverse_denominator.raw());
 
-            flint::Fmpz scale;
-            fmpz_pow_ui(scale.raw(), element_polynomial.raw()->den,
+            flint::Fmpz scale_by;
+            fmpz_pow_ui(scale_by.raw(), element_polynomial.raw()->den,
                         static_cast<ulong>(exponent));
             fmpq_poly_scalar_mul_fmpz(element_polynomial.raw(),
-                                      element_polynomial.raw(), scale.raw());
-            if (!root_scale.set_fmpq_poly(
+                                      element_polynomial.raw(), scale_by.raw());
+            if (!scale.define(*parent) || !scaled_radicand.define(*parent) ||
+                !scale.set_fmpq_poly(
                         flint::FmpqPolyConstRef(inverse_scale)) ||
-                !radicand.set_fmpq_poly(
+                !scaled_radicand.set_fmpq_poly(
                         flint::FmpqPolyConstRef(element_polynomial))) {
                 return false;
             }
+            radicand = &scaled_radicand;
+            root_scale = &scale;
         }
     }
 
@@ -2451,7 +2459,7 @@ bool pure_power_hensel_root(bool& is_power,
             }
             if (status == ResiduePowerStatus::power) {
                 if (try_pure_power_root_at_prime(
-                            root, radicand, input, root_scale,
+                            root, *radicand, input, root_scale,
                             element_polynomial, raw_field, prime,
                             field_polynomial, factor, ctx,
                             std::move(inverse_roots), exponent, diagnostics)) {
