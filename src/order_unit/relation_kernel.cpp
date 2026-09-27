@@ -1294,12 +1294,70 @@ bool dlog_kernel_from_matrix(flint::FmpzMat& out,
     return true;
 }
 
+bool residue_dlog_character_column(flint::FmpzMat& out,
+                                   const OrderUnitGroup& group,
+                                   const PrimeIdeal& prime,
+                                   flint::FmpzConstRef ell) noexcept {
+    slong proof_rank = 0;
+    if (!group.is_set() || !dlog_proof_rank(proof_rank, group, ell)) {
+        return false;
+    }
+    if (proof_rank == group.free_rank()) {
+        return residue_dlog_matrix(out, group, prime, ell);
+    }
+    // l divides the torsion order: append the torsion generator, as
+    // reference `compute_candidates_for_saturate` appends zeta to the
+    // input units.  Both routes below evaluate the free generators and zeta
+    // with one character, so the column's entries are comparable.
+    if (saturation_proof_prime_column_direct_degree_one(out, group, prime,
+                                                        ell)) {
+        return true;
+    }
+    return residue_dlog_proof_matrix(out, group, prime, ell);
+}
+
 bool residue_dlog_kernel(flint::FmpzMat& out,
                          const OrderUnitGroup& group,
                          PrimeIdealSpan primes,
                          flint::FmpzConstRef ell) noexcept {
     SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.detail_residue_dlog_kernel");
+    const Order* order = group.parent();
+    slong width = 0;
+    if (!group.is_set() || order == nullptr || primes.empty() ||
+        !dlog_proof_rank(width, group, ell)) {
+        return false;
+    }
+
+    flint::FmpzMat matrix(width, static_cast<slong>(primes.size()));
+    for (std::size_t j = 0; j < primes.size(); ++j) {
+        if (!same_order_parent(primes[j].parent(), order)) {
+            return false;
+        }
+        flint::FmpzMat column(width, 1);
+        if (!residue_dlog_character_column(column, group, primes[j], ell) ||
+            flint::fmpz_mat_nrows(column) != width) {
+            return false;
+        }
+        for (slong i = 0; i < width; ++i) {
+            flint::fmpz_set(flint::fmpz_mat_entry(
+                                    matrix, i, static_cast<slong>(j)),
+                            flint::FmpzConstRef(
+                                    flint::fmpz_mat_entry(column, i, 0).raw()));
+        }
+    }
+
+    SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.dlog_kernel_nullspace");
+    return dlog_kernel_from_matrix(out, matrix, ell);
+}
+
+bool residue_dlog_free_kernel(flint::FmpzMat& out,
+                              const OrderUnitGroup& group,
+                              PrimeIdealSpan primes,
+                              flint::FmpzConstRef ell) noexcept {
+    SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.detail_residue_dlog_free_kernel");
     const Order* order = group.parent();
     const slong rank = group.free_rank();
     if (!group.is_set() || order == nullptr || primes.empty() ||
@@ -1394,6 +1452,31 @@ bool saturation_prime_column(flint::FmpzMat& out,
     }
 
     return residue_dlog_matrix(out, group, prime, ell);
+}
+
+bool saturation_prime_character_column(flint::FmpzMat& out,
+                                       const OrderUnitGroup& group,
+                                       const PrimeIdeal& prime,
+                                       flint::FmpzConstRef ell) noexcept {
+    const Order* order = group.parent();
+    if (!group.is_set() || !same_order_parent(prime.parent(), order) ||
+        !flint::fmpz_is_prime(ell)) {
+        return false;
+    }
+
+    ResidueField residue_field(prime);
+    flint::Fmpz cardinality;
+    flint::Fmpz qminus;
+    if (!residue_field.is_defined() ||
+        !residue_field.cardinality(flint::FmpzRef(cardinality))) {
+        return false;
+    }
+    fmpz_sub_ui(qminus.raw(), cardinality.raw(), 1);
+    if (fmpz_divisible(qminus.raw(), ell.raw()) == 0) {
+        return false;
+    }
+
+    return residue_dlog_character_column(out, group, prime, ell);
 }
 
 bool saturation_proof_prime_usable(const OrderUnitGroup& group,

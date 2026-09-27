@@ -362,10 +362,28 @@ bool kernel_row_root(bool& is_power,
                      flint::FmpzConstRef ell,
                      CompactFieldModulusCache* field_modulus_cache =
                              nullptr) noexcept;
+// Character kernel of the free generators and, when l divides the torsion
+// order, the torsion generator: dlog_proof_rank() columns, as the candidate
+// set of reference `compute_candidates_for_saturate`.  This is the kernel of
+// the public OrderUnitGroup::residue_dlog_kernel and of the non-proof
+// saturation routines.
 bool residue_dlog_kernel(flint::FmpzMat& out,
                          const OrderUnitGroup& group,
                          PrimeIdealSpan primes,
                          flint::FmpzConstRef ell) noexcept;
+// Character kernel of the free generators only (free_rank() columns).  The
+// proof pre-scan uses it for its free-exponent pass.
+bool residue_dlog_free_kernel(flint::FmpzMat& out,
+                              const OrderUnitGroup& group,
+                              PrimeIdealSpan primes,
+                              flint::FmpzConstRef ell) noexcept;
+// One residue-character column for residue_dlog_kernel: dlog_proof_rank()
+// entries, the free generators followed by the torsion generator when l
+// divides the torsion order.  All entries use the same character.
+bool residue_dlog_character_column(flint::FmpzMat& out,
+                                   const OrderUnitGroup& group,
+                                   const PrimeIdeal& prime,
+                                   flint::FmpzConstRef ell) noexcept;
 bool residue_dlog_proof_kernel(flint::FmpzMat& out,
                                const OrderUnitGroup& group,
                                PrimeIdealSpan primes,
@@ -402,6 +420,11 @@ bool saturation_prime_column(flint::FmpzMat& out,
                              const OrderUnitGroup& group,
                              const PrimeIdeal& prime,
                              flint::FmpzConstRef ell) noexcept;
+// saturation_prime_column with the residue_dlog_character_column shape.
+bool saturation_prime_character_column(flint::FmpzMat& out,
+                                       const OrderUnitGroup& group,
+                                       const PrimeIdeal& prime,
+                                       flint::FmpzConstRef ell) noexcept;
 bool saturation_proof_prime_usable(const OrderUnitGroup& group,
                                    const PrimeIdeal& prime,
                                    flint::FmpzConstRef ell) noexcept;

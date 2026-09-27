@@ -1072,13 +1072,20 @@ bool select_saturation_primes_with_kernel(
         return true;
     }
 
+    // Character columns carry the torsion generator when l divides the
+    // torsion order, as reference `compute_candidates_for_saturate`.
+    slong width = 0;
+    if (!detail::dlog_proof_rank(width, group, ell)) {
+        return false;
+    }
     std::vector<PrimeIdeal> selected;
     selected.reserve(static_cast<std::size_t>(target_len));
-    flint::FmpzMat dlog_matrix(rank, 0);
+    flint::FmpzMat dlog_matrix(width, 0);
 
     auto try_append_prime = [&](const PrimeIdeal& prime) noexcept -> bool {
-        flint::FmpzMat column(rank, 1);
-        if (!detail::saturation_prime_column(column, group, prime, ell)) {
+        flint::FmpzMat column(width, 1);
+        if (!detail::saturation_prime_character_column(column, group, prime,
+                                                       ell)) {
             return true;
         }
         selected.emplace_back(*order);
@@ -1133,7 +1140,7 @@ bool select_saturation_primes_with_kernel(
             group.diagnostics(), DiagnosticsModule::unit_group,
             "unit_group.saturation_selector.source_shape_fallback");
     selected.clear();
-    flint::FmpzMat fallback_matrix(rank, 0);
+    flint::FmpzMat fallback_matrix(width, 0);
     dlog_matrix = std::move(fallback_matrix);
     flint::fmpz_set_ui(flint::FmpzRef(p), 2);
     while (static_cast<slong>(selected.size()) < target_len &&
@@ -1439,9 +1446,11 @@ bool OrderUnitGroup::saturate_row(bool& changed,
                                   flint::FmpzConstRef ell,
                                   EmbeddingContext& embeddings,
                                   slong precision) noexcept {
-    // The public row API keeps its free-rank kernel width; torsion-extended
-    // proof-kernel rows are internal to the proof routes.
-    if (flint::fmpz_mat_ncols(kernel_rows) != group.free_rank()) {
+    // Rows have the residue_dlog_kernel width: free_rank() columns, plus the
+    // torsion exponent when ell divides the torsion order.
+    slong width = 0;
+    if (!detail::dlog_proof_rank(width, group, ell) ||
+        flint::fmpz_mat_ncols(kernel_rows) != width) {
         return false;
     }
     return saturate_row_with_cache(*this, changed, group, kernel_rows, row,
@@ -2503,11 +2512,19 @@ bool OrderUnitGroup::prove_local_saturated_(
     } else if (first_prime != nullptr) {
         SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
                             "unit_group.proof_precomputed_kernel_unusable");
-        pass_ok = pass_result.saturate_local_once(
-                pass_changed, working,
-                PrimeIdealSpan(first_prime,
-                               static_cast<std::size_t>(primes.size())),
-                ell, embeddings, precision);
+        // Free-exponent pass over the selected primes; the torsion-twisted
+        // rows follow below.
+        flint::FmpzMat free_kernel(0, working.free_rank());
+        pass_ok = detail::residue_dlog_free_kernel(
+                          free_kernel, working,
+                          PrimeIdealSpan(first_prime,
+                                         static_cast<std::size_t>(
+                                                 primes.size())),
+                          ell) &&
+                  pass_result.saturate_local_with_kernel_(
+                          pass_changed, working,
+                          flint::FmpzMatConstRef(free_kernel), ell,
+                          embeddings, precision);
     }
 
     const slong free_rank = working.free_rank();

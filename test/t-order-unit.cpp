@@ -2160,7 +2160,9 @@ int test_saturate_row_real_quadratic_square() {
     assert(group.set_units(order, silex::FactoredElementSpan(generators, 1),
                            embeddings, 128));
 
-    sflint::FmpzMat row(1, 1);
+    // ell = 2 divides the torsion order 2 of Z[sqrt2], so rows carry the
+    // torsion exponent in a final column.
+    sflint::FmpzMat row(1, 2);
     sflint::Fmpz ell;
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, 0), 1);
     assert(set_fmpz_si(ell, 2));
@@ -2196,7 +2198,7 @@ int test_saturate_row_no_root_and_divisible_copy() {
     assert(group.set_units(order, silex::FactoredElementSpan(generators, 1),
                            embeddings, 128));
 
-    sflint::FmpzMat row(1, 1);
+    sflint::FmpzMat row(1, 2);  // free exponent, torsion exponent 0
     sflint::Fmpz ell;
     assert(set_fmpz_si(ell, 2));
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, 0), 1);
@@ -2228,16 +2230,23 @@ int test_saturate_row_rank_zero_and_failures() {
     assert(rank_zero.compute(degree_one_order));
     assert(check_rank_zero_group(rank_zero, degree_one_order, 2));
 
+    // Rank zero with ell = 2 | w = 2: a row is only the torsion exponent.
     sflint::FmpzMat zero_width(1, 0);
+    sflint::FmpzMat torsion_only(1, 1);
     sflint::Fmpz ell;
     assert(set_fmpz_si(ell, 2));
     silex::OrderUnitGroup copied(degree_one_order);
     bool changed = true;
     assert(copied.saturate_row(changed, rank_zero,
-                               sflint::FmpzMatConstRef(zero_width), 0,
+                               sflint::FmpzMatConstRef(torsion_only), 0,
                                sflint::FmpzConstRef(ell),
                                degree_one_embeddings, 80));
     assert(!changed);
+    assert(check_rank_zero_group(copied, degree_one_order, 2));
+    assert(!copied.saturate_row(changed, rank_zero,
+                                sflint::FmpzMatConstRef(zero_width), 0,
+                                sflint::FmpzConstRef(ell),
+                                degree_one_embeddings, 80));
     assert(check_rank_zero_group(copied, degree_one_order, 2));
 
     silex::NumberField field = quadratic_field(2);
@@ -2253,11 +2262,16 @@ int test_saturate_row_rank_zero_and_failures() {
     assert(group.set_units(order, silex::FactoredElementSpan(generators, 1),
                            embeddings, 128));
 
-    sflint::FmpzMat row(1, 1);
-    sflint::FmpzMat bad_width(1, 2);
+    sflint::FmpzMat row(1, 2);
+    sflint::FmpzMat free_width(1, 1);  // missing the torsion column
+    sflint::FmpzMat bad_width(1, 3);
     sflint::Fmpz not_prime;
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, 0), 1);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(free_width, 0, 0), 1);
     assert(set_fmpz_si(not_prime, 4));
+    assert(!copied.saturate_row(changed, group,
+                                sflint::FmpzMatConstRef(free_width), 0,
+                                sflint::FmpzConstRef(ell), embeddings, 128));
     assert(!copied.saturate_row(changed, group, sflint::FmpzMatConstRef(row),
                                 1, sflint::FmpzConstRef(ell), embeddings,
                                 128));
@@ -2297,13 +2311,32 @@ int test_residue_dlog_kernel_real_quadratic() {
     assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
     assert(primes.size() == 1);
 
+    // 5 is inert, so the residue field is F_25.  Both eps = 1 + sqrt2 (its
+    // norm to F_5 is N(eps) = -1 = 4, a square) and -1 are squares in F_25,
+    // so with ell = 2 | w = 2 the kernel is all of F_2^2: the free column and
+    // the torsion column.
     silex::PrimeIdealSpan prime_span(primes.at(0), primes.size());
     sflint::FmpzMat kernel(0, 0);
     assert(group.residue_dlog_kernel(kernel, prime_span,
                                      sflint::FmpzConstRef(ell)));
-    assert(sflint::fmpz_mat_ncols(kernel) == 1);
-    assert(sflint::fmpz_mat_nrows(kernel) == 1);
+    assert(sflint::fmpz_mat_ncols(kernel) == 2);
+    assert(sflint::fmpz_mat_nrows(kernel) == 2);
     assert(mat_entry_is_si(kernel, 0, 0, 1));
+    assert(mat_entry_is_si(kernel, 0, 1, 0));
+    assert(mat_entry_is_si(kernel, 1, 0, 0));
+    assert(mat_entry_is_si(kernel, 1, 1, 1));
+
+    // ell = 3 does not divide w = 2: no torsion column.  7 = 1 mod 3 splits
+    // in Q(sqrt2) (3^2 = 2 mod 7).
+    assert(set_fmpz_si(p, 7));
+    assert(set_fmpz_si(ell, 3));
+    silex::PrimeIdealList split;
+    assert(silex::decompose_prime(split, order, sflint::FmpzConstRef(p)));
+    assert(split.size() == 2);
+    assert(group.residue_dlog_kernel(
+            kernel, silex::PrimeIdealSpan(split.at(0), split.size()),
+            sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_ncols(kernel) == 1);
 
     return 0;
 }
@@ -4324,10 +4357,13 @@ int test_prove_index_bound_nonmaximal_quadratic_sqrt5() {
     silex::OrderUnitGroup square_start(equation);
     assert(set_single_unit_group(square_start, equation, phi6, embeddings));
     assert(set_fmpz_si(ell, 2));
+    // ell = 2 divides w = 2, so the row carries a torsion exponent (0).
+    sflint::FmpzMat square_row(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(square_row, 0, 0), 1);
     silex::OrderUnitGroup square_saturated(equation);
     changed = false;
     assert(square_saturated.saturate_row(
-            changed, square_start, sflint::FmpzMatConstRef(row), 0,
+            changed, square_start, sflint::FmpzMatConstRef(square_row), 0,
             sflint::FmpzConstRef(ell), embeddings, 256));
     assert(changed);
     assert(check_first_free_generator_is_order_unit(square_saturated,
@@ -4689,6 +4725,98 @@ int test_prove_torsion_twisted_saturation_root() {
     return 0;
 }
 
+// Non-proof saturation on the same u = -(3 + 2 sqrt2) = -eps^2 at ell = 2.
+// At the two primes above 7 (sqrt2 = +/-3 mod 7), -1 is not a square
+// (7 = 3 mod 4), so u is not a square either and the free-exponent kernel
+// is empty: a free-only kernel misses the root.  The torsion-extended
+// kernel is spanned by (e, t) = (1, 1), whose candidate u * (-1) = eps^2 has
+// the root eps.  GP 2.17.4 cross-check:
+//     kronecker(-1, 7)                               \\ -1
+//     [kronecker(-9, 7), kronecker(3, 7)]            \\ [-1, -1]: u mod P
+//     bnfisunit(bnfinit(x^2 - 2), -(3 + 2*x))        \\ [2, 1]~
+int test_saturate_torsion_twisted_non_proof() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+    silex::Element epsilon(field);
+    silex::Element twisted(field);
+    assert(set_real_quadratic_unit(epsilon));
+    assert(twisted.multiply(epsilon, epsilon));
+    assert(twisted.negate(twisted));
+
+    silex::OrderUnitGroup start(order);
+    assert(set_single_unit_group(start, order, twisted, embeddings));
+
+    sflint::Fmpz p;
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(p, 7));
+    assert(set_fmpz_si(ell, 2));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 2);
+    silex::PrimeIdealSpan prime_span(primes.at(0), primes.size());
+
+    sflint::FmpzMat free_kernel(0, 0);
+    assert(silex::detail::residue_dlog_free_kernel(
+            free_kernel, start, prime_span, sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_ncols(free_kernel) == 1);
+    assert(sflint::fmpz_mat_nrows(free_kernel) == 0);
+
+    sflint::FmpzMat kernel(0, 0);
+    assert(start.residue_dlog_kernel(kernel, prime_span,
+                                     sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_ncols(kernel) == 2);
+    assert(sflint::fmpz_mat_nrows(kernel) == 1);
+    assert(mat_entry_is_si(kernel, 0, 0, 1));
+    assert(mat_entry_is_si(kernel, 0, 1, 1));
+
+    bool changed = false;
+    silex::OrderUnitGroup row_out(order);
+    assert(row_out.saturate_row(changed, start, sflint::FmpzMatConstRef(kernel),
+                                0, sflint::FmpzConstRef(ell), embeddings,
+                                256));
+    assert(changed);
+    assert(first_free_generator_is_pm_unit_power_pm1(row_out, epsilon));
+
+    // The untwisted row (1, 0) is u itself, which is not a square.
+    sflint::FmpzMat untwisted(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(untwisted, 0, 0), 1);
+    silex::OrderUnitGroup untwisted_out(order);
+    changed = true;
+    assert(untwisted_out.saturate_row(
+            changed, start, sflint::FmpzMatConstRef(untwisted), 0,
+            sflint::FmpzConstRef(ell), embeddings, 256));
+    assert(!changed);
+    assert(check_first_free_generator(untwisted_out, twisted));
+
+    silex::OrderUnitGroup local(order);
+    changed = false;
+    assert(local.saturate_local_once(changed, start, prime_span,
+                                     sflint::FmpzConstRef(ell), embeddings,
+                                     256));
+    assert(changed);
+    assert(first_free_generator_is_pm_unit_power_pm1(local, epsilon));
+
+    // The bounded pass selects the two primes above 7 first (3 and 5 are
+    // inert), adjoins eps, and the next pass leaves it unchanged.
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 31));
+    silex::OrderUnitGroup bounded(order);
+    bool stable = false;
+    changed = false;
+    assert(bounded.saturate_bounded(changed, stable, start,
+                                    sflint::FmpzConstRef(ell), 2,
+                                    sflint::FmpzConstRef(aux_bound), 4,
+                                    embeddings, 256));
+    assert(changed);
+    assert(stable);
+    assert(first_free_generator_is_pm_unit_power_pm1(bounded, epsilon));
+    assert(bounded.certification_status() ==
+           silex::CertificationMode::unknown);
+
+    return 0;
+}
+
 // Z[3 sqrt2] = Z[sqrt18], the equation order of x^2 - 18, has index 3 in
 // Z[sqrt2].  Its unit group is <-1, 17 + 4 sqrt18> = <-1, (1 + sqrt2)^4>,
 // of index 4 in Z[sqrt2]^x; reference GP 2.17.4 session:
@@ -5041,11 +5169,15 @@ int test_saturate_local_once_rank_zero_and_failures() {
     assert(primes.size() == 1);
     silex::PrimeIdealSpan prime_span(primes.at(0), primes.size());
 
+    // ell = 2 divides w = 2, so the only column is the torsion generator
+    // -1, a square mod 5 (-1 = 2^2): the kernel is spanned by (1).  Its
+    // candidate -1 is not a square in Q, so nothing is adjoined below.
     sflint::FmpzMat kernel(5, 5);
     assert(rank_zero.residue_dlog_kernel(kernel, prime_span,
                                          sflint::FmpzConstRef(ell)));
-    assert(sflint::fmpz_mat_nrows(kernel) == 0);
-    assert(sflint::fmpz_mat_ncols(kernel) == 0);
+    assert(sflint::fmpz_mat_nrows(kernel) == 1);
+    assert(sflint::fmpz_mat_ncols(kernel) == 1);
+    assert(mat_entry_is_si(kernel, 0, 0, 1));
 
     silex::OrderUnitGroup copied(degree_one_order);
     bool changed = true;
@@ -5590,6 +5722,7 @@ int main() {
     test_prove_index_bound_cubic2213_past_prescan_bound();
     test_prove_index_bound_quartic70640();
     test_prove_torsion_twisted_saturation_root();
+    test_saturate_torsion_twisted_non_proof();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
     test_saturate_index_bounded();
     test_saturate_index_bounded_adaptive();

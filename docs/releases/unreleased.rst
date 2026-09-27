@@ -87,6 +87,19 @@ Fixed
   in ``Q(sqrt2)``.  Such cases previously failed closed.  Candidate roots now
   include the torsion generator, and verification still requires an empty
   torsion-extended kernel.
+- ``OrderUnitGroup::residue_dlog_kernel`` and ``saturate_row`` now include
+  the torsion generator when ``ell`` divides the torsion order ``w``.
+  **This changes the kernel shape:** when ``ell | w``, kernel rows have
+  ``free_rank() + 1`` columns, the last one the exponent of the torsion
+  generator, and ``saturate_row`` rejects rows of width ``free_rank()``.
+  When ``ell`` does not divide ``w`` the shape is unchanged.
+  ``saturate_local_once``, ``saturate_bounded``, ``saturate_index_bounded``,
+  ``saturate_index_bounded_adaptive``, and
+  ``set_relation_kernel_units_index_bounded_saturated`` test the same
+  torsion-extended candidates, so they now also find a unit that is an
+  ``ell``-th power only up to torsion, such as ``-(3 + 2 sqrt2)`` at
+  ``ell = 2``.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
 - ``zeta_residue_bf_audit`` and ``zeta_class_regulator_product_bf_audit`` now
   leave every output unchanged when they fail.  Every BF audit API now writes
   the value last, so a call that passes the same ``Arb`` for the value and the

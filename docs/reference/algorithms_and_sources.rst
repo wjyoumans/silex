@@ -621,6 +621,19 @@ one combined kernel) and only affects which valid root a pre-scan pass finds
 first, never whether ``ell`` is verified, since verification still requires
 an empty torsion-extended kernel.
 
+The non-proof saturation routines use the same torsion-extended candidates.
+``OrderUnitGroup::residue_dlog_kernel`` returns the kernel of the
+``ell``-th-power residue characters on the free generators and, when ``ell``
+divides the torsion order ``w``, on ``zeta``: its rows have
+``free_rank() + 1`` columns, the last one the exponent of ``zeta``, when
+``ell | w`` and ``free_rank()`` columns otherwise, as the vectors ``v1`` of
+``compute_candidates_for_saturate``.  ``saturate_row`` takes a row of that
+width and tests ``prod u_j^(e_j) * zeta^(e_t)``, as in ``saturate!``;
+``saturate_local_once``, ``saturate_bounded``, and the index-bounded passes
+built on them test every row of that kernel.  As in the proof routes, a
+root is adjoined only after the exact order-unit check, and these routines
+never record a verified proof status.
+
 The index bound comes from ``unit_lower_regulator_bound``.  For a subgroup
 ``G`` of full rank in ``O^x``, with ``O`` an order of the field ``K``,
 ``[O^x : G] = R_G / Reg(O) <= R_G / R_K``.  So any proven lower bound

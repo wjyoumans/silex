@@ -197,6 +197,16 @@ public:
             flint::FmpzConstRef aux_bound_start,
             flint::FmpzConstRef aux_bound_max,
             slong max_passes) noexcept;
+    // Residue-character kernels and their rows.  A kernel row has one
+    // column per free generator of `group`, in free_generator order, and,
+    // when ell divides the torsion order w, one final column for the torsion
+    // generator; its width is free_rank() + 1 when ell | w and free_rank()
+    // otherwise.  Entries are reduced to [0, ell).  residue_dlog_kernel
+    // returns a basis of the common kernel, over the given primes, of the
+    // ell-th-power residue characters on these generators.  saturate_row
+    // takes one such row (e_1, ..., e_r[, t]), tests whether
+    // prod u_i^(e_i) * zeta^t is an ell-th power, and, when its root is a
+    // unit of the order, adjoins it; rows of any other width are rejected.
     bool saturate_row(bool& changed,
                       const OrderUnitGroup& group,
                       flint::FmpzMatConstRef kernel_rows,
@@ -220,6 +230,9 @@ public:
                                         flint::FmpzConstRef ell,
                                         flint::FmpzConstRef bound)
             const noexcept;
+    // saturate_local_once and the bounded saturation passes below test the
+    // rows of the residue_dlog_kernel shape described above, so a unit that
+    // is an ell-th power only up to torsion is found when ell | w.
     bool saturate_local_once(bool& changed,
                              const OrderUnitGroup& group,
                              PrimeIdealSpan primes,
