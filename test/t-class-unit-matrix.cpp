@@ -4,6 +4,7 @@
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/unit.hpp>
+#include <silex/zeta.hpp>
 
 #include "test_support.hpp"
 
@@ -2069,6 +2070,30 @@ int test_grh_cubic_records_bf_audit() {
     assert(record->work_precision >= record->requested_precision);
     assert(sflint::arb_is_finite(record->error_bound));
     assert(!sflint::arb_is_negative(record->error_bound));
+
+    // Tie the audit to the accepting value.  The transaction ran at
+    // precision 128, and the accepting hR is the public default zeta route
+    // at that precision.  That route adds the recorded error bound to the
+    // radius of log(residue), so the enclosure of log(hR) is at least that
+    // wide.
+    assert(record->requested_precision == 128);
+    sflint::Arb log_hR;
+    assert(silex::zeta_class_regulator_product(
+            sflint::ArbRef(log_hR), setup.maximal_order,
+            record->requested_precision));
+    ::arb_log(log_hR.raw(), log_hR.raw(), record->requested_precision);
+    assert(sflint::arb_is_finite(log_hR));
+    ::arf_t bound_upper;
+    ::arf_t log_hR_radius;
+    ::arf_init(bound_upper);
+    ::arf_init(log_hR_radius);
+    ::arb_get_ubound_arf(bound_upper, record->error_bound.raw(), 256);
+    ::arf_set_mag(log_hR_radius, arb_radref(log_hR.raw()));
+    const bool bound_within_radius =
+            ::arf_cmp(bound_upper, log_hR_radius) <= 0;
+    ::arf_clear(bound_upper);
+    ::arf_clear(log_hR_radius);
+    assert(bound_within_radius);
     return 0;
 }
 
@@ -2158,8 +2183,24 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     }
     assert(proven_units.certification_status() ==
            silex::CertificationMode::proven);
+    // Pin the mechanism, not only the outcome.  try_certify_with_units
+    // tries the stored record first; failing that, it recomputes
+    // L(1, chi) at the call's precision, and then tries saturation.  At
+    // precision 1 the zeta product is unavailable, so the recompute route
+    // cannot run, and the saturation route would leave per-prime records.
+    // A promotion with no saturation records therefore came from the
+    // stored record.
+    {
+        sflint::Arb precision_one_hR;
+        assert(!silex::zeta_class_regulator_product(
+                sflint::ArbRef(precision_one_hR), setup.maximal_order, 1));
+    }
+    assert(class_group.relation_saturation_record_count() == 0);
     assert(class_group.try_certify_with_units(
-            proven_units, silex::CertificationMode::proven, 128));
+            proven_units, silex::CertificationMode::proven, 1));
+    assert(class_group.relation_saturation_record_count() == 0);
+    assert(class_group.relation_saturation_status() ==
+           silex::ProofState::not_checked);
     assert(class_group.certification_status() ==
            silex::CertificationMode::proven);
     assert(class_group.unit_proof_status() == silex::ProofState::verified);

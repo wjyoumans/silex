@@ -162,6 +162,13 @@ The class-group proof metadata is deliberately componentized:
 - BF zeta audit records keep the cutoff, maximum cutoff, requested precision,
   working precision, and error bound of a Belabas-Friedman evaluation.  The
   error bound is valid under GRH, so the record is GRH-conditional evidence.
+  A record stored by ``try_certify_class_unit_with_zeta_bf`` or by a
+  ``zeta_bf_max_cutoff`` BF audit comes from an evaluation that selects its
+  cutoff so that the error bound meets the target for the requested
+  precision, and fails otherwise.  A record stored by an accepted ``grh``
+  paired transaction comes from the default-route evaluation behind the
+  accepting ``hR``, which does not require that target: its error bound may
+  exceed it, and its cutoff may equal its maximum cutoff.
 
 The coarse class-group mode is promoted to ``proven`` only when the relevant
 source-backed gate has verified the components it needs.  For example, a
