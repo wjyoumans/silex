@@ -397,6 +397,29 @@ void test_power_non_integral_unit_norm_roots() noexcept {
     assert_power_of_root_found(element_from_fraction(sqrt_five, {1, 1}, 2),
                                7);
 
+    // A rational radicand.  1/8 is rational, so its power-basis coordinates
+    // are (1/8, 0) and its primitive characteristic polynomial over Q(i) is
+    // (8x - 1)^2 = 64x^2 - 16x + 1 (content 1), giving lc = 64 = 4^3: the
+    // pre-filter's leading-coefficient rule applies even to a value whose
+    // minimal polynomial has degree 1, not just the field degree.
+    assert_power_of_root_found(element_from_fraction(gaussian, {1}, 8), 3);
+
+    // A non-integral root of non-unit norm: N((1 + 2i)/3) = 5/9, not +-1.
+    // This exercises the norm-based verification in verify_power_root after
+    // rescaling, not only the height check that guards unit-norm candidates.
+    assert_power_of_root_found(element_from_fraction(gaussian, {1, 2}, 3), 3);
+
+    // The power-basis denominator can exceed the denominator over the
+    // maximal order O_K.  In Q(sqrt 5), O_K = Z[(1 + sqrt 5)/2], and
+    // (1 + sqrt 5)/6 = ((1 + sqrt 5)/2)/3 has O_K-denominator 3, but its
+    // power-basis (Z[sqrt 5]) denominator is 6.  Silex rescales by the
+    // (possibly larger) power-basis denominator, per the documented
+    // deviation from the reference's maximal-order choice; the exact check
+    // in assert_power_of_root_found still requires the result to be exactly
+    // correct.
+    assert_power_of_root_found(
+            element_from_fraction(sqrt_five, {1, 1}, 6), 3);
+
     // Non-powers stay non-powers: (3 + 4i)/5 is not a square or a cube, and
     // ((3 + 4i)/5)^2 is not a cube.  A definite answer must be false.
     sflint::Fmpz exponent;
@@ -408,6 +431,20 @@ void test_power_non_integral_unit_norm_roots() noexcept {
     assert(square.multiply(three_four, three_four));
     sflint::fmpz_set_si(sflint::FmpzRef(exponent), 3);
     assert_power_answer_consistent(square, exponent, false);
+
+    // A non-power that passes the leading-coefficient pre-filter, exercising
+    // the rescaled residue disproof rather than an early unsupported return
+    // from the filter itself.  i * (3 + 4i)/25 = (-4 + 3i)/25
+    // = i * ((2 + i)/5)^2.  Its primitive characteristic polynomial is
+    // 25x^2 + 8x + 1 (content 1), so lc = 25, a square; the filter cannot
+    // reject it before rescaling.  It is not a square in Q(i): i * b^2 = c^2
+    // for nonzero b would force i = (c/b)^2, and i is not a square in Q(i)
+    // (a square root of i generates the degree-4 field Q(zeta_8)).  Any
+    // definite answer must be false; a rejected pre-filter elsewhere stays
+    // unsupported (a project decision, not tested here).
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), 2);
+    assert_power_answer_consistent(
+            element_from_fraction(gaussian, {-4, 3}, 25), exponent, false);
 }
 
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
