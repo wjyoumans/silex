@@ -435,10 +435,11 @@ def main() -> int:
         }
         # The `grh` transaction itself records the analytic index-one check
         # that accepted the pair (decision 2026-09-27, "T-053 GRH-mode
-        # analytic record"): a Belabas-Friedman hR, so `grh`. The record is
-        # informational and leaves the labels and the unit/regulator proof
-        # states alone. No BF validation enclosure is used in `grh` mode,
-        # so there is no BF audit record.
+        # analytic record"): a Belabas-Friedman hR, so `grh`, together with
+        # that evaluation's BF audit data (decision 2026-09-27, "T-053
+        # follow-up"; the record's contents are checked in
+        # t-class-unit-matrix.cpp). The record is informational and leaves
+        # the labels and the unit/regulator proof states alone.
         assert grh_audited_instance["class_group"][
             "analytic_class_regulator_status"
         ] == "verified"
@@ -447,7 +448,7 @@ def main() -> int:
         ] == "grh"
         assert grh_audited_instance["class_group"][
             "zeta_bf_proof_status"
-        ] == "not_checked"
+        ] == "verified"
         assert grh_audited_instance["class_group_proof_status"] == "grh"
         assert grh_audited_instance["unit_group_proof_status"] == "grh"
         assert grh_audited_instance["regulator_proof_status"] == (
@@ -455,6 +456,11 @@ def main() -> int:
         )
         assert grh_audited_instance["class_group"]["unit_proof_status"] == (
             "not_checked"
+        )
+        # `factor_base_bound` reports the bound the transaction used, not the
+        # request: the grh policy raises the requested bound on this row.
+        assert int(grh_audited_instance["factor_base_bound"]) > int(
+            grh_audited_instance["requested_factor_base_bound"]
         )
 
     # A real-quadratic `grh` transaction is accepted by the analytic
@@ -480,9 +486,38 @@ def main() -> int:
         "zeta_bf_proof_status"
     ] == "not_checked"
 
+    # The same with a nontrivial class group: Q(sqrt(10)), h = 2, class
+    # group Z/2, unit rank 1 (GP 2.17 quadclassunit(40)). The regulator is
+    # checked against log(3 + sqrt(10)) in t-class-unit-matrix.cpp.
+    real_quadratic_h2_grh = run_json(
+        [str(args.exe), "--coeffs", "-10,0,1", "--mode", "grh"],
+        root,
+    )
+    assert real_quadratic_h2_grh["success"] is True
+    assert real_quadratic_h2_grh["certification_status"] == "grh"
+    assert real_quadratic_h2_grh["class_group"]["certification"] == "grh"
+    assert real_quadratic_h2_grh["unit_group"]["certification"] == "grh"
+    assert real_quadratic_h2_grh["class_group"]["order"] == "2"
+    assert real_quadratic_h2_grh["class_group"]["invariants"] == ["2"]
+    assert real_quadratic_h2_grh["unit_group"]["free_rank"] == 1
+    assert real_quadratic_h2_grh["class_group"][
+        "analytic_class_regulator_status"
+    ] == "verified"
+    assert real_quadratic_h2_grh["class_group"][
+        "analytic_class_regulator_certification"
+    ] == "proven"
+    assert real_quadratic_h2_grh["class_group"][
+        "zeta_bf_proof_status"
+    ] == "not_checked"
+
     # A requested audit that runs but does not succeed is reported as
     # ran/failed, distinct from not requested or skipped (T-044 S4). This
-    # pins the current outcome for x^2 + 5 in `proven` mode.
+    # pins the current outcome for x^2 + 5 in `proven` mode. The BF
+    # evaluation and the index-one check pass; the gate then fails in
+    # ClassGroupContext::try_promote_proven_certification_: the exact
+    # imaginary-quadratic route leaves no per-prime relation-saturation
+    # record at ell = 2 (h = 2), and a GRH-conditional BF check cannot stand
+    # in for one. A change to either would flip this assertion.
     failed_audit = run_json(
         [str(args.exe), "--coeffs", "5,0,1", "--mode", "proven",
          "--zeta-bf-audit"],

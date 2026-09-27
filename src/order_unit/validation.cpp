@@ -75,10 +75,11 @@ bool analytic_class_regulator_product_for_validation(
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
         ZetaBfResidueDegreeCache* residue_degree_cache,
-        bool* unconditional) noexcept {
+        bool* unconditional,
+        ZetaBfRouteAudit* bf_audit) noexcept {
     return detail::zeta_class_regulator_product_with_diagnostics(
             out, order, precision, diagnostics, residue_degree_base,
-            residue_degree_cache, unconditional);
+            residue_degree_cache, unconditional, bf_audit);
 }
 
 bool bf_class_regulator_product_for_validation(
@@ -1123,24 +1124,28 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                             record_grh_acceptance_analytic_check(
                                     class_group,
                                     analytic_cache.value_unconditional());
-                    if (analytic_cache.validation_active() &&
-                        !ClassGroupCertificationAccess::
+                    // When that hR was a Belabas-Friedman value, also record
+                    // its audit data.  A grh request never enables the
+                    // validation enclosure (validation_bf_max_cutoff_for_
+                    // options), so the value is the default zeta route's
+                    // Belabas-Friedman fallback; a seeded value has no audit
+                    // data and records none.
+                    // The record cannot fail here: the presentation exists,
+                    // both precisions are positive, and the error bound is
+                    // finite because the Belabas-Friedman value it was added
+                    // to is finite (bf_log_residue_cutoff).
+                    if (const ZetaBfRouteAudit* bf_audit =
+                                analytic_cache.value_bf_audit();
+                        bf_audit != nullptr) {
+                        static_cast<void>(ClassGroupCertificationAccess::
                                 record_grh_acceptance_bf_audit(
                                         class_group,
-                                        analytic_cache
-                                                .validation_error_bound(),
-                                        analytic_cache.validation_cutoff(),
-                                        analytic_cache
-                                                .validation_computed_max_cutoff(),
-                                        analytic_cache.validation_precision(),
-                                        analytic_cache
-                                                .validation_work_precision())) {
-                        // The analytic record above still describes the
-                        // accepting check; only its audit data is missing.
-                        SILEX_PROFILE_EVENT(
-                                diagnostics, DiagnosticsModule::unit_group,
-                                "unit_group.validation_grh_bf_audit_record_"
-                                "failed");
+                                        flint::ArbConstRef(
+                                                bf_audit->error_bound),
+                                        bf_audit->cutoff,
+                                        bf_audit->max_cutoff,
+                                        bf_audit->requested_precision,
+                                        bf_audit->work_precision));
                     }
                 }
                 summary.outcome = ValidateRefineOutcome::proven;

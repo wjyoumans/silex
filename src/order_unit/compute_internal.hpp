@@ -76,7 +76,8 @@ const char* validate_refine_outcome_profile_label(
         ValidateRefineOutcome outcome) noexcept;
 
 // `unconditional` reports whether the product came from an unconditional
-// route (see zeta_class_regulator_product_with_diagnostics).
+// route, and `bf_audit` receives the Belabas-Friedman audit data when it did
+// not (see zeta_class_regulator_product_with_diagnostics).
 bool analytic_class_regulator_product_for_validation(
         flint::ArbRef out,
         const Order& order,
@@ -84,7 +85,8 @@ bool analytic_class_regulator_product_for_validation(
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
-        bool* unconditional = nullptr) noexcept;
+        bool* unconditional = nullptr,
+        ZetaBfRouteAudit* bf_audit = nullptr) noexcept;
 
 bool bf_class_regulator_product_for_validation(
         flint::ArbRef out,
@@ -149,14 +151,17 @@ public:
         }
 
         value_unconditional_ = false;
+        value_bf_audit_valid_ = false;
         valid_ = analytic_class_regulator_product_for_validation(
                          flint::ArbRef(value_), order, precision, diagnostics,
                          residue_degree_base,
                          cache_bf_residue_degrees ? &bf_residue_degree_cache_
                                                   : nullptr,
-                         &value_unconditional_)
+                         &value_unconditional_, &value_bf_audit_)
                 ? 1
                 : -1;
+        value_bf_audit_valid_ = valid_ > 0 && !value_unconditional_ &&
+                                order.degree() > 1;
         precision_ = precision;
         return valid_ > 0;
     }
@@ -169,8 +174,9 @@ public:
         precision_ = precision;
         valid_ = 1;
         // A seeded value (a Belabas-Friedman audit or a route estimate) is
-        // never an unconditional hR.
+        // never an unconditional hR, and carries no default-route audit.
         value_unconditional_ = false;
+        value_bf_audit_valid_ = false;
         validation_active_ = false;
     }
 
@@ -185,6 +191,15 @@ public:
     // validation enclosure, assume GRH and report false.
     bool value_unconditional() const noexcept {
         return !validation_active_ && valid_ > 0 && value_unconditional_;
+    }
+
+    // The Belabas-Friedman audit data of value() when it came from the
+    // default zeta route's Belabas-Friedman fallback (not the validation
+    // enclosure, not a seeded value); nullptr otherwise.
+    const ZetaBfRouteAudit* value_bf_audit() const noexcept {
+        return !validation_active_ && valid_ > 0 && value_bf_audit_valid_
+                ? &value_bf_audit_
+                : nullptr;
     }
 
     bool ensure_validation(
@@ -241,16 +256,6 @@ public:
 
     slong validation_work_precision() const noexcept {
         return validation_work_precision_;
-    }
-
-    // Max cutoff and requested precision of the active validation
-    // enclosure; meaningful only while validation_active().
-    ulong validation_computed_max_cutoff() const noexcept {
-        return validation_computed_max_cutoff_;
-    }
-
-    slong validation_precision() const noexcept {
-        return validation_precision_;
     }
 
     bool ensure_bf_audit(const Order& order,
@@ -343,6 +348,8 @@ private:
     slong precision_ = 0;
     int valid_ = 0;
     bool value_unconditional_ = false;
+    ZetaBfRouteAudit value_bf_audit_;
+    bool value_bf_audit_valid_ = false;
     flint::Arb bf_value_;
     flint::Arb bf_error_bound_;
     ulong bf_cutoff_ = 0;

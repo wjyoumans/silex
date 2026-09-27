@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -2010,6 +2011,167 @@ int test_random_quadratic_h4_proven_pair() {
     return 0;
 }
 
+// Decision 2026-09-27 "T-053 follow-up": a `grh` cubic transaction is
+// accepted by the analytic index-one test against the default zeta route's
+// Belabas-Friedman hR.  It records that check as `grh` together with the
+// Belabas-Friedman audit data, and both labels stay `grh`.
+int test_grh_cubic_records_bf_audit() {
+    const slong cubic[] = {-1, -1, 0};
+    const char* name = "grh cubic x^3 - x - 1 BF audit record";
+
+    FieldSetup setup = setup_from_coefficients(cubic, 3);
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::grh)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+    // A `grh` request never evaluates the Belabas-Friedman validation
+    // enclosure, so this cutoff is not the one recorded below.
+    options.zeta_bf_max_cutoff = 5000;
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)) &&
+           sflint::fmpz_is_one(sflint::FmpzConstRef(class_order)));
+    assert(units.is_set() && units.free_rank() == 1);
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    assert(class_group.unit_proof_status() ==
+           silex::ProofState::not_checked);
+    assert(class_group.regulator_proof_status() ==
+           silex::ProofState::not_checked);
+
+    assert(class_group.analytic_class_regulator_status() ==
+           silex::ProofState::verified);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::grh);
+    assert(class_group.zeta_bf_proof_status() ==
+           silex::ProofState::verified);
+    const std::optional<silex::ClassGroupZetaBfProofRecord> record =
+            class_group.zeta_bf_proof_record();
+    assert(record.has_value());
+    // The default zeta route's maximum cutoff (zeta.cpp kBfDefaultMaxCutoff).
+    assert(record->max_cutoff == 20000);
+    assert(record->cutoff > 0 && record->cutoff <= record->max_cutoff);
+    assert(record->requested_precision > 0);
+    assert(record->work_precision >= record->requested_precision);
+    assert(sflint::arb_is_finite(record->error_bound));
+    assert(!sflint::arb_is_negative(record->error_bound));
+    return 0;
+}
+
+// Decision 2026-09-27 "T-053 follow-up", N1: a real-quadratic `grh`
+// transaction records its unconditional L(1, chi) check as `proven` but
+// never promotes its own labels.  A later explicit
+// try_certify_with_units(proven) with proven units may use that stored
+// record to promote the class group to `proven`; this is the one exception
+// to "the record never promotes labels".  Q(sqrt(10)): h = 2, class group
+// Z/2, fundamental unit 3 + sqrt(10), regulator 1.8184464592320668...
+// (GP 2.17 quadclassunit(40) and bnfinit(x^2 - 10, 1)).
+int test_real_quadratic_grh_record_and_later_promotion() {
+    const slong quadratic[] = {-10, 0};
+    const char* name = "grh real quadratic x^2 - 10 record";
+
+    FieldSetup setup = setup_from_coefficients(quadratic, 2);
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::grh)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)) &&
+           sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order), 2) == 0);
+    assert(class_group.invariant_count() == 1);
+    sflint::Fmpz invariant;
+    assert(class_group.invariant(sflint::FmpzRef(invariant), 0) &&
+           sflint::fmpz_cmp_ui(sflint::FmpzConstRef(invariant), 2) == 0);
+    assert(units.is_set() && units.free_rank() == 1);
+
+    // log(3 + sqrt(10)).
+    sflint::Arb expected_regulator;
+    ::arb_sqrt_ui(expected_regulator.raw(), 10, 128);
+    ::arb_add_ui(expected_regulator.raw(), expected_regulator.raw(), 3, 128);
+    ::arb_log(expected_regulator.raw(), expected_regulator.raw(), 128);
+    sflint::Arb regulator;
+    assert(units.regulator(sflint::ArbRef(regulator)));
+    ::arb_abs(regulator.raw(), regulator.raw());
+    assert(::arb_overlaps(regulator.raw(), expected_regulator.raw()) != 0);
+
+    // The transaction records the unconditional check and keeps `grh`.
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    assert(class_group.analytic_class_regulator_status() ==
+           silex::ProofState::verified);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::proven);
+    assert(class_group.zeta_bf_proof_status() ==
+           silex::ProofState::not_checked);
+    assert(class_group.unit_proof_status() ==
+           silex::ProofState::not_checked);
+
+    // The transaction's own `grh` units cannot promote the class group.
+    assert(!class_group.try_certify_with_units(
+            units, silex::CertificationMode::proven, 128));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+
+    // Separately proven units for the same order may: the stored
+    // unconditional record, verified factor-base generation, and the
+    // proven units satisfy try_certify_with_units(proven).
+    silex::ClassGroupContext proven_class_group;
+    silex::OrderUnitGroup proven_units;
+    silex::ClassGroupComputeOptions proven_options = options;
+    proven_options.requested_certification =
+            silex::CertificationMode::proven;
+    if (!proven_units.compute_with_class_group(
+                proven_class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), proven_options,
+                128)) {
+        std::cerr << name << ": proven unit computation failed\n";
+        return 1;
+    }
+    assert(proven_units.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(class_group.try_certify_with_units(
+            proven_units, silex::CertificationMode::proven, 128));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(class_group.unit_proof_status() == silex::ProofState::verified);
+    assert(class_group.regulator_proof_status() ==
+           silex::ProofState::verified);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::proven);
+    // try_certify_with_units changes only the class group.
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -2023,5 +2185,7 @@ int main() {
     status |= test_higher_degree_completion_boundaries();
     status |= test_expanded_random_class_group_candidates();
     status |= test_random_quadratic_h4_proven_pair();
+    status |= test_grh_cubic_records_bf_audit();
+    status |= test_real_quadratic_grh_record_and_later_promotion();
     return status;
 }

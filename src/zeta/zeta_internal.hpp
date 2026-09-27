@@ -49,6 +49,20 @@ struct ZetaBfResidueDegreeCache {
     std::size_t lookup_hint = 0;
 };
 
+// Audit data of the Belabas-Friedman evaluation behind a default-route
+// zeta product: the truncation error bound added to the log residue (valid
+// under GRH, Belabas-Friedman 2015, Theorem 1), the cutoff used, the
+// maximum cutoff the default route allows, and the requested and working
+// precisions.  The default route does not require the error bound to meet
+// the precision target, so `cutoff` may equal `max_cutoff`.
+struct ZetaBfRouteAudit {
+    flint::Arb error_bound;
+    ulong cutoff = 0;
+    ulong max_cutoff = 0;
+    slong requested_precision = 0;
+    slong work_precision = 0;
+};
+
 bool grh_factor_base_bound_with_diagnostics(
         flint::FmpzRef out,
         const Order& order,
@@ -59,6 +73,9 @@ bool grh_factor_base_bound_with_diagnostics(
 // (explicit quadratic backend, maximal order, |D| fitting a ulong).  It is
 // false when the product came from the Belabas-Friedman fallback, whose error
 // bound assumes GRH for zeta_K and zeta_Q (Belabas-Friedman 2015, Theorem 1).
+// `bf_audit`, when given, receives the audit data of that fallback; it is
+// written only on success on the fallback route and left unchanged
+// otherwise.
 bool zeta_class_regulator_product_with_diagnostics(
         flint::ArbRef out,
         const Order& order,
@@ -66,7 +83,8 @@ bool zeta_class_regulator_product_with_diagnostics(
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base = nullptr,
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
-        bool* unconditional = nullptr) noexcept;
+        bool* unconditional = nullptr,
+        ZetaBfRouteAudit* bf_audit = nullptr) noexcept;
 
 // True when `zeta_class_regulator_product` has an unconditional route for
 // `order`: degree one, or the quadratic L(1, chi) route preconditions.  The

@@ -63,22 +63,26 @@ public:
     // class/unit pair (decision 2026-09-27 "T-053 GRH-mode analytic
     // record").  The record is informational: it sets
     // `analytic_class_regulator_status` to `verified` with the
-    // conditionality of the hR that was used (`hr_unconditional` for
-    // degree one or the quadratic L(1, chi) route, GRH for a
-    // Belabas-Friedman hR) and never changes the class-group or unit
-    // certification labels, the unit/regulator proof states, or any other
-    // proof record.  A Belabas-Friedman check recorded here never serves as
+    // conditionality of the hR that was used (`hr_unconditional` for the
+    // quadratic L(1, chi) route, GRH for a Belabas-Friedman hR; degree one
+    // takes the exact route and never reaches this record) and never
+    // changes the class-group or unit certification labels, the
+    // unit/regulator proof states, or any other proof record.  A Belabas-Friedman check recorded here never serves as
     // a proof component.  The caller must have accepted the pair by the
     // analytic index-one test against that hR; the exact imaginary-quadratic
-    // route, which uses no analytic value, records nothing.
+    // route, which uses no analytic value, records nothing.  An
+    // unconditional record stored here can later let an explicit
+    // try_certify_with_units(proven) promote the class group (see
+    // analytic_class_regulator_certification() in class_group.hpp); this
+    // call itself never promotes.
     static void record_grh_acceptance_analytic_check(
             ClassGroupContext& context,
             bool hr_unconditional) noexcept;
 
     // Adds the Belabas-Friedman audit data (error bound, cutoff, and
     // precisions) of the hR used by record_grh_acceptance_analytic_check()
-    // when that hR was a Belabas-Friedman validation enclosure.  Like that
-    // record, it never changes certification labels.
+    // when that hR was the default zeta route's Belabas-Friedman fallback.
+    // Like that record, it never changes certification labels.
     static bool record_grh_acceptance_bf_audit(
             ClassGroupContext& context,
             flint::ArbConstRef error_bound,

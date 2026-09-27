@@ -2133,18 +2133,37 @@ bool bf_log_residue_cutoff(flint::ArbRef out,
     return true;
 }
 
+// `audit`, when given, receives the audit data of the evaluation; it is
+// written only on success.
 bool bf_log_residue_default(flint::ArbRef out,
                             const Order& order,
                             slong precision,
                             const DiagnosticsContext* diagnostics,
                             const FactorBase* residue_degree_base = nullptr,
                             detail::ZetaBfResidueDegreeCache*
-                                    residue_degree_cache = nullptr)
+                                    residue_degree_cache = nullptr,
+                            detail::ZetaBfRouteAudit* audit = nullptr)
         noexcept {
-    return bf_log_residue_cutoff(out, order, kBfDefaultMaxCutoff, false,
-                                 nullptr, nullptr, nullptr, precision,
-                                 diagnostics, residue_degree_base,
-                                 residue_degree_cache);
+    if (audit == nullptr) {
+        return bf_log_residue_cutoff(out, order, kBfDefaultMaxCutoff, false,
+                                     nullptr, nullptr, nullptr, precision,
+                                     diagnostics, residue_degree_base,
+                                     residue_degree_cache);
+    }
+    flint::ArbRef audit_error_bound(audit->error_bound);
+    ulong cutoff = 0;
+    slong work_precision = 0;
+    if (!bf_log_residue_cutoff(out, order, kBfDefaultMaxCutoff, false,
+                               &audit_error_bound, &cutoff, &work_precision,
+                               precision, diagnostics, residue_degree_base,
+                               residue_degree_cache)) {
+        return false;
+    }
+    audit->cutoff = cutoff;
+    audit->max_cutoff = kBfDefaultMaxCutoff;
+    audit->requested_precision = precision;
+    audit->work_precision = work_precision;
+    return true;
 }
 
 }  // namespace
@@ -2152,7 +2171,9 @@ bool bf_log_residue_default(flint::ArbRef out,
 // `unconditional`, when given, reports the route that produced the residue:
 // true for degree one and for the quadratic L(1, chi) route, both of which
 // are unconditional, and false for the Belabas-Friedman fallback, whose
-// error bound assumes GRH (Belabas-Friedman 2015, Theorem 1).
+// error bound assumes GRH (Belabas-Friedman 2015, Theorem 1).  `bf_audit`,
+// when given, receives the audit data of that fallback; it is written only
+// when the call succeeds on the fallback route.
 bool zeta_residue_impl(flint::ArbRef out,
                        const Order& order,
                        slong precision,
@@ -2160,7 +2181,8 @@ bool zeta_residue_impl(flint::ArbRef out,
                        const FactorBase* residue_degree_base = nullptr,
                        detail::ZetaBfResidueDegreeCache*
                                residue_degree_cache = nullptr,
-                       bool* unconditional = nullptr)
+                       bool* unconditional = nullptr,
+                       detail::ZetaBfRouteAudit* bf_audit = nullptr)
         noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.residue");
@@ -2173,6 +2195,7 @@ bool zeta_residue_impl(flint::ArbRef out,
 
     flint::Arb result;
     bool route_unconditional = true;
+    detail::ZetaBfRouteAudit local_audit;
     if (order.degree() == 1) {
         flint::arb_one(result);
     } else if (!quadratic_residue(result, order, precision)) {
@@ -2181,7 +2204,9 @@ bool zeta_residue_impl(flint::ArbRef out,
         if (!bf_log_residue_default(flint::ArbRef(log_residue),
                                     order, precision, diagnostics,
                                     residue_degree_base,
-                                    residue_degree_cache)) {
+                                    residue_degree_cache,
+                                    bf_audit != nullptr ? &local_audit
+                                                        : nullptr)) {
             return false;
         }
         flint::arb_exp(result, log_residue, precision);
@@ -2194,6 +2219,9 @@ bool zeta_residue_impl(flint::ArbRef out,
     flint::arb_set(out, flint::ArbConstRef(result));
     if (unconditional != nullptr) {
         *unconditional = route_unconditional;
+    }
+    if (bf_audit != nullptr && !route_unconditional) {
+        *bf_audit = std::move(local_audit);
     }
     return true;
 }
@@ -2355,7 +2383,8 @@ bool zeta_class_regulator_product_impl(
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base = nullptr,
         detail::ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
-        bool* unconditional = nullptr)
+        bool* unconditional = nullptr,
+        detail::ZetaBfRouteAudit* bf_audit = nullptr)
         noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.class_regulator_product");
@@ -2368,13 +2397,16 @@ bool zeta_class_regulator_product_impl(
 
     flint::Arb result;
     bool route_unconditional = true;
+    detail::ZetaBfRouteAudit local_audit;
     if (order.degree() == 1) {
         flint::arb_one(result);
     } else {
         flint::Arb residue;
         if (!zeta_residue_impl(flint::ArbRef(residue), order, precision,
                                diagnostics, residue_degree_base,
-                               residue_degree_cache, &route_unconditional) ||
+                               residue_degree_cache, &route_unconditional,
+                               bf_audit != nullptr ? &local_audit
+                                                   : nullptr) ||
             !class_regulator_product_from_residue(
                     flint::ArbRef(result), order, flint::ArbConstRef(residue),
                     precision, diagnostics)) {
@@ -2385,6 +2417,9 @@ bool zeta_class_regulator_product_impl(
     flint::arb_set(out, flint::ArbConstRef(result));
     if (unconditional != nullptr) {
         *unconditional = route_unconditional;
+    }
+    if (bf_audit != nullptr && !route_unconditional) {
+        *bf_audit = std::move(local_audit);
     }
     return true;
 }
@@ -2533,12 +2568,13 @@ bool zeta_class_regulator_product_with_diagnostics(
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
         ZetaBfResidueDegreeCache* residue_degree_cache,
-        bool* unconditional) noexcept {
+        bool* unconditional,
+        ZetaBfRouteAudit* bf_audit) noexcept {
     return zeta_class_regulator_product_impl(out, order, precision,
                                             diagnostics,
                                             residue_degree_base,
                                             residue_degree_cache,
-                                            unconditional);
+                                            unconditional, bf_audit);
 }
 
 bool zeta_unconditional_route_available(const Order& order) noexcept {
