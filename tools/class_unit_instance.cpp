@@ -316,8 +316,7 @@ struct ZetaBfAuditOutcome {
 // `proven` (no change) and add only the GRH-conditional analytic record.
 // Equivalently, this only runs the audit for `requested_certification ==
 // proven`. A `grh`-mode transaction needs no audit: it records the analytic
-// check that accepted it by itself (decision 2026-09-27, "T-053 GRH-mode
-// analytic record").
+// check that accepted it by itself.
 ZetaBfAuditOutcome run_zeta_bf_audit_if_requested(
         silex::ClassGroupContext& class_group,
         silex::OrderUnitGroup& units,

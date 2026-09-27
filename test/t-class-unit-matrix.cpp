@@ -2011,10 +2011,10 @@ int test_random_quadratic_h4_proven_pair() {
     return 0;
 }
 
-// Decision 2026-09-27 "T-053 follow-up": a `grh` cubic transaction is
-// accepted by the analytic index-one test against the default zeta route's
-// Belabas-Friedman hR.  It records that check as `grh` together with the
-// Belabas-Friedman audit data, and both labels stay `grh`.
+// A `grh` cubic transaction is accepted by the analytic index-one test
+// against the default zeta route's Belabas-Friedman hR.  It records that
+// check as `grh` together with the Belabas-Friedman audit data, and both
+// labels stay `grh`.
 int test_grh_cubic_records_bf_audit() {
     const slong cubic[] = {-1, -1, 0};
     const char* name = "grh cubic x^3 - x - 1 BF audit record";
@@ -2072,8 +2072,8 @@ int test_grh_cubic_records_bf_audit() {
     return 0;
 }
 
-// Decision 2026-09-27 "T-053 follow-up", N1: a real-quadratic `grh`
-// transaction records its unconditional L(1, chi) check as `proven` but
+// A real-quadratic `grh` transaction records its unconditional L(1, chi)
+// check as `proven` but
 // never promotes its own labels.  A later explicit
 // try_certify_with_units(proven) with proven units may use that stored
 // record to promote the class group to `proven`; this is the one exception

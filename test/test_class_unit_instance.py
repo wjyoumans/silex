@@ -270,8 +270,7 @@ def main() -> int:
             ]
         # The instance JSON always reports the GRH dependence of the
         # analytic hR check (ClassGroup::analytic_class_regulator_
-        # certification(), decision 2026-09-26 "T-012 public gates and
-        # GRH accessor"), whether or not that check was exercised.
+        # certification()), whether or not that check was exercised.
         assert "analytic_class_regulator_certification" in (
             proven_instance["class_group"]
         )
@@ -354,9 +353,8 @@ def main() -> int:
         # the exact imaginary-quadratic `grh` route: the index comes from
         # the exact class number, not from an analytic hR, and its GRH
         # dependence is in factor-base generation (checked only up to the
-        # GRH bound). By decision 2026-09-27 ("T-053 GRH-mode analytic
-        # record") that route records no analytic check, so these rows stay
-        # `not_checked`/`unknown`. The grh routes that do use the analytic
+        # GRH bound). That route records no analytic check, so these rows
+        # stay `not_checked`/`unknown`. The grh routes that do use the analytic
         # index-one test (cubic, real quadratic) are checked below.
         assert grh_instance["class_group"][
             "analytic_class_regulator_status"
@@ -476,8 +474,8 @@ def main() -> int:
         # `grh`-requested run, mismatching the top-level
         # `certification_status` (already fixed by the transaction, before
         # any audit runs). Checked here on this row's own higher-degree
-        # field under `--mode grh` (regression for T-044 round-2 blocker
-        # B1); the degree-one case is checked separately below.
+        # field under `--mode grh`; the degree-one case is checked
+        # separately below.
         grh_audited_instance = run_json(
             [
                 str(args.exe),
@@ -501,12 +499,10 @@ def main() -> int:
             "wall_ms": None,
         }
         # The `grh` transaction itself records the analytic index-one check
-        # that accepted the pair (decision 2026-09-27, "T-053 GRH-mode
-        # analytic record"): a Belabas-Friedman hR, so `grh`, together with
-        # that evaluation's BF audit data (decision 2026-09-27, "T-053
-        # follow-up"; the record's contents are checked in
-        # t-class-unit-matrix.cpp). The record is informational and leaves
-        # the labels and the unit/regulator proof states alone.
+        # that accepted the pair: a Belabas-Friedman hR, so `grh`, together
+        # with that evaluation's BF audit data (the record's contents are
+        # checked in t-class-unit-matrix.cpp). The record is informational
+        # and leaves the labels and the unit/regulator proof states alone.
         assert grh_audited_instance["class_group"][
             "analytic_class_regulator_status"
         ] == "verified"
@@ -578,7 +574,7 @@ def main() -> int:
     ] == "not_checked"
 
     # A requested audit that runs but does not succeed is reported as
-    # ran/failed, distinct from not requested or skipped (T-044 S4). This
+    # ran/failed, distinct from not requested or skipped. This
     # pins the current outcome for x^2 + 5 in `proven` mode. The BF
     # evaluation and the index-one check pass; the gate then fails in
     # ClassGroupContext::try_promote_proven_certification_: the exact

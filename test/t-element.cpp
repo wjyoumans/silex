@@ -203,7 +203,7 @@ void assert_power_answer_consistent(const silex::Element& value,
     }
 }
 
-// Regression (T-027): a lifted candidate of norm +-1 passes the norm
+// Regression: a lifted candidate of norm +-1 passes the norm
 // pre-check, and verifying it formed candidate^n for n near 2^40 or 2^60,
 // which did not finish.  The height pre-check (n log M(P_c) <= log M(P_a) + 1)
 // now rejects such candidates before powering.  None of these units is an
@@ -341,7 +341,7 @@ silex::Element element_from_fraction(
     return element;
 }
 
-// Regression (T-034): non-integral powers whose roots have norm +-1 were
+// Regression: non-integral powers whose roots have norm +-1 were
 // never found.  The Hensel reconstruction recovers f'(theta) c in Z[theta],
 // which needs an integral root c.  The reference is_power
 // (src/NumField/NfAbs/Elem.jl) solves y^n = a d^n for the denominator d of a

@@ -677,7 +677,7 @@ int test_order_keeps_parent_alive() {
     return 0;
 }
 
-// Maximality is computed, never asserted (T-030).  Order has no accessible
+// Maximality is computed, never asserted.  Order has no accessible
 // member that marks or withdraws maximality; each concept must be false.
 template <typename T>
 concept can_set_maximality = requires(T& order, bool value) {
@@ -695,7 +695,7 @@ static_assert(!can_set_maximality<silex::Order>);
 static_assert(!can_record_maximality<silex::Order>);
 static_assert(!can_clear_maximality<silex::Order>);
 
-// The T-014 review probe began by labelling Z[sqrt(5)] maximal, which let a
+// A probe that begins by labelling Z[sqrt(5)] maximal must not let a
 // unit-index proof accept 2 + sqrt(5) as fundamental.  Through the public API
 // the equation order stays non-maximal in every handle and copy, and the only
 // maximal label comes from computing the maximal order, which is strictly

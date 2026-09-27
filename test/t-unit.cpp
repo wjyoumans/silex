@@ -413,8 +413,8 @@ void assert_roots_of_unity(const silex::NumberField& field,
 //
 //     for(n=3,30, print(n, " ", nfrootsof1(nfinit(polcyclo(n)))[1]))
 //
-// Before T-038, Q(zeta_9) returned w = 6 (true 18) and every n with a prime
-// factor >= 5 failed.
+// This used to return w = 6 for Q(zeta_9) (true 18) and fail for every n
+// with a prime factor >= 5.
 int test_roots_of_unity_cyclotomic_fields() {
     const ulong expected_w[31] = {
             0,  0,  0,  6,  4,  10, 6,  14, 8,  18, 10,
@@ -449,7 +449,7 @@ int test_roots_of_unity_noncyclotomic_presentations() {
     const slong zeta12[] = {13, -8, 11, -4, 1};
     assert_roots_of_unity(integer_polynomial_field(zeta12, 5), 12);
 
-    // Q(zeta_5): w = 10.  Before T-043 this failed closed (no root finder
+    // Q(zeta_5): w = 10.  This used to fail closed (no root finder
     // for zeta_5 outside cyclotomic-translate presentations); the Hensel
     // search for Phi_5 now finds it.
     const slong zeta5[] = {11, 7, 9, 3, 1};
@@ -554,10 +554,10 @@ int test_roots_of_unity_nonmonic_presentations() {
 }
 
 // Q(zeta_40) as T = charpoly(Mod(x + 3*x^2 + x^3, polcyclo(40))) in GP 2.17.4
-// (the T-043 presentation "40_3"), with w = 40 from nfrootsof1.  The good-prime
+// (the "40_3" presentation), with w = 40 from nfrootsof1.  The good-prime
 // gcd stays at 120 for more than n + 20 = 36 consecutive good primes, where
 // the stopping rule of reference `guess_roots` alone stops, and 120 cannot be
-// reduced, so this failed closed before T-054.  phi(120) = 32 does not divide
+// reduced, so this used to fail closed.  phi(120) = 32 does not divide
 // n = 16, so the reset of reference `_torsion_group_order_divisor` keeps the
 // search going until the gcd reaches 40.  -T(3x) is the same field with a
 // non-monic defining polynomial with negative leading coefficient.
@@ -980,17 +980,18 @@ int test_lower_regulator_bound_maximum() {
     assert(::arb_is_exact(value.raw()) != 0);
     assert(::arf_equal(arb_midref(value.raw()), expected.raw()) != 0);
 
-    // The five T-029 fields (GP 2.17 bnfinit(f, 1); w = 2 and
-    // bnfcertify = 1 for each).  Index bound floor(R / R_lower) uses
-    // Friedman Table 6: (3,0) 0.52, (2,1) 0.36, (3,1) 0.62.
-    struct T029Field {
+    // Five fields that need the unbounded auxiliary-prime search to prove
+    // their unit index (GP 2.17 bnfinit(f, 1); w = 2 and bnfcertify = 1 for
+    // each).  Index bound floor(R / R_lower) uses Friedman Table 6:
+    // (3,0) 0.52, (2,1) 0.36, (3,1) 0.62.
+    struct FriedmanIndexBoundField {
         slong coefficients[6];
         slong length;
         ulong table_entry;
         const char* regulator;
         slong index_bound;
     };
-    const T029Field fields[] = {
+    const FriedmanIndexBoundField fields[] = {
             {{-1, -8, -4, 1}, 4, 5200,
              "12.68082022713452093603368239737775544244", 24},
             {{-3, 2, 1, 4, 1}, 5, 3600,
@@ -999,7 +1000,7 @@ int test_lower_regulator_bound_maximum() {
             {{4, 1, 3, -8, 1}, 5, 3600, "28.9150416062", 80},
             {{3, -3, -3, -6, -7, 1}, 6, 6200, "734.654033002", 1184},
     };
-    for (const T029Field& entry : fields) {
+    for (const FriedmanIndexBoundField& entry : fields) {
         silex::NumberField field =
                 integer_polynomial_field(entry.coefficients, entry.length);
         assert(silex::unit_lower_regulator_bound(sflint::ArbRef(value), field,

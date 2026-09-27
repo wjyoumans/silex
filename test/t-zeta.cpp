@@ -535,12 +535,12 @@ int test_hR_ground_truth() {
             // x^4 - x^2 + 1 (Phi_12), disc 144, w = 12, h = 1
             {{1, 0, -1, 0, 1}, 5,
              "1.3169578969248167086250463473079684440"},
-            // x^6 - x^3 + 1 (Phi_9), disc -19683, w = 18, h = 1.  Before
-            // T-038 Silex used w = 6 here and returned hR / 3.
+            // x^6 - x^3 + 1 (Phi_9), disc -19683, w = 18, h = 1.  This used
+            // to use w = 6 here and return hR / 3.
             {{1, 0, 0, -1, 0, 0, 1}, 7,
              "3.3971498025847701145790480197497869449"},
-            // Phi_7, disc -16807, w = 14, h = 1.  Before T-038 the w search
-            // failed here.
+            // Phi_7, disc -16807, w = 14, h = 1.  The w search used to fail
+            // here.
             {{1, 1, 1, 1, 1, 1, 1}, 7,
              "2.1018187284902895533553041817932980382"},
     };

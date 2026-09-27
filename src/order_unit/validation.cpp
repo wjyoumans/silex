@@ -1115,8 +1115,7 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                 // Minkowski-type bound (validation_index_bound_from_product),
                 // so GRH enters only through a Belabas-Friedman hR.
                 if (!exact_quadratic_index) {
-                    // Decision 2026-09-27 "T-053 GRH-mode analytic record":
-                    // record the analytic check that accepted the pair, with
+                    // Record the analytic check that accepted the pair, with
                     // its own conditionality.  Informational only; the
                     // labels stay `grh`.  The exact imaginary-quadratic
                     // index uses no analytic value and records nothing.

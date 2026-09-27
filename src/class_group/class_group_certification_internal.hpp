@@ -60,8 +60,7 @@ public:
             bool hr_unconditional) noexcept;
 
     // Records the analytic index-one check that accepted a `grh`-requested
-    // class/unit pair (decision 2026-09-27 "T-053 GRH-mode analytic
-    // record").  The record is informational: it sets
+    // class/unit pair.  The record is informational: it sets
     // `analytic_class_regulator_status` to `verified` with the
     // conditionality of the hR that was used (`hr_unconditional` for the
     // quadratic L(1, chi) route, GRH for a Belabas-Friedman hR; degree one

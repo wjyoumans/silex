@@ -1106,8 +1106,8 @@ std::vector<std::string> enum_brute_force(const fmpz_mat_t basis,
     return enum_brute_force(basis, bound.raw(), radius);
 }
 
-// T-001 review finding F1: a double-route range failure after callbacks used
-// to restart on the Arb route and deliver the same vectors again.
+// Regression: a double-route range failure used to restart on the Arb route
+// and deliver the same vectors again.
 int test_short_vector_enum_no_duplicate_restart() {
     silex::flint::FmpzMat basis(3, 3);
     fmpz_one(fmpz_mat_entry(basis.raw(), 0, 0));
@@ -1132,7 +1132,7 @@ int test_short_vector_enum_no_duplicate_restart() {
 
     // A capped call whose uncapped coordinate interval is far outside the
     // slong range: the interval center (about 1e19 here) must be clamped in
-    // double before any integer conversion (T-019 review B1).  The double
+    // double before any integer conversion.  The double
     // route's 2^-40 relative bound slack admits extra rows at this size, so
     // require a duplicate-free superset of the exact set.
     {

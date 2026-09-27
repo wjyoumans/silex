@@ -214,7 +214,9 @@ RootRefinementStatus refine_roots_from_initial(
         // calling FLINT acb_poly_find_roots with the previous root vector as
         // initial approximations, then validates the result.  Unlike the
         // reference, which re-sorts with _acb_vec_sort_pretty, the refined
-        // roots are matched back to the previous place order (T-022).
+        // roots are matched back to the previous place order by overlap
+        // instead of resorted, so a place's index stays tied to the same
+        // root across refinements and does not depend on sort order.
         const slong max_iterations =
                 FLINT_MIN(FLINT_MAX(degree, work_precision / 4),
                           work_precision);

@@ -44,8 +44,8 @@ inline NumberField field_by_polynomial(
 // by |Im| and falls back to the real part only when the |Im| difference ball
 // contains zero.  With roots accurate to about 64 bits the difference is
 // unresolved and A sorts first; with roots accurate to 512 bits it is resolved
-// and B sorts first.  The pre-T-022 refine path re-sorted the refined roots
-// with that comparator, so a 64 -> 512 refine swapped the two complex places;
+// and B sorts first.  A refine path that re-sorts the refined roots with
+// that comparator lets a 64 -> 512 refine swap the two complex places;
 // the place-order tests in t-embedding.cpp and t-archimedean.cpp failed on
 // that code.
 inline NumberField close_imaginary_pairs_field() noexcept {
