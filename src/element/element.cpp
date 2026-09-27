@@ -2303,104 +2303,22 @@ bool try_pure_power_root_at_prime(
     return false;
 }
 
-bool pure_power_hensel_root(bool& is_power,
-                                  Element& root,
-                                  const Element& input,
-                                  slong exponent,
-                                  const DiagnosticsContext* diagnostics) noexcept {
-    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                        "element.power_hensel_root");
-    // Private port of reference `_roots_hensel(y^n - a, ispure=true,
-    // is_normal=true)` for monic integral degree < 10 fields.  The result is
-    // published only after exact verification; unported cases remain
-    // unsupported.
-    const NumberField* parent = input.parent();
-    if (parent == nullptr || parent->degree() <= 1 ||
-        parent->degree() >= 10 || exponent <= 1) {
-        return false;
-    }
-
-    flint::FmpqPoly element_polynomial;
-    {
-        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                            "element.power_hensel_input_polynomial");
-        if (!input.get_fmpq_poly(flint::FmpqPolyRef(element_polynomial))) {
-            return false;
-        }
-    }
-
-    const nf_struct* raw_field = parent->raw_flint_field();
-    if (raw_field == nullptr ||
-        !fmpq_poly_is_monic_integral(raw_field->pol)) {
-        return false;
-    }
-
-    // The lifted candidate is reconstructed as f'(theta) c in Z[theta], which
-    // holds for every integral c.  Following reference
-    // `src/NumField/NfAbs/Elem.jl:is_power(::AbsSimpleNumFieldElem, ::Int)`,
-    // a non-integral input a is replaced by a d^n, with d the denominator of
-    // a in the power basis, and a root y of y^n = a d^n gives the root y / d
-    // of a.  Since (y / d)^n = a exactly when y^n = a d^n, a residue disproof
-    // for a d^n disproves a.  Silex rescales only when a is not an algebraic
-    // integer, since otherwise every root is integral and already
-    // reconstructible.  `radicand` and `root_scale` default to the unscaled
-    // input and no scale (nullptr means "scale by 1"), so the integral path
-    // (the common case) pays no extra Element construction, copy, or
-    // multiply-by-one.
-    const Element* radicand = &input;
-    const Element* root_scale = nullptr;
-    Element scaled_radicand;
-    Element scale;
-    if (fmpz_is_one(element_polynomial.raw()->den) == 0) {
-        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                            "element.power_hensel_denominator");
-        flint::Fmpz leading;
-        if (!primitive_characteristic_leading_coefficient(leading, input)) {
-            return false;
-        }
-        if (fmpz_is_one(leading.raw()) == 0) {
-            // Silex pre-filter, not in the reference: it only returns
-            // unsupported, so it never changes a definite answer.  With lc(P)
-            // as in primitive_characteristic_leading_coefficient,
-            // lc(P_a) = lc(P_c)^n when c^n = a, because the finite-place
-            // terms d_v log max(1, |c|_v) scale by n.  A non-integral a has
-            // only non-integral roots, whose lc is at least 2.  So lc(P_a)
-            // must be an exact n-th power of an integer >= 2, which also
-            // bounds n by log_2 lc(P_a) and hence the size of d^n.
-            flint::Fmpz lc_root;
-            flint::Fmpz one;
-            fmpz_one(one.raw());
-            if (fmpz_cmp_ui(leading.raw(),
-                            static_cast<ulong>(1)) <= 0 ||
-                static_cast<ulong>(exponent) >= fmpz_bits(leading.raw()) ||
-                fmpz_root(lc_root.raw(), leading.raw(), exponent) == 0) {
-                return false;
-            }
-
-            flint::Fmpq inverse_denominator;
-            fmpq_set_fmpz_frac(inverse_denominator.raw(), one.raw(),
-                               element_polynomial.raw()->den);
-            flint::FmpqPoly inverse_scale;
-            fmpq_poly_set_coeff_fmpq(inverse_scale.raw(), 0,
-                                     inverse_denominator.raw());
-
-            flint::Fmpz scale_by;
-            fmpz_pow_ui(scale_by.raw(), element_polynomial.raw()->den,
-                        static_cast<ulong>(exponent));
-            fmpq_poly_scalar_mul_fmpz(element_polynomial.raw(),
-                                      element_polynomial.raw(), scale_by.raw());
-            if (!scale.define(*parent) || !scaled_radicand.define(*parent) ||
-                !scale.set_fmpq_poly(
-                        flint::FmpqPolyConstRef(inverse_scale)) ||
-                !scaled_radicand.set_fmpq_poly(
-                        flint::FmpqPolyConstRef(element_polynomial))) {
-                return false;
-            }
-            radicand = &scaled_radicand;
-            root_scale = &scale;
-        }
-    }
-
+// Prime search and Hensel lift of pure_power_hensel_root for the radicand
+// `radicand` = input * d^n, whose power-basis coordinates are
+// `element_polynomial`; root_scale = 1/d, or nullptr when radicand is input
+// itself (d = 1).  A lifted root is published only after exact verification
+// against input.
+bool pure_power_hensel_prime_search(
+        bool& is_power,
+        Element& root,
+        const Element& radicand,
+        const Element& input,
+        const Element* root_scale,
+        const flint::FmpqPoly& element_polynomial,
+        const NumberField* parent,
+        const nf_struct* raw_field,
+        slong exponent,
+        const DiagnosticsContext* diagnostics) noexcept {
     flint::Fmpz prime;
     fmpz_set_ui(prime.raw(), 3);
     constexpr slong max_prime_attempts = 256;
@@ -2459,7 +2377,7 @@ bool pure_power_hensel_root(bool& is_power,
             }
             if (status == ResiduePowerStatus::power) {
                 if (try_pure_power_root_at_prime(
-                            root, *radicand, input, root_scale,
+                            root, radicand, input, root_scale,
                             element_polynomial, raw_field, prime,
                             field_polynomial, factor, ctx,
                             std::move(inverse_roots), exponent, diagnostics)) {
@@ -2472,6 +2390,119 @@ bool pure_power_hensel_root(bool& is_power,
     }
 
     return false;
+}
+
+bool pure_power_hensel_root(bool& is_power,
+                                  Element& root,
+                                  const Element& input,
+                                  slong exponent,
+                                  const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                        "element.power_hensel_root");
+    // Private port of reference `_roots_hensel(y^n - a, ispure=true,
+    // is_normal=true)` for monic integral degree < 10 fields.  The result is
+    // published only after exact verification; unported cases remain
+    // unsupported.
+    const NumberField* parent = input.parent();
+    if (parent == nullptr || parent->degree() <= 1 ||
+        parent->degree() >= 10 || exponent <= 1) {
+        return false;
+    }
+
+    flint::FmpqPoly element_polynomial;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                            "element.power_hensel_input_polynomial");
+        if (!input.get_fmpq_poly(flint::FmpqPolyRef(element_polynomial))) {
+            return false;
+        }
+    }
+
+    const nf_struct* raw_field = parent->raw_flint_field();
+    if (raw_field == nullptr ||
+        !fmpq_poly_is_monic_integral(raw_field->pol)) {
+        return false;
+    }
+
+    // The lifted candidate is reconstructed as f'(theta) c in Z[theta], which
+    // holds for every integral c.  Following reference
+    // `src/NumField/NfAbs/Elem.jl:is_power(::AbsSimpleNumFieldElem, ::Int)`,
+    // a non-integral input a is replaced by a d^n, with d the denominator of
+    // a in the power basis, and a root y of y^n = a d^n gives the root y / d
+    // of a.  Since (y / d)^n = a exactly when y^n = a d^n, a residue disproof
+    // for a d^n disproves a.  Silex rescales only when a is not an algebraic
+    // integer, since otherwise every root is integral and already
+    // reconstructible.  The scaled radicand and scale exist only on the
+    // rescaled branch, so the integral path (the common case) searches the
+    // input itself with no extra Element construction, copy, or
+    // multiply-by-one (a null root_scale means "scale by 1").
+    if (fmpz_is_one(element_polynomial.raw()->den) == 0) {
+        Element scaled_radicand;
+        Element scale;
+        bool rescaled = false;
+        {
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                                "element.power_hensel_denominator");
+            flint::Fmpz leading;
+            if (!primitive_characteristic_leading_coefficient(leading,
+                                                              input)) {
+                return false;
+            }
+            if (fmpz_is_one(leading.raw()) == 0) {
+                // Silex pre-filter, not in the reference: it only returns
+                // unsupported, so it never changes a definite answer.  With
+                // lc(P) as in primitive_characteristic_leading_coefficient,
+                // lc(P_a) = lc(P_c)^n when c^n = a, because the finite-place
+                // terms d_v log max(1, |c|_v) scale by n.  A non-integral a
+                // has only non-integral roots, whose lc is at least 2.  So
+                // lc(P_a) must be an exact n-th power of an integer >= 2,
+                // which also bounds n by log_2 lc(P_a) and hence the size of
+                // d^n.
+                flint::Fmpz lc_root;
+                flint::Fmpz one;
+                fmpz_one(one.raw());
+                if (fmpz_cmp_ui(leading.raw(),
+                                static_cast<ulong>(1)) <= 0 ||
+                    static_cast<ulong>(exponent) >= fmpz_bits(leading.raw()) ||
+                    fmpz_root(lc_root.raw(), leading.raw(), exponent) == 0) {
+                    return false;
+                }
+
+                flint::Fmpq inverse_denominator;
+                fmpq_set_fmpz_frac(inverse_denominator.raw(), one.raw(),
+                                   element_polynomial.raw()->den);
+                flint::FmpqPoly inverse_scale;
+                fmpq_poly_set_coeff_fmpq(inverse_scale.raw(), 0,
+                                         inverse_denominator.raw());
+
+                flint::Fmpz scale_by;
+                fmpz_pow_ui(scale_by.raw(), element_polynomial.raw()->den,
+                            static_cast<ulong>(exponent));
+                fmpq_poly_scalar_mul_fmpz(element_polynomial.raw(),
+                                          element_polynomial.raw(),
+                                          scale_by.raw());
+                if (!scale.define(*parent) ||
+                    !scaled_radicand.define(*parent) ||
+                    !scale.set_fmpq_poly(
+                            flint::FmpqPolyConstRef(inverse_scale)) ||
+                    !scaled_radicand.set_fmpq_poly(
+                            flint::FmpqPolyConstRef(element_polynomial))) {
+                    return false;
+                }
+                rescaled = true;
+            }
+        }
+        if (rescaled) {
+            return pure_power_hensel_prime_search(
+                    is_power, root, scaled_radicand, input, &scale,
+                    element_polynomial, parent, raw_field, exponent,
+                    diagnostics);
+        }
+    }
+
+    return pure_power_hensel_prime_search(
+            is_power, root, input, input, nullptr, element_polynomial,
+            parent, raw_field, exponent, diagnostics);
 }
 
 bool pure_square_hensel_root(bool& is_square,
