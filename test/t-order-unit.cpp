@@ -359,6 +359,37 @@ bool check_first_free_generator_is_order_unit(
            principal.is_one();
 }
 
+bool first_free_generator_is_pm_unit_power_pm1(
+        const silex::OrderUnitGroup& group,
+        const silex::Element& unit) noexcept {
+    const silex::NumberField* field = unit.parent();
+    if (field == nullptr) {
+        return false;
+    }
+
+    silex::FactoredElement compact(*field);
+    silex::Element expanded(*field);
+    silex::Element inverse(*field);
+    silex::Element candidate(*field);
+    if (!group.free_generator(compact, 0) || !compact.evaluate(expanded) ||
+        !inverse.invert(unit)) {
+        return false;
+    }
+    const silex::Element* bases[] = {&unit, &inverse};
+    for (const silex::Element* base : bases) {
+        if (expanded.equal(*base)) {
+            return true;
+        }
+        if (!candidate.negate(*base)) {
+            return false;
+        }
+        if (expanded.equal(candidate)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool set_quadratic_coeffs(silex::Element& out,
                           slong constant_num,
                           ulong constant_den,
@@ -648,6 +679,72 @@ int test_compute_with_class_group_real_quadratic() {
     assert(sqrt5_class_group.relation_saturation_status() ==
            silex::ProofState::verified);
     assert(check_real_quadratic_group(sqrt5_units, maximal, epsilon5));
+
+    return 0;
+}
+
+// A proven compute on a maximal order passes its relation-kernel units
+// through the index-bounded saturation pass
+// (set_relation_kernel_units_index_bounded_saturated) before
+// prove_index_bound, and that pass includes the torsion generator when
+// ell | w.  In Q(sqrt97), w = 2, so the ell = 2 pass runs with the torsion
+// column.  This pins the published generator, eps = 5604 + 569 sqrt97
+// (norm -1; reference GP 2.17.4: quadunit(97) = 5035 + 1138*w with
+// w = (1 + sqrt97)/2), and checks that the same class-group context replayed
+// through the public saturation pass has index bound at least 2 and is
+// changed by it to +-eps^(+-1), so drift in that pass or the proof shows up.
+int test_compute_with_class_group_proven_saturated_generator() {
+    silex::NumberField field = quadratic_field(97);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 256;
+    options.max_relations = 48;
+    options.requested_certification = silex::CertificationMode::proven;
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(class_group, order,
+                                          sflint::FmpzConstRef(bound),
+                                          options, 160));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(class_group.unit_proof_status() == silex::ProofState::verified);
+
+    silex::Element epsilon(field);
+    assert(set_quadratic_coeffs(epsilon, 5604, 1, 569, 1));
+    assert(check_real_quadratic_group(units, order, epsilon));
+
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup initial(order);
+    assert(initial.set_relation_kernel_units_index_bounded(
+            order, class_group, embeddings, 160, 160));
+    sflint::Fmpz index_bound;
+    assert(initial.regulator_index_bound(sflint::FmpzRef(index_bound), 160));
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(index_bound), 2) >= 0);
+
+    sflint::Fmpz aux_start;
+    sflint::Fmpz aux_max;
+    assert(set_fmpz_si(aux_start, 2));
+    assert(set_fmpz_si(aux_max, 31));
+    silex::OrderUnitGroup saturated(order);
+    bool changed = false;
+    bool stable = false;
+    assert(saturated.set_relation_kernel_units_index_bounded_saturated(
+            changed, stable, order, class_group, embeddings, 160, 160, 1,
+            sflint::FmpzConstRef(aux_start), sflint::FmpzConstRef(aux_max),
+            2));
+    assert(changed);
+    assert(first_free_generator_is_pm_unit_power_pm1(saturated, epsilon));
 
     return 0;
 }
@@ -2269,9 +2366,13 @@ int test_saturate_row_rank_zero_and_failures() {
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, 0), 1);
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(free_width, 0, 0), 1);
     assert(set_fmpz_si(not_prime, 4));
+    // A rejected row leaves the output flag and group untouched.
+    changed = true;
     assert(!copied.saturate_row(changed, group,
                                 sflint::FmpzMatConstRef(free_width), 0,
                                 sflint::FmpzConstRef(ell), embeddings, 128));
+    assert(changed);
+    assert(check_rank_zero_group(copied, degree_one_order, 2));
     assert(!copied.saturate_row(changed, group, sflint::FmpzMatConstRef(row),
                                 1, sflint::FmpzConstRef(ell), embeddings,
                                 128));
@@ -2337,6 +2438,29 @@ int test_residue_dlog_kernel_real_quadratic() {
             kernel, silex::PrimeIdealSpan(split.at(0), split.size()),
             sflint::FmpzConstRef(ell)));
     assert(sflint::fmpz_mat_ncols(kernel) == 1);
+
+    // Failure with ell = 2 | w = 2 leaves the output untouched: the prime
+    // above 2 has no ell-th-power residue character, both alone and after a
+    // prime above 7 whose torsion-extended column succeeds.
+    assert(set_fmpz_si(p, 2));
+    assert(set_fmpz_si(ell, 2));
+    silex::PrimeIdealList above_ell;
+    assert(silex::decompose_prime(above_ell, order, sflint::FmpzConstRef(p)));
+    assert(above_ell.size() == 1);
+    silex::PrimeIdeal mixed[2];
+    assert(mixed[0].define(order) && mixed[0].set(*split.at(0)));
+    assert(mixed[1].define(order) && mixed[1].set(*above_ell.at(0)));
+    sflint::FmpzMat sentinel(1, 1);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sentinel, 0, 0), 7);
+    assert(!group.residue_dlog_kernel(
+            sentinel, silex::PrimeIdealSpan(above_ell.at(0), above_ell.size()),
+            sflint::FmpzConstRef(ell)));
+    assert(!group.residue_dlog_kernel(sentinel,
+                                      silex::PrimeIdealSpan(mixed, 2),
+                                      sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_nrows(sentinel) == 1);
+    assert(sflint::fmpz_mat_ncols(sentinel) == 1);
+    assert(mat_entry_is_si(sentinel, 0, 0, 7));
 
     return 0;
 }
@@ -4197,37 +4321,6 @@ int test_prove_index_bound() {
 }
 
 // True when the first free generator of `group` is one of +/-unit^(+/-1).
-bool first_free_generator_is_pm_unit_power_pm1(
-        const silex::OrderUnitGroup& group,
-        const silex::Element& unit) noexcept {
-    const silex::NumberField* field = unit.parent();
-    if (field == nullptr) {
-        return false;
-    }
-
-    silex::FactoredElement compact(*field);
-    silex::Element expanded(*field);
-    silex::Element inverse(*field);
-    silex::Element candidate(*field);
-    if (!group.free_generator(compact, 0) || !compact.evaluate(expanded) ||
-        !inverse.invert(unit)) {
-        return false;
-    }
-    const silex::Element* bases[] = {&unit, &inverse};
-    for (const silex::Element* base : bases) {
-        if (expanded.equal(*base)) {
-            return true;
-        }
-        if (!candidate.negate(*base)) {
-            return false;
-        }
-        if (expanded.equal(candidate)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // True when the regulator ball contains `expected`, a 100-digit decimal
 // read at 1024 bits (its conversion error is far below the ball radius).
 bool regulator_contains(const silex::OrderUnitGroup& group,
@@ -5672,6 +5765,7 @@ int main() {
     test_compute_real_quadratic_proven();
     test_compute_with_class_group_rank_zero();
     test_compute_with_class_group_real_quadratic();
+    test_compute_with_class_group_proven_saturated_generator();
     test_compute_with_class_group_real_quadratic_210();
     test_nonmaximal_quadratic_pair_rejection_preserves_output();
     test_compute_with_class_group_quintic_proven();

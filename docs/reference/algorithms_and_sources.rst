@@ -626,13 +626,24 @@ The non-proof saturation routines use the same torsion-extended candidates.
 ``ell``-th-power residue characters on the free generators and, when ``ell``
 divides the torsion order ``w``, on ``zeta``: its rows have
 ``free_rank() + 1`` columns, the last one the exponent of ``zeta``, when
-``ell | w`` and ``free_rank()`` columns otherwise, as the vectors ``v1`` of
-``compute_candidates_for_saturate``.  ``saturate_row`` takes a row of that
-width and tests ``prod u_j^(e_j) * zeta^(e_t)``, as in ``saturate!``;
+``ell | w`` and ``free_rank()`` columns otherwise, one row per candidate
+exponent vector of ``compute_candidates_for_saturate`` (which returns the
+candidates as the columns of its matrix).  ``saturate_row`` takes a row of
+that width and tests ``prod u_j^(e_j) * zeta^(e_t)``, as in ``saturate!``;
 ``saturate_local_once``, ``saturate_bounded``, and the index-bounded passes
 built on them test every row of that kernel.  As in the proof routes, a
 root is adjoined only after the exact order-unit check, and these routines
 never record a verified proof status.
+
+A ``proven`` unit computation from a class-group context runs its
+relation-kernel units through the index-bounded saturation pass
+(``set_relation_kernel_units_index_bounded_saturated``) before
+``prove_index_bound``, so that pass now also considers torsion-twisted
+candidates when ``ell | w``.  It can therefore hand the proof a larger
+subgroup, or a different generator of the same subgroup, than before.  The
+proof routine and its rule are unchanged: every adjoined root is an exact
+unit of the order, and ``ell`` is verified only when the torsion-extended
+kernel is empty.
 
 The index bound comes from ``unit_lower_regulator_bound``.  For a subgroup
 ``G`` of full rank in ``O^x``, with ``O`` an order of the field ``K``,
