@@ -509,9 +509,10 @@ GRH for factor-base generation.  It accepts a pair only after it has verified
 generation up to the Minkowski-type bound (``factor_base_class_group_bound``)
 unconditionally.  It never accepts a pair on the strength of a GRH-sized
 factor base that does not cover that bound.  For such a field (for example
-``x^3 + x + 200``) no ``grh`` result is published on that basis; the current
-transaction does not fail promptly there and can run for minutes without
-finishing.  This is stricter than PARI 2.17.3
+``x^3 + x + 200`` or ``x^2 - 100003``) the transaction fails closed as soon
+as the factor base is built: the continuation never rebuilds the factor base
+or proves its generation, so extending relations could not lead to
+acceptance.  This is stricter than PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_param``, where the primes up to the
 ``GRHchk`` bound generate the class group under GRH, and than Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group``.  Relation and unit

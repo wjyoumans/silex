@@ -35,6 +35,13 @@ Changed
 Fixed
 -----
 
+- A ``grh`` paired class/unit transaction of positive unit rank whose
+  GRH-sized factor base does not reach the Minkowski-type bound (for example
+  ``x^3 + x + 200`` or ``x^2 - 100003``) now fails closed as soon as the
+  factor base is built.  It previously kept extending relations, which could
+  never lead to acceptance, and did not finish in practice.  Which requests
+  succeed is unchanged.
+
 - ``roots_of_unity`` and ``root_of_unity_order`` no longer return a
   wrong ``w``.  ``Q(zeta_9)`` previously gave ``w = 6``, where the true value
   is 18, which made ``zeta_class_regulator_product`` three times too small.
