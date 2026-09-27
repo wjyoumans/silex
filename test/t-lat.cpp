@@ -1132,9 +1132,9 @@ int test_short_vector_enum_no_duplicate_restart() {
 
     // A capped call whose uncapped coordinate interval is far outside the
     // slong range: the interval center (about 1e19 here) must be clamped in
-    // double before any integer conversion.  The double
-    // route's 2^-40 relative bound slack admits extra rows at this size, so
-    // require a duplicate-free superset of the exact set.
+    // double before any integer conversion.  The double route's 2^-40
+    // relative bound slack admits extra rows at this size, so require a
+    // duplicate-free superset of the exact set.
     {
         silex::flint::Fmpz huge;
         fmpz_set_str(huge.raw(), "100000000000000000000000000000000000000", 10);

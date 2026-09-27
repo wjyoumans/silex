@@ -695,11 +695,11 @@ static_assert(!can_set_maximality<silex::Order>);
 static_assert(!can_record_maximality<silex::Order>);
 static_assert(!can_clear_maximality<silex::Order>);
 
-// A probe that begins by labelling Z[sqrt(5)] maximal must not let a
-// unit-index proof accept 2 + sqrt(5) as fundamental.  Through the public API
-// the equation order stays non-maximal in every handle and copy, and the only
-// maximal label comes from computing the maximal order, which is strictly
-// larger.
+// Background: a wrong maximal label on Z[sqrt(5)] could let a unit-index
+// proof accept 2 + sqrt(5) as fundamental.  This test checks only the
+// maximality label: through the public API the equation order stays
+// non-maximal in every handle and copy, and the only maximal label comes
+// from computing the maximal order, which is strictly larger.
 int test_maximality_is_only_computed() {
     silex::NumberField field = quadratic_field(5);
     silex::Order equation = silex::test::equation_order(field);

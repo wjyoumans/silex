@@ -25,8 +25,8 @@ Changed
   BF gates are unchanged.  The one exception: a ``proven`` record stored by a
   real-quadratic ``grh`` run lets a later explicit
   ``try_certify_with_units(units, proven)`` with proven units promote the
-  class group to ``proven``.  The exact imaginary-quadratic and degree-one ``grh`` routes
-  use no analytic check and record none.  The documentation now also states
+  class group to ``proven``.  The exact imaginary-quadratic and degree-one
+  ``grh`` routes use no analytic check and record none.  The documentation now also states
   that ``grh`` mode in degree three and higher and for real quadratic fields
   requires factor-base generation verified up to the Minkowski-type bound and
   does not use GRH for generation.  See "Class groups and order units" in
