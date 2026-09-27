@@ -76,7 +76,9 @@ product helpers for:
   Dirichlet ``L(1, chi_D)`` support;
 * higher-degree maximal orders through the Belabas-Friedman fallback.
 
-Only the first two routes are unconditional.  The Belabas-Friedman error
+Only the first two routes are unconditional, and the quadratic route only
+when its ``L(1, chi_D)`` evaluation succeeds; otherwise it falls back to
+Belabas-Friedman.  The Belabas-Friedman error
 bound (Belabas and Friedman 2015, Theorem 1) assumes GRH for the Dedekind zeta
 function, so a value from the fallback is GRH-conditional.
 

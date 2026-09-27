@@ -309,9 +309,14 @@ one.
 
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
-one, and maximal orders of explicit quadratic-backend fields, where the
-residue comes from FLINT Dirichlet ``L(1, chi_D)``.  Every other ``hR`` comes
-from the Belabas--Friedman evaluation (K. Belabas and E. Friedman,
+one, and maximal orders of explicit quadratic-backend fields whose
+discriminant ``|D|`` fits in a machine word, where the residue comes from
+FLINT Dirichlet ``L(1, chi_D)``.  When that ``L(1, chi_D)`` evaluation fails
+(for example the Dirichlet group cannot be initialized, or the ``L``-value
+ball is not finite with a positive real part), the quadratic route falls back to Belabas--Friedman, and
+the value is then GRH-conditional like any other; certification uses the
+route that actually produced the value, not the field type.  Every other
+``hR`` comes from the Belabas--Friedman evaluation (K. Belabas and E. Friedman,
 "Computing the residue of the Dedekind zeta function", *Math. Comp.* 84
 (2015), 357--369, Theorem 1), whose truncation-error bound assumes GRH.  Such
 an ``hR`` is therefore at most ``grh`` evidence: the analytic check is
@@ -319,11 +324,27 @@ recorded with ``analytic_class_regulator_certification() == grh``, it never
 marks units, the regulator, or relation saturation as proven, and it never
 promotes a result to ``proven``.  For degree three and higher a ``proven``
 request succeeds only through the saturation route above (generation, proven
-units, and saturation at every ``p | h_cand``, as in Hecke's
-``_class_group_proof``) and otherwise fails closed.  Inside the paired
-transaction a Belabas--Friedman index-one check only selects the candidate
-pair to prove; the unit group is then proven from the regulator lower bound
-and unit saturation, and the class group by saturation.
+units, and saturation at every ``p | h_cand``, following Hecke's
+``_class_group_proof``) and otherwise fails closed.  Silex deviates from
+Hecke's routine in two documented, conservative ways: it proves the unit
+group first (as Hecke's ``_unit_group_proof`` does) and then runs the class
+saturation against the proven units, instead of saturating relations and
+unproven units jointly; and when an ``ell``-local test finds a missing root it
+fails closed instead of enlarging the relations as Hecke's ``saturate!``
+does.  Inside the paired transaction a Belabas--Friedman index-one check only
+selects the candidate pair to prove; the unit group is then proven from the
+regulator lower bound and unit saturation, and the class group by
+saturation.  A failed saturation proof leaves the candidate units and class
+group unchanged.
+
+A Belabas--Friedman check recorded after an unconditional one (for example a
+BF audit of a quadratic field already proven through ``L(1, chi_D)``) keeps
+the unconditional label, and a Belabas--Friedman check is accepted only
+against units that are already proven.  Because the Belabas--Friedman value
+no longer contributes to a degree-three-or-higher ``proven`` result, such
+results report ``analytic_class_regulator_status()`` and
+``zeta_bf_proof_status()`` as ``not_checked`` unless an audit is requested
+separately; these statuses are audit records, not proof components.
 
 The ``ell``-local test takes the Smith-invariant ``beta`` rows (compact power
 witnesses of invariant generators whose invariant ``ell`` divides), the free

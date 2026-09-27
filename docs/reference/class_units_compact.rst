@@ -51,9 +51,12 @@ class-regulator product from the zeta function, and
 ``try_prove_relation_saturation_with_units`` runs its own ``ell``-local test.
 The analytic product is unconditional only for degree one and for the
 quadratic ``L(1, chi)`` route.  Otherwise it is a Belabas-Friedman value whose
-error bound assumes GRH, and these gates then publish ``proven`` only when
-relation saturation at every prime dividing the candidate class order is
-already proven; they never use that value to mark units proven.
+error bound assumes GRH, and these gates then succeed only when the units
+are already proven and relation saturation at every prime dividing the
+candidate class order is already proven; they never use that value to mark
+units proven.  The ``zeta_bf_max_cutoff`` argument of
+``try_certify_with_units`` is ignored: a ``proven`` request never evaluates a
+Belabas-Friedman ``hR``.
 Gates that would trust caller-supplied proof data, such as an analytic
 class-regulator product, a saturation index bound, or an exact generator
 norm, are internal to the library and not part of the installed API.  The
