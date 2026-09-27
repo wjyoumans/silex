@@ -15,8 +15,11 @@
 #include <silex/flint/fmpz_poly.hpp>
 
 #include <flint/fmpz_vec.h>
+#include <flint/fmpz_mod_poly.h>
+#include <flint/fmpz_poly.h>
 #include <flint/fq_poly.h>
 #include <flint/fq_poly_factor.h>
+#include <flint/ulong_extras.h>
 
 #include <algorithm>
 #include <cmath>
@@ -706,31 +709,24 @@ bool pure_power_conjugate_bounds(
     return bounds.size() == static_cast<std::size_t>(places);
 }
 
-bool pure_power_lifting_exponent(
+// Friedrich-Fieker lifting exponent for reconstructing, in the equation
+// order of the monic integral field `parent`, an element x whose scaled
+// conjugates satisfy |f'(theta)^(i) x^(i)| <= root_bounds[i] at the r1 + r2
+// places, from a prime of residue degree `residue_degree` above `prime`.
+//
+// Source trace: reference implementation
+// `src/NumFieldOrd/NfOrd/Hensel.jl:_lifting_expo` with `any_order(K)` equal
+// to the equation order for this monic-integral private root path.
+bool friedrich_fieker_lifting_exponent(
         slong& out,
-        const Element& input,
-        const flint::FmpqPoly& derivative_polynomial,
+        const NumberField& parent_field,
+        const std::vector<flint::Arb>& root_bounds,
         const flint::Fmpz& prime,
         slong residue_degree,
-        slong exponent,
-        const DiagnosticsContext* diagnostics) noexcept {
-    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                        "element.power_hensel_lifting_exponent");
-    // Source trace: reference implementation
-    // `src/NumFieldOrd/NfOrd/Hensel.jl:_lifting_expo` with
-    // `any_order(K)` equal to the equation order for this monic-integral
-    // private root path.
-    const NumberField* parent = input.parent();
-    if (parent == nullptr || residue_degree <= 0 || exponent <= 1 ||
-        fmpz_fits_si(prime.raw()) == 0 || fmpz_sgn(prime.raw()) <= 0) {
-        return false;
-    }
-
-    constexpr slong precision = 128;
-    std::vector<flint::Arb> root_bounds;
-    if (!pure_power_conjugate_bounds(
-                root_bounds, input, derivative_polynomial, exponent,
-                precision)) {
+        slong precision) noexcept {
+    const NumberField* parent = &parent_field;
+    if (residue_degree <= 0 || fmpz_fits_si(prime.raw()) == 0 ||
+        fmpz_sgn(prime.raw()) <= 0) {
         return false;
     }
 
@@ -828,6 +824,34 @@ bool pure_power_lifting_exponent(
 
     out = std::max<slong>(2, fmpz_get_si(lift_exponent.raw()));
     return out >= 2;
+}
+
+bool pure_power_lifting_exponent(
+        slong& out,
+        const Element& input,
+        const flint::FmpqPoly& derivative_polynomial,
+        const flint::Fmpz& prime,
+        slong residue_degree,
+        slong exponent,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                        "element.power_hensel_lifting_exponent");
+    const NumberField* parent = input.parent();
+    if (parent == nullptr || residue_degree <= 0 || exponent <= 1 ||
+        fmpz_fits_si(prime.raw()) == 0 || fmpz_sgn(prime.raw()) <= 0) {
+        return false;
+    }
+
+    constexpr slong precision = 128;
+    std::vector<flint::Arb> root_bounds;
+    if (!pure_power_conjugate_bounds(
+                root_bounds, input, derivative_polynomial, exponent,
+                precision)) {
+        return false;
+    }
+    return friedrich_fieker_lifting_exponent(out, *parent, root_bounds,
+                                             prime, residue_degree,
+                                             precision);
 }
 
 bool lifting_chain(std::vector<slong>& out,
@@ -2606,6 +2630,433 @@ bool pure_power_residue_disproves(bool& is_power,
     return false;
 }
 
+// Root-of-unity search of reference `_torsion_units_gen`: a root in K of the
+// cyclotomic polynomial f = Phi_m, found as reference
+// `_roots_hensel(f, max_roots = 1, is_normal = true, root_bound = ones)`
+// finds it (reference v0.38.6 `src/NumFieldOrd/NfOrd/TorsionUnits.jl` lines
+// 414-457 and `Hensel.jl` lines 57-232 and 313-637), for monic integral
+// fields.  The roots of Phi_m are the primitive m-th roots of unity, so the
+// candidate is certified by its exact multiplicative order.
+
+// |f'(theta)^(i)| at the r1 + r2 places: the scaled root bounds of
+// `_roots_hensel` (Hensel.jl lines 202-205) with root_bound = 1, since every
+// conjugate of a root of unity has absolute value 1.
+bool unit_circle_scaled_root_bounds(
+        std::vector<flint::Arb>& bounds,
+        const NumberField& parent,
+        const flint::FmpqPoly& derivative_polynomial,
+        slong precision) noexcept {
+    EmbeddingContext embeddings(parent);
+    if (!embeddings.refine(precision)) {
+        return false;
+    }
+    Element derivative(parent);
+    if (!derivative.is_defined() ||
+        !derivative.set_fmpq_poly(flint::FmpqPolyConstRef(
+                derivative_polynomial))) {
+        return false;
+    }
+
+    const slong degree = parent.degree();
+    flint::AcbVec values(degree);
+    if (!embeddings.evaluate_all(flint::AcbVecRef(values), derivative,
+                                 precision)) {
+        return false;
+    }
+
+    const Signature sig = embeddings.signature();
+    const slong r1 = sig.r1();
+    const slong places = sig.r1() + sig.r2();
+    bounds.clear();
+    bounds.reserve(static_cast<std::size_t>(places));
+    for (slong place = 0; place < places; ++place) {
+        const slong root_index = place < r1 ? place : r1 + 2 * (place - r1);
+        flint::Arb bound;
+        flint::acb_abs(bound, values.data() + root_index, precision);
+        if (!flint::arb_is_finite(bound)) {
+            return false;
+        }
+        bounds.push_back(std::move(bound));
+    }
+    return bounds.size() == static_cast<std::size_t>(places);
+}
+
+// True when z has exact multiplicative order m, that is, when z is a root of
+// Phi_m: z^m = 1 and z^(m/l) != 1 for every prime l | m.
+bool element_has_exact_order(const Element& z, ulong m) noexcept {
+    const NumberField* parent = z.parent();
+    if (parent == nullptr || m == 0) {
+        return false;
+    }
+    Element power(*parent);
+    flint::Fmpz exponent;
+    fmpz_set_ui(exponent.raw(), m);
+    if (!power.is_defined() ||
+        !power.pow_fmpz(z, flint::FmpzConstRef(exponent)) ||
+        !power.equal_si(1)) {
+        return false;
+    }
+    n_factor_t factors;
+    n_factor_init(&factors);
+    n_factor(&factors, m, 1);
+    for (int i = 0; i < factors.num; ++i) {
+        fmpz_set_ui(exponent.raw(), m / factors.p[i]);
+        if (!power.pow_fmpz(z, flint::FmpzConstRef(exponent)) ||
+            power.equal_si(1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The residue data `_roots_hensel` selects: a prime p, a factor g of the
+// field polynomial modulo p (a prime P above p of residue degree deg g), a
+// root r of f modulo P and 1/f'(r) modulo P, the last two as polynomials in
+// F_p[t] reduced modulo g.
+struct CyclotomicResidueRoot {
+    ulong prime = 0;
+    slong residue_degree = 0;
+    flint::FmpzPoly factor;
+    flint::FmpzPoly root;
+    flint::FmpzPoly inverse_derivative;
+};
+
+bool fq_to_fmpz_poly(flint::FmpzPoly& out,
+                     const fq_struct* value,
+                     const flint::FqCtx& field,
+                     const flint::FmpzModCtx& ctx) noexcept {
+    flint::FmpzModPoly reduced(ctx);
+    if (!reduced.is_initialized()) {
+        return false;
+    }
+    fq_get_fmpz_mod_poly(reduced.raw(), value, field.raw());
+    fmpz_mod_poly_get_fmpz_poly(out.raw(), reduced.raw(), ctx.raw());
+    return true;
+}
+
+// A root of f modulo the prime of `field` (F_q = F_p[t]/(g)) and the inverse
+// of f' at that root.  False when f has no root in F_q.
+bool fq_cyclotomic_root(CyclotomicResidueRoot& out,
+                        const FqPoly& f_mod,
+                        const flint::FqCtx& field,
+                        const flint::FmpzModCtx& ctx) noexcept {
+    FqPolyFactor roots(field.raw());
+    fq_poly_roots(roots.raw(), f_mod.raw(), 0, field.raw());
+    if (roots.raw()->num == 0) {
+        return false;
+    }
+    const fq_poly_struct* linear = roots.raw()->poly;
+    if (fq_poly_degree(linear, field.raw()) != 1) {
+        return false;
+    }
+
+    flint::Fq constant(field);
+    flint::Fq leading(field);
+    flint::Fq root(field);
+    flint::Fq value(field);
+    if (!constant.is_initialized() || !leading.is_initialized() ||
+        !root.is_initialized() || !value.is_initialized()) {
+        return false;
+    }
+    fq_poly_get_coeff(constant.raw(), linear, 0, field.raw());
+    fq_poly_get_coeff(leading.raw(), linear, 1, field.raw());
+    if (fq_is_zero(leading.raw(), field.raw()) != 0) {
+        return false;
+    }
+    fq_inv(leading.raw(), leading.raw(), field.raw());
+    fq_neg(root.raw(), constant.raw(), field.raw());
+    fq_mul(root.raw(), root.raw(), leading.raw(), field.raw());
+
+    FqPoly derivative(field.raw());
+    fq_poly_derivative(derivative.raw(), f_mod.raw(), field.raw());
+    fq_poly_evaluate_fq(value.raw(), derivative.raw(), root.raw(),
+                        field.raw());
+    if (fq_is_zero(value.raw(), field.raw()) != 0) {
+        return false;
+    }
+    fq_inv(value.raw(), value.raw(), field.raw());
+    return fq_to_fmpz_poly(out.root, root.raw(), field, ctx) &&
+           fq_to_fmpz_poly(out.inverse_derivative, value.raw(), field, ctx);
+}
+
+enum class CyclotomicPrimeStatus { selected, no_root, unsupported };
+
+// Prime selection of `_roots_hensel` (Hensel.jl lines 83-181) for
+// is_normal = true.  Primes start above deg f + 1 and must keep the field
+// polynomial squarefree of full degree.  For each prime P above p with f
+// squarefree modulo P, no residue root proves that f has no root in K, and,
+// because the roots of Phi_m generate a normal extension, fewer than deg f
+// residue roots proves the same (lines 159-165).  Among the remaining
+// primes the reference prefers fewer residue roots, then larger residue
+// degree, and stops once STABILIZED (2 for n >= 10, else 0) primes in a row
+// do not improve the choice.
+CyclotomicPrimeStatus select_cyclotomic_prime(
+        CyclotomicResidueRoot& out,
+        const flint::FmpzPoly& f,
+        const nf_struct* raw_field,
+        slong degree) noexcept {
+    const slong f_degree = fmpz_poly_degree(f.raw());
+    const slong stabilized = degree >= 10 ? 2 : 0;
+    slong current_num = f_degree + 1;
+    slong not_better = 1;
+    bool have = false;
+
+    // Resource bound only; reaching it leaves the search unsupported.
+    constexpr slong max_prime_attempts = 256;
+    ulong p = static_cast<ulong>(f_degree) + 1;
+    for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
+        p = n_nextprime(p, 1);
+        flint::Fmpz prime;
+        fmpz_set_ui(prime.raw(), p);
+        flint::FmpzModCtx ctx(prime.raw());
+        flint::FmpzModPoly field_polynomial(ctx);
+        if (ctx.raw() == nullptr || !field_polynomial.is_initialized()) {
+            return CyclotomicPrimeStatus::unsupported;
+        }
+        if (!fmpq_poly_reduce_modulus(field_polynomial, raw_field->pol, ctx,
+                                      prime.raw()) ||
+            fmpz_mod_poly_degree(field_polynomial.raw(), ctx.raw()) !=
+                    degree ||
+            fmpz_mod_poly_is_squarefree(field_polynomial.raw(),
+                                        ctx.raw()) == 0) {
+            continue;
+        }
+
+        flint::FmpzModPolyFactor factorization(ctx);
+        fmpz_mod_poly_factor(factorization.raw(), field_polynomial.raw(),
+                             ctx.raw());
+        for (slong i = 0; i < factorization.raw()->num; ++i) {
+            flint::FmpzModPoly factor(ctx);
+            if (!factor.is_initialized()) {
+                return CyclotomicPrimeStatus::unsupported;
+            }
+            fmpz_mod_poly_factor_get_poly(factor.raw(), factorization.raw(),
+                                          i, ctx.raw());
+            const slong residue_degree =
+                    fmpz_mod_poly_degree(factor.raw(), ctx.raw());
+            flint::FqCtx field(factor, ctx, "z");
+            if (field.raw() == nullptr) {
+                return CyclotomicPrimeStatus::unsupported;
+            }
+            FqPoly f_mod(field.raw());
+            for (slong j = 0; j <= f_degree; ++j) {
+                fq_poly_set_coeff_fmpz(f_mod.raw(), j, f.raw()->coeffs + j,
+                                       field.raw());
+            }
+            if (fq_poly_is_squarefree(f_mod.raw(), field.raw()) == 0) {
+                continue;
+            }
+
+            FqPolyFactor roots(field.raw());
+            fq_poly_roots(roots.raw(), f_mod.raw(), 0, field.raw());
+            const slong num = roots.raw()->num;
+            if (num == 0 || num < f_degree) {
+                return CyclotomicPrimeStatus::no_root;
+            }
+
+            if (num < current_num ||
+                (num == current_num && residue_degree > out.residue_degree)) {
+                if (!fq_cyclotomic_root(out, f_mod, field, ctx)) {
+                    return CyclotomicPrimeStatus::unsupported;
+                }
+                out.prime = p;
+                out.residue_degree = residue_degree;
+                fmpz_mod_poly_get_fmpz_poly(out.factor.raw(), factor.raw(),
+                                            ctx.raw());
+                current_num = num;
+                have = true;
+            } else {
+                ++not_better;
+            }
+            if (not_better >= stabilized) {
+                return have ? CyclotomicPrimeStatus::selected
+                            : CyclotomicPrimeStatus::unsupported;
+            }
+        }
+    }
+    return CyclotomicPrimeStatus::unsupported;
+}
+
+// f(x) modulo (p^k, modulus) for x reduced modulo modulus.
+bool evaluate_mod(flint::FmpzModPoly& out,
+                  const flint::FmpzModPoly& polynomial,
+                  const flint::FmpzModPoly& x,
+                  const flint::FmpzModPoly& modulus,
+                  const flint::FmpzModCtx& ctx) noexcept {
+    fmpz_mod_poly_compose_mod(out.raw(), polynomial.raw(), x.raw(),
+                              modulus.raw(), ctx.raw());
+    return true;
+}
+
+// Lifting and reconstruction of `_hensel` (Hensel.jl lines 313-637) for a
+// non-pure f: Newton steps x -> x - f(x) / f'(x) with the inverse of f'(x)
+// lifted by y -> y (2 - y f'(x)) (lines 593-596), scaling by the Kronecker
+// denominator T'(theta) of the field polynomial T before the lattice
+// reconstruction (lines 425 and 599-611), and an exact check of every
+// candidate that stabilizes or reaches the Friedrich-Fieker exponent (lines
+// 617-631).
+//
+// Deviation: the reference lifts every residue root when is_normal is set
+// (line 411; its comment at lines 407-408 says only max_roots are needed).
+// Silex lifts one.  This loses no root: P is unramified and f is squarefree
+// modulo P, so the roots of f in K reduce to distinct residue roots, and when
+// f is normal with a root in K it has deg f roots in K, whose reductions are
+// then all the residue roots.
+bool lift_cyclotomic_root(Element& root,
+                          const NumberField& field,
+                          const flint::FmpzPoly& f,
+                          ulong m,
+                          const CyclotomicResidueRoot& residue) noexcept {
+    const nf_struct* raw_field = field.raw_flint_field();
+    const slong degree = field.degree();
+    flint::Fmpz prime;
+    fmpz_set_ui(prime.raw(), residue.prime);
+    flint::FmpzModCtx prime_ctx(prime.raw());
+    flint::FmpzModPoly field_mod_prime(prime_ctx);
+    flint::FmpzModPoly factor_mod_prime(prime_ctx);
+    if (prime_ctx.raw() == nullptr || !field_mod_prime.is_initialized() ||
+        !factor_mod_prime.is_initialized() ||
+        !fmpq_poly_reduce_modulus(field_mod_prime, raw_field->pol, prime_ctx,
+                                  prime.raw())) {
+        return false;
+    }
+    fmpz_mod_poly_set_fmpz_poly(factor_mod_prime.raw(),
+                                residue.factor.raw(), prime_ctx.raw());
+
+    flint::FmpqPoly derivative_polynomial;
+    fmpq_poly_derivative(derivative_polynomial.raw(), raw_field->pol);
+    Element inverse_denominator(field);
+    if (!inverse_denominator.is_defined() ||
+        !inverse_denominator.set_fmpq_poly(
+                flint::FmpqPolyConstRef(derivative_polynomial)) ||
+        !inverse_denominator.invert(inverse_denominator)) {
+        return false;
+    }
+
+    constexpr slong precision = 128;
+    std::vector<flint::Arb> root_bounds;
+    slong target_lift_exponent = 0;
+    std::vector<slong> lift_chain;
+    if (!unit_circle_scaled_root_bounds(root_bounds, field,
+                                        derivative_polynomial, precision) ||
+        !friedrich_fieker_lifting_exponent(
+                target_lift_exponent, field, root_bounds, prime,
+                residue.residue_degree, precision) ||
+        !lifting_chain(lift_chain, target_lift_exponent)) {
+        return false;
+    }
+
+    flint::FmpzPoly f_derivative;
+    fmpz_poly_derivative(f_derivative.raw(), f.raw());
+    flint::FmpzPoly lifted_root;
+    flint::FmpzPoly lifted_inverse;
+    fmpz_poly_set(lifted_root.raw(), residue.root.raw());
+    fmpz_poly_set(lifted_inverse.raw(), residue.inverse_derivative.raw());
+
+    flint::Fmpz one;
+    fmpz_one(one.raw());
+    Element previous(field);
+    bool have_previous = false;
+    if (!previous.is_defined()) {
+        return false;
+    }
+    for (std::size_t step = 1; step < lift_chain.size(); ++step) {
+        const slong lift_exponent = lift_chain[step];
+        const bool final_lift = step + 1 == lift_chain.size();
+        flint::Fmpz precision_modulus;
+        fmpz_pow_ui(precision_modulus.raw(), prime.raw(),
+                    static_cast<ulong>(lift_exponent));
+        flint::FmpzModCtx ctx(precision_modulus.raw());
+        if (ctx.raw() == nullptr) {
+            return false;
+        }
+        flint::FmpzModPoly lifted_factor(ctx);
+        flint::FmpzModPoly f_mod(ctx);
+        flint::FmpzModPoly fs_mod(ctx);
+        flint::FmpzModPoly den(ctx);
+        flint::FmpzModPoly x(ctx);
+        flint::FmpzModPoly y(ctx);
+        flint::FmpzModPoly f_value(ctx);
+        flint::FmpzModPoly fs_value(ctx);
+        flint::FmpzModPoly correction(ctx);
+        flint::FmpzModPoly two(ctx);
+        flint::FmpzModPoly scaled(ctx);
+        if (!lifted_factor.is_initialized() || !f_mod.is_initialized() ||
+            !fs_mod.is_initialized() || !den.is_initialized() ||
+            !x.is_initialized() || !y.is_initialized() ||
+            !f_value.is_initialized() || !fs_value.is_initialized() ||
+            !correction.is_initialized() || !two.is_initialized() ||
+            !scaled.is_initialized() ||
+            !hensel_lift_factor_to_precision(
+                    lifted_factor, raw_field->pol, field_mod_prime,
+                    factor_mod_prime, prime_ctx, prime.raw(), lift_exponent,
+                    precision_modulus.raw(), ctx) ||
+            !fmpq_poly_reduce_modulus(den, derivative_polynomial.raw(), ctx,
+                                      precision_modulus.raw())) {
+            return false;
+        }
+        fmpz_mod_poly_rem(den.raw(), den.raw(), lifted_factor.raw(),
+                          ctx.raw());
+        fmpz_mod_poly_set_fmpz_poly(f_mod.raw(), f.raw(), ctx.raw());
+        fmpz_mod_poly_set_fmpz_poly(fs_mod.raw(), f_derivative.raw(),
+                                    ctx.raw());
+        fmpz_mod_poly_set_fmpz_poly(x.raw(), lifted_root.raw(), ctx.raw());
+        fmpz_mod_poly_rem(x.raw(), x.raw(), lifted_factor.raw(), ctx.raw());
+        fmpz_mod_poly_set_fmpz_poly(y.raw(), lifted_inverse.raw(), ctx.raw());
+        fmpz_mod_poly_rem(y.raw(), y.raw(), lifted_factor.raw(), ctx.raw());
+        fmpz_mod_poly_set_ui(two.raw(), 2, ctx.raw());
+
+        // y <- y (2 - y f'(x)); x <- x - f(x) y, both at the old x.
+        evaluate_mod(f_value, f_mod, x, lifted_factor, ctx);
+        evaluate_mod(fs_value, fs_mod, x, lifted_factor, ctx);
+        fmpz_mod_poly_mulmod(correction.raw(), y.raw(), fs_value.raw(),
+                             lifted_factor.raw(), ctx.raw());
+        fmpz_mod_poly_sub(correction.raw(), two.raw(), correction.raw(),
+                          ctx.raw());
+        fmpz_mod_poly_mulmod(y.raw(), y.raw(), correction.raw(),
+                             lifted_factor.raw(), ctx.raw());
+        fmpz_mod_poly_mulmod(correction.raw(), f_value.raw(), y.raw(),
+                             lifted_factor.raw(), ctx.raw());
+        fmpz_mod_poly_sub(x.raw(), x.raw(), correction.raw(), ctx.raw());
+        fmpz_mod_poly_get_fmpz_poly(lifted_root.raw(), x.raw(), ctx.raw());
+        fmpz_mod_poly_get_fmpz_poly(lifted_inverse.raw(), y.raw(), ctx.raw());
+
+        fmpz_mod_poly_mulmod(scaled.raw(), x.raw(), den.raw(),
+                             lifted_factor.raw(), ctx.raw());
+
+        flint::FmpzMat basis(degree, degree);
+        flint::FmpzMat inverse_num(degree, degree);
+        flint::Fmpz inverse_den;
+        Element candidate(field);
+        if (!candidate.is_defined() ||
+            !power_reconstruction_data(basis, inverse_num, inverse_den,
+                                       degree, lifted_factor, ctx,
+                                       precision_modulus.raw(), nullptr) ||
+            !reconstruct_power_root_candidate(
+                    candidate, inverse_denominator, scaled, ctx, basis,
+                    inverse_num, flint::FmpzConstRef(inverse_den),
+                    inverse_denominator, flint::FmpzConstRef(one),
+                    nullptr)) {
+            return false;
+        }
+
+        if ((have_previous && candidate.equal(previous)) || final_lift) {
+            if (element_has_exact_order(candidate, m)) {
+                root.swap(candidate);
+                return true;
+            }
+            // The reference returns no roots here when the final lift fails
+            // and f is normal; Silex reports failure either way.
+        } else {
+            if (!previous.set(candidate)) {
+                return false;
+            }
+            have_previous = true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 namespace detail {
@@ -2619,6 +3070,32 @@ bool ensure_parent(Element& out, const NumberField& field) noexcept {
     }
     out = Element(field);
     return out.is_defined();
+}
+
+bool cyclotomic_root_hensel(Element& root,
+                            const NumberField& field,
+                            ulong m) noexcept {
+    const nf_struct* raw_field = field.raw_flint_field();
+    const slong degree = field.degree();
+    if (!field.is_defined() || raw_field == nullptr || m < 3 ||
+        degree < 2 || !fmpq_poly_is_monic_integral(raw_field->pol) ||
+        !root.has_parent(field)) {
+        return false;
+    }
+
+    flint::FmpzPoly f;
+    fmpz_poly_cyclotomic(f.raw(), m);
+    CyclotomicResidueRoot residue;
+    if (select_cyclotomic_prime(residue, f, raw_field, degree) !=
+        CyclotomicPrimeStatus::selected) {
+        return false;
+    }
+    Element candidate(field);
+    if (!candidate.is_defined() ||
+        !lift_cyclotomic_root(candidate, field, f, m, residue)) {
+        return false;
+    }
+    return root.set(candidate);
 }
 
 }  // namespace detail
