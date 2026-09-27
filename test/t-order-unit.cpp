@@ -4967,6 +4967,242 @@ int test_prove_index_bound_nonmaximal_quadratic_sqrt18() {
     return 0;
 }
 
+// Non-proof twisted row in the nonmaximal order Z[sqrt18] (index 3 in
+// Z[sqrt2]).  u = -(17 + 4 sqrt18) = -eps^4 with eps = 1 + sqrt2.  At the
+// two primes above 7 (sqrt18 = +/-2 mod 7), u reduces to 3 and 5 and -1 to
+// 6, none of them squares mod 7, so the torsion-extended kernel is spanned
+// by (e, t) = (1, 1).  Its candidate u * (-1) = 17 + 4 sqrt18 has the square
+// root 3 + 2 sqrt2 = 3 + (2/3) sqrt18, which is not in the order, so every
+// non-proof route must succeed without adjoining it.  GP 2.17.4 cross-check:
+//     [kronecker(3, 7), kronecker(5, 7), kronecker(-1, 7)]  \\ [-1, -1, -1]
+//     kronecker(18, 7)                                      \\ 1: 7 splits
+int test_saturate_torsion_twisted_non_proof_nonmaximal_sqrt18() {
+    sflint::FmpzPoly polynomial;
+    ::fmpz_poly_set_coeff_si(polynomial.raw(), 2, 1);
+    ::fmpz_poly_set_coeff_si(polynomial.raw(), 0, -18);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element order_unit(field);  // 17 + 4 sqrt18 = (1 + sqrt2)^4
+    assert(set_quadratic_coeffs(order_unit, 17, 1, 4, 1));
+    silex::Element twisted(field);
+    assert(twisted.negate(order_unit));
+
+    silex::OrderUnitGroup start(order);
+    assert(set_single_unit_group(start, order, twisted, embeddings));
+
+    sflint::Fmpz p;
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(p, 7));
+    assert(set_fmpz_si(ell, 2));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 2);
+    silex::PrimeIdealSpan prime_span(primes.at(0), primes.size());
+
+    sflint::FmpzMat kernel(0, 0);
+    assert(start.residue_dlog_kernel(kernel, prime_span,
+                                     sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_ncols(kernel) == 2);
+    assert(sflint::fmpz_mat_nrows(kernel) == 1);
+    assert(mat_entry_is_si(kernel, 0, 0, 1));
+    assert(mat_entry_is_si(kernel, 0, 1, 1));
+    sflint::FmpzMat proof_kernel(0, 0);
+    assert(start.residue_dlog_proof_kernel(proof_kernel, prime_span,
+                                           sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(kernel),
+                                  sflint::FmpzMatConstRef(proof_kernel)));
+
+    bool changed = true;
+    silex::OrderUnitGroup row_out(order);
+    assert(row_out.saturate_row(changed, start, sflint::FmpzMatConstRef(kernel),
+                                0, sflint::FmpzConstRef(ell), embeddings,
+                                256));
+    assert(!changed);
+    assert(check_first_free_generator(row_out, twisted));
+    assert(check_first_free_generator_is_order_unit(row_out, order));
+
+    silex::OrderUnitGroup local(order);
+    changed = true;
+    assert(local.saturate_local_once(changed, start, prime_span,
+                                     sflint::FmpzConstRef(ell), embeddings,
+                                     256));
+    assert(!changed);
+    assert(check_first_free_generator(local, twisted));
+
+    // The bounded pass skips 3 (it divides the order discriminant 72) and 5
+    // (inert), selects the two primes above 7, and adjoins nothing.
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 31));
+    silex::OrderUnitGroup bounded(order);
+    bool stable = false;
+    changed = true;
+    assert(bounded.saturate_bounded(changed, stable, start,
+                                    sflint::FmpzConstRef(ell), 2,
+                                    sflint::FmpzConstRef(aux_bound), 4,
+                                    embeddings, 256));
+    assert(!changed);
+    assert(stable);
+    assert(check_first_free_generator(bounded, twisted));
+    assert(bounded.certification_status() ==
+           silex::CertificationMode::unknown);
+
+    return 0;
+}
+
+// True when the first free generator f of `group` satisfies
+// f^exponent == unit^(+/-exponent), i.e. f = unit^(+/-1) up to a root of
+// unity whose order divides `exponent`.
+bool first_free_generator_matches_unit_mod_torsion(
+        const silex::OrderUnitGroup& group,
+        const silex::Element& unit,
+        slong exponent) noexcept {
+    const silex::NumberField* field = unit.parent();
+    if (field == nullptr) {
+        return false;
+    }
+
+    sflint::Fmpz power;
+    sflint::fmpz_set_si(sflint::FmpzRef(power), exponent);
+    silex::FactoredElement compact(*field);
+    silex::Element expanded(*field);
+    silex::Element generator_power(*field);
+    silex::Element unit_power(*field);
+    silex::Element inverse_power(*field);
+    return group.free_generator(compact, 0) &&
+           compact.evaluate(expanded) &&
+           generator_power.pow_fmpz(expanded, sflint::FmpzConstRef(power)) &&
+           unit_power.pow_fmpz(unit, sflint::FmpzConstRef(power)) &&
+           inverse_power.invert(unit_power) &&
+           (generator_power.equal(unit_power) ||
+            generator_power.equal(inverse_power));
+}
+
+// Odd ell dividing the torsion order: ell = 3 in the maximal order
+// Z[zeta_12] of x^4 - x^2 + 1 (w = 12, free rank 1, fundamental unit
+// x - 1).  u = (1 - x)^3 * zeta_3^(-1) with zeta_3 = x^4, so u is a cube
+// only up to torsion: u * x^k is a cube exactly when k = 1 mod 3.  At the
+// four degree-one primes above 13, zeta_3 is not a cube (F_13^x has no
+// cube of order 3), so neither is u, and the free-exponent kernel is
+// empty.  The torsion-extended kernel is one-dimensional, and its row
+// yields a cube root (1 - x) * zeta with zeta in mu_12.  GP 2.17.4
+// cross-check (field variable y):
+//     K = bnfinit(y^4 - y^2 + 1, 1); [K.tu, K.fu]  \\ [[12, y], [y - 1]]
+//     u = Mod(1 - y, y^4 - y^2 + 1)^3 * Mod(y, y^4 - y^2 + 1)^8;
+//     bnfisunit(K, lift(u))                         \\ [3, 2]~
+//     #nfroots(K, x^3 - lift(u))                    \\ 0
+//     #nfroots(K, x^3 - lift(u * Mod(y, y^4 - y^2 + 1)))  \\ 3
+int test_saturate_torsion_twisted_non_proof_odd_ell() {
+    sflint::FmpzPoly polynomial;
+    ::fmpz_poly_set_coeff_si(polynomial.raw(), 4, 1);
+    ::fmpz_poly_set_coeff_si(polynomial.raw(), 2, -1);
+    ::fmpz_poly_set_coeff_si(polynomial.raw(), 0, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element theta(field);
+    silex::Element eta(field);  // 1 - x
+    assert(theta.gen());
+    assert(eta.negate(theta));
+    assert(eta.add_si(eta, 1));
+    sflint::Fmpz exponent;
+    silex::Element eta_cube(field);
+    silex::Element zeta3_inverse(field);  // x^8 = zeta_3^2
+    silex::Element twisted(field);
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), 3);
+    assert(eta_cube.pow_fmpz(eta, sflint::FmpzConstRef(exponent)));
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), 8);
+    assert(zeta3_inverse.pow_fmpz(theta, sflint::FmpzConstRef(exponent)));
+    assert(twisted.multiply(eta_cube, zeta3_inverse));
+
+    silex::OrderUnitGroup start(order);
+    assert(set_single_unit_group(start, order, twisted, embeddings));
+    sflint::Fmpz torsion_order;
+    assert(start.torsion_order(sflint::FmpzRef(torsion_order)));
+    assert(sflint::fmpz_equal_si(torsion_order, 12));
+
+    sflint::Fmpz p;
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(p, 13));
+    assert(set_fmpz_si(ell, 3));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 4);
+    silex::PrimeIdealSpan prime_span(primes.at(0), primes.size());
+
+    sflint::FmpzMat free_kernel(0, 0);
+    assert(silex::detail::residue_dlog_free_kernel(
+            free_kernel, start, prime_span, sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_ncols(free_kernel) == 1);
+    assert(sflint::fmpz_mat_nrows(free_kernel) == 0);
+
+    // The torsion entry depends on which primitive 12th root is the torsion
+    // generator, so only the shape and the nonzero entries are fixed.
+    sflint::FmpzMat kernel(0, 0);
+    assert(start.residue_dlog_kernel(kernel, prime_span,
+                                     sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_ncols(kernel) == 2);
+    assert(sflint::fmpz_mat_nrows(kernel) == 1);
+    assert(!sflint::fmpz_is_zero(sflint::fmpz_mat_entry(kernel, 0, 0)));
+    assert(!sflint::fmpz_is_zero(sflint::fmpz_mat_entry(kernel, 0, 1)));
+    sflint::FmpzMat proof_kernel(0, 0);
+    assert(start.residue_dlog_proof_kernel(proof_kernel, prime_span,
+                                           sflint::FmpzConstRef(ell)));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(kernel),
+                                  sflint::FmpzMatConstRef(proof_kernel)));
+
+    bool changed = false;
+    silex::OrderUnitGroup row_out(order);
+    assert(row_out.saturate_row(changed, start, sflint::FmpzMatConstRef(kernel),
+                                0, sflint::FmpzConstRef(ell), embeddings,
+                                256));
+    assert(changed);
+    assert(first_free_generator_matches_unit_mod_torsion(row_out, eta, 12));
+
+    // The untwisted row (1, 0) is u itself, which is not a cube.
+    sflint::FmpzMat untwisted(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(untwisted, 0, 0), 1);
+    silex::OrderUnitGroup untwisted_out(order);
+    changed = true;
+    assert(untwisted_out.saturate_row(
+            changed, start, sflint::FmpzMatConstRef(untwisted), 0,
+            sflint::FmpzConstRef(ell), embeddings, 256));
+    assert(!changed);
+    assert(check_first_free_generator(untwisted_out, twisted));
+
+    silex::OrderUnitGroup local(order);
+    changed = false;
+    assert(local.saturate_local_once(changed, start, prime_span,
+                                     sflint::FmpzConstRef(ell), embeddings,
+                                     256));
+    assert(changed);
+    assert(first_free_generator_matches_unit_mod_torsion(local, eta, 12));
+
+    // The bounded pass skips 7 (its primes have degree two) and selects the
+    // four primes above 13, adjoins the cube root, and the next pass leaves
+    // it unchanged.
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 61));
+    silex::OrderUnitGroup bounded(order);
+    bool stable = false;
+    changed = false;
+    assert(bounded.saturate_bounded(changed, stable, start,
+                                    sflint::FmpzConstRef(ell), 4,
+                                    sflint::FmpzConstRef(aux_bound), 4,
+                                    embeddings, 256));
+    assert(changed);
+    assert(stable);
+    assert(first_free_generator_matches_unit_mod_torsion(bounded, eta, 12));
+    assert(bounded.certification_status() ==
+           silex::CertificationMode::unknown);
+
+    return 0;
+}
+
 int test_saturate_index_bounded() {
     silex::NumberField degree_one = degree_one_field();
     silex::Order degree_one_order;
@@ -5818,6 +6054,8 @@ int main() {
     test_prove_torsion_twisted_saturation_root();
     test_saturate_torsion_twisted_non_proof();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
+    test_saturate_torsion_twisted_non_proof_nonmaximal_sqrt18();
+    test_saturate_torsion_twisted_non_proof_odd_ell();
     test_saturate_index_bounded();
     test_saturate_index_bounded_adaptive();
     test_saturate_local_once_real_quadratic();
