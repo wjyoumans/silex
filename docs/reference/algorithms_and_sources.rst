@@ -170,8 +170,11 @@ of a field and a generator.  Fields with a real place, quadratic fields and
 branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
 
 1. ``guess_roots``: for primes ``p >= 3`` not dividing ``disc(T)`` of the
-   monic integral defining polynomial ``T``, ``w`` divides
-   ``p^g - 1`` with ``g`` the gcd of the residue degrees above ``p``.  The
+   monic integral defining polynomial ``T`` of ``theta' = a_n theta``, where
+   ``a_n`` is the leading coefficient of the integral numerator of the
+   field's defining polynomial (``theta' = theta`` when it is monic), ``w``
+   divides ``p^g - 1`` with ``g`` the gcd of the residue degrees above ``p``.
+   The
    gcd of these values is a proven multiple of ``w``.  As in PARI, the loop
    stops when the gcd fits in a word and has not changed for more than
    ``n + 20`` consecutive good primes.  As in Hecke v0.38.6
@@ -183,7 +186,7 @@ branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
    Silex uses ``disc(T)``, which gives a weaker but still valid reduction.
 3. When ``phi(bound) = n``, ``ZXirred_is_cyclo_translate`` tests whether
    ``T(y) = Phi_N(+-y + c)``, reading ``c`` from the trace coefficient.  Silex
-   takes the two candidates ``+-(theta + c)`` and certifies them by exact order
+   takes the two candidates ``+-(theta' + c)`` and certifies them by exact order
    instead of PARI's Graeffe comparison.
 4. Otherwise Silex builds a primitive ``p^e``-th root for each prime power
    ``p^e`` of the bound.  PARI uses ``nfisincl(polcyclo(p^e), T)`` and Hecke
@@ -191,8 +194,11 @@ branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
    and power roots: ``zeta_4 = sqrt(-1)``, then square roots up to
    ``zeta_(2^e)``; ``zeta_3 = (-1 + sqrt(-3))/2``, then cube roots up to
    ``zeta_(3^e)``.  Any ``p``-th root of a primitive ``p^j``-th root of unity
-   is a primitive ``p^(j+1)``-th root, so the choice of root at each step does
-   not matter.
+   is a primitive ``p^(j+1)``-th root.  If ``zeta_(p^(j+1))`` lies in ``K``,
+   the ``p``-th power map from the cyclic group ``mu_(p^(j+1))`` onto
+   ``mu_(p^j)`` is surjective, so every ``p^j``-th root of unity is a
+   ``p``-th power in ``K``.  Together these make the choice of root at each
+   step irrelevant.
 
 Silex publishes ``w`` only when it certifies a root of unity whose exact
 order is the reduced bound.  The certificate is ``z^w = 1`` and
@@ -202,12 +208,18 @@ warning.  Silex fails closed instead, and it also fails closed for a prime
 ``p >= 5`` in the bound when ``T`` is not a cyclotomic translate, because it
 has no root finder for ``Phi_(p^e)`` there.  It also fails when the exact
 square or power root it needs is unsupported, as for fields of degree 10 or
-more outside the cyclotomic-translate case.  Defining polynomials that are not
-monic and integral are rescaled first: ``theta' = a_n theta``.
+more outside the cyclotomic-translate case.  The rescaling to ``theta'`` in
+steps 1-3 applies only to the bound and the cyclotomic-translate test.  The
+exact square and power roots of step 4 need a monic integral defining
+polynomial, so a field whose defining polynomial is not monic and integral
+currently fails closed when ``w > 2`` and it is not a cyclotomic translate;
+``w = 2`` is still found there.
 ``test/t-unit.cpp`` checks ``Q(zeta_n)`` for ``n = 3..30`` against
 ``nfrootsof1`` from PARI/GP 2.17.4, along with non-cyclotomic presentations
 of ``Q(zeta_9)``, ``Q(zeta_12)`` and ``Q(zeta_16)``, the fail-closed case
-``Q(zeta_5)``, and fail-closed behavior against bounds that are too large.
+``Q(zeta_5)`` (a known limitation: the true ``w`` is 10), and fail-closed
+behavior against bounds that are too large or not multiples of the proven
+bound.
 Earlier versions used only ``sqrt(-1)`` and ``sqrt(-3)`` without comparing
 the result to the bound, and returned ``w = 6`` for ``Q(zeta_9)``, where the
 true value is 18.
