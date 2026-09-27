@@ -30,10 +30,10 @@
 // Private Hensel-lifting and root-reconstruction machinery for `Element`:
 // exact square/power roots, pure-power Hensel lifting (`is_square`,
 // `is_power`) and the cyclotomic root-of-unity finder
-// (`detail::cyclotomic_root_hensel`).  Split out of `element.cpp` (see
-// notes/reviews/T-043-reviewer.md N2): moved as one block because the
-// cyclotomic search reuses the pure-power Hensel/reconstruction helpers, so
-// the two are not separable without exporting all of it.
+// (`detail::cyclotomic_root_hensel`).  Split out of `element.cpp` as one
+// block because the cyclotomic search reuses the pure-power Hensel/
+// reconstruction helpers, so the two are not separable without exporting
+// all of it.
 namespace silex {
 namespace {
 

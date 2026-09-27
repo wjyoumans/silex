@@ -187,9 +187,8 @@ branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
    the stability count while ``phi(gcd)`` does not divide ``n = [K : Q]``:
    ``Q(zeta_w)`` is a subfield of ``K``, so ``phi(w) | n``, and a gcd with
    ``phi(gcd)`` not dividing ``n`` is a strict multiple of ``w``, so the
-   reset only delays the stop, never changing the final bound to a wrong
-   ``w`` (decisions.md 2026-09-27 "Roots-of-unity bound reset and monic
-   model").
+   reset only delays the stop, so the final gcd still divides the one
+   the reference ``guess_roots`` rule would return.
 
    By the Chebotarev density theorem the gcd over all good primes equals
    ``w``: for each prime ``l`` dividing ``w``, let

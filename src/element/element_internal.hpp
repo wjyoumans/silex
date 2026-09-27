@@ -19,15 +19,16 @@ bool ensure_parent(Element& out, const NumberField& field) noexcept;
 bool has_exact_order(const Element& z, ulong m) noexcept;
 
 // Entry points into the private Hensel-lifting and root-reconstruction
-// machinery of `src/element/hensel.cpp` (see notes/reviews/T-043-reviewer.md
-// N2): exact square/power roots over Q and quadratic fields, pure-power
-// Hensel lifting for `Element::is_square` / `Element::is_power`, the generic
-// trace and norm via the multiplication matrix, and the cyclotomic
-// root-of-unity finder.  Moved out of `element.cpp` as one block because the
-// cyclotomic search reuses the pure-power helpers.
+// machinery of `src/element/hensel.cpp`: exact square/power roots over Q
+// and quadratic fields, pure-power Hensel lifting for `Element::is_square` /
+// `Element::is_power`, the generic trace via the multiplication matrix and
+// norm via FLINT, and the cyclotomic root-of-unity finder.  Moved out of
+// `element.cpp` as one block because the cyclotomic search reuses the
+// pure-power helpers.
 
-// Trace and norm of `element` in `field` (degree `degree`) via its
-// multiplication matrix, for backends without a direct computation.
+// Trace of `element` in `field` (degree `degree`) via its multiplication
+// matrix, and norm via FLINT's `nf_elem_norm`, for backends without a
+// direct computation.
 void generic_trace(flint::FmpqRef out,
                    const nf_struct* field,
                    slong degree,
