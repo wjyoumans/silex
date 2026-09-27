@@ -375,11 +375,33 @@ bool bf_radius_lt(const flint::Arb& value, const flint::Arb& target) noexcept {
     return flint::arb_lt(radius, target);
 }
 
+// Rounds `cutoff` up to the next multiple of 9, the only cutoffs the BF term
+// accepts.  When that multiple is not representable, which happens only for
+// cutoffs above the largest multiple of 9 in a ulong (for example a
+// UWORD_MAX cap), it saturates to that largest multiple instead of wrapping.
 ulong bf_adjust_cutoff(ulong cutoff) noexcept {
-    while (cutoff % 9 != 0) {
-        ++cutoff;
+    const ulong remainder = cutoff % 9;
+    if (remainder == 0) {
+        return cutoff;
     }
-    return cutoff;
+    const ulong step = 9 - remainder;
+    if (cutoff > UWORD_MAX - step) {
+        return cutoff - remainder;
+    }
+    return cutoff + step;
+}
+
+// log(3 * cutoff), without overflowing the product for cutoffs above
+// UWORD_MAX / 3.  Smaller cutoffs keep the direct single-log evaluation.
+void bf_log_3cutoff(flint::Arb& out, ulong cutoff, slong precision) noexcept {
+    if (cutoff <= UWORD_MAX / 3) {
+        flint::arb_log_ui(out, 3 * cutoff, precision);
+        return;
+    }
+    flint::Arb log_3;
+    flint::arb_log_ui(log_3, 3, precision);
+    flint::arb_log_ui(out, cutoff, precision);
+    flint::arb_add(out, out, log_3, precision);
 }
 
 bool bf_next_cutoff(ulong& next, ulong cutoff, ulong max_cutoff) noexcept {
@@ -1724,7 +1746,7 @@ bool bf_term(flint::Arb& out,
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                             "unit_group.zeta_bf.term.final_scale");
-        flint::arb_log_ui(log_3cutoff, 3 * cutoff, precision);
+        bf_log_3cutoff(log_3cutoff, cutoff, precision);
         flint::arb_mul(factor, sqrt_cutoff, log_3cutoff, precision);
         flint::arb_mul_2exp_si(factor, factor, 1);
         flint::arb_inv(factor, factor, precision);
@@ -1784,7 +1806,7 @@ bool bf_error_bound(flint::Arb& out,
     flint::arb_sqrt(sqrt_log_discriminant, log_discriminant, precision);
     flint::arb_set_ui(sqrt_cutoff, cutoff);
     flint::arb_sqrt(sqrt_cutoff, sqrt_cutoff, precision);
-    flint::arb_log_ui(log_3cutoff, 3 * cutoff, precision);
+    bf_log_3cutoff(log_3cutoff, cutoff, precision);
     flint::arb_log_ui(log_cutoff9, cutoff / 9, precision);
 
     bf_const_decimal(c1, 2324, 1000, precision);
@@ -2283,12 +2305,17 @@ bool zeta_residue_bf_audit(flint::ArbRef out,
         return false;
     }
 
+    // Audit metadata goes to locals and is published with the value only
+    // after every step succeeds, so a failure leaves all outputs unchanged.
     flint::Arb log_residue;
-    flint::ArbRef audit_error_bound(error_bound);
+    flint::Arb local_error_bound;
+    ulong local_cutoff = 0;
+    slong local_work_precision = 0;
+    flint::ArbRef audit_error_bound(local_error_bound);
     if (!bf_log_residue_cutoff(flint::ArbRef(log_residue), order,
                                max_cutoff, true, &audit_error_bound,
-                               &cutoff, &work_precision, precision,
-                               nullptr)) {
+                               &local_cutoff, &local_work_precision,
+                               precision, nullptr)) {
         return false;
     }
 
@@ -2299,6 +2326,9 @@ bool zeta_residue_bf_audit(flint::ArbRef out,
     }
 
     flint::arb_set(out, flint::ArbConstRef(log_residue));
+    flint::arb_set(error_bound, flint::ArbConstRef(local_error_bound));
+    cutoff = local_cutoff;
+    work_precision = local_work_precision;
     return true;
 }
 
@@ -2410,15 +2440,22 @@ bool zeta_class_regulator_product_bf_audit_impl(
         return true;
     }
 
+    // Audit metadata and the product go to locals and are published only
+    // after every step succeeds, so a failure leaves all outputs unchanged.
     flint::Arb log_residue;
-    flint::ArbRef audit_error_bound(error_bound);
+    flint::Arb product;
+    flint::Arb local_error_bound;
+    ulong local_cutoff = 0;
+    slong local_work_precision = 0;
+    flint::ArbRef audit_error_bound(local_error_bound);
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                             "unit_group.zeta_bf.audit_log_residue");
         if (!bf_log_residue_cutoff(flint::ArbRef(log_residue), order,
                                    max_cutoff, true, &audit_error_bound,
-                                   &cutoff, &work_precision, precision,
-                                   diagnostics, residue_degree_base,
+                                   &local_cutoff, &local_work_precision,
+                                   precision, diagnostics,
+                                   residue_degree_base,
                                    residue_degree_cache)) {
             return false;
         }
@@ -2434,9 +2471,17 @@ bool zeta_class_regulator_product_bf_audit_impl(
         return false;
     }
 
-    return class_regulator_product_from_residue(
-            out, order, flint::ArbConstRef(log_residue), precision,
-            diagnostics);
+    if (!class_regulator_product_from_residue(
+                flint::ArbRef(product), order,
+                flint::ArbConstRef(log_residue), precision, diagnostics)) {
+        return false;
+    }
+
+    flint::arb_set(out, flint::ArbConstRef(product));
+    flint::arb_set(error_bound, flint::ArbConstRef(local_error_bound));
+    cutoff = local_cutoff;
+    work_precision = local_work_precision;
+    return true;
 }
 
 bool zeta_class_regulator_product_bf_audit(flint::ArbRef out,
