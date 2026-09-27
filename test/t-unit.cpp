@@ -3,6 +3,10 @@
 #include "test_support.hpp"
 #include "unit/unit_internal.hpp"
 
+#include <flint/fmpq_poly.h>
+#include <flint/fmpz_poly.h>
+#include <flint/ulong_extras.h>
+
 #include <cassert>
 #include <vector>
 
@@ -360,6 +364,143 @@ silex::NumberField integer_polynomial_field(const slong* coefficients,
     }
     return silex::test::field_by_polynomial(
             sflint::FmpqPolyConstRef(polynomial));
+}
+
+// True when generator has exact multiplicative order `order`: generator^order
+// is one and generator^(order/l) is not one for every prime l | order.
+bool has_exact_order(const silex::Element& generator, ulong order) noexcept {
+    silex::Element power(*generator.parent());
+    sflint::Fmpz exponent;
+    fmpz_set_ui(exponent.raw(), order);
+    if (!power.pow_fmpz(generator, sflint::FmpzConstRef(exponent)) ||
+        !power.equal_si(1)) {
+        return false;
+    }
+    n_factor_t factors;
+    n_factor_init(&factors);
+    n_factor(&factors, order, 1);
+    for (int i = 0; i < factors.num; ++i) {
+        fmpz_set_ui(exponent.raw(), order / factors.p[i]);
+        if (!power.pow_fmpz(generator, sflint::FmpzConstRef(exponent)) ||
+            power.equal_si(1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void assert_roots_of_unity(const silex::NumberField& field,
+                           ulong expected) noexcept {
+    sflint::Fmpz order;
+    silex::Element generator(field);
+    assert(silex::roots_of_unity(sflint::FmpzRef(order), generator, field));
+    assert(fmpz_equal_ui(order.raw(), expected) != 0);
+    assert(has_exact_order(generator, expected));
+
+    sflint::Fmpz order_only;
+    assert(silex::root_of_unity_order(sflint::FmpzRef(order_only), field));
+    assert(fmpz_equal_ui(order_only.raw(), expected) != 0);
+
+    silex::Element generator_only(field);
+    assert(silex::root_of_unity_generator(generator_only, field));
+    assert(has_exact_order(generator_only, expected));
+}
+
+// Q(zeta_n) defined by Phi_n for n = 3..30.  The expected w values are from
+// an external reference, GP 2.17.4, not from Silex:
+//
+//     for(n=3,30, print(n, " ", nfrootsof1(nfinit(polcyclo(n)))[1]))
+//
+// Before T-038, Q(zeta_9) returned w = 6 (true 18) and every n with a prime
+// factor >= 5 failed.
+int test_roots_of_unity_cyclotomic_fields() {
+    const ulong expected_w[31] = {
+            0,  0,  0,  6,  4,  10, 6,  14, 8,  18, 10,
+            22, 12, 26, 14, 30, 16, 34, 18, 38, 20, 42,
+            22, 46, 24, 50, 26, 54, 28, 58, 30};
+    for (ulong n = 3; n <= 30; ++n) {
+        sflint::FmpzPoly cyclotomic;
+        fmpz_poly_cyclotomic(cyclotomic.raw(), n);
+        sflint::FmpqPoly polynomial;
+        fmpq_poly_set_fmpz_poly(polynomial.raw(), cyclotomic.raw());
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        assert_roots_of_unity(field, expected_w[n]);
+    }
+    return 0;
+}
+
+// Cyclotomic fields given by polynomials that are not translates of a
+// cyclotomic polynomial, so the search must build the prime-power roots.
+// Each polynomial is charpoly(Mod(x + 2*x^2, polcyclo(m))) in GP 2.17.4, and
+// the expected w is GP's nfrootsof1 of it.
+int test_roots_of_unity_noncyclotomic_presentations() {
+    // Q(zeta_9): w = 18 (3-part 9 found through a cube root of zeta_3).
+    const slong zeta9[] = {57, -36, 36, 9, 6, 0, 1};
+    assert_roots_of_unity(integer_polynomial_field(zeta9, 7), 18);
+
+    // Q(zeta_16): w = 16 (square roots from zeta_4 up to zeta_16).
+    const slong zeta16[] = {257, 16, 80, 128, 32, 0, 0, 0, 1};
+    assert_roots_of_unity(integer_polynomial_field(zeta16, 9), 16);
+
+    // Q(zeta_12): w = 12.
+    const slong zeta12[] = {13, -8, 11, -4, 1};
+    assert_roots_of_unity(integer_polynomial_field(zeta12, 5), 12);
+
+    // Q(zeta_5): w = 10.  The search has no root finder for zeta_p with
+    // p >= 5 outside cyclotomic-translate presentations, so it fails closed
+    // rather than return a w below the good-prime bound.
+    const slong zeta5[] = {11, 7, 9, 3, 1};
+    silex::NumberField field5 = integer_polynomial_field(zeta5, 5);
+    sflint::Fmpz order;
+    fmpz_set_ui(order.raw(), 17);
+    silex::Element generator(field5);
+    assert(generator.set_si(7));
+    assert(!silex::roots_of_unity(sflint::FmpzRef(order), generator, field5));
+    assert(fmpz_equal_ui(order.raw(), 17) != 0);
+    assert(generator.equal_si(7));
+    assert(!silex::root_of_unity_order(sflint::FmpzRef(order), field5));
+    assert(fmpz_equal_ui(order.raw(), 17) != 0);
+    return 0;
+}
+
+// The search publishes w only when it finds a root of unity whose exact order
+// is the supplied good-prime bound; a bound it cannot attain fails closed.
+int test_roots_of_unity_fail_closed_against_bound() {
+    silex::NumberField qi = quadratic_field(-1);
+    const slong zeta9[] = {57, -36, 36, 9, 6, 0, 1};
+    silex::NumberField field9 = integer_polynomial_field(zeta9, 7);
+
+    sflint::Fmpz order;
+    silex::Element generator(qi);
+    assert(silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator, qi, 4));
+    assert(fmpz_equal_ui(order.raw(), 4) != 0);
+    assert(has_exact_order(generator, 4));
+
+    // A bound that is a strict multiple of w: Q(i) has no zeta_3 or zeta_8.
+    fmpz_set_ui(order.raw(), 17);
+    assert(generator.set_si(7));
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator, qi, 12));
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator, qi, 8));
+    assert(fmpz_equal_ui(order.raw(), 17) != 0);
+    assert(generator.equal_si(7));
+
+    silex::Element generator9(field9);
+    assert(silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator9, field9, 18));
+    assert(fmpz_equal_ui(order.raw(), 18) != 0);
+    assert(has_exact_order(generator9, 18));
+    // The old zeta_4/zeta_6 search returned 6 here.  A bound of 54 is a multiple
+    // of the true w = 18 that the search cannot attain.
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator9, field9, 54));
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator9, field9, 36));
+    assert(fmpz_equal_ui(order.raw(), 18) != 0);
+    return 0;
 }
 
 // |value - reference| < 2^-90, with reference a decimal string from GP.
@@ -736,6 +877,9 @@ int main() {
     test_rank();
     test_quadratic_fundamental_unit();
     test_roots_of_unity();
+    test_roots_of_unity_cyclotomic_fields();
+    test_roots_of_unity_noncyclotomic_presentations();
+    test_roots_of_unity_fail_closed_against_bound();
     test_lower_regulator_bound();
     test_lower_regulator_bound_terms();
     test_lower_regulator_bound_maximum();

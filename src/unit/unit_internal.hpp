@@ -3,7 +3,24 @@
 #include <silex/flint/arb.hpp>
 #include <silex/flint/fmpz.hpp>
 
+namespace silex {
+class Element;
+class NumberField;
+}  // namespace silex
+
 namespace silex::detail {
+
+// Search step of roots_of_unity (see src/unit/roots_of_unity.cpp), exposed
+// for tests.  `bound` must be a proven multiple of the number w of roots of
+// unity in `field`, such as the reduced good-prime bound.  Succeeds only when
+// it finds a root of unity of exact order `bound`, which then proves
+// w = bound; writes order = bound and that generator.  Fails closed, leaving
+// the outputs unchanged, when it cannot attain the bound, including when the
+// bound is a strict multiple of w.
+bool roots_of_unity_for_bound(flint::FmpzRef order,
+                              Element& generator,
+                              const NumberField& field,
+                              ulong bound) noexcept;
 
 // Rigorous lower bounds for the regulator R of a number field with r1 real
 // and r2 complex places and w roots of unity.  Each function writes an Arb
