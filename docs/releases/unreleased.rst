@@ -22,6 +22,18 @@ Fixed
   previously failed, are now supported.  See "Roots of unity" in
   :doc:`../reference/algorithms_and_sources`.
 
+- ``roots_of_unity``, ``root_of_unity_order`` and
+  ``root_of_unity_generator`` now find ``w`` in cases that previously failed
+  closed.  These include ``zeta_p`` for ``p >= 5`` when the defining
+  polynomial is not a cyclotomic translate, such as ``Q(zeta_5)`` given by
+  ``x^4 + 3x^3 + 9x^2 + 7x + 11``.  They also include 2- and 3-power roots
+  of unity in fields of degree 10 or more, and defining polynomials that are
+  not monic and integral.  A primitive ``p^e``-th root of unity that the
+  exact square and cube roots cannot supply is now found by Hensel lifting a
+  root of ``Phi_(p^e)`` from a good prime, following Hecke.  A non-monic
+  field is searched in a monic integral model.  ``w`` is still returned only
+  when a root of unity of exactly the proven bound's order is certified.
+
 - ``Element::is_power`` and ``Element::is_square`` now find non-integral roots
   that were previously reported as unsupported, for example
   ``((3 + 4i) / 5)^3`` in ``Q(i)``.  A non-integral input is rescaled by its

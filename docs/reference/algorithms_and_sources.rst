@@ -170,12 +170,18 @@ of a field and a generator.  Fields with a real place, quadratic fields and
 branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
 
 1. ``guess_roots``: for primes ``p >= 3`` not dividing ``disc(T)`` of the
-   monic integral defining polynomial ``T`` of ``theta' = a_n theta``, where
-   ``a_n`` is the leading coefficient of the integral numerator of the
-   field's defining polynomial (``theta' = theta`` when it is monic), ``w``
+   monic integral defining polynomial ``T`` of ``theta' = L theta``, ``w``
    divides ``p^g - 1`` with ``g`` the gcd of the residue degrees above ``p``.
-   The
-   gcd of these values is a proven multiple of ``w``.  As in PARI, the loop
+   ``T`` and the positive integer ``L`` come from PARI's
+   ``src/basemath/base1.c:ZX_primitive_to_monic`` (lines 390-449), which
+   ``nfmaxord`` applies to non-monic polynomials: for each ``p^e`` exactly
+   dividing the leading coefficient of the primitive integral numerator
+   ``a(x)`` of the defining polynomial, ``L`` takes the factor ``p^k`` for
+   the least ``k`` that makes ``p^(k n - e) a(x / p^k)`` integral.
+   ``L = 1`` and ``theta' = theta`` when ``a`` is monic.
+   The gcd of these values is a proven multiple of ``w``.  By the Chebotarev
+   density theorem the gcd over all good primes equals ``w``, so a bound
+   larger than ``w`` comes only from stopping early.  As in PARI, the loop
    stops when the gcd fits in a word and has not changed for more than
    ``n + 20`` consecutive good primes.  As in Hecke v0.38.6
    ``src/NumFieldOrd/NfOrd/TorsionUnits.jl:_torsion_group_order_divisor``,
@@ -188,38 +194,65 @@ branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
    ``T(y) = Phi_N(+-y + c)``, reading ``c`` from the trace coefficient.  Silex
    takes the two candidates ``+-(theta' + c)`` and certifies them by exact order
    instead of PARI's Graeffe comparison.
-4. Otherwise Silex builds a primitive ``p^e``-th root for each prime power
-   ``p^e`` of the bound.  PARI uses ``nfisincl(polcyclo(p^e), T)`` and Hecke
-   ``_torsion_units_gen`` uses ``_roots_hensel``.  Silex uses its exact square
-   and power roots: ``zeta_4 = sqrt(-1)``, then square roots up to
-   ``zeta_(2^e)``; ``zeta_3 = (-1 + sqrt(-3))/2``, then cube roots up to
-   ``zeta_(3^e)``.  Any ``p``-th root of a primitive ``p^j``-th root of unity
-   is a primitive ``p^(j+1)``-th root.  If ``zeta_(p^(j+1))`` lies in ``K``,
-   the ``p``-th power map from the cyclic group ``mu_(p^(j+1))`` onto
-   ``mu_(p^j)`` is surjective, so every ``p^j``-th root of unity is a
-   ``p``-th power in ``K``.  Together these make the choice of root at each
-   step irrelevant.
+4. Otherwise Silex looks for a primitive ``p^e``-th root of unity for each
+   prime power ``p^e > 2`` of the bound and multiplies them.  PARI uses
+   ``nfisincl(polcyclo(p^e), T)``; Silex follows Hecke v0.38.6
+   ``TorsionUnits.jl:_torsion_units_gen`` (lines 414-457).  The search runs
+   in a monic integral model: the field itself when its defining polynomial
+   is monic and integral, and otherwise ``Q(theta')`` defined by ``T``.  A
+   root ``g(theta')`` found there is the element ``g(L theta)`` of the
+   field.
+
+   a. Silex first tries its exact square and power roots, which need degree
+      less than 10: ``zeta_4 = sqrt(-1)``, then square roots up to
+      ``zeta_(2^e)``; ``zeta_3 = (-1 + sqrt(-3))/2``, then cube roots up to
+      ``zeta_(3^e)``.  Any ``p``-th root of a primitive ``p^j``-th root of
+      unity is a primitive ``p^(j+1)``-th root.  If ``zeta_(p^(j+1))`` lies
+      in ``K``, the ``p``-th power map from the cyclic group
+      ``mu_(p^(j+1))`` onto ``mu_(p^j)`` is surjective, so every ``p^j``-th
+      root of unity is a ``p``-th power in ``K``.  Together these make the
+      choice of root at each step irrelevant.
+   b. When that fails or is unsupported (``p >= 5``, or degree 10 or more),
+      Silex finds a root of ``Phi_(p^e)`` in ``K`` as Hecke's
+      ``_roots_hensel(Phi_(p^e), max_roots = 1, is_normal = true,
+      root_bound = ones)`` does (``src/NumFieldOrd/NfOrd/Hensel.jl`` lines
+      57-232 and ``_hensel``, lines 313-637).  It chooses a prime ``P`` of
+      the equation order where ``T`` and ``Phi_(p^e)`` are squarefree
+      (lines 83-181), takes a root of ``Phi_(p^e)`` in the residue field,
+      and lifts it and the inverse of the derivative by Newton steps
+      (lines 593-596).  It multiplies by ``T'(theta)`` and reconstructs the
+      element by rounding against an LLL-reduced basis of ``P^k``
+      (lines 599-611).  The exponent ``k`` is the Friedrich-Fieker bound
+      ``_lifting_expo`` (lines 674-721) with root bound 1 at every place,
+      since every conjugate of a root of unity has absolute value 1.  Hecke
+      stops when a residue field has fewer than ``deg Phi_(p^e)`` roots,
+      which proves that ``K`` has none, because ``Q(zeta_(p^e))`` is normal.
+      Silex reports failure there.  Hecke lifts every residue root.  Silex
+      lifts one, which loses nothing: a normal ``Phi_(p^e)`` with a root in
+      ``K`` has all its roots in ``K``, and their reductions are all the
+      residue roots.
 
 Silex publishes ``w`` only when it certifies a root of unity whose exact
 order is the reduced bound.  The certificate is ``z^w = 1`` and
 ``z^(w/l) != 1`` for every prime ``l | w``.  With the upper bound, this
-proves ``w``.  PARI accepts a smaller prime power after a "wrong guess"
-warning.  Silex fails closed instead, and it also fails closed for a prime
-``p >= 5`` in the bound when ``T`` is not a cyclotomic translate, because it
-has no root finder for ``Phi_(p^e)`` there.  It also fails when the exact
-square or power root it needs is unsupported, as for fields of degree 10 or
-more outside the cyclotomic-translate case.  The rescaling to ``theta'`` in
-steps 1-3 applies only to the bound and the cyclotomic-translate test.  The
-exact square and power roots of step 4 need a monic integral defining
-polynomial, so a field whose defining polynomial is not monic and integral
-currently fails closed when ``w > 2`` and it is not a cyclotomic translate;
-``w = 2`` is still found there.
+proves ``w``.  The certificate is checked in the field itself, after mapping
+back from the monic model, so neither step 4a nor step 4b has to be
+trusted.  PARI accepts a smaller prime power after a "wrong guess" warning.
+Silex fails closed instead.  This happens when the good-prime loop stops
+with a bound above ``w``, including ``w = 2`` whenever the reduced bound is
+not 2.  It also happens when the Hensel search finds no root, for example
+at its limit of 256 primes or when its lifting bound cannot be evaluated.
+Fields with a real place and quadratic fields, including those with a
+non-monic polynomial, take the direct cases above and do not reach these
+steps.
 ``test/t-unit.cpp`` checks ``Q(zeta_n)`` for ``n = 3..30`` against
-``nfrootsof1`` from PARI/GP 2.17.4, along with non-cyclotomic presentations
-of ``Q(zeta_9)``, ``Q(zeta_12)`` and ``Q(zeta_16)``, the fail-closed case
-``Q(zeta_5)`` (a known limitation: the true ``w`` is 10), and fail-closed
-behavior against bounds that are too large or not multiples of the proven
-bound.
+``nfrootsof1`` from PARI/GP 2.17.4.  It also checks non-cyclotomic
+presentations of ``Q(zeta_n)`` for ``n = 5, 7, 9, 11, 12, 16, 27`` and 32,
+where degrees 16 and 18 use step 4b for 2- and 3-power roots.  It checks
+non-monic presentations with ``w = 2``, a non-monic cyclotomic translate,
+and non-monic presentations with ``w = 10``, 12, 18, 32 and 50.  It checks
+the Hensel search on its own, and fail-closed behavior against bounds that
+are too large or not multiples of the proven bound.
 Earlier versions used only ``sqrt(-1)`` and ``sqrt(-3)`` without comparing
 the result to the bound, and returned ``w = 6`` for ``Q(zeta_9)``, where the
 true value is 18.
