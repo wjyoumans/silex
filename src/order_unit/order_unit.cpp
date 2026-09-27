@@ -337,10 +337,16 @@ bool class_regulator_index_bound_from_candidate_product(
         }
     }
 
-    flint::arf_get_fmpz(candidate, upper, ARF_RND_CEIL);
-    if (flint::fmpz_sgn(flint::FmpzConstRef(candidate)) <= 0) {
-        flint::fmpz_one(flint::FmpzRef(candidate));
+    // With a correct analytic enclosure the quotient is the combined
+    // class/unit index, a positive integer.  An upper endpoint below one
+    // leaves no positive integer in the enclosure, so the analytic value and
+    // the candidate are inconsistent; fail closed instead of reporting index
+    // one (decision 2026-09-26).  Otherwise the outward-rounded ceiling is a
+    // conservative bound.
+    if (flint::arf_cmp_ui(upper, 1) < 0) {
+        return false;
     }
+    flint::arf_get_fmpz(candidate, upper, ARF_RND_CEIL);
 
     flint::fmpz_set(out, flint::FmpzConstRef(candidate));
     return true;

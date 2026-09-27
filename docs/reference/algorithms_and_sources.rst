@@ -337,6 +337,14 @@ regulator lower bound and unit saturation, and the class group by
 saturation.  A failed saturation proof leaves the candidate units and class
 group unchanged.
 
+The analytic index bound is the ceiling of the rigorous upper endpoint of the
+quotient ``h_cand R_cand / hR``.  When the analytic ``hR`` is correct this
+quotient is the combined class/unit index, a positive integer.  If the upper
+endpoint is below one, the enclosure contains no positive integer, so the
+analytic value and the candidate are inconsistent; the bound then fails
+closed and the check reports the analytic value as unavailable instead of
+reporting index one.
+
 A Belabas--Friedman check recorded after an unconditional one (for example a
 BF audit of a quadratic field already proven through ``L(1, chi_D)``) keeps
 the unconditional label, and a Belabas--Friedman check is accepted only

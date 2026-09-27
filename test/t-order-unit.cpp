@@ -3164,6 +3164,15 @@ int test_class_regulator_index_bound() {
             sflint::ArbConstRef(analytic_hR), 0));
     assert(sflint::fmpz_equal_si(sentinel, 42));
 
+    // An analytic hR of 2 against the candidate product 1 puts the quotient
+    // below one; the bound fails closed rather than reporting index one.
+    sflint::Arb large_analytic_hR;
+    sflint::arb_set_si(large_analytic_hR, 2);
+    assert(!units.class_regulator_index_bound(
+            sflint::FmpzRef(sentinel), class_group,
+            sflint::ArbConstRef(large_analytic_hR), 128));
+    assert(sflint::fmpz_equal_si(sentinel, 42));
+
     return 0;
 }
 
@@ -3202,6 +3211,49 @@ int test_class_regulator_index_bound_interval_boundary() {
             sflint::ArbConstRef(candidate_product),
             sflint::ArbConstRef(narrow_analytic_product), 128, nullptr));
     assert(sflint::fmpz_equal_si(bound, 2));
+
+    return 0;
+}
+
+// The quotient h_cand R_cand / (hR)_analytic is a positive integer (the
+// combined class/unit index) when the analytic enclosure is correct.  An
+// upper endpoint below one leaves no positive integer in the enclosure, so
+// the bound fails closed instead of reporting index one (decision
+// 2026-09-26).
+int test_class_regulator_index_bound_below_one_fails_closed() {
+    sflint::Arb candidate_product;
+    sflint::Arb analytic_product;
+    sflint::Fmpz bound;
+
+    // 1 / 2: upper endpoint below one, fail closed, output unchanged.
+    sflint::arb_set_si(candidate_product, 1);
+    sflint::arb_set_si(analytic_product, 2);
+    assert(set_fmpz_si(bound, 42));
+    assert(!silex::detail::class_regulator_index_bound_from_candidate_product(
+            sflint::FmpzRef(bound),
+            sflint::ArbConstRef(candidate_product),
+            sflint::ArbConstRef(analytic_product), 128, nullptr));
+    assert(sflint::fmpz_equal_si(bound, 42));
+
+    // 1 / (2 +/- 1/2): the enclosure [2/5, 2/3] is still below one.
+    sflint::Fmpq half;
+    sflint::fmpq_set_si(half, 1, 2);
+    sflint::Arb error;
+    sflint::arb_set_fmpq(error, half, 128);
+    sflint::arb_add_error(analytic_product, error);
+    assert(!silex::detail::class_regulator_index_bound_from_candidate_product(
+            sflint::FmpzRef(bound),
+            sflint::ArbConstRef(candidate_product),
+            sflint::ArbConstRef(analytic_product), 128, nullptr));
+    assert(sflint::fmpz_equal_si(bound, 42));
+
+    // An exact quotient of one still gives one.
+    sflint::arb_set_si(analytic_product, 1);
+    assert(silex::detail::class_regulator_index_bound_from_candidate_product(
+            sflint::FmpzRef(bound),
+            sflint::ArbConstRef(candidate_product),
+            sflint::ArbConstRef(analytic_product), 128, nullptr));
+    assert(sflint::fmpz_equal_si(bound, 1));
 
     return 0;
 }
@@ -5409,6 +5461,7 @@ int main() {
     test_regulator_index_bound();
     test_class_regulator_index_bound();
     test_class_regulator_index_bound_interval_boundary();
+    test_class_regulator_index_bound_below_one_fails_closed();
     test_unit_index_bound_from_regulator_quotient();
     test_class_unit_regulator_certification();
     test_belabas_friedman_class_regulator_is_grh_conditional();

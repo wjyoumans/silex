@@ -67,7 +67,9 @@ checks that the group's torsion is the torsion subgroup Silex computes for
 the order, so the analytic test on the free part cannot certify wrong
 torsion.  A caller who has an ``hR`` value of their own can compare it with
 ``OrderUnitGroup::class_regulator_index_bound``, which reports a bound but
-does not publish certification.
+does not publish certification.  It returns ``false`` when the quotient
+``h_cand R_cand / hR`` has an upper endpoint below one, since no positive
+integer index is then consistent with the supplied value.
 
 The installed headers still declare a few low-level ideal construction
 shortcuts in ``silex::detail`` (``set_known_two_generator_ideal``,
