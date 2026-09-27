@@ -741,7 +741,11 @@ bool try_prove_candidate_pair_by_saturation(
     // A GRH-conditional (Belabas-Friedman) analytic index-one result only
     // selects this candidate.  The proof is unconditional: the unit group is
     // proven from the regulator lower bound and unit saturation, and the
-    // class group from relation saturation at every p | h_cand.
+    // class group from relation saturation at every p | h_cand.  The proven
+    // unit group is built aside and replaces `units` only after the class
+    // proof succeeds, so a failure leaves both objects unchanged.
+    flint::Fmpz aux_bound;
+    flint::fmpz_set_si(flint::FmpzRef(aux_bound), kComputeProofAuxMax);
     if (units.certification_status() != CertificationMode::proven) {
         OrderUnitGroup proven(order);
         proven.set_diagnostics(units.diagnostics());
@@ -762,11 +766,16 @@ bool try_prove_candidate_pair_by_saturation(
                     "unit_group.validation_saturation_proof.units_unavailable");
             return false;
         }
+        if (!ClassGroupCertificationAccess::
+                    try_prove_class_order_saturation_with_units(
+                            class_group, proven,
+                            flint::FmpzConstRef(aux_bound))) {
+            return false;
+        }
         units.swap(proven);
+        return true;
     }
 
-    flint::Fmpz aux_bound;
-    flint::fmpz_set_si(flint::FmpzRef(aux_bound), kComputeProofAuxMax);
     return ClassGroupCertificationAccess::
             try_prove_class_order_saturation_with_units(
                     class_group, units, flint::FmpzConstRef(aux_bound));

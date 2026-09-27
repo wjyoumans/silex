@@ -166,13 +166,17 @@ public:
     // `verified` once an analytic class-regulator check (hR from the zeta
     // function) has passed for the current presentation.  The check is
     // unconditional only for degree one and for the quadratic L(1, chi)
-    // route; a Belabas-Friedman hR (every degree >= 3 field, and a degree-two
-    // field outside the explicit quadratic backend) assumes GRH.  Use
-    // analytic_class_regulator_certification() to read which one was used.
+    // route; a Belabas-Friedman hR (every degree >= 3 field, a degree-two
+    // field outside the explicit quadratic backend, and a quadratic field
+    // whose L(1, chi) evaluation fails and falls back to Belabas-Friedman)
+    // assumes GRH.  Use analytic_class_regulator_certification() to read
+    // which one was used.
     ProofState analytic_class_regulator_status() const noexcept;
     // `proven` for an unconditional analytic check, `grh` for a
     // Belabas-Friedman (GRH-conditional) check, and `unknown` when no
-    // analytic check is recorded.  A GRH-conditional check never makes the
+    // analytic check is recorded.  Once an unconditional check is recorded,
+    // a later Belabas-Friedman audit of the same presentation keeps the
+    // `proven` label.  A GRH-conditional check never makes the
     // class group or the units `proven`: a `proven` label then requires
     // factor-base generation, proven units, and verified relation saturation
     // at every prime dividing the candidate class number.
@@ -202,7 +206,11 @@ public:
     // units plus either an unconditional analytic hR (degree one or the
     // quadratic L(1, chi) route) or verified relation saturation at every
     // prime dividing the candidate class number.  A Belabas-Friedman hR,
-    // which assumes GRH, is never used to publish `proven`.
+    // which assumes GRH, is never used to publish `proven`, so
+    // `zeta_bf_max_cutoff` is ignored for a `proven` request (and no other
+    // request evaluates hR); the overload is kept for source compatibility.  On degree >= 3 a `proven` request runs the
+    // saturation proof, which computes discrete logarithms at auxiliary
+    // primes for every prime dividing the candidate class number.
     bool try_certify_with_units(const OrderUnitGroup& units,
                                 CertificationMode requested,
                                 slong precision) noexcept;
@@ -213,9 +221,10 @@ public:
     // Publish `proven` for the class group and units from an analytic hR
     // only when that hR is unconditional (degree one or the quadratic
     // L(1, chi) route).  With a Belabas-Friedman hR, which assumes GRH, they
-    // succeed only if relation saturation has already been proven at every
-    // prime dividing the candidate class number; otherwise they fail and
-    // leave both objects unchanged.
+    // succeed only if `units` is already proven and relation saturation has
+    // already been proven at every prime dividing the candidate class
+    // number; then they only record the GRH-conditional analytic check.
+    // Otherwise they fail and leave both objects unchanged.
     bool try_certify_class_unit_with_zeta(OrderUnitGroup& units,
                                           slong precision) noexcept;
     bool try_certify_class_unit_with_zeta_bf(OrderUnitGroup& units,
@@ -330,6 +339,7 @@ private:
             flint::ArbConstRef analytic_hR,
             slong precision,
             bool hr_unconditional) noexcept;
+    void record_analytic_class_regulator_check_(bool unconditional) noexcept;
     bool record_zeta_bf_audit_(flint::ArbConstRef error_bound,
                                ulong cutoff,
                                ulong max_cutoff,

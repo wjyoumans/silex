@@ -3441,11 +3441,59 @@ int test_class_unit_regulator_certification() {
         assert(::arb_set_str(decimal_window.raw(),
                              "0.881373587019543 +/- 1e-15", 256) == 0);
         assert(::arb_contains(decimal_window.raw(), zeta_hR.raw()) != 0);
+        // The same value reported as GRH-conditional (as when the
+        // quadratic L(1, chi) evaluation fails and the zeta route falls
+        // back to Belabas-Friedman) cannot publish `proven`, although this
+        // order has an unconditional route: the gate honours the route that
+        // produced the value, not the order type.
+        assert(!CertificationAccess::try_certify_class_unit_with_units(
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256,
+                false));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(units.certification_status() ==
+               silex::CertificationMode::unknown);
         assert(CertificationAccess::try_certify_class_unit_with_units(
-                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256,
+                true));
         assert(class_group.certification_status() ==
                silex::CertificationMode::proven);
         assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::proven);
+
+        // A later Belabas-Friedman audit is recorded but does not downgrade
+        // the unconditional L(1, chi) check to `grh`.  (Precision 64: the
+        // Belabas-Friedman evaluation does not reach 256 bits within the
+        // cutoff on this field.)
+        assert(class_group.try_certify_class_unit_with_zeta_bf(units, 20000,
+                                                               64));
+        assert(class_group.zeta_bf_proof_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::proven);
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+
+        // A Belabas-Friedman hR cannot prove other, unproven units, even on
+        // a context that is already proven: the gate fails and changes
+        // nothing.
+        silex::OrderUnitGroup other(order);
+        assert(real_quadratic_two_units(other, order, embeddings, epsilon));
+        assert(other.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(!class_group.try_certify_class_unit_with_zeta_bf(other, 20000,
+                                                                64));
+        assert(other.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.analytic_class_regulator_certification() ==
                silex::CertificationMode::proven);
     }
 
@@ -3477,7 +3525,8 @@ int test_class_unit_regulator_certification() {
         assert(silex::zeta_class_regulator_product(sflint::ArbRef(zeta_hR),
                                                    order, 256));
         assert(!CertificationAccess::try_certify_class_unit_with_units(
-                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256,
+                true));
         assert(class_group.certification_status() ==
                silex::CertificationMode::unknown);
         assert(class_group.analytic_class_regulator_status() ==
@@ -3505,7 +3554,8 @@ int test_class_unit_regulator_certification() {
         assert(silex::zeta_class_regulator_product(sflint::ArbRef(zeta_hR),
                                                    order, 256));
         assert(!CertificationAccess::try_certify_class_unit_with_units(
-                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256,
+                true));
         assert(class_group.certification_status() ==
                silex::CertificationMode::unknown);
         assert(class_group.analytic_class_regulator_status() ==
@@ -3699,7 +3749,8 @@ int test_belabas_friedman_class_regulator_is_grh_conditional() {
         assert(!class_group.try_certify_class_unit_with_zeta_bf(units, 20000,
                                                                 256));
         assert(!CertificationAccess::try_certify_class_unit_with_units(
-                class_group, units, sflint::ArbConstRef(zeta_hR), 256));
+                class_group, units, sflint::ArbConstRef(zeta_hR), 256,
+                false));
         assert(!class_group.try_certify_with_units(
                 units, silex::CertificationMode::proven, 256, 20000));
         assert(class_group.certification_status() ==
@@ -3750,6 +3801,180 @@ int test_belabas_friedman_class_regulator_is_grh_conditional() {
                silex::CertificationMode::grh);
         assert(class_group.relation_saturation_status() ==
                silex::ProofState::verified);
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    return 0;
+}
+
+// x^3 - 11: h = 2 (Cl = Z/2), unit rank 1.  Oracle, GP 2.17
+// `bnfinit(x^3 - 11, 1)`: `.cyc` = [2], `.reg` = 5.58720662606090776185...,
+// `.tu` = [2, -1], `bnfcertify` = 1.  A `proven` request must reach
+// `proven` through the saturation route, which on this field runs the ell = 2
+// local proof; the Belabas-Friedman hR (GRH) supplies no proof component.
+int test_saturation_proves_nontrivial_class_group_without_grh() {
+    using CertificationAccess =
+            silex::detail::ClassGroupCertificationAccess;
+
+    silex::NumberField field = cubic_field(0, -11);
+    silex::Order equation;
+    equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+    silex::EmbeddingContext embeddings(field);
+
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+
+    silex::ClassGroupComputeOptions proven_options;
+    proven_options.max_candidates = 5000;
+    proven_options.max_relations = 500;
+    proven_options.zeta_bf_max_cutoff = 20000;
+    proven_options.requested_certification =
+            silex::CertificationMode::proven;
+
+    silex::ClassGroupContext proven_class_group;
+    silex::OrderUnitGroup proven_units;
+    assert(proven_units.compute_with_class_group(
+            proven_class_group, order, sflint::FmpzConstRef(bound),
+            proven_options, 128));
+    assert(proven_class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(proven_units.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(proven_class_group.analytic_class_regulator_certification() !=
+           silex::CertificationMode::proven);
+    assert(proven_class_group.relation_saturation_status() ==
+           silex::ProofState::verified);
+
+    // Cl = Z/2, as in GP.
+    assert(proven_class_group.invariant_count() == 1);
+    sflint::Fmpz invariant;
+    assert(proven_class_group.invariant(sflint::FmpzRef(invariant), 0));
+    assert(sflint::fmpz_equal_si(invariant, 2));
+
+    // The class group is proven by the ell = 2 local proof, and every
+    // recorded saturation check is verified.
+    bool saw_two = false;
+    for (slong i = 0; i < proven_class_group.relation_saturation_record_count();
+         ++i) {
+        sflint::Fmpz ell;
+        silex::ProofState status = silex::ProofState::not_checked;
+        assert(proven_class_group.relation_saturation_record(
+                sflint::FmpzRef(ell), status, i));
+        assert(status == silex::ProofState::verified);
+        if (sflint::fmpz_equal_si(ell, 2)) {
+            saw_two = true;
+        }
+    }
+    assert(saw_two);
+
+    // R = 5.587206626060907761855..., torsion {+1, -1}, as in GP.
+    sflint::Arb regulator;
+    assert(proven_units.regulator(sflint::ArbRef(regulator)));
+    sflint::Arb reference;
+    assert(::arb_set_str(reference.raw(),
+                         "5.58720662606090776185541302052 +/- 1e-28",
+                         128) == 0);
+    assert(::arb_overlaps(regulator.raw(), reference.raw()) != 0);
+    sflint::Fmpz torsion_order;
+    assert(proven_units.torsion_order(sflint::FmpzRef(torsion_order)));
+    assert(sflint::fmpz_equal_si(torsion_order, 2));
+
+    // Proven units, GRH-conditional hR, saturation not yet proven: every
+    // analytic gate fails closed and leaves the candidate unchanged.  The
+    // units are genuinely fundamental, so the analytic index-one test
+    // itself passes; only the GRH rule blocks publication.
+    {
+        silex::ClassGroupCandidateOptions options;
+        options.max_candidates = 5000;
+        options.max_relations = 500;
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), options));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        silex::OrderUnitGroup units(std::move(proven_units));
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+
+        sflint::Arb zeta_hR;
+        sflint::Arb error_bound;
+        ulong cutoff = 0;
+        slong work_precision = 0;
+        assert(silex::zeta_class_regulator_product_bf_audit(
+                sflint::ArbRef(zeta_hR), sflint::ArbRef(error_bound), cutoff,
+                work_precision, order, 20000, 64));
+        sflint::Fmpz aux_bound;
+        assert(set_fmpz_si(aux_bound, 1000));
+
+        const auto assert_unchanged = [&]() {
+            assert(class_group.certification_status() ==
+                   silex::CertificationMode::unknown);
+            assert(class_group.relation_saturation_status() !=
+                   silex::ProofState::verified);
+            assert(class_group.analytic_class_regulator_status() ==
+                   silex::ProofState::not_checked);
+            assert(class_group.analytic_class_regulator_certification() ==
+                   silex::CertificationMode::unknown);
+            assert(class_group.zeta_bf_proof_status() ==
+                   silex::ProofState::not_checked);
+            assert(class_group.unit_proof_status() ==
+                   silex::ProofState::not_checked);
+            assert(class_group.regulator_proof_status() ==
+                   silex::ProofState::not_checked);
+            assert(units.certification_status() ==
+                   silex::CertificationMode::proven);
+        };
+
+        assert(!class_group.try_certify_class_unit_with_zeta(units, 64));
+        assert_unchanged();
+        assert(!class_group.try_certify_class_unit_with_zeta_bf(units, 20000,
+                                                                64));
+        assert_unchanged();
+        assert(!CertificationAccess::try_certify_class_unit_with_units(
+                class_group, units, sflint::ArbConstRef(zeta_hR), 64,
+                false));
+        assert_unchanged();
+        assert(!CertificationAccess::try_analytic_index_bound_with_units(
+                class_group, units, sflint::ArbConstRef(zeta_hR),
+                sflint::FmpzConstRef(aux_bound), 64, false));
+        assert_unchanged();
+        assert(!CertificationAccess::try_certify_class_unit_with_bf_audit(
+                class_group, units, sflint::ArbConstRef(zeta_hR),
+                sflint::ArbConstRef(error_bound), cutoff, 20000, 64,
+                work_precision));
+        assert_unchanged();
+
+        // Control: the unconditional saturation route proves the same pair.
+        assert(class_group.try_certify_with_units(
+                units, silex::CertificationMode::proven, 256, 20000));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::unknown);
+
+        // With saturation proven, the same GRH-conditional values pass the
+        // analytic gates, which shows that the failures above came from the
+        // GRH rule and not from an inconclusive enclosure.  The check is
+        // recorded as `grh` and the label stays `proven`.
+        assert(class_group.try_certify_class_unit_with_zeta(units, 64));
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::grh);
+        assert(class_group.try_certify_class_unit_with_zeta_bf(units, 20000,
+                                                               64));
+        assert(class_group.zeta_bf_proof_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::grh);
         assert(class_group.certification_status() ==
                silex::CertificationMode::proven);
     }
@@ -5187,6 +5412,7 @@ int main() {
     test_unit_index_bound_from_regulator_quotient();
     test_class_unit_regulator_certification();
     test_belabas_friedman_class_regulator_is_grh_conditional();
+    test_saturation_proves_nontrivial_class_group_without_grh();
     test_cached_torsion_never_reaches_proven();
     test_prove_index_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();

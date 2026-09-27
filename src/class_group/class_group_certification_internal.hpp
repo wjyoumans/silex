@@ -46,28 +46,18 @@ public:
     // degree one, or the quadratic L(1, chi) route.  A Belabas-Friedman hR
     // assumes GRH (Belabas-Friedman 2015, Theorem 1) and never publishes
     // `proven` on its own.  `hr_unconditional` states the route that
-    // produced the supplied value; it is honoured only for an order that has
-    // an unconditional route at all.  The overloads without it treat the
-    // value as unconditional exactly when the order has such a route.
-    static bool try_certify_class_unit_with_units(
-            ClassGroupContext& context,
-            OrderUnitGroup& units,
-            flint::ArbConstRef analytic_class_regulator_product,
-            slong precision) noexcept;
-
+    // produced the supplied value (for example
+    // `AnalyticClassRegulatorCache::value_unconditional()`); it is honoured
+    // only for an order that has an unconditional route at all.  There is
+    // deliberately no overload without it: whether a value is unconditional
+    // depends on the route that computed it, not on the order, because the
+    // quadratic route falls back to Belabas-Friedman when L(1, chi) fails.
     static bool try_certify_class_unit_with_units(
             ClassGroupContext& context,
             OrderUnitGroup& units,
             flint::ArbConstRef analytic_class_regulator_product,
             slong precision,
             bool hr_unconditional) noexcept;
-
-    static bool try_analytic_index_bound_with_units(
-            ClassGroupContext& context,
-            const OrderUnitGroup& units,
-            flint::ArbConstRef analytic_class_regulator_product,
-            flint::FmpzConstRef aux_prime_bound,
-            slong precision) noexcept;
 
     static bool try_analytic_index_bound_with_units(
             ClassGroupContext& context,

@@ -4504,16 +4504,6 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_units(
         ClassGroupContext& context,
         OrderUnitGroup& units,
         flint::ArbConstRef analytic_class_regulator_product,
-        slong precision) noexcept {
-    return try_certify_class_unit_with_units(
-            context, units, analytic_class_regulator_product, precision,
-            true);
-}
-
-bool ClassGroupCertificationAccess::try_certify_class_unit_with_units(
-        ClassGroupContext& context,
-        OrderUnitGroup& units,
-        flint::ArbConstRef analytic_class_regulator_product,
         slong precision,
         bool hr_unconditional) noexcept {
     return context.try_certify_class_unit_with_units_(
@@ -4521,17 +4511,6 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_units(
             hr_unconditional &&
                     detail::zeta_unconditional_route_available(
                             context.parent_));
-}
-
-bool ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
-        ClassGroupContext& context,
-        const OrderUnitGroup& units,
-        flint::ArbConstRef analytic_class_regulator_product,
-        flint::FmpzConstRef aux_prime_bound,
-        slong precision) noexcept {
-    return try_analytic_index_bound_with_units(
-            context, units, analytic_class_regulator_product,
-            aux_prime_bound, precision, true);
 }
 
 bool ClassGroupCertificationAccess::try_analytic_index_bound_with_units(
@@ -9681,6 +9660,14 @@ bool ClassGroupContext::record_analytic_class_unit_regulator_(
         !same_order_parent(units.parent(), &parent_)) {
         return false;
     }
+    // A GRH-conditional hR cannot prove the unit index, so it is checked
+    // only against units already proven unconditionally.  Otherwise a gate
+    // could succeed on a context proven earlier while `units` stays
+    // unproven.
+    if (!hr_unconditional &&
+        units.certification_status() != CertificationMode::proven) {
+        return false;
+    }
     // The analytic index test covers only the free part.  The published
     // unit group is proven only if its torsion is the torsion Silex computes
     // for the order, never a cached or supplied value.
@@ -9702,15 +9689,11 @@ bool ClassGroupContext::record_analytic_class_unit_regulator_(
     }
 
     // The analytic index-one test proves the unit and regulator only when hR
-    // is unconditional.  A GRH-conditional check is recorded as such and
-    // leaves the unit proof to an unconditional unit proof.
-    analytic_class_regulator_status_ = ProofState::verified;
-    analytic_class_regulator_assumes_grh_ = !hr_unconditional;
-    if (hr_unconditional ||
-        units.certification_status() == CertificationMode::proven) {
-        unit_proof_status_ = ProofState::verified;
-        regulator_proof_status_ = ProofState::verified;
-    }
+    // is unconditional.  A GRH-conditional check is recorded as such (the
+    // units are then already proven, see above).
+    record_analytic_class_regulator_check_(hr_unconditional);
+    unit_proof_status_ = ProofState::verified;
+    regulator_proof_status_ = ProofState::verified;
     return true;
 }
 
@@ -9800,6 +9783,19 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
     return transaction.finish(true);
 }
 
+// Records a verified analytic class-regulator check.  An unconditional
+// check already recorded for this presentation is kept: a later
+// GRH-conditional check of the same hR adds no hypothesis to it.
+void ClassGroupContext::record_analytic_class_regulator_check_(
+        bool unconditional) noexcept {
+    const bool had_unconditional =
+            analytic_class_regulator_status_ == ProofState::verified &&
+            !analytic_class_regulator_assumes_grh_;
+    analytic_class_regulator_status_ = ProofState::verified;
+    analytic_class_regulator_assumes_grh_ =
+            !had_unconditional && !unconditional;
+}
+
 bool ClassGroupContext::record_zeta_bf_audit_(
         flint::ArbConstRef error_bound,
         ulong cutoff,
@@ -9813,8 +9809,7 @@ bool ClassGroupContext::record_zeta_bf_audit_(
 
     // Belabas-Friedman Theorem 1 assumes GRH for zeta_K and zeta_Q; only the
     // degree-one residue (exactly one) is unconditional.
-    analytic_class_regulator_status_ = ProofState::verified;
-    analytic_class_regulator_assumes_grh_ = parent_.degree() != 1;
+    record_analytic_class_regulator_check_(parent_.degree() == 1);
     zeta_bf_status_ = ProofState::verified;
     zeta_bf_cutoff_ = cutoff;
     zeta_bf_max_cutoff_ = max_cutoff;

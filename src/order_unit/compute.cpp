@@ -3493,7 +3493,8 @@ bool OrderUnitGroup::compute_with_class_group(
                 return detail::ClassGroupCertificationAccess::
                         try_certify_class_unit_with_units(
                                 candidate_class_group, candidate_units,
-                                analytic_cache.value(), precision);
+                                analytic_cache.value(), precision,
+                                analytic_cache.value_unconditional());
             };
 
             const bool try_quadratic_rank_one_unit_proof =

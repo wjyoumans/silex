@@ -2111,7 +2111,7 @@ int test_analytic_class_unit_proof_requires_factor_base_generation() {
     assert(units.class_regulator_product(
             sflint::ArbRef(analytic_hR), context, 192));
     assert(!CertificationAccess::try_certify_class_unit_with_units(
-            context, units, sflint::ArbConstRef(analytic_hR), 192));
+            context, units, sflint::ArbConstRef(analytic_hR), 192, true));
     assert(context.certification_status() ==
            silex::CertificationMode::unknown);
     assert(context.analytic_class_regulator_status() ==
@@ -2164,7 +2164,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     sflint::arb_zero(zero);
     assert(!CertificationAccess::try_analytic_index_bound_with_units(
             invalid_analytic_context, units, sflint::ArbConstRef(zero),
-            sflint::FmpzConstRef(aux_bound), 128));
+            sflint::FmpzConstRef(aux_bound), 128, true));
     assert(invalid_analytic_context.unit_proof_status() ==
            silex::ProofState::not_checked);
     assert(invalid_analytic_context.regulator_proof_status() ==
@@ -2182,7 +2182,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     assert(set_fmpz_si(aux_bound, 2));
     assert(!CertificationAccess::try_analytic_index_bound_with_units(
             unavailable_context, units, sflint::ArbConstRef(analytic_hR),
-            sflint::FmpzConstRef(aux_bound), 128));
+            sflint::FmpzConstRef(aux_bound), 128, true));
     assert(unavailable_context.unit_proof_status() ==
            silex::ProofState::not_checked);
     assert(unavailable_context.regulator_proof_status() ==
@@ -2203,7 +2203,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     sflint::arb_one(exact_hR);
     assert(CertificationAccess::try_analytic_index_bound_with_units(
             index_one_context, units, sflint::ArbConstRef(exact_hR),
-            sflint::FmpzConstRef(aux_bound), 128));
+            sflint::FmpzConstRef(aux_bound), 128, true));
     assert(index_one_context.unit_proof_status() ==
            silex::ProofState::verified);
     assert(index_one_context.regulator_proof_status() ==
@@ -2223,7 +2223,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     assert(set_fmpz_si(aux_bound, 31));
     assert(!CertificationAccess::try_analytic_index_bound_with_units(
             nontrivial_bound_context, units, sflint::ArbConstRef(analytic_hR),
-            sflint::FmpzConstRef(aux_bound), 128));
+            sflint::FmpzConstRef(aux_bound), 128, true));
     assert(nontrivial_bound_context.unit_proof_status() ==
            silex::ProofState::not_checked);
     assert(nontrivial_bound_context.regulator_proof_status() ==
