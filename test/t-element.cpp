@@ -314,8 +314,10 @@ void test_power_height_check_keeps_roots() noexcept {
     }
 
     // (3 + 4i)/5 has norm 1 but is not integral, and it is not a
-    // (2^40 + 1)-th power.  This call is unsupported today, so only
-    // consistency is checked: it must not report a power.
+    // (2^40 + 1)-th power.  The leading coefficient 5 of its primitive
+    // characteristic polynomial is not a (2^40 + 1)-th power, so the Hensel
+    // path rejects it before rescaling and the call is unsupported today.
+    // Only consistency is checked: it must not report a power.
     silex::Element fraction(gaussian);
     {
         sflint::FmpqPoly polynomial;
@@ -328,6 +330,84 @@ void test_power_height_check_keeps_roots() noexcept {
     sflint::fmpz_add_ui(sflint::FmpzRef(two_40_plus_one),
                         sflint::FmpzConstRef(two_40), 1);
     assert_power_answer_consistent(fraction, two_40_plus_one, false);
+}
+
+silex::Element element_from_fraction(
+        const silex::NumberField& field,
+        std::initializer_list<slong> numerator,
+        slong denominator) noexcept {
+    silex::Element element = element_from_coefficients(field, numerator);
+    assert(element.scalar_div_si(element, denominator));
+    return element;
+}
+
+// Regression (T-034): non-integral powers whose roots have norm +-1 were
+// never found.  The Hensel reconstruction recovers f'(theta) c in Z[theta],
+// which needs an integral root c.  The reference is_power
+// (src/NumField/NfAbs/Elem.jl) solves y^n = a d^n for the denominator d of a
+// and returns y/d; Silex now does the same for non-integral a.  The found
+// roots have norm +-1, so they also pass the height pre-check with a nonzero
+// leading-coefficient term on both sides.  For (3 + 4i)/5 that term, log 5,
+// is the whole of log M(P), since both conjugates have absolute value 1.
+void assert_power_of_root_found(const silex::Element& base,
+                                slong n) noexcept {
+    const silex::NumberField& field = *base.parent();
+    sflint::Fmpz exponent;
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+    silex::Element power(field);
+    assert(power.pow_fmpz(base, sflint::FmpzConstRef(exponent)));
+    assert_is_power_with_root(power, exponent);
+}
+
+void test_power_non_integral_unit_norm_roots() noexcept {
+    silex::NumberField gaussian = imaginary_quadratic_field();
+    const silex::Element three_four =
+            element_from_fraction(gaussian, {3, 4}, 5);
+    for (slong n : {3, 4, 5, 6, 7}) {
+        assert_power_of_root_found(three_four, n);
+    }
+    assert_power_of_root_found(element_from_fraction(gaussian, {5, 12}, 13),
+                               3);
+    assert_power_of_root_found(element_from_fraction(gaussian, {7, 24}, 25),
+                               3);
+
+    silex::NumberField sqrt_two = sqrt_two_field();
+    for (slong n : {3, 5}) {
+        assert_power_of_root_found(
+                element_from_fraction(sqrt_two, {11, 6}, 7), n);
+    }
+
+    silex::NumberField sqrt_seven = field_from_coefficients({-7, 0, 1});
+    assert_power_of_root_found(element_from_fraction(sqrt_seven, {4, 1}, 3),
+                               3);
+
+    // Q(zeta_8) = Q[x]/(x^4 + 1), with zeta_8^2 = i.  Squares here go
+    // through the Hensel square path, not the quadratic formula.
+    silex::NumberField zeta_eight = field_from_coefficients({1, 0, 0, 0, 1});
+    for (slong n : {2, 3}) {
+        assert_power_of_root_found(
+                element_from_fraction(zeta_eight, {3, 0, 4}, 5), n);
+    }
+    assert_power_of_root_found(
+            element_from_fraction(zeta_eight, {5, 0, 12}, 13), 2);
+
+    // Denominator in Z[theta] but integral: ((1 + sqrt 5)/2)^7 needs no
+    // rescaling and stays found.
+    silex::NumberField sqrt_five = field_from_coefficients({-5, 0, 1});
+    assert_power_of_root_found(element_from_fraction(sqrt_five, {1, 1}, 2),
+                               7);
+
+    // Non-powers stay non-powers: (3 + 4i)/5 is not a square or a cube, and
+    // ((3 + 4i)/5)^2 is not a cube.  A definite answer must be false.
+    sflint::Fmpz exponent;
+    for (slong n : {2, 3}) {
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+        assert_power_answer_consistent(three_four, exponent, false);
+    }
+    silex::Element square(gaussian);
+    assert(square.multiply(three_four, three_four));
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), 3);
+    assert_power_answer_consistent(square, exponent, false);
 }
 
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
@@ -439,6 +519,7 @@ int main() {
     test_power_disproof_at_prime_dividing_exponent();
     test_power_huge_exponent_unit_candidates();
     test_power_height_check_keeps_roots();
+    test_power_non_integral_unit_norm_roots();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 

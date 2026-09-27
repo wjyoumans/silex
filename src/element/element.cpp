@@ -1811,23 +1811,18 @@ flint_bitcnt_t element_coefficient_bits(const Element& element) noexcept {
     return fmpq_poly_coefficient_bits(polynomial.raw());
 }
 
-// Enclosure of log M(P), where P is the primitive integral characteristic
-// polynomial of element over Q and M is the Mahler measure:
-//   log M(P) = log |lc(P)| + sum_{i=1}^{d} log max(1, |sigma_i(element)|),
-// with sigma_1, ..., sigma_d the complex embeddings of the parent field
-// Since P is a power of the primitive minimal polynomial, log M(P) =
-// d * h(element) for the absolute logarithmic Weil height h (Bombieri and
+// Leading coefficient of the primitive integral characteristic polynomial
+// P of element over Q.  It is 1 exactly when element is an algebraic integer,
+// and log lc(P) is the finite-place part of log M(P) = d h(element): it is
+// the sum over finite places v of d_v log max(1, |element|_v) (Bombieri and
 // Gubler, Heights in Diophantine Geometry, sections 1.5-1.6).
-bool log_mahler_measure_enclosure(flint::Arb& out,
-                                  EmbeddingContext& embeddings,
-                                  const Element& element,
-                                  slong precision) noexcept {
+bool primitive_characteristic_leading_coefficient(
+        flint::Fmpz& out,
+        const Element& element) noexcept {
     const NumberField* parent = element.parent();
-    if (parent == nullptr) {
-        return false;
-    }
-    const slong degree = parent->degree();
-    const nf_struct* raw_field = parent->raw_flint_field();
+    const nf_struct* raw_field =
+            parent == nullptr ? nullptr : parent->raw_flint_field();
+    const slong degree = parent == nullptr ? 0 : parent->degree();
     if (raw_field == nullptr || degree <= 0) {
         return false;
     }
@@ -1844,13 +1839,35 @@ bool log_mahler_measure_enclosure(flint::Arb& out,
         return false;
     }
     flint::Fmpz content;
-    flint::Fmpz leading;
     _fmpz_vec_content(content.raw(), characteristic.raw()->coeffs,
                       degree + 1);
     if (fmpz_is_zero(content.raw()) != 0) {
         return false;
     }
-    fmpz_divexact(leading.raw(), characteristic.raw()->den, content.raw());
+    fmpz_divexact(out.raw(), characteristic.raw()->den, content.raw());
+    return true;
+}
+
+// Enclosure of log M(P), where P is the primitive integral characteristic
+// polynomial of element over Q and M is the Mahler measure:
+//   log M(P) = log |lc(P)| + sum_{i=1}^{d} log max(1, |sigma_i(element)|),
+// with sigma_1, ..., sigma_d the complex embeddings of the parent field
+// Since P is a power of the primitive minimal polynomial, log M(P) =
+// d * h(element) for the absolute logarithmic Weil height h (Bombieri and
+// Gubler, Heights in Diophantine Geometry, sections 1.5-1.6).
+bool log_mahler_measure_enclosure(flint::Arb& out,
+                                  EmbeddingContext& embeddings,
+                                  const Element& element,
+                                  slong precision) noexcept {
+    const NumberField* parent = element.parent();
+    if (parent == nullptr) {
+        return false;
+    }
+    const slong degree = parent->degree();
+    flint::Fmpz leading;
+    if (!primitive_characteristic_leading_coefficient(leading, element)) {
+        return false;
+    }
 
     flint::AcbVec values(degree);
     if (!embeddings.evaluate_all(flint::AcbVecRef(values), element,
@@ -2058,9 +2075,14 @@ bool pure_power_hensel_step(
     return true;
 }
 
+// Lifts a root of y^n = input, where input = power_input * d^n and
+// root_scale = 1/d (d = 1 when power_input is used as is), and verifies the
+// scaled candidate against power_input.  See pure_power_hensel_root.
 bool try_pure_power_root_at_prime(
         Element& root,
         const Element& input,
+        const Element& power_input,
+        const Element& root_scale,
         const flint::FmpqPoly& element_polynomial,
         const nf_struct* raw_field,
         const flint::Fmpz& prime,
@@ -2085,7 +2107,9 @@ bool try_pure_power_root_at_prime(
         try_full_degree_pure_square_root_at_prime(
                 root, input, element_polynomial, raw_field, prime, factor,
                 prime_ctx, diagnostics)) {
-        return true;
+        // root^2 == input == power_input * d^2 exactly, so (root / d)^2 ==
+        // power_input.
+        return root.multiply(root, root_scale);
     }
 
     if (inverse_roots.empty()) {
@@ -2104,7 +2128,8 @@ bool try_pure_power_root_at_prime(
         if (!denominator.is_defined() || !inverse_denominator.is_defined() ||
             !denominator.set_fmpq_poly(
                     flint::FmpqPolyConstRef(derivative_polynomial)) ||
-            !inverse_denominator.invert(denominator)) {
+            !inverse_denominator.invert(denominator) ||
+            !inverse_denominator.multiply(inverse_denominator, root_scale)) {
             return false;
         }
     }
@@ -2255,7 +2280,7 @@ bool try_pure_power_root_at_prime(
             }
             if (stabilized || final_lift) {
                 if (verify_power_root(
-                            candidate, input,
+                            candidate, power_input,
                             flint::FmpzConstRef(exponent_fmpz),
                             diagnostics)) {
                     root.swap(candidate);
@@ -2305,6 +2330,67 @@ bool pure_power_hensel_root(bool& is_power,
     if (raw_field == nullptr ||
         !fmpq_poly_is_monic_integral(raw_field->pol)) {
         return false;
+    }
+
+    // The lifted candidate is reconstructed as f'(theta) c in Z[theta], which
+    // holds for every integral c.  Following reference
+    // `src/NumField/NfAbs/Elem.jl:is_power(::AbsSimpleNumFieldElem, ::Int)`,
+    // a non-integral input a is replaced by a d^n, with d the denominator of
+    // a in the power basis, and a root y of y^n = a d^n gives the root y / d
+    // of a.  Since (y / d)^n = a exactly when y^n = a d^n, a residue disproof
+    // for a d^n disproves a.  Silex rescales only when a is not an algebraic
+    // integer, since otherwise every root is integral and already
+    // reconstructible.
+    Element radicand(*parent);
+    Element root_scale(*parent);
+    if (!radicand.set(input) || !root_scale.one()) {
+        return false;
+    }
+    if (fmpz_is_one(element_polynomial.raw()->den) == 0) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                            "element.power_hensel_denominator");
+        flint::Fmpz leading;
+        if (!primitive_characteristic_leading_coefficient(leading, input)) {
+            return false;
+        }
+        if (fmpz_is_one(leading.raw()) == 0) {
+            // Silex pre-filter, not in the reference: it only returns
+            // unsupported, so it never changes a definite answer.  With lc(P)
+            // as in primitive_characteristic_leading_coefficient,
+            // lc(P_a) = lc(P_c)^n when c^n = a, because the finite-place
+            // terms d_v log max(1, |c|_v) scale by n.  A non-integral a has
+            // only non-integral roots, whose lc is at least 2.  So lc(P_a)
+            // must be an exact n-th power of an integer >= 2, which also
+            // bounds n by log_2 lc(P_a) and hence the size of d^n.
+            flint::Fmpz lc_root;
+            flint::Fmpz one;
+            fmpz_one(one.raw());
+            if (fmpz_cmp_ui(leading.raw(),
+                            static_cast<ulong>(1)) <= 0 ||
+                static_cast<ulong>(exponent) >= fmpz_bits(leading.raw()) ||
+                fmpz_root(lc_root.raw(), leading.raw(), exponent) == 0) {
+                return false;
+            }
+
+            flint::Fmpq inverse_denominator;
+            fmpq_set_fmpz_frac(inverse_denominator.raw(), one.raw(),
+                               element_polynomial.raw()->den);
+            flint::FmpqPoly inverse_scale;
+            fmpq_poly_set_coeff_fmpq(inverse_scale.raw(), 0,
+                                     inverse_denominator.raw());
+
+            flint::Fmpz scale;
+            fmpz_pow_ui(scale.raw(), element_polynomial.raw()->den,
+                        static_cast<ulong>(exponent));
+            fmpq_poly_scalar_mul_fmpz(element_polynomial.raw(),
+                                      element_polynomial.raw(), scale.raw());
+            if (!root_scale.set_fmpq_poly(
+                        flint::FmpqPolyConstRef(inverse_scale)) ||
+                !radicand.set_fmpq_poly(
+                        flint::FmpqPolyConstRef(element_polynomial))) {
+                return false;
+            }
+        }
     }
 
     flint::Fmpz prime;
@@ -2365,7 +2451,8 @@ bool pure_power_hensel_root(bool& is_power,
             }
             if (status == ResiduePowerStatus::power) {
                 if (try_pure_power_root_at_prime(
-                            root, input, element_polynomial, raw_field, prime,
+                            root, radicand, input, root_scale,
+                            element_polynomial, raw_field, prime,
                             field_polynomial, factor, ctx,
                             std::move(inverse_roots), exponent, diagnostics)) {
                     is_power = true;
