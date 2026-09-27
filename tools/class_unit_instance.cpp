@@ -170,6 +170,7 @@ struct Options {
     bool verbose = false;
     bool profiling = false;
     bool marked_protocol = false;
+    bool zeta_bf_audit = false;
 };
 
 constexpr const char* ready_marker = "__SILEX_BENCH_SILEX_READY__";
@@ -268,11 +269,32 @@ bool compute_class_unit_from_options(
         sflint::FmpzConstRef factor_base_bound,
         const silex::ClassGroupComputeOptions& compute_options,
         slong precision,
-        const Options&,
+        const Options& options,
         silex::detail::ClassUnitTransactionReport& audit) noexcept {
-    return silex::detail::compute_class_unit_transaction(
-            units, class_group, order, factor_base_bound, compute_options,
-            precision, audit);
+    if (!silex::detail::compute_class_unit_transaction(
+                units, class_group, order, factor_base_bound,
+                compute_options, precision, audit)) {
+        return false;
+    }
+    if (options.zeta_bf_audit) {
+        // A post-hoc Belabas-Friedman analytic hR audit (source: K. Belabas
+        // and E. Friedman, "Computing the residue of the Dedekind zeta
+        // function", Math. Comp. 84 (2015), 357-369, Theorem 1; its
+        // truncation-error bound assumes GRH outside degree one and the
+        // quadratic L(1, chi) route -- see
+        // docs/reference/algorithms_and_sources.rst:403-406).
+        // ClassGroupContext::try_certify_class_unit_with_zeta_bf only
+        // records the check when `units` is already proven and leaves both
+        // objects unchanged otherwise (include/silex/class_group.hpp), so
+        // this call cannot weaken or change the certification already
+        // published by the transaction above -- it can only additionally
+        // populate `analytic_class_regulator_status`/
+        // `analytic_class_regulator_certification` with the check's own
+        // (possibly GRH-conditional) result.
+        (void) class_group.try_certify_class_unit_with_zeta_bf(
+                units, compute_options.zeta_bf_max_cutoff, precision);
+    }
+    return true;
 }
 
 std::string fmpz_string(sflint::FmpzConstRef value) {
@@ -473,6 +495,11 @@ void print_usage(std::ostream& out) {
         << "  --s-prime-witness P:INDEX:SELECTION_INDEX:BETA0,...,BETAn "
            "(repeatable; complete manifest witness order)\n"
         << "  --marked-protocol\n"
+        << "  --zeta-bf-audit (post-hoc Belabas-Friedman analytic hR audit "
+           "after a successful compute; ClassGroup::"
+           "try_certify_class_unit_with_zeta_bf records the check's own "
+           "GRH dependence in analytic_class_regulator_certification "
+           "without changing certification_status)\n"
         << "  --log --trace --verbose --profile\n";
 }
 
@@ -619,6 +646,10 @@ bool parse_options(int argc,
         }
         if (arg == "--marked-protocol") {
             options.marked_protocol = true;
+            continue;
+        }
+        if (arg == "--zeta-bf-audit") {
+            options.zeta_bf_audit = true;
             continue;
         }
         error = "unknown option: " + arg;

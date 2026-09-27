@@ -66,7 +66,7 @@ def main() -> int:
     assert "source-neutral" in manifest["fixture_contract"]
     fields = manifest["fields"]
     assert isinstance(fields, list)
-    assert len(fields) == 22
+    assert len(fields) == 23
     assert len({row["id"] for row in fields}) == len(fields)
     assert all(row["expected_success"] is True for row in fields)
     assert all(row["mode"] in {"proven", "grh"} for row in fields)

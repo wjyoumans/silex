@@ -266,6 +266,17 @@
       "expected_success": true,
       "status": "grh_certification",
       "source": "Initial-release GRH-certification fixture"
+    },
+    {
+      "id": "cubic_disc23_analytic_grh",
+      "coefficients_low_to_high": [-1, -1, 0, 1],
+      "mode": "proven",
+      "expected_class_order": 1,
+      "expected_unit_rank": 1,
+      "timeout_seconds": 20,
+      "expected_success": true,
+      "status": "analytic_grh_certification",
+      "source": "Belabas-Friedman post-hoc GRH-conditional analytic hR audit fixture (x^3 - x - 1, h = 1, disc = -23; matches test/t-order-unit.cpp test_belabas_friedman_class_regulator_is_grh_conditional). The default `proven` transaction settles this field by unconditional relation saturation alone (h = 1 needs no relations), leaving analytic_class_regulator_status unrecorded; --zeta-bf-audit additionally runs ClassGroupContext::try_certify_class_unit_with_zeta_bf post-hoc so the JSON also reports the GRH-conditional analytic hR check's own certification, without changing the overall proven result."
     }
   ]
 }

@@ -131,7 +131,7 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "must_pass_fast"
     ]
-    assert len(manifest["fields"]) == 22
+    assert len(manifest["fields"]) == 23
     assert len(proven_rows) == 17
     exact_rows = {
         "degree_one_proven",
@@ -292,6 +292,93 @@ def main() -> int:
             assert grh_instance["class_group"][
                 "analytic_class_regulator_certification"
             ] == "grh"
+
+    # Every row above leaves `analytic_class_regulator_status` at
+    # `not_checked`: the default `proven` transaction settles a trivial or
+    # small class group by unconditional relation saturation alone, and a
+    # `grh` request accepts the GRH-conditional index-one bound without ever
+    # recording the analytic check itself (its `grh` label comes from the
+    # GRH-dependent factor-base bound, not from `analytic_class_regulator_
+    # status`/`_certification`).  So the `else` branch above -- an actually
+    # GRH-conditional (`"grh"`-valued) analytic hR check -- is exercised by
+    # a dedicated fixture row instead: `--zeta-bf-audit` (tools/class_unit_
+    # instance.cpp) runs ClassGroupContext::try_certify_class_unit_with_
+    # zeta_bf(...) post-hoc, mirroring test/t-order-unit.cpp's
+    # test_belabas_friedman_class_regulator_is_grh_conditional (a `proven`
+    # request settles a nontrivial-degree field by saturation, then a
+    # Belabas-Friedman audit recorded afterward is labelled `grh` without
+    # replacing the saturation proof or changing the overall `proven`
+    # result).
+    analytic_grh_rows = [
+        row
+        for row in manifest["fields"]
+        if row.get("status") == "analytic_grh_certification"
+    ]
+    assert len(analytic_grh_rows) == 1
+    for row in analytic_grh_rows:
+        assert row["mode"] == "proven"
+        coeffs = ",".join(
+            str(value) for value in row["coefficients_low_to_high"]
+        )
+        analytic_instance = run_json(
+            [
+                str(args.exe),
+                "--coeffs",
+                coeffs,
+                "--mode",
+                row["mode"],
+                "--zeta-bf-audit",
+            ],
+            root,
+        )
+        assert analytic_instance["success"] is True
+        assert analytic_instance["final_result_published"] is True
+        # The overall result is unaffected: still `proven`, via saturation.
+        assert analytic_instance["certification_status"] == "proven"
+        assert analytic_instance["class_group_proof_status"] == "proven"
+        assert analytic_instance["unit_group_proof_status"] == "proven"
+        assert analytic_instance["class_group"]["order"] == str(
+            row["expected_class_order"]
+        )
+        assert analytic_instance["unit_group"]["free_rank"] == row[
+            "expected_unit_rank"
+        ]
+        assert analytic_instance["class_group"][
+            "relation_saturation_status"
+        ] == "verified"
+        # The post-hoc audit is what newly reports the analytic check's own
+        # GRH-conditional certification.
+        assert analytic_instance["class_group"][
+            "analytic_class_regulator_status"
+        ] == "verified"
+        assert analytic_instance["class_group"][
+            "analytic_class_regulator_certification"
+        ] == "grh"
+        assert analytic_instance["class_group"][
+            "zeta_bf_proof_status"
+        ] == "verified"
+
+        # Without `--zeta-bf-audit` the same field settles by saturation
+        # alone and never exercises the analytic check (regression check
+        # for the flag's default-off behavior).
+        unaudited_instance = run_json(
+            [
+                str(args.exe),
+                "--coeffs",
+                coeffs,
+                "--mode",
+                row["mode"],
+            ],
+            root,
+        )
+        assert unaudited_instance["success"] is True
+        assert unaudited_instance["certification_status"] == "proven"
+        assert unaudited_instance["class_group"][
+            "analytic_class_regulator_status"
+        ] == "not_checked"
+        assert unaudited_instance["class_group"][
+            "analytic_class_regulator_certification"
+        ] == "unknown"
 
     for removed_option in (
         "--coordinate-radius=2",
