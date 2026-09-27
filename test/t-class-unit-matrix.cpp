@@ -2174,6 +2174,88 @@ int test_real_quadratic_grh_record_and_later_promotion() {
 
 }  // namespace
 
+// Decision 2026-09-27 "T-053 GRH-mode analytic record; GRH generation": a
+// grh request of positive unit rank is accepted only after factor-base
+// generation is verified to the Minkowski-type bound, and it fails closed
+// otherwise.  The GRH-sized factor base cannot become verified during the
+// continuation, so the transaction must fail at once rather than extend
+// relations until a resource cap; the default (uncapped) resource options
+// are used on purpose.  The pair is left wholly unset.  The proven control
+// shows that the failure is the grh coverage rule, not an unusable field.
+// x^3 + x + 200: D = -1080004, class group Z/2 (GP 2.17
+// bnfinit(x^3 + x + 200, 1)); x^2 - 100003: D = 400012, h = 1 (GP 2.17
+// quadclassunit(400012)).
+int test_grh_unverified_generation_fails_closed() {
+    struct Row {
+        const char* name;
+        std::vector<slong> coefficients;
+        ulong proven_class_order;
+    };
+    const Row rows[] = {
+            {"grh cubic x^3 + x + 200 without Minkowski coverage",
+             {200, 1, 0},
+             2},
+            {"grh real quadratic x^2 - 100003 without Minkowski coverage",
+             {-100003, 0},
+             1},
+    };
+
+    for (const Row& row : rows) {
+        FieldSetup setup = setup_from_coefficients(
+                row.coefficients.data(),
+                static_cast<slong>(row.coefficients.size()));
+        sflint::Fmpz factor_base_bound;
+        silex::ClassGroupComputeOptions options;
+        if (!configure_matrix_options(options, factor_base_bound,
+                                      setup.maximal_order,
+                                      silex::CertificationMode::grh)) {
+            std::cerr << row.name << ": options unavailable\n";
+            return 1;
+        }
+        options.max_candidates = WORD_MAX;
+        options.max_relations = WORD_MAX;
+
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units;
+        if (units.compute_with_class_group(
+                    class_group, setup.maximal_order,
+                    sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+            std::cerr << row.name << ": grh request did not fail closed\n";
+            return 1;
+        }
+        PairPublicSnapshot after;
+        if (!capture_pair_public_snapshot(after, class_group, units) ||
+            !snapshot_is_wholly_unset(after)) {
+            std::cerr << row.name << ": failed grh request left output\n";
+            return 1;
+        }
+
+        silex::ClassGroupComputeOptions proven_options;
+        if (!configure_matrix_options(proven_options, factor_base_bound,
+                                      setup.maximal_order,
+                                      silex::CertificationMode::proven)) {
+            std::cerr << row.name << ": proven options unavailable\n";
+            return 1;
+        }
+        silex::ClassGroupContext proven_class_group;
+        silex::OrderUnitGroup proven_units;
+        sflint::Fmpz class_order;
+        if (!proven_units.compute_with_class_group(
+                    proven_class_group, setup.maximal_order,
+                    sflint::FmpzConstRef(factor_base_bound), proven_options,
+                    128) ||
+            proven_class_group.certification_status() !=
+                    silex::CertificationMode::proven ||
+            !proven_class_group.order(sflint::FmpzRef(class_order)) ||
+            sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order),
+                                row.proven_class_order) != 0) {
+            std::cerr << row.name << ": proven control failed\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int main() {
     int status = 0;
     status |= test_public_paired_certification_request_validation();
@@ -2187,5 +2269,6 @@ int main() {
     status |= test_random_quadratic_h4_proven_pair();
     status |= test_grh_cubic_records_bf_audit();
     status |= test_real_quadratic_grh_record_and_later_promotion();
+    status |= test_grh_unverified_generation_fails_closed();
     return status;
 }

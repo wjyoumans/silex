@@ -2647,6 +2647,27 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                 order, factor_base_bound, local_options)) {
         return false;
     }
+    if (options.requested_certification == CertificationMode::grh &&
+        rank > 0 &&
+        candidate_class_group.factor_base_generation_status() !=
+                ProofState::verified) {
+        // Decision 2026-09-27 "T-053 GRH-mode analytic record; GRH
+        // generation": a grh request of positive unit rank is accepted only
+        // by the analytic index-one test, and validation_index_bound_from_
+        // product reports index one only after factor-base generation is
+        // verified to the Minkowski-type bound.  The grh factor base is
+        // built once, above, and the continuation below (LLL relation
+        // slices, relation saturation, unit refresh) never rebuilds it or
+        // runs a generation proof, so an unverified status here is final and
+        // the loop could only extend relations until max_relations.  Fail
+        // closed now.  Rank zero is excluded: the exact imaginary-quadratic
+        // grh route certifies without the Minkowski-type coverage.
+        SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
+                  LogLevel::detail,
+                  "grh class/unit request failed closed: factor-base "
+                  "generation is not verified to the Minkowski-type bound");
+        return false;
+    }
     if (options.requested_certification == CertificationMode::proven ||
         (options.requested_certification == CertificationMode::grh &&
          candidate_class_group.factor_base_generation_status() ==

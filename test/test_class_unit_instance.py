@@ -115,6 +115,44 @@ def assert_marked_phase_failures(exe: Path, root: Path) -> None:
             else "marked protocol target nonce is invalid")
 
 
+def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
+    # A reducible defining polynomial is rejected at field construction
+    # (NumberField::by_polynomial requires irreducibility over Q), so no
+    # maximal order or class/unit transaction exists in either mode.
+    # x^3 + x + 30 = (x + 3)(x^2 - 3x + 10).
+    for mode in ("proven", "grh"):
+        instance = run_json(
+            [str(exe), "--coeffs", "30,1,0,1", "--mode", mode], root
+        )
+        assert instance["success"] is False
+        assert instance["final_result_published"] is False
+        assert instance["field_defined"] is False
+        assert instance["maximal_order_defined"] is False
+        assert instance["failure_reason"] == "input_or_options_unavailable"
+
+    # grh mode needs factor-base generation verified to the Minkowski-type
+    # bound (decision 2026-09-27, "T-053 GRH-mode analytic record; GRH
+    # generation"). These fields' GRH-sized factor base does not reach it,
+    # so the request fails closed instead of extending relations without
+    # end. x^3 + x + 200: |D| = 1080004, bound 100 < 463. x^2 - 100003:
+    # D = 400012, bound 100 < 316.
+    for coeffs, used, requested in (
+        ("200,1,0,1", "100", "463"),
+        ("-100003,0,1", "100", "316"),
+    ):
+        instance = run_json(
+            [str(exe), "--coeffs", coeffs, "--mode", "grh"], root
+        )
+        assert instance["success"] is False
+        assert instance["final_result_published"] is False
+        assert instance["field_defined"] is True
+        assert instance["maximal_order_defined"] is True
+        assert instance["failure_reason"] == "class_unit_computation_failed"
+        assert instance["certification_status"] == "unknown"
+        assert instance["factor_base_bound"] == used
+        assert instance["requested_factor_base_bound"] == requested
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
@@ -123,6 +161,7 @@ def main() -> int:
 
     root = Path(__file__).resolve().parents[1]
     assert_marked_phase_failures(args.exe, root)
+    assert_fail_closed_inputs(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
 
