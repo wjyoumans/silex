@@ -1055,21 +1055,9 @@ bool select_saturation_primes_with_kernel(
     SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.select_saturation_primes_with_kernel");
     const Order* order = group.parent();
-    const slong rank = group.free_rank();
     if (!group.is_set() || order == nullptr || !flint::fmpz_is_prime(ell) ||
         target_len < 0 || fmpz_cmp_ui(bound.raw(), 2) < 0) {
         return false;
-    }
-
-    if (target_len == 0) {
-        PrimeIdealList candidate(*order, 0);
-        flint::FmpzMat candidate_kernel(rank, 0);
-        if (!candidate.is_defined()) {
-            return false;
-        }
-        out.swap(candidate);
-        kernel = std::move(candidate_kernel);
-        return true;
     }
 
     // Character columns carry the torsion generator when l divides the
@@ -1077,6 +1065,21 @@ bool select_saturation_primes_with_kernel(
     slong width = 0;
     if (!detail::dlog_proof_rank(width, group, ell)) {
         return false;
+    }
+
+    if (target_len == 0) {
+        // No characters: the common kernel is the whole exponent space, so
+        // its basis is the width x width identity (rows are kernel vectors,
+        // as dlog_kernel_from_matrix publishes them).
+        PrimeIdealList candidate(*order, 0);
+        flint::FmpzMat candidate_kernel(width, width);
+        if (!candidate.is_defined()) {
+            return false;
+        }
+        flint::fmpz_mat_one(flint::FmpzMatRef(candidate_kernel));
+        out.swap(candidate);
+        kernel = std::move(candidate_kernel);
+        return true;
     }
     std::vector<PrimeIdeal> selected;
     selected.reserve(static_cast<std::size_t>(target_len));
@@ -1957,7 +1960,7 @@ bool OrderUnitGroup::saturate_local_once(bool& changed,
         }
     }
 
-    flint::FmpzMat kernel(0, group.free_rank());
+    flint::FmpzMat kernel(0, 0);
     SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.saturation_residue_dlog");
     if (!detail::residue_dlog_kernel(kernel, group, primes, ell)) {
@@ -2077,7 +2080,7 @@ bool OrderUnitGroup::saturate_bounded(bool& changed,
         SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
                             "unit_group.saturate_bounded.pass");
         PrimeIdealList primes;
-        flint::FmpzMat kernel(0, working.free_rank());
+        flint::FmpzMat kernel(0, 0);
         if (!select_saturation_primes_with_kernel(
                     primes, kernel, working, ell, aux_target_len, aux_bound)) {
             SILEX_PROFILE_EVENT(
