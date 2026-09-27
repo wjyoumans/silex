@@ -77,6 +77,12 @@ def main() -> int:
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument(
+        "--zeta-bf-audit",
+        action="store_true",
+        help="pass --zeta-bf-audit to the instance tool (also set by a "
+        "manifest row with \"zeta_bf_audit\": true)",
+    )
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
@@ -112,6 +118,8 @@ def main() -> int:
                 return 2
         if args.mode is None and field_row.get("mode") is not None:
             args.mode = str(field_row["mode"])
+        if field_row.get("zeta_bf_audit") is True:
+            args.zeta_bf_audit = True
         if args.timeout is None and field_row.get("timeout_seconds") is not None:
             args.timeout = float(field_row["timeout_seconds"])
         if args.expect_success is None and field_row.get("expected_success") is not None:
@@ -163,6 +171,8 @@ def main() -> int:
         cmd.append("--verbose")
     if args.profile:
         cmd.append("--profile")
+    if args.zeta_bf_audit:
+        cmd.append("--zeta-bf-audit")
 
     try:
         completed = subprocess.run(

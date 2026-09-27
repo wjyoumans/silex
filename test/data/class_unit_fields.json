@@ -276,7 +276,8 @@
       "timeout_seconds": 20,
       "expected_success": true,
       "status": "analytic_grh_certification",
-      "source": "Belabas-Friedman post-hoc GRH-conditional analytic hR audit fixture (x^3 - x - 1, h = 1, disc = -23; matches test/t-order-unit.cpp test_belabas_friedman_class_regulator_is_grh_conditional). The default `proven` transaction settles this field by unconditional relation saturation alone (h = 1 needs no relations), leaving analytic_class_regulator_status unrecorded; --zeta-bf-audit additionally runs ClassGroupContext::try_certify_class_unit_with_zeta_bf post-hoc so the JSON also reports the GRH-conditional analytic hR check's own certification, without changing the overall proven result."
+      "zeta_bf_audit": true,
+      "source": "Belabas-Friedman post-hoc GRH-conditional analytic hR audit fixture (x^3 - x - 1, h = 1, disc = -23; matches test/t-order-unit.cpp test_belabas_friedman_class_regulator_is_grh_conditional). The default `proven` transaction settles this field by unconditional relation saturation alone (h = 1 needs no relations), leaving analytic_class_regulator_status unrecorded; --zeta-bf-audit (passed by tools/bench/run-class-unit-instance.py for this row through its zeta_bf_audit key) additionally runs ClassGroupContext::try_certify_class_unit_with_zeta_bf post-hoc so the JSON also reports the GRH-conditional analytic hR check's own certification, without changing the overall proven result."
     }
   ]
 }

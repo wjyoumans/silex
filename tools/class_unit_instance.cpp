@@ -291,21 +291,22 @@ struct ZetaBfAuditOutcome {
 // A post-hoc Belabas-Friedman analytic hR audit (source: K. Belabas and
 // E. Friedman, "Computing the residue of the Dedekind zeta function", Math.
 // Comp. 84 (2015), 357-369, Theorem 1; its truncation-error bound assumes
-// GRH outside degree one and the quadratic L(1, chi) route -- see
-// docs/reference/algorithms_and_sources.rst:403-406).
+// GRH outside degree one, where the residue is exactly one -- see
+// docs/reference/algorithms_and_sources.rst).
 //
 // ClassGroupContext::try_certify_class_unit_with_zeta_bf's own contract
 // (include/silex/class_group.hpp) is: it only *records the check* without
 // touching the certification already published when `units` is already
 // proven AND relation saturation is already proven at every prime dividing
-// the candidate class number -- but in degree one (and on the quadratic
-// L(1, chi) route) its underlying hR is unconditional, so it publishes
-// `proven` outright regardless of what was requested. That degree-one case
-// can turn a `grh`-requested, `grh`-published transaction into one where
-// `class_group.certification`/`unit_group.certification` read `proven`
-// while the top-level `certification_status` (taken from the transaction
-// report before this audit ever runs) still reads `grh`, mismatching within
-// one JSON document.
+// the candidate class number -- but in degree one its Belabas-Friedman hR
+// is unconditional, so it publishes `proven` outright regardless of what
+// was requested. (The quadratic L(1, chi) route belongs to the sibling
+// try_certify_class_unit_with_zeta, not to this function.) That degree-one
+// case could turn a `grh`-requested, `grh`-published transaction into one
+// where `class_group.certification`/`unit_group.certification` read
+// `proven` while the top-level `certification_status` (taken from the
+// transaction report before this audit ever runs) still reads `grh`,
+// mismatching within one JSON document.
 //
 // To keep this call's only visible effect being "add an
 // analytic_class_regulator_* record", it is only made when the transaction
@@ -314,7 +315,9 @@ struct ZetaBfAuditOutcome {
 // describes, so the call is then guaranteed to leave both certifications at
 // `proven` (no change) and add only the GRH-conditional analytic record.
 // Equivalently, this only runs the audit for `requested_certification ==
-// proven`.
+// proven`. A `grh`-mode transaction needs no audit: it records the analytic
+// check that accepted it by itself (decision 2026-09-27, "T-053 GRH-mode
+// analytic record").
 ZetaBfAuditOutcome run_zeta_bf_audit_if_requested(
         silex::ClassGroupContext& class_group,
         silex::OrderUnitGroup& units,
@@ -550,7 +553,10 @@ void print_usage(std::ostream& out) {
            "GRH dependence in analytic_class_regulator_certification "
            "without changing an already-`proven` certification; skipped "
            "and reported as such in the `zeta_bf_audit` JSON object "
-           "otherwise, e.g. for a `grh`-mode run)\n"
+           "otherwise, e.g. for a `grh`-mode run, which records its own "
+           "accepting analytic check; its time is excluded from "
+           "target_wall_ms/target_cpu_ms except with --compute-sunit, "
+           "where it falls inside them)\n"
         << "  --log --trace --verbose --profile\n";
 }
 
@@ -1786,7 +1792,27 @@ int main(int argc, char** argv) {
               << json_bool(maximal_defined) << ",\n";
     std::cout << "  \"precision\": "
               << static_cast<long long>(input_options.precision) << ",\n";
+    // `factor_base_bound` is the bound the transaction actually used: the
+    // execution policy's selected bound (for a `grh` request, the GRH
+    // factor-base bound, not the tool-side request) when a policy was
+    // selected, otherwise the tool-side request.
+    // `requested_factor_base_bound` is always the tool-side request
+    // (Minkowski-type bound or `--factor-base-bound`).
     std::cout << "  \"factor_base_bound\": ";
+    if (options_defined && transaction_report.policy.selected) {
+        write_json_string(std::cout,
+                          fmpz_string(sflint::FmpzConstRef(
+                                  transaction_report.policy
+                                          .selected_factor_base_bound)));
+    } else if (options_defined) {
+        write_json_string(std::cout,
+                          fmpz_string(sflint::FmpzConstRef(
+                                  factor_base_bound)));
+    } else {
+        std::cout << "null";
+    }
+    std::cout << ",\n";
+    std::cout << "  \"requested_factor_base_bound\": ";
     if (options_defined) {
         write_json_string(std::cout,
                           fmpz_string(sflint::FmpzConstRef(
