@@ -173,19 +173,36 @@ branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
    monic integral defining polynomial ``T`` of ``theta' = L theta``, ``w``
    divides ``p^g - 1`` with ``g`` the gcd of the residue degrees above ``p``.
    ``T`` and the positive integer ``L`` come from PARI's
-   ``src/basemath/base1.c:ZX_primitive_to_monic`` (lines 390-449), which
+   ``src/basemath/base1.c:ZX_primitive_to_monic`` (lines 390-446), which
    ``nfmaxord`` applies to non-monic polynomials: for each ``p^e`` exactly
    dividing the leading coefficient of the primitive integral numerator
    ``a(x)`` of the defining polynomial, ``L`` takes the factor ``p^k`` for
    the least ``k`` that makes ``p^(k n - e) a(x / p^k)`` integral.
    ``L = 1`` and ``theta' = theta`` when ``a`` is monic.
-   The gcd of these values is a proven multiple of ``w``.  By the Chebotarev
-   density theorem the gcd over all good primes equals ``w``, so a bound
-   larger than ``w`` comes only from stopping early.  As in PARI, the loop
-   stops when the gcd fits in a word and has not changed for more than
+   The gcd of these values is a proven multiple of ``w``.  As in PARI, the
+   loop stops when the gcd fits in a word and has not changed for more than
    ``n + 20`` consecutive good primes.  As in Hecke v0.38.6
-   ``src/NumFieldOrd/NfOrd/TorsionUnits.jl:_torsion_group_order_divisor``,
-   it stops at once when the gcd is 2.
+   ``src/NumFieldOrd/NfOrd/TorsionUnits.jl:_torsion_group_order_divisor``
+   (lines 274-345), it also stops at once when the gcd is 2, and it resets
+   the stability count while ``phi(gcd)`` does not divide ``n = [K : Q]``:
+   ``Q(zeta_w)`` is a subfield of ``K``, so ``phi(w) | n``, and a gcd with
+   ``phi(gcd)`` not dividing ``n`` is a strict multiple of ``w``, so the
+   reset only delays the stop, never changing the final bound to a wrong
+   ``w`` (decisions.md 2026-09-27 "Roots-of-unity bound reset and monic
+   model").
+
+   By the Chebotarev density theorem the gcd over all good primes equals
+   ``w``: for each prime ``l`` dividing ``w``, let
+   ``l^a = l^(v_l(w) + 1)``, so ``zeta_(l^a)`` is not in ``K``, and let
+   ``M`` be the Galois closure of ``K(zeta_(l^a))`` over ``Q``.  The
+   subgroup of ``Gal(M/Q)`` fixing ``K`` does not fix ``zeta_(l^a)``, so it
+   contains some ``sigma`` that moves it.  The good primes whose Frobenius
+   is conjugate to ``sigma`` have positive density; each has a
+   residue-degree-one prime in ``K``, so ``gcd f = 1``, and satisfies
+   ``p != 1 (mod l^a)``, so ``l^a`` does not divide ``p^(gcd f) - 1 = p - 1``.
+   Only finitely many ``l`` divide the first term, so the gcd over all good
+   primes is ``w``.  So a bound larger than ``w`` comes only from stopping
+   early, never from a wrong gcd value.
 2. The degree and ramification conditions of ``nfrootsof1`` lower each prime
    power of the bound: ``Q(zeta_(p^k))`` has degree ``(p - 1) p^(k-1)`` and a
    known ``p``-adic discriminant valuation.  Like PARI's polynomial branch,
@@ -197,7 +214,7 @@ branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
 4. Otherwise Silex looks for a primitive ``p^e``-th root of unity for each
    prime power ``p^e > 2`` of the bound and multiplies them.  PARI uses
    ``nfisincl(polcyclo(p^e), T)``; Silex follows Hecke v0.38.6
-   ``TorsionUnits.jl:_torsion_units_gen`` (lines 414-457).  The search runs
+   ``TorsionUnits.jl:_torsion_units_gen`` (lines 414-456).  The search runs
    in a monic integral model: the field itself when its defining polynomial
    is monic and integral, and otherwise ``Q(theta')`` defined by ``T``.  A
    root ``g(theta')`` found there is the element ``g(L theta)`` of the
