@@ -4586,13 +4586,6 @@ int test_prove_index_bound_quartic70640() {
     return 0;
 }
 
-// Z[3 sqrt2] = Z[sqrt18], the equation order of x^2 - 18, has index 3 in
-// Z[sqrt2].  Its unit group is <-1, 17 + 4 sqrt18> = <-1, (1 + sqrt2)^4>,
-// of index 4 in Z[sqrt2]^x; reference GP 2.17.4 session:
-//     quadunit(72)       \\ 17 + 4*w, w = sqrt18
-//     quadregulator(72)  \\ 3.5254943480781721009...
-// The square root 3 + 2 sqrt2 = 3 + (2/3) sqrt18 of the fundamental unit is
-// not in the order and must not be adjoined.
 // u = -(3 + 2 sqrt2) = -eps^2, eps = 1 + sqrt2, is a square in Q(sqrt2)
 // only up to torsion: u * (-1) = eps^2.  Every residue character of order 2
 // takes the same value on u and on -1, so the 2-saturation candidates must
@@ -4610,6 +4603,16 @@ int test_prove_torsion_twisted_saturation_root() {
     assert(set_real_quadratic_unit(epsilon));
     assert(twisted.multiply(epsilon, epsilon));
     assert(twisted.negate(twisted));
+
+    // Witness identity r^ell = prod u^e * zeta^t for e = t = 1, ell = 2:
+    // r = eps, u = twisted = -eps^2, zeta = -1 (the order's torsion
+    // generator).  u * zeta = (-eps^2) * (-1) = eps^2 = r^2.
+    silex::Element witness_power(field);
+    silex::Element witness_product(field);
+    assert(witness_power.multiply(epsilon, epsilon));
+    assert(witness_product.negate(twisted));
+    assert(witness_power.equal(witness_product));
+
     silex::OrderUnitGroup start(order);
     assert(set_single_unit_group(start, order, twisted, embeddings));
 
@@ -4654,6 +4657,7 @@ int test_prove_torsion_twisted_saturation_root() {
         assert(proved.certification_status() ==
                silex::CertificationMode::proven);
         assert(first_free_generator_is_pm_unit_power_pm1(proved, epsilon));
+        // GP: \p 100; quadregulator(8)
         assert(regulator_contains(
                 proved,
                 "0.8813735870195430252326093249797923090281603282616354107532"
@@ -4666,6 +4670,13 @@ int test_prove_torsion_twisted_saturation_root() {
     return 0;
 }
 
+// Z[3 sqrt2] = Z[sqrt18], the equation order of x^2 - 18, has index 3 in
+// Z[sqrt2].  Its unit group is <-1, 17 + 4 sqrt18> = <-1, (1 + sqrt2)^4>,
+// of index 4 in Z[sqrt2]^x; reference GP 2.17.4 session:
+//     quadunit(72)       \\ 17 + 4*w, w = sqrt18
+//     quadregulator(72)  \\ 3.5254943480781721009...
+// The square root 3 + 2 sqrt2 = 3 + (2/3) sqrt18 of the fundamental unit is
+// not in the order and must not be adjoined.
 int test_prove_index_bound_nonmaximal_quadratic_sqrt18() {
     sflint::FmpzPoly polynomial;
     ::fmpz_poly_set_coeff_si(polynomial.raw(), 2, 1);
@@ -4683,10 +4694,18 @@ int test_prove_index_bound_nonmaximal_quadratic_sqrt18() {
     assert(set_quadratic_coeffs(order_unit, 17, 1, 4, 1));
     silex::Element order_unit2(field);  // 577 + 136 sqrt18
     assert(order_unit2.multiply(order_unit, order_unit));
+    // -(17 + 4 sqrt18) = -eps^4 is a square only up to torsion:
+    // -(17 + 4 sqrt18) * (-1) = eps^4 = (3 + 2 sqrt2)^2, and 3 + 2 sqrt2 is
+    // not in the order (see the comment above).  The torsion-extended
+    // kernel's twisted candidate (e, t) = (1, 1) sees this same
+    // out-of-order root and must also fail closed.
+    silex::Element neg_order_unit(field);
+    assert(neg_order_unit.negate(order_unit));
 
     // l = 2 adjoins 17 + 4 sqrt18 (a square root in the order) from its
     // square, then meets 3 + 2 sqrt2 and fails closed.
-    const silex::Element* inputs[] = {&order_unit, &order_unit2};
+    const silex::Element* inputs[] = {&order_unit, &order_unit2,
+                                      &neg_order_unit};
     for (const silex::Element* input : inputs) {
         silex::OrderUnitGroup start(equation);
         assert(set_single_unit_group(start, equation, *input, embeddings));
@@ -4700,6 +4719,11 @@ int test_prove_index_bound_nonmaximal_quadratic_sqrt18() {
     assert_nonmaximal_proof_fails_closed(equation, fundamental_start,
                                          order_unit, kLogFundamental, 2,
                                          embeddings);
+    silex::OrderUnitGroup twisted_start(equation);
+    assert(set_single_unit_group(twisted_start, equation, neg_order_unit,
+                                 embeddings));
+    assert_nonmaximal_proof_fails_closed(equation, twisted_start, order_unit,
+                                         kLogFundamental, 2, embeddings);
     return 0;
 }
 

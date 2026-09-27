@@ -416,10 +416,18 @@ character kernel, so a unit that is an ``ell``-th power only up to torsion,
 such as ``-(3 + 2 sqrt2) = -(1 + sqrt2)^2`` at ``ell = 2``, is enlarged
 instead of failing closed.  An exact root ``r`` with
 ``r^ell = prod u_j^(e_j) * zeta^(e_t)`` satisfies ``r^ell = prod u_j^(e_j)``
-modulo torsion, so the new free basis uses only the free exponents.  The
-pre-scan tests the free-exponent kernel first and then the kernel vectors with
-``e_t != 0 mod ell``.  Verification still requires an empty
-torsion-extended kernel.
+modulo torsion, so the new free basis uses only the free exponents.
+Silex's ``zeta`` is ``group.torsion_generator``, the generator of the
+*order's* unit group's torsion subgroup ``mu(O)``, not of ``mu(K)`` as in
+Hecke's ``torsion_units_gen_order(K)``; ``mu(O)`` is the group that matters
+for ``[O^x : G]`` when ``O`` is non-maximal, and this is a pre-existing Silex
+choice, not one introduced with the torsion-extended candidates.  The
+pre-scan tests the free-exponent kernel first and then, only if that leaves
+the group unchanged, the kernel vectors with ``e_t != 0 mod ell``; this
+ordering has no Hecke counterpart (``saturate!`` tests every candidate from
+one combined kernel) and only affects which valid root a pre-scan pass finds
+first, never whether ``ell`` is verified, since verification still requires
+an empty torsion-extended kernel.
 
 The index bound comes from ``unit_lower_regulator_bound``.  For a subgroup
 ``G`` of full rank in ``O^x``, with ``O`` an order of the field ``K``,

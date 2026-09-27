@@ -2520,24 +2520,21 @@ bool OrderUnitGroup::prove_local_saturated_(
         // try the rows with t != 0 mod l, whose l-th roots (a unit that is
         // an l-th power only up to torsion, e.g. -(3 + 2 sqrt2) at l = 2)
         // the free-width kernel cannot see.
-        slong twisted_rows = 0;
+        std::vector<slong> twisted_rows;
         for (slong row = 0; row < flint::fmpz_mat_nrows(kernel); ++row) {
             if (fmpz_divisible(flint::fmpz_mat_entry(kernel, row, free_rank)
                                        .raw(),
                                ell.raw()) == 0) {
-                ++twisted_rows;
+                twisted_rows.push_back(row);
             }
         }
-        if (twisted_rows > 0) {
-            flint::FmpzMat twisted_kernel(twisted_rows, free_rank + 1);
-            slong next = 0;
-            for (slong row = 0; row < flint::fmpz_mat_nrows(kernel); ++row) {
-                if (fmpz_divisible(
-                            flint::fmpz_mat_entry(kernel, row, free_rank)
-                                    .raw(),
-                            ell.raw()) != 0) {
-                    continue;
-                }
+        if (!twisted_rows.empty()) {
+            flint::FmpzMat twisted_kernel(
+                    static_cast<slong>(twisted_rows.size()), free_rank + 1);
+            for (slong next = 0;
+                 next < static_cast<slong>(twisted_rows.size()); ++next) {
+                const slong row =
+                        twisted_rows[static_cast<std::size_t>(next)];
                 for (slong col = 0; col <= free_rank; ++col) {
                     flint::fmpz_set(
                             flint::fmpz_mat_entry(twisted_kernel, next, col),
@@ -2545,7 +2542,6 @@ bool OrderUnitGroup::prove_local_saturated_(
                                     flint::fmpz_mat_entry(kernel, row, col)
                                             .raw()));
                 }
-                ++next;
             }
             SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
                                 "unit_group.proof_torsion_twisted_kernel");
