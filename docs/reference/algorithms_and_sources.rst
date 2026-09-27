@@ -194,12 +194,30 @@ case returns failure (unsupported) and leaves the caller's root unchanged.
   same roots in ``F_q``.  Without that test they can differ: for ``q = 11``,
   ``n = 6``, ``g = 2`` and ``u = 2``, every ``a`` solves ``y^2 = a^2``, but
   not every ``a`` is a sixth power.
+* For a non-integral input ``a`` (equivalently ``lc(P_a) > 1``, with ``P_x``
+  as in the height filter below), Silex follows Hecke v0.38.6
+  ``src/NumField/NfAbs/Elem.jl:is_power`` (lines 674-711): it lifts a root of
+  ``y^n = a d^n``, where ``d`` is the power-basis denominator of ``a`` (the
+  denominator of ``a`` in ``Z[theta]``, not in a maximal order), and returns
+  ``y / d``.  This is needed because the Hensel reconstruction above recovers
+  ``f'(theta) c`` as an element of ``Z[theta]``, which holds for every
+  integral ``c`` (since ``f'(theta) O_K`` is contained in ``Z[theta]``) but
+  fails for most non-integral ``c``; ``d c`` is integral by construction, so
+  the rescaled root is reconstructible.  A residue disproof on ``a d^n`` is
+  valid for ``a``, since ``a d^n = (d c)^n`` whenever ``a = c^n``.
+  **Deviation** (documented at the call site): Silex rescales only when ``a``
+  is not an algebraic integer.  Hecke rescales whenever ``d != 1``.  Every
+  integral root is already reconstructible from the unscaled input, so
+  behavior for integral ``a`` is unchanged either way; Hecke's choice of
+  ``d`` from a maximal order, when known, only gives a smaller denominator
+  and is not a correctness difference.
 
-Two Silex pre-filters run before the exact check ``c^n == a`` and only reject
-candidates, so a rejection leaves the query unsupported and never changes a
-definite answer.  Neither is in the upstream sources: Hecke's polynomial
-degree ``n`` is a machine integer bounded by the polynomial it builds, while
-Silex accepts ``n`` up to ``2^63 - 1`` and must not form ``c^n`` blindly.
+Three Silex pre-filters run before the exact check ``c^n == a`` and only
+reject candidates, so a rejection leaves the query unsupported and never
+changes a definite answer.  None is in the upstream sources: Hecke's
+polynomial degree ``n`` is a machine integer bounded by the polynomial it
+builds, while Silex accepts ``n`` up to ``2^63 - 1`` and must not form
+``c^n``, or the rescaled radicand ``a d^n`` above, blindly.
 
 * Norm filter: ``N(c)^n = N(a)`` by multiplicativity of the norm.  When
   ``N(c)`` is not ``0`` or ``+-1``, the comparison needs ``n`` below the bit
@@ -221,6 +239,20 @@ Silex accepts ``n`` up to ``2^63 - 1`` and must not form ``c^n`` blindly.
   is 128 bits plus the largest coefficient bit size of ``c``, ``a`` and the
   defining polynomial.  If the enclosures are too wide to decide, the
   candidate goes on to the exact check.
+* Denominator (leading-coefficient) filter, ahead of the rescaling above: by
+  the same finite-place identity used for the height filter,
+  ``log lc(P_x) = sum`` over finite places ``v`` of
+  ``d_v log max(1, |x|_v)``, so ``lc(P_{c^n}) = lc(P_c)^n`` exactly whenever
+  ``c^n = a``.  A non-integral ``a`` has only non-integral roots, and a
+  non-integral ``c`` has ``lc(P_c) >= 2``, so ``lc(P_a)`` must be an exact
+  ``n``-th power of an integer ``>= 2``; this also bounds
+  ``n < bits(lc(P_a))``, and hence the size of ``d^n``, before it is formed.
+  The query is left unsupported when ``lc(P_a)`` is not such a power or when
+  ``n >= bits(lc(P_a))``.  This is a stronger, denominator-ideal-norm form of
+  the norm filter's reasoning (``lc(P_x)`` is the norm of the denominator
+  ideal of ``x``), and it is sound as a disproof: per project decision, it is
+  not promoted to a definite ``false``, and the existing residue disproof
+  above still runs on the original, unscaled ``a``.
 
 Embedding root contexts
 -----------------------
