@@ -221,6 +221,7 @@ add_library(silex
     src/aut/aut.cpp
     src/embedding/embedding.cpp
     src/element/element.cpp
+    src/element/hensel.cpp
     src/hom/hom.cpp
     src/number_field/number_field.cpp
     src/signature/signature.cpp

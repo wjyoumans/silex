@@ -282,8 +282,8 @@ bool good_prime_root_bound(ulong& bound,
         } else {
             stable = 0;
             // phi(gcd) is recomputed only when the gcd changes.  A gcd that
-            // does not fit in a word never counts as stable, as in the
-            // reference.
+            // does not fit in a word never counts as stable, as in
+            // reference 2.17.3 `guess_roots`.
             phi_divides_degree =
                     fmpz_abs_fits_ui(gcd.raw()) != 0 &&
                     static_cast<ulong>(degree) %
@@ -351,35 +351,6 @@ ulong reduce_root_bound(ulong bound,
     return bound;
 }
 
-// True when z has exact multiplicative order m: z^m = 1 and z^(m/l) != 1 for
-// every prime l | m.  This is the certificate that w is at least m.
-bool has_exact_order(const Element& z, ulong m) noexcept {
-    const NumberField* parent = z.parent();
-    if (parent == nullptr || m == 0) {
-        return false;
-    }
-    Element power(*parent);
-    flint::Fmpz exponent;
-    fmpz_set_ui(exponent.raw(), m);
-    if (!power.is_defined() ||
-        !power.pow_fmpz(z, flint::FmpzConstRef(exponent)) ||
-        !power.equal_si(1)) {
-        return false;
-    }
-
-    n_factor_t factors;
-    n_factor_init(&factors);
-    n_factor(&factors, m, 1);
-    for (int i = 0; i < factors.num; ++i) {
-        fmpz_set_ui(exponent.raw(), m / factors.p[i]);
-        if (!power.pow_fmpz(z, flint::FmpzConstRef(exponent)) ||
-            power.equal_si(1)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 // Candidate root of unity when T(y) = Phi_N(+-y + c) for the scaled
 // generator y = theta'.
 //
@@ -432,10 +403,11 @@ bool cyclotomic_translate_root(Element& generator,
         !candidate.add(candidate, term)) {
         return false;
     }
-    if (has_exact_order(candidate, bound)) {
+    if (detail::has_exact_order(candidate, bound)) {
         return generator.set(candidate);
     }
-    if (candidate.negate(candidate) && has_exact_order(candidate, bound)) {
+    if (candidate.negate(candidate) &&
+        detail::has_exact_order(candidate, bound)) {
         return generator.set(candidate);
     }
     return false;
@@ -624,7 +596,7 @@ bool search_roots_for_bound(flint::FmpzRef order,
     } else if (!result.set(product)) {
         return false;
     }
-    if (!has_exact_order(result, bound)) {
+    if (!detail::has_exact_order(result, bound)) {
         return false;
     }
     fmpz_set_ui(order.raw(), bound);
