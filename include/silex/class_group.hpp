@@ -201,7 +201,7 @@ public:
     // it is a GRH-conditional record, not an unconditional proof.  A record
     // stored by an accepted `grh` class/unit transaction comes from the
     // default zeta route, whose error bound need not meet the target for the
-    // requested precision (unlike try_certify_class_unit_with_zeta_bf).
+    // requested precision (unlike `try_certify_class_unit_with_zeta_bf`).
     ProofState zeta_bf_proof_status() const noexcept;
     bool zeta_bf_proof_record(ulong& cutoff,
                               ulong& max_cutoff,
