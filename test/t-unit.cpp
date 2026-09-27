@@ -447,9 +447,13 @@ int test_roots_of_unity_noncyclotomic_presentations() {
     const slong zeta12[] = {13, -8, 11, -4, 1};
     assert_roots_of_unity(integer_polynomial_field(zeta12, 5), 12);
 
-    // Q(zeta_5): w = 10.  The search has no root finder for zeta_p with
-    // p >= 5 outside cyclotomic-translate presentations, so it fails closed
-    // rather than return a w below the good-prime bound.
+    // KNOWN LIMITATION, not correct behavior: Q(zeta_5) has w = 10, and a
+    // complete implementation must return 10 here.  The search has no root
+    // finder for zeta_p with p >= 5 outside cyclotomic-translate
+    // presentations, so it fails closed rather than return a w below the
+    // good-prime bound.  This assertion pins that fail-closed limitation and
+    // must be flipped to assert_roots_of_unity(field5, 10) once a Phi_(p^k)
+    // root finder lands.
     const slong zeta5[] = {11, 7, 9, 3, 1};
     silex::NumberField field5 = integer_polynomial_field(zeta5, 5);
     sflint::Fmpz order;
@@ -495,11 +499,34 @@ int test_roots_of_unity_fail_closed_against_bound() {
     assert(has_exact_order(generator9, 18));
     // The old zeta_4/zeta_6 search returned 6 here.  A bound of 54 is a multiple
     // of the true w = 18 that the search cannot attain.
+    silex::Element saved9(field9);
+    assert(saved9.set(generator9));
     assert(!silex::detail::roots_of_unity_for_bound(
             sflint::FmpzRef(order), generator9, field9, 54));
     assert(!silex::detail::roots_of_unity_for_bound(
             sflint::FmpzRef(order), generator9, field9, 36));
     assert(fmpz_equal_ui(order.raw(), 18) != 0);
+    assert(generator9.equal(saved9));
+
+    // A proper divisor of w violates the precondition that the bound is a
+    // multiple of w.  Q(zeta_9) contains zeta_6, so without the guard the
+    // exact-order check would accept 6 and publish the wrong w; the guard
+    // rejects any bound that is not a multiple of the proven good-prime
+    // bound.
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator9, field9, 6));
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator9, field9, 2));
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator9, field9, 0));
+    assert(fmpz_equal_ui(order.raw(), 18) != 0);
+    assert(generator9.equal(saved9));
+    fmpz_set_ui(order.raw(), 17);
+    assert(generator.set_si(7));
+    assert(!silex::detail::roots_of_unity_for_bound(
+            sflint::FmpzRef(order), generator, qi, 2));
+    assert(fmpz_equal_ui(order.raw(), 17) != 0);
+    assert(generator.equal_si(7));
     return 0;
 }
 

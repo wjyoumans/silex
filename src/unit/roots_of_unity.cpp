@@ -427,6 +427,30 @@ bool prime_power_root_of_unity(Element& out,
     return out.set(z);
 }
 
+// The good-prime bound of `guess_roots` reduced by degree and ramification:
+// a proven multiple of w for the field defined by the monic integral
+// `polynomial`.  False when the discriminant vanishes or the good-prime
+// search reaches its resource limit.
+bool proven_root_bound(ulong& bound,
+                       const flint::FmpzPoly& polynomial) noexcept {
+    flint::Fmpz discriminant;
+    fmpz_poly_discriminant(discriminant.raw(), polynomial.raw());
+    if (fmpz_is_zero(discriminant.raw()) != 0) {
+        return false;
+    }
+    ulong good_prime_bound = 0;
+    if (!good_prime_root_bound(good_prime_bound, polynomial, discriminant)) {
+        return false;
+    }
+    if (good_prime_bound != 2) {
+        good_prime_bound = reduce_root_bound(
+                good_prime_bound, fmpz_poly_degree(polynomial.raw()),
+                discriminant);
+    }
+    bound = good_prime_bound;
+    return true;
+}
+
 // Step 2 of reference `nfrootsof1` against a proven multiple `bound` of w,
 // with a fail-closed rule: the search succeeds only when it certifies a root
 // of unity of exact order `bound`, which with the upper bound proves
@@ -529,22 +553,12 @@ bool compute_roots_of_unity(flint::FmpzRef order,
     // root of unity of that order.
     flint::FmpzPoly polynomial;
     flint::Fmpz scale;
-    flint::Fmpz discriminant;
     if (!monic_integral_defining_poly(polynomial, scale, field)) {
         return false;
     }
-    fmpz_poly_discriminant(discriminant.raw(), polynomial.raw());
-    if (fmpz_is_zero(discriminant.raw()) != 0) {
-        return false;
-    }
-
     ulong bound = 0;
-    if (!good_prime_root_bound(bound, polynomial, discriminant)) {
+    if (!proven_root_bound(bound, polynomial)) {
         return false;
-    }
-    if (bound != 2) {
-        bound = reduce_root_bound(
-                bound, fmpz_poly_degree(polynomial.raw()), discriminant);
     }
     return search_roots_for_bound(order, generator, field, polynomial, scale,
                                   bound);
@@ -567,8 +581,13 @@ bool roots_of_unity(flint::FmpzRef order,
         return false;
     }
 
+    // Publish the generator first: it is the only write that can fail, so a
+    // failure leaves both outputs unchanged.
+    if (!generator.set(tmp_generator)) {
+        return false;
+    }
     fmpz_set(order.raw(), tmp_order.raw());
-    return generator.set(tmp_generator);
+    return true;
 }
 
 bool root_of_unity_order(flint::FmpzRef order,
@@ -619,6 +638,16 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
         return false;
     }
 
+    // Guard the precondition: `bound` must be a multiple of the proven
+    // reduced good-prime bound, hence of w.  Without it a proper divisor of w
+    // (bound 6 for Q(zeta_9)) would pass the exact-order check and be
+    // published as w.
+    ulong proven = 0;
+    if (bound == 0 || !proven_root_bound(proven, polynomial) ||
+        bound % proven != 0) {
+        return false;
+    }
+
     flint::Fmpz tmp_order;
     Element tmp_generator(field);
     if (!tmp_generator.is_defined() ||
@@ -626,8 +655,11 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
                                 field, polynomial, scale, bound)) {
         return false;
     }
+    if (!generator.set(tmp_generator)) {
+        return false;
+    }
     fmpz_set(order.raw(), tmp_order.raw());
-    return generator.set(tmp_generator);
+    return true;
 }
 
 }  // namespace detail
