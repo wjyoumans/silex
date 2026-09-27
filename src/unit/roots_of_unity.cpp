@@ -10,6 +10,7 @@
 
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_factor.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
@@ -135,10 +136,18 @@ ulong factor_residue_degree_gcd(const flint::FmpzPoly& polynomial,
 }
 
 // Monic integral defining polynomial of theta' = scale * theta, where theta
-// is the field generator.  With T = sum a_i x^i the integral numerator of the
-// defining polynomial and a_n its leading coefficient, theta' = a_n theta is
-// a root of sum a_i a_n^(n-1-i) y^i, which is monic with integer
-// coefficients.  scale = 1 when T is already monic.
+// is the field generator and scale is a positive integer.
+//
+// Source trace: reference 2.17.3 src/basemath/base1.c `ZX_primitive_to_monic`
+// (lines 390-449), which `nfmaxord` applies (through `ZX_Q_normalize`) to a
+// non-monic defining polynomial.  Let a_0 + ... + a_n x^n be the primitive
+// integral numerator of the defining polynomial, with a_n > 0.  For each
+// prime power p^e || a_n, take the least k with k n >= e and
+// v_p(a_j) + (k n - e) >= k j for every j < n with a_j != 0.  Then
+// p^(k n - e) a(x / p^k) has integral coefficients and p-free leading
+// coefficient.  Over all p this gives a monic integral polynomial whose root
+// is scale * theta with scale = prod p^k.  scale = 1 when the numerator is
+// already monic.
 bool monic_integral_defining_poly(flint::FmpzPoly& out,
                                   flint::Fmpz& scale,
                                   const NumberField& field) noexcept {
@@ -147,26 +156,53 @@ bool monic_integral_defining_poly(flint::FmpzPoly& out,
         return false;
     }
 
-    flint::FmpzPoly numerator;
-    fmpq_poly_get_numerator(numerator.raw(), raw->pol);
-    const slong degree = fmpz_poly_degree(numerator.raw());
-    fmpz_poly_get_coeff_fmpz(scale.raw(), numerator.raw(), degree);
-    if (fmpz_is_zero(scale.raw()) != 0) {
-        return false;
+    fmpq_poly_get_numerator(out.raw(), raw->pol);
+    fmpz_poly_primitive_part(out.raw(), out.raw());
+    const slong n = fmpz_poly_degree(out.raw());
+    fmpz_one(scale.raw());
+    fmpz* a = out.raw()->coeffs;
+    if (fmpz_is_one(a + n) != 0) {
+        return true;
     }
 
+    flint::FmpzFactor factorization;
+    fmpz_factor(factorization.raw(), a + n);
+    flint::Fmpz p;
+    flint::Fmpz pk;
     flint::Fmpz power;
-    flint::Fmpz coeff;
-    fmpz_one(power.raw());
-    fmpz_poly_zero(out.raw());
-    fmpz_poly_set_coeff_ui(out.raw(), degree, 1);
-    for (slong i = degree - 1; i >= 0; --i) {
-        fmpz_poly_get_coeff_fmpz(coeff.raw(), numerator.raw(), i);
-        fmpz_mul(coeff.raw(), coeff.raw(), power.raw());
-        fmpz_poly_set_coeff_fmpz(out.raw(), i, coeff.raw());
-        fmpz_mul(power.raw(), power.raw(), scale.raw());
+    flint::Fmpz cofactor;
+    for (slong i = 0; i < factorization.raw()->num; ++i) {
+        fmpz_set(p.raw(), factorization.raw()->p + i);
+        const slong e = static_cast<slong>(factorization.raw()->exp[i]);
+        slong k = (e + n - 1) / n;
+        slong d = k * n - e;
+        for (slong j = n - 1; j > 0; --j) {
+            if (fmpz_is_zero(a + j) != 0) {
+                continue;
+            }
+            const slong v = static_cast<slong>(
+                    fmpz_remove(cofactor.raw(), a + j, p.raw()));
+            while (v + d < k * j) {
+                ++k;
+                d += n;
+            }
+        }
+        fmpz_pow_ui(pk.raw(), p.raw(), static_cast<ulong>(k));
+        fmpz_mul(scale.raw(), scale.raw(), pk.raw());
+        // a_j *= p^(d - k j) for k j <= d, and a_j /= p^(k j - d) otherwise.
+        for (slong j = 0; j <= n; ++j) {
+            const slong shift = d - k * j;
+            if (shift >= 0) {
+                fmpz_pow_ui(power.raw(), p.raw(), static_cast<ulong>(shift));
+                fmpz_mul(a + j, a + j, power.raw());
+            } else {
+                fmpz_pow_ui(power.raw(), p.raw(), static_cast<ulong>(-shift));
+                fmpz_divexact(a + j, a + j, power.raw());
+            }
+        }
     }
-    return true;
+    _fmpz_poly_normalise(out.raw());
+    return fmpz_poly_degree(out.raw()) == n && fmpz_is_one(a + n) != 0;
 }
 
 // Resource bound only: the search below stops by the stationarity rule long
@@ -386,9 +422,9 @@ bool cyclotomic_translate_root(Element& generator,
 // zeta_(3^(j+1)) = zeta_(3^j)^(1/3).  Any p-th root of a primitive
 // p^j-th root of unity (j >= 1) is a primitive p^(j+1)-th root, and if
 // zeta_(p^(j+1)) is in K then every p^j-th root of unity is a p-th power in K,
-// so the choice of root at each step does not matter.  This replaces the
-// `nfisincl(polcyclo(p^k), T)` test of reference `nfrootsof1` step 2 (and
-// the `_roots_hensel` search of reference `_torsion_units_gen`) for these primes;
+// so the choice of root at each step does not matter.  It is tried before
+// the Hensel search of prime_power_component and needs a monic integral
+// field of degree less than 10 (the contract of is_square and is_power);
 // false when a root is not found or not decided.
 bool prime_power_root_of_unity(Element& out,
                                const NumberField& field,
@@ -451,13 +487,44 @@ bool proven_root_bound(ulong& bound,
     return true;
 }
 
+// True when the field's defining polynomial is monic with integer
+// coefficients, so that it equals the polynomial T' of theta' = theta.
+bool defining_polynomial_is_monic_integral(const NumberField& field) noexcept {
+    const nf_struct* raw = field.raw_flint_field();
+    if (raw == nullptr) {
+        return false;
+    }
+    const slong length = fmpq_poly_length(raw->pol);
+    return length >= 2 && fmpz_is_one(fmpq_poly_denref(raw->pol)) != 0 &&
+           fmpz_is_one(fmpq_poly_numref(raw->pol) + length - 1) != 0;
+}
+
+// A primitive p^e-th root of unity in the monic integral field `field`
+// (p^e >= 3).  The exact square- and power-root chain is tried first; when it
+// fails or is unsupported (p >= 5, degree 10 or more), the Hensel root
+// search for Phi_(p^e) of reference `_torsion_units_gen` decides.  Both
+// results are certified by exact order in the caller.
+bool prime_power_component(Element& out,
+                           const NumberField& field,
+                           ulong p,
+                           slong e) noexcept {
+    if (prime_power_root_of_unity(out, field, p, e)) {
+        return true;
+    }
+    return detail::cyclotomic_root_hensel(
+            out, field, n_pow(p, static_cast<ulong>(e)));
+}
+
 // Step 2 of reference `nfrootsof1` against a proven multiple `bound` of w,
 // with a fail-closed rule: the search succeeds only when it certifies a root
 // of unity of exact order `bound`, which with the upper bound proves
 // w = bound.  The reference instead accepts a smaller p-power after a "wrong
 // guess" warning; Silex fails, because w is then not certified by the bound.
-// This also covers the unported case p >= 5 outside cyclotomic-translate
-// presentations.
+//
+// The prime-power roots are searched in a monic integral model of the field:
+// the field itself when its defining polynomial is monic and integral, and
+// otherwise Q(theta') with theta' = scale * theta defined by `polynomial`.  A
+// root g(theta') found there is the element g(scale * theta) of the field.
 bool search_roots_for_bound(flint::FmpzRef order,
                             Element& generator,
                             const NumberField& field,
@@ -484,14 +551,21 @@ bool search_roots_for_bound(flint::FmpzRef order,
         return generator.set(result);
     }
 
+    const bool use_model = !defining_polynomial_is_monic_integral(field);
+    NumberField model;
+    if (use_model &&
+        !model.define_by_polynomial(flint::FmpzPolyConstRef(polynomial))) {
+        return false;
+    }
+    const NumberField& search_field = use_model ? model : field;
+
     n_factor_t factors;
     n_factor_init(&factors);
     n_factor(&factors, bound, 1);
-    if (!result.set_si(1)) {
-        return false;
-    }
-    Element component(field);
-    if (!component.is_defined()) {
+    Element product(search_field);
+    Element component(search_field);
+    if (!product.is_defined() || !component.is_defined() ||
+        !product.set_si(1)) {
         return false;
     }
     for (int i = 0; i < factors.num; ++i) {
@@ -501,12 +575,29 @@ bool search_roots_for_bound(flint::FmpzRef order,
             if (!component.set_si(-1)) {
                 return false;
             }
-        } else if (!prime_power_root_of_unity(component, field, p, e)) {
+        } else if (!prime_power_component(component, search_field, p, e)) {
             return false;
         }
-        if (!result.multiply(result, component)) {
+        if (!product.multiply(product, component)) {
             return false;
         }
+    }
+
+    if (use_model) {
+        flint::FmpqPoly coordinates;
+        flint::Fmpq scale_q;
+        fmpz_set(fmpq_numref(scale_q.raw()), scale.raw());
+        fmpz_one(fmpq_denref(scale_q.raw()));
+        if (!product.get_fmpq_poly(flint::FmpqPolyRef(coordinates))) {
+            return false;
+        }
+        fmpq_poly_rescale(coordinates.raw(), coordinates.raw(),
+                          scale_q.raw());
+        if (!result.set_fmpq_poly(flint::FmpqPolyConstRef(coordinates))) {
+            return false;
+        }
+    } else if (!result.set(product)) {
+        return false;
     }
     if (!has_exact_order(result, bound)) {
         return false;

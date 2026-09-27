@@ -1,5 +1,7 @@
+#include <silex/flint/fmpq.hpp>
 #include <silex/unit.hpp>
 
+#include "element/element_internal.hpp"
 #include "test_support.hpp"
 #include "unit/unit_internal.hpp"
 
@@ -447,24 +449,136 @@ int test_roots_of_unity_noncyclotomic_presentations() {
     const slong zeta12[] = {13, -8, 11, -4, 1};
     assert_roots_of_unity(integer_polynomial_field(zeta12, 5), 12);
 
-    // KNOWN LIMITATION, not correct behavior: Q(zeta_5) has w = 10, and a
-    // complete implementation must return 10 here.  The search has no root
-    // finder for zeta_p with p >= 5 outside cyclotomic-translate
-    // presentations, so it fails closed rather than return a w below the
-    // good-prime bound.  This assertion pins that fail-closed limitation and
-    // must be flipped to assert_roots_of_unity(field5, 10) once a Phi_(p^k)
-    // root finder lands.
+    // Q(zeta_5): w = 10.  Before T-043 this failed closed (no root finder
+    // for zeta_5 outside cyclotomic-translate presentations); the Hensel
+    // search for Phi_5 now finds it.
     const slong zeta5[] = {11, 7, 9, 3, 1};
-    silex::NumberField field5 = integer_polynomial_field(zeta5, 5);
-    sflint::Fmpz order;
-    fmpz_set_ui(order.raw(), 17);
-    silex::Element generator(field5);
-    assert(generator.set_si(7));
-    assert(!silex::roots_of_unity(sflint::FmpzRef(order), generator, field5));
-    assert(fmpz_equal_ui(order.raw(), 17) != 0);
-    assert(generator.equal_si(7));
-    assert(!silex::root_of_unity_order(sflint::FmpzRef(order), field5));
-    assert(fmpz_equal_ui(order.raw(), 17) != 0);
+    assert_roots_of_unity(integer_polynomial_field(zeta5, 5), 10);
+
+    // Q(zeta_7): w = 14, and Q(zeta_11) (degree 10): w = 22.
+    const slong zeta7[] = {43, 19, 25, 27, 9, 3, 1};
+    assert_roots_of_unity(integer_polynomial_field(zeta7, 7), 14);
+    const slong zeta11[] = {683, 235, 137, 251, 377, 243, 81, 27, 9, 3, 1};
+    assert_roots_of_unity(integer_polynomial_field(zeta11, 11), 22);
+    return 0;
+}
+
+// Degree 10 or more, where the exact square and power roots are not
+// supported, so the 2- and 3-power roots come from the Hensel search.  The
+// polynomials are charpoly(Mod(x + 2*x^2, polcyclo(m))) and
+// charpoly(Mod(x + x^2, polcyclo(27))), charpoly(Mod(x + x^3, polcyclo(32)))
+// in GP 2.17.4, with w from nfrootsof1.
+int test_roots_of_unity_high_degree_prime_powers() {
+    // Q(zeta_27), degree 18: w = 54.
+    const slong zeta27[] = {261633, -9180, -54756, -118512, -53136, 57024,
+                            88704,  69120, 20736,  513,     18,     108,
+                            240,    144,   0,      0,       0,      0,
+                            1};
+    assert_roots_of_unity(integer_polynomial_field(zeta27, 19), 54);
+    const slong zeta27b[] = {1, 9, 108, 516, 1278, 1782, 1386, 540, 81, 2,
+                             9, 27, 30, 9, 0, 0, 0, 0, 1};
+    assert_roots_of_unity(integer_polynomial_field(zeta27b, 19), 54);
+
+    // Q(zeta_32), degree 16: w = 32.
+    const slong zeta32[] = {65537, 32, 416, 2816, 10560, 21504, 21504, 8192,
+                            512,   0,  0,   0,    0,     0,     0,     0,
+                            1};
+    assert_roots_of_unity(integer_polynomial_field(zeta32, 17), 32);
+    const slong zeta32b[] = {4, 0, -32, 0, 128, 0, 192, 0, 140,
+                             0, 16, 0, 0, 0, 0, 0, 1};
+    assert_roots_of_unity(integer_polynomial_field(zeta32b, 17), 32);
+    return 0;
+}
+
+silex::NumberField rational_polynomial_field(const slong* numerators,
+                                             const slong* denominators,
+                                             slong length) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::Fmpq coeff;
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i < length; ++i) {
+        fmpq_set_si(coeff.raw(), numerators[i],
+                    static_cast<ulong>(denominators[i]));
+        fmpq_poly_set_coeff_fmpq(polynomial.raw(), i, coeff.raw());
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// Defining polynomials that are not monic and integral.  Each is a monic
+// polynomial above with x replaced by c x (times a constant), and the expected
+// w is GP 2.17.4 nfrootsof1(nfinit(P)).
+int test_roots_of_unity_nonmonic_presentations() {
+    // w = 2: 3x^4 + x + 5 and 2x^4 + 3x^2 + x + 7, both totally complex.
+    const slong w2a[] = {5, 1, 0, 0, 3};
+    assert_roots_of_unity(integer_polynomial_field(w2a, 5), 2);
+    const slong w2b[] = {7, 1, 3, 0, 2};
+    assert_roots_of_unity(integer_polynomial_field(w2b, 5), 2);
+
+    // Cyclotomic translate: Phi_5(2x), w = 10.
+    const slong phi5_2x[] = {1, 2, 4, 8, 16};
+    assert_roots_of_unity(integer_polynomial_field(phi5_2x, 5), 10);
+
+    // w > 2 through the monic model: Q(zeta_5) as f(3x) and f(2x)/16 for
+    // f = x^4 + 3x^3 + 9x^2 + 7x + 11 (w = 10), Q(zeta_12) as g(5x) (w = 12)
+    // and Q(zeta_9) as h(2x) (w = 18).
+    const slong zeta5_3x[] = {11, 21, 81, 81, 81};
+    assert_roots_of_unity(integer_polynomial_field(zeta5_3x, 5), 10);
+    const slong zeta5_half_num[] = {11, 7, 9, 3, 1};
+    const slong zeta5_half_den[] = {16, 8, 4, 2, 1};
+    assert_roots_of_unity(
+            rational_polynomial_field(zeta5_half_num, zeta5_half_den, 5), 10);
+    const slong zeta12_5x[] = {13, -40, 275, -500, 625};
+    assert_roots_of_unity(integer_polynomial_field(zeta12_5x, 5), 12);
+    const slong zeta9_2x[] = {57, -72, 144, 72, 96, 0, 64};
+    assert_roots_of_unity(integer_polynomial_field(zeta9_2x, 7), 18);
+
+    // Degree 16 and 20: P(3x) for P = charpoly(Mod(x + 2*x^2, polcyclo(m)))
+    // with m = 32 (w = 32) and m = 25 (w = 50).  The monic model is P itself
+    // (theta' = 3 theta), where the Hensel search succeeds; the model
+    // theta' = a_n theta has coefficients of several hundred bits, for which
+    // the lifting bound cannot be evaluated.
+    const slong zeta32_3x[] = {65537,   96,      3744,     76032,   855360,
+                               5225472, 15676416, 17915904, 3359232, 0,
+                               0,       0,        0,        0,       0,
+                               0,       43046721};
+    assert_roots_of_unity(integer_polynomial_field(zeta32_3x, 17), 32);
+    const slong zeta25_3x[] = {
+            1016801,   -924360,    -4705560,   9331200,    17463600,
+            -54719469, -1844370,   640441080,  1316136600, 897544800,
+            772892361, 1534093020, 754646220,  637729200,  1913187600,
+            473513931, 430467210,  2582803260, 0,          0,
+            3486784401};
+    assert_roots_of_unity(integer_polynomial_field(zeta25_3x, 21), 50);
+    return 0;
+}
+
+// The Hensel search for a root of Phi_m on its own: it finds primitive m-th
+// roots of unity that exist and reports failure for those that do not.
+int test_cyclotomic_root_hensel() {
+    const slong zeta9[] = {57, -36, 36, 9, 6, 0, 1};
+    silex::NumberField field9 = integer_polynomial_field(zeta9, 7);
+    silex::Element root(field9);
+    assert(silex::detail::cyclotomic_root_hensel(root, field9, 9));
+    assert(has_exact_order(root, 9));
+    assert(silex::detail::cyclotomic_root_hensel(root, field9, 3));
+    assert(has_exact_order(root, 3));
+    assert(silex::detail::cyclotomic_root_hensel(root, field9, 18));
+    assert(has_exact_order(root, 18));
+
+    // Q(zeta_9) has no primitive 4th, 5th or 27th root of unity; the root is
+    // left unchanged.
+    assert(root.set_si(7));
+    assert(!silex::detail::cyclotomic_root_hensel(root, field9, 4));
+    assert(!silex::detail::cyclotomic_root_hensel(root, field9, 5));
+    assert(!silex::detail::cyclotomic_root_hensel(root, field9, 27));
+    assert(root.equal_si(7));
+
+    // A non-monic defining polynomial is outside the helper's contract.
+    const slong zeta5_3x[] = {11, 21, 81, 81, 81};
+    silex::NumberField nonmonic = integer_polynomial_field(zeta5_3x, 5);
+    silex::Element nonmonic_root(nonmonic);
+    assert(!silex::detail::cyclotomic_root_hensel(nonmonic_root, nonmonic, 5));
     return 0;
 }
 
@@ -906,6 +1020,9 @@ int main() {
     test_roots_of_unity();
     test_roots_of_unity_cyclotomic_fields();
     test_roots_of_unity_noncyclotomic_presentations();
+    test_roots_of_unity_high_degree_prime_powers();
+    test_roots_of_unity_nonmonic_presentations();
+    test_cyclotomic_root_hensel();
     test_roots_of_unity_fail_closed_against_bound();
     test_lower_regulator_bound();
     test_lower_regulator_bound_terms();
