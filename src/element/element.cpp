@@ -2634,7 +2634,7 @@ bool pure_power_residue_disproves(bool& is_power,
 // cyclotomic polynomial f = Phi_m, found as reference
 // `_roots_hensel(f, max_roots = 1, is_normal = true, root_bound = ones)`
 // finds it (reference v0.38.6 `src/NumFieldOrd/NfOrd/TorsionUnits.jl` lines
-// 414-457 and `Hensel.jl` lines 57-232 and 313-637), for monic integral
+// 414-456 and `Hensel.jl` lines 57-232 and 313-637), for monic integral
 // fields.  The roots of Phi_m are the primitive m-th roots of unity, so the
 // candidate is certified by its exact multiplicative order.
 
