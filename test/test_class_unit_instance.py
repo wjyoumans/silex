@@ -201,6 +201,19 @@ def main() -> int:
             assert proven_instance["class_group"]["invariants"] == [
                 str(value) for value in row["expected_class_invariants"]
             ]
+        # The instance JSON always reports the GRH dependence of the
+        # analytic hR check (ClassGroup::analytic_class_regulator_
+        # certification(), decision 2026-09-26 "T-012 public gates and
+        # GRH accessor"), whether or not that check was exercised.
+        assert "analytic_class_regulator_certification" in (
+            proven_instance["class_group"]
+        )
+        if proven_instance["class_group"][
+            "analytic_class_regulator_status"
+        ] == "not_checked":
+            assert proven_instance["class_group"][
+                "analytic_class_regulator_certification"
+            ] == "unknown"
         if row["id"] in exact_rows:
             # Exact completion needs no analytic or BF receipt.
             for component in (
@@ -209,10 +222,15 @@ def main() -> int:
                 assert proven_instance["class_group"][component] == "not_checked"
         if row["id"] == "real_quadratic_210_proven":
             # The canonical Dirichlet index-one gate certifies this pair
-            # without a relation-saturation or BF proof attempt.
+            # without a relation-saturation or BF proof attempt. The gate
+            # is unconditional, so the GRH dependence field reads
+            # `proven`, not the result's overall `proven` certification.
             assert proven_instance["class_group"][
                 "analytic_class_regulator_status"
             ] == "verified"
+            assert proven_instance["class_group"][
+                "analytic_class_regulator_certification"
+            ] == "proven"
             assert proven_instance["class_group"][
                 "zeta_bf_proof_status"
             ] == "not_checked"
@@ -258,6 +276,22 @@ def main() -> int:
             str(value) for value in row["expected_class_invariants"]
         ]
         assert grh_instance["unit_group"]["free_rank"] == 0
+        # GRH runs report the analytic hR's GRH dependence too, even when
+        # the `grh` label came from the factor-base bound rather than the
+        # analytic check itself.
+        assert "analytic_class_regulator_certification" in (
+            grh_instance["class_group"]
+        )
+        if grh_instance["class_group"][
+            "analytic_class_regulator_status"
+        ] == "not_checked":
+            assert grh_instance["class_group"][
+                "analytic_class_regulator_certification"
+            ] == "unknown"
+        else:
+            assert grh_instance["class_group"][
+                "analytic_class_regulator_certification"
+            ] == "grh"
 
     for removed_option in (
         "--coordinate-radius=2",

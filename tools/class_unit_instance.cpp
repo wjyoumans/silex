@@ -1741,6 +1741,12 @@ int main(int argc, char** argv) {
             proof_state_name(
                     class_group.analytic_class_regulator_status()));
     std::cout << ",\n";
+    std::cout << "    \"analytic_class_regulator_certification\": ";
+    write_json_string(
+            std::cout,
+            certification_name(
+                    class_group.analytic_class_regulator_certification()));
+    std::cout << ",\n";
     std::cout << "    \"zeta_bf_proof_status\": ";
     write_json_string(std::cout,
                       proof_state_name(class_group.zeta_bf_proof_status()));

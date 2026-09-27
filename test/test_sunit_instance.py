@@ -241,6 +241,9 @@ def assert_sunit_instance(instance: dict[str, Any], row: dict[str, Any]) -> None
         assert instance["class_group"][
             "analytic_class_regulator_status"
         ] == "verified"
+        assert instance["class_group"][
+            "analytic_class_regulator_certification"
+        ] == "proven"
         assert instance["class_group"]["zeta_bf_proof_status"] == "not_checked"
     assert "algorithm" not in instance
     assert "fallback_used" not in instance
