@@ -2325,10 +2325,12 @@ bool zeta_residue_bf_audit(flint::ArbRef out,
         return false;
     }
 
-    flint::arb_set(out, flint::ArbConstRef(log_residue));
+    // Publish `out` last so that an aliased call (`out == error_bound`)
+    // ends up holding the value, matching every other audit path.
     flint::arb_set(error_bound, flint::ArbConstRef(local_error_bound));
     cutoff = local_cutoff;
     work_precision = local_work_precision;
+    flint::arb_set(out, flint::ArbConstRef(log_residue));
     return true;
 }
 
@@ -2477,10 +2479,12 @@ bool zeta_class_regulator_product_bf_audit_impl(
         return false;
     }
 
-    flint::arb_set(out, flint::ArbConstRef(product));
+    // Publish `out` last so that an aliased call (`out == error_bound`)
+    // ends up holding the value, matching every other audit path.
     flint::arb_set(error_bound, flint::ArbConstRef(local_error_bound));
     cutoff = local_cutoff;
     work_precision = local_work_precision;
+    flint::arb_set(out, flint::ArbConstRef(product));
     return true;
 }
 

@@ -424,13 +424,21 @@ int test_max_cutoff_near_uword_max() {
                 silex::zeta_residue_bf_audit(maximal, max_cutoff, 128);
         assert(residue_audit.has_value());
         assert(residue_audit->cutoff == residue_reference->cutoff);
+        assert(residue_audit->work_precision ==
+               residue_reference->work_precision);
         assert(arb_identical(residue_audit->value, residue_reference->value));
+        assert(arb_identical(residue_audit->error_bound,
+                             residue_reference->error_bound));
 
         auto product_audit = silex::zeta_class_regulator_product_bf_audit(
                 maximal, max_cutoff, 128);
         assert(product_audit.has_value());
         assert(product_audit->cutoff == product_reference->cutoff);
+        assert(product_audit->work_precision ==
+               product_reference->work_precision);
         assert(arb_identical(product_audit->value, product_reference->value));
+        assert(arb_identical(product_audit->error_bound,
+                             product_reference->error_bound));
 
         sflint::Arb value;
         assert(silex::zeta_log_residue_bf(sflint::ArbRef(value), maximal,
@@ -443,6 +451,63 @@ int test_max_cutoff_near_uword_max() {
                 sflint::ArbRef(value), maximal, max_cutoff, 128));
         assert(arb_identical(value, product_reference->value));
     }
+
+    return 0;
+}
+
+int test_aliased_out_error_bound_publishes_value_last() {
+    // A caller that passes the same Arb for `out` and `error_bound` is
+    // nonsensical but legal. Every BF audit buffer form must leave that
+    // Arb holding the value on success, like `zeta_log_residue_bf_audit`
+    // (which already writes the error bound, then `out`, into the caller's
+    // buffers): `out` is always the last write.
+    silex::NumberField field = cubic_field();
+    silex::Order maximal = maximal_order_of(field);
+    ulong cutoff = 0;
+    slong work_precision = 0;
+
+    sflint::Arb log_residue;
+    sflint::Arb log_error_bound;
+    assert(silex::zeta_log_residue_bf_audit(
+            sflint::ArbRef(log_residue), sflint::ArbRef(log_error_bound),
+            cutoff, work_precision, maximal, 20000, 128));
+    // The value and the error bound must differ, or the test would pass
+    // vacuously.
+    assert(!arb_identical(log_residue, log_error_bound));
+
+    sflint::Arb log_aliased;
+    ulong aliased_cutoff = 0;
+    slong aliased_work_precision = 0;
+    assert(silex::zeta_log_residue_bf_audit(
+            sflint::ArbRef(log_aliased), sflint::ArbRef(log_aliased),
+            aliased_cutoff, aliased_work_precision, maximal, 20000, 128));
+    assert(arb_identical(log_aliased, log_residue));
+
+    sflint::Arb residue;
+    sflint::Arb residue_error_bound;
+    assert(silex::zeta_residue_bf_audit(
+            sflint::ArbRef(residue), sflint::ArbRef(residue_error_bound),
+            cutoff, work_precision, maximal, 20000, 128));
+    assert(!arb_identical(residue, residue_error_bound));
+
+    sflint::Arb residue_aliased;
+    assert(silex::zeta_residue_bf_audit(
+            sflint::ArbRef(residue_aliased), sflint::ArbRef(residue_aliased),
+            aliased_cutoff, aliased_work_precision, maximal, 20000, 128));
+    assert(arb_identical(residue_aliased, residue));
+
+    sflint::Arb product;
+    sflint::Arb product_error_bound;
+    assert(silex::zeta_class_regulator_product_bf_audit(
+            sflint::ArbRef(product), sflint::ArbRef(product_error_bound),
+            cutoff, work_precision, maximal, 20000, 128));
+    assert(!arb_identical(product, product_error_bound));
+
+    sflint::Arb product_aliased;
+    assert(silex::zeta_class_regulator_product_bf_audit(
+            sflint::ArbRef(product_aliased), sflint::ArbRef(product_aliased),
+            aliased_cutoff, aliased_work_precision, maximal, 20000, 128));
+    assert(arb_identical(product_aliased, product));
 
     return 0;
 }
@@ -509,6 +574,7 @@ int main() {
     test_quintic_bf();
     test_audit_failure_leaves_outputs_unchanged();
     test_max_cutoff_near_uword_max();
+    test_aliased_out_error_bound_publishes_value_last();
     test_hR_ground_truth();
     return 0;
 }
