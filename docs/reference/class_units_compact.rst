@@ -153,8 +153,12 @@ The class-group proof metadata is deliberately componentized:
   A ``grh`` paired transaction accepted by the analytic index-one test
   records that check too, as information only: its class-group and unit
   labels stay ``grh`` even when the check itself reads ``proven`` (quadratic
-  ``L(1, chi)``).  The exact imaginary-quadratic and degree-one ``grh``
-  routes record no analytic check;
+  ``L(1, chi)``), and a Belabas-Friedman check also stores its BF zeta
+  audit record.  A stored ``proven`` check from a real-quadratic ``grh``
+  run can later let an explicit ``try_certify_with_units(units, proven)``
+  with proven units promote the class group; the transaction itself never
+  promotes.  The exact imaginary-quadratic and degree-one ``grh`` routes
+  record no analytic check;
 - BF zeta audit records keep the cutoff, maximum cutoff, requested precision,
   working precision, and error bound of a Belabas-Friedman evaluation.  The
   error bound is valid under GRH, so the record is GRH-conditional evidence.

@@ -17,9 +17,15 @@ Changed
   ``analytic_class_regulator_status()`` reads ``verified``, and
   ``analytic_class_regulator_certification()`` gives the check's own
   conditionality: ``grh`` for a Belabas-Friedman ``hR`` and ``proven`` for
-  the quadratic ``L(1, chi)`` value.  The record is informational.  The
-  class-group and unit labels stay ``grh``, and the public zeta and BF gates
-  are unchanged.  The exact imaginary-quadratic and degree-one ``grh`` routes
+  the quadratic ``L(1, chi)`` value.  With a Belabas-Friedman ``hR`` the
+  evaluation's BF audit data is recorded too, so ``zeta_bf_proof_status()``
+  reads ``verified`` and ``zeta_bf_proof_record()`` gives its error bound,
+  cutoff, and precisions.  The record is informational.  The transaction
+  keeps the class-group and unit labels at ``grh``, and the public zeta and
+  BF gates are unchanged.  The one exception: a ``proven`` record stored by a
+  real-quadratic ``grh`` run lets a later explicit
+  ``try_certify_with_units(units, proven)`` with proven units promote the
+  class group to ``proven``.  The exact imaginary-quadratic and degree-one ``grh`` routes
   use no analytic check and record none.  The documentation now also states
   that ``grh`` mode in degree three and higher and for real quadratic fields
   requires factor-base generation verified up to the Minkowski-type bound and

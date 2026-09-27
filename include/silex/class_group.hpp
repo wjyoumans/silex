@@ -172,9 +172,10 @@ public:
     // assumes GRH.  Use analytic_class_regulator_certification() to read
     // which one was used.  A `grh` class/unit transaction accepted by the
     // analytic index-one test records that check here as well; the record is
-    // informational and leaves the `grh` labels unchanged.  The exact
-    // imaginary-quadratic and degree-one `grh` routes use no analytic check
-    // and record none.
+    // informational and leaves the `grh` labels unchanged.  With a
+    // Belabas-Friedman hR it also records that evaluation's audit data
+    // (zeta_bf_proof_record()).  The exact imaginary-quadratic and
+    // degree-one `grh` routes use no analytic check and record none.
     ProofState analytic_class_regulator_status() const noexcept;
     // `proven` for an unconditional analytic check, `grh` for a
     // Belabas-Friedman (GRH-conditional) check, and `unknown` when no
@@ -183,7 +184,13 @@ public:
     // `proven` label.  This is the conditionality of the analytic check
     // only, not of the result: a `grh` transaction accepted through an
     // unconditional hR (quadratic L(1, chi)) reports `proven` here while
-    // certification_status() stays `grh`.  A GRH-conditional check never
+    // certification_status() stays `grh`.  The `grh` transaction itself
+    // never promotes a label.  The one exception to "the record never
+    // promotes" is a later explicit try_certify_with_units(units, proven)
+    // with proven `units`: a stored `proven` record (a real-quadratic `grh`
+    // run, whose factor-base generation is verified to the Minkowski-type
+    // bound) then counts as the unconditional analytic check and can promote
+    // the class group to `proven`.  A GRH-conditional check never
     // serves as a proof component and never makes the class group or the
     // units `proven`: a `proven` label then requires factor-base
     // generation, proven units, and verified relation saturation at every
