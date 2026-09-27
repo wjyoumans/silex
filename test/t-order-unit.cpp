@@ -5032,8 +5032,9 @@ int test_saturate_torsion_twisted_non_proof_nonmaximal_sqrt18() {
     assert(!changed);
     assert(check_first_free_generator(local, twisted));
 
-    // The bounded pass skips 3 (it divides the order discriminant 72) and 5
-    // (inert), selects the two primes above 7, and adjoins nothing.
+    // The bounded pass skips 3 (decompose_prime(order, 3, 1) finds no
+    // degree-one prime of this order above 3) and 5 (inert), selects the
+    // two primes above 7, and adjoins nothing.
     sflint::Fmpz aux_bound;
     assert(set_fmpz_si(aux_bound, 31));
     silex::OrderUnitGroup bounded(order);
