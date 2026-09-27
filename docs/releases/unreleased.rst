@@ -34,6 +34,14 @@ Fixed
   field is searched in a monic integral model.  ``w`` is still returned only
   when a root of unity of exactly the proven bound's order is certified.
 
+- ``roots_of_unity``, ``root_of_unity_order`` and
+  ``root_of_unity_generator`` fail closed less often.  The good-prime bound
+  search no longer stops while the Euler phi of its gcd does not divide the
+  field degree, as in Hecke, since such a gcd cannot be ``w``.  For example,
+  a presentation of ``Q(zeta_40)`` whose bound previously stalled at 120 now
+  gives ``w = 40``.  ``w`` is still returned only when a root of unity of
+  exactly the proven bound's order is certified.
+
 - ``Element::is_power`` and ``Element::is_square`` now find non-integral roots
   that were previously reported as unsupported, for example
   ``((3 + 4i) / 5)^3`` in ``Q(i)``.  A non-integral input is rescaled by its

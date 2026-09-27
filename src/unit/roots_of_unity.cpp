@@ -139,7 +139,7 @@ ulong factor_residue_degree_gcd(const flint::FmpzPoly& polynomial,
 // is the field generator and scale is a positive integer.
 //
 // Source trace: reference 2.17.3 src/basemath/base1.c `ZX_primitive_to_monic`
-// (lines 390-449), which `nfmaxord` applies (through `ZX_Q_normalize`) to a
+// (lines 390-446), which `nfmaxord` applies (through `ZX_Q_normalize`) to a
 // non-monic defining polynomial.  Let a_0 + ... + a_n x^n be the primitive
 // integral numerator of the defining polynomial, with a_n > 0.  For each
 // prime power p^e || a_n, take the least k with k n >= e and
@@ -216,11 +216,27 @@ constexpr slong kGoodPrimeSearchLimit = slong{1} << 16;
 // prime p not dividing disc(T), every prime P | p has N(P) = p^f(P) and
 // mu(K) injects into (O_K/P)^*, so w | p^f(P) - 1 for every P | p, hence
 // w | gcd_P (p^f(P) - 1) = p^(gcd f(P)) - 1.  The gcd over primes p >= 3 is a
-// proven multiple of w.  As in the reference, the loop stops once the gcd fits in a
-// word and has been unchanged for more than B = n + 20 consecutive good
-// primes.  Following reference
-// `TorsionUnits.jl:_torsion_group_order_divisor`, it also stops as soon as the gcd is
-// 2, which is exact since w is even and every odd p^f - 1 is even.
+// proven multiple of w, whatever the stopping rule.  As in the reference, the
+// loop stops once the gcd fits in a word and has been unchanged for more than
+// B = n + 20 consecutive good primes.  Following reference v0.38.6
+// `TorsionUnits.jl:_torsion_group_order_divisor` (lines 274-345), it also
+// stops as soon as the gcd is 2, which is exact since w is even and every odd
+// p^f - 1 is even, and it resets the stability count while phi(gcd) does not
+// divide n: Q(zeta_w) is a subfield of K, so phi(w) | n, and such a gcd is a
+// strict multiple of w.  The reset only delays the stop, so the final gcd
+// still divides the one the reference rule would return.
+//
+// Why the gcd over all good primes equals w (Chebotarev density theorem):
+// let l^a = l^(v_l(w) + 1), so zeta_(l^a) is not in K, and let M be the Galois
+// closure of K(zeta_(l^a)) over Q.  The subgroup of Gal(M/Q) fixing K does not
+// fix zeta_(l^a), so it contains some sigma that moves it.  The good primes
+// whose Frobenius is conjugate to sigma have positive density; each has a
+// residue-degree-one prime in K, so gcd f = 1, and satisfies p != 1
+// (mod l^a), so l^a does not divide p^(gcd f) - 1 = p - 1.  Only finitely
+// many l divide the first term, so the gcd over all good primes is w.  The
+// stopping rule is therefore a heuristic for when to stop, never for what w
+// is: w is published only after a root of exact order equal to the reduced
+// bound is certified, and otherwise the computation fails closed.
 bool good_prime_root_bound(ulong& bound,
                            const flint::FmpzPoly& polynomial,
                            const flint::Fmpz& discriminant) noexcept {
@@ -232,6 +248,7 @@ bool good_prime_root_bound(ulong& bound,
     flint::Fmpz previous;
     bool have = false;
     slong stable = 0;
+    bool phi_divides_degree = false;
     ulong p = 3;
     for (slong attempt = 0; attempt < kGoodPrimeSearchLimit;
          ++attempt, p = n_nextprime(p, 1)) {
@@ -258,12 +275,20 @@ bool good_prime_root_bound(ulong& bound,
         }
 
         if (have && fmpz_equal(previous.raw(), gcd.raw()) != 0) {
-            if (fmpz_abs_fits_ui(gcd.raw()) != 0 && ++stable > stable_limit) {
+            if (phi_divides_degree && ++stable > stable_limit) {
                 bound = fmpz_get_ui(gcd.raw());
                 return true;
             }
         } else {
             stable = 0;
+            // phi(gcd) is recomputed only when the gcd changes.  A gcd that
+            // does not fit in a word never counts as stable, as in the
+            // reference.
+            phi_divides_degree =
+                    fmpz_abs_fits_ui(gcd.raw()) != 0 &&
+                    static_cast<ulong>(degree) %
+                                    n_euler_phi(fmpz_get_ui(gcd.raw())) ==
+                            0;
         }
         have = true;
     }

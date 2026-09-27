@@ -553,6 +553,75 @@ int test_roots_of_unity_nonmonic_presentations() {
     return 0;
 }
 
+// Q(zeta_40) as T = charpoly(Mod(x + 3*x^2 + x^3, polcyclo(40))) in GP 2.17.4
+// (the T-043 presentation "40_3"), with w = 40 from nfrootsof1.  The good-prime
+// gcd stays at 120 for more than n + 20 = 36 consecutive good primes, where
+// the stopping rule of reference `guess_roots` alone stops, and 120 cannot be
+// reduced, so this failed closed before T-054.  phi(120) = 32 does not divide
+// n = 16, so the reset of reference `_torsion_group_order_divisor` keeps the
+// search going until the gcd reaches 40.  -T(3x) is the same field with a
+// non-monic defining polynomial with negative leading coefficient.
+int test_roots_of_unity_phi_reset() {
+    const slong zeta40[] = {4669921, -6094020, 817562, 2113680, -400340,
+                            -802560, 252122,   524760, 183534,  60,
+                            -8492,   0,        435,    0,       -22,
+                            0,       1};
+    assert_roots_of_unity(integer_polynomial_field(zeta40, 17), 40);
+    const slong zeta40_m3x[] = {
+            -4669921,   18282060,    -7358058,  -57069360, 32427540,
+            195022080,  -183796938,  -1147650120, -1204166574, -1180980,
+            501444108,  0,           -231176835, 0,           105225318,
+            0,          -43046721};
+    assert_roots_of_unity(integer_polynomial_field(zeta40_m3x, 17), 40);
+    return 0;
+}
+
+// Asserts that all three public entry points fail and leave their outputs
+// unchanged.
+void assert_roots_of_unity_fail_closed(
+        const silex::NumberField& field) noexcept {
+    sflint::Fmpz order;
+    fmpz_set_ui(order.raw(), 17);
+    silex::Element generator(field);
+    assert(generator.set_si(7));
+    assert(!silex::roots_of_unity(sflint::FmpzRef(order), generator, field));
+    assert(fmpz_equal_ui(order.raw(), 17) != 0);
+    assert(generator.equal_si(7));
+
+    assert(!silex::root_of_unity_order(sflint::FmpzRef(order), field));
+    assert(fmpz_equal_ui(order.raw(), 17) != 0);
+
+    assert(!silex::root_of_unity_generator(generator, field));
+    assert(generator.equal_si(7));
+}
+
+// KNOWN LIMITATION: a field whose good-prime gcd stalls at a strict multiple
+// of w that the reset does not catch fails closed through the public API.
+// T = charpoly(Mod(x + 2*x^2 + x^3, Q)) in GP 2.17.4 for Q the first
+// polcompositum of polcyclo(5) and x^2 + 11, so K = Q(zeta_5, sqrt(-11)) with
+// w = 10 (nfrootsof1).  The gcd stays at 30 for more than n + 20 = 28
+// consecutive good primes.  phi(30) = 8 divides n = 8, so the reset does not
+// apply, and v_3(disc T) = 4 meets the degree and ramification bound, so the
+// reduction keeps the factor 3.  K has no zeta_3, so no root of exact order
+// 30 is certified.  The threshold 5n = 40 of reference
+// `_torsion_group_order_divisor` would reach 10, but Silex keeps n + 20.
+// T(3x) is the same field with a non-monic defining polynomial and fails
+// closed the same way.  A change of stopping rule may flip these to w = 10,
+// never to a wrong w.
+int test_roots_of_unity_public_fail_closed() {
+    const slong stalled[] = {6813116442581, 1047154163766, 94346195848,
+                             4956165560,    147295001,     2623880,
+                             31172,         242,           1};
+    assert_roots_of_unity_fail_closed(
+            integer_polynomial_field(stalled, 9));
+    const slong stalled_3x[] = {6813116442581, 3141462491298, 849115762632,
+                                133816470120,  11930895081,   637602840,
+                                22724388,      529254,        6561};
+    assert_roots_of_unity_fail_closed(
+            integer_polynomial_field(stalled_3x, 9));
+    return 0;
+}
+
 // The Hensel search for a root of Phi_m on its own: it finds primitive m-th
 // roots of unity that exist and reports failure for those that do not.
 int test_cyclotomic_root_hensel() {
@@ -1024,6 +1093,8 @@ int main() {
     test_roots_of_unity_nonmonic_presentations();
     test_cyclotomic_root_hensel();
     test_roots_of_unity_fail_closed_against_bound();
+    test_roots_of_unity_phi_reset();
+    test_roots_of_unity_public_fail_closed();
     test_lower_regulator_bound();
     test_lower_regulator_bound_terms();
     test_lower_regulator_bound_maximum();
