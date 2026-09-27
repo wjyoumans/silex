@@ -149,7 +149,12 @@ The class-group proof metadata is deliberately componentized:
   passed for the finite presentation, and
   ``analytic_class_regulator_certification()`` reports whether that check was
   unconditional (``proven``) or used a Belabas-Friedman ``hR`` and so assumes
-  GRH (``grh``); a ``grh`` check never contributes to a ``proven`` label;
+  GRH (``grh``); a ``grh`` check never contributes to a ``proven`` label.
+  A ``grh`` paired transaction accepted by the analytic index-one test
+  records that check too, as information only: its class-group and unit
+  labels stay ``grh`` even when the check itself reads ``proven`` (quadratic
+  ``L(1, chi)``).  The exact imaginary-quadratic and degree-one ``grh``
+  routes record no analytic check;
 - BF zeta audit records keep the cutoff, maximum cutoff, requested precision,
   working precision, and error bound of a Belabas-Friedman evaluation.  The
   error bound is valid under GRH, so the record is GRH-conditional evidence.

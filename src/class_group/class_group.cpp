@@ -4500,6 +4500,31 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
     return transaction.finish(true);
 }
 
+void ClassGroupCertificationAccess::record_grh_acceptance_analytic_check(
+        ClassGroupContext& context,
+        bool hr_unconditional) noexcept {
+    if (!context.has_presentation()) {
+        return;
+    }
+    // Same route check as try_certify_class_unit_with_units: only an order
+    // with an unconditional hR route can carry an unconditional record.
+    context.record_analytic_class_regulator_check_(
+            hr_unconditional &&
+            detail::zeta_unconditional_route_available(context.parent_));
+}
+
+bool ClassGroupCertificationAccess::record_grh_acceptance_bf_audit(
+        ClassGroupContext& context,
+        flint::ArbConstRef error_bound,
+        ulong cutoff,
+        ulong max_cutoff,
+        slong requested_precision,
+        slong work_precision) noexcept {
+    return context.record_zeta_bf_audit_(error_bound, cutoff, max_cutoff,
+                                         requested_precision,
+                                         work_precision);
+}
+
 bool ClassGroupCertificationAccess::try_certify_class_unit_with_units(
         ClassGroupContext& context,
         OrderUnitGroup& units,

@@ -4029,6 +4029,25 @@ int test_saturation_proves_nontrivial_class_group_without_grh() {
                silex::CertificationMode::grh);
         assert(class_group.certification_status() ==
                silex::CertificationMode::proven);
+
+        // The grh-mode acceptance record cannot claim an unconditional hR
+        // for an order without an unconditional route, and it never changes
+        // the certification label or the proof states.
+        const silex::ProofState unit_proof_before =
+                class_group.unit_proof_status();
+        const silex::ProofState saturation_before =
+                class_group.relation_saturation_status();
+        CertificationAccess::record_grh_acceptance_analytic_check(
+                class_group, true);
+        assert(class_group.analytic_class_regulator_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::grh);
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.unit_proof_status() == unit_proof_before);
+        assert(class_group.relation_saturation_status() ==
+               saturation_before);
     }
 
     return 0;

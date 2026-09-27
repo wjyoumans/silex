@@ -170,16 +170,24 @@ public:
     // field outside the explicit quadratic backend, and a quadratic field
     // whose L(1, chi) evaluation fails and falls back to Belabas-Friedman)
     // assumes GRH.  Use analytic_class_regulator_certification() to read
-    // which one was used.
+    // which one was used.  A `grh` class/unit transaction accepted by the
+    // analytic index-one test records that check here as well; the record is
+    // informational and leaves the `grh` labels unchanged.  The exact
+    // imaginary-quadratic and degree-one `grh` routes use no analytic check
+    // and record none.
     ProofState analytic_class_regulator_status() const noexcept;
     // `proven` for an unconditional analytic check, `grh` for a
     // Belabas-Friedman (GRH-conditional) check, and `unknown` when no
     // analytic check is recorded.  Once an unconditional check is recorded,
     // a later Belabas-Friedman audit of the same presentation keeps the
-    // `proven` label.  A GRH-conditional check never makes the
-    // class group or the units `proven`: a `proven` label then requires
-    // factor-base generation, proven units, and verified relation saturation
-    // at every prime dividing the candidate class number.
+    // `proven` label.  This is the conditionality of the analytic check
+    // only, not of the result: a `grh` transaction accepted through an
+    // unconditional hR (quadratic L(1, chi)) reports `proven` here while
+    // certification_status() stays `grh`.  A GRH-conditional check never
+    // serves as a proof component and never makes the class group or the
+    // units `proven`: a `proven` label then requires factor-base
+    // generation, proven units, and verified relation saturation at every
+    // prime dividing the candidate class number.
     CertificationMode analytic_class_regulator_certification() const noexcept;
     // Audit of a Belabas-Friedman hR evaluation.  Its error bound is valid
     // under GRH for zeta_K and zeta_Q (Belabas-Friedman 2015, Theorem 1), so

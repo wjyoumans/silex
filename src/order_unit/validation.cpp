@@ -1109,6 +1109,40 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                 // reference `_class_unit_group` accepts analytic index one for a
                 // GRH request and skips the later unconditional class/unit
                 // proof passes.  The caller publishes the conditional labels.
+                // Unlike the reference, Silex reaches index one here only
+                // after factor-base generation is verified up to the
+                // Minkowski-type bound (validation_index_bound_from_product),
+                // so GRH enters only through a Belabas-Friedman hR.
+                if (!exact_quadratic_index) {
+                    // Decision 2026-09-27 "T-053 GRH-mode analytic record":
+                    // record the analytic check that accepted the pair, with
+                    // its own conditionality.  Informational only; the
+                    // labels stay `grh`.  The exact imaginary-quadratic
+                    // index uses no analytic value and records nothing.
+                    ClassGroupCertificationAccess::
+                            record_grh_acceptance_analytic_check(
+                                    class_group,
+                                    analytic_cache.value_unconditional());
+                    if (analytic_cache.validation_active() &&
+                        !ClassGroupCertificationAccess::
+                                record_grh_acceptance_bf_audit(
+                                        class_group,
+                                        analytic_cache
+                                                .validation_error_bound(),
+                                        analytic_cache.validation_cutoff(),
+                                        analytic_cache
+                                                .validation_computed_max_cutoff(),
+                                        analytic_cache.validation_precision(),
+                                        analytic_cache
+                                                .validation_work_precision())) {
+                        // The analytic record above still describes the
+                        // accepting check; only its audit data is missing.
+                        SILEX_PROFILE_EVENT(
+                                diagnostics, DiagnosticsModule::unit_group,
+                                "unit_group.validation_grh_bf_audit_record_"
+                                "failed");
+                    }
+                }
                 summary.outcome = ValidateRefineOutcome::proven;
                 return true;
             }

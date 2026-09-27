@@ -243,6 +243,16 @@ public:
         return validation_work_precision_;
     }
 
+    // Max cutoff and requested precision of the active validation
+    // enclosure; meaningful only while validation_active().
+    ulong validation_computed_max_cutoff() const noexcept {
+        return validation_computed_max_cutoff_;
+    }
+
+    slong validation_precision() const noexcept {
+        return validation_precision_;
+    }
+
     bool ensure_bf_audit(const Order& order,
                          ulong max_cutoff,
                          slong precision,

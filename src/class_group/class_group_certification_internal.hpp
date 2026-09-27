@@ -59,6 +59,34 @@ public:
             slong precision,
             bool hr_unconditional) noexcept;
 
+    // Records the analytic index-one check that accepted a `grh`-requested
+    // class/unit pair (decision 2026-09-27 "T-053 GRH-mode analytic
+    // record").  The record is informational: it sets
+    // `analytic_class_regulator_status` to `verified` with the
+    // conditionality of the hR that was used (`hr_unconditional` for
+    // degree one or the quadratic L(1, chi) route, GRH for a
+    // Belabas-Friedman hR) and never changes the class-group or unit
+    // certification labels, the unit/regulator proof states, or any other
+    // proof record.  A Belabas-Friedman check recorded here never serves as
+    // a proof component.  The caller must have accepted the pair by the
+    // analytic index-one test against that hR; the exact imaginary-quadratic
+    // route, which uses no analytic value, records nothing.
+    static void record_grh_acceptance_analytic_check(
+            ClassGroupContext& context,
+            bool hr_unconditional) noexcept;
+
+    // Adds the Belabas-Friedman audit data (error bound, cutoff, and
+    // precisions) of the hR used by record_grh_acceptance_analytic_check()
+    // when that hR was a Belabas-Friedman validation enclosure.  Like that
+    // record, it never changes certification labels.
+    static bool record_grh_acceptance_bf_audit(
+            ClassGroupContext& context,
+            flint::ArbConstRef error_bound,
+            ulong cutoff,
+            ulong max_cutoff,
+            slong requested_precision,
+            slong work_precision) noexcept;
+
     static bool try_analytic_index_bound_with_units(
             ClassGroupContext& context,
             const OrderUnitGroup& units,

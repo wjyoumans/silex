@@ -476,12 +476,46 @@ reporting index one.
 
 A Belabas--Friedman check recorded after an unconditional one (for example a
 BF audit of a quadratic field already proven through ``L(1, chi_D)``) keeps
-the unconditional label, and a Belabas--Friedman check is accepted only
-against units that are already proven.  Because the Belabas--Friedman value
+the unconditional label.  A Belabas--Friedman check never serves as a proof
+component, and is recorded against unproven units only as the ``grh``-mode
+acceptance record described below.  Because the Belabas--Friedman value
 no longer contributes to a degree-three-or-higher ``proven`` result, such
 results report ``analytic_class_regulator_status()`` and
 ``zeta_bf_proof_status()`` as ``not_checked`` unless an audit is requested
 separately; these statuses are audit records, not proof components.
+
+A ``grh`` request for a paired class/unit transaction sizes the factor base
+with the GRH bound, the minimum of the Belabas--Diaz y Diaz--Friedman
+criterion and Bach's bound, as Hecke
+``src/NumFieldOrd/NfOrd/Clgp/FactorBaseBound.jl:factor_base_bound_grh`` does.
+In degree three and higher and for real quadratic fields, Silex does not use
+GRH for factor-base generation.  It accepts a pair only after it has verified
+generation up to the Minkowski-type bound (``factor_base_class_group_bound``)
+unconditionally, and it fails closed when the GRH-sized factor base does not
+cover that bound (for example ``x^3 + x + 200``).  This is stricter than
+PARI 2.17.3 ``src/basemath/buch2.c:Buchall_param``, where the primes up to
+the ``GRHchk`` bound generate the class group under GRH, and than Hecke
+``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group``.  Relation and unit
+completeness then rest on the analytic index-one test: an enclosure of
+``h_cand R_cand / hR`` whose upper endpoint is below two, as in Hecke
+``_validate_class_unit_group`` and PARI's ``bad_check``.  With a
+Belabas--Friedman ``hR`` that test holds under GRH (Belabas--Friedman 2015,
+Theorem 1).  With the quadratic ``L(1, chi_D)`` value it is unconditional.
+The pair is published with both labels ``grh``, and the analytic check that
+accepted it is recorded on the published class group with its own
+conditionality.  ``analytic_class_regulator_certification()`` is ``grh`` for
+a Belabas--Friedman ``hR`` and ``proven`` for an unconditional ``hR`` (degree
+one or quadratic ``L(1, chi)``).  When the ``hR`` was a Belabas--Friedman
+validation enclosure, the BF audit data is recorded as well.  The record is
+informational.  It never changes or promotes the class-group or unit labels,
+and it does not change the public zeta and BF gates, which still fail closed
+in degree three and higher unless saturation is proven.  The exact
+imaginary-quadratic ``grh`` route uses an exact class number instead of an
+analytic value.  Its GRH dependence is in factor-base generation, which is
+checked only up to the GRH bound, and it records no analytic check.  The
+degree-one ``grh`` route uses the exact degree-one route described below and
+records none either.  Per-component GRH provenance, including generation, is
+not yet reported.
 
 The ``ell``-local test takes the Smith-invariant ``beta`` rows (compact power
 witnesses of invariant generators whose invariant ``ell`` divides), the free

@@ -9,6 +9,23 @@ branches; earlier post-0.1.1 changes are not yet listed here.  Listed entries
 are available on the ``dev`` channel and become the next release's notes when
 that release is prepared.
 
+Changed
+-------
+
+- A ``grh`` paired class/unit transaction that is accepted by the analytic
+  index-one test now records that check on the published class group.
+  ``analytic_class_regulator_status()`` reads ``verified``, and
+  ``analytic_class_regulator_certification()`` gives the check's own
+  conditionality: ``grh`` for a Belabas-Friedman ``hR`` and ``proven`` for
+  the quadratic ``L(1, chi)`` value.  The record is informational.  The
+  class-group and unit labels stay ``grh``, and the public zeta and BF gates
+  are unchanged.  The exact imaginary-quadratic and degree-one ``grh`` routes
+  use no analytic check and record none.  The documentation now also states
+  that ``grh`` mode in degree three and higher and for real quadratic fields
+  requires factor-base generation verified up to the Minkowski-type bound and
+  does not use GRH for generation.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 Fixed
 -----
 
