@@ -8,9 +8,15 @@
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/order_unit.hpp>
+#include <silex/prime_ideal.hpp>
 #include <silex/zeta.hpp>
 
+#include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <vector>
+
+#include <flint/ulong_extras.h>
 
 namespace {
 namespace sflint = silex::flint;
@@ -237,6 +243,177 @@ bool check_transaction_failure_leaves_outputs_unset(
 }
 
 
+
+// Residue degrees of the primes of `order` above `p`, sorted, from the
+// general prime-decomposition routine.
+bool decomposition_residue_degrees(std::vector<slong>& out,
+                                   const silex::Order& order,
+                                   ulong p) noexcept {
+    sflint::Fmpz prime;
+    sflint::fmpz_set_ui(sflint::FmpzRef(prime), p);
+    silex::PrimeIdealList primes;
+    if (!silex::decompose_prime(primes, order,
+                                sflint::FmpzConstRef(prime))) {
+        return false;
+    }
+    out.clear();
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* ideal = primes.at(i);
+        if (ideal == nullptr || ideal->residue_degree() <= 0) {
+            return false;
+        }
+        out.push_back(ideal->residue_degree());
+    }
+    std::sort(out.begin(), out.end());
+    return !out.empty();
+}
+
+void cache_store(silex::detail::ZetaBfResidueDegreeCache& cache,
+                 ulong p,
+                 const std::vector<slong>& degrees) noexcept {
+    const std::size_t offset = cache.residue_degrees.size();
+    cache.residue_degrees.insert(cache.residue_degrees.end(),
+                                 degrees.begin(), degrees.end());
+    cache.entries.push_back(silex::detail::ZetaBfResidueDegreeCacheEntry{
+            p, offset, degrees.size()});
+}
+
+bool call_bf_audit(sflint::Arb& product,
+                   sflint::Arb& error_bound,
+                   ulong& cutoff,
+                   slong& work_precision,
+                   const silex::Order& order,
+                   silex::detail::ZetaBfResidueDegreeCache* cache) noexcept {
+    return silex::detail::
+            zeta_class_regulator_product_bf_audit_with_diagnostics(
+                    sflint::ArbRef(product), sflint::ArbRef(error_bound),
+                    cutoff, work_precision, order, 20000, 128, nullptr,
+                    nullptr, cache);
+}
+
+struct ReferenceDecomposition {
+    ulong p;
+    slong degrees[4];  // sorted residue degrees, zero-terminated
+};
+
+// Residue-degree differential test.  The BF term normally gets residue
+// degrees from the defining polynomial mod p (with fallbacks for primes
+// dividing the index).  Prefilling the residue-degree cache with degrees
+// from decompose_prime for every prime below the cutoff replaces that path,
+// so the two BF results must agree exactly.  decompose_prime itself is
+// anchored to the external reference GP 2.17.4,
+// `idealprimedec(nfinit(P), p)[j].f`.
+bool check_residue_degree_differential(
+        const FieldSetup& setup,
+        const ReferenceDecomposition* anchors,
+        std::size_t anchor_count,
+        ulong perturbed_prime) noexcept {
+    const silex::Order& order = setup.maximal_order;
+    std::vector<slong> degrees;
+    for (std::size_t i = 0; i < anchor_count; ++i) {
+        std::vector<slong> expected;
+        for (slong degree : anchors[i].degrees) {
+            if (degree == 0) {
+                break;
+            }
+            expected.push_back(degree);
+        }
+        if (!decomposition_residue_degrees(degrees, order, anchors[i].p) ||
+            degrees != expected) {
+            return false;
+        }
+    }
+
+    sflint::Arb reference;
+    sflint::Arb reference_error;
+    ulong reference_cutoff = 0;
+    slong reference_precision = 0;
+    if (!call_bf_audit(reference, reference_error, reference_cutoff,
+                       reference_precision, order, nullptr)) {
+        return false;
+    }
+
+    silex::detail::ZetaBfResidueDegreeCache cache;
+    silex::detail::ZetaBfResidueDegreeCache perturbed;
+    bool perturbed_stored = false;
+    for (ulong p = 2; p < reference_cutoff; p = n_nextprime(p, 1)) {
+        if (!decomposition_residue_degrees(degrees, order, p)) {
+            return false;
+        }
+        cache_store(cache, p, degrees);
+        if (p == perturbed_prime) {
+            // Move all of the residue degree into one prime ideal.
+            slong total = 0;
+            for (slong degree : degrees) {
+                total += degree;
+            }
+            if (degrees.size() == 1) {
+                return false;
+            }
+            cache_store(perturbed, p, std::vector<slong>{total});
+            perturbed_stored = true;
+        } else {
+            cache_store(perturbed, p, degrees);
+        }
+    }
+    if (!perturbed_stored) {
+        return false;
+    }
+
+    sflint::Arb candidate;
+    sflint::Arb candidate_error;
+    ulong candidate_cutoff = 0;
+    slong candidate_precision = 0;
+    if (!call_bf_audit(candidate, candidate_error, candidate_cutoff,
+                       candidate_precision, order, &cache) ||
+        candidate_cutoff != reference_cutoff ||
+        candidate_precision != reference_precision ||
+        ::arb_equal(candidate.raw(), reference.raw()) == 0 ||
+        ::arb_equal(candidate_error.raw(), reference_error.raw()) == 0) {
+        return false;
+    }
+
+    // Sensitivity check: a cache with one wrong decomposition is consumed
+    // and changes the BF value, so the comparison above is not vacuous.
+    if (!call_bf_audit(candidate, candidate_error, candidate_cutoff,
+                       candidate_precision, order, &perturbed)) {
+        return false;
+    }
+    return ::arb_equal(candidate.raw(), reference.raw()) == 0;
+}
+
+bool check_residue_degree_differentials() noexcept {
+    // x^3 - x - 1, disc -23.
+    const slong cubic_coefficients[] = {-1, -1, 0};
+    const ReferenceDecomposition cubic_anchors[] = {
+            {2, {3}},       {3, {3}},    {5, {1, 2}},  {7, {1, 2}},
+            {11, {1, 2}},   {13, {3}},   {23, {1, 1}}, {503, {1, 2}},
+    };
+    // x^3 - x^2 - 2x - 8 (Dedekind): 2 divides the index of Z[x] and
+    // splits completely, so the defining polynomial mod 2 is unusable.
+    const slong dedekind_coefficients[] = {-8, -2, -1};
+    const ReferenceDecomposition dedekind_anchors[] = {
+            {2, {1, 1, 1}}, {3, {3}},    {5, {1, 2}},  {7, {3}},
+            {11, {3}},      {13, {3}},   {23, {3}},    {503, {1, 1}},
+    };
+    // x^4 - 4x^2 + 2: 2 is totally ramified.
+    const slong quartic_coefficients[] = {2, 0, -4, 0};
+    const ReferenceDecomposition quartic_anchors[] = {
+            {2, {1}},       {3, {4}},    {5, {4}},     {7, {2, 2}},
+            {11, {4}},      {13, {4}},   {23, {2, 2}}, {503, {2, 2}},
+    };
+
+    return check_residue_degree_differential(
+                   setup_from_coefficients(cubic_coefficients, 3),
+                   cubic_anchors, 8, 5) &&
+           check_residue_degree_differential(
+                   setup_from_coefficients(dedekind_coefficients, 3),
+                   dedekind_anchors, 8, 2) &&
+           check_residue_degree_differential(
+                   setup_from_coefficients(quartic_coefficients, 4),
+                   quartic_anchors, 8, 7);
+}
+
 }  // namespace
 
 int main() {
@@ -250,7 +427,8 @@ int main() {
                    !check_producer(quartic, 1971, 30000) ||
                    !check_cache_separation(cubic) ||
                    !check_transaction_failure_leaves_outputs_unset(cubic) ||
-                   !check_transaction_failure_leaves_outputs_unset(quartic)
+                   !check_transaction_failure_leaves_outputs_unset(quartic) ||
+                   !check_residue_degree_differentials()
             ? 1
             : 0;
 }
