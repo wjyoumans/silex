@@ -21,4 +21,5 @@ documentation build.  Local and hosted builds set them with
    :maxdepth: 1
    :caption: Versioned notes
 
+   unreleased
    0.1.1
