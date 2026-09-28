@@ -45,38 +45,6 @@ silex::NumberField field_by_polynomial(sflint::FmpqPoly& polynomial) noexcept {
             sflint::FmpqPolyConstRef(polynomial));
 }
 
-// White-box helper: returns a defined field whose FLINT context has been
-// replaced by one for the non-squarefree polynomial x^2.  NumberField
-// construction rejects x^2, so this is the only way to keep the internal
-// non-squarefree failure paths covered.  The field starts as the generic
-// (non-quadratic-backend) field defined by x^2 - x - 1 so that no quadratic
-// backend data disagrees with the installed polynomial.
-silex::NumberField nonsquarefree_field() noexcept {
-    sflint::FmpqPoly polynomial;
-    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
-    silex::NumberField field = silex::test::field_by_polynomial(
-            sflint::FmpqPolyConstRef(polynomial));
-    assert(field.backend_kind() == silex::NumberFieldBackendKind::generic);
-
-    sflint::FmpqPoly square;
-    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
-    nf_struct* raw = field.raw_flint_field();
-    assert(raw != nullptr);
-    nf_clear(raw);
-    nf_init(raw, square.raw());
-    assert(field.degree() == 2);
-    return field;
-}
-
-void check_square_rejected() noexcept {
-    sflint::FmpqPoly square;
-    sflint::fmpq_poly_set_coeff_si(square, 2, 1);
-    assert(!silex::NumberField::by_polynomial(
-            sflint::FmpqPolyConstRef(square)).is_defined());
-}
-
 bool contains_si(const acb_t value, slong expected) noexcept {
     return sflint::arb_contains_si(sflint::acb_realref_ptr(value), expected) &&
            sflint::arb_contains_zero(sflint::acb_imagref_ptr(value));
@@ -144,6 +112,7 @@ silex::NumberField close_real_roots_field() noexcept {
 struct RefineProfileCounters {
     slong find_roots = 0;
     slong full_roots_fallback = 0;
+    slong no_signature = 0;
     slong events = 0;
 };
 
@@ -167,6 +136,10 @@ void refine_profile_callback(void* user,
         std::strcmp(label, "element.embedding.refine.full_roots_fallback") ==
                 0) {
         ++counters->full_roots_fallback;
+    }
+    if (event == silex::ProfileEvent::event &&
+        std::strcmp(label, "element.embedding.refine.no_signature") == 0) {
+        ++counters->no_signature;
     }
 }
 
@@ -318,7 +291,7 @@ int test_cubic_trace_norm() {
 }
 
 int test_undefined_field_failure() {
-    check_square_rejected();
+    silex::test::check_square_rejected();
 
     silex::NumberField undefined;
     silex::EmbeddingContext embeddings(undefined);
@@ -347,11 +320,32 @@ int test_undefined_field_failure() {
 }
 
 int test_failure_preserves_output() {
-    silex::NumberField field = nonsquarefree_field();
+    silex::NumberField field = silex::test::nonsquarefree_field();
 
     silex::EmbeddingContext embeddings(field);
-    assert(!embeddings.refine(64));
+
+    // A field whose defining polynomial is not squarefree has no signature
+    // (define() cannot isolate its roots into r1 real and r2 complex-pair
+    // places), so refine() fails closed at the `sig_.degree() != degree_`
+    // check and reports it as `element.embedding.refine.no_signature`
+    // (T-022) rather than falling through to root isolation.
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    RefineProfileCounters counters;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::element),
+            refine_profile_callback, &counters);
+
+    assert(!embeddings.refine(64, &diagnostics));
     assert(!embeddings.is_set());
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counters.no_signature == 1);
+    assert(counters.find_roots == 0);
+    assert(counters.full_roots_fallback == 0);
+#else
+    assert(counters.events == 0);
+#endif
 
     silex::Element theta(field);
     assert(theta.gen());
