@@ -9,6 +9,7 @@
 #include "class_group/relation_search_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "test_support.hpp"
+#include "zeta/zeta_internal.hpp"
 
 #include <cassert>
 #include <type_traits>
@@ -2038,6 +2039,133 @@ int test_saturation_promotion_requires_every_class_order_prime() {
     return 0;
 }
 
+// T-010 follow-up: saturation completes ell-by-ell as each required prime is
+// proven individually, not only through the one-shot index-bound helper
+// exercised above.  Covers h_cand = 3 (ell = 2 then 3) and the k = 5 case
+// h_cand = 15 = 3 * 5 (ell = 3 then 5).  Each low-level
+// try_prove_relation_saturation_with_units call never promotes the class
+// group itself (class_group.cpp:9937-9958); only a subsequent certification
+// call, here the saturation-only CertificationAccess helper, does.
+int test_relation_saturation_completes_prime_by_prime() {
+    // h_cand = 3: Q(sqrt(-23)) has class number 3.
+    {
+        silex::NumberField field = quadratic_field(-23);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+
+        silex::OrderUnitGroup units;
+        assert(units.compute(maximal));
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+
+        silex::ClassGroupContext context;
+        prepare_minus_23_candidate(context, maximal, 1, 3);
+        assert(context.try_certify_with_units(
+                units, silex::CertificationMode::unknown, 128));
+        assert(context.unit_proof_status() == silex::ProofState::verified);
+
+        sflint::Fmpz aux_bound;
+        assert(set_fmpz_si(aux_bound, 200));
+        sflint::Fmpz ell;
+
+        // ell = 2 does not divide h_cand = 3, but is itself provable; one
+        // record is not enough to complete the proof.
+        assert(set_fmpz_si(ell, 2));
+        assert(context.try_prove_relation_saturation_with_units(
+                units, sflint::FmpzConstRef(ell),
+                sflint::FmpzConstRef(aux_bound)));
+        assert(context.relation_saturation_record_count() == 1);
+        assert(context.relation_saturation_status() !=
+               silex::ProofState::verified);
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+
+        // ell = 3 completes coverage of every prime dividing h_cand.
+        assert(set_fmpz_si(ell, 3));
+        assert(context.try_prove_relation_saturation_with_units(
+                units, sflint::FmpzConstRef(ell),
+                sflint::FmpzConstRef(aux_bound)));
+        assert(context.relation_saturation_record_count() == 2);
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+        // Completing the per-ell records does not itself promote the class
+        // group; only a certification call does.
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(CertificationAccess::try_prove_class_order_saturation_with_units(
+                context, units, sflint::FmpzConstRef(aux_bound)));
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    // The k = 5 case, h_cand = 15 = 3 * 5: Q(sqrt(-239)) has class number 15
+    // (cyclic).
+    {
+        silex::NumberField field = quadratic_field(-239);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+
+        silex::ClassGroupCandidateOptions options;
+        options.max_candidates = 20000;
+        options.max_relations = 2000;
+        sflint::Fmpz factor_base_bound;
+        assert(class_group_bound_at_least_two(factor_base_bound, maximal));
+
+        silex::ClassGroupContext context;
+        assert(context.compute_candidate(
+                maximal, sflint::FmpzConstRef(factor_base_bound), options));
+        sflint::Fmpz order_out;
+        assert(context.order(sflint::FmpzRef(order_out)));
+        assert(sflint::fmpz_equal_si(order_out, 15));
+
+        sflint::Fmpz required_bound;
+        assert(context.factor_base_generation_bound(
+                sflint::FmpzRef(required_bound)));
+        assert(context.check_factor_base_generation_bound(
+                sflint::FmpzConstRef(required_bound)));
+
+        silex::OrderUnitGroup units;
+        assert(units.compute(maximal));
+        assert(context.try_certify_with_units(
+                units, silex::CertificationMode::unknown, 128));
+        assert(context.unit_proof_status() == silex::ProofState::verified);
+
+        sflint::Fmpz aux_bound;
+        assert(set_fmpz_si(aux_bound, 200));
+        sflint::Fmpz ell;
+
+        // ell = 3 alone does not cover h_cand = 15 = 3 * 5.
+        assert(set_fmpz_si(ell, 3));
+        assert(context.try_prove_relation_saturation_with_units(
+                units, sflint::FmpzConstRef(ell),
+                sflint::FmpzConstRef(aux_bound)));
+        assert(context.relation_saturation_record_count() == 1);
+        assert(context.relation_saturation_status() !=
+               silex::ProofState::verified);
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+
+        // ell = 5 completes coverage.
+        assert(set_fmpz_si(ell, 5));
+        assert(context.try_prove_relation_saturation_with_units(
+                units, sflint::FmpzConstRef(ell),
+                sflint::FmpzConstRef(aux_bound)));
+        assert(context.relation_saturation_record_count() == 2);
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(CertificationAccess::try_prove_class_order_saturation_with_units(
+                context, units, sflint::FmpzConstRef(aux_bound)));
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    return 0;
+}
+
 int test_relation_saturation_index_bound_checks_nondivisor_primes() {
     silex::NumberField field = quadratic_field(-47);
     silex::Order equation = silex::test::equation_order(field);
@@ -2116,8 +2244,19 @@ int test_analytic_class_unit_proof_requires_factor_base_generation() {
     sflint::Arb analytic_hR;
     assert(units.class_regulator_product(
             sflint::ArbRef(analytic_hR), context, 192));
+    // Pass the flag the route itself reports for this maximal quadratic
+    // order, not a literal `true` (T-012): the quadratic L(1, chi) route can
+    // fall back to Belabas-Friedman, so whether a held value is unconditional
+    // depends on the route that produced it
+    // (src/zeta/zeta_internal.hpp:89-94).
+    sflint::Arb reported_hR;
+    bool hr_unconditional = false;
+    assert(silex::detail::zeta_class_regulator_product_with_diagnostics(
+            sflint::ArbRef(reported_hR), maximal, 192, nullptr, nullptr,
+            nullptr, &hr_unconditional));
     assert(!CertificationAccess::try_certify_class_unit_with_units(
-            context, units, sflint::ArbConstRef(analytic_hR), 192, true));
+            context, units, sflint::ArbConstRef(analytic_hR), 192,
+            hr_unconditional));
     assert(context.certification_status() ==
            silex::CertificationMode::unknown);
     assert(context.analytic_class_regulator_status() ==
@@ -2156,6 +2295,16 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     silex::OrderUnitGroup units;
     assert(units.compute(order));
 
+    // The flag the degree-one route itself reports (T-012: use the reported
+    // route, not a literal `true`); degree one has no zeta computation and
+    // is always unconditional (src/zeta/zeta.cpp:2401-2402).
+    sflint::Arb reported_hR;
+    bool hr_unconditional = false;
+    assert(silex::detail::zeta_class_regulator_product_with_diagnostics(
+            sflint::ArbRef(reported_hR), order, 128, nullptr, nullptr,
+            nullptr, &hr_unconditional));
+    assert(hr_unconditional);
+
     sflint::Fmpq half;
     sflint::fmpq_set_si(half, 1, 2);
     sflint::Arb analytic_hR;
@@ -2170,7 +2319,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     sflint::arb_zero(zero);
     assert(!CertificationAccess::try_analytic_index_bound_with_units(
             invalid_analytic_context, units, sflint::ArbConstRef(zero),
-            sflint::FmpzConstRef(aux_bound), 128, true));
+            sflint::FmpzConstRef(aux_bound), 128, hr_unconditional));
     assert(invalid_analytic_context.unit_proof_status() ==
            silex::ProofState::not_checked);
     assert(invalid_analytic_context.regulator_proof_status() ==
@@ -2188,7 +2337,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     assert(set_fmpz_si(aux_bound, 2));
     assert(!CertificationAccess::try_analytic_index_bound_with_units(
             unavailable_context, units, sflint::ArbConstRef(analytic_hR),
-            sflint::FmpzConstRef(aux_bound), 128, true));
+            sflint::FmpzConstRef(aux_bound), 128, hr_unconditional));
     assert(unavailable_context.unit_proof_status() ==
            silex::ProofState::not_checked);
     assert(unavailable_context.regulator_proof_status() ==
@@ -2209,7 +2358,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     sflint::arb_one(exact_hR);
     assert(CertificationAccess::try_analytic_index_bound_with_units(
             index_one_context, units, sflint::ArbConstRef(exact_hR),
-            sflint::FmpzConstRef(aux_bound), 128, true));
+            sflint::FmpzConstRef(aux_bound), 128, hr_unconditional));
     assert(index_one_context.unit_proof_status() ==
            silex::ProofState::verified);
     assert(index_one_context.regulator_proof_status() ==
@@ -2229,7 +2378,7 @@ int test_relation_saturation_analytic_index_bound_with_units_degree_one() {
     assert(set_fmpz_si(aux_bound, 31));
     assert(!CertificationAccess::try_analytic_index_bound_with_units(
             nontrivial_bound_context, units, sflint::ArbConstRef(analytic_hR),
-            sflint::FmpzConstRef(aux_bound), 128, true));
+            sflint::FmpzConstRef(aux_bound), 128, hr_unconditional));
     assert(nontrivial_bound_context.unit_proof_status() ==
            silex::ProofState::not_checked);
     assert(nontrivial_bound_context.regulator_proof_status() ==
@@ -2421,6 +2570,7 @@ int main() {
     test_relation_saturation_index_bound_with_units_degree_one();
     test_relation_saturation_index_bound_checks_nondivisor_primes();
     test_saturation_promotion_requires_every_class_order_prime();
+    test_relation_saturation_completes_prime_by_prime();
     test_analytic_class_unit_proof_requires_factor_base_generation();
     test_relation_saturation_analytic_index_bound_with_units_degree_one();
     test_compute_candidate_preserves_on_failure();
