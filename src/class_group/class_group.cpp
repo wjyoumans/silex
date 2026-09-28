@@ -4582,6 +4582,20 @@ void ClassGroupCertificationAccess::record_grh_acceptance_analytic_check(
             detail::zeta_unconditional_route_available(context.parent_));
 }
 
+bool ClassGroupCertificationAccess::publish_grh_labels(
+        ClassGroupContext& context,
+        OrderUnitGroup& units,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (!detail::order_unit_torsion_is_computed(units)) {
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                            "unit_group.grh_publication.torsion_not_computed");
+        return false;
+    }
+    context.certification_ = CertificationMode::grh;
+    units.certification_ = CertificationMode::grh;
+    return true;
+}
+
 bool ClassGroupCertificationAccess::record_grh_acceptance_bf_audit(
         ClassGroupContext& context,
         flint::ArbConstRef error_bound,
@@ -4709,8 +4723,7 @@ bool ClassGroupCertificationAccess::
 
     // A grh request, and index > 1 under a proven request, publish nothing
     // here, so the torsion is not checked.  At grh index one the caller
-    // publishes grh labels on `units`; those units were built internally
-    // with computed torsion (torsion invariant, order_unit_internal.hpp).
+    // publishes grh labels through publish_grh_labels, which checks it.
     if (requested == CertificationMode::proven &&
         flint::fmpz_is_one(flint::FmpzConstRef(index))) {
         // Callers treat index one under a proven request as a certified

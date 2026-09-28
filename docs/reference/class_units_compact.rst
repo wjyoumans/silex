@@ -66,12 +66,15 @@ norm valuation.  Before a class/unit gate marks a unit group proven, it also
 checks that the group's torsion is the torsion subgroup Silex computes for
 the order, so the analytic test on the free part cannot certify wrong
 torsion.  The unit proofs ``OrderUnitGroup::prove_index_bound``,
-``saturate_index_bounded`` and ``saturate_index_bounded_adaptive`` make the
-same check on their input before any work and return ``false`` otherwise,
-since both their ``proven`` label and their ``ell``-local tests at primes
-dividing the torsion order depend on it.  Every unit group built through the
-installed API carries the computed torsion, so these checks do not change a
-result there.  A caller who has an ``hR`` value of their own can compare it with
+``saturate_index_bounded``, ``saturate_index_bounded_adaptive`` and
+``prove_local_saturated`` make the same check on their input after their
+argument checks and before any work, and otherwise return ``false`` with the
+output unchanged, since their ``proven`` label and their ``ell``-local
+records at primes dividing the torsion order depend on it.  A ``grh`` paired
+transaction makes the check too before it publishes the ``grh`` labels, since
+the torsion does not depend on GRH, and fails otherwise.  Every unit group
+built through the installed API carries the computed torsion, so these
+checks do not change a result there.  A caller who has an ``hR`` value of their own can compare it with
 ``OrderUnitGroup::class_regulator_index_bound``, which reports a bound but
 does not publish certification.  It returns ``false`` when the quotient
 ``h_cand R_cand / hR`` has an upper endpoint below one, since no positive

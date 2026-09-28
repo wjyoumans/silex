@@ -89,6 +89,17 @@ public:
     // precisions) of the hR used by record_grh_acceptance_analytic_check()
     // when that hR was the default zeta route's Belabas-Friedman fallback.
     // Like that record, it never changes certification labels.
+    // Publishes the grh labels on a completed class/unit pair.  GRH is
+    // assumed only by the analytic hR check; the torsion does not depend on
+    // it, and a wrong torsion order w would make the grh unit label wrong.
+    // So the torsion of `units` must be the torsion Silex computes for the
+    // order (order_unit_torsion_is_computed, one rank_zero_torsion);
+    // otherwise this fails closed: false, both labels unchanged.
+    static bool publish_grh_labels(
+            ClassGroupContext& context,
+            OrderUnitGroup& units,
+            const DiagnosticsContext* diagnostics) noexcept;
+
     static bool record_grh_acceptance_bf_audit(
             ClassGroupContext& context,
             flint::ArbConstRef error_bound,

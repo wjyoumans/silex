@@ -1537,11 +1537,10 @@ bool OrderUnitGroup::set_relation_kernel_units_index_bounded_saturated(
     bool sat_stable = false;
     // `initial` was installed above with computed torsion (torsion invariant
     // in order_unit_internal.hpp), so the public torsion check is skipped.
-    if (detail::OrderUnitGroupAccess::
-                saturate_index_bounded_adaptive_computed_torsion(
-                        saturated, sat_changed, sat_stable, initial,
-                        embeddings, aux_target_len, aux_bound_start,
-                        aux_bound_max, max_passes, max_precision)) {
+    if (detail::OrderUnitGroupAccess::saturate_index_bounded_adaptive_body(
+                saturated, sat_changed, sat_stable, initial, embeddings,
+                aux_target_len, aux_bound_start, aux_bound_max, max_passes,
+                max_precision, false)) {
         swap(saturated);
         changed = sat_changed;
         stable = sat_stable;

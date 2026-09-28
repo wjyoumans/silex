@@ -4466,9 +4466,10 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
 // The public unit proofs check the torsion of their input themselves.  On
 // Z[i] with torsion under-claimed as {1, -1} (w = 2 instead of 4), the
 // regulator index bound of the empty free part is one, so without the check
-// prove_index_bound and saturate_index_bounded would label the group proven.
-// They must fail closed and leave the output unchanged; the same group with
-// computed torsion is proven.
+// prove_index_bound and the saturate methods would label the group proven,
+// prove_local_saturated would record an ell = 2 result, and the grh
+// publication would label the pair grh.  They must fail closed and leave the
+// output unchanged; the same group with computed torsion is accepted.
 int test_unit_proofs_require_computed_torsion() {
     using OrderUnitGroupAccess = silex::detail::OrderUnitGroupAccess;
 
@@ -4529,20 +4530,45 @@ int test_unit_proofs_require_computed_torsion() {
         assert(torsion_is(out, 4));
     }
 
-    // saturate_index_bounded and its adaptive form.
+    // Each rejection below emits its own torsion event; under profiling
+    // builds the count shows which check fired.
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    const auto expect_events = [&](slong expected) {
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(counter.count == expected);
+#else
+        (void)expected;
+        assert(counter.count == 0);
+#endif
+    };
+
+    // saturate_index_bounded.
     {
+        counter.label = "unit_group.saturate_index_bounded.torsion_not_computed";
+        counter.count = 0;
         silex::OrderUnitGroup out(order);
+        out.set_diagnostics(&diagnostics);
         bool changed = true;
         bool stable = true;
         assert(!out.saturate_index_bounded(changed, stable, under, embeddings,
                                            4, sflint::FmpzConstRef(aux_bound),
                                            2, 256));
-        assert(!out.saturate_index_bounded_adaptive(
-                changed, stable, under, embeddings, 4,
-                sflint::FmpzConstRef(aux_bound),
-                sflint::FmpzConstRef(aux_max), 2, 256));
         assert(!out.is_set());
         assert(changed && stable);
+        expect_events(1);
+
+        // An unset input fails as an argument error, not a torsion event.
+        silex::OrderUnitGroup unset(order);
+        assert(!out.saturate_index_bounded(changed, stable, unset, embeddings,
+                                           4, sflint::FmpzConstRef(aux_bound),
+                                           2, 256));
+        expect_events(1);
 
         assert(out.saturate_index_bounded(changed, stable, computed,
                                           embeddings, 4,
@@ -4551,7 +4577,37 @@ int test_unit_proofs_require_computed_torsion() {
         assert(out.certification_status() == silex::CertificationMode::proven);
         assert(torsion_is(out, 4));
 
+        // A rejected input leaves a previously published result unchanged.
+        out.set_diagnostics(&diagnostics);
+        changed = true;
+        stable = true;
+        assert(!out.saturate_index_bounded(changed, stable, under, embeddings,
+                                           4, sflint::FmpzConstRef(aux_bound),
+                                           2, 256));
+        assert(out.certification_status() == silex::CertificationMode::proven);
+        assert(torsion_is(out, 4));
+        assert(changed && stable);
+        expect_events(2);
+    }
+
+    // saturate_index_bounded_adaptive, on its own: it runs the passes
+    // through the unchecked body, so its own entry check is what rejects.
+    {
+        counter.label =
+                "unit_group.saturate_index_bounded_adaptive.torsion_not_computed";
+        counter.count = 0;
         silex::OrderUnitGroup adaptive(order);
+        adaptive.set_diagnostics(&diagnostics);
+        bool changed = true;
+        bool stable = true;
+        assert(!adaptive.saturate_index_bounded_adaptive(
+                changed, stable, under, embeddings, 4,
+                sflint::FmpzConstRef(aux_bound),
+                sflint::FmpzConstRef(aux_max), 2, 256));
+        assert(!adaptive.is_set());
+        assert(changed && stable);
+        expect_events(1);
+
         assert(adaptive.saturate_index_bounded_adaptive(
                 changed, stable, computed, embeddings, 4,
                 sflint::FmpzConstRef(aux_bound),
@@ -4559,6 +4615,61 @@ int test_unit_proofs_require_computed_torsion() {
         assert(adaptive.certification_status() ==
                silex::CertificationMode::proven);
         assert(torsion_is(adaptive, 4));
+
+        adaptive.set_diagnostics(&diagnostics);
+        changed = true;
+        stable = true;
+        assert(!adaptive.saturate_index_bounded_adaptive(
+                changed, stable, under, embeddings, 4,
+                sflint::FmpzConstRef(aux_bound),
+                sflint::FmpzConstRef(aux_max), 2, 256));
+        assert(adaptive.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(torsion_is(adaptive, 4));
+        assert(changed && stable);
+        expect_events(2);
+    }
+
+    // prove_local_saturated at ell = 2, which divides both w = 2 and w = 4,
+    // so the ell-local test uses the torsion column.  It records no proof
+    // on the under-claimed torsion and leaves the output unchanged.
+    {
+        counter.label = "unit_group.prove_local_saturated.torsion_not_computed";
+        counter.count = 0;
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, 2));
+        silex::OrderUnitGroup local(order);
+        local.set_diagnostics(&diagnostics);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(!local.prove_local_saturated(
+                status, changed, under, sflint::FmpzConstRef(ell), 4,
+                sflint::FmpzConstRef(aux_bound), embeddings, 256));
+        assert(!local.is_set());
+        assert(status == silex::ProofState::not_checked);
+        assert(changed);
+        expect_events(1);
+
+        assert(local.prove_local_saturated(
+                status, changed, computed, sflint::FmpzConstRef(ell), 4,
+                sflint::FmpzConstRef(aux_bound), embeddings, 256));
+        assert(status == silex::ProofState::verified);
+        assert(local.unit_proof_verified(sflint::FmpzConstRef(ell)));
+        assert(torsion_is(local, 4));
+        const slong records = local.unit_proof_record_count();
+
+        local.set_diagnostics(&diagnostics);
+        status = silex::ProofState::not_checked;
+        changed = true;
+        assert(!local.prove_local_saturated(
+                status, changed, under, sflint::FmpzConstRef(ell), 4,
+                sflint::FmpzConstRef(aux_bound), embeddings, 256));
+        assert(status == silex::ProofState::not_checked);
+        assert(changed);
+        assert(local.unit_proof_verified(sflint::FmpzConstRef(ell)));
+        assert(local.unit_proof_record_count() == records);
+        assert(torsion_is(local, 4));
+        expect_events(2);
     }
 
     // try_certify_with_units treats a proven label on uncomputed torsion as
@@ -4601,6 +4712,48 @@ int test_unit_proofs_require_computed_torsion() {
         assert(class_group.certification_status() ==
                silex::CertificationMode::proven);
         assert(class_group.unit_proof_status() == silex::ProofState::verified);
+    }
+
+    // The grh publication of a completed class/unit pair checks the torsion
+    // itself: GRH does not bear on w, so under-claimed torsion gets no grh
+    // label and neither object changes.  Computed torsion is published.
+    {
+        using CertificationAccess =
+                silex::detail::ClassGroupCertificationAccess;
+        counter.label = "unit_group.grh_publication.torsion_not_computed";
+        counter.count = 0;
+        sflint::Fmpz bound;
+        assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                    order));
+        if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+            sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+        }
+        silex::ClassGroupCandidateOptions candidate_options;
+        candidate_options.max_candidates = 256;
+        candidate_options.max_relations = 48;
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), candidate_options));
+
+        silex::OrderUnitGroup labelled(order);
+        assert(labelled.set(under));
+        assert(!CertificationAccess::publish_grh_labels(class_group, labelled,
+                                                        &diagnostics));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(labelled.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(torsion_is(labelled, 2));
+        expect_events(1);
+
+        silex::OrderUnitGroup good(order);
+        assert(good.set(computed));
+        assert(CertificationAccess::publish_grh_labels(class_group, good,
+                                                       &diagnostics));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::grh);
+        assert(good.certification_status() == silex::CertificationMode::grh);
+        expect_events(1);
     }
 
     return 0;

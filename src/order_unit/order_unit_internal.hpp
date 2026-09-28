@@ -127,12 +127,16 @@ bool compute_power(Element& out,
 // saturation kernels carry a torsion column, so wrong torsion can hide an
 // ell-th root.  Therefore the public routines that label a unit group
 // proven, OrderUnitGroup::prove_index_bound, saturate_index_bounded and
-// saturate_index_bounded_adaptive, check order_unit_torsion_is_computed on
-// their input first and fail closed (return false, output unchanged)
-// otherwise, and ClassGroupContext::try_certify_with_units treats a proven
-// unit group without computed torsion as unproven.  Internal paths that
-// build the group themselves rely on the invariant instead of checking it
-// again; they say so where they do.
+// saturate_index_bounded_adaptive, and prove_local_saturated, which records
+// verified ell-local proofs, check order_unit_torsion_is_computed on their
+// input after their argument checks and before any work, and fail closed
+// (return false, output unchanged) otherwise.
+// ClassGroupContext::try_certify_with_units treats a proven unit group
+// without computed torsion as unproven, and the grh labels of a class/unit
+// pair are published only through
+// ClassGroupCertificationAccess::publish_grh_labels, which checks the
+// torsion too.  Internal paths that build the group themselves rely on the
+// invariant instead of checking it again; they say so where they do.
 //
 // Noninstalled unit-installation hook.  `trusted` skips the per-generator
 // unit check for internal routes whose generators are already known units.
@@ -161,11 +165,12 @@ public:
     }
 
     // The bodies of OrderUnitGroup::saturate_index_bounded and
-    // saturate_index_bounded_adaptive without their torsion check.  The
-    // caller guarantees that `group` carries computed torsion, either by
-    // checking order_unit_torsion_is_computed or by the invariant above for
-    // a group it built itself.
-    static bool saturate_index_bounded_computed_torsion(
+    // saturate_index_bounded_adaptive.  After the argument checks, and
+    // before any work, `check_torsion` requires order_unit_torsion_is_computed
+    // on `group` and otherwise fails closed (output unchanged); the public
+    // methods pass true.  An internal caller may pass false only for a group
+    // it built itself, relying on the invariant above.
+    static bool saturate_index_bounded_body(
             OrderUnitGroup& out,
             bool& changed,
             bool& stable,
@@ -174,8 +179,9 @@ public:
             slong aux_target_len,
             flint::FmpzConstRef aux_bound,
             slong max_passes,
-            slong precision) noexcept;
-    static bool saturate_index_bounded_adaptive_computed_torsion(
+            slong precision,
+            bool check_torsion) noexcept;
+    static bool saturate_index_bounded_adaptive_body(
             OrderUnitGroup& out,
             bool& changed,
             bool& stable,
@@ -185,7 +191,8 @@ public:
             flint::FmpzConstRef aux_bound_start,
             flint::FmpzConstRef aux_bound_max,
             slong max_passes,
-            slong precision) noexcept;
+            slong precision,
+            bool check_torsion) noexcept;
 };
 
 inline bool order_unit_group_set_units_internal(

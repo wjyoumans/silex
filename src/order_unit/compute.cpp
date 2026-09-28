@@ -2907,9 +2907,14 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
             options.requested_certification == CertificationMode::grh) {
             // reference Clgp.jl:_class_unit_group publishes this completed pair
             // after analytic index-one validation and skips only the later
-            // unconditional class- and unit-group proof passes.
-            candidate_class_group.certification_ = CertificationMode::grh;
-            candidate_units.certification_ = CertificationMode::grh;
+            // unconditional class- and unit-group proof passes.  Silex also
+            // requires computed torsion before the grh labels and fails
+            // closed otherwise; the caller's objects are not touched.
+            if (!detail::ClassGroupCertificationAccess::publish_grh_labels(
+                        candidate_class_group, candidate_units,
+                        active_diagnostics)) {
+                return false;
+            }
         }
 
         if (certified) {
@@ -3065,10 +3070,11 @@ bool OrderUnitGroup::compute_with_class_group(
 
         // The caller requested the weaker conditional contract.  Retain the
         // exact proof receipts produced above, but keep both public coarse
-        // labels equal to the requested certification mode.
-        class_group.certification_ = CertificationMode::grh;
-        certification_ = CertificationMode::grh;
-        return true;
+        // labels equal to the requested certification mode.  The grh
+        // publication checks the torsion like every other grh publication;
+        // on failure the transaction discards both objects.
+        return detail::ClassGroupCertificationAccess::publish_grh_labels(
+                class_group, *this, active_diagnostics);
     }
     if (policy->relations == detail::NativeRelationStrategy::lll) {
         return compute_with_relation_class_group_(
