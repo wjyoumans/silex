@@ -502,6 +502,15 @@ void check_invert_rejects_zero_divisor(silex::NumberField field,
     sflint::fmpz_set_si(exponent, -1);
     assert(!out.pow_fmpz(zero_divisor, sflint::FmpzConstRef(exponent)));
     assert(out.equal_si(7));
+
+    // Aliased invert (out == input): Element::invert writes into a separate
+    // temporary and only swaps it in on success (src/element/element.cpp,
+    // Element::invert), so a rejected zero divisor must fail the same way
+    // and leave the aliased element's own value untouched.
+    silex::Element aliased(field);
+    assert(aliased.add_si(theta, -root));
+    assert(!aliased.invert(aliased));
+    assert(aliased.equal(zero_divisor));
 }
 
 void check_invert_round_trip(const silex::NumberField& field) noexcept {
@@ -542,6 +551,26 @@ void test_invert_zero_divisors() noexcept {
     sflint::fmpq_poly_set_coeff_si(quadratic_reducible, 0, -4);
     check_invert_rejects_zero_divisor(
             quadratic_field(), quadratic_reducible, 2);
+
+    // The same quadratic (degree two) representation, but starting from a
+    // NumberField whose own backend_kind() is generic rather than the
+    // Silex quadratic backend: x^2 - 12 is irreducible but its radicand 12
+    // is not squarefree, so by_polynomial() never installs the quadratic
+    // backend for it (T-015).  Element::invert's own dispatch instead reads
+    // FLINT's own nf_struct flag (element.cpp:262, NF_QUADRATIC), which is
+    // set from the reinitialized degree-two polynomial regardless of
+    // backend_kind(), so this exercises the same guard independently of
+    // Silex's backend classification.
+    sflint::FmpqPoly generic_quadratic_seed;
+    sflint::fmpq_poly_set_coeff_si(generic_quadratic_seed, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(generic_quadratic_seed, 0, -12);
+    silex::NumberField generic_quadratic_field =
+            silex::test::field_by_polynomial(
+                    sflint::FmpqPolyConstRef(generic_quadratic_seed));
+    assert(generic_quadratic_field.backend_kind() ==
+           silex::NumberFieldBackendKind::generic);
+    check_invert_rejects_zero_divisor(
+            generic_quadratic_field, quadratic_reducible, 2);
 
     // Generic representation: (x^2 + 1)(x - 3), zero divisor theta - 3.
     sflint::FmpqPoly cubic_reducible;
