@@ -4210,6 +4210,102 @@ int test_saturation_proves_nontrivial_class_group_without_grh() {
     return 0;
 }
 
+// The exact imaginary-quadratic route proves the class group from the exact
+// class number h(D) (FLINT reduced forms): with generation verified, the
+// relation lattice has index h_cand / h = 1 in the full one, so it is
+// saturated at every prime ell | h.  The route stores one verified
+// relation-saturation record for each such ell, so a later GRH-conditional
+// Belabas-Friedman audit keeps `proven` by promoting from those records.
+int test_exact_imaginary_quadratic_saturation_records() {
+    struct Case {
+        slong radicand;
+        slong class_number;
+        slong prime_count;
+    };
+    // D = -4, -3, -20, -23, -56, -47, -87.
+    const Case cases[] = {{-1, 1, 0},  {-3, 1, 0},  {-5, 2, 1},
+                          {-23, 3, 1}, {-14, 4, 1}, {-47, 5, 1},
+                          {-87, 6, 2}};
+
+    for (const Case& test_case : cases) {
+        silex::NumberField field = quadratic_field(test_case.radicand);
+        silex::Order equation;
+        equation = silex::test::equation_order(field);
+        silex::Order order(field);
+        assert(order.maximal_order(equation));
+        assert(order.is_maximal());
+
+        sflint::Fmpz bound;
+        assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                    order));
+        if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+            sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+        }
+
+        silex::ClassGroupComputeOptions options;
+        options.max_candidates = 5000;
+        options.max_relations = 500;
+        options.requested_certification = silex::CertificationMode::proven;
+
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units;
+        assert(units.compute_with_class_group(class_group, order,
+                                              sflint::FmpzConstRef(bound),
+                                              options, 128));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+
+        sflint::Fmpz class_order;
+        assert(class_group.order(sflint::FmpzRef(class_order)));
+        assert(sflint::fmpz_equal_si(class_order, test_case.class_number));
+
+        // One verified record for each distinct prime ell | h, and none
+        // for h = 1.
+        const auto check_records = [&]() {
+            assert(class_group.relation_saturation_record_count() ==
+                   test_case.prime_count);
+            for (slong i = 0; i < test_case.prime_count; ++i) {
+                auto record = class_group.relation_saturation_record(i);
+                assert(record.has_value());
+                assert(record->status == silex::ProofState::verified);
+                assert(sflint::fmpz_is_prime(
+                        sflint::FmpzConstRef(record->ell)));
+                assert(sflint::fmpz_divisible(
+                        sflint::FmpzConstRef(class_order),
+                        sflint::FmpzConstRef(record->ell)));
+                for (slong j = 0; j < i; ++j) {
+                    auto other = class_group.relation_saturation_record(j);
+                    assert(other.has_value());
+                    assert(!sflint::fmpz_equal(
+                            sflint::FmpzConstRef(other->ell),
+                            sflint::FmpzConstRef(record->ell)));
+                }
+            }
+        };
+        check_records();
+
+        // The BF audit records a GRH-conditional check; it succeeds by
+        // promoting from the stored saturation records.
+        assert(class_group.try_certify_class_unit_with_zeta_bf(units, 20000,
+                                                               128));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.zeta_bf_proof_status() ==
+               silex::ProofState::verified);
+        assert(class_group.analytic_class_regulator_certification() ==
+               silex::CertificationMode::grh);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+        check_records();
+    }
+
+    return 0;
+}
+
 int test_prove_index_bound() {
     silex::NumberField degree_one = degree_one_field();
     silex::Order degree_one_order;
@@ -6045,6 +6141,7 @@ int main() {
     test_class_unit_regulator_certification();
     test_belabas_friedman_class_regulator_is_grh_conditional();
     test_saturation_proves_nontrivial_class_group_without_grh();
+    test_exact_imaginary_quadratic_saturation_records();
     test_cached_torsion_never_reaches_proven();
     test_prove_index_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();

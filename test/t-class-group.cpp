@@ -1197,7 +1197,13 @@ int test_compute_candidate_proven_quadratic() {
     assert(proven_imaginary.try_certify_quadratic(
             silex::CertificationMode::proven));
     assert_proven_class_group_certification(proven_imaginary);
-    assert(proven_imaginary.relation_saturation_record_count() == 0);
+    // The exact route (h_cand = h(D) = 2) stores a verified saturation
+    // record at ell = 2.
+    assert(proven_imaginary.relation_saturation_record_count() == 1);
+    auto imaginary_record = proven_imaginary.relation_saturation_record(0);
+    assert(imaginary_record.has_value());
+    assert(sflint::fmpz_equal_si(imaginary_record->ell, 2));
+    assert(imaginary_record->status == silex::ProofState::verified);
     assert(proven_imaginary.order(sflint::FmpzRef(order_out)));
     assert(sflint::fmpz_equal_si(order_out, 2));
     assert(proven_imaginary.relation_count() >= 2);

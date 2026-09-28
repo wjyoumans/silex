@@ -126,6 +126,15 @@ public:
             ulong max_cutoff,
             slong requested_precision,
             slong work_precision) noexcept;
+
+private:
+    // Stores a verified relation-saturation record, backed by an
+    // exact-class-order proof record, at every prime dividing the verified
+    // exact class order `exact_order`.  A prime that already carries a
+    // verified ell-local proof keeps it.
+    static bool record_exact_class_order_saturation(
+            ClassGroupContext& context,
+            flint::FmpzConstRef exact_order) noexcept;
 };
 
 }  // namespace silex::detail

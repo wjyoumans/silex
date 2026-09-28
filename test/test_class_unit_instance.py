@@ -573,17 +573,31 @@ def main() -> int:
         "zeta_bf_proof_status"
     ] == "not_checked"
 
-    # A requested audit that runs but does not succeed is reported as
-    # ran/failed, distinct from not requested or skipped. This
-    # pins the current outcome for x^2 + 5 in `proven` mode. The BF
-    # evaluation and the index-one check pass; the gate then fails in
-    # ClassGroupContext::try_promote_proven_certification_: the exact
-    # imaginary-quadratic route leaves no per-prime relation-saturation
-    # record at ell = 2 (h = 2), and a GRH-conditional BF check cannot stand
-    # in for one. A change to either would flip this assertion.
-    failed_audit = run_json(
+    # A requested audit on x^2 + 5 (h = 2) in `proven` mode runs and
+    # succeeds. The exact imaginary-quadratic route stores a verified
+    # relation-saturation record at ell = 2, and the GRH-conditional BF
+    # audit keeps `proven` by promoting from that stored record.
+    iq_audit = run_json(
         [str(args.exe), "--coeffs", "5,0,1", "--mode", "proven",
          "--zeta-bf-audit"],
+        root,
+    )
+    assert iq_audit["success"] is True
+    assert iq_audit["certification_status"] == "proven"
+    assert iq_audit["class_group"]["certification"] == "proven"
+    assert iq_audit["class_group"]["order"] == "2"
+    assert iq_audit["zeta_bf_audit"]["requested"] is True
+    assert iq_audit["zeta_bf_audit"]["ran"] is True
+    assert iq_audit["zeta_bf_audit"]["succeeded"] is True
+    assert iq_audit["zeta_bf_audit"]["skip_reason"] is None
+
+    # A requested audit that runs but does not succeed is reported as
+    # ran/failed, distinct from not requested or skipped. With a BF cutoff
+    # of 1 the evaluation cannot meet the error target, so the audit gate
+    # fails; the audit is rolled back and the transaction stays `proven`.
+    failed_audit = run_json(
+        [str(args.exe), "--coeffs", "5,0,1", "--mode", "proven",
+         "--zeta-bf-audit", "--bf-cutoff", "1"],
         root,
     )
     assert failed_audit["success"] is True

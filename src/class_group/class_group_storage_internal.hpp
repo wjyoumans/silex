@@ -59,12 +59,29 @@ struct RelationSaturationRecord {
     ProofState status = ProofState::not_checked;
 };
 
+// What a relation-saturation proof record at `ell` rests on.
+//
+// - `ell_local_dlog`: the ell-local test of
+//   ClassGroupContext::prove_relation_saturation_dlog_ell_; `rank`,
+//   `target_rank`, and `local_primes` describe that computation.
+// - `exact_class_order`: the exact imaginary-quadratic route.  With
+//   generation verified and h_cand equal to the exact class number h, the
+//   computed relation lattice has index h_cand / h = 1 in the full one, so it
+//   is saturated at every prime; `rank`, `target_rank`, and `local_primes`
+//   are zero because no ell-local computation ran.
+enum class RelationSaturationProofBasis : unsigned char {
+    ell_local_dlog,
+    exact_class_order,
+};
+
 struct RelationSaturationProofRecord {
     flint::Fmpz ell;
     ProofState status = ProofState::not_checked;
     slong rank = 0;
     slong target_rank = 0;
     slong local_primes = 0;
+    RelationSaturationProofBasis basis =
+            RelationSaturationProofBasis::ell_local_dlog;
 };
 
 struct RelationAdmissionCache {

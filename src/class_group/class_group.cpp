@@ -4453,10 +4453,79 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
+    // h_cand equals the exact class number h and generation is verified, so
+    // the computed relation lattice has index h_cand / h = 1 in the full one
+    // and is saturated at every prime ell | h.  Store that as per-ell
+    // records, so the saturation proof is visible to later gates such as a
+    // Belabas-Friedman audit, which promotes only from stored records.
+    ClassGroupContext::CertificationTransaction_ transaction(context);
+    if (!record_exact_class_order_saturation(context, exact_order) ||
+        !context.relation_saturation_covers_class_order_()) {
+        return false;
+    }
+
     context.certification_ = CertificationMode::proven;
     context.relation_saturation_status_ = ProofState::verified;
     context.unit_proof_status_ = ProofState::verified;
     context.regulator_proof_status_ = ProofState::verified;
+    return transaction.finish(true);
+}
+
+bool ClassGroupCertificationAccess::record_exact_class_order_saturation(
+        ClassGroupContext& context,
+        flint::FmpzConstRef exact_order) noexcept {
+    if (flint::fmpz_sgn(exact_order) <= 0) {
+        return false;
+    }
+    if (flint::fmpz_is_one(exact_order)) {
+        return true;
+    }
+    if (!context.ensure_private_storage_()) {
+        return false;
+    }
+
+    flint::FmpzFactor factorization;
+    flint::fmpz_factor(flint::FmpzFactorRef(factorization), exact_order);
+    flint::Fmpz ell;
+    for (slong i = 0;
+         i < flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
+         ++i) {
+        flint::fmpz_factor_get_fmpz(
+                flint::FmpzRef(ell),
+                flint::FmpzFactorConstRef(factorization), i);
+        if (context.relation_saturation_ell_verified_(
+                    flint::FmpzConstRef(ell))) {
+            continue;
+        }
+
+        detail::RelationSaturationProofRecord* proof = nullptr;
+        for (detail::RelationSaturationProofRecord& record :
+             context.private_storage_->relation_saturation_proof_records) {
+            if (flint::fmpz_equal(flint::FmpzConstRef(record.ell),
+                                  flint::FmpzConstRef(ell))) {
+                proof = &record;
+                break;
+            }
+        }
+        if (proof == nullptr) {
+            context.private_storage_->relation_saturation_proof_records
+                    .emplace_back();
+            proof = &context.private_storage_
+                             ->relation_saturation_proof_records.back();
+            flint::fmpz_set(flint::FmpzRef(proof->ell),
+                            flint::FmpzConstRef(ell));
+        }
+        proof->status = ProofState::verified;
+        proof->rank = 0;
+        proof->target_rank = 0;
+        proof->local_primes = 0;
+        proof->basis = detail::RelationSaturationProofBasis::exact_class_order;
+
+        if (!context.mark_relation_saturation_verified_(
+                    flint::FmpzConstRef(ell))) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -4641,10 +4710,20 @@ bool ClassGroupCertificationAccess::
     if (requested == CertificationMode::proven &&
         flint::fmpz_is_one(flint::FmpzConstRef(index)) &&
         detail::order_unit_torsion_is_computed(units)) {
+        // Index one against the exact class number: as in
+        // try_certify_imaginary_quadratic_from_exact_order, the relations
+        // are saturated at every prime ell | h, and that is stored per ell.
+        ClassGroupContext::CertificationTransaction_ transaction(context);
+        if (!record_exact_class_order_saturation(
+                    context, flint::FmpzConstRef(exact_order)) ||
+            !context.relation_saturation_covers_class_order_()) {
+            return false;
+        }
         context.certification_ = CertificationMode::proven;
         context.relation_saturation_status_ = ProofState::verified;
         context.unit_proof_status_ = ProofState::verified;
         context.regulator_proof_status_ = ProofState::verified;
+        (void) transaction.finish(true);
         units.mark_certification_proven_();
     }
     flint::fmpz_set(out, flint::FmpzConstRef(index));
@@ -7179,6 +7258,7 @@ bool ClassGroupContext::record_relation_saturation_proof_(
         record.rank = rank;
         record.target_rank = target_rank;
         record.local_primes = local_primes;
+        record.basis = detail::RelationSaturationProofBasis::ell_local_dlog;
         return true;
     }
 
@@ -7258,8 +7338,9 @@ bool ClassGroupContext::relation_saturation_ell_verified_(
 // h_cand.  The relations are therefore complete exactly when they are
 // saturated at every prime p | h_cand.  A saturation proof covers the
 // candidate only when every such p carries a verified ell-record backed by a
-// verified local proof; the set of required primes is derived from the
-// published presentation alone.
+// verified proof record: an ell-local proof, or the exact imaginary-quadratic
+// class number (index h_cand / h = 1); the set of required primes is derived
+// from the published presentation alone.
 bool ClassGroupContext::relation_saturation_covers_class_order_()
         const noexcept {
     flint::Fmpz class_order;
@@ -7349,6 +7430,7 @@ void ClassGroupContext::save_certification_state_(
         copy.rank = record.rank;
         copy.target_rank = record.target_rank;
         copy.local_primes = record.local_primes;
+        copy.basis = record.basis;
     }
 }
 

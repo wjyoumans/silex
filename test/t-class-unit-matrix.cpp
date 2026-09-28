@@ -941,6 +941,53 @@ bool check_free_unit_witnesses(const silex::OrderUnitGroup& units,
     return true;
 }
 
+// An exact route (degree one, or the exact imaginary-quadratic class
+// number) stores exactly one verified relation-saturation record for each
+// distinct prime dividing the class order, and none when it is one.
+bool exact_saturation_records_cover_order(
+        const silex::ClassGroupContext& class_group,
+        slong class_order) noexcept {
+    if (class_order <= 0) {
+        return false;
+    }
+    slong remaining = class_order;
+    slong prime_count = 0;
+    for (slong p = 2; p <= remaining; ++p) {
+        if (remaining % p != 0) {
+            continue;
+        }
+        ++prime_count;
+        while (remaining % p == 0) {
+            remaining /= p;
+        }
+    }
+    if (class_group.relation_saturation_record_count() != prime_count) {
+        return false;
+    }
+    for (slong i = 0; i < prime_count; ++i) {
+        auto record = class_group.relation_saturation_record(i);
+        if (!record.has_value() ||
+            record->status != silex::ProofState::verified ||
+            !sflint::fmpz_fits_si(sflint::FmpzConstRef(record->ell))) {
+            return false;
+        }
+        const slong ell =
+                sflint::fmpz_get_si(sflint::FmpzConstRef(record->ell));
+        if (ell < 2 || class_order % ell != 0) {
+            return false;
+        }
+        for (slong j = 0; j < i; ++j) {
+            auto other = class_group.relation_saturation_record(j);
+            if (!other.has_value() ||
+                sflint::fmpz_equal(sflint::FmpzConstRef(other->ell),
+                                   sflint::FmpzConstRef(record->ell))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool check_class_unit_pair(const char* name,
                            const FieldSetup& setup,
                            silex::CertificationMode requested,
@@ -1126,7 +1173,8 @@ bool check_class_unit_pair(const char* name,
                     silex::ProofState::verified ||
             class_group.relation_source_count(
                     silex::ClassGroupRelationSource::Saturation) != 0 ||
-            class_group.relation_saturation_record_count() != 0) {
+            !exact_saturation_records_cover_order(class_group,
+                                                  expected_class_order)) {
             std::cerr << name << ": unexpected exact proof metadata\n";
             return false;
         }
