@@ -17,6 +17,7 @@
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/relation_unit_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
+#include "order_unit/compute_internal.hpp"
 #include "test_support.hpp"
 
 #include <flint/fmpq_poly.h>
@@ -4306,6 +4307,120 @@ int test_exact_imaginary_quadratic_saturation_records() {
     return 0;
 }
 
+// The exact imaginary-quadratic index route may report index one under a
+// proven request only after it has published the pair proven.  With torsion
+// that Silex did not compute (Z[i] with an under-claimed w = 2), the route
+// must fail closed rather than hand callers an unproven index one, and the
+// candidate-pair validation loop must not report an unproven pair as proven.
+int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
+    using CertificationAccess =
+            silex::detail::ClassGroupCertificationAccess;
+    using OrderUnitGroupAccess = silex::detail::OrderUnitGroupAccess;
+
+    silex::NumberField field = quadratic_field(-1);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    assert(order.is_maximal());
+    silex::EmbeddingContext embeddings(field);
+
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupCandidateOptions candidate_options;
+    candidate_options.max_candidates = 256;
+    candidate_options.max_relations = 48;
+
+    sflint::Fmpz torsion_order;
+    assert(set_fmpz_si(torsion_order, 2));
+    silex::OrderElement torsion_generator(order);
+    assert(torsion_generator.set_si(-1));
+    const auto under_claimed = [&](silex::OrderUnitGroup& units) {
+        assert(OrderUnitGroupAccess::set_units(
+                units, order, silex::FactoredElementSpan(), embeddings, 256,
+                true, &torsion_order, &torsion_generator));
+        assert(!silex::detail::order_unit_torsion_is_computed(units));
+    };
+
+    // Direct: no index is returned and nothing is published.
+    {
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), candidate_options));
+        silex::OrderUnitGroup under(order);
+        under_claimed(under);
+
+        sflint::Fmpz index;
+        assert(!CertificationAccess::rank_zero_quadratic_class_index_bound(
+                sflint::FmpzRef(index), class_group, under,
+                silex::CertificationMode::proven));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(under.certification_status() ==
+               silex::CertificationMode::unknown);
+    }
+
+    // Through the candidate-pair validation loop: a proven request never
+    // reports the under-claimed pair as proven.  The exact index route fails
+    // closed, and the saturation fallback, whose unit proof keeps the input
+    // torsion, rejects the group before the class proof.
+    {
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), candidate_options));
+        silex::OrderUnitGroup under(order);
+        under_claimed(under);
+        silex::OrderUnitGroup scratch(order);
+
+        silex::ClassGroupComputeOptions options;
+        options.requested_certification = silex::CertificationMode::proven;
+        silex::detail::AnalyticClassRegulatorCache analytic_cache;
+        silex::detail::ValidateRefineSummary summary;
+        assert(!silex::detail::try_validate_refine_loop(
+                class_group, under, scratch, order, options, embeddings,
+                analytic_cache, summary, 256, false));
+        assert(summary.outcome != silex::detail::ValidateRefineOutcome::proven);
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(under.certification_status() ==
+               silex::CertificationMode::unknown);
+        sflint::Fmpz kept_torsion;
+        assert(under.torsion_order(sflint::FmpzRef(kept_torsion)));
+        assert(sflint::fmpz_equal_si(kept_torsion, 2));
+    }
+
+    // Control: the torsion Silex computes certifies at index one.
+    {
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), candidate_options));
+        silex::OrderUnitGroup computed(order);
+        assert(computed.set_units(order, silex::FactoredElementSpan(),
+                                  embeddings, 256));
+        assert(silex::detail::order_unit_torsion_is_computed(computed));
+
+        sflint::Fmpz index;
+        assert(CertificationAccess::rank_zero_quadratic_class_index_bound(
+                sflint::FmpzRef(index), class_group, computed,
+                silex::CertificationMode::proven));
+        assert(sflint::fmpz_is_one(sflint::FmpzConstRef(index)));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(computed.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    return 0;
+}
+
 int test_prove_index_bound() {
     silex::NumberField degree_one = degree_one_field();
     silex::Order degree_one_order;
@@ -6143,6 +6258,7 @@ int main() {
     test_saturation_proves_nontrivial_class_group_without_grh();
     test_exact_imaginary_quadratic_saturation_records();
     test_cached_torsion_never_reaches_proven();
+    test_rank_zero_quadratic_index_one_requires_computed_torsion();
     test_prove_index_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();
     test_adjoin_dependent_relation_nonmaximal_root();

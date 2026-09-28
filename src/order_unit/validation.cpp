@@ -767,6 +767,17 @@ bool try_prove_candidate_pair_by_saturation(
                     "unit_group.validation_saturation_proof.units_unavailable");
             return false;
         }
+        // prove_index_bound proves the free part and keeps the torsion of
+        // its input.  The published unit group is proven only if that
+        // torsion is the torsion Silex computes for the order, never a
+        // cached or supplied value; check it before the class proof so a
+        // rejection leaves both objects unchanged.
+        if (!order_unit_torsion_is_computed(proven)) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.validation_saturation_proof.units_unavailable");
+            return false;
+        }
         if (!ClassGroupCertificationAccess::
                     try_prove_class_order_saturation_with_units(
                             class_group, proven,

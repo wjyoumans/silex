@@ -4708,8 +4708,16 @@ bool ClassGroupCertificationAccess::
     }
 
     if (requested == CertificationMode::proven &&
-        flint::fmpz_is_one(flint::FmpzConstRef(index)) &&
-        detail::order_unit_torsion_is_computed(units)) {
+        flint::fmpz_is_one(flint::FmpzConstRef(index))) {
+        // Callers treat index one under a proven request as a certified
+        // pair, so it is returned only after the pair is published proven.
+        // The published unit group is proven only if its torsion is the
+        // torsion Silex computes for the order (as in
+        // try_certify_class_unit_with_units_); otherwise fail closed and
+        // leave the other validation routes to the caller.
+        if (!detail::order_unit_torsion_is_computed(units)) {
+            return false;
+        }
         // Index one against the exact class number: as in
         // try_certify_imaginary_quadratic_from_exact_order, the relations
         // are saturated at every prime ell | h, and that is stored per ell.
