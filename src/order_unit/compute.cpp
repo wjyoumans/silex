@@ -12,8 +12,11 @@
 #include "../lat/flatter_backend_internal.hpp"
 #include "../lat/fplll_backend_internal.hpp"
 
+#include <flint/fmpq_mat.h>
+
 #include <silex/class_group.hpp>
 #include <silex/flint/arf.hpp>
+#include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpz_lll.hpp>
 #include <silex/signature.hpp>
 #include <silex/unit.hpp>
@@ -191,12 +194,20 @@ bool rank_zero_torsion(flint::FmpzRef best_order,
         return false;
     }
 
+    // Only membership may skip a power: a coordinate computation that fails
+    // makes the whole call fail rather than silently leaving that root out,
+    // which would under-claim the torsion.
+    flint::FmpqMat coordinates(1, order.degree());
     slong best = 1;
     for (slong k = 0; k < n; ++k) {
-        if (!compute_power(power, root, k)) {
+        if (!compute_power(power, root, k) ||
+            !order.coordinates(flint::FmpqMatRef(coordinates), power)) {
             return false;
         }
-        if (candidate.set_element(power)) {
+        if (fmpq_mat_is_integral(coordinates.raw()) != 0) {
+            if (!candidate.set_element(power)) {
+                return false;
+            }
             const slong ord = n / gcd_slong(n, k);
             if (ord > best) {
                 best = ord;
