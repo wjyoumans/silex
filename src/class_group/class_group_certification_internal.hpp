@@ -85,10 +85,6 @@ public:
             ClassGroupContext& context,
             bool hr_unconditional) noexcept;
 
-    // Adds the Belabas-Friedman audit data (error bound, cutoff, and
-    // precisions) of the hR used by record_grh_acceptance_analytic_check()
-    // when that hR was the default zeta route's Belabas-Friedman fallback.
-    // Like that record, it never changes certification labels.
     // Publishes the grh labels on a completed class/unit pair.  GRH is
     // assumed only by the analytic hR check; the torsion does not depend on
     // it, and a wrong torsion order w would make the grh unit label wrong.
@@ -100,6 +96,10 @@ public:
             OrderUnitGroup& units,
             const DiagnosticsContext* diagnostics) noexcept;
 
+    // Adds the Belabas-Friedman audit data (error bound, cutoff, and
+    // precisions) of the hR used by record_grh_acceptance_analytic_check()
+    // when that hR was the default zeta route's Belabas-Friedman fallback.
+    // Like that record, it never changes certification labels.
     static bool record_grh_acceptance_bf_audit(
             ClassGroupContext& context,
             flint::ArbConstRef error_bound,

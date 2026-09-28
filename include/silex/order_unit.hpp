@@ -344,7 +344,8 @@ private:
             flint::FmpzConstRef aux_bound,
             EmbeddingContext& embeddings,
             slong precision,
-            bool use_stable_proof_fallback) noexcept;
+            bool use_stable_proof_fallback,
+            bool check_torsion) noexcept;
     bool saturate_local_with_kernel_(bool& changed,
                                      const OrderUnitGroup& group,
                                      flint::FmpzMatConstRef kernel,

@@ -2395,7 +2395,8 @@ bool OrderUnitGroup::prove_local_saturated(ProofState& status,
                                            EmbeddingContext& embeddings,
                                            slong precision) noexcept {
     return prove_local_saturated_(status, changed, group, ell, aux_target_len,
-                                  aux_bound, embeddings, precision, false);
+                                  aux_bound, embeddings, precision, false,
+                                  true);
 }
 
 bool OrderUnitGroup::prove_local_saturated_(
@@ -2407,7 +2408,8 @@ bool OrderUnitGroup::prove_local_saturated_(
         flint::FmpzConstRef aux_bound,
         EmbeddingContext& embeddings,
         slong precision,
-        bool use_stable_proof_fallback) noexcept {
+        bool use_stable_proof_fallback,
+        bool check_torsion) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.prove_local_saturated");
     const Order* order = group.parent();
@@ -2426,14 +2428,12 @@ bool OrderUnitGroup::prove_local_saturated_(
     }
 
     // A verified ell-local record at ell | w rests on the torsion column of
-    // the saturation kernel, so it relies on the input torsion.  The public
-    // entry fails closed, before any work, unless that is the torsion Silex
-    // computes for the order.  The stable-proof fallback is reached only
-    // from prove_index_bound, which has checked the same input torsion, and
-    // its passes keep that torsion or recompute it, so it is not checked
-    // again there.
-    if (!use_stable_proof_fallback &&
-        !detail::order_unit_torsion_is_computed(group)) {
+    // the saturation kernel, so it relies on the input torsion.  With
+    // check_torsion this fails closed, before any work, unless that is the
+    // torsion Silex computes for the order.  Only prove_index_bound passes
+    // false: it has checked the same input torsion, and its passes keep that
+    // torsion or recompute it, so it is not checked again there.
+    if (check_torsion && !detail::order_unit_torsion_is_computed(group)) {
         SILEX_PROFILE_EVENT(
                 diagnostics_, DiagnosticsModule::unit_group,
                 "unit_group.prove_local_saturated.torsion_not_computed");
@@ -2873,7 +2873,7 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
                 pass_ok = pass_result.prove_local_saturated_(
                         pass_status, pass_changed, working,
                         flint::FmpzConstRef(ell), aux_target_len, aux_bound,
-                        embeddings, precision, true);
+                        embeddings, precision, true, false);
             }
             if (!pass_ok) {
                 return publish(working, ProofState::unavailable, any_changed);
