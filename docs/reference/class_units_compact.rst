@@ -142,7 +142,10 @@ The class-group proof metadata is deliberately componentized:
 
 - factor-base generation records audit rational primes against the stored
   build/generation bounds;
-- relation-saturation records audit the ``ell``-local saturation checks;
+- relation-saturation records audit saturation at each prime ``ell``: the
+  ``ell``-local saturation checks, or, for the exact imaginary-quadratic
+  ``proven`` route, one verified record for each prime dividing the exact
+  class number, whose index argument proves saturation at every prime;
 - unit and regulator proof statuses record the paired class/unit inputs used
   by the certification gate;
 - analytic class-regulator status records whether an analytic ``hR`` check

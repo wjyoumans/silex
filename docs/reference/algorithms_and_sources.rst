@@ -452,6 +452,19 @@ verifies itself, and proven unit publication through the class/unit gates
 re-derives the torsion subgroup of the order rather than trusting a stored
 one.
 
+The exact imaginary-quadratic ``proven`` route uses the same index argument
+with the exact class number ``h = h(D)``, counted from the reduced forms
+returned by FLINT ``qfb_reduced_forms``, in place of ``ell``-local tests.
+With generation verified up to the Minkowski-type bound and ``h_cand = h``,
+the computed relation lattice has index one in the full one, so it is
+saturated at every prime.  The route stores a verified relation-saturation
+record for every prime ``ell`` dividing ``h`` (none when ``h = 1``), backed
+internally by a proof record that names the exact class number, not an
+``ell``-local test, as its basis.  A prime that already carries a verified
+``ell``-local proof keeps it.  Later gates, such as the Belabas--Friedman
+audit, therefore see the same per-prime saturation records as for a
+saturation-backed proof and can promote from them.
+
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
 one, and maximal orders of explicit quadratic-backend fields whose

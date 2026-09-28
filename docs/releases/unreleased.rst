@@ -44,6 +44,17 @@ Changed
 Fixed
 -----
 
+- ``try_certify_class_unit_with_zeta_bf`` (and the ``--zeta-bf-audit`` option
+  of the class/unit instance tool) no longer fails on an imaginary quadratic
+  field with class number greater than one that the exact
+  imaginary-quadratic route proved, such as ``x^2 + 5``.  That route now
+  stores a verified relation-saturation record for every prime dividing the
+  exact class number, so ``relation_saturation_record_count()`` is now
+  positive for such fields (one record for each distinct prime of ``h``; it
+  was zero), and the GRH-conditional audit keeps ``proven`` by promoting from
+  those records.  Fields with class number one are unchanged.  See "Class
+  groups and order units" in :doc:`../reference/algorithms_and_sources`.
+
 - A ``grh`` paired class/unit transaction of positive unit rank whose
   GRH-sized factor base does not reach the Minkowski-type bound (for example
   ``x^3 + x + 200`` or ``x^2 - 100003``) now fails closed once the factor
