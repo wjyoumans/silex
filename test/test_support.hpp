@@ -75,6 +75,38 @@ inline NumberField quadratic_field(slong radicand) noexcept {
     return field;
 }
 
+// White-box helper: returns a defined field whose FLINT context has been
+// replaced by one for the non-squarefree polynomial x^2.  NumberField
+// construction rejects x^2, so this is the only way to keep the internal
+// non-squarefree failure paths covered.  The field starts as the generic
+// (non-quadratic-backend) field defined by x^2 - x - 1 so that no quadratic
+// backend data disagrees with the installed polynomial.
+inline NumberField nonsquarefree_field() noexcept {
+    flint::FmpqPoly polynomial;
+    flint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    flint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+    flint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+    NumberField field =
+            field_by_polynomial(flint::FmpqPolyConstRef(polynomial));
+    assert(field.backend_kind() == NumberFieldBackendKind::generic);
+
+    flint::FmpqPoly square;
+    flint::fmpq_poly_set_coeff_si(square, 2, 1);
+    nf_struct* raw = field.raw_flint_field();
+    assert(raw != nullptr);
+    nf_clear(raw);
+    nf_init(raw, square.raw());
+    assert(field.degree() == 2);
+    return field;
+}
+
+inline void check_square_rejected() noexcept {
+    flint::FmpqPoly square;
+    flint::fmpq_poly_set_coeff_si(square, 2, 1);
+    assert(!NumberField::by_polynomial(flint::FmpqPolyConstRef(square))
+                    .is_defined());
+}
+
 inline Order equation_order(const NumberField& parent) noexcept {
     Order order = Order::equation_order(parent);
     assert(order.is_defined());
