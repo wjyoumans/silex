@@ -10,6 +10,7 @@
 #include <flint/fmpz_mat.h>
 #include <flint/fmpz_mod_mat.h>
 #include <flint/mag.h>
+#include <flint/ulong_extras.h>
 
 #include <silex/class_group.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
@@ -1041,6 +1042,11 @@ void OrderUnitGroup::reset_unit_proof_records() noexcept {
     clear_unit_proof_records_();
 }
 
+// Labels the group proven when the regulator index bound is one.  It does
+// not check the torsion: its callers are set_relation_kernel_units_index_
+// bounded, whose group was just installed with computed torsion, and the
+// saturate_index_bounded body, whose public entry points check it (see the
+// torsion invariant in order_unit_internal.hpp).
 void OrderUnitGroup::try_certify_index_one(slong precision) noexcept {
     if (!is_set() || precision <= 0) {
         return;
@@ -1127,19 +1133,11 @@ bool OrderUnitGroupAccess::set_units(
                             "unit_group.set_units_torsion");
         if (cached_torsion_order != nullptr &&
             cached_torsion_generator != nullptr) {
-            // -1 lies in every order, so the torsion order is even; and the
-            // generator must have exactly the cached order.  This rejects a
-            // cached pair that is not a cyclic group of roots of unity of
-            // that order in the order.
-            const Order* torsion_parent = cached_torsion_generator->parent();
-            if (torsion_parent == nullptr ||
-                !torsion_parent->has_same_data(order) ||
-                flint::fmpz_sgn(flint::FmpzConstRef(
-                        *cached_torsion_order)) <= 0 ||
-                ::fmpz_is_even(cached_torsion_order->raw()) == 0 ||
-                !order_element_has_exact_order(
-                        *cached_torsion_generator, order,
-                        flint::FmpzConstRef(*cached_torsion_order)) ||
+            // This rejects a cached pair that is not a cyclic group of roots
+            // of unity of that order in the order.
+            if (!cached_torsion_is_valid(
+                        order, flint::FmpzConstRef(*cached_torsion_order),
+                        *cached_torsion_generator) ||
                 !candidate.torsion_generator_.set(
                         *cached_torsion_generator)) {
                 SILEX_LOG(out.diagnostics(), DiagnosticsModule::unit_group,
@@ -1280,6 +1278,32 @@ bool order_element_has_exact_order(const OrderElement& generator,
         }
     }
     return true;
+}
+
+bool cached_torsion_is_valid(const Order& order,
+                             flint::FmpzConstRef torsion_order,
+                             const OrderElement& torsion_generator) noexcept {
+    // -1 lies in every order, so the torsion order w is even.  Q(zeta_w) is
+    // a subfield of K, so phi(w) = [Q(zeta_w) : Q] divides n = [K : Q]; the
+    // roots-of-unity bound uses the same test (roots_of_unity.cpp).  This
+    // caps w (phi(w) >= sqrt(w / 2)) before the exact-order check computes
+    // g^w.
+    const Order* generator_parent = torsion_generator.parent();
+    const slong degree = order.degree();
+    if (generator_parent == nullptr ||
+        !generator_parent->has_same_data(order) || degree <= 0 ||
+        flint::fmpz_sgn(torsion_order) <= 0 ||
+        ::fmpz_is_even(torsion_order.raw()) == 0 ||
+        !flint::fmpz_fits_si(torsion_order)) {
+        return false;
+    }
+    const ulong phi = n_euler_phi(
+            static_cast<ulong>(flint::fmpz_get_si(torsion_order)));
+    if (phi == 0 || static_cast<ulong>(degree) % phi != 0) {
+        return false;
+    }
+    return order_element_has_exact_order(torsion_generator, order,
+                                         torsion_order);
 }
 
 bool order_unit_torsion_is_computed(const OrderUnitGroup& units) noexcept {
@@ -1511,9 +1535,13 @@ bool OrderUnitGroup::set_relation_kernel_units_index_bounded_saturated(
 
     bool sat_changed = false;
     bool sat_stable = false;
-    if (saturated.saturate_index_bounded_adaptive(
-                sat_changed, sat_stable, initial, embeddings, aux_target_len,
-                aux_bound_start, aux_bound_max, max_passes, max_precision)) {
+    // `initial` was installed above with computed torsion (torsion invariant
+    // in order_unit_internal.hpp), so the public torsion check is skipped.
+    if (detail::OrderUnitGroupAccess::
+                saturate_index_bounded_adaptive_computed_torsion(
+                        saturated, sat_changed, sat_stable, initial,
+                        embeddings, aux_target_len, aux_bound_start,
+                        aux_bound_max, max_passes, max_precision)) {
         swap(saturated);
         changed = sat_changed;
         stable = sat_stable;

@@ -24,6 +24,7 @@
 #include <flint/ulong_extras.h>
 
 #include <cassert>
+#include <cstring>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -4307,6 +4308,24 @@ int test_exact_imaginary_quadratic_saturation_records() {
     return 0;
 }
 
+// Counts profile events with one label.
+struct TorsionEventCounter {
+    const char* label = nullptr;
+    slong count = 0;
+};
+
+void torsion_event_callback(void* user,
+                            silex::DiagnosticsModule,
+                            silex::ProfileEvent event,
+                            const char*,
+                            const char* label) noexcept {
+    TorsionEventCounter* counter = static_cast<TorsionEventCounter*>(user);
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, counter->label) == 0) {
+        ++counter->count;
+    }
+}
+
 // The exact imaginary-quadratic index route may report index one under a
 // proven request only after it has published the pair proven.  With torsion
 // that Silex did not compute (Z[i] with an under-claimed w = 2), the route
@@ -4368,8 +4387,9 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
 
     // Through the candidate-pair validation loop: a proven request never
     // reports the under-claimed pair as proven.  The exact index route fails
-    // closed, and the saturation fallback, whose unit proof keeps the input
-    // torsion, rejects the group before the class proof.
+    // closed, and in the saturation fallback prove_index_bound rejects the
+    // input torsion before the class proof, so the loop ends with
+    // index_one_publication_failed.
     {
         silex::ClassGroupContext class_group;
         assert(class_group.compute_candidate(
@@ -4378,6 +4398,17 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
         under_claimed(under);
         silex::OrderUnitGroup scratch(order);
 
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        TorsionEventCounter counter;
+        counter.label = "unit_group.prove_index_bound.torsion_not_computed";
+        silex::diagnostics_set_profiling(
+                diagnostics, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::unit_group),
+                torsion_event_callback, &counter);
+        under.set_diagnostics(&diagnostics);
+
         silex::ClassGroupComputeOptions options;
         options.requested_certification = silex::CertificationMode::proven;
         silex::detail::AnalyticClassRegulatorCache analytic_cache;
@@ -4385,7 +4416,8 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
         assert(!silex::detail::try_validate_refine_loop(
                 class_group, under, scratch, order, options, embeddings,
                 analytic_cache, summary, 256, false));
-        assert(summary.outcome != silex::detail::ValidateRefineOutcome::proven);
+        assert(summary.outcome == silex::detail::ValidateRefineOutcome::
+                                          index_one_publication_failed);
         assert(class_group.certification_status() ==
                silex::CertificationMode::unknown);
         assert(under.certification_status() ==
@@ -4393,6 +4425,12 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
         sflint::Fmpz kept_torsion;
         assert(under.torsion_order(sflint::FmpzRef(kept_torsion)));
         assert(sflint::fmpz_equal_si(kept_torsion, 2));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(counter.count >= 1);
+#else
+        assert(counter.count == 0);
+#endif
+        under.set_diagnostics(nullptr);
     }
 
     // Control: the torsion Silex computes certifies at index one.
@@ -4404,6 +4442,10 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
         assert(computed.set_units(order, silex::FactoredElementSpan(),
                                   embeddings, 256));
         assert(silex::detail::order_unit_torsion_is_computed(computed));
+        // Q(i) has the roots of unity {1, i, -1, -i}.
+        sflint::Fmpz computed_torsion;
+        assert(computed.torsion_order(sflint::FmpzRef(computed_torsion)));
+        assert(sflint::fmpz_equal_si(computed_torsion, 4));
 
         sflint::Fmpz index;
         assert(CertificationAccess::rank_zero_quadratic_class_index_bound(
@@ -4418,6 +4460,187 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
                silex::CertificationMode::proven);
     }
 
+    return 0;
+}
+
+// The public unit proofs check the torsion of their input themselves.  On
+// Z[i] with torsion under-claimed as {1, -1} (w = 2 instead of 4), the
+// regulator index bound of the empty free part is one, so without the check
+// prove_index_bound and saturate_index_bounded would label the group proven.
+// They must fail closed and leave the output unchanged; the same group with
+// computed torsion is proven.
+int test_unit_proofs_require_computed_torsion() {
+    using OrderUnitGroupAccess = silex::detail::OrderUnitGroupAccess;
+
+    silex::NumberField field = quadratic_field(-1);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::OrderUnitGroup computed(order);
+    assert(computed.set_units(order, silex::FactoredElementSpan(), embeddings,
+                              256));
+    assert(silex::detail::order_unit_torsion_is_computed(computed));
+
+    sflint::Fmpz torsion_order;
+    assert(set_fmpz_si(torsion_order, 2));
+    silex::OrderElement torsion_generator(order);
+    assert(torsion_generator.set_si(-1));
+    silex::OrderUnitGroup under(order);
+    assert(OrderUnitGroupAccess::set_units(
+            under, order, silex::FactoredElementSpan(), embeddings, 256, true,
+            &torsion_order, &torsion_generator));
+    assert(!silex::detail::order_unit_torsion_is_computed(under));
+
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 64));
+    sflint::Fmpz aux_max;
+    assert(set_fmpz_si(aux_max, 256));
+    const auto torsion_is = [](const silex::OrderUnitGroup& units, slong w) {
+        sflint::Fmpz stored;
+        return units.torsion_order(sflint::FmpzRef(stored)) &&
+               sflint::fmpz_equal_si(stored, w);
+    };
+
+    // prove_index_bound.
+    {
+        silex::OrderUnitGroup out(order);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(!out.prove_index_bound(status, changed, under, 4,
+                                      sflint::FmpzConstRef(aux_bound), 2,
+                                      embeddings, 256));
+        assert(!out.is_set());
+        assert(status == silex::ProofState::not_checked);
+        assert(changed);
+
+        assert(out.prove_index_bound(status, changed, computed, 4,
+                                     sflint::FmpzConstRef(aux_bound), 2,
+                                     embeddings, 256));
+        assert(status == silex::ProofState::verified);
+        assert(out.certification_status() == silex::CertificationMode::proven);
+        assert(torsion_is(out, 4));
+
+        // A rejected input leaves a previously published result unchanged.
+        assert(!out.prove_index_bound(status, changed, under, 4,
+                                      sflint::FmpzConstRef(aux_bound), 2,
+                                      embeddings, 256));
+        assert(out.certification_status() == silex::CertificationMode::proven);
+        assert(torsion_is(out, 4));
+    }
+
+    // saturate_index_bounded and its adaptive form.
+    {
+        silex::OrderUnitGroup out(order);
+        bool changed = true;
+        bool stable = true;
+        assert(!out.saturate_index_bounded(changed, stable, under, embeddings,
+                                           4, sflint::FmpzConstRef(aux_bound),
+                                           2, 256));
+        assert(!out.saturate_index_bounded_adaptive(
+                changed, stable, under, embeddings, 4,
+                sflint::FmpzConstRef(aux_bound),
+                sflint::FmpzConstRef(aux_max), 2, 256));
+        assert(!out.is_set());
+        assert(changed && stable);
+
+        assert(out.saturate_index_bounded(changed, stable, computed,
+                                          embeddings, 4,
+                                          sflint::FmpzConstRef(aux_bound), 2,
+                                          256));
+        assert(out.certification_status() == silex::CertificationMode::proven);
+        assert(torsion_is(out, 4));
+
+        silex::OrderUnitGroup adaptive(order);
+        assert(adaptive.saturate_index_bounded_adaptive(
+                changed, stable, computed, embeddings, 4,
+                sflint::FmpzConstRef(aux_bound),
+                sflint::FmpzConstRef(aux_max), 2, 256));
+        assert(adaptive.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(torsion_is(adaptive, 4));
+    }
+
+    // try_certify_with_units treats a proven label on uncomputed torsion as
+    // unproven: a proven request fails and publishes nothing.  The same
+    // label on computed torsion certifies (h = 1).
+    {
+        sflint::Fmpz bound;
+        assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                    order));
+        if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+            sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+        }
+        silex::ClassGroupCandidateOptions candidate_options;
+        candidate_options.max_candidates = 256;
+        candidate_options.max_relations = 48;
+
+        silex::OrderUnitGroup labelled(order);
+        assert(labelled.set(under));
+        OrderUnitGroupAccess::mark_certification_proven(labelled);
+        assert(labelled.certification_status() ==
+               silex::CertificationMode::proven);
+
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), candidate_options));
+        assert(!class_group.try_certify_with_units(
+                labelled, silex::CertificationMode::proven, 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(class_group.unit_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(class_group.regulator_proof_status() ==
+               silex::ProofState::not_checked);
+
+        silex::OrderUnitGroup good(order);
+        assert(good.set(computed));
+        OrderUnitGroupAccess::mark_certification_proven(good);
+        assert(class_group.try_certify_with_units(
+                good, silex::CertificationMode::proven, 256));
+        assert(class_group.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(class_group.unit_proof_status() == silex::ProofState::verified);
+    }
+
+    return 0;
+}
+
+// The cached-torsion test rejects any w with phi(w) not dividing the degree
+// before it computes a power, and otherwise requires a generator of exact
+// order w in the order.
+int test_cached_torsion_is_valid() {
+    silex::NumberField field = quadratic_field(-1);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+
+    silex::OrderElement minus_one(order);
+    assert(minus_one.set_si(-1));
+    silex::OrderElement i_unit(order);
+    sflint::Fmpz w;
+    {
+        silex::OrderUnitGroup units(order);
+        assert(units.compute(order));
+        assert(units.torsion_generator(i_unit));
+        assert(units.torsion_order(sflint::FmpzRef(w)));
+        assert(sflint::fmpz_equal_si(w, 4));
+    }
+
+    const auto valid = [&](slong value, const silex::OrderElement& g) {
+        sflint::Fmpz order_value;
+        assert(set_fmpz_si(order_value, value));
+        return silex::detail::cached_torsion_is_valid(
+                order, sflint::FmpzConstRef(order_value), g);
+    };
+    assert(valid(4, i_unit));
+    assert(valid(2, minus_one));  // a subgroup: valid, not all torsion
+    assert(!valid(2, i_unit));    // wrong exact order
+    assert(!valid(8, i_unit));    // phi(8) = 4 does not divide 2
+    assert(!valid(6, minus_one)); // phi(6) = 2 divides 2; not order 6
+    assert(!valid(3, minus_one)); // odd
+    assert(!valid(0, minus_one));
+    assert(!valid(-2, minus_one));
+    assert(!valid(WORD(1) << 62, minus_one));  // phi = 2^61
     return 0;
 }
 
@@ -6259,6 +6482,8 @@ int main() {
     test_exact_imaginary_quadratic_saturation_records();
     test_cached_torsion_never_reaches_proven();
     test_rank_zero_quadratic_index_one_requires_computed_torsion();
+    test_unit_proofs_require_computed_torsion();
+    test_cached_torsion_is_valid();
     test_prove_index_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();
     test_adjoin_dependent_relation_nonmaximal_root();

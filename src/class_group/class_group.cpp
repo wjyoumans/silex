@@ -4707,6 +4707,10 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
+    // A grh request, and index > 1 under a proven request, publish nothing
+    // here, so the torsion is not checked.  At grh index one the caller
+    // publishes grh labels on `units`; those units were built internally
+    // with computed torsion (torsion invariant, order_unit_internal.hpp).
     if (requested == CertificationMode::proven &&
         flint::fmpz_is_one(flint::FmpzConstRef(index))) {
         // Callers treat index one under a proven request as a certified
@@ -9531,7 +9535,13 @@ bool ClassGroupContext::try_certify_with_units(
         return requested != CertificationMode::proven;
     }
 
-    if (units.certification_status() != CertificationMode::proven) {
+    // Defence in depth: the routes that label units proven check their
+    // torsion first (torsion invariant, order_unit_internal.hpp), but this
+    // gate publishes verified unit and regulator proofs from the label, so
+    // it also requires the torsion Silex computes for the order and
+    // otherwise treats the units as unproven.
+    if (units.certification_status() != CertificationMode::proven ||
+        !detail::order_unit_torsion_is_computed(units)) {
         return requested != CertificationMode::proven;
     }
 

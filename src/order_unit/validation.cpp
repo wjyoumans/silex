@@ -767,17 +767,14 @@ bool try_prove_candidate_pair_by_saturation(
                     "unit_group.validation_saturation_proof.units_unavailable");
             return false;
         }
-        // prove_index_bound proves the free part and keeps the torsion of
-        // its input.  The published unit group is proven only if that
-        // torsion is the torsion Silex computes for the order, never a
-        // cached or supplied value; check it before the class proof so a
-        // rejection leaves both objects unchanged.
-        if (!order_unit_torsion_is_computed(proven)) {
-            SILEX_PROFILE_EVENT(
-                    diagnostics, DiagnosticsModule::unit_group,
-                    "unit_group.validation_saturation_proof.units_unavailable");
-            return false;
-        }
+        // The published unit group is proven only if its torsion is the
+        // torsion Silex computes for the order, never a cached or supplied
+        // value.  prove_index_bound checks that on its input before any
+        // work and fails closed otherwise (event
+        // unit_group.prove_index_bound.torsion_not_computed), and a proven
+        // result carries that torsion, so it is not recomputed here.  The
+        // check happens before the class proof, so a rejection leaves both
+        // objects unchanged.
         if (!ClassGroupCertificationAccess::
                     try_prove_class_order_saturation_with_units(
                             class_group, proven,
@@ -788,6 +785,9 @@ bool try_prove_candidate_pair_by_saturation(
         return true;
     }
 
+    // Units already labelled proven were labelled by a route that computed
+    // or checked their torsion (the torsion invariant in
+    // order_unit_internal.hpp), so the label is trusted here.
     return ClassGroupCertificationAccess::
             try_prove_class_order_saturation_with_units(
                     class_group, units, flint::FmpzConstRef(aux_bound));
@@ -885,6 +885,9 @@ bool recompute_units_from_class_context(OrderUnitGroup& units,
             // reference class-relation unit refresh above supplies the tentative
             // full-rank unit context; reuse the native proof/saturation route
             // to certify or carry any accepted roots forward.
+            // prove_index_bound checks the torsion before it labels the
+            // result proven, so the swapped-in group is proven only with
+            // computed torsion.
             OrderUnitGroup proven(order);
             proven.set_diagnostics(units.diagnostics());
             ProofState status = ProofState::not_checked;
@@ -980,6 +983,9 @@ bool recompute_units_from_class_context(OrderUnitGroup& units,
         return false;
     }
 
+    // prove_index_bound checks the torsion of `refined` before it labels
+    // the result proven; by the torsion invariant (order_unit_internal.hpp)
+    // the check passes for this internally built group.
     if (!proven.prove_index_bound(
                 status, proof_changed, refined, kComputeSatAuxTarget,
                 flint::FmpzConstRef(proof_aux_bound),

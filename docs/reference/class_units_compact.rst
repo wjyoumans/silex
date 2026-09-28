@@ -65,7 +65,13 @@ torsion and for the prime-ideal hooks that take a supplied residue root or
 norm valuation.  Before a class/unit gate marks a unit group proven, it also
 checks that the group's torsion is the torsion subgroup Silex computes for
 the order, so the analytic test on the free part cannot certify wrong
-torsion.  A caller who has an ``hR`` value of their own can compare it with
+torsion.  The unit proofs ``OrderUnitGroup::prove_index_bound``,
+``saturate_index_bounded`` and ``saturate_index_bounded_adaptive`` make the
+same check on their input before any work and return ``false`` otherwise,
+since both their ``proven`` label and their ``ell``-local tests at primes
+dividing the torsion order depend on it.  Every unit group built through the
+installed API carries the computed torsion, so these checks do not change a
+result there.  A caller who has an ``hR`` value of their own can compare it with
 ``OrderUnitGroup::class_regulator_index_bound``, which reports a bound but
 does not publish certification.  It returns ``false`` when the quotient
 ``h_cand R_cand / hR`` has an upper endpoint below one, since no positive

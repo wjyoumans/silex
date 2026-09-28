@@ -21,6 +21,13 @@ public:
             ClassGroupContext& context,
             flint::FmpzConstRef required_bound) noexcept;
 
+    // Exact imaginary-quadratic index h_cand / h for a rank-zero maximal
+    // order.  Under a proven request, true with index one means the class
+    // group and `units` have been published proven (this requires the
+    // torsion of `units` to be the computed torsion); false publishes
+    // nothing.  Index > 1, or any index under a grh request, publishes
+    // nothing and is only a saturation target or acceptance test for the
+    // caller.
     static bool rank_zero_quadratic_class_index_bound(
             flint::FmpzRef out,
             ClassGroupContext& context,

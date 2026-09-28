@@ -2310,9 +2310,17 @@ bool set_best_rank_one_relation_kernel_unit(
         // reference's relation_completion_parameters computes nfrootsof1 once for the BNF pass;
         // reference stores torsion_units on the field/order context.  The
         // rank-one scan varies only the free generator, so reuse torsion.
+        // The pair is checked once here with the test the cached-torsion
+        // hook applies to it, so a pair the hook would refuse fails the
+        // scan now instead of rejecting every candidate below.  The hook
+        // still repeats the check per candidate; w is capped by the degree,
+        // so that costs a few small powers.
         if (!torsion_generator.is_defined() ||
             !rank_zero_torsion(flint::FmpzRef(torsion_order),
-                               torsion_generator, order)) {
+                               torsion_generator, order) ||
+            !cached_torsion_is_valid(order,
+                                     flint::FmpzConstRef(torsion_order),
+                                     torsion_generator)) {
             SILEX_LOG(out.diagnostics(), DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "rank-one relation-kernel torsion unavailable");

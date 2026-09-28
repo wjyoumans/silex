@@ -111,14 +111,35 @@ bool compute_power(Element& out,
                    const Element& base,
                    slong exponent) noexcept;
 
+// Torsion invariant.  Every unit group that the installed API can produce
+// carries the torsion subgroup that Silex computes for its order
+// (rank_zero_torsion): the public setters compute it, set() copies it, and
+// the saturation routines keep it or recompute it when they adjoin a root.
+// The only way to install other torsion is the cached-torsion hook below,
+// and its internal callers pass either torsion computed by rank_zero_torsion
+// for the same order (the rank-one relation-kernel scan) or the roots of
+// unity of the field whose generator lies in the order, which is then the
+// torsion of the order (HNF unit publication).  A cached pair is checked to
+// be a cyclic group of roots of unity in the order, not to be all of them,
+// so under-claimed torsion (for example -1 on Z[i]) is accepted there.
+//
+// The unit proofs depend on the torsion: at a prime ell dividing w the
+// saturation kernels carry a torsion column, so wrong torsion can hide an
+// ell-th root.  Therefore the public routines that label a unit group
+// proven, OrderUnitGroup::prove_index_bound, saturate_index_bounded and
+// saturate_index_bounded_adaptive, check order_unit_torsion_is_computed on
+// their input first and fail closed (return false, output unchanged)
+// otherwise, and ClassGroupContext::try_certify_with_units treats a proven
+// unit group without computed torsion as unproven.  Internal paths that
+// build the group themselves rely on the invariant instead of checking it
+// again; they say so where they do.
+//
 // Noninstalled unit-installation hook.  `trusted` skips the per-generator
 // unit check for internal routes whose generators are already known units.
 // Cached torsion (both pointers or neither) replaces the torsion
-// recomputation; it is accepted only when `cached_torsion_order` is a
-// positive even integer and `cached_torsion_generator` is an element of
-// `order` of exactly that multiplicative order.  The installed group always
-// publishes unknown certification; proven publication re-derives torsion
-// (see order_unit_torsion_is_computed).
+// recomputation; it is accepted only when cached_torsion_is_valid holds.
+// The installed group always publishes unknown certification; proven
+// publication re-derives torsion (see order_unit_torsion_is_computed).
 class OrderUnitGroupAccess {
 public:
     static bool set_units(
@@ -138,6 +159,33 @@ public:
     static void mark_certification_proven(OrderUnitGroup& units) noexcept {
         units.mark_certification_proven_();
     }
+
+    // The bodies of OrderUnitGroup::saturate_index_bounded and
+    // saturate_index_bounded_adaptive without their torsion check.  The
+    // caller guarantees that `group` carries computed torsion, either by
+    // checking order_unit_torsion_is_computed or by the invariant above for
+    // a group it built itself.
+    static bool saturate_index_bounded_computed_torsion(
+            OrderUnitGroup& out,
+            bool& changed,
+            bool& stable,
+            const OrderUnitGroup& group,
+            EmbeddingContext& embeddings,
+            slong aux_target_len,
+            flint::FmpzConstRef aux_bound,
+            slong max_passes,
+            slong precision) noexcept;
+    static bool saturate_index_bounded_adaptive_computed_torsion(
+            OrderUnitGroup& out,
+            bool& changed,
+            bool& stable,
+            const OrderUnitGroup& group,
+            EmbeddingContext& embeddings,
+            slong aux_target_len,
+            flint::FmpzConstRef aux_bound_start,
+            flint::FmpzConstRef aux_bound_max,
+            slong max_passes,
+            slong precision) noexcept;
 };
 
 inline bool order_unit_group_set_units_internal(
@@ -159,6 +207,17 @@ inline bool order_unit_group_set_units_internal(
 bool order_element_has_exact_order(const OrderElement& generator,
                                    const Order& order,
                                    flint::FmpzConstRef torsion_order) noexcept;
+
+// True when (`torsion_order`, `torsion_generator`) can be torsion of
+// `order`: `torsion_order` is a positive even integer w with phi(w) dividing
+// [K : Q] (Q(zeta_w) is a subfield of K), and `torsion_generator` lies in
+// `order` and has multiplicative order exactly w.  The degree test comes
+// first, so an impossible w is rejected before any power is computed.  It
+// does not show that the pair is all of the torsion; see
+// order_unit_torsion_is_computed.
+bool cached_torsion_is_valid(const Order& order,
+                             flint::FmpzConstRef torsion_order,
+                             const OrderElement& torsion_generator) noexcept;
 
 // True when the torsion stored in `units` is the torsion subgroup of its
 // order as Silex computes it (rank_zero_torsion): the stored order equals the

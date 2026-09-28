@@ -2146,20 +2146,23 @@ bool OrderUnitGroup::saturate_bounded(bool& changed,
     return true;
 }
 
-bool OrderUnitGroup::saturate_index_bounded(bool& changed,
-                                            bool& stable,
-                                            const OrderUnitGroup& group,
-                                            EmbeddingContext& embeddings,
-                                            slong aux_target_len,
-                                            flint::FmpzConstRef aux_bound,
-                                            slong max_passes,
-                                            slong precision) noexcept {
-    SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
+bool detail::OrderUnitGroupAccess::saturate_index_bounded_computed_torsion(
+        OrderUnitGroup& out,
+        bool& changed,
+        bool& stable,
+        const OrderUnitGroup& group,
+        EmbeddingContext& embeddings,
+        slong aux_target_len,
+        flint::FmpzConstRef aux_bound,
+        slong max_passes,
+        slong precision) noexcept {
+    const DiagnosticsContext* const diagnostics = out.diagnostics();
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.saturate_index_bounded");
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (!is_defined() || !group.is_set() ||
-        !same_order_parent(parent(), order) ||
+    if (!out.is_defined() || !group.is_set() ||
+        !same_order_parent(out.parent(), order) ||
         !embedding_has_parent(embeddings, field) ||
         aux_target_len <= 0 || fmpz_cmp_ui(aux_bound.raw(), 2) < 0 ||
         max_passes < 0 || precision <= 0) {
@@ -2168,13 +2171,13 @@ bool OrderUnitGroup::saturate_index_bounded(bool& changed,
 
     OrderUnitGroup working(*order);
     OrderUnitGroup pass_result(*order);
-    working.set_diagnostics(diagnostics_);
-    pass_result.set_diagnostics(diagnostics_);
+    working.set_diagnostics(diagnostics);
+    pass_result.set_diagnostics(diagnostics);
     if (!working.is_defined() || !pass_result.is_defined() ||
         !working.set(group)) {
         return false;
     }
-    working.set_diagnostics(diagnostics_);
+    working.set_diagnostics(diagnostics);
 
     flint::Fmpz index_bound;
     if (!group.regulator_index_bound(flint::FmpzRef(index_bound),
@@ -2202,10 +2205,10 @@ bool OrderUnitGroup::saturate_index_bounded(bool& changed,
             if (!any_changed) {
                 return false;
             }
-            if (!set(working)) {
+            if (!out.set(working)) {
                 return false;
             }
-            try_certify_index_one(precision);
+            out.try_certify_index_one(precision);
             changed = true;
             stable = false;
             return true;
@@ -2223,16 +2226,18 @@ bool OrderUnitGroup::saturate_index_bounded(bool& changed,
         fmpz_nextprime(ell.raw(), ell.raw(), 1);
     }
 
-    if (!set(working)) {
+    if (!out.set(working)) {
         return false;
     }
-    try_certify_index_one(precision);
+    out.try_certify_index_one(precision);
     changed = any_changed;
     stable = all_stable;
     return true;
 }
 
-bool OrderUnitGroup::saturate_index_bounded_adaptive(
+bool detail::OrderUnitGroupAccess::
+        saturate_index_bounded_adaptive_computed_torsion(
+        OrderUnitGroup& out,
         bool& changed,
         bool& stable,
         const OrderUnitGroup& group,
@@ -2242,12 +2247,13 @@ bool OrderUnitGroup::saturate_index_bounded_adaptive(
         flint::FmpzConstRef aux_bound_max,
         slong max_passes,
         slong precision) noexcept {
-    SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
+    const DiagnosticsContext* const diagnostics = out.diagnostics();
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.saturate_index_bounded_adaptive");
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (!is_defined() || !group.is_set() ||
-        !same_order_parent(parent(), order) ||
+    if (!out.is_defined() || !group.is_set() ||
+        !same_order_parent(out.parent(), order) ||
         !embedding_has_parent(embeddings, field) ||
         aux_target_len <= 0 || fmpz_cmp_ui(aux_bound_start.raw(), 2) < 0 ||
         fmpz_cmp(aux_bound_max.raw(), aux_bound_start.raw()) < 0 ||
@@ -2257,13 +2263,13 @@ bool OrderUnitGroup::saturate_index_bounded_adaptive(
 
     OrderUnitGroup working(*order);
     OrderUnitGroup pass_result(*order);
-    working.set_diagnostics(diagnostics_);
-    pass_result.set_diagnostics(diagnostics_);
+    working.set_diagnostics(diagnostics);
+    pass_result.set_diagnostics(diagnostics);
     if (!working.is_defined() || !pass_result.is_defined() ||
         !working.set(group)) {
         return false;
     }
-    working.set_diagnostics(diagnostics_);
+    working.set_diagnostics(diagnostics);
 
     flint::Fmpz aux_bound;
     flint::Fmpz next_bound;
@@ -2273,10 +2279,12 @@ bool OrderUnitGroup::saturate_index_bounded_adaptive(
     for (;;) {
         bool pass_changed = false;
         bool pass_stable = false;
-        if (pass_result.saturate_index_bounded(
-                    pass_changed, pass_stable, working, embeddings,
-                    aux_target_len, flint::FmpzConstRef(aux_bound),
-                    max_passes, precision)) {
+        // `working` keeps the torsion of `group` or recomputes it when a
+        // root is adjoined, so the caller's torsion guarantee still holds.
+        if (saturate_index_bounded_computed_torsion(
+                    pass_result, pass_changed, pass_stable, working,
+                    embeddings, aux_target_len,
+                    flint::FmpzConstRef(aux_bound), max_passes, precision)) {
             if (pass_changed || pass_stable) {
                 working.swap(pass_result);
                 if (pass_changed) {
@@ -2285,7 +2293,7 @@ bool OrderUnitGroup::saturate_index_bounded_adaptive(
             }
 
             if (pass_stable) {
-                if (!set(working)) {
+                if (!out.set(working)) {
                     return false;
                 }
                 changed = any_changed;
@@ -2298,7 +2306,7 @@ bool OrderUnitGroup::saturate_index_bounded_adaptive(
             if (!any_changed) {
                 return false;
             }
-            if (!set(working)) {
+            if (!out.set(working)) {
                 return false;
             }
             changed = true;
@@ -2315,7 +2323,7 @@ bool OrderUnitGroup::saturate_index_bounded_adaptive(
             if (!any_changed) {
                 return false;
             }
-            if (!set(working)) {
+            if (!out.set(working)) {
                 return false;
             }
             changed = true;
@@ -2325,6 +2333,55 @@ bool OrderUnitGroup::saturate_index_bounded_adaptive(
         flint::fmpz_set(flint::FmpzRef(aux_bound),
                         flint::FmpzConstRef(next_bound));
     }
+}
+
+bool OrderUnitGroup::saturate_index_bounded(bool& changed,
+                                            bool& stable,
+                                            const OrderUnitGroup& group,
+                                            EmbeddingContext& embeddings,
+                                            slong aux_target_len,
+                                            flint::FmpzConstRef aux_bound,
+                                            slong max_passes,
+                                            slong precision) noexcept {
+    // The result is labelled proven when the index bound is one, and the
+    // passes test ell-th roots up to the torsion generator at ell | w, so
+    // both rely on the input torsion.  Fail closed unless it is the torsion
+    // Silex computes for the order.
+    if (!group.is_set() || !detail::order_unit_torsion_is_computed(group)) {
+        SILEX_PROFILE_EVENT(
+                diagnostics_, DiagnosticsModule::unit_group,
+                "unit_group.saturate_index_bounded.torsion_not_computed");
+        return false;
+    }
+    return detail::OrderUnitGroupAccess::
+            saturate_index_bounded_computed_torsion(
+                    *this, changed, stable, group, embeddings,
+                    aux_target_len, aux_bound, max_passes, precision);
+}
+
+bool OrderUnitGroup::saturate_index_bounded_adaptive(
+        bool& changed,
+        bool& stable,
+        const OrderUnitGroup& group,
+        EmbeddingContext& embeddings,
+        slong aux_target_len,
+        flint::FmpzConstRef aux_bound_start,
+        flint::FmpzConstRef aux_bound_max,
+        slong max_passes,
+        slong precision) noexcept {
+    // As saturate_index_bounded; the torsion is checked once here, not on
+    // every pass.
+    if (!group.is_set() || !detail::order_unit_torsion_is_computed(group)) {
+        SILEX_PROFILE_EVENT(
+                diagnostics_, DiagnosticsModule::unit_group,
+                "unit_group.saturate_index_bounded.torsion_not_computed");
+        return false;
+    }
+    return detail::OrderUnitGroupAccess::
+            saturate_index_bounded_adaptive_computed_torsion(
+                    *this, changed, stable, group, embeddings,
+                    aux_target_len, aux_bound_start, aux_bound_max,
+                    max_passes, precision);
 }
 
 bool OrderUnitGroup::prove_local_saturated(ProofState& status,
@@ -2713,6 +2770,19 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
 
     slong rank = -1;
     if (!unit_rank(rank, *field) || group.free_rank() != rank) {
+        return false;
+    }
+
+    // A verified result is labelled proven, and the ell-local proofs at
+    // ell | w use the torsion column, so both rely on the input torsion.
+    // Fail closed, before any work, unless it is the torsion Silex computes
+    // for the order.  The saturation passes below keep that torsion or
+    // recompute it when they adjoin a root, so a proven result carries
+    // computed torsion and callers need not check it again.
+    if (!detail::order_unit_torsion_is_computed(group)) {
+        SILEX_PROFILE_EVENT(
+                diagnostics_, DiagnosticsModule::unit_group,
+                "unit_group.prove_index_bound.torsion_not_computed");
         return false;
     }
 
