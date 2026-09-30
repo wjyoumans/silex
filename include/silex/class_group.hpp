@@ -239,12 +239,13 @@ public:
                                 ulong zeta_bf_max_cutoff) noexcept;
     // Publish `proven` for the class group and units from an analytic hR
     // only when that hR is unconditional (degree one or the quadratic
-    // L(1, chi) route).  With a Belabas-Friedman hR (outside degree one),
-    // which assumes GRH, they succeed only if `units` is already proven and
-    // relation saturation has
-    // already been proven at every prime dividing the candidate class
-    // number; then they only record the GRH-conditional analytic check.
-    // Otherwise they fail and leave both objects unchanged.
+    // L(1, chi) route).  In degree one the Belabas-Friedman entry point uses
+    // the exact value hR = 1 and evaluates no series.  With a
+    // Belabas-Friedman hR in any other degree, which assumes GRH, they
+    // succeed only if `units` is already proven and relation saturation has
+    // already been proven at every prime dividing the candidate class number;
+    // then they only record the GRH-conditional analytic check.  Otherwise
+    // they fail and leave both objects unchanged.
     bool try_certify_class_unit_with_zeta(OrderUnitGroup& units,
                                           slong precision) noexcept;
     bool try_certify_class_unit_with_zeta_bf(OrderUnitGroup& units,

@@ -45,18 +45,21 @@ not accepted by ``compute_candidate``.  Proven status is published only by
 the paired transaction or by a separate explicit source-backed proof gate.
 
 The public proof gates certify only from data that Silex computes itself.
-``try_certify_with_units``, ``try_certify_class_unit_with_zeta``, and
+``try_certify_class_unit_with_zeta`` and
 ``try_certify_class_unit_with_zeta_bf`` evaluate the analytic
 class-regulator product from the zeta function, and
 ``try_prove_relation_saturation_with_units`` runs its own ``ell``-local test.
 The analytic product is unconditional only for degree one and for the
-quadratic ``L(1, chi)`` route.  Otherwise it is a Belabas-Friedman value whose
-error bound assumes GRH, and these gates then succeed only when the units
-are already proven and relation saturation at every prime dividing the
-candidate class order is already proven; they never use that value to mark
-units proven.  The ``zeta_bf_max_cutoff`` argument of
-``try_certify_with_units`` is ignored: a ``proven`` request never evaluates a
-Belabas-Friedman ``hR``.
+quadratic ``L(1, chi)`` route of ``try_certify_class_unit_with_zeta``.
+Otherwise it is a Belabas-Friedman value whose error bound assumes GRH, and
+these two gates then succeed only when the units are already proven and
+relation saturation at every prime dividing the candidate class order is
+already proven; they never use that value to mark units proven.
+``try_certify_with_units`` requires proven units and never evaluates a
+Belabas-Friedman ``hR``, so its ``zeta_bf_max_cutoff`` argument is ignored.
+A ``proven`` request uses the analytic product only when it is
+unconditional, and otherwise runs the relation-saturation proof at every
+prime dividing the candidate class order itself.
 Gates that would trust caller-supplied proof data, such as an analytic
 class-regulator product, a saturation index bound, or an exact generator
 norm, are internal to the library and not part of the installed API.  The
@@ -74,13 +77,18 @@ records at primes dividing the torsion order depend on it.  A ``grh`` paired
 transaction makes the check too before it publishes the ``grh`` labels, since
 the torsion does not depend on GRH, and fails otherwise.  Every unit group
 built through the installed API carries the computed torsion, so these
-checks do not change a result there.  A caller who has an ``hR`` value of their own can compare it with
-``OrderUnitGroup::class_regulator_index_bound``, which reports a bound but
-does not publish certification.  It returns ``false`` when the quotient
-``h_cand R_cand / hR`` has an upper endpoint below one.  The quotient is a
-positive integer only when the analytic value is correct and factor-base
-generation is proven, and the accessor does not check generation, so it
-fails closed in this case instead of reporting an index.
+checks do not change a result there.
+
+A caller who has an ``hR`` value of their own can compare it with
+``OrderUnitGroup::class_regulator_index_bound``, which does not publish
+certification.  It returns the ceiling of the upper endpoint of the
+quotient ``h_cand R_cand / hR``.  That quotient equals the combined
+class/unit index, and the value bounds that index, only when the analytic
+value is correct and factor-base generation is proven; the accessor does not
+check generation, so otherwise the value bounds only the quotient.  The
+accessor returns ``false`` when the quotient has an upper endpoint below
+one, since no positive integer then lies in the enclosure, instead of
+reporting an index.
 
 The installed headers still declare a few low-level ideal construction
 shortcuts in ``silex::detail`` (``set_known_two_generator_ideal``,
@@ -89,8 +97,10 @@ shortcuts in ``silex::detail`` (``set_known_two_generator_ideal``,
 that accept caller-supplied generators or HNF data without re-deriving them.
 They set no certification label and are not proof gates; they are not part of
 the supported API.
+
 The ``proven`` and ``grh`` labels assume that user code defines nothing in
-namespace ``silex::detail``, which holds the library's internal helpers.
+namespace ``silex::detail``, since they rely on the internal helpers there
+being the library's own.
 
 Paired Class/Unit Transaction
 -----------------------------

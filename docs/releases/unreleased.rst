@@ -21,16 +21,16 @@ Changed
   evaluation's BF audit data is recorded too, so ``zeta_bf_proof_status()``
   reads ``verified`` and ``zeta_bf_proof_record()`` gives its error bound,
   cutoff, and precisions.  The record is informational.  The transaction
-  keeps the class-group and unit labels at ``grh``, and the public zeta and
-  BF gates are unchanged.  The one exception: a ``proven`` record stored by a
-  real-quadratic ``grh`` run lets a later explicit
+  keeps the class-group and unit labels at ``grh``, and that change leaves
+  the public zeta and BF gates unchanged.  The one exception: a ``proven``
+  record stored by a real-quadratic ``grh`` run lets a later explicit
   ``try_certify_with_units(units, proven)`` with proven units promote the
   class group to ``proven``.  The exact imaginary-quadratic and degree-one
-  ``grh`` routes use no analytic check and record none.  The documentation now
-  also states that ``grh`` mode in degree three and higher and for real
+  ``grh`` routes use no analytic check and record none.  The documentation
+  now also states that ``grh`` mode in degree three and higher and for real
   quadratic fields requires factor-base generation verified up to the
-  Minkowski-type bound and does not use GRH for generation.  See "Class groups
-  and order units" in :doc:`../reference/algorithms_and_sources`.
+  Minkowski-type bound and does not use GRH for generation.  See "Class
+  groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 - **Breaking:** ``OrderUnitGroup::residue_dlog_kernel`` and
   ``saturate_row`` now include the torsion generator when ``ell`` divides the
@@ -41,17 +41,27 @@ Changed
   unchanged.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
-- The public zeta and Belabas-Friedman gates ``try_certify_with_units``,
-  ``try_certify_class_unit_with_zeta`` and
+- ``try_certify_with_units`` no longer evaluates a Belabas-Friedman
+  ``hR``, and its ``zeta_bf_max_cutoff`` argument is ignored.  A ``proven``
+  request still needs proven units.  It uses an analytic ``hR`` only when
+  that value is unconditional (degree one or the quadratic ``L(1, chi)``
+  route); otherwise, and always in degree three and higher, it runs the
+  relation-saturation proof at every prime dividing the candidate class
+  number itself.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
+- The public zeta gates ``try_certify_class_unit_with_zeta`` and
   ``try_certify_class_unit_with_zeta_bf`` are stricter outside degree one.
   When the analytic ``hR`` is a Belabas-Friedman value, which assumes GRH,
   they now succeed only if the units are already ``proven`` and relation
   saturation is already proven at every prime dividing the candidate class
-  number, and then only record the GRH-conditional check.  Otherwise they
-  return ``false`` and leave both objects unchanged.  The same gates still
-  succeed with proven units, and degree one and the quadratic
-  ``L(1, chi)`` route, whose ``hR`` is unconditional, are unchanged.  See
-  "Class groups and order units" in
+  number, and then they only record the GRH-conditional check; otherwise
+  they return ``false`` and leave both objects unchanged.
+  ``try_certify_class_unit_with_zeta_bf`` uses a Belabas-Friedman value for
+  quadratic fields too, and in degree one the exact value ``hR = 1``.  Degree
+  one and the quadratic ``L(1, chi)`` route of
+  ``try_certify_class_unit_with_zeta``, whose ``hR`` is unconditional, are
+  unchanged.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 - ``OrderUnitGroup::prove_index_bound``, ``saturate_index_bounded``,

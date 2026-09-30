@@ -344,7 +344,9 @@ bool class_regulator_index_bound_from_candidate_product(
     // leaves no positive integer in the enclosure (the analytic value or the
     // candidate is wrong, or the factor base does not generate); fail closed
     // instead of reporting index one (decision 2026-09-26).  Otherwise the
-    // outward-rounded ceiling is a conservative bound.
+    // outward-rounded ceiling bounds the quotient; it bounds the combined
+    // index only when the analytic value is correct and generation is
+    // proven.
     if (flint::arf_cmp_ui(upper, 1) < 0) {
         return false;
     }

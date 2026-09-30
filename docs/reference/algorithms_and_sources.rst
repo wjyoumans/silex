@@ -497,13 +497,14 @@ discriminant ``|D|`` fits in a machine word, where the residue comes from
 FLINT Dirichlet ``L(1, chi_D)``.  When that ``L(1, chi_D)`` evaluation fails
 (for example the Dirichlet group cannot be initialized, or the ``L``-value
 ball is not finite with a positive real part), the quadratic route falls back
-to Belabas--Friedman, and the value is then GRH-conditional like any other; certification uses the
-route that actually produced the value, not the field type.  Every other
-``hR`` comes from the Belabas--Friedman evaluation (K. Belabas and E. Friedman,
-"Computing the residue of the Dedekind zeta function", *Math. Comp.* 84
-(2015), 357--369, Theorem 1), whose truncation-error bound assumes GRH.  Such
-an ``hR`` is therefore at most ``grh`` evidence: the analytic check is
-recorded with ``analytic_class_regulator_certification() == grh``, it never
+to Belabas--Friedman, and the value is then GRH-conditional like any other;
+certification uses the route that actually produced the value, not the field
+type.  Every other ``hR`` comes from the Belabas--Friedman evaluation (K.
+Belabas and E. Friedman, "Computing the residue of the Dedekind zeta
+function", *Math. Comp.* 84 (2015), 357--369, Theorem 1), whose
+truncation-error bound assumes GRH.  Such an ``hR`` is therefore at most
+``grh`` evidence: the analytic check is recorded with
+``analytic_class_regulator_certification() == grh``, it never
 marks units, the regulator, or relation saturation as proven, and it never
 promotes a result to ``proven``.  For degree three and higher a ``proven``
 request succeeds only through the saturation route above (generation, proven
@@ -522,10 +523,12 @@ group unchanged.
 
 A Belabas--Friedman check recorded after an unconditional one (for example a
 BF audit of a quadratic field already proven through ``L(1, chi_D)``) keeps
-the unconditional label.  Outside degree one, a Belabas--Friedman check
-never serves as a proof component, and is recorded against unproven units only as the ``grh``-mode
-acceptance record described below.  Because the Belabas--Friedman value
-no longer contributes to a degree-three-or-higher ``proven`` result, such
+the unconditional label.  A Belabas--Friedman evaluation never serves as a
+proof component; in degree one the Belabas--Friedman entry points use the exact
+value ``hR = 1`` and evaluate no Belabas--Friedman series.  Outside degree one
+a Belabas--Friedman check is recorded against unproven units only as the
+``grh``-mode acceptance record described below.  Because the Belabas--Friedman
+value no longer contributes to a degree-three-or-higher ``proven`` result, such
 results report ``analytic_class_regulator_status()`` and
 ``zeta_bf_proof_status()`` as ``not_checked`` unless an audit is requested
 separately; these statuses are audit records, not proof components.
