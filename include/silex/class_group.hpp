@@ -242,10 +242,13 @@ public:
     // L(1, chi) route).  In degree one the Belabas-Friedman entry point uses
     // the exact value hR = 1 and evaluates no series.  With a
     // Belabas-Friedman hR in any other degree, which assumes GRH, they
-    // succeed only if `units` is already proven and relation saturation has
-    // already been proven at every prime dividing the candidate class number;
-    // then they only record the GRH-conditional analytic check.  Otherwise
-    // they fail and leave both objects unchanged.
+    // succeed only if `units` is already proven and the class group already
+    // has an unconditional proof component for this presentation: relation
+    // saturation proven at every prime dividing the candidate class number, or
+    // an unconditional analytic check recorded earlier (degree one or the
+    // quadratic L(1, chi) route, including one stored by a real-quadratic grh
+    // run); then they only record the GRH-conditional analytic check.
+    // Otherwise they fail and leave both objects unchanged.
     bool try_certify_class_unit_with_zeta(OrderUnitGroup& units,
                                           slong precision) noexcept;
     bool try_certify_class_unit_with_zeta_bf(OrderUnitGroup& units,

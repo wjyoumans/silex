@@ -52,11 +52,14 @@ Changed
 
 - The public zeta gates ``try_certify_class_unit_with_zeta`` and
   ``try_certify_class_unit_with_zeta_bf`` are stricter outside degree one.
-  When the analytic ``hR`` is a Belabas-Friedman value, which assumes GRH,
-  they now succeed only if the units are already ``proven`` and relation
-  saturation is already proven at every prime dividing the candidate class
-  number, and then they only record the GRH-conditional check; otherwise
-  they return ``false`` and leave both objects unchanged.
+  When the analytic ``hR`` is a Belabas-Friedman value, which assumes GRH, they
+  now succeed only if the units are already ``proven`` and the class group
+  already has an unconditional proof component for this presentation: relation
+  saturation proven at every prime dividing the candidate class number, or an
+  unconditional analytic check recorded earlier (degree one or the quadratic
+  ``L(1, chi)`` route, including one stored by a real-quadratic ``grh`` run),
+  and then they only record the GRH-conditional check; otherwise they return
+  ``false`` and leave both objects unchanged.
   ``try_certify_class_unit_with_zeta_bf`` uses a Belabas-Friedman value for
   quadratic fields too, and in degree one the exact value ``hR = 1``.  Degree
   one and the quadratic ``L(1, chi)`` route of

@@ -52,9 +52,12 @@ class-regulator product from the zeta function, and
 The analytic product is unconditional only for degree one and for the
 quadratic ``L(1, chi)`` route of ``try_certify_class_unit_with_zeta``.
 Otherwise it is a Belabas-Friedman value whose error bound assumes GRH, and
-these two gates then succeed only when the units are already proven and
-relation saturation at every prime dividing the candidate class order is
-already proven; they never use that value to mark units proven.
+these two gates then succeed only when the units are already proven and the
+class group already has an unconditional proof component for this presentation:
+relation saturation proven at every prime dividing the candidate class number,
+or an unconditional analytic check recorded earlier (degree one or the
+quadratic ``L(1, chi)`` route, including one stored by a real-quadratic ``grh``
+run); they never use that value to mark units proven.
 ``try_certify_with_units`` requires proven units and never evaluates a
 Belabas-Friedman ``hR``, so its ``zeta_bf_max_cutoff`` argument is ignored.
 A ``proven`` request uses the analytic product only when it is
