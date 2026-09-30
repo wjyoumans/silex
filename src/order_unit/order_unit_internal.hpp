@@ -257,7 +257,8 @@ bool unit_index_bound_from_regulator_quotient(
 // analytic_class_regulator_product, a bound for the combined class/unit
 // index.  Fails, leaving out unchanged, when either input is not finite and
 // positive or when that upper endpoint is below one: the quotient is then
-// not consistent with a positive integer index.
+// not consistent with a positive integer index (a positive integer only when
+// the analytic value is correct and factor-base generation is proven).
 bool class_regulator_index_bound_from_candidate_product(
         flint::FmpzRef out,
         flint::ArbConstRef candidate_class_regulator_product,

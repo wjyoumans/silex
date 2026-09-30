@@ -77,8 +77,10 @@ built through the installed API carries the computed torsion, so these
 checks do not change a result there.  A caller who has an ``hR`` value of their own can compare it with
 ``OrderUnitGroup::class_regulator_index_bound``, which reports a bound but
 does not publish certification.  It returns ``false`` when the quotient
-``h_cand R_cand / hR`` has an upper endpoint below one, since no positive
-integer index is then consistent with the supplied value.
+``h_cand R_cand / hR`` has an upper endpoint below one.  The quotient is a
+positive integer only when the analytic value is correct and factor-base
+generation is proven, and the accessor does not check generation, so it
+fails closed in this case instead of reporting an index.
 
 The installed headers still declare a few low-level ideal construction
 shortcuts in ``silex::detail`` (``set_known_two_generator_ideal``,
@@ -87,6 +89,8 @@ shortcuts in ``silex::detail`` (``set_known_two_generator_ideal``,
 that accept caller-supplied generators or HNF data without re-deriving them.
 They set no certification label and are not proof gates; they are not part of
 the supported API.
+The ``proven`` and ``grh`` labels assume that user code defines nothing in
+namespace ``silex::detail``, which holds the library's internal helpers.
 
 Paired Class/Unit Transaction
 -----------------------------

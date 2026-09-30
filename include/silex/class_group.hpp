@@ -226,9 +226,10 @@ public:
     // prime dividing the candidate class number.  A Belabas-Friedman hR,
     // which assumes GRH, is never used to publish `proven`, so
     // `zeta_bf_max_cutoff` is ignored for a `proven` request (and no other
-    // request evaluates hR); the overload is kept for source compatibility.  On degree >= 3 a `proven` request runs the
-    // saturation proof, which computes discrete logarithms at auxiliary
-    // primes for every prime dividing the candidate class number.
+    // request evaluates hR); the overload is kept for source compatibility.
+    // On degree >= 3 a `proven` request runs the saturation proof, which
+    // computes discrete logarithms at auxiliary primes for every prime
+    // dividing the candidate class number.
     bool try_certify_with_units(const OrderUnitGroup& units,
                                 CertificationMode requested,
                                 slong precision) noexcept;
@@ -238,8 +239,9 @@ public:
                                 ulong zeta_bf_max_cutoff) noexcept;
     // Publish `proven` for the class group and units from an analytic hR
     // only when that hR is unconditional (degree one or the quadratic
-    // L(1, chi) route).  With a Belabas-Friedman hR, which assumes GRH, they
-    // succeed only if `units` is already proven and relation saturation has
+    // L(1, chi) route).  With a Belabas-Friedman hR (outside degree one),
+    // which assumes GRH, they succeed only if `units` is already proven and
+    // relation saturation has
     // already been proven at every prime dividing the candidate class
     // number; then they only record the GRH-conditional analytic check.
     // Otherwise they fail and leave both objects unchanged.

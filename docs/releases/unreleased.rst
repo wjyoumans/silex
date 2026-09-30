@@ -41,6 +41,28 @@ Changed
   unchanged.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The public zeta and Belabas-Friedman gates ``try_certify_with_units``,
+  ``try_certify_class_unit_with_zeta`` and
+  ``try_certify_class_unit_with_zeta_bf`` are stricter outside degree one.
+  When the analytic ``hR`` is a Belabas-Friedman value, which assumes GRH,
+  they now succeed only if the units are already ``proven`` and relation
+  saturation is already proven at every prime dividing the candidate class
+  number, and then only record the GRH-conditional check.  Otherwise they
+  return ``false`` and leave both objects unchanged.  The same gates still
+  succeed with proven units, and degree one and the quadratic
+  ``L(1, chi)`` route, whose ``hR`` is unconditional, are unchanged.  See
+  "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
+- ``OrderUnitGroup::prove_index_bound``, ``saturate_index_bounded``,
+  ``saturate_index_bounded_adaptive`` and ``prove_local_saturated`` now check
+  on entry that the unit group's torsion is the torsion Silex computes for
+  the order, and return ``false`` with the output unchanged otherwise.  A
+  ``grh`` paired transaction makes the same check before it publishes the
+  ``grh`` labels.  Every unit group built through the installed API already
+  carries the computed torsion, so no result from the installed API changes.
+  See :doc:`../reference/class_units_compact`.
+
 Fixed
 -----
 

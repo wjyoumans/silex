@@ -452,9 +452,34 @@ verifies itself, and proven unit publication through the class/unit gates
 re-derives the torsion subgroup of the order rather than trusting a stored
 one.
 
+The analytic index bound is the ceiling of the rigorous upper endpoint of the
+quotient ``h_cand R_cand / hR``.  When the analytic ``hR`` is correct and the
+factor base generates the class group, this quotient is the combined
+class/unit index, a positive integer.  If the upper endpoint is below one, the
+enclosure contains no positive integer: the analytic value or the candidate is
+wrong, or the factor base does not generate the class group (in general the
+quotient is ``[Lambda_S : L] / [Cl : <S>]``, which can lie below one when the
+factor base ``S`` does not generate).  In every such case the bound fails
+closed, and the check reports the analytic value as unavailable instead of
+reporting index one.  The public accessor
+``OrderUnitGroup::class_regulator_index_bound`` does not itself check
+generation, so it fails closed for any upper endpoint below one.  Only once
+factor-base generation is proven is the quotient a positive integer.
+
+This is a deliberate deviation from Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp.jl:_validate_class_unit_group``, which in this
+case returns index one (through ``abs_upper_bound`` of a value in ``(0, 1)``)
+and so accepts.  Silex fails closed instead (a user decision, 2026-09-26).
+PARI 2.17.3 ``src/basemath/buch2.c:bad_check`` also rejects a quotient below
+0.75, treating it as a precision failure, though it then retries with more
+precision where Silex fails.
+
 The exact imaginary-quadratic ``proven`` route uses the same index argument
 with the exact class number ``h = h(D)``, counted from the reduced forms
 returned by FLINT ``qfb_reduced_forms``, in place of ``ell``-local tests.
+Here ``D`` is the fundamental discriminant of the maximal order (the route
+applies to maximal orders only), so every form of discriminant ``D`` is
+primitive and the count of reduced forms is the class number of the order.
 With generation verified up to the Minkowski-type bound and ``h_cand = h``,
 the computed relation lattice has index one in the full one, so it is
 saturated at every prime.  The route stores a verified relation-saturation
@@ -471,8 +496,8 @@ one, and maximal orders of explicit quadratic-backend fields whose
 discriminant ``|D|`` fits in a machine word, where the residue comes from
 FLINT Dirichlet ``L(1, chi_D)``.  When that ``L(1, chi_D)`` evaluation fails
 (for example the Dirichlet group cannot be initialized, or the ``L``-value
-ball is not finite with a positive real part), the quadratic route falls back to Belabas--Friedman, and
-the value is then GRH-conditional like any other; certification uses the
+ball is not finite with a positive real part), the quadratic route falls back
+to Belabas--Friedman, and the value is then GRH-conditional like any other; certification uses the
 route that actually produced the value, not the field type.  Every other
 ``hR`` comes from the Belabas--Friedman evaluation (K. Belabas and E. Friedman,
 "Computing the residue of the Dedekind zeta function", *Math. Comp.* 84
@@ -495,18 +520,10 @@ regulator lower bound and unit saturation, and the class group by
 saturation.  A failed saturation proof leaves the candidate units and class
 group unchanged.
 
-The analytic index bound is the ceiling of the rigorous upper endpoint of the
-quotient ``h_cand R_cand / hR``.  When the analytic ``hR`` is correct this
-quotient is the combined class/unit index, a positive integer.  If the upper
-endpoint is below one, the enclosure contains no positive integer, so the
-analytic value and the candidate are inconsistent; the bound then fails
-closed and the check reports the analytic value as unavailable instead of
-reporting index one.
-
 A Belabas--Friedman check recorded after an unconditional one (for example a
 BF audit of a quadratic field already proven through ``L(1, chi_D)``) keeps
-the unconditional label.  A Belabas--Friedman check never serves as a proof
-component, and is recorded against unproven units only as the ``grh``-mode
+the unconditional label.  Outside degree one, a Belabas--Friedman check
+never serves as a proof component, and is recorded against unproven units only as the ``grh``-mode
 acceptance record described below.  Because the Belabas--Friedman value
 no longer contributes to a degree-three-or-higher ``proven`` result, such
 results report ``analytic_class_regulator_status()`` and
