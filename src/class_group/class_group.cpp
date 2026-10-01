@@ -9520,7 +9520,12 @@ bool ClassGroupContext::try_certify_quadratic(
 
     // Generation to the required bound and h_cand = 1 give h | 1, so h = 1
     // without any units.  No unit group was proven here, so the unit and
-    // regulator proof states are left as they were.
+    // regulator proof states are left as they were.  With h = 1 no prime
+    // needs a saturation record, so stale records are cleared as in
+    // try_certify_trivial_quotient.
+    if (private_storage_ != nullptr) {
+        private_storage_->relation_saturation_records.clear();
+    }
     certification_ = CertificationMode::proven;
     relation_saturation_status_ = ProofState::verified;
     return transaction.finish(true);

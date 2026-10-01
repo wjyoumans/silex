@@ -1263,6 +1263,53 @@ int test_compute_candidate_proven_quadratic() {
     return 0;
 }
 
+// A successful real-quadratic try_certify_quadratic proves h = 1, so no
+// prime needs a saturation record; it clears stale records as
+// try_certify_trivial_quotient does.
+int test_certify_real_quadratic_clears_saturation_records() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    assert(order.is_maximal());
+
+    sflint::Fmpz bound;
+    assert(class_group_bound_at_least_two(bound, order));
+    silex::ClassGroupCandidateOptions options;
+    options.max_candidates = 256;
+    options.max_relations = 32;
+
+    silex::ClassGroupContext context;
+    assert(context.compute_candidate(order, sflint::FmpzConstRef(bound),
+                                     options));
+    assert(context.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(bound)));
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(order));
+    assert(units.certification_status() == silex::CertificationMode::proven);
+    assert(context.try_certify_with_units(
+            units, silex::CertificationMode::unknown, 80));
+
+    // Saturation at every prime up to 2 leaves an ell = 2 record.
+    sflint::Fmpz index_bound;
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(index_bound, 2));
+    assert(set_fmpz_si(aux_bound, 31));
+    assert(CertificationAccess::
+                   try_prove_relation_saturation_index_bound_with_units(
+                           context, units, sflint::FmpzConstRef(index_bound),
+                           sflint::FmpzConstRef(aux_bound)));
+    assert(context.relation_saturation_record_count() == 1);
+
+    assert(context.try_certify_quadratic(silex::CertificationMode::proven));
+    assert(context.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::verified);
+    assert(context.relation_saturation_record_count() == 0);
+    return 0;
+}
+
 int test_default_maximal_quadratic_proven_policy() {
     auto check_imaginary = [](slong radicand,
                               slong expected_order,
@@ -2569,6 +2616,7 @@ int main() {
     test_compute_candidate_ideal_lattice_search();
     test_compute_candidate_small_quadratic_policy();
     test_compute_candidate_proven_quadratic();
+    test_certify_real_quadratic_clears_saturation_records();
     test_default_maximal_quadratic_proven_policy();
     test_nonmaximal_quadratic_candidate_rejection_preserves_output();
     test_try_certify_with_units_zeta_quadratic();
