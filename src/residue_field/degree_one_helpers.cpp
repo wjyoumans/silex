@@ -1,5 +1,7 @@
 #include "residue_field_internal.hpp"
 
+#include "../prime_ideal/prime_ideal_internal.hpp"
+
 #include <limits>
 
 #include <flint/fmpq_poly.h>
@@ -173,15 +175,15 @@ bool degree_one_prime_root_mod_p(flint::Fmpz& root,
     ::fmpz_mul(root.raw(), root.raw(), inverse_leading.raw());
     ::fmpz_mod(root.raw(), root.raw(), p.raw());
 
+    // Read the residue variable recorded in the prime when it was built, not
+    // the order's current maximality record (see
+    // PrimeIdeal::residue_polynomial).
     const Order* order = prime.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     flint::Fmpz radicand;
-    flint::Fmpz conductor;
-    if (field != nullptr && order->degree() == 2 && order->is_maximal() &&
-        field->backend_kind() == NumberFieldBackendKind::quadratic &&
+    if (field != nullptr &&
+        PrimeIdealAccess::residue_uses_integral_generator(prime) &&
         field->quadratic_radicand(flint::FmpzRef(radicand)) &&
-        order->quadratic_conductor(flint::FmpzRef(conductor)) &&
-        flint::fmpz_is_one(conductor) &&
         flint::fmpz_fdiv_ui(radicand, 4) == 1) {
         // Direct maximal-quadratic residue polynomials use reference's integral
         // generator omega=(1+theta)/2.  The degree-one fast paths evaluate

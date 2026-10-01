@@ -8,6 +8,7 @@
 
 #include "order/order_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
+#include "residue_field/residue_field_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -1990,6 +1991,149 @@ int test_residue_convention_fixed_at_decomposition() {
     return 0;
 }
 
+// The degree-one root helper converts an omega root to the theta root from
+// the convention recorded in the prime, so withdrawing the parent order's
+// maximality afterwards (internal OrderAccess hook only) keeps the theta
+// root: theta = 2 omega - 1 must still satisfy theta^2 = 5 mod p.
+int test_degree_one_root_follows_recorded_convention() {
+    silex::NumberField field = silex::test::quadratic_field(5);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, 11));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 2);
+    std::vector<slong> roots;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        assert(PrimeIdealAccess::residue_uses_integral_generator(*prime));
+        sflint::Fmpz root;
+        sflint::Fmpz root_p;
+        assert(silex::detail::degree_one_prime_root_mod_p(root, root_p,
+                                                          *prime));
+        const slong value = static_cast<slong>(fmpz_get_si(root.raw()));
+        assert((value * value - 5) % 11 == 0);
+        roots.push_back(value);
+    }
+
+    silex::detail::OrderAccess::set_maximality_unchecked(maximal, false);
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        assert(PrimeIdealAccess::residue_uses_integral_generator(*prime));
+        sflint::Fmpz root;
+        sflint::Fmpz root_p;
+        assert(silex::detail::degree_one_prime_root_mod_p(root, root_p,
+                                                          *prime));
+        assert(fmpz_get_si(root.raw()) ==
+               roots[static_cast<std::size_t>(i)]);
+    }
+    silex::detail::OrderAccess::set_maximality_unchecked(maximal, true);
+    return 0;
+}
+
+// Reverse misuse direction: an alpha-convention prime keeps that convention
+// after its order is marked maximal, for reduce() and valuation (which
+// needs the maximal marking, so it is checked afterwards).  For d = 3
+// the equation order Z[theta] is maximal with conductor 1 and is recorded
+// as maximal, so correct use gives the integral-generator convention.  The
+// internal OrderAccess hook withdraws maximality to build an alpha prime and
+// then restores it.  A prime decomposed after the restore uses the integral
+// generator convention; PrimeIdeal::equal tells the two apart even though
+// their ideals and residue-polynomial coefficients agree.
+int test_alpha_convention_kept_after_marking_maximal() {
+    silex::NumberField field = silex::test::quadratic_field(3);
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::quadratic);
+    silex::Order equation = silex::test::equation_order(field);
+    assert(equation.is_maximal());
+
+    silex::Element theta(field);
+    assert(theta.gen());
+    silex::Element shifted(field);
+    silex::OrderElement shifted_order(equation);
+
+    for (const slong prime_value : {11L, 5L}) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, prime_value));
+        silex::detail::OrderAccess::set_maximality_unchecked(equation, false);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, equation,
+                                      sflint::FmpzConstRef(p)));
+        const auto count = static_cast<std::size_t>(primes.size());
+        std::vector<sflint::FmpzPoly> theta_images(count);
+        for (slong i = 0; i < primes.size(); ++i) {
+            const auto k = static_cast<std::size_t>(i);
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(!PrimeIdealAccess::residue_uses_integral_generator(*prime));
+            assert(prime->reduce(sflint::FmpzPolyRef(theta_images[k]),
+                                 theta));
+        }
+
+        silex::detail::OrderAccess::set_maximality_unchecked(equation, true);
+        silex::PrimeIdealList marked;
+        assert(silex::decompose_prime(marked, equation,
+                                      sflint::FmpzConstRef(p)));
+        assert(marked.size() == primes.size());
+        for (slong i = 0; i < primes.size(); ++i) {
+            const auto k = static_cast<std::size_t>(i);
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(!PrimeIdealAccess::residue_uses_integral_generator(*prime));
+            sflint::FmpzPoly reduced;
+            assert(prime->reduce(sflint::FmpzPolyRef(reduced), theta));
+            assert(fmpz_poly_equal(reduced.raw(),
+                                   theta_images[k].raw()) != 0);
+            // theta - r lies in P (valuation 1, norm r^2 - 3) for the
+            // degree-one prime with root r; for the inert prime theta + 1
+            // has norm -2, a unit at P.
+            slong root = 1;
+            if (prime->residue_degree() == 1) {
+                sflint::Fmpz stored_root;
+                assert(degree_one_root_from_residue_polynomial(stored_root,
+                                                               *prime));
+                root = static_cast<slong>(fmpz_get_si(stored_root.raw()));
+            }
+            element_alpha_over(shifted, -root, 1, 1);
+            assert(shifted_order.set_element(shifted));
+            slong value = -1;
+            assert(prime->valuation(value, shifted_order));
+            assert(value == (prime->residue_degree() == 1 ? 1 : 0));
+
+            bool found_same_ideal = false;
+            for (slong j = 0; j < marked.size(); ++j) {
+                const silex::PrimeIdeal* fresh = marked.at(j);
+                assert(PrimeIdealAccess::residue_uses_integral_generator(
+                        *fresh));
+                sflint::FmpzPoly prime_poly;
+                sflint::FmpzPoly fresh_poly;
+                assert(prime->residue_polynomial(
+                        sflint::FmpzPolyRef(prime_poly)));
+                assert(fresh->residue_polynomial(
+                        sflint::FmpzPolyRef(fresh_poly)));
+                if (fmpz_poly_equal(prime_poly.raw(), fresh_poly.raw()) !=
+                    0) {
+                    silex::Ideal prime_ideal(equation);
+                    silex::Ideal fresh_ideal(equation);
+                    assert(prime->get_ideal(prime_ideal));
+                    assert(fresh->get_ideal(fresh_ideal));
+                    assert(prime_ideal.equal(fresh_ideal));
+                    found_same_ideal = true;
+                    slong fresh_value = -1;
+                    assert(fresh->valuation(fresh_value, shifted_order));
+                    assert(fresh_value == value);
+                    assert(!prime->equal(*fresh));
+                    assert(!fresh->equal(*prime));
+                }
+                assert(fresh->equal(*fresh));
+            }
+            assert(found_same_ideal);
+            assert(prime->equal(*prime));
+        }
+    }
+    return 0;
+}
+
 // For every prime P above each listed p that carries residue data, the
 // stored Kummer generator lies in P (reduces to 0) and the images of the
 // order basis span O/P = F_p^f, so reduce() is onto the residue field.
@@ -2142,5 +2286,7 @@ int main() {
     assert(test_quadratic_backend_omega_reduce_unchanged() == 0);
     assert(test_residue_convention_fixed_at_decomposition() == 0);
     assert(test_kummer_generator_reduces_to_zero_and_residues_span() == 0);
+    assert(test_degree_one_root_follows_recorded_convention() == 0);
+    assert(test_alpha_convention_kept_after_marking_maximal() == 0);
     return 0;
 }

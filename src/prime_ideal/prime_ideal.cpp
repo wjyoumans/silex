@@ -2562,9 +2562,14 @@ bool PrimeIdeal::equal(const PrimeIdeal& other) const noexcept {
         has_residue_poly_ != other.has_residue_poly_) {
         return false;
     }
+    // The same coefficients in a different residue variable (omega or
+    // alpha) describe a different residue map, so the recorded convention is
+    // part of the comparison.
     return !has_residue_poly_ ||
-           fmpz_poly_equal(residue_poly_.raw(),
-                           other.residue_poly_.raw()) != 0;
+           (residue_in_integral_generator_ ==
+                    other.residue_in_integral_generator_ &&
+            fmpz_poly_equal(residue_poly_.raw(),
+                            other.residue_poly_.raw()) != 0);
 }
 
 bool PrimeIdeal::reduce(flint::FmpzPolyRef out,
