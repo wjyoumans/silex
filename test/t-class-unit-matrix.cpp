@@ -2339,7 +2339,12 @@ int test_low_bound_generation_check_does_not_promote() {
     // bound 1 it must not promote.  The class group still becomes `proven`
     // through the saturation route, which re-runs the generation check at
     // the required bound and leaves its ell = 2 record (h = 2); the stored
-    // record route leaves none.
+    // record route leaves none.  try_certify_with_units offers no way to
+    // switch the saturation route off, so the stored record route is seen
+    // only through these side effects.
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
     assert(class_group.relation_saturation_record_count() == 0);
     assert(class_group.try_certify_with_units(
             proven_units, silex::CertificationMode::proven, 1));
@@ -2350,6 +2355,10 @@ int test_low_bound_generation_check_does_not_promote() {
     assert(sflint::fmpz_cmp(sflint::FmpzConstRef(checked_bound),
                             sflint::FmpzConstRef(generation_bound)) >= 0);
     assert(class_group.relation_saturation_record_count() == 1);
+    auto record = class_group.relation_saturation_record(0);
+    assert(record.has_value());
+    assert(sflint::fmpz_equal_si(record->ell, 2));
+    assert(record->status == silex::ProofState::verified);
     return 0;
 }
 
