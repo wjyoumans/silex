@@ -418,7 +418,14 @@ in the branch where ``p`` does not divide the index: an order element is
 mapped to its ``alpha``-polynomial through the order basis (PARI
 ``nf_get_zkprimpart`` and ``nf_get_zkden``) and reduced modulo
 ``(p, g)``.  Silex does not implement PARI's anti-uniformizer handling of
-denominators divisible by ``p`` (``Rg_to_ff``); such inputs fail.  On a
+denominators divisible by ``p`` (``Rg_to_ff``); such inputs fail.  PARI
+takes that polynomial branch only for residue degree ``f > 1``; for
+``f = 1`` it projects with ``dim1proj`` on the prime's HNF (``base2.c``
+lines 2520--2526), whereas Silex uses the polynomial reduction for every
+``f``.  PARI's ``nf`` is always the maximal order, so applying the same
+reduction on an equation order is Silex's own extension, justified by
+``Z[alpha]/(p, g(alpha)) = F_p[x]/(g)`` for an irreducible factor ``g`` of
+the defining polynomial modulo ``p``.  On a
 maximal quadratic-backend order the residue polynomial is instead taken in
 the integral generator ``omega`` of PARI ``quadgen``/``quadpoly``, whose
 ``[1, omega]`` coordinates are already the ``omega``-polynomial.  The

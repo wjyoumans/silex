@@ -44,9 +44,9 @@ The choice is recorded in the ``PrimeIdeal`` when it is built and does not
 follow later changes to the parent order's maximality record.  ``reduce``
 returns a polynomial in the same variable, with coefficients in ``[0, p)``.
 The ``alpha`` convention requires ``alpha`` to be integral (a monic integral
-defining polynomial, which ``decompose_prime`` requires), so that
-``Z[alpha]`` lies in ``O``; on that convention ``reduce`` returns ``false``
-when ``p | [O : Z[alpha]]``.
+defining polynomial, which ``decompose_prime`` requires), so the equation
+and maximal orders on which residue data is produced contain ``Z[alpha]``;
+on that convention ``reduce`` returns ``false`` when ``p | [O : Z[alpha]]``.
 ``valuation`` accepts ``OrderElement``, ``Element``, ``Ideal``,
 ``FractionalIdeal``, and ``FactoredElement`` inputs on the currently
 certified/implemented paths. Fractional inputs subtract the exact rational

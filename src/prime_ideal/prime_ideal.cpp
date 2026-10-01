@@ -356,10 +356,10 @@ bool reduce_poly_mod_residue(flint::FmpzPoly& out,
 }
 
 // Alpha-convention half of detail::residue_variable_numerator (source trace
-// there), in two parts.  The alpha-polynomial reduction is defined on O only when O lies in the
-// p-local alpha-power lattice, i.e. p does not divide the denominator of the
-// order basis matrix.  For an order containing Z[alpha] this holds exactly
-// when p does not divide [O : Z[alpha]].
+// there), in two parts.  The alpha-polynomial reduction is defined on O only
+// when O lies in the p-local alpha-power lattice, i.e. p does not divide the
+// denominator of the order basis matrix.  For an order containing Z[alpha]
+// this holds exactly when p does not divide [O : Z[alpha]].
 bool order_basis_denominator_coprime_to(const Order& order,
                                         flint::FmpzConstRef p) noexcept {
     if (order.is_equation_order()) {

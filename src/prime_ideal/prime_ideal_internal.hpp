@@ -31,16 +31,17 @@ bool residue_polynomial_uses_quadratic_integral_generator(
 
 // Writes `element` as numerator(v) / denominator, where v is the variable of
 // `prime`'s stored residue polynomial (alpha, or omega as recorded in the
-// prime when it was built) and numerator has integer coefficients.  On the alpha convention the
-// element's alpha-polynomial is used directly: this is the image of its order
-// coordinates under the order basis matrix, not the coordinates themselves.
-// Fails, leaving outputs unspecified, when p divides the denominator or, on
-// the alpha convention, when p divides the order basis denominator.  The
-// alpha convention requires alpha integral (monic integral defining
-// polynomial); then Z[alpha] lies in O and the failure is exactly
-// p | [O : Z[alpha]].  Reducing
-// numerator modulo (p, residue polynomial) and multiplying by
-// denominator^{-1} mod p gives the residue class of `element` modulo P.
+// prime when it was built) and numerator has integer coefficients.  On the
+// alpha convention the element's alpha-polynomial is used directly: this is
+// the image of its order coordinates under the order basis matrix, not the
+// coordinates themselves.  Fails, leaving outputs unspecified, when p divides
+// the denominator or, on the alpha convention, when p divides the order basis
+// denominator.  The alpha convention requires alpha integral (monic integral
+// defining polynomial).  The equation and maximal orders on which residue
+// data is produced then contain Z[alpha], and for them the failure is exactly
+// p | [O : Z[alpha]].  Reducing numerator modulo (p, residue polynomial)
+// and multiplying by denominator^{-1} mod p gives the residue class of
+// `element` modulo P.
 bool residue_variable_numerator(flint::FmpzPoly& numerator,
                                 flint::Fmpz& denominator,
                                 const PrimeIdeal& prime,
@@ -69,11 +70,6 @@ public:
 // data, and read-only access to recorded residue-map state.
 class PrimeIdealAccess {
 public:
-    // Builds the degree-one prime (p, theta - root) of an equation or
-    // maximal order.  It checks that f(root) = 0 mod p and that the defining
-    // polynomial f is squarefree mod p (so p does not divide the index of
-    // Z[theta] and Dedekind-Kummer applies); otherwise it fails and leaves
-    // `out` unchanged.
     // The residue-polynomial convention recorded when `prime` was built.
     static bool residue_uses_integral_generator(
             const PrimeIdeal& prime) noexcept;
@@ -83,6 +79,11 @@ public:
     // divide [O : Z[alpha]]).  Cached in the prime after the first call.
     static bool order_basis_is_p_integral(const PrimeIdeal& prime) noexcept;
 
+    // Builds the degree-one prime (p, theta - root) of an equation or
+    // maximal order.  It checks that f(root) = 0 mod p and that the defining
+    // polynomial f is squarefree mod p (so p does not divide the index of
+    // Z[theta] and Dedekind-Kummer applies); otherwise it fails and leaves
+    // `out` unchanged.
     static bool set_degree_one_prime_ideal_from_root(
             PrimeIdeal& out,
             const Order& order,

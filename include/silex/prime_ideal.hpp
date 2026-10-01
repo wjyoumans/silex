@@ -62,7 +62,8 @@ public:
     // fixed when the prime is built.  O/P is F_p[x]/(g) with x the image of
     // that generator.  The alpha convention requires alpha to be integral
     // (decompose_prime requires a monic integral defining polynomial), so
-    // that Z[alpha] lies in the order O.  reduce() maps order coordinates to
+    // the equation and maximal orders on which residue data is produced
+    // contain Z[alpha].  reduce() maps order coordinates to
     // that variable through the order basis matrix (never as power-basis
     // coefficients) and returns false when the stored polynomial is
     // unavailable, when the element is not in the order, or, on the alpha
