@@ -6192,6 +6192,64 @@ int test_select_saturation_primes() {
     return 0;
 }
 
+// The public selector and the bounded saturation passes' selector run the
+// same scans, so they pick the same primes.  Z[sqrt7] (disc 28) at ell = 3
+// and Z[sqrt13] (disc 52) at ell = 3 each have a rational q = 1 mod ell
+// dividing the discriminant (7 and 13, both ramified) with a degree-one
+// prime above it: both selectors skip it, as the reference
+// compute_candidates_for_saturate does.  Z[sqrt2] at ell = 2 has no such q.
+void assert_saturation_selectors_agree(slong radicand,
+                                       const char* unit_constant,
+                                       const char* unit_linear,
+                                       slong ell_value,
+                                       slong target_len,
+                                       slong bound_value,
+                                       slong skipped_q) {
+    silex::NumberField field = quadratic_field(radicand);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+    silex::Element unit(field);
+    assert(set_integral_quadratic_coeffs_str(unit, unit_constant,
+                                             unit_linear));
+    silex::OrderUnitGroup group(order);
+    assert(set_single_unit_group(group, order, unit, embeddings));
+
+    sflint::Fmpz ell;
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(ell, ell_value));
+    assert(set_fmpz_si(bound, bound_value));
+
+    silex::PrimeIdealList public_primes;
+    silex::PrimeIdealList bounded_primes;
+    sflint::FmpzMat kernel(0, 0);
+    assert(group.select_saturation_primes(public_primes,
+                                          sflint::FmpzConstRef(ell),
+                                          target_len,
+                                          sflint::FmpzConstRef(bound)));
+    assert(silex::detail::select_saturation_primes_with_kernel(
+            bounded_primes, kernel, group, sflint::FmpzConstRef(ell),
+            target_len, sflint::FmpzConstRef(bound)));
+    assert(public_primes.size() == target_len);
+    assert(bounded_primes.size() == target_len);
+    for (slong i = 0; i < target_len; ++i) {
+        const silex::PrimeIdeal* lhs = public_primes.at(i);
+        const silex::PrimeIdeal* rhs = bounded_primes.at(i);
+        assert(lhs != nullptr && rhs != nullptr);
+        assert(lhs->equal(*rhs));
+        sflint::Fmpz q;
+        assert(lhs->rational_prime(sflint::FmpzRef(q)));
+        assert(::fmpz_cmp_si(q.raw(), skipped_q) != 0);
+    }
+}
+
+int test_saturation_selectors_agree() {
+    assert_saturation_selectors_agree(7, "8", "3", 3, 2, 100, 7);
+    assert_saturation_selectors_agree(13, "649", "180", 3, 2, 100, 13);
+    assert_saturation_selectors_agree(2, "1", "1", 2, 3, 100, 0);
+    return 0;
+}
+
 int test_saturate_bounded_real_quadratic() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order;
@@ -6653,6 +6711,7 @@ int main() {
     test_saturate_local_once_real_quadratic();
     test_saturate_local_once_rank_zero_and_failures();
     test_select_saturation_primes();
+    test_saturation_selectors_agree();
     test_saturate_bounded_real_quadratic();
     test_saturate_bounded_rank_zero_zero_pass_partial_and_failures();
     test_supplied_real_quadratic_units();

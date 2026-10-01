@@ -236,13 +236,10 @@ public:
     // is a unit modulo every prime, so the extra column rejects no prime:
     // the per-prime acceptance test agrees between the two.  Both selectors
     // also fall back to a second scan over every residue degree, the same
-    // way, when the first scan does not fill target_len.  The scans can
-    // still pick different primes, though: the public selector's first scan
-    // also skips rational primes dividing the order discriminant, which the
-    // bounded selector's first scan does not, and this is the only
-    // difference between the two scans (e.g. Z[sqrt(7)], ell = 3).  If the
-    // acceptance test changes, keep it in agreement between the two; the
-    // discriminant-skip difference is a separate, tracked question.
+    // way, when the first scan does not fill target_len.  Both first scans
+    // skip rational primes dividing the order discriminant, so the two
+    // selectors pick the same primes.  If the scans or the acceptance test
+    // change, keep them in agreement between the two.
     bool select_saturation_primes(PrimeIdealList& out,
                                   flint::FmpzConstRef ell,
                                   slong target_len,

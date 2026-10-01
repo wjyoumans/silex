@@ -1045,6 +1045,10 @@ bool publish_saturation_selection(PrimeIdealList& out,
     return detail::dlog_kernel_from_matrix(kernel, dlog_matrix, ell);
 }
 
+}  // namespace
+
+namespace detail {
+
 bool select_saturation_primes_with_kernel(
         PrimeIdealList& out,
         flint::FmpzMat& kernel,
@@ -1085,6 +1089,11 @@ bool select_saturation_primes_with_kernel(
     selected.reserve(static_cast<std::size_t>(target_len));
     flint::FmpzMat dlog_matrix(width, 0);
 
+    flint::Fmpz order_discriminant;
+    if (!order_discriminant_for_saturation(order_discriminant, *order)) {
+        return false;
+    }
+
     auto try_append_prime = [&](const PrimeIdeal& prime) noexcept -> bool {
         flint::FmpzMat column(width, 1);
         if (!detail::saturation_prime_character_column(column, group, prime,
@@ -1104,11 +1113,24 @@ bool select_saturation_primes_with_kernel(
     flint::fmpz_set_ui(flint::FmpzRef(p), 2);
     while (static_cast<slong>(selected.size()) < target_len &&
            fmpz_cmp(p.raw(), bound.raw()) <= 0) {
+        // reference RelSaturate.compute_candidates_for_saturate scans rational
+        // q = 1 mod ell, skips q dividing the discriminant, and uses only
+        // degree-one primes above q; the same first scan as
+        // OrderUnitGroup::select_saturation_primes.
         fmpz_sub_ui(pminus.raw(), p.raw(), 1);
         if (fmpz_divisible(pminus.raw(), ell.raw()) == 0) {
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.saturation_selector.congruence_skip");
+            fmpz_nextprime(p.raw(), p.raw(), 1);
+            continue;
+        }
+        if (rational_prime_divides_order_discriminant(
+                    flint::FmpzConstRef(order_discriminant),
+                    flint::FmpzConstRef(p))) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.saturation_selector.discriminant_skip");
             fmpz_nextprime(p.raw(), p.raw(), 1);
             continue;
         }
@@ -1165,6 +1187,10 @@ bool select_saturation_primes_with_kernel(
     return publish_saturation_selection(out, kernel, *order, selected,
                                         dlog_matrix, target_len, ell);
 }
+
+}  // namespace detail
+
+namespace {
 
 bool select_saturation_proof_kernel_direct_degree_one(
         slong& local_prime_count,
@@ -2081,7 +2107,7 @@ bool OrderUnitGroup::saturate_bounded(bool& changed,
                             "unit_group.saturate_bounded.pass");
         PrimeIdealList primes;
         flint::FmpzMat kernel(0, 0);
-        if (!select_saturation_primes_with_kernel(
+        if (!detail::select_saturation_primes_with_kernel(
                     primes, kernel, working, ell, aux_target_len, aux_bound)) {
             SILEX_PROFILE_EVENT(
                     diagnostics_, DiagnosticsModule::unit_group,

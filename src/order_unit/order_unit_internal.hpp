@@ -494,6 +494,17 @@ bool saturation_prime_character_column(flint::FmpzMat& out,
                                        const OrderUnitGroup& group,
                                        const PrimeIdeal& prime,
                                        flint::FmpzConstRef ell) noexcept;
+// The bounded saturation passes' prime selector: the same scans as
+// OrderUnitGroup::select_saturation_primes (first scan over q = 1 mod ell
+// not dividing the order discriminant, degree-one primes only; then every
+// residue degree), and so the same primes, with the residue_dlog_kernel
+// shape kernel of the selected characters published alongside.
+bool select_saturation_primes_with_kernel(PrimeIdealList& out,
+                                          flint::FmpzMat& kernel,
+                                          const OrderUnitGroup& group,
+                                          flint::FmpzConstRef ell,
+                                          slong target_len,
+                                          flint::FmpzConstRef bound) noexcept;
 bool saturation_proof_prime_usable(const OrderUnitGroup& group,
                                    const PrimeIdeal& prime,
                                    flint::FmpzConstRef ell) noexcept;
