@@ -54,16 +54,21 @@ public:
     bool rational_prime(flint::FmpzRef out) const noexcept;
     bool get_ideal(Ideal& out) const noexcept;
     bool kummer_generator_coordinates(flint::FmpzMatRef out) const noexcept;
-    // Residue-polynomial variable convention (current, per backend): on a
-    // maximal quadratic-backend order with basis [1, omega], the residue
-    // polynomial g and reduce() outputs are polynomials in the integral
-    // generator omega; otherwise they are polynomials in the NumberField
-    // generator alpha.  O/P is F_p[x]/(g) with x the image of that
-    // generator.  reduce() maps order coordinates to that variable through
-    // the order basis matrix (never as power-basis coefficients) and returns
-    // false when the stored polynomial is unavailable, when the element is
-    // not in the order, or, on the alpha convention, when p divides the order
-    // basis denominator [O : Z[alpha]].  Coefficients are reduced to [0, p).
+    // Residue-polynomial variable convention (current, per backend): when
+    // the prime was decomposed over a maximal quadratic-backend order with
+    // basis [1, omega], the residue polynomial g and reduce() outputs are
+    // polynomials in the integral generator omega; otherwise they are
+    // polynomials in the NumberField generator alpha.  The convention is
+    // fixed when the prime is built.  O/P is F_p[x]/(g) with x the image of
+    // that generator.  The alpha convention requires alpha to be integral
+    // (decompose_prime requires a monic integral defining polynomial), so
+    // that Z[alpha] lies in the order O.  reduce() maps order coordinates to
+    // that variable through the order basis matrix (never as power-basis
+    // coefficients) and returns false when the stored polynomial is
+    // unavailable, when the element is not in the order, or, on the alpha
+    // convention, when p | [O : Z[alpha]] (equivalently, p divides the
+    // denominator of the order basis written in the alpha power basis).
+    // Coefficients are reduced to [0, p).
     bool residue_polynomial(flint::FmpzPolyRef out) const noexcept;
     bool norm(flint::FmpzRef out) const noexcept;
     slong ramification_index() const noexcept;
@@ -102,7 +107,8 @@ private:
                   slong ramification_index,
                   slong residue_degree,
                   const Ideal& ideal,
-                  flint::FmpzPolyConstRef residue_polynomial) noexcept;
+                  flint::FmpzPolyConstRef residue_polynomial,
+                  bool residue_in_integral_generator) noexcept;
     bool set_data_no_residue(flint::FmpzConstRef p,
                              slong ramification_index,
                              slong residue_degree,
@@ -114,6 +120,7 @@ private:
             noexcept;
     const flint::FmpzMat* coordinate_valuation_matrix_cached()
             const noexcept;
+    bool order_basis_is_p_integral() const noexcept;
     bool valuation_by_power_containment(
             slong& out,
             const OrderElement& element,
@@ -162,6 +169,12 @@ private:
     bool has_kummer_generator_ = false;
     bool has_residue_poly_ = false;
     bool has_linear_residue_root_ = false;
+    // Residue polynomial is in the quadratic integral generator omega rather
+    // than alpha; recorded by the routine that produced it.
+    bool residue_in_integral_generator_ = false;
+    // Lazily cached: 0 unknown, 1 if p does not divide the order basis
+    // denominator in the alpha power basis, -1 if it does.
+    mutable signed char order_basis_p_integral_ = 0;
 };
 
 class PrimeIdealList {

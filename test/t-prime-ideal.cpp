@@ -1,10 +1,12 @@
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/nmod_mat.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_ring.hpp>
 
+#include "order/order_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
 #include "test_support.hpp"
 
@@ -338,6 +340,31 @@ int test_degree_one_prime_from_root_rejects_non_roots() {
     assert(sflint::fmpz_equal_si(norm, 7));
     assert(prime.residue_degree() == 1);
 
+    return 0;
+}
+
+// On a maximal order with [O : Z[theta]] = 2, the root 1 of
+// f = x^3 - 3x^2 + 2x - 8 mod 2 does not give a Dedekind-Kummer prime
+// (2 divides the index; f = x^2 (x + 1) mod 2 is not squarefree), so the
+// internal constructor refuses it and leaves its output unchanged.
+int test_degree_one_prime_from_root_rejects_index_prime() {
+    sflint::FmpqPoly polynomial;
+    poly_cubic_disc1724(polynomial);
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    sflint::Fmpz p;
+    sflint::Fmpz root;
+    assert(set_fmpz_si(p, 2));
+    assert(set_fmpz_si(root, 1));
+    silex::PrimeIdeal prime(maximal);
+    assert(!PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
+            prime, maximal, sflint::FmpzConstRef(p),
+            sflint::FmpzConstRef(root)));
+    assert(!prime.has_prime_data());
     return 0;
 }
 
@@ -1895,12 +1922,194 @@ int test_quadratic_backend_omega_reduce_unchanged() {
     return 0;
 }
 
+// The residue-polynomial variable (omega or alpha) is fixed when the prime is
+// built.  Order handles share their maximality record, so withdrawing the
+// parent order's maximality afterwards (only reachable through the internal
+// OrderAccess hook) must not make reduce() read omega-polynomial data as
+// alpha-polynomial data.
+int test_residue_convention_fixed_at_decomposition() {
+    silex::NumberField field = silex::test::quadratic_field(5);
+    assert(field.backend_kind() == silex::NumberFieldBackendKind::quadratic);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::Element theta(field);
+    silex::Element omega(field);
+    assert(theta.gen());
+    element_alpha_over(omega, 1, 1, 2);
+    silex::OrderElement omega_order(maximal);
+    assert(omega_order.set_element(omega));
+
+    for (const slong prime_value : {11L, 7L}) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, prime_value));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, maximal,
+                                      sflint::FmpzConstRef(p)));
+        std::vector<sflint::FmpzPoly> theta_images(
+                static_cast<std::size_t>(primes.size()));
+        std::vector<sflint::FmpzPoly> omega_images(
+                static_cast<std::size_t>(primes.size()));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const auto k = static_cast<std::size_t>(i);
+            assert(primes.at(i)->reduce(
+                    sflint::FmpzPolyRef(theta_images[k]), theta));
+            assert(primes.at(i)->reduce(
+                    sflint::FmpzPolyRef(omega_images[k]), omega));
+        }
+
+        {
+            silex::detail::OrderAccess::set_maximality_unchecked(maximal,
+                                                                 false);
+            for (slong i = 0; i < primes.size(); ++i) {
+                const auto k = static_cast<std::size_t>(i);
+                sflint::FmpzPoly reduced;
+                assert(primes.at(i)->reduce(sflint::FmpzPolyRef(reduced),
+                                            theta));
+                assert(fmpz_poly_equal(reduced.raw(),
+                                       theta_images[k].raw()) != 0);
+                assert(primes.at(i)->reduce(sflint::FmpzPolyRef(reduced),
+                                            omega));
+                assert(fmpz_poly_equal(reduced.raw(),
+                                       omega_images[k].raw()) != 0);
+                assert(primes.at(i)->reduce(sflint::FmpzPolyRef(reduced),
+                                            omega_order));
+                assert(fmpz_poly_equal(reduced.raw(),
+                                       omega_images[k].raw()) != 0);
+
+                silex::PrimeIdeal copied(maximal);
+                assert(copied.set(*primes.at(i)));
+                assert(copied.reduce(sflint::FmpzPolyRef(reduced), omega));
+                assert(fmpz_poly_equal(reduced.raw(),
+                                       omega_images[k].raw()) != 0);
+            }
+        }
+        silex::detail::OrderAccess::set_maximality_unchecked(maximal, true);
+    }
+    return 0;
+}
+
+// For every prime P above each listed p that carries residue data, the
+// stored Kummer generator lies in P (reduces to 0) and the images of the
+// order basis span O/P = F_p^f, so reduce() is onto the residue field.
+// Returns the number of primes checked.
+slong check_kummer_generator_and_residue_span(const silex::Order& order,
+                                              const slong* rational_primes,
+                                              slong prime_count) noexcept {
+    const slong n = order.degree();
+    slong checked = 0;
+    for (slong k = 0; k < prime_count; ++k) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, rational_primes[k]));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            sflint::FmpzPoly modulus;
+            if (!prime->residue_polynomial(sflint::FmpzPolyRef(modulus))) {
+                continue;
+            }
+            const slong f = prime->residue_degree();
+            assert(fmpz_poly_degree(modulus.raw()) == f);
+
+            sflint::FmpzMat kummer(1, n);
+            assert(prime->kummer_generator_coordinates(
+                    sflint::FmpzMatRef(kummer)));
+            silex::OrderElement generator(order);
+            assert(generator.set_coordinates(sflint::FmpzMatConstRef(kummer)));
+            sflint::FmpzPoly reduced;
+            assert(prime->reduce(sflint::FmpzPolyRef(reduced), generator));
+            assert(fmpz_poly_is_zero(reduced.raw()) != 0);
+
+            sflint::NmodMat images(n, f, static_cast<ulong>(
+                                                 rational_primes[k]));
+            for (slong j = 0; j < n; ++j) {
+                sflint::FmpzMat unit(1, n);
+                fmpz_one(fmpz_mat_entry(unit.raw(), 0, j));
+                silex::OrderElement basis_element(order);
+                assert(basis_element.set_coordinates(
+                        sflint::FmpzMatConstRef(unit)));
+                assert(prime->reduce(sflint::FmpzPolyRef(reduced),
+                                     basis_element));
+                assert(fmpz_poly_degree(reduced.raw()) < f);
+                for (slong c = 0; c < f; ++c) {
+                    sflint::Fmpz coefficient;
+                    fmpz_poly_get_coeff_fmpz(coefficient.raw(),
+                                             reduced.raw(), c);
+                    nmod_mat_entry(images.raw(), j, c) =
+                            fmpz_fdiv_ui(coefficient.raw(),
+                                         static_cast<ulong>(
+                                                 rational_primes[k]));
+                }
+            }
+            assert(nmod_mat_rank(images.raw()) == f);
+            ++checked;
+        }
+    }
+    return checked;
+}
+
+int test_kummer_generator_reduces_to_zero_and_residues_span() {
+    {
+        // Direct maximal-quadratic omega convention: split, inert, ramified.
+        silex::NumberField field = silex::test::quadratic_field(5);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        const slong primes[] = {2, 5, 7, 11};
+        assert(check_kummer_generator_and_residue_span(maximal, primes, 4) >=
+               5);
+    }
+    {
+        // Equation order, alpha convention.
+        sflint::FmpqPoly polynomial;
+        poly_x4_minus_x_minus_1(polynomial);
+        silex::NumberField field;
+        silex::Order order;
+        order = order_by_polynomial(field, polynomial);
+        const slong primes[] = {3, 7, 11};
+        assert(check_kummer_generator_and_residue_span(order, primes, 3) >=
+               3);
+    }
+    {
+        // Maximal orders with [O : Z[alpha]] = 2 and 3, at primes not
+        // dividing the index.
+        sflint::FmpqPoly cubic;
+        poly_cubic_disc1724(cubic);
+        silex::NumberField cubic_field;
+        silex::Order cubic_equation;
+        cubic_equation = order_by_polynomial(cubic_field, cubic);
+        silex::Order cubic_maximal(cubic_field);
+        assert(cubic_maximal.maximal_order(cubic_equation));
+        const slong cubic_primes[] = {3, 5, 7, 13};
+        assert(check_kummer_generator_and_residue_span(cubic_maximal,
+                                                       cubic_primes, 4) >= 4);
+
+        sflint::FmpqPoly quartic;
+        poly_index3_quartic(quartic);
+        silex::NumberField quartic_field;
+        silex::Order quartic_equation;
+        quartic_equation = order_by_polynomial(quartic_field, quartic);
+        silex::Order quartic_maximal(quartic_field);
+        assert(quartic_maximal.maximal_order(quartic_equation));
+        const slong quartic_primes[] = {2, 5, 7};
+        assert(check_kummer_generator_and_residue_span(quartic_maximal,
+                                                       quartic_primes, 3) >=
+               3);
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     assert(test_degree_one() == 0);
     assert(test_degree_one_prime_from_root_matches_decomposition() == 0);
     assert(test_degree_one_prime_from_root_rejects_non_roots() == 0);
+    assert(test_degree_one_prime_from_root_rejects_index_prime() == 0);
     assert(test_invalid_prime_failure_preserves_output() == 0);
     assert(test_unsupported_order_failure_preserves_output() == 0);
     assert(test_quadratic_splitting_types() == 0);
@@ -1931,5 +2140,7 @@ int main() {
     assert(test_generic_nonpower_basis_reduce_quadratic() == 0);
     assert(test_reduce_homomorphism_on_index_maximal_orders() == 0);
     assert(test_quadratic_backend_omega_reduce_unchanged() == 0);
+    assert(test_residue_convention_fixed_at_decomposition() == 0);
+    assert(test_kummer_generator_reduces_to_zero_and_residues_span() == 0);
     return 0;
 }

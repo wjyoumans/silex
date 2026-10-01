@@ -356,32 +356,38 @@ bool reduce_poly_mod_residue(flint::FmpzPoly& out,
 }
 
 // Alpha-convention half of detail::residue_variable_numerator (source trace
-// there): writes `element`, which has `order`'s field as parent, as
-// numerator(alpha) / denominator.  Fails when p divides the order basis
-// denominator or the element's alpha-polynomial denominator.
-bool alpha_residue_numerator(flint::FmpzPoly& numerator,
-                             flint::Fmpz& denominator,
-                             const Order& order,
-                             flint::FmpzConstRef p,
-                             const Element& element) noexcept {
-    if (!order.is_equation_order()) {
-        // The alpha-polynomial reduction is defined on O only when O lies in
-        // the p-local alpha-power lattice, i.e. p does not divide the
-        // denominator of the order basis matrix.
-        flint::FmpqMat basis(order.degree(), order.degree());
-        if (!order.get_basis(flint::FmpqMatRef(basis))) {
-            return false;
-        }
-        for (slong i = 0; i < order.degree(); ++i) {
-            for (slong j = 0; j < order.degree(); ++j) {
-                if (fmpz_divisible(fmpq_mat_entry_den(basis.raw(), i, j),
-                                   p.raw()) != 0) {
-                    return false;
-                }
+// there), in two parts.  The alpha-polynomial reduction is defined on O only when O lies in the
+// p-local alpha-power lattice, i.e. p does not divide the denominator of the
+// order basis matrix.  For an order containing Z[alpha] this holds exactly
+// when p does not divide [O : Z[alpha]].
+bool order_basis_denominator_coprime_to(const Order& order,
+                                        flint::FmpzConstRef p) noexcept {
+    if (order.is_equation_order()) {
+        return true;
+    }
+    flint::FmpqMat basis(order.degree(), order.degree());
+    if (!order.get_basis(flint::FmpqMatRef(basis))) {
+        return false;
+    }
+    for (slong i = 0; i < order.degree(); ++i) {
+        for (slong j = 0; j < order.degree(); ++j) {
+            if (fmpz_divisible(fmpq_mat_entry_den(basis.raw(), i, j),
+                               p.raw()) != 0) {
+                return false;
             }
         }
     }
+    return true;
+}
 
+// Writes `element` as numerator(alpha) / denominator.  Fails when p divides
+// the element's alpha-polynomial denominator.  The caller must have checked
+// order_basis_denominator_coprime_to for the prime (cached per prime by
+// PrimeIdeal::order_basis_is_p_integral).
+bool alpha_residue_numerator(flint::FmpzPoly& numerator,
+                             flint::Fmpz& denominator,
+                             flint::FmpzConstRef p,
+                             const Element& element) noexcept {
     flint::FmpqPoly polynomial;
     if (!element.get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
         return false;
@@ -2294,6 +2300,9 @@ void PrimeIdeal::swap(PrimeIdeal& other) noexcept {
     std::swap(has_residue_poly_, other.has_residue_poly_);
     std::swap(has_linear_residue_root_,
               other.has_linear_residue_root_);
+    std::swap(residue_in_integral_generator_,
+              other.residue_in_integral_generator_);
+    std::swap(order_basis_p_integral_, other.order_basis_p_integral_);
 }
 
 void PrimeIdeal::clear() noexcept {
@@ -2312,6 +2321,8 @@ void PrimeIdeal::clear() noexcept {
     has_kummer_generator_ = false;
     has_residue_poly_ = false;
     has_linear_residue_root_ = false;
+    residue_in_integral_generator_ = false;
+    order_basis_p_integral_ = 0;
 }
 
 bool PrimeIdeal::define(const Order& parent) noexcept {
@@ -2362,6 +2373,9 @@ bool PrimeIdeal::set(const PrimeIdeal& other) noexcept {
     copy.has_kummer_generator_ = other.has_kummer_generator_;
     copy.has_residue_poly_ = other.has_residue_poly_;
     copy.has_linear_residue_root_ = other.has_linear_residue_root_;
+    copy.residue_in_integral_generator_ =
+            other.residue_in_integral_generator_;
+    copy.order_basis_p_integral_ = other.order_basis_p_integral_;
 
     swap(copy);
     return true;
@@ -2393,19 +2407,17 @@ PrimeIdeal::coordinate_valuation_matrix_cached() const noexcept {
 
     bool initialized = false;
     if (has_residue_poly_ &&
-        (parent_.is_equation_order() || parent_.is_maximal())) {
+        (residue_in_integral_generator_ || parent_.is_equation_order() ||
+         parent_.is_maximal())) {
         flint::Fmpz radicand;
-        flint::Fmpz conductor;
-        if (parent_.is_maximal() && parent_.degree() == 2 &&
-            parent_.parent()->backend_kind() ==
-                    NumberFieldBackendKind::quadratic &&
-            parent_.parent()->quadratic_radicand(flint::FmpzRef(radicand)) &&
-            parent_.quadratic_conductor(flint::FmpzRef(conductor)) &&
-            flint::fmpz_is_one(conductor)) {
-            initialized = quadratic_quotient_multiplier_matrix(
-                    next->multiplier_matrix, parent_,
-                    flint::FmpzConstRef(radicand), residue_poly_,
-                    flint::FmpzConstRef(p_));
+        if (residue_in_integral_generator_) {
+            initialized =
+                    parent_.parent()->quadratic_radicand(
+                            flint::FmpzRef(radicand)) &&
+                    quadratic_quotient_multiplier_matrix(
+                            next->multiplier_matrix, parent_,
+                            flint::FmpzConstRef(radicand), residue_poly_,
+                            flint::FmpzConstRef(p_));
         } else {
             const nf_struct* raw_field = parent_.parent()->raw_flint_field();
             initialized = raw_field != nullptr &&
@@ -2566,8 +2578,7 @@ bool PrimeIdeal::reduce(flint::FmpzPolyRef out,
     // (alpha, or omega on the direct maximal-quadratic path) before reducing.
     flint::FmpzPoly input;
     flint::FmpzPoly result;
-    if (detail::residue_polynomial_uses_quadratic_integral_generator(
-                parent_)) {
+    if (residue_in_integral_generator_) {
         // Direct maximal-quadratic path: the order basis is [1, omega] and
         // the residue polynomial is in omega, so the element's integral
         // order coordinates already are its omega-polynomial coefficients
@@ -2588,8 +2599,8 @@ bool PrimeIdeal::reduce(flint::FmpzPolyRef out,
     Element ambient(*parent_.parent());
     flint::Fmpz denominator;
     flint::Fmpz denominator_inverse;
-    if (!element.get_element(ambient) ||
-        !alpha_residue_numerator(input, denominator, parent_,
+    if (!order_basis_is_p_integral() || !element.get_element(ambient) ||
+        !alpha_residue_numerator(input, denominator,
                                  flint::FmpzConstRef(p_), ambient) ||
         fmpz_invmod(denominator_inverse.raw(), denominator.raw(),
                     p_.raw()) == 0 ||
@@ -2615,6 +2626,23 @@ bool PrimeIdeal::reduce(flint::FmpzPolyRef out,
 
     OrderElement order_element(parent_);
     return order_element.set_element(element) && reduce(out, order_element);
+}
+
+bool PrimeIdeal::order_basis_is_p_integral() const noexcept {
+    // The check depends only on the immutable order basis and p, so it is
+    // computed once per prime on first alpha-convention reduction rather than
+    // per element, and never during decomposition.
+    if (order_basis_p_integral_ == 0) {
+        if (!has_prime_data()) {
+            return false;
+        }
+        order_basis_p_integral_ =
+                order_basis_denominator_coprime_to(parent_,
+                                                   flint::FmpzConstRef(p_))
+                        ? 1
+                        : -1;
+    }
+    return order_basis_p_integral_ > 0;
 }
 
 bool PrimeIdeal::valuation_by_power_containment(
@@ -3169,7 +3197,8 @@ bool PrimeIdeal::set_data(
         slong ramification_index,
         slong residue_degree,
         const Ideal& ideal,
-        flint::FmpzPolyConstRef residue_polynomial) noexcept {
+        flint::FmpzPolyConstRef residue_polynomial,
+        bool residue_in_integral_generator) noexcept {
     if (!is_defined() || !same_order_parent(ideal.parent(), &parent_) ||
         !ideal.has_hnf() || ramification_index <= 0 || residue_degree <= 0 ||
         fmpz_poly_degree(residue_polynomial.raw()) <= 0) {
@@ -3196,6 +3225,8 @@ bool PrimeIdeal::set_data(
     has_prime_ = true;
     has_kummer_generator_ = false;
     has_residue_poly_ = true;
+    residue_in_integral_generator_ = residue_in_integral_generator;
+    order_basis_p_integral_ = 0;
     return true;
 }
 
@@ -3227,6 +3258,8 @@ bool PrimeIdeal::set_data_no_residue(flint::FmpzConstRef p,
     has_kummer_generator_ = false;
     has_residue_poly_ = false;
     has_linear_residue_root_ = false;
+    residue_in_integral_generator_ = false;
+    order_basis_p_integral_ = 0;
     return true;
 }
 
@@ -3262,11 +3295,14 @@ const flint::Fmpz* linear_residue_root_ptr(
 
 bool residue_polynomial_uses_quadratic_integral_generator(
         const Order& order) noexcept {
-    // Same selection as decompose_prime's direct maximal-quadratic branch and
-    // set_degree_one_prime_ideal_from_root: those store residue polynomials
-    // in reference's integral generator omega (`quadgen`/`quadpoly`).
-    // Called per reduction, so the cheapest discriminating conditions come
-    // first.  degree() == 2 implies the order, hence its field, is defined.
+    // The single selection used by every construction route (decompose_prime's
+    // direct maximal-quadratic branch, set_first_degree_one_prime and
+    // set_degree_one_prime_ideal_from_root): those store residue polynomials
+    // in reference's integral generator omega (`quadgen`/`quadpoly`).  It is
+    // evaluated when a prime is built and the result is stored in the prime,
+    // so a later change to the order's maximality record cannot change how
+    // an existing prime reads its residue polynomial.  degree() == 2 implies
+    // the order, hence its field, is defined.
     if (order.degree() != 2 || !order.is_maximal()) {
         return false;
     }
@@ -3305,7 +3341,7 @@ bool residue_variable_numerator(flint::FmpzPoly& numerator,
         return false;
     }
 
-    if (residue_polynomial_uses_quadratic_integral_generator(*order)) {
+    if (PrimeIdealAccess::residue_uses_integral_generator(prime)) {
         flint::FmpqMat coordinates(1, order->degree());
         if (!order->coordinates(flint::FmpqMatRef(coordinates), element)) {
             return false;
@@ -3332,7 +3368,8 @@ bool residue_variable_numerator(flint::FmpzPoly& numerator,
         return true;
     }
 
-    return alpha_residue_numerator(numerator, denominator, *order,
+    return PrimeIdealAccess::order_basis_is_p_integral(prime) &&
+           alpha_residue_numerator(numerator, denominator,
                                    flint::FmpzConstRef(p), element);
 }
 
@@ -3346,7 +3383,8 @@ bool MaximalQuadraticPrimeAccess::set_from_integral_generator_factor(
         const flint::FmpzModCtx& context) noexcept {
     if (!out.is_defined() || !same_order_parent(out.parent(), &order) ||
         order.parent() == nullptr || factor.raw() == nullptr ||
-        context.raw() == nullptr || ramification_index <= 0) {
+        context.raw() == nullptr || ramification_index <= 0 ||
+        !residue_polynomial_uses_quadratic_integral_generator(order)) {
         return false;
     }
 
@@ -3372,7 +3410,8 @@ bool MaximalQuadraticPrimeAccess::set_from_integral_generator_factor(
     fmpz_mod_poly_get_fmpz_poly(residue_polynomial, factor.raw(), context);
     return out.set_data(p, ramification_index, residue_degree,
                         candidate_ideal,
-                        flint::FmpzPolyConstRef(residue_polynomial)) &&
+                        flint::FmpzPolyConstRef(residue_polynomial),
+                        true) &&
            out.set_kummer_generator(
                    flint::FmpzMatConstRef(kummer_generator));
 }
@@ -3388,17 +3427,14 @@ bool MaximalQuadraticPrimeAccess::set_first_degree_one_prime(
             "prime_ideal.maximal_quadratic.first_degree_one");
     kind = RetainedQuadraticPrimeKind::inert;
     if (!out.is_defined() || !same_order_parent(out.parent(), &order) ||
-        !order.has_basis() || order.parent() == nullptr ||
-        order.degree() != 2 || !order.is_maximal() ||
-        order.parent()->backend_kind() !=
-                NumberFieldBackendKind::quadratic ||
+        !order.has_basis() ||
+        !residue_polynomial_uses_quadratic_integral_generator(order) ||
         fmpz_is_prime(p.raw()) == 0 ||
         !fmpq_poly_is_monic_integral(order.parent()->raw_flint_field()->pol)) {
         return false;
     }
 
     flint::Fmpz radicand;
-    flint::Fmpz conductor;
     Element integral_generator(*order.parent());
     flint::FmpzPoly minimal_polynomial;
     {
@@ -3406,8 +3442,6 @@ bool MaximalQuadraticPrimeAccess::set_first_degree_one_prime(
                 diagnostics, DiagnosticsModule::prime_ideal,
                 "prime_ideal.maximal_quadratic.prepare");
         if (!order.parent()->quadratic_radicand(flint::FmpzRef(radicand)) ||
-            !order.quadratic_conductor(flint::FmpzRef(conductor)) ||
-            !flint::fmpz_is_one(flint::FmpzConstRef(conductor)) ||
             !integral_generator.is_defined() ||
             !set_quadratic_integral_generator(
                     integral_generator, *order.parent(),
@@ -3479,6 +3513,17 @@ bool MaximalQuadraticPrimeAccess::set_first_degree_one_prime(
     return true;
 }
 
+bool PrimeIdealAccess::residue_uses_integral_generator(
+        const PrimeIdeal& prime) noexcept {
+    return prime.has_prime_data() && prime.has_residue_poly_ &&
+           prime.residue_in_integral_generator_;
+}
+
+bool PrimeIdealAccess::order_basis_is_p_integral(
+        const PrimeIdeal& prime) noexcept {
+    return prime.order_basis_is_p_integral();
+}
+
 bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
         PrimeIdeal& out,
         const Order& order,
@@ -3519,13 +3564,9 @@ bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
 
     const NumberField* field = order.parent();
     flint::Fmpz radicand;
-    flint::Fmpz conductor;
     const bool use_quadratic_integral_generator =
-            order.degree() == 2 && order.is_maximal() &&
-            field->backend_kind() == NumberFieldBackendKind::quadratic &&
-            field->quadratic_radicand(flint::FmpzRef(radicand)) &&
-            order.quadratic_conductor(flint::FmpzRef(conductor)) &&
-            flint::fmpz_is_one(conductor);
+            residue_polynomial_uses_quadratic_integral_generator(order) &&
+            field->quadratic_radicand(flint::FmpzRef(radicand));
 
     flint::Fmpz residue_root;
     flint::fmpz_set(flint::FmpzRef(residue_root), root);
@@ -3603,7 +3644,8 @@ bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
 
     fmpz_mat_center_row_mod_prime(kummer_generator, 0, p);
     return out.set_data(p, 1, 1, candidate_ideal,
-                        flint::FmpzPolyConstRef(residue_polynomial)) &&
+                        flint::FmpzPolyConstRef(residue_polynomial),
+                        use_quadratic_integral_generator) &&
            out.set_kummer_generator(flint::FmpzMatConstRef(kummer_generator));
 }
 
@@ -3777,7 +3819,8 @@ bool decompose_prime(PrimeIdealList& out,
             if (!candidates.append(order) ||
                 !candidates.back()->set_data(
                         p, 1, 1, p_ideal,
-                        flint::FmpzPolyConstRef(residue_polynomial))) {
+                        flint::FmpzPolyConstRef(residue_polynomial),
+                        false)) {
                 return false;
             }
         }
@@ -3789,14 +3832,9 @@ bool decompose_prime(PrimeIdealList& out,
     flint::FmpzModCtx ctx(p.raw());
 
     flint::Fmpz quadratic_radicand;
-    flint::Fmpz quadratic_conductor;
-    if (order.degree() == 2 && order.is_maximal() &&
-            order.parent()->backend_kind() ==
-                    NumberFieldBackendKind::quadratic &&
-            order.parent()->quadratic_radicand(
-                    flint::FmpzRef(quadratic_radicand)) &&
-            order.quadratic_conductor(flint::FmpzRef(quadratic_conductor)) &&
-            flint::fmpz_is_one(quadratic_conductor)) {
+    if (detail::residue_polynomial_uses_quadratic_integral_generator(order) &&
+        order.parent()->quadratic_radicand(
+                flint::FmpzRef(quadratic_radicand))) {
         // reference `quadgen`/`quadpoly` use the integral generator omega and its
         // minimal polynomial.  Factoring in that generator keeps the stored
         // residue polynomial aligned with this order's natural basis.
@@ -3898,7 +3936,7 @@ bool decompose_prime(PrimeIdealList& out,
                candidates.back()->set_data(
                        p, factorization.raw()->exp[factor_index],
                        residue_degree, candidate_ideal,
-                       flint::FmpzPolyConstRef(residue_polynomial)) &&
+                       flint::FmpzPolyConstRef(residue_polynomial), false) &&
                candidates.back()->set_kummer_generator(
                        flint::FmpzMatConstRef(kummer_generator));
     };
@@ -3945,7 +3983,7 @@ bool decompose_prime(PrimeIdealList& out,
                 !candidates.back()->set_data(
                         p, roots.raw()->exp[i], residue_degree,
                         candidate_ideal,
-                        flint::FmpzPolyConstRef(residue_polynomial)) ||
+                        flint::FmpzPolyConstRef(residue_polynomial), false) ||
                 !candidates.back()->set_kummer_generator(
                         flint::FmpzMatConstRef(kummer_generator))) {
                 return false;
