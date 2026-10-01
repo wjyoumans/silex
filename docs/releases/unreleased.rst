@@ -79,6 +79,23 @@ Changed
 Fixed
 -----
 
+- A class group is promoted to ``proven`` only when its verified
+  factor-base generation check covers the required generation bound
+  (``factor_base_generation_checked_bound()`` at least
+  ``factor_base_generation_bound()``).  Previously a public
+  ``check_factor_base_generation_bound`` call at a smaller bound, such as 1,
+  could stand in for the full check and let a ``proven`` real-quadratic
+  analytic record promote the class group through
+  ``try_certify_with_units``.  Routes that run the full check themselves,
+  such as the relation-saturation proof, are unchanged.
+
+- ``try_certify_quadratic`` on a real quadratic field with class number one
+  no longer sets ``unit_proof_status()`` and ``regulator_proof_status()`` to
+  ``verified``.  That route proves ``h = 1`` from factor-base generation and
+  the candidate class number alone and never proves a unit group, so both
+  statuses now keep their previous value (``not_checked`` on a fresh
+  context).  The class group is still ``proven``.
+
 - ``try_certify_class_unit_with_zeta_bf`` (and the ``--zeta-bf-audit`` option
   of the class/unit instance tool) no longer fails on an imaginary quadratic
   field with class number greater than one that the exact

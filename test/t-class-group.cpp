@@ -1242,7 +1242,20 @@ int test_compute_candidate_proven_quadratic() {
             sflint::FmpzConstRef(bound)));
     assert(proven_real.try_certify_quadratic(
             silex::CertificationMode::proven));
-    assert_proven_class_group_certification(proven_real);
+    // h_cand = 1 with verified generation proves h = 1 without any units,
+    // so the class group is proven but no unit or regulator proof is
+    // claimed.
+    assert(proven_real.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(proven_real.factor_base_generation_status() ==
+           silex::ProofState::verified);
+    assert(proven_real.factor_base_generation_checked_status() ==
+           silex::ProofState::verified);
+    assert(proven_real.relation_saturation_status() ==
+           silex::ProofState::verified);
+    assert(proven_real.unit_proof_status() == silex::ProofState::not_checked);
+    assert(proven_real.regulator_proof_status() ==
+           silex::ProofState::not_checked);
     assert(proven_real.relation_saturation_record_count() == 0);
     assert(proven_real.order(sflint::FmpzRef(order_out)));
     assert(sflint::fmpz_is_one(order_out));

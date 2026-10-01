@@ -9518,10 +9518,11 @@ bool ClassGroupContext::try_certify_quadratic(
         return false;
     }
 
+    // Generation to the required bound and h_cand = 1 give h | 1, so h = 1
+    // without any units.  No unit group was proven here, so the unit and
+    // regulator proof states are left as they were.
     certification_ = CertificationMode::proven;
     relation_saturation_status_ = ProofState::verified;
-    unit_proof_status_ = ProofState::verified;
-    regulator_proof_status_ = ProofState::verified;
     return transaction.finish(true);
 }
 
