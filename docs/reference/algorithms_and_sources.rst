@@ -413,6 +413,18 @@ factorization over a base, and relation rows.  Hecke
 anchors.  Dedekind--Kummer factor data is interpreted in the correct integral
 generator, not silently relabeled as polynomial-generator data.
 
+Residue reduction follows PARI 2.17.3 ``src/basemath/base2.c:modprinit``
+in the branch where ``p`` does not divide the index: an order element is
+mapped to its ``alpha``-polynomial through the order basis (PARI
+``nf_get_zkprimpart`` and ``nf_get_zkden``) and reduced modulo
+``(p, g)``.  Silex does not implement PARI's anti-uniformizer handling of
+denominators divisible by ``p`` (``Rg_to_ff``); such inputs fail.  On a
+maximal quadratic-backend order the residue polynomial is instead taken in
+the integral generator ``omega`` of PARI ``quadgen``/``quadpoly``, whose
+``[1, omega]`` coordinates are already the ``omega``-polynomial.  The
+generator in use is chosen by one shared predicate when a prime is built and
+stored in the prime, so it cannot drift from the stored residue polynomial.
+
 Class groups and order units
 ----------------------------
 

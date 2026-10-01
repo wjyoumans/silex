@@ -35,6 +35,18 @@ consuming decomposition-dependent outputs.  ``get_ideal`` materializes the
 copied integral ideal.  ``residue_polynomial`` and residue reduction require a
 decomposition route that produced residue-polynomial data; the explicit
 maximal monogenic path intentionally does not always provide it.
+
+The residue polynomial ``g`` describes ``O/P = F_p[x]/(g)``, where ``x`` is
+the image of one fixed generator.  For a prime decomposed over a maximal
+quadratic-backend order with basis ``[1, omega]``, that generator is the
+integral generator ``omega``; otherwise it is the field generator ``alpha``.
+The choice is recorded in the ``PrimeIdeal`` when it is built and does not
+follow later changes to the parent order's maximality record.  ``reduce``
+returns a polynomial in the same variable, with coefficients in ``[0, p)``.
+The ``alpha`` convention requires ``alpha`` to be integral (a monic integral
+defining polynomial, which ``decompose_prime`` requires), so that
+``Z[alpha]`` lies in ``O``; on that convention ``reduce`` returns ``false``
+when ``p | [O : Z[alpha]]``.
 ``valuation`` accepts ``OrderElement``, ``Element``, ``Ideal``,
 ``FractionalIdeal``, and ``FactoredElement`` inputs on the currently
 certified/implemented paths. Fractional inputs subtract the exact rational
