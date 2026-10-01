@@ -2261,6 +2261,98 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     return 0;
 }
 
+// A public generation check at a bound below the required generation bound
+// does not establish that the factor base generates the class group, so it
+// cannot stand in for the full check when the stored unconditional record
+// would promote.  check_factor_base_generation_bound(1) records a verified
+// check at bound 1 once an earlier check has failed; the `proven` label
+// reached afterwards must rest on a check that covers the required bound.
+// Q(sqrt(10)) as in test_real_quadratic_grh_record_and_later_promotion.
+int test_low_bound_generation_check_does_not_promote() {
+    const slong quadratic[] = {-10, 0};
+    const char* name = "low-bound generation check x^2 - 10";
+
+    FieldSetup setup = setup_from_coefficients(quadratic, 2);
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::grh)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::proven);
+
+    silex::ClassGroupContext proven_class_group;
+    silex::OrderUnitGroup proven_units;
+    silex::ClassGroupComputeOptions proven_options = options;
+    proven_options.requested_certification =
+            silex::CertificationMode::proven;
+    if (!proven_units.compute_with_class_group(
+                proven_class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), proven_options,
+                128)) {
+        std::cerr << name << ": proven unit computation failed\n";
+        return 1;
+    }
+    assert(proven_units.certification_status() ==
+           silex::CertificationMode::proven);
+
+    sflint::Fmpz generation_bound;
+    assert(class_group.factor_base_generation_bound(
+            sflint::FmpzRef(generation_bound)));
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(generation_bound), 1) >
+           0);
+    sflint::Fmpz build_bound;
+    assert(class_group.factor_base_build_bound(sflint::FmpzRef(build_bound)));
+
+    // A check beyond the build bound fails and clears the verified check;
+    // a check at bound 1 then verifies trivially.
+    sflint::Fmpz beyond_build;
+    sflint::fmpz_add_ui(sflint::FmpzRef(beyond_build),
+                        sflint::FmpzConstRef(build_bound), 1);
+    assert(!class_group.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(beyond_build)));
+    sflint::Fmpz one;
+    sflint::fmpz_one(sflint::FmpzRef(one));
+    assert(class_group.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(one)));
+    sflint::Fmpz checked_bound;
+    assert(class_group.factor_base_generation_checked_bound(
+            sflint::FmpzRef(checked_bound)));
+    assert(sflint::fmpz_is_one(checked_bound));
+
+    // Precision 1 disables the L(1, chi) recompute (see the test above), so
+    // the stored record is the only analytic route, and with a check at
+    // bound 1 it must not promote.  The class group still becomes `proven`
+    // through the saturation route, which re-runs the generation check at
+    // the required bound and leaves its ell = 2 record (h = 2); the stored
+    // record route leaves none.
+    assert(class_group.relation_saturation_record_count() == 0);
+    assert(class_group.try_certify_with_units(
+            proven_units, silex::CertificationMode::proven, 1));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(class_group.factor_base_generation_checked_bound(
+            sflint::FmpzRef(checked_bound)));
+    assert(sflint::fmpz_cmp(sflint::FmpzConstRef(checked_bound),
+                            sflint::FmpzConstRef(generation_bound)) >= 0);
+    assert(class_group.relation_saturation_record_count() == 1);
+    return 0;
+}
+
 }  // namespace
 
 // grh mode never uses GRH for factor-base generation: a grh request of
@@ -2378,6 +2470,7 @@ int main() {
     status |= test_random_quadratic_h4_proven_pair();
     status |= test_grh_cubic_records_bf_audit();
     status |= test_real_quadratic_grh_record_and_later_promotion();
+    status |= test_low_bound_generation_check_does_not_promote();
     status |= test_grh_unverified_generation_fails_closed();
     return status;
 }

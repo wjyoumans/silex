@@ -9707,9 +9707,18 @@ bool ClassGroupContext::try_promote_proven_certification_() noexcept {
     const bool unit_regulator_verified =
             unit_proof_status_ == ProofState::verified &&
             regulator_proof_status_ == ProofState::verified;
+    // The checked generation must cover the required generation bound: the
+    // public check_factor_base_generation_bound accepts any bound, and a
+    // check below the required bound does not show that the factor base
+    // generates the class group.
     const bool factor_base_verified =
             factor_base_generation_status_ == ProofState::verified &&
-            factor_base_generation_checked_status_ == ProofState::verified;
+            factor_base_generation_checked_status_ == ProofState::verified &&
+            !flint::fmpz_is_zero(
+                    flint::FmpzConstRef(factor_base_generation_bound_)) &&
+            flint::fmpz_cmp(
+                    flint::FmpzConstRef(factor_base_generation_checked_bound_),
+                    flint::FmpzConstRef(factor_base_generation_bound_)) >= 0;
     // A Belabas-Friedman analytic check assumes GRH and never promotes to
     // `proven`; the saturation route is unconditional.
     const bool unconditional_analytic_check =
