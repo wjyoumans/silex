@@ -12,6 +12,27 @@ that release is prepared.
 Changed
 -------
 
+- The index-bounded relation-saturation pass of class/unit validation now
+  reports ``relation_saturation_status()`` as ``verified`` only when its
+  index bound holds without GRH or verified records cover every prime
+  dividing the candidate class number; otherwise it reports
+  ``unavailable``.  This changes the status after a ``grh`` imaginary
+  quadratic run whose candidate class number exceeded the exact one.  The
+  unconditional analytic index-one route keeps ``verified``.  Labels are
+  unaffected.
+
+- A relation-saturation proof at a prime ``ell`` whose local target rank is
+  zero (``ell`` divides neither the candidate class number nor the torsion
+  order, and the unit rank is zero) now succeeds and records a verified
+  proof with rank 0 and target 0, instead of failing.  Such a prime needs no
+  check: the saturation index is prime to ``ell``.
+
+- The exact imaginary-quadratic index route of class/unit validation now
+  rolls back its factor-base generation check when it fails.  A rank-zero
+  quadratic pair whose input units under-claim the torsion is then
+  recomputed with the computed torsion and can be published ``proven``;
+  the under-claimed units are never published ``proven``.
+
 - Bounded saturation (``saturate_bounded``, index-bounded saturation) may now
   return different, equally valid unit generators.  Its prime selector now
   skips rational primes dividing the order discriminant, like the public
