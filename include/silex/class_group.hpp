@@ -162,6 +162,29 @@ public:
     factor_base_generation_record(slong index) const noexcept;
     bool check_factor_base_generation_bound(
             flint::FmpzConstRef required_bound) noexcept;
+    // Whether the relations of the current presentation are known to be
+    // saturated.  The routes that set `verified` do not all mean the same
+    // coverage:
+    // - the saturation proofs (try_prove_relation_saturation_with_units and
+    //   the saturation route of a `proven` try_certify_with_units) and the
+    //   exact imaginary-quadratic route set it only once every prime
+    //   p | h_cand has a verified relation_saturation_record();
+    // - try_certify_trivial_quotient, and try_certify_quadratic with
+    //   h_cand = 1, set it with no prime required and no record kept;
+    // - the unconditional analytic index-one route of a `proven`
+    //   try_certify_with_units (degree one or the quadratic L(1, chi)
+    //   route) sets it because index one means saturation at every prime,
+    //   but it clears the per-prime records, so the status can be
+    //   `verified` while the records do not cover every p | h_cand;
+    // - saturate_relations_bounded_with_units sets `verified` when its
+    //   bounded search removed every prime from the candidate index and
+    //   `unavailable` otherwise; its records describe that search, not an
+    //   ell-local proof.  Internal class/unit validation uses an
+    //   index-bounded variant that sets `verified` once the primes of its
+    //   index bound are removed, which need not cover every p | h_cand.
+    // No route publishes `proven` from this status: each `proven` route
+    // rests on verified records for every p | h_cand, on h_cand = 1, on the
+    // exact class number, or on an unconditional analytic check.
     ProofState relation_saturation_status() const noexcept;
     // `verified` once an analytic class-regulator check (hR from the zeta
     // function) has passed for the current presentation.  The check is
