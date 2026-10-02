@@ -166,9 +166,13 @@ public:
     // saturated.  The routes that set `verified` do not all mean the same
     // coverage:
     // - the saturation proofs (try_prove_relation_saturation_with_units and
-    //   the saturation route of a `proven` try_certify_with_units) and the
-    //   exact imaginary-quadratic route set it only once every prime
-    //   p | h_cand has a verified relation_saturation_record();
+    //   the saturation route of a `proven` try_certify_with_units), the
+    //   exact imaginary-quadratic route, the internal index-bound proof
+    //   try_prove_relation_saturation_index_bound_with_units_, and the
+    //   rank-zero exact index-one route
+    //   (rank_zero_quadratic_class_index_bound) set it only once every
+    //   prime p | h_cand has a verified relation_saturation_record(); the
+    //   last two require relation_saturation_covers_class_order_();
     // - try_certify_trivial_quotient, and try_certify_quadratic with
     //   h_cand = 1, set it with no prime required and no record kept;
     // - the unconditional analytic index-one route of a `proven`
@@ -179,14 +183,11 @@ public:
     // - saturate_relations_bounded_with_units sets `verified` when its
     //   bounded search removed every prime from the candidate index and
     //   `unavailable` otherwise; its records describe that search, not an
-    //   ell-local proof.  Internal class/unit validation uses an
-    //   index-bounded variant that sets `verified` once the primes of its
-    //   index bound are removed, which need not cover every p | h_cand
-    //   (try_prove_relation_saturation_index_bound_with_units_ is the
-    //   internal route that does this);
-    // - the rank-zero exact index-one route
-    //   (rank_zero_quadratic_class_index_bound) sets it because the
-    //   index bound is exactly one;
+    //   ell-local proof.  Internal class/unit validation uses the
+    //   index-bounded variant
+    //   saturate_relations_bounded_for_index_with_units_ (the public
+    //   method forwards to it), which sets `verified` once the primes of
+    //   its index bound are removed; that need not cover every p | h_cand.
     // The bounded search leaves the status unchanged when the candidate
     // index is 1 or has no prime factors (it returns early).
     // No route publishes `proven` from this status: each `proven` route
