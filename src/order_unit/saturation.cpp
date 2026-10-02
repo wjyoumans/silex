@@ -1045,6 +1045,82 @@ bool publish_saturation_selection(PrimeIdealList& out,
     return detail::dlog_kernel_from_matrix(kernel, dlog_matrix, ell);
 }
 
+// One scan over rational primes p = 2, 3, ... <= bound, shared by
+// OrderUnitGroup::select_saturation_primes and
+// detail::select_saturation_primes_with_kernel.  It stops once `selected`
+// holds target_len primes and offers each candidate prime ideal to
+// `append_prime`, which decides whether to keep it and returns false only on
+// a hard failure.
+//
+// First pass (source_shape_fallback false): reference
+// RelSaturate.compute_candidates_for_saturate scans rational q = 1 mod ell,
+// skips q dividing the discriminant, and uses only degree-one primes above
+// q.  Deliberate difference: the reference also skips q dividing
+// [O_K : Z[alpha]] with q not dividing d_K for non-monogenic maximal orders;
+// here only q | disc(O) is skipped.  Selection only, not soundness.
+//
+// Fallback pass (source_shape_fallback true): every prime ideal above every
+// rational prime, with no congruence or discriminant filter.
+template <typename AppendPrime>
+bool scan_saturation_candidate_primes(
+        std::vector<PrimeIdeal>& selected,
+        const Order& order,
+        const DiagnosticsContext* diagnostics,
+        flint::FmpzConstRef order_discriminant,
+        flint::FmpzConstRef ell,
+        slong target_len,
+        flint::FmpzConstRef bound,
+        bool source_shape_fallback,
+        AppendPrime& append_prime) noexcept {
+    flint::Fmpz p;
+    flint::Fmpz pminus;
+    flint::fmpz_set_ui(flint::FmpzRef(p), 2);
+    while (static_cast<slong>(selected.size()) < target_len &&
+           fmpz_cmp(p.raw(), bound.raw()) <= 0) {
+        PrimeIdealList local;
+        if (source_shape_fallback) {
+            if (!decompose_prime(local, order, flint::FmpzConstRef(p))) {
+                fmpz_nextprime(p.raw(), p.raw(), 1);
+                continue;
+            }
+        } else {
+            fmpz_sub_ui(pminus.raw(), p.raw(), 1);
+            if (fmpz_divisible(pminus.raw(), ell.raw()) == 0) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.saturation_selector.congruence_skip");
+                fmpz_nextprime(p.raw(), p.raw(), 1);
+                continue;
+            }
+            if (rational_prime_divides_order_discriminant(
+                        order_discriminant, flint::FmpzConstRef(p))) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.saturation_selector.discriminant_skip");
+                fmpz_nextprime(p.raw(), p.raw(), 1);
+                continue;
+            }
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.saturation_selector_decompose_degree_one");
+            if (!decompose_prime(local, order, flint::FmpzConstRef(p), 1)) {
+                fmpz_nextprime(p.raw(), p.raw(), 1);
+                continue;
+            }
+        }
+        for (slong i = 0; i < local.size() &&
+                          static_cast<slong>(selected.size()) < target_len;
+             ++i) {
+            const PrimeIdeal* prime = local.at(i);
+            if (prime != nullptr && !append_prime(*prime)) {
+                return false;
+            }
+        }
+        fmpz_nextprime(p.raw(), p.raw(), 1);
+    }
+    return true;
+}
+
 }  // namespace
 
 namespace detail {
@@ -1108,57 +1184,12 @@ bool select_saturation_primes_with_kernel(
         return true;
     };
 
-    flint::Fmpz p;
-    flint::Fmpz pminus;
-    flint::fmpz_set_ui(flint::FmpzRef(p), 2);
-    while (static_cast<slong>(selected.size()) < target_len &&
-           fmpz_cmp(p.raw(), bound.raw()) <= 0) {
-        // reference RelSaturate.compute_candidates_for_saturate scans rational
-        // q = 1 mod ell, skips q dividing the discriminant, and uses only
-        // degree-one primes above q.  The same first scan as
-        // OrderUnitGroup::select_saturation_primes.  Deliberate difference:
-        // the reference also skips q dividing [O_K : Z[alpha]] with q not
-        // dividing d_K for non-monogenic maximal orders; here only
-        // q | disc(O) is skipped.  Selection only, not soundness.
-        fmpz_sub_ui(pminus.raw(), p.raw(), 1);
-        if (fmpz_divisible(pminus.raw(), ell.raw()) == 0) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.saturation_selector.congruence_skip");
-            fmpz_nextprime(p.raw(), p.raw(), 1);
-            continue;
-        }
-        if (rational_prime_divides_order_discriminant(
-                    flint::FmpzConstRef(order_discriminant),
-                    flint::FmpzConstRef(p))) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.saturation_selector.discriminant_skip");
-            fmpz_nextprime(p.raw(), p.raw(), 1);
-            continue;
-        }
-
-        PrimeIdealList local;
-        {
-            SILEX_PROFILE_SCOPE(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.saturation_selector_decompose_degree_one");
-            if (!decompose_prime(local, *order, flint::FmpzConstRef(p), 1)) {
-                fmpz_nextprime(p.raw(), p.raw(), 1);
-                continue;
-            }
-        }
-        for (slong i = 0; i < local.size() &&
-                          static_cast<slong>(selected.size()) < target_len;
-             ++i) {
-            const PrimeIdeal* prime = local.at(i);
-            if (prime != nullptr && !try_append_prime(*prime)) {
-                return false;
-            }
-        }
-        fmpz_nextprime(p.raw(), p.raw(), 1);
+    if (!scan_saturation_candidate_primes(
+                selected, *order, group.diagnostics(),
+                flint::FmpzConstRef(order_discriminant), ell, target_len,
+                bound, false, try_append_prime)) {
+        return false;
     }
-
     if (static_cast<slong>(selected.size()) == target_len) {
         return publish_saturation_selection(out, kernel, *order, selected,
                                             dlog_matrix, target_len, ell);
@@ -1170,23 +1201,12 @@ bool select_saturation_primes_with_kernel(
     selected.clear();
     flint::FmpzMat fallback_matrix(width, 0);
     dlog_matrix = std::move(fallback_matrix);
-    flint::fmpz_set_ui(flint::FmpzRef(p), 2);
-    while (static_cast<slong>(selected.size()) < target_len &&
-           fmpz_cmp(p.raw(), bound.raw()) <= 0) {
-        PrimeIdealList local;
-        if (decompose_prime(local, *order, flint::FmpzConstRef(p))) {
-            for (slong i = 0; i < local.size() &&
-                              static_cast<slong>(selected.size()) < target_len;
-                 ++i) {
-                const PrimeIdeal* prime = local.at(i);
-                if (prime != nullptr && !try_append_prime(*prime)) {
-                    return false;
-                }
-            }
-        }
-        fmpz_nextprime(p.raw(), p.raw(), 1);
+    if (!scan_saturation_candidate_primes(
+                selected, *order, group.diagnostics(),
+                flint::FmpzConstRef(order_discriminant), ell, target_len,
+                bound, true, try_append_prime)) {
+        return false;
     }
-
     return publish_saturation_selection(out, kernel, *order, selected,
                                         dlog_matrix, target_len, ell);
 }
@@ -1529,28 +1549,6 @@ bool OrderUnitGroup::select_saturation_primes(
         return true;
     }
 
-    auto publish_selected =
-            [&](std::vector<PrimeIdeal>& selected_primes) noexcept -> bool {
-        if (static_cast<slong>(selected_primes.size()) != target_len) {
-            return false;
-        }
-
-        PrimeIdealList candidate(*order, target_len);
-        if (!candidate.is_defined()) {
-            return false;
-        }
-        for (slong i = 0; i < target_len; ++i) {
-            PrimeIdeal* dest = candidate.at(i);
-            if (dest == nullptr ||
-                !dest->set(selected_primes[static_cast<std::size_t>(i)])) {
-                return false;
-            }
-        }
-
-        out.swap(candidate);
-        return true;
-    };
-
     std::vector<PrimeIdeal> selected;
     selected.reserve(static_cast<std::size_t>(target_len));
 
@@ -1559,59 +1557,21 @@ bool OrderUnitGroup::select_saturation_primes(
         return false;
     }
 
-    flint::Fmpz p;
-    flint::Fmpz pminus;
-    flint::fmpz_set_ui(flint::FmpzRef(p), 2);
-    while (static_cast<slong>(selected.size()) < target_len &&
-           fmpz_cmp(p.raw(), bound.raw()) <= 0) {
-        // reference RelSaturate.compute_candidates_for_saturate scans rational
-        // q = 1 mod ell and uses only degree-one primes above q.
-        fmpz_sub_ui(pminus.raw(), p.raw(), 1);
-        if (fmpz_divisible(pminus.raw(), ell.raw()) == 0) {
-            SILEX_PROFILE_EVENT(
-                    diagnostics_, DiagnosticsModule::unit_group,
-                    "unit_group.saturation_selector.congruence_skip");
-            fmpz_nextprime(p.raw(), p.raw(), 1);
-            continue;
+    auto append_usable_prime = [&](const PrimeIdeal& prime) noexcept -> bool {
+        if (!detail::saturation_prime_usable(*this, prime, ell)) {
+            return true;
         }
-        if (rational_prime_divides_order_discriminant(
-                    flint::FmpzConstRef(order_discriminant),
-                    flint::FmpzConstRef(p))) {
-            SILEX_PROFILE_EVENT(
-                    diagnostics_, DiagnosticsModule::unit_group,
-                    "unit_group.saturation_selector.discriminant_skip");
-            fmpz_nextprime(p.raw(), p.raw(), 1);
-            continue;
-        }
+        selected.emplace_back(*order);
+        return selected.back().set(prime);
+    };
 
-        PrimeIdealList local;
-        {
-            SILEX_PROFILE_SCOPE(
-                    diagnostics_, DiagnosticsModule::unit_group,
-                    "unit_group.saturation_selector_decompose_degree_one");
-            if (!decompose_prime(local, *order, flint::FmpzConstRef(p), 1)) {
-                fmpz_nextprime(p.raw(), p.raw(), 1);
-                continue;
-            }
-        }
-        if (local.size() > 0) {
-            for (slong i = 0; i < local.size() &&
-                              static_cast<slong>(selected.size()) < target_len;
-                 ++i) {
-                const PrimeIdeal* prime = local.at(i);
-                if (prime != nullptr &&
-                    detail::saturation_prime_usable(*this, *prime, ell)) {
-                    selected.emplace_back(*order);
-                    if (!selected.back().set(*prime)) {
-                        return false;
-                    }
-                }
-            }
-        }
-        fmpz_nextprime(p.raw(), p.raw(), 1);
+    if (!scan_saturation_candidate_primes(
+                selected, *order, diagnostics_,
+                flint::FmpzConstRef(order_discriminant), ell, target_len,
+                bound, false, append_usable_prime)) {
+        return false;
     }
-
-    if (publish_selected(selected)) {
+    if (copy_selected_primes_to_list(out, *order, selected, target_len)) {
         return true;
     }
 
@@ -1619,28 +1579,13 @@ bool OrderUnitGroup::select_saturation_primes(
             diagnostics_, DiagnosticsModule::unit_group,
             "unit_group.saturation_selector.source_shape_fallback");
     selected.clear();
-    flint::fmpz_set_ui(flint::FmpzRef(p), 2);
-    while (static_cast<slong>(selected.size()) < target_len &&
-           fmpz_cmp(p.raw(), bound.raw()) <= 0) {
-        PrimeIdealList local;
-        if (decompose_prime(local, *order, flint::FmpzConstRef(p))) {
-            for (slong i = 0; i < local.size() &&
-                              static_cast<slong>(selected.size()) < target_len;
-                 ++i) {
-                const PrimeIdeal* prime = local.at(i);
-                if (prime != nullptr &&
-                    detail::saturation_prime_usable(*this, *prime, ell)) {
-                    selected.emplace_back(*order);
-                    if (!selected.back().set(*prime)) {
-                        return false;
-                    }
-                }
-            }
-        }
-        fmpz_nextprime(p.raw(), p.raw(), 1);
+    if (!scan_saturation_candidate_primes(
+                selected, *order, diagnostics_,
+                flint::FmpzConstRef(order_discriminant), ell, target_len,
+                bound, true, append_usable_prime)) {
+        return false;
     }
-
-    return publish_selected(selected);
+    return copy_selected_primes_to_list(out, *order, selected, target_len);
 }
 
 bool OrderUnitGroup::select_saturation_proof_primes(
