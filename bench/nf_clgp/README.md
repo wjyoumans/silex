@@ -10,9 +10,31 @@ The `b-silex-nf_clgp` target includes:
 - deterministic cubic, quartic, quintic, and bounded sextic candidate rows;
 - scaled factor-base variants for selected fields;
 - degree-one and real/imaginary quadratic paired class/unit rows;
+- a separate GRH-conditional population of `BM_class_unit_0_1_0_*_grh` rows;
 - deterministic random-sweep, random-matrix, and boundary workloads; and
 - public counters for success, factor-base size, relation counts and rank,
   relation sources, kernel witnesses, class order, and proof metadata.
+
+## GRH-conditional rows
+
+The `BM_class_unit_0_1_0_*_grh` rows call
+`OrderUnitGroup::compute_with_class_group` with `CertificationMode::grh`.
+Each one is paired by name stem with the `_proven` row on the same field (for
+example `BM_class_unit_0_1_0_cubic_disc23_grh` and
+`BM_class_unit_0_1_0_cubic_disc23_proven`) and uses the same options and
+exact expectation, so a pair differs only in the requested certification.
+The `conditional` counter is 1 on every grh row and absent on proven rows.
+
+A grh row fails unless both published objects carry exactly the `grh` label:
+a conditional result is never `unknown` and never `proven`, and a grh row is
+not proven evidence. `test/test_class_unit_google_benchmark.py` validates the
+two populations separately and checks that each grh row has its paired proven
+row with the same class order.
+
+Only fields that currently succeed in grh mode have a row. In grh mode a real
+quadratic field or a field of degree three or more fails closed unless
+factor-base generation is verified to the Minkowski-type bound, so fields
+that fail closed (for example `x^3 + x + 200` and `x^2 - 100003`) have no row.
 
 Private diagnostic counters must remain in separately named internal targets.
 They must use existing internal boundaries, publish no production result, and

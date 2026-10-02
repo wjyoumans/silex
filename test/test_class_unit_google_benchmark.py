@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
+GRH_CERTIFICATION = 2.0
 PROVEN_CERTIFICATION = 3.0
 VERIFIED_PROOF = 2.0
 
@@ -36,10 +37,12 @@ EXACT_RESULT_COUNTERS = (
     "unit_output_exact",
 )
 
-RELEASE_BENCHMARK_NAMES = {
+PROVEN_BENCHMARK_NAMES = {
     "BM_class_unit_0_1_0_degree_one_proven",
     "BM_class_unit_0_1_0_real_quadratic_proven",
+    "BM_class_unit_0_1_0_real_quadratic_40001_proven",
     "BM_class_unit_0_1_0_imag_quadratic_proven",
+    "BM_class_unit_0_1_0_cubic_disc23_proven",
     "BM_class_unit_0_1_0_cubic_trivial_proven",
     "BM_class_unit_0_1_0_cubic_nontrivial_proven",
     "BM_class_unit_0_1_0_quartic_cyclotomic_proven",
@@ -57,8 +60,33 @@ RELEASE_BENCHMARK_NAMES = {
     "BM_class_unit_random_matrix/3/4/0/1/0/iterations:1",
 }
 
+# The GRH-conditional population.  Each row requests grh on the field of the
+# proven row with the same name stem and must publish exactly the grh label.
+# It is validated separately from the proven population and never counts as
+# proven evidence.
+GRH_BENCHMARK_NAMES = {
+    "BM_class_unit_0_1_0_imag_quadratic_grh",
+    "BM_class_unit_0_1_0_real_quadratic_grh",
+    "BM_class_unit_0_1_0_real_quadratic_40001_grh",
+    "BM_class_unit_0_1_0_cubic_disc23_grh",
+    "BM_class_unit_0_1_0_cubic_nontrivial_grh",
+    "BM_class_unit_0_1_0_quartic_cyclotomic_grh",
+    "BM_class_unit_0_1_0_quartic_noncyclotomic_grh",
+    "BM_class_unit_0_1_0_quintic_grh",
+    "BM_class_unit_0_1_0_sextic_grh",
+}
+
+RELEASE_BENCHMARK_NAMES = PROVEN_BENCHMARK_NAMES | GRH_BENCHMARK_NAMES
+
+# Proven rows whose class group is settled by the unconditional quadratic
+# analytic class-number route.  Relation saturation is not run for them, so
+# they must record a verified analytic class/regulator check instead.
+ANALYTIC_PROOF_NAMES = {
+    "BM_class_unit_0_1_0_real_quadratic_40001_proven",
+}
+
 RELEASE_FILTER = (
-    "^(BM_class_unit_0_1_0_.*_proven|"
+    "^(BM_class_unit_0_1_0_.*_(proven|grh)|"
     "BM_class_unit_random_matrix/3/4/0/1/0.*)$"
 )
 
@@ -113,17 +141,52 @@ def validate(payload: object) -> list[str]:
             continue
         require_counter(failures, row, "success", 1.0)
         require_counter(failures, row, "failure_reason", 0.0)
-        require_counter(
-            failures, row, "requested_cert", PROVEN_CERTIFICATION
-        )
-        require_counter(failures, row, "class_cert", PROVEN_CERTIFICATION)
-        require_counter(failures, row, "unit_cert", PROVEN_CERTIFICATION)
-        require_counter(failures, row, "fb_checked", VERIFIED_PROOF)
-        require_counter(failures, row, "relation_saturation", VERIFIED_PROOF)
-        require_counter(failures, row, "unit_proof", VERIFIED_PROOF)
-        require_counter(failures, row, "regulator_proof", VERIFIED_PROOF)
+        if name in GRH_BENCHMARK_NAMES:
+            # Conditional population: both labels are exactly grh, never
+            # unknown and never proven.  No proof component is required.
+            require_counter(
+                failures, row, "requested_cert", GRH_CERTIFICATION
+            )
+            require_counter(failures, row, "class_cert", GRH_CERTIFICATION)
+            require_counter(failures, row, "unit_cert", GRH_CERTIFICATION)
+            require_counter(failures, row, "conditional", 1.0)
+        else:
+            require_counter(
+                failures, row, "requested_cert", PROVEN_CERTIFICATION
+            )
+            require_counter(failures, row, "class_cert", PROVEN_CERTIFICATION)
+            require_counter(failures, row, "unit_cert", PROVEN_CERTIFICATION)
+            if row.get("conditional") is not None:
+                failures.append(
+                    f"{name}: proven row carries the conditional marker"
+                )
+            require_counter(failures, row, "fb_checked", VERIFIED_PROOF)
+            if name in ANALYTIC_PROOF_NAMES:
+                require_counter(failures, row, "analytic_hR", VERIFIED_PROOF)
+            else:
+                require_counter(
+                    failures, row, "relation_saturation", VERIFIED_PROOF
+                )
+            require_counter(failures, row, "unit_proof", VERIFIED_PROOF)
+            require_counter(failures, row, "regulator_proof", VERIFIED_PROOF)
         for counter in EXACT_RESULT_COUNTERS:
             require_counter(failures, row, counter, 1.0)
+
+    by_name = {str(row.get("name")): row for row in rows}
+    for grh_name in sorted(GRH_BENCHMARK_NAMES & actual_names):
+        proven_name = grh_name[: -len("_grh")] + "_proven"
+        grh_row = by_name[grh_name]
+        proven_row = by_name.get(proven_name)
+        if proven_name not in PROVEN_BENCHMARK_NAMES or proven_row is None:
+            failures.append(f"{grh_name}: no paired proven row {proven_name}")
+            continue
+        # Same field: the exact class order must agree within a pair.
+        if grh_row.get("class_order") != proven_row.get("class_order"):
+            failures.append(
+                f"{grh_name}: class_order={grh_row.get('class_order')!r} "
+                f"differs from {proven_name} "
+                f"({proven_row.get('class_order')!r})"
+            )
     return failures
 
 
@@ -185,7 +248,10 @@ def main() -> int:
             print(f"benchmark stderr:\n{completed.stderr}", file=sys.stderr)
         return 1
 
-    print(f"validated {len(RELEASE_BENCHMARK_NAMES)} release benchmark rows")
+    print(
+        f"validated {len(PROVEN_BENCHMARK_NAMES)} proven and "
+        f"{len(GRH_BENCHMARK_NAMES)} grh release benchmark rows"
+    )
     return 0
 
 
