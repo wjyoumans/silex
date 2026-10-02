@@ -475,6 +475,13 @@ factor base; proven units and regulator; and a verified ``ell``-local proof
 for every prime ``p`` dividing ``h_cand``.  The required primes are derived
 from the published presentation; the internal index-bound gate proves the
 union of the primes up to its bound and the prime divisors of ``h_cand``.
+A prime ``ell`` whose ``ell``-local target rank is zero (``ell`` divides
+neither ``h_cand`` nor the computed torsion order ``w``, and the unit rank is
+zero) needs no discrete-logarithm check: the index of the computed relation
+lattice in the full one divides ``h_cand``, and the unit index divides ``w``,
+so the ``ell``-part of the S-unit index is trivial.  Silex records a verified
+``ell``-local proof with rank 0 and target 0 for such a prime.  This rests on
+that index argument, not on a matching upstream routine.
 Gates that accept a supplied index bound or analytic class-regulator product
 are not installed; public certification uses only values Silex computes or
 verifies itself, and proven unit publication through the class/unit gates

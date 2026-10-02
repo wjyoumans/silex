@@ -134,6 +134,16 @@ public:
             flint::FmpzConstRef index_bound,
             flint::FmpzConstRef aux_prime_bound) noexcept;
 
+    // The stored ell-local saturation proof record for `ell`, for tests and
+    // audits; false when none is stored.
+    static bool relation_saturation_proof_record(
+            const ClassGroupContext& context,
+            flint::FmpzConstRef ell,
+            ProofState& status,
+            slong& rank,
+            slong& target_rank,
+            slong& local_primes) noexcept;
+
     // A Belabas-Friedman audit records a GRH-conditional analytic check; it
     // publishes `proven` only when saturation has already been proven (or in
     // degree one, where hR = 1 exactly).

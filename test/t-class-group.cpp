@@ -1908,20 +1908,40 @@ int test_relation_saturation_index_bound_with_units_degree_one() {
     assert(invalid_context.relation_saturation_status() ==
            silex::ProofState::not_checked);
 
-    silex::ClassGroupContext unavailable_context;
-    prepare_context(unavailable_context);
-    assert(unavailable_context.try_certify_with_units(
+    // Over Q (h_cand = 1, w = 2, unit rank 0) the primes 3 and 5 below the
+    // bound 6 have target rank 0: they divide neither h_cand nor w, so the
+    // index argument proves them with nothing to check.  Each records a
+    // verified ell-local proof with rank 0 and target 0, and ell = 2 is
+    // proved through the torsion.
+    silex::ClassGroupContext rank_zero_context;
+    prepare_context(rank_zero_context);
+    assert(rank_zero_context.try_certify_with_units(
             units, silex::CertificationMode::unknown, 80));
     assert(set_fmpz_si(index_bound, 6));
-    assert(!CertificationAccess::
+    assert(CertificationAccess::
                    try_prove_relation_saturation_index_bound_with_units(
-                           unavailable_context, units, sflint::FmpzConstRef(index_bound),
+                           rank_zero_context, units, sflint::FmpzConstRef(index_bound),
                            sflint::FmpzConstRef(aux_bound)));
-    assert(unavailable_context.relation_saturation_status() ==
-           silex::ProofState::not_checked);
-    assert(unavailable_context.relation_saturation_record_count() == 0);
-    assert(unavailable_context.certification_status() ==
-           silex::CertificationMode::unknown);
+    assert(rank_zero_context.relation_saturation_status() ==
+           silex::ProofState::verified);
+    assert(rank_zero_context.relation_saturation_record_count() == 3);
+    assert(rank_zero_context.certification_status() ==
+           silex::CertificationMode::proven);
+    for (const slong small_ell : {3, 5}) {
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, small_ell));
+        silex::ProofState proof_status = silex::ProofState::not_checked;
+        slong rank = -1;
+        slong target_rank = -1;
+        slong local_primes = -1;
+        assert(CertificationAccess::relation_saturation_proof_record(
+                rank_zero_context, sflint::FmpzConstRef(ell), proof_status,
+                rank, target_rank, local_primes));
+        assert(proof_status == silex::ProofState::verified);
+        assert(rank == 0);
+        assert(target_rank == 0);
+        assert(local_primes == 0);
+    }
 
     silex::ClassGroupContext proven_context;
     prepare_context(proven_context);
@@ -2307,15 +2327,33 @@ int test_relation_saturation_index_bound_checks_nondivisor_primes() {
     assert(context.try_prove_relation_saturation_with_units(
             units, sflint::FmpzConstRef(ell_five),
             sflint::FmpzConstRef(aux_bound)));
-    // A bound I <= 5 also requires excluding 2 and 3; ell=3 is unavailable.
-    assert(!CertificationAccess::
+    // A bound I <= 5 also requires the primes 2 and 3 that do not divide
+    // h_cand = 5.  ell = 2 divides w = 2 and is proved through the torsion;
+    // ell = 3 divides neither h_cand nor w and the unit rank is 0, so its
+    // target rank is 0 and it records a verified proof with rank 0 and
+    // target 0.
+    assert(CertificationAccess::
                    try_prove_relation_saturation_index_bound_with_units(
                            context, units, sflint::FmpzConstRef(index_bound),
                            sflint::FmpzConstRef(aux_bound)));
-    // The failed bound leaves the verified ell=5 record untouched.
     assert(context.relation_saturation_status() ==
            silex::ProofState::verified);
-    assert(context.relation_saturation_record_count() == 1);
+    assert(context.relation_saturation_record_count() == 3);
+    assert(context.certification_status() ==
+           silex::CertificationMode::proven);
+    sflint::Fmpz ell_three;
+    assert(set_fmpz_si(ell_three, 3));
+    silex::ProofState proof_status = silex::ProofState::not_checked;
+    slong rank = -1;
+    slong target_rank = -1;
+    slong local_primes = -1;
+    assert(CertificationAccess::relation_saturation_proof_record(
+            context, sflint::FmpzConstRef(ell_three), proof_status, rank,
+            target_rank, local_primes));
+    assert(proof_status == silex::ProofState::verified);
+    assert(rank == 0);
+    assert(target_rank == 0);
+    assert(local_primes == 0);
 
     return 0;
 }

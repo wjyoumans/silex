@@ -4771,6 +4771,29 @@ bool ClassGroupCertificationAccess::
     return transaction.finish(true);
 }
 
+bool ClassGroupCertificationAccess::relation_saturation_proof_record(
+        const ClassGroupContext& context,
+        flint::FmpzConstRef ell,
+        ProofState& status,
+        slong& rank,
+        slong& target_rank,
+        slong& local_primes) noexcept {
+    if (context.private_storage_ == nullptr) {
+        return false;
+    }
+    for (const detail::RelationSaturationProofRecord& record :
+         context.private_storage_->relation_saturation_proof_records) {
+        if (flint::fmpz_equal(flint::FmpzConstRef(record.ell), ell)) {
+            status = record.status;
+            rank = record.rank;
+            target_rank = record.target_rank;
+            local_primes = record.local_primes;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ClassGroupCertificationAccess::
         saturate_relations_for_index_bound_with_units(
                 bool& changed,
@@ -7285,7 +7308,7 @@ bool ClassGroupContext::record_relation_saturation_proof_(
         slong local_primes) noexcept {
     if (!ensure_private_storage_() || !flint::fmpz_is_prime(ell) ||
         !valid_relation_saturation_record_status(status) || rank < 0 ||
-        target_rank <= 0 || local_primes < 0 ||
+        target_rank < 0 || local_primes < 0 ||
         (status == ProofState::verified && rank < target_rank)) {
         return false;
     }
@@ -9658,8 +9681,25 @@ bool ClassGroupContext::prove_relation_saturation_dlog_ell_(
     const slong target_rank =
             static_cast<slong>(beta_rows.size()) + units.free_rank() +
             (include_torsion ? 1 : 0);
-    if (target_rank <= 0) {
+    if (target_rank < 0) {
         return false;
+    }
+    if (target_rank == 0) {
+        // Target rank 0 means ell divides no invariant (ell does not divide
+        // h_cand), the unit rank is 0, and ell does not divide the torsion
+        // order w.  With L_found contained in L_true contained in Z^S, the
+        // index [L_true : L_found] divides [Z^S : L_found] = h_cand, so it
+        // is prime to ell; with unit rank 0 the unit index divides w, also
+        // prime to ell.  The ell-part of the S-unit index is therefore
+        // trivial and ell-saturation holds with nothing to check: record a
+        // verified ell-local proof with rank 0 and target 0.  The argument
+        // needs w to be the true torsion order, so it requires the torsion
+        // Silex computes for the order.
+        if (!detail::order_unit_torsion_is_computed(units)) {
+            return false;
+        }
+        return record_relation_saturation_proof_(
+                ell, ProofState::verified, 0, 0, 0);
     }
 
     std::vector<flint::FmpzMat> columns;
