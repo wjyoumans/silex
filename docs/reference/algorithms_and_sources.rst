@@ -628,11 +628,14 @@ means only that its ``ell`` verified; the relation-saturation status becomes
 
 The order-unit saturation proofs build degree-one primes ``(q, theta - r)``
 from roots ``r`` of the defining polynomial ``f`` modulo ``q`` with an
-internal constructor.  It accepts a root only when ``f(r) = 0 mod q`` and
-``f`` is squarefree modulo ``q``, the Dedekind-Kummer hypothesis under which
-``(q, theta - r)`` is a prime of residue degree and ramification index one
-(Cohen, *A Course in Computational Algebraic Number Theory*, GTM 138,
-Theorem 4.8.13); this is the same condition as the degree-one fast path of
+internal constructor.  It accepts a root when ``f(r) = 0 mod q`` and ``f``
+is squarefree modulo ``q``.  This is a sufficient condition for
+``(q, theta - r)`` to be a prime of residue degree and ramification index one:
+``q`` then does not divide the index of ``Z[theta]``, so the Dedekind-Kummer
+theorem applies (Cohen, *A Course in Computational Algebraic Number Theory*,
+GTM 138, Theorem 4.8.13).  It is not a necessary condition, and the
+constructor refuses every root that fails it, even when ``(q, theta - r)`` is
+still such a prime.  This is the same condition as the degree-one fast path of
 ``decompose_prime``.
 
 The unconditional unit proof ``OrderUnitGroup::prove_index_bound`` bounds the

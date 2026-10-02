@@ -3542,14 +3542,17 @@ bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
         return false;
     }
 
+    flint::FmpzModCtx ctx(p.raw());
     {
-        // (p, theta - r) is a degree-one prime with e = 1 only when r is a
-        // root of f mod p and p does not divide the index [O_K : Z[theta]];
-        // f squarefree mod p gives both p unramified in Z[theta] and the
-        // Dedekind-Kummer hypothesis (Cohen, GTM 138, Thm. 4.8.13).  This is
-        // the same condition as the degree-one fast path of decompose_prime.
-        flint::FmpzModCtx check_ctx(p.raw());
-        flint::FmpzModPoly reduced(check_ctx);
+        // f(r) = 0 mod p with f squarefree mod p is a sufficient condition
+        // for (p, theta - r) to be a degree-one prime with e = 1: f
+        // squarefree mod p means p does not divide disc(f), so p does not
+        // divide the index [O_K : Z[theta]], p is unramified, and the
+        // Dedekind-Kummer theorem applies (Cohen, GTM 138, Thm. 4.8.13).
+        // It is not necessary: a root failing it is refused even when
+        // (p, theta - r) is still such a prime.  This is the same condition
+        // as the degree-one fast path of decompose_prime.
+        flint::FmpzModPoly reduced(ctx);
         flint::Fmpz value;
         flint::Fmpz reduced_root;
         if (!reduced.is_initialized()) {
@@ -3557,12 +3560,12 @@ bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
         }
         fmpq_poly_get_fmpz_mod_poly(reduced,
                                     order.parent()->raw_flint_field()->pol,
-                                    check_ctx);
+                                    ctx);
         fmpz_mod(reduced_root.raw(), root.raw(), p.raw());
         fmpz_mod_poly_evaluate_fmpz(value.raw(), reduced.raw(),
-                                    reduced_root.raw(), check_ctx.raw());
+                                    reduced_root.raw(), ctx.raw());
         if (!fmpz_is_zero(value.raw()) ||
-            fmpz_mod_poly_is_squarefree(reduced.raw(), check_ctx.raw()) == 0) {
+            fmpz_mod_poly_is_squarefree(reduced.raw(), ctx.raw()) == 0) {
             return false;
         }
     }
@@ -3594,7 +3597,6 @@ bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
         fmpz_mod(residue_root.raw(), residue_root.raw(), p.raw());
     }
 
-    flint::FmpzModCtx ctx(p.raw());
     flint::FmpzModPoly residue_mod(ctx);
     if (!residue_mod.is_initialized()) {
         return false;

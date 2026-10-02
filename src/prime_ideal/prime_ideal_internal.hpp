@@ -80,10 +80,12 @@ public:
     static bool order_basis_is_p_integral(const PrimeIdeal& prime) noexcept;
 
     // Builds the degree-one prime (p, theta - root) of an equation or
-    // maximal order.  It checks that f(root) = 0 mod p and that the defining
-    // polynomial f is squarefree mod p (so p does not divide the index of
-    // Z[theta] and Dedekind-Kummer applies); otherwise it fails and leaves
-    // `out` unchanged.
+    // maximal order.  It requires f(root) = 0 mod p and the defining
+    // polynomial f squarefree mod p, a sufficient condition for
+    // (p, theta - root) to be a degree-one prime with e = 1 (p then does not
+    // divide the index of Z[theta] and Dedekind-Kummer applies).  The
+    // condition is not necessary; when it fails, the call fails and leaves
+    // `out` unchanged even if (p, theta - root) is such a prime.
     static bool set_degree_one_prime_ideal_from_root(
             PrimeIdeal& out,
             const Order& order,
