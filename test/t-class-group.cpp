@@ -2024,6 +2024,7 @@ int test_exact_order_certification_failure_restores_generation_check() {
 
     sflint::Fmpz discriminant;
     sflint::Fmpz exact_order;
+    sflint::Fmpz checked_bound;
     assert(set_fmpz_si(discriminant, -23));
     assert(set_fmpz_si(exact_order, 3));
     assert(!CertificationAccess::
@@ -2035,6 +2036,9 @@ int test_exact_order_certification_failure_restores_generation_check() {
            silex::CertificationMode::unknown);
     assert(context.factor_base_generation_checked_status() ==
            silex::ProofState::not_checked);
+    assert(!context.factor_base_generation_checked_bound(
+            sflint::FmpzRef(checked_bound)));
+    assert(sflint::fmpz_equal_si(checked_bound, 0));
     assert(context.factor_base_generation_record_count() == 0);
     assert(context.relation_saturation_status() ==
            silex::ProofState::not_checked);

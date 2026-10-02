@@ -181,7 +181,14 @@ public:
     //   `unavailable` otherwise; its records describe that search, not an
     //   ell-local proof.  Internal class/unit validation uses an
     //   index-bounded variant that sets `verified` once the primes of its
-    //   index bound are removed, which need not cover every p | h_cand.
+    //   index bound are removed, which need not cover every p | h_cand
+    //   (try_prove_relation_saturation_index_bound_with_units_ is the
+    //   internal route that does this);
+    // - the rank-zero exact index-one route
+    //   (rank_zero_quadratic_class_index_bound) sets it because the
+    //   index bound is exactly one;
+    // The bounded search leaves the status unchanged when the candidate
+    // index is 1 or has no prime factors (it returns early).
     // No route publishes `proven` from this status: each `proven` route
     // rests on verified records for every p | h_cand, on h_cand = 1, on the
     // exact class number, or on an unconditional analytic check.
