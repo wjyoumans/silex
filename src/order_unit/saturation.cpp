@@ -2369,8 +2369,8 @@ bool OrderUnitGroup::prove_local_saturated(ProofState& status,
                                            EmbeddingContext& embeddings,
                                            slong precision) noexcept {
     return prove_local_saturated_(status, changed, group, ell, aux_target_len,
-                                  aux_bound, embeddings, precision, false,
-                                  true);
+                                  aux_bound, embeddings, precision,
+                                  LocalSaturationProofMode_::standalone);
 }
 
 bool OrderUnitGroup::prove_local_saturated_(
@@ -2382,10 +2382,12 @@ bool OrderUnitGroup::prove_local_saturated_(
         flint::FmpzConstRef aux_bound,
         EmbeddingContext& embeddings,
         slong precision,
-        bool use_stable_proof_fallback,
-        bool check_torsion) noexcept {
+        LocalSaturationProofMode_ mode) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.prove_local_saturated");
+    const bool use_stable_proof_fallback =
+            mode == LocalSaturationProofMode_::index_bound_pass;
+    const bool check_torsion = mode == LocalSaturationProofMode_::standalone;
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     if (!is_defined() || !group.is_set() ||
@@ -2404,9 +2406,10 @@ bool OrderUnitGroup::prove_local_saturated_(
     // A verified ell-local record at ell | w rests on the torsion column of
     // the saturation kernel, so it relies on the input torsion.  With
     // check_torsion this fails closed, before any work, unless that is the
-    // torsion Silex computes for the order.  Only prove_index_bound passes
-    // false: it has checked the same input torsion, and its passes keep that
-    // torsion or recompute it, so it is not checked again there.
+    // torsion Silex computes for the order.  Only the index_bound_pass mode
+    // (prove_index_bound) skips it: it has checked the same input torsion,
+    // and its passes keep that torsion or recompute it, so it is not checked
+    // again there.
     if (check_torsion && !detail::order_unit_torsion_is_computed(group)) {
         SILEX_PROFILE_EVENT(
                 diagnostics_, DiagnosticsModule::unit_group,
@@ -2847,7 +2850,8 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
                 pass_ok = pass_result.prove_local_saturated_(
                         pass_status, pass_changed, working,
                         flint::FmpzConstRef(ell), aux_target_len, aux_bound,
-                        embeddings, precision, true, false);
+                        embeddings, precision,
+                        LocalSaturationProofMode_::index_bound_pass);
             }
             if (!pass_ok) {
                 return publish(working, ProofState::unavailable, any_changed);

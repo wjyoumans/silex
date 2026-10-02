@@ -336,6 +336,14 @@ private:
             slong stable_prefix_len) noexcept;
     void reset_unit_proof_records() noexcept;
     void try_certify_index_one(slong precision) noexcept;
+    // Callers of prove_local_saturated_.  standalone (prove_local_saturated)
+    // checks the input torsion and has no stable-proof fallback;
+    // index_bound_pass (a prove_index_bound pass, whose torsion is already
+    // checked) uses the stable-proof fallback and skips the torsion check.
+    enum class LocalSaturationProofMode_ : unsigned char {
+        standalone,
+        index_bound_pass,
+    };
     bool prove_local_saturated_(
             ProofState& status,
             bool& changed,
@@ -345,8 +353,7 @@ private:
             flint::FmpzConstRef aux_bound,
             EmbeddingContext& embeddings,
             slong precision,
-            bool use_stable_proof_fallback,
-            bool check_torsion) noexcept;
+            LocalSaturationProofMode_ mode) noexcept;
     bool saturate_local_with_kernel_(bool& changed,
                                      const OrderUnitGroup& group,
                                      flint::FmpzMatConstRef kernel,
