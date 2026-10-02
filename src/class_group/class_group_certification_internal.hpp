@@ -36,12 +36,17 @@ public:
             OrderUnitGroup& units,
             CertificationMode requested) noexcept;
 
+    // Bounded saturation at the primes of `index_bound`, a bound on
+    // h_cand / h.  `index_bound_unconditional` says whether that bound holds
+    // without GRH; when it does not, relation_saturation_status() becomes
+    // `verified` only if verified ell-records cover every p | h_cand.
     static bool saturate_relations_for_index_bound_with_units(
             bool& changed,
             bool& saturated,
             ClassGroupContext& context,
             const OrderUnitGroup& units,
             flint::FmpzConstRef index_bound,
+            bool index_bound_unconditional,
             flint::FmpzConstRef aux_prime_bound,
             slong max_appends_per_ell,
             slong max_appends_total) noexcept;

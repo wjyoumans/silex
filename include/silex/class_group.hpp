@@ -183,11 +183,19 @@ public:
     // - saturate_relations_bounded_with_units sets `verified` when its
     //   bounded search removed every prime from the candidate index and
     //   `unavailable` otherwise; its records describe that search, not an
-    //   ell-local proof.  Internal class/unit validation uses the
+    //   ell-local proof.  Its bound is h_cand itself, which bounds
+    //   h_cand / h unconditionally.  Internal class/unit validation uses the
     //   index-bounded variant
     //   saturate_relations_bounded_for_index_with_units_ (the public
-    //   method forwards to it), which sets `verified` once the primes of
-    //   its index bound are removed; that need not cover every p | h_cand.
+    //   method forwards to it), which removes only the primes of a supplied
+    //   bound on h_cand / h.  It sets `verified` once those primes are
+    //   removed and either the bound holds unconditionally or verified
+    //   records cover every p | h_cand, and `unavailable` otherwise.  The
+    //   validation pass supplies the exact imaginary-quadratic index, which
+    //   is unconditional under a `proven` request (generation checked to
+    //   the Minkowski-type bound) and GRH-conditional under a `grh` request;
+    //   a Belabas-Friedman analytic index bound only decides whether the
+    //   pass runs and is never the bound it saturates against.
     // The bounded search leaves the status unchanged when the candidate
     // index is 1 or has no prime factors (it returns early).
     // No route publishes `proven` from this status: each `proven` route
@@ -514,6 +522,7 @@ private:
             bool& saturated,
             const OrderUnitGroup& units,
             flint::FmpzConstRef index_bound,
+            bool index_bound_unconditional,
             flint::FmpzConstRef aux_prime_bound,
             slong max_appends_per_ell,
             slong max_appends_total) noexcept;

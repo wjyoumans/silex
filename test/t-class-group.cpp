@@ -1859,6 +1859,81 @@ int test_relation_saturation_bounded_append_with_units_degree_one() {
     return 0;
 }
 
+// Index-bounded saturation (the internal class/unit validation pass) clears
+// the primes of a bound on h_cand / h.  Clearing them proves saturation only
+// when the bound holds unconditionally; with a GRH-conditional bound the
+// status stays below `verified` unless verified ell-records cover every
+// p | h_cand.  Q(sqrt(-23)) has h = 3; the relations below give h_cand = 6,
+// so the bound 2 = h_cand / h is cleared and h_cand becomes 3, which no
+// ell-local proof covers.
+int test_relation_saturation_index_bounded_status_needs_unconditional_bound() {
+    silex::NumberField field = shifted_quadratic_field(-1, 6);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(order));
+    assert(units.certification_status() == silex::CertificationMode::proven);
+
+    auto prepare_context = [&](silex::ClassGroupContext& context) noexcept {
+        sflint::Fmpz bound;
+        assert(set_fmpz_si(bound, 3));
+        context = silex::ClassGroupContext(order);
+        assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+        const silex::FactorBase* base = context.factor_base();
+        assert(base != nullptr);
+        // Generators a + b x with x^2 = x - 6: 4, 3, x, 1 + x.
+        const slong generators[][2] = {{4, 0}, {3, 0}, {0, 1}, {1, 1}};
+        for (const auto& generator : generators) {
+            sflint::FmpqPoly polynomial;
+            sflint::fmpq_poly_zero(polynomial);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 0, generator[0]);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 1, generator[1]);
+            silex::Element alpha(field);
+            assert(alpha.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+            silex::Relation relation(*base);
+            assert(relation.set_generator(alpha));
+            assert(context.append_relation(relation));
+        }
+        assert(context.publish_presentation());
+        sflint::Fmpz order_out;
+        assert(context.order(sflint::FmpzRef(order_out)));
+        assert(sflint::fmpz_equal_si(order_out, 6));
+    };
+
+    sflint::Fmpz index_bound;
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(index_bound, 2));
+    assert(set_fmpz_si(aux_bound, 101));
+    for (const bool unconditional : {false, true}) {
+        silex::ClassGroupContext context;
+        prepare_context(context);
+        bool changed = false;
+        bool saturated = false;
+        assert(CertificationAccess::
+                       saturate_relations_for_index_bound_with_units(
+                               changed, saturated, context, units,
+                               sflint::FmpzConstRef(index_bound),
+                               unconditional,
+                               sflint::FmpzConstRef(aux_bound), 4, 8));
+        // The bounded search cleared ell = 2 from h_cand.
+        assert(changed);
+        assert(saturated);
+        sflint::Fmpz order_out;
+        assert(context.order(sflint::FmpzRef(order_out)));
+        assert(sflint::fmpz_equal_si(order_out, 3));
+        assert(context.relation_saturation_record_count() == 1);
+        assert(context.relation_saturation_status() ==
+               (unconditional ? silex::ProofState::verified
+                              : silex::ProofState::unavailable));
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+    }
+    return 0;
+}
+
 int test_relation_saturation_index_bound_with_units_degree_one() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -2715,6 +2790,7 @@ int main() {
     test_relation_saturation_bounded_append_with_units_degree_one();
     test_relation_saturation_index_bound_with_units_degree_one();
     test_relation_saturation_index_bound_checks_nondivisor_primes();
+    test_relation_saturation_index_bounded_status_needs_unconditional_bound();
     test_exact_order_certification_failure_restores_generation_check();
     test_saturation_promotion_requires_every_class_order_prime();
     test_relation_saturation_completes_prime_by_prime();

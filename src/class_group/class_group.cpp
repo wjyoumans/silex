@@ -4801,12 +4801,14 @@ bool ClassGroupCertificationAccess::
                 ClassGroupContext& context,
                 const OrderUnitGroup& units,
                 flint::FmpzConstRef index_bound,
+                bool index_bound_unconditional,
                 flint::FmpzConstRef aux_prime_bound,
                 slong max_appends_per_ell,
                 slong max_appends_total) noexcept {
     return context.saturate_relations_bounded_for_index_with_units_(
-            changed, saturated, units, index_bound, aux_prime_bound,
-            max_appends_per_ell, max_appends_total);
+            changed, saturated, units, index_bound,
+            index_bound_unconditional, aux_prime_bound, max_appends_per_ell,
+            max_appends_total);
 }
 
 bool compact_first_reduction(
@@ -10780,8 +10782,10 @@ bool ClassGroupContext::saturate_relations_bounded_with_units(
         return false;
     }
 
+    // The current index h_cand bounds h_cand / h unconditionally: the full
+    // relation lattice lies between the computed one and Z^S.
     return saturate_relations_bounded_for_index_with_units_(
-            changed, saturated, units, flint::FmpzConstRef(index),
+            changed, saturated, units, flint::FmpzConstRef(index), true,
             aux_prime_bound, max_appends_per_ell, max_appends_total);
 }
 
@@ -10790,6 +10794,7 @@ bool ClassGroupContext::saturate_relations_bounded_for_index_with_units_(
         bool& saturated,
         const OrderUnitGroup& units,
         flint::FmpzConstRef index_bound,
+        bool index_bound_unconditional,
         flint::FmpzConstRef aux_prime_bound,
         slong max_appends_per_ell,
         slong max_appends_total) noexcept {
@@ -10888,8 +10893,16 @@ bool ClassGroupContext::saturate_relations_bounded_for_index_with_units_(
     if (any_changed && !publish_presentation()) {
         return false;
     }
+    // Clearing every prime of the bound from the candidate index proves
+    // saturation only when the bound is a true bound on h_cand / h.  A bound
+    // that rests on GRH (a grh-request generation bound) does not prove it,
+    // so the status is `verified` only when the bound is unconditional or
+    // verified ell-records already cover every p | h_cand.
     relation_saturation_status_ =
-            all_cleared ? ProofState::verified : ProofState::unavailable;
+            all_cleared && (index_bound_unconditional ||
+                            relation_saturation_covers_class_order_())
+                    ? ProofState::verified
+                    : ProofState::unavailable;
     if (units.certification_status() == CertificationMode::proven) {
         unit_proof_status_ = ProofState::verified;
         regulator_proof_status_ = ProofState::verified;

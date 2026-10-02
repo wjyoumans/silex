@@ -513,13 +513,23 @@ bool saturate_candidate_class_relations_with_units(
 
     flint::Fmpz aux_bound;
     relation_saturation_aux_bound(aux_bound, options);
+    // The exact imaginary-quadratic index h_cand / h bounds the saturation
+    // index only once the factor base generates the class group.  A proven
+    // request checked generation to the Minkowski-type bound
+    // (rank_zero_quadratic_class_index_bound), so the bound is
+    // unconditional; a grh request assumes generation under GRH.  The other
+    // branch saturates at the primes of h_cand itself, an unconditional
+    // bound; the analytic index bound only decides whether to run it.
+    const bool exact_index_bound_unconditional =
+            options.requested_certification == CertificationMode::proven;
     bool saturated = false;
     const slong remaining = options.max_relations - class_group.relation_count();
     const bool saturation_ok = index_bound_is_exact
             ? ClassGroupCertificationAccess::
                       saturate_relations_for_index_bound_with_units(
                               changed, saturated, class_group, units,
-                              index_bound, flint::FmpzConstRef(aux_bound),
+                              index_bound, exact_index_bound_unconditional,
+                              flint::FmpzConstRef(aux_bound),
                               relation_saturation_max_appends_per_ell(options),
                               remaining)
             : class_group.saturate_relations_bounded_with_units(
