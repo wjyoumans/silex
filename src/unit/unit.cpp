@@ -624,8 +624,9 @@ namespace {
 
 // Working precision for the signature bounds.  The bounds are lower bounds
 // only, so a lower endpoint computed at 64 bits only weakens the bound
-// and stays rigorous at any precision; capping it keeps the Satz 3 special-function evaluations cheap
-// for callers that ask for several hundred bits.
+// and stays rigorous at any precision; capping it keeps the Satz 3
+// special-function evaluations cheap for callers that ask for several hundred
+// bits.
 constexpr slong kRegulatorBoundPrecision = 64;
 
 bool valid_signature_bound_input(slong r1,

@@ -56,9 +56,10 @@ methods for calculating vectors of short length in a lattice, including a
 complexity analysis", *Math. Comp.* 44 (1985), 463--471, and H. Cohen, *A
 Course in Computational Algebraic Number Theory*, GTM 138, section 2.7.3 (the
 citations given at ``enum_double_coordinates_bounded`` in ``src/lat/lat.cpp``).
-Silex uses the bound only to choose between the double and Arb routes; the
-enumeration itself is a witness search as described in :doc:`lat`.  Optional fplll and flatter integrations
-remain backend comparisons rather than mathematical authorities.
+Silex uses the bound only to choose the route for uncapped calls
+(``max_coord < 0``); the enumeration itself is a witness search as described
+in :doc:`lat`.  Optional fplll and flatter integrations remain backend
+comparisons rather than mathematical authorities.
 
 The LLL reference checks compare FLINT's optional transformation argument in
 three forms: a zero matrix, an identity-initialized matrix, and a null pointer.
@@ -650,9 +651,9 @@ and doubles ``stable`` after a candidate that is not.  Silex multiplies
 elements.  This is an accepted deviation: the stopping rule decides only when
 candidates are tested, never whether ``ell`` is verified.  The same constant
 ``3.5`` is used for the initial ``ell = 2`` pass and for the small-index
-saturation loop in ``src/order_unit/compute.cpp``.  Silex first scans the primes
-``q <= aux_bound`` (the caller's bound; 1000 in class/unit validation) and
-continues with the Hecke scan when that pre-scan selects no usable prime,
+saturation loop in ``src/order_unit/compute.cpp``.  Silex first scans the
+primes ``q <= aux_bound`` (the caller's bound; 1000 in class/unit
+validation) and continues with the Hecke scan when that pre-scan selects no usable prime,
 when it leaves a nonempty kernel without adjoining a root, or when
 ``ell >= aux_bound``.  The auxiliary bound is therefore not a proof
 parameter; a unit proof record stores it as the pre-scan bound of the call,
@@ -745,14 +746,15 @@ of ``K``:
   ``D_K = -10051, -10571, -12167``).  Theorem B gives their regulators
   0.2052, 0.2132 and 0.2372, so Silex uses 0.2052 for ``(0, 3)``.
 
-All of these bounds are non-decreasing in ``w``.  For an order ``O``, ``O^x`` has
-finite index in ``O_K^x``, so ``Reg(O) >= R_K``, and the field's ``w`` is the
-right value to use.  If ``w`` cannot be computed, Silex uses ``w = 2``.  The
+All of these bounds are non-decreasing in ``w``.  For an order ``O``, ``O^x``
+has finite index in ``O_K^x``, so ``Reg(O) >= R_K``, and the field's ``w`` is
+the right value to use.  If ``w`` cannot be computed, Silex uses ``w = 2``.  The
 terms are evaluated at a working precision of at most 64 bits; the result is
 an exact lower endpoint, so this only weakens the bound.  The floor in
 ``regulator_index_bound`` is taken of a rigorous upper endpoint, whereas Hecke
-floors a floating-point quotient, so Silex follows Hecke's rule but is
-stricter than it.  The Zimmert Korollar and the Friedman Corollary are
+floors a floating-point quotient, so Silex follows Hecke's rule but,
+unlike a floating-point floor, can never report a bound below the true
+index.  The Zimmert Korollar and the Friedman Corollary are
 dominated by the Satz 3 values at ``gamma = 1`` and ``gamma = 3/5``, which are
 already evaluated; they are kept as documented cross-checks.
 

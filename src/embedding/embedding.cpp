@@ -311,7 +311,7 @@ bool isolate_roots_in_previous_order(acb_ptr roots,
                             "element.embedding.refine.full_roots_order_retry");
         // Unreachable given the precondition: for a squarefree polynomial the
         // previous balls are at positive distance from every other root, so
-        // the retry succeeds at a finite precision far below COEFF_MAX / 2.
+        // the retry succeeds at a finite precision.
         // The guard only keeps the doubling from overflowing slong.
         if (work_precision > (COEFF_MAX / 2)) {
             SILEX_PROFILE_EVENT(

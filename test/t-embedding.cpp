@@ -585,9 +585,9 @@ int test_refine_precision_cap() {
     // At most the working precisions 128, 256, 512 and 1024 = 8 * 128 are
     // tried from the previous roots.  With FLINT 3.6.0 all four fail (the
     // uncapped loop would go on to 2048) and the refine falls back to full
-    // isolation.  The exact count of attempts depends on FLINT, and so does
-    // the fallback: the >= 1 assertion holds because all four precisions
-    // fail with FLINT 3.6.0, not because the cap forces a fallback.
+    // isolation.  The exact count of attempts and the fallback itself depend
+    // on FLINT: the >= 1 assertion holds because all four precisions fail
+    // with FLINT 3.6.0, not because the cap forces a fallback.
     assert(counters.events > 0);
     assert(counters.find_roots >= 1);
     assert(counters.find_roots <= 4);
