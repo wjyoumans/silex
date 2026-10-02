@@ -4329,8 +4329,10 @@ void torsion_event_callback(void* user,
 // The exact imaginary-quadratic index route may report index one under a
 // proven request only after it has published the pair proven.  With torsion
 // that Silex did not compute (Z[i] with an under-claimed w = 2), the route
-// must fail closed rather than hand callers an unproven index one, and the
-// candidate-pair validation loop must not report an unproven pair as proven.
+// must fail closed rather than hand callers an unproven index one, and a
+// failed call leaves no generation check behind.  The candidate-pair
+// validation loop then recomputes the units with the computed torsion and
+// publishes that pair proven; the under-claimed units are never proven.
 int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
     using CertificationAccess =
             silex::detail::ClassGroupCertificationAccess;
@@ -4383,13 +4385,17 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
                silex::ProofState::not_checked);
         assert(under.certification_status() ==
                silex::CertificationMode::unknown);
+        // The failed call ran the generation check inside its transaction,
+        // so that check is rolled back too.
+        assert(class_group.factor_base_generation_checked_status() ==
+               silex::ProofState::not_checked);
     }
 
-    // Through the candidate-pair validation loop: a proven request never
-    // reports the under-claimed pair as proven.  The exact index route fails
-    // closed, and in the saturation fallback prove_index_bound rejects the
-    // input torsion before the class proof, so the loop ends with
-    // index_one_publication_failed.
+    // Through the candidate-pair validation loop: the exact index route
+    // fails closed and leaves no generation check, so the loop does not take
+    // the integer index-one shortcut.  It recomputes the units with the
+    // computed torsion (w = 4) and publishes that pair proven through the
+    // exact index route.  The under-claimed (w = 2) units are never proven.
     {
         silex::ClassGroupContext class_group;
         assert(class_group.compute_candidate(
@@ -4413,18 +4419,40 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
         options.requested_certification = silex::CertificationMode::proven;
         silex::detail::AnalyticClassRegulatorCache analytic_cache;
         silex::detail::ValidateRefineSummary summary;
-        assert(!silex::detail::try_validate_refine_loop(
+        assert(silex::detail::try_validate_refine_loop(
                 class_group, under, scratch, order, options, embeddings,
                 analytic_cache, summary, 256, false));
-        assert(summary.outcome == silex::detail::ValidateRefineOutcome::
-                                          index_one_publication_failed);
+        assert(summary.outcome ==
+               silex::detail::ValidateRefineOutcome::proven);
         assert(class_group.certification_status() ==
-               silex::CertificationMode::unknown);
+               silex::CertificationMode::proven);
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+        // The loop swaps the refined units into `under`.  Whichever object
+        // is proven has the computed torsion w = 4; no object with the
+        // under-claimed w = 2 is proven.
         assert(under.certification_status() ==
-               silex::CertificationMode::unknown);
-        sflint::Fmpz kept_torsion;
-        assert(under.torsion_order(sflint::FmpzRef(kept_torsion)));
-        assert(sflint::fmpz_equal_si(kept_torsion, 2));
+               silex::CertificationMode::proven);
+        bool saw_under_claimed = false;
+        for (const silex::OrderUnitGroup* group : {&under, &scratch}) {
+            if (!group->is_set()) {
+                continue;
+            }
+            sflint::Fmpz group_torsion;
+            assert(group->torsion_order(sflint::FmpzRef(group_torsion)));
+            if (sflint::fmpz_equal_si(group_torsion, 2)) {
+                saw_under_claimed = true;
+                assert(group->certification_status() !=
+                       silex::CertificationMode::proven);
+            }
+            if (group->certification_status() ==
+                silex::CertificationMode::proven) {
+                assert(sflint::fmpz_equal_si(group_torsion, 4));
+                assert(silex::detail::order_unit_torsion_is_computed(
+                        *group));
+            }
+        }
+        assert(saw_under_claimed);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
         assert(counter.count >= 1);
 #else

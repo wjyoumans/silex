@@ -4699,6 +4699,11 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
+    // The transaction covers the generation check below, which writes the
+    // checked bound, status, and per-prime records, and the index-one
+    // publication, so a call that returns false leaves the certification
+    // state as it was.
+    ClassGroupContext::CertificationTransaction_ transaction(context);
     flint::Fmpz required_bound;
     if (requested == CertificationMode::grh) {
         flint::Fmpz build_bound;
@@ -4751,7 +4756,6 @@ bool ClassGroupCertificationAccess::
         // Index one against the exact class number: as in
         // try_certify_imaginary_quadratic_from_exact_order, the relations
         // are saturated at every prime ell | h, and that is stored per ell.
-        ClassGroupContext::CertificationTransaction_ transaction(context);
         if (!record_exact_class_order_saturation(
                     context, flint::FmpzConstRef(exact_order)) ||
             !context.relation_saturation_covers_class_order_()) {
@@ -4761,11 +4765,10 @@ bool ClassGroupCertificationAccess::
         context.relation_saturation_status_ = ProofState::verified;
         context.unit_proof_status_ = ProofState::verified;
         context.regulator_proof_status_ = ProofState::verified;
-        (void) transaction.finish(true);
         units.mark_certification_proven_();
     }
     flint::fmpz_set(out, flint::FmpzConstRef(index));
-    return true;
+    return transaction.finish(true);
 }
 
 bool ClassGroupCertificationAccess::

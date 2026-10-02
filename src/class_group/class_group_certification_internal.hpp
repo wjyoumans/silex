@@ -24,10 +24,12 @@ public:
     // Exact imaginary-quadratic index h_cand / h for a rank-zero maximal
     // order.  Under a proven request, true with index one means the class
     // group and `units` have been published proven (this requires the
-    // torsion of `units` to be the computed torsion); false publishes
-    // nothing.  Index > 1, or any index under a grh request, publishes
-    // nothing and is only a saturation target or acceptance test for the
-    // caller.
+    // torsion of `units` to be the computed torsion).  False leaves the
+    // certification state as it was, including the factor-base generation
+    // check a proven request runs first.  Index > 1, or any index under a
+    // grh request, publishes no label and is only a saturation target or
+    // acceptance test for the caller; a proven request then keeps its
+    // generation check.
     static bool rank_zero_quadratic_class_index_bound(
             flint::FmpzRef out,
             ClassGroupContext& context,
