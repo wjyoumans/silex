@@ -373,8 +373,9 @@ int test_degree_one_prime_from_root_rejects_index_prime() {
 // convention reduction needs p not dividing the index.  At p = 3 the inert
 // prime reduces alpha.  No construction route records alpha residue data at
 // p = 2, so the test forces such a record through the internal hook and
-// checks that reduce() and residue_variable_numerator() refuse it and leave
-// their outputs unchanged.
+// checks that reduce() and residue_variable_numerator() refuse it.  Only
+// reduce() is checked to leave its outputs unchanged; the outputs of
+// residue_variable_numerator() are unspecified on failure.
 int test_alpha_reduction_refuses_index_prime() {
     sflint::FmpqPoly polynomial;
     poly_cubic_disc1724(polynomial);
@@ -412,7 +413,7 @@ int test_alpha_reduction_refuses_index_prime() {
 
     // Record g = x in the alpha convention at p = 2.
     fmpz_poly_set_coeff_si(residue_polynomial.raw(), 1, 1);
-    assert(PrimeIdealAccess::set_alpha_residue_polynomial_unchecked(
+    assert(PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
             prime, sflint::FmpzPolyConstRef(residue_polynomial)));
     assert(!PrimeIdealAccess::residue_uses_integral_generator(prime));
     assert(!PrimeIdealAccess::order_basis_is_p_integral(prime));

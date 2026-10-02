@@ -97,8 +97,10 @@ public:
     // keeping its p, e, f and ideal, without checking that p does not divide
     // [O : Z[alpha]].  No construction route records alpha residue data at
     // such a p; this lets tests reach the p | index refusal of
-    // PrimeIdeal::reduce and residue_variable_numerator.
-    static bool set_alpha_residue_polynomial_unchecked(
+    // PrimeIdeal::reduce and residue_variable_numerator.  It does not check
+    // that the degree of `residue_polynomial` matches the residue degree f of
+    // the prime.  For tests only.
+    static bool set_alpha_residue_polynomial_for_testing(
             PrimeIdeal& prime,
             flint::FmpzPolyConstRef residue_polynomial) noexcept;
 

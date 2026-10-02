@@ -3529,7 +3529,7 @@ bool PrimeIdealAccess::order_basis_is_p_integral(
     return prime.order_basis_is_p_integral();
 }
 
-bool PrimeIdealAccess::set_alpha_residue_polynomial_unchecked(
+bool PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
         PrimeIdeal& prime,
         flint::FmpzPolyConstRef residue_polynomial) noexcept {
     if (!prime.has_prime_data()) {
