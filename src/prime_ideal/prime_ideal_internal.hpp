@@ -92,6 +92,16 @@ public:
             flint::FmpzConstRef p,
             flint::FmpzConstRef root) noexcept;
 
+    // Test hook: replaces the residue data of `prime` (which must already
+    // have prime data) with `residue_polynomial` in the alpha convention,
+    // keeping its p, e, f and ideal, without checking that p does not divide
+    // [O : Z[alpha]].  No construction route records alpha residue data at
+    // such a p; this lets tests reach the p | index refusal of
+    // PrimeIdeal::reduce and residue_variable_numerator.
+    static bool set_alpha_residue_polynomial_unchecked(
+            PrimeIdeal& prime,
+            flint::FmpzPolyConstRef residue_polynomial) noexcept;
+
     // `norm_vp` must be the exact p-adic valuation of the absolute norm of
     // `element`; the result is wrong otherwise.
     static bool prime_ideal_valuation_with_norm_vp(

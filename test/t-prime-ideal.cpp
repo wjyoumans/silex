@@ -369,6 +369,67 @@ int test_degree_one_prime_from_root_rejects_index_prime() {
     return 0;
 }
 
+// On the cubic_disc1724 maximal order ([O : Z[alpha]] = 2) the alpha-
+// convention reduction needs p not dividing the index.  At p = 3 the inert
+// prime reduces alpha.  No construction route records alpha residue data at
+// p = 2, so the test forces such a record through the internal hook and
+// checks that reduce() and residue_variable_numerator() refuse it and leave
+// their outputs unchanged.
+int test_alpha_reduction_refuses_index_prime() {
+    sflint::FmpqPoly polynomial;
+    poly_cubic_disc1724(polynomial);
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    sflint::Fmpz index;
+    assert(silex::order_index(sflint::FmpzRef(index), equation, maximal));
+    assert(sflint::fmpz_equal_si(index, 2));
+
+    silex::Element alpha(field);
+    assert(alpha.gen());
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, 3));
+    silex::PrimeIdealList primes3;
+    assert(silex::decompose_prime(primes3, maximal, sflint::FmpzConstRef(p)));
+    assert(primes3.size() == 1);
+    assert(!PrimeIdealAccess::residue_uses_integral_generator(*primes3.at(0)));
+    assert(PrimeIdealAccess::order_basis_is_p_integral(*primes3.at(0)));
+    sflint::FmpzPoly reduced;
+    assert(primes3.at(0)->reduce(sflint::FmpzPolyRef(reduced), alpha));
+
+    assert(set_fmpz_si(p, 2));
+    silex::PrimeIdealList primes2;
+    assert(silex::decompose_prime(primes2, maximal, sflint::FmpzConstRef(p)));
+    assert(primes2.size() > 0);
+    silex::PrimeIdeal prime(maximal);
+    assert(prime.set(*primes2.at(0)));
+    sflint::FmpzPoly residue_polynomial;
+    assert(!prime.residue_polynomial(
+            sflint::FmpzPolyRef(residue_polynomial)));
+
+    // Record g = x in the alpha convention at p = 2.
+    fmpz_poly_set_coeff_si(residue_polynomial.raw(), 1, 1);
+    assert(PrimeIdealAccess::set_alpha_residue_polynomial_unchecked(
+            prime, sflint::FmpzPolyConstRef(residue_polynomial)));
+    assert(!PrimeIdealAccess::residue_uses_integral_generator(prime));
+    assert(!PrimeIdealAccess::order_basis_is_p_integral(prime));
+
+    sflint::FmpzPoly untouched;
+    fmpz_poly_set_si(untouched.raw(), 77);
+    assert(!prime.reduce(sflint::FmpzPolyRef(untouched), alpha));
+    assert(fmpz_poly_degree(untouched.raw()) == 0);
+    assert(fmpz_poly_coeff_is_si(untouched, 0, 77));
+
+    sflint::FmpzPoly numerator;
+    sflint::Fmpz denominator;
+    assert(!silex::detail::residue_variable_numerator(numerator, denominator,
+                                                      prime, alpha));
+    return 0;
+}
+
 int test_degree_one_prime_from_root_matches_decomposition() {
     sflint::FmpqPoly polynomial;
     poly_x4_minus_x_minus_1(polynomial);
@@ -2254,6 +2315,7 @@ int main() {
     assert(test_degree_one_prime_from_root_matches_decomposition() == 0);
     assert(test_degree_one_prime_from_root_rejects_non_roots() == 0);
     assert(test_degree_one_prime_from_root_rejects_index_prime() == 0);
+    assert(test_alpha_reduction_refuses_index_prime() == 0);
     assert(test_invalid_prime_failure_preserves_output() == 0);
     assert(test_unsupported_order_failure_preserves_output() == 0);
     assert(test_quadratic_splitting_types() == 0);

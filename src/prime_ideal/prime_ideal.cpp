@@ -3529,6 +3529,16 @@ bool PrimeIdealAccess::order_basis_is_p_integral(
     return prime.order_basis_is_p_integral();
 }
 
+bool PrimeIdealAccess::set_alpha_residue_polynomial_unchecked(
+        PrimeIdeal& prime,
+        flint::FmpzPolyConstRef residue_polynomial) noexcept {
+    if (!prime.has_prime_data()) {
+        return false;
+    }
+    return prime.set_data(flint::FmpzConstRef(prime.p_), prime.e_, prime.f_,
+                          prime.ideal_, residue_polynomial, false);
+}
+
 bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
         PrimeIdeal& out,
         const Order& order,
