@@ -6197,11 +6197,13 @@ int test_select_saturation_primes() {
 // and Z[sqrt13] (disc 52) at ell = 3 each have a rational q = 1 mod ell
 // dividing the discriminant (7 and 13, both ramified) with a degree-one
 // prime above it: both selectors skip it, as the reference
-// compute_candidates_for_saturate does.  Z[sqrt2] at ell = 2 has no such q,
-// so it is an agreement-only case (skipped_q = 0): its skip assertion is
-// vacuous.  The cubic x^3 - 3x + 1 (disc 81) at ell = 2 is the ell = 2 skip
-// case: q = 3 is odd, divides the discriminant, and is totally ramified with
-// a degree-one prime above it, so both selectors must leave 3 out.
+// compute_candidates_for_saturate does.  Z[sqrt3] (disc 12) at ell = 2 is
+// the ell = 2 skip case: q = 3 is odd, ramified, and its degree-one prime
+// has an accepted character column, so removing the skip from either
+// selector changes the selected primes.  Z[sqrt2] at ell = 2 and the cubic
+// x^3 - 3x + 1 at ell = 2 are agreement-only cases (skipped_q = 0): Z[sqrt2]
+// has no such q, and the cubic's q = 3 is not selected even without the
+// skip.
 void assert_saturation_selectors_agree_for(const silex::Order& order,
                                            const silex::Element* units,
                                            slong unit_count,
@@ -6272,13 +6274,13 @@ void assert_saturation_selectors_agree(slong radicand,
 int test_saturation_selectors_agree() {
     assert_saturation_selectors_agree(7, "8", "3", 3, 2, 100, 7);
     assert_saturation_selectors_agree(13, "649", "180", 3, 2, 100, 13);
+    // ell = 2 skip case: 2 + sqrt3 is the fundamental unit, and 3 | 12.
+    assert_saturation_selectors_agree(3, "2", "1", 2, 2, 200, 3);
     // Agreement only: no skipped prime (skipped_q = 0).
     assert_saturation_selectors_agree(2, "1", "1", 2, 3, 100, 0);
 
-    // ell = 2 skip case.  The root theta of x^3 - 3x + 1 and its conjugate
-    // theta^2 - 2 are independent units (rank 2), and 3 | 81 has a
-    // degree-one prime ideal, so a selector that did not skip 3 would
-    // return it.
+    // Agreement only (skipped_q = 0).  The root theta of x^3 - 3x + 1 and
+    // its conjugate theta^2 - 2 are independent units (rank 2).
     silex::NumberField cubic = cubic_field(-3, 1);
     silex::Order cubic_order;
     cubic_order = silex::test::equation_order(cubic);
@@ -6289,7 +6291,7 @@ int test_saturation_selectors_agree() {
     assert(conjugate.add_si(conjugate, -2));
     silex::Element cubic_units[] = {std::move(theta), std::move(conjugate)};
     assert_saturation_selectors_agree_for(cubic_order, cubic_units, 2, 2, 2,
-                                          200, 3);
+                                          200, 0);
     return 0;
 }
 
