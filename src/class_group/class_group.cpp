@@ -10782,8 +10782,9 @@ bool ClassGroupContext::saturate_relations_bounded_with_units(
         return false;
     }
 
-    // The current index h_cand bounds h_cand / h unconditionally: the full
-    // relation lattice lies between the computed one and Z^S.
+    // The current index h_cand bounds [L_true : L_found] unconditionally:
+    // the full relation lattice L_true lies between the computed one L_found
+    // and Z^S.  That index equals h_cand / h only once generation is known.
     return saturate_relations_bounded_for_index_with_units_(
             changed, saturated, units, flint::FmpzConstRef(index), true,
             aux_prime_bound, max_appends_per_ell, max_appends_total);
@@ -10897,7 +10898,10 @@ bool ClassGroupContext::saturate_relations_bounded_for_index_with_units_(
     // saturation only when the bound is a true bound on h_cand / h.  A bound
     // that rests on GRH (a grh-request generation bound) does not prove it,
     // so the status is `verified` only when the bound is unconditional or
-    // verified ell-records already cover every p | h_cand.
+    // verified ell-records already cover every p | h_cand.  The records are
+    // cleared at the start of this pass and only primes of the bound are
+    // re-marked, each `verified` exactly when cleared, so coverage holds
+    // only once the new h_cand is 1; it never rescues a conditional bound.
     relation_saturation_status_ =
             all_cleared && (index_bound_unconditional ||
                             relation_saturation_covers_class_order_())

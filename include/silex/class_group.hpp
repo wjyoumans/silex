@@ -183,14 +183,19 @@ public:
     // - saturate_relations_bounded_with_units sets `verified` when its
     //   bounded search removed every prime from the candidate index and
     //   `unavailable` otherwise; its records describe that search, not an
-    //   ell-local proof.  Its bound is h_cand itself, which bounds
-    //   h_cand / h unconditionally.  Internal class/unit validation uses the
+    //   ell-local proof.  Its bound is h_cand itself, which bounds the index
+    //   of the computed relation lattice in the full one unconditionally
+    //   (that index equals h_cand / h only once generation is known).
+    //   Internal class/unit validation uses the
     //   index-bounded variant
     //   saturate_relations_bounded_for_index_with_units_ (the public
     //   method forwards to it), which removes only the primes of a supplied
     //   bound on h_cand / h.  It sets `verified` once those primes are
     //   removed and either the bound holds unconditionally or verified
     //   records cover every p | h_cand, and `unavailable` otherwise.  The
+    //   pass keeps records only for primes of the bound, so coverage holds
+    //   only once the resulting h_cand is 1 and never rescues a conditional
+    //   bound.  The
     //   validation pass supplies the exact imaginary-quadratic index, which
     //   is unconditional under a `proven` request (generation checked to
     //   the Minkowski-type bound) and GRH-conditional under a `grh` request;

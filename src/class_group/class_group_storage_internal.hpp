@@ -63,7 +63,9 @@ struct RelationSaturationRecord {
 //
 // - `ell_local_dlog`: the ell-local test of
 //   ClassGroupContext::prove_relation_saturation_dlog_ell_; `rank`,
-//   `target_rank`, and `local_primes` describe that computation.
+//   `target_rank`, and `local_primes` describe that computation.  When the
+//   local target rank is 0 the proof is vacuous and no computation ran;
+//   the record then stores zero for all three.
 // - `exact_class_order`: the exact imaginary-quadratic route.  With
 //   generation verified and h_cand equal to the exact class number h, the
 //   computed relation lattice has index h_cand / h = 1 in the full one, so it

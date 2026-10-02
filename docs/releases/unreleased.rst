@@ -15,9 +15,12 @@ Changed
 - The index-bounded relation-saturation pass of class/unit validation now
   reports ``relation_saturation_status()`` as ``verified`` only when its
   index bound holds without GRH or verified records cover every prime
-  dividing the candidate class number; otherwise it reports
-  ``unavailable``.  This changes the status after a ``grh`` imaginary
-  quadratic run whose candidate class number exceeded the exact one.  The
+  dividing the candidate class number (in this pass coverage holds only once
+  the candidate class number has been reduced to 1, so it never rescues a
+  GRH-conditional bound); otherwise it reports ``unavailable``.  This
+  changes the status after a ``grh`` imaginary quadratic run whose candidate
+  class number exceeded the exact one, and with it
+  ``SUnitGroup::source_relation_saturation_status()``, which copies it.  The
   unconditional analytic index-one route keeps ``verified``.  Labels are
   unaffected.
 
