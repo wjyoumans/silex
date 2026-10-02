@@ -28,9 +28,9 @@ bool degree_is_positive(flint::FmpqPolyConstRef polynomial) noexcept {
 }
 
 // Irreducibility over Q of a polynomial of positive degree.  By Gauss's
-// lemma this is irreducibility over Z of its primitive part.  FLINT's
-// fmpz_poly_factor returns the content (with sign) separately and the
-// remaining factors as primitive irreducible polynomials of positive degree
+// lemma this is irreducibility over Z of its primitive part.  Per the FLINT
+// 3.6 src/fmpz_poly_factor/factor.c contract, fmpz_poly_factor returns the
+// content (with sign) separately and the remaining factors as primitive irreducible polynomials of positive degree
 // with multiplicities, so the input is irreducible exactly when that list is
 // a single factor of multiplicity one.  Degree-one polynomials are
 // irreducible and need no factorization.

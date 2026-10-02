@@ -127,7 +127,7 @@ Fincke--Pohst coordinate bound :math:`\sqrt{b\,(G^{-1})_{ii}}` with
 :math:`b` = ``bound_sq``, evaluated in double precision, is at most 10000 for
 every coordinate.  That route enumerates in double arithmetic on the Arb
 midpoints, widens each coordinate interval by ``1e-9`` and the bound by a
-relative ``2^-40``, so it can report rows whose squared norm is slightly above
+relative :math:`2^{-40}`, so it can report rows whose squared norm is slightly above
 ``bound_sq`` and its completeness is not certified.  Other inputs use the Arb
 route, which encloses each coordinate interval with ball arithmetic and
 returns ``false`` when a partial norm or pivot is undecided at ``prec``.  It
@@ -138,8 +138,8 @@ falls back to the Arb route after it has delivered a callback.
 A capped call stays on the double route even when its uncapped coordinate
 interval would lie outside the machine-integer range, because the interval is
 clamped to ``max_coord`` first.  Earlier versions sent such calls to the Arb
-route before any callback; they now get the non-certified double route, whose
-2^-40 relative slack can admit additional rows when ``bound_sq`` is large.
+route; they now get the non-certified double route, whose
+:math:`2^{-40}` relative slack can admit additional rows when ``bound_sq`` is large.
 
 Implementation Lineage
 ----------------------

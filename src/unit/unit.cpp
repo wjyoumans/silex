@@ -175,7 +175,7 @@ bool unit_lower_regulator_bound(flint::ArbRef out,
         return false;
     }
 
-    // Every bound used here increases with w, so it is valid for any
+    // Every bound used here is non-decreasing in w, so it is valid for any
     // w <= w_K.  For an order O in K, O^x is a finite-index subgroup of
     // O_K^x, so Reg(O) >= R_K and a lower bound for R_K bounds Reg(O); w is
     // therefore the root-of-unity count of the field, not of the order.  If
@@ -623,9 +623,8 @@ namespace detail {
 namespace {
 
 // Working precision for the signature bounds.  The bounds are lower bounds
-// only, so a lower endpoint computed at 64 bits loses at most a relative
-// 2^-60 or so against a tighter evaluation and stays rigorous at any
-// precision; capping it keeps the Satz 3 special-function evaluations cheap
+// only, so a lower endpoint computed at 64 bits only weakens the bound
+// and stays rigorous at any precision; capping it keeps the Satz 3 special-function evaluations cheap
 // for callers that ask for several hundred bits.
 constexpr slong kRegulatorBoundPrecision = 64;
 

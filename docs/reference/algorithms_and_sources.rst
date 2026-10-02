@@ -50,7 +50,14 @@ strictly column-sorted and never store zero values.
 ``src/lat`` implements exact row lattices, HNF and transformation matrices,
 containment, sum, intersection, index, saturation, LLL reduction, and bounded
 short-vector enumeration.  FLINT HNF/SNF and exact solve contracts are the
-baseline for canonical operations; optional fplll and flatter integrations
+baseline for canonical operations.  The coordinate bound that routes
+enumeration is the Fincke--Pohst bound: U. Fincke and M. Pohst, "Improved
+methods for calculating vectors of short length in a lattice, including a
+complexity analysis", *Math. Comp.* 44 (1985), 463--471, and H. Cohen, *A
+Course in Computational Algebraic Number Theory*, GTM 138, section 2.7.3 (the
+citations given at ``enum_double_coordinates_bounded`` in ``src/lat/lat.cpp``).
+Silex uses the bound only to choose between the double and Arb routes; the
+enumeration itself is a witness search as described in :doc:`lat`.  Optional fplll and flatter integrations
 remain backend comparisons rather than mathematical authorities.
 
 The LLL reference checks compare FLINT's optional transformation argument in
@@ -109,7 +116,8 @@ field's polynomial generator.
 
 Field construction requires a defining polynomial that is irreducible over
 ``Q``.  The check factors the primitive integral multiple of the polynomial
-with FLINT ``fmpz_poly_factor`` (``src/fmpz_poly_factor``), which returns the
+with FLINT ``fmpz_poly_factor`` (``src/fmpz_poly_factor``; contract from FLINT
+3.6 ``src/fmpz_poly_factor/factor.c``), which returns the
 content separately and the remaining factors as primitive irreducible
 polynomials with multiplicities; by Gauss's lemma the polynomial is
 irreducible over ``Q`` exactly when that list is one factor of multiplicity
@@ -375,8 +383,8 @@ for archimedean evaluation.  Hecke v0.38.6 ``src/Misc/acb_root_ctx.jl``
 (``_roots!``) is the source: it refines by calling FLINT
 ``acb_poly_find_roots`` with the previous roots as initial approximations,
 doubling the working precision, and accepts the result once all roots are
-isolated, accurate enough, and pass ``acb_poly_validate_real_roots``.  The
-first isolation, and the fallback, use FLINT
+isolated, accurate enough, and pass ``acb_poly_validate_real_roots``.  Silex's
+first isolation, and its fallback, use FLINT
 ``arb_fmpz_poly_complex_roots``.  The signature comes from FLINT
 ``fmpz_poly_signature`` and is computed when the context is defined.
 
@@ -399,7 +407,8 @@ Silex deviates from the source in three intentional ways:
   balls one-to-one, Silex isolates again at double the precision.  This
   terminates because each root is at positive distance from the closed
   previous balls that do not contain it.  Refinement fails only when the
-  working precision would overflow, or for a non-squarefree polynomial.
+  working precision would overflow, for a non-squarefree polynomial, or for
+  invalid input.
 
 Local algebra and relations
 ---------------------------
@@ -638,8 +647,10 @@ than ``stable`` times the number of input elements; ``saturate!`` starts at
 ``stable = 3.5``, adjoins candidates that are ``ell``-th powers and repeats,
 and doubles ``stable`` after a candidate that is not.  Silex multiplies
 ``stable`` by the current kernel dimension instead of the number of input
-elements; the stopping rule decides only when candidates are tested, never
-whether ``ell`` is verified.  Silex first scans the primes
+elements.  This is an accepted deviation: the stopping rule decides only when
+candidates are tested, never whether ``ell`` is verified.  The same constant
+``3.5`` is used for the initial ``ell = 2`` pass and for the small-index
+saturation loop in ``src/order_unit/compute.cpp``.  Silex first scans the primes
 ``q <= aux_bound`` (the caller's bound; 1000 in class/unit validation) and
 continues with the Hecke scan when that pre-scan selects no usable prime,
 when it leaves a nonempty kernel without adjoining a root, or when
@@ -734,11 +745,16 @@ of ``K``:
   ``D_K = -10051, -10571, -12167``).  Theorem B gives their regulators
   0.2052, 0.2132 and 0.2372, so Silex uses 0.2052 for ``(0, 3)``.
 
-All of these bounds increase with ``w``.  For an order ``O``, ``O^x`` has
+All of these bounds are non-decreasing in ``w``.  For an order ``O``, ``O^x`` has
 finite index in ``O_K^x``, so ``Reg(O) >= R_K``, and the field's ``w`` is the
 right value to use.  If ``w`` cannot be computed, Silex uses ``w = 2``.  The
 terms are evaluated at a working precision of at most 64 bits; the result is
-an exact lower endpoint, so this only makes the bound slightly weaker.
+an exact lower endpoint, so this only weakens the bound.  The floor in
+``regulator_index_bound`` is taken of a rigorous upper endpoint, whereas Hecke
+floors a floating-point quotient, so Silex follows Hecke's rule but is
+stricter than it.  The Zimmert Korollar and the Friedman Corollary are
+dominated by the Satz 3 values at ``gamma = 1`` and ``gamma = 3/5``, which are
+already evaluated; they are kept as documented cross-checks.
 
 Hecke's ``lower_regulator_bound``
 (``src/NumFieldOrd/NfOrd/Unit/Regulator.jl``) uses
