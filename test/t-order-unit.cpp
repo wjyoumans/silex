@@ -6197,23 +6197,32 @@ int test_select_saturation_primes() {
 // and Z[sqrt13] (disc 52) at ell = 3 each have a rational q = 1 mod ell
 // dividing the discriminant (7 and 13, both ramified) with a degree-one
 // prime above it: both selectors skip it, as the reference
-// compute_candidates_for_saturate does.  Z[sqrt2] at ell = 2 has no such q.
-void assert_saturation_selectors_agree(slong radicand,
-                                       const char* unit_constant,
-                                       const char* unit_linear,
-                                       slong ell_value,
-                                       slong target_len,
-                                       slong bound_value,
-                                       slong skipped_q) {
-    silex::NumberField field = quadratic_field(radicand);
-    silex::Order order;
-    order = silex::test::equation_order(field);
-    silex::EmbeddingContext embeddings(field);
-    silex::Element unit(field);
-    assert(set_integral_quadratic_coeffs_str(unit, unit_constant,
-                                             unit_linear));
+// compute_candidates_for_saturate does.  Z[sqrt2] at ell = 2 has no such q,
+// so it is an agreement-only case (skipped_q = 0): its skip assertion is
+// vacuous.  The cubic x^3 - 3x + 1 (disc 81) at ell = 2 is the ell = 2 skip
+// case: q = 3 is odd, divides the discriminant, and is totally ramified with
+// a degree-one prime above it, so both selectors must leave 3 out.
+void assert_saturation_selectors_agree_for(const silex::Order& order,
+                                           const silex::Element* units,
+                                           slong unit_count,
+                                           slong ell_value,
+                                           slong target_len,
+                                           slong bound_value,
+                                           slong skipped_q) {
+    silex::EmbeddingContext embeddings(*order.parent());
     silex::OrderUnitGroup group(order);
-    assert(set_single_unit_group(group, order, unit, embeddings));
+    {
+        std::vector<silex::FactoredElement> generators;
+        for (slong i = 0; i < unit_count; ++i) {
+            silex::FactoredElement generator(*order.parent());
+            assert(generator.set_element(units[i]));
+            generators.push_back(std::move(generator));
+        }
+        assert(group.set_units(
+                order,
+                silex::FactoredElementSpan(generators.data(), unit_count),
+                embeddings, 256));
+    }
 
     sflint::Fmpz ell;
     sflint::Fmpz bound;
@@ -6243,10 +6252,44 @@ void assert_saturation_selectors_agree(slong radicand,
     }
 }
 
+void assert_saturation_selectors_agree(slong radicand,
+                                       const char* unit_constant,
+                                       const char* unit_linear,
+                                       slong ell_value,
+                                       slong target_len,
+                                       slong bound_value,
+                                       slong skipped_q) {
+    silex::NumberField field = quadratic_field(radicand);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::Element unit(field);
+    assert(set_integral_quadratic_coeffs_str(unit, unit_constant,
+                                             unit_linear));
+    assert_saturation_selectors_agree_for(order, &unit, 1, ell_value,
+                                          target_len, bound_value, skipped_q);
+}
+
 int test_saturation_selectors_agree() {
     assert_saturation_selectors_agree(7, "8", "3", 3, 2, 100, 7);
     assert_saturation_selectors_agree(13, "649", "180", 3, 2, 100, 13);
+    // Agreement only: no skipped prime (skipped_q = 0).
     assert_saturation_selectors_agree(2, "1", "1", 2, 3, 100, 0);
+
+    // ell = 2 skip case.  The root theta of x^3 - 3x + 1 and its conjugate
+    // theta^2 - 2 are independent units (rank 2), and 3 | 81 has a
+    // degree-one prime ideal, so a selector that did not skip 3 would
+    // return it.
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order cubic_order;
+    cubic_order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    assert(theta.gen());
+    silex::Element conjugate(cubic);
+    assert(conjugate.multiply(theta, theta));
+    assert(conjugate.add_si(conjugate, -2));
+    silex::Element cubic_units[] = {std::move(theta), std::move(conjugate)};
+    assert_saturation_selectors_agree_for(cubic_order, cubic_units, 2, 2, 2,
+                                          200, 3);
     return 0;
 }
 

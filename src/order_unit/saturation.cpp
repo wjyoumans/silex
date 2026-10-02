@@ -1115,8 +1115,11 @@ bool select_saturation_primes_with_kernel(
            fmpz_cmp(p.raw(), bound.raw()) <= 0) {
         // reference RelSaturate.compute_candidates_for_saturate scans rational
         // q = 1 mod ell, skips q dividing the discriminant, and uses only
-        // degree-one primes above q; the same first scan as
-        // OrderUnitGroup::select_saturation_primes.
+        // degree-one primes above q.  The same first scan as
+        // OrderUnitGroup::select_saturation_primes.  Deliberate difference:
+        // the reference also skips q dividing [O_K : Z[alpha]] with q not
+        // dividing d_K for non-monogenic maximal orders; here only
+        // q | disc(O) is skipped.  Selection only, not soundness.
         fmpz_sub_ui(pminus.raw(), p.raw(), 1);
         if (fmpz_divisible(pminus.raw(), ell.raw()) == 0) {
             SILEX_PROFILE_EVENT(

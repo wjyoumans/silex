@@ -239,7 +239,11 @@ public:
     // way, when the first scan does not fill target_len.  Both first scans
     // skip rational primes dividing the order discriminant, so the two
     // selectors pick the same primes.  If the scans or the acceptance test
-    // change, keep them in agreement between the two.
+    // change, keep them in agreement between the two.  The skip is not
+    // identical to the reference implementation's, which also skips q
+    // dividing [O_K : Z[alpha]] with q not dividing d_K for non-monogenic
+    // maximal orders, while these selectors skip only q dividing disc(O).
+    // This affects which primes are selected, not the soundness of the proof.
     bool select_saturation_primes(PrimeIdealList& out,
                                   flint::FmpzConstRef ell,
                                   slong target_len,

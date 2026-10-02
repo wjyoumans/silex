@@ -12,6 +12,12 @@ that release is prepared.
 Changed
 -------
 
+- Bounded saturation (``saturate_bounded``, index-bounded saturation) may now
+  return different, equally valid unit generators.  Its prime selector now
+  skips rational primes dividing the order discriminant, like the public
+  ``select_saturation_primes``, so the two pick the same primes.  Proof
+  status is unaffected.
+
 - A ``grh`` paired class/unit transaction that is accepted by the analytic
   index-one test now records that check on the published class group.
   ``analytic_class_regulator_status()`` reads ``verified``, and
