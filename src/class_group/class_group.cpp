@@ -4282,6 +4282,16 @@ bool compact_infinite_reduction(
 
 }  // namespace
 
+// The certification fields a CertificationTransaction_ restores.  The
+// factor-base fields factor_base_build_bound_, factor_base_generation_bound_,
+// and factor_base_generation_status_ are deliberately excluded: they
+// describe the factor base itself and are written only when it is built
+// (record_factor_base_generation_) or by the relation-search honesty receipt
+// (record_factor_base_honesty_proof_), never by a certification route, so a
+// failed certification attempt has nothing of theirs to restore.  The
+// generation check that certification routes run
+// (check_factor_base_generation_bound) writes the checked bound, its status,
+// and the per-prime generation records, which are therefore included.
 struct ClassGroupContext::CertificationSnapshot_ {
     CertificationMode certification = CertificationMode::unknown;
     flint::Fmpz factor_base_generation_checked_bound;
@@ -4437,6 +4447,10 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
+    // The transaction also covers the generation check below, which writes
+    // the checked bound, status, and per-prime records, so a rejected
+    // candidate leaves them as they were.
+    ClassGroupContext::CertificationTransaction_ transaction(context);
     flint::Fmpz context_discriminant;
     flint::Fmpz required_bound;
     flint::Fmpz class_order;
@@ -4458,7 +4472,6 @@ bool ClassGroupCertificationAccess::
     // and is saturated at every prime ell | h.  Store that as per-ell
     // records, so the saturation proof is visible to later gates such as a
     // Belabas-Friedman audit, which promotes only from stored records.
-    ClassGroupContext::CertificationTransaction_ transaction(context);
     if (!record_exact_class_order_saturation(context, exact_order) ||
         !context.relation_saturation_covers_class_order_()) {
         return false;

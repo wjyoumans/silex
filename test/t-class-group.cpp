@@ -1957,7 +1957,8 @@ int test_relation_saturation_index_bound_with_units_degree_one() {
 void prepare_minus_23_candidate(silex::ClassGroupContext& context,
                                 const silex::Order& maximal,
                                 slong beta_power,
-                                slong expected_order) noexcept {
+                                slong expected_order,
+                                bool check_generation = true) noexcept {
     const silex::NumberField* field = maximal.parent();
     assert(field != nullptr);
     sflint::Fmpz bound;
@@ -1992,12 +1993,54 @@ void prepare_minus_23_candidate(silex::ClassGroupContext& context,
     sflint::Fmpz order_out;
     assert(context.order(sflint::FmpzRef(order_out)));
     assert(sflint::fmpz_equal_si(order_out, expected_order));
+    if (!check_generation) {
+        return;
+    }
 
     sflint::Fmpz required_bound;
     assert(context.factor_base_generation_bound(
             sflint::FmpzRef(required_bound)));
     assert(context.check_factor_base_generation_bound(
             sflint::FmpzConstRef(required_bound)));
+}
+
+// A failed exact imaginary-quadratic certification leaves the
+// factor-base generation check exactly as it found it.  With h_cand = 9 and
+// the exact class number 3 the route runs the generation check and then
+// rejects the candidate, so the check it ran must be rolled back.
+int test_exact_order_certification_failure_restores_generation_check() {
+    silex::NumberField field = quadratic_field(-23);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::ClassGroupContext context;
+    prepare_minus_23_candidate(context, maximal, 3, 9, false);
+    assert(context.factor_base_generation_status() ==
+           silex::ProofState::verified);
+    assert(context.factor_base_generation_checked_status() ==
+           silex::ProofState::not_checked);
+    assert(context.factor_base_generation_record_count() == 0);
+
+    sflint::Fmpz discriminant;
+    sflint::Fmpz exact_order;
+    assert(set_fmpz_si(discriminant, -23));
+    assert(set_fmpz_si(exact_order, 3));
+    assert(!CertificationAccess::
+                   try_certify_imaginary_quadratic_from_exact_order(
+                           context, silex::CertificationMode::proven,
+                           sflint::FmpzConstRef(discriminant),
+                           sflint::FmpzConstRef(exact_order)));
+    assert(context.certification_status() ==
+           silex::CertificationMode::unknown);
+    assert(context.factor_base_generation_checked_status() ==
+           silex::ProofState::not_checked);
+    assert(context.factor_base_generation_record_count() == 0);
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+    assert(context.relation_saturation_record_count() == 0);
+
+    return 0;
 }
 
 int test_saturation_promotion_requires_every_class_order_prime() {
@@ -2630,6 +2673,7 @@ int main() {
     test_relation_saturation_bounded_append_with_units_degree_one();
     test_relation_saturation_index_bound_with_units_degree_one();
     test_relation_saturation_index_bound_checks_nondivisor_primes();
+    test_exact_order_certification_failure_restores_generation_check();
     test_saturation_promotion_requires_every_class_order_prime();
     test_relation_saturation_completes_prime_by_prime();
     test_analytic_class_unit_proof_requires_factor_base_generation();
