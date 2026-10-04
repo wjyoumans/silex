@@ -2050,7 +2050,51 @@ int main(int argc, char** argv) {
     std::cout << ",\n";
     std::cout << "    \"unit_proof_record_count\": "
               << static_cast<long long>(units.unit_proof_record_count())
-              << "\n";
+              << ",\n";
+    // The unit regulator as the library enclosure: decimal midpoint, a
+    // double midpoint and radius, and the transaction's regulator proof
+    // label.  Absent or non-finite values print null.
+    {
+        sflint::Arb unit_regulator;
+        const bool have_unit_regulator =
+                units.regulator(sflint::ArbRef(unit_regulator));
+        const bool finite_unit_regulator =
+                have_unit_regulator && arb_is_finite(unit_regulator.raw());
+        std::cout << "    \"regulator_decimal\": ";
+        if (finite_unit_regulator) {
+            char* decimal = ::arb_get_str(unit_regulator.raw(), 30,
+                                          ARB_STR_NO_RADIUS);
+            write_json_string(std::cout, decimal);
+            ::flint_free(decimal);
+        } else {
+            std::cout << "null";
+        }
+        std::cout << ",\n";
+        const std::streamsize saved_precision = std::cout.precision();
+        std::cout << "    \"regulator_midpoint\": ";
+        if (finite_unit_regulator) {
+            std::cout << std::setprecision(17)
+                      << ::arf_get_d(arb_midref(unit_regulator.raw()),
+                                     ARF_RND_NEAR);
+        } else {
+            std::cout << "null";
+        }
+        std::cout << ",\n";
+        std::cout << "    \"regulator_radius\": ";
+        if (finite_unit_regulator) {
+            std::cout << std::setprecision(17)
+                      << ::mag_get_d(arb_radref(unit_regulator.raw()));
+        } else {
+            std::cout << "null";
+        }
+        std::cout << std::setprecision(static_cast<int>(saved_precision));
+        std::cout << ",\n";
+    }
+    std::cout << "    \"regulator_proof_status\": ";
+    write_json_string(
+            std::cout,
+            proof_state_name(transaction_report.regulator_proof_status));
+    std::cout << "\n";
     std::cout << "  },\n";
 
     std::cout << "  \"sunit\": {\n";

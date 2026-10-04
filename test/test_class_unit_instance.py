@@ -21,6 +21,24 @@ TARGET_DONE_MARKER = "__SILEX_BENCH_SILEX_TARGET_DONE__"
 TARGET_NONCE = "0123456789abcdef0123456789abcdef"
 
 
+
+def assert_unit_regulator_enclosure(instance, expected_proof_status):
+    """The unit_group object reports the regulator enclosure and its label."""
+    unit_group = instance["unit_group"]
+    midpoint = unit_group["regulator_midpoint"]
+    radius = unit_group["regulator_radius"]
+    assert isinstance(midpoint, float) or isinstance(midpoint, int)
+    assert midpoint > 0.0
+    assert 0.0 <= radius < 1e-20 * max(1.0, midpoint)
+    assert abs(float(unit_group["regulator_decimal"]) - midpoint) <= (
+        1e-12 * midpoint
+    )
+    assert unit_group["regulator_proof_status"] == expected_proof_status
+    assert unit_group["regulator_proof_status"] == instance[
+        "regulator_proof_status"
+    ]
+
+
 def run_json(cmd: list[str], root: Path) -> dict[str, object]:
     completed = subprocess.run(
         cmd,
@@ -337,6 +355,7 @@ def main() -> int:
         ]
         assert proven_instance["class_group"]["certification"] == "proven"
         assert proven_instance["unit_group"]["certification"] == "proven"
+        assert_unit_regulator_enclosure(proven_instance, "verified")
         r1, r2 = proven_instance["signature"]
         assert r1 + 2 * r2 == len(row["coefficients_low_to_high"]) - 1
         assert r1 + r2 - 1 == row["expected_unit_rank"]
@@ -430,6 +449,12 @@ def main() -> int:
         ]
         assert grh_instance["class_group"]["certification"] == "grh"
         assert grh_instance["unit_group"]["certification"] == "grh"
+        assert_unit_regulator_enclosure(
+            grh_instance, grh_instance["regulator_proof_status"]
+        )
+        assert grh_instance["unit_group"]["regulator_proof_status"] != (
+            "verified"
+        )
         # `factor_base_bound` is the bound the transaction used (the GRH
         # policy's selected bound), `requested_factor_base_bound` the
         # tool-side request (the Minkowski-type bound).
