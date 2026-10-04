@@ -40,6 +40,7 @@ EXACT_RESULT_COUNTERS = (
 PROVEN_BENCHMARK_NAMES = {
     "BM_class_unit_0_1_0_degree_one_proven",
     "BM_class_unit_0_1_0_real_quadratic_proven",
+    "BM_class_unit_0_1_0_real_quadratic_40001_proven",
     "BM_class_unit_0_1_0_imag_quadratic_proven",
     "BM_class_unit_0_1_0_real_quadratic_100003_proven",
     "BM_class_unit_0_1_0_cubic_disc23_proven",
@@ -68,6 +69,7 @@ PROVEN_BENCHMARK_NAMES = {
 GRH_BENCHMARK_NAMES = {
     "BM_class_unit_0_1_0_imag_quadratic_grh",
     "BM_class_unit_0_1_0_real_quadratic_grh",
+    "BM_class_unit_0_1_0_real_quadratic_40001_grh",
     "BM_class_unit_0_1_0_real_quadratic_100003_grh",
     "BM_class_unit_0_1_0_cubic_disc23_grh",
     "BM_class_unit_0_1_0_cubic_disc1080004_grh",
@@ -81,12 +83,6 @@ GRH_BENCHMARK_NAMES = {
 }
 
 RELEASE_BENCHMARK_NAMES = PROVEN_BENCHMARK_NAMES | GRH_BENCHMARK_NAMES
-
-# Proven rows whose class group is settled by the unconditional quadratic
-# analytic class-number route.  Relation saturation is not run for them, so
-# they must record a verified analytic class/regulator check instead.
-ANALYTIC_PROOF_NAMES = {
-}
 
 RELEASE_FILTER = (
     "^(BM_class_unit_0_1_0_.*_(proven|grh)|"
