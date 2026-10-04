@@ -572,8 +572,10 @@ saturation-backed proof and can promote from them.
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
 one, and maximal orders of explicit quadratic-backend fields whose
-discriminant ``|D|`` fits in a machine word, where the residue comes from
-``L(1, chi_D)``.  Silex evaluates ``L(1, chi_D)`` for the primitive real
+discriminant satisfies ``|D| < 2^44`` (about ``1.76e13``), where the residue
+comes from ``L(1, chi_D)``.  The size cap bounds the running time, which
+grows like ``sqrt(|D| prec)``; it does not depend on the precision, and
+larger fields use the Belabas--Friedman fallback.  Silex evaluates ``L(1, chi_D)`` for the primitive real
 character ``chi_D(n) = (D/n)`` (Kronecker symbol) of the fundamental
 discriminant ``D`` with the approximate functional equation of FLINT
 ``acb_dirichlet_l_fmpq_afe`` (FLINT 3.6.0 ``src/acb_dirichlet/l_fmpq_afe.c``,

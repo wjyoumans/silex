@@ -455,8 +455,19 @@ bool quadratic_l1_afe(flint::Arb& out,
     return ::arb_is_finite(out.raw()) != 0;
 }
 
+// Size cap of the quadratic L(1, chi) route: it takes only |D| below
+// 2^44 (about 1.76e13).  The approximate functional equation does work
+// growing like sqrt(|D| prec), and the evaluation runs inside noexcept calls
+// that cannot be interrupted, so without a cap a field with |D| near 2^64
+// could run for hours.  At 2^44 the measured cost at |D| about 1e12 (about
+// 25 s imaginary, 86 s real at default precision) scales to a few minutes.
+// The cap depends on |D| only, not on precision, so whether a field has the
+// unconditional route stays a property of the order.  Fields at or above it
+// fall back to Belabas-Friedman like any field the route does not handle.
+constexpr ulong quadratic_route_max_abs_discriminant_bits = 44;
+
 // Preconditions of the unconditional quadratic route: a maximal order of an
-// explicit quadratic-backend field whose discriminant fits a ulong modulus.
+// explicit quadratic-backend field with |D| < 2^44 (see the cap above).
 bool quadratic_residue_modulus(ulong& modulus,
                                flint::Fmpz& discriminant,
                                const Order& order) noexcept {
@@ -483,7 +494,8 @@ bool quadratic_residue_modulus(ulong& modulus,
     }
 
     modulus = flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
-    return modulus != 0;
+    return modulus != 0 &&
+           (modulus >> quadratic_route_max_abs_discriminant_bits) == 0;
 }
 
 bool quadratic_residue(flint::Arb& out,

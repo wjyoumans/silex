@@ -235,6 +235,68 @@ void check_public_class_unit_with_zeta() {
     assert(units.certification_status() == silex::CertificationMode::proven);
 }
 
+// Maximal order of Q(sqrt(radicand)) for a squarefree radicand, checked to
+// have discriminant `expected`.
+silex::Order quadratic_maximal_order(silex::NumberField& field,
+                                     const char* radicand,
+                                     const char* expected) {
+    sflint::Fmpz r;
+    assert(::fmpz_set_str(r.raw(), radicand, 10) == 0);
+    field = silex::NumberField::quadratic(sflint::FmpzConstRef(r));
+    sflint::Fmpz one;
+    sflint::fmpz_one(sflint::FmpzRef(one));
+    silex::Order order =
+            silex::Order::quadratic_order(field, sflint::FmpzConstRef(one));
+    assert(field.is_defined() && order.is_defined() && order.is_maximal());
+    sflint::Fmpz discriminant;
+    sflint::Fmpz want;
+    assert(order.discriminant(sflint::FmpzRef(discriminant)));
+    assert(::fmpz_set_str(want.raw(), expected, 10) == 0);
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(discriminant),
+                              sflint::FmpzConstRef(want)));
+    return order;
+}
+
+// The quadratic L(1, chi) route takes only |D| < 2^44 = 17592186044416;
+// larger fields fall back to Belabas-Friedman.  The route predicate is
+// checked on both sides of the cap and at |D| about 1e12 (the fields of the
+// slow tests below), without evaluating an L-value.
+void check_route_size_cap() {
+    struct Case {
+        const char* radicand;
+        const char* discriminant;
+        bool quadratic_route;
+    };
+    const Case cases[] = {
+            {"-4398046511105", "-17592186044420", false},  // -(2^44 + 4)
+            {"17592186044417", "17592186044417", false},   // 2^44 + 1
+            {"-4398046511102", "-17592186044408", true},   // -(2^44 - 8)
+            {"17592186044413", "17592186044413", true},    // 2^44 - 3
+            {"-1000000000039", "-1000000000039", true},
+            {"1000000000061", "1000000000061", true},
+    };
+    for (const Case& c : cases) {
+        silex::NumberField field;
+        const silex::Order order =
+                quadratic_maximal_order(field, c.radicand, c.discriminant);
+        assert(silex::detail::zeta_unconditional_route_available(order) ==
+               c.quadratic_route);
+    }
+
+    // Above the cap the residue comes from the GRH-conditional
+    // Belabas-Friedman fallback.
+    silex::NumberField field;
+    const silex::Order order = quadratic_maximal_order(
+            field, "-4398046511105", "-17592186044420");
+    sflint::Arb product;
+    bool unconditional = true;
+    assert(silex::detail::zeta_class_regulator_product_with_diagnostics(
+            sflint::ArbRef(product), order, 64, nullptr, nullptr, nullptr,
+            &unconditional));
+    assert(!unconditional);
+    assert(sflint::arb_is_positive(product));
+}
+
 bool slow_tests_enabled() noexcept {
     const char* value = std::getenv("SILEX_TEST_SLOW");
     return value != nullptr && value[0] != '\0' &&
@@ -283,6 +345,7 @@ int main() {
     check_against_flint_dirichlet(100049, 192);
 
     check_failure_paths();
+    check_route_size_cap();
 
     check_large_imaginary_discriminant(-10000000019, 39809);
     check_public_class_unit_with_zeta();
