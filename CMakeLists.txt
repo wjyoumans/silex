@@ -895,6 +895,14 @@ if(SILEX_BUILD_TESTS)
     add_test(NAME silex-factor-base COMMAND t-silex-factor-base)
     list(APPEND SILEX_TEST_NAMES silex-factor-base)
 
+    add_executable(t-silex-generation-bound test/t-generation-bound.cpp)
+    target_link_libraries(t-silex-generation-bound PRIVATE Silex::silex)
+    target_include_directories(t-silex-generation-bound
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-generation-bound)
+    add_test(NAME silex-generation-bound COMMAND t-silex-generation-bound)
+    list(APPEND SILEX_TEST_NAMES silex-generation-bound)
+
     add_executable(t-silex-ideal-factorization test/t-ideal-factorization.cpp)
     target_link_libraries(t-silex-ideal-factorization PRIVATE Silex::silex)
     target_include_directories(t-silex-ideal-factorization
