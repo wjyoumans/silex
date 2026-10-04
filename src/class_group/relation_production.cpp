@@ -470,6 +470,8 @@ bool ClassGroupContext::extend_relation_kernel_units_(
         return false;
     }
 
+    detail::ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
+            *this);
     return run_native_experimental_relation_route_(
             order, factor_base_bound, options,
             false);
@@ -499,6 +501,8 @@ bool ClassGroupContext::compute_relation_candidate_(
         return false;
     }
 
+    detail::ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
+            *this);
     SILEX_PROFILE_EVENT(active_diagnostics, DiagnosticsModule::class_group,
                         "class_group.build_factor_base");
     const bool paired_transaction =

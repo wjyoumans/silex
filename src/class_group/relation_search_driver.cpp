@@ -330,13 +330,14 @@ AnalyticFinishDecision apply_honesty_check(
     const FactorBaseWitnessEscalation escalation =
             factor_base_witness_escalation(factor_base_restart_available);
     bool honest = false;
+    FactorBaseHonestyScanAudit scan_audit;
     if (base == nullptr ||
         !factor_base_honesty_check(
                 honest, *base, active_factor_base_bound,
                 flint::FmpzConstRef(required_bound), subfb_state,
                 random_seed, use_required_prime_factor_over_base,
                 route_state.analytic_finish_precision, escalation,
-                diagnostics)) {
+                diagnostics, &scan_audit)) {
         return AnalyticFinishDecision::failed;
     }
     if (honest) {
@@ -356,6 +357,10 @@ AnalyticFinishDecision apply_honesty_check(
         return request_honesty_factor_base_restart(route_state,
                                                         diagnostics);
     }
+    // The escalated search is exhausted and the route ends here; name the
+    // prime and caps in the class/unit transaction report, if any.
+    ClassGroupRelationSearchAccess::record_factor_base_honesty_failure(
+            context, scan_audit.unwitnessed);
     return AnalyticFinishDecision::failed;
 }
 

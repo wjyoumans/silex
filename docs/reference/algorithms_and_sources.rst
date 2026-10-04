@@ -1041,9 +1041,13 @@ widens the number of ``Vbase`` primes in each random product, doubling its
 try limit as that number grows and then removing the limit; the Silex random
 tries keep the sub-factor base fixed.  The class-group detail log records the
 caps of the last stage searched, and on the T2 route how many ideals stopped
-at the candidate cap or the step limit.  Every candidate at every stage
-passes the same exact witness check, and stage 0 is the previous search, so
-results that succeeded at stage 0 are unchanged.
+at the candidate cap or the step limit.  When such a final failure ends the
+last candidate attempt of a class/unit transaction, the transaction fails
+with reason ``factor_base_honesty_unwitnessed`` instead of
+``class_unit_computation_failed``, as ``silex-class-unit-instance`` prints in
+``failure_reason``; the failure itself and every label are unchanged.  Every
+candidate at every stage passes the same exact witness check, and stage 0 is
+the previous search, so results that succeeded at stage 0 are unchanged.
 
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in

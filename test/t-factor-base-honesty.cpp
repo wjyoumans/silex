@@ -1,7 +1,9 @@
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
+#include "class_group/relation_search_driver_internal.hpp"
 #include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "order/order_internal.hpp"
+#include "order_unit/class_unit_transaction_internal.hpp"
 #include "test_support.hpp"
 
 #include <silex/class_group.hpp>
@@ -17,6 +19,7 @@
 #include <silex/order.hpp>
 #include <silex/order_element.hpp>
 #include <silex/prime_ideal.hpp>
+#include <silex/relation.hpp>
 
 #include <array>
 #include <cassert>
@@ -1212,7 +1215,12 @@ int test_escalated_witness_search_proves_large_class_group_base() {
                                  search::FactorBaseWitnessEscalation::none) ||
         honest || audit.max_search_stage != 0 ||
         audit.escalated_witnessed_targets != 0 ||
-        !logged_caps(capture, kStageZeroCaps)) {
+        !logged_caps(capture, kStageZeroCaps) ||
+        !audit.unwitnessed.recorded || audit.unwitnessed.stage != 0 ||
+        audit.unwitnessed.max_stage != 0 ||
+        audit.unwitnessed.radius != 8 ||
+        audit.unwitnessed.max_twists != 16 ||
+        audit.unwitnessed.random_tries != 50) {
         return 1;
     }
 
@@ -1229,9 +1237,23 @@ int test_escalated_witness_search_proves_large_class_group_base() {
                    audit.max_search_stage >= 1 &&
                    audit.max_search_stage <=
                            search::kFactorBaseHonestyEscalationStages &&
-                   capture.exhausted_messages == 0
+                   capture.exhausted_messages == 0 &&
+                   !audit.unwitnessed.recorded
             ? 0
             : 1;
+}
+
+// The final-stage lattice caps recorded for an unwitnessed degree-one prime
+// above p.
+bool final_stage_lattice_failure(
+        const silex::detail::FactorBaseHonestyFailure& failure,
+        slong p) noexcept {
+    return failure.recorded && failure.p == p &&
+           failure.residue_degree == 1 && !failure.direct_witness_search &&
+           failure.stage == search::kFactorBaseHonestyEscalationStages &&
+           failure.max_stage == search::kFactorBaseHonestyEscalationStages &&
+           failure.radius == 64 && failure.max_twists == 128 &&
+           failure.random_tries == 400;
 }
 
 // Q(sqrt(-5)) has class number 2 and the prime above 2 is the nontrivial
@@ -1250,7 +1272,117 @@ int test_bounded_escalation_reports_final_caps() {
                    audit.witnessed_targets == 0 &&
                    audit.max_search_stage ==
                            search::kFactorBaseHonestyEscalationStages &&
-                   logged_caps(capture, kFinalStageCaps)
+                   logged_caps(capture, kFinalStageCaps) &&
+                   final_stage_lattice_failure(audit.unwitnessed, 2)
+            ? 0
+            : 1;
+}
+
+namespace driver = silex::detail::relation_search;
+
+struct HonestyCheckpointRun {
+    driver::AnalyticFinishDecision decision =
+            driver::AnalyticFinishDecision::incomplete;
+    silex::detail::ClassUnitTransactionReport audit;
+};
+
+// Runs the relation-search honesty checkpoint for Q(sqrt(-21)) on the
+// norm-at-most-2 base, optionally inside a class/unit transaction.  The class
+// group is Z/2 x Z/2; the base holds only the ramified prime above 2, and the
+// ramified prime above 3 lies in another nontrivial class (neither 3 nor 6 is
+// a norm x^2 + 21 y^2), so no search effort can witness it and the scan always
+// stops there.
+bool run_honesty_checkpoint(HonestyCheckpointRun& run,
+                            bool factor_base_restart_available,
+                            bool attach_transaction) noexcept {
+    FieldSetup setup = imaginary_quadratic_fixture(21);
+    sflint::Fmpz active_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), 2);
+    silex::ClassGroupContext context(setup.maximal_order);
+    if (!context.is_defined() ||
+        !context.build_factor_base(sflint::FmpzConstRef(active_bound)) ||
+        context.factor_base() == nullptr) {
+        return false;
+    }
+    // The checkpoint needs a published presentation: (2) = P2^2.
+    silex::Relation relation(*context.factor_base());
+    silex::Element two(setup.field);
+    if (!two.set_si(2) || !relation.set_generator(two) ||
+        !context.append_relation(relation) ||
+        !context.publish_presentation()) {
+        return false;
+    }
+    run.audit.reset();
+    silex::detail::ClassUnitTransactionContext transaction{
+            run.audit, nullptr, {}, {}, false};
+    if (attach_transaction) {
+        silex::detail::ClassUnitTransactionAccess::set_run_context(
+                context, &transaction);
+    }
+    silex::detail::RelationSearchControlState route_state;
+    run.decision = driver::apply_honesty_check(
+            context, route_state, true, setup.maximal_order, nullptr,
+            sflint::FmpzConstRef(active_bound),
+            factor_base_restart_available, false, nullptr);
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               nullptr);
+    return true;
+}
+
+// When the honesty checkpoint ends the route (no factor-base restart left),
+// the class/unit transaction report names the unwitnessed prime and the
+// final stage's caps, and a failed transaction reports
+// factor_base_honesty_unwitnessed.  With a restart available the checkpoint
+// asks for it and records nothing; clearing the record at the next attempt
+// restores class_unit_computation_failed.
+int test_terminal_honesty_failure_names_transaction_reason() {
+    HonestyCheckpointRun terminal;
+    if (!run_honesty_checkpoint(terminal, false, true) ||
+        terminal.decision != driver::AnalyticFinishDecision::failed) {
+        return 1;
+    }
+    const silex::detail::FactorBaseHonestyFailure& failure =
+            terminal.audit.factor_base_honesty_failure;
+    if (!final_stage_lattice_failure(failure, 3) ||
+        std::strcmp(silex::detail::class_unit_computation_failure_reason(
+                            terminal.audit),
+                    "factor_base_honesty_unwitnessed") != 0) {
+        return 1;
+    }
+
+    HonestyCheckpointRun restart;
+    if (!run_honesty_checkpoint(restart, true, true) ||
+        restart.decision !=
+                driver::AnalyticFinishDecision::restart_factor_base ||
+        restart.audit.factor_base_honesty_failure.recorded ||
+        std::strcmp(silex::detail::class_unit_computation_failure_reason(
+                            restart.audit),
+                    "class_unit_computation_failed") != 0) {
+        return 1;
+    }
+
+    HonestyCheckpointRun detached;
+    if (!run_honesty_checkpoint(detached, false, false) ||
+        detached.decision != driver::AnalyticFinishDecision::failed ||
+        detached.audit.factor_base_honesty_failure.recorded) {
+        return 1;
+    }
+
+    FieldSetup setup = imaginary_quadratic_fixture(21);
+    silex::ClassGroupContext context(setup.maximal_order);
+    silex::detail::ClassUnitTransactionContext transaction{
+            terminal.audit, nullptr, {}, {}, false};
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               &transaction);
+    silex::detail::ClassGroupRelationSearchAccess::
+            clear_factor_base_honesty_failure(context);
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               nullptr);
+    return !terminal.audit.factor_base_honesty_failure.recorded &&
+                   std::strcmp(
+                           silex::detail::class_unit_computation_failure_reason(
+                                   terminal.audit),
+                           "class_unit_computation_failed") == 0
             ? 0
             : 1;
 }
@@ -1288,7 +1420,9 @@ int main() {
                    test_escalated_witness_search_proves_large_class_group_base() !=
                            0 ||
                    test_bounded_escalation_reports_final_caps() != 0 ||
-                   test_escalation_only_without_recovery() != 0
+                   test_escalation_only_without_recovery() != 0 ||
+                   test_terminal_honesty_failure_names_transaction_reason() !=
+                           0
             ? 1
             : 0;
 }

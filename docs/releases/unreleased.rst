@@ -27,6 +27,15 @@ Added
   ``silex-class-unit-instance`` adds the five values to its ``class_group``
   JSON object.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
+- ``silex-class-unit-instance`` reports ``failure_reason``
+  ``factor_base_honesty_unwitnessed`` (``failure_stage`` ``total``) when a
+  class/unit computation fails because the last candidate attempt stopped at
+  a required prime that the factor-base honesty witness search could not
+  witness at its final caps, with no factor-base restart left.  Other
+  computation failures still report ``class_unit_computation_failed``, and
+  results, labels and successful runs are unchanged.  The caps of the last
+  stage searched remain in the class-group detail log.  See "Class groups and
+  order units" in :doc:`../reference/algorithms_and_sources`.
 
 Changed
 -------

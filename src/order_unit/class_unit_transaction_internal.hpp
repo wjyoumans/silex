@@ -6,6 +6,8 @@
 #include <silex/class_group.hpp>
 #include <silex/order_unit.hpp>
 
+#include "../class_group/factor_base_honesty_failure_internal.hpp"
+
 namespace silex::detail {
 
 struct RelationFactorBasePlan;
@@ -116,6 +118,11 @@ struct ClassUnitTransactionReport {
     ProofState unit_proof_status = ProofState::not_checked;
     ProofState regulator_proof_status = ProofState::not_checked;
     bool final_result_published = false;
+    // The unwitnessed required prime that ended the most recent class-group
+    // candidate computation or extension, if the relation-search honesty
+    // checkpoint ended it with no factor-base restart left.  Cleared when
+    // each attempt starts; read only to name a failed transaction's reason.
+    FactorBaseHonestyFailure factor_base_honesty_failure{};
 
     void reset() noexcept;
     void record_timing(ClassUnitStage stage, double elapsed_ms) noexcept;
@@ -150,6 +157,12 @@ public:
 };
 
 const char* class_unit_stage_name(ClassUnitStage stage) noexcept;
+// The failure_reason of a transaction whose class/unit computation failed:
+// factor_base_honesty_unwitnessed when the last candidate attempt ended at an
+// unwitnessed required prime with no factor-base restart left, otherwise
+// class_unit_computation_failed.
+const char* class_unit_computation_failure_reason(
+        const ClassUnitTransactionReport& audit) noexcept;
 bool native_hnf_unit_strategy_for_signature(
         slong degree,
         slong unit_rank) noexcept;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "factor_base_honesty_failure_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 
 namespace silex::detail::relation_search {
@@ -76,6 +77,8 @@ struct FactorBaseHonestyScanAudit {
     slong escalated_witnessed_targets = 0;
     slong max_search_stage = 0;
     ulong final_random_state = 0;
+    // Set when the scan stops at a required prime with no witness.
+    FactorBaseHonestyFailure unwitnessed;
 };
 
 bool factor_base_honesty_primitive_part(

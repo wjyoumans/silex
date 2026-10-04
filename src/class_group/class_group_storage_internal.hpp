@@ -12,6 +12,8 @@
 
 namespace silex::detail {
 
+struct FactorBaseHonestyFailure;
+
 struct PartialRelationEntry {
     explicit PartialRelationEntry(const Order& order) noexcept
         : prime(order),
@@ -343,6 +345,15 @@ public:
 
     static bool defer_native_goal_publication(
             const ClassGroupContext& context) noexcept;
+
+    // Record, or clear, in the attached class/unit transaction report the
+    // unwitnessed required prime that ended a candidate attempt; no-ops
+    // without a transaction.
+    static void record_factor_base_honesty_failure(
+            ClassGroupContext& context,
+            const FactorBaseHonestyFailure& failure) noexcept;
+    static void clear_factor_base_honesty_failure(
+            ClassGroupContext& context) noexcept;
 
     static bool sync_row_module_checkpoint(
             ClassGroupContext& context) noexcept {

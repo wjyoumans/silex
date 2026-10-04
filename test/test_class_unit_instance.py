@@ -222,6 +222,9 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
             [str(exe), "--coeffs", coeffs, "--mode", mode], root
         )
         assert instance["success"] is True
+        # A published result names no failure stage or reason.
+        assert instance["failure_stage"] is None
+        assert instance["failure_reason"] is None
         assert instance["certification_status"] == mode
         class_group = instance["class_group"]
         assert class_group["factor_base_generation_certification"] == (
@@ -325,6 +328,8 @@ def main() -> int:
         )
         assert proven_instance["success"] is True
         assert proven_instance["final_result_published"] is True
+        assert proven_instance["failure_stage"] is None
+        assert proven_instance["failure_reason"] is None
         assert proven_instance["field_defined"] is True
         assert proven_instance["maximal_order_defined"] is True
         assert proven_instance["class_group"]["has_presentation"] is True

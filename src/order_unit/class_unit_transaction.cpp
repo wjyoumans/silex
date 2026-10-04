@@ -207,6 +207,33 @@ bool ClassGroupRelationSearchAccess::defer_native_goal_publication(
            !uses_class_unit_kernel(run_context);
 }
 
+void ClassGroupRelationSearchAccess::record_factor_base_honesty_failure(
+        ClassGroupContext& context,
+        const FactorBaseHonestyFailure& failure) noexcept {
+    ClassUnitTransactionContext* const run_context =
+            context.class_unit_transaction_context_;
+    if (run_context != nullptr) {
+        run_context->audit.factor_base_honesty_failure = failure;
+    }
+}
+
+void ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
+        ClassGroupContext& context) noexcept {
+    ClassUnitTransactionContext* const run_context =
+            context.class_unit_transaction_context_;
+    if (run_context != nullptr) {
+        run_context->audit.factor_base_honesty_failure =
+                FactorBaseHonestyFailure{};
+    }
+}
+
+const char* class_unit_computation_failure_reason(
+        const ClassUnitTransactionReport& audit) noexcept {
+    return audit.factor_base_honesty_failure.recorded
+            ? "factor_base_honesty_unwitnessed"
+            : "class_unit_computation_failed";
+}
+
 void ClassUnitTransactionReport::reset() noexcept {
     failure_stage = ClassUnitStage::none;
     failure_reason = nullptr;
@@ -218,6 +245,7 @@ void ClassUnitTransactionReport::reset() noexcept {
     unit_proof_status = ProofState::not_checked;
     regulator_proof_status = ProofState::not_checked;
     final_result_published = false;
+    factor_base_honesty_failure = FactorBaseHonestyFailure{};
 }
 
 void ClassUnitTransactionReport::record_timing(ClassUnitStage stage,
@@ -339,7 +367,7 @@ bool compute_class_unit_transaction(
                                                 nullptr);
     if (!success) {
         audit.failure_stage = ClassUnitStage::total;
-        audit.failure_reason = "class_unit_computation_failed";
+        audit.failure_reason = class_unit_computation_failure_reason(audit);
         audit.record_timing(ClassUnitStage::total,
                             elapsed_milliseconds(total_start));
         return false;

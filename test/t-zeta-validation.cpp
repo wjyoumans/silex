@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 
 #include <flint/ulong_extras.h>
@@ -230,9 +231,14 @@ bool check_transaction_failure_leaves_outputs_unset(
     const bool computed = silex::detail::compute_class_unit_transaction(
             units, class_group, setup.maximal_order,
             sflint::FmpzConstRef(factor_base_bound), options, 128, audit);
+    // A computation that fails without reaching the honesty checkpoint keeps
+    // the generic reason.
     return !computed &&
-           audit.failure_stage != silex::detail::ClassUnitStage::none &&
+           audit.failure_stage == silex::detail::ClassUnitStage::total &&
            audit.failure_reason != nullptr &&
+           std::strcmp(audit.failure_reason,
+                       "class_unit_computation_failed") == 0 &&
+           !audit.factor_base_honesty_failure.recorded &&
            !audit.final_result_published &&
            audit.class_group_certification ==
                    silex::CertificationMode::unknown &&
