@@ -4288,7 +4288,10 @@ bool compact_infinite_reduction(
 // describe the factor base itself and are written only when it is built
 // (record_factor_base_generation_) or by the relation-search honesty receipt
 // (record_factor_base_honesty_proof_), never by a certification route, so a
-// failed certification attempt has nothing of theirs to restore.  The
+// failed certification attempt has nothing of theirs to restore.  The same
+// holds for the GRH generation record in private storage
+// (record_grh_factor_base_generation), written only right after the grh
+// policy builds its base.  The
 // generation check that certification routes run
 // (check_factor_base_generation_bound) writes the checked bound, its status,
 // and the per-prime generation records, which are therefore included.
@@ -4672,6 +4675,35 @@ bool ClassGroupCertificationAccess::record_factor_base_honesty_proof(
         ClassGroupContext& context,
         flint::FmpzConstRef required_bound) noexcept {
     return context.record_factor_base_honesty_proof_(required_bound);
+}
+
+bool ClassGroupCertificationAccess::record_grh_factor_base_generation(
+        ClassGroupContext& context,
+        flint::FmpzConstRef grh_bound) noexcept {
+    if (!context.has_factor_base() || !context.parent_.is_maximal() ||
+        flint::fmpz_sgn(grh_bound) <= 0 ||
+        flint::fmpz_cmp(
+                flint::FmpzConstRef(context.factor_base_build_bound_),
+                grh_bound) < 0 ||
+        !context.ensure_private_storage_()) {
+        return false;
+    }
+    detail::ClassGroupContextStorage& storage = *context.private_storage_;
+    flint::fmpz_set(flint::FmpzRef(storage.grh_generation_bound), grh_bound);
+    storage.grh_generation_covered = true;
+    return true;
+}
+
+bool ClassGroupCertificationAccess::grh_factor_base_generation_covered(
+        const ClassGroupContext& context) noexcept {
+    return context.has_factor_base() &&
+           context.private_storage_ != nullptr &&
+           context.private_storage_->grh_generation_covered &&
+           flint::fmpz_cmp(
+                   flint::FmpzConstRef(context.factor_base_build_bound_),
+                   flint::FmpzConstRef(
+                           context.private_storage_->grh_generation_bound)) >=
+                   0;
 }
 
 bool ClassGroupCertificationAccess::
@@ -7260,6 +7292,13 @@ bool ClassGroupContext::record_factor_base_generation_(
     flint::fmpz_zero(flint::FmpzRef(factor_base_generation_bound_));
     factor_base_generation_status_ = ProofState::unavailable;
     reset_factor_base_generation_check_();
+    // A GRH generation record describes the previous base; only the grh
+    // build site may write a new one, after this build.
+    if (private_storage_ != nullptr) {
+        flint::fmpz_zero(
+                flint::FmpzRef(private_storage_->grh_generation_bound));
+        private_storage_->grh_generation_covered = false;
+    }
 
     flint::Fmpz required;
     if (parent_.is_defined() &&

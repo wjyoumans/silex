@@ -21,6 +21,26 @@ public:
             ClassGroupContext& context,
             flint::FmpzConstRef required_bound) noexcept;
 
+    // Records GRH-conditional factor-base generation for a base that was
+    // just built to contain every prime ideal of norm at most its build
+    // bound (the grh policy's norm-bounded base), when that build bound is
+    // at least `grh_bound`, the GRH generation bound min(BDF, Bach).  Under
+    // GRH such a base generates the class group (Bach 1990, Thm 4;
+    // Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  The record is separate
+    // from the unconditional generation status, which stays as built and is
+    // never set to `verified` here; it is written only at build time and
+    // never by the honesty receipt.  Returns false, recording nothing, when
+    // the build bound is below `grh_bound` or the context has no base.
+    static bool record_grh_factor_base_generation(
+            ClassGroupContext& context,
+            flint::FmpzConstRef grh_bound) noexcept;
+
+    // True when the factor base carries the GRH generation record above.
+    // Only a grh class/unit request writes it; readers that need
+    // unconditional generation use factor_base_generation_status().
+    static bool grh_factor_base_generation_covered(
+            const ClassGroupContext& context) noexcept;
+
     // Exact imaginary-quadratic index h_cand / h for a rank-zero maximal
     // order.  Under a proven request, true with index one means the class
     // group and `units` have been published proven (this requires the

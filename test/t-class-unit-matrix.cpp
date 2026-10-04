@@ -2364,41 +2364,44 @@ int test_low_bound_generation_check_does_not_promote() {
 
 }  // namespace
 
-// grh mode never uses GRH for factor-base generation: a grh request of
-// positive unit rank is accepted only by the analytic index-one test, and
-// that test reports index one only after factor-base generation is verified
-// to the Minkowski-type bound (factor_base_class_group_bound; see
+// A grh request of positive unit rank may take factor-base generation from
+// GRH: its base contains every prime ideal of norm at most the GRH bound
+// min(BDF, Bach) (Bach 1990, Thm 4; Belabas-Diaz y Diaz-Friedman 2008,
+// Cor 2.2), so the analytic index-one test may accept although the base
+// stays below the Minkowski-type bound (factor_base_class_group_bound; see
 // docs/reference/algorithms_and_sources.rst, "Class groups and order
-// units").  Without that coverage the index-one acceptance can never pass,
-// so a grh request whose GRH-sized factor base falls short must fail closed
-// at once rather than extend relations until a resource cap; the default
-// (uncapped) resource options are used on purpose below
-// (max_relations = WORD_MAX), so a regression here would show up as a
-// ctest timeout rather than a failed assertion.  The pair is left wholly
-// unset.  The proven control shows that the failure is the grh coverage
-// rule, not an unusable field.
+// units").  These fields used to fail closed for want of Minkowski-type
+// coverage.  The pair must now be published with exactly the grh label on
+// both objects, the class order must match the proven control, and the
+// GRH coverage must never show up as unconditional evidence: generation is
+// not `verified` and relation saturation is not `verified`.  The default
+// (uncapped) resource options are used on purpose (max_relations =
+// WORD_MAX), so a regression that loses the acceptance would show up as a
+// ctest timeout rather than a silent cap.
 // x^3 + x + 200: D = -1080004, class group Z/2 (GP 2.17
 // bnfinit(x^3 + x + 200, 1)); x^2 - 100003: D = 400012, h = 1 (GP 2.17
 // quadclassunit(400012)).
-int test_grh_unverified_generation_fails_closed() {
+int test_grh_generation_below_minkowski_bound() {
     struct Row {
         const char* name;
         std::vector<slong> coefficients;
         ulong proven_class_order;
-        // The grh policy's selected (GRH-heuristic) factor-base bound for
-        // this exact field, as independently recorded by the CLI-driven
-        // `assert_fail_closed_inputs` in test_class_unit_instance.py (its
-        // `factor_base_bound`).  Checked below against the Minkowski-type
-        // bound computed here, so that a change to either bound's sizing
-        // cannot silently turn this into a no-op regression test.
+        // The grh policy's selected factor-base bound for this exact
+        // field, as independently recorded by the CLI-driven
+        // `assert_grh_generation_below_minkowski` in
+        // test_class_unit_instance.py (its `factor_base_bound`).  Checked
+        // below against the Minkowski-type bound computed here, so that a
+        // change to either bound's sizing cannot silently turn this into a
+        // test of unconditional generation.
         ulong grh_selected_factor_base_bound;
     };
     const Row rows[] = {
-            {"grh cubic x^3 + x + 200 without Minkowski coverage",
+            {"grh cubic x^3 + x + 200 below the Minkowski-type bound",
              {200, 1, 0},
              2,
              100},
-            {"grh real quadratic x^2 - 100003 without Minkowski coverage",
+            {"grh real quadratic x^2 - 100003 below the Minkowski-type "
+             "bound",
              {-100003, 0},
              1,
              100},
@@ -2418,7 +2421,7 @@ int test_grh_unverified_generation_fails_closed() {
         }
         // Precondition: the Minkowski-type bound must exceed the grh
         // policy's selected bound, or factor-base generation would verify
-        // and the guard below would have nothing to catch.
+        // unconditionally and GRH generation would not be exercised.
         assert(sflint::fmpz_cmp_ui(
                        sflint::FmpzConstRef(factor_base_bound),
                        row.grh_selected_factor_base_bound) > 0);
@@ -2427,16 +2430,28 @@ int test_grh_unverified_generation_fails_closed() {
 
         silex::ClassGroupContext class_group;
         silex::OrderUnitGroup units;
-        if (units.compute_with_class_group(
+        sflint::Fmpz grh_class_order;
+        if (!units.compute_with_class_group(
                     class_group, setup.maximal_order,
-                    sflint::FmpzConstRef(factor_base_bound), options, 128)) {
-            std::cerr << row.name << ": grh request did not fail closed\n";
+                    sflint::FmpzConstRef(factor_base_bound), options, 128) ||
+            class_group.certification_status() !=
+                    silex::CertificationMode::grh ||
+            units.certification_status() != silex::CertificationMode::grh ||
+            !class_group.order(sflint::FmpzRef(grh_class_order)) ||
+            sflint::fmpz_cmp_ui(sflint::FmpzConstRef(grh_class_order),
+                                row.proven_class_order) != 0) {
+            std::cerr << row.name << ": grh request did not succeed\n";
             return 1;
         }
-        PairPublicSnapshot after;
-        if (!capture_pair_public_snapshot(after, class_group, units) ||
-            !snapshot_is_wholly_unset(after)) {
-            std::cerr << row.name << ": failed grh request left output\n";
+        // GRH coverage is never reported as unconditional evidence.
+        if (class_group.factor_base_generation_status() ==
+                    silex::ProofState::verified ||
+            class_group.factor_base_generation_checked_status() ==
+                    silex::ProofState::verified ||
+            class_group.relation_saturation_status() ==
+                    silex::ProofState::verified) {
+            std::cerr << row.name
+                      << ": GRH generation reported as verified\n";
             return 1;
         }
 
@@ -2462,6 +2477,22 @@ int test_grh_unverified_generation_fails_closed() {
             std::cerr << row.name << ": proven control failed\n";
             return 1;
         }
+
+        // Proven promotion still needs unconditional generation.  Proven
+        // units, together with whatever analytic record the grh run left
+        // (an unconditional L(1, chi) value for the real quadratic field),
+        // must not promote a class group whose base covers only the GRH
+        // bound, and the failed attempt leaves the grh label in place.
+        if (class_group.try_certify_with_units(
+                    proven_units, silex::CertificationMode::proven, 128) ||
+            class_group.certification_status() !=
+                    silex::CertificationMode::grh ||
+            class_group.factor_base_generation_status() ==
+                    silex::ProofState::verified) {
+            std::cerr << row.name
+                      << ": GRH-only generation promoted to proven\n";
+            return 1;
+        }
     }
     return 0;
 }
@@ -2480,6 +2511,6 @@ int main() {
     status |= test_grh_cubic_records_bf_audit();
     status |= test_real_quadratic_grh_record_and_later_promotion();
     status |= test_low_bound_generation_check_does_not_promote();
-    status |= test_grh_unverified_generation_fails_closed();
+    status |= test_grh_generation_below_minkowski_bound();
     return status;
 }

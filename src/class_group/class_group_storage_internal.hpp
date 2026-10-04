@@ -232,6 +232,15 @@ struct ClassGroupContextStorage {
     bool analytic_finish_product_valid = false;
 
     std::vector<FactorBaseGenerationRecord> factor_base_generation_records;
+    // GRH-conditional factor-base generation (grh class/unit requests only):
+    // set when the factor base was built to contain every prime ideal of
+    // norm at most `grh_generation_bound`, the GRH generation bound
+    // min(BDF, Bach).  Kept apart from the unconditional generation status,
+    // which it never sets.  Written only when the base is built, like
+    // factor_base_generation_status_, so certification transactions do not
+    // restore it.
+    flint::Fmpz grh_generation_bound;
+    bool grh_generation_covered = false;
     std::vector<RelationSaturationRecord> relation_saturation_records;
     std::vector<RelationSaturationProofRecord>
             relation_saturation_proof_records;
@@ -265,6 +274,8 @@ struct ClassGroupContextStorage {
         analytic_finish_product_valid = false;
 
         factor_base_generation_records.clear();
+        flint::fmpz_zero(flint::FmpzRef(grh_generation_bound));
+        grh_generation_covered = false;
         relation_saturation_records.clear();
         relation_saturation_proof_records.clear();
     }

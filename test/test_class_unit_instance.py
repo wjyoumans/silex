@@ -130,37 +130,55 @@ def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
         assert instance["maximal_order_defined"] is False
         assert instance["failure_reason"] == "input_or_options_unavailable"
 
-    # grh mode never uses GRH for factor-base generation: a grh request of
-    # positive unit rank is accepted only after factor-base generation is
-    # verified to the Minkowski-type bound (factor_base_class_group_bound).
-    # Without that coverage the index-one acceptance can never pass, so
-    # these fields' GRH-sized factor base, which does not reach the bound,
-    # makes the request fail closed instead of extending relations without
-    # end. x^3 + x + 200: |D| = 1080004, bound 100 < 463. x^2 - 100003:
-    # D = 400012, bound 100 < 316.
-    for coeffs, used, requested in (
-        ("200,1,0,1", "100", "463"),
-        ("-100003,0,1", "100", "316"),
+
+def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
+    # A grh request of positive unit rank may take factor-base generation
+    # from GRH: its base contains every prime ideal of norm at most the GRH
+    # bound min(BDF, Bach), so the analytic index-one test may accept below
+    # the Minkowski-type bound (factor_base_class_group_bound). These fields
+    # used to fail closed for want of Minkowski-type coverage; they now
+    # publish exactly the grh label. GRH coverage is never reported as
+    # unconditional evidence: generation stays `unavailable` and relation
+    # saturation is not `verified`. x^3 + x + 200: |D| = 1080004, bound
+    # 100 < 463, class group Z/2. x^2 - 100003: D = 400012, bound
+    # 100 < 316, h = 1.
+    for coeffs, used, requested, order, invariants in (
+        ("200,1,0,1", "100", "463", "2", ["2"]),
+        ("-100003,0,1", "100", "316", "1", []),
     ):
         instance = run_json(
             [str(exe), "--coeffs", coeffs, "--mode", "grh"], root
         )
-        assert instance["success"] is False
-        assert instance["final_result_published"] is False
-        assert instance["field_defined"] is True
-        assert instance["maximal_order_defined"] is True
-        assert instance["failure_reason"] == "class_unit_computation_failed"
-        assert instance["certification_status"] == "unknown"
+        assert instance["success"] is True
+        assert instance["final_result_published"] is True
+        assert instance["certification_status"] == "grh"
+        assert instance["class_group_proof_status"] == "grh"
+        assert instance["unit_group_proof_status"] == "grh"
         assert instance["factor_base_bound"] == used
         assert instance["requested_factor_base_bound"] == requested
+        class_group = instance["class_group"]
+        assert class_group["order"] == order
+        assert class_group["invariants"] == invariants
+        assert class_group["certification"] == "grh"
+        assert instance["unit_group"]["certification"] == "grh"
+        assert class_group["factor_base_generation_status"] == "unavailable"
+        assert class_group["relation_saturation_status"] != "verified"
+        # The real-quadratic hR comes from an unconditional L(1, chi)
+        # evaluation, the cubic one from a Belabas-Friedman bound; the
+        # published label is grh either way, since generation rests on GRH.
+        assert class_group["analytic_class_regulator_status"] == "verified"
+        assert class_group["analytic_class_regulator_certification"] == (
+            "proven" if instance["degree"] == 2 else "grh"
+        )
 
 
 def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
-    # The equality boundary of the coverage rule checked above:
+    # The equality boundary of unconditional generation in grh mode:
     # record_factor_base_generation_ (src/class_group/class_group.cpp)
     # verifies with `>=`, so a GRH-sized factor base that reaches the
-    # Minkowski-type bound exactly (not just strictly above it) still lets
-    # the grh request succeed. x^2 - 40001: 40001 = 13 * 17 * 181 is
+    # Minkowski-type bound exactly (not just strictly above it) records
+    # unconditional (`verified`) generation, while the published label
+    # stays grh. x^2 - 40001: 40001 = 13 * 17 * 181 is
     # squarefree and 1 mod 4, so D = 40001 and the real-quadratic branch of
     # factor_base_class_group_bound gives floor(sqrt(40001) / 2) = 100,
     # exactly the grh policy's selected bound here. h = 32, class group
@@ -189,6 +207,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     assert_marked_phase_failures(args.exe, root)
     assert_fail_closed_inputs(args.exe, root)
+    assert_grh_generation_below_minkowski(args.exe, root)
     assert_grh_minkowski_equality_boundary(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
@@ -198,7 +217,7 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "must_pass_fast"
     ]
-    assert len(manifest["fields"]) == 23
+    assert len(manifest["fields"]) == 29
     assert len(proven_rows) == 17
     exact_rows = {
         "degree_one_proven",
@@ -312,7 +331,8 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "grh_certification"
     ]
-    assert len(grh_rows) == 5
+    assert len(grh_rows) == 11
+    grh_bounds: dict[str, tuple[int, int]] = {}
     for row in grh_rows:
         grh_instance = run_json(
             [
@@ -341,27 +361,65 @@ def main() -> int:
         assert grh_instance["class_group"]["invariants"] == [
             str(value) for value in row["expected_class_invariants"]
         ]
-        assert grh_instance["unit_group"]["free_rank"] == 0
+        assert grh_instance["unit_group"]["free_rank"] == row[
+            "expected_unit_rank"
+        ]
         assert grh_instance["class_group"]["certification"] == "grh"
         assert grh_instance["unit_group"]["certification"] == "grh"
         # `factor_base_bound` is the bound the transaction used (the GRH
         # policy's selected bound), `requested_factor_base_bound` the
-        # tool-side request.
-        assert int(grh_instance["factor_base_bound"]) >= 2
-        assert int(grh_instance["requested_factor_base_bound"]) >= 2
-        # Every `grh_certification` row is imaginary quadratic and takes
-        # the exact imaginary-quadratic `grh` route: the index comes from
-        # the exact class number, not from an analytic hR, and its GRH
-        # dependence is in factor-base generation (checked only up to the
-        # GRH bound). That route records no analytic check, so these rows
-        # stay `not_checked`/`unknown`. The grh routes that do use the analytic
-        # index-one test (cubic, real quadratic) are checked below.
+        # tool-side request (the Minkowski-type bound).
+        used = int(grh_instance["factor_base_bound"])
+        minkowski = int(grh_instance["requested_factor_base_bound"])
+        assert used >= 2
+        assert minkowski >= 2
+        grh_bounds[row["id"]] = (used, minkowski)
+        if row["expected_unit_rank"] == 0:
+            # Rank-zero grh rows are imaginary quadratic and take the exact
+            # imaginary-quadratic `grh` route: the index comes from the
+            # exact class number, not from an analytic hR, and its GRH
+            # dependence is in factor-base generation (checked only up to
+            # the GRH bound). That route records no analytic check, so
+            # these rows stay `not_checked`/`unknown`.
+            assert grh_instance["class_group"][
+                "analytic_class_regulator_status"
+            ] == "not_checked"
+            assert grh_instance["class_group"][
+                "analytic_class_regulator_certification"
+            ] == "unknown"
+            continue
+        # Positive unit rank: the analytic index-one test accepts, with a
+        # Belabas-Friedman hR (GRH-conditional) above degree two and an
+        # unconditional L(1, chi) hR for real quadratic fields. Generation is
+        # unconditional (`verified`) only when the GRH-sized base reaches
+        # the Minkowski-type bound; below it, generation rests on GRH and
+        # is never reported `verified`. Relation saturation is not proved
+        # by a GRH-conditional acceptance.
         assert grh_instance["class_group"][
             "analytic_class_regulator_status"
-        ] == "not_checked"
+        ] == "verified"
         assert grh_instance["class_group"][
             "analytic_class_regulator_certification"
-        ] == "unknown"
+        ] == ("proven" if grh_instance["degree"] == 2 else "grh")
+        assert grh_instance["class_group"][
+            "factor_base_generation_status"
+        ] == ("verified" if used >= minkowski else "unavailable")
+        assert grh_instance["class_group"][
+            "relation_saturation_status"
+        ] != "verified"
+    # Each GRH-generation row is below the Minkowski-type bound; the
+    # x^2 - 10007 row sits exactly on it.
+    for field_id in (
+        "cubic_x3_x_200_grh",
+        "real_quadratic_100003_grh",
+        "quartic_disc1412343_grh",
+        "quintic_disc401370255_grh",
+        "imaginary_quadratic_100003_grh",
+    ):
+        used, minkowski = grh_bounds[field_id]
+        assert used < minkowski
+    used, minkowski = grh_bounds["real_quadratic_10007_grh"]
+    assert used == minkowski
 
     # An actually GRH-conditional (`"grh"`-valued) analytic hR check is
     # exercised by a dedicated fixture row instead: `--zeta-bf-audit`

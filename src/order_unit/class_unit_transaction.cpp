@@ -58,7 +58,8 @@ bool select_policy(
     if (options.requested_certification == CertificationMode::grh &&
         policy.degree != 1) {
         if (!grh_factor_base_bound(
-                    selected_bound, order, options.diagnostics)) {
+                    selected_bound, order, options.diagnostics,
+                    &policy.grh_generation_bound)) {
             return false;
         }
         policy.factor_base_bound =
@@ -141,10 +142,15 @@ bool select_policy(
 bool grh_factor_base_bound(
         flint::Fmpz& out,
         const Order& order,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        flint::Fmpz* generation_bound) noexcept {
     if (!grh_factor_base_bound_with_diagnostics(
                 flint::FmpzRef(out), order, diagnostics)) {
         return false;
+    }
+    if (generation_bound != nullptr) {
+        flint::fmpz_set(flint::FmpzRef(*generation_bound),
+                        flint::FmpzConstRef(out));
     }
     for (;;) {
         FactorBase probe(order);

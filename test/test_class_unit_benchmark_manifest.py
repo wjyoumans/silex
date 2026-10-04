@@ -66,7 +66,7 @@ def main() -> int:
     assert "source-neutral" in manifest["fixture_contract"]
     fields = manifest["fields"]
     assert isinstance(fields, list)
-    assert len(fields) == 23
+    assert len(fields) == 29
     assert len({row["id"] for row in fields}) == len(fields)
     assert all(row["expected_success"] is True for row in fields)
     assert all(row["mode"] in {"proven", "grh"} for row in fields)
@@ -74,7 +74,7 @@ def main() -> int:
     proven = [row for row in fields if row["status"] == "must_pass_fast"]
     grh = [row for row in fields if row["status"] == "grh_certification"]
     assert len(proven) == 17
-    assert len(grh) == 5
+    assert len(grh) == 11
     assert all(row["mode"] == "proven" for row in proven)
     assert all(row["mode"] == "grh" for row in grh)
     assert all(row["timeout_seconds"] == 20 for row in proven)
@@ -128,6 +128,14 @@ def main() -> int:
         (66, 0, 1),
         (185, 0, 1),
         (47, 0, 1),
+        # GRH-conditional factor-base generation below the Minkowski-type
+        # bound, the equality boundary, and a rank-zero field below it.
+        (200, 1, 0, 1),
+        (-100003, 0, 1),
+        (4, 1, 3, -8, 1),
+        (3, -3, -3, -6, -7, 1),
+        (-10007, 0, 1),
+        (100003, 0, 1),
     }
 
     campaign_only_keys = {

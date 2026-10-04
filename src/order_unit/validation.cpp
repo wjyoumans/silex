@@ -149,12 +149,17 @@ bool relation_saturation_retry_aux_bound(
 
 namespace {
 
+// `accept_grh_generation` lets GRH-conditional factor-base generation
+// (record_grh_factor_base_generation) stand in for the unconditional
+// generation check.  Only a grh request may pass true for an acceptance
+// decision; that record is written only on a grh request's base.
 bool validation_index_bound_from_product(
         flint::Fmpz& index_bound,
         const OrderUnitGroup& units,
         const ClassGroupContext& class_group,
         flint::ArbConstRef analytic_class_regulator_product,
-        slong precision) noexcept {
+        slong precision,
+        bool accept_grh_generation) noexcept {
     const Order* const order = class_group.parent();
     slong expected_rank = -1;
     if (order == nullptr || order->parent() == nullptr ||
@@ -172,13 +177,21 @@ bool validation_index_bound_from_product(
         return false;
     }
 
-    const bool integer_index_prerequisites =
+    const bool unconditional_generation =
             class_group.factor_base_generation_status() ==
                     ProofState::verified &&
             class_group.factor_base_generation_checked_status() ==
                     ProofState::verified;
+    const bool integer_index_prerequisites =
+            unconditional_generation ||
+            (accept_grh_generation &&
+             ClassGroupCertificationAccess::
+                     grh_factor_base_generation_covered(class_group));
     // In this validation context the quotient is an integer class/unit
-    // index only after factor-base generation has been proved.  Keep the
+    // index only once the factor base generates the class group: proved
+    // to the Minkowski-type bound, or, for a grh request, assumed under GRH
+    // from a base containing every prime ideal up to the GRH bound (Bach
+    // 1990, Thm 4; Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  Keep the
     // public ratio accessor conservative, but recognize the source-complete
     // index-one case before taking an outward-rounded ceiling.
     if (integer_index_prerequisites &&
@@ -209,7 +222,8 @@ bool analytic_index_bound_for_validation(
         const ClassGroupContext& class_group,
         AnalyticClassRegulatorCache& analytic_cache,
         const Order& order,
-        slong precision) noexcept {
+        slong precision,
+        bool accept_grh_generation) noexcept {
     SILEX_PROFILE_SCOPE(units.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.validation_analytic_index_bound");
     {
@@ -227,7 +241,7 @@ bool analytic_index_bound_for_validation(
                 "unit_group.validation_analytic_index_bound.index_bound");
         return validation_index_bound_from_product(
                 index_bound, units, class_group, analytic_cache.value(),
-                precision);
+                precision, accept_grh_generation);
     }
 }
 
@@ -241,9 +255,12 @@ bool class_unit_validation_estimate(
         slong precision) noexcept {
     SILEX_PROFILE_SCOPE(units.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.validation_estimate");
+    // An estimate, never an acceptance: the GRH generation record exists
+    // only on a grh request's base, where it plays the role of verified
+    // generation in the stopping heuristics.
     if (!analytic_index_bound_for_validation(
                 index_bound, units, class_group, analytic_cache, order,
-                precision) ||
+                precision, true) ||
         flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) < 0) {
         return false;
     }
@@ -315,7 +332,7 @@ bool class_unit_bf_validation_estimate(
             : analytic_cache.bf_value();
     if (!validation_index_bound_from_product(
                 index_bound, units, class_group, validation_value,
-                precision) ||
+                precision, true) ||
         flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) < 0) {
         return false;
     }
@@ -1125,7 +1142,7 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
         if (!exact_quadratic_index &&
             !analytic_index_bound_for_validation(
                     index_bound, units, class_group, analytic_cache, order,
-                    precision)) {
+                    precision, requested_grh)) {
             summary.outcome = ValidateRefineOutcome::analytic_unavailable;
             return false;
         }
@@ -1137,10 +1154,13 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                 // reference `_class_unit_group` accepts analytic index one for a
                 // GRH request and skips the later unconditional class/unit
                 // proof passes.  The caller publishes the conditional labels.
-                // Unlike the reference, Silex reaches index one here only
-                // after factor-base generation is verified up to the
-                // Minkowski-type bound (validation_index_bound_from_product),
-                // so GRH enters only through a Belabas-Friedman hR.
+                // As in the reference, index one here needs factor-base
+                // generation, which a grh request may take under GRH from a
+                // base containing every prime ideal up to min(BDF, Bach)
+                // (validation_index_bound_from_product), or unconditionally
+                // when the base reaches the Minkowski-type bound.  GRH then
+                // enters through that generation bound and a
+                // Belabas-Friedman hR.
                 if (!exact_quadratic_index) {
                     // Record the analytic check that accepted the pair, with
                     // its own conditionality.  Informational only; the
@@ -1296,7 +1316,7 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
 
         bool next_check_available = analytic_index_bound_for_validation(
                 next_index_bound, scratch_units, class_group, analytic_cache,
-                order, precision);
+                order, precision, requested_grh);
         if (next_check_available) {
             flint::fmpz_set(flint::FmpzRef(summary.last_index_bound),
                             flint::FmpzConstRef(next_index_bound));

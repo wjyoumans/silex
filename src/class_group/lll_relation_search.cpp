@@ -2,6 +2,7 @@
 #include <silex/ideal.hpp>
 #include <silex/ideal_factorization.hpp>
 
+#include "class_group_certification_internal.hpp"
 #include "class_group_internal.hpp"
 #include "lll_relation_search_internal.hpp"
 #include "relation_candidate_internal.hpp"
@@ -1451,6 +1452,27 @@ bool ClassGroupContext::compute_tentative_candidate_(
         !candidate.build_search_factor_base_(factor_base_bound,
                                             strict_transaction)) {
         return false;
+    }
+    // The strict build contains every prime ideal of norm at most
+    // factor_base_bound (inert primes included, both primes of a split
+    // pair).  Under a grh policy that bound is at least the GRH generation
+    // bound, so record GRH-conditional generation for this base.  The
+    // unconditional generation status is left as built.
+    if (strict_transaction) {
+        const detail::ClassUnitExecutionPolicy& policy =
+                class_unit_transaction_context_->audit.policy;
+        if (policy.selected &&
+            policy.factor_base_bound ==
+                    detail::NativeFactorBaseBoundStrategy::grh &&
+            policy.factor_base ==
+                    detail::NativeFactorBaseStrategy::norm_bounded &&
+            !detail::ClassGroupCertificationAccess::
+                    record_grh_factor_base_generation(
+                            candidate,
+                            flint::FmpzConstRef(
+                                    policy.grh_generation_bound))) {
+            return false;
+        }
     }
 
     detail::ClassGroupRelationOptions local_options = options;

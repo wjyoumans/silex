@@ -268,6 +268,78 @@
       "source": "Initial-release GRH-certification fixture"
     },
     {
+      "id": "cubic_x3_x_200_grh",
+      "coefficients_low_to_high": [200, 1, 0, 1],
+      "mode": "grh",
+      "expected_class_order": 2,
+      "expected_class_invariants": [2],
+      "expected_unit_rank": 1,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "GRH-conditional factor-base generation fixture: x^3 + x + 200, disc -1080004, generation bound below the Minkowski-type bound"
+    },
+    {
+      "id": "real_quadratic_100003_grh",
+      "coefficients_low_to_high": [-100003, 0, 1],
+      "mode": "grh",
+      "expected_class_order": 1,
+      "expected_class_invariants": [],
+      "expected_unit_rank": 1,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "GRH-conditional factor-base generation fixture: x^2 - 100003, disc 400012, generation bound below the Minkowski-type bound"
+    },
+    {
+      "id": "quartic_disc1412343_grh",
+      "coefficients_low_to_high": [4, 1, 3, -8, 1],
+      "mode": "grh",
+      "expected_class_order": 4,
+      "expected_class_invariants": [4],
+      "expected_unit_rank": 2,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "GRH-conditional factor-base generation fixture: the field of quartic_disc1412343_proven, generation bound below the Minkowski-type bound"
+    },
+    {
+      "id": "quintic_disc401370255_grh",
+      "coefficients_low_to_high": [3, -3, -3, -6, -7, 1],
+      "mode": "grh",
+      "expected_class_order": 1,
+      "expected_class_invariants": [],
+      "expected_unit_rank": 3,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "GRH-conditional factor-base generation fixture: the field of quintic_disc401370255_proven, generation bound below the Minkowski-type bound"
+    },
+    {
+      "id": "real_quadratic_10007_grh",
+      "coefficients_low_to_high": [-10007, 0, 1],
+      "mode": "grh",
+      "expected_class_order": 1,
+      "expected_class_invariants": [],
+      "expected_unit_rank": 1,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "Unconditional generation in grh mode: x^2 - 10007, disc 40028, GRH factor-base bound equal to the Minkowski-type bound"
+    },
+    {
+      "id": "imaginary_quadratic_100003_grh",
+      "coefficients_low_to_high": [100003, 0, 1],
+      "mode": "grh",
+      "expected_class_order": 39,
+      "expected_class_invariants": [39],
+      "expected_unit_rank": 0,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "Rank-zero grh fixture: x^2 + 100003, disc -100003, GRH factor-base bound below the Minkowski-type bound"
+    },
+    {
       "id": "cubic_disc23_analytic_grh",
       "coefficients_low_to_high": [-1, -1, 0, 1],
       "mode": "proven",
