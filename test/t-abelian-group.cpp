@@ -1,5 +1,7 @@
 #include <silex/abelian_group.hpp>
 
+#include <flint/fmpz_mat.h>
+
 #include <cassert>
 #include <utility>
 
@@ -388,6 +390,144 @@ int test_trivial_snf_coordinates() {
     return 0;
 }
 
+bool generator_state_equal(const silex::FiniteAbelianGroup& group,
+                           const sflint::FmpzMat& generators,
+                           const sflint::FmpzMat& coordinates) noexcept {
+    const slong n = group.generator_count();
+    auto current = group.invariant_generator_matrix();
+    if (!current.has_value() ||
+        !sflint::fmpz_mat_equal(*current, generators)) {
+        return false;
+    }
+    sflint::FmpzMat unit_row(1, n);
+    sflint::FmpzMat coords(1, group.invariant_count());
+    for (slong j = 0; j < n; ++j) {
+        sflint::fmpz_mat_zero(sflint::FmpzMatRef(unit_row));
+        set_entry_si(unit_row, 0, j, 1);
+        if (!group.invariant_coordinates(sflint::FmpzMatRef(coords),
+                                         sflint::FmpzMatConstRef(unit_row))) {
+            return false;
+        }
+        for (slong k = 0; k < group.invariant_count(); ++k) {
+            if (!sflint::fmpz_equal(entry_const(coords, 0, k),
+                                    entry_const(coordinates, j, k))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool snapshot_generator_state(const silex::FiniteAbelianGroup& group,
+                              sflint::FmpzMat& generators,
+                              sflint::FmpzMat& coordinates) noexcept {
+    const slong n = group.generator_count();
+    sflint::FmpzMat unit_row(1, n);
+    sflint::FmpzMat coords(1, group.invariant_count());
+    if (!group.invariant_generator_matrix(sflint::FmpzMatRef(generators))) {
+        return false;
+    }
+    for (slong j = 0; j < n; ++j) {
+        sflint::fmpz_mat_zero(sflint::FmpzMatRef(unit_row));
+        set_entry_si(unit_row, 0, j, 1);
+        if (!group.invariant_coordinates(sflint::FmpzMatRef(coords),
+                                         sflint::FmpzMatConstRef(unit_row))) {
+            return false;
+        }
+        for (slong k = 0; k < group.invariant_count(); ++k) {
+            sflint::fmpz_set(sflint::fmpz_mat_entry(coordinates, j, k),
+                             entry_const(coords, 0, k));
+        }
+    }
+    return true;
+}
+
+// Invariant generators and coordinates are published from the Smith form of
+// an HNF basis; the first witness request recomputes the Smith form of the
+// full relation matrix.  FLINT's fmpz_mat_snf_transform begins with a row
+// HNF, which is unique, so for a basis of the relation lattice both runs give
+// the same Smith form and right transform.  Pin that the witness request
+// leaves generators and coordinates unchanged on a larger group.
+int test_witness_request_keeps_generators() {
+    constexpr slong n = 6;
+    constexpr slong m = 14;
+    const slong diagonal[n] = {1, 2, 6, 30, 210, 2310};
+    const slong inv[5] = {2, 6, 30, 210, 2310};
+
+    // relations = M * D * W with W unimodular and M containing a unimodular
+    // top block, so the group is Z/2 + Z/6 + Z/30 + Z/210 + Z/2310.
+    sflint::FmpzMat mix(m, n);
+    sflint::FmpzMat scaled(n, n);
+    sflint::FmpzMat right(n, n);
+    sflint::FmpzMat partial(m, n);
+    sflint::FmpzMat relations(m, n);
+    for (slong i = 0; i < m; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            if (i < n) {
+                set_entry_si(mix, i, j,
+                             j == i ? 1 : (j < i ? (3 * i + j) % 5 - 2 : 0));
+            } else {
+                set_entry_si(mix, i, j, (7 * i + 3 * j) % 9 - 4);
+            }
+        }
+    }
+    for (slong i = 0; i < n; ++i) {
+        set_entry_si(scaled, i, i, diagonal[i]);
+        for (slong j = 0; j < n; ++j) {
+            set_entry_si(right, i, j,
+                         j == i ? 1 : (j > i ? (i + 2 * j) % 7 - 3 : 0));
+        }
+    }
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(partial),
+                         sflint::FmpzMatConstRef(mix),
+                         sflint::FmpzMatConstRef(scaled));
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(relations),
+                         sflint::FmpzMatConstRef(partial),
+                         sflint::FmpzMatConstRef(right));
+
+    sflint::FmpzMat hnf_full(m, n);
+    sflint::FmpzMat hnf_basis(n, n);
+    ::fmpz_mat_hnf(hnf_full.raw(), relations.raw());
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            sflint::fmpz_set(sflint::fmpz_mat_entry(hnf_basis, i, j),
+                             entry_const(hnf_full, i, j));
+        }
+    }
+    for (slong i = n; i < m; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            assert(entry_is_zero(hnf_full, i, j));
+        }
+    }
+
+    for (int with_basis = 0; with_basis < 2; ++with_basis) {
+        silex::FiniteAbelianGroup group;
+        if (with_basis != 0) {
+            assert(group.set_relation_matrix_with_hnf_basis(
+                    sflint::FmpzMatConstRef(relations),
+                    sflint::FmpzMatConstRef(hnf_basis)));
+        } else {
+            assert(group.set_relation_matrix(
+                    sflint::FmpzMatConstRef(relations)));
+        }
+        assert(invariants_are_si(group, inv, 5));
+
+        sflint::FmpzMat generators(5, n);
+        sflint::FmpzMat coordinates(n, 5);
+        assert(snapshot_generator_state(group, generators, coordinates));
+
+        assert(generator_relation_identity(group));
+        assert(relation_kernel_identity(group));
+        assert(invariants_are_si(group, inv, 5));
+        assert(generator_state_equal(group, generators, coordinates));
+
+        assert(generator_relation_identity(group));
+        assert(generator_state_equal(group, generators, coordinates));
+    }
+
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -396,5 +536,6 @@ int main() {
     assert(test_element_reduce_and_coordinates() == 0);
     assert(test_nondiagonal_and_generator_relations() == 0);
     assert(test_trivial_snf_coordinates() == 0);
+    assert(test_witness_request_keeps_generators() == 0);
     return 0;
 }
