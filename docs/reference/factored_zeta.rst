@@ -72,8 +72,11 @@ Zeta and Class-Regulator Product APIs
 product helpers for:
 
 * degree-one orders;
-* maximal quadratic orders with conductor-one metadata through FLINT
-  Dirichlet ``L(1, chi_D)`` support;
+* maximal quadratic orders with conductor-one metadata whose discriminant
+  ``|D|`` fits in a machine word, through ``L(1, chi_D)`` for the Kronecker
+  character ``(D/.)``, evaluated with an approximate functional equation
+  adapted from FLINT ``acb_dirichlet_l_fmpq_afe`` (see "Class groups and
+  order units" in :doc:`algorithms_and_sources`);
 * higher-degree maximal orders through the Belabas-Friedman fallback.
 
 Only the first two routes are unconditional, and the quadratic route only

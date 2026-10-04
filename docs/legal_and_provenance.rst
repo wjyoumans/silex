@@ -54,7 +54,11 @@ runtime dependencies of the native Silex library.
 ``FLINT``
    Supplies the exact arithmetic, storage, HNF/SNF, polynomial, number-field,
    and modular-linear-algebra contracts used by Silex.  The supported and
-   qualified versions are recorded in :doc:`support_matrix`.
+   qualified versions are recorded in :doc:`support_matrix`.  FLINT is also a
+   source of adapted code: the quadratic ``L(1, chi_D)`` evaluation in
+   ``src/zeta/zeta.cpp`` is derived from FLINT 3.6.0
+   ``src/acb_dirichlet/l_fmpq_afe.c`` (copyright (C) 2021 Fredrik Johansson,
+   LGPL-3.0-or-later), as recorded in ``THIRD_PARTY_NOTICES.md``.
 
 Historical Silex import
 -----------------------

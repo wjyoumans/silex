@@ -530,10 +530,24 @@ An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
 one, and maximal orders of explicit quadratic-backend fields whose
 discriminant ``|D|`` fits in a machine word, where the residue comes from
-FLINT Dirichlet ``L(1, chi_D)``.  When that ``L(1, chi_D)`` evaluation fails
-(for example the Dirichlet group cannot be initialized, or the ``L``-value
-ball is not finite with a positive real part), the quadratic route falls back
-to Belabas--Friedman, and the value is then GRH-conditional like any other;
+``L(1, chi_D)``.  Silex evaluates ``L(1, chi_D)`` for the primitive real
+character ``chi_D(n) = (D/n)`` (Kronecker symbol) of the fundamental
+discriminant ``D`` with the approximate functional equation of FLINT
+``acb_dirichlet_l_fmpq_afe`` (FLINT 3.6.0 ``src/acb_dirichlet/l_fmpq_afe.c``,
+copyright (C) 2021 Fredrik Johansson, LGPL-3.0-or-later; the adapted code is
+in ``src/zeta/zeta.cpp``).  It keeps FLINT's two sums, truncation rule, tail
+bound, tolerances, and working precisions, and the result is a rigorous ball
+enclosure.  It deviates from FLINT in three places: ``chi_D(n)`` is the
+Kronecker symbol instead of a Dirichlet-group discrete logarithm, so no
+Dirichlet group is built and the work grows like ``sqrt(|D| prec)``; the root
+number is ``W(chi_D) = 1``, because the Gauss sum of a primitive real
+character is ``sqrt(q)`` for even and ``i sqrt(q)`` for odd characters
+(Davenport, *Multiplicative Number Theory*, Chapters 5 and 9); and the
+incomplete gamma values are the closed forms ``Gamma(1, z) = exp(-z)``,
+``Gamma(1/2, z) = sqrt(pi) erfc(sqrt(z))`` and ``Gamma(0, z) = E_1(z)``
+(DLMF 6.2 and 8.4), evaluated with arb ball functions.  When the ``L``-value
+ball is not finite and positive, the quadratic route falls back to
+Belabas--Friedman, and the value is then GRH-conditional like any other;
 certification uses the route that actually produced the value, not the field
 type.  Every other ``hR`` comes from the Belabas--Friedman evaluation (K.
 Belabas and E. Friedman, "Computing the residue of the Dedekind zeta

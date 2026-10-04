@@ -86,6 +86,25 @@ Hecke's own notice identifies separately licensed included components; consult
 the Hecke.jl distribution when redistributing those components. They are not
 bundled in this repository.
 
+## FLINT
+
+The quadratic `L(1, chi_D)` evaluation in `src/zeta/zeta.cpp` is adapted from
+the approximate functional equation `acb_dirichlet_l_fmpq_afe` in
+[FLINT 3.6.0](https://flintlib.org/) `src/acb_dirichlet/l_fmpq_afe.c`. The
+adaptation keeps FLINT's sums, truncation rule, tail bound, tolerances, and
+working precisions, and evaluates the character with Kronecker symbols and
+the incomplete gamma values in closed form; the source comment and the public
+algorithm/source map record the deviations.
+
+Copyright (C) 2021 Fredrik Johansson.
+
+FLINT is free software licensed under the GNU Lesser General Public License,
+version 3 or, at your option, any later version (`LGPL-3.0-or-later`).
+Silex's `GPL-3.0-or-later` distribution terms are compatible with and
+preserve the applicable obligations for adapted material. Complete FLINT
+author and license notices remain available from the FLINT source
+distribution.
+
 ## External dependencies
 
 Silex links to FLINT and may optionally use third-party development tools or

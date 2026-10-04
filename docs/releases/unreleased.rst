@@ -117,6 +117,24 @@ Changed
   carries the computed torsion, so no result from the installed API changes.
   See :doc:`../reference/class_units_compact`.
 
+- The unconditional quadratic ``L(1, chi)`` route now evaluates
+  ``L(1, chi_D)`` with the Kronecker character ``(D/.)`` and an approximate
+  functional equation adapted from FLINT ``acb_dirichlet_l_fmpq_afe``,
+  instead of FLINT's Dirichlet-character ``L``-function.  It no longer builds
+  a Dirichlet group, so its cost grows like ``sqrt(|D|)`` rather than
+  ``|D|``.  Quadratic fields whose ``L(1, chi)`` evaluation previously failed
+  (the Dirichlet group could not be initialized) or did not finish, and which
+  therefore fell back to a GRH-conditional Belabas-Friedman ``hR``, now get an
+  unconditional ``hR``.  The class/unit routes that use it, such as
+  ``try_certify_class_unit_with_zeta`` and the analytic index-one check, then
+  record a ``proven`` analytic check where they previously recorded ``grh``
+  or failed.  The certification
+  rule is unchanged: a finite, positive ``L``-value ball is unconditional, and
+  anything else still falls back to Belabas-Friedman.  For ``|D|`` near
+  ``10^12`` an evaluation takes tens of seconds (imaginary) to a few minutes
+  (real).  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 Fixed
 -----
 
