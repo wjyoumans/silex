@@ -31,6 +31,17 @@ Added
 Changed
 -------
 
+- The GRH generation bound of a ``grh`` class/unit request falls back to
+  Bach's bound alone when the Belabas-Diaz y Diaz-Friedman criterion cannot
+  be computed or decided (for example for a non-monic defining polynomial,
+  or an interval comparison in its search that cannot be decided), and the
+  generation record then names Bach's theorem
+  (``ClassGroupGenerationBasis::bach``).  Such requests used to fail closed
+  at policy selection.  Proven results and the failure rules are unchanged;
+  a ``grh`` request on a non-monic presentation still fails closed, because
+  the factor base needs a monic integral defining polynomial.  See "Class
+  groups and order units" in :doc:`../reference/algorithms_and_sources`.
+
 - ``factor_base_class_group_bound`` now returns a smaller proven bound in
   degree 3 and above: the smallest of Zimmert's bound (Zimmert 1981,
   Satz 2, for degree at most 20), Minkowski's bound with ``(4/pi)^r2``, and

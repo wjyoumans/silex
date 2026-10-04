@@ -1373,13 +1373,22 @@ bool grh_factor_base_bound_impl(
         bool* bach_selected) noexcept {
     flint::Fmpz bdf;
     flint::Fmpz bach;
-    if (!factor_base_bound_bdf(flint::FmpzRef(bdf), order,
-                                     diagnostics) ||
-        !factor_base_bound_bach(flint::FmpzRef(bach), order)) {
+    if (!factor_base_bound_bach(flint::FmpzRef(bach), order)) {
         return false;
     }
-    const bool use_bach = flint::fmpz_cmp(flint::FmpzConstRef(bdf),
-                                          flint::FmpzConstRef(bach)) > 0;
+    // Bach's bound alone is used when the Belabas-Diaz y Diaz-Friedman
+    // criterion cannot be computed or decided: a non-monic defining
+    // polynomial (its residue-degree route needs a monic integral one), a
+    // residue-degree failure, an Arb comparison that cannot decide, or a
+    // search past the double range.  Bach 1990, Theorem 4 (and the remark
+    // following it in degree two) holds without the BDF value, and BDF 2008,
+    // Section 3, itself takes Bach's bound once its search passes it.
+    const bool bdf_computed =
+            factor_base_bound_bdf(flint::FmpzRef(bdf), order, diagnostics);
+    const bool use_bach =
+            !bdf_computed ||
+            flint::fmpz_cmp(flint::FmpzConstRef(bdf),
+                            flint::FmpzConstRef(bach)) > 0;
     flint::fmpz_set(out, use_bach ? flint::FmpzConstRef(bach)
                                   : flint::FmpzConstRef(bdf));
     if (bach_selected != nullptr) {

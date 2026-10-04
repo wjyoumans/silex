@@ -4746,6 +4746,14 @@ bool ClassGroupCertificationAccess::grh_factor_base_generation_covered(
                    0;
 }
 
+ClassGroupGenerationBasis
+ClassGroupCertificationAccess::grh_factor_base_generation_basis(
+        const ClassGroupContext& context) noexcept {
+    return grh_factor_base_generation_covered(context)
+            ? context.private_storage_->grh_generation_basis
+            : ClassGroupGenerationBasis::none;
+}
+
 bool ClassGroupCertificationAccess::
         rank_zero_quadratic_class_index_bound(
                 flint::FmpzRef out,

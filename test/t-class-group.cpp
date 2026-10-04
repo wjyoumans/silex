@@ -3,6 +3,7 @@
 #include <silex/ideal_factorization.hpp>
 #include <silex/order_element.hpp>
 #include <silex/order_unit.hpp>
+#include <silex/prime_ideal.hpp>
 #include <silex/relation.hpp>
 
 #include "class_group/class_group_certification_internal.hpp"
@@ -2917,6 +2918,47 @@ int test_grh_provenance_records() {
     assert(context.class_unit_completeness_basis() ==
            silex::ClassUnitCompletenessBasis::belabas_friedman);
 
+    // Base completeness, checked against prime decomposition directly:
+    // every prime ideal of norm at most the build bound 100 is in the base,
+    // including both primes of a split pair, inert primes and ramified
+    // primes.  Under GRH these primes generate the class group because 100
+    // is at least the GRH generation bound 50.
+    const slong grh_build_bound = 100;
+    assert(context.factor_base_build_bound(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, grh_build_bound));
+    const silex::FactorBase* grh_base = context.factor_base();
+    assert(grh_base != nullptr);
+    slong checked_primes = 0;
+    slong checked_higher_degree = 0;
+    slong checked_ramified = 0;
+    for (ulong p = 2; p <= static_cast<ulong>(grh_build_bound);
+         p = n_nextprime(p, 1)) {
+        sflint::Fmpz rational_prime;
+        sflint::fmpz_set_ui(sflint::FmpzRef(rational_prime), p);
+        silex::PrimeIdealList above;
+        assert(silex::decompose_prime(above, maximal_order,
+                                      sflint::FmpzConstRef(rational_prime)));
+        assert(above.size() > 0);
+        for (slong i = 0; i < above.size(); ++i) {
+            const silex::PrimeIdeal* prime = above.at(i);
+            assert(prime != nullptr);
+            sflint::Fmpz norm;
+            assert(prime->norm(sflint::FmpzRef(norm)));
+            if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(norm),
+                                    static_cast<ulong>(grh_build_bound)) >
+                0) {
+                continue;
+            }
+            assert(grh_base->contains(*prime));
+            ++checked_primes;
+            checked_higher_degree += prime->residue_degree() > 1 ? 1 : 0;
+            checked_ramified += prime->ramification_index() > 1 ? 1 : 0;
+        }
+    }
+    assert(checked_primes == grh_base->length());
+    assert(checked_higher_degree > 0);
+    assert(checked_ramified > 0);
+
     // Only the two GRH theorems are recordable, and the GRH bound must not
     // exceed the build bound (100 here).
     sflint::Fmpz grh_bound;
@@ -2986,6 +3028,131 @@ int test_grh_provenance_records() {
     return 0;
 }
 
+// The GRH generation bound falls back to Bach's bound alone when the
+// Belabas-Diaz y Diaz-Friedman criterion cannot be computed or decided, and
+// the theorem that gave the bound reaches the grh record through the policy.
+int test_grh_generation_bound_bach_fallback() {
+    // 4x^3 + x + 100 defines the field of x^3 + x + 200 (its root is half a
+    // root of x^3 + x + 200), so |D| = 1080004 for both presentations.  The
+    // residue-degree route of the BDF criterion needs a monic integral
+    // defining polynomial, so for the non-monic presentation BDF cannot be
+    // computed and the bound is Bach's alone: ceil(12 log^2 1080004) = 2317
+    // (Bach 1990, Theorem 4).  The monic presentation keeps the BDF bound 50.
+    silex::NumberField monic_field = cubic_field(1, 200);
+    silex::Order monic_equation = silex::test::equation_order(monic_field);
+    silex::Order monic_maximal(monic_field);
+    assert(monic_maximal.maximal_order(monic_equation));
+    sflint::Fmpz bound;
+    bool bach_selected = true;
+    assert(silex::detail::grh_factor_base_bound_with_diagnostics(
+            sflint::FmpzRef(bound), monic_maximal, nullptr, &bach_selected));
+    assert(sflint::fmpz_equal_si(bound, 50));
+    assert(!bach_selected);
+
+    sflint::FmpqPoly nonmonic_polynomial;
+    sflint::fmpq_poly_zero(nonmonic_polynomial);
+    sflint::fmpq_poly_set_coeff_si(nonmonic_polynomial, 3, 4);
+    sflint::fmpq_poly_set_coeff_si(nonmonic_polynomial, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(nonmonic_polynomial, 0, 100);
+    silex::NumberField nonmonic_field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(nonmonic_polynomial));
+    // Z[2 beta] = Z[alpha], with basis 1, 2 beta, 4 beta^2.
+    sflint::FmpqMat alpha_basis(3, 3);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 0, 0), 1, 1);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 1, 1), 2, 1);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 2, 2), 4, 1);
+    silex::Order alpha_order = silex::Order::from_basis(
+            nonmonic_field, sflint::FmpqMatConstRef(alpha_basis));
+    assert(alpha_order.is_defined());
+    silex::Order nonmonic_maximal(nonmonic_field);
+    assert(nonmonic_maximal.maximal_order(alpha_order));
+    sflint::Fmpz discriminant;
+    assert(nonmonic_maximal.discriminant(sflint::FmpzRef(discriminant)));
+    assert(sflint::fmpz_equal_si(discriminant, -1080004));
+    bach_selected = false;
+    assert(silex::detail::grh_factor_base_bound_with_diagnostics(
+            sflint::FmpzRef(bound), nonmonic_maximal, nullptr,
+            &bach_selected));
+    assert(sflint::fmpz_equal_si(bound, 2317));
+    assert(bach_selected);
+
+    // A grh request on the non-monic presentation still fails closed, since
+    // prime decomposition (and so the norm-bounded factor base) also needs a
+    // monic integral defining polynomial.  The failure publishes nothing.
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 500;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::grh;
+    {
+        sflint::Fmpz requested_bound;
+        sflint::fmpz_set_ui(sflint::FmpzRef(requested_bound), 500);
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units;
+        silex::detail::ClassUnitTransactionReport audit;
+        assert(!silex::detail::compute_class_unit_transaction(
+                units, class_group, nonmonic_maximal,
+                sflint::FmpzConstRef(requested_bound), options, 128, audit));
+        assert(!audit.final_result_published);
+        assert(audit.class_group_certification ==
+               silex::CertificationMode::unknown);
+        assert(audit.unit_group_certification ==
+               silex::CertificationMode::unknown);
+        assert(!class_group.has_factor_base());
+        assert(!class_group.has_presentation());
+        assert(!units.is_set());
+    }
+
+    // End to end through the policy, a field where Bach's bound is the
+    // smaller: x^2 + x + 4 (D = -15, class group Z/2).  Bach's bound
+    // ceil(6 log^2 15) = 45 (Bach 1990, Theorem 4 and the remark following
+    // it) is below the BDF bound, whose dichotomy search never returns less
+    // than 50.  The grh policy records basis bach with that bound, and the
+    // class group's GRH generation record carries it.  The base also reaches
+    // the Minkowski-type bound of so small a field, so the public generation
+    // basis is the unconditional one.
+    silex::NumberField quadratic = shifted_quadratic_field(1, 4);
+    silex::Order quadratic_equation = silex::test::equation_order(quadratic);
+    silex::Order quadratic_maximal(quadratic);
+    assert(quadratic_maximal.maximal_order(quadratic_equation));
+    sflint::Fmpz minkowski;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(minkowski),
+                                               quadratic_maximal));
+    silex::ClassGroupGenerationBasis basis =
+            silex::ClassGroupGenerationBasis::none;
+    sflint::Fmpz generation_bound;
+    assert(silex::detail::grh_factor_base_bound(
+            bound, quadratic_maximal, nullptr, &generation_bound, &basis));
+    assert(basis == silex::ClassGroupGenerationBasis::bach);
+    assert(sflint::fmpz_equal_si(generation_bound, 45));
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, quadratic_maximal,
+            sflint::FmpzConstRef(minkowski), options, 128, audit));
+    assert(audit.final_result_published);
+    assert(audit.policy.factor_base_bound ==
+           silex::detail::NativeFactorBaseBoundStrategy::grh);
+    assert(audit.policy.grh_generation_basis ==
+           silex::ClassGroupGenerationBasis::bach);
+    assert(sflint::fmpz_equal_si(audit.policy.grh_generation_bound, 45));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
+    assert(CertificationAccess::grh_factor_base_generation_covered(
+            class_group));
+    assert(CertificationAccess::grh_factor_base_generation_basis(
+                   class_group) == silex::ClassGroupGenerationBasis::bach);
+    assert(class_group.factor_base_generation_basis() ==
+           silex::ClassGroupGenerationBasis::minkowski_type);
+    return 0;
+}
+
 int main() {
     test_certification_metadata_defaults_and_invalidation();
     test_factor_base_generation_metadata();
@@ -3030,5 +3197,6 @@ int main() {
     test_compute_candidate_preserves_on_failure();
     test_move_and_swap();
     test_grh_provenance_records();
+    test_grh_generation_bound_bach_fallback();
     return 0;
 }

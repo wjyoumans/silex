@@ -63,9 +63,11 @@ struct ZetaBfRouteAudit {
     slong work_precision = 0;
 };
 
-// `out` is the GRH generation bound min(BDF, Bach).  `bach_selected`, when
-// given, is set on success to whether Bach's bound gave that minimum
-// (strictly below the BDF bound); on a tie the BDF bound is reported.
+// `out` is the GRH generation bound min(BDF, Bach), or Bach's bound alone
+// when the BDF criterion cannot be computed or decided (for example for a
+// non-monic defining polynomial).  `bach_selected`, when given, is set on
+// success to whether Bach's bound gave `out`: strictly below the BDF bound,
+// or the BDF bound unavailable; on a tie the BDF bound is reported.
 bool grh_factor_base_bound_with_diagnostics(
         flint::FmpzRef out,
         const Order& order,

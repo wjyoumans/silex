@@ -47,6 +47,12 @@ public:
     static bool grh_factor_base_generation_covered(
             const ClassGroupContext& context) noexcept;
 
+    // The theorem stored with that record, bdf or bach, and none when there
+    // is no record.  Unlike factor_base_generation_basis(), it reports the
+    // record even when generation is also unconditional.
+    static ClassGroupGenerationBasis grh_factor_base_generation_basis(
+            const ClassGroupContext& context) noexcept;
+
     // Exact imaginary-quadratic index h_cand / h for a rank-zero maximal
     // order.  Under a proven request, true with index one means the class
     // group and `units` have been published proven (this requires the

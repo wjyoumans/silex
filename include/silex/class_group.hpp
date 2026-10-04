@@ -208,9 +208,10 @@ public:
     // `proven` when factor_base_generation_status() is `verified` (basis
     // minkowski_type), `grh` when a `grh` class/unit request built the base
     // to contain every prime ideal up to the GRH generation bound
-    // min(BDF, Bach) and generation is not also unconditional (basis bdf or
-    // bach, whichever theorem gave that bound), and `unknown` otherwise
-    // (basis none).  GRH generation never changes
+    // min(BDF, Bach), or Bach's bound alone when the BDF criterion cannot be
+    // computed or decided, and generation is not also unconditional (basis
+    // bdf or bach, whichever theorem gave that bound), and `unknown`
+    // otherwise (basis none).  GRH generation never changes
     // factor_base_generation_status(), which keeps meaning unconditional
     // generation, and never counts toward a `proven` label.
     CertificationMode factor_base_generation_certification() const noexcept;

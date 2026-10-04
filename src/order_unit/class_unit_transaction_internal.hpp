@@ -78,8 +78,10 @@ struct ClassUnitExecutionPolicy {
     slong unit_rank = -1;
     slong discriminant_bits = 0;
     flint::Fmpz selected_factor_base_bound;
-    // grh policy only: the GRH generation bound min(BDF, Bach) before the
-    // selected bound is doubled to reach the minimum factor-base size.
+    // grh policy only: the GRH generation bound min(BDF, Bach), or Bach's
+    // bound alone when the BDF criterion cannot be computed or decided,
+    // before the selected bound is doubled to reach the minimum factor-base
+    // size.
     // Under GRH every prime ideal of norm at most this bound generates the
     // class group; zero on every other policy.
     flint::Fmpz grh_generation_bound;
@@ -151,7 +153,8 @@ const char* class_unit_stage_name(ClassUnitStage stage) noexcept;
 bool native_hnf_unit_strategy_for_signature(
         slong degree,
         slong unit_rank) noexcept;
-// `out` is the GRH generation bound min(BDF, Bach), doubled until the
+// `out` is the GRH generation bound min(BDF, Bach) (Bach's alone when the
+// BDF criterion cannot be computed or decided), doubled until the
 // norm-bounded factor base has more than the minimum number of primes.
 // `generation_bound`, when given, receives the undoubled GRH bound, and
 // `generation_basis`, when given, the theorem that gave it (bdf or bach).
