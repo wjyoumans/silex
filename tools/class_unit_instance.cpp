@@ -17,6 +17,7 @@
 #include <silex/signature.hpp>
 #include <silex/sunit.hpp>
 
+#include "class_unit_failure_detail.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 
 #include <flint/arf.h>
@@ -1750,6 +1751,10 @@ int main(int argc, char** argv) {
     } else {
         write_json_string(std::cout, transaction_report.failure_reason);
     }
+    std::cout << ",\n";
+    std::cout << "  \"failure_detail\": ";
+    silex_tools::write_class_unit_failure_detail_json(std::cout,
+                                                      transaction_report);
     std::cout << ",\n";
     std::cout << "  \"certification_status\": ";
     write_json_string(

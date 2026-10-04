@@ -146,6 +146,10 @@ def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
         assert instance["field_defined"] is False
         assert instance["maximal_order_defined"] is False
         assert instance["failure_reason"] == "input_or_options_unavailable"
+        # failure_detail is null for every reason other than
+        # factor_base_honesty_unwitnessed.
+        assert "failure_detail" in instance
+        assert instance["failure_detail"] is None
 
 
 def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
@@ -222,9 +226,11 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
             [str(exe), "--coeffs", coeffs, "--mode", mode], root
         )
         assert instance["success"] is True
-        # A published result names no failure stage or reason.
+        # A published result names no failure stage, reason or detail.
         assert instance["failure_stage"] is None
         assert instance["failure_reason"] is None
+        assert "failure_detail" in instance
+        assert instance["failure_detail"] is None
         assert instance["certification_status"] == mode
         class_group = instance["class_group"]
         assert class_group["factor_base_generation_certification"] == (
@@ -330,6 +336,8 @@ def main() -> int:
         assert proven_instance["final_result_published"] is True
         assert proven_instance["failure_stage"] is None
         assert proven_instance["failure_reason"] is None
+        assert "failure_detail" in proven_instance
+        assert proven_instance["failure_detail"] is None
         assert proven_instance["field_defined"] is True
         assert proven_instance["maximal_order_defined"] is True
         assert proven_instance["class_group"]["has_presentation"] is True

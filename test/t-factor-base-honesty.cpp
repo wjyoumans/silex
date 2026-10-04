@@ -6,6 +6,7 @@
 #include "order/order_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "test_support.hpp"
+#include "../tools/class_unit_failure_detail.hpp"
 
 #include <silex/class_group.hpp>
 #include <silex/diagnostics.hpp>
@@ -25,6 +26,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1443,6 +1445,81 @@ int test_later_attempt_clears_honesty_failure() {
             : 1;
 }
 
+// The instance JSON's failure_detail value for a class/unit transaction
+// report.
+std::string failure_detail_json(
+        const silex::detail::ClassUnitTransactionReport& report) {
+    std::ostringstream out;
+    silex_tools::write_class_unit_failure_detail_json(out, report);
+    return out.str();
+}
+
+// failure_detail names the unwitnessed prime and the final stage's caps when
+// the reason is factor_base_honesty_unwitnessed: the lattice caps the real
+// checkpoint recorded, or the T2 caps of a T2 record.  It is null for any
+// other reason, even with a record present, and with no reason.
+int test_failure_detail_json() {
+    HonestyCheckpointRun terminal;
+    if (!run_honesty_checkpoint(terminal, false, true)) {
+        return 1;
+    }
+    silex::detail::ClassUnitTransactionReport& report = terminal.audit;
+    report.failure_stage = silex::detail::ClassUnitStage::total;
+    report.failure_reason =
+            silex::detail::class_unit_computation_failure_reason(report);
+    const bool lattice =
+            failure_detail_json(report) ==
+            "{\n"
+            "    \"p\": 3,\n"
+            "    \"residue_degree\": 1,\n"
+            "    \"search\": \"lattice\",\n"
+            "    \"stage\": 3,\n"
+            "    \"max_stage\": 3,\n"
+            "    \"radius\": 64,\n"
+            "    \"twists\": 128,\n"
+            "    \"random_tries\": 400\n"
+            "  }";
+
+    silex::detail::FactorBaseHonestyFailure& failure =
+            report.factor_base_honesty_failure;
+    failure.p = -1;
+    failure.residue_degree = 2;
+    failure.direct_witness_search = true;
+    failure.stage = 1;
+    failure.max_stage = 3;
+    failure.random_tries = 100;
+    failure.factor_attempts = 1000;
+    failure.element_steps = 2000;
+    const bool t2 =
+            failure_detail_json(report) ==
+            "{\n"
+            "    \"p\": null,\n"
+            "    \"residue_degree\": 2,\n"
+            "    \"search\": \"t2\",\n"
+            "    \"stage\": 1,\n"
+            "    \"max_stage\": 3,\n"
+            "    \"random_tries\": 100,\n"
+            "    \"factor_attempts\": 1000,\n"
+            "    \"element_steps\": 2000\n"
+            "  }";
+
+    report.failure_reason = "unsupported_certification_request";
+    const bool other_reason = failure_detail_json(report) == "null";
+    report.failure_reason = nullptr;
+    const bool no_reason = failure_detail_json(report) == "null";
+
+    HonestyCheckpointRun restart;
+    if (!run_honesty_checkpoint(restart, true, true)) {
+        return 1;
+    }
+    restart.audit.failure_stage = silex::detail::ClassUnitStage::total;
+    restart.audit.failure_reason =
+            silex::detail::class_unit_computation_failure_reason(
+                    restart.audit);
+    const bool generic = failure_detail_json(restart.audit) == "null";
+    return lattice && t2 && other_reason && no_reason && generic ? 0 : 1;
+}
+
 // Escalation runs only where an unwitnessed prime is final: a caller with a
 // factor-base restart or a fallback route keeps the stage-0 caps of the
 // reference be_honest.
@@ -1479,7 +1556,8 @@ int main() {
                    test_escalation_only_without_recovery() != 0 ||
                    test_terminal_honesty_failure_names_transaction_reason() !=
                            0 ||
-                   test_later_attempt_clears_honesty_failure() != 0
+                   test_later_attempt_clears_honesty_failure() != 0 ||
+                   test_failure_detail_json() != 0
             ? 1
             : 0;
 }

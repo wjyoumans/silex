@@ -33,9 +33,16 @@ Added
   a required prime that the factor-base honesty witness search could not
   witness at its final caps, with no factor-base restart left.  Other
   computation failures still report ``class_unit_computation_failed``, and
-  results, labels and successful runs are unchanged.  The caps of the last
-  stage searched remain in the class-group detail log.  See "Class groups and
-  order units" in :doc:`../reference/algorithms_and_sources`.
+  results, labels and successful runs are unchanged.  A new top-level JSON
+  field ``failure_detail`` holds structured detail about a failure, with keys
+  that depend on ``failure_reason``.  It is null except for
+  ``factor_base_honesty_unwitnessed``, where it names the unwitnessed prime
+  (``p`` and ``residue_degree``), the witness search route (``search``,
+  ``lattice`` or ``t2``), the stage of its last search (``stage`` and
+  ``max_stage``), and that stage's caps: ``radius``, ``twists`` and
+  ``random_tries`` on the lattice route, or ``random_tries``,
+  ``factor_attempts`` and ``element_steps`` on the T2 route.  See "Class
+  groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 Changed
 -------

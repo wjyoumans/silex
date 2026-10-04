@@ -1049,6 +1049,17 @@ with reason ``factor_base_honesty_unwitnessed`` instead of
 candidate at every stage passes the same exact witness check, and stage 0 is
 the previous search, so results that succeeded at stage 0 are unchanged.
 
+In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``
+object is the one place for structured failure detail; its keys depend on
+``failure_reason``, and it is null for every reason other than
+``factor_base_honesty_unwitnessed``.  For that reason it gives the
+unwitnessed prime as ``p`` (null if it does not fit a signed machine word)
+and ``residue_degree``, the route as ``search`` (``lattice`` or ``t2``), the
+last stage searched and the last stage allowed as ``stage`` and
+``max_stage``, and that stage's caps under the detail log's names:
+``radius``, ``twists`` and ``random_tries`` on the lattice route, or
+``random_tries``, ``factor_attempts`` and ``element_steps`` on the T2 route.
+
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in
 ``Buchall_param`` publish the trivial class group, regulator one, torsion
