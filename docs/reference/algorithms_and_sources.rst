@@ -581,10 +581,11 @@ GRH such a base generates the class group: Belabas--Diaz y Diaz--Friedman
 2008, Corollary 2.2, assumes the Riemann hypothesis for the ``L``-functions
 of the nontrivial class-group characters; Bach 1990, Theorem 4 (with
 conductor one, ``12 log^2 |D|``) and the remark following it (p. 376,
-``6 log^2 |D|`` in degree two), assumes it for ``zeta_K`` as well.  Silex records this as a separate GRH generation
-record on the factor base, written only when the grh policy builds the base.
-It never sets ``factor_base_generation_status()`` to ``verified`` and is not
-the relation-search honesty receipt, so public generation readers and every
+``6 log^2 |D|`` in degree two), assumes it for ``zeta_K`` as well.  Silex
+records this as a separate GRH generation record on the factor base, written
+only when the grh policy builds the base.  It never sets
+``factor_base_generation_status()`` to ``verified`` and is not the
+relation-search honesty receipt, so public generation readers and every
 ``proven`` route still see only unconditional generation, and a ``proven``
 promotion still requires generation verified up to the Minkowski-type bound
 (``factor_base_class_group_bound``).  When the GRH-sized base reaches that
