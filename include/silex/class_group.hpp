@@ -255,11 +255,12 @@ public:
     //   earlier (for example by a real-quadratic grh run), and of
     //   try_certify_class_unit_with_zeta set it once they certify
     //   `proven`, because index one with generation checked means
-    //   saturation at every prime.  They clear the per-prime records, so
-    //   the status can be `verified` while the records do not cover every
-    //   p | h_cand; try_certify_class_unit_with_zeta and the stored-check
-    //   promotion keep them when verified records already cover every
-    //   p | h_cand;
+    //   saturation at every prime.  They clear the per-prime records
+    //   unless verified records already cover every p | h_cand, so the
+    //   status can be `verified` with no records.  The exception is the
+    //   internal fallback try_analytic_index_bound_with_units_, which a
+    //   `proven` try_certify_with_units runs when the direct index-one
+    //   check fails: it always clears them;
     // - saturate_relations_bounded_with_units sets `verified` when its
     //   bounded search removed every prime from the candidate index and
     //   `unavailable` otherwise; its records describe that search, not an

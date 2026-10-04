@@ -197,10 +197,11 @@ Fixed
   every prime.  It was ``not_checked`` on that route, for example on a real
   quadratic field with class number greater than one such as
   ``x^2 - 40001``, and on an imaginary quadratic field certified through
-  ``try_certify_with_units``.  No per-prime records are kept, except that
-  the stored-check promotion and ``try_certify_class_unit_with_zeta`` keep
-  verified records that already cover every prime dividing the candidate
-  class number.  Labels are unchanged.
+  ``try_certify_with_units``.  These routes clear the per-prime records
+  unless verified records already cover every prime dividing the candidate
+  class number, in which case they are kept.  The internal fallback that
+  ``try_certify_with_units`` runs when the direct index-one check fails
+  still clears them.  Labels are unchanged.
 
 - ``try_certify_class_unit_with_zeta_bf`` (and the ``--zeta-bf-audit`` option
   of the class/unit instance tool) no longer fails on an imaginary quadratic
