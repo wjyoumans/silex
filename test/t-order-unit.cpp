@@ -2320,6 +2320,135 @@ int test_saturate_row_no_root_and_divisible_copy() {
     return 0;
 }
 
+void set_arb_coordinate(sflint::ArbMat& coordinates,
+                        slong row,
+                        slong numerator,
+                        slong denominator,
+                        slong error_exponent) noexcept {
+    sflint::Fmpq value;
+    ::fmpq_set_si(value.raw(), numerator, static_cast<ulong>(denominator));
+    arb_struct* entry = arb_mat_entry(coordinates.raw(), row, 0);
+    ::arb_set_fmpq(entry, value.raw(), 512);
+    ::arb_add_error_2exp_si(entry, error_exponent);
+}
+
+bool candidate_row_equals(const sflint::FmpzMat& candidate,
+                          const slong* expected,
+                          slong length) noexcept {
+    for (slong i = 0; i < length; ++i) {
+        if (!sflint::fmpz_equal_si(
+                    sflint::fmpz_mat_entry(candidate, 0, i), expected[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int test_dependent_relation_rational_candidate() {
+    sflint::ArbMat coordinates(2, 1);
+    sflint::FmpzMat candidate(1, 3);
+    bool found = false;
+
+    // Coordinates 1/1000003 and 5/7: the common denominator is
+    // 7 * 1000003 = 7000021, recovered without scanning denominators.
+    set_arb_coordinate(coordinates, 0, 1, 1000003, -200);
+    set_arb_coordinate(coordinates, 1, 5, 7, -200);
+    assert(silex::detail::dependent_relation_rational_candidate(
+            found, candidate, coordinates, 10000000));
+    assert(found);
+    const slong expected[] = {-7, -5000015, 7000021};
+    assert(candidate_row_equals(candidate, expected, 3));
+
+    // The same coordinates with a denominator bound below 7000021.
+    found = true;
+    assert(silex::detail::dependent_relation_rational_candidate(
+            found, candidate, coordinates, 7000020));
+    assert(!found);
+
+    // Integral coordinates give denominator one.
+    set_arb_coordinate(coordinates, 0, 3, 1, -40);
+    set_arb_coordinate(coordinates, 1, -2, 1, -40);
+    assert(silex::detail::dependent_relation_rational_candidate(
+            found, candidate, coordinates, 2));
+    assert(found);
+    const slong integral[] = {-3, 2, 1};
+    assert(candidate_row_equals(candidate, integral, 3));
+
+    // A ball with radius above one does not determine a candidate.
+    set_arb_coordinate(coordinates, 0, 1, 3, 1);
+    found = true;
+    assert(silex::detail::dependent_relation_rational_candidate(
+            found, candidate, coordinates, 1000));
+    assert(!found);
+
+    // Shape errors fail.
+    sflint::FmpzMat wrong(1, 2);
+    assert(!silex::detail::dependent_relation_rational_candidate(
+            found, wrong, coordinates, 1000));
+    assert(!silex::detail::dependent_relation_rational_candidate(
+            found, candidate, coordinates, 0));
+    return 0;
+}
+
+int test_add_dependent_unit_large_denominator() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+
+    // The group <epsilon^N> has index N = 1000000007 in the unit group mod
+    // torsion, so adjoining epsilon needs the relation
+    // epsilon^N = (epsilon^N)^1, whose denominator is N.
+    constexpr slong kIndex = 1000000007;
+    silex::FactoredElement generator(field);
+    assert(generator.push(epsilon, kIndex));
+    silex::FactoredElement generators[] = {std::move(generator)};
+
+    // epsilon^N is a unit by construction; the trusted install skips the
+    // public per-generator check, which would expand it.
+    silex::OrderUnitGroup group(order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            group, order, silex::FactoredElementSpan(generators, 1),
+            embeddings, 128, true));
+    sflint::Fmpz index_bound;
+    assert(group.regulator_index_bound(sflint::FmpzRef(index_bound), 128));
+    assert(::fmpz_cmp_si(index_bound.raw(), kIndex) >= 0);
+
+    silex::FactoredElement candidate(field);
+    assert(candidate.set_element(epsilon));
+    silex::detail::RelationUnitExtractionState state;
+    bool changed = false;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128));
+    assert(changed);
+    assert(group.free_rank() == 1);
+
+    silex::OrderUnitGroup expected(order);
+    silex::FactoredElement fundamental(field);
+    assert(fundamental.set_element(epsilon));
+    silex::FactoredElement fundamental_generators[] = {
+            std::move(fundamental)};
+    assert(expected.set_units(
+            order, silex::FactoredElementSpan(fundamental_generators, 1),
+            embeddings, 128));
+    sflint::Arb regulator;
+    sflint::Arb expected_regulator;
+    assert(group.regulator(sflint::ArbRef(regulator)));
+    assert(expected.regulator(sflint::ArbRef(expected_regulator)));
+    assert(::arb_overlaps(regulator.raw(), expected_regulator.raw()) != 0);
+
+    // Adjoining epsilon again finds the denominator-one relation and leaves
+    // the group unchanged.
+    changed = true;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128));
+    assert(!changed);
+    return 0;
+}
+
 int test_saturate_row_rank_zero_and_failures() {
     silex::NumberField degree_one = degree_one_field();
     silex::Order degree_one_order;
@@ -4330,6 +4459,54 @@ void torsion_event_callback(void* user,
         std::strcmp(label, counter->label) == 0) {
         ++counter->count;
     }
+}
+
+int test_add_dependent_unit_precision_cap() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+    silex::FactoredElement generator(field);
+    assert(generator.push(epsilon, 7));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    silex::OrderUnitGroup group(order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            group, order, silex::FactoredElementSpan(generators, 1),
+            embeddings, 128, true));
+
+    // 2 is not a unit, so no relation with a bounded denominator exists and
+    // every precision is inconclusive.  The doubling stops at the cap and
+    // the group is left unchanged.
+    silex::Element two(field);
+    assert(two.set_si(2));
+    silex::FactoredElement candidate(field);
+    assert(candidate.set_element(two));
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "unit_group.dependent_relation_precision_cap";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    group.set_diagnostics(&diagnostics);
+
+    silex::detail::RelationUnitExtractionState state;
+    bool changed = true;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128));
+    assert(!changed);
+    assert(state.rel_add_precision == silex::detail::kRelAddStartPrecision);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count == 1);
+#else
+    assert(counter.count == 0);
+#endif
+    group.set_diagnostics(nullptr);
+    return 0;
 }
 
 // The exact imaginary-quadratic index route may report index one under a
@@ -6750,6 +6927,9 @@ int main() {
     test_relation_kernel_unit_failures_preserve_output();
     test_saturate_row_real_quadratic_square();
     test_saturate_row_no_root_and_divisible_copy();
+    test_dependent_relation_rational_candidate();
+    test_add_dependent_unit_large_denominator();
+    test_add_dependent_unit_precision_cap();
     test_saturate_row_rank_zero_and_failures();
     test_residue_dlog_kernel_real_quadratic();
     test_residue_dlog_proof_kernel_torsion();

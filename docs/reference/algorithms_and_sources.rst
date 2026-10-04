@@ -462,6 +462,24 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
+``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
+``Unit/Relation.jl:_find_rational_relation!``.  Silex computes the
+coordinates of ``y`` against the generators' log matrix in Arb, replaces each
+coordinate ball by the simplest rational inside it (FLINT
+``_fmpq_simplest_between`` on the exact ball endpoints, as Nemo
+``simplest_rational_inside``), and takes the least common multiple ``m`` of
+the denominators.  A ball of radius above one, or a denominator or ``m``
+above the regulator index bound, makes the attempt inconclusive.  The
+candidate relation is only a guess until it passes the exact power-root or
+torsion check.  An inconclusive attempt or a failed check doubles the
+precision.  Hecke's loop is unbounded; Silex stops at a fixed precision cap
+and then leaves the group unchanged.  The loop terminates below the cap in
+the usual case: when the true coordinate is ``a/b`` with ``b`` at most the
+bound ``B`` and the ball radius is below ``1/B^2``, every other fraction
+``p/q`` in the ball with ``q <= b`` lies at distance at least
+``1/(qb) >= 1/B^2``, so the simplest rational is ``a/b``.
+
 Saturation-backed class-group proof follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_class_group_proof``: verify generation
 up to the Minkowski-type bound, then saturate at every prime dividing the

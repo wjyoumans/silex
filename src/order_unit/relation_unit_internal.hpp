@@ -15,6 +15,12 @@ namespace silex::detail {
 inline constexpr slong kUnitCandidateSortPrecision = 32;
 inline constexpr slong kTorsionStartPrecision = 16;
 inline constexpr slong kRelAddStartPrecision = 32;
+// Resource cap on the precision doubling of dependent-unit recovery; it is
+// not a mathematical bound.  Reconstructing a denominator below 2^63 needs
+// coordinate radii below 2^-126, so the cap leaves ample room for the
+// log-embedding loss of large compact exponents.  Reaching it fails the
+// search, and add_dependent_unit then leaves the group unchanged.
+inline constexpr slong kRelAddMaxPrecision = WORD(1) << 16;
 inline constexpr slong kReduceModUnitsMaxPrecision = 10000;
 
 enum class RelationTorsionStatus {

@@ -1762,6 +1762,11 @@ bool search_dependent_relation(
         return false;
     }
 
+    // reference Unit/UnitGrpCtx.jl `_search_rational_relation` and
+    // `_add_dependent_unit!` double the precision until the rational
+    // reconstruction yields a relation that checks exactly; the reference
+    // loop is unbounded, Silex stops at kRelAddMaxPrecision.
+    const slong max_precision = max_slong(precision, kRelAddMaxPrecision);
     slong work_precision = precision;
     for (;;) {
         const flint::ArbMat* inverse = nullptr;
@@ -1773,8 +1778,8 @@ bool search_dependent_relation(
 
         if (!dependent_relation_bounded_with_inverse(
                     recovered, root, relation, torsion_exp, group, candidate,
-                    embeddings, *inverse, denominator_bound, 1,
-                    work_precision, true, false)) {
+                    embeddings, *inverse, denominator_bound, work_precision,
+                    true, false)) {
             return false;
         }
         if (recovered) {
@@ -1782,7 +1787,10 @@ bool search_dependent_relation(
             return true;
         }
 
-        if (work_precision > std::numeric_limits<slong>::max() / 2) {
+        if (work_precision > max_precision / 2) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.dependent_relation_precision_cap");
             return false;
         }
         work_precision *= 2;

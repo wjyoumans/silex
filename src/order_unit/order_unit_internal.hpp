@@ -565,6 +565,15 @@ bool dependent_relation_bounded_min_denominator(
         slong max_precision,
         bool require_y_root,
         bool require_torsion_exponent) noexcept;
+// Candidate relation (-a_1, ..., -a_r, m) with a_i / m the simplest
+// rational inside coordinate ball i and m <= denominator_bound, following
+// reference Unit/Relation.jl `_find_rational_relation!`.  found is false when
+// the balls do not determine such a candidate at this precision.  The
+// candidate is unverified.
+bool dependent_relation_rational_candidate(bool& found,
+                                           flint::FmpzMat& candidate,
+                                           const flint::ArbMat& coordinates,
+                                           slong denominator_bound) noexcept;
 bool dependent_relation_bounded_with_inverse(
         bool& recovered,
         FactoredElement& root,
@@ -575,7 +584,6 @@ bool dependent_relation_bounded_with_inverse(
         EmbeddingContext& embeddings,
         const flint::ArbMat& inverse_cutoff,
         flint::FmpzConstRef denominator_bound,
-        slong min_denominator,
         slong precision,
         bool require_y_root,
         bool require_torsion_exponent) noexcept;

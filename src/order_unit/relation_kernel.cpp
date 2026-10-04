@@ -1731,39 +1731,27 @@ bool dependent_relation_rank_zero(bool& recovered,
     return true;
 }
 
-bool try_denominator(bool& recovered,
-                     FactoredElement& root,
-                     flint::FmpzMat& rel,
-                     flint::Fmpz& torsion_exp,
-                     const OrderUnitGroup& group,
-                     const FactoredElement& y,
-                     EmbeddingContext& embeddings,
-                     const flint::ArbMat& coordinates,
-                     slong denominator,
-                     slong precision,
-                     bool require_y_root,
-                     bool require_torsion_exponent) noexcept {
-    SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.dependent_relation_try_denominator");
+// Exactly verifies the candidate row (-a_1, ..., -a_r, m), m >= 1, as a
+// relation y^m = prod u_i^a_i modulo torsion.  A candidate obtained from
+// rounded or reconstructed coordinates is only a guess; this check is what
+// makes a recovered relation usable.
+bool verify_dependent_relation_candidate(bool& recovered,
+                                         FactoredElement& root,
+                                         flint::FmpzMat& rel,
+                                         flint::Fmpz& torsion_exp,
+                                         const OrderUnitGroup& group,
+                                         const FactoredElement& y,
+                                         EmbeddingContext& embeddings,
+                                         const flint::FmpzMat& candidate,
+                                         bool require_y_root,
+                                         bool require_torsion_exponent) noexcept {
     const slong rank = group.free_rank();
-    flint::ArbMat scaled(rank, 1);
-    flint::FmpzMat candidate(1, rank + 1);
-    arb_mat_set(scaled.raw(), coordinates.raw());
-    arb_mat_scalar_mul_si(scaled.raw(), scaled.raw(), denominator, precision);
-
-    for (slong i = 0; i < rank; ++i) {
-        if (!arb_get_unique_fmpz(
-                    flint::fmpz_mat_entry(candidate, 0, i).raw(),
-                    arb_mat_entry(scaled.raw(), i, 0))) {
-            recovered = false;
-            return true;
-        }
-        flint::fmpz_neg(flint::fmpz_mat_entry(candidate, 0, i),
-                        flint::FmpzConstRef(
-                                flint::fmpz_mat_entry(candidate, 0, i).raw()));
+    const flint::FmpzConstRef last =
+            flint::fmpz_mat_entry(candidate, 0, rank);
+    if (flint::fmpz_sgn(last) <= 0 || !flint::fmpz_fits_si(last)) {
+        return false;
     }
-    flint::fmpz_set_si(flint::fmpz_mat_entry(candidate, 0, rank),
-                       denominator);
+    const slong denominator = flint::fmpz_get_si(last);
 
     bool is_relation = false;
     if (denominator >= 2) {
@@ -1799,6 +1787,45 @@ bool try_denominator(bool& recovered,
         recovered = false;
     }
     return true;
+}
+
+bool try_denominator(bool& recovered,
+                     FactoredElement& root,
+                     flint::FmpzMat& rel,
+                     flint::Fmpz& torsion_exp,
+                     const OrderUnitGroup& group,
+                     const FactoredElement& y,
+                     EmbeddingContext& embeddings,
+                     const flint::ArbMat& coordinates,
+                     slong denominator,
+                     slong precision,
+                     bool require_y_root,
+                     bool require_torsion_exponent) noexcept {
+    SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.dependent_relation_try_denominator");
+    const slong rank = group.free_rank();
+    flint::ArbMat scaled(rank, 1);
+    flint::FmpzMat candidate(1, rank + 1);
+    arb_mat_set(scaled.raw(), coordinates.raw());
+    arb_mat_scalar_mul_si(scaled.raw(), scaled.raw(), denominator, precision);
+
+    for (slong i = 0; i < rank; ++i) {
+        if (!arb_get_unique_fmpz(
+                    flint::fmpz_mat_entry(candidate, 0, i).raw(),
+                    arb_mat_entry(scaled.raw(), i, 0))) {
+            recovered = false;
+            return true;
+        }
+        flint::fmpz_neg(flint::fmpz_mat_entry(candidate, 0, i),
+                        flint::FmpzConstRef(
+                                flint::fmpz_mat_entry(candidate, 0, i).raw()));
+    }
+    flint::fmpz_set_si(flint::fmpz_mat_entry(candidate, 0, rank),
+                       denominator);
+
+    return verify_dependent_relation_candidate(
+            recovered, root, rel, torsion_exp, group, y, embeddings,
+            candidate, require_y_root, require_torsion_exponent);
 }
 
 bool find_dependent_relation_at_precision(bool& recovered,
@@ -1879,6 +1906,91 @@ bool find_dependent_relation_at_precision(bool& recovered,
     return true;
 }
 
+bool dependent_relation_rational_candidate(bool& found,
+                                           flint::FmpzMat& candidate,
+                                           const flint::ArbMat& coordinates,
+                                           slong denominator_bound) noexcept {
+    found = false;
+    const slong rank = flint::arb_mat_nrows_value(coordinates);
+    if (rank <= 0 || flint::arb_mat_ncols_value(coordinates) != 1 ||
+        denominator_bound <= 0 || flint::fmpz_mat_nrows(candidate) != 1 ||
+        flint::fmpz_mat_ncols(candidate) != rank + 1) {
+        return false;
+    }
+
+    // reference Unit/Relation.jl `_find_rational_relation!`: replace each
+    // coordinate ball by the simplest rational inside it (`simplest_inside`,
+    // Nemo `simplest_rational_inside` = FLINT `_fmpq_simplest_between` on the
+    // exact ball endpoints), reject a ball with radius above one, and reject
+    // the attempt when a denominator or their lcm exceeds the bound.  The
+    // reference accepts denominators below the bound; Silex accepts the
+    // closed range 1..bound, the range the denominator bound proves.
+    //
+    // Why the precision loop terminates: if the true coordinate is a/b with
+    // b <= bound and the ball has radius rho < 1/bound^2, every other p/q in
+    // the ball with q <= b satisfies |p/q - a/b| >= 1/(qb) >= 1/bound^2 > rho,
+    // so the simplest rational in the ball is a/b.  Nothing here is trusted:
+    // the caller verifies the candidate exactly.
+    std::vector<flint::Fmpq> approximations(static_cast<std::size_t>(rank));
+    flint::Fmpz lower;
+    flint::Fmpz upper;
+    flint::Fmpz exponent;
+    flint::Fmpz scale;
+    flint::Fmpz common;
+    flint::fmpz_one(flint::FmpzRef(common));
+    for (slong i = 0; i < rank; ++i) {
+        const arb_struct* entry = arb_mat_entry(coordinates.raw(), i, 0);
+        if (!arb_is_finite(entry) ||
+            mag_cmp_2exp_si(arb_radref(entry), 0) > 0) {
+            return true;
+        }
+
+        arb_get_interval_fmpz_2exp(lower.raw(), upper.raw(), exponent.raw(),
+                                   entry);
+        if (!flint::fmpz_fits_si(flint::FmpzConstRef(exponent))) {
+            return true;
+        }
+        const slong shift = flint::fmpz_get_si(flint::FmpzConstRef(exponent));
+        flint::fmpz_one(flint::FmpzRef(scale));
+        if (shift >= 0) {
+            fmpz_mul_2exp(lower.raw(), lower.raw(),
+                          static_cast<flint_bitcnt_t>(shift));
+            fmpz_mul_2exp(upper.raw(), upper.raw(),
+                          static_cast<flint_bitcnt_t>(shift));
+        } else {
+            fmpz_mul_2exp(scale.raw(), scale.raw(),
+                          static_cast<flint_bitcnt_t>(-shift));
+        }
+
+        flint::Fmpq& approximation =
+                approximations[static_cast<std::size_t>(i)];
+        _fmpq_simplest_between(fmpq_numref(approximation.raw()),
+                               fmpq_denref(approximation.raw()), lower.raw(),
+                               scale.raw(), upper.raw(), scale.raw());
+        if (fmpz_cmp_si(fmpq_denref(approximation.raw()), denominator_bound) >
+            0) {
+            return true;
+        }
+        fmpz_lcm(common.raw(), common.raw(),
+                 fmpq_denref(approximation.raw()));
+        if (fmpz_cmp_si(common.raw(), denominator_bound) > 0) {
+            return true;
+        }
+    }
+
+    for (slong i = 0; i < rank; ++i) {
+        const flint::Fmpq& approximation =
+                approximations[static_cast<std::size_t>(i)];
+        fmpz* out = flint::fmpz_mat_entry(candidate, 0, i).raw();
+        fmpz_divexact(out, common.raw(), fmpq_denref(approximation.raw()));
+        fmpz_mul(out, out, fmpq_numref(approximation.raw()));
+        fmpz_neg(out, out);
+    }
+    fmpz_set(flint::fmpz_mat_entry(candidate, 0, rank).raw(), common.raw());
+    found = true;
+    return true;
+}
+
 bool dependent_relation_bounded_with_inverse(
         bool& recovered,
         FactoredElement& root,
@@ -1889,7 +2001,6 @@ bool dependent_relation_bounded_with_inverse(
         EmbeddingContext& embeddings,
         const flint::ArbMat& inverse_cutoff,
         flint::FmpzConstRef denominator_bound,
-        slong min_denominator,
         slong precision,
         bool require_y_root,
         bool require_torsion_exponent) noexcept {
@@ -1898,21 +2009,16 @@ bool dependent_relation_bounded_with_inverse(
         embeddings.parent() == nullptr ||
         !embeddings.parent()->has_same_data(*y.parent()) ||
         flint::fmpz_sgn(denominator_bound) <= 0 ||
-        !flint::fmpz_fits_si(denominator_bound) ||
-        min_denominator <= 0 || precision <= 0 ||
+        !flint::fmpz_fits_si(denominator_bound) || precision <= 0 ||
         flint::arb_mat_nrows_value(inverse_cutoff) != rank ||
         flint::arb_mat_ncols_value(inverse_cutoff) != rank ||
         flint::fmpz_mat_nrows(rel) != 1 ||
         flint::fmpz_mat_ncols(rel) != rank + 1) {
         return false;
     }
+    recovered = false;
 
     const slong bound = flint::fmpz_get_si(denominator_bound);
-    if (min_denominator > bound) {
-        recovered = false;
-        return true;
-    }
-
     slong places = 0;
     if (!compact_places(places, embeddings) || places != rank + 1) {
         return false;
@@ -1938,19 +2044,30 @@ bool dependent_relation_bounded_with_inverse(
                 arb_mat_entry(coordinate_row.raw(), 0, i));
     }
 
-    for (slong m = min_denominator; m <= bound; ++m) {
-        if (!try_denominator(recovered, root, rel, torsion_exp, group, y,
-                             embeddings, coordinates, m, precision,
-                             require_y_root, require_torsion_exponent)) {
+    flint::FmpzMat candidate(1, rank + 1);
+    bool found = false;
+    {
+        SILEX_PROFILE_SCOPE(
+                group.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.dependent_relation_rational_reconstruction");
+        if (!dependent_relation_rational_candidate(found, candidate,
+                                                   coordinates, bound)) {
             return false;
         }
-        if (recovered) {
-            return true;
-        }
+    }
+    if (!found) {
+        SILEX_PROFILE_EVENT(
+                group.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.dependent_relation_rational_reconstruction."
+                "inconclusive");
+        return true;
     }
 
-    recovered = false;
-    return true;
+    SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.dependent_relation_verify_candidate");
+    return verify_dependent_relation_candidate(
+            recovered, root, rel, torsion_exp, group, y, embeddings,
+            candidate, require_y_root, require_torsion_exponent);
 }
 
 bool dependent_relation_bounded_min_denominator(
