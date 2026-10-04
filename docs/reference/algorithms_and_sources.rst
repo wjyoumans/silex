@@ -1032,6 +1032,38 @@ maps.  Silex deliberately orders coordinates as torsion, ordinary free, then
 nonunit and exposes owned result objects rather than a reference-system
 container layout.
 
+The published witnesses are factored products whose exponents come from HNF
+transforms and can be very large, so Silex does not verify them by expanding
+the product.  For each class-relation HNF row, the witness is
+``w_i = prod_j g_j^C[i,j]``, a product of stored relation generators.
+For every generator ``g_j`` that some witness uses, Silex proves once
+that its principal ideal equals the ideal of its stored factor-base row,
+``(g_j) = prod_P P^R[j,P]``.  This is an exact fractional-ideal
+equality, so it also rejects a generator that carries a prime outside the
+factor base.  This check is required because some relation rows are installed
+from known data without being factored again.  The ideal map
+``v -> prod_P P^v[P]`` is a homomorphism, so the exact matrix
+identities already checked give the claimed principal ideals:
+
+- the HNF transform identity ``C * stored == rows``;
+- the S-class identity ``coef * augmented == d * generator_rows``;
+- the two relation-kernel products that must be zero;
+- the valuation transform identity ``transform * raw == valuation_rows``.
+
+The ideal relation of each selected prime is still checked by expansion when
+it is found; its multiplier has only a few small factors.  Each S-class
+invariant witness and each S-unit generator is also checked against its
+factored valuations at every selected prime.  Where a selected prime equals a
+factor-base prime, the expected valuation adds the contributions from both.
+Correctness therefore rests on three things: the per-generator ideal proofs,
+the checked matrix identities, and exact factored-element arithmetic.
+Hecke's FacElem S-unit code places the same trust in factored arithmetic.
+Silex's check is stricter than the upstream S-unit routine: Hecke 0.39.19
+``Sunits.jl`` leaves both its ideal-relation check and its final generator
+check commented out and trusts the relation rows.  Factored exponent products
+and valuations that overflow ``slong`` fail the build at the failing stage
+instead of wrapping.  A failed proof never falls back to another check.
+
 Maintenance requirements
 ------------------------
 
