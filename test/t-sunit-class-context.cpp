@@ -551,6 +551,54 @@ int test_composition_overflow_fails_closed() {
     assert(!above_two[0].valuation(valuation, huge));
     return 0;
 }
+
+// When a selected prime P equals a factor-base prime Q_k, the derived
+// valuation of an S-class witness at P adds d * generator_row_k to the
+// selected exponent instead of treating FB and S as independent coordinates.
+int test_invariant_witness_valuation_merges_factor_base_prime() {
+    ProvenQuadraticFixture fixture = proven_quadratic(-5);
+    silex::detail::SUnitClassContext context;
+    context.order = fixture.order;
+    assert(context.factor_base.set(*fixture.class_group.factor_base()));
+    context.selected_primes = first_prime_above(fixture.order, 2);
+    std::vector<slong> index;
+    assert(silex::detail::selected_factor_base_indices(index, context));
+    assert(index.size() == 1 && index[0] >= 0);
+
+    // (2) = P^2 for the ramified prime P above 2.
+    silex::Element two(fixture.field);
+    silex::FactoredElement witness(fixture.field);
+    assert(two.set_si(2));
+    assert(witness.set_element(two));
+    sflint::FmpzMat generator_row(1, context.factor_base.length());
+    sflint::FmpzMat selected(1, 1);
+    sflint::Fmpz invariant;
+    sflint::fmpz_set_si(sflint::FmpzRef(invariant), 2);
+
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(
+                                sflint::FmpzMatRef(generator_row), 0, index[0]),
+                        1);
+    assert(silex::detail::verify_s_class_invariant_witness(
+            context, index, sflint::FmpzMatConstRef(generator_row),
+            sflint::FmpzConstRef(invariant), witness,
+            sflint::FmpzMatConstRef(selected)));
+
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(
+                                sflint::FmpzMatRef(selected), 0, 0),
+                        2);
+    assert(!silex::detail::verify_s_class_invariant_witness(
+            context, index, sflint::FmpzMatConstRef(generator_row),
+            sflint::FmpzConstRef(invariant), witness,
+            sflint::FmpzMatConstRef(selected)));
+
+    sflint::fmpz_zero(sflint::fmpz_mat_entry(
+            sflint::FmpzMatRef(generator_row), 0, index[0]));
+    assert(silex::detail::verify_s_class_invariant_witness(
+            context, index, sflint::FmpzMatConstRef(generator_row),
+            sflint::FmpzConstRef(invariant), witness,
+            sflint::FmpzMatConstRef(selected)));
+    return 0;
+}
 }  // namespace
 
 int main() {
@@ -561,5 +609,6 @@ int main() {
     assert(test_selected_primes_meeting_and_avoiding_factor_base() == 0);
     assert(test_class_number_three() == 0);
     assert(test_composition_overflow_fails_closed() == 0);
+    assert(test_invariant_witness_valuation_merges_factor_base_prime() == 0);
     return 0;
 }

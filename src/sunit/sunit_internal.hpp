@@ -58,6 +58,23 @@ struct SUnitClassContext {
 
 const char* sunit_class_build_stage_name(SUnitClassBuildStage stage) noexcept;
 
+// For each selected prime, the index of the equal factor-base prime, or -1.
+bool selected_factor_base_indices(std::vector<slong>& out,
+                                  const SUnitClassContext& context) noexcept;
+
+// Factored valuation check of an S-class invariant witness at the selected
+// primes: v_{P_j}(witness) == selected_exponents_j + invariant *
+// generator_row_k when P_j equals factor-base prime Q_k, and
+// selected_exponents_j otherwise.
+bool verify_s_class_invariant_witness(
+        const SUnitClassContext& context,
+        const std::vector<slong>& selected_fb_index,
+        flint::FmpzMatConstRef generator_row,
+        flint::FmpzConstRef invariant,
+        const FactoredElement& witness,
+        flint::FmpzMatConstRef selected_exponents,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept;
+
 bool build_sunit_class_context(
         SUnitClassBuildResult& result,
         SUnitClassContext& out,

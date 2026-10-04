@@ -92,6 +92,8 @@ bool compose_augmented_witness(
     return true;
 }
 
+}  // namespace
+
 // For each selected prime P_j, the index k with P_j equal to the factor-base
 // prime Q_k, or -1.  S may meet the factor base, so derived valuations are
 // taken in the ideal group, merging a selected prime with its equal
@@ -115,6 +117,8 @@ bool selected_factor_base_indices(std::vector<slong>& out,
     }
     return true;
 }
+
+namespace {
 
 // Checks v_{P_j}(element) == expected_j at every selected prime from the
 // factored element itself; PrimeIdeal::valuation sums exponent times base
@@ -141,6 +145,8 @@ bool factored_selected_valuations_match(
     }
     return true;
 }
+
+}  // namespace
 
 // The published witness F_i = prod_k w_k^{a_ik} prod_j m_j^{b_ij} satisfies
 // (F_i) = J_i^{d_i} prod_j P_j^{-b_ij} by derivation, not by expansion:
@@ -181,6 +187,8 @@ bool verify_s_class_invariant_witness(
     return factored_selected_valuations_match(
             context, witness, flint::FmpzMatConstRef(expected), diagnostics);
 }
+
+namespace {
 
 // (G_i) = prod_j P_j^{valuation_row_ij} follows from the checked identities
 // generator_coefficients * augmented == 0 and transform * raw ==
