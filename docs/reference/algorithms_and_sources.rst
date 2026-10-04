@@ -1060,9 +1060,13 @@ the checked matrix identities, and exact factored-element arithmetic.
 Hecke's FacElem S-unit code places the same trust in factored arithmetic.
 Silex's check is stricter than the upstream S-unit routine: Hecke 0.39.19
 ``Sunits.jl`` leaves both its ideal-relation check and its final generator
-check commented out and trusts the relation rows.  Factored exponent products
-and valuations that overflow ``slong`` fail the build at the failing stage
-instead of wrapping.  A failed proof never falls back to another check.
+check commented out and trusts the relation rows.  A composition coefficient
+that does not fit in ``slong`` is not refused: ``compact_multiply_power_fmpz``
+evaluates the factored base and raises it to the ``fmpz`` power, which is exact
+but may be expensive.  Factored exponent products that overflow ``slong`` in
+``FactoredElement::pow_si``, and factored valuations that overflow ``slong``,
+fail the build at the failing stage instead of wrapping.  A failed proof never
+falls back to another check.
 
 Maintenance requirements
 ------------------------
