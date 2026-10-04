@@ -617,10 +617,20 @@ character is ``sqrt(q)`` for even and ``i sqrt(q)`` for odd characters
 incomplete gamma values are the closed forms ``Gamma(1, z) = exp(-z)``,
 ``Gamma(1/2, z) = sqrt(pi) erfc(sqrt(z))`` and ``Gamma(0, z) = E_1(z)``
 (DLMF 6.2 and 8.4), evaluated with arb ball functions at block anchors and
-obtained by Taylor stepping between them, where FLINT evaluates every term
+obtained by Taylor stepping between them, where FLINT evaluates each term
 from scratch.
 
-The stepping is Silex's own evaluator and uses no FLINT code.  Write
+The stepping is Silex's own evaluator and uses no FLINT code.  Its closest
+upstream analogue is in the same FLINT file: the term loop there has a
+disabled branch that would continue each incomplete gamma value from the
+previous term with ``_arb_gamma_upper_fmpq_step_bsplit`` (a source comment
+says evaluating from scratch "seems to be faster"), and FLINT uses that
+routine for the bit-burst refinement within each term.  That routine takes a
+single step between two points, with its own number of terms, and sums the
+Taylor series by binary splitting.  Silex instead fixes one polynomial per
+block of consecutive indices: the coefficients are computed once at the
+block anchor, each value in the block is a Horner evaluation, and one
+truncation bound at the largest step covers the whole block.  Write
 ``a = (s + parity) / 2`` in ``{0, 1/2, 1}``, ``z_n = pi n^2 / q``, and for an
 anchor ``z = z_{n0}`` put ``K = exp(-z) z^(a-1)`` and ``v = z_n - z =
 (pi / q) (n - n0) (n + n0) >= 0``.  Substituting ``u = z + w`` in
@@ -652,12 +662,12 @@ and the extra precision carried by the anchors are chosen in floating point
 and affect only the width and the cost, not the validity, of the enclosure;
 where no block of at least four steps fits, the value is evaluated directly.
 
-When the ``L``-value ball is not finite and positive, the quadratic route falls back to
-Belabas--Friedman, and the value is then GRH-conditional like any other;
-certification uses the route that actually produced the value, not the field
-type.  Every other ``hR`` comes from the Belabas--Friedman evaluation (K.
-Belabas and E. Friedman, "Computing the residue of the Dedekind zeta
-function", *Math. Comp.* 84 (2015), 357--369, Theorem 1), whose
+When the ``L``-value ball is not finite and positive, the quadratic route
+falls back to Belabas--Friedman, and the value is then GRH-conditional like
+any other; certification uses the route that actually produced the value, not
+the field type.  Every other ``hR`` comes from the Belabas--Friedman
+evaluation (K. Belabas and E. Friedman, "Computing the residue of the
+Dedekind zeta function", *Math. Comp.* 84 (2015), 357--369, Theorem 1), whose
 truncation-error bound assumes GRH.  Such an ``hR`` is therefore at most
 ``grh`` evidence: the analytic check is recorded with
 ``analytic_class_regulator_certification() == grh``, it never

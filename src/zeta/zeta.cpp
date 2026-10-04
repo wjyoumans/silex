@@ -342,8 +342,18 @@ void quadratic_afe_gamma_direct(flint::Arb& out,
 }
 
 // Taylor stepping for the incomplete gamma values of the sums below.  This
-// evaluator is Silex's own; it is not derived from FLINT, whose
-// `acb_dirichlet_fmpq_sum_afe` evaluates every Gamma(a, z_n) from scratch.
+// evaluator is Silex's own and is not derived from FLINT.  The closest
+// upstream analogue is in FLINT `acb_dirichlet/l_fmpq_afe.c`: its term loop
+// has a disabled branch that would continue Gamma(a, z_n) from the previous
+// term with `_arb_gamma_upper_fmpq_step_bsplit` (the enabled branch evaluates
+// each term from scratch, which a comment there says "seems to be faster"),
+// and it uses that routine for the bit-burst refinement within each term.
+// `_arb_gamma_upper_fmpq_step_bsplit` takes one step between two points,
+// choosing its own number of terms and summing the Taylor series by binary
+// splitting.  Silex instead fixes one polynomial per block of consecutive
+// indices: its coefficients are computed once at the block anchor, each
+// value in the block is a Horner evaluation, and one truncation bound at the
+// largest step covers the whole block.
 //
 // Identity.  Let a = shift / 2 in {0, 1/2, 1}, z > 0 and K = e^{-z} z^{a-1}.
 // Substituting u = z + w gives u^{a-1} e^{-u} = K e^{-w} (1 + w / z)^{a-1},
@@ -391,8 +401,8 @@ void quadratic_afe_gamma_direct(flint::Arb& out,
 // Gamma(a, z_n) whenever the anchor ball contains Gamma(a, z_{n0}); by
 // induction over the chained anchors, which start from a direct evaluation,
 // every value is a valid enclosure.  The precisions only control the width:
-// the anchors carry `guard` extra bits, a bound for the binary length of the
-// number of chained anchors, so that the radii they pass on to the later
+// the anchors carry `guard` extra bits, an estimate of the binary length of
+// the number of chained anchors, so that the radii they pass on to the later
 // terms stay within the per-term tolerance of the direct evaluation.
 constexpr slong quadratic_afe_step_max_terms = 64;
 constexpr ulong quadratic_afe_step_min_block = 4;

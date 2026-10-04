@@ -197,9 +197,10 @@ Changed
   index-one check, then record a ``proven`` analytic check where they
   previously recorded ``grh`` or failed.  The certification rule is
   unchanged: a finite, positive ``L``-value ball is unconditional, and
-  anything else still falls back to Belabas-Friedman.  For ``|D|`` near
-  ``10^12`` an evaluation takes roughly 25 seconds (imaginary) and under 2
-  minutes (real) on a desktop machine; these times are approximate.  See "Class groups and order units" in
+  anything else still falls back to Belabas-Friedman.  The incomplete gamma
+  values of the evaluation are obtained by Taylor stepping over blocks of
+  consecutive terms instead of being evaluated term by term, which lowers
+  the cost for large ``|D|``.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 Fixed
