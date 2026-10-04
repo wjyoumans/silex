@@ -5,6 +5,7 @@
 #include <silex/relation.hpp>
 
 #include "class_group/class_group_internal.hpp"
+#include "relation/relation_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -111,6 +112,191 @@ void assert_finish_workspace_exact(
     assert(::fmpz_mat_is_zero(zero_rows.raw()) != 0);
 }
 
+// Q(sqrt 2) with factor base {P_2, 3} (bound 3).  The relation rows of the
+// tests below are installed through RelationAccess::set_relation_from_known_row,
+// which trusts its row, so only the per-generator ideal proof in
+// class_relation_witnessed_hnf_basis can reject a wrong one.
+struct Sqrt2Fixture {
+    silex::NumberField field;
+    silex::Order order;
+    silex::ClassGroupContext context;
+    silex::Element root;  // sqrt 2
+    silex::Element unit;  // 1 + sqrt 2
+};
+
+void sqrt2_fixture(Sqrt2Fixture& out) noexcept {
+    out.field = silex::test::quadratic_field(2);
+    const silex::Order equation = silex::test::equation_order(out.field);
+    out.order = silex::Order(out.field);
+    assert(out.order.maximal_order(equation));
+    out.context = silex::ClassGroupContext(out.order);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 3);
+    assert(out.context.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(out.context.factor_base()->length() == 2);
+    out.root = silex::Element(out.field);
+    out.unit = silex::Element(out.field);
+    assert(out.root.gen());
+    silex::Element square(out.field);
+    assert(square.multiply(out.root, out.root));
+    assert(square.equal_si(2));
+    assert(out.unit.add_si(out.root, 1));
+}
+
+sflint::FmpzMat honest_row(const silex::FactorBase& base,
+                           const silex::Element& generator) noexcept {
+    silex::Relation relation(base);
+    assert(relation.set_generator(generator));
+    sflint::FmpzMat row(1, base.length());
+    assert(relation.exponents(sflint::FmpzMatRef(row)));
+    return row;
+}
+
+void append_known_row(silex::ClassGroupContext& context,
+                      const silex::Element& generator,
+                      sflint::FmpzMatConstRef row) noexcept {
+    const silex::FactorBase* base = context.factor_base();
+    silex::Relation relation(*base);
+    assert(silex::detail::RelationAccess::set_relation_from_known_row(
+            relation, *base, generator, row));
+    assert(context.append_relation(relation));
+}
+
+bool generator_ideal_matches_row(const silex::ClassGroupContext& context,
+                                 const silex::Element& generator,
+                                 sflint::FmpzMatConstRef row) noexcept {
+    silex::FractionalIdeal principal(*context.parent());
+    silex::FractionalIdeal expected(*context.parent());
+    assert(principal.set_principal(generator));
+    assert(silex::detail::factor_base_row_ideal(
+            expected, *context.factor_base(), row));
+    return principal.equal(expected);
+}
+
+// Differential oracle: every published witness generates its HNF row's
+// ideal when expanded (the former expansion check), and its factored
+// valuations at every factor-base prime equal that row.
+void assert_witnesses_match_rows(
+        const silex::ClassGroupContext& context,
+        const silex::detail::WitnessedClassRelationHnfBasis& basis) noexcept {
+    const silex::FactorBase* base = context.factor_base();
+    const slong generator_count = base->length();
+    silex::Ideal one(*context.parent());
+    assert(one.one());
+    sflint::FmpzMat row(1, generator_count);
+    silex::PrimeIdeal prime(*context.parent());
+    for (std::size_t i = 0; i < basis.witnesses.size(); ++i) {
+        for (slong k = 0; k < generator_count; ++k) {
+            sflint::fmpz_set(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(row), 0, k),
+                    sflint::fmpz_mat_entry(
+                            sflint::FmpzMatConstRef(basis.rows),
+                            static_cast<slong>(i), k));
+            slong valuation = 0;
+            assert(base->prime(prime, k));
+            assert(prime.valuation(valuation, basis.witnesses[i]));
+            assert(sflint::fmpz_equal_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(row), 0, k),
+                    valuation));
+        }
+        assert(silex::detail::verify_class_group_ideal_relation_witness(
+                context, one, basis.witnesses[i],
+                sflint::FmpzMatConstRef(row)));
+    }
+}
+
+// A relation whose stored row is wrong at one factor-base prime must stop
+// the witnessed basis, even though C * stored == rows still holds exactly.
+int test_corrupted_known_row_rejected() {
+    Sqrt2Fixture fixture;
+    sqrt2_fixture(fixture);
+    const silex::FactorBase& base = *fixture.context.factor_base();
+    silex::Element three(fixture.field);
+    assert(three.set_si(3));
+    sflint::FmpzMat root_row = honest_row(base, fixture.root);
+    sflint::FmpzMat bad_row = honest_row(base, three);
+    ::fmpz_mat_add(bad_row.raw(), bad_row.raw(), root_row.raw());
+    append_known_row(fixture.context, fixture.root,
+                     sflint::FmpzMatConstRef(root_row));
+    append_known_row(fixture.context, three,
+                     sflint::FmpzMatConstRef(bad_row));
+    assert(fixture.context.relation_rank() == 2);
+    assert(!generator_ideal_matches_row(fixture.context, three,
+                                        sflint::FmpzMatConstRef(bad_row)));
+
+    silex::detail::WitnessedClassRelationHnfBasis basis;
+    assert(!silex::detail::class_relation_witnessed_hnf_basis(
+            basis, fixture.context));
+    assert(basis.witnesses.empty());
+    return 0;
+}
+
+// 15 = 3 * 5 has the factor-base valuations of 3, but (5) is a prime outside
+// the factor base, so a check of factor-base valuations alone would accept
+// the row of 3; the exact ideal proof must not.
+int test_extra_prime_outside_factor_base_rejected() {
+    Sqrt2Fixture fixture;
+    sqrt2_fixture(fixture);
+    const silex::FactorBase& base = *fixture.context.factor_base();
+    silex::Element three(fixture.field);
+    silex::Element fifteen(fixture.field);
+    assert(three.set_si(3));
+    assert(fifteen.set_si(15));
+    sflint::FmpzMat root_row = honest_row(base, fixture.root);
+    sflint::FmpzMat three_row = honest_row(base, three);
+    silex::PrimeIdeal prime(fixture.order);
+    for (slong k = 0; k < base.length(); ++k) {
+        slong valuation = 0;
+        assert(base.prime(prime, k));
+        assert(prime.valuation(valuation, fifteen));
+        assert(sflint::fmpz_equal_si(
+                sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(three_row), 0,
+                                       k),
+                valuation));
+    }
+    append_known_row(fixture.context, fixture.root,
+                     sflint::FmpzMatConstRef(root_row));
+    append_known_row(fixture.context, fifteen,
+                     sflint::FmpzMatConstRef(three_row));
+    assert(!generator_ideal_matches_row(fixture.context, fifteen,
+                                        sflint::FmpzMatConstRef(three_row)));
+
+    silex::detail::WitnessedClassRelationHnfBasis basis;
+    assert(!silex::detail::class_relation_witnessed_hnf_basis(
+            basis, fixture.context));
+    return 0;
+}
+
+// A generator multiplied by a unit keeps its ideal, so its true row passes.
+int test_unit_multiplied_generator_accepted() {
+    Sqrt2Fixture fixture;
+    sqrt2_fixture(fixture);
+    const silex::FactorBase& base = *fixture.context.factor_base();
+    silex::Element three(fixture.field);
+    silex::Element cube(fixture.field);
+    silex::Element root_unit(fixture.field);
+    silex::Element three_unit(fixture.field);
+    sflint::Fmpz exponent;
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), -3);
+    assert(three.set_si(3));
+    assert(cube.pow_fmpz(fixture.unit, sflint::FmpzConstRef(exponent)));
+    assert(root_unit.multiply(fixture.root, fixture.unit));
+    assert(three_unit.multiply(three, cube));
+    sflint::FmpzMat root_row = honest_row(base, fixture.root);
+    sflint::FmpzMat three_row = honest_row(base, three);
+    append_known_row(fixture.context, root_unit,
+                     sflint::FmpzMatConstRef(root_row));
+    append_known_row(fixture.context, three_unit,
+                     sflint::FmpzMatConstRef(three_row));
+
+    silex::detail::WitnessedClassRelationHnfBasis basis;
+    assert(silex::detail::class_relation_witnessed_hnf_basis(
+            basis, fixture.context));
+    assert(basis.witnesses.size() == 2);
+    assert_witnesses_match_rows(fixture.context, basis);
+    return 0;
+}
+
 int test_witnessed_hnf_basis() {
     silex::NumberField field;
     silex::Order order;
@@ -164,6 +350,8 @@ int test_witnessed_hnf_basis() {
                 context, one, basis.witnesses[static_cast<std::size_t>(i)],
                 sflint::FmpzMatConstRef(row)));
     }
+
+    assert_witnesses_match_rows(context, basis);
 
     assert(context.relation_count() == relation_count);
     assert(context.has_presentation() == had_presentation);
@@ -437,6 +625,11 @@ int test_default_completion_populates_finish_workspace() {
            class_group.relation_count());
     assert(workspace->logged_relation_count ==
            class_group.relation_count());
+
+    silex::detail::WitnessedClassRelationHnfBasis basis;
+    assert(silex::detail::class_relation_witnessed_hnf_basis(
+            basis, class_group));
+    assert_witnesses_match_rows(class_group, basis);
     return 0;
 }
 
@@ -449,5 +642,8 @@ int main() {
     assert(test_incremental_finish_workspace_lifecycle() == 0);
     assert(test_finish_workspace_requires_factor_base() == 0);
     assert(test_default_completion_populates_finish_workspace() == 0);
+    assert(test_corrupted_known_row_rejected() == 0);
+    assert(test_extra_prime_outside_factor_base_rejected() == 0);
+    assert(test_unit_multiplied_generator_accepted() == 0);
     return 0;
 }
