@@ -100,8 +100,10 @@ Copyright (C) 2021 Fredrik Johansson.
 
 FLINT is free software licensed under the GNU Lesser General Public License,
 version 3 or, at your option, any later version (`LGPL-3.0-or-later`).
-Silex's `GPL-3.0-or-later` distribution terms are compatible with and
-preserve the applicable obligations for adapted material. Complete FLINT
+LGPL-3.0 consists of GPL-3.0 with additional permissions, which GPL-3.0
+section 7 allows a redistributor to remove; the adapted code is therefore
+distributed as part of Silex under `GPL-3.0-or-later`, and FLINT's copyright
+and license notice is retained in the source. Complete FLINT
 author and license notices remain available from the FLINT source
 distribution.
 
