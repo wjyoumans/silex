@@ -1,5 +1,9 @@
 #include "zeta/zeta_internal.hpp"
 
+#include <silex/class_group.hpp>
+#include <silex/number_field.hpp>
+#include <silex/order.hpp>
+#include <silex/order_unit.hpp>
 #include <silex/flint/acb.hpp>
 #include <silex/flint/arb.hpp>
 #include <silex/flint/dirichlet.hpp>
@@ -178,6 +182,59 @@ void check_large_real_discriminant() {
     assert(::arb_overlaps(value.raw(), expected.raw()) != 0);
 }
 
+// Public route: D = -100000020 (radicand -25000005), h(D) = 5056, taken
+// from an independent class-number computation.  The previous L(1, chi) route searched the Dirichlet group
+// modulo |D| for the Kronecker character, O(|D|) work that takes about a
+// minute here and grows linearly; the approximate functional equation takes
+// a fraction of a second.  The proven paired computation uses the exact
+// imaginary-quadratic class number and records no analytic check;
+// try_certify_class_unit_with_zeta then evaluates hR through the quadratic
+// L(1, chi) route and records an unconditional (`proven`) analytic check.
+void check_public_class_unit_with_zeta() {
+    sflint::Fmpz radicand;
+    sflint::fmpz_set_si(sflint::FmpzRef(radicand), -25000005);
+    silex::NumberField field =
+            silex::NumberField::quadratic(sflint::FmpzConstRef(radicand));
+    silex::Order order = silex::Order::equation_order(field);
+    assert(field.is_defined() && order.is_defined() && order.is_maximal());
+    sflint::Fmpz discriminant;
+    assert(order.discriminant(sflint::FmpzRef(discriminant)));
+    assert(sflint::fmpz_equal_si(discriminant, -100000020));
+
+    sflint::Fmpz factor_base_bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(factor_base_bound), 2);
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            class_group, order, sflint::FmpzConstRef(factor_base_bound),
+            options, 128));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::unknown);
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 5056));
+
+    const auto start = std::chrono::steady_clock::now();
+    assert(class_group.try_certify_class_unit_with_zeta(units, 128));
+    const double seconds = std::chrono::duration<double>(
+                                   std::chrono::steady_clock::now() - start)
+                                   .count();
+    std::printf("try_certify_class_unit_with_zeta for D = -100000020: "
+                "%.2f s\n",
+                seconds);
+    assert(class_group.analytic_class_regulator_status() ==
+           silex::ProofState::verified);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::proven);
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(units.certification_status() == silex::CertificationMode::proven);
+}
+
 bool slow_tests_enabled() noexcept {
     const char* value = std::getenv("SILEX_TEST_SLOW");
     return value != nullptr && value[0] != '\0' &&
@@ -228,6 +285,7 @@ int main() {
     check_failure_paths();
 
     check_large_imaginary_discriminant(-10000000019, 39809);
+    check_public_class_unit_with_zeta();
 
     // |D| about 1e12 takes tens of seconds to minutes; opt in with
     // SILEX_TEST_SLOW=1.
