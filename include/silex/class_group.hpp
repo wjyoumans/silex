@@ -57,6 +57,46 @@ struct ClassGroupZetaBfProofRecord {
     flint::Arb error_bound;
 };
 
+// The result that establishes that the factor base generates the class
+// group (ClassGroupContext::factor_base_generation_basis()).
+// - minkowski_type: unconditional; every prime ideal up to the
+//   Minkowski-type bound factor_base_class_group_bound() is in the base or
+//   was checked to lie in its span.
+// - bdf: under the Riemann hypothesis for the L-functions of the nontrivial
+//   characters of the class group (Belabas-Diaz y Diaz-Friedman 2008,
+//   Corollary 2.2).
+// - bach: under the Riemann hypothesis for zeta_K and those L-functions
+//   (Bach 1990, Theorem 4 and the remark following it).
+enum class ClassGroupGenerationBasis {
+    none = 0,
+    minkowski_type = 1,
+    bdf = 2,
+    bach = 3
+};
+
+// The result that establishes relation and unit completeness of a published
+// class/unit pair (ClassGroupContext::class_unit_completeness_basis()).
+// Completeness is relative to factor-base generation: it says the relations
+// and units are complete for a generating factor base.
+// - belabas_friedman: analytic index one against a Belabas-Friedman hR, under
+//   the Riemann hypothesis for zeta_K and zeta_Q (Belabas-Friedman 2015,
+//   Theorem 1).
+// - unconditional_analytic: analytic index one against an unconditional hR
+//   (the quadratic L(1, chi) route).
+// - exact_class_number: the candidate class number equals the exact
+//   imaginary-quadratic class number.
+// - unconditional_certification: the class group and units were certified
+//   `proven` (saturation or an unconditional analytic check, see
+//   relation_saturation_status() and analytic_class_regulator_certification()),
+//   including the exact degree-one route of a `grh` request.
+enum class ClassUnitCompletenessBasis {
+    none = 0,
+    belabas_friedman = 1,
+    unconditional_analytic = 2,
+    exact_class_number = 3,
+    unconditional_certification = 4
+};
+
 // Resource ceilings for the deterministic standalone relation candidate.
 // Successful candidates always retain CertificationMode::unknown.
 struct ClassGroupCandidateOptions {
@@ -162,6 +202,35 @@ public:
     factor_base_generation_record(slong index) const noexcept;
     bool check_factor_base_generation_bound(
             flint::FmpzConstRef required_bound) noexcept;
+    // Where factor-base generation rests, for the current factor base:
+    // `proven` when factor_base_generation_status() is `verified` (basis
+    // minkowski_type), `grh` when a `grh` class/unit request built the base
+    // to contain every prime ideal up to the GRH generation bound
+    // min(BDF, Bach) and generation is not also unconditional (basis bdf or
+    // bach, whichever theorem gave that bound), and `unknown` otherwise
+    // (basis none).  GRH generation never changes
+    // factor_base_generation_status(), which keeps meaning unconditional
+    // generation, and never counts toward a `proven` label.
+    CertificationMode factor_base_generation_certification() const noexcept;
+    ClassGroupGenerationBasis factor_base_generation_basis() const noexcept;
+    // The bound of that theorem: the Minkowski-type bound
+    // (factor_base_generation_bound()) for `proven`, the GRH generation
+    // bound before the factor-base size doubling for `grh`.  False when the
+    // certification is `unknown`.
+    bool factor_base_generation_certification_bound(
+            flint::FmpzRef out) const noexcept;
+    // Where relation and unit completeness rests for the published pair,
+    // relative to factor-base generation: `proven` for a `proven` class
+    // group (basis unconditional_certification) and for a `grh` pair
+    // accepted through the exact imaginary-quadratic class number, an
+    // unconditional quadratic L(1, chi) hR, or the exact degree-one route;
+    // `grh` for a `grh` pair accepted through a Belabas-Friedman hR (every
+    // degree >= 3 field, a degree-two field outside the explicit quadratic
+    // backend, and a quadratic field whose L(1, chi) evaluation fell back to
+    // Belabas-Friedman); `unknown` otherwise.  A `grh` result whose
+    // generation and completeness are both `proven` keeps the `grh` label.
+    CertificationMode class_unit_completeness_certification() const noexcept;
+    ClassUnitCompletenessBasis class_unit_completeness_basis() const noexcept;
     // Whether the relations of the current presentation are known to be
     // saturated.  The routes that set `verified` do not all mean the same
     // coverage:
