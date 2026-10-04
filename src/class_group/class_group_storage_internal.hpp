@@ -241,6 +241,18 @@ struct ClassGroupContextStorage {
     // restore it.
     flint::Fmpz grh_generation_bound;
     bool grh_generation_covered = false;
+    // The theorem that gave grh_generation_bound (bdf or bach).
+    ClassGroupGenerationBasis grh_generation_basis =
+            ClassGroupGenerationBasis::none;
+    // Relation and unit completeness of a `grh`-requested pair, written
+    // when the pair is accepted (record_grh_acceptance_analytic_check,
+    // record_grh_acceptance_exact_class_number) or relabelled
+    // (publish_grh_labels).  Read only while the published label is `grh`;
+    // cleared with the other certification metadata and restored by
+    // certification transactions.
+    CertificationMode class_unit_completeness = CertificationMode::unknown;
+    ClassUnitCompletenessBasis class_unit_completeness_basis =
+            ClassUnitCompletenessBasis::none;
     std::vector<RelationSaturationRecord> relation_saturation_records;
     std::vector<RelationSaturationProofRecord>
             relation_saturation_proof_records;
@@ -276,6 +288,9 @@ struct ClassGroupContextStorage {
         factor_base_generation_records.clear();
         flint::fmpz_zero(flint::FmpzRef(grh_generation_bound));
         grh_generation_covered = false;
+        grh_generation_basis = ClassGroupGenerationBasis::none;
+        class_unit_completeness = CertificationMode::unknown;
+        class_unit_completeness_basis = ClassUnitCompletenessBasis::none;
         relation_saturation_records.clear();
         relation_saturation_proof_records.clear();
     }

@@ -170,6 +170,58 @@ def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
         assert class_group["analytic_class_regulator_certification"] == (
             "proven" if instance["degree"] == 2 else "grh"
         )
+        # Provenance: generation rests on the BDF bound (50 for both
+        # fields, below Bach's), completeness on the hR that accepted.
+        assert class_group["factor_base_generation_certification"] == "grh"
+        assert class_group["factor_base_generation_basis"] == "bdf"
+        assert class_group[
+            "factor_base_generation_certification_bound"
+        ] == "50"
+        if instance["degree"] == 2:
+            assert class_group[
+                "class_unit_completeness_certification"
+            ] == "proven"
+            assert class_group["class_unit_completeness_basis"] == (
+                "unconditional_analytic"
+            )
+        else:
+            assert class_group[
+                "class_unit_completeness_certification"
+            ] == "grh"
+            assert class_group["class_unit_completeness_basis"] == (
+                "belabas_friedman"
+            )
+
+
+def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
+    # A proven result: generation to the Minkowski-type bound and
+    # unconditional completeness. The degree-one grh route is the exact
+    # route relabelled grh: both components proven, label grh.
+    for coeffs, mode, bound in (
+        ("200,1,0,1", "proven", "463"),
+        ("0,1", "grh", "1"),
+    ):
+        instance = run_json(
+            [str(exe), "--coeffs", coeffs, "--mode", mode], root
+        )
+        assert instance["success"] is True
+        assert instance["certification_status"] == mode
+        class_group = instance["class_group"]
+        assert class_group["factor_base_generation_certification"] == (
+            "proven"
+        )
+        assert class_group["factor_base_generation_basis"] == (
+            "minkowski_type"
+        )
+        assert class_group[
+            "factor_base_generation_certification_bound"
+        ] == bound
+        assert class_group["class_unit_completeness_certification"] == (
+            "proven"
+        )
+        assert class_group["class_unit_completeness_basis"] == (
+            "unconditional_certification"
+        )
 
 
 def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
@@ -196,6 +248,17 @@ def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     )
     assert instance["class_group"]["order"] == "32"
     assert instance["class_group"]["invariants"] == ["2", "16"]
+    # Generation verified to the Minkowski-type bound is reported proven,
+    # which tells this result apart from one whose generation rests on GRH
+    # although both carry grh labels.
+    class_group = instance["class_group"]
+    assert class_group["factor_base_generation_certification"] == "proven"
+    assert class_group["factor_base_generation_basis"] == "minkowski_type"
+    assert class_group["factor_base_generation_certification_bound"] == "100"
+    assert class_group["class_unit_completeness_certification"] == "proven"
+    assert class_group["class_unit_completeness_basis"] == (
+        "unconditional_analytic"
+    )
 
 
 def main() -> int:
@@ -209,6 +272,7 @@ def main() -> int:
     assert_fail_closed_inputs(args.exe, root)
     assert_grh_generation_below_minkowski(args.exe, root)
     assert_grh_minkowski_equality_boundary(args.exe, root)
+    assert_proven_and_degree_one_provenance(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
 
@@ -374,6 +438,27 @@ def main() -> int:
         assert used >= 2
         assert minkowski >= 2
         grh_bounds[row["id"]] = (used, minkowski)
+        provenance = grh_instance["class_group"]
+        generation_bound = int(
+            provenance["factor_base_generation_certification_bound"]
+        )
+        if used >= minkowski:
+            assert provenance["factor_base_generation_certification"] == (
+                "proven"
+            )
+            assert provenance["factor_base_generation_basis"] == (
+                "minkowski_type"
+            )
+            assert generation_bound == minkowski
+        else:
+            assert provenance["factor_base_generation_certification"] == (
+                "grh"
+            )
+            assert provenance["factor_base_generation_basis"] in (
+                "bdf",
+                "bach",
+            )
+            assert generation_bound <= used
         if row["expected_unit_rank"] == 0:
             # Rank-zero grh rows are imaginary quadratic and take the exact
             # imaginary-quadratic `grh` route: the index comes from the
@@ -387,6 +472,12 @@ def main() -> int:
             assert grh_instance["class_group"][
                 "analytic_class_regulator_certification"
             ] == "unknown"
+            assert provenance["class_unit_completeness_certification"] == (
+                "proven"
+            )
+            assert provenance["class_unit_completeness_basis"] == (
+                "exact_class_number"
+            )
             continue
         # Positive unit rank: the analytic index-one test accepts, with a
         # Belabas-Friedman hR (GRH-conditional) above degree two and an
@@ -407,6 +498,20 @@ def main() -> int:
         assert grh_instance["class_group"][
             "relation_saturation_status"
         ] != "verified"
+        if grh_instance["degree"] == 2:
+            assert provenance["class_unit_completeness_certification"] == (
+                "proven"
+            )
+            assert provenance["class_unit_completeness_basis"] == (
+                "unconditional_analytic"
+            )
+        else:
+            assert provenance["class_unit_completeness_certification"] == (
+                "grh"
+            )
+            assert provenance["class_unit_completeness_basis"] == (
+                "belabas_friedman"
+            )
     # Each GRH-generation row is below the Minkowski-type bound; the
     # x^2 - 10007 row sits exactly on it.
     for field_id in (

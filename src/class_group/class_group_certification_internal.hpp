@@ -32,9 +32,14 @@ public:
     // never set to `verified` here; it is written only at build time and
     // never by the honesty receipt.  Returns false, recording nothing, when
     // the build bound is below `grh_bound` or the context has no base.
+    // `basis` is the theorem that gave `grh_bound`, bdf or bach; any other
+    // value records nothing and returns false.  It is reported by
+    // factor_base_generation_basis() while generation is not also
+    // unconditional.
     static bool record_grh_factor_base_generation(
             ClassGroupContext& context,
-            flint::FmpzConstRef grh_bound) noexcept;
+            flint::FmpzConstRef grh_bound,
+            ClassGroupGenerationBasis basis) noexcept;
 
     // True when the factor base carries the GRH generation record above.
     // Only a grh class/unit request writes it; readers that need
@@ -109,16 +114,33 @@ public:
     // try_certify_with_units(proven) promote the class group (see
     // analytic_class_regulator_certification() in class_group.hpp); this
     // call itself never promotes.
+    //
+    // It also records relation and unit completeness of the accepted pair
+    // (class_unit_completeness_certification() in class_group.hpp):
+    // `proven` with basis unconditional_analytic for an unconditional hR,
+    // `grh` with basis belabas_friedman otherwise (Belabas-Friedman 2015,
+    // Theorem 1, which assumes RH for zeta_K and zeta_Q).
     static void record_grh_acceptance_analytic_check(
             ClassGroupContext& context,
             bool hr_unconditional) noexcept;
+
+    // Records that a `grh`-requested pair was accepted by index one against
+    // the exact imaginary-quadratic class number
+    // (rank_zero_quadratic_class_index_bound): completeness `proven` with
+    // basis exact_class_number.  Like the analytic record, it never changes
+    // certification labels.
+    static void record_grh_acceptance_exact_class_number(
+            ClassGroupContext& context) noexcept;
 
     // Publishes the grh labels on a completed class/unit pair.  GRH is
     // assumed only by the analytic hR check; the torsion does not depend on
     // it, and a wrong torsion order w would make the grh unit label wrong.
     // So the torsion of `units` must be the torsion Silex computes for the
     // order (order_unit_torsion_is_computed, one rank_zero_torsion);
-    // otherwise this fails closed: false, both labels unchanged.
+    // otherwise this fails closed: false, both labels unchanged.  When the
+    // class group is already `proven` (the exact degree-one route of a grh
+    // request), completeness is recorded `proven` with basis
+    // unconditional_certification before the relabel.
     static bool publish_grh_labels(
             ClassGroupContext& context,
             OrderUnitGroup& units,

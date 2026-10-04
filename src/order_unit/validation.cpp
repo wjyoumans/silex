@@ -1202,6 +1202,14 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                                         bf_audit->work_precision));
                     }
                 }
+                if (exact_quadratic_index && requested_grh) {
+                    // Index one against the exact class number: the
+                    // relations and units are complete unconditionally,
+                    // relative to generation.  The labels stay `grh`.
+                    ClassGroupCertificationAccess::
+                            record_grh_acceptance_exact_class_number(
+                                    class_group);
+                }
                 summary.outcome = ValidateRefineOutcome::proven;
                 return true;
             }

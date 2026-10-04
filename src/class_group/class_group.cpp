@@ -4317,6 +4317,9 @@ struct ClassGroupContext::CertificationSnapshot_ {
     flint::Arb zeta_bf_error_bound;
     ProofState unit_proof_status = ProofState::not_checked;
     ProofState regulator_proof_status = ProofState::not_checked;
+    CertificationMode class_unit_completeness = CertificationMode::unknown;
+    ClassUnitCompletenessBasis class_unit_completeness_basis =
+            ClassUnitCompletenessBasis::none;
 };
 
 // Restores every certification field on scope exit unless finish() is
@@ -4593,9 +4596,31 @@ void ClassGroupCertificationAccess::record_grh_acceptance_analytic_check(
     }
     // Same route check as try_certify_class_unit_with_units: only an order
     // with an unconditional hR route can carry an unconditional record.
-    context.record_analytic_class_regulator_check_(
+    const bool unconditional =
             hr_unconditional &&
-            detail::zeta_unconditional_route_available(context.parent_));
+            detail::zeta_unconditional_route_available(context.parent_);
+    context.record_analytic_class_regulator_check_(unconditional);
+    if (context.ensure_private_storage_()) {
+        detail::ClassGroupContextStorage& storage = *context.private_storage_;
+        storage.class_unit_completeness =
+                unconditional ? CertificationMode::proven
+                              : CertificationMode::grh;
+        storage.class_unit_completeness_basis =
+                unconditional
+                ? ClassUnitCompletenessBasis::unconditional_analytic
+                : ClassUnitCompletenessBasis::belabas_friedman;
+    }
+}
+
+void ClassGroupCertificationAccess::record_grh_acceptance_exact_class_number(
+        ClassGroupContext& context) noexcept {
+    if (!context.has_presentation() || !context.ensure_private_storage_()) {
+        return;
+    }
+    detail::ClassGroupContextStorage& storage = *context.private_storage_;
+    storage.class_unit_completeness = CertificationMode::proven;
+    storage.class_unit_completeness_basis =
+            ClassUnitCompletenessBasis::exact_class_number;
 }
 
 bool ClassGroupCertificationAccess::publish_grh_labels(
@@ -4606,6 +4631,17 @@ bool ClassGroupCertificationAccess::publish_grh_labels(
         SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
                             "unit_group.grh_publication.torsion_not_computed");
         return false;
+    }
+    // The exact degree-one route certified the pair before this relabel.
+    // Record that, so the relabelled `grh` pair still reports where its
+    // completeness came from.  Without storage the record stays unknown,
+    // which only under-reports.
+    if (context.certification_ == CertificationMode::proven &&
+        context.ensure_private_storage_()) {
+        context.private_storage_->class_unit_completeness =
+                CertificationMode::proven;
+        context.private_storage_->class_unit_completeness_basis =
+                ClassUnitCompletenessBasis::unconditional_certification;
     }
     context.certification_ = CertificationMode::grh;
     units.certification_ = CertificationMode::grh;
@@ -4679,8 +4715,11 @@ bool ClassGroupCertificationAccess::record_factor_base_honesty_proof(
 
 bool ClassGroupCertificationAccess::record_grh_factor_base_generation(
         ClassGroupContext& context,
-        flint::FmpzConstRef grh_bound) noexcept {
-    if (!context.has_factor_base() || !context.parent_.is_maximal() ||
+        flint::FmpzConstRef grh_bound,
+        ClassGroupGenerationBasis basis) noexcept {
+    if ((basis != ClassGroupGenerationBasis::bdf &&
+         basis != ClassGroupGenerationBasis::bach) ||
+        !context.has_factor_base() || !context.parent_.is_maximal() ||
         flint::fmpz_sgn(grh_bound) <= 0 ||
         flint::fmpz_cmp(
                 flint::FmpzConstRef(context.factor_base_build_bound_),
@@ -4691,6 +4730,7 @@ bool ClassGroupCertificationAccess::record_grh_factor_base_generation(
     detail::ClassGroupContextStorage& storage = *context.private_storage_;
     flint::fmpz_set(flint::FmpzRef(storage.grh_generation_bound), grh_bound);
     storage.grh_generation_covered = true;
+    storage.grh_generation_basis = basis;
     return true;
 }
 
@@ -7229,6 +7269,10 @@ void ClassGroupContext::reset_certification_metadata_() noexcept {
     if (private_storage_ != nullptr) {
         private_storage_->relation_saturation_records.clear();
         private_storage_->relation_saturation_proof_records.clear();
+        private_storage_->class_unit_completeness =
+                CertificationMode::unknown;
+        private_storage_->class_unit_completeness_basis =
+                ClassUnitCompletenessBasis::none;
     }
     analytic_class_regulator_status_ = ProofState::not_checked;
     analytic_class_regulator_assumes_grh_ = false;
@@ -7298,6 +7342,8 @@ bool ClassGroupContext::record_factor_base_generation_(
         flint::fmpz_zero(
                 flint::FmpzRef(private_storage_->grh_generation_bound));
         private_storage_->grh_generation_covered = false;
+        private_storage_->grh_generation_basis =
+                ClassGroupGenerationBasis::none;
     }
 
     flint::Fmpz required;
@@ -7505,9 +7551,14 @@ void ClassGroupContext::save_certification_state_(
     out.factor_base_generation_records.clear();
     out.relation_saturation_records.clear();
     out.relation_saturation_proof_records.clear();
+    out.class_unit_completeness = CertificationMode::unknown;
+    out.class_unit_completeness_basis = ClassUnitCompletenessBasis::none;
     if (private_storage_ == nullptr) {
         return;
     }
+    out.class_unit_completeness = private_storage_->class_unit_completeness;
+    out.class_unit_completeness_basis =
+            private_storage_->class_unit_completeness_basis;
     for (const detail::FactorBaseGenerationRecord& record :
          private_storage_->factor_base_generation_records) {
         out.factor_base_generation_records.emplace_back();
@@ -7568,6 +7619,9 @@ void ClassGroupContext::restore_certification_state_(
             saved.relation_saturation_records);
     private_storage_->relation_saturation_proof_records.swap(
             saved.relation_saturation_proof_records);
+    private_storage_->class_unit_completeness = saved.class_unit_completeness;
+    private_storage_->class_unit_completeness_basis =
+            saved.class_unit_completeness_basis;
 }
 
 bool append_factor_base_generation_record(
@@ -9434,6 +9488,78 @@ CertificationMode ClassGroupContext::analytic_class_regulator_certification()
     }
     return analytic_class_regulator_assumes_grh_ ? CertificationMode::grh
                                                  : CertificationMode::proven;
+}
+
+CertificationMode ClassGroupContext::factor_base_generation_certification()
+        const noexcept {
+    if (!has_presentation()) {
+        return CertificationMode::unknown;
+    }
+    if (factor_base_generation_status_ == ProofState::verified) {
+        return CertificationMode::proven;
+    }
+    return detail::ClassGroupCertificationAccess::
+                           grh_factor_base_generation_covered(*this)
+            ? CertificationMode::grh
+            : CertificationMode::unknown;
+}
+
+ClassGroupGenerationBasis ClassGroupContext::factor_base_generation_basis()
+        const noexcept {
+    switch (factor_base_generation_certification()) {
+    case CertificationMode::proven:
+        return ClassGroupGenerationBasis::minkowski_type;
+    case CertificationMode::grh:
+        return private_storage_->grh_generation_basis;
+    default:
+        return ClassGroupGenerationBasis::none;
+    }
+}
+
+bool ClassGroupContext::factor_base_generation_certification_bound(
+        flint::FmpzRef out) const noexcept {
+    switch (factor_base_generation_certification()) {
+    case CertificationMode::proven:
+        return factor_base_generation_bound(out);
+    case CertificationMode::grh:
+        flint::fmpz_set(out, flint::FmpzConstRef(
+                                     private_storage_->grh_generation_bound));
+        return true;
+    default:
+        return false;
+    }
+}
+
+CertificationMode ClassGroupContext::class_unit_completeness_certification()
+        const noexcept {
+    // A `proven` label is complete unconditionally; a `grh` label reports
+    // the record written when the pair was accepted or relabelled.
+    if (!has_presentation()) {
+        return CertificationMode::unknown;
+    }
+    if (certification_ == CertificationMode::proven) {
+        return CertificationMode::proven;
+    }
+    if (certification_ == CertificationMode::grh &&
+        private_storage_ != nullptr) {
+        return private_storage_->class_unit_completeness;
+    }
+    return CertificationMode::unknown;
+}
+
+ClassUnitCompletenessBasis ClassGroupContext::class_unit_completeness_basis()
+        const noexcept {
+    if (!has_presentation()) {
+        return ClassUnitCompletenessBasis::none;
+    }
+    if (certification_ == CertificationMode::proven) {
+        return ClassUnitCompletenessBasis::unconditional_certification;
+    }
+    if (certification_ == CertificationMode::grh &&
+        private_storage_ != nullptr) {
+        return private_storage_->class_unit_completeness_basis;
+    }
+    return ClassUnitCompletenessBasis::none;
 }
 
 ProofState ClassGroupContext::zeta_bf_proof_status() const noexcept {

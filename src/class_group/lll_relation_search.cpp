@@ -1470,7 +1470,8 @@ bool ClassGroupContext::compute_tentative_candidate_(
                     record_grh_factor_base_generation(
                             candidate,
                             flint::FmpzConstRef(
-                                    policy.grh_generation_bound))) {
+                                    policy.grh_generation_bound),
+                            policy.grh_generation_basis)) {
             return false;
         }
     }

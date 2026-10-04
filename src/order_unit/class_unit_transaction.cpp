@@ -59,7 +59,8 @@ bool select_policy(
         policy.degree != 1) {
         if (!grh_factor_base_bound(
                     selected_bound, order, options.diagnostics,
-                    &policy.grh_generation_bound)) {
+                    &policy.grh_generation_bound,
+                    &policy.grh_generation_basis)) {
             return false;
         }
         policy.factor_base_bound =
@@ -143,10 +144,16 @@ bool grh_factor_base_bound(
         flint::Fmpz& out,
         const Order& order,
         const DiagnosticsContext* diagnostics,
-        flint::Fmpz* generation_bound) noexcept {
+        flint::Fmpz* generation_bound,
+        ClassGroupGenerationBasis* generation_basis) noexcept {
+    bool bach_selected = false;
     if (!grh_factor_base_bound_with_diagnostics(
-                flint::FmpzRef(out), order, diagnostics)) {
+                flint::FmpzRef(out), order, diagnostics, &bach_selected)) {
         return false;
+    }
+    if (generation_basis != nullptr) {
+        *generation_basis = bach_selected ? ClassGroupGenerationBasis::bach
+                                          : ClassGroupGenerationBasis::bdf;
     }
     if (generation_bound != nullptr) {
         flint::fmpz_set(flint::FmpzRef(*generation_bound),

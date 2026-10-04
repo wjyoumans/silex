@@ -2757,6 +2757,116 @@ int test_move_and_swap() {
 
 }  // namespace
 
+int test_grh_provenance_records() {
+    // GRH provenance of a grh class/unit result, and the plumbing of the
+    // GRH generation record.  x^3 + x + 200 (|D| = 1080004): the grh
+    // policy's GRH generation bound is the BDF bound 50, its base is built
+    // to 100, and the Minkowski-type bound is 463, so generation rests on
+    // GRH; completeness rests on a Belabas-Friedman hR.
+    silex::NumberField field = cubic_field(1, 200);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz minkowski;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(minkowski),
+                                               maximal_order));
+
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 500;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::ClassGroupContext context;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            context, maximal_order, sflint::FmpzConstRef(minkowski), options,
+            128));
+    assert(context.certification_status() == silex::CertificationMode::grh);
+    assert(context.factor_base_generation_status() !=
+           silex::ProofState::verified);
+
+    sflint::Fmpz value;
+    assert(context.factor_base_generation_certification() ==
+           silex::CertificationMode::grh);
+    assert(context.factor_base_generation_basis() ==
+           silex::ClassGroupGenerationBasis::bdf);
+    assert(context.factor_base_generation_certification_bound(
+            sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 50));
+    assert(context.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    assert(context.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::belabas_friedman);
+
+    // Only the two GRH theorems are recordable, and the GRH bound must not
+    // exceed the build bound (100 here).
+    sflint::Fmpz grh_bound;
+    assert(set_fmpz_si(grh_bound, 101));
+    assert(!CertificationAccess::record_grh_factor_base_generation(
+            context, sflint::FmpzConstRef(grh_bound),
+            silex::ClassGroupGenerationBasis::bach));
+    assert(set_fmpz_si(grh_bound, 60));
+    assert(!CertificationAccess::record_grh_factor_base_generation(
+            context, sflint::FmpzConstRef(grh_bound),
+            silex::ClassGroupGenerationBasis::minkowski_type));
+    assert(!CertificationAccess::record_grh_factor_base_generation(
+            context, sflint::FmpzConstRef(grh_bound),
+            silex::ClassGroupGenerationBasis::none));
+    assert(context.factor_base_generation_basis() ==
+           silex::ClassGroupGenerationBasis::bdf);
+    // A Bach record (the theorem chosen when Bach's bound is the smaller)
+    // is reported as such, with its bound.
+    assert(CertificationAccess::record_grh_factor_base_generation(
+            context, sflint::FmpzConstRef(grh_bound),
+            silex::ClassGroupGenerationBasis::bach));
+    assert(context.factor_base_generation_certification() ==
+           silex::CertificationMode::grh);
+    assert(context.factor_base_generation_basis() ==
+           silex::ClassGroupGenerationBasis::bach);
+    assert(context.factor_base_generation_certification_bound(
+            sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 60));
+    assert(context.factor_base_generation_status() !=
+           silex::ProofState::verified);
+
+    // The proven partner: generation to the Minkowski-type bound and
+    // unconditional completeness.
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext proven;
+    silex::OrderUnitGroup proven_units;
+    assert(proven_units.compute_with_class_group(
+            proven, maximal_order, sflint::FmpzConstRef(minkowski), options,
+            128));
+    assert(proven.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(proven.factor_base_generation_certification() ==
+           silex::CertificationMode::proven);
+    assert(proven.factor_base_generation_basis() ==
+           silex::ClassGroupGenerationBasis::minkowski_type);
+    assert(proven.factor_base_generation_certification_bound(
+            sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(value),
+                              sflint::FmpzConstRef(minkowski)));
+    assert(proven.class_unit_completeness_certification() ==
+           silex::CertificationMode::proven);
+    assert(proven.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::unconditional_certification);
+
+    // A context without a presentation reports nothing.
+    silex::ClassGroupContext empty;
+    assert(empty.factor_base_generation_certification() ==
+           silex::CertificationMode::unknown);
+    assert(empty.factor_base_generation_basis() ==
+           silex::ClassGroupGenerationBasis::none);
+    assert(!empty.factor_base_generation_certification_bound(
+            sflint::FmpzRef(value)));
+    assert(empty.class_unit_completeness_certification() ==
+           silex::CertificationMode::unknown);
+    assert(empty.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::none);
+    return 0;
+}
+
 int main() {
     test_certification_metadata_defaults_and_invalidation();
     test_factor_base_generation_metadata();
@@ -2798,5 +2908,6 @@ int main() {
     test_relation_saturation_analytic_index_bound_with_units_degree_one();
     test_compute_candidate_preserves_on_failure();
     test_move_and_swap();
+    test_grh_provenance_records();
     return 0;
 }

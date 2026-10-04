@@ -237,6 +237,38 @@ const char* certification_name(silex::CertificationMode mode) noexcept {
     return "unknown";
 }
 
+const char* generation_basis_name(
+        silex::ClassGroupGenerationBasis basis) noexcept {
+    switch (basis) {
+    case silex::ClassGroupGenerationBasis::none:
+        return "none";
+    case silex::ClassGroupGenerationBasis::minkowski_type:
+        return "minkowski_type";
+    case silex::ClassGroupGenerationBasis::bdf:
+        return "bdf";
+    case silex::ClassGroupGenerationBasis::bach:
+        return "bach";
+    }
+    return "none";
+}
+
+const char* completeness_basis_name(
+        silex::ClassUnitCompletenessBasis basis) noexcept {
+    switch (basis) {
+    case silex::ClassUnitCompletenessBasis::none:
+        return "none";
+    case silex::ClassUnitCompletenessBasis::belabas_friedman:
+        return "belabas_friedman";
+    case silex::ClassUnitCompletenessBasis::unconditional_analytic:
+        return "unconditional_analytic";
+    case silex::ClassUnitCompletenessBasis::exact_class_number:
+        return "exact_class_number";
+    case silex::ClassUnitCompletenessBasis::unconditional_certification:
+        return "unconditional_certification";
+    }
+    return "none";
+}
+
 const char* proof_state_name(silex::ProofState state) noexcept {
     switch (state) {
     case silex::ProofState::not_checked:
@@ -1900,6 +1932,45 @@ int main(int argc, char** argv) {
             std::cout,
             certification_name(
                     class_group.analytic_class_regulator_certification()));
+    std::cout << ",\n";
+    // Where GRH entered the published result, read from the library's
+    // provenance accessors (not re-derived here).
+    std::cout << "    \"factor_base_generation_certification\": ";
+    write_json_string(
+            std::cout,
+            certification_name(
+                    class_group.factor_base_generation_certification()));
+    std::cout << ",\n";
+    std::cout << "    \"factor_base_generation_basis\": ";
+    write_json_string(
+            std::cout,
+            generation_basis_name(
+                    class_group.factor_base_generation_basis()));
+    std::cout << ",\n";
+    std::cout << "    \"factor_base_generation_certification_bound\": ";
+    {
+        sflint::Fmpz generation_bound;
+        if (class_group.factor_base_generation_certification_bound(
+                    sflint::FmpzRef(generation_bound))) {
+            write_json_string(
+                    std::cout,
+                    fmpz_string(sflint::FmpzConstRef(generation_bound)));
+        } else {
+            std::cout << "null";
+        }
+    }
+    std::cout << ",\n";
+    std::cout << "    \"class_unit_completeness_certification\": ";
+    write_json_string(
+            std::cout,
+            certification_name(
+                    class_group.class_unit_completeness_certification()));
+    std::cout << ",\n";
+    std::cout << "    \"class_unit_completeness_basis\": ";
+    write_json_string(
+            std::cout,
+            completeness_basis_name(
+                    class_group.class_unit_completeness_basis()));
     std::cout << ",\n";
     std::cout << "    \"zeta_bf_proof_status\": ";
     write_json_string(std::cout,

@@ -1355,7 +1355,8 @@ bool factor_base_bound_bach(flint::FmpzRef out,
 bool grh_factor_base_bound_impl(
         flint::FmpzRef out,
         const Order& order,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        bool* bach_selected) noexcept {
     flint::Fmpz bdf;
     flint::Fmpz bach;
     if (!factor_base_bound_bdf(flint::FmpzRef(bdf), order,
@@ -1363,11 +1364,12 @@ bool grh_factor_base_bound_impl(
         !factor_base_bound_bach(flint::FmpzRef(bach), order)) {
         return false;
     }
-    if (flint::fmpz_cmp(flint::FmpzConstRef(bdf),
-                        flint::FmpzConstRef(bach)) <= 0) {
-        flint::fmpz_set(out, flint::FmpzConstRef(bdf));
-    } else {
-        flint::fmpz_set(out, flint::FmpzConstRef(bach));
+    const bool use_bach = flint::fmpz_cmp(flint::FmpzConstRef(bdf),
+                                          flint::FmpzConstRef(bach)) > 0;
+    flint::fmpz_set(out, use_bach ? flint::FmpzConstRef(bach)
+                                  : flint::FmpzConstRef(bdf));
+    if (bach_selected != nullptr) {
+        *bach_selected = use_bach;
     }
     if (flint::fmpz_is_zero(out)) {
         flint::fmpz_one(out);
@@ -2771,8 +2773,10 @@ namespace silex::detail {
 bool grh_factor_base_bound_with_diagnostics(
         flint::FmpzRef out,
         const Order& order,
-        const DiagnosticsContext* diagnostics) noexcept {
-    return grh_factor_base_bound_impl(out, order, diagnostics);
+        const DiagnosticsContext* diagnostics,
+        bool* bach_selected) noexcept {
+    return grh_factor_base_bound_impl(out, order, diagnostics,
+                                      bach_selected);
 }
 
 bool zeta_class_regulator_product_with_diagnostics(

@@ -63,10 +63,14 @@ struct ZetaBfRouteAudit {
     slong work_precision = 0;
 };
 
+// `out` is the GRH generation bound min(BDF, Bach).  `bach_selected`, when
+// given, is set on success to whether Bach's bound gave that minimum
+// (strictly below the BDF bound); on a tie the BDF bound is reported.
 bool grh_factor_base_bound_with_diagnostics(
         flint::FmpzRef out,
         const Order& order,
-        const DiagnosticsContext* diagnostics) noexcept;
+        const DiagnosticsContext* diagnostics,
+        bool* bach_selected = nullptr) noexcept;
 
 // `unconditional`, when given, is set to true exactly when the product came
 // from an unconditional route: degree one, or the quadratic L(1, chi) route

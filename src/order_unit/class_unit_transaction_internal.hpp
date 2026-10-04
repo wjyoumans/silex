@@ -83,6 +83,11 @@ struct ClassUnitExecutionPolicy {
     // Under GRH every prime ideal of norm at most this bound generates the
     // class group; zero on every other policy.
     flint::Fmpz grh_generation_bound;
+    // grh policy only: the theorem that gave grh_generation_bound, bdf
+    // (Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2) or bach (Bach 1990,
+    // Thm 4); none on every other policy.
+    ClassGroupGenerationBasis grh_generation_basis =
+            ClassGroupGenerationBasis::none;
     NativeFactorBaseBoundStrategy factor_base_bound =
             NativeFactorBaseBoundStrategy::none;
     NativeFactorBaseStrategy factor_base = NativeFactorBaseStrategy::none;
@@ -148,12 +153,14 @@ bool native_hnf_unit_strategy_for_signature(
         slong unit_rank) noexcept;
 // `out` is the GRH generation bound min(BDF, Bach), doubled until the
 // norm-bounded factor base has more than the minimum number of primes.
-// `generation_bound`, when given, receives the undoubled GRH bound.
+// `generation_bound`, when given, receives the undoubled GRH bound, and
+// `generation_basis`, when given, the theorem that gave it (bdf or bach).
 bool grh_factor_base_bound(
         flint::Fmpz& out,
         const Order& order,
         const DiagnosticsContext* diagnostics = nullptr,
-        flint::Fmpz* generation_bound = nullptr) noexcept;
+        flint::Fmpz* generation_bound = nullptr,
+        ClassGroupGenerationBasis* generation_basis = nullptr) noexcept;
 
 bool compute_class_unit_transaction(
         OrderUnitGroup& units,

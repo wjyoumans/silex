@@ -2692,6 +2692,10 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         // relations until max_relations.  Fail closed now.  Rank zero is
         // excluded: the exact imaginary-quadratic grh route checks its own
         // GRH coverage.
+        // Unreachable under the current policy: every grh policy builds a
+        // norm-bounded base for the LLL route, whose build writes the GRH
+        // generation record or fails before this point.  Kept as a guard in
+        // case the policy changes.
         SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                   LogLevel::detail,
                   "grh class/unit request failed closed: the factor base "
