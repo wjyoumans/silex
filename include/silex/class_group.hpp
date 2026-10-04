@@ -230,9 +230,10 @@ public:
     // unconditional quadratic L(1, chi) hR, or the exact degree-one route;
     // `grh` for a `grh` pair accepted through a Belabas-Friedman hR (every
     // degree >= 3 field, a degree-two field outside the explicit quadratic
-    // backend, and a quadratic field whose L(1, chi) evaluation fell back to
-    // Belabas-Friedman); `unknown` otherwise.  A `grh` result whose
-    // generation and completeness are both `proven` keeps the `grh` label.
+    // backend, and a quadratic field with |D| >= 2^44 or whose L(1, chi)
+    // evaluation fell back to Belabas-Friedman); `unknown` otherwise.  A
+    // `grh` result whose generation and completeness are both `proven` keeps
+    // the `grh` label.
     CertificationMode class_unit_completeness_certification() const noexcept;
     ClassUnitCompletenessBasis class_unit_completeness_basis() const noexcept;
     // Whether the relations of the current presentation are known to be
@@ -285,10 +286,11 @@ public:
     // unconditional only for degree one and for the quadratic L(1, chi)
     // route; a Belabas-Friedman hR (every degree >= 3 field, a degree-two
     // field outside the explicit quadratic backend, and a quadratic field
-    // whose L(1, chi) evaluation fails and falls back to Belabas-Friedman)
-    // assumes GRH.  Use analytic_class_regulator_certification() to read
-    // which one was used.  A `grh` class/unit transaction accepted by the
-    // analytic index-one test records that check here as well; the record is
+    // with |D| >= 2^44 or whose L(1, chi) evaluation fails and falls back to
+    // Belabas-Friedman) assumes GRH.  Use
+    // analytic_class_regulator_certification() to read which one was used.
+    // A `grh` class/unit transaction accepted by the analytic index-one test
+    // records that check here as well; the record is
     // informational and leaves the `grh` labels unchanged.  With a
     // Belabas-Friedman hR it also records that evaluation's audit data
     // (zeta_bf_proof_record()).  The exact imaginary-quadratic and

@@ -183,11 +183,12 @@ void check_large_real_discriminant() {
 }
 
 // Public route: D = -100000020 (radicand -25000005), h(D) = 5056, taken
-// from an independent class-number computation.  The previous L(1, chi) route searched the Dirichlet group
-// modulo |D| for the Kronecker character, O(|D|) work that takes about a
-// minute here and grows linearly; the approximate functional equation takes
-// a fraction of a second.  The proven paired computation uses the exact
-// imaginary-quadratic class number and records no analytic check;
+// from an independent class-number computation.  The previous L(1, chi)
+// route searched the Dirichlet group modulo |D| for the Kronecker
+// character, O(|D|) work that takes about a minute here and grows linearly;
+// the approximate functional equation takes a fraction of a second.  The
+// proven paired computation uses the exact imaginary-quadratic class number
+// and records no analytic check;
 // try_certify_class_unit_with_zeta then evaluates hR through the quadratic
 // L(1, chi) route and records an unconditional (`proven`) analytic check.
 void check_public_class_unit_with_zeta() {

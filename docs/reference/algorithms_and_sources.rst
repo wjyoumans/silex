@@ -573,11 +573,12 @@ An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
 one, and maximal orders of explicit quadratic-backend fields whose
 discriminant satisfies ``|D| < 2^44`` (about ``1.76e13``), where the residue
-comes from ``L(1, chi_D)``.  The size cap bounds the running time, which
-grows like ``sqrt(|D| prec)``; it does not depend on the precision, and
-larger fields use the Belabas--Friedman fallback.  Silex evaluates ``L(1, chi_D)`` for the primitive real
-character ``chi_D(n) = (D/n)`` (Kronecker symbol) of the fundamental
-discriminant ``D`` with the approximate functional equation of FLINT
+comes from ``L(1, chi_D)``.  The size cap bounds the cost of the
+evaluation, whose number of terms grows like ``sqrt(|D| prec)``.  The cap
+itself does not depend on the precision, and fields with ``|D| >= 2^44`` use
+the Belabas--Friedman fallback.  Silex evaluates ``L(1, chi_D)`` for the
+primitive real character ``chi_D(n) = (D/n)`` (Kronecker symbol) of the
+fundamental discriminant ``D`` with the approximate functional equation of FLINT
 ``acb_dirichlet_l_fmpq_afe`` (FLINT 3.6.0 ``src/acb_dirichlet/l_fmpq_afe.c``,
 copyright (C) 2021 Fredrik Johansson, LGPL-3.0-or-later; the adapted code is
 in ``src/zeta/zeta.cpp``).  It keeps FLINT's two sums, truncation rule, tail
@@ -732,7 +733,8 @@ two components are both ``proven`` still reads ``grh``.  Per route:
    * - Real quadratic, ``L(1, chi_D)``
      - ``grh`` or ``proven``
      - ``proven`` (``unconditional_analytic``)
-   * - Real quadratic, ``L(1, chi_D)`` failed, Belabas--Friedman fallback
+   * - Real quadratic, ``L(1, chi_D)`` failed or ``|D| >= 2^44``,
+       Belabas--Friedman fallback
      - ``grh`` or ``proven``
      - ``grh`` (``belabas_friedman``)
    * - Degree two outside the explicit quadratic backend

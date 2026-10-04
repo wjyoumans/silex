@@ -489,13 +489,15 @@ bool quadratic_residue_modulus(ulong& modulus,
     }
     flint::fmpz_abs(flint::FmpzRef(abs_discriminant),
                     flint::FmpzConstRef(discriminant));
-    if (!flint::fmpz_abs_fits_ui(flint::FmpzConstRef(abs_discriminant))) {
+    // Test the size on the fmpz, so the check holds at any word size.
+    if (::fmpz_bits(flint::FmpzConstRef(abs_discriminant).raw()) >
+            quadratic_route_max_abs_discriminant_bits ||
+        !flint::fmpz_abs_fits_ui(flint::FmpzConstRef(abs_discriminant))) {
         return false;
     }
 
     modulus = flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
-    return modulus != 0 &&
-           (modulus >> quadratic_route_max_abs_discriminant_bits) == 0;
+    return modulus != 0;
 }
 
 bool quadratic_residue(flint::Arb& out,

@@ -50,7 +50,8 @@ The public proof gates certify only from data that Silex computes itself.
 class-regulator product from the zeta function, and
 ``try_prove_relation_saturation_with_units`` runs its own ``ell``-local test.
 The analytic product is unconditional only for degree one and for the
-quadratic ``L(1, chi)`` route of ``try_certify_class_unit_with_zeta``.
+quadratic ``L(1, chi)`` route of ``try_certify_class_unit_with_zeta``, which
+takes only quadratic fields with ``|D| < 2^44``.
 Otherwise it is a Belabas-Friedman value whose error bound assumes GRH, and
 these two gates then succeed only when the units are already proven and the
 class group already has an unconditional proof component for this presentation:

@@ -155,11 +155,13 @@ Changed
   ``|D|``.  Quadratic fields whose ``L(1, chi)`` evaluation previously failed
   (the Dirichlet group could not be initialized) or did not finish, and which
   therefore fell back to a GRH-conditional Belabas-Friedman ``hR``, now get an
-  unconditional ``hR``.  The class/unit routes that use it, such as
-  ``try_certify_class_unit_with_zeta`` and the analytic index-one check, then
-  record a ``proven`` analytic check where they previously recorded ``grh``
-  or failed.  The certification
-  rule is unchanged: a finite, positive ``L``-value ball is unconditional, and
+  unconditional ``hR`` when ``|D| < 2^44`` (about ``1.76e13``).  The route
+  takes only those fields, which bounds its running time; larger quadratic
+  fields use the Belabas-Friedman fallback.  The class/unit routes that use
+  it, such as ``try_certify_class_unit_with_zeta`` and the analytic
+  index-one check, then record a ``proven`` analytic check where they
+  previously recorded ``grh`` or failed.  The certification rule is
+  unchanged: a finite, positive ``L``-value ball is unconditional, and
   anything else still falls back to Belabas-Friedman.  For ``|D|`` near
   ``10^12`` an evaluation takes roughly 25 seconds (imaginary) and under 2
   minutes (real) on a desktop machine; these times are approximate.  See "Class groups and order units" in
