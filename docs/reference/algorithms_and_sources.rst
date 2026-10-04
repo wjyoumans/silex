@@ -463,22 +463,29 @@ focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
-``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
+v0.38.6 ``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
 ``Unit/Relation.jl:_find_rational_relation!``.  Silex computes the
 coordinates of ``y`` against the generators' log matrix in Arb, replaces each
 coordinate ball by the simplest rational inside it (FLINT
 ``_fmpq_simplest_between`` on the exact ball endpoints, as Nemo
 ``simplest_rational_inside``), and takes the least common multiple ``m`` of
 the denominators.  A ball of radius above one, or a denominator or ``m``
-above the regulator index bound, makes the attempt inconclusive.  The
-candidate relation is only a guess until it passes the exact power-root or
-torsion check.  An inconclusive attempt or a failed check doubles the
+above the regulator index bound ``B``, makes the attempt inconclusive.
+Silex accepts each denominator ``q`` in the closed range ``q <= B``.
+Hecke's ``simplest_inside`` requires each denominator below the bound, while
+its lcm test accepts ``m`` equal to it.  The closed range is the one the
+bound proves: with ``G`` the group generated so far and ``U`` the unit group,
+every denominator divides the least ``m`` with ``y^m`` in ``G`` modulo
+torsion, and ``m <= [U:G] <= B``, so ``m = B`` can occur.  The candidate
+relation is only a guess until it passes the exact power-root or torsion
+check.  An inconclusive attempt or a failed check doubles the
 precision.  Hecke's loop is unbounded; Silex stops at a fixed precision cap
 and then leaves the group unchanged.  The loop terminates below the cap in
 the usual case: when the true coordinate is ``a/b`` with ``b`` at most the
-bound ``B`` and the ball radius is below ``1/B^2``, every other fraction
-``p/q`` in the ball with ``q <= b`` lies at distance at least
-``1/(qb) >= 1/B^2``, so the simplest rational is ``a/b``.
+bound ``B`` and the ball radius is below ``1/(2B^2)``, the ball has diameter
+below ``1/B^2``, while every other fraction ``p/q`` with ``q <= b`` lies at
+distance at least ``1/(qb) >= 1/B^2`` from ``a/b``, so the simplest rational
+in the ball is ``a/b``.
 
 Saturation-backed class-group proof follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_class_group_proof``: verify generation

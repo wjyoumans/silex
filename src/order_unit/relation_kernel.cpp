@@ -1923,14 +1923,17 @@ bool dependent_relation_rational_candidate(bool& found,
     // Nemo `simplest_rational_inside` = FLINT `_fmpq_simplest_between` on the
     // exact ball endpoints), reject a ball with radius above one, and reject
     // the attempt when a denominator or their lcm exceeds the bound.  The
-    // reference accepts denominators below the bound; Silex accepts the
-    // closed range 1..bound, the range the denominator bound proves.
+    // reference `simplest_inside` accepts denominators below the bound while
+    // its lcm test accepts an lcm equal to it; Silex accepts the closed range
+    // 1..bound.  Every denominator divides the least m with y^m in the group
+    // modulo torsion, and m <= [U:G] <= bound, so m == bound can occur.
     //
     // Why the precision loop terminates: if the true coordinate is a/b with
-    // b <= bound and the ball has radius rho < 1/bound^2, every other p/q in
-    // the ball with q <= b satisfies |p/q - a/b| >= 1/(qb) >= 1/bound^2 > rho,
-    // so the simplest rational in the ball is a/b.  Nothing here is trusted:
-    // the caller verifies the candidate exactly.
+    // b <= bound and the ball has radius rho < 1/(2 bound^2), any two points
+    // of the ball are less than 1/bound^2 apart, while every other p/q with
+    // q <= b satisfies |p/q - a/b| >= 1/(qb) >= 1/bound^2, so the simplest
+    // rational in the ball is a/b.  Nothing here is trusted: the caller
+    // verifies the candidate exactly.
     std::vector<flint::Fmpq> approximations(static_cast<std::size_t>(rank));
     flint::Fmpz lower;
     flint::Fmpz upper;

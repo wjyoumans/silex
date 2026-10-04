@@ -2449,6 +2449,91 @@ int test_add_dependent_unit_large_denominator() {
     return 0;
 }
 
+int test_dependent_relation_wrong_simplest_rational_rejected() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+    silex::FactoredElement generator(field);
+    assert(generator.push(epsilon, 5));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    silex::OrderUnitGroup group(order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            group, order, silex::FactoredElementSpan(generators, 1),
+            embeddings, 128, true));
+
+    // y = epsilon^3 has coordinate 3/5 against the generator epsilon^5.
+    silex::FactoredElement y(field);
+    assert(y.push(epsilon, 3));
+    constexpr slong kPrecision = 128;
+    sflint::ArbVec generator_log(2);
+    sflint::ArbVec y_log(2);
+    assert(generators[0].logarithmic_embedding(
+            sflint::ArbVecRef(generator_log), embeddings,
+            silex::LogEmbeddingMode::product, kPrecision));
+    assert(y.logarithmic_embedding(sflint::ArbVecRef(y_log), embeddings,
+                                   silex::LogEmbeddingMode::product,
+                                   kPrecision));
+    sflint::ArbMat inverse(1, 1);
+    ::arb_inv(arb_mat_entry(inverse.raw(), 0, 0), generator_log.data(),
+              kPrecision);
+
+    // Widen the inverse so the coordinate ball is about 3/5 +- 7/100.  The
+    // ball contains the true value 3/5, but its simplest rational is 2/3.
+    sflint::Arb widen;
+    ::arb_set_si(widen.raw(), 7);
+    ::arb_div_si(widen.raw(), widen.raw(), 100, kPrecision);
+    sflint::Arb magnitude;
+    ::arb_abs(magnitude.raw(), y_log.data());
+    ::arb_div(widen.raw(), widen.raw(), magnitude.raw(), kPrecision);
+    sflint::ArbMat wide_inverse(1, 1);
+    ::arb_set(arb_mat_entry(wide_inverse.raw(), 0, 0),
+              arb_mat_entry(inverse.raw(), 0, 0));
+    ::arb_add_error(arb_mat_entry(wide_inverse.raw(), 0, 0), widen.raw());
+
+    sflint::ArbMat coordinates(1, 1);
+    ::arb_mul(arb_mat_entry(coordinates.raw(), 0, 0), y_log.data(),
+              arb_mat_entry(wide_inverse.raw(), 0, 0), kPrecision);
+    sflint::Fmpq true_value;
+    ::fmpq_set_si(true_value.raw(), 3, 5);
+    sflint::Arb true_ball;
+    ::arb_set_fmpq(true_ball.raw(), true_value.raw(), kPrecision);
+    assert(::arb_contains(arb_mat_entry(coordinates.raw(), 0, 0),
+                          true_ball.raw()) != 0);
+    sflint::FmpzMat guess(1, 2);
+    bool found = false;
+    assert(silex::detail::dependent_relation_rational_candidate(
+            found, guess, coordinates, 5));
+    assert(found);
+    const slong wrong[] = {-2, 3};
+    assert(candidate_row_equals(guess, wrong, 2));
+
+    // The exact check rejects the wrong candidate y^3 = (epsilon^5)^2.
+    silex::FactoredElement root(field);
+    sflint::FmpzMat relation(1, 2);
+    sflint::Fmpz torsion_exp;
+    bool recovered = true;
+    sflint::Fmpz bound;
+    ::fmpz_set_si(bound.raw(), 5);
+    assert(silex::detail::dependent_relation_bounded_with_inverse(
+            recovered, root, relation, torsion_exp, group, y, embeddings,
+            wide_inverse, sflint::FmpzConstRef(bound), kPrecision, true,
+            false));
+    assert(!recovered);
+
+    // The precise inverse gives the true relation y^5 = (epsilon^5)^3.
+    assert(silex::detail::dependent_relation_bounded_with_inverse(
+            recovered, root, relation, torsion_exp, group, y, embeddings,
+            inverse, sflint::FmpzConstRef(bound), kPrecision, true, false));
+    assert(recovered);
+    const slong expected[] = {-3, 5};
+    assert(candidate_row_equals(relation, expected, 2));
+    return 0;
+}
+
 int test_saturate_row_rank_zero_and_failures() {
     silex::NumberField degree_one = degree_one_field();
     silex::Order degree_one_order;
@@ -4493,6 +4578,9 @@ int test_add_dependent_unit_precision_cap() {
             silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
             torsion_event_callback, &counter);
     group.set_diagnostics(&diagnostics);
+    const slong rank_before = group.free_rank();
+    sflint::Arb regulator_before;
+    assert(group.regulator(sflint::ArbRef(regulator_before)));
 
     silex::detail::RelationUnitExtractionState state;
     bool changed = true;
@@ -4500,6 +4588,10 @@ int test_add_dependent_unit_precision_cap() {
                                              embeddings, state, 128));
     assert(!changed);
     assert(state.rel_add_precision == silex::detail::kRelAddStartPrecision);
+    assert(group.free_rank() == rank_before);
+    sflint::Arb regulator_after;
+    assert(group.regulator(sflint::ArbRef(regulator_after)));
+    assert(::arb_equal(regulator_after.raw(), regulator_before.raw()) != 0);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(counter.count == 1);
 #else
@@ -6929,6 +7021,7 @@ int main() {
     test_saturate_row_no_root_and_divisible_copy();
     test_dependent_relation_rational_candidate();
     test_add_dependent_unit_large_denominator();
+    test_dependent_relation_wrong_simplest_rational_rejected();
     test_add_dependent_unit_precision_cap();
     test_saturate_row_rank_zero_and_failures();
     test_residue_dlog_kernel_real_quadratic();
