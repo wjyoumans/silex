@@ -488,11 +488,11 @@ verifies itself, and proven unit publication through the class/unit gates
 re-derives the torsion subgroup of the order rather than trusting a stored
 one.
 
-The generation bound is ``factor_base_class_group_bound`` for a maximal
-order: every ideal class contains an integral ideal of norm at most the
+``factor_base_class_group_bound`` returns the generation bound for a
+maximal order: every ideal class contains an integral ideal of norm at most the
 bound, so verifying that the prime ideals up to it lie in the factor base
 proves generation.  It is 1 in degree one, ``floor(sqrt(|d|/3))`` for
-imaginary quadratic and ``floor(sqrt(d))/2`` for real quadratic fields.  In
+imaginary quadratic and ``floor(sqrt(d)/2)`` for real quadratic fields.  In
 degree ``n = r1 + 2 r2 >= 3`` it is the smallest of three proven bounds,
 which is valid because each of them is:
 
