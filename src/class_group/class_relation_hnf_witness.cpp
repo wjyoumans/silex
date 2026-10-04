@@ -155,6 +155,37 @@ bool push_context_relation_witnesses(
     return true;
 }
 
+// Proves (g_j) = prod_P P^{R_j[P]} for one stored relation, where g_j and R_j
+// are the generator and row at index `relation` of the same context matrix
+// `stored` that the witnesses are composed from.  Exact fractional-ideal
+// equality settles support outside the factor base as well, so a generator
+// whose factor-base valuations match but which carries another prime fails.
+bool verify_stored_relation_generator(
+        const ClassGroupContext& context,
+        flint::FmpzMatConstRef stored,
+        slong relation) noexcept {
+    const Order* order = context.parent();
+    const FactorBase* base = context.factor_base();
+    if (order == nullptr || order->parent() == nullptr || base == nullptr ||
+        relation < 0 || relation >= flint::fmpz_mat_nrows(stored) ||
+        flint::fmpz_mat_ncols(stored) != base->length()) {
+        return false;
+    }
+
+    Element generator(*order->parent());
+    flint::FmpzMat row(1, base->length());
+    FractionalIdeal principal(*order);
+    FractionalIdeal expected(*order);
+    return generator.is_defined() && principal.is_defined() &&
+           expected.is_defined() &&
+           context.relation_generator(generator, relation) &&
+           fmpz_mat_copy_row(flint::FmpzMatRef(row), 0, stored, relation) &&
+           principal.set_principal(generator, context.diagnostics()) &&
+           factor_base_row_ideal(expected, *base,
+                                 flint::FmpzMatConstRef(row)) &&
+           principal.equal(expected);
+}
+
 }  // namespace
 
 bool hnf_unit_witness_coefficients(
@@ -252,11 +283,25 @@ bool class_relation_witnessed_hnf_basis(
         return false;
     }
 
-    Ideal one(*order);
-    flint::FmpzMat row(1, generator_count);
-    if (!one.is_defined() || !one.one()) {
-        return false;
+    // Each witness w_i = prod_j g_j^{C_ij} generates I(rows_i): the ideal map
+    // I(v) = prod_P P^{v_P} is a homomorphism, so (g_j) = I(stored_j) for
+    // every j with some C_ij != 0, together with the exact identity
+    // C * stored == rows checked above, gives
+    // (w_i) = prod_j I(stored_j)^{C_ij} = I(rows_i) without expanding w_i.
+    for (slong j = 0; j < relation_count; ++j) {
+        bool used = false;
+        for (slong i = 0; i < rank && !used; ++i) {
+            used = !flint::fmpz_is_zero(flint::fmpz_mat_entry(
+                    flint::FmpzMatConstRef(candidate.relation_coefficients),
+                    i, j));
+        }
+        if (used && !verify_stored_relation_generator(
+                            context, flint::FmpzMatConstRef(hnf_data.stored),
+                            j)) {
+            return false;
+        }
     }
+
     candidate.witnesses.reserve(static_cast<std::size_t>(rank));
     for (slong i = 0; i < rank; ++i) {
         FactoredElement witness(*field);
@@ -264,11 +309,7 @@ bool class_relation_witnessed_hnf_basis(
             !push_context_relation_witnesses(
                     witness, context,
                     flint::FmpzMatConstRef(candidate.relation_coefficients),
-                    i) ||
-            !fmpz_mat_copy_row(flint::FmpzMatRef(row), 0,
-                               flint::FmpzMatConstRef(candidate.rows), i) ||
-            !verify_class_group_ideal_relation_witness(
-                    context, one, witness, flint::FmpzMatConstRef(row))) {
+                    i)) {
             return false;
         }
         candidate.witnesses.push_back(std::move(witness));

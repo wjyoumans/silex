@@ -52,41 +52,6 @@ bool copy_selected_primes(std::vector<PrimeIdeal>& out,
     return true;
 }
 
-bool selected_prime_row_ideal(
-        FractionalIdeal& out,
-        const std::vector<PrimeIdeal>& selected_primes,
-        flint::FmpzMatConstRef row) noexcept {
-    const Order* order = out.parent();
-    if (order == nullptr || flint::fmpz_mat_nrows(row) != 1 ||
-        flint::fmpz_mat_ncols(row) !=
-                static_cast<slong>(selected_primes.size())) {
-        return false;
-    }
-
-    FractionalIdeal accumulator(*order);
-    FractionalIdeal prime_ideal(*order);
-    FractionalIdeal power(*order);
-    if (!accumulator.is_defined() || !prime_ideal.is_defined() ||
-        !power.is_defined() || !accumulator.one()) {
-        return false;
-    }
-    for (slong i = 0; i < static_cast<slong>(selected_primes.size()); ++i) {
-        flint::FmpzConstRef exponent = flint::fmpz_mat_entry(row, 0, i);
-        if (flint::fmpz_is_zero(exponent)) {
-            continue;
-        }
-        if (!prime_to_fractional_ideal(
-                    prime_ideal,
-                    selected_primes[static_cast<std::size_t>(i)]) ||
-            !power.pow_fmpz(prime_ideal, exponent) ||
-            !accumulator.multiply(accumulator, power)) {
-            return false;
-        }
-    }
-    out.swap(accumulator);
-    return true;
-}
-
 bool compose_augmented_witness(
         FactoredElement& out,
         const WitnessedClassRelationHnfBasis& class_hnf,
@@ -127,73 +92,107 @@ bool compose_augmented_witness(
     return true;
 }
 
-bool factored_principal_ideal(FractionalIdeal& out,
-                              const FactoredElement& element,
-                              const DiagnosticsContext* diagnostics) noexcept {
-    const Order* order = out.parent();
-    if (order == nullptr || order->parent() == nullptr ||
-        element.parent() == nullptr ||
-        !element.parent()->has_same_data(*order->parent())) {
+// For each selected prime P_j, the index k with P_j equal to the factor-base
+// prime Q_k, or -1.  S may meet the factor base, so derived valuations are
+// taken in the ideal group, merging a selected prime with its equal
+// factor-base prime instead of treating FB and S as independent coordinates.
+bool selected_factor_base_indices(std::vector<slong>& out,
+                                  const SUnitClassContext& context) noexcept {
+    out.assign(context.selected_primes.size(), -1);
+    PrimeIdeal prime(context.order);
+    if (!prime.is_defined()) {
         return false;
     }
-    Element value(*order->parent());
-    return value.is_defined() && element.evaluate(value) &&
-           out.set_principal(value, diagnostics);
+    for (slong k = 0; k < context.factor_base.length(); ++k) {
+        if (!context.factor_base.prime(prime, k)) {
+            return false;
+        }
+        for (std::size_t j = 0; j < context.selected_primes.size(); ++j) {
+            if (context.selected_primes[j].equal(prime)) {
+                out[j] = k;
+            }
+        }
+    }
+    return true;
 }
 
+// Checks v_{P_j}(element) == expected_j at every selected prime from the
+// factored element itself; PrimeIdeal::valuation sums exponent times base
+// valuation without expanding the product and fails on slong overflow.
+bool factored_selected_valuations_match(
+        const SUnitClassContext& context,
+        const FactoredElement& element,
+        flint::FmpzMatConstRef expected,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const slong selected_count =
+            static_cast<slong>(context.selected_primes.size());
+    if (flint::fmpz_mat_nrows(expected) != 1 ||
+        flint::fmpz_mat_ncols(expected) != selected_count) {
+        return false;
+    }
+    for (slong j = 0; j < selected_count; ++j) {
+        slong actual = 0;
+        if (!context.selected_primes[static_cast<std::size_t>(j)].valuation(
+                    actual, element, diagnostics) ||
+            !flint::fmpz_equal_si(flint::fmpz_mat_entry(expected, 0, j),
+                                  actual)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The published witness F_i = prod_k w_k^{a_ik} prod_j m_j^{b_ij} satisfies
+// (F_i) = J_i^{d_i} prod_j P_j^{-b_ij} by derivation, not by expansion:
+// (w_k) = I(rows_k) from class_relation_witnessed_hnf_basis,
+// (m_j) P_j = I(selected_row_j) from the exactly verified ideal-relation
+// witness, and the checked identity coef * augmented == d * generator_rows.
+// The factored valuation check at the selected primes is a cheap check of
+// the published object itself.
 bool verify_s_class_invariant_witness(
         const SUnitClassContext& context,
-        const FractionalIdeal& invariant_ideal,
+        const std::vector<slong>& selected_fb_index,
+        flint::FmpzMatConstRef generator_row,
         flint::FmpzConstRef invariant,
         const FactoredElement& witness,
         flint::FmpzMatConstRef selected_exponents,
         const DiagnosticsContext* diagnostics) noexcept {
-    const Order* order = invariant_ideal.parent();
-    if (order == nullptr || !order->has_same_data(context.order)) {
+    const slong selected_count =
+            static_cast<slong>(context.selected_primes.size());
+    if (selected_fb_index.size() != context.selected_primes.size() ||
+        flint::fmpz_mat_nrows(generator_row) != 1 ||
+        flint::fmpz_mat_ncols(generator_row) != context.factor_base.length() ||
+        flint::fmpz_mat_nrows(selected_exponents) != 1 ||
+        flint::fmpz_mat_ncols(selected_exponents) != selected_count) {
         return false;
     }
-    FractionalIdeal ideal_power(*order);
-    FractionalIdeal selected_product(*order);
-    FractionalIdeal expected(*order);
-    FractionalIdeal principal(*order);
-    return ideal_power.is_defined() && selected_product.is_defined() &&
-           expected.is_defined() && principal.is_defined() &&
-           ideal_power.pow_fmpz(invariant_ideal, invariant) &&
-           selected_prime_row_ideal(selected_product, context.selected_primes,
-                                    selected_exponents) &&
-           expected.multiply(ideal_power, selected_product) &&
-           factored_principal_ideal(principal, witness, diagnostics) &&
-           principal.equal(expected);
+    flint::FmpzMat expected(1, selected_count);
+    for (slong j = 0; j < selected_count; ++j) {
+        flint::FmpzRef value =
+                flint::fmpz_mat_entry(flint::FmpzMatRef(expected), 0, j);
+        flint::fmpz_set(value, flint::fmpz_mat_entry(selected_exponents, 0, j));
+        const slong k = selected_fb_index[static_cast<std::size_t>(j)];
+        if (k >= 0) {
+            flint::fmpz_addmul(value,
+                               flint::fmpz_mat_entry(generator_row, 0, k),
+                               invariant);
+        }
+    }
+    return factored_selected_valuations_match(
+            context, witness, flint::FmpzMatConstRef(expected), diagnostics);
 }
 
+// (G_i) = prod_j P_j^{valuation_row_ij} follows from the checked identities
+// generator_coefficients * augmented == 0 and transform * raw ==
+// valuation_rows (raw = minus the kernel's selected block); the factored
+// valuation check confirms the published generator at the selected primes.
 bool verify_sunit_generator(
         const SUnitClassContext& context,
         const FactoredElement& generator,
         flint::FmpzMatConstRef valuation_row,
         const DiagnosticsContext* diagnostics) noexcept {
-    FractionalIdeal expected(context.order);
-    FractionalIdeal principal(context.order);
-    if (!expected.is_defined() || !principal.is_defined() ||
-        !selected_prime_row_ideal(expected, context.selected_primes,
-                                  valuation_row) ||
-        !factored_principal_ideal(principal, generator, diagnostics) ||
-        !principal.equal(expected)) {
-        return false;
-    }
-
-    for (slong i = 0; i < static_cast<slong>(context.selected_primes.size());
-         ++i) {
-        flint::FmpzConstRef expected_valuation =
-                flint::fmpz_mat_entry(valuation_row, 0, i);
-        slong actual = 0;
-        if (!flint::fmpz_fits_si(expected_valuation) ||
-            !context.selected_primes[static_cast<std::size_t>(i)].valuation(
-                    actual, generator, diagnostics) ||
-            actual != flint::fmpz_get_si(expected_valuation)) {
-            return false;
-        }
-    }
-    return true;
+    return factored_selected_valuations_match(context, generator,
+                                              valuation_row, diagnostics);
 }
 
 bool matrix_is_zero(flint::FmpzMatConstRef matrix) noexcept {
@@ -252,6 +251,10 @@ bool build_s_class_invariants(
             static_cast<std::size_t>(invariant_count));
     flint::FmpzMat generator_row(1, generator_count);
     flint::FmpzMat selected_row(1, selected_count);
+    std::vector<slong> selected_fb_index;
+    if (!selected_factor_base_indices(selected_fb_index, context)) {
+        return false;
+    }
     for (slong i = 0; i < invariant_count; ++i) {
         if (!copy_row(flint::FmpzMatRef(generator_row), 0,
                       flint::FmpzMatConstRef(generator_rows), i)) {
@@ -287,7 +290,8 @@ bool build_s_class_invariants(
                     flint::FmpzConstRef(exponent.raw()));
         }
         if (!verify_s_class_invariant_witness(
-                    context, invariant_ideal,
+                    context, selected_fb_index,
+                    flint::FmpzMatConstRef(generator_row),
                     flint::FmpzConstRef(invariant), witness,
                     flint::FmpzMatConstRef(selected_row), diagnostics)) {
             return false;
