@@ -447,11 +447,11 @@ bool snapshot_generator_state(const silex::FiniteAbelianGroup& group,
 }
 
 // Invariant generators and coordinates are published from the Smith form of
-// an HNF basis; the first witness request recomputes the Smith form of the
-// full relation matrix.  FLINT's fmpz_mat_snf_transform begins with a row
-// HNF, which is unique, so for a basis of the relation lattice both runs give
-// the same Smith form and right transform.  Pin that the witness request
-// leaves generators and coordinates unchanged on a larger group.
+// the stored HNF basis.  The first witness request takes the HNF of the full
+// relation matrix, checks it against that basis, and reruns the Smith form on
+// the same basis, so the published state does not move.  Pin that the
+// witness request leaves generators and coordinates unchanged on a larger
+// group.
 int test_witness_request_keeps_generators() {
     constexpr slong n = 6;
     constexpr slong m = 14;
@@ -536,6 +536,109 @@ int test_witness_request_keeps_generators() {
     return 0;
 }
 
+// FLINT's fmpz_mat_snf_transform skips its row-HNF phase when the input is
+// already diagonal, so a signed diagonal relation matrix and its HNF basis
+// reach the gcd/lcm phase with different signs.  Pin that witness requests on
+// the public setter leave generators and coordinates unchanged there too.
+bool diagonal_witness_keeps_generators(const slong* diagonal,
+                                       slong n,
+                                       slong zero_rows,
+                                       const slong* inv,
+                                       slong inv_count) noexcept {
+    sflint::FmpzMat relations(n + zero_rows, n);
+    for (slong i = 0; i < n; ++i) {
+        set_entry_si(relations, i, i, diagonal[i]);
+    }
+    silex::FiniteAbelianGroup group;
+    if (!group.set_relation_matrix(sflint::FmpzMatConstRef(relations)) ||
+        !invariants_are_si(group, inv, inv_count)) {
+        return false;
+    }
+
+    sflint::FmpzMat generators(inv_count, n);
+    sflint::FmpzMat coordinates(n, inv_count);
+    return snapshot_generator_state(group, generators, coordinates) &&
+           generator_relation_identity(group) &&
+           relation_kernel_identity(group) &&
+           invariants_are_si(group, inv, inv_count) &&
+           generator_state_equal(group, generators, coordinates) &&
+           generator_relation_identity(group) &&
+           generator_state_equal(group, generators, coordinates);
+}
+
+int test_diagonal_witness_keeps_generators() {
+    const slong neg_2_3[2] = {-2, 3};
+    const slong pos_2_neg_3[2] = {2, -3};
+    const slong mixed[3] = {4, -6, 10};
+    const slong inv_6[1] = {6};
+    const slong inv_2_2_60[3] = {2, 2, 60};
+
+    assert(diagonal_witness_keeps_generators(neg_2_3, 2, 0, inv_6, 1));
+    assert(diagonal_witness_keeps_generators(neg_2_3, 2, 1, inv_6, 1));
+    assert(diagonal_witness_keeps_generators(pos_2_neg_3, 2, 0, inv_6, 1));
+    assert(diagonal_witness_keeps_generators(mixed, 3, 0, inv_2_2_60, 3));
+    assert(diagonal_witness_keeps_generators(mixed, 3, 2, inv_2_2_60, 3));
+    return 0;
+}
+
+// The internal basis setter brings a spanning basis that is not in HNF to
+// HNF before its Smith form, so witness requests see the same basis.  A basis
+// that does not span the relation lattice makes witness requests fail closed
+// without changing the published generators.
+int test_internal_basis_setter_witnesses() {
+    using silex::detail::FiniteAbelianGroupAccess;
+    const slong inv_2_6[2] = {2, 6};
+    sflint::FmpzMat relations(3, 2);
+    set_entry_si(relations, 0, 0, 4);
+    set_entry_si(relations, 1, 1, 6);
+    set_entry_si(relations, 2, 0, 2);
+
+    silex::FiniteAbelianGroup reference;
+    assert(reference.set_relation_matrix(sflint::FmpzMatConstRef(relations)));
+    sflint::FmpzMat reference_generators(2, 2);
+    sflint::FmpzMat reference_coordinates(2, 2);
+    assert(snapshot_generator_state(reference, reference_generators,
+                                    reference_coordinates));
+
+    // A unimodular row mix of the HNF basis diag(2, 6).
+    sflint::FmpzMat mixed_basis(2, 2);
+    set_entry_si(mixed_basis, 0, 0, 2);
+    set_entry_si(mixed_basis, 0, 1, 6);
+    set_entry_si(mixed_basis, 1, 1, -6);
+    silex::FiniteAbelianGroup mixed;
+    assert(FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+            mixed, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(mixed_basis)));
+    assert(invariants_are_si(mixed, inv_2_6, 2));
+    assert(generator_state_equal(mixed, reference_generators,
+                                 reference_coordinates));
+    assert(generator_relation_identity(mixed));
+    assert(relation_kernel_identity(mixed));
+    assert(generator_state_equal(mixed, reference_generators,
+                                 reference_coordinates));
+
+    // diag(4, 6) spans an index-2 sublattice of the relation lattice.
+    sflint::FmpzMat short_basis(2, 2);
+    set_entry_si(short_basis, 0, 0, 4);
+    set_entry_si(short_basis, 1, 1, 6);
+    silex::FiniteAbelianGroup misuse;
+    assert(FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+            misuse, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(short_basis)));
+    const slong count = misuse.invariant_count();
+    sflint::FmpzMat generators(count, 2);
+    sflint::FmpzMat coordinates(2, count);
+    sflint::FmpzMat combinations(count, 3);
+    sflint::FmpzMat kernel(misuse.relation_kernel_count(), 3);
+    assert(snapshot_generator_state(misuse, generators, coordinates));
+    assert(!misuse.invariant_generator_relation_matrix(
+            sflint::FmpzMatRef(combinations)));
+    assert(!misuse.relation_kernel_matrix(sflint::FmpzMatRef(kernel)));
+    assert(misuse.is_defined());
+    assert(generator_state_equal(misuse, generators, coordinates));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -545,5 +648,7 @@ int main() {
     assert(test_nondiagonal_and_generator_relations() == 0);
     assert(test_trivial_snf_coordinates() == 0);
     assert(test_witness_request_keeps_generators() == 0);
+    assert(test_diagonal_witness_keeps_generators() == 0);
+    assert(test_internal_basis_setter_witnesses() == 0);
     return 0;
 }

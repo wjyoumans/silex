@@ -101,6 +101,7 @@ FiniteAbelianGroup& FiniteAbelianGroup::operator=(
 
 void FiniteAbelianGroup::swap(FiniteAbelianGroup& other) noexcept {
     relations_.swap(other.relations_);
+    hnf_basis_.swap(other.hnf_basis_);
     snf_.swap(other.snf_);
     left_transform_.swap(other.left_transform_);
     right_transform_.swap(other.right_transform_);
@@ -113,6 +114,7 @@ void FiniteAbelianGroup::swap(FiniteAbelianGroup& other) noexcept {
 
 void FiniteAbelianGroup::clear() noexcept {
     relations_ = flint::FmpzMat(0, 0);
+    hnf_basis_ = flint::FmpzMat(0, 0);
     snf_ = flint::FmpzMat(0, 0);
     left_transform_ = flint::FmpzMat(0, 0);
     right_transform_ = flint::FmpzMat(0, 0);
@@ -135,6 +137,8 @@ bool FiniteAbelianGroup::set(const FiniteAbelianGroup& other) noexcept {
     FiniteAbelianGroup copy;
     copy.relations_ = flint::FmpzMat(other.relation_count(),
                                      other.generator_count());
+    copy.hnf_basis_ = flint::FmpzMat(other.generator_count(),
+                                     other.generator_count());
     copy.snf_ = flint::FmpzMat(flint::fmpz_mat_nrows(other.snf_),
                                other.generator_count());
     copy.left_transform_ = flint::FmpzMat(
@@ -148,6 +152,8 @@ bool FiniteAbelianGroup::set(const FiniteAbelianGroup& other) noexcept {
 
     flint::fmpz_mat_set(flint::FmpzMatRef(copy.relations_),
                         flint::FmpzMatConstRef(other.relations_));
+    flint::fmpz_mat_set(flint::FmpzMatRef(copy.hnf_basis_),
+                        flint::FmpzMatConstRef(other.hnf_basis_));
     flint::fmpz_mat_set(flint::FmpzMatRef(copy.snf_),
                         flint::FmpzMatConstRef(other.snf_));
     flint::fmpz_mat_set(flint::FmpzMatRef(copy.left_transform_),
@@ -171,6 +177,8 @@ bool FiniteAbelianGroup::set(const FiniteAbelianGroup& other) noexcept {
 
 bool FiniteAbelianGroup::is_defined() const noexcept {
     return defined_ && flint::fmpz_mat_ncols(relations_) == generator_count_ &&
+           flint::fmpz_mat_nrows(hnf_basis_) == generator_count_ &&
+           flint::fmpz_mat_ncols(hnf_basis_) == generator_count_ &&
            flint::fmpz_mat_nrows(snf_) >= generator_count_ &&
            flint::fmpz_mat_ncols(snf_) == generator_count_ &&
            (!has_left_transform_ ||
@@ -236,6 +244,7 @@ bool FiniteAbelianGroup::set_relation_matrix_with_hnf_basis(
 
     FiniteAbelianGroup candidate;
     candidate.relations_ = flint::FmpzMat(rows, columns);
+    candidate.hnf_basis_ = flint::FmpzMat(columns, columns);
     candidate.snf_ = flint::FmpzMat(columns, columns);
     candidate.left_transform_ = flint::FmpzMat(0, 0);
     candidate.right_transform_ = flint::FmpzMat(columns, columns);
@@ -244,12 +253,22 @@ bool FiniteAbelianGroup::set_relation_matrix_with_hnf_basis(
 
     flint::fmpz_mat_set(flint::FmpzMatRef(candidate.relations_), relations);
 
+    // Store the basis in Hermite normal form: the witness path compares it
+    // with the HNF of the full relation matrix and reruns the Smith form on
+    // that same basis, so both runs must see identical input.
+    if (::fmpz_mat_is_in_hnf(hnf_basis.raw()) != 0) {
+        flint::fmpz_mat_set(flint::FmpzMatRef(candidate.hnf_basis_),
+                            hnf_basis);
+    } else {
+        ::fmpz_mat_hnf(candidate.hnf_basis_.raw(), hnf_basis.raw());
+    }
+
     flint::FmpzMat left_reduced(columns, columns);
     flint::fmpz_mat_snf_transform(
             flint::FmpzMatRef(candidate.snf_),
             flint::FmpzMatRef(left_reduced),
             flint::FmpzMatRef(candidate.right_transform_),
-            hnf_basis);
+            flint::FmpzMatConstRef(candidate.hnf_basis_));
 
     if (!snf_full_column_rank(flint::FmpzMatConstRef(candidate.snf_), columns) ||
         !inverse_unimodular(
@@ -274,34 +293,66 @@ bool FiniteAbelianGroup::ensure_left_transform() const noexcept {
         return true;
     }
 
-    // Expensive fallback: this reconstructs the original transformed SNF
-    // relation map for APIs that need witnesses in terms of stored rows.
-    flint::FmpzMat full_snf(relation_count(), generator_count());
-    flint::FmpzMat full_left(relation_count(), relation_count());
-    flint::FmpzMat full_right(generator_count(), generator_count());
-    flint::FmpzMat full_right_inv(generator_count(), generator_count());
-    flint::FmpzVec full_invariants(0);
-
-    flint::fmpz_mat_snf_transform(
-            flint::FmpzMatRef(full_snf),
-            flint::FmpzMatRef(full_left),
-            flint::FmpzMatRef(full_right),
-            flint::FmpzMatConstRef(relations_));
-
-    if (!snf_full_column_rank(flint::FmpzMatConstRef(full_snf),
-                              generator_count()) ||
-        !inverse_unimodular(full_right_inv,
-                            flint::FmpzMatConstRef(full_right)) ||
-        !set_invariants(full_invariants, flint::FmpzMatConstRef(full_snf),
-                        generator_count())) {
+    // Expensive fallback for APIs that need witnesses in terms of stored
+    // rows.  The published Smith form, invariants and generators come from
+    // the stored HNF basis and are never replaced here.  Take the HNF of the
+    // full relation matrix, T * relations = [H; 0] with T unimodular, fail
+    // closed unless H is the stored basis, and rerun the Smith form on H:
+    // U_H * H * V = S.  Then diag(U_H, I) * T * relations * V = [S; 0].
+    const slong m = relation_count();
+    const slong n = generator_count();
+    flint::FmpzMat hnf_full(m, n);
+    flint::FmpzMat hnf_left(m, m);
+    ::fmpz_mat_hnf_transform(hnf_full.raw(), hnf_left.raw(),
+                             relations_.raw());
+    if (trimmed_nonzero_rows(hnf_full.raw()) != n) {
         return false;
     }
 
-    snf_.swap(full_snf);
+    flint::FmpzMat hnf_top(n, n);
+    {
+        flint::FmpzMatConstWindow hnf_window(hnf_full, 0, 0, n, n);
+        flint::fmpz_mat_set(flint::FmpzMatRef(hnf_top),
+                            hnf_window.const_ref());
+    }
+    if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(hnf_top),
+                               flint::FmpzMatConstRef(hnf_basis_))) {
+        return false;
+    }
+
+    flint::FmpzMat basis_snf(n, n);
+    flint::FmpzMat basis_left(n, n);
+    flint::FmpzMat basis_right(n, n);
+    flint::fmpz_mat_snf_transform(
+            flint::FmpzMatRef(basis_snf),
+            flint::FmpzMatRef(basis_left),
+            flint::FmpzMatRef(basis_right),
+            flint::FmpzMatConstRef(hnf_top));
+    // Same input as the published Smith form; the left transform is only
+    // consistent with the published generators if S and V are reproduced.
+    if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(basis_snf),
+                               flint::FmpzMatConstRef(snf_)) ||
+        !flint::fmpz_mat_equal(flint::FmpzMatConstRef(basis_right),
+                               flint::FmpzMatConstRef(right_transform_))) {
+        return false;
+    }
+
+    flint::FmpzMat full_left(m, m);
+    {
+        flint::FmpzMatConstWindow hnf_left_top(hnf_left, 0, 0, n, m);
+        flint::FmpzMatWindow full_left_top(full_left, 0, 0, n, m);
+        flint::fmpz_mat_mul(full_left_top.ref(),
+                            flint::FmpzMatConstRef(basis_left),
+                            hnf_left_top.const_ref());
+    }
+    {
+        flint::FmpzMatConstWindow hnf_left_bottom(hnf_left, n, 0, m, m);
+        flint::FmpzMatWindow full_left_bottom(full_left, n, 0, m, m);
+        flint::fmpz_mat_set(full_left_bottom.ref(),
+                            hnf_left_bottom.const_ref());
+    }
+
     left_transform_.swap(full_left);
-    right_transform_.swap(full_right);
-    right_transform_inv_.swap(full_right_inv);
-    invariants_.swap(full_invariants);
     has_left_transform_ = true;
     return true;
 }

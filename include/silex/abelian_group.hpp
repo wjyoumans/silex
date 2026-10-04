@@ -68,6 +68,7 @@ private:
     bool ensure_left_transform() const noexcept;
 
     flint::FmpzMat relations_{0, 0};
+    flint::FmpzMat hnf_basis_{0, 0};
     mutable flint::FmpzMat snf_{0, 0};
     mutable flint::FmpzMat left_transform_{0, 0};
     mutable flint::FmpzMat right_transform_{0, 0};
