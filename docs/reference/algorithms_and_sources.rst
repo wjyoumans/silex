@@ -488,6 +488,49 @@ verifies itself, and proven unit publication through the class/unit gates
 re-derives the torsion subgroup of the order rather than trusting a stored
 one.
 
+The generation bound is ``factor_base_class_group_bound`` for a maximal
+order: every ideal class contains an integral ideal of norm at most the
+bound, so verifying that the prime ideals up to it lie in the factor base
+proves generation.  It is 1 in degree one, ``floor(sqrt(|d|/3))`` for
+imaginary quadratic and ``floor(sqrt(d))/2`` for real quadratic fields.  In
+degree ``n = r1 + 2 r2 >= 3`` it is the smallest of three proven bounds,
+which is valid because each of them is:
+
+* H. Zimmert, "Ideale kleiner Norm in Idealklassen und eine
+  Regulatorabschätzung", *Invent. Math.* 62 (1981), 367--380, Satz 2
+  (p. 372), used for ``n <= 20``: every ideal class contains an integral
+  ideal ``a`` with ``log(sqrt|d| / N(a)) >= L``, where
+  ``L = r1 (-psi((1+gamma)/2) - log Gamma(1/2+gamma) + log Gamma(1+gamma) +
+  (1/2) log pi) + r2 (-2 psi(1+gamma) + 2 log 2 + log(1/2+gamma) + log pi) -
+  2/(gamma-alpha) - log[(1+1/alpha) (1+1/gamma)^(-2)
+  (1+1/(2 gamma-alpha))^(-1)]`` for every ``gamma > alpha > 0``.  Silex
+  takes ``alpha = gamma - gamma(gamma+1)/sqrt(1+3 gamma+3 gamma^2)`` from
+  Bemerkung 1 (p. 373) and, for each signature, a fixed ``gamma`` in
+  hundredths that maximizes ``L`` over that grid; where Tabelle 1 (p. 368)
+  prints a ``gamma``, the tabulated value equals it, and ``exp(L)``
+  reproduces the printed constants.  The choice of ``gamma`` affects only
+  the size of the bound, not its validity.  Silex evaluates ``L`` with Arb
+  at 128 bits and uses the ceiling of the upper endpoint of
+  ``sqrt|d| exp(-L)``.
+* Minkowski's bound ``n! n^(-n) (4/pi)^r2 sqrt|d|`` (S. Lang, *Algebraic
+  Number Theory*, p. 119, Theorem 4, as quoted by Zimmert 1981, p. 367),
+  evaluated the same way.
+* The exact integer form ``max(1, ceil(n! ceil(sqrt|d|) 2^r2 / n^n))``, which
+  replaces ``4/pi`` with the larger ``2``.  This was the whole bound before
+  Zimmert's bound was adopted; it remains the fallback if an Arb evaluation
+  does not give a finite enclosure, and it guarantees that the bound never
+  exceeds its former value.
+
+Neither of the first two dominates: for ``(r1, r2) = (1, 1)`` Minkowski's
+constant ``27/(6 (4/pi))`` exceeds Zimmert's ``exp(L)``, so Minkowski's bound
+is the smaller one there.  For larger degrees Zimmert's bound is much smaller;
+for ``x^19 - x - 1`` it is 6135 against the former 43837247.  PARI 2.17.3
+``src/basemath/buch3.c:zimmertbound`` uses a table of constants larger than
+the optimum of Satz 2 for every signature, so its bounds are smaller; Silex
+does not use that table because its derivation is not traced to a source.
+``test/t-generation-bound.cpp`` pins Zimmert's bound against an independent
+evaluation of Satz 2 and the combined bound for a corpus of fields.
+
 The analytic index bound is the ceiling of the rigorous upper endpoint of the
 quotient ``h_cand R_cand / hR``.  When the analytic ``hR`` is correct and the
 factor base generates the class group, this quotient is the combined

@@ -12,6 +12,17 @@ that release is prepared.
 Changed
 -------
 
+- ``factor_base_class_group_bound`` now returns a smaller proven bound in
+  degree 3 and above: the smallest of Zimmert's bound (Zimmert 1981,
+  Satz 2, for degree at most 20), Minkowski's bound with ``(4/pi)^r2``, and
+  the former bound, which used ``2^r2`` in place of ``(4/pi)^r2``.  The
+  bound never exceeds its former value; for example it drops from 463 to
+  295 for ``x^3 + x + 200`` and from 43837247 to 6135 for ``x^19 - x - 1``.
+  Proven class/unit computations therefore verify factor-base generation
+  over fewer prime ideals; their results and certification labels are
+  unchanged.  Degree one and quadratic bounds are unchanged.  See
+  :doc:`../reference/algorithms_and_sources`.
+
 - The index-bounded relation-saturation pass of class/unit validation now
   reports ``relation_saturation_status()`` as ``verified`` only when its
   index bound holds without GRH or verified records cover every prime
