@@ -616,8 +616,43 @@ character is ``sqrt(q)`` for even and ``i sqrt(q)`` for odd characters
 (Davenport, *Multiplicative Number Theory*, Chapters 2 and 9); and the
 incomplete gamma values are the closed forms ``Gamma(1, z) = exp(-z)``,
 ``Gamma(1/2, z) = sqrt(pi) erfc(sqrt(z))`` and ``Gamma(0, z) = E_1(z)``
-(DLMF 6.2 and 8.4), evaluated with arb ball functions.  When the ``L``-value
-ball is not finite and positive, the quadratic route falls back to
+(DLMF 6.2 and 8.4), evaluated with arb ball functions at block anchors and
+obtained by Taylor stepping between them, where FLINT evaluates every term
+from scratch.
+
+The stepping is Silex's own evaluator and uses no FLINT code.  Write
+``a = (s + parity) / 2`` in ``{0, 1/2, 1}``, ``z_n = pi n^2 / q``, and for an
+anchor ``z = z_{n0}`` put ``K = exp(-z) z^(a-1)`` and ``v = z_n - z =
+(pi / q) (n - n0) (n + n0) >= 0``.  Substituting ``u = z + w`` in
+``Gamma(a, z) - Gamma(a, z + v) = int_z^(z+v) u^(a-1) exp(-u) du`` and
+expanding ``exp(-w) (1 + w / z)^(a-1)`` with the binomial series (DLMF 4.6.7,
+absolutely convergent for ``0 <= w < z``) gives, for ``0 <= v < z`` (any
+``v >= 0`` when ``a = 1``)::
+
+    Gamma(a, z + v) = Gamma(a, z) + K sum_{m >= 0} p_m (-v)^(m+1) / (m + 1),
+    p_m = sum_{j=0..m} |binom(a - 1, j)| z^(-j) / (m - j)!,
+
+because ``binom(a - 1, j)`` is ``(-1)^j`` for ``a = 0``, ``(-1)^j binom(2j, j)
+/ 4^j`` for ``a = 1/2``, and zero for ``j >= 1`` when ``a = 1``.  In all three
+cases ``|binom(a - 1, j)| <= 1``, so with ``rho = max(1, 1 / z)`` (``rho = 1``
+for ``a = 1``) one has ``0 <= p_m < e rho^m``, and for ``rho v < 1`` (which
+gives ``v < z`` when ``a < 1``) the terms with ``m >= M`` sum to at most
+``|K| e v (rho v)^M / (1 - rho v)`` (using ``1 / (m + 1) <= 1`` and the
+geometric series).  A block anchored at ``n0`` covers ``n0
+<= n <= n0 + B``, so ``v <= v_max = (pi / q) B (2 n0 + B)``.  Within it each
+value is the anchor ball plus the degree-``M`` polynomial in ``-v`` evaluated
+in ball arithmetic, with the truncation bound at ``v_max`` added to the
+radius; that bound is computed in upward-rounded ``mag`` arithmetic from an
+upper bound of ``|K|``, of ``v_max`` and of ``rho``, and a block is used only
+if these bounds give ``rho v_max < 1``.  The first anchor is a direct
+evaluation and each later anchor is the stepped value at the end of the
+previous block, so by induction every value is a ball containing the exact
+``Gamma(a, z_n)``.  ``B`` (so that ``rho v_max`` is about ``2^-10``), ``M``,
+and the extra precision carried by the anchors are chosen in floating point
+and affect only the width and the cost, not the validity, of the enclosure;
+where no block of at least four steps fits, the value is evaluated directly.
+
+When the ``L``-value ball is not finite and positive, the quadratic route falls back to
 Belabas--Friedman, and the value is then GRH-conditional like any other;
 certification uses the route that actually produced the value, not the field
 type.  Every other ``hR`` comes from the Belabas--Friedman evaluation (K.

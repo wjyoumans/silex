@@ -159,12 +159,11 @@ void check_large_imaginary_discriminant(slong d, slong class_number) {
     assert(radius_lt_2exp_si(h, -2));
 }
 
-// Real D = 1000000000061: the L(1, chi) enclosure contains 2 h R / sqrt(D)
-// with h = 1 and R = 236155.816169219892016..., taken from an independent
-// class-group and regulator computation.
-void check_large_real_discriminant() {
-    const slong d = 1000000000061;
-    const ulong q = 1000000000061UL;
+// Real D > 0 with class number one: the L(1, chi) enclosure contains
+// 2 R / sqrt(D), with h = 1 and the regulator R (a decimal ball) taken from
+// an independent class-group and regulator computation.
+void check_large_real_discriminant(slong d, const char* regulator) {
+    const ulong q = static_cast<ulong>(d);
     sflint::Fmpz discriminant;
     sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
     check_large_character(discriminant, q);
@@ -174,8 +173,7 @@ void check_large_real_discriminant() {
 
     sflint::Arb expected;
     sflint::Arb t;
-    assert(::arb_set_str(expected.raw(), "236155.816169219892016 +/- 1e-15",
-                         128) == 0);
+    assert(::arb_set_str(expected.raw(), regulator, 128) == 0);
     sflint::arb_mul_2exp_si(expected, expected, 1);
     sflint::arb_sqrt_ui(t, q, 128);
     sflint::arb_div(expected, expected, t, 128);
@@ -351,11 +349,23 @@ int main() {
     check_large_imaginary_discriminant(-10000000019, 39809);
     check_public_class_unit_with_zeta();
 
-    // |D| about 1e12 takes tens of seconds to minutes; opt in with
+    // |D| about 1e11 runs Taylor stepping of the incomplete gamma values over
+    // most of both sums, including Gamma(0, z) = E_1(z), which only real D
+    // use (D = -10000000019 above covers Gamma(1, z) and Gamma(1/2, z)).
+    // h = 1 and R = 468981.557709373150346..., taken from an independent
+    // class-group and regulator computation with an unconditional
+    // class-group certificate.
+    check_large_real_discriminant(100000000057,
+                                  "468981.557709373150346155393 +/- 1e-21");
+
+    // |D| about 1e12 is slow; opt in with
     // SILEX_TEST_SLOW=1.
     if (slow_tests_enabled()) {
         check_large_imaginary_discriminant(-1000000000039, 1113261);
-        check_large_real_discriminant();
+        // h = 1 and R = 236155.816169219892016..., taken from an independent
+        // class-group and regulator computation.
+        check_large_real_discriminant(1000000000061,
+                                      "236155.816169219892016 +/- 1e-15");
     }
     return 0;
 }

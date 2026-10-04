@@ -7,6 +7,7 @@
 #include <silex/diagnostics.hpp>
 #include <silex/factor_base.hpp>
 #include <silex/flint/arb.hpp>
+#include <silex/flint/arb_vec.hpp>
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/nmod_poly.hpp>
 #include <silex/flint/nmod_poly_factor.hpp>
@@ -324,10 +325,327 @@ void quadratic_afe_gamma_upper(flint::Arb& out,
     }
 }
 
+// Gamma(shift / 2, z_n) for z_n = pi n^2 / q directly from the closed forms
+// above: z_n at precision `zprec` (FLINT's wp2), the value at `prec`.
+void quadratic_afe_gamma_direct(flint::Arb& out,
+                                ulong shift,
+                                ulong n,
+                                ulong q,
+                                slong prec,
+                                slong zprec) noexcept {
+    flint::Arb z;
+    ::arb_const_pi(z.raw(), zprec);
+    ::arb_mul_ui(z.raw(), z.raw(), n, zprec);
+    ::arb_mul_ui(z.raw(), z.raw(), n, zprec);
+    ::arb_div_ui(z.raw(), z.raw(), q, zprec);
+    quadratic_afe_gamma_upper(out, shift, z, prec);
+}
+
+// Taylor stepping for the incomplete gamma values of the sums below.  This
+// evaluator is Silex's own; it is not derived from FLINT, whose
+// `acb_dirichlet_fmpq_sum_afe` evaluates every Gamma(a, z_n) from scratch.
+//
+// Identity.  Let a = shift / 2 in {0, 1/2, 1}, z > 0 and K = e^{-z} z^{a-1}.
+// Substituting u = z + w gives u^{a-1} e^{-u} = K e^{-w} (1 + w / z)^{a-1},
+// and for 0 <= w < z (any w >= 0 when a = 1)
+//   e^{-w} (1 + w / z)^{a-1} = sum_{m >= 0} (-1)^m p_m w^m,
+//   p_m = sum_{j=0}^{m} |binom(a - 1, j)| z^{-j} / (m - j)!,
+// because binom(a - 1, j) has sign (-1)^j for a in {0, 1/2} (it is (-1)^j
+// for a = 0 and (-1)^j binom(2j, j) / 4^j for a = 1/2) and vanishes for
+// j >= 1 when a = 1 (DLMF 4.6.7 for the binomial series, absolutely
+// convergent for w < z).  Integrating termwise over [0, v] for 0 <= v < z,
+//   Gamma(a, z + v) = Gamma(a, z) - int_z^{z+v} u^{a-1} e^{-u} du
+//                   = Gamma(a, z) + K sum_{m >= 0} p_m (-v)^{m+1} / (m + 1).
+//
+// Truncation bound.  |binom(a - 1, j)| <= 1 in all three cases, so with
+// rho = max(1, 1 / z) (rho = 1 for a = 1) and z^{-j} <= rho^m for j <= m,
+//   0 <= p_m <= rho^m sum_{i=0}^{m} 1 / i! < e rho^m.
+// For rho v < 1 (which implies v < z when a < 1) the terms with m >= M sum to
+// at most
+//   |K| e v (rho v)^M / (1 - rho v)
+// in absolute value, using 1 / (m + 1) <= 1 and the geometric series.
+//
+// Scheme.  The indices n are split into consecutive blocks.  A block
+// anchored at n0 with z = z_{n0} covers n0 <= n <= n0 + B, so every
+// v = z_n - z = (pi / q) (n - n0) (n + n0) satisfies v <= v_max with
+// v_max = (pi / q) B (2 n0 + B).  B is chosen in floating point so that
+// rho v_max <= 2^-10, and M so that the truncation bound at v_max meets the
+// anchor tolerance; neither choice affects rigor, only width and cost.  The
+// anchor value Gamma(a, z_{n0}) is either computed directly (closed forms,
+// arb special functions) or, chaining blocks, is the value at the last
+// index n0 + B of the previous block.  Within a block, Gamma(a, z_n) is the
+// anchor value plus the degree-M polynomial in -v (Horner's rule) plus the
+// truncation bound as radius.
+//
+// Error analysis.  Every quantity is an arb ball: z_{n0} and v from
+// pi / q and exact integers, K from `arb_exp`, `arb_rsqrt` and `arb_inv`,
+// p_m from exact rational constants (1 / i! and binom(2j, j) / 4^j) with
+// `arb_dot`, the coefficients K p_m / (m + 1), and the Horner evaluation.
+// Each ball contains the exact value of the quantity it stands for, at any
+// precision, by the inclusion property of ball arithmetic.  The truncation
+// bound is computed in upward-rounded `mag` arithmetic from an upper bound of
+// |K|, an upper bound of v_max, and an upper bound of rho (from a lower bound
+// of z_{n0}); a block is not used unless rho v_max < 1 holds for these
+// bounds, so the hypotheses of the bound hold for the exact z_{n0}.  Adding
+// the bound to the radius therefore gives a ball containing
+// Gamma(a, z_n) whenever the anchor ball contains Gamma(a, z_{n0}); by
+// induction over the chained anchors, which start from a direct evaluation,
+// every value is a valid enclosure.  The precisions only control the width:
+// the anchors carry `guard` extra bits, a bound for the binary length of the
+// number of chained anchors, so that the radii they pass on to the later
+// terms stay within the per-term tolerance of the direct evaluation.
+constexpr slong quadratic_afe_step_max_terms = 64;
+constexpr ulong quadratic_afe_step_min_block = 4;
+constexpr ulong quadratic_afe_step_max_block = UWORD(1) << 20;
+constexpr double quadratic_afe_step_log2_ratio = 10.0;
+
+class QuadraticAfeGammaStepper {
+public:
+    QuadraticAfeGammaStepper(ulong shift, ulong q) noexcept
+        : shift_(shift),
+          q_(q),
+          inverse_factorial_(quadratic_afe_step_max_terms),
+          binomial_(quadratic_afe_step_max_terms),
+          weight_(quadratic_afe_step_max_terms),
+          coefficient_(quadratic_afe_step_max_terms) {
+    }
+
+    bool active() const noexcept {
+        return active_;
+    }
+
+    ulong next_anchor() const noexcept {
+        return next_anchor_;
+    }
+
+    void stop() noexcept {
+        active_ = false;
+    }
+
+    // Floating-point choice of the block length B and the number of terms M
+    // for a block anchored at n, with anchor tolerance 2^target.  Returns
+    // false when the block would be shorter than the minimum or need more
+    // than the maximum number of terms.
+    bool plan(ulong n, double target) noexcept {
+        const double pi = 3.1415926535897932385;
+        const double inv_log2 = 1.4426950408889634074;
+        const double qd = static_cast<double>(q_);
+        const double nd = static_cast<double>(n);
+        const double z = pi * nd * nd / qd;
+        const double rho = shift_ == 2 ? 1.0 : FLINT_MAX(1.0, 1.0 / z);
+        // B (2 n + B) <= y, solved without cancellation.
+        const double y = std::ldexp(qd / (pi * rho),
+                                    -static_cast<int>(
+                                            quadratic_afe_step_log2_ratio));
+        double b = std::floor(y / (std::sqrt(nd * nd + y) + nd));
+        if (!(b >= static_cast<double>(quadratic_afe_step_min_block))) {
+            return false;
+        }
+        b = FLINT_MIN(b, static_cast<double>(quadratic_afe_step_max_block));
+        const double v = pi / qd * b * (2.0 * nd + b);
+        const double log2_rho_v = std::log2(rho * v);
+        const double a = 0.5 * static_cast<double>(shift_);
+        const double log2_k = (-z + (a - 1.0) * std::log(z)) * inv_log2;
+        const double need = log2_k + inv_log2 + std::log2(v) + 1.0 - target;
+        double terms = need <= 0.0 ? 1.0 : std::ceil(need / -log2_rho_v);
+        terms = FLINT_MAX(terms, 1.0);
+        if (!(log2_rho_v < 0.0) ||
+            !(terms <= static_cast<double>(quadratic_afe_step_max_terms))) {
+            return false;
+        }
+        block_ = static_cast<ulong>(b);
+        terms_ = static_cast<slong>(terms);
+        log2_k_ = log2_k;
+        log2_rho_ = std::log2(rho);
+        return true;
+    }
+
+    // Starts the block planned by `plan(n, ...)`, anchored at n with
+    // anchor_value containing Gamma(a, z_n); coefficients at `prec`.  Returns
+    // false, leaving the stepper inactive, when the rigorous bounds do not
+    // give rho v_max < 1.
+    bool start(ulong n, const flint::Arb& anchor_value, slong prec) noexcept {
+        active_ = false;
+        ensure_tables(prec + 32);
+
+        flint::Arb z;
+        flint::Arb t;
+        flint::Arb inv_z;
+        flint::Arb power;
+        const slong zprec = prec + 24;
+        ::arb_const_pi(z.raw(), zprec);
+        ::arb_mul_ui(z.raw(), z.raw(), n, zprec);
+        ::arb_mul_ui(z.raw(), z.raw(), n, zprec);
+        ::arb_div_ui(z.raw(), z.raw(), q_, zprec);
+
+        // K = e^{-z} z^{a-1}.
+        ::arb_neg(t.raw(), z.raw());
+        ::arb_exp(k_.raw(), t.raw(), prec);
+        if (shift_ != 2) {
+            ::arb_inv(inv_z.raw(), z.raw(), prec);
+        }
+        if (shift_ == 1) {
+            ::arb_rsqrt(t.raw(), z.raw(), prec);
+            ::arb_mul(k_.raw(), k_.raw(), t.raw(), prec);
+        } else if (shift_ == 0) {
+            ::arb_mul(k_.raw(), k_.raw(), inv_z.raw(), prec);
+        }
+
+        // Coefficients K p_m / (m + 1).
+        arb_ptr weight = weight_.data();
+        arb_srcptr inverse_factorial = inverse_factorial_.data();
+        arb_ptr coefficient = coefficient_.data();
+        ::arb_one(power.raw());
+        for (slong m = 0; m < terms_; ++m) {
+            if (shift_ == 2) {
+                ::arb_set(t.raw(), inverse_factorial + m);
+            } else {
+                if (m > 0) {
+                    ::arb_mul(power.raw(), power.raw(), inv_z.raw(), prec);
+                }
+                if (shift_ == 1) {
+                    ::arb_mul(weight + m, power.raw(), binomial_.data() + m,
+                              prec);
+                } else {
+                    ::arb_set(weight + m, power.raw());
+                }
+                ::arb_dot(t.raw(), nullptr, 0, weight, 1,
+                          inverse_factorial + m, -1, m + 1, prec);
+            }
+            ::arb_mul(t.raw(), t.raw(), k_.raw(), prec);
+            ::arb_div_ui(coefficient + m, t.raw(), static_cast<ulong>(m + 1),
+                         prec);
+        }
+
+        // Truncation bound |K| e v_max (rho v_max)^M / (1 - rho v_max).
+        MagValue v_max;
+        MagValue rho;
+        MagValue rho_v;
+        MagValue u;
+        ::arb_mul_ui(t.raw(), c2_.raw(), block_, prec);
+        ::arb_mul_ui(t.raw(), t.raw(), 2 * n + block_, prec);
+        ::arb_get_mag(v_max.raw(), t.raw());
+        mag_one(rho.raw());
+        if (shift_ != 2) {
+            ::arb_get_mag_lower(u.raw(), z.raw());
+            mag_inv(u.raw(), u.raw());
+            mag_max(rho.raw(), rho.raw(), u.raw());
+        }
+        mag_mul(rho_v.raw(), rho.raw(), v_max.raw());
+        if (mag_cmp_2exp_si(rho_v.raw(), 0) >= 0) {
+            return false;
+        }
+        ::arb_get_mag(truncation_.raw(), k_.raw());
+        mag_set_ui(u.raw(), 3);  // e < 3
+        mag_mul(truncation_.raw(), truncation_.raw(), u.raw());
+        mag_mul(truncation_.raw(), truncation_.raw(), v_max.raw());
+        mag_pow_ui(u.raw(), rho_v.raw(), static_cast<ulong>(terms_));
+        mag_mul(truncation_.raw(), truncation_.raw(), u.raw());
+        mag_one(u.raw());
+        mag_sub_lower(u.raw(), u.raw(), rho_v.raw());
+        mag_div(truncation_.raw(), truncation_.raw(), u.raw());
+
+        ::arb_set(anchor_value_.raw(), anchor_value.raw());
+        coefficient_prec_ = prec;
+        anchor_ = n;
+        next_anchor_ = n + block_;
+        active_ = true;
+        return true;
+    }
+
+    // Gamma(a, z_n) for anchor < n <= next_anchor, to absolute tolerance
+    // about 2^target, rounded to `prec`.
+    void evaluate(flint::Arb& out, ulong n, double target,
+                  slong prec) noexcept {
+        const double inv_log2 = 1.4426950408889634074;
+        const ulong d1 = n - anchor_;
+        const ulong d2 = n + anchor_;
+        const double v = 3.1415926535897932385 / static_cast<double>(q_) *
+                         static_cast<double>(d1) * static_cast<double>(d2);
+        const double log2_v = std::log2(v);
+        const double log2_rho_v = log2_v + log2_rho_;
+        // Bits needed by the term of degree m + 1: |K| e v (rho v)^m
+        // against 2^target, with a few bits for the M roundings.
+        const double base = log2_k_ + inv_log2 + log2_v - target +
+                            std::log2(static_cast<double>(terms_)) + 4.0;
+        const auto term_prec = [&](slong m) noexcept {
+            const double bits =
+                    std::ceil(base + static_cast<double>(m) * log2_rho_v);
+            if (!(bits > 30.0)) {
+                return WORD(30);
+            }
+            return FLINT_MIN(static_cast<slong>(bits), coefficient_prec_);
+        };
+
+        arb_srcptr coefficient = coefficient_.data();
+        const slong prec0 = term_prec(0);
+        ::arb_mul_ui(t_.raw(), c2_.raw(), d1, prec0 + 8);
+        ::arb_mul_ui(t_.raw(), t_.raw(), d2, prec0 + 8);
+        ::arb_neg(t_.raw(), t_.raw());
+
+        ::arb_set_round(acc_.raw(), coefficient + terms_ - 1,
+                        term_prec(terms_ - 1));
+        for (slong m = terms_ - 2; m >= 0; --m) {
+            const slong p = term_prec(m);
+            ::arb_mul(acc_.raw(), acc_.raw(), t_.raw(), p);
+            ::arb_add(acc_.raw(), acc_.raw(), coefficient + m, p);
+        }
+        ::arb_mul(acc_.raw(), acc_.raw(), t_.raw(), prec0);
+        ::arb_add(out.raw(), anchor_value_.raw(), acc_.raw(), prec);
+        ::arb_add_error_mag(out.raw(), truncation_.raw());
+    }
+
+private:
+    // pi / q, 1 / i! and binom(2j, j) / 4^j at precision at least `prec`.
+    void ensure_tables(slong prec) noexcept {
+        if (prec <= table_prec_) {
+            return;
+        }
+        table_prec_ = prec + 64;
+        ::arb_const_pi(c2_.raw(), table_prec_);
+        ::arb_div_ui(c2_.raw(), c2_.raw(), q_, table_prec_);
+        arb_ptr inverse_factorial = inverse_factorial_.data();
+        arb_ptr binomial = binomial_.data();
+        ::arb_one(inverse_factorial);
+        ::arb_one(binomial);
+        for (slong j = 1; j < quadratic_afe_step_max_terms; ++j) {
+            const ulong uj = static_cast<ulong>(j);
+            ::arb_div_ui(inverse_factorial + j, inverse_factorial + j - 1, uj,
+                         table_prec_);
+            ::arb_mul_ui(binomial + j, binomial + j - 1, 2 * uj - 1,
+                         table_prec_);
+            ::arb_div_ui(binomial + j, binomial + j, 2 * uj, table_prec_);
+        }
+    }
+
+    ulong shift_;
+    ulong q_;
+    flint::ArbVec inverse_factorial_;
+    flint::ArbVec binomial_;
+    flint::ArbVec weight_;
+    flint::ArbVec coefficient_;
+    flint::Arb c2_;
+    flint::Arb k_;
+    flint::Arb anchor_value_;
+    flint::Arb t_;
+    flint::Arb acc_;
+    MagValue truncation_;
+    slong table_prec_ = 0;
+    slong coefficient_prec_ = 0;
+    slong terms_ = 1;
+    ulong block_ = 0;
+    ulong anchor_ = 0;
+    ulong next_anchor_ = 0;
+    double log2_k_ = 0.0;
+    double log2_rho_ = 0.0;
+    bool active_ = false;
+};
+
 // FLINT `acb_dirichlet_fmpq_sum_afe` at s in {0, 1} for a real character:
 //   sum_{n >= 1} chi(n) Gamma((s + parity) / 2, pi n^2 / q) / n^s,
 // truncated at the first n whose tail bound is below `abs_tol`, which is then
-// added to the radius.
+// added to the radius.  The gamma values come from the Taylor stepping above
+// where it applies, and directly from the closed forms otherwise.
 void quadratic_afe_sum(flint::Arb& res,
                        flint::FmpzConstRef discriminant,
                        ulong q,
@@ -340,9 +658,23 @@ void quadratic_afe_sum(flint::Arb& res,
     const double aa = 0.5 * static_cast<double>(shift);
     const double abs_tol_mag = mag_get_d_log2_approx(abs_tol);
 
+    // Extra bits for the chained anchors: the binary length of an estimate
+    // of the truncation index, which bounds the number of anchors.  The tail
+    // bound is about e^{-pi n^2 / q} (1 + q / pi) 2, so the loop stops near
+    // pi n^2 / q = -abs_tol_mag log(2) + log(1 + q / pi) + log(2).
+    const double qd = static_cast<double>(q);
+    const double z_end = FLINT_MAX(
+            1.0, (1.0 - abs_tol_mag) * 0.69314718055994530942 +
+                         std::log1p(qd / 3.1415926535897932385));
+    const double n_end = std::sqrt(qd * z_end / 3.1415926535897932385) + 2.0;
+    const slong guard =
+            n_end < 9.0e15 ? static_cast<slong>(FLINT_BIT_COUNT(
+                                     static_cast<ulong>(n_end))) + 2
+                           : 64;
+
     MagValue err;
-    flint::Arb z;
     flint::Arb term;
+    QuadraticAfeGammaStepper stepper(shift, q);
 
     ::arb_zero(res.raw());
 
@@ -354,9 +686,6 @@ void quadratic_afe_sum(flint::Arb& res,
         }
 
         const int chi = detail::quadratic_character(discriminant, n);
-        if (chi == 0) {
-            continue;
-        }
 
         // Working precision of FLINT's term: Gamma(a, z) n^-s to `abs_tol`.
         const double nd = static_cast<double>(n);
@@ -383,11 +712,40 @@ void quadratic_afe_sum(flint::Arb& res,
         }
         wp2 = FLINT_MAX(wp2, 30);
 
-        ::arb_const_pi(z.raw(), wp2);
-        ::arb_mul_ui(z.raw(), z.raw(), n, wp2);
-        ::arb_mul_ui(z.raw(), z.raw(), n, wp2);
-        ::arb_div_ui(z.raw(), z.raw(), q, wp2);
-        quadratic_afe_gamma_upper(term, shift, z, wp);
+        // Absolute tolerance of Gamma(a, z_n) matching `wp`, and the tighter
+        // one of the anchors.
+        const double target = abs_tol_mag - 5.0 - ns_mag;
+        const double anchor_target = target - static_cast<double>(guard);
+        const slong anchor_wp = wp + guard;
+
+        bool have_term = false;
+        if (stepper.active() && n == stepper.next_anchor()) {
+            stepper.evaluate(term, n, anchor_target, anchor_wp);
+            have_term = true;
+            if (!stepper.plan(n, anchor_target) ||
+                !stepper.start(n, term, anchor_wp)) {
+                stepper.stop();
+            }
+        } else if (stepper.active()) {
+            if (chi != 0) {
+                stepper.evaluate(term, n, target, wp);
+                have_term = true;
+            }
+        } else if (stepper.plan(n, anchor_target)) {
+            quadratic_afe_gamma_direct(term, shift, n, q, anchor_wp,
+                                       wp2 + guard);
+            have_term = true;
+            if (!stepper.start(n, term, anchor_wp)) {
+                stepper.stop();
+            }
+        }
+
+        if (chi == 0) {
+            continue;
+        }
+        if (!have_term) {
+            quadratic_afe_gamma_direct(term, shift, n, q, wp, wp2);
+        }
         if (s == 1) {
             ::arb_div_ui(term.raw(), term.raw(), n, wp);
         }
@@ -459,8 +817,9 @@ bool quadratic_l1_afe(flint::Arb& out,
 // 2^44 (about 1.76e13).  The approximate functional equation does work
 // growing like sqrt(|D| prec), and the evaluation runs inside noexcept calls
 // that cannot be interrupted, so without a cap a field with |D| near 2^64
-// could run for hours.  At 2^44 the measured cost at |D| about 1e12 (about
-// 25 s imaginary, 86 s real at default precision) scales to a few minutes.
+// could run for hours.  At 2^44 the number of terms is about four times
+// (sqrt(2^44 / 1e12) < 4.2) that at |D| about 1e12, which the slow tests
+// exercise.
 // The cap depends on |D| only, not on precision, so whether a field has the
 // unconditional route stays a property of the order.  Fields at or above it
 // fall back to Belabas-Friedman like any field the route does not handle.
