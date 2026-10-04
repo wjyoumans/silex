@@ -773,6 +773,13 @@ inline constexpr ExactClassUnitExpectation kQuinticDisc57895ClassUnit{
         kTrivialClassGroup, 3, 2, 4.43153392698, 4.43153392702};
 inline constexpr ExactClassUnitExpectation kSexticSmallClassUnit{
         kTrivialClassGroup, 3, 2, 0.74063147262, 0.74063147264};
+// x^3 + x + 200 (discriminant -1080004) and x^2 - 100003 use the same
+// sourcing: GP 2.17.4 bnfinit data certified with bnfcertify.  The regulators
+// are 297.835315655189... and 400.424111478426... respectively.
+inline constexpr ExactClassUnitExpectation kCubicDisc1080004ClassUnit{
+        kC2ClassGroup, 1, 2, 297.835315654, 297.835315657};
+inline constexpr ExactClassUnitExpectation kRealQuadratic100003ClassUnit{
+        kTrivialClassGroup, 1, 2, 400.424111477, 400.424111480};
 inline constexpr ExactClassUnitExpectation kRandomCubicClassUnit{
         kTrivialClassGroup, 1, 2, 8.29429929651, 8.29429929655};
 
@@ -1052,12 +1059,20 @@ bool validate_exact_unit_output(
     if (free_generators_available &&
         evaluated_generators.size() ==
                 static_cast<std::size_t>(expected.unit_rank)) {
+        // A unit with a conjugate near exp(-R) needs a working precision of
+        // a few multiples of R / log 2 bits before its logarithmic embedding
+        // can be enclosed, so retry at doubled precision rather than fixing
+        // one precision for every field.
         silex::EmbeddingContext embeddings(*field);
-        recomputed_regulator_available = silex::unit_regulator(
-                sflint::ArbRef(recomputed_regulator), embeddings,
-                silex::ElementSpan(evaluated_generators.data(),
-                                   evaluated_generators.size()),
-                128);
+        for (slong precision = 128;
+             !recomputed_regulator_available && precision <= 4096;
+             precision *= 2) {
+            recomputed_regulator_available = silex::unit_regulator(
+                    sflint::ArbRef(recomputed_regulator), embeddings,
+                    silex::ElementSpan(evaluated_generators.data(),
+                                       evaluated_generators.size()),
+                    precision);
+        }
     }
     state.counters["recomputed_regulator_available"] =
             recomputed_regulator_available ? 1.0 : 0.0;
@@ -2450,6 +2465,21 @@ void BM_class_unit_0_1_0_cubic_disc23_proven(benchmark::State& state) {
             kCubicDisc23ClassUnit);
 }
 
+void BM_class_unit_0_1_0_real_quadratic_100003_proven(
+        benchmark::State& state) {
+    BM_class_unit_0_1_0_from_quadratic(
+            state, 100003, silex::CertificationMode::proven, 20000,
+            kRealQuadratic100003ClassUnit);
+}
+
+void BM_class_unit_0_1_0_cubic_disc1080004_proven(benchmark::State& state) {
+    sflint::FmpqPoly polynomial;
+    set_cubic_polynomial(polynomial, 1, 200);
+    BM_class_unit_0_1_0_from_poly(
+            state, polynomial, silex::CertificationMode::proven, 20000,
+            kCubicDisc1080004ClassUnit);
+}
+
 void BM_class_unit_0_1_0_cubic_trivial_proven(
         benchmark::State& state) {
     sflint::FmpqPoly polynomial;
@@ -2656,10 +2686,9 @@ void BM_class_unit_0_1_0_sextic_proven(benchmark::State& state) {
 // the field of the proven row named in its comment, with the same options
 // and expectation, so the pair differs only in the requested certification.
 // The row fails unless both published objects carry exactly the grh label
-// (see valid_class_unit_result).  Only fields that succeed in grh mode are
-// listed: a real quadratic field or a field of degree three or more fails
-// closed in grh mode unless factor-base generation is verified to the
-// Minkowski-type bound, and such fields have no grh row here.
+// (see valid_class_unit_result).  In grh mode factor-base generation may be
+// GRH-conditional, so these rows include fields whose generation is verified
+// only below the Minkowski-type bound.
 
 // Pairs with BM_class_unit_0_1_0_imag_quadratic_proven.
 void BM_class_unit_0_1_0_imag_quadratic_grh(benchmark::State& state) {
@@ -2693,6 +2722,22 @@ void BM_class_unit_0_1_0_cubic_nontrivial_grh(benchmark::State& state) {
             kCubicNontrivialClassUnit, true);
 }
 
+// Pairs with BM_class_unit_0_1_0_real_quadratic_100003_proven.
+void BM_class_unit_0_1_0_real_quadratic_100003_grh(benchmark::State& state) {
+    BM_class_unit_0_1_0_from_quadratic(
+            state, 100003, silex::CertificationMode::grh, 20000,
+            kRealQuadratic100003ClassUnit);
+}
+
+// Pairs with BM_class_unit_0_1_0_cubic_disc1080004_proven.
+void BM_class_unit_0_1_0_cubic_disc1080004_grh(benchmark::State& state) {
+    sflint::FmpqPoly polynomial;
+    set_cubic_polynomial(polynomial, 1, 200);
+    BM_class_unit_0_1_0_from_poly(
+            state, polynomial, silex::CertificationMode::grh, 20000,
+            kCubicDisc1080004ClassUnit);
+}
+
 // Pairs with BM_class_unit_0_1_0_quartic_cyclotomic_proven.
 void BM_class_unit_0_1_0_quartic_cyclotomic_grh(benchmark::State& state) {
     sflint::FmpqPoly polynomial;
@@ -2712,6 +2757,15 @@ void BM_class_unit_0_1_0_quartic_noncyclotomic_grh(
             kQuarticNoncyclotomicClassUnit, false, true);
 }
 
+// Pairs with BM_class_unit_0_1_0_quartic_disc1412343_proven.
+void BM_class_unit_0_1_0_quartic_disc1412343_grh(benchmark::State& state) {
+    sflint::FmpqPoly polynomial;
+    set_quartic_polynomial(polynomial, -8, 3, 1, 4);
+    BM_class_unit_0_1_0_from_poly(
+            state, polynomial, silex::CertificationMode::grh, 20000,
+            kQuarticDisc1412343ClassUnit, false, true);
+}
+
 // Pairs with BM_class_unit_0_1_0_quintic_proven.
 void BM_class_unit_0_1_0_quintic_grh(benchmark::State& state) {
     sflint::FmpqPoly polynomial;
@@ -2719,6 +2773,15 @@ void BM_class_unit_0_1_0_quintic_grh(benchmark::State& state) {
     BM_class_unit_0_1_0_from_poly(
             state, polynomial, silex::CertificationMode::grh, 20000,
             kQuinticSmallClassUnit, false, false, true);
+}
+
+// Pairs with BM_class_unit_0_1_0_quintic_disc401370255_proven.
+void BM_class_unit_0_1_0_quintic_disc401370255_grh(benchmark::State& state) {
+    sflint::FmpqPoly polynomial;
+    set_quintic_polynomial(polynomial, -7, -6, -3, -3, 3);
+    BM_class_unit_0_1_0_from_poly(
+            state, polynomial, silex::CertificationMode::grh, 20000,
+            kQuinticDisc401370255ClassUnit, false, false, true);
 }
 
 // Pairs with BM_class_unit_0_1_0_sextic_proven.
@@ -2755,7 +2818,9 @@ BENCHMARK(BM_class_group_sextic_minus1_minus1_candidate);
 BENCHMARK(BM_class_unit_0_1_0_degree_one_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_proven);
+BENCHMARK(BM_class_unit_0_1_0_real_quadratic_100003_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_disc23_proven);
+BENCHMARK(BM_class_unit_0_1_0_cubic_disc1080004_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_trivial_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_nontrivial_proven);
 BENCHMARK(BM_class_unit_0_1_0_quartic_cyclotomic_proven);
@@ -2779,11 +2844,15 @@ BENCHMARK(BM_diagnostic_class_unit_0_1_0_quintic_disc57895_proven_cap)
 BENCHMARK(BM_class_unit_0_1_0_sextic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_grh);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_grh);
+BENCHMARK(BM_class_unit_0_1_0_real_quadratic_100003_grh);
 BENCHMARK(BM_class_unit_0_1_0_cubic_disc23_grh);
+BENCHMARK(BM_class_unit_0_1_0_cubic_disc1080004_grh);
 BENCHMARK(BM_class_unit_0_1_0_cubic_nontrivial_grh);
 BENCHMARK(BM_class_unit_0_1_0_quartic_cyclotomic_grh);
 BENCHMARK(BM_class_unit_0_1_0_quartic_noncyclotomic_grh);
+BENCHMARK(BM_class_unit_0_1_0_quartic_disc1412343_grh);
 BENCHMARK(BM_class_unit_0_1_0_quintic_grh);
+BENCHMARK(BM_class_unit_0_1_0_quintic_disc401370255_grh);
 BENCHMARK(BM_class_unit_0_1_0_sextic_grh);
 BENCHMARK(BM_class_unit_random_sweep)
         ->Args({2, 4, 0, 1, 0})

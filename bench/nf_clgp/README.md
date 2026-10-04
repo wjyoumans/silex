@@ -31,10 +31,12 @@ not proven evidence. `test/test_class_unit_google_benchmark.py` validates the
 two populations separately and checks that each grh row has its paired proven
 row with the same class order.
 
-Only fields that currently succeed in grh mode have a row. In grh mode a real
-quadratic field or a field of degree three or more fails closed unless
-factor-base generation is verified to the Minkowski-type bound, so fields
-that fail closed (for example `x^3 + x + 200` and `x^2 - 100003`) have no row.
+In grh mode factor-base generation may be GRH-conditional, so the grh
+population includes fields whose generation is verified only below the
+Minkowski-type bound, such as `x^3 + x + 200`
+(`BM_class_unit_0_1_0_cubic_disc1080004_grh`) and `x^2 - 100003`
+(`BM_class_unit_0_1_0_real_quadratic_100003_grh`). Their proven partners
+must still verify relation saturation.
 
 Private diagnostic counters must remain in separately named internal targets.
 They must use existing internal boundaries, publish no production result, and
