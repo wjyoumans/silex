@@ -139,14 +139,14 @@ void large_l1(sflint::Arb& value, const sflint::Fmpz& discriminant, slong d) {
 
 // Imaginary D < -4: the L(1, chi) enclosure gives
 // h(D) = sqrt(|D|) L(1, chi) / pi = class_number, taken from an independent
-// class-number computation.
-void check_large_imaginary_discriminant(slong d, slong class_number) {
+// class-number computation.  The enclosure is returned in value.
+void check_large_imaginary_discriminant(sflint::Arb& value, slong d,
+                                        slong class_number) {
     const ulong q = static_cast<ulong>(-d);
     sflint::Fmpz discriminant;
     sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
     check_large_character(discriminant, q);
 
-    sflint::Arb value;
     large_l1(value, discriminant, d);
 
     sflint::Arb h;
@@ -155,6 +155,36 @@ void check_large_imaginary_discriminant(slong d, slong class_number) {
     sflint::arb_mul(h, value, t, 128);
     sflint::arb_const_pi(t, 128);
     sflint::arb_div(h, h, t, 128);
+    assert(sflint::arb_contains_si(h, class_number));
+    assert(radius_lt_2exp_si(h, -2));
+}
+
+// The same imaginary D at a higher precision: the enclosure has the
+// precision's radius, still gives h(D) = class_number, and overlaps the
+// 64-bit enclosure low.  This is an agreement test for the
+// precision-dependent stepping parameters, not a check of the truncation
+// bound.
+void check_large_imaginary_discriminant_at(const sflint::Arb& low, slong d,
+                                           slong class_number,
+                                           slong precision) {
+    const ulong q = static_cast<ulong>(-d);
+    sflint::Fmpz discriminant;
+    sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+
+    sflint::Arb value;
+    assert(silex::detail::quadratic_dirichlet_l1(
+            sflint::ArbRef(value), sflint::FmpzConstRef(discriminant),
+            precision));
+    assert(sflint::arb_is_positive(value));
+    assert(radius_lt_2exp_si(value, -(precision - 16)));
+    assert(::arb_overlaps(value.raw(), low.raw()) != 0);
+
+    sflint::Arb h;
+    sflint::Arb t;
+    sflint::arb_sqrt_ui(t, q, precision);
+    sflint::arb_mul(h, value, t, precision);
+    sflint::arb_const_pi(t, precision);
+    sflint::arb_div(h, h, t, precision);
     assert(sflint::arb_contains_si(h, class_number));
     assert(radius_lt_2exp_si(h, -2));
 }
@@ -346,7 +376,10 @@ int main() {
     check_failure_paths();
     check_route_size_cap();
 
-    check_large_imaginary_discriminant(-10000000019, 39809);
+    sflint::Arb imaginary_l1;
+    check_large_imaginary_discriminant(imaginary_l1, -10000000019, 39809);
+    check_large_imaginary_discriminant_at(imaginary_l1, -10000000019, 39809,
+                                          128);
     check_public_class_unit_with_zeta();
 
     // |D| about 1e11 runs Taylor stepping of the incomplete gamma values over
@@ -361,7 +394,8 @@ int main() {
     // |D| about 1e12 is slow; opt in with
     // SILEX_TEST_SLOW=1.
     if (slow_tests_enabled()) {
-        check_large_imaginary_discriminant(-1000000000039, 1113261);
+        check_large_imaginary_discriminant(imaginary_l1, -1000000000039,
+                                           1113261);
         // h = 1 and R = 236155.816169219892016..., taken from an independent
         // class-group and regulator computation.
         check_large_real_discriminant(1000000000061,
