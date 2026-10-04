@@ -10,6 +10,10 @@
 
 namespace silex {
 
+namespace detail {
+class FiniteAbelianGroupAccess;
+}
+
 class FiniteAbelianGroup {
 public:
     FiniteAbelianGroup() noexcept = default;
@@ -27,9 +31,6 @@ public:
 
     bool is_defined() const noexcept;
     bool set_relation_matrix(flint::FmpzMatConstRef relations) noexcept;
-    bool set_relation_matrix_with_hnf_basis(
-            flint::FmpzMatConstRef relations,
-            flint::FmpzMatConstRef hnf_basis) noexcept;
 
     slong relation_count() const noexcept;
     slong generator_count() const noexcept;
@@ -57,6 +58,13 @@ public:
             flint::FmpzMatConstRef row) const noexcept;
 
 private:
+    // Names in silex::detail (including detail::FiniteAbelianGroupAccess) are
+    // internal to Silex and its tests, not a supported entry point.
+    friend class detail::FiniteAbelianGroupAccess;
+
+    bool set_relation_matrix_with_hnf_basis(
+            flint::FmpzMatConstRef relations,
+            flint::FmpzMatConstRef hnf_basis) noexcept;
     bool ensure_left_transform() const noexcept;
 
     flint::FmpzMat relations_{0, 0};

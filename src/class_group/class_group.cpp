@@ -23,6 +23,7 @@
 #include <silex/unit.hpp>
 #include <silex/zeta.hpp>
 
+#include "../abelian_group/abelian_group_internal.hpp"
 #include "class_group_internal.hpp"
 #include "class_group_certification_internal.hpp"
 #include "factor_base_proof_targets_internal.hpp"
@@ -9300,7 +9301,8 @@ bool ClassGroupContext::publish_presentation() noexcept {
     FiniteAbelianGroup candidate;
     if (!relations_.rows(flint::FmpzMatRef(relation_rows)) ||
         !row_module_.get_hnf_rows(flint::FmpzMatRef(hnf_basis)) ||
-        !candidate.set_relation_matrix_with_hnf_basis(
+        !detail::FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+                candidate,
                 flint::FmpzMatConstRef(relation_rows),
                 flint::FmpzMatConstRef(hnf_basis))) {
         return false;

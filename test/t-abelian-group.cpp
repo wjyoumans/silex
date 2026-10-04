@@ -1,5 +1,7 @@
 #include <silex/abelian_group.hpp>
 
+#include "abelian_group/abelian_group_internal.hpp"
+
 #include <flint/fmpz_mat.h>
 
 #include <cassert>
@@ -360,7 +362,9 @@ int test_nondiagonal_and_generator_relations() {
     silex::FiniteAbelianGroup hnf_group;
     set_entry_si(hnf_basis, 0, 0, 2);
     set_entry_si(hnf_basis, 1, 1, 6);
-    assert(hnf_group.set_relation_matrix_with_hnf_basis(
+    assert(silex::detail::FiniteAbelianGroupAccess::
+                   set_relation_matrix_with_hnf_basis(
+            hnf_group,
             sflint::FmpzMatConstRef(relations),
             sflint::FmpzMatConstRef(hnf_basis)));
     assert(hnf_group.relation_count() == 3);
@@ -500,10 +504,14 @@ int test_witness_request_keeps_generators() {
         }
     }
 
+    // The public setter forwards the same HNF top block to the internal
+    // setter; the second iteration pins the internal path directly.
     for (int with_basis = 0; with_basis < 2; ++with_basis) {
         silex::FiniteAbelianGroup group;
         if (with_basis != 0) {
-            assert(group.set_relation_matrix_with_hnf_basis(
+            assert(silex::detail::FiniteAbelianGroupAccess::
+                           set_relation_matrix_with_hnf_basis(
+                    group,
                     sflint::FmpzMatConstRef(relations),
                     sflint::FmpzMatConstRef(hnf_basis)));
         } else {

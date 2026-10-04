@@ -580,6 +580,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-abelian-group test/t-abelian-group.cpp)
     target_link_libraries(t-silex-abelian-group PRIVATE Silex::silex)
+    target_include_directories(t-silex-abelian-group PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-abelian-group)
     add_test(NAME silex-abelian-group COMMAND t-silex-abelian-group)
     list(APPEND SILEX_TEST_NAMES silex-abelian-group)
