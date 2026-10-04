@@ -21,13 +21,12 @@ TARGET_DONE_MARKER = "__SILEX_BENCH_SILEX_TARGET_DONE__"
 TARGET_NONCE = "0123456789abcdef0123456789abcdef"
 
 
-
 def assert_unit_regulator_enclosure(instance, expected_proof_status):
     """The unit_group object reports the regulator enclosure and its label."""
     unit_group = instance["unit_group"]
     midpoint = unit_group["regulator_midpoint"]
     radius = unit_group["regulator_radius"]
-    assert isinstance(midpoint, float) or isinstance(midpoint, int)
+    assert isinstance(midpoint, (int, float))
     assert midpoint > 0.0
     assert 0.0 <= radius < 1e-20 * max(1.0, midpoint)
     assert abs(float(unit_group["regulator_decimal"]) - midpoint) <= (
@@ -452,8 +451,8 @@ def main() -> int:
         assert_unit_regulator_enclosure(
             grh_instance, grh_instance["regulator_proof_status"]
         )
-        assert grh_instance["unit_group"]["regulator_proof_status"] != (
-            "verified"
+        assert grh_instance["unit_group"]["regulator_proof_status"] == (
+            "not_checked"
         )
         # `factor_base_bound` is the bound the transaction used (the GRH
         # policy's selected bound), `requested_factor_base_bound` the
