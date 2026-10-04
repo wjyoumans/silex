@@ -573,23 +573,40 @@ A ``grh`` request for a paired class/unit transaction sizes the factor base
 with the GRH bound, the minimum of the Belabas--Diaz y Diaz--Friedman
 criterion and Bach's bound, as Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/FactorBaseBound.jl:factor_base_bound_grh`` does.
-In degree three and higher and for real quadratic fields, Silex does not use
-GRH for factor-base generation.  It accepts a pair only after it has verified
-generation up to the Minkowski-type bound (``factor_base_class_group_bound``)
-unconditionally.  It never accepts a pair on the strength of a GRH-sized
-factor base that does not cover that bound.  For such a field (for example
-``x^3 + x + 200`` or ``x^2 - 100003``) the transaction fails closed once the
-factor base and its initial relations are built: the continuation never
-rebuilds the factor base or proves its generation, so extending relations
-further could not lead to acceptance.  This is stricter than PARI 2.17.3
+In degree three and higher and for real quadratic fields, factor-base
+generation may rest on GRH.  The grh base contains every prime ideal of norm
+at most its build bound, inert primes and both primes of a split pair
+included, and that build bound is at least the undoubled GRH bound.  Under
+GRH such a base generates the class group: Belabas--Diaz y Diaz--Friedman
+2008, Corollary 2.2, assumes the Riemann hypothesis for the ``L``-functions
+of the nontrivial class-group characters; Bach 1990, Theorem 4 (with
+conductor one, ``12 log^2 |D|``; ``6 log^2 |D|`` in degree two), assumes it
+for ``zeta_K`` as well.  Silex records this as a separate GRH generation
+record on the factor base, written only when the grh policy builds the base.
+It never sets ``factor_base_generation_status()`` to ``verified`` and is not
+the relation-search honesty receipt, so public generation readers and every
+``proven`` route still see only unconditional generation, and a ``proven``
+promotion still requires generation verified up to the Minkowski-type bound
+(``factor_base_class_group_bound``).  When the GRH-sized base reaches that
+bound anyway, generation is recorded unconditionally as before.  A
+positive-rank ``grh`` transaction whose base covers neither bound fails
+closed once the factor base and its initial relations are built: the
+continuation never rebuilds the factor base, so extending relations further
+could not lead to acceptance.  As in PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_param``, where the primes up to the
-``GRHchk`` bound generate the class group under GRH, and than Hecke v0.38.6
-``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group``.  Relation and unit
-completeness then rest on the analytic index-one test: an enclosure of
+``GRHchk`` bound generate the class group under GRH, and Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group``, fields such as
+``x^3 + x + 200`` and ``x^2 - 100003``, whose Minkowski-type bound is far
+above the GRH bound, are therefore accepted in ``grh`` mode.  Relation and
+unit completeness then rest on the analytic index-one test: an enclosure of
 ``h_cand R_cand / hR`` whose upper endpoint is below two, as in Hecke
 ``_validate_class_unit_group`` and PARI's ``bad_check``.  With a
 Belabas--Friedman ``hR`` that test holds under GRH (Belabas--Friedman 2015,
-Theorem 1).  With the quadratic ``L(1, chi_D)`` value it is unconditional.
+Theorem 1).  With the quadratic ``L(1, chi_D)`` value the test itself is
+unconditional, but the result still rests on GRH through generation unless
+the base reached the Minkowski-type bound.  Such an acceptance is not a
+relation-saturation proof: ``relation_saturation_status()`` is not set to
+``verified`` by it.
 The pair is published with both labels ``grh``, and the analytic check that
 accepted it is recorded on the published class group with its own
 conditionality.  ``analytic_class_regulator_certification()`` is ``grh`` for
@@ -607,7 +624,8 @@ let an explicit ``try_certify_with_units(units, proven)`` with proven units
 promote the class group to ``proven``.  This is sound, because the index-one
 test against the unconditional ``L(1, chi_D)`` value, with generation verified
 up to the Minkowski-type bound, gives ``h_cand = h`` and ``R_cand = R_K``
-unconditionally.  The exact
+unconditionally.  A ``grh`` run whose base covers only the GRH bound has no
+unconditional generation, so that promotion fails for it.  The exact
 imaginary-quadratic ``grh`` route uses an exact class number instead of an
 analytic value.  Its GRH dependence is in factor-base generation, which is
 checked only up to the GRH bound, and it records no analytic check.  The

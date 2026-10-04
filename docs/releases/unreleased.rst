@@ -56,10 +56,21 @@ Changed
   record stored by a real-quadratic ``grh`` run lets a later explicit
   ``try_certify_with_units(units, proven)`` with proven units promote the
   class group to ``proven``.  The exact imaginary-quadratic and degree-one
-  ``grh`` routes use no analytic check and record none.  The documentation
-  now also states that ``grh`` mode in degree three and higher and for real
-  quadratic fields requires factor-base generation verified up to the
-  Minkowski-type bound and does not use GRH for generation.  See "Class
+  ``grh`` routes use no analytic check and record none.  See "Class groups
+  and order units" in :doc:`../reference/algorithms_and_sources`.
+
+- A ``grh`` paired class/unit transaction in degree three and higher or for
+  a real quadratic field may now take factor-base generation from GRH: its
+  factor base contains every prime ideal up to the GRH bound (the minimum of
+  the Belabas-Diaz y Diaz-Friedman and Bach bounds), which generates the
+  class group under GRH.  Fields whose Minkowski-type bound lies above the
+  GRH bound, such as ``x^3 + x + 200``, ``x^2 - 100003`` and many quartic
+  and quintic fields, used to fail closed in ``grh`` mode and are now
+  published with both labels ``grh``.  GRH generation is kept apart from
+  unconditional generation: ``factor_base_generation_status()`` and
+  ``relation_saturation_status()`` never read ``verified`` because of it,
+  a ``proven`` request is unchanged, and a later ``proven`` promotion still
+  requires generation verified up to the Minkowski-type bound.  See "Class
   groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 - **Breaking:** ``OrderUnitGroup::residue_dlog_kernel`` and
