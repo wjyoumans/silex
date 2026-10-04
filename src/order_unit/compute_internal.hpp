@@ -415,7 +415,8 @@ bool class_unit_validation_estimate(
         const ClassGroupContext& class_group,
         AnalyticClassRegulatorCache& analytic_cache,
         const Order& order,
-        slong precision) noexcept;
+        slong precision,
+        bool accept_grh_generation) noexcept;
 bool class_unit_bf_validation_estimate(
         flint::Fmpz& index_bound,
         flint::Arb& expected_regulator,
@@ -425,7 +426,8 @@ bool class_unit_bf_validation_estimate(
         const Order& order,
         ulong max_cutoff,
         slong precision,
-        const DiagnosticsContext* diagnostics) noexcept;
+        const DiagnosticsContext* diagnostics,
+        bool accept_grh_generation) noexcept;
 bool expected_regulator_stop(
         const OrderUnitGroup& units,
         const flint::Arb& expected_regulator,
@@ -454,6 +456,9 @@ struct ValidationUnitRefreshOptions {
     ulong validation_bf_max_cutoff = 0;
     bool use_class_relation_units = false;
     bool require_source_units = false;
+    // True exactly for a grh request: lets the validation estimates count
+    // the GRH factor-base generation record.
+    bool accept_grh_generation = false;
 };
 
 bool set_class_relation_units(bool& ready,
@@ -467,7 +472,8 @@ bool set_class_relation_units(bool& ready,
                                     slong precision,
                                     slong rank,
                                     slong outer_add,
-                                    ulong validation_bf_max_cutoff) noexcept;
+                                    ulong validation_bf_max_cutoff,
+                                    bool accept_grh_generation) noexcept;
 bool recompute_units_from_class_context(OrderUnitGroup& units,
                                         const Order& order,
                                         const ClassGroupContext& class_group,

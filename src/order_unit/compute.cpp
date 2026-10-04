@@ -1863,7 +1863,8 @@ void validation_stop_after_improvement(
         AnalyticClassRegulatorCache& analytic_cache,
         const Order& order,
         slong precision,
-        ulong validation_bf_max_cutoff) noexcept {
+        ulong validation_bf_max_cutoff,
+        bool accept_grh_generation) noexcept {
     stop = false;
     if (!extraction_state.has_expected_regulator) {
         if (validation_bf_max_cutoff != 0 && order.degree() > 2) {
@@ -1873,13 +1874,14 @@ void validation_stop_after_improvement(
                             extraction_state.expected_regulator, units,
                             class_group, analytic_cache, order,
                             validation_bf_max_cutoff, precision,
-                            units.diagnostics());
+                            units.diagnostics(), accept_grh_generation);
         } else {
             extraction_state.has_expected_regulator =
                     class_unit_validation_estimate(
                             extraction_state.validation_index_bound,
                             extraction_state.expected_regulator, units,
-                            class_group, analytic_cache, order, precision);
+                            class_group, analytic_cache, order, precision,
+                            accept_grh_generation);
         }
     }
     if (extraction_state.has_expected_regulator &&
@@ -1898,7 +1900,8 @@ bool unknown_candidate_validated(
         const Order& order,
         AnalyticClassRegulatorCache& analytic_cache,
         slong expected_rank,
-        slong precision) noexcept {
+        slong precision,
+        bool accept_grh_generation) noexcept {
     SILEX_PROFILE_SCOPE(units.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.unknown_validation");
     validated = false;
@@ -1945,7 +1948,7 @@ bool unknown_candidate_validated(
             class_unit_validation_estimate(
                     extraction_state.validation_index_bound,
                     extraction_state.expected_regulator, units, class_group,
-                    analytic_cache, order, precision);
+                    analytic_cache, order, precision, accept_grh_generation);
     if (!extraction_state.has_expected_regulator) {
         summary.outcome = ValidateRefineOutcome::analytic_unavailable;
         return true;
@@ -1971,11 +1974,12 @@ bool class_unit_index_bound_for_improvement(
         const ClassGroupContext& class_group,
         AnalyticClassRegulatorCache& analytic_cache,
         const Order& order,
-        slong precision) noexcept {
+        slong precision,
+        bool accept_grh_generation) noexcept {
     flint::Arb expected_regulator;
     return class_unit_validation_estimate(
             out, expected_regulator, units, class_group, analytic_cache, order,
-            precision);
+            precision, accept_grh_generation);
 }
 
 bool unit_improvement_ratio(slong& out,
@@ -1984,12 +1988,13 @@ bool unit_improvement_ratio(slong& out,
                                   const ClassGroupContext& class_group,
                                   AnalyticClassRegulatorCache& analytic_cache,
                                   const Order& order,
-                                  slong precision) noexcept {
+                                  slong precision,
+                                  bool accept_grh_generation) noexcept {
     out = 0;
     flint::Fmpz ending_index;
     if (!class_unit_index_bound_for_improvement(
                 ending_index, units, class_group, analytic_cache, order,
-                precision) ||
+                precision, accept_grh_generation) ||
         flint::fmpz_is_zero(flint::FmpzConstRef(ending_index))) {
         return false;
     }
@@ -2032,7 +2037,8 @@ bool unknown_saturation_at_two(
         const Order& order,
         slong expected_rank,
         slong precision,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        bool accept_grh_generation) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.saturation_at_two");
     validated = false;
@@ -2063,7 +2069,7 @@ bool unknown_saturation_at_two(
     extraction_state.saturation_at_two_done = true;
     return unknown_candidate_validated(
             validated, extraction_state, summary, units, class_group, order,
-            analytic_cache, expected_rank, precision);
+            analytic_cache, expected_rank, precision, accept_grh_generation);
 }
 
 bool unknown_small_index_saturation(
@@ -2078,7 +2084,8 @@ bool unknown_small_index_saturation(
         const Order& order,
         slong expected_rank,
         slong precision,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        bool accept_grh_generation) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.small_index_saturation");
     validated = false;
@@ -2125,7 +2132,7 @@ bool unknown_small_index_saturation(
         if (!unknown_candidate_validated(
                     revalidated, extraction_state, summary, units,
                     class_group, order, analytic_cache, expected_rank,
-                    precision)) {
+                    precision, accept_grh_generation)) {
             return false;
         }
         if (revalidated) {
@@ -2166,7 +2173,8 @@ bool improve_full_rank_class_relation_units(
         slong precision,
         slong rank,
         slong outer_add,
-        ulong validation_bf_max_cutoff) noexcept {
+        ulong validation_bf_max_cutoff,
+        bool accept_grh_generation) noexcept {
     improved = false;
     if (!out.is_set() || !same_order_parent(out.parent(), &order) ||
         out.free_rank() != rank || rank <= 0 || outer_add < 0 ||
@@ -2252,7 +2260,8 @@ bool improve_full_rank_class_relation_units(
                 validation_stop_after_improvement(
                         stop, extraction_state, out, class_group,
                         analytic_cache, order, precision,
-                        validation_bf_max_cutoff);
+                        validation_bf_max_cutoff,
+                        accept_grh_generation);
                 if (stop) {
                     finished = true;
                     break;
@@ -2299,7 +2308,8 @@ bool set_class_relation_units(bool& ready,
                                     slong precision,
                                     slong rank,
                                     slong outer_add,
-                                    ulong validation_bf_max_cutoff) noexcept {
+                                    ulong validation_bf_max_cutoff,
+                                    bool accept_grh_generation) noexcept {
     ready = false;
     improved = 0;
     const NumberField* field = order.parent();
@@ -2316,7 +2326,7 @@ bool set_class_relation_units(bool& ready,
         flint::Fmpz starting_index;
         if (!class_unit_index_bound_for_improvement(
                     starting_index, out, class_group, analytic_cache, order,
-                    precision)) {
+                    precision, accept_grh_generation)) {
             return false;
         }
 
@@ -2324,13 +2334,15 @@ bool set_class_relation_units(bool& ready,
         if (!improve_full_rank_class_relation_units(
                     changed, out, order, class_group, embeddings,
                     analytic_cache, extraction_state, precision, rank,
-                    outer_add, validation_bf_max_cutoff)) {
+                    outer_add, validation_bf_max_cutoff,
+                    accept_grh_generation)) {
             return false;
         }
         (void)changed;
         if (!unit_improvement_ratio(
                     improved, flint::FmpzConstRef(starting_index), out,
-                    class_group, analytic_cache, order, precision)) {
+                    class_group, analytic_cache, order, precision,
+                    accept_grh_generation)) {
             return false;
         }
         ready = true;
@@ -2414,7 +2426,8 @@ bool set_class_relation_units(bool& ready,
                     validation_stop_after_improvement(
                             stop, extraction_state, out, class_group,
                             analytic_cache, order, precision,
-                            validation_bf_max_cutoff);
+                            validation_bf_max_cutoff,
+                            accept_grh_generation);
                     if (stop) {
                         finished = true;
                         break;
@@ -2462,7 +2475,8 @@ bool set_class_relation_units(bool& ready,
                 validation_stop_after_improvement(
                         stop, extraction_state, out, class_group,
                         analytic_cache, order, precision,
-                        validation_bf_max_cutoff);
+                        validation_bf_max_cutoff,
+                        accept_grh_generation);
                 if (stop) {
                     finished = true;
                     break;
@@ -2506,7 +2520,8 @@ bool set_class_relation_units(bool& ready,
                     validation_stop_after_improvement(
                             stop, extraction_state, out, class_group,
                             analytic_cache, order, precision,
-                            validation_bf_max_cutoff);
+                            validation_bf_max_cutoff,
+                            accept_grh_generation);
                     if (stop) {
                         finished = true;
                         break;
@@ -2713,6 +2728,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     slong unit_add = 0;
     slong unit_improved = 0;
     detail::ValidationUnitRefreshOptions refresh_options;
+    refresh_options.accept_grh_generation =
+            options.requested_certification == CertificationMode::grh;
     if (rank > 1 || (transaction && rank > 0)) {
         refresh_options.relation_unit_state = &relation_unit_state;
         refresh_options.unit_add = &unit_add;
@@ -2755,7 +2772,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                         candidate_units, order, candidate_class_group,
                         embeddings, analytic_cache, relation_unit_state,
                         precision, rank, unit_add,
-                        refresh_options.validation_bf_max_cutoff)) {
+                        refresh_options.validation_bf_max_cutoff,
+                        refresh_options.accept_grh_generation)) {
                 return false;
             }
             if (!candidate_units_ready) {
@@ -2803,7 +2821,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                         candidate_units, order, candidate_class_group,
                         embeddings, analytic_cache, relation_unit_state,
                         precision, rank, unit_add,
-                        refresh_options.validation_bf_max_cutoff)) {
+                        refresh_options.validation_bf_max_cutoff,
+                        refresh_options.accept_grh_generation)) {
                 return false;
             }
             if (!candidate_units_ready) {
@@ -2839,7 +2858,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                             validated, relation_unit_state,
                             validate_summary, candidate_units,
                             candidate_class_group, order, analytic_cache,
-                            rank, precision)) {
+                            rank, precision,
+                            refresh_options.accept_grh_generation)) {
                     return false;
                 }
                 return validated;
@@ -2871,7 +2891,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                             saturation_at_two_validated, relation_unit_state,
                             validate_summary, candidate_class_group,
                             candidate_units, embeddings, analytic_cache,
-                            order, rank, precision, active_diagnostics)) {
+                            order, rank, precision, active_diagnostics,
+                            refresh_options.accept_grh_generation)) {
                     return false;
                 }
                 if (saturation_at_two_validated) {
@@ -2889,7 +2910,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                         relation_unit_state, validate_summary,
                         candidate_class_group, candidate_units, embeddings,
                         analytic_cache, order, rank, precision,
-                        active_diagnostics)) {
+                        active_diagnostics,
+                        refresh_options.accept_grh_generation)) {
                 return false;
             }
             if (saturation_validated) {
@@ -3117,6 +3139,8 @@ bool OrderUnitGroup::compute_with_class_group(
     const bool hnf_unit_candidates =
             native_hnf_unit_candidates;
     detail::ValidationUnitRefreshOptions refresh_options;
+    refresh_options.accept_grh_generation =
+            options.requested_certification == CertificationMode::grh;
     if (native_unit_candidates) {
         refresh_options.relation_unit_state = &relation_unit_state;
         refresh_options.unit_add = &unit_add;
@@ -3378,7 +3402,8 @@ bool OrderUnitGroup::compute_with_class_group(
                             candidate_units, order, candidate_class_group,
                             embeddings, analytic_cache, relation_unit_state,
                             precision, rank, unit_add,
-                            refresh_options.validation_bf_max_cutoff)) {
+                            refresh_options.validation_bf_max_cutoff,
+                            refresh_options.accept_grh_generation)) {
                     SILEX_LOG(active_diagnostics,
                               DiagnosticsModule::unit_group,
                               LogLevel::detail,
@@ -3499,7 +3524,8 @@ bool OrderUnitGroup::compute_with_class_group(
                                 validated, relation_unit_state,
                                 validate_summary, candidate_units,
                                 candidate_class_group, order, analytic_cache,
-                                rank, precision)) {
+                                rank, precision,
+                                refresh_options.accept_grh_generation)) {
                         return false;
                     }
                     return validated;
@@ -3597,7 +3623,8 @@ bool OrderUnitGroup::compute_with_class_group(
                                 saturation_at_two_validated, relation_unit_state,
                                 validate_summary, candidate_class_group,
                                 candidate_units, embeddings, analytic_cache,
-                                order, rank, precision, active_diagnostics)) {
+                                order, rank, precision, active_diagnostics,
+                                refresh_options.accept_grh_generation)) {
                         return false;
                     }
                     if (saturation_at_two_validated) {
@@ -3614,7 +3641,8 @@ bool OrderUnitGroup::compute_with_class_group(
                             relation_unit_state, validate_summary,
                             candidate_class_group, candidate_units, embeddings,
                             analytic_cache, order, rank, precision,
-                            active_diagnostics)) {
+                            active_diagnostics,
+                            refresh_options.accept_grh_generation)) {
                     return false;
                 }
                 if (saturation_validated) {

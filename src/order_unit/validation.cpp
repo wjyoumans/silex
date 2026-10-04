@@ -191,7 +191,8 @@ bool validation_index_bound_from_product(
     // index only once the factor base generates the class group: proved
     // to the Minkowski-type bound, or, for a grh request, assumed under GRH
     // from a base containing every prime ideal up to the GRH bound (Bach
-    // 1990, Thm 4; Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  Keep the
+    // 1990, Thm 4 and the remark following it, p. 376; Belabas-Diaz y
+    // Diaz-Friedman 2008, Cor 2.2).  Keep the
     // public ratio accessor conservative, but recognize the source-complete
     // index-one case before taking an outward-rounded ceiling.
     if (integer_index_prerequisites &&
@@ -252,15 +253,17 @@ bool class_unit_validation_estimate(
         const ClassGroupContext& class_group,
         AnalyticClassRegulatorCache& analytic_cache,
         const Order& order,
-        slong precision) noexcept {
+        slong precision,
+        bool accept_grh_generation) noexcept {
     SILEX_PROFILE_SCOPE(units.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.validation_estimate");
-    // An estimate, never an acceptance: the GRH generation record exists
-    // only on a grh request's base, where it plays the role of verified
-    // generation in the stopping heuristics.
+    // `accept_grh_generation` is true exactly for a grh request, whose base
+    // alone can carry the GRH generation record.  An estimated index of one
+    // can become an acceptance (unknown_candidate_validated), so the record
+    // counts as generation only inside a grh request.
     if (!analytic_index_bound_for_validation(
                 index_bound, units, class_group, analytic_cache, order,
-                precision, true) ||
+                precision, accept_grh_generation) ||
         flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) < 0) {
         return false;
     }
@@ -289,13 +292,15 @@ bool class_unit_bf_validation_estimate(
         const Order& order,
         ulong max_cutoff,
         slong precision,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        bool accept_grh_generation) noexcept {
     SILEX_PROFILE_SCOPE(units.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.bf_validation_estimate");
     if (max_cutoff == 0 || order.degree() <= 2) {
         return class_unit_validation_estimate(
                 index_bound, expected_regulator, units, class_group,
-                analytic_cache, order, precision);
+                analytic_cache, order, precision,
+                accept_grh_generation);
     }
 
     const bool use_validation =
@@ -310,7 +315,8 @@ bool class_unit_bf_validation_estimate(
                     class_group.factor_base())) {
             return class_unit_validation_estimate(
                     index_bound, expected_regulator, units, class_group,
-                    analytic_cache, order, precision);
+                    analytic_cache, order, precision,
+                    accept_grh_generation);
         }
     } else {
         SILEX_PROFILE_SCOPE(
@@ -321,7 +327,8 @@ bool class_unit_bf_validation_estimate(
                     class_group.factor_base())) {
             return class_unit_validation_estimate(
                     index_bound, expected_regulator, units, class_group,
-                    analytic_cache, order, precision);
+                    analytic_cache, order, precision,
+                    accept_grh_generation);
         }
         analytic_cache.seed(order, analytic_cache.bf_value(),
                             analytic_cache.bf_work_precision());
@@ -332,7 +339,7 @@ bool class_unit_bf_validation_estimate(
             : analytic_cache.bf_value();
     if (!validation_index_bound_from_product(
                 index_bound, units, class_group, validation_value,
-                precision, true) ||
+                precision, accept_grh_generation) ||
         flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) < 0) {
         return false;
     }
@@ -884,7 +891,8 @@ bool recompute_units_from_class_context(OrderUnitGroup& units,
                     analytic_cache, *refresh_options.relation_unit_state,
                     precision, refresh_options.rank,
                     *refresh_options.unit_add,
-                    refresh_options.validation_bf_max_cutoff)) {
+                    refresh_options.validation_bf_max_cutoff,
+                    refresh_options.accept_grh_generation)) {
             SILEX_PROFILE_EVENT(
                     units.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.validation_recompute.result.failed");
