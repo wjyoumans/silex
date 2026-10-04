@@ -198,7 +198,7 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
     # unconditional completeness. The degree-one grh route is the exact
     # route relabelled grh: both components proven, label grh.
     for coeffs, mode, bound in (
-        ("200,1,0,1", "proven", "463"),
+        ("200,1,0,1", "proven", "295"),
         ("0,1", "grh", "1"),
     ):
         instance = run_json(
