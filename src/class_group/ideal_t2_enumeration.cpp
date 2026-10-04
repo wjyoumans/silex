@@ -101,7 +101,8 @@ static bool quadratic_form_data_from_arb_gram(std::vector<double>& out,
                                 const flint::ArbMat& gram) noexcept;
 static bool finite_quadratic_form_volume_bound(
         double& out,
-        const std::vector<double>& gram_schmidt_diagonal) noexcept;
+        const std::vector<double>& gram_schmidt_diagonal,
+        slong target_factor_attempts) noexcept;
 
 static double quadratic_form_entry(const std::vector<double>& quadratic_form_data,
                      slong dimension,
@@ -112,7 +113,8 @@ static double quadratic_form_entry(const std::vector<double>& quadratic_form_dat
 
 static bool initial_bound_from_quadratic_form(double& out,
                                      const std::vector<double>& quadratic_form_data,
-                                     slong dimension) noexcept {
+                                     slong dimension,
+                                     slong target_factor_attempts) noexcept {
     if (dimension <= 0 ||
         static_cast<slong>(quadratic_form_data.size()) != dimension * dimension) {
         return false;
@@ -149,7 +151,8 @@ static bool initial_bound_from_quadratic_form(double& out,
 
     double volume_bound = 0.0;
     if (!finite_quadratic_form_volume_bound(volume_bound,
-                                        gram_schmidt_diagonal)) {
+                                        gram_schmidt_diagonal,
+                                        target_factor_attempts)) {
         return false;
     }
     out = std::max(2.0 * second_vector_norm, volume_bound);
@@ -524,7 +527,8 @@ static double euclidean_ball_volume(slong dimension) noexcept {
 
 static bool finite_quadratic_form_volume_bound(
         double& out,
-        const std::vector<double>& gram_schmidt_diagonal) noexcept {
+        const std::vector<double>& gram_schmidt_diagonal,
+        slong target_factor_attempts) noexcept {
     const slong dimension =
             static_cast<slong>(gram_schmidt_diagonal.size());
     if (dimension <= 0) {
@@ -536,7 +540,11 @@ static bool finite_quadratic_form_volume_bound(
         return false;
     }
 
-    const double target = (4.0 * static_cast<double>(kMaxFactorAttempts)) /
+    if (target_factor_attempts <= 0) {
+        return false;
+    }
+    const double target =
+            (4.0 * static_cast<double>(target_factor_attempts)) /
                           ball_volume;
     if (!std::isfinite(target) || target <= 0.0) {
         return false;
@@ -601,7 +609,8 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
         const Ideal& ideal,
         slong precision,
         const DiagnosticsContext* diagnostics,
-        detail::OrderMinkowskiEmbeddingCache* embedding_cache)
+        detail::OrderMinkowskiEmbeddingCache* embedding_cache,
+        slong target_factor_attempts)
         noexcept {
     const Order* order = ideal.parent();
     if (order == nullptr || !ideal.has_hnf() || precision <= 0) {
@@ -709,7 +718,8 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.finite_enumeration_setup.initial_bound");
         if (!initial_bound_from_quadratic_form(initial_enumeration_bound,
-                                             quadratic_form_data, degree)) {
+                                             quadratic_form_data, degree,
+                                             target_factor_attempts)) {
             SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                       LogLevel::detail,
                       "T2 context initial bound computation failed");
@@ -727,12 +737,14 @@ bool build_finite_ideal_t2_enumeration_data_with_retry(
         FiniteIdealT2EnumerationData& out,
         const Ideal& ideal,
         const DiagnosticsContext* diagnostics,
-        detail::OrderMinkowskiEmbeddingCache* embedding_cache)
+        detail::OrderMinkowskiEmbeddingCache* embedding_cache,
+        slong target_factor_attempts)
         noexcept {
     for (slong precision = kT2EnumerationInitialPrecision;
          precision <= kT2EnumerationMaxPrecision;) {
         if (build_finite_ideal_t2_enumeration_data_at_precision(
-                    out, ideal, precision, diagnostics, embedding_cache)) {
+                    out, ideal, precision, diagnostics, embedding_cache,
+                    target_factor_attempts)) {
             return true;
         }
         if (precision == kT2EnumerationMaxPrecision) {

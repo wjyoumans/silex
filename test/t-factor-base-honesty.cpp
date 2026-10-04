@@ -5,6 +5,7 @@
 #include "test_support.hpp"
 
 #include <silex/class_group.hpp>
+#include <silex/diagnostics.hpp>
 #include <silex/element.hpp>
 #include <silex/factor_base.hpp>
 #include <silex/flint/fmpq_poly.hpp>
@@ -19,6 +20,8 @@
 
 #include <array>
 #include <cassert>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace {
@@ -1087,6 +1090,125 @@ int test_scan_detects_lower_interval_omissions_and_fails_closed() {
             : 0;
 }
 
+FieldSetup imaginary_quadratic_fixture(slong d) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, d);
+    FieldSetup setup;
+    setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    if (!setup.maximal_order.maximal_order(equation_order) ||
+        !setup.maximal_order.is_maximal()) {
+        return FieldSetup{};
+    }
+    return setup;
+}
+
+struct HonestyLogCapture {
+    slong exhausted_messages = 0;
+    std::string last_detail;
+};
+
+void capture_honesty_log(void* user,
+                         silex::DiagnosticsModule,
+                         silex::LogLevel,
+                         const char*,
+                         const char* message,
+                         const char* detail) noexcept {
+    auto* capture = static_cast<HonestyLogCapture*>(user);
+    if (message != nullptr &&
+        std::strcmp(message,
+                    "be_honest witness search exhausted at final caps") ==
+                0) {
+        ++capture->exhausted_messages;
+        capture->last_detail = detail == nullptr ? "" : detail;
+    }
+}
+
+bool run_legacy_honesty_scan(bool& honest,
+                             silex::detail::relation_search::
+                                     FactorBaseHonestyScanAudit& audit,
+                             HonestyLogCapture& capture,
+                             slong d,
+                             ulong active,
+                             ulong required) noexcept {
+    FieldSetup setup = imaginary_quadratic_fixture(d);
+    sflint::Fmpz active_bound;
+    sflint::Fmpz required_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), active);
+    sflint::fmpz_set_ui(sflint::FmpzRef(required_bound), required);
+    silex::FactorBase base(setup.maximal_order);
+    if (!base.is_defined() ||
+        !base.build_relation_completion_base(
+                sflint::FmpzConstRef(active_bound))) {
+        return false;
+    }
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_logging(
+            diagnostics, silex::LogLevel::detail,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            capture_honesty_log, &capture);
+    return silex::detail::relation_search::factor_base_honesty_check(
+            honest, base, sflint::FmpzConstRef(active_bound),
+            sflint::FmpzConstRef(required_bound), nullptr, UWORD(0), false,
+            128, &diagnostics, &audit);
+}
+
+// Q(sqrt(-1559)) has class number 51.  With the norm <= 3 relation base,
+// one required prime below 300 has no witness at the stage-0 caps (radius 8,
+// 16 twists, 50 random tries) and is witnessed after one escalation, so the
+// scan proves honesty instead of failing closed.
+int test_escalated_witness_search_proves_large_class_group_base() {
+    bool honest = false;
+    silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
+    HonestyLogCapture capture;
+    if (!run_legacy_honesty_scan(honest, audit, capture, 1559, 3, 300)) {
+        return 1;
+    }
+    return honest && audit.witness_targets > 0 &&
+                   audit.witnessed_targets == audit.witness_targets &&
+                   audit.escalated_witnessed_targets >= 1 &&
+                   audit.max_witness_stage >= 1 &&
+                   audit.max_witness_stage <=
+                           silex::detail::relation_search::
+                                   kFactorBaseHonestyEscalationStages &&
+                   capture.exhausted_messages == 0
+            ? 0
+            : 1;
+}
+
+// Q(sqrt(-1001)) with the norm <= 3 relation base: the search escalates
+// through every bounded stage, fails closed, and the log names the caps of
+// the final stage.
+int test_bounded_escalation_reports_final_caps() {
+    bool honest = true;
+    silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
+    HonestyLogCapture capture;
+    if (!run_legacy_honesty_scan(honest, audit, capture, 1001, 3, 300) ||
+        honest ||
+        audit.max_witness_stage !=
+                silex::detail::relation_search::
+                        kFactorBaseHonestyEscalationStages) {
+        return 1;
+    }
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    return capture.exhausted_messages == 1 &&
+                   capture.last_detail.find(
+                           "stage=3/3 search=lattice radius=64 twists=128 "
+                           "random_tries=400") != std::string::npos
+            ? 0
+            : 1;
+#else
+    return 0;
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -1104,7 +1226,10 @@ int main() {
                            0 ||
                    test_ramified_target_is_never_omitted() != 0 ||
                    test_scan_detects_lower_interval_omissions_and_fails_closed() !=
-                           0
+                           0 ||
+                   test_escalated_witness_search_proves_large_class_group_base() !=
+                           0 ||
+                   test_bounded_escalation_reports_final_caps() != 0
             ? 1
             : 0;
 }

@@ -997,6 +997,22 @@ arbitrary-precision input does not enlarge the search: the initial rational
 prime retains its machine-integer eligibility check, and the scalar loop,
 candidate order, bounds, random draws, and non-scalar path are unchanged.
 
+The honesty witness search for each required prime starts at fixed caps:
+lattice radius 8, 16 twists, 50 random sub-factor-base tries (PARI 2.17.3
+``src/basemath/buch2.c:be_honest``, ``maxtry_HONEST``), and, on the T2 route,
+500 factored candidates and a 1e6-node enumeration step limit per ideal.
+PARI's ``be_honest`` gives up at those caps and enlarges the factor base;
+``bnftestprimes`` instead calls ``SPLIT``, which doubles its random-try limit
+and widens its twisting set in stages with no final cap.  Silex follows the
+staged form with a bound: when a required prime has no witness at the
+stage-0 caps, all of these caps double at each of at most three further
+stages, the T2 enumeration bound targets four times the factored-candidate
+cap as before, and only then is the prime reported unwitnessed.  The
+class-group detail log then records the final stage's caps, and on the T2
+route how many ideals stopped at the candidate cap or the step limit.  Every
+candidate at every stage passes the same exact witness check, and stage 0 is
+the previous search, so results that succeeded at stage 0 are unchanged.
+
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in
 ``Buchall_param`` publish the trivial class group, regulator one, torsion

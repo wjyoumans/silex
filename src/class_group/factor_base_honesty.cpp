@@ -13,13 +13,52 @@
 #include "relation_search_internal.hpp"
 #include "../ideal_factorization/ideal_factorization_internal.hpp"
 
+#include <cstdio>
 #include <vector>
 
 namespace silex::detail::relation_search {
 
+// Stage-0 witness search effort.  The 50 random tries follow the reference
+// buch2.c:be_honest (maxtry_HONEST); the T2 caps are the shared per-ideal
+// enumeration caps of ideal_t2_enumeration_internal.hpp.
 constexpr slong kFactorBaseHonestySearchRadius = 8;
 constexpr slong kFactorBaseHonestyMaxTwists = 16;
 constexpr slong kFactorBaseHonestyMaxRandomTries = 50;
+// Escalation stages: see kFactorBaseHonestyEscalationStages.
+
+namespace {
+
+struct FactorBaseWitnessSearchEffort {
+    slong stage = 0;
+    slong radius = kFactorBaseHonestySearchRadius;
+    slong max_twists = kFactorBaseHonestyMaxTwists;
+    slong random_tries = kFactorBaseHonestyMaxRandomTries;
+    slong factor_attempts = kMaxFactorAttempts;
+    slong element_steps = kMaxElementSteps;
+};
+
+FactorBaseWitnessSearchEffort factor_base_witness_search_effort(
+        slong stage) noexcept {
+    FactorBaseWitnessSearchEffort effort;
+    effort.stage = stage;
+    for (slong i = 0; i < stage; ++i) {
+        effort.radius *= 2;
+        effort.max_twists *= 2;
+        effort.random_tries *= 2;
+        effort.factor_attempts *= 2;
+        effort.element_steps *= 2;
+    }
+    return effort;
+}
+
+// Which per-ideal T2 cap stopped an exhausted direct witness search.
+struct RequiredPrimeWitnessExhaustion {
+    slong ideals = 0;
+    slong factor_attempt_cap_hits = 0;
+    slong element_step_cap_hits = 0;
+};
+
+}  // namespace
 
 namespace {
 
@@ -252,6 +291,8 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         const PrimeIdeal& required_prime,
         const Ideal& ideal,
         const Element& back_multiplier,
+        const FactorBaseWitnessSearchEffort& effort,
+        RequiredPrimeWitnessExhaustion& exhaustion,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
@@ -264,7 +305,8 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
 
     FiniteIdealT2EnumerationData t2_context;
     if (!build_finite_ideal_t2_enumeration_data_with_retry(
-                t2_context, ideal, diagnostics, embedding_cache)) {
+                t2_context, ideal, diagnostics, embedding_cache,
+                effort.factor_attempts)) {
         return RequiredPrimeWitnessSearchResult::failed;
     }
 
@@ -275,7 +317,7 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
                 skip_first_scalar, *order,
                 flint::FmpzMatConstRef(t2_context.basis)) ||
         !enumeration.start(t2_context.initial_bound_value,
-                           kMaxElementSteps, skip_first_scalar)) {
+                           effort.element_steps, skip_first_scalar)) {
         return RequiredPrimeWitnessSearchResult::failed;
     }
 
@@ -289,6 +331,7 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         return RequiredPrimeWitnessSearchResult::failed;
     }
 
+    ++exhaustion.ideals;
     slong factor_attempts = 0;
     while (enumeration.next()) {
         if (!enumeration.current_row(flint::FmpzMatRef(coefficients))) {
@@ -312,8 +355,9 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         if (scalar) {
             continue;
         }
-        if (factor_attempts >= kMaxFactorAttempts) {
-            break;
+        if (factor_attempts >= effort.factor_attempts) {
+            ++exhaustion.factor_attempt_cap_hits;
+            return RequiredPrimeWitnessSearchResult::exhausted;
         }
         ++factor_attempts;
 
@@ -332,6 +376,9 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         }
     }
 
+    if (enumeration.element_step_limit_reached()) {
+        ++exhaustion.element_step_cap_hits;
+    }
     return RequiredPrimeWitnessSearchResult::exhausted;
 }
 
@@ -341,6 +388,8 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
         const SubfactorBaseSchedule* subfactor_base_schedule,
         ulong& random_state,
         slong ideal_reduction_precision,
+        const FactorBaseWitnessSearchEffort& effort,
+        RequiredPrimeWitnessExhaustion& exhaustion,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
@@ -367,15 +416,15 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
     }
 
     RequiredPrimeWitnessSearchResult result = enumerate_required_prime_witness(
-            base, required_prime, current, back_multiplier, embedding_cache,
-            diagnostics);
+            base, required_prime, current, back_multiplier, effort,
+            exhaustion, embedding_cache, diagnostics);
     if (result != RequiredPrimeWitnessSearchResult::exhausted) {
         return result;
     }
 
     // Reset to the required prime before each bounded random
     // subfactor-base twist.
-    for (slong trial = 0; trial < kFactorBaseHonestyMaxRandomTries; ++trial) {
+    for (slong trial = 0; trial < effort.random_tries; ++trial) {
         if (!current.set(required_ideal) || !back_multiplier.one()) {
             return RequiredPrimeWitnessSearchResult::failed;
         }
@@ -410,8 +459,8 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
             return RequiredPrimeWitnessSearchResult::failed;
         }
         result = enumerate_required_prime_witness(
-                base, required_prime, current, back_multiplier,
-                embedding_cache, diagnostics);
+                base, required_prime, current, back_multiplier, effort,
+                exhaustion, embedding_cache, diagnostics);
         if (result != RequiredPrimeWitnessSearchResult::exhausted) {
             return result;
         }
@@ -561,6 +610,7 @@ bool factor_base_reduces_prime_by_twisted_lattice_search(
         const FactorBase& base,
         const PrimeIdeal& prime,
         slong radius,
+        slong twist_cap,
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
@@ -570,9 +620,7 @@ bool factor_base_reduces_prime_by_twisted_lattice_search(
     }
 
     const slong max_twists =
-            base.length() < kFactorBaseHonestyMaxTwists
-                    ? base.length()
-                    : kFactorBaseHonestyMaxTwists;
+            base.length() < twist_cap ? base.length() : twist_cap;
     PrimeIdeal twist_prime(*order);
     Ideal prime_ideal(*order);
     Ideal twist_ideal(*order);
@@ -602,6 +650,7 @@ bool factor_base_reduces_prime_by_principal_search(
         const FactorBase& base,
         const PrimeIdeal& prime,
         slong radius,
+        slong twist_cap,
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
@@ -649,7 +698,7 @@ bool factor_base_reduces_prime_by_principal_search(
                    base, prime, radius,
                    predicate, diagnostics) ||
            factor_base_reduces_prime_by_twisted_lattice_search(
-                   base, prime, radius,
+                   base, prime, radius, twist_cap,
                    predicate, diagnostics);
 }
 
@@ -658,6 +707,7 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
         const PrimeIdeal& prime,
         const SubfactorBaseSchedule* subfactor_base_schedule,
         slong radius,
+        slong random_tries,
         ulong& random_state,
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
@@ -680,7 +730,7 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
         return false;
     }
 
-    for (slong trial = 0; trial < kFactorBaseHonestyMaxRandomTries; ++trial) {
+    for (slong trial = 0; trial < random_tries; ++trial) {
         if (!current.set(prime_ideal)) {
             return false;
         }
@@ -717,6 +767,63 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
         }
     }
     return false;
+}
+
+void log_unwitnessed_required_prime(
+        const DiagnosticsContext* diagnostics,
+        flint::FmpzConstRef p,
+        const PrimeIdeal& prime,
+        bool direct_witness_search,
+        const FactorBaseWitnessSearchEffort& effort,
+        const RequiredPrimeWitnessExhaustion& exhaustion) noexcept {
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    if (!log_enabled(diagnostics, DiagnosticsModule::class_group,
+                     LogLevel::detail)) {
+        return;
+    }
+    const long p_value = flint::fmpz_fits_si(p)
+            ? static_cast<long>(flint::fmpz_get_si(p))
+            : -1L;
+    char detail[320];
+    if (direct_witness_search) {
+        std::snprintf(detail, sizeof(detail),
+                      "p=%ld residue_degree=%ld stage=%ld/%ld "
+                      "search=t2 random_tries=%ld factor_attempts=%ld "
+                      "element_steps=%ld ideals=%ld "
+                      "factor_attempt_cap_hits=%ld "
+                      "element_step_cap_hits=%ld",
+                      p_value, static_cast<long>(prime.residue_degree()),
+                      static_cast<long>(effort.stage),
+                      static_cast<long>(kFactorBaseHonestyEscalationStages),
+                      static_cast<long>(effort.random_tries),
+                      static_cast<long>(effort.factor_attempts),
+                      static_cast<long>(effort.element_steps),
+                      static_cast<long>(exhaustion.ideals),
+                      static_cast<long>(exhaustion.factor_attempt_cap_hits),
+                      static_cast<long>(exhaustion.element_step_cap_hits));
+    } else {
+        std::snprintf(detail, sizeof(detail),
+                      "p=%ld residue_degree=%ld stage=%ld/%ld "
+                      "search=lattice radius=%ld twists=%ld "
+                      "random_tries=%ld",
+                      p_value, static_cast<long>(prime.residue_degree()),
+                      static_cast<long>(effort.stage),
+                      static_cast<long>(kFactorBaseHonestyEscalationStages),
+                      static_cast<long>(effort.radius),
+                      static_cast<long>(effort.max_twists),
+                      static_cast<long>(effort.random_tries));
+    }
+    log_emit(diagnostics, DiagnosticsModule::class_group, LogLevel::detail,
+             __func__, "be_honest witness search exhausted at final caps",
+             detail);
+#else
+    (void) diagnostics;
+    (void) p;
+    (void) prime;
+    (void) direct_witness_search;
+    (void) effort;
+    (void) exhaustion;
+#endif
 }
 
 bool factor_base_honest_for_rational_prime(bool& honest,
@@ -761,35 +868,51 @@ bool factor_base_honest_for_rational_prime(bool& honest,
             continue;
         }
         if (audit != nullptr) ++audit->witness_targets;
-        if (use_direct_required_prime_witness) {
-            const RequiredPrimeWitnessSearchResult result =
-                    find_required_prime_witness(
-                            base, *prime, subfactor_base_schedule, random_state,
-                            ideal_reduction_precision, embedding_cache,
-                            diagnostics);
-            if (result == RequiredPrimeWitnessSearchResult::failed) {
-                return false;
+        bool witnessed = false;
+        FactorBaseWitnessSearchEffort effort;
+        RequiredPrimeWitnessExhaustion exhaustion;
+        for (slong stage = 0;
+             stage <= kFactorBaseHonestyEscalationStages && !witnessed;
+             ++stage) {
+            effort = factor_base_witness_search_effort(stage);
+            if (use_direct_required_prime_witness) {
+                exhaustion = RequiredPrimeWitnessExhaustion{};
+                const RequiredPrimeWitnessSearchResult result =
+                        find_required_prime_witness(
+                                base, *prime, subfactor_base_schedule,
+                                random_state, ideal_reduction_precision,
+                                effort, exhaustion, embedding_cache,
+                                diagnostics);
+                if (result == RequiredPrimeWitnessSearchResult::failed) {
+                    return false;
+                }
+                witnessed =
+                        result == RequiredPrimeWitnessSearchResult::found;
+            } else {
+                witnessed =
+                        factor_base_reduces_prime_by_principal_search(
+                                base, *prime, effort.radius,
+                                effort.max_twists, predicate,
+                                diagnostics) ||
+                        factor_base_reduces_prime_by_random_subfactor_base_search(
+                                base, *prime, subfactor_base_schedule,
+                                effort.radius, effort.random_tries,
+                                random_state, predicate, diagnostics);
             }
-            if (result == RequiredPrimeWitnessSearchResult::found) {
-                if (audit != nullptr) ++audit->witnessed_targets;
-                continue;
-            }
-            return true;
         }
-        if (factor_base_reduces_prime_by_principal_search(
-                    base, *prime, kFactorBaseHonestySearchRadius,
-                    predicate, diagnostics)) {
-            if (audit != nullptr) ++audit->witnessed_targets;
+        if (audit != nullptr && effort.stage > audit->max_witness_stage) {
+            audit->max_witness_stage = effort.stage;
+        }
+        if (witnessed) {
+            if (audit != nullptr) {
+                ++audit->witnessed_targets;
+                if (effort.stage > 0) ++audit->escalated_witnessed_targets;
+            }
             continue;
         }
-        if (factor_base_reduces_prime_by_random_subfactor_base_search(
-                    base, *prime, subfactor_base_schedule,
-                    kFactorBaseHonestySearchRadius,
-                    random_state, predicate,
-                    diagnostics)) {
-            if (audit != nullptr) ++audit->witnessed_targets;
-            continue;
-        }
+        log_unwitnessed_required_prime(
+                diagnostics, p, *prime, use_direct_required_prime_witness,
+                effort, exhaustion);
         return true;
     }
 

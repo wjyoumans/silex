@@ -13,6 +13,10 @@ struct OrderMinkowskiEmbeddingCache;
 
 namespace silex::detail::relation_search {
 
+// Per-ideal T2 enumeration effort: the enumeration bound targets about
+// 4 * kMaxFactorAttempts lattice points.  The factor-base honesty witness
+// search may raise both caps in bounded stages (factor_base_honesty.cpp);
+// relation search uses them unchanged.
 inline constexpr slong kMaxFactorAttempts = 500;
 inline constexpr slong kMaxElementSteps =
         4 * kMaxFactorAttempts * kMaxFactorAttempts;
@@ -61,7 +65,8 @@ bool fmpz_mat_single_row_is_primitive(flint::FmpzMatConstRef row) noexcept;
 bool build_finite_ideal_t2_enumeration_data_with_retry(
         FiniteIdealT2EnumerationData& out, const Ideal& ideal,
         const DiagnosticsContext* diagnostics,
-        detail::OrderMinkowskiEmbeddingCache* embedding_cache) noexcept;
+        detail::OrderMinkowskiEmbeddingCache* embedding_cache,
+        slong target_factor_attempts = kMaxFactorAttempts) noexcept;
 
 double arb_midpoint_double(flint::ArbConstRef value) noexcept;
 
