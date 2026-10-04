@@ -88,7 +88,8 @@ enum class ClassGroupGenerationBasis {
 // - unconditional_certification: the class group and units were certified
 //   `proven` (saturation or an unconditional analytic check, see
 //   relation_saturation_status() and analytic_class_regulator_certification()),
-//   including the exact degree-one route of a `grh` request.
+//   including the exact degree-one route of a `grh` request.  A `proven`
+//   class group certified without a unit pair also reports this basis.
 enum class ClassUnitCompletenessBasis {
     none = 0,
     belabas_friedman = 1,
@@ -202,7 +203,8 @@ public:
     factor_base_generation_record(slong index) const noexcept;
     bool check_factor_base_generation_bound(
             flint::FmpzConstRef required_bound) noexcept;
-    // Where factor-base generation rests, for the current factor base:
+    // Where factor-base generation rests, for the current presentation (`unknown`
+    // when there is none, even if a factor base exists):
     // `proven` when factor_base_generation_status() is `verified` (basis
     // minkowski_type), `grh` when a `grh` class/unit request built the base
     // to contain every prime ideal up to the GRH generation bound
@@ -219,7 +221,9 @@ public:
     // certification is `unknown`.
     bool factor_base_generation_certification_bound(
             flint::FmpzRef out) const noexcept;
-    // Where relation and unit completeness rests for the published pair,
+    // Where relation and unit completeness rests for the published pair
+    // (or for a `proven` class group alone, which also reports `proven` /
+    // unconditional_certification),
     // relative to factor-base generation: `proven` for a `proven` class
     // group (basis unconditional_certification) and for a `grh` pair
     // accepted through the exact imaginary-quadratic class number, an
