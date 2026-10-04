@@ -580,19 +580,17 @@ included, and that build bound is at least the undoubled GRH bound.  Under
 GRH such a base generates the class group: Belabas--Diaz y Diaz--Friedman
 2008, Corollary 2.2, assumes the Riemann hypothesis for the ``L``-functions
 of the nontrivial class-group characters; Bach 1990, Theorem 4 (with
-conductor one, ``12 log^2 |D|``; ``6 log^2 |D|`` in degree two), assumes it
-for ``zeta_K`` as well.  Silex records this as a separate GRH generation
+conductor one, ``12 log^2 |D|``) and the remark following it (p. 376,
+``6 log^2 |D|`` in degree two), assumes it for ``zeta_K`` as well.  Silex records this as a separate GRH generation
 record on the factor base, written only when the grh policy builds the base.
 It never sets ``factor_base_generation_status()`` to ``verified`` and is not
 the relation-search honesty receipt, so public generation readers and every
 ``proven`` route still see only unconditional generation, and a ``proven``
 promotion still requires generation verified up to the Minkowski-type bound
 (``factor_base_class_group_bound``).  When the GRH-sized base reaches that
-bound anyway, generation is recorded unconditionally as before.  A
-positive-rank ``grh`` transaction whose base covers neither bound fails
-closed once the factor base and its initial relations are built: the
-continuation never rebuilds the factor base, so extending relations further
-could not lead to acceptance.  As in PARI 2.17.3
+bound anyway, generation is recorded unconditionally as before.  If the
+GRH generation record cannot be written, the ``grh`` transaction fails
+closed.  As in PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_param``, where the primes up to the
 ``GRHchk`` bound generate the class group under GRH, and Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group``, fields such as

@@ -25,8 +25,9 @@ public:
     // just built to contain every prime ideal of norm at most its build
     // bound (the grh policy's norm-bounded base), when that build bound is
     // at least `grh_bound`, the GRH generation bound min(BDF, Bach).  Under
-    // GRH such a base generates the class group (Bach 1990, Thm 4;
-    // Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  The record is separate
+    // GRH such a base generates the class group (Bach 1990, Thm 4 and the
+    // remark following it, p. 376; Belabas-Diaz y Diaz-Friedman 2008,
+    // Cor 2.2).  The record is separate
     // from the unconditional generation status, which stays as built and is
     // never set to `verified` here; it is written only at build time and
     // never by the honesty receipt.  Returns false, recording nothing, when
