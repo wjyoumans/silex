@@ -232,12 +232,12 @@ def assert_sunit_instance(instance: dict[str, Any], row: dict[str, Any]) -> None
                 "regulator_proof_status"):
         assert instance["class_group"][key] == "verified"
     dirichlet_route = row["id"] == "real_quadratic_210_first_over_2"
-    assert instance["class_group"]["relation_saturation_status"] == (
-        "not_checked" if dirichlet_route else "verified"
-    )
+    # Every source pair reports verified saturation, including the one
+    # certified by the Dirichlet index-one gate, where index one proves it.
+    assert instance["class_group"]["relation_saturation_status"] == "verified"
     if dirichlet_route:
         # The source pair uses the canonical Dirichlet index-one gate;
-        # S-unit publication preserves its unused component receipts.
+        # S-unit publication preserves its analytic receipts.
         assert instance["class_group"][
             "analytic_class_regulator_status"
         ] == "verified"

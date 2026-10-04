@@ -3611,6 +3611,11 @@ int test_class_unit_regulator_certification() {
                silex::ProofState::verified);
         assert(class_group.regulator_proof_status() ==
                silex::ProofState::verified);
+        // Index one against the unconditional hR proves saturation at
+        // every prime; no ell-local records are kept.
+        assert(class_group.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(class_group.relation_saturation_record_count() == 0);
         assert(units.certification_status() ==
                silex::CertificationMode::proven);
         // Q(sqrt 2) has class number 1 and torsion {+1, -1}.

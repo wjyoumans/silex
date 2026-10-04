@@ -9999,7 +9999,21 @@ bool ClassGroupContext::try_certify_analytic_class_regulator_(
     analytic_class_regulator_assumes_grh_ = false;
     unit_proof_status_ = ProofState::verified;
     regulator_proof_status_ = ProofState::verified;
-    return try_promote_proven_certification_();
+    if (!try_promote_proven_certification_()) {
+        return false;
+    }
+    // Index one against an unconditional hR, with generation checked to the
+    // required bound, gives h_cand * R_cand = h * R, where h_cand / h and
+    // R_cand / R are the relation and unit indices, so both are one and the
+    // relations are saturated at every prime.  As in
+    // try_analytic_index_bound_with_units_, the status is `verified` and the
+    // per-prime records are cleared: this is not an ell-local proof
+    // (relation_saturation_status() in class_group.hpp).
+    if (private_storage_ != nullptr) {
+        private_storage_->relation_saturation_records.clear();
+    }
+    relation_saturation_status_ = ProofState::verified;
+    return true;
 }
 
 bool ClassGroupContext::try_certify_analytic_class_unit_regulator_(
@@ -10014,10 +10028,16 @@ bool ClassGroupContext::try_certify_analytic_class_unit_regulator_(
         return false;
     }
 
-    // Only an unconditional hR proves the unit index; with a GRH hR the
-    // promotion above came from saturation, which already required proven
-    // units.
+    // Only an unconditional hR proves the unit index and the relation
+    // saturation; with a GRH hR the promotion above came from saturation,
+    // which already required proven units, and the saturation status is
+    // left as that proof set it.  The saturation argument is the one in
+    // try_certify_analytic_class_regulator_.
     if (hr_unconditional) {
+        if (private_storage_ != nullptr) {
+            private_storage_->relation_saturation_records.clear();
+        }
+        relation_saturation_status_ = ProofState::verified;
         units.mark_certification_proven_();
     }
     return transaction.finish(true);

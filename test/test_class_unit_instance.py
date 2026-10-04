@@ -338,8 +338,7 @@ def main() -> int:
         ] == "verified"
         assert proven_instance["class_group"][
             "relation_saturation_status"
-        ] == ("not_checked" if row["id"] == "real_quadratic_210_proven"
-              else "verified")
+        ] == "verified"
         assert proven_instance["class_group"]["unit_proof_status"] == (
             "verified"
         )
@@ -389,8 +388,10 @@ def main() -> int:
                 assert proven_instance["class_group"][component] == "not_checked"
         if row["id"] == "real_quadratic_210_proven":
             # The canonical Dirichlet index-one gate certifies this pair
-            # without a relation-saturation or BF proof attempt. The gate
-            # is unconditional, so the GRH dependence field reads
+            # without an ell-local saturation or BF proof attempt; index
+            # one proves saturation at every prime, so the saturation
+            # status above is `verified`. The gate is unconditional, so
+            # the GRH dependence field reads
             # `proven`, not the result's overall `proven` certification.
             assert proven_instance["class_group"][
                 "analytic_class_regulator_status"

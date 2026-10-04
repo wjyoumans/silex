@@ -1592,8 +1592,10 @@ int test_try_certify_with_units_zeta_quadratic() {
            silex::ProofState::verified);
     assert(context.analytic_class_regulator_status() ==
            silex::ProofState::verified);
+    // Index one against the unconditional L(1, chi) hR proves saturation
+    // at every prime, with no ell-local records kept.
     assert(context.relation_saturation_status() ==
-           silex::ProofState::not_checked);
+           silex::ProofState::verified);
     assert(context.relation_saturation_record_count() == 0);
     assert(context.unit_proof_status() == silex::ProofState::verified);
     assert(context.regulator_proof_status() == silex::ProofState::verified);
