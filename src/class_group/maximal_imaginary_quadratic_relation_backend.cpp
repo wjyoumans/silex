@@ -1140,6 +1140,10 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                     flint::FmpzConstRef(required_generation_bound), nullptr,
                     honesty_seed, false,
                     kQuadraticPrincipalReductionPrecision,
+                    // An unwitnessed prime falls back to the general
+                    // relation route, so keep the stage-0 caps here.
+                    detail::relation_search::factor_base_witness_escalation(
+                            true),
                     active_diagnostics)) {
             return SpecializedRelationBackendStatus::failed;
         }

@@ -1001,17 +1001,24 @@ The honesty witness search for each required prime starts at fixed caps:
 lattice radius 8, 16 twists, 50 random sub-factor-base tries (PARI 2.17.3
 ``src/basemath/buch2.c:be_honest``, ``maxtry_HONEST``), and, on the T2 route,
 500 factored candidates and a 1e6-node enumeration step limit per ideal.
-PARI's ``be_honest`` gives up at those caps and enlarges the factor base;
-``bnftestprimes`` instead calls ``SPLIT``, which doubles its random-try limit
-and widens its twisting set in stages with no final cap.  Silex follows the
-staged form with a bound: when a required prime has no witness at the
-stage-0 caps, all of these caps double at each of at most three further
-stages, the T2 enumeration bound targets four times the factored-candidate
-cap as before, and only then is the prime reported unwitnessed.  The
-class-group detail log then records the final stage's caps, and on the T2
-route how many ideals stopped at the candidate cap or the step limit.  Every
-candidate at every stage passes the same exact witness check, and stage 0 is
-the previous search, so results that succeeded at stage 0 are unchanged.
+PARI's ``be_honest`` gives up at those caps and ``bnfinit`` enlarges the
+factor base.  Silex keeps that flow wherever a factor-base restart or the
+imaginary quadratic fallback route is available.  Where an unwitnessed prime
+is a final failure, Silex instead doubles every one of these caps at each of
+at most three further stages (the step limit doubles with the candidate cap
+rather than growing quadratically, and the T2 enumeration bound targets four
+times the candidate cap as before), and only then reports the prime
+unwitnessed.  The doubling, the caps it applies to, and the three stages are
+Silex's own bounded choices with no upstream source.  The nearest reference
+schedule, ``SPLIT`` (used by ``bnftestprimes`` and ``isprincipal`` once the
+class group is known), keeps a fixed set of twisting directions and instead
+widens the number of ``Vbase`` primes in each random product, doubling its
+try limit as that number grows and then removing the limit; the Silex random
+tries keep the sub-factor base fixed.  The class-group detail log records the
+caps of the last stage searched, and on the T2 route how many ideals stopped
+at the candidate cap or the step limit.  Every candidate at every stage
+passes the same exact witness check, and stage 0 is the previous search, so
+results that succeeded at stage 0 are unchanged.
 
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in

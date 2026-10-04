@@ -24,7 +24,6 @@ namespace silex::detail::relation_search {
 constexpr slong kFactorBaseHonestySearchRadius = 8;
 constexpr slong kFactorBaseHonestyMaxTwists = 16;
 constexpr slong kFactorBaseHonestyMaxRandomTries = 50;
-// Escalation stages: see kFactorBaseHonestyEscalationStages.
 
 namespace {
 
@@ -37,6 +36,10 @@ struct FactorBaseWitnessSearchEffort {
     slong element_steps = kMaxElementSteps;
 };
 
+// Each escalation stage doubles every cap.  The element-step limit doubles
+// with the factor-attempt cap rather than following kMaxElementSteps =
+// 4 * kMaxFactorAttempts^2, which would quadruple it per stage; this keeps
+// the growth of every cap linear in the stage multiplier and is deliberate.
 FactorBaseWitnessSearchEffort factor_base_witness_search_effort(
         slong stage) noexcept {
     FactorBaseWitnessSearchEffort effort;
@@ -57,10 +60,6 @@ struct RequiredPrimeWitnessExhaustion {
     slong factor_attempt_cap_hits = 0;
     slong element_step_cap_hits = 0;
 };
-
-}  // namespace
-
-namespace {
 
 bool full_factorization_has_principal_witness(
         const FactorBase& base,
@@ -774,6 +773,7 @@ void log_unwitnessed_required_prime(
         flint::FmpzConstRef p,
         const PrimeIdeal& prime,
         bool direct_witness_search,
+        slong max_stage,
         const FactorBaseWitnessSearchEffort& effort,
         const RequiredPrimeWitnessExhaustion& exhaustion) noexcept {
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
@@ -794,7 +794,7 @@ void log_unwitnessed_required_prime(
                       "element_step_cap_hits=%ld",
                       p_value, static_cast<long>(prime.residue_degree()),
                       static_cast<long>(effort.stage),
-                      static_cast<long>(kFactorBaseHonestyEscalationStages),
+                      static_cast<long>(max_stage),
                       static_cast<long>(effort.random_tries),
                       static_cast<long>(effort.factor_attempts),
                       static_cast<long>(effort.element_steps),
@@ -808,7 +808,7 @@ void log_unwitnessed_required_prime(
                       "random_tries=%ld",
                       p_value, static_cast<long>(prime.residue_degree()),
                       static_cast<long>(effort.stage),
-                      static_cast<long>(kFactorBaseHonestyEscalationStages),
+                      static_cast<long>(max_stage),
                       static_cast<long>(effort.radius),
                       static_cast<long>(effort.max_twists),
                       static_cast<long>(effort.random_tries));
@@ -821,6 +821,7 @@ void log_unwitnessed_required_prime(
     (void) p;
     (void) prime;
     (void) direct_witness_search;
+    (void) max_stage;
     (void) effort;
     (void) exhaustion;
 #endif
@@ -835,6 +836,8 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                            ulong& random_state,
                                            bool use_direct_required_prime_witness,
                                            slong ideal_reduction_precision,
+                                           FactorBaseWitnessEscalation
+                                                   escalation,
                                            detail::OrderMinkowskiEmbeddingCache*
                                                    embedding_cache,
                                            const DiagnosticsContext*
@@ -868,11 +871,15 @@ bool factor_base_honest_for_rational_prime(bool& honest,
             continue;
         }
         if (audit != nullptr) ++audit->witness_targets;
+        const slong max_stage =
+                escalation == FactorBaseWitnessEscalation::bounded
+                        ? kFactorBaseHonestyEscalationStages
+                        : 0;
         bool witnessed = false;
         FactorBaseWitnessSearchEffort effort;
         RequiredPrimeWitnessExhaustion exhaustion;
         for (slong stage = 0;
-             stage <= kFactorBaseHonestyEscalationStages && !witnessed;
+             stage <= max_stage && !witnessed;
              ++stage) {
             effort = factor_base_witness_search_effort(stage);
             if (use_direct_required_prime_witness) {
@@ -900,8 +907,8 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                 random_state, predicate, diagnostics);
             }
         }
-        if (audit != nullptr && effort.stage > audit->max_witness_stage) {
-            audit->max_witness_stage = effort.stage;
+        if (audit != nullptr && effort.stage > audit->max_search_stage) {
+            audit->max_search_stage = effort.stage;
         }
         if (witnessed) {
             if (audit != nullptr) {
@@ -912,7 +919,7 @@ bool factor_base_honest_for_rational_prime(bool& honest,
         }
         log_unwitnessed_required_prime(
                 diagnostics, p, *prime, use_direct_required_prime_witness,
-                effort, exhaustion);
+                max_stage, effort, exhaustion);
         return true;
     }
 
@@ -931,6 +938,7 @@ bool factor_base_honesty_check(bool& honest,
                                ulong random_seed,
                                bool use_direct_required_prime_witness,
                                slong ideal_reduction_precision,
+                               FactorBaseWitnessEscalation escalation,
                                const DiagnosticsContext* diagnostics,
                                FactorBaseHonestyScanAudit* audit,
                                FactorBaseWitnessPredicate predicate)
@@ -966,7 +974,7 @@ bool factor_base_honesty_check(bool& honest,
                     prime_honest, base, flint::FmpzConstRef(p),
                     required_bound, subfactor_base_schedule, random_state,
                     use_direct_required_prime_witness,
-                    ideal_reduction_precision, &embedding_cache,
+                    ideal_reduction_precision, escalation, &embedding_cache,
                     diagnostics, predicate, audit);
         if (audit != nullptr) audit->final_random_state = random_state;
         if (!checked) {

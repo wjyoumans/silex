@@ -324,13 +324,18 @@ AnalyticFinishDecision apply_honesty_check(
             : relation_search_phase_seed(context, base->length(),
                                          kHonestyPhase,
                                          route_state.honesty_restart_requests);
+    // With a factor-base restart available, keep the reference be_honest
+    // flow: give up at the stage-0 caps and enlarge the factor base.  Without
+    // one an unwitnessed prime fails the route, so escalate first.
+    const FactorBaseWitnessEscalation escalation =
+            factor_base_witness_escalation(factor_base_restart_available);
     bool honest = false;
     if (base == nullptr ||
         !factor_base_honesty_check(
                 honest, *base, active_factor_base_bound,
                 flint::FmpzConstRef(required_bound), subfb_state,
                 random_seed, use_required_prime_factor_over_base,
-                route_state.analytic_finish_precision,
+                route_state.analytic_finish_precision, escalation,
                 diagnostics)) {
         return AnalyticFinishDecision::failed;
     }

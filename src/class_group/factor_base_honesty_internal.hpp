@@ -32,15 +32,37 @@ bool factor_base_principal_witness(
         const DiagnosticsContext* diagnostics = nullptr,
         FactorBaseWitnessAudit* audit = nullptr) noexcept;
 
-// When a required prime has no witness at the stage-0 caps, the witness
-// search effort for that prime (lattice radius, twists, random tries, and the
-// T2 factor-attempt and element-step caps) doubles at each of at most this
-// many further stages before the prime is reported unwitnessed.  The
-// reference buch2.c:be_honest stops after stage 0 (maxtry_HONEST) and
-// enlarges the factor base; bnftestprimes calls SPLIT, which doubles its
-// random-try limit and widens its twisting set in stages without a final
-// cap.  Silex keeps the stages bounded.  Only search effort changes: every
-// witness found at any stage passes the same exact check.
+// Whether the honesty witness search for a required prime may escalate past
+// the stage-0 caps.  The reference buch2.c:be_honest gives up after
+// 1 + maxtry_HONEST attempts and bnfinit enlarges the factor base, so a
+// caller with a factor-base restart or another route to fall back on keeps
+// that flow (none).  A caller for which an unwitnessed prime is a final
+// failure asks for bounded escalation instead; callers select the mode with
+// factor_base_witness_escalation().
+enum class FactorBaseWitnessEscalation {
+    none,
+    bounded,
+};
+
+constexpr FactorBaseWitnessEscalation factor_base_witness_escalation(
+        bool recovery_available) noexcept {
+    return recovery_available ? FactorBaseWitnessEscalation::none
+                              : FactorBaseWitnessEscalation::bounded;
+}
+
+// Under bounded escalation, when a required prime has no witness at the
+// stage-0 caps, the witness search effort for that prime (lattice radius,
+// twists, random tries, and the T2 factor-attempt and element-step caps)
+// doubles at each of at most this many further stages before the prime is
+// reported unwitnessed.  The doubling, the choice of caps that double, and
+// the number of stages are Silex's own bounded choices with no upstream
+// source.  The nearest reference schedule, buch2.c:SPLIT (used by
+// bnftestprimes and isprincipal once the class group is known), keeps a fixed
+// set of twisting directions and instead widens the number of Vbase primes in
+// each random product, doubling its try limit as that number grows and then
+// removing the limit; the Silex random tries keep the sub-factor base fixed.
+// Only search effort changes: every witness found at any stage passes the
+// same exact check.
 inline constexpr slong kFactorBaseHonestyEscalationStages = 3;
 
 struct FactorBaseHonestyScanAudit {
@@ -49,9 +71,10 @@ struct FactorBaseHonestyScanAudit {
     slong witness_targets = 0;
     slong witnessed_targets = 0;
     // Targets witnessed only after the stage-0 caps were raised, and the
-    // highest escalation stage any target reached.
+    // highest escalation stage any target's search reached, whether or not
+    // that search found a witness.
     slong escalated_witnessed_targets = 0;
-    slong max_witness_stage = 0;
+    slong max_search_stage = 0;
     ulong final_random_state = 0;
 };
 
@@ -76,6 +99,7 @@ bool factor_base_honesty_check(
         ulong random_seed,
         bool use_direct_required_prime_witness,
         slong ideal_reduction_precision,
+        FactorBaseWitnessEscalation escalation,
         const DiagnosticsContext* diagnostics,
         FactorBaseHonestyScanAudit* audit = nullptr,
         FactorBaseWitnessPredicate predicate =

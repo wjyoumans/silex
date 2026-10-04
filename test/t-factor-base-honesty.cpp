@@ -804,14 +804,16 @@ int test_legacy_scan_predicate_equivalence() {
         const bool expected_ok = search::factor_base_honesty_check(
                 expected_honest, base, sflint::FmpzConstRef(active),
                 sflint::FmpzConstRef(required), nullptr, UWORD(42), false,
-                128, nullptr, &expected, Mode::full_factorization);
+                128, search::FactorBaseWitnessEscalation::none, nullptr,
+                &expected, Mode::full_factorization);
         for (Mode mode : {Mode::selected, Mode::order_element_direct}) {
             bool honest = !expected_honest;
             search::FactorBaseHonestyScanAudit audit;
             const bool ok = search::factor_base_honesty_check(
                     honest, base, sflint::FmpzConstRef(active),
                     sflint::FmpzConstRef(required), nullptr, UWORD(42), false,
-                    128, nullptr, &audit, mode);
+                    128, search::FactorBaseWitnessEscalation::none, nullptr,
+                    &audit, mode);
             if (ok != expected_ok || honest != expected_honest ||
                 audit.rational_prime_checks != expected.rational_prime_checks ||
                 audit.checks_at_or_below_active_bound != expected.checks_at_or_below_active_bound ||
@@ -847,7 +849,10 @@ int test_truncated_decomposition_withholds_honesty() {
             silex::detail::relation_search::factor_base_honesty_check(
                     honest, base, sflint::FmpzConstRef(active_bound),
                     sflint::FmpzConstRef(required_bound), nullptr, UWORD(0),
-                    false, 128, nullptr, &audit);
+                    false, 128,
+                    silex::detail::relation_search::
+                            FactorBaseWitnessEscalation::none,
+                    nullptr, &audit);
 
     // The scan itself succeeds, but it must withhold the honesty proof after
     // testing both relevant degree-one primes.  Skipping the final relevant
@@ -1011,7 +1016,10 @@ int test_ramified_target_is_never_omitted() {
             silex::detail::relation_search::factor_base_honesty_check(
                     honest, base, sflint::FmpzConstRef(active_bound),
                     sflint::FmpzConstRef(required_bound), nullptr, UWORD(0),
-                    true, 128, nullptr, &audit);
+                    true, 128,
+                    silex::detail::relation_search::
+                            FactorBaseWitnessEscalation::none,
+                    nullptr, &audit);
 
     // The first omitted target is the ramified norm-4 prime above 2.  With no
     // witness schedule the strict check must fail there, independently of the
@@ -1077,7 +1085,10 @@ int test_scan_detects_lower_interval_omissions_and_fails_closed() {
             silex::detail::relation_search::factor_base_honesty_check(
                     honest, base, sflint::FmpzConstRef(active_bound),
                     sflint::FmpzConstRef(required_bound), nullptr, UWORD(0),
-                    true, 128, nullptr, &audit);
+                    true, 128,
+                    silex::detail::relation_search::
+                            FactorBaseWitnessEscalation::none,
+                    nullptr, &audit);
 
     // With no sub-factor-base witness state, the first omitted norm-9 ideal
     // fails closed. The audit proves that the scan reached it through p=3.
@@ -1129,13 +1140,45 @@ void capture_honesty_log(void* user,
     }
 }
 
+namespace search = silex::detail::relation_search;
+
+// Expected detail-log text for an unwitnessed prime on the lattice route.
+constexpr const char* kStageZeroCaps =
+        "stage=0/0 search=lattice radius=8 twists=16 random_tries=50";
+constexpr const char* kFinalStageCaps =
+        "stage=3/3 search=lattice radius=64 twists=128 random_tries=400";
+
+void enable_honesty_log(silex::DiagnosticsContext& diagnostics,
+                        HonestyLogCapture& capture) noexcept {
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_logging(
+            diagnostics, silex::LogLevel::detail,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            capture_honesty_log, &capture);
+}
+
+bool logged_caps(const HonestyLogCapture& capture,
+                 const char* caps) noexcept {
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    return capture.exhausted_messages == 1 &&
+           capture.last_detail.find(caps) != std::string::npos;
+#else
+    (void) capture;
+    (void) caps;
+    return true;
+#endif
+}
+
+// An active bound of 1 keeps the defined but empty norm-at-most-1 base.
 bool run_legacy_honesty_scan(bool& honest,
-                             silex::detail::relation_search::
-                                     FactorBaseHonestyScanAudit& audit,
+                             search::FactorBaseHonestyScanAudit& audit,
                              HonestyLogCapture& capture,
                              slong d,
                              ulong active,
-                             ulong required) noexcept {
+                             ulong required,
+                             search::FactorBaseWitnessEscalation escalation)
+        noexcept {
     FieldSetup setup = imaginary_quadratic_fixture(d);
     sflint::Fmpz active_bound;
     sflint::Fmpz required_bound;
@@ -1143,70 +1186,85 @@ bool run_legacy_honesty_scan(bool& honest,
     sflint::fmpz_set_ui(sflint::FmpzRef(required_bound), required);
     silex::FactorBase base(setup.maximal_order);
     if (!base.is_defined() ||
-        !base.build_relation_completion_base(
-                sflint::FmpzConstRef(active_bound))) {
+        (active > 1 && !base.build_relation_completion_base(
+                               sflint::FmpzConstRef(active_bound)))) {
         return false;
     }
     silex::DiagnosticsContext diagnostics;
-    silex::diagnostics_context_init(diagnostics);
-    silex::diagnostics_set_logging(
-            diagnostics, silex::LogLevel::detail,
-            silex::diagnostics_module_bit(
-                    silex::DiagnosticsModule::class_group),
-            capture_honesty_log, &capture);
-    return silex::detail::relation_search::factor_base_honesty_check(
+    enable_honesty_log(diagnostics, capture);
+    return search::factor_base_honesty_check(
             honest, base, sflint::FmpzConstRef(active_bound),
             sflint::FmpzConstRef(required_bound), nullptr, UWORD(0), false,
-            128, &diagnostics, &audit);
+            128, escalation, &diagnostics, &audit);
 }
 
 // Q(sqrt(-1559)) has class number 51.  With the norm <= 3 relation base,
 // one required prime below 300 has no witness at the stage-0 caps (radius 8,
-// 16 twists, 50 random tries) and is witnessed after one escalation, so the
-// scan proves honesty instead of failing closed.
+// 16 twists, 50 random tries).  Without escalation the scan fails closed
+// there, as the reference be_honest does before enlarging the factor base;
+// with bounded escalation the prime is witnessed at a later stage and the
+// scan proves honesty.
 int test_escalated_witness_search_proves_large_class_group_base() {
-    bool honest = false;
-    silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
+    bool honest = true;
+    search::FactorBaseHonestyScanAudit audit;
     HonestyLogCapture capture;
-    if (!run_legacy_honesty_scan(honest, audit, capture, 1559, 3, 300)) {
+    if (!run_legacy_honesty_scan(honest, audit, capture, 1559, 3, 300,
+                                 search::FactorBaseWitnessEscalation::none) ||
+        honest || audit.max_search_stage != 0 ||
+        audit.escalated_witnessed_targets != 0 ||
+        !logged_caps(capture, kStageZeroCaps)) {
+        return 1;
+    }
+
+    honest = false;
+    capture = HonestyLogCapture{};
+    if (!run_legacy_honesty_scan(
+                honest, audit, capture, 1559, 3, 300,
+                search::FactorBaseWitnessEscalation::bounded)) {
         return 1;
     }
     return honest && audit.witness_targets > 0 &&
                    audit.witnessed_targets == audit.witness_targets &&
                    audit.escalated_witnessed_targets >= 1 &&
-                   audit.max_witness_stage >= 1 &&
-                   audit.max_witness_stage <=
-                           silex::detail::relation_search::
-                                   kFactorBaseHonestyEscalationStages &&
+                   audit.max_search_stage >= 1 &&
+                   audit.max_search_stage <=
+                           search::kFactorBaseHonestyEscalationStages &&
                    capture.exhausted_messages == 0
             ? 0
             : 1;
 }
 
-// Q(sqrt(-1001)) with the norm <= 3 relation base: the search escalates
-// through every bounded stage, fails closed, and the log names the caps of
-// the final stage.
+// Q(sqrt(-5)) has class number 2 and the prime above 2 is the nontrivial
+// class.  The empty norm-at-most-1 base generates only the trivial class, so
+// no search effort can witness that prime: the test checks that bounded
+// escalation runs every stage, fails closed, and logs the final stage's caps,
+// not that a cap happened to be too small.
 int test_bounded_escalation_reports_final_caps() {
     bool honest = true;
-    silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
+    search::FactorBaseHonestyScanAudit audit;
     HonestyLogCapture capture;
-    if (!run_legacy_honesty_scan(honest, audit, capture, 1001, 3, 300) ||
-        honest ||
-        audit.max_witness_stage !=
-                silex::detail::relation_search::
-                        kFactorBaseHonestyEscalationStages) {
-        return 1;
-    }
-#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
-    return capture.exhausted_messages == 1 &&
-                   capture.last_detail.find(
-                           "stage=3/3 search=lattice radius=64 twists=128 "
-                           "random_tries=400") != std::string::npos
+    return run_legacy_honesty_scan(
+                   honest, audit, capture, 5, 1, 2,
+                   search::FactorBaseWitnessEscalation::bounded) &&
+                   !honest && audit.witness_targets == 1 &&
+                   audit.witnessed_targets == 0 &&
+                   audit.max_search_stage ==
+                           search::kFactorBaseHonestyEscalationStages &&
+                   logged_caps(capture, kFinalStageCaps)
             ? 0
             : 1;
-#else
-    return 0;
-#endif
+}
+
+// Escalation runs only where an unwitnessed prime is final: a caller with a
+// factor-base restart or a fallback route keeps the stage-0 caps of the
+// reference be_honest.
+int test_escalation_only_without_recovery() {
+    return search::factor_base_witness_escalation(true) ==
+                           search::FactorBaseWitnessEscalation::none &&
+                   search::factor_base_witness_escalation(false) ==
+                           search::FactorBaseWitnessEscalation::bounded
+            ? 0
+            : 1;
 }
 
 }  // namespace
@@ -1229,7 +1287,8 @@ int main() {
                            0 ||
                    test_escalated_witness_search_proves_large_class_group_base() !=
                            0 ||
-                   test_bounded_escalation_reports_final_caps() != 0
+                   test_bounded_escalation_reports_final_caps() != 0 ||
+                   test_escalation_only_without_recovery() != 0
             ? 1
             : 0;
 }
