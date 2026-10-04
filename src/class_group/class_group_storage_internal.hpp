@@ -355,6 +355,25 @@ public:
     static void clear_factor_base_honesty_failure(
             ClassGroupContext& context) noexcept;
 
+    // The class-group candidate computation and extension entry points the
+    // class/unit transaction calls for each attempt.
+    static bool compute_relation_candidate(
+            ClassGroupContext& context,
+            const Order& order,
+            flint::FmpzConstRef factor_base_bound,
+            const ClassGroupRelationOptions& options) noexcept {
+        return context.compute_relation_candidate_(
+                order, factor_base_bound, options);
+    }
+    static bool extend_relation_kernel_units(
+            ClassGroupContext& context,
+            const Order& order,
+            flint::FmpzConstRef factor_base_bound,
+            const ClassGroupRelationOptions& options) noexcept {
+        return context.extend_relation_kernel_units_(
+                order, factor_base_bound, options);
+    }
+
     static bool sync_row_module_checkpoint(
             ClassGroupContext& context) noexcept {
         return context.sync_row_module_checkpoint_();

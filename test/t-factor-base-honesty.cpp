@@ -1,3 +1,4 @@
+#include "class_group/class_group_internal.hpp"
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
@@ -1387,6 +1388,61 @@ int test_terminal_honesty_failure_names_transaction_reason() {
             : 1;
 }
 
+// A later class-group attempt in the same class/unit transaction clears the
+// record an earlier attempt's terminal honesty checkpoint left, so the
+// transaction's reason belongs to its last attempt.  The clear runs before
+// the attempt's guards: an extension of a context with no factor base and a
+// candidate computation with an invalid search radius are both rejected
+// before any search, and both still clear.
+int test_later_attempt_clears_honesty_failure() {
+    HonestyCheckpointRun earlier;
+    if (!run_honesty_checkpoint(earlier, false, true) ||
+        !final_stage_lattice_failure(
+                earlier.audit.factor_base_honesty_failure, 3)) {
+        return 1;
+    }
+    const silex::detail::FactorBaseHonestyFailure recorded =
+            earlier.audit.factor_base_honesty_failure;
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+
+    FieldSetup setup = imaginary_quadratic_fixture(21);
+    silex::ClassGroupContext context(setup.maximal_order);
+    silex::detail::ClassUnitTransactionContext transaction{
+            earlier.audit, nullptr, {}, {}, false};
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               &transaction);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(bound), 20);
+    silex::detail::ClassGroupRelationOptions options =
+            silex::detail::class_group_relation_options(
+                    setup.maximal_order, silex::ClassGroupComputeOptions{});
+
+    const bool extended = Access::extend_relation_kernel_units(
+            context, setup.maximal_order, sflint::FmpzConstRef(bound),
+            options);
+    const bool extension_cleared =
+            !extended && !earlier.audit.factor_base_honesty_failure.recorded;
+
+    Access::record_factor_base_honesty_failure(context, recorded);
+    silex::detail::ClassGroupRelationOptions invalid_options = options;
+    invalid_options.coordinate_search_radius = 0;
+    const bool rejected = Access::compute_relation_candidate(
+            context, setup.maximal_order, sflint::FmpzConstRef(bound),
+            invalid_options);
+    const bool rejection_cleared =
+            !rejected && !earlier.audit.factor_base_honesty_failure.recorded;
+
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               nullptr);
+    return extension_cleared && rejection_cleared &&
+                   std::strcmp(
+                           silex::detail::class_unit_computation_failure_reason(
+                                   earlier.audit),
+                           "class_unit_computation_failed") == 0
+            ? 0
+            : 1;
+}
+
 // Escalation runs only where an unwitnessed prime is final: a caller with a
 // factor-base restart or a fallback route keeps the stage-0 caps of the
 // reference be_honest.
@@ -1422,7 +1478,8 @@ int main() {
                    test_bounded_escalation_reports_final_caps() != 0 ||
                    test_escalation_only_without_recovery() != 0 ||
                    test_terminal_honesty_failure_names_transaction_reason() !=
-                           0
+                           0 ||
+                   test_later_attempt_clears_honesty_failure() != 0
             ? 1
             : 0;
 }

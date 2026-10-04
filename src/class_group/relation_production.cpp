@@ -456,6 +456,9 @@ bool ClassGroupContext::extend_relation_kernel_units_(
             options.diagnostics != nullptr ? options.diagnostics : diagnostics_;
     SILEX_PROFILE_SCOPE(active_diagnostics, DiagnosticsModule::class_group,
                         "class_group.extend_relation_kernel_units");
+    // Each attempt starts clean, even one its guards reject below.
+    detail::ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
+            *this);
     if (!detail::order_has_parented_basis(order) || !order.is_maximal() ||
         !same_order_parent(parent(), &order) || !has_factor_base() ||
         options.coordinate_search_radius < 1 ||
@@ -470,8 +473,6 @@ bool ClassGroupContext::extend_relation_kernel_units_(
         return false;
     }
 
-    detail::ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
-            *this);
     return run_native_experimental_relation_route_(
             order, factor_base_bound, options,
             false);
@@ -488,6 +489,9 @@ bool ClassGroupContext::compute_relation_candidate_(
     SILEX_VERBOSE(active_diagnostics, DiagnosticsModule::class_group,
                   VerboseLevel::progress,
                   "class-group candidate computation started");
+    // Each attempt starts clean, even one its guards reject below.
+    detail::ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
+            *this);
     if (!detail::order_has_parented_basis(order) || !order.is_maximal() ||
         options.coordinate_search_radius < 1 ||
         options.ideal_search_radius < 0 ||
@@ -501,8 +505,6 @@ bool ClassGroupContext::compute_relation_candidate_(
         return false;
     }
 
-    detail::ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
-            *this);
     SILEX_PROFILE_EVENT(active_diagnostics, DiagnosticsModule::class_group,
                         "class_group.build_factor_base");
     const bool paired_transaction =
