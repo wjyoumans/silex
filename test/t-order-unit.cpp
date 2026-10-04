@@ -1972,9 +1972,10 @@ int test_relation_kernel_units_index_bounded_quartic_power_root() {
     equation_order = silex::test::equation_order(field);
     assert(order.maximal_order(equation_order));
 
+    // This fixture's relation kernel comes from a factor base of the former
+    // generation-bound size.
     sflint::Fmpz factor_bound;
-    assert(silex::factor_base_class_group_bound(
-            sflint::FmpzRef(factor_bound), order));
+    assert(silex::test::former_generation_bound(factor_bound, order));
     if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(factor_bound), 2) < 0) {
         sflint::fmpz_set_ui(sflint::FmpzRef(factor_bound), 2);
     }

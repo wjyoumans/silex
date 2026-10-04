@@ -437,7 +437,7 @@ int test_class_group_bound() {
     assert(set_fmpz_si(bound, 99));
     assert(silex::factor_base_class_group_bound(
             sflint::FmpzRef(bound), cubic_order));
-    assert(sflint::fmpz_equal_si(bound, 5));
+    assert(sflint::fmpz_equal_si(bound, 3));
 
     return 0;
 }

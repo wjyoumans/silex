@@ -800,8 +800,11 @@ bool configure_candidate_options(
         sflint::Fmpz& factor_base_bound,
         const silex::Order& order) noexcept {
     options = silex::ClassGroupCandidateOptions{};
-    if (!silex::factor_base_class_group_bound(
-                sflint::FmpzRef(factor_base_bound), order)) {
+    // The candidate fixtures below were built on a factor base of the
+    // former generation-bound size; keep it so that each one exercises the
+    // same candidate (including the incomplete candidates of the boundary
+    // rows).
+    if (!silex::test::former_generation_bound(factor_base_bound, order)) {
         return false;
     }
     if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(factor_base_bound), 2) < 0) {
@@ -1267,7 +1270,8 @@ bool check_candidate_boundary_and_proven_pair(
         slong expected_class_order,
         slong expected_unit_rank,
         const slong* expected_invariants = nullptr,
-        slong expected_invariant_count = -1) noexcept {
+        slong expected_invariant_count = -1,
+        bool expect_honesty_checkpoint = true) noexcept {
     if (!check_class_group_candidate(
                 name, setup, expected_candidate_order, 1)) {
         return false;
@@ -1276,7 +1280,7 @@ bool check_candidate_boundary_and_proven_pair(
     return check_class_unit_pair(
             name, setup, silex::CertificationMode::proven,
             expected_class_order, expected_unit_rank, expected_invariants,
-            expected_invariant_count, 2, false, true);
+            expected_invariant_count, 2, false, expect_honesty_checkpoint);
 }
 
 bool check_zero_resource_failure_atomicity(
@@ -1864,12 +1868,16 @@ int test_higher_degree_completion_boundaries() {
         return 1;
     }
 
+    // Zimmert's generation bound is small enough for the next two cubics,
+    // the first quartic and the quartic of discriminant -35019 that the
+    // factor-base build already covers it, so no honesty scan runs there.
+    // The other boundary rows below still need the scan and check it.
     FieldSetup cubic_nontrivial_setup =
             setup_from_coefficients(cubic_nontrivial, 3);
     if (!check_class_unit_pair(
                 "nontrivial cubic proven completion regression",
                 cubic_nontrivial_setup, silex::CertificationMode::proven, 2,
-                1, cubic_nontrivial_invariants, 1, 2, false, true)) {
+                1, cubic_nontrivial_invariants, 1, 2, false, false)) {
         return 1;
     }
 
@@ -1878,7 +1886,7 @@ int test_higher_degree_completion_boundaries() {
     if (!check_class_unit_pair(
                 "deterministic random cubic proven completion regression",
                 cubic_seeded_h4_setup, silex::CertificationMode::proven, 1,
-                1, nullptr, -1, 2, false, true)) {
+                1, nullptr, -1, 2, false, false)) {
         return 1;
     }
 
@@ -1901,7 +1909,7 @@ int test_higher_degree_completion_boundaries() {
     FieldSetup quartic_setup = setup_from_coefficients(quartic, 4);
     if (!check_candidate_boundary_and_proven_pair(
                 "quartic proven completion regression", quartic_setup, 1,
-                1, 1)) {
+                1, 1, nullptr, -1, false)) {
         return 1;
     }
 
@@ -1933,7 +1941,7 @@ int test_higher_degree_completion_boundaries() {
             setup_from_coefficients(quartic_disc35019, 4);
     if (!check_candidate_boundary_and_proven_pair(
                 "quartic discriminant -35019 proven completion regression",
-                quartic_disc35019_setup, 1, 1, 2)) {
+                quartic_disc35019_setup, 1, 1, 2, nullptr, -1, false)) {
         return 1;
     }
 

@@ -4,8 +4,12 @@
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/diagnostics.hpp>
+#include <silex/flint/arb.hpp>
+#include <silex/flint/arf.hpp>
 #include <silex/signature.hpp>
 
+#include <flint/arb.h>
+#include <flint/arf.h>
 #include <flint/fmpz.h>
 
 #include <algorithm>
@@ -30,6 +34,10 @@ void ceil_sqrt(flint::Fmpz& out, flint::FmpzConstRef value) noexcept {
     }
 }
 
+// Exact integer form of Minkowski's bound with 2^r2 in place of (4/pi)^r2:
+// ceil(n! * ceil(sqrt|d|) * 2^r2 / n^n).  Since 4/pi < 2 it is never below
+// the bounds computed below, and it is the fallback if their Arb evaluation
+// does not produce a finite enclosure.
 void generic_minkowski_bound(flint::Fmpz& out,
                              flint::FmpzConstRef abs_discriminant,
                              slong degree,
@@ -48,6 +56,243 @@ void generic_minkowski_bound(flint::Fmpz& out,
                 static_cast<ulong>(degree));
     fmpz_cdiv_q(out.raw(), numerator.raw(), denominator.raw());
     if (fmpz_is_zero(out.raw()) != 0) {
+        fmpz_one(out.raw());
+    }
+}
+
+constexpr slong kGenerationBoundPrecision = 128;
+constexpr slong kZimmertMaxDegree = 20;
+
+// Parameter gamma of Zimmert's Satz 2, in hundredths, indexed by
+// [n - 3][r2] for 3 <= n <= 20.  Source: H. Zimmert, "Ideale kleiner Norm in
+// Idealklassen und eine Regulatorabschaetzung", Invent. Math. 62 (1981),
+// 367-380.  Satz 2 (p. 372) holds for every gamma > alpha > 0, so gamma
+// affects only the size of the bound, never its validity.  Each entry
+// maximises the right side of Satz 2 over gamma in steps of 1/100, with alpha
+// from Bemerkung 1 (p. 373), as Zimmert did for Tabelle 1 (p. 368, explained
+// on pp. 373-374).  For every signature in Tabelle 1 the entry equals
+// Zimmert's printed gamma.
+constexpr unsigned char kZimmertGammaHundredths[18][11] = {
+    {156, 184},                                           // n = 3
+    {118, 134, 154},                                      // n = 4
+    {96, 107, 120},                                       // n = 5
+    {83, 90, 99, 109},                                    // n = 6
+    {73, 79, 85, 92},                                     // n = 7
+    {66, 70, 75, 81, 87},                                 // n = 8
+    {60, 64, 68, 72, 77},                                 // n = 9
+    {56, 59, 62, 65, 69, 74},                             // n = 10
+    {52, 55, 57, 60, 63, 67},                             // n = 11
+    {49, 51, 54, 56, 59, 62, 65},                         // n = 12
+    {47, 49, 50, 52, 55, 57, 60},                         // n = 13
+    {45, 46, 48, 50, 51, 54, 56, 59},                     // n = 14
+    {43, 44, 45, 47, 49, 50, 53, 55},                     // n = 15
+    {41, 42, 43, 45, 46, 48, 50, 52, 54},                 // n = 16
+    {39, 40, 42, 43, 44, 46, 47, 49, 51},                 // n = 17
+    {38, 39, 40, 41, 42, 43, 45, 46, 48, 50},             // n = 18
+    {37, 38, 38, 39, 41, 42, 43, 44, 46, 47},             // n = 19
+    {36, 36, 37, 38, 39, 40, 41, 42, 44, 45, 46},         // n = 20
+};
+
+// Sets out to the ceiling of the upper endpoint of value.  Fails if the
+// enclosure is not finite.
+bool ceil_upper_endpoint(flint::Fmpz& out, const flint::Arb& value) noexcept {
+    if (arb_is_finite(value.raw()) == 0) {
+        return false;
+    }
+    flint::Arf upper;
+    arb_get_ubound_arf(upper.raw(), value.raw(), kGenerationBoundPrecision);
+    if (arf_is_finite(upper.raw()) == 0) {
+        return false;
+    }
+    arf_get_fmpz(out.raw(), upper.raw(), ARF_RND_CEIL);
+    return true;
+}
+
+// Encloses the right side of Zimmert 1981, Satz 2 (p. 372):
+//
+//   log(d^(1/2) / N(a)) >=
+//       r1 (-psi((1+g)/2) - log Gamma(1/2+g) + log Gamma(1+g) + (1/2) log pi)
+//     + r2 (-2 psi(1+g) + 2 log 2 + log(1/2+g) + log pi)
+//     - 2/(g-a) - log[(1+1/a) (1+1/g)^(-2) (1+1/(2g-a))^(-1)],
+//
+// valid for every g > a > 0, where every ideal class contains an integral
+// ideal a with this norm bound.  Here g = gamma_hundredths/100 and
+// a = g - g(g+1)/sqrt(1+3g+3g^2), Zimmert's choice of alpha in Bemerkung 1
+// (p. 373); 0 < a < g for every g > 0.  Ball arithmetic encloses the value at
+// the exact g and a, so the lower endpoint is a valid lower bound.
+bool zimmert_log_lower_bound(flint::Arb& out,
+                             slong r1,
+                             slong r2,
+                             ulong gamma_hundredths) noexcept {
+    const slong prec = kGenerationBoundPrecision;
+    flint::Arb g;
+    flint::Arb alpha;
+    flint::Arb x;
+    flint::Arb y;
+    flint::Arb log_pi;
+    flint::Arb real_term;
+    flint::Arb complex_term;
+    flint::Arb total;
+
+    arb_set_ui(g.raw(), gamma_hundredths);
+    arb_div_ui(g.raw(), g.raw(), 100, prec);
+
+    // alpha = g - g(g+1)/sqrt(1+3g+3g^2)
+    arb_mul_ui(x.raw(), g.raw(), 3, prec);
+    arb_add_ui(y.raw(), g.raw(), 1, prec);
+    arb_mul(x.raw(), x.raw(), y.raw(), prec);
+    arb_add_ui(x.raw(), x.raw(), 1, prec);
+    arb_sqrt(x.raw(), x.raw(), prec);
+    arb_mul(y.raw(), y.raw(), g.raw(), prec);
+    arb_div(y.raw(), y.raw(), x.raw(), prec);
+    arb_sub(alpha.raw(), g.raw(), y.raw(), prec);
+    arb_sub(x.raw(), g.raw(), alpha.raw(), prec);
+    if (arb_is_positive(alpha.raw()) == 0 || arb_is_positive(x.raw()) == 0) {
+        return false;
+    }
+
+    arb_const_pi(log_pi.raw(), prec);
+    arb_log(log_pi.raw(), log_pi.raw(), prec);
+
+    // Real places: -psi((1+g)/2) - log Gamma(1/2+g) + log Gamma(1+g)
+    //              + (1/2) log pi
+    arb_add_ui(x.raw(), g.raw(), 1, prec);
+    arb_mul_2exp_si(x.raw(), x.raw(), -1);
+    arb_digamma(y.raw(), x.raw(), prec);
+    arb_neg(real_term.raw(), y.raw());
+    arb_one(x.raw());
+    arb_mul_2exp_si(x.raw(), x.raw(), -1);
+    arb_add(x.raw(), x.raw(), g.raw(), prec);
+    arb_lgamma(y.raw(), x.raw(), prec);
+    arb_sub(real_term.raw(), real_term.raw(), y.raw(), prec);
+    arb_add_ui(x.raw(), g.raw(), 1, prec);
+    arb_lgamma(y.raw(), x.raw(), prec);
+    arb_add(real_term.raw(), real_term.raw(), y.raw(), prec);
+    arb_mul_2exp_si(y.raw(), log_pi.raw(), -1);
+    arb_add(real_term.raw(), real_term.raw(), y.raw(), prec);
+
+    // Complex places: -2 psi(1+g) + 2 log 2 + log(1/2+g) + log pi
+    arb_add_ui(x.raw(), g.raw(), 1, prec);
+    arb_digamma(y.raw(), x.raw(), prec);
+    arb_mul_2exp_si(complex_term.raw(), y.raw(), 1);
+    arb_neg(complex_term.raw(), complex_term.raw());
+    arb_const_log2(y.raw(), prec);
+    arb_mul_2exp_si(y.raw(), y.raw(), 1);
+    arb_add(complex_term.raw(), complex_term.raw(), y.raw(), prec);
+    arb_one(x.raw());
+    arb_mul_2exp_si(x.raw(), x.raw(), -1);
+    arb_add(x.raw(), x.raw(), g.raw(), prec);
+    arb_log(y.raw(), x.raw(), prec);
+    arb_add(complex_term.raw(), complex_term.raw(), y.raw(), prec);
+    arb_add(complex_term.raw(), complex_term.raw(), log_pi.raw(), prec);
+
+    arb_mul_si(total.raw(), real_term.raw(), r1, prec);
+    arb_mul_si(y.raw(), complex_term.raw(), r2, prec);
+    arb_add(total.raw(), total.raw(), y.raw(), prec);
+
+    // - 2/(g-a)
+    arb_sub(x.raw(), g.raw(), alpha.raw(), prec);
+    arb_ui_div(y.raw(), 2, x.raw(), prec);
+    arb_sub(total.raw(), total.raw(), y.raw(), prec);
+
+    // - log(1+1/a) + 2 log(1+1/g) + log(1+1/(2g-a))
+    arb_inv(x.raw(), alpha.raw(), prec);
+    arb_log1p(y.raw(), x.raw(), prec);
+    arb_sub(total.raw(), total.raw(), y.raw(), prec);
+    arb_inv(x.raw(), g.raw(), prec);
+    arb_log1p(y.raw(), x.raw(), prec);
+    arb_mul_2exp_si(y.raw(), y.raw(), 1);
+    arb_add(total.raw(), total.raw(), y.raw(), prec);
+    arb_mul_2exp_si(x.raw(), g.raw(), 1);
+    arb_sub(x.raw(), x.raw(), alpha.raw(), prec);
+    arb_inv(x.raw(), x.raw(), prec);
+    arb_log1p(y.raw(), x.raw(), prec);
+    arb_add(total.raw(), total.raw(), y.raw(), prec);
+
+    if (arb_is_finite(total.raw()) == 0) {
+        return false;
+    }
+    arb_swap(out.raw(), total.raw());
+    return true;
+}
+
+// Zimmert 1981, Satz 2: every ideal class contains an integral ideal of norm
+// at most sqrt|d| * exp(-L), with L the right side above.  Sets out to the
+// ceiling of a rigorous upper bound for sqrt|d| * exp(-L).
+bool zimmert_bound(flint::Fmpz& out,
+                   flint::FmpzConstRef abs_discriminant,
+                   slong degree,
+                   slong real_places,
+                   slong complex_pairs) noexcept {
+    if (degree < 3 || degree > kZimmertMaxDegree || real_places < 0 ||
+        complex_pairs < 0 || real_places + 2 * complex_pairs != degree) {
+        return false;
+    }
+    const ulong gamma =
+        kZimmertGammaHundredths[degree - 3][complex_pairs];
+    flint::Arb log_lower;
+    if (gamma == 0 ||
+        !zimmert_log_lower_bound(log_lower, real_places, complex_pairs,
+                                 gamma)) {
+        return false;
+    }
+    flint::Arb value;
+    flint::Arb root;
+    arb_neg(log_lower.raw(), log_lower.raw());
+    arb_exp(value.raw(), log_lower.raw(), kGenerationBoundPrecision);
+    arb_set_fmpz(root.raw(), abs_discriminant.raw());
+    arb_sqrt(root.raw(), root.raw(), kGenerationBoundPrecision);
+    arb_mul(value.raw(), value.raw(), root.raw(), kGenerationBoundPrecision);
+    return ceil_upper_endpoint(out, value);
+}
+
+// Minkowski's bound n! n^(-n) (4/pi)^r2 sqrt|d| (Lang, Algebraic Number
+// Theory, p. 119, Th. 4, as quoted by Zimmert 1981, p. 367).  Sets out to the
+// ceiling of a rigorous upper bound for it.
+bool minkowski_bound(flint::Fmpz& out,
+                     flint::FmpzConstRef abs_discriminant,
+                     slong degree,
+                     slong complex_pairs) noexcept {
+    const slong prec = kGenerationBoundPrecision;
+    flint::Arb value;
+    flint::Arb x;
+    flint::Fmpz integer;
+
+    arb_set_fmpz(value.raw(), abs_discriminant.raw());
+    arb_sqrt(value.raw(), value.raw(), prec);
+    fmpz_fac_ui(integer.raw(), static_cast<ulong>(degree));
+    arb_mul_fmpz(value.raw(), value.raw(), integer.raw(), prec);
+    fmpz_set_ui(integer.raw(), static_cast<ulong>(degree));
+    fmpz_pow_ui(integer.raw(), integer.raw(), static_cast<ulong>(degree));
+    arb_div_fmpz(value.raw(), value.raw(), integer.raw(), prec);
+    arb_const_pi(x.raw(), prec);
+    arb_ui_div(x.raw(), 4, x.raw(), prec);
+    arb_pow_ui(x.raw(), x.raw(), static_cast<ulong>(complex_pairs), prec);
+    arb_mul(value.raw(), value.raw(), x.raw(), prec);
+    return ceil_upper_endpoint(out, value);
+}
+
+// Proven bound for degree >= 3: the smallest of Zimmert's bound (degree at
+// most 20), Minkowski's bound with (4/pi)^r2, and the exact integer
+// Minkowski form with 2^r2.  Each is a theorem, so the minimum is too.
+void generation_bound(flint::Fmpz& out,
+                      flint::FmpzConstRef abs_discriminant,
+                      slong degree,
+                      slong real_places,
+                      slong complex_pairs) noexcept {
+    generic_minkowski_bound(out, abs_discriminant, degree, complex_pairs);
+    flint::Fmpz candidate;
+    if (minkowski_bound(candidate, abs_discriminant, degree, complex_pairs) &&
+        fmpz_cmp(candidate.raw(), out.raw()) < 0) {
+        fmpz_swap(out.raw(), candidate.raw());
+    }
+    if (degree <= kZimmertMaxDegree &&
+        zimmert_bound(candidate, abs_discriminant, degree, real_places,
+                      complex_pairs) &&
+        fmpz_cmp(candidate.raw(), out.raw()) < 0) {
+        fmpz_swap(out.raw(), candidate.raw());
+    }
+    if (fmpz_cmp_ui(out.raw(), 1) < 0) {
         fmpz_one(out.raw());
     }
 }
@@ -78,7 +323,49 @@ bool is_inert_prime_decomposition(const PrimeIdealList& decomposed,
            prime->residue_degree() == degree;
 }
 
+bool generation_bound_inputs_valid(flint::FmpzConstRef abs_discriminant,
+                                   slong real_places,
+                                   slong complex_pairs) noexcept {
+    return real_places >= 0 && complex_pairs >= 0 &&
+           real_places + 2 * complex_pairs >= 3 &&
+           fmpz_sgn(abs_discriminant.raw()) > 0;
+}
+
 }  // namespace
+
+bool detail::generation_bound(flint::FmpzRef out,
+                              flint::FmpzConstRef abs_discriminant,
+                              slong real_places,
+                              slong complex_pairs) noexcept {
+    if (!generation_bound_inputs_valid(abs_discriminant, real_places,
+                                       complex_pairs)) {
+        return false;
+    }
+    flint::Fmpz bound;
+    silex::generation_bound(bound, abs_discriminant,
+                            real_places + 2 * complex_pairs, real_places,
+                            complex_pairs);
+    fmpz_set(out.raw(), bound.raw());
+    return true;
+}
+
+bool detail::zimmert_generation_bound(flint::FmpzRef out,
+                                      flint::FmpzConstRef abs_discriminant,
+                                      slong real_places,
+                                      slong complex_pairs) noexcept {
+    if (!generation_bound_inputs_valid(abs_discriminant, real_places,
+                                       complex_pairs)) {
+        return false;
+    }
+    flint::Fmpz bound;
+    if (!zimmert_bound(bound, abs_discriminant,
+                       real_places + 2 * complex_pairs, real_places,
+                       complex_pairs)) {
+        return false;
+    }
+    fmpz_set(out.raw(), bound.raw());
+    return true;
+}
 
 FactorBase::FactorBase(const Order& parent) noexcept {
     define(parent);
@@ -745,10 +1032,11 @@ bool factor_base_class_group_bound(flint::FmpzRef out,
         fmpz_sqrt(bound.raw(), abs_discriminant.raw());
         fmpz_fdiv_q_2exp(bound.raw(), bound.raw(), 1);
     } else {
-        generic_minkowski_bound(bound,
-                                flint::FmpzConstRef(abs_discriminant),
-                                degree,
-                                sig.r2());
+        generation_bound(bound,
+                         flint::FmpzConstRef(abs_discriminant),
+                         degree,
+                         sig.r1(),
+                         sig.r2());
     }
 
     fmpz_set(out.raw(), bound.raw());

@@ -135,15 +135,15 @@ def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
     # A grh request of positive unit rank may take factor-base generation
     # from GRH: its base contains every prime ideal of norm at most the GRH
     # bound min(BDF, Bach), so the analytic index-one test may accept below
-    # the Minkowski-type bound (factor_base_class_group_bound). These fields
+    # the proven generation bound (factor_base_class_group_bound). These fields
     # used to fail closed for want of Minkowski-type coverage; they now
     # publish exactly the grh label. GRH coverage is never reported as
     # unconditional evidence: generation stays `unavailable` and relation
     # saturation is not `verified`. x^3 + x + 200: |D| = 1080004, bound
-    # 100 < 463, class group Z/2. x^2 - 100003: D = 400012, bound
+    # 100 < 295, class group Z/2. x^2 - 100003: D = 400012, bound
     # 100 < 316, h = 1.
     for coeffs, used, requested, order, invariants in (
-        ("200,1,0,1", "100", "463", "2", ["2"]),
+        ("200,1,0,1", "100", "295", "2", ["2"]),
         ("-100003,0,1", "100", "316", "1", []),
     ):
         instance = run_json(

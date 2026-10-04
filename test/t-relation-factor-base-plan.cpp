@@ -156,7 +156,7 @@ int test_exact_working_bounds_and_order_scoped_cache() {
         !silex::factor_base_class_group_bound(
                 sflint::FmpzRef(public_bound), quintic.maximal_order) ||
         !sflint::fmpz_equal_si(
-                sflint::FmpzConstRef(public_bound), 1539)) {
+                sflint::FmpzConstRef(public_bound), 624)) {
         return 1;
     }
 
