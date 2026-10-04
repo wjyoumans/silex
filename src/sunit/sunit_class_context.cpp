@@ -92,34 +92,6 @@ bool compose_augmented_witness(
     return true;
 }
 
-}  // namespace
-
-// For each selected prime P_j, the index k with P_j equal to the factor-base
-// prime Q_k, or -1.  S may meet the factor base, so derived valuations are
-// taken in the ideal group, merging a selected prime with its equal
-// factor-base prime instead of treating FB and S as independent coordinates.
-bool selected_factor_base_indices(std::vector<slong>& out,
-                                  const SUnitClassContext& context) noexcept {
-    out.assign(context.selected_primes.size(), -1);
-    PrimeIdeal prime(context.order);
-    if (!prime.is_defined()) {
-        return false;
-    }
-    for (slong k = 0; k < context.factor_base.length(); ++k) {
-        if (!context.factor_base.prime(prime, k)) {
-            return false;
-        }
-        for (std::size_t j = 0; j < context.selected_primes.size(); ++j) {
-            if (context.selected_primes[j].equal(prime)) {
-                out[j] = k;
-            }
-        }
-    }
-    return true;
-}
-
-namespace {
-
 // Checks v_{P_j}(element) == expected_j at every selected prime from the
 // factored element itself; PrimeIdeal::valuation sums exponent times base
 // valuation without expanding the product and fails on slong overflow.
@@ -147,6 +119,30 @@ bool factored_selected_valuations_match(
 }
 
 }  // namespace
+
+// For each selected prime P_j, the index k with P_j equal to the factor-base
+// prime Q_k, or -1.  S may meet the factor base, so derived valuations are
+// taken in the ideal group, merging a selected prime with its equal
+// factor-base prime instead of treating FB and S as independent coordinates.
+bool selected_factor_base_indices(std::vector<slong>& out,
+                                  const SUnitClassContext& context) noexcept {
+    out.assign(context.selected_primes.size(), -1);
+    PrimeIdeal prime(context.order);
+    if (!prime.is_defined()) {
+        return false;
+    }
+    for (slong k = 0; k < context.factor_base.length(); ++k) {
+        if (!context.factor_base.prime(prime, k)) {
+            return false;
+        }
+        for (std::size_t j = 0; j < context.selected_primes.size(); ++j) {
+            if (context.selected_primes[j].equal(prime)) {
+                out[j] = k;
+            }
+        }
+    }
+    return true;
+}
 
 // The published witness F_i = prod_k w_k^{a_ik} prod_j m_j^{b_ij} satisfies
 // (F_i) = J_i^{d_i} prod_j P_j^{-b_ij} by derivation, not by expansion:
