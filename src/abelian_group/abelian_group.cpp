@@ -330,6 +330,9 @@ bool FiniteAbelianGroup::ensure_left_transform() const noexcept {
             flint::FmpzMatConstRef(hnf_top));
     // Same input as the published Smith form; the left transform is only
     // consistent with the published generators if S and V are reproduced.
+    // This equality check is defensive: it cannot fire while FLINT is
+    // deterministic on identical input, and it guards against differences
+    // between FLINT versions.
     if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(basis_snf),
                                flint::FmpzMatConstRef(snf_)) ||
         !flint::fmpz_mat_equal(flint::FmpzMatConstRef(basis_right),

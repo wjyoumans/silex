@@ -44,6 +44,11 @@ Changed
   monic integral defining polynomial.  See "Class
   groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
+- **Breaking:** ``FiniteAbelianGroup::set_relation_matrix_with_hnf_basis``,
+  public in 0.1.1, is no longer public API; it is now internal.
+  ``FiniteAbelianGroup`` also has a new private member, so its layout changed
+  and code compiled against an earlier header must be rebuilt.
+
 - ``factor_base_class_group_bound`` now returns a smaller proven bound in
   degree 3 and above: the smallest of Zimmert's bound (Zimmert 1981,
   Satz 2, for degree at most 20), Minkowski's bound with ``(4/pi)^r2``, and
@@ -182,6 +187,10 @@ Changed
 
 Fixed
 -----
+
+- ``FiniteAbelianGroup`` invariant generators now stay stable across witness
+  requests.  A signed diagonal relation matrix such as ``diag(-2, 3)``
+  previously could yield generators that changed between calls.
 
 - A class group is promoted to ``proven`` only when its verified
   factor-base generation check covers the required generation bound
