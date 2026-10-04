@@ -96,6 +96,12 @@ bool selected_prime_product(
 }
 
 // Index k with selected prime j equal to factor-base prime Q_k, or -1.
+// Test oracle: this deliberately duplicates
+// silex::detail::selected_factor_base_indices rather than calling it, so the
+// tests do not take their expected merge from the code under test; do not
+// deduplicate.  Both match primes with the exact PrimeIdeal::equal, so this
+// copy does not check the matching primitive itself; the valuations it is used
+// with come independently from PrimeIdeal::valuation.
 std::vector<slong> selected_factor_base_indices(
         const silex::detail::SUnitClassContext& context) noexcept {
     std::vector<slong> out(context.selected_primes.size(), -1);
@@ -483,7 +489,6 @@ int test_nontrivial_s_class_group() {
     assert_exact_context_identities(context);
     return 0;
 }
-
 
 // S meeting the factor base in one prime and avoiding it in another: the
 // derived valuation vectors must merge P_j with its equal factor-base prime.

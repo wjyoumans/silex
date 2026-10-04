@@ -115,7 +115,11 @@ void assert_finish_workspace_exact(
 // Q(sqrt 2) with factor base {P_2, 3} (bound 3).  The relation rows of the
 // tests below are installed through RelationAccess::set_relation_from_known_row,
 // which trusts its row, so only the per-generator ideal proof in
-// class_relation_witnessed_hnf_basis can reject a wrong one.
+// class_relation_witnessed_hnf_basis can reject a wrong one.  These tests call
+// that function directly: build_sunit_class_context needs a proven class-group
+// presentation, and appending a relation to a proven context either drops the
+// presentation or skips the row, so its class_hnf_basis stage cannot be
+// reached with a corrupted row without a new test hook.
 struct Sqrt2Fixture {
     silex::NumberField field;
     silex::Order order;
