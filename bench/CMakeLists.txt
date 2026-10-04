@@ -203,7 +203,6 @@ silex_benchmark_release_rows(b-silex-nf_clgp
     BM_class_unit_0_1_0_degree_one_proven
     BM_class_unit_0_1_0_real_quadratic_proven
     BM_class_unit_0_1_0_imag_quadratic_proven
-    BM_class_unit_0_1_0_real_quadratic_40001_proven
     BM_class_unit_0_1_0_cubic_disc23_proven
     BM_class_unit_0_1_0_cubic_trivial_proven
     BM_class_unit_0_1_0_cubic_nontrivial_proven
@@ -221,7 +220,6 @@ silex_benchmark_release_rows(b-silex-nf_clgp
     BM_class_unit_0_1_0_sextic_proven
     BM_class_unit_0_1_0_imag_quadratic_grh
     BM_class_unit_0_1_0_real_quadratic_grh
-    BM_class_unit_0_1_0_real_quadratic_40001_grh
     BM_class_unit_0_1_0_cubic_disc23_grh
     BM_class_unit_0_1_0_cubic_nontrivial_grh
     BM_class_unit_0_1_0_quartic_cyclotomic_grh

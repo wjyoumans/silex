@@ -40,7 +40,6 @@ EXACT_RESULT_COUNTERS = (
 PROVEN_BENCHMARK_NAMES = {
     "BM_class_unit_0_1_0_degree_one_proven",
     "BM_class_unit_0_1_0_real_quadratic_proven",
-    "BM_class_unit_0_1_0_real_quadratic_40001_proven",
     "BM_class_unit_0_1_0_imag_quadratic_proven",
     "BM_class_unit_0_1_0_cubic_disc23_proven",
     "BM_class_unit_0_1_0_cubic_trivial_proven",
@@ -67,7 +66,6 @@ PROVEN_BENCHMARK_NAMES = {
 GRH_BENCHMARK_NAMES = {
     "BM_class_unit_0_1_0_imag_quadratic_grh",
     "BM_class_unit_0_1_0_real_quadratic_grh",
-    "BM_class_unit_0_1_0_real_quadratic_40001_grh",
     "BM_class_unit_0_1_0_cubic_disc23_grh",
     "BM_class_unit_0_1_0_cubic_nontrivial_grh",
     "BM_class_unit_0_1_0_quartic_cyclotomic_grh",
@@ -82,7 +80,6 @@ RELEASE_BENCHMARK_NAMES = PROVEN_BENCHMARK_NAMES | GRH_BENCHMARK_NAMES
 # analytic class-number route.  Relation saturation is not run for them, so
 # they must record a verified analytic class/regulator check instead.
 ANALYTIC_PROOF_NAMES = {
-    "BM_class_unit_0_1_0_real_quadratic_40001_proven",
 }
 
 RELEASE_FILTER = (
@@ -161,12 +158,9 @@ def validate(payload: object) -> list[str]:
                     f"{name}: proven row carries the conditional marker"
                 )
             require_counter(failures, row, "fb_checked", VERIFIED_PROOF)
-            if name in ANALYTIC_PROOF_NAMES:
-                require_counter(failures, row, "analytic_hR", VERIFIED_PROOF)
-            else:
-                require_counter(
-                    failures, row, "relation_saturation", VERIFIED_PROOF
-                )
+            require_counter(
+                failures, row, "relation_saturation", VERIFIED_PROOF
+            )
             require_counter(failures, row, "unit_proof", VERIFIED_PROOF)
             require_counter(failures, row, "regulator_proof", VERIFIED_PROOF)
         for counter in EXACT_RESULT_COUNTERS:

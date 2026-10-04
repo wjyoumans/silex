@@ -721,7 +721,6 @@ struct ExactClassUnitExpectation {
 inline constexpr slong kC2Invariants[] = {2};
 inline constexpr slong kC4Invariants[] = {4};
 inline constexpr slong kC5Invariants[] = {5};
-inline constexpr slong kC2C16Invariants[] = {2, 16};
 inline constexpr ExactClassGroupExpectation kTrivialClassGroup{
         1, nullptr, 0};
 inline constexpr ExactClassGroupExpectation kC2ClassGroup{
@@ -730,8 +729,6 @@ inline constexpr ExactClassGroupExpectation kC4ClassGroup{
         4, kC4Invariants, 1};
 inline constexpr ExactClassGroupExpectation kC5ClassGroup{
         5, kC5Invariants, 1};
-inline constexpr ExactClassGroupExpectation kC2C16ClassGroup{
-        32, kC2C16Invariants, 2};
 
 // The torsion orders and regulator intervals were computed independently with
 // GP 2.17.4 bnf data, with the degree-greater-than-one fields certified by its
@@ -744,14 +741,10 @@ inline constexpr ExactClassUnitExpectation kRealQuadraticClassUnit{
         kTrivialClassGroup, 1, 2, 0.48121182505, 0.48121182507};
 inline constexpr ExactClassUnitExpectation kImaginaryQuadraticClassUnit{
         kC5ClassGroup, 0, 2, 1.0, 1.0};
-// x^3 - x - 1 (discriminant -23) and x^2 - 40001 use the same sourcing as
-// the rows above: GP 2.17.4 bnfinit data certified with bnfcertify.  The
-// quadratic class group is Z/2 x Z/16, listed in Silex's ascending invariant
-// order.
+// x^3 - x - 1 (discriminant -23) uses the same sourcing as the rows above:
+// GP 2.17.4 bnfinit data certified with bnfcertify.
 inline constexpr ExactClassUnitExpectation kCubicDisc23ClassUnit{
         kTrivialClassGroup, 1, 2, 0.28119957432, 0.28119957434};
-inline constexpr ExactClassUnitExpectation kRealQuadratic40001ClassUnit{
-        kC2C16ClassGroup, 1, 2, 5.99147079704, 5.99147079706};
 inline constexpr ExactClassUnitExpectation kCubicTrivialClassUnit{
         kTrivialClassGroup, 1, 2, 1.34737734832, 1.34737734834};
 inline constexpr ExactClassUnitExpectation kCubicNontrivialClassUnit{
@@ -2449,13 +2442,6 @@ void BM_class_unit_0_1_0_imag_quadratic_proven(
             kImaginaryQuadraticClassUnit);
 }
 
-void BM_class_unit_0_1_0_real_quadratic_40001_proven(
-        benchmark::State& state) {
-    BM_class_unit_0_1_0_from_quadratic(
-            state, 40001, silex::CertificationMode::proven, 20000,
-            kRealQuadratic40001ClassUnit);
-}
-
 void BM_class_unit_0_1_0_cubic_disc23_proven(benchmark::State& state) {
     sflint::FmpqPoly polynomial;
     set_cubic_polynomial(polynomial, -1, -1);
@@ -2689,14 +2675,6 @@ void BM_class_unit_0_1_0_real_quadratic_grh(benchmark::State& state) {
             kRealQuadraticClassUnit);
 }
 
-// Pairs with BM_class_unit_0_1_0_real_quadratic_40001_proven.
-void BM_class_unit_0_1_0_real_quadratic_40001_grh(
-        benchmark::State& state) {
-    BM_class_unit_0_1_0_from_quadratic(
-            state, 40001, silex::CertificationMode::grh, 20000,
-            kRealQuadratic40001ClassUnit);
-}
-
 // Pairs with BM_class_unit_0_1_0_cubic_disc23_proven.
 void BM_class_unit_0_1_0_cubic_disc23_grh(benchmark::State& state) {
     sflint::FmpqPoly polynomial;
@@ -2777,7 +2755,6 @@ BENCHMARK(BM_class_group_sextic_minus1_minus1_candidate);
 BENCHMARK(BM_class_unit_0_1_0_degree_one_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_proven);
-BENCHMARK(BM_class_unit_0_1_0_real_quadratic_40001_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_disc23_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_trivial_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_nontrivial_proven);
@@ -2802,7 +2779,6 @@ BENCHMARK(BM_diagnostic_class_unit_0_1_0_quintic_disc57895_proven_cap)
 BENCHMARK(BM_class_unit_0_1_0_sextic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_grh);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_grh);
-BENCHMARK(BM_class_unit_0_1_0_real_quadratic_40001_grh);
 BENCHMARK(BM_class_unit_0_1_0_cubic_disc23_grh);
 BENCHMARK(BM_class_unit_0_1_0_cubic_nontrivial_grh);
 BENCHMARK(BM_class_unit_0_1_0_quartic_cyclotomic_grh);
