@@ -9779,6 +9779,20 @@ bool ClassGroupContext::try_certify_with_units(
     }
 
     if (try_promote_proven_certification_()) {
+        // A promotion from an unconditional analytic check recorded earlier
+        // (for example by a real-quadratic grh run) rests on the same
+        // argument as try_certify_analytic_class_regulator_: index one
+        // against an unconditional hR, with generation checked to the
+        // required bound, saturates the relations at every prime.  Complete
+        // verified ell-local records from a saturation proof are kept.
+        if (analytic_class_regulator_status_ == ProofState::verified &&
+            !analytic_class_regulator_assumes_grh_ &&
+            !relation_saturation_proof_complete_()) {
+            if (private_storage_ != nullptr) {
+                private_storage_->relation_saturation_records.clear();
+            }
+            relation_saturation_status_ = ProofState::verified;
+        }
         return transaction.finish(true);
     }
 
@@ -10032,12 +10046,15 @@ bool ClassGroupContext::try_certify_analytic_class_unit_regulator_(
     // saturation; with a GRH hR the promotion above came from saturation,
     // which already required proven units, and the saturation status is
     // left as that proof set it.  The saturation argument is the one in
-    // try_certify_analytic_class_regulator_.
+    // try_certify_analytic_class_regulator_.  Complete verified ell-local
+    // records from an earlier saturation proof are kept.
     if (hr_unconditional) {
-        if (private_storage_ != nullptr) {
-            private_storage_->relation_saturation_records.clear();
+        if (!relation_saturation_proof_complete_()) {
+            if (private_storage_ != nullptr) {
+                private_storage_->relation_saturation_records.clear();
+            }
+            relation_saturation_status_ = ProofState::verified;
         }
-        relation_saturation_status_ = ProofState::verified;
         units.mark_certification_proven_();
     }
     return transaction.finish(true);

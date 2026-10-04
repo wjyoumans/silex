@@ -189,14 +189,18 @@ Fixed
 
 - A ``proven`` class/unit result certified by the unconditional analytic
   index-one test (degree one or the quadratic ``L(1, chi)`` value, through
-  ``try_certify_with_units`` or ``try_certify_class_unit_with_zeta``) now
+  ``try_certify_with_units``, including its promotion from an
+  unconditional check stored earlier by a real-quadratic ``grh`` run, or
+  ``try_certify_class_unit_with_zeta``) now
   reports ``relation_saturation_status()`` as ``verified``, as documented:
   index one with verified generation means the relations are saturated at
   every prime.  It was ``not_checked`` on that route, for example on a real
   quadratic field with class number greater than one such as
   ``x^2 - 40001``, and on an imaginary quadratic field certified through
-  ``try_certify_with_units``.  No per-prime records are kept, and labels
-  are unchanged.
+  ``try_certify_with_units``.  No per-prime records are kept, except that
+  the stored-check promotion and ``try_certify_class_unit_with_zeta`` keep
+  verified records that already cover every prime dividing the candidate
+  class number.  Labels are unchanged.
 
 - ``try_certify_class_unit_with_zeta_bf`` (and the ``--zeta-bf-audit`` option
   of the class/unit instance tool) no longer fails on an imaginary quadratic

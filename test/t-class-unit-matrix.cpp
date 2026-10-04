@@ -2245,7 +2245,9 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     // precision 1 the zeta product is unavailable, so the recompute route
     // cannot run, and the saturation route would leave per-prime records.
     // A promotion with no saturation records therefore came from the
-    // stored record.
+    // stored record.  The stored unconditional index-one check, with
+    // generation checked to the required bound, saturates the relations at
+    // every prime, so the status is `verified` with no records kept.
     {
         sflint::Arb precision_one_hR;
         assert(!silex::zeta_class_regulator_product(
@@ -2256,7 +2258,7 @@ int test_real_quadratic_grh_record_and_later_promotion() {
             proven_units, silex::CertificationMode::proven, 1));
     assert(class_group.relation_saturation_record_count() == 0);
     assert(class_group.relation_saturation_status() ==
-           silex::ProofState::not_checked);
+           silex::ProofState::verified);
     assert(class_group.certification_status() ==
            silex::CertificationMode::proven);
     assert(class_group.unit_proof_status() == silex::ProofState::verified);
@@ -2266,6 +2268,38 @@ int test_real_quadratic_grh_record_and_later_promotion() {
            silex::CertificationMode::proven);
     // try_certify_with_units changes only the class group.
     assert(units.certification_status() == silex::CertificationMode::grh);
+
+    // When verified ell-local records already prove saturation at every
+    // p | h_cand, the same stored-record promotion keeps them.
+    silex::ClassGroupContext saturated_class_group;
+    silex::OrderUnitGroup saturated_units;
+    if (!saturated_units.compute_with_class_group(
+                saturated_class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": second grh computation failed\n";
+        return 1;
+    }
+    assert(saturated_class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(saturated_class_group.try_certify_with_units(
+            proven_units, silex::CertificationMode::unknown, 128));
+    sflint::Fmpz ell;
+    sflint::Fmpz aux_bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(ell), 2);
+    sflint::fmpz_set_si(sflint::FmpzRef(aux_bound), 200);
+    assert(saturated_class_group.try_prove_relation_saturation_with_units(
+            proven_units, sflint::FmpzConstRef(ell),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(saturated_class_group.relation_saturation_status() ==
+           silex::ProofState::verified);
+    assert(saturated_class_group.relation_saturation_record_count() == 1);
+    assert(saturated_class_group.try_certify_with_units(
+            proven_units, silex::CertificationMode::proven, 1));
+    assert(saturated_class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(saturated_class_group.relation_saturation_status() ==
+           silex::ProofState::verified);
+    assert(saturated_class_group.relation_saturation_record_count() == 1);
     return 0;
 }
 
@@ -2512,19 +2546,22 @@ int test_grh_generation_below_minkowski_bound() {
 // are saturated at every prime and relation_saturation_status() reports
 // `verified` (class_group.hpp).  The `grh` run on the same field takes the
 // grh acceptance route, which records the unconditional analytic check but
-// leaves relation saturation unchecked.  Expected class groups from GP 2.17
-// bnfinit and bnfcertify: Q(sqrt(40001)) has Cl = Z/2 x Z/16 (h = 32) and
-// Q(sqrt(210)) has Cl = Z/2 x Z/2 (h = 4).
+// leaves relation saturation unchecked; try_certify_class_unit_with_zeta
+// then proves that grh pair through the same unconditional index-one
+// argument.  Expected class groups from GP 2.17 bnfinit and bnfcertify:
+// Q(sqrt(40001)) has Cl = Z/2 x Z/16 (h = 32) and Q(sqrt(210)) has
+// Cl = Z/2 x Z/2 (h = 4).
 int test_real_quadratic_h_gt_one_proven_saturation() {
     struct Row {
         slong radicand;
         ulong class_order;
-        slong invariant_count;
+        ulong invariants[2];
         const char* name;
     };
     const Row rows[] = {
-            {40001, 32, 2, "real quadratic x^2 - 40001 saturation status"},
-            {210, 4, 2, "real quadratic x^2 - 210 saturation status"},
+            {40001, 32, {2, 16},
+             "real quadratic x^2 - 40001 saturation status"},
+            {210, 4, {2, 2}, "real quadratic x^2 - 210 saturation status"},
     };
 
     for (const Row& row : rows) {
@@ -2557,7 +2594,7 @@ int test_real_quadratic_h_gt_one_proven_saturation() {
             if (!class_group.order(sflint::FmpzRef(class_order)) ||
                 sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order),
                                     row.class_order) != 0 ||
-                class_group.invariant_count() != row.invariant_count ||
+                class_group.invariant_count() != 2 ||
                 !units.is_set() || units.free_rank() != 1) {
                 std::cerr << row.name << ": unexpected class/unit data\n";
                 return 1;
@@ -2590,6 +2627,24 @@ int test_real_quadratic_h_gt_one_proven_saturation() {
                                  "unverified\n";
                     return 1;
                 }
+                // No ell-local records: the analytic route, not a
+                // saturation proof at p = 2, set the status.  The
+                // invariants separate Z/2 x Z/16 from Z/4 x Z/8.
+                if (class_group.relation_saturation_record_count() != 0) {
+                    std::cerr << row.name
+                              << ": proven run kept saturation records\n";
+                    return 1;
+                }
+                for (slong i = 0; i < 2; ++i) {
+                    sflint::Fmpz invariant;
+                    if (!class_group.invariant(sflint::FmpzRef(invariant),
+                                               i) ||
+                        sflint::fmpz_cmp_ui(sflint::FmpzConstRef(invariant),
+                                            row.invariants[i]) != 0) {
+                        std::cerr << row.name << ": unexpected invariants\n";
+                        return 1;
+                    }
+                }
             } else if (class_group.factor_base_generation_checked_status() !=
                                silex::ProofState::verified ||
                        class_group.relation_saturation_status() !=
@@ -2602,6 +2657,27 @@ int test_real_quadratic_h_gt_one_proven_saturation() {
                 // The grh acceptance route proves no unit index and runs no
                 // saturation proof, so these stay as the run left them.
                 std::cerr << row.name << ": grh run changed proof statuses\n";
+                return 1;
+            }
+
+            // The public zeta entry point proves the grh pair: the
+            // unconditional L(1, chi) index-one check proves the units and
+            // saturates the relations at every prime.
+            if (!proven &&
+                (!class_group.try_certify_class_unit_with_zeta(units, 128) ||
+                 class_group.certification_status() !=
+                         silex::CertificationMode::proven ||
+                 units.certification_status() !=
+                         silex::CertificationMode::proven ||
+                 class_group.relation_saturation_status() !=
+                         silex::ProofState::verified ||
+                 class_group.relation_saturation_record_count() != 0 ||
+                 class_group.unit_proof_status() !=
+                         silex::ProofState::verified ||
+                 class_group.regulator_proof_status() !=
+                         silex::ProofState::verified)) {
+                std::cerr << row.name << ": zeta entry point did not prove "
+                                         "the grh pair\n";
                 return 1;
             }
         }

@@ -250,11 +250,15 @@ public:
     // - try_certify_trivial_quotient, and try_certify_quadratic with
     //   h_cand = 1, set it with no prime required and no record kept;
     // - the unconditional analytic index-one routes (degree one or the
-    //   quadratic L(1, chi) route) of a `proven` try_certify_with_units and
-    //   of try_certify_class_unit_with_zeta set it once they certify
+    //   quadratic L(1, chi) route) of a `proven` try_certify_with_units,
+    //   including its promotion from an unconditional check stored
+    //   earlier (for example by a real-quadratic grh run), and of
+    //   try_certify_class_unit_with_zeta set it once they certify
     //   `proven`, because index one with generation checked means
-    //   saturation at every prime, but they clear the per-prime records, so
+    //   saturation at every prime.  They clear the per-prime records, so
     //   the status can be `verified` while the records do not cover every
+    //   p | h_cand; try_certify_class_unit_with_zeta and the stored-check
+    //   promotion keep them when verified records already cover every
     //   p | h_cand;
     // - saturate_relations_bounded_with_units sets `verified` when its
     //   bounded search removed every prime from the candidate index and
