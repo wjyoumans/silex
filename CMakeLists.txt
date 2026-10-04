@@ -857,6 +857,16 @@ if(SILEX_BUILD_TESTS)
         COMMAND t-silex-zeta-validation)
     list(APPEND SILEX_TEST_NAMES silex-zeta-validation)
 
+    add_executable(t-silex-zeta-quadratic-l1
+        test/t-zeta-quadratic-l1.cpp)
+    target_link_libraries(t-silex-zeta-quadratic-l1 PRIVATE Silex::silex)
+    target_include_directories(t-silex-zeta-quadratic-l1 PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-zeta-quadratic-l1)
+    add_test(NAME silex-zeta-quadratic-l1
+        COMMAND t-silex-zeta-quadratic-l1)
+    list(APPEND SILEX_TEST_NAMES silex-zeta-quadratic-l1)
+
     add_executable(t-silex-ideal test/t-ideal.cpp)
     target_link_libraries(t-silex-ideal PRIVATE Silex::silex)
     silex_apply_target_warnings(t-silex-ideal)

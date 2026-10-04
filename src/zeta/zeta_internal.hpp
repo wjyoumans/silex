@@ -130,4 +130,17 @@ bool class_regulator_product_estimate_with_diagnostics(
         flint::Fmpz* torsion_order = nullptr,
         Element* torsion_generator = nullptr) noexcept;
 
+// The character of the quadratic L(1, chi) route: the Kronecker symbol
+// (D / n), which for a fundamental discriminant D is the real primitive
+// character modulo |D|.
+int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept;
+
+// L(1, chi_D) for a fundamental discriminant D with |D| >= 3 fitting a
+// ulong, by the approximate functional equation with chi_D evaluated as a
+// Kronecker symbol.  Returns false when D is outside that range or the
+// enclosure is not finite; D is not checked to be fundamental.
+bool quadratic_dirichlet_l1(flint::ArbRef out,
+                            flint::FmpzConstRef discriminant,
+                            slong precision) noexcept;
+
 }  // namespace silex::detail

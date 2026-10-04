@@ -6,8 +6,7 @@
 
 #include <silex/diagnostics.hpp>
 #include <silex/factor_base.hpp>
-#include <silex/flint/acb.hpp>
-#include <silex/flint/dirichlet.hpp>
+#include <silex/flint/arb.hpp>
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/nmod_poly.hpp>
 #include <silex/flint/nmod_poly_factor.hpp>
@@ -15,8 +14,11 @@
 #include <silex/signature.hpp>
 #include <silex/unit.hpp>
 
+#include <flint/arb.h>
+#include <flint/arb_hypgeom.h>
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
+#include <flint/mag.h>
 #include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
 
@@ -179,51 +181,278 @@ bool fmpq_poly_is_monic_integral(const fmpq_poly_t polynomial) noexcept {
     return fmpz_is_one(fmpq_numref(coeff.raw())) != 0;
 }
 
-bool dirichlet_value_matches_kronecker(const flint::DirichletGroup& group,
-                                       const flint::DirichletChar& character,
-                                       flint::FmpzConstRef discriminant,
-                                       ulong n) noexcept {
-    flint::Fmpz zn;
-    flint::fmpz_set_ui(flint::FmpzRef(zn), n);
-    const int expected = flint::fmpz_kronecker(discriminant,
-                                              flint::FmpzConstRef(zn));
-    if (expected == 0) {
-        return true;
+// L(1, chi_D) for the real primitive character chi_D(n) = (D/n) (Kronecker
+// symbol) of a fundamental discriminant D, modulo q = |D| (Davenport,
+// "Multiplicative Number Theory", 3rd ed., Chapter 5).  The evaluation is the
+// approximate functional equation of FLINT 3.6.0
+// `acb_dirichlet_l_fmpq_afe` (src/acb_dirichlet/l_fmpq_afe.c) at s = 1: the
+// same two sums, the same truncation rule and tail bound
+// (`acb_dirichlet_afe_tail_bound`), the same tolerances and working
+// precisions.  The code below from here to `quadratic_l1_afe` is derived
+// from that file:
+//
+//   Copyright (C) 2021 Fredrik Johansson
+//   This file is part of FLINT, licensed under the GNU Lesser General Public
+//   License, version 3 or (at your option) any later version
+//   (LGPL-3.0-or-later); see <https://www.gnu.org/licenses/>.
+//
+// The adaptation is distributed with Silex under GPL-3.0-or-later.
+// Intentional deviations from FLINT:
+// - chi(n) is the Kronecker symbol `fmpz_kronecker(D, n)` instead of a
+//   discrete logarithm in the Dirichlet group (`acb_dirichlet_chi`), so the
+//   cost is O(sqrt(q prec)) symbol and special-function evaluations and no
+//   Dirichlet group is built;
+// - W(chi) = 1 is used directly (see below) instead of the root number
+//   computed from the character;
+// - the incomplete gamma values use the closed forms below, evaluated with
+//   arb ball functions, instead of FLINT's incremental series for
+//   Gamma((s + parity) / 2, z) along the sum.
+//
+// With parity a (a = 0 for D > 0, a = 1 for D < 0) and z_n = pi n^2 / q,
+//   L(1, chi) Gamma((1 + a) / 2)
+//     = sum chi(n) Gamma((1 + a) / 2, z_n) / n
+//       + W(chi) (pi / q)^(1/2) sum chi(n) Gamma(a / 2, z_n),
+// where W(chi) = tau(chi) / (i^a sqrt(q)) = 1 because the Gauss sum of a real
+// primitive character is sqrt(D) for D > 0 and i sqrt(|D|) for D < 0
+// (Davenport, Chapters 2 and 9).  The incomplete gamma values used are
+// Gamma(1, z) = exp(-z), Gamma(1/2, z) = sqrt(pi) erfc(sqrt(z)), and
+// Gamma(0, z) = E_1(z) (DLMF 8.4).
+
+class MagValue {
+public:
+    MagValue() noexcept {
+        mag_init(value_);
     }
 
-    const ulong got = flint::dirichlet_chi(group, character, n);
-    if (expected == 1) {
-        return got == 0;
+    ~MagValue() noexcept {
+        mag_clear(value_);
     }
-    return expected == -1 && group.exponent() % 2 == 0 &&
-           got == group.exponent() / 2;
+
+    MagValue(const MagValue&) = delete;
+    MagValue& operator=(const MagValue&) = delete;
+
+    mag_struct* raw() noexcept {
+        return value_;
+    }
+
+    const mag_struct* raw() const noexcept {
+        return value_;
+    }
+
+private:
+    mag_t value_;
+};
+
+double quadratic_afe_log_gamma_upper_approx(double a, double z) noexcept {
+    if (a < z) {
+        return (a - 1) * std::log(z) - z;
+    }
+    return a * (std::log(a) - 1);
 }
 
-bool find_quadratic_character(flint::DirichletChar& out,
-                              const flint::DirichletGroup& group,
-                              flint::FmpzConstRef discriminant) noexcept {
-    flint::DirichletChar candidate(group);
-    for (ulong j = 0; j < group.character_count(); ++j) {
-        flint::dirichlet_char_index(candidate, group, j);
-        if (!flint::dirichlet_char_is_real(group, candidate) ||
-            !flint::dirichlet_char_is_primitive(group, candidate)) {
+// FLINT `acb_dirichlet_afe_tail_bound` for the half-integer
+// sd2 = (s + parity) / 2 with s in {0, 1}; `sprime` is ceil(sd2) in {0, 1}.
+void quadratic_afe_tail_bound(mag_struct* res,
+                              slong sprime,
+                              ulong n,
+                              ulong q,
+                              int parity) noexcept {
+    MagValue pi_n2_q;
+    MagValue t;
+    MagValue u;
+
+    mag_const_pi_lower(pi_n2_q.raw());
+    mag_mul_ui_lower(pi_n2_q.raw(), pi_n2_q.raw(), n);
+    mag_mul_ui_lower(pi_n2_q.raw(), pi_n2_q.raw(), n);
+    mag_set_ui(t.raw(), q);
+    mag_div_lower(pi_n2_q.raw(), pi_n2_q.raw(), t.raw());
+
+    mag_set_ui(t.raw(), static_cast<ulong>(sprime));
+    if (sprime > 0 && mag_cmp(pi_n2_q.raw(), t.raw()) <= 0) {
+        mag_inf(res);
+        return;
+    }
+
+    mag_expinv(res, pi_n2_q.raw());
+    mag_div_ui(res, res, n);
+    if (parity == 0) {
+        mag_div_ui(res, res, n);
+    }
+
+    mag_set_ui(t.raw(), q);
+    mag_const_pi_lower(u.raw());
+    mag_div(t.raw(), t.raw(), u.raw());
+    mag_add_ui(t.raw(), t.raw(), 1);
+    mag_mul(res, res, t.raw());
+
+    if (sprime > 0) {
+        mag_mul_2exp_si(res, res, sprime);
+    }
+
+    // (pi / q)^(sprime - 1): one for sprime = 1, an upper bound for q / pi
+    // for sprime = 0.
+    if (sprime == 0) {
+        mag_const_pi_lower(t.raw());
+        mag_set_ui(u.raw(), q);
+        mag_div_lower(t.raw(), t.raw(), u.raw());
+        mag_inv(t.raw(), t.raw());
+        mag_mul(res, res, t.raw());
+    }
+}
+
+// Upper incomplete gamma Gamma(shift / 2, z) for shift in {0, 1, 2}.
+void quadratic_afe_gamma_upper(flint::Arb& out,
+                               ulong shift,
+                               const flint::Arb& z,
+                               slong prec) noexcept {
+    flint::Arb t;
+    if (shift == 2) {
+        ::arb_neg(t.raw(), z.raw());
+        ::arb_exp(out.raw(), t.raw(), prec);
+    } else if (shift == 1) {
+        ::arb_sqrt(t.raw(), z.raw(), prec);
+        ::arb_hypgeom_erfc(out.raw(), t.raw(), prec);
+        ::arb_const_sqrt_pi(t.raw(), prec);
+        ::arb_mul(out.raw(), out.raw(), t.raw(), prec);
+    } else {
+        // E_1(z) = -Ei(-z) for z > 0 (DLMF 6.2); FLINT's `arb_hypgeom_ei`
+        // keeps the requested precision where `arb_hypgeom_expint` with
+        // s = 1 can return a much wider ball.
+        ::arb_neg(t.raw(), z.raw());
+        ::arb_hypgeom_ei(out.raw(), t.raw(), prec);
+        ::arb_neg(out.raw(), out.raw());
+    }
+}
+
+// FLINT `acb_dirichlet_fmpq_sum_afe` at s in {0, 1} for a real character:
+//   sum_{n >= 1} chi(n) Gamma((s + parity) / 2, pi n^2 / q) / n^s,
+// truncated at the first n whose tail bound is below `abs_tol`, which is then
+// added to the radius.
+void quadratic_afe_sum(flint::Arb& res,
+                       flint::FmpzConstRef discriminant,
+                       ulong q,
+                       int parity,
+                       ulong s,
+                       const mag_struct* abs_tol,
+                       slong prec) noexcept {
+    const ulong shift = s + static_cast<ulong>(parity);
+    const slong sprime = static_cast<slong>((shift + 1) / 2);
+    const double aa = 0.5 * static_cast<double>(shift);
+    const double abs_tol_mag = mag_get_d_log2_approx(abs_tol);
+
+    MagValue err;
+    flint::Arb z;
+    flint::Arb term;
+
+    ::arb_zero(res.raw());
+
+    for (ulong n = 1;; ++n) {
+        quadratic_afe_tail_bound(err.raw(), sprime, n, q, parity);
+        if (mag_cmp(err.raw(), abs_tol) < 0) {
+            ::arb_add_error_mag(res.raw(), err.raw());
+            return;
+        }
+
+        const int chi = detail::quadratic_character(discriminant, n);
+        if (chi == 0) {
             continue;
         }
 
-        bool ok = true;
-        for (ulong n = 1; n <= group.modulus(); ++n) {
-            if (!dirichlet_value_matches_kronecker(
-                        group, candidate, discriminant, n)) {
-                ok = false;
-                break;
-            }
+        // Working precision of FLINT's term: Gamma(a, z) n^-s to `abs_tol`.
+        const double nd = static_cast<double>(n);
+        const double zz = 3.1415926535897932385 * nd * nd /
+                          static_cast<double>(q);
+        const double gammainc_mag =
+                quadratic_afe_log_gamma_upper_approx(aa, zz) / std::log(2.0);
+        const double ns_mag = -static_cast<double>(s) * std::log(nd) /
+                              std::log(2.0);
+        slong wp = static_cast<slong>(gammainc_mag + ns_mag - abs_tol_mag + 5);
+        wp = FLINT_MAX(wp, 30);
+
+        // FLINT's wp2, the precision allowing for cancellation, at which it
+        // computes z.  Gamma(a, z) is singular only for a = 0 (shift 0);
+        // otherwise Gamma(a) is Gamma(1/2) = sqrt(pi) or Gamma(1) = 1, whose
+        // binary exponent (`ARF_EXP` of the midpoint) is 1 in both cases.
+        slong wp2;
+        if (shift == 0) {
+            wp2 = static_cast<slong>(-abs_tol_mag + ns_mag + aa * std::log(zz) +
+                                     zz / std::log(2.0) + 5);
+        } else {
+            wp2 = static_cast<slong>(FLINT_MAX(1.0, gammainc_mag) + ns_mag -
+                                     abs_tol_mag + 5);
         }
-        if (ok) {
-            flint::dirichlet_char_set(out, group, candidate);
-            return true;
+        wp2 = FLINT_MAX(wp2, 30);
+
+        ::arb_const_pi(z.raw(), wp2);
+        ::arb_mul_ui(z.raw(), z.raw(), n, wp2);
+        ::arb_mul_ui(z.raw(), z.raw(), n, wp2);
+        ::arb_div_ui(z.raw(), z.raw(), q, wp2);
+        quadratic_afe_gamma_upper(term, shift, z, wp);
+        if (s == 1) {
+            ::arb_div_ui(term.raw(), term.raw(), n, wp);
+        }
+        if (chi > 0) {
+            ::arb_add(res.raw(), res.raw(), term.raw(), prec);
+        } else {
+            ::arb_sub(res.raw(), res.raw(), term.raw(), prec);
         }
     }
-    return false;
+}
+
+// FLINT `acb_dirichlet_l_fmpq_afe` at s = 1 for chi_D, with W(chi_D) = 1.
+bool quadratic_l1_afe(flint::Arb& out,
+                      flint::FmpzConstRef discriminant,
+                      ulong q,
+                      slong precision) noexcept {
+    if (q < 3 || precision <= 0) {
+        return false;
+    }
+    const int parity = flint::fmpz_sgn(discriminant) < 0 ? 1 : 0;
+    const slong origprec = precision;
+    const slong prec = static_cast<slong>(
+            static_cast<double>(precision) * 1.001 +
+            2 * static_cast<double>(FLINT_BIT_COUNT(q)));
+
+    const double pi_q = 3.1415926535897932385 / static_cast<double>(q);
+    const double inv_log2 = 1.4426950408889634074;
+    const double m1 = quadratic_afe_log_gamma_upper_approx(
+                              0.5 * (1.0 + parity), pi_q) * inv_log2;
+    const double m2 = quadratic_afe_log_gamma_upper_approx(
+                              0.5 * parity, pi_q) * inv_log2;
+    const double m2pre = 0.5 * std::log(pi_q) * inv_log2;
+    const double mmax = FLINT_MAX(m1, m2 + m2pre);
+
+    MagValue tol1;
+    MagValue tol2;
+    mag_one(tol1.raw());
+    mag_mul_2exp_si(tol1.raw(), tol1.raw(),
+                    static_cast<slong>(mmax - static_cast<double>(prec)));
+    mag_mul_2exp_si(tol2.raw(), tol1.raw(), static_cast<slong>(-m2pre));
+
+    slong prec1 = static_cast<slong>(static_cast<double>(prec) - (mmax - m1));
+    prec1 = FLINT_MAX(prec1, 32);
+    slong prec2 = static_cast<slong>(static_cast<double>(prec) -
+                                     (mmax - (m2 + m2pre)));
+    prec2 = FLINT_MAX(prec2, 32);
+
+    flint::Arb s1;
+    flint::Arb s2;
+    flint::Arb t;
+    quadratic_afe_sum(s1, discriminant, q, parity, 1, tol1.raw(), prec1);
+    quadratic_afe_sum(s2, discriminant, q, parity, 0, tol2.raw(), prec2);
+
+    // S1 + (pi / q)^(1/2) S2, divided by Gamma((1 + parity) / 2).
+    ::arb_const_pi(t.raw(), prec);
+    ::arb_div_ui(t.raw(), t.raw(), q, prec);
+    ::arb_sqrt(t.raw(), t.raw(), prec);
+    ::arb_mul(s2.raw(), s2.raw(), t.raw(), prec);
+    ::arb_add(out.raw(), s1.raw(), s2.raw(), prec);
+    if (parity == 0) {
+        ::arb_const_sqrt_pi(t.raw(), prec);
+        ::arb_div(out.raw(), out.raw(), t.raw(), prec);
+    }
+    ::arb_set_round(out.raw(), out.raw(), origprec);
+    return ::arb_is_finite(out.raw()) != 0;
 }
 
 // Preconditions of the unconditional quadratic route: a maximal order of an
@@ -267,29 +496,14 @@ bool quadratic_residue(flint::Arb& out,
         return false;
     }
 
-    flint::DirichletGroup group(modulus);
-    if (!group.is_initialized()) {
-        return false;
-    }
-    flint::DirichletChar character(group);
-    if (!find_quadratic_character(character, group,
-                                  flint::FmpzConstRef(discriminant))) {
+    flint::Arb value;
+    if (!quadratic_l1_afe(value, flint::FmpzConstRef(discriminant), modulus,
+                          FLINT_MAX(precision + 64, 128)) ||
+        !flint::arb_is_positive(value)) {
         return false;
     }
 
-    flint::Fmpq one;
-    flint::Acb value;
-    flint::fmpq_one(one);
-    flint::acb_dirichlet_l_fmpq(
-            value, flint::FmpqConstRef(one), group.raw(), character.raw(),
-            FLINT_MAX(precision + 64, 128));
-    if (!flint::acb_is_finite(value) ||
-        !flint::arb_contains_zero(flint::acb_imag_part(value)) ||
-        !flint::arb_is_positive(flint::acb_real_part(value))) {
-        return false;
-    }
-
-    flint::arb_set(flint::ArbRef(out), flint::acb_real_part(value));
+    flint::arb_set(flint::ArbRef(out), flint::ArbConstRef(value));
     return true;
 }
 
@@ -2654,6 +2868,30 @@ bool class_regulator_product_estimate_with_diagnostics(
                                                      residue_degree_cache,
                                                      torsion_order,
                                                      torsion_generator);
+}
+
+int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept {
+    flint::Fmpz zn;
+    flint::fmpz_set_ui(flint::FmpzRef(zn), n);
+    return flint::fmpz_kronecker(discriminant, flint::FmpzConstRef(zn));
+}
+
+bool quadratic_dirichlet_l1(flint::ArbRef out,
+                            flint::FmpzConstRef discriminant,
+                            slong precision) noexcept {
+    flint::Fmpz abs_discriminant;
+    flint::fmpz_abs(flint::FmpzRef(abs_discriminant), discriminant);
+    if (!flint::fmpz_abs_fits_ui(flint::FmpzConstRef(abs_discriminant))) {
+        return false;
+    }
+    const ulong q =
+            flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
+    flint::Arb value;
+    if (!quadratic_l1_afe(value, discriminant, q, precision)) {
+        return false;
+    }
+    flint::arb_set(out, flint::ArbConstRef(value));
+    return true;
 }
 
 }  // namespace silex::detail
