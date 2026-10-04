@@ -188,7 +188,7 @@ bool fmpq_poly_is_monic_integral(const fmpq_poly_t polynomial) noexcept {
 // `acb_dirichlet_l_fmpq_afe` (src/acb_dirichlet/l_fmpq_afe.c) at s = 1: the
 // same two sums, the same truncation rule and tail bound
 // (`acb_dirichlet_afe_tail_bound`), the same tolerances and working
-// precisions.  The code below from here to `quadratic_l1_afe` is derived
+// precisions.  The code below from here through `quadratic_l1_afe` is derived
 // from that file:
 //
 //   Copyright (C) 2021 Fredrik Johansson

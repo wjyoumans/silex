@@ -542,7 +542,7 @@ Kronecker symbol instead of a Dirichlet-group discrete logarithm, so no
 Dirichlet group is built and the work grows like ``sqrt(|D| prec)``; the root
 number is ``W(chi_D) = 1``, because the Gauss sum of a primitive real
 character is ``sqrt(q)`` for even and ``i sqrt(q)`` for odd characters
-(Davenport, *Multiplicative Number Theory*, Chapters 5 and 9); and the
+(Davenport, *Multiplicative Number Theory*, Chapters 2 and 9); and the
 incomplete gamma values are the closed forms ``Gamma(1, z) = exp(-z)``,
 ``Gamma(1/2, z) = sqrt(pi) erfc(sqrt(z))`` and ``Gamma(0, z) = E_1(z)``
 (DLMF 6.2 and 8.4), evaluated with arb ball functions.  When the ``L``-value

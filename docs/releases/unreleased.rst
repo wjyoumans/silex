@@ -131,8 +131,8 @@ Changed
   or failed.  The certification
   rule is unchanged: a finite, positive ``L``-value ball is unconditional, and
   anything else still falls back to Belabas-Friedman.  For ``|D|`` near
-  ``10^12`` an evaluation takes tens of seconds (imaginary) to a few minutes
-  (real).  See "Class groups and order units" in
+  ``10^12`` an evaluation takes roughly 25 seconds (imaginary) and under 2
+  minutes (real) on a desktop machine; these times are approximate.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 Fixed

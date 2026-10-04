@@ -184,6 +184,37 @@ bool slow_tests_enabled() noexcept {
            !(value[0] == '0' && value[1] == '\0');
 }
 
+// Invalid input fails closed and leaves `out` untouched.
+void check_fails_closed(const sflint::Fmpz& discriminant, slong precision) {
+    sflint::Arb out;
+    ::arb_set_si(out.raw(), 7);
+    assert(!silex::detail::quadratic_dirichlet_l1(
+            sflint::ArbRef(out), sflint::FmpzConstRef(discriminant),
+            precision));
+    sflint::Arb expected;
+    ::arb_set_si(expected.raw(), 7);
+    assert(::arb_equal(out.raw(), expected.raw()) != 0);
+}
+
+void check_failure_paths() {
+    sflint::Fmpz d;
+    // D = 0, and |D| = 1, 2 (modulus q < 3).
+    for (const slong value : {0L, 1L, -1L, 2L, -2L}) {
+        sflint::fmpz_set_si(sflint::FmpzRef(d), value);
+        check_fails_closed(d, 128);
+    }
+    // |D| = 2^64 + 3 does not fit a ulong.
+    sflint::fmpz_set_ui(sflint::FmpzRef(d), 1);
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(d), sflint::FmpzConstRef(d), 64);
+    sflint::fmpz_add_ui(sflint::FmpzRef(d), sflint::FmpzConstRef(d), 3);
+    sflint::fmpz_neg(sflint::FmpzRef(d), sflint::FmpzConstRef(d));
+    check_fails_closed(d, 128);
+    // Non-positive precision with a valid discriminant.
+    sflint::fmpz_set_si(sflint::FmpzRef(d), -23);
+    check_fails_closed(d, 0);
+    check_fails_closed(d, -5);
+}
+
 }  // namespace
 
 int main() {
@@ -194,10 +225,7 @@ int main() {
     check_against_flint_dirichlet(-100003, 128);
     check_against_flint_dirichlet(100049, 192);
 
-    sflint::Arb unused;
-    sflint::Fmpz zero;
-    assert(!silex::detail::quadratic_dirichlet_l1(
-            sflint::ArbRef(unused), sflint::FmpzConstRef(zero), 128));
+    check_failure_paths();
 
     check_large_imaginary_discriminant(-10000000019, 39809);
 
