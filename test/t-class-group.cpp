@@ -3078,7 +3078,11 @@ int test_grh_generation_bound_bach_fallback() {
 
     // A grh request on the non-monic presentation still fails closed, since
     // prime decomposition (and so the norm-bounded factor base) also needs a
-    // monic integral defining polynomial.  The failure publishes nothing.
+    // monic integral defining polynomial.  The bound above now succeeds, so
+    // the request still fails at policy selection, in the factor-base probe.
+    // The failure publishes nothing.
+    assert(!silex::detail::grh_factor_base_bound(bound, nonmonic_maximal,
+                                                 nullptr, nullptr, nullptr));
     silex::ClassGroupComputeOptions options;
     options.max_candidates = 5000;
     options.max_relations = 500;
@@ -3093,6 +3097,9 @@ int test_grh_generation_bound_bach_fallback() {
         assert(!silex::detail::compute_class_unit_transaction(
                 units, class_group, nonmonic_maximal,
                 sflint::FmpzConstRef(requested_bound), options, 128, audit));
+        assert(audit.failure_stage ==
+               silex::detail::ClassUnitStage::factor_base_bound);
+        assert(!audit.policy.selected);
         assert(!audit.final_result_published);
         assert(audit.class_group_certification ==
                silex::CertificationMode::unknown);

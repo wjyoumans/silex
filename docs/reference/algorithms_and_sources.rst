@@ -636,8 +636,9 @@ criterion and Bach's bound, as Hecke v0.38.6
 When the Belabas--Diaz y Diaz--Friedman criterion cannot be computed or
 decided, the GRH bound is Bach's bound alone, and the generation record
 names Bach's theorem.  This happens for a non-monic defining polynomial,
-since the criterion's residue-degree route needs a monic integral one, and
-when an interval comparison in its search cannot be decided.  Bach's theorem
+since the criterion's residue-degree route needs a monic integral one, for a
+residue-degree failure, when an interval comparison in its search cannot be
+decided, and when its search passes the range of a double.  Bach's theorem
 does not depend on the criterion, and Belabas--Diaz y Diaz--Friedman 2008,
 Section 3, itself takes Bach's bound once its search passes it.  A ``grh``
 request on a non-monic presentation still fails closed today, because prime
