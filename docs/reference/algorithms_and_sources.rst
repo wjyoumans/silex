@@ -686,8 +686,59 @@ imaginary-quadratic ``grh`` route uses an exact class number instead of an
 analytic value.  Its GRH dependence is in factor-base generation, which is
 checked only up to the GRH bound, and it records no analytic check.  The
 degree-one ``grh`` route uses the exact degree-one route described below and
-records none either.  Per-component GRH provenance, including generation, is
-not yet reported.
+records none either.
+
+Each published class group reports where GRH entered, component by
+component, through ``factor_base_generation_certification()``,
+``factor_base_generation_basis()``,
+``factor_base_generation_certification_bound()``,
+``class_unit_completeness_certification()`` and
+``class_unit_completeness_basis()``; ``silex-class-unit-instance`` prints the
+same values in its ``class_group`` object.  Generation is ``proven``, with
+basis ``minkowski_type`` and the proven generation bound, when
+``factor_base_generation_status()`` is ``verified``; it is ``grh`` when only
+the GRH generation record above holds, with basis ``bdf`` or ``bach`` for the
+theorem that gave the GRH bound and that bound before the factor-base size
+doubling.  A ``grh`` generation basis ``bdf`` assumes the Riemann hypothesis
+for the ``L``-functions of the nontrivial class-group characters
+(Belabas--Diaz y Diaz--Friedman 2008, Corollary 2.2); ``bach`` assumes it for
+``zeta_K`` as well (Bach 1990, Theorem 4).  Completeness of the relations and
+units is stated relative to generation, because the index argument needs a
+generating factor base.  It is ``grh``, basis ``belabas_friedman``, when the
+pair was accepted against a Belabas--Friedman ``hR``, whose error bound
+assumes the Riemann hypothesis for ``zeta_K`` and for ``zeta_Q``
+(Belabas--Friedman 2015, Theorem 1).  It is ``proven`` when the pair was
+accepted against the unconditional quadratic ``L(1, chi_D)`` value
+(``unconditional_analytic``) or the exact imaginary-quadratic class number
+(``exact_class_number``), and for a ``proven`` class group or the exact
+degree-one route (``unconditional_certification``).
+``certification_status()`` stays the requested label: a ``grh`` result whose
+two components are both ``proven`` still reads ``grh``.  Per route:
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``grh`` route
+     - Generation
+     - Completeness
+   * - Degree one
+     - ``proven`` (``minkowski_type``)
+     - ``proven`` (``unconditional_certification``)
+   * - Imaginary quadratic, exact class number
+     - ``grh``, or ``proven`` when the base reaches the proven bound
+     - ``proven`` (``exact_class_number``)
+   * - Real quadratic, ``L(1, chi_D)``
+     - ``grh`` or ``proven``
+     - ``proven`` (``unconditional_analytic``)
+   * - Real quadratic, ``L(1, chi_D)`` failed, Belabas--Friedman fallback
+     - ``grh`` or ``proven``
+     - ``grh`` (``belabas_friedman``)
+   * - Degree two outside the explicit quadratic backend
+     - ``grh`` or ``proven``
+     - ``grh`` (``belabas_friedman``)
+   * - Degree three and higher
+     - ``grh`` or ``proven``
+     - ``grh`` (``belabas_friedman``)
 
 The ``ell``-local test takes the Smith-invariant ``beta`` rows (compact power
 witnesses of invariant generators whose invariant ``ell`` divides), the free

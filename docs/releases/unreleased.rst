@@ -9,6 +9,25 @@ branches; earlier post-0.1.1 changes are not yet listed here.  Listed entries
 are available on the ``dev`` channel and become the next release's notes when
 that release is prepared.
 
+Added
+-----
+
+- ``ClassGroupContext`` reports where GRH entered a class/unit result:
+  ``factor_base_generation_certification()``,
+  ``factor_base_generation_basis()`` and
+  ``factor_base_generation_certification_bound()`` say whether factor-base
+  generation is ``proven`` (the proven generation bound) or ``grh`` (the
+  Belabas-Diaz y Diaz-Friedman or Bach bound, whichever was used), and
+  ``class_unit_completeness_certification()`` and
+  ``class_unit_completeness_basis()`` say whether relation and unit
+  completeness is ``proven`` (exact class number, unconditional
+  ``L(1, chi)``, or a ``proven`` certification) or ``grh``
+  (Belabas-Friedman ``hR``).  New enums ``ClassGroupGenerationBasis`` and
+  ``ClassUnitCompletenessBasis`` name the theorems.  Labels are unchanged.
+  ``silex-class-unit-instance`` adds the five values to its ``class_group``
+  JSON object.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 Changed
 -------
 

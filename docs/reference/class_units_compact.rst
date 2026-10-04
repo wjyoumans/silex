@@ -188,6 +188,13 @@ The class-group proof metadata is deliberately componentized:
   with proven units promote the class group; the transaction itself never
   promotes.  The exact imaginary-quadratic and degree-one ``grh`` routes
   record no analytic check;
+- GRH provenance reports, for each published class group, whether
+  factor-base generation (``factor_base_generation_certification()``,
+  ``_basis()`` and ``_certification_bound()``) and relation and unit
+  completeness (``class_unit_completeness_certification()`` and
+  ``_basis()``) are ``proven`` or rest on GRH, and the theorem used, so a
+  ``grh`` result whose generation was verified to the proven bound is told
+  apart from one whose generation was assumed under GRH;
 - BF zeta audit records keep the cutoff, maximum cutoff, requested precision,
   working precision, and error bound of a Belabas-Friedman evaluation.  The
   error bound is valid under GRH, so the record is GRH-conditional evidence.
