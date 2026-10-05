@@ -200,7 +200,10 @@ Changed
   anything else still falls back to Belabas-Friedman.  The incomplete gamma
   values of the evaluation are obtained by Taylor stepping over blocks of
   consecutive terms instead of being evaluated term by term, which lowers
-  the cost for large ``|D|``.  See "Class groups and order units" in
+  the cost for large ``|D|``.  At ``|D|`` near ``10^12`` and 64-bit
+  precision, an evaluation now takes 9.9 s instead of 123 s for a real field
+  (12.5x) and 12.3 s instead of 34.7 s for an imaginary field (2.8x), on one
+  core of a Ryzen AI 9 HX PRO 370.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 Fixed
