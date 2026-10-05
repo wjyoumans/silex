@@ -4,6 +4,7 @@
 #include "order_unit_internal.hpp"
 #include "precision_cap_internal.hpp"
 
+#include <atomic>
 #include <limits>
 #include <vector>
 
@@ -28,7 +29,9 @@ namespace silex {
 namespace {
 
 // Test-only override of the shared precision-doubling cap; zero means off.
-slong g_precision_doubling_cap_override = 0;
+// Production code only reads it.  Relaxed atomic so a reader on another
+// thread never races with a test setting it.
+std::atomic<slong> g_precision_doubling_cap_override{0};
 
 }  // namespace
 
@@ -191,8 +194,10 @@ bool compact_independence_from_log_matrix(bool& decided,
 }
 
 slong precision_doubling_cap(slong requested) noexcept {
-    if (g_precision_doubling_cap_override > 0) {
-        return g_precision_doubling_cap_override;
+    const slong forced =
+            g_precision_doubling_cap_override.load(std::memory_order_relaxed);
+    if (forced > 0) {
+        return forced;
     }
     slong cap = kPrecisionDoublingCapFloorBits;
     if (requested > 0 &&
@@ -213,11 +218,14 @@ bool precision_doubling_allowed(slong work_precision,
     }
     SILEX_LOG(diagnostics, DiagnosticsModule::unit_group, LogLevel::detail,
               reason);
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.precision_doubling_cap");
     return false;
 }
 
 void set_precision_doubling_cap_for_testing(slong cap) noexcept {
-    g_precision_doubling_cap_override = cap > 0 ? cap : 0;
+    g_precision_doubling_cap_override.store(cap > 0 ? cap : 0,
+                                            std::memory_order_relaxed);
 }
 
 bool compact_independent(bool& independent,

@@ -474,6 +474,23 @@ bool check_real_quadratic_group(const silex::OrderUnitGroup& group,
            sflint::arb_is_positive(regulator);
 }
 
+struct TorsionEventCounter {
+    const char* label = nullptr;
+    slong count = 0;
+};
+
+void torsion_event_callback(void* user,
+                            silex::DiagnosticsModule,
+                            silex::ProfileEvent event,
+                            const char*,
+                            const char* label) noexcept {
+    TorsionEventCounter* counter = static_cast<TorsionEventCounter*>(user);
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, counter->label) == 0) {
+        ++counter->count;
+    }
+}
+
 // Forces the shared precision-doubling cap (T-111) down to one bit so each
 // capped doubling loop must stop after its first undecided pass and return
 // false, then checks the same call succeeds with the default cap.
@@ -510,6 +527,22 @@ int test_precision_doubling_cap_forced_failures() {
     silex::EmbeddingContext embeddings(field);
     silex::FactoredElementSpan span(&generator, 1);
 
+    // Every capped loop emits one profile event when the cap stops it.
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "unit_group.precision_doubling_cap";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    slong expected_events = 0;
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+#define SILEX_TEST_CAP_EVENT() (++expected_events)
+#else
+#define SILEX_TEST_CAP_EVENT() ((void)0)
+#endif
+
     // Factored logarithmic embedding: in a field whose two complex pairs
     // agree to about 300 bits, the embedding is unavailable at the first
     // working precision, so the loop must double; the cap stops it.
@@ -525,7 +558,9 @@ int test_precision_doubling_cap_forced_failures() {
             PrecisionCapOverride cap(1);
             assert(!factored.logarithmic_embedding(
                     sflint::ArbVecRef(logs), close_embeddings,
-                    silex::LogEmbeddingMode::product, 1));
+                    silex::LogEmbeddingMode::product, 1, &diagnostics));
+            SILEX_TEST_CAP_EVENT();
+            assert(counter.count == expected_events);
         }
         assert(factored.logarithmic_embedding(
                 sflint::ArbVecRef(logs), close_embeddings,
@@ -538,7 +573,9 @@ int test_precision_doubling_cap_forced_failures() {
         {
             PrecisionCapOverride cap(1);
             assert(!silex::detail::compact_independent(
-                    independent, embeddings, span, 1));
+                    independent, embeddings, span, 1, &diagnostics));
+            SILEX_TEST_CAP_EVENT();
+            assert(counter.count == expected_events);
         }
         assert(silex::detail::compact_independent(
                 independent, embeddings, span, 1));
@@ -552,7 +589,9 @@ int test_precision_doubling_cap_forced_failures() {
             PrecisionCapOverride cap(1);
             assert(!silex::detail::compact_regulator_adaptive(
                     sflint::ArbRef(regulator), embeddings, span, 32,
-                    1000000));
+                    1000000, &diagnostics));
+            SILEX_TEST_CAP_EVENT();
+            assert(counter.count == expected_events);
         }
         assert(silex::detail::compact_regulator_adaptive(
                 sflint::ArbRef(regulator), embeddings, span, 32, 64));
@@ -582,16 +621,21 @@ int test_precision_doubling_cap_forced_failures() {
         silex::detail::RelationUnitExtractionState state;
         const sflint::ArbMat* inverse = nullptr;
         slong precision = 1;
+        group.set_diagnostics(&diagnostics);
         {
             PrecisionCapOverride cap(1);
             assert(!silex::detail::conj_log_cutoff_inverse(
                     inverse, state, group, cubic_embeddings, precision));
+            SILEX_TEST_CAP_EVENT();
+            assert(counter.count == expected_events);
         }
+        group.set_diagnostics(nullptr);
         precision = 1;
         assert(silex::detail::conj_log_cutoff_inverse(
                 inverse, state, group, cubic_embeddings, precision));
         assert(inverse != nullptr);
     }
+#undef SILEX_TEST_CAP_EVENT
     return 0;
 }
 
@@ -4651,23 +4695,6 @@ int test_exact_imaginary_quadratic_saturation_records() {
 }
 
 // Counts profile events with one label.
-struct TorsionEventCounter {
-    const char* label = nullptr;
-    slong count = 0;
-};
-
-void torsion_event_callback(void* user,
-                            silex::DiagnosticsModule,
-                            silex::ProfileEvent event,
-                            const char*,
-                            const char* label) noexcept {
-    TorsionEventCounter* counter = static_cast<TorsionEventCounter*>(user);
-    if (event == silex::ProfileEvent::event && label != nullptr &&
-        std::strcmp(label, counter->label) == 0) {
-        ++counter->count;
-    }
-}
-
 int test_add_dependent_unit_precision_cap() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order;

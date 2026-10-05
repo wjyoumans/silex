@@ -2549,7 +2549,7 @@ bool select_independent_relation_kernel_units(
         if (!compact_independent(independent, embeddings,
                                  FactoredElementSpan(selected.data(),
                                                      selected.size()),
-                                 precision)) {
+                                 precision, class_group.diagnostics())) {
             selected.pop_back();
             continue;
         }

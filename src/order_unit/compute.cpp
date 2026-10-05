@@ -59,7 +59,8 @@ struct IncrementalUnitContext {
     bool add_independent_unit(bool& changed,
                               const FactoredElement& candidate,
                               EmbeddingContext& embeddings,
-                              slong precision) noexcept {
+                              slong precision,
+                              const DiagnosticsContext* diagnostics) noexcept {
         changed = false;
         if (field == nullptr || target_rank <= 0 || full_rank ||
             precision <= 0 || candidate.parent() == nullptr ||
@@ -77,7 +78,7 @@ struct IncrementalUnitContext {
         if (!compact_independent(independent, embeddings,
                                  FactoredElementSpan(units.data(),
                                                      units.size()),
-                                 precision) ||
+                                 precision, diagnostics) ||
             !independent) {
             units.pop_back();
             return true;
@@ -2453,7 +2454,8 @@ bool set_class_relation_units(bool& ready,
 
             bool added = false;
             if (!partial_units.add_independent_unit(added, candidate,
-                                                    embeddings, precision)) {
+                                                    embeddings, precision,
+                                                    class_group.diagnostics())) {
                 return false;
             }
             if (!added) {
