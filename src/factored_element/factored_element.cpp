@@ -1,4 +1,5 @@
 #include <silex/factored_element.hpp>
+#include "../order_unit/precision_cap_internal.hpp"
 
 #include <flint/arb.h>
 
@@ -916,6 +917,8 @@ bool FactoredElement::logarithmic_embedding(
     }
 
     const slong target_radius_2exp = -precision;
+    const slong cap = detail::precision_doubling_cap(
+            work_precision > precision ? work_precision : precision);
     for (;;) {
         slong factor_precision = 0;
         if (!factored_log_bucket_precision(factor_precision,
@@ -966,7 +969,10 @@ bool FactoredElement::logarithmic_embedding(
             return out.set_from(flint::ArbVecConstRef(sum));
         }
 
-        if (work_precision > std::numeric_limits<slong>::max() / 2) {
+        if (!detail::precision_doubling_allowed(
+                    work_precision, cap, diagnostics,
+                    "factored logarithmic embedding stopped at the "
+                    "precision cap")) {
             return false;
         }
         work_precision *= 2;

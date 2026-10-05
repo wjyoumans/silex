@@ -18,6 +18,7 @@
 #include "order_unit/relation_unit_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "order_unit/compute_internal.hpp"
+#include "order_unit/precision_cap_internal.hpp"
 #include "test_support.hpp"
 
 #include <flint/fmpq_poly.h>
@@ -471,6 +472,127 @@ bool check_real_quadratic_group(const silex::OrderUnitGroup& group,
            sflint::fmpz_equal_si(torsion_order, 2) &&
            group.regulator(sflint::ArbRef(regulator)) &&
            sflint::arb_is_positive(regulator);
+}
+
+// Forces the shared precision-doubling cap (T-111) down to one bit so each
+// capped doubling loop must stop after its first undecided pass and return
+// false, then checks the same call succeeds with the default cap.
+struct PrecisionCapOverride {
+    explicit PrecisionCapOverride(slong cap) noexcept {
+        silex::detail::set_precision_doubling_cap_for_testing(cap);
+    }
+    ~PrecisionCapOverride() {
+        silex::detail::set_precision_doubling_cap_for_testing(0);
+    }
+};
+
+int test_precision_doubling_cap_default_value() {
+    using silex::detail::precision_doubling_cap;
+    assert(precision_doubling_cap(1) == (WORD(1) << 20));
+    assert(precision_doubling_cap(1 << 14) == (WORD(1) << 20));
+    assert(precision_doubling_cap(1 << 15) == (WORD(1) << 21));
+    assert(precision_doubling_cap(0) == (WORD(1) << 20));
+    assert(precision_doubling_cap(std::numeric_limits<slong>::max()) ==
+           (WORD(1) << 20));
+    assert(silex::detail::precision_doubling_allowed(
+            (WORD(1) << 19), WORD(1) << 20, nullptr, "x"));
+    assert(!silex::detail::precision_doubling_allowed(
+            (WORD(1) << 19) + 1, WORD(1) << 20, nullptr, "x"));
+    return 0;
+}
+
+int test_precision_doubling_cap_forced_failures() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Element epsilon(field);
+    assert(set_quadratic_coeffs(epsilon, 1, 1, 1, 1));
+    silex::FactoredElement generator(field);
+    assert(generator.set_element(epsilon));
+    silex::EmbeddingContext embeddings(field);
+    silex::FactoredElementSpan span(&generator, 1);
+
+    // Factored logarithmic embedding: in a field whose two complex pairs
+    // agree to about 300 bits, the embedding is unavailable at the first
+    // working precision, so the loop must double; the cap stops it.
+    {
+        silex::NumberField close = silex::test::close_imaginary_pairs_field();
+        silex::Element gen(close);
+        assert(gen.gen());
+        silex::FactoredElement factored(close);
+        assert(factored.set_element(gen));
+        silex::EmbeddingContext close_embeddings(close);
+        sflint::ArbVec logs(2);
+        {
+            PrecisionCapOverride cap(1);
+            assert(!factored.logarithmic_embedding(
+                    sflint::ArbVecRef(logs), close_embeddings,
+                    silex::LogEmbeddingMode::product, 1));
+        }
+        assert(factored.logarithmic_embedding(
+                sflint::ArbVecRef(logs), close_embeddings,
+                silex::LogEmbeddingMode::product, 1));
+    }
+
+    // Compact independence: precision 1 is not enough to decide.
+    {
+        bool independent = false;
+        {
+            PrecisionCapOverride cap(1);
+            assert(!silex::detail::compact_independent(
+                    independent, embeddings, span, 1));
+        }
+        assert(silex::detail::compact_independent(
+                independent, embeddings, span, 1));
+        assert(independent);
+    }
+
+    // Compact regulator to a tolerance no finite precision meets quickly.
+    {
+        sflint::Arb regulator;
+        {
+            PrecisionCapOverride cap(1);
+            assert(!silex::detail::compact_regulator_adaptive(
+                    sflint::ArbRef(regulator), embeddings, span, 32,
+                    1000000));
+        }
+        assert(silex::detail::compact_regulator_adaptive(
+                sflint::ArbRef(regulator), embeddings, span, 32, 64));
+    }
+
+    // Conjugate-log cutoff inverse: in the cyclic cubic x^3 - 3x + 1 the
+    // units theta and theta - 1 give a rank-two group whose 2x2 cutoff
+    // matrix cannot be inverted at one bit.
+    {
+        silex::NumberField cubic = cubic_field(-3, 1);
+        silex::Order order;
+        order = silex::test::equation_order(cubic);
+        silex::Element theta(cubic);
+        silex::Element theta_minus_one(cubic);
+        assert(theta.gen());
+        assert(theta_minus_one.add_si(theta, -1));
+        silex::FactoredElement generators[] = {
+                silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+        assert(generators[0].set_element(theta));
+        assert(generators[1].set_element(theta_minus_one));
+        silex::EmbeddingContext cubic_embeddings(cubic);
+        silex::OrderUnitGroup group;
+        assert(group.set_units(order,
+                               silex::FactoredElementSpan(generators, 2),
+                               cubic_embeddings, 64));
+        assert(group.free_rank() == 2);
+        silex::detail::RelationUnitExtractionState state;
+        const sflint::ArbMat* inverse = nullptr;
+        slong precision = 1;
+        {
+            PrecisionCapOverride cap(1);
+            assert(!silex::detail::conj_log_cutoff_inverse(
+                    inverse, state, group, cubic_embeddings, precision));
+        }
+        precision = 1;
+        assert(silex::detail::conj_log_cutoff_inverse(
+                inverse, state, group, cubic_embeddings, precision));
+        assert(inverse != nullptr);
+    }
+    return 0;
 }
 
 int test_degree_one_rank_zero_group() {
@@ -6991,6 +7113,8 @@ int test_set_move_and_access_failures() {
 
 int main() {
     test_unit_extraction_cache_clear();
+    test_precision_doubling_cap_default_value();
+    test_precision_doubling_cap_forced_failures();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();
     test_compute_with_class_group_rank_zero();

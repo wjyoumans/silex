@@ -4,6 +4,7 @@
 #include "class_unit_transaction_internal.hpp"
 #include "compact_reconstruction_bound_internal.hpp"
 #include "relation_unit_internal.hpp"
+#include "precision_cap_internal.hpp"
 #include "order_unit_internal.hpp"
 #include "../class_group/class_group_certification_internal.hpp"
 #include "../class_group/class_group_internal.hpp"
@@ -1705,6 +1706,7 @@ bool conj_log_cutoff_inverse(const flint::ArbMat*& out,
     }
 
     slong work_precision = precision;
+    const slong cap = precision_doubling_cap(precision);
     for (;;) {
         slong places = 0;
         if (!compact_places(places, embeddings) || places != rank + 1) {
@@ -1739,7 +1741,10 @@ bool conj_log_cutoff_inverse(const flint::ArbMat*& out,
             return true;
         }
 
-        if (work_precision > std::numeric_limits<slong>::max() / 2) {
+        if (!precision_doubling_allowed(
+                    work_precision, cap, group.diagnostics(),
+                    "conjugate log cutoff inverse stopped at the "
+                    "precision cap")) {
             return false;
         }
         work_precision *= 2;

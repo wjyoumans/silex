@@ -2,6 +2,7 @@
 
 #include "compute_internal.hpp"
 #include "order_unit_internal.hpp"
+#include "precision_cap_internal.hpp"
 
 #include <limits>
 #include <vector>
@@ -25,6 +26,9 @@
 
 namespace silex {
 namespace {
+
+// Test-only override of the shared precision-doubling cap; zero means off.
+slong g_precision_doubling_cap_override = 0;
 
 }  // namespace
 
@@ -186,10 +190,41 @@ bool compact_independence_from_log_matrix(bool& decided,
     return true;
 }
 
+slong precision_doubling_cap(slong requested) noexcept {
+    if (g_precision_doubling_cap_override > 0) {
+        return g_precision_doubling_cap_override;
+    }
+    slong cap = kPrecisionDoublingCapFloorBits;
+    if (requested > 0 &&
+        requested <= std::numeric_limits<slong>::max() /
+                             kPrecisionDoublingCapFactor &&
+        requested * kPrecisionDoublingCapFactor > cap) {
+        cap = requested * kPrecisionDoublingCapFactor;
+    }
+    return cap;
+}
+
+bool precision_doubling_allowed(slong work_precision,
+                                slong cap,
+                                const DiagnosticsContext* diagnostics,
+                                const char* reason) noexcept {
+    if (work_precision <= cap / 2) {
+        return true;
+    }
+    SILEX_LOG(diagnostics, DiagnosticsModule::unit_group, LogLevel::detail,
+              reason);
+    return false;
+}
+
+void set_precision_doubling_cap_for_testing(slong cap) noexcept {
+    g_precision_doubling_cap_override = cap > 0 ? cap : 0;
+}
+
 bool compact_independent(bool& independent,
                          EmbeddingContext& embeddings,
                          FactoredElementSpan generators,
-                         slong precision) noexcept {
+                         slong precision,
+                         const DiagnosticsContext* diagnostics) noexcept {
     if (generators.empty()) {
         independent = true;
         return true;
@@ -204,6 +239,7 @@ bool compact_independent(bool& independent,
 
     const slong places = sig.r1() + sig.r2();
     slong work_precision = precision;
+    const slong cap = precision_doubling_cap(precision);
     for (;;) {
         flint::ArbMat logs(len, places);
         bool decided = false;
@@ -218,7 +254,9 @@ bool compact_independent(bool& independent,
             return true;
         }
 
-        if (work_precision > std::numeric_limits<slong>::max() / 2) {
+        if (!precision_doubling_allowed(
+                    work_precision, cap, diagnostics,
+                    "compact independence stopped at the precision cap")) {
             return false;
         }
         work_precision *= 2;
@@ -393,7 +431,8 @@ bool compact_regulator_adaptive(flint::ArbRef out,
                                 EmbeddingContext& embeddings,
                                 FactoredElementSpan generators,
                                 slong start_precision,
-                                slong abs_tolerance) noexcept {
+                                slong abs_tolerance,
+                                const DiagnosticsContext* diagnostics) noexcept {
     if (start_precision <= 0 || abs_tolerance <= 0) {
         return false;
     }
@@ -410,6 +449,7 @@ bool compact_regulator_adaptive(flint::ArbRef out,
     }
 
     slong precision = max_slong(start_precision, 32);
+    const slong cap = precision_doubling_cap(start_precision);
     for (;;) {
         flint::ArbMat logs(len, places);
         flint::Arb regulator;
@@ -424,7 +464,9 @@ bool compact_regulator_adaptive(flint::ArbRef out,
             return true;
         }
 
-        if (precision > std::numeric_limits<slong>::max() / 2) {
+        if (!precision_doubling_allowed(
+                    precision, cap, diagnostics,
+                    "compact regulator stopped at the precision cap")) {
             return false;
         }
         precision *= 2;
@@ -1212,7 +1254,7 @@ bool OrderUnitGroupAccess::set_units(
                     independent, embeddings,
                     FactoredElementSpan(copied_generators.data(),
                                         copied_generators.size()),
-                    precision) ||
+                    precision, out.diagnostics()) ||
             !independent) {
             SILEX_LOG(out.diagnostics(), DiagnosticsModule::unit_group,
                       LogLevel::detail,
@@ -1227,7 +1269,7 @@ bool OrderUnitGroupAccess::set_units(
                     flint::ArbRef(candidate.regulator_), embeddings,
                     FactoredElementSpan(copied_generators.data(),
                                         copied_generators.size()),
-                    precision, kRegulatorAbsTolerance)) {
+                    precision, kRegulatorAbsTolerance, out.diagnostics())) {
             SILEX_LOG(out.diagnostics(), DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "set_units failed while computing regulator");

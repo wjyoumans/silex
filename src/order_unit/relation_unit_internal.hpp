@@ -109,6 +109,12 @@ struct RelationUnitExtractionState {
     }
 };
 
+bool conj_log_cutoff_inverse(const flint::ArbMat*& out,
+                             RelationUnitExtractionState& extraction_state,
+                             const OrderUnitGroup& group,
+                             EmbeddingContext& embeddings,
+                             slong& precision) noexcept;
+
 bool unit_candidate_torsion_status(
         RelationTorsionStatus& status,
         RelationUnitExtractionState& extraction_state,

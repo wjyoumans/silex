@@ -273,7 +273,16 @@ bool class_regulator_index_is_one_from_candidate_product(
 bool compact_independent(bool& independent,
                          EmbeddingContext& embeddings,
                          FactoredElementSpan generators,
-                         slong precision) noexcept;
+                         slong precision,
+                         const DiagnosticsContext* diagnostics =
+                                 nullptr) noexcept;
+bool compact_regulator_adaptive(flint::ArbRef out,
+                                EmbeddingContext& embeddings,
+                                FactoredElementSpan generators,
+                                slong start_precision,
+                                slong abs_tolerance,
+                                const DiagnosticsContext* diagnostics =
+                                        nullptr) noexcept;
 bool compact_independent_from_log_matrix(bool& independent,
                                          const flint::ArbMat& logs,
                                          slong len,
