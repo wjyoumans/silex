@@ -246,6 +246,308 @@ bool zimmert_bound(flint::Fmpz& out,
     return ceil_upper_endpoint(out, value);
 }
 
+// Parameter gamma of Zimmert's Korollar 1 (twin classes), in hundredths,
+// indexed by [n - 3][r2] for 3 <= n <= 20.  Korollar 1 (p. 376) holds for
+// every gamma > 0, and the finite-m inequality evaluated below for every
+// gamma > 0 that is not an integer, so gamma affects only the size of the
+// bound, never its validity.  Each entry maximises
+// zimmert_twin_class_log_lower_bound over 0 < gamma < 3 in steps of 1/100,
+// integers excluded (test/zimmert_twin_class_oracle.py --gammas).
+constexpr unsigned char kZimmertTwinClassGammaHundredths[18][11] = {
+    {153, 182},                                           // n = 3
+    {116, 133, 153},                                      // n = 4
+    {95, 106, 119},                                       // n = 5
+    {82, 89, 98, 109},                                    // n = 6
+    {72, 78, 85, 92},                                     // n = 7
+    {65, 70, 75, 81, 87},                                 // n = 8
+    {60, 63, 67, 72, 77},                                 // n = 9
+    {56, 58, 62, 65, 69, 74},                             // n = 10
+    {52, 54, 57, 60, 63, 67},                             // n = 11
+    {49, 51, 53, 56, 59, 62, 65},                         // n = 12
+    {46, 48, 50, 52, 55, 57, 60},                         // n = 13
+    {44, 46, 48, 49, 51, 54, 56, 59},                     // n = 14
+    {42, 44, 45, 47, 49, 50, 53, 55},                     // n = 15
+    {41, 42, 43, 45, 46, 48, 50, 52, 54},                 // n = 16
+    {39, 40, 41, 43, 44, 45, 47, 49, 51},                 // n = 17
+    {38, 39, 40, 41, 42, 43, 45, 46, 48, 50},             // n = 18
+    {36, 37, 38, 39, 40, 42, 43, 44, 46, 47},             // n = 19
+    {35, 36, 37, 38, 39, 40, 41, 42, 44, 45, 47},         // n = 20
+};
+
+// Number m of factors in Zimmert's Q_a and Q_b (proof of Satz 4, p. 379).
+// Every m >= 1 gives a valid inequality; G_{m,j} increases to F_{a,b} as m
+// grows, and at m = 128 it is within 1e-4 of F for the tabulated gammas.
+constexpr slong kZimmertTwinClassTerms = 128;
+
+// Sets out to psi(x).  For x not positive, uses psi(x) = psi(x + k) -
+// sum_{i=0}^{k-1} 1/(x + i) with k = floor(-x) + 1, so arb_digamma is only
+// evaluated at a positive argument.  Fails if x + i contains zero for some i
+// or the result is not finite.
+bool digamma_by_shift(flint::Arb& out,
+                      const flint::Arb& x,
+                      slong prec) noexcept {
+    flint::Arb shifted;
+    flint::Arb term;
+    flint::Arb correction;
+    arb_set(shifted.raw(), x.raw());
+    arb_zero(correction.raw());
+    if (arb_is_positive(x.raw()) == 0) {
+        flint::Fmpz k;
+        arf_get_fmpz(k.raw(), arb_midref(x.raw()), ARF_RND_FLOOR);
+        fmpz_neg(k.raw(), k.raw());
+        fmpz_add_ui(k.raw(), k.raw(), 1);
+        if (fmpz_sgn(k.raw()) <= 0 || fmpz_cmp_ui(k.raw(), 64) > 0) {
+            return false;
+        }
+        const ulong steps = fmpz_get_ui(k.raw());
+        for (ulong i = 0; i < steps; ++i) {
+            if (arb_contains_zero(shifted.raw()) != 0) {
+                return false;
+            }
+            arb_inv(term.raw(), shifted.raw(), prec);
+            arb_add(correction.raw(), correction.raw(), term.raw(), prec);
+            arb_add_ui(shifted.raw(), shifted.raw(), 1, prec);
+        }
+        if (arb_is_positive(shifted.raw()) == 0) {
+            return false;
+        }
+    }
+    arb_digamma(term.raw(), shifted.raw(), prec);
+    arb_sub(out.raw(), term.raw(), correction.raw(), prec);
+    return arb_is_finite(out.raw()) != 0;
+}
+
+// Sets out to (scale/D) (psi(y + 1/2) - psi(y)) - 1/u - 1/v with y =
+// (numerator)/D, where numerator, u and v are given as balls; v may be
+// omitted (null).  Every argument of psi here is positive.
+bool zimmert_twin_class_term(flint::Arb& out,
+                             const flint::Arb& numerator,
+                             const flint::Arb& d,
+                             ulong scale,
+                             const flint::Arb& u,
+                             const flint::Arb* v,
+                             slong prec) noexcept {
+    flint::Arb y;
+    flint::Arb z;
+    flint::Arb value;
+    arb_div(y.raw(), numerator.raw(), d.raw(), prec);
+    arb_one(z.raw());
+    arb_mul_2exp_si(z.raw(), z.raw(), -1);
+    arb_add(z.raw(), z.raw(), y.raw(), prec);
+    if (arb_is_positive(y.raw()) == 0) {
+        return false;
+    }
+    arb_digamma(value.raw(), z.raw(), prec);
+    arb_digamma(z.raw(), y.raw(), prec);
+    arb_sub(value.raw(), value.raw(), z.raw(), prec);
+    arb_mul_ui(value.raw(), value.raw(), scale, prec);
+    arb_div(value.raw(), value.raw(), d.raw(), prec);
+    if (arb_contains_zero(u.raw()) != 0) {
+        return false;
+    }
+    arb_inv(z.raw(), u.raw(), prec);
+    arb_sub(value.raw(), value.raw(), z.raw(), prec);
+    if (v != nullptr) {
+        if (arb_contains_zero(v->raw()) != 0) {
+            return false;
+        }
+        arb_inv(z.raw(), v->raw(), prec);
+        arb_sub(value.raw(), value.raw(), z.raw(), prec);
+    }
+    arb_swap(out.raw(), value.raw());
+    return true;
+}
+
+// Encloses (G_{m,j}(g) + n log pi) / 2, where G_{m,j} is the left side of
+// Zimmert's Hilfssatz (p. 378) for the function H = -Q_a^a Q_b^b U V of the
+// proof of Satz 4 (p. 379), with a = r1 + r2, b = r2, g = gamma/100,
+// m = kZimmertTwinClassTerms and j = ceil(1/2 + g), the smallest natural
+// number with j >= 1/2 + g.  For every such m and j the proof establishes
+// G_{m,j}(g) <= 2 log A + f'/f(1+g) + g'/g(1+g), and Satz 4 is the limit
+// m -> infinity; so, as in the derivation of Korollar 1 (p. 376), for every
+// ideal class K there are integral ideals a in K and b in D K^(-1) (D the
+// class of the different) with log(d / (N(a) N(b))) >= G_{m,j}(g) + n log pi.
+// With D = 2(1 + 2g), y_l = (2l - 1 + g)/D, y'_l = (2l + g)/D and
+// delta(y) = psi(y + 1/2) - psi(y), the log-derivatives of Zimmert's
+// definitions give
+//
+//   G = a [sum_{l=1}^{m} ((4/D) delta(y_l) - 1/(2l-2-g) - 1/(2l-1+g))
+//          + sum_{l=m+1}^{m+j} ((2/D) delta(y_l) - 1/(2l-2-g))]
+//     + b [sum_{l=1}^{m} ((4/D) delta(y'_l) - 1/(2l-1-g) - 1/(2l+g))
+//          + sum_{l=m+1}^{m+j} ((2/D) delta(y'_l) - 1/(2l-1-g))]
+//     + (4/D) [psi(g/D) + psi((1+g)/D) - psi((1+3g)/D) - psi((2+3g)/D)]
+//     - (a/2) [psi(1/2 + g/2) + psi(-g/2)] - (b/2) [psi(1 + g/2) + psi(1/2 - g/2)].
+//
+// This is the inequality the proof establishes for finite m, not the limit
+// F_{a,b} of p. 376; no tail estimate is used.  Fails for an integer g
+// (Zimmert's terms are singular there) or g outside (0, 3).
+bool zimmert_twin_class_log_lower_bound(flint::Arb& out,
+                                        slong r1,
+                                        slong r2,
+                                        ulong gamma_hundredths) noexcept {
+    const slong prec = kGenerationBoundPrecision;
+    if (r1 < 0 || r2 < 0 || r1 + r2 < 1 || gamma_hundredths == 0 ||
+        gamma_hundredths >= 300 || gamma_hundredths % 100 == 0) {
+        return false;
+    }
+    const slong a = r1 + r2;
+    const slong b = r2;
+    const slong m = kZimmertTwinClassTerms;
+    const slong j = static_cast<slong>((gamma_hundredths + 149) / 100);
+
+    flint::Arb g;
+    flint::Arb d;
+    flint::Arb numerator;
+    flint::Arb u;
+    flint::Arb v;
+    flint::Arb term;
+    flint::Arb real_sum;
+    flint::Arb complex_sum;
+    flint::Arb x;
+    flint::Arb y;
+    flint::Arb total;
+
+    arb_set_ui(g.raw(), gamma_hundredths);
+    arb_div_ui(g.raw(), g.raw(), 100, prec);
+    arb_mul_2exp_si(d.raw(), g.raw(), 1);
+    arb_add_ui(d.raw(), d.raw(), 1, prec);
+    arb_mul_2exp_si(d.raw(), d.raw(), 1);
+
+    arb_zero(real_sum.raw());
+    arb_zero(complex_sum.raw());
+    for (slong l = 1; l <= m + j; ++l) {
+        const bool full = l <= m;
+        const ulong scale = full ? 4 : 2;
+        // Real places: y_l = (2l - 1 + g)/D, u = 2l - 2 - g, v = 2l - 1 + g.
+        arb_add_si(numerator.raw(), g.raw(), 2 * l - 1, prec);
+        arb_neg(u.raw(), g.raw());
+        arb_add_si(u.raw(), u.raw(), 2 * l - 2, prec);
+        if (!zimmert_twin_class_term(term, numerator, d, scale, u,
+                                     full ? &numerator : nullptr, prec)) {
+            return false;
+        }
+        arb_add(real_sum.raw(), real_sum.raw(), term.raw(), prec);
+        if (b == 0) {
+            continue;
+        }
+        // Complex places: y'_l = (2l + g)/D, u = 2l - 1 - g, v = 2l + g.
+        arb_add_si(numerator.raw(), g.raw(), 2 * l, prec);
+        arb_neg(u.raw(), g.raw());
+        arb_add_si(u.raw(), u.raw(), 2 * l - 1, prec);
+        if (!zimmert_twin_class_term(term, numerator, d, scale, u,
+                                     full ? &numerator : nullptr, prec)) {
+            return false;
+        }
+        arb_add(complex_sum.raw(), complex_sum.raw(), term.raw(), prec);
+    }
+
+    // Real-place constant: psi(1/2 + g/2) + psi(-g/2), weight -a/2.
+    flint::Arb constant;
+    arb_mul_2exp_si(x.raw(), g.raw(), -1);
+    arb_neg(x.raw(), x.raw());
+    if (!digamma_by_shift(constant, x, prec)) {
+        return false;
+    }
+    arb_one(x.raw());
+    arb_add(x.raw(), x.raw(), g.raw(), prec);
+    arb_mul_2exp_si(x.raw(), x.raw(), -1);
+    arb_digamma(y.raw(), x.raw(), prec);
+    arb_add(constant.raw(), constant.raw(), y.raw(), prec);
+    arb_mul_2exp_si(constant.raw(), constant.raw(), -1);
+    arb_sub(real_sum.raw(), real_sum.raw(), constant.raw(), prec);
+
+    // Complex-place constant: psi(1 + g/2) + psi(1/2 - g/2), weight -b/2.
+    if (b != 0) {
+        arb_mul_2exp_si(x.raw(), g.raw(), -1);
+        arb_add_ui(y.raw(), x.raw(), 1, prec);
+        arb_digamma(constant.raw(), y.raw(), prec);
+        arb_neg(x.raw(), x.raw());
+        arb_one(y.raw());
+        arb_mul_2exp_si(y.raw(), y.raw(), -1);
+        arb_add(x.raw(), x.raw(), y.raw(), prec);
+        if (!digamma_by_shift(y, x, prec)) {
+            return false;
+        }
+        arb_add(constant.raw(), constant.raw(), y.raw(), prec);
+        arb_mul_2exp_si(constant.raw(), constant.raw(), -1);
+        arb_sub(complex_sum.raw(), complex_sum.raw(), constant.raw(), prec);
+    }
+
+    arb_mul_si(total.raw(), real_sum.raw(), a, prec);
+    arb_mul_si(y.raw(), complex_sum.raw(), b, prec);
+    arb_add(total.raw(), total.raw(), y.raw(), prec);
+
+    // U V part: (4/D) [psi(g/D) + psi((1+g)/D) - psi((1+3g)/D)
+    //                  - psi((2+3g)/D)]; every argument is positive.
+    flint::Arb uv;
+    arb_div(x.raw(), g.raw(), d.raw(), prec);
+    arb_digamma(uv.raw(), x.raw(), prec);
+    arb_add_ui(x.raw(), g.raw(), 1, prec);
+    arb_div(x.raw(), x.raw(), d.raw(), prec);
+    arb_digamma(y.raw(), x.raw(), prec);
+    arb_add(uv.raw(), uv.raw(), y.raw(), prec);
+    arb_mul_ui(x.raw(), g.raw(), 3, prec);
+    arb_add_ui(x.raw(), x.raw(), 1, prec);
+    arb_div(x.raw(), x.raw(), d.raw(), prec);
+    arb_digamma(y.raw(), x.raw(), prec);
+    arb_sub(uv.raw(), uv.raw(), y.raw(), prec);
+    arb_mul_ui(x.raw(), g.raw(), 3, prec);
+    arb_add_ui(x.raw(), x.raw(), 2, prec);
+    arb_div(x.raw(), x.raw(), d.raw(), prec);
+    arb_digamma(y.raw(), x.raw(), prec);
+    arb_sub(uv.raw(), uv.raw(), y.raw(), prec);
+    arb_mul_ui(uv.raw(), uv.raw(), 4, prec);
+    arb_div(uv.raw(), uv.raw(), d.raw(), prec);
+    arb_add(total.raw(), total.raw(), uv.raw(), prec);
+
+    // (G + n log pi) / 2
+    arb_const_pi(x.raw(), prec);
+    arb_log(x.raw(), x.raw(), prec);
+    arb_mul_si(x.raw(), x.raw(), r1 + 2 * r2, prec);
+    arb_add(total.raw(), total.raw(), x.raw(), prec);
+    arb_mul_2exp_si(total.raw(), total.raw(), -1);
+
+    if (arb_is_finite(total.raw()) == 0) {
+        return false;
+    }
+    arb_swap(out.raw(), total.raw());
+    return true;
+}
+
+// Zimmert 1981, Korollar 1 (twin classes), in the finite-m form above: for
+// every ideal class K, K or D K^(-1) contains an integral ideal of norm at
+// most sqrt|d| exp(-c), with c = (G_{m,j}(g) + n log pi)/2 at the tabulated
+// gamma.  Sets out to the ceiling of a rigorous upper bound for it.  This is
+// not a bound on the smallest ideal of every class; it proves generation
+// only together with the class of the different (see the callers).
+bool zimmert_twin_class_bound(flint::Fmpz& out,
+                              flint::FmpzConstRef abs_discriminant,
+                              slong degree,
+                              slong real_places,
+                              slong complex_pairs) noexcept {
+    if (degree < 3 || degree > kZimmertMaxDegree || real_places < 0 ||
+        complex_pairs < 0 || real_places + 2 * complex_pairs != degree) {
+        return false;
+    }
+    const ulong gamma =
+        kZimmertTwinClassGammaHundredths[degree - 3][complex_pairs];
+    flint::Arb log_lower;
+    if (gamma == 0 ||
+        !zimmert_twin_class_log_lower_bound(log_lower, real_places,
+                                            complex_pairs, gamma)) {
+        return false;
+    }
+    flint::Arb value;
+    flint::Arb root;
+    arb_neg(log_lower.raw(), log_lower.raw());
+    arb_exp(value.raw(), log_lower.raw(), kGenerationBoundPrecision);
+    arb_set_fmpz(root.raw(), abs_discriminant.raw());
+    arb_sqrt(root.raw(), root.raw(), kGenerationBoundPrecision);
+    arb_mul(value.raw(), value.raw(), root.raw(), kGenerationBoundPrecision);
+    return ceil_upper_endpoint(out, value);
+}
+
+
 // Minkowski's bound n! n^(-n) (4/pi)^r2 sqrt|d| (Lang, Algebraic Number
 // Theory, p. 119, Th. 4, as quoted by Zimmert 1981, p. 367).  Sets out to the
 // ceiling of a rigorous upper bound for it.
@@ -362,6 +664,48 @@ bool detail::zimmert_generation_bound(flint::FmpzRef out,
                        real_places + 2 * complex_pairs, real_places,
                        complex_pairs)) {
         return false;
+    }
+    fmpz_set(out.raw(), bound.raw());
+    return true;
+}
+
+bool detail::zimmert_twin_class_log_lower_bound(
+        flint::ArbRef out,
+        slong real_places,
+        slong complex_pairs,
+        ulong gamma_hundredths) noexcept {
+    flint::Arb value;
+    if (!silex::zimmert_twin_class_log_lower_bound(
+                value, real_places, complex_pairs, gamma_hundredths)) {
+        return false;
+    }
+    arb_swap(out.raw(), value.raw());
+    return true;
+}
+
+bool detail::twin_class_generation_bound(
+        flint::FmpzRef out,
+        flint::FmpzConstRef abs_discriminant,
+        slong real_places,
+        slong complex_pairs) noexcept {
+    if (!generation_bound_inputs_valid(abs_discriminant, real_places,
+                                       complex_pairs)) {
+        return false;
+    }
+    const slong degree = real_places + 2 * complex_pairs;
+    flint::Fmpz bound;
+    if (!zimmert_twin_class_bound(bound, abs_discriminant, degree,
+                                  real_places, complex_pairs)) {
+        return false;
+    }
+    flint::Fmpz classical;
+    silex::generation_bound(classical, abs_discriminant, degree, real_places,
+                            complex_pairs);
+    if (fmpz_cmp(classical.raw(), bound.raw()) < 0) {
+        fmpz_swap(bound.raw(), classical.raw());
+    }
+    if (fmpz_cmp_ui(bound.raw(), 1) < 0) {
+        fmpz_one(bound.raw());
     }
     fmpz_set(out.raw(), bound.raw());
     return true;

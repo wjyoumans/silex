@@ -7,11 +7,13 @@
 // with mpmath at 60 digits, and the field discriminants and signatures with
 // an independent computer algebra system.
 
+#include <silex/flint/arb.hpp>
 #include <silex/flint/fmpz.hpp>
 
 #include "factor_base/factor_base_internal.hpp"
 #include "test_support.hpp"
 
+#include <flint/arb.h>
 #include <flint/fmpz.h>
 
 #include <cassert>
@@ -49,6 +51,47 @@ constexpr ZimmertRow kZimmertRows[] = {
     {20, 0, "2309"},
     {0, 9, "20716959"},
     {1, 9, "4405574"},};
+
+// Zimmert 1981, Tabelle 3 (p. 377), every row with 3 <= n <= 20: the printed
+// gamma (hundredths) and the printed value digits * 10^exponent of
+// exp((F + n log pi)/2), rounded down.  The finite-m lower bound evaluated by
+// Silex must lie in [printed, printed + 10^exponent).  The same rows, with
+// F itself and the margins, are printed by test/zimmert_twin_class_oracle.py.
+struct TwinTableRow {
+    slong r1;
+    slong r2;
+    ulong gamma_hundredths;
+    ulong digits;
+    slong exponent;
+};
+
+constexpr TwinTableRow kZimmertTable3Rows[] = {
+    {3, 0, 153, 556, -2},  {1, 1, 182, 395, -2},  {4, 0, 115, 185, -1},
+    {2, 1, 131, 121, -1},  {0, 2, 153, 832, -2},  {5, 0, 95, 685, -1},
+    {3, 1, 106, 427, -1},  {1, 2, 119, 274, -1},  {6, 0, 82, 273, 0},
+    {0, 3, 109, 629, -1},  {8, 0, 66, 511, 1},    {0, 4, 87, 570, 0},
+    {10, 0, 56, 110, 3},   {0, 5, 74, 577, 1},    {20, 0, 36, 163, 10},
+    {0, 10, 47, 148, 7},
+};
+
+// The twin-class generation bound at |d| = 10^30, from
+// test/zimmert_twin_class_oracle.py --bounds (mpmath, 40 digits).
+constexpr ZimmertRow kZimmertTwinRows[] = {
+    {3, 0, "179551258722812"},
+    {1, 1, "253049350890244"},
+    {4, 0, "54042633370230"},
+    {2, 1, "82011265496414"},
+    {0, 2, "120106805483435"},
+    {6, 0, "3653771524654"},
+    {0, 3, "15875003319015"},
+    {8, 0, "195454042501"},
+    {0, 4, "1753752398095"},
+    {10, 0, "9032610819"},
+    {0, 10, "671359"},
+    {16, 0, "529776"},
+    {20, 0, "611"},
+    {1, 9, "1750324"},
+};
 
 // Every class/unit fixture field of degree >= 3 in test/data and a corpus of
 // benchmark fields of degrees 3 to 81: absolute discriminant of the maximal
@@ -584,6 +627,119 @@ int test_zimmert_pinned_values() {
     return 0;
 }
 
+// Scales value by 10^(-exponent), exactly for exponent <= 0.
+void scale_by_power_of_ten(sflint::Arb& value, slong exponent) noexcept {
+    sflint::Arb power;
+    arb_set_ui(power.raw(), 10);
+    arb_pow_ui(power.raw(), power.raw(),
+               static_cast<ulong>(exponent < 0 ? -exponent : exponent), 256);
+    if (exponent < 0) {
+        arb_mul(value.raw(), value.raw(), power.raw(), 256);
+    } else {
+        arb_div(value.raw(), value.raw(), power.raw(), 256);
+    }
+}
+
+int test_zimmert_twin_class_table3() {
+    sflint::Arb constant;
+    sflint::Arb value;
+    sflint::Arb edge;
+    for (const TwinTableRow& row : kZimmertTable3Rows) {
+        if (!silex::detail::zimmert_twin_class_log_lower_bound(
+                    sflint::ArbRef(constant), row.r1, row.r2,
+                    row.gamma_hundredths)) {
+            return 1;
+        }
+        arb_exp(value.raw(), constant.raw(), 256);
+        scale_by_power_of_ten(value, row.exponent);
+        arb_set_ui(edge.raw(), row.digits);
+        if (arb_ge(value.raw(), edge.raw()) == 0) {
+            return 1;
+        }
+        arb_add_ui(edge.raw(), edge.raw(), 1, 256);
+        if (arb_lt(value.raw(), edge.raw()) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int test_zimmert_twin_class_pinned_values() {
+    sflint::Fmpz abs_discriminant;
+    sflint::Fmpz bound;
+    sflint::Fmpz expected;
+    fmpz_set_ui(abs_discriminant.raw(), 10);
+    fmpz_pow_ui(abs_discriminant.raw(), abs_discriminant.raw(), 30);
+    for (const ZimmertRow& row : kZimmertTwinRows) {
+        if (!set_decimal(expected, row.bound) ||
+            !silex::detail::twin_class_generation_bound(
+                    sflint::FmpzRef(bound),
+                    sflint::FmpzConstRef(abs_discriminant), row.r1, row.r2) ||
+            !fmpz_equal(bound.raw(), expected.raw())) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The twin-class bound never exceeds generation_bound, is defined exactly
+// for 3 <= n <= 20, and rejects integer or out-of-range gamma.
+int test_zimmert_twin_class_domain() {
+    const char* discriminants[] = {"23", "1000", "1000000007",
+                                   "100000000000000000000"};
+    sflint::Fmpz abs_discriminant;
+    sflint::Fmpz bound;
+    sflint::Fmpz classical;
+    for (slong degree = 3; degree <= 21; ++degree) {
+        for (slong r2 = 0; 2 * r2 <= degree; ++r2) {
+            const slong r1 = degree - 2 * r2;
+            for (const char* decimal : discriminants) {
+                fmpz_set_si(bound.raw(), -7);
+                if (!set_decimal(abs_discriminant, decimal) ||
+                    !silex::detail::generation_bound(
+                            sflint::FmpzRef(classical),
+                            sflint::FmpzConstRef(abs_discriminant), r1, r2)) {
+                    return 1;
+                }
+                const bool ok = silex::detail::twin_class_generation_bound(
+                        sflint::FmpzRef(bound),
+                        sflint::FmpzConstRef(abs_discriminant), r1, r2);
+                if (degree > 20) {
+                    if (ok || fmpz_cmp_si(bound.raw(), -7) != 0) {
+                        return 1;
+                    }
+                    continue;
+                }
+                if (!ok || fmpz_cmp_ui(bound.raw(), 1) < 0 ||
+                    fmpz_cmp(bound.raw(), classical.raw()) > 0) {
+                    return 1;
+                }
+            }
+        }
+    }
+    sflint::Arb constant;
+    const ulong rejected_gammas[] = {0, 100, 200, 300, 450};
+    for (ulong gamma : rejected_gammas) {
+        if (silex::detail::zimmert_twin_class_log_lower_bound(
+                    sflint::ArbRef(constant), 3, 0, gamma)) {
+            return 1;
+        }
+    }
+    if (silex::detail::zimmert_twin_class_log_lower_bound(
+                sflint::ArbRef(constant), 0, 0, 50) ||
+        !silex::detail::zimmert_twin_class_log_lower_bound(
+                sflint::ArbRef(constant), 0, 2, 299)) {
+        return 1;
+    }
+    fmpz_set_ui(abs_discriminant.raw(), 1000);
+    if (silex::detail::twin_class_generation_bound(
+                sflint::FmpzRef(bound),
+                sflint::FmpzConstRef(abs_discriminant), 2, 0)) {
+        return 1;
+    }
+    return 0;
+}
+
 int test_field_pinned_values() {
     sflint::Fmpz abs_discriminant;
     sflint::Fmpz bound;
@@ -653,5 +809,8 @@ int main() {
     assert(test_zimmert_pinned_values() == 0);
     assert(test_field_pinned_values() == 0);
     assert(test_rejected_inputs_preserve_output() == 0);
+    assert(test_zimmert_twin_class_table3() == 0);
+    assert(test_zimmert_twin_class_pinned_values() == 0);
+    assert(test_zimmert_twin_class_domain() == 0);
     return 0;
 }
