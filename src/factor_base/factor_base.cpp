@@ -1451,8 +1451,8 @@ bool largest_prime_norm_above(flint::Fmpz& out,
 // f'(theta) O_K = F D for the conductor F = {x : x O_K in Z[theta]}, so
 // [D] = [F]^(-1).  F = O_K when the index is 1 (Corollary to Proposition
 // 4.18, p. 153), and otherwise every prime dividing F lies above some
-// p | [O_K : Z[theta]], because the index lies in F.  Anything else falls back to the bound of
-// factor_base_class_group_bound (Satz 2 and Minkowski).
+// p | [O_K : Z[theta]], because the index lies in F.  Anything else falls back
+// to the bound of factor_base_class_group_bound (Satz 2 and Minkowski).
 bool detail::proven_generation_requirement(
         flint::FmpzRef bound,
         GenerationDifferentRoute& route,
