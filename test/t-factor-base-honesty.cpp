@@ -1459,8 +1459,9 @@ std::string failure_detail_json(
 // failure_detail names the unwitnessed prime and the final stage's caps when
 // the reason is factor_base_honesty_unwitnessed: the lattice caps the real
 // checkpoint recorded, or the T2 caps of a T2 record.  The prime is a
-// decimal string, small or beyond a machine word, never a number or null.  It is null for any
-// other reason, even with a record present, and with no reason.
+// decimal string, small or beyond a machine word, never a number or null.  It
+// is null for any other reason, even with a record present, and with no
+// reason.
 int test_failure_detail_json() {
     HonestyCheckpointRun terminal;
     if (!run_honesty_checkpoint(terminal, false, true)) {
