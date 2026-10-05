@@ -565,7 +565,7 @@ is the class of the different, with
 ``log(|d| / (N(a) N(b))) >= F_{r1+r2, r2}(gamma) + n log pi`` for every
 ``gamma > 0``.  Hence ``K`` or ``[D] K^(-1)`` contains an integral ideal of
 norm at most ``sqrt|d| exp(-(F + n log pi)/2)``.  Silex does not evaluate
-the series ``F_{a,b}`` of p. 376.  The proof of Satz 4 (pp. 378--379) applies
+the series ``F_{a,b}`` of p. 376.  The proof of Satz 4 (pp. 379--380) applies
 the Hilfssatz (p. 378) to ``H = -Q_a^a Q_b^b U V``, where ``Q_a`` and ``Q_b``
 are products of ``m`` factors, and for every ``m >= 1`` it establishes the
 inequality with the left side ``G_{m,j}(gamma)`` of the Hilfssatz in place of
@@ -593,8 +593,9 @@ takes the twin-class bound ``B`` to be the ceiling of the upper endpoint of
 ``gamma``; every other ``gamma > 0`` gives a valid bound, so ``gamma``
 affects only its size.  For each signature with ``3 <= n <= 20`` Silex fixes
 the ``gamma`` in hundredths, ``0 < gamma < 3`` and not an integer, that
-maximizes ``G``.  ``G_{m,j}`` increases to ``F`` as ``m`` grows; at
-``m = 128`` it is within ``1e-4`` of ``F`` at these ``gamma``.
+maximizes ``G``.  ``G_{m,j}`` converges to ``F`` as ``m`` grows; at
+``m = 128``, ``F - G < 3e-4`` at these ``gamma``.  The validity of the
+bound does not depend on how close ``G`` is to ``F``.
 ``test/t-generation-bound.cpp`` checks the constant
 ``exp((G + n log pi)/2)`` against all 16 rows of Tabelle 3 (p. 377) with
 ``3 <= n <= 20`` (the printed value is a lower bound within one unit of its
@@ -610,28 +611,26 @@ every class lies in ``H``, since ``K`` or ``[D] K^(-1)`` does.  Silex settles
 ``[D]`` exactly, only for a monic defining polynomial ``f`` with integer
 coefficients and root ``theta``, in one of two ways:
 
-* ``O_K = Z[theta]`` (index one): the different is the principal ideal
-  ``f'(theta) O_K`` (H. Cohen, *A Course in Computational Algebraic Number
-  Theory*, GTM 138, Exercise 4.30, which assumes exactly this), so
-  ``[D]`` is trivial and the requirement is ``B``.
+* ``O_K = Z[theta]`` (index one): the conductor ``F`` below is ``O_K``
+  (W. Narkiewicz, *Elementary and Analytic Theory of Algebraic Numbers*,
+  3rd ed., Springer, 2004, Corollary to Proposition 4.18, p. 153), so the
+  different is the principal ideal ``f'(theta) O_K``, ``[D]`` is trivial
+  and the requirement is ``B``.
 * ``[O_K : Z[theta]] > 1``: ``f'(theta) O_K = F D`` for the conductor
   ``F = {x in K : x O_K in Z[theta]}``, so ``[D] = [F]^(-1)``.  The index
   lies in ``F``, so every prime ideal dividing ``F`` lies above a prime
   ``p`` dividing the index.  The requirement is the larger of ``B`` and the
   largest norm of a prime ideal of ``O_K`` above such a ``p``, which puts
   ``[F]``, and so ``[D]``, in ``H``.  For ``f'(theta) O_K = F D`` Silex cites
-  H. Cohen, *Advanced Topics in Computational Number Theory*, GTM 193,
-  Lemma 10.1.20 and the proof of Corollary 10.1.21 (pp. 484--485).  Cohen
-  states both for an extension ``L/K`` of number fields and ``pi`` a
-  uniformizer of a prime ideal of ``L`` above a prime ``p`` of ``K`` that is
-  totally ramified, with ``f`` the minimal polynomial of ``pi`` over
-  ``Z_K``.  The proof of Lemma 10.1.20 uses only that ``pi`` is integral
-  over ``Z_K`` with monic minimal polynomial of degree ``[L : K]``, and the
-  chain of equivalences in the proof of Corollary 10.1.21, which gives
-  ``D(L/K) = f'(pi) a^(-1)`` for the conductor ``a`` of ``Z_K[pi]``, uses
-  only Lemma 10.1.20; the total ramification and ``p``-maximality enter only
-  in the last step.  Silex applies that argument with ``K = Q``, ``L`` the
-  number field and ``pi = theta``, outside the stated hypotheses.
+  Narkiewicz 2004, Proposition 4.18(i) (p. 152), which states
+  ``f_A = delta_{L/K}(a) D_{L/K}^(-1)`` for the conductor ``f_A`` of
+  ``A = R[a]``, where ``a`` is an integral element generating ``L/K`` and
+  ``delta_{L/K}(a) = f'(a)``, with ``K = Q``, ``R = Z``, ``L`` the number
+  field and ``a = theta``; its proof rests on Proposition 4.17 (p. 151),
+  ``R[a]^* = f'(a)^(-1) R[a]``.  H. Cohen, *Advanced Topics in
+  Computational Number Theory*, GTM 193, Lemma 10.1.20 and the proof of
+  Corollary 10.1.21 (pp. 484--485), give the same argument in a relative
+  setting.
 
 Silex uses the twin-class route only when its requirement is strictly below
 ``factor_base_class_group_bound``.  Otherwise, and whenever the degree is
@@ -650,15 +649,19 @@ and in the relation-search honesty check.
 PARI 2.17.3 ``src/basemath/buch3.c:zimmertbound``, the bound of
 ``bnfcertify``, uses a table of constants that are larger than the optimum
 of Satz 2 for every signature.  The table follows Zimmert's Korollar 1,
-and ``bnfcertify0`` accordingly tests whether the different is principal in
-the class group, through ``bnfisprincipal0``, whenever the polynomial order
-is not maximal.  Earlier releases make the same test (for example 2.7.6
-``src/basemath/buch2.c:testprimes``); it moved to ``bnfcertify0`` in 2.9.  Silex
-does not copy the table: for every signature with ``5 <= n <= 20`` except
-``(n, r2) = (5, 1)``, ``(5, 2)`` and ``(6, 3)``, its constant exceeds the
-optimum of Korollar 1 over ``gamma``, so PARI's bound is smaller than any
-bound Korollar 1 proves, by up to about 0.33% of the bound at ``n = 20``.
-From ``n = 8`` up the excess is clearly beyond floating-point error.
+and ``bnfcertify0`` accordingly expresses the class of the different over
+the computed class group, through ``bnfisprincipal0(bnf, D, nf_FORCE)``,
+whenever the polynomial order is not maximal; it discards the result, so
+this is not a principality test.  Earlier releases make the same call (for
+example 2.7.6 ``src/basemath/buch2.c:testprimes``); it moved to
+``bnfcertify0`` in 2.9.  Silex does not copy the table: for every
+signature with ``5 <= n <= 20`` except ``(n, r2) = (5, 1)``, ``(5, 2)`` and
+``(6, 3)``, its constant exceeds the optimum of Korollar 1 over ``gamma``,
+so PARI's bound is smaller than any bound Korollar 1 proves, by up to about
+0.33% of the bound at ``n = 20``.  This comparison was computed with
+non-interval mpmath at 30 digits, not with Arb, so the small excesses for
+``5 <= n <= 7`` are not certified; from ``n = 8`` up the excess is clearly
+beyond floating-point error.
 
 The analytic index bound is the ceiling of the rigorous upper endpoint of the
 quotient ``h_cand R_cand / hR``.  When the analytic ``hR`` is correct and the

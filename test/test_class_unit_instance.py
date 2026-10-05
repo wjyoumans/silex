@@ -254,6 +254,41 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
         )
 
 
+def assert_twin_class_conductor_honesty_path(exe: Path, root: Path) -> None:
+    # The conductor_primes route through the relation-search honesty check.
+    # x^3 + 25x + 25000 defines the field of x^3 + x + 200 (|d| = 1080004,
+    # class group Z/2) with [O_K : Z[theta]] = 125, so the different is
+    # settled by covering the prime ideals above 5 (norms 5, 5, 5), and the
+    # requirement is max(263, 5) = 263, Zimmert's twin-class bound, below
+    # the Minkowski-type bound 295. A factor base of 19 lies below that
+    # requirement, so generation up to 263 is verified only by the honesty
+    # check (apply_honesty_check in relation_search_driver.cpp), which must
+    # take the same requirement as the build-time record.
+    instance = run_json(
+        [
+            str(exe), "--coeffs", "25000,25,0,1", "--mode", "proven",
+            "--factor-base-bound", "19",
+        ],
+        root,
+    )
+    assert instance["success"] is True
+    assert instance["certification_status"] == "proven"
+    assert instance["equation_order_index"] == "125"
+    assert instance["maximal_order_discriminant"] == "-1080004"
+    assert instance["factor_base_bound"] == "19"
+    class_group = instance["class_group"]
+    assert class_group["order"] == "2"
+    assert class_group["invariants"] == ["2"]
+    assert class_group["factor_base_generation_status"] == "verified"
+    assert class_group["factor_base_generation_certification"] == "proven"
+    assert class_group["factor_base_generation_basis"] == (
+        "zimmert_twin_class"
+    )
+    assert class_group["factor_base_generation_certification_bound"] == (
+        "263"
+    )
+
+
 def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     # The equality boundary of unconditional generation in grh mode:
     # record_factor_base_generation_ (src/class_group/class_group.cpp)
@@ -303,6 +338,7 @@ def main() -> int:
     assert_grh_generation_below_minkowski(args.exe, root)
     assert_grh_minkowski_equality_boundary(args.exe, root)
     assert_proven_and_degree_one_provenance(args.exe, root)
+    assert_twin_class_conductor_honesty_path(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
 

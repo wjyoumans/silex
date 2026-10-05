@@ -2706,8 +2706,9 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                 grh_factor_base_generation_covered(candidate_class_group)) {
         // A grh request of positive unit rank is accepted only by the
         // analytic index-one test, which needs factor-base generation:
-        // unconditional (the base reaches the Minkowski-type bound,
-        // factor_base_class_group_bound) or, inside this grh request, under
+        // unconditional (the base reaches the proven generation requirement:
+        // factor_base_class_group_bound, or Zimmert's twin-class bound
+        // where it applies) or, inside this grh request, under
         // GRH (the base contains every prime ideal of norm at most the GRH
         // bound min(BDF, Bach); record_grh_factor_base_generation).  See
         // docs/reference/algorithms_and_sources.rst, "Class groups and

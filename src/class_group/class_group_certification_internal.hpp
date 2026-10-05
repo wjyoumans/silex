@@ -2,7 +2,7 @@
 
 #include <silex/class_group.hpp>
 
-#include "../factor_base/factor_base_internal.hpp"
+#include "../factor_base/generation_different_route_internal.hpp"
 
 namespace silex::detail {
 

@@ -301,7 +301,7 @@
       "timeout_seconds": 10,
       "expected_success": true,
       "status": "grh_certification",
-      "source": "GRH-conditional factor-base generation fixture: the field of quartic_disc1412343_proven, generation bound below the Minkowski-type bound"
+      "source": "grh request on the field of quartic_disc1412343_proven whose GRH-sized base (100) reaches Zimmert's twin-class bound (98 < Minkowski-type 122): generation proven, completeness grh"
     },
     {
       "id": "quintic_disc401370255_grh",

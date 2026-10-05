@@ -6,7 +6,7 @@
 #include <silex/flint/fmpz_mod_poly.hpp>
 
 #include "relation_completion_scheduler_internal.hpp"
-#include "../factor_base/factor_base_internal.hpp"
+#include "../factor_base/generation_different_route_internal.hpp"
 
 #include <optional>
 #include <vector>

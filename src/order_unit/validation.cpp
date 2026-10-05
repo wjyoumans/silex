@@ -189,12 +189,13 @@ bool validation_index_bound_from_product(
                      grh_factor_base_generation_covered(class_group));
     // In this validation context the quotient is an integer class/unit
     // index only once the factor base generates the class group: proved
-    // to the Minkowski-type bound, or, for a grh request, assumed under GRH
-    // from a base containing every prime ideal up to the GRH bound (Bach
-    // 1990, Thm 4 and the remark following it, p. 376; Belabas-Diaz y
-    // Diaz-Friedman 2008, Cor 2.2).  Keep the
-    // public ratio accessor conservative, but recognize the source-complete
-    // index-one case before taking an outward-rounded ceiling.
+    // to the proven generation requirement (the Minkowski-type bound, or
+    // Zimmert's twin-class bound where it applies), or, for a grh request,
+    // assumed under GRH from a base containing every prime ideal up to the
+    // GRH bound (Bach 1990, Thm 4 and the remark following it, p. 376;
+    // Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  Keep the public ratio
+    // accessor conservative, but recognize the source-complete index-one
+    // case before taking an outward-rounded ceiling.
     if (integer_index_prerequisites &&
         class_regulator_index_is_one_from_candidate_product(
                 flint::ArbConstRef(candidate_class_regulator_product),
@@ -1166,7 +1167,9 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                 // generation, which a grh request may take under GRH from a
                 // base containing every prime ideal up to min(BDF, Bach)
                 // (validation_index_bound_from_product), or unconditionally
-                // when the base reaches the Minkowski-type bound.  GRH then
+                // when the base reaches the proven generation requirement
+                // (the Minkowski-type bound, or Zimmert's twin-class bound
+                // where it applies).  GRH then
                 // enters through that generation bound and a
                 // Belabas-Friedman hR.
                 if (!exact_quadratic_index) {

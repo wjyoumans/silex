@@ -128,8 +128,9 @@ def main() -> int:
         (66, 0, 1),
         (185, 0, 1),
         (47, 0, 1),
-        # GRH-conditional factor-base generation below the Minkowski-type
-        # bound, the equality boundary, and a rank-zero field below it.
+        # GRH-sized factor bases below the Minkowski-type bound (the quartic
+        # one reaches Zimmert's twin-class bound, so its generation is
+        # proven), the equality boundary, and a rank-zero field below it.
         (200, 1, 0, 1),
         (-100003, 0, 1),
         (4, 1, 3, -8, 1),

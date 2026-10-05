@@ -24,6 +24,7 @@
 #include <silex/zeta.hpp>
 
 #include "../abelian_group/abelian_group_internal.hpp"
+#include "../factor_base/factor_base_internal.hpp"
 #include "class_group_internal.hpp"
 #include "class_group_certification_internal.hpp"
 #include "factor_base_proof_targets_internal.hpp"

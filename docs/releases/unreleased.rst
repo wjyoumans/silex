@@ -110,7 +110,7 @@ Changed
   smaller bound now records unconditional (``proven``) generation where it
   used to record ``grh`` generation, as for the quartic field of
   ``x^4 - 8 x^3 + 3 x^2 + x + 4`` (bound 98 against 122, base 100).
-  Results and certification labels are unchanged.  See "Class groups and
+  Results and overall certification labels are unchanged.  See "Class groups and
   order units" in :doc:`../reference/algorithms_and_sources`.
 
 - The index-bounded relation-saturation pass of class/unit validation now
@@ -171,7 +171,9 @@ Changed
   unconditional generation: ``factor_base_generation_status()`` and
   ``relation_saturation_status()`` never read ``verified`` because of it,
   a ``proven`` request is unchanged, and a later ``proven`` promotion still
-  requires generation verified up to the Minkowski-type bound.  See "Class
+  requires generation verified up to the proven generation requirement (the
+  Minkowski-type bound, or Zimmert's twin-class bound where it applies).
+  See "Class
   groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 - **Breaking:** ``OrderUnitGroup::residue_dlog_kernel`` and

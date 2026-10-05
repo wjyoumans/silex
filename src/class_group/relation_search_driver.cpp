@@ -18,6 +18,7 @@
 #include "relation_factor_base_rebuild_internal.hpp"
 #include "relation_factor_base_plan_internal.hpp"
 #include "relation_search_internal.hpp"
+#include "../factor_base/factor_base_internal.hpp"
 #include "../ideal_factorization/ideal_factorization_internal.hpp"
 #include "../order/order_internal.hpp"
 #include "../order_unit/class_unit_transaction_internal.hpp"

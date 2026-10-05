@@ -276,14 +276,15 @@ constexpr unsigned char kZimmertTwinClassGammaHundredths[18][11] = {
     {35, 36, 37, 38, 39, 40, 41, 42, 44, 45, 47},         // n = 20
 };
 
-// Number m of factors in Zimmert's Q_a and Q_b (proof of Satz 4, p. 379).
-// Every m >= 1 gives a valid inequality; G_{m,j} increases to F_{a,b} as m
-// grows, and at m = 128 it is within 1e-4 of F for the tabulated gammas.
+// Number m of factors in Zimmert's Q_a and Q_b (proof of Satz 4,
+// pp. 379-380).  Every m >= 1 gives a valid inequality; G_{m,j} converges
+// to F_{a,b} as m grows, and at m = 128, F - G < 3e-4 for the tabulated
+// gammas.
 constexpr slong kZimmertTwinClassTerms = 128;
 
 // Sets out to psi(x).  For x not positive, uses psi(x) = psi(x + k) -
-// sum_{i=0}^{k-1} 1/(x + i) with k = floor(-x) + 1, so arb_digamma is only
-// evaluated at a positive argument.  Fails if x + i contains zero for some i
+// sum_{i=0}^{k-1} 1/(x + i) with k = 1 - floor(mid(x)), mid(x) the midpoint
+// of the ball x, so arb_digamma is only evaluated at a positive argument.  Fails if x + i contains zero for some i
 // or the result is not finite.
 bool digamma_by_shift(flint::Arb& out,
                       const flint::Arb& x,
@@ -362,7 +363,7 @@ bool zimmert_twin_class_term(flint::Arb& out,
 
 // Encloses (G_{m,j}(g) + n log pi) / 2, where G_{m,j} is the left side of
 // Zimmert's Hilfssatz (p. 378) for the function H = -Q_a^a Q_b^b U V of the
-// proof of Satz 4 (p. 379), with a = r1 + r2, b = r2, g = gamma/100,
+// proof of Satz 4 (pp. 379-380), with a = r1 + r2, b = r2, g = gamma/100,
 // m = kZimmertTwinClassTerms and j = ceil(1/2 + g), the smallest natural
 // number with j >= 1/2 + g.  For every such m and j the proof establishes
 // G_{m,j}(g) <= 2 log A + f'/f(1+g) + g'/g(1+g), and Satz 4 is the limit
@@ -1444,13 +1445,12 @@ bool largest_prime_norm_above(flint::Fmpz& out,
 // Zimmert 1981, Korollar 1 gives, for every class K, an integral ideal of
 // norm at most B in K or in D K^(-1).  With every prime ideal of norm at
 // most the requirement in the generated subgroup H, K lies in H as soon as
-// [D] does.  For theta with monic minimal polynomial f in Z[x], Cohen,
-// Advanced Topics in Computational Number Theory (GTM 193), Lemma 10.1.20
-// and the proof of Corollary 10.1.21 (pp. 484-485) give
+// [D] does.  For theta with monic minimal polynomial f in Z[x], Narkiewicz,
+// Elementary and Analytic Theory of Algebraic Numbers (3rd ed., 2004),
+// Proposition 4.18(i) (p. 152, with Proposition 4.17, p. 151) gives
 // f'(theta) O_K = F D for the conductor F = {x : x O_K in Z[theta]}, so
-// [D] = [F]^(-1).  F = O_K when the index is 1 (Cohen, A Course in
-// Computational Algebraic Number Theory, GTM 138, Exercise 4.30), and
-// otherwise every prime dividing F lies above some p | [O_K : Z[theta]],
+// [D] = [F]^(-1).  F = O_K when the index is 1 (Corollary to Proposition
+// 4.18, p. 153), and otherwise every prime dividing F lies above some p | [O_K : Z[theta]],
 // because the index lies in F.  Anything else falls back to the bound of
 // factor_base_class_group_bound (Satz 2 and Minkowski).
 bool detail::proven_generation_requirement(
