@@ -42,6 +42,7 @@ PROVEN_BENCHMARK_NAMES = {
     "BM_class_unit_0_1_0_real_quadratic_proven",
     "BM_class_unit_0_1_0_real_quadratic_40001_proven",
     "BM_class_unit_0_1_0_imag_quadratic_proven",
+    "BM_class_unit_0_1_0_imag_quadratic_3116399_proven",
     "BM_class_unit_0_1_0_real_quadratic_100003_proven",
     "BM_class_unit_0_1_0_cubic_disc23_proven",
     "BM_class_unit_0_1_0_cubic_disc1080004_proven",

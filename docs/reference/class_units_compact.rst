@@ -17,6 +17,15 @@ relation combinations, row reduction, invariant coordinates, and Smith
 left-kernel relation-dependency rows.  It is documented here as part of the
 class/unit presentation layer rather than as a separate algebra hierarchy.
 
+The relation-kernel rows, and the combination rows behind the invariant
+generators, are witnesses of a unimodular left transform.  The kernel rows form
+a basis of the integer left kernel of the relation matrix, but they are not
+canonical: when there are more relations than generators the transform depends
+on which branch FLINT's ``fmpz_mat_hnf_transform`` takes (chosen by a
+random-prime rank test).  They are stable within one object, but two objects
+with equal relations may return different, equally valid, rows.  Rely only on
+properties that hold for every basis.
+
 ``silex::ClassGroupContext`` owns the native class-group candidate state and
 stores its ``Order`` parent handle by value.  It manages copied factor bases,
 relation rows, retained

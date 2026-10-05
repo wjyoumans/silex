@@ -129,6 +129,44 @@ bool generator_relation_identity(const silex::FiniteAbelianGroup& group) noexcep
     return true;
 }
 
+// True when the rows of `kernel` form a Z-basis of the integer left kernel of
+// `relations`: they annihilate it, there are exactly m - rank of them and they
+// are independent, and the row lattice is saturated (all Smith invariants of
+// `kernel` are 1, equivalently the k x k minors have gcd 1).  A row set that
+// spans only a proper sublattice of the kernel, for example a basis with one
+// row doubled (|det U| = 2 in the unimodular completion), fails the last test.
+bool is_left_kernel_basis(const sflint::FmpzMat& relations,
+                          const sflint::FmpzMat& kernel) noexcept {
+    const slong m = sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(relations));
+    const slong n = sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(relations));
+    const slong k = sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(kernel));
+    if (sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(kernel)) != m) {
+        return false;
+    }
+    sflint::FmpzMat product(k, n);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(product),
+                         sflint::FmpzMatConstRef(kernel),
+                         sflint::FmpzMatConstRef(relations));
+    if (!matrix_is_zero(product)) {
+        return false;
+    }
+    if (k != m - sflint::fmpz_mat_rank(sflint::FmpzMatConstRef(relations)) ||
+        sflint::fmpz_mat_rank(sflint::FmpzMatConstRef(kernel)) != k) {
+        return false;
+    }
+    if (k == 0) {
+        return true;
+    }
+    sflint::FmpzMat snf(k, m);
+    ::fmpz_mat_snf(snf.raw(), kernel.raw());
+    for (slong i = 0; i < k; ++i) {
+        if (!entry_is_si(snf, i, i, 1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool relation_kernel_identity(const silex::FiniteAbelianGroup& group) noexcept {
     const slong kernels = group.relation_kernel_count();
     const slong m = group.relation_count();
@@ -165,7 +203,35 @@ bool relation_kernel_identity(const silex::FiniteAbelianGroup& group) noexcept {
     sflint::fmpz_mat_mul(sflint::FmpzMatRef(product),
                          sflint::FmpzMatConstRef(kernel),
                          sflint::FmpzMatConstRef(relations));
-    return matrix_is_zero(product);
+    return matrix_is_zero(product) && is_left_kernel_basis(relations, kernel);
+}
+
+// The basis check must reject a kernel row set that is only a sublattice of
+// the left kernel, and one that is not the full kernel.
+int test_kernel_basis_check_rejects_bad_kernels() {
+    // relations = [[2, 0], [0, 3], [2, 3]]: left kernel is spanned by (1,1,-1).
+    sflint::FmpzMat relations(3, 2);
+    set_entry_si(relations, 0, 0, 2);
+    set_entry_si(relations, 1, 1, 3);
+    set_entry_si(relations, 2, 0, 2);
+    set_entry_si(relations, 2, 1, 3);
+    silex::FiniteAbelianGroup group;
+    assert(group.set_relation_matrix(sflint::FmpzMatConstRef(relations)));
+    auto kernel = group.relation_kernel_matrix();
+    assert(kernel.has_value());
+    assert(is_left_kernel_basis(relations, *kernel));
+
+    // Rebuild the one kernel row doubled: (2, 2, -2).
+    sflint::FmpzMat doubled(1, 3);
+    set_entry_si(doubled, 0, 0, 2);
+    set_entry_si(doubled, 0, 1, 2);
+    set_entry_si(doubled, 0, 2, -2);
+    assert(sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(*kernel)) == 3);
+    assert(!is_left_kernel_basis(relations, doubled));
+
+    sflint::FmpzMat empty(0, 3);
+    assert(!is_left_kernel_basis(relations, empty));
+    return 0;
 }
 
 int test_basic() {
@@ -643,6 +709,7 @@ int test_internal_basis_setter_witnesses() {
 
 int main() {
     assert(test_basic() == 0);
+    assert(test_kernel_basis_check_rejects_bad_kernels() == 0);
     assert(test_copy_swap_failure_preserves_output() == 0);
     assert(test_element_reduce_and_coordinates() == 0);
     assert(test_nondiagonal_and_generator_relations() == 0);

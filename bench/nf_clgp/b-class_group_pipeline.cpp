@@ -722,6 +722,7 @@ inline constexpr slong kC2Invariants[] = {2};
 inline constexpr slong kC4Invariants[] = {4};
 inline constexpr slong kC5Invariants[] = {5};
 inline constexpr slong kC2C16Invariants[] = {2, 16};
+inline constexpr slong kC2C2C2C316Invariants[] = {2, 2, 2, 316};
 inline constexpr ExactClassGroupExpectation kTrivialClassGroup{
         1, nullptr, 0};
 inline constexpr ExactClassGroupExpectation kC2ClassGroup{
@@ -732,6 +733,8 @@ inline constexpr ExactClassGroupExpectation kC5ClassGroup{
         5, kC5Invariants, 1};
 inline constexpr ExactClassGroupExpectation kC2C16ClassGroup{
         32, kC2C16Invariants, 2};
+inline constexpr ExactClassGroupExpectation kC2C2C2C316ClassGroup{
+        2528, kC2C2C2C316Invariants, 4};
 
 // The torsion orders and regulator intervals were computed independently with
 // GP 2.17.4 bnf data, with the degree-greater-than-one fields certified by its
@@ -787,6 +790,11 @@ inline constexpr ExactClassUnitExpectation kCubicDisc1080004ClassUnit{
         kC2ClassGroup, 1, 2, 297.835315654, 297.835315657};
 inline constexpr ExactClassUnitExpectation kRealQuadratic100003ClassUnit{
         kTrivialClassGroup, 1, 2, 400.424111477, 400.424111480};
+// x^2 + 3116399 (discriminant -3116399, five prime factors) is a large class
+// group row: order 2528 with invariants 2, 2, 2, 316.  GP 2.17.4 bnfinit data
+// certified with bnfcertify.  Rank-zero regulator contracts are exact.
+inline constexpr ExactClassUnitExpectation kImagQuadratic3116399ClassUnit{
+        kC2C2C2C316ClassGroup, 0, 2, 1.0, 1.0};
 inline constexpr ExactClassUnitExpectation kRandomCubicClassUnit{
         kTrivialClassGroup, 1, 2, 8.29429929651, 8.29429929655};
 
@@ -2464,6 +2472,16 @@ void BM_class_unit_0_1_0_imag_quadratic_proven(
             kImaginaryQuadraticClassUnit);
 }
 
+// Large class group (order 2528, four invariants) for exercising the
+// abelian-group Smith form work on a presentation far larger than the other
+// rows; no timing expectation is attached.
+void BM_class_unit_0_1_0_imag_quadratic_3116399_proven(
+        benchmark::State& state) {
+    BM_class_unit_0_1_0_from_quadratic(
+            state, -3116399, silex::CertificationMode::proven, 20000,
+            kImagQuadratic3116399ClassUnit);
+}
+
 void BM_class_unit_0_1_0_real_quadratic_40001_proven(
         benchmark::State& state) {
     BM_class_unit_0_1_0_from_quadratic(
@@ -2840,6 +2858,7 @@ BENCHMARK(BM_class_group_sextic_minus1_minus1_candidate);
 BENCHMARK(BM_class_unit_0_1_0_degree_one_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_proven);
+BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_3116399_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_40001_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_100003_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_disc23_proven);

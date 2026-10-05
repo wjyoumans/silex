@@ -47,6 +47,13 @@ public:
 
     bool invariant_generator_matrix(flint::FmpzMatRef out) const noexcept;
     bool invariant_generator_relation_matrix(flint::FmpzMatRef out) const noexcept;
+    // The relation-kernel rows form a Z-basis of the integer left kernel of
+    // the relation matrix, and the invariant-generator relation combinations
+    // come from the same left transform.  These witness rows are valid but not
+    // canonical: they depend on the transform FLINT's hnf_transform picks when
+    // there are more relations than generators, so only properties that hold
+    // for every basis (the product with the relations, saturation) may be
+    // relied on.  They are stable within one object.
     bool relation_kernel_row(flint::FmpzMatRef out, slong index) const noexcept;
     bool relation_kernel_matrix(flint::FmpzMatRef out) const noexcept;
     std::optional<flint::FmpzMat> invariant_generator_matrix() const noexcept;
