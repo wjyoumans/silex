@@ -4,12 +4,14 @@
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/diagnostics.hpp>
+#include <silex/flint/fmpz_factor.hpp>
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arf.hpp>
 #include <silex/signature.hpp>
 
 #include <flint/arb.h>
 #include <flint/arf.h>
+#include <flint/fmpq_poly.h>
 #include <flint/fmpz.h>
 
 #include <algorithm>
@@ -1384,6 +1386,128 @@ bool factor_base_class_group_bound(flint::FmpzRef out,
     }
 
     fmpz_set(out.raw(), bound.raw());
+    return true;
+}
+
+namespace {
+
+// True when the stored defining polynomial of `field` is monic with integer
+// coefficients, so that its root theta is an algebraic integer and
+// Z[theta] is the equation order.
+bool field_polynomial_is_monic_integral(const NumberField& field) noexcept {
+    const nf_struct* raw = field.raw_flint_field();
+    if (raw == nullptr) {
+        return false;
+    }
+    const slong length = fmpq_poly_length(raw->pol);
+    return length >= 2 && fmpz_is_one(fmpq_poly_denref(raw->pol)) != 0 &&
+           fmpz_is_one(fmpq_poly_numref(raw->pol) + length - 1) != 0;
+}
+
+// The largest norm of a prime ideal of the maximal order `order` above a
+// rational prime dividing `index`.
+bool largest_prime_norm_above(flint::Fmpz& out,
+                              const Order& order,
+                              flint::FmpzConstRef index) noexcept {
+    flint::FmpzFactor factorization;
+    flint::fmpz_factor(flint::FmpzFactorRef(factorization), index);
+    const slong factor_count =
+            flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
+    flint::Fmpz largest;
+    flint::Fmpz p;
+    flint::Fmpz norm;
+    for (slong i = 0; i < factor_count; ++i) {
+        flint::fmpz_factor_get_fmpz(
+                flint::FmpzRef(p), flint::FmpzFactorConstRef(factorization),
+                i);
+        PrimeIdealList primes;
+        if (!decompose_prime(primes, order, flint::FmpzConstRef(p)) ||
+            primes.size() < 1) {
+            return false;
+        }
+        for (slong k = 0; k < primes.size(); ++k) {
+            const PrimeIdeal* prime = primes.at(k);
+            if (prime == nullptr || !prime->norm(flint::FmpzRef(norm))) {
+                return false;
+            }
+            if (fmpz_cmp(norm.raw(), largest.raw()) > 0) {
+                fmpz_set(largest.raw(), norm.raw());
+            }
+        }
+    }
+    fmpz_swap(out.raw(), largest.raw());
+    return true;
+}
+
+}  // namespace
+
+// Zimmert 1981, Korollar 1 gives, for every class K, an integral ideal of
+// norm at most B in K or in D K^(-1).  With every prime ideal of norm at
+// most the requirement in the generated subgroup H, K lies in H as soon as
+// [D] does.  For theta with monic minimal polynomial f in Z[x], Cohen,
+// Advanced Topics in Computational Number Theory (GTM 193), Lemma 10.1.20
+// and the proof of Corollary 10.1.21 (pp. 484-485) give
+// f'(theta) O_K = F D for the conductor F = {x : x O_K in Z[theta]}, so
+// [D] = [F]^(-1).  F = O_K when the index is 1 (Cohen, A Course in
+// Computational Algebraic Number Theory, GTM 138, Exercise 4.30), and
+// otherwise every prime dividing F lies above some p | [O_K : Z[theta]],
+// because the index lies in F.  Anything else falls back to the bound of
+// factor_base_class_group_bound (Satz 2 and Minkowski).
+bool detail::proven_generation_requirement(
+        flint::FmpzRef bound,
+        GenerationDifferentRoute& route,
+        const Order& order) noexcept {
+    flint::Fmpz classical;
+    if (!factor_base_class_group_bound(flint::FmpzRef(classical), order)) {
+        return false;
+    }
+    flint::Fmpz chosen;
+    fmpz_set(chosen.raw(), classical.raw());
+    GenerationDifferentRoute chosen_route = GenerationDifferentRoute::none;
+
+    const slong degree = order.degree();
+    const NumberField* field = order.parent();
+    flint::Fmpz discriminant;
+    Signature sig;
+    flint::Fmpz twin;
+    if (degree >= 3 && degree <= kZimmertMaxDegree && field != nullptr &&
+        field_polynomial_is_monic_integral(*field) &&
+        order.discriminant(flint::FmpzRef(discriminant)) &&
+        fmpz_is_zero(discriminant.raw()) == 0 && sig.compute(*field)) {
+        fmpz_abs(discriminant.raw(), discriminant.raw());
+        if (zimmert_twin_class_bound(twin,
+                                     flint::FmpzConstRef(discriminant),
+                                     degree, sig.r1(), sig.r2()) &&
+            fmpz_cmp(twin.raw(), classical.raw()) < 0) {
+            if (fmpz_cmp_ui(twin.raw(), 1) < 0) {
+                fmpz_one(twin.raw());
+            }
+            const Order equation = Order::equation_order(*field);
+            flint::Fmpz index;
+            flint::Fmpz conductor_norm;
+            if (equation.is_defined() &&
+                order_index(flint::FmpzRef(index), equation, order)) {
+                if (fmpz_is_one(index.raw()) != 0) {
+                    fmpz_set(chosen.raw(), twin.raw());
+                    chosen_route = GenerationDifferentRoute::index_one;
+                } else if (largest_prime_norm_above(
+                                   conductor_norm, order,
+                                   flint::FmpzConstRef(index))) {
+                    if (fmpz_cmp(conductor_norm.raw(), twin.raw()) < 0) {
+                        fmpz_set(conductor_norm.raw(), twin.raw());
+                    }
+                    if (fmpz_cmp(conductor_norm.raw(), classical.raw()) < 0) {
+                        fmpz_swap(chosen.raw(), conductor_norm.raw());
+                        chosen_route =
+                                GenerationDifferentRoute::conductor_primes;
+                    }
+                }
+            }
+        }
+    }
+
+    fmpz_set(bound.raw(), chosen.raw());
+    route = chosen_route;
     return true;
 }
 

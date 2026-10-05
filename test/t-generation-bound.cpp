@@ -7,13 +7,17 @@
 // with mpmath at 60 digits, and the field discriminants and signatures with
 // an independent computer algebra system.
 
+#include <silex/factor_base.hpp>
 #include <silex/flint/arb.hpp>
+#include <silex/flint/fmpq_mat.hpp>
+#include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
 
 #include "factor_base/factor_base_internal.hpp"
 #include "test_support.hpp"
 
 #include <flint/arb.h>
+#include <flint/fmpq_mat.h>
 #include <flint/fmpz.h>
 
 #include <cassert>
@@ -802,6 +806,110 @@ int test_rejected_inputs_preserve_output() {
     return fmpz_cmp_si(bound.raw(), 99) == 0 ? 0 : 1;
 }
 
+// The maximal order of the field defined by
+// c3 x^3 + c1 x + c0, computed from the order with basis 1, c3 beta,
+// c3^2 beta^2, which is Z[c3 beta] and so lies in O_K.
+silex::Order cubic_maximal_order(slong c3, slong c1, slong c0) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, c3);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, c1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, c0);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    sflint::FmpqMat basis(3, 3);
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 0, 0), 1, 1);
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 1), c3, 1);
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 2, 2), c3 * c3, 1);
+    silex::Order integral =
+            silex::Order::from_basis(field, sflint::FmpqMatConstRef(basis));
+    assert(integral.is_defined());
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(integral));
+    return maximal;
+}
+
+// The proven generation requirement on five presentations of the field of
+// x^3 + x + 200 (|d| = 1080004, signature (1, 1), class group Z/2; indices
+// and prime norms from an independent computer algebra system), where the
+// Minkowski-type bound is ceil(6/27 (4/pi) sqrt(1080004)) = 295 and
+// Zimmert's twin-class bound is ceil(sqrt(1080004) / 3.95179...) = 263:
+// - x^3 + x + 200 has index 1: route index_one, requirement 263;
+// - x^3 + 25 x + 25000 (theta = 5 alpha) has index 125, and every prime
+//   above 5 has norm 5: conductor_primes, requirement 263;
+// - x^3 + 289 x + 982600 (theta = 17 alpha) has index 17^3, with prime
+//   norms 17 and 289 above 17: conductor_primes, requirement 289;
+// - x^3 + 361 x + 1371800 (theta = 19 alpha) has a prime of norm 361 above
+//   19, above the Minkowski-type bound: no route, requirement 295;
+// - 4 x^3 + x + 100 (beta = alpha / 2) is not monic: no route, 295.
+int test_proven_generation_requirement() {
+    struct Row {
+        slong c3;
+        slong c1;
+        slong c0;
+        slong requirement;
+        silex::detail::GenerationDifferentRoute route;
+    };
+    using Route = silex::detail::GenerationDifferentRoute;
+    const Row rows[] = {
+            {1, 1, 200, 263, Route::index_one},
+            {1, 25, 25000, 263, Route::conductor_primes},
+            {1, 289, 982600, 289, Route::conductor_primes},
+            {1, 361, 1371800, 295, Route::none},
+            {4, 1, 100, 295, Route::none},
+    };
+    sflint::Fmpz bound;
+    sflint::Fmpz classical;
+    sflint::Fmpz discriminant;
+    for (const Row& row : rows) {
+        const silex::Order order =
+                cubic_maximal_order(row.c3, row.c1, row.c0);
+        if (!order.discriminant(sflint::FmpzRef(discriminant)) ||
+            !sflint::fmpz_equal_si(discriminant, -1080004) ||
+            !silex::factor_base_class_group_bound(sflint::FmpzRef(classical),
+                                                  order) ||
+            !sflint::fmpz_equal_si(classical, 295)) {
+            return 1;
+        }
+        Route route = Route::index_one;
+        if (!silex::detail::proven_generation_requirement(
+                    sflint::FmpzRef(bound), route, order) ||
+            !sflint::fmpz_equal_si(bound, row.requirement) ||
+            route != row.route) {
+            return 1;
+        }
+    }
+
+    // Degree 2 keeps factor_base_class_group_bound.
+    silex::NumberField quadratic = silex::test::quadratic_field(-23);
+    silex::Order quadratic_maximal(quadratic);
+    if (!quadratic_maximal.maximal_order(
+                silex::test::equation_order(quadratic)) ||
+        !silex::factor_base_class_group_bound(sflint::FmpzRef(classical),
+                                              quadratic_maximal)) {
+        return 1;
+    }
+    Route route = Route::index_one;
+    if (!silex::detail::proven_generation_requirement(
+                sflint::FmpzRef(bound), route, quadratic_maximal) ||
+        !fmpz_equal(bound.raw(), classical.raw()) || route != Route::none) {
+        return 1;
+    }
+
+    // A non-maximal order has no requirement and leaves the outputs as they
+    // were.
+    silex::Order equation = silex::test::equation_order(
+            *cubic_maximal_order(1, 25, 25000).parent());
+    fmpz_set_si(bound.raw(), 99);
+    route = Route::index_one;
+    if (silex::detail::proven_generation_requirement(sflint::FmpzRef(bound),
+                                                     route, equation) ||
+        !sflint::fmpz_equal_si(bound, 99) || route != Route::index_one) {
+        return 1;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -812,5 +920,6 @@ int main() {
     assert(test_zimmert_twin_class_table3() == 0);
     assert(test_zimmert_twin_class_pinned_values() == 0);
     assert(test_zimmert_twin_class_domain() == 0);
+    assert(test_proven_generation_requirement() == 0);
     return 0;
 }

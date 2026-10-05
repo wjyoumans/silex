@@ -3280,7 +3280,7 @@ int test_grh_provenance_records() {
     // GRH provenance of a grh class/unit result, and the plumbing of the
     // GRH generation record.  x^3 + x + 200 (|D| = 1080004): the grh
     // policy's GRH generation bound is the BDF bound 50, its base is built
-    // to 100, and the Minkowski-type bound is 463, so generation rests on
+    // to 100, and the Minkowski-type bound is 295, so generation rests on
     // GRH; completeness rests on a Belabas-Friedman hR.
     silex::NumberField field = cubic_field(1, 200);
     silex::Order equation_order = silex::test::equation_order(field);
@@ -3389,8 +3389,11 @@ int test_grh_provenance_records() {
     assert(context.factor_base_generation_status() !=
            silex::ProofState::verified);
 
-    // The proven partner: generation to the Minkowski-type bound and
-    // unconditional completeness.
+    // The proven partner: unconditional generation and completeness.
+    // x^3 + x + 200 has O_K = Z[theta] (its discriminant is the field
+    // discriminant), so the different is principal and generation rests on
+    // Zimmert's twin-class bound ceil(sqrt(1080004) / 3.9517...) = 263
+    // (Korollar 1, finite-m form), below the Minkowski-type bound 295.
     options.requested_certification = silex::CertificationMode::proven;
     silex::ClassGroupContext proven;
     silex::OrderUnitGroup proven_units;
@@ -3402,11 +3405,14 @@ int test_grh_provenance_records() {
     assert(proven.factor_base_generation_certification() ==
            silex::CertificationMode::proven);
     assert(proven.factor_base_generation_basis() ==
-           silex::ClassGroupGenerationBasis::minkowski_type);
+           silex::ClassGroupGenerationBasis::zimmert_twin_class);
+    assert(CertificationAccess::factor_base_generation_different_route(
+                   proven) ==
+           silex::detail::GenerationDifferentRoute::index_one);
+    assert(sflint::fmpz_equal_si(minkowski, 295));
     assert(proven.factor_base_generation_certification_bound(
             sflint::FmpzRef(value)));
-    assert(sflint::fmpz_equal(sflint::FmpzConstRef(value),
-                              sflint::FmpzConstRef(minkowski)));
+    assert(sflint::fmpz_equal_si(value, 263));
     assert(proven.class_unit_completeness_certification() ==
            silex::CertificationMode::proven);
     assert(proven.class_unit_completeness_basis() ==
@@ -3559,6 +3565,67 @@ int test_grh_generation_bound_bach_fallback() {
     return 0;
 }
 
+// Proven generation on Zimmert's twin-class bound needs the class of the
+// different in the generated subgroup.  Two more presentations of the field
+// of x^3 + x + 200 (class group Z/2, Minkowski-type bound 295, twin-class
+// bound 263): x^3 + 25 x + 25000 (theta = 5 alpha, index 125, primes above 5
+// of norm 5) takes the conductor_primes route with requirement 263, while
+// x^3 + 361 x + 1371800 (theta = 19 alpha, a prime of norm 361 above 19)
+// keeps the Minkowski-type bound.  The class group is the same in every
+// presentation.
+int test_twin_class_generation_routes() {
+    struct Row {
+        slong c1;
+        slong c0;
+        slong requirement;
+        silex::ClassGroupGenerationBasis basis;
+        silex::detail::GenerationDifferentRoute route;
+    };
+    const Row rows[] = {
+            {25, 25000, 263,
+             silex::ClassGroupGenerationBasis::zimmert_twin_class,
+             silex::detail::GenerationDifferentRoute::conductor_primes},
+            {361, 1371800, 295,
+             silex::ClassGroupGenerationBasis::minkowski_type,
+             silex::detail::GenerationDifferentRoute::none},
+    };
+    for (const Row& row : rows) {
+        silex::NumberField field = cubic_field(row.c1, row.c0);
+        silex::Order equation_order = silex::test::equation_order(field);
+        silex::Order maximal_order(field);
+        assert(maximal_order.maximal_order(equation_order));
+        sflint::Fmpz minkowski;
+        assert(silex::factor_base_class_group_bound(
+                sflint::FmpzRef(minkowski), maximal_order));
+        assert(sflint::fmpz_equal_si(minkowski, 295));
+
+        silex::ClassGroupComputeOptions options;
+        options.max_candidates = 5000;
+        options.max_relations = 500;
+        options.zeta_bf_max_cutoff = 20000;
+        options.requested_certification = silex::CertificationMode::proven;
+        silex::ClassGroupContext proven;
+        silex::OrderUnitGroup units;
+        assert(units.compute_with_class_group(
+                proven, maximal_order, sflint::FmpzConstRef(minkowski),
+                options, 128));
+        assert(proven.certification_status() ==
+               silex::CertificationMode::proven);
+        sflint::Fmpz value;
+        assert(proven.order(sflint::FmpzRef(value)));
+        assert(sflint::fmpz_equal_si(value, 2));
+        assert(proven.factor_base_generation_basis() == row.basis);
+        assert(CertificationAccess::factor_base_generation_different_route(
+                       proven) == row.route);
+        assert(proven.factor_base_generation_bound(sflint::FmpzRef(value)));
+        assert(sflint::fmpz_equal_si(value, row.requirement));
+        assert(proven.factor_base_generation_certification_bound(
+                sflint::FmpzRef(value)));
+        assert(sflint::fmpz_equal_si(value, row.requirement));
+    }
+    return 0;
+}
+
 int main() {
     test_certification_metadata_defaults_and_invalidation();
     test_factor_base_generation_metadata();
@@ -3608,5 +3675,6 @@ int main() {
     test_move_and_swap();
     test_grh_provenance_records();
     test_grh_generation_bound_bach_fallback();
+    test_twin_class_generation_routes();
     return 0;
 }

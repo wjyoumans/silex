@@ -93,6 +93,26 @@ Changed
   unchanged.  Degree one and quadratic bounds are unchanged.  See
   :doc:`../reference/algorithms_and_sources`.
 
+- Proven class/unit computations in degree 3 to 20 can verify factor-base
+  generation up to a smaller bound: Zimmert's twin-class bound (Zimmert
+  1981, Korollar 1, evaluated in the finite form of its proof), when the
+  defining polynomial is monic with integer coefficients and the class of
+  the different is settled exactly.  That holds when ``O_K = Z[theta]``,
+  where the different is principal, or when the bound is raised to cover
+  every prime ideal above the primes dividing ``[O_K : Z[theta]]``.  The
+  bound is used only when it is below ``factor_base_class_group_bound``,
+  which is unchanged.  Such results report the new generation basis
+  ``ClassGroupGenerationBasis::zimmert_twin_class`` (printed as
+  ``zimmert_twin_class`` by ``silex-class-unit-instance``) with that bound
+  as ``factor_base_generation_certification_bound()``; other results still
+  report ``minkowski_type``.  For example the bound drops from 295 to 263
+  for ``x^3 + x + 200``.  A ``grh`` request whose factor base reaches the
+  smaller bound now records unconditional (``proven``) generation where it
+  used to record ``grh`` generation, as for the quartic field of
+  ``x^4 - 8 x^3 + 3 x^2 + x + 4`` (bound 98 against 122, base 100).
+  Results and certification labels are unchanged.  See "Class groups and
+  order units" in :doc:`../reference/algorithms_and_sources`.
+
 - The index-bounded relation-saturation pass of class/unit validation now
   reports ``relation_saturation_status()`` as ``verified`` only when its
   index bound holds without GRH or verified records cover every prime

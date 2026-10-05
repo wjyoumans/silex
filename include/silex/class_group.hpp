@@ -62,6 +62,15 @@ struct ClassGroupZetaBfProofRecord {
 // - minkowski_type: unconditional; every prime ideal up to the
 //   Minkowski-type bound factor_base_class_group_bound() is in the base or
 //   was checked to lie in its span.
+// - zimmert_twin_class: unconditional; every prime ideal up to Zimmert's
+//   twin-class bound (Zimmert 1981, Korollar 1), which every ideal class K
+//   meets in K or in D K^(-1) for the different D, is in the base or was
+//   checked to lie in its span, and the class of D was shown to lie in that
+//   span exactly: the defining polynomial is monic integral and either
+//   O_K = Z[theta], so D = f'(theta) O_K is principal, or the bound also
+//   covers every prime ideal above each p | [O_K : Z[theta]], which
+//   includes the primes of the conductor of Z[theta].  Used only when it is
+//   smaller than the Minkowski-type bound.
 // - bdf: under the Riemann hypothesis for the L-functions of the nontrivial
 //   characters of the class group (Belabas-Diaz y Diaz-Friedman 2008,
 //   Corollary 2.2).
@@ -71,7 +80,8 @@ enum class ClassGroupGenerationBasis {
     none = 0,
     minkowski_type = 1,
     bdf = 2,
-    bach = 3
+    bach = 3,
+    zimmert_twin_class = 4
 };
 
 // The result that establishes relation and unit completeness of a published
@@ -206,7 +216,8 @@ public:
     // Where factor-base generation rests, for the current presentation (`unknown`
     // when there is none, even if a factor base exists):
     // `proven` when factor_base_generation_status() is `verified` (basis
-    // minkowski_type), `grh` when a `grh` class/unit request built the base
+    // minkowski_type, or zimmert_twin_class when the recorded requirement is
+    // the twin-class bound), `grh` when a `grh` class/unit request built the base
     // to contain every prime ideal up to the GRH generation bound
     // min(BDF, Bach), or Bach's bound alone when the BDF criterion cannot be
     // computed or decided, and generation is not also unconditional (basis
@@ -216,8 +227,9 @@ public:
     // generation, and never counts toward a `proven` label.
     CertificationMode factor_base_generation_certification() const noexcept;
     ClassGroupGenerationBasis factor_base_generation_basis() const noexcept;
-    // The bound of that theorem: the Minkowski-type bound
-    // (factor_base_generation_bound()) for `proven`, the GRH generation
+    // The bound of that theorem: the recorded requirement
+    // (factor_base_generation_bound(), the Minkowski-type or twin-class
+    // bound) for `proven`, the GRH generation
     // bound before the factor-base size doubling for `grh`.  False when the
     // certification is `unknown`.
     bool factor_base_generation_certification_bound(

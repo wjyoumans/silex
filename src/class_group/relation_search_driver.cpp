@@ -303,9 +303,12 @@ AnalyticFinishDecision apply_honesty_check(
                 : AnalyticFinishDecision::failed;
     }
 
+    // The same requirement record_factor_base_generation_ records: the
+    // twin-class bound only with the different settled exactly.
     flint::Fmpz required_bound;
-    if (!factor_base_class_group_bound(flint::FmpzRef(required_bound),
-                                       order)) {
+    GenerationDifferentRoute different_route = GenerationDifferentRoute::none;
+    if (!proven_generation_requirement(flint::FmpzRef(required_bound),
+                                       different_route, order)) {
         return AnalyticFinishDecision::failed;
     }
     if (flint::fmpz_cmp(flint::FmpzConstRef(required_bound),

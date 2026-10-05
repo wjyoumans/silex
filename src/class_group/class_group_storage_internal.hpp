@@ -6,6 +6,7 @@
 #include <silex/flint/fmpz_mod_poly.hpp>
 
 #include "relation_completion_scheduler_internal.hpp"
+#include "../factor_base/factor_base_internal.hpp"
 
 #include <optional>
 #include <vector>
@@ -246,6 +247,15 @@ struct ClassGroupContextStorage {
     // The theorem that gave grh_generation_bound (bdf or bach).
     ClassGroupGenerationBasis grh_generation_basis =
             ClassGroupGenerationBasis::none;
+    // How the unconditional generation requirement (the recorded
+    // factor_base_generation_bound_, from proven_generation_requirement)
+    // treats the class of the different: none for the
+    // factor_base_class_group_bound requirement, index_one or
+    // conductor_primes for Zimmert's twin-class requirement.
+    // Written with that bound when the base is built, so certification
+    // transactions do not restore it.
+    GenerationDifferentRoute generation_different_route =
+            GenerationDifferentRoute::none;
     // Relation and unit completeness of a `grh`-requested pair, written
     // when the pair is accepted (record_grh_acceptance_analytic_check,
     // record_grh_acceptance_exact_class_number) or relabelled
@@ -291,6 +301,7 @@ struct ClassGroupContextStorage {
         flint::fmpz_zero(flint::FmpzRef(grh_generation_bound));
         grh_generation_covered = false;
         grh_generation_basis = ClassGroupGenerationBasis::none;
+        generation_different_route = GenerationDifferentRoute::none;
         class_unit_completeness = CertificationMode::unknown;
         class_unit_completeness_basis = ClassUnitCompletenessBasis::none;
         relation_saturation_records.clear();

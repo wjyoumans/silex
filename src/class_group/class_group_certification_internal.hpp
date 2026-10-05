@@ -2,6 +2,8 @@
 
 #include <silex/class_group.hpp>
 
+#include "../factor_base/factor_base_internal.hpp"
+
 namespace silex::detail {
 
 class ClassGroupCertificationAccess {
@@ -51,6 +53,13 @@ public:
     // is no record.  Unlike factor_base_generation_basis(), it reports the
     // record even when generation is also unconditional.
     static ClassGroupGenerationBasis grh_factor_base_generation_basis(
+            const ClassGroupContext& context) noexcept;
+
+    // How the recorded unconditional generation requirement
+    // (factor_base_generation_bound()) treats the class of the different:
+    // index_one or conductor_primes when it is Zimmert's twin-class bound,
+    // none when it is factor_base_class_group_bound or nothing is recorded.
+    static GenerationDifferentRoute factor_base_generation_different_route(
             const ClassGroupContext& context) noexcept;
 
     // Exact imaginary-quadratic index h_cand / h for a rank-zero maximal

@@ -4778,6 +4778,14 @@ ClassGroupCertificationAccess::grh_factor_base_generation_basis(
             : ClassGroupGenerationBasis::none;
 }
 
+GenerationDifferentRoute
+ClassGroupCertificationAccess::factor_base_generation_different_route(
+        const ClassGroupContext& context) noexcept {
+    return context.private_storage_ != nullptr
+            ? context.private_storage_->generation_different_route
+            : GenerationDifferentRoute::none;
+}
+
 bool ClassGroupCertificationAccess::
         rank_zero_quadratic_class_index_bound(
                 flint::FmpzRef out,
@@ -7371,11 +7379,32 @@ bool ClassGroupContext::record_factor_base_generation_(
         private_storage_->grh_generation_covered = false;
         private_storage_->grh_generation_basis =
                 ClassGroupGenerationBasis::none;
+        private_storage_->generation_different_route =
+                detail::GenerationDifferentRoute::none;
     }
 
+    // The requirement is Zimmert's twin-class bound only together with an
+    // exact treatment of the different (index_one or conductor_primes);
+    // otherwise it is factor_base_class_group_bound.
     flint::Fmpz required;
+    detail::GenerationDifferentRoute route =
+            detail::GenerationDifferentRoute::none;
     if (parent_.is_defined() &&
-        factor_base_class_group_bound(flint::FmpzRef(required), parent_)) {
+        detail::proven_generation_requirement(flint::FmpzRef(required), route,
+                                              parent_)) {
+        if (route != detail::GenerationDifferentRoute::none) {
+            if (!ensure_private_storage_()) {
+                return false;
+            }
+            private_storage_->generation_different_route = route;
+            SILEX_LOG(diagnostics_, DiagnosticsModule::class_group,
+                      LogLevel::detail,
+                      route == detail::GenerationDifferentRoute::index_one
+                              ? "generation requirement zimmert_twin_class, "
+                                "different index_one"
+                              : "generation requirement zimmert_twin_class, "
+                                "different conductor_primes");
+        }
         flint::fmpz_set(flint::FmpzRef(factor_base_generation_bound_),
                         flint::FmpzConstRef(required));
         if (flint::fmpz_cmp(build_bound, flint::FmpzConstRef(required)) >= 0) {
@@ -9536,7 +9565,11 @@ ClassGroupGenerationBasis ClassGroupContext::factor_base_generation_basis()
         const noexcept {
     switch (factor_base_generation_certification()) {
     case CertificationMode::proven:
-        return ClassGroupGenerationBasis::minkowski_type;
+        return private_storage_ != nullptr &&
+                       private_storage_->generation_different_route !=
+                               detail::GenerationDifferentRoute::none
+                ? ClassGroupGenerationBasis::zimmert_twin_class
+                : ClassGroupGenerationBasis::minkowski_type;
     case CertificationMode::grh:
         return private_storage_->grh_generation_basis;
     default:
