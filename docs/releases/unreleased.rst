@@ -27,6 +27,11 @@ Added
   ``silex-class-unit-instance`` adds the five values to its ``class_group``
   JSON object.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
+- ``silex-class-unit-instance`` adds ``generation_different_route`` to its
+  ``class_group`` JSON object.  It names how the class of the different was
+  handled for the ``zimmert_twin_class`` generation basis, ``index_one`` or
+  ``conductor_primes`` (the spelling of the detail log), and is null for every
+  other basis.  Additive; the format is unchanged.
 - ``silex-class-unit-instance`` reports ``failure_reason``
   ``factor_base_honesty_unwitnessed`` (``failure_stage`` ``total``) when a
   class/unit computation fails because the last candidate attempt stopped at

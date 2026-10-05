@@ -197,6 +197,7 @@ def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
         # fields, below Bach's), completeness on the hR that accepted.
         assert class_group["factor_base_generation_certification"] == "grh"
         assert class_group["factor_base_generation_basis"] == "bdf"
+        assert class_group["generation_different_route"] is None
         assert class_group[
             "factor_base_generation_certification_bound"
         ] == "50"
@@ -224,9 +225,9 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
     # discriminant), so Zimmert's twin-class bound 263, below the
     # Minkowski-type bound 295, is the requirement (different route
     # index_one). Degree 1 is outside Zimmert's range 3..20.
-    for coeffs, mode, basis, bound in (
-        ("200,1,0,1", "proven", "zimmert_twin_class", "263"),
-        ("0,1", "grh", "minkowski_type", "1"),
+    for coeffs, mode, basis, bound, route in (
+        ("200,1,0,1", "proven", "zimmert_twin_class", "263", "index_one"),
+        ("0,1", "grh", "minkowski_type", "1", None),
     ):
         instance = run_json(
             [str(exe), "--coeffs", coeffs, "--mode", mode], root
@@ -243,6 +244,10 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
             "proven"
         )
         assert class_group["factor_base_generation_basis"] == basis
+        # generation_different_route is the recorded route for a twin-class
+        # basis and null for every other basis.
+        assert "generation_different_route" in class_group
+        assert class_group["generation_different_route"] == route
         assert class_group[
             "factor_base_generation_certification_bound"
         ] == bound
@@ -284,6 +289,7 @@ def assert_twin_class_conductor_honesty_path(exe: Path, root: Path) -> None:
     assert class_group["factor_base_generation_basis"] == (
         "zimmert_twin_class"
     )
+    assert class_group["generation_different_route"] == "conductor_primes"
     assert class_group["factor_base_generation_certification_bound"] == (
         "263"
     )
@@ -319,6 +325,7 @@ def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     class_group = instance["class_group"]
     assert class_group["factor_base_generation_certification"] == "proven"
     assert class_group["factor_base_generation_basis"] == "minkowski_type"
+    assert class_group["generation_different_route"] is None
     assert class_group["factor_base_generation_certification_bound"] == "100"
     assert class_group["class_unit_completeness_certification"] == "proven"
     assert class_group["class_unit_completeness_basis"] == (

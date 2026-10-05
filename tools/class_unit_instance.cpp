@@ -18,6 +18,7 @@
 #include <silex/sunit.hpp>
 
 #include "class_unit_failure_detail.hpp"
+#include "class_group/class_group_certification_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 
 #include <flint/arf.h>
@@ -253,6 +254,21 @@ const char* generation_basis_name(
         return "zimmert_twin_class";
     }
     return "none";
+}
+
+// The route recorded for the class of the different under Zimmert's
+// twin-class generation bound, with the spelling of the detail log.
+const char* different_route_name(
+        silex::detail::GenerationDifferentRoute route) noexcept {
+    switch (route) {
+    case silex::detail::GenerationDifferentRoute::index_one:
+        return "index_one";
+    case silex::detail::GenerationDifferentRoute::conductor_primes:
+        return "conductor_primes";
+    case silex::detail::GenerationDifferentRoute::none:
+        break;
+    }
+    return nullptr;
 }
 
 const char* completeness_basis_name(
@@ -1953,6 +1969,25 @@ int main(int argc, char** argv) {
             std::cout,
             generation_basis_name(
                     class_group.factor_base_generation_basis()));
+    std::cout << ",\n";
+    // How the different was handled; null unless the generation basis is
+    // zimmert_twin_class.
+    std::cout << "    \"generation_different_route\": ";
+    {
+        const char* route = nullptr;
+        if (class_group.factor_base_generation_basis() ==
+            silex::ClassGroupGenerationBasis::zimmert_twin_class) {
+            route = different_route_name(
+                    silex::detail::ClassGroupCertificationAccess::
+                            factor_base_generation_different_route(
+                                    class_group));
+        }
+        if (route != nullptr) {
+            write_json_string(std::cout, route);
+        } else {
+            std::cout << "null";
+        }
+    }
     std::cout << ",\n";
     std::cout << "    \"factor_base_generation_certification_bound\": ";
     {

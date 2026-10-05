@@ -642,7 +642,9 @@ does not settle ``[D]`` from relations, so a field whose index primes have
 large norm keeps that bound.  With the twin-class route the generation basis
 is ``zimmert_twin_class`` and the generation certification bound is the
 requirement; the detail log names the route (``index_one`` or
-``conductor_primes``).  The same requirement applies wherever unconditional
+``conductor_primes``), and ``silex-class-unit-instance`` prints it as
+``generation_different_route`` in its ``class_group`` object, null for any
+other basis.  The same requirement applies wherever unconditional
 generation is recorded, including by a ``grh`` run whose base reaches it,
 and in the relation-search honesty check.
 
