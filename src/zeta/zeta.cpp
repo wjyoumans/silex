@@ -326,14 +326,15 @@ void quadratic_afe_gamma_upper(flint::Arb& out,
 }
 
 // Gamma(shift / 2, z_n) for z_n = pi n^2 / q directly from the closed forms
-// above: z_n at precision `zprec` (FLINT's wp2), the value at `prec`.
+// above: z_n at precision `zprec` (FLINT's wp2), the value at `prec`.  `z`
+// is scratch storage, reused across terms.
 void quadratic_afe_gamma_direct(flint::Arb& out,
+                                flint::Arb& z,
                                 ulong shift,
                                 ulong n,
                                 ulong q,
                                 slong prec,
                                 slong zprec) noexcept {
-    flint::Arb z;
     ::arb_const_pi(z.raw(), zprec);
     ::arb_mul_ui(z.raw(), z.raw(), n, zprec);
     ::arb_mul_ui(z.raw(), z.raw(), n, zprec);
@@ -428,6 +429,12 @@ public:
         return next_anchor_;
     }
 
+    // True once `plan` has rejected an index for which it would reject
+    // every larger index too, so that no further block can start.
+    bool exhausted() const noexcept {
+        return exhausted_;
+    }
+
     void stop() noexcept {
         active_ = false;
     }
@@ -436,6 +443,14 @@ public:
     // for a block anchored at n, with anchor tolerance 2^target.  Returns
     // false when the block would be shorter than the minimum or need more
     // than the maximum number of terms.
+    //
+    // When it returns false because the block is too short and rho = 1, it
+    // also marks the stepper exhausted.  For every larger index the computed
+    // z is at least as large, so rho stays 1 and y is the same, and the
+    // computed B is at most as large: every operation in it is a correctly
+    // rounded IEEE operation on positive operands, hence monotone in each
+    // argument.  So `plan` would return false for all larger indices, and
+    // skipping those calls changes no result.
     bool plan(ulong n, double target) noexcept {
         const double pi = 3.1415926535897932385;
         const double inv_log2 = 1.4426950408889634074;
@@ -449,6 +464,7 @@ public:
                                             quadratic_afe_step_log2_ratio));
         double b = std::floor(y / (std::sqrt(nd * nd + y) + nd));
         if (!(b >= static_cast<double>(quadratic_afe_step_min_block))) {
+            exhausted_ = rho == 1.0;
             return false;
         }
         b = FLINT_MIN(b, static_cast<double>(quadratic_afe_step_max_block));
@@ -649,13 +665,15 @@ private:
     double log2_k_ = 0.0;
     double log2_rho_ = 0.0;
     bool active_ = false;
+    bool exhausted_ = false;
 };
 
 // FLINT `acb_dirichlet_fmpq_sum_afe` at s in {0, 1} for a real character:
 //   sum_{n >= 1} chi(n) Gamma((s + parity) / 2, pi n^2 / q) / n^s,
 // truncated at the first n whose tail bound is below `abs_tol`, which is then
 // added to the radius.  The gamma values come from the Taylor stepping above
-// where it applies, and directly from the closed forms otherwise.
+// where it applies, and directly from the closed forms otherwise; once no
+// block can start any more, the loop is FLINT's term loop again.
 void quadratic_afe_sum(flint::Arb& res,
                        flint::FmpzConstRef discriminant,
                        ulong q,
@@ -683,6 +701,7 @@ void quadratic_afe_sum(flint::Arb& res,
                            : 64;
 
     MagValue err;
+    flint::Arb z;
     flint::Arb term;
     QuadraticAfeGammaStepper stepper(shift, q);
 
@@ -696,6 +715,12 @@ void quadratic_afe_sum(flint::Arb& res,
         }
 
         const int chi = detail::quadratic_character(discriminant, n);
+        // A term with chi(n) = 0 is still visited while a block may start at
+        // it or cover it; afterwards it is skipped before any setup.
+        const bool stepping = !stepper.exhausted();
+        if (chi == 0 && !stepping) {
+            continue;
+        }
 
         // Working precision of FLINT's term: Gamma(a, z) n^-s to `abs_tol`.
         const double nd = static_cast<double>(n);
@@ -729,7 +754,9 @@ void quadratic_afe_sum(flint::Arb& res,
         const slong anchor_wp = wp + guard;
 
         bool have_term = false;
-        if (stepper.active() && n == stepper.next_anchor()) {
+        if (!stepping) {
+            // No block can start; evaluate directly below.
+        } else if (stepper.active() && n == stepper.next_anchor()) {
             stepper.evaluate(term, n, anchor_target, anchor_wp);
             have_term = true;
             if (!stepper.plan(n, anchor_target) ||
@@ -742,7 +769,7 @@ void quadratic_afe_sum(flint::Arb& res,
                 have_term = true;
             }
         } else if (stepper.plan(n, anchor_target)) {
-            quadratic_afe_gamma_direct(term, shift, n, q, anchor_wp,
+            quadratic_afe_gamma_direct(term, z, shift, n, q, anchor_wp,
                                        wp2 + guard);
             have_term = true;
             if (!stepper.start(n, term, anchor_wp)) {
@@ -754,7 +781,7 @@ void quadratic_afe_sum(flint::Arb& res,
             continue;
         }
         if (!have_term) {
-            quadratic_afe_gamma_direct(term, shift, n, q, wp, wp2);
+            quadratic_afe_gamma_direct(term, z, shift, n, q, wp, wp2);
         }
         if (s == 1) {
             ::arb_div_ui(term.raw(), term.raw(), n, wp);
