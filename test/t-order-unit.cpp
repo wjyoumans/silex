@@ -4817,9 +4817,13 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
 
     // Through the candidate-pair validation loop: the exact index route
     // fails closed and leaves no generation check, so the loop does not take
-    // the integer index-one shortcut.  It recomputes the units with the
-    // computed torsion (w = 4) and publishes that pair proven through the
-    // exact index route.  The under-claimed (w = 2) units are never proven.
+    // the integer index-one shortcut.  With the under-claimed w the analytic
+    // index bound is above one, so the loop does not reach the saturation
+    // fallback either (where prove_index_bound would reject the w = 2 input;
+    // test_unit_proofs_require_computed_torsion covers that rejection).  It
+    // recomputes the units in `scratch` with the computed torsion (w = 4),
+    // proves them, and publishes that pair proven through the exact index
+    // route.  The under-claimed (w = 2) units are never proven.
     {
         silex::ClassGroupContext class_group;
         assert(class_group.compute_candidate(
@@ -4831,13 +4835,15 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
         silex::DiagnosticsContext diagnostics;
         silex::diagnostics_context_init(diagnostics);
         TorsionEventCounter counter;
-        counter.label = "unit_group.prove_index_bound.torsion_not_computed";
+        // The recompute runs on `scratch` and reports its proven result.
+        counter.label = "unit_group.validation_recompute.result.proven";
         silex::diagnostics_set_profiling(
                 diagnostics, true,
                 silex::diagnostics_module_bit(
                         silex::DiagnosticsModule::unit_group),
                 torsion_event_callback, &counter);
         under.set_diagnostics(&diagnostics);
+        scratch.set_diagnostics(&diagnostics);
 
         silex::ClassGroupComputeOptions options;
         options.requested_certification = silex::CertificationMode::proven;
@@ -4883,6 +4889,7 @@ int test_rank_zero_quadratic_index_one_requires_computed_torsion() {
         assert(counter.count == 0);
 #endif
         under.set_diagnostics(nullptr);
+        scratch.set_diagnostics(nullptr);
     }
 
     // Control: the torsion Silex computes certifies at index one.
@@ -4955,33 +4962,6 @@ int test_unit_proofs_require_computed_torsion() {
                sflint::fmpz_equal_si(stored, w);
     };
 
-    // prove_index_bound.
-    {
-        silex::OrderUnitGroup out(order);
-        silex::ProofState status = silex::ProofState::not_checked;
-        bool changed = true;
-        assert(!out.prove_index_bound(status, changed, under, 4,
-                                      sflint::FmpzConstRef(aux_bound), 2,
-                                      embeddings, 256));
-        assert(!out.is_set());
-        assert(status == silex::ProofState::not_checked);
-        assert(changed);
-
-        assert(out.prove_index_bound(status, changed, computed, 4,
-                                     sflint::FmpzConstRef(aux_bound), 2,
-                                     embeddings, 256));
-        assert(status == silex::ProofState::verified);
-        assert(out.certification_status() == silex::CertificationMode::proven);
-        assert(torsion_is(out, 4));
-
-        // A rejected input leaves a previously published result unchanged.
-        assert(!out.prove_index_bound(status, changed, under, 4,
-                                      sflint::FmpzConstRef(aux_bound), 2,
-                                      embeddings, 256));
-        assert(out.certification_status() == silex::CertificationMode::proven);
-        assert(torsion_is(out, 4));
-    }
-
     // Each rejection below emits its own torsion event; under profiling
     // builds the count shows which check fired.
     silex::DiagnosticsContext diagnostics;
@@ -4999,6 +4979,38 @@ int test_unit_proofs_require_computed_torsion() {
         assert(counter.count == 0);
 #endif
     };
+
+    // prove_index_bound.
+    {
+        counter.label = "unit_group.prove_index_bound.torsion_not_computed";
+        counter.count = 0;
+        silex::OrderUnitGroup out(order);
+        out.set_diagnostics(&diagnostics);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(!out.prove_index_bound(status, changed, under, 4,
+                                      sflint::FmpzConstRef(aux_bound), 2,
+                                      embeddings, 256));
+        assert(!out.is_set());
+        assert(status == silex::ProofState::not_checked);
+        assert(changed);
+        expect_events(1);
+
+        assert(out.prove_index_bound(status, changed, computed, 4,
+                                     sflint::FmpzConstRef(aux_bound), 2,
+                                     embeddings, 256));
+        assert(status == silex::ProofState::verified);
+        assert(out.certification_status() == silex::CertificationMode::proven);
+        assert(torsion_is(out, 4));
+
+        // A rejected input leaves a previously published result unchanged.
+        assert(!out.prove_index_bound(status, changed, under, 4,
+                                      sflint::FmpzConstRef(aux_bound), 2,
+                                      embeddings, 256));
+        assert(out.certification_status() == silex::CertificationMode::proven);
+        assert(torsion_is(out, 4));
+        expect_events(2);
+    }
 
     // saturate_index_bounded.
     {
