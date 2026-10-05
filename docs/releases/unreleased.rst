@@ -74,8 +74,8 @@ Changed
   at policy selection and now uses Bach's bound.  Proven results and the
   failure rules are unchanged; a ``grh`` request on a non-monic presentation
   still fails closed at policy selection, because the factor base needs a
-  monic integral defining polynomial.  See "Class
-  groups and order units" in :doc:`../reference/algorithms_and_sources`.
+  monic integral defining polynomial.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
 
 - **Breaking:** ``FiniteAbelianGroup::set_relation_matrix_with_hnf_basis``,
   public in 0.1.1, is no longer public API; it is now internal.

@@ -284,8 +284,8 @@ constexpr slong kZimmertTwinClassTerms = 128;
 
 // Sets out to psi(x).  For x not positive, uses psi(x) = psi(x + k) -
 // sum_{i=0}^{k-1} 1/(x + i) with k = 1 - floor(mid(x)), mid(x) the midpoint
-// of the ball x, so arb_digamma is only evaluated at a positive argument.  Fails if x + i contains zero for some i
-// or the result is not finite.
+// of the ball x, so arb_digamma is only evaluated at a positive argument.
+// Fails if x + i contains zero for some i or the result is not finite.
 bool digamma_by_shift(flint::Arb& out,
                       const flint::Arb& x,
                       slong prec) noexcept {
@@ -1450,8 +1450,8 @@ bool largest_prime_norm_above(flint::Fmpz& out,
 // Proposition 4.18(i) (p. 152, with Proposition 4.17, p. 151) gives
 // f'(theta) O_K = F D for the conductor F = {x : x O_K in Z[theta]}, so
 // [D] = [F]^(-1).  F = O_K when the index is 1 (Corollary to Proposition
-// 4.18, p. 153), and otherwise every prime dividing F lies above some p | [O_K : Z[theta]],
-// because the index lies in F.  Anything else falls back to the bound of
+// 4.18, p. 153), and otherwise every prime dividing F lies above some
+// p | [O_K : Z[theta]], because the index lies in F.  Anything else falls back to the bound of
 // factor_base_class_group_bound (Satz 2 and Minkowski).
 bool detail::proven_generation_requirement(
         flint::FmpzRef bound,
