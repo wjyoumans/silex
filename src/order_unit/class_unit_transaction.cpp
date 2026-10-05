@@ -6,6 +6,7 @@
 #include <silex/signature.hpp>
 
 #include <chrono>
+#include <utility>
 
 namespace silex::detail {
 namespace {
@@ -209,11 +210,11 @@ bool ClassGroupRelationSearchAccess::defer_native_goal_publication(
 
 void ClassGroupRelationSearchAccess::record_factor_base_honesty_failure(
         ClassGroupContext& context,
-        const FactorBaseHonestyFailure& failure) noexcept {
+        FactorBaseHonestyFailure&& failure) noexcept {
     ClassUnitTransactionContext* const run_context =
             context.class_unit_transaction_context_;
     if (run_context != nullptr) {
-        run_context->audit.factor_base_honesty_failure = failure;
+        run_context->audit.factor_base_honesty_failure = std::move(failure);
     }
 }
 

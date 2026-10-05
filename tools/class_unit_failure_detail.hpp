@@ -2,6 +2,8 @@
 
 #include "order_unit/class_unit_transaction_internal.hpp"
 
+#include <flint/fmpz.h>
+
 #include <cstring>
 #include <ostream>
 
@@ -11,13 +13,13 @@ namespace silex_tools {
 // the one place for structured detail about a failure: an object whose keys
 // depend on `failure_reason`, or null when that reason carries no detail.
 // Only factor_base_honesty_unwitnessed carries detail: the unwitnessed
-// required prime (`p`, null if it does not fit a signed machine word, and
-// `residue_degree`), its witness search route (`search`, "lattice" or
-// "t2"), the stage of its last search against the last stage allowed, and
-// that stage's caps under the class-group detail log's names: `radius`,
-// `twists` and `random_tries` on the lattice route, `random_tries`,
-// `factor_attempts` and `element_steps` on the T2 route.  Nested lines are
-// indented for a top-level field.
+// required prime (`p`, a decimal string like every big integer in this
+// JSON, and `residue_degree`), its witness search route (`search`,
+// "lattice" or "t2"), the stage of its last search against the last stage
+// allowed, and that stage's caps under the class-group detail log's names:
+// `radius`, `twists` and `random_tries` on the lattice route,
+// `random_tries`, `factor_attempts` and `element_steps` on the T2 route.
+// Nested lines are indented for a top-level field.
 inline void write_class_unit_failure_detail_json(
         std::ostream& out,
         const silex::detail::ClassUnitTransactionReport& report) {
@@ -33,12 +35,10 @@ inline void write_class_unit_failure_detail_json(
     const auto field = [&out](const char* name, slong value) {
         out << ",\n    \"" << name << "\": " << static_cast<long long>(value);
     };
-    out << "{\n    \"p\": ";
-    if (failure.p < 0) {
-        out << "null";
-    } else {
-        out << static_cast<long long>(failure.p);
-    }
+    // Decimal digits need no JSON escaping.
+    char* const p = fmpz_get_str(nullptr, 10, failure.p.raw());
+    out << "{\n    \"p\": \"" << (p != nullptr ? p : "") << "\"";
+    flint_free(p);
     field("residue_degree", failure.residue_degree);
     out << ",\n    \"search\": \""
         << (failure.direct_witness_search ? "t2" : "lattice") << "\"";

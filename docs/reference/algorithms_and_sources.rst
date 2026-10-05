@@ -1053,12 +1053,13 @@ In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``
 object is the one place for structured failure detail; its keys depend on
 ``failure_reason``, and it is null for every reason other than
 ``factor_base_honesty_unwitnessed``.  For that reason it gives the
-unwitnessed prime as ``p`` (null if it does not fit a signed machine word)
-and ``residue_degree``, the route as ``search`` (``lattice`` or ``t2``), the
-last stage searched and the last stage allowed as ``stage`` and
-``max_stage``, and that stage's caps under the detail log's names:
-``radius``, ``twists`` and ``random_tries`` on the lattice route, or
+unwitnessed prime as ``p``, a decimal string such as ``"3"`` like every big
+integer in this JSON, and ``residue_degree``, the route as ``search``
+(``lattice`` or ``t2``), the last stage searched and the last stage allowed
+as ``stage`` and ``max_stage``, and that stage's caps under the detail log's
+names: ``radius``, ``twists`` and ``random_tries`` on the lattice route, or
 ``random_tries``, ``factor_attempts`` and ``element_steps`` on the T2 route.
+The residue degree, stages and caps are JSON numbers.
 
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in

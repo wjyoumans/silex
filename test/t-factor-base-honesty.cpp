@@ -28,6 +28,7 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1251,7 +1252,7 @@ int test_escalated_witness_search_proves_large_class_group_base() {
 bool final_stage_lattice_failure(
         const silex::detail::FactorBaseHonestyFailure& failure,
         slong p) noexcept {
-    return failure.recorded && failure.p == p &&
+    return failure.recorded && sflint::fmpz_equal_si(failure.p, p) &&
            failure.residue_degree == 1 && !failure.direct_witness_search &&
            failure.stage == search::kFactorBaseHonestyEscalationStages &&
            failure.max_stage == search::kFactorBaseHonestyEscalationStages &&
@@ -1403,8 +1404,6 @@ int test_later_attempt_clears_honesty_failure() {
                 earlier.audit.factor_base_honesty_failure, 3)) {
         return 1;
     }
-    const silex::detail::FactorBaseHonestyFailure recorded =
-            earlier.audit.factor_base_honesty_failure;
     using Access = silex::detail::ClassGroupRelationSearchAccess;
 
     FieldSetup setup = imaginary_quadratic_fixture(21);
@@ -1425,7 +1424,10 @@ int test_later_attempt_clears_honesty_failure() {
     const bool extension_cleared =
             !extended && !earlier.audit.factor_base_honesty_failure.recorded;
 
-    Access::record_factor_base_honesty_failure(context, recorded);
+    silex::detail::FactorBaseHonestyFailure present;
+    present.recorded = true;
+    sflint::fmpz_set_si(sflint::FmpzRef(present.p), 3);
+    Access::record_factor_base_honesty_failure(context, std::move(present));
     silex::detail::ClassGroupRelationOptions invalid_options = options;
     invalid_options.coordinate_search_radius = 0;
     const bool rejected = Access::compute_relation_candidate(
@@ -1456,7 +1458,8 @@ std::string failure_detail_json(
 
 // failure_detail names the unwitnessed prime and the final stage's caps when
 // the reason is factor_base_honesty_unwitnessed: the lattice caps the real
-// checkpoint recorded, or the T2 caps of a T2 record.  It is null for any
+// checkpoint recorded, or the T2 caps of a T2 record.  The prime is a
+// decimal string, small or beyond a machine word, never a number or null.  It is null for any
 // other reason, even with a record present, and with no reason.
 int test_failure_detail_json() {
     HonestyCheckpointRun terminal;
@@ -1470,7 +1473,7 @@ int test_failure_detail_json() {
     const bool lattice =
             failure_detail_json(report) ==
             "{\n"
-            "    \"p\": 3,\n"
+            "    \"p\": \"3\",\n"
             "    \"residue_degree\": 1,\n"
             "    \"search\": \"lattice\",\n"
             "    \"stage\": 3,\n"
@@ -1482,7 +1485,11 @@ int test_failure_detail_json() {
 
     silex::detail::FactorBaseHonestyFailure& failure =
             report.factor_base_honesty_failure;
-    failure.p = -1;
+    // 2^89 - 1, a prime beyond any machine word, prints in full.
+    if (!sflint::fmpz_set_str(sflint::FmpzRef(failure.p),
+                              "618970019642690137449562111")) {
+        return 1;
+    }
     failure.residue_degree = 2;
     failure.direct_witness_search = true;
     failure.stage = 1;
@@ -1493,7 +1500,7 @@ int test_failure_detail_json() {
     const bool t2 =
             failure_detail_json(report) ==
             "{\n"
-            "    \"p\": null,\n"
+            "    \"p\": \"618970019642690137449562111\",\n"
             "    \"residue_degree\": 2,\n"
             "    \"search\": \"t2\",\n"
             "    \"stage\": 1,\n"

@@ -351,7 +351,7 @@ public:
     // without a transaction.
     static void record_factor_base_honesty_failure(
             ClassGroupContext& context,
-            const FactorBaseHonestyFailure& failure) noexcept;
+            FactorBaseHonestyFailure&& failure) noexcept;
     static void clear_factor_base_honesty_failure(
             ClassGroupContext& context) noexcept;
 

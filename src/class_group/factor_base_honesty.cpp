@@ -923,7 +923,7 @@ bool factor_base_honest_for_rational_prime(bool& honest,
         if (audit != nullptr) {
             FactorBaseHonestyFailure& failure = audit->unwitnessed;
             failure.recorded = true;
-            failure.p = flint::fmpz_fits_si(p) ? flint::fmpz_get_si(p) : -1;
+            flint::fmpz_set(flint::FmpzRef(failure.p), p);
             failure.residue_degree = prime->residue_degree();
             failure.direct_witness_search = use_direct_required_prime_witness;
             failure.stage = effort.stage;

@@ -360,7 +360,7 @@ AnalyticFinishDecision apply_honesty_check(
     // The escalated search is exhausted and the route ends here; name the
     // prime and caps in the class/unit transaction report, if any.
     ClassGroupRelationSearchAccess::record_factor_base_honesty_failure(
-            context, scan_audit.unwitnessed);
+            context, std::move(scan_audit.unwitnessed));
     return AnalyticFinishDecision::failed;
 }
 

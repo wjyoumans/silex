@@ -1,5 +1,7 @@
 #pragma once
 
+#include <silex/flint/fmpz.hpp>
+
 #include <flint/flint.h>
 
 namespace silex::detail {
@@ -9,12 +11,11 @@ namespace silex::detail {
 // allowed, and that stage's caps.  The lattice route uses radius,
 // max_twists and random_tries; the T2 route uses random_tries,
 // factor_attempts and element_steps.  The relation-search honesty
-// checkpoint copies it into a class/unit transaction report when the
-// failure ends the candidate attempt.
+// checkpoint moves it into a class/unit transaction report when the
+// failure ends the candidate attempt.  It is move-only, as its prime is.
 struct FactorBaseHonestyFailure {
     bool recorded = false;
-    // -1 when p does not fit a slong, as in the detail log line.
-    slong p = 0;
+    flint::Fmpz p;
     slong residue_degree = 0;
     bool direct_witness_search = false;
     slong stage = 0;
