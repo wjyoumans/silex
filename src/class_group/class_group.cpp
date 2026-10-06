@@ -9682,7 +9682,10 @@ bool ClassGroupContext::try_certify_trivial_quotient(
         return false;
     }
 
+    // With h = 1 no prime needs a saturation record, so the ell-records and
+    // the proof records behind them are both cleared.
     private_storage_->relation_saturation_records.clear();
+    private_storage_->relation_saturation_proof_records.clear();
     relation_saturation_status_ = ProofState::verified;
     if (factor_base_generation_checked_status_ ==
                 ProofState::verified &&
@@ -9737,10 +9740,11 @@ bool ClassGroupContext::try_certify_quadratic(
     // Generation to the required bound and h_cand = 1 give h | 1, so h = 1
     // without any units.  No unit group was proven here, so the unit and
     // regulator proof states are left as they were.  With h = 1 no prime
-    // needs a saturation record, so stale records are cleared as in
-    // try_certify_trivial_quotient.
+    // needs a saturation record, so stale ell-records and proof records are
+    // cleared as in try_certify_trivial_quotient.
     if (private_storage_ != nullptr) {
         private_storage_->relation_saturation_records.clear();
+        private_storage_->relation_saturation_proof_records.clear();
     }
     certification_ = CertificationMode::proven;
     relation_saturation_status_ = ProofState::verified;
