@@ -136,17 +136,19 @@ bool publish_s_class_storage(
 //     R_S = R * [Z^S : v(U_S)] * prod_{P in S} log N(P),
 //
 // and the exact sequence U -> U_S -> Z^S -> Cl -> Cl_S -> 0 (Cohen, GTM 193,
-// Prop. 7.4.7) gives [Z^S : v(U_S)] = |<S> in Cl| = h / h_S.  This is
-// Bernard and Roux-Langlois, Twisted-PHS (ASIACRYPT 2020), Prop. 2.2, and
-// Bernard's thesis (Rennes 2022), Def. 2.5 and Prop. 2.6.  The index is
-// taken exactly as |det| of the published nonunit valuation HNF, whose rows
-// are v(g_i) for the nonunit generators and span v(U_S).
+// Props. 7.4.4 and 7.4.7) gives [Z^S : v(U_S)] = |<S> in Cl| = h / h_S.
+// This is Bernard and Roux-Langlois, Twisted-PHS (ASIACRYPT 2020),
+// Prop. 2.2, and Bernard's thesis (Rennes 2022), Def. 2.5 and Prop. 2.6.
+// The index is taken exactly as |det| of the published nonunit valuation
+// HNF, whose rows are v(g_i) for the nonunit generators and span v(U_S),
+// and is checked against h / h_S before use: a mismatch fails.
 //
 // The reference bnfsunit (bnfunits.c:217-233) instead returns
 // R * h_S * prod log N(P), which equals R_S * h_S^2 / h and agrees with R_S
 // only when h = h_S^2.
 bool compute_s_regulator(flint::Arb& out,
                          const detail::SUnitClassContext& context,
+                         const ClassGroupContext& class_group,
                          const OrderUnitGroup& ordinary_units,
                          slong precision) noexcept {
     if (precision <= 0 || !ordinary_units.regulator(flint::ArbRef(out)) ||
@@ -171,6 +173,21 @@ bool compute_s_regulator(flint::Arb& out,
     flint::fmpz_abs(flint::FmpzRef(valuation_index),
                     flint::FmpzConstRef(valuation_index));
     if (flint::fmpz_sgn(flint::FmpzConstRef(valuation_index)) <= 0) {
+        return false;
+    }
+    // [Z^S : v(U_S)] * h_S must equal h (Cohen, GTM 193, Prop. 7.4.4).
+    flint::Fmpz class_number;
+    flint::Fmpz index_times_s_class_number;
+    if (!class_group.order(flint::FmpzRef(class_number)) ||
+        !context.s_class_group.order(
+                flint::FmpzRef(index_times_s_class_number))) {
+        return false;
+    }
+    flint::fmpz_mul(flint::FmpzRef(index_times_s_class_number),
+                    flint::FmpzConstRef(index_times_s_class_number),
+                    flint::FmpzConstRef(valuation_index));
+    if (!flint::fmpz_equal(flint::FmpzConstRef(index_times_s_class_number),
+                           flint::FmpzConstRef(class_number))) {
         return false;
     }
     flint::arb_mul_fmpz(out, out, flint::FmpzConstRef(valuation_index),
@@ -230,8 +247,8 @@ bool publish_s_unit_storage(
     flint::fmpz_mat_set(flint::FmpzMatRef(out.nonunit_valuations),
                         flint::FmpzMatConstRef(context.valuation_rows));
     failure_stage = SUnitComputeStage::s_regulator;
-    if (!compute_s_regulator(out.regulator, context, ordinary_units,
-                             options.regulator_precision)) {
+    if (!compute_s_regulator(out.regulator, context, class_group,
+                             ordinary_units, options.regulator_precision)) {
         return false;
     }
 
