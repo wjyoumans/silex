@@ -11,6 +11,7 @@
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_field.hpp>
 #include <silex/signature.hpp>
+#include <silex/unit.hpp>
 #include <silex/zeta.hpp>
 
 #include "class_group/class_group_certification_internal.hpp"
@@ -2553,6 +2554,266 @@ int test_dependent_relation_rational_candidate() {
             found, wrong, coordinates, 1000));
     assert(!silex::detail::dependent_relation_rational_candidate(
             found, candidate, coordinates, 0));
+    return 0;
+}
+
+int test_dependent_relation_denominator_step() {
+    sflint::ArbMat coordinates(2, 1);
+    bool possible = false;
+    slong step = 0;
+
+    // Narrow balls around 3/7 and 5/14: only multiples of 14 can pass the
+    // scan's integer test.
+    set_arb_coordinate(coordinates, 0, 3, 7, -100);
+    set_arb_coordinate(coordinates, 1, 5, 14, -100);
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 128));
+    assert(possible);
+    assert(step == 14);
+
+    // The same balls with bound 13: no m <= 13 is a multiple of 14.
+    possible = true;
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 13, 128));
+    assert(!possible);
+
+    // A ball around 1/1009 with bound 1000 holds no rational with a
+    // denominator <= 1000.
+    set_arb_coordinate(coordinates, 0, 1, 1009, -100);
+    set_arb_coordinate(coordinates, 1, 0, 1, -100);
+    possible = true;
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 1000, 128));
+    assert(!possible);
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 1009, 128));
+    assert(possible);
+    assert(step == 1009);
+
+    // Only narrow balls constrain the step: the ball 1/2 +- 1/4 holds 1/3,
+    // 2/5, 3/5, ..., so it determines nothing.
+    set_arb_coordinate(coordinates, 0, 1, 3, -100);
+    set_arb_coordinate(coordinates, 1, 1, 2, -2);
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 50, 128));
+    assert(possible);
+    assert(step == 3);
+
+    // No narrow ball: every denominator stays a candidate.
+    set_arb_coordinate(coordinates, 0, 1, 3, -4);
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 50, 128));
+    assert(possible);
+    assert(step == 1);
+
+    // The rounding margin of the scaled balls widens the balls by about
+    // |x| 2^(8 - precision): at 12 bits the 2^-100 ball around 3/7 is no
+    // longer narrow for bound 20.
+    set_arb_coordinate(coordinates, 0, 3, 7, -100);
+    set_arb_coordinate(coordinates, 1, 0, 1, -100);
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 128));
+    assert(possible);
+    assert(step == 7);
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 12));
+    assert(possible);
+    assert(step == 1);
+
+    // Shape and argument errors fail.
+    sflint::ArbMat wide(2, 2);
+    assert(!silex::detail::dependent_relation_denominator_step(
+            possible, step, wide, 20, 128));
+    assert(!silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 0, 128));
+    assert(!silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 0));
+    return 0;
+}
+
+struct ScopeCounter {
+    const char* label = nullptr;
+    slong count = 0;
+};
+
+void scope_begin_callback(void* user,
+                          silex::DiagnosticsModule,
+                          silex::ProfileEvent event,
+                          const char*,
+                          const char* label) noexcept {
+    ScopeCounter* counter = static_cast<ScopeCounter*>(user);
+    if (event == silex::ProfileEvent::begin_scope && label != nullptr &&
+        std::strcmp(label, counter->label) == 0) {
+        ++counter->count;
+    }
+}
+
+// The bounded dependent-relation search (set_relation_kernel_units_bounded)
+// tries only the denominators that can pass its integer test, in the order
+// of the full scan from min_denominator, and recovers the same relations.
+int test_dependent_relation_min_denominator_scan() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+    silex::FactoredElement y(field);
+    assert(y.set_element(epsilon));
+
+    const auto group_of_power = [&](silex::OrderUnitGroup& group,
+                                    slong exponent) {
+        silex::FactoredElement generator(field);
+        assert(generator.push(epsilon, exponent));
+        silex::FactoredElement generators[] = {std::move(generator)};
+        assert(silex::detail::order_unit_group_set_units_internal(
+                group, order, silex::FactoredElementSpan(generators, 1),
+                embeddings, 128, true));
+    };
+    const auto search = [&](bool& recovered, sflint::FmpzMat& rel,
+                            const silex::OrderUnitGroup& group,
+                            const silex::FactoredElement& value,
+                            slong bound) {
+        silex::FactoredElement root(field);
+        sflint::Fmpz torsion_exp;
+        sflint::Fmpz denominator_bound;
+        assert(set_fmpz_si(denominator_bound, bound));
+        return silex::detail::dependent_relation_bounded_min_denominator(
+                recovered, root, rel, torsion_exp, group, value, embeddings,
+                sflint::FmpzConstRef(denominator_bound), 2, 128, 128, false,
+                false);
+    };
+
+    // <epsilon^1009>: epsilon has coordinate 1/1009, so the scan from 2
+    // reaches its first candidate at 1009 and tries no other denominator.
+    {
+        silex::OrderUnitGroup group(order);
+        group_of_power(group, 1009);
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        ScopeCounter counter;
+        counter.label = "unit_group.dependent_relation_try_denominator";
+        silex::diagnostics_set_profiling(
+                diagnostics, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::unit_group),
+                scope_begin_callback, &counter);
+        group.set_diagnostics(&diagnostics);
+        bool recovered = false;
+        sflint::FmpzMat rel(1, 2);
+        assert(search(recovered, rel, group, y, 2000));
+        assert(recovered);
+        const slong expected[] = {-1, 1009};
+        assert(candidate_row_equals(rel, expected, 2));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(counter.count == 1);
+#else
+        assert(counter.count == 0);
+#endif
+        group.set_diagnostics(nullptr);
+
+        // Bound 1008 admits no candidate, so nothing is recovered.
+        recovered = true;
+        assert(search(recovered, rel, group, y, 1008));
+        assert(!recovered);
+    }
+
+    // <epsilon^1000000007> with bound 1000000007: one candidate, where the
+    // full scan tried about 10^9 denominators.
+    {
+        silex::OrderUnitGroup group(order);
+        group_of_power(group, 1000000007);
+        bool recovered = false;
+        sflint::FmpzMat rel(1, 2);
+        assert(search(recovered, rel, group, y, 1000000007));
+        assert(recovered);
+        const slong expected[] = {-1, 1000000007};
+        assert(candidate_row_equals(rel, expected, 2));
+    }
+
+    // y = epsilon^3 in <epsilon>: the coordinate 3 is integral, and the
+    // scan starts at min_denominator 2, so it recovers (-6, 2) as before.
+    {
+        silex::OrderUnitGroup group(order);
+        group_of_power(group, 1);
+        silex::FactoredElement cube(field);
+        assert(cube.push(epsilon, 3));
+        bool recovered = false;
+        sflint::FmpzMat rel(1, 2);
+        assert(search(recovered, rel, group, cube, 50));
+        assert(recovered);
+        const slong expected[] = {-6, 2};
+        assert(candidate_row_equals(rel, expected, 2));
+    }
+    return 0;
+}
+
+// rank_zero_torsion returns the first root-of-unity power of largest order
+// lying in the order, with consistent element and coordinates.
+int test_rank_zero_torsion_generators() {
+    const auto check = [](const silex::Order& order, slong expected_order,
+                          slong root_power) {
+        const silex::NumberField* field = order.parent();
+        assert(field != nullptr);
+        sflint::Fmpz torsion_order;
+        silex::OrderElement generator(order);
+        assert(silex::detail::rank_zero_torsion(
+                sflint::FmpzRef(torsion_order), generator, order));
+        assert(sflint::fmpz_equal_si(torsion_order, expected_order));
+
+        sflint::Fmpz field_order;
+        silex::Element root(*field);
+        assert(silex::roots_of_unity(sflint::FmpzRef(field_order), root,
+                                     *field));
+        silex::Element expected(*field);
+        assert(silex::detail::compute_power(expected, root, root_power));
+        silex::Element value(*field);
+        assert(generator.get_element(value));
+        assert(value.equal(expected));
+
+        silex::OrderElement reference(order);
+        assert(reference.set_element(expected));
+        sflint::FmpzMat coordinates(1, order.degree());
+        sflint::FmpzMat reference_coordinates(1, order.degree());
+        assert(generator.get_coordinates(sflint::FmpzMatRef(coordinates)));
+        assert(reference.get_coordinates(
+                sflint::FmpzMatRef(reference_coordinates)));
+        assert(::fmpz_mat_equal(coordinates.raw(),
+                                reference_coordinates.raw()) != 0);
+    };
+
+    silex::NumberField rational = degree_one_field();
+    silex::Order rational_order;
+    rational_order = silex::test::equation_order(rational);
+    check(rational_order, 2, 1);
+
+    silex::NumberField sqrt2 = quadratic_field(2);
+    silex::Order sqrt2_order;
+    sqrt2_order = silex::test::equation_order(sqrt2);
+    check(sqrt2_order, 2, 1);
+
+    silex::NumberField gaussian = quadratic_field(-1);
+    silex::Order gaussian_order;
+    gaussian_order = silex::test::equation_order(gaussian);
+    check(gaussian_order, 4, 1);
+
+    // Z[sqrt(-3)] misses the primitive sixth and third roots of unity, so
+    // the first power in the order is the third, -1.
+    silex::NumberField eisenstein = quadratic_field(-3);
+    silex::Order equation;
+    equation = silex::test::equation_order(eisenstein);
+    assert(!equation.is_maximal());
+    check(equation, 2, 3);
+    silex::Order maximal(eisenstein);
+    assert(maximal.maximal_order(equation));
+    assert(maximal.is_maximal());
+    check(maximal, 6, 1);
+
+    silex::NumberField zeta8 = quartic_field(0, 0, 0, 1);
+    silex::Order zeta8_order;
+    zeta8_order = silex::test::equation_order(zeta8);
+    check(zeta8_order, 8, 1);
     return 0;
 }
 
@@ -7409,6 +7670,9 @@ int main() {
     test_saturate_row_real_quadratic_square();
     test_saturate_row_no_root_and_divisible_copy();
     test_dependent_relation_rational_candidate();
+    test_dependent_relation_denominator_step();
+    test_dependent_relation_min_denominator_scan();
+    test_rank_zero_torsion_generators();
     test_add_dependent_unit_large_denominator();
     test_dependent_relation_wrong_simplest_rational_rejected();
     test_add_dependent_unit_precision_cap();

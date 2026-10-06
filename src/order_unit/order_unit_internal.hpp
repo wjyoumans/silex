@@ -574,6 +574,17 @@ bool dependent_relation_bounded_min_denominator(
         slong max_precision,
         bool require_y_root,
         bool require_torsion_exponent) noexcept;
+// Denominator filter for the dependent-relation scan at `precision`:
+// possible is false when no m in 1..denominator_bound can give integers in
+// every ball of m * coordinate (the scan's integer test, rounding included),
+// and otherwise every such m is a multiple of step.  step is the lcm of the
+// denominators of the simplest rationals in those coordinate balls that are
+// narrow enough to determine them (step 1 when none is).
+bool dependent_relation_denominator_step(bool& possible,
+                                         slong& step,
+                                         const flint::ArbMat& coordinates,
+                                         slong denominator_bound,
+                                         slong precision) noexcept;
 // Candidate relation (-a_1, ..., -a_r, m) with a_i / m the simplest
 // rational inside coordinate ball i and m <= denominator_bound, following
 // reference Unit/Relation.jl `_find_rational_relation!`.  found is false when

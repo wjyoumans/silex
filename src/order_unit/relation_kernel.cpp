@@ -1828,6 +1828,119 @@ bool try_denominator(bool& recovered,
             candidate, require_y_root, require_torsion_exponent);
 }
 
+namespace {
+
+// Exact endpoints lower / scale <= upper / scale of a finite ball, scale a
+// positive power of two.  False when the ball is not finite or its exponent
+// does not fit a slong.
+bool ball_rational_interval(flint::Fmpz& lower,
+                            flint::Fmpz& upper,
+                            flint::Fmpz& scale,
+                            const arb_struct* ball) noexcept {
+    if (!arb_is_finite(ball)) {
+        return false;
+    }
+    flint::Fmpz exponent;
+    arb_get_interval_fmpz_2exp(lower.raw(), upper.raw(), exponent.raw(),
+                               ball);
+    if (!flint::fmpz_fits_si(flint::FmpzConstRef(exponent))) {
+        return false;
+    }
+    const slong shift = flint::fmpz_get_si(flint::FmpzConstRef(exponent));
+    flint::fmpz_one(flint::FmpzRef(scale));
+    if (shift >= 0) {
+        fmpz_mul_2exp(lower.raw(), lower.raw(),
+                      static_cast<flint_bitcnt_t>(shift));
+        fmpz_mul_2exp(upper.raw(), upper.raw(),
+                      static_cast<flint_bitcnt_t>(shift));
+    } else {
+        fmpz_mul_2exp(scale.raw(), scale.raw(),
+                      static_cast<flint_bitcnt_t>(-shift));
+    }
+    return true;
+}
+
+}  // namespace
+
+bool dependent_relation_denominator_step(bool& possible,
+                                         slong& step,
+                                         const flint::ArbMat& coordinates,
+                                         slong denominator_bound,
+                                         slong precision) noexcept {
+    possible = true;
+    step = 1;
+    const slong rank = flint::arb_mat_nrows_value(coordinates);
+    if (rank <= 0 || flint::arb_mat_ncols_value(coordinates) != 1 ||
+        denominator_bound <= 0 || precision <= 0) {
+        return false;
+    }
+
+    // This only skips denominators that the scan below would skip anyway;
+    // it never accepts one.  try_denominator(m) needs every ball of
+    // m * coordinate (arb_mat_scalar_mul_si at `precision`) to contain an
+    // integer k.  That ball lies in m * E, where E is the coordinate ball
+    // x +- r widened to radius 2 r + (|x| + r) 2^(8 - precision): FLINT
+    // arb_mul_arf rounds the midpoint m x by less than one ulp
+    // (<= m |x| 2^(1 - precision)) and adds that ulp to the radius m r,
+    // which three upward mag roundings enlarge by a factor below
+    // 1 + 2^-27.  So k / m lies in E.
+    // When E is narrower than 1 / bound^2 it holds at most one rational with
+    // denominator <= bound (two differ by at least 1 / bound^2), and then
+    // that rational is the simplest one in E (the one with least
+    // denominator, FLINT `_fmpq_simplest_between`).  Its denominator q must
+    // divide every such m <= bound, and if q > bound no m qualifies.  The
+    // same simplest-rational reconstruction is the reference
+    // Unit/Relation.jl `_find_rational_relation!`; here it only narrows the
+    // denominators that the unchanged exact scan tries.
+    const ulong bound = static_cast<ulong>(denominator_bound);
+    flint::Arb enlarged;
+    flint::Arb scratch;
+    flint::Fmpz lower;
+    flint::Fmpz upper;
+    flint::Fmpz scale;
+    flint::Fmpz width;
+    flint::Fmpq simplest;
+    flint::Fmpz common;
+    flint::fmpz_one(flint::FmpzRef(common));
+    for (slong i = 0; i < rank; ++i) {
+        const arb_struct* entry = arb_mat_entry(coordinates.raw(), i, 0);
+        if (!arb_is_finite(entry)) {
+            continue;
+        }
+        arb_set(enlarged.raw(), entry);
+        mag_mul_2exp_si(arb_radref(enlarged.raw()),
+                        arb_radref(enlarged.raw()), 1);
+        arb_get_mag(arb_radref(scratch.raw()), entry);
+        mag_mul_2exp_si(arb_radref(scratch.raw()), arb_radref(scratch.raw()),
+                        8 - precision);
+        mag_add(arb_radref(enlarged.raw()), arb_radref(enlarged.raw()),
+                arb_radref(scratch.raw()));
+        if (!ball_rational_interval(lower, upper, scale, enlarged.raw())) {
+            continue;
+        }
+
+        // Narrow: (upper - lower) / scale < 1 / bound^2.
+        fmpz_sub(width.raw(), upper.raw(), lower.raw());
+        fmpz_mul_ui(width.raw(), width.raw(), bound);
+        fmpz_mul_ui(width.raw(), width.raw(), bound);
+        if (fmpz_cmp(width.raw(), scale.raw()) >= 0) {
+            continue;
+        }
+
+        _fmpq_simplest_between(fmpq_numref(simplest.raw()),
+                               fmpq_denref(simplest.raw()), lower.raw(),
+                               scale.raw(), upper.raw(), scale.raw());
+        fmpz_lcm(common.raw(), common.raw(), fmpq_denref(simplest.raw()));
+        if (fmpz_cmp_ui(common.raw(), bound) > 0) {
+            possible = false;
+            return true;
+        }
+    }
+
+    step = flint::fmpz_get_si(flint::FmpzConstRef(common));
+    return true;
+}
+
 bool find_dependent_relation_at_precision(bool& recovered,
                                           FactoredElement& root,
                                           flint::FmpzMat& rel,
@@ -1890,7 +2003,35 @@ bool find_dependent_relation_at_precision(bool& recovered,
         SILEX_PROFILE_SCOPE(group.diagnostics(),
                             DiagnosticsModule::unit_group,
                             "unit_group.dependent_relation_denominator_scan");
-        for (slong m = min_denominator; m <= denominator_bound; ++m) {
+        // The scan tries m = min_denominator, ..., denominator_bound in
+        // order.  dependent_relation_denominator_step shows that only
+        // multiples of `step` can pass try_denominator's integer test, so
+        // the others are skipped; the denominators tried, their order and
+        // the exact checks are those of the full scan.
+        bool possible = true;
+        slong step = 1;
+        if (!dependent_relation_denominator_step(possible, step, coordinates,
+                                                 denominator_bound,
+                                                 precision)) {
+            return false;
+        }
+        if (!possible) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.dependent_relation_denominator_scan.empty");
+            recovered = false;
+            return true;
+        }
+        slong m = min_denominator;
+        const slong remainder = m % step;
+        if (remainder != 0) {
+            if (m > denominator_bound - (step - remainder)) {
+                recovered = false;
+                return true;
+            }
+            m += step - remainder;
+        }
+        while (m <= denominator_bound) {
             if (!try_denominator(recovered, root, rel, torsion_exp, group, y,
                                  embeddings, coordinates, m, precision,
                                  require_y_root, require_torsion_exponent)) {
@@ -1899,6 +2040,10 @@ bool find_dependent_relation_at_precision(bool& recovered,
             if (recovered) {
                 return true;
             }
+            if (m > denominator_bound - step) {
+                break;
+            }
+            m += step;
         }
     }
 
@@ -1937,32 +2082,15 @@ bool dependent_relation_rational_candidate(bool& found,
     std::vector<flint::Fmpq> approximations(static_cast<std::size_t>(rank));
     flint::Fmpz lower;
     flint::Fmpz upper;
-    flint::Fmpz exponent;
     flint::Fmpz scale;
     flint::Fmpz common;
     flint::fmpz_one(flint::FmpzRef(common));
     for (slong i = 0; i < rank; ++i) {
         const arb_struct* entry = arb_mat_entry(coordinates.raw(), i, 0);
         if (!arb_is_finite(entry) ||
-            mag_cmp_2exp_si(arb_radref(entry), 0) > 0) {
+            mag_cmp_2exp_si(arb_radref(entry), 0) > 0 ||
+            !ball_rational_interval(lower, upper, scale, entry)) {
             return true;
-        }
-
-        arb_get_interval_fmpz_2exp(lower.raw(), upper.raw(), exponent.raw(),
-                                   entry);
-        if (!flint::fmpz_fits_si(flint::FmpzConstRef(exponent))) {
-            return true;
-        }
-        const slong shift = flint::fmpz_get_si(flint::FmpzConstRef(exponent));
-        flint::fmpz_one(flint::FmpzRef(scale));
-        if (shift >= 0) {
-            fmpz_mul_2exp(lower.raw(), lower.raw(),
-                          static_cast<flint_bitcnt_t>(shift));
-            fmpz_mul_2exp(upper.raw(), upper.raw(),
-                          static_cast<flint_bitcnt_t>(shift));
-        } else {
-            fmpz_mul_2exp(scale.raw(), scale.raw(),
-                          static_cast<flint_bitcnt_t>(-shift));
         }
 
         flint::Fmpq& approximation =
