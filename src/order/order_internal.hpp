@@ -4,6 +4,26 @@
 
 namespace silex::detail {
 
+// Conductor {x in order : x * overorder is contained in order} of `order` in
+// an overorder, as an ideal of `order`.  `out` must already be defined over
+// `order` (same order data); it keeps that parent.  Fails, leaving `out`
+// unchanged, when the orders lie in different fields or `order` is not
+// contained in `overorder`.  Port of reference v0.38.6
+// src/NumFieldOrd/NfOrd/NfOrd.jl:1488 `conductor(R, S)`; see conductor.cpp.
+bool order_conductor(Ideal& out,
+                     const Order& order,
+                     const Order& overorder) noexcept;
+
+// Contraction of an ideal of an overorder to a suborder: `ideal` intersected
+// with `suborder`, as an ideal of `suborder`.  `out` must already be defined
+// over `suborder`; it keeps that parent.  Fails, leaving `out` unchanged,
+// when `suborder` is not contained in the ideal's order.  Port of reference
+// v0.38.6 src/NumFieldOrd/NfOrd/Ideal/Arithmetic.jl:952 `contract(A, O)`;
+// see conductor.cpp.
+bool ideal_contract(Ideal& out,
+                    const Ideal& ideal,
+                    const Order& suborder) noexcept;
+
 inline bool order_has_parented_basis(const Order& order) noexcept {
     return order.is_defined() && order.has_basis() && order.parent() != nullptr;
 }

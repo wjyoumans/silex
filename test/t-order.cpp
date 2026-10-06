@@ -1,8 +1,13 @@
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/ideal.hpp>
 #include <silex/order.hpp>
 
+#include "order/order_internal.hpp"
 #include "test_support.hpp"
+
+#include <flint/fmpz.h>
+#include <flint/fmpz_mat.h>
 
 #include <cassert>
 #include <utility>
@@ -754,6 +759,192 @@ int test_maximality_is_only_computed() {
     return 0;
 }
 
+// Ideal of `order` whose basis rows, in coordinates of `order`, are `rows`
+// (row-major, degree x degree).
+silex::Ideal ideal_from_rows(const silex::Order& order,
+                             const slong* rows) noexcept {
+    const slong n = order.degree();
+    sflint::FmpzMat matrix(n, n);
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            ::fmpz_set_si(fmpz_mat_entry(matrix.raw(), i, j), rows[i * n + j]);
+        }
+    }
+    silex::Ideal out(order);
+    assert(out.set_hnf(sflint::FmpzMatConstRef(matrix)));
+    return out;
+}
+
+// f * O as an ideal of O.
+silex::Ideal scalar_ideal(const silex::Order& order, slong scalar) noexcept {
+    const slong n = order.degree();
+    sflint::FmpzMat matrix(n, n);
+    for (slong i = 0; i < n; ++i) {
+        ::fmpz_set_si(fmpz_mat_entry(matrix.raw(), i, i), scalar);
+    }
+    silex::Ideal out(order);
+    assert(out.set_hnf(sflint::FmpzMatConstRef(matrix)));
+    return out;
+}
+
+// For Z + f*O_K the conductor in O_K is f*O_K.  Check the general conductor
+// against Order::quadratic_conductor and against the contraction of f*O_K.
+void check_quadratic_conductor(slong radicand, slong conductor) noexcept {
+    silex::NumberField field = quadratic_field(radicand);
+    sflint::Fmpz f;
+    sflint::fmpz_set_si(sflint::FmpzRef(f), conductor);
+    silex::Order order =
+            silex::Order::quadratic_order(field, sflint::FmpzConstRef(f));
+    assert(order.is_defined());
+    sflint::Fmpz recorded;
+    assert(order.quadratic_conductor(sflint::FmpzRef(recorded)));
+    assert(sflint::fmpz_equal_si(recorded, conductor));
+
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(order));
+
+    silex::Ideal general(order);
+    assert(silex::detail::order_conductor(general, order, maximal));
+    assert(general.parent()->has_same_data(order));
+
+    silex::Ideal expected(order);
+    assert(silex::detail::ideal_contract(
+            expected, scalar_ideal(maximal, sflint::fmpz_get_si(recorded)),
+            order));
+    assert(general.equal(expected));
+
+    // [R : f O_K] = [O_K : f O_K] / [O_K : R] = f^2 / f.
+    sflint::Fmpz norm;
+    assert(general.norm(sflint::FmpzRef(norm)));
+    assert(sflint::fmpz_equal_si(norm, conductor));
+}
+
+int test_general_conductor_quadratic() {
+    check_quadratic_conductor(5, 2);   // Z[sqrt(5)]: f = 2 O_K
+    check_quadratic_conductor(2, 3);   // Z[3 sqrt(2)]: f = 3 O_K
+    check_quadratic_conductor(5, 1);
+    check_quadratic_conductor(5, 6);
+    check_quadratic_conductor(2, 1);
+    check_quadratic_conductor(-1, 4);
+    check_quadratic_conductor(-3, 2);
+    check_quadratic_conductor(-3, 5);
+    check_quadratic_conductor(13, 3);
+    check_quadratic_conductor(-7, 6);
+
+    // Z[sqrt(5)] is the equation order; f = 2 O_K there as well.
+    silex::NumberField field = quadratic_field(5);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    silex::Ideal conductor(equation);
+    assert(silex::detail::order_conductor(conductor, equation, maximal));
+    silex::Ideal expected(equation);
+    assert(silex::detail::ideal_contract(expected, scalar_ideal(maximal, 2),
+                                         equation));
+    assert(conductor.equal(expected));
+
+    // The conductor of an order in itself is the unit ideal, and contraction
+    // to the ideal's own order is a copy.
+    silex::Ideal self(maximal);
+    assert(silex::detail::order_conductor(self, maximal, maximal));
+    assert(self.is_one());
+    silex::Ideal copied(maximal);
+    silex::Ideal two = scalar_ideal(maximal, 2);
+    assert(silex::detail::ideal_contract(copied, two, maximal));
+    assert(copied.equal(two));
+    return 0;
+}
+
+// Cubic equation orders against the external reference GP 2.17.4.  For
+// Z[alpha] the conductor is f'(alpha) times the inverse different, and the
+// gp values below were computed with:
+//   f(p)={my(nf=nfinit(p),F,B);
+//     F=idealdiv(nf,deriv(nf.pol),nf.diff);
+//     B=matrix(3,3,i,j,polcoeff(lift(nfbasistoalg(nf,F[,j])),i-1));
+//     print(F," ",mathnf(B));}
+//   f(x^3-x-216)  -> F = [2,1,0;0,1,0;0,0,2] on nf.zk,
+//                    mathnf(B) = [2,1,1;0,1,0;0,0,1]
+//   f(x^3-54)     -> F = 9 * identity on nf.zk (F = 9 O_K),
+//                    mathnf(B) = [9,0,0;0,3,0;0,0,1]
+// mathnf(B) holds the conductor's generators as columns in power-basis
+// coordinates, which are the coordinates of the equation order; the rows
+// below are its columns.
+int test_general_conductor_cubic() {
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, -216);
+        silex::NumberField field = field_by_polynomial(polynomial);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+
+        silex::Ideal conductor(equation);
+        assert(silex::detail::order_conductor(conductor, equation, maximal));
+        const slong gp_rows[9] = {2, 0, 0, 1, 1, 0, 1, 0, 1};
+        assert(conductor.equal(ideal_from_rows(equation, gp_rows)));
+        sflint::Fmpz norm;
+        assert(conductor.norm(sflint::FmpzRef(norm)));
+        assert(sflint::fmpz_equal_si(norm, 2));
+    }
+    {
+        sflint::FmpqPoly polynomial;
+        poly_x3_minus(polynomial, 54);
+        silex::NumberField field = field_by_polynomial(polynomial);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+
+        silex::Ideal conductor(equation);
+        assert(silex::detail::order_conductor(conductor, equation, maximal));
+        const slong gp_rows[9] = {9, 0, 0, 0, 3, 0, 0, 0, 1};
+        assert(conductor.equal(ideal_from_rows(equation, gp_rows)));
+
+        silex::Ideal contracted(equation);
+        assert(silex::detail::ideal_contract(
+                contracted, scalar_ideal(maximal, 9), equation));
+        assert(conductor.equal(contracted));
+    }
+    return 0;
+}
+
+int test_conductor_and_contraction_failures() {
+    silex::NumberField field = quadratic_field(5);
+    sflint::Fmpz two;
+    sflint::fmpz_set_si(sflint::FmpzRef(two), 2);
+    silex::Order order =
+            silex::Order::quadratic_order(field, sflint::FmpzConstRef(two));
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(order));
+
+    // O_K is not contained in Z[sqrt(5)]: both routines fail and leave the
+    // output unchanged.
+    silex::Ideal out = scalar_ideal(maximal, 3);
+    silex::Ideal before = scalar_ideal(maximal, 3);
+    assert(!silex::detail::order_conductor(out, maximal, order));
+    assert(out.equal(before));
+    silex::Ideal two_order = scalar_ideal(order, 2);
+    assert(!silex::detail::ideal_contract(out, two_order, maximal));
+    assert(out.equal(before));
+
+    // The output must already be defined over the order it is an ideal of.
+    silex::Ideal wrong_parent = scalar_ideal(maximal, 3);
+    assert(!silex::detail::order_conductor(wrong_parent, order, maximal));
+    assert(wrong_parent.equal(before));
+    silex::Ideal undefined;
+    assert(!silex::detail::order_conductor(undefined, order, maximal));
+    assert(!undefined.is_defined());
+
+    // Orders of different fields.
+    silex::NumberField other = quadratic_field(2);
+    silex::Order other_order = silex::test::equation_order(other);
+    silex::Ideal other_out(other_order);
+    assert(!silex::detail::order_conductor(other_out, other_order, maximal));
+    assert(!silex::detail::ideal_contract(other_out, before, other_order));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -770,5 +961,8 @@ int main() {
     assert(test_maximal_order_failure_preserves_output() == 0);
     assert(test_order_keeps_parent_alive() == 0);
     assert(test_maximality_is_only_computed() == 0);
+    assert(test_general_conductor_quadratic() == 0);
+    assert(test_general_conductor_cubic() == 0);
+    assert(test_conductor_and_contraction_failures() == 0);
     return 0;
 }

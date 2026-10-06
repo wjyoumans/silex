@@ -227,6 +227,7 @@ add_library(silex
     src/signature/signature.cpp
     src/ideal/ideal.cpp
     src/ideal_factorization/ideal_factorization.cpp
+    src/order/conductor.cpp
     src/order/order.cpp
     src/order_element/order_element.cpp
     src/order_unit/class_unit_transaction.cpp
@@ -815,6 +816,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-order test/t-order.cpp)
     target_link_libraries(t-silex-order PRIVATE Silex::silex)
+    target_include_directories(t-silex-order PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-order)
     add_test(NAME silex-order COMMAND t-silex-order)
     list(APPEND SILEX_TEST_NAMES silex-order)
