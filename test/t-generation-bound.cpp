@@ -9,6 +9,7 @@
 
 #include <silex/factor_base.hpp>
 #include <silex/flint/arb.hpp>
+#include <silex/flint/arf.hpp>
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
@@ -17,6 +18,7 @@
 #include "test_support.hpp"
 
 #include <flint/arb.h>
+#include <flint/arf.h>
 #include <flint/fmpq_mat.h>
 #include <flint/fmpz.h>
 
@@ -686,6 +688,86 @@ int test_zimmert_twin_class_pinned_values() {
     return 0;
 }
 
+// The precomputed twin-class table (src/factor_base/zimmert_twin_class_table.inc,
+// written by tools/zimmert_twin_class_table.cpp).  For every signature with
+// 3 <= n <= 20 the entry exists, carries the tabulated gamma, and its exact
+// value E = s / 10^k satisfies U <= E <= U (1 + 10^-kTwinTableTolerance),
+// where U is the upper endpoint of the 128-bit Arb enclosure of exp(-c)
+// recomputed here from zimmert_twin_class_log_lower_bound.  E >= U >= exp(-c)
+// is the safe side: the run-time bound ceil(E sqrt|d|) is then at least the
+// theorem's sqrt|d| exp(-c).  The generator rounds U up to 30 significant
+// digits (relative gap below 10^-29; the enclosure itself is accurate to
+// about 2^-110), so 10^-25 leaves room for a slightly different enclosure
+// radius under another FLINT build while keeping the table tight:
+// ceil(E sqrt|d|) can exceed ceil(U sqrt|d|), the value the former run-time
+// Arb evaluation produced up to its own rounding, only if an integer lies in
+// [U sqrt|d|, E sqrt|d|], an interval shorter than 10^-5 for every bound
+// below 10^20.
+constexpr slong kTwinTablePrecision = 128;  // as in the generator
+constexpr ulong kTwinTableTolerance = 25;
+
+int test_zimmert_twin_class_verified_table() {
+    sflint::Fmpz significand;
+    sflint::Fmpz power;
+    sflint::Fmpz tolerance;
+    sflint::Arb constant;
+    sflint::Arb value;
+    sflint::Arf upper;
+    sflint::Arf scaled;
+    sflint::Arf entry;
+    sflint::Arf gap;
+    fmpz_ui_pow_ui(tolerance.raw(), 10, kTwinTableTolerance);
+    slong entries = 0;
+    for (slong degree = 2; degree <= 21; ++degree) {
+        for (slong r2 = 0; 2 * r2 <= degree; ++r2) {
+            const slong r1 = degree - 2 * r2;
+            const ulong gamma =
+                    silex::detail::zimmert_twin_class_gamma_hundredths(r1, r2);
+            slong scale = -1;
+            ulong entry_gamma = 0;
+            const bool has_entry =
+                    silex::detail::zimmert_twin_class_table_entry(
+                            sflint::FmpzRef(significand), scale, entry_gamma,
+                            r1, r2);
+            if (degree < 3 || degree > 20) {
+                if (gamma != 0 || has_entry) {
+                    return 1;
+                }
+                continue;
+            }
+            if (gamma == 0 || !has_entry || entry_gamma != gamma ||
+                scale < 0 || fmpz_sgn(significand.raw()) <= 0 ||
+                !silex::detail::zimmert_twin_class_log_lower_bound(
+                        sflint::ArbRef(constant), r1, r2, gamma)) {
+                return 1;
+            }
+            ++entries;
+            arb_neg(constant.raw(), constant.raw());
+            arb_exp(value.raw(), constant.raw(), kTwinTablePrecision);
+            if (arb_is_finite(value.raw()) == 0) {
+                return 1;
+            }
+            arb_get_ubound_arf(upper.raw(), value.raw(), kTwinTablePrecision);
+            // Compare s with U 10^k, both exactly.
+            fmpz_ui_pow_ui(power.raw(), 10, static_cast<ulong>(scale));
+            arf_mul_fmpz(scaled.raw(), upper.raw(), power.raw(),
+                         ARF_PREC_EXACT, ARF_RND_CEIL);
+            arf_set_fmpz(entry.raw(), significand.raw());
+            if (arf_cmp(entry.raw(), scaled.raw()) < 0) {
+                return 1;
+            }
+            arf_sub(gap.raw(), entry.raw(), scaled.raw(), ARF_PREC_EXACT,
+                    ARF_RND_CEIL);
+            arf_mul_fmpz(gap.raw(), gap.raw(), tolerance.raw(),
+                         ARF_PREC_EXACT, ARF_RND_CEIL);
+            if (arf_cmp(gap.raw(), scaled.raw()) > 0) {
+                return 1;
+            }
+        }
+    }
+    return entries == 117 ? 0 : 1;
+}
+
 // The twin-class bound never exceeds generation_bound, is defined exactly
 // for 3 <= n <= 20, and rejects integer or out-of-range gamma.
 int test_zimmert_twin_class_domain() {
@@ -919,6 +1001,7 @@ int main() {
     assert(test_rejected_inputs_preserve_output() == 0);
     assert(test_zimmert_twin_class_table3() == 0);
     assert(test_zimmert_twin_class_pinned_values() == 0);
+    assert(test_zimmert_twin_class_verified_table() == 0);
     assert(test_zimmert_twin_class_domain() == 0);
     assert(test_proven_generation_requirement() == 0);
     return 0;

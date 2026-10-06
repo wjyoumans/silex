@@ -383,7 +383,8 @@ bool zimmert_twin_class_term(flint::Arb& out,
 //
 // This is the inequality the proof establishes for finite m, not the limit
 // F_{a,b} of p. 376; no tail estimate is used.  Fails for an integer g
-// (Zimmert's terms are singular there) or g outside (0, 3).
+// (Zimmert's terms are singular there) or g outside (0, 3).  Not evaluated
+// at run time: it generates and verifies kZimmertTwinClassTable below.
 bool zimmert_twin_class_log_lower_bound(flint::Arb& out,
                                         slong r1,
                                         slong r2,
@@ -517,37 +518,57 @@ bool zimmert_twin_class_log_lower_bound(flint::Arb& out,
     return true;
 }
 
+// Upper bound significand / 10^scale (an exact decimal rational) for
+// exp(-c), c = (G_{m,j}(g) + n log pi)/2 at the tabulated gamma.  A null
+// significand marks a signature without a table entry.
+struct ZimmertTwinClassEntry {
+    ulong gamma_hundredths;
+    const char* significand;
+    slong scale;
+};
+
+// kZimmertTwinClassTable[n - 3][r2]: precomputed, not evaluated at run time.
+// Generated offline by tools/zimmert_twin_class_table.cpp (which says how to
+// regenerate it) from zimmert_twin_class_log_lower_bound, and verified entry
+// by entry against it by test/t-generation-bound.cpp.
+#include "zimmert_twin_class_table.inc"
+
 // Zimmert 1981, Korollar 1 (twin classes), in the finite-m form above: for
 // every ideal class K, K or D K^(-1) contains an integral ideal of norm at
 // most sqrt|d| exp(-c), with c = (G_{m,j}(g) + n log pi)/2 at the tabulated
-// gamma.  Sets out to the ceiling of a rigorous upper bound for it.  This is
-// not a bound on the smallest ideal of every class; it proves generation
-// only together with the class of the different (see the callers).
+// gamma.  Sets out to ceil(E sqrt|d|) for the table entry E >= exp(-c),
+// computed exactly in integers: with E = s / 10^k, ceil(s sqrt|d|) is the
+// integer square root of s^2 |d| rounded up, and
+// ceil(E sqrt|d|) = ceil(ceil(s sqrt|d|) / 10^k).  This is not a bound on
+// the smallest ideal of every class; it proves generation only together with
+// the class of the different (see the callers).
 bool zimmert_twin_class_bound(flint::Fmpz& out,
                               flint::FmpzConstRef abs_discriminant,
                               slong degree,
                               slong real_places,
                               slong complex_pairs) noexcept {
     if (degree < 3 || degree > kZimmertMaxDegree || real_places < 0 ||
-        complex_pairs < 0 || real_places + 2 * complex_pairs != degree) {
+        complex_pairs < 0 || real_places + 2 * complex_pairs != degree ||
+        fmpz_sgn(abs_discriminant.raw()) < 0) {
         return false;
     }
-    const ulong gamma =
-        kZimmertTwinClassGammaHundredths[degree - 3][complex_pairs];
-    flint::Arb log_lower;
-    if (gamma == 0 ||
-        !zimmert_twin_class_log_lower_bound(log_lower, real_places,
-                                            complex_pairs, gamma)) {
+    const ZimmertTwinClassEntry& entry =
+        kZimmertTwinClassTable[degree - 3][complex_pairs];
+    flint::Fmpz significand;
+    if (entry.significand == nullptr || entry.scale < 0 ||
+        fmpz_set_str(significand.raw(), entry.significand, 10) != 0 ||
+        fmpz_sgn(significand.raw()) <= 0) {
         return false;
     }
-    flint::Arb value;
-    flint::Arb root;
-    arb_neg(log_lower.raw(), log_lower.raw());
-    arb_exp(value.raw(), log_lower.raw(), kGenerationBoundPrecision);
-    arb_set_fmpz(root.raw(), abs_discriminant.raw());
-    arb_sqrt(root.raw(), root.raw(), kGenerationBoundPrecision);
-    arb_mul(value.raw(), value.raw(), root.raw(), kGenerationBoundPrecision);
-    return ceil_upper_endpoint(out, value);
+    flint::Fmpz square;
+    flint::Fmpz root;
+    flint::Fmpz power;
+    fmpz_mul(square.raw(), significand.raw(), significand.raw());
+    fmpz_mul(square.raw(), square.raw(), abs_discriminant.raw());
+    ceil_sqrt(root, flint::FmpzConstRef(square));
+    fmpz_ui_pow_ui(power.raw(), 10, static_cast<ulong>(entry.scale));
+    fmpz_cdiv_q(out.raw(), root.raw(), power.raw());
+    return true;
 }
 
 
@@ -683,6 +704,40 @@ bool detail::zimmert_twin_class_log_lower_bound(
         return false;
     }
     arb_swap(out.raw(), value.raw());
+    return true;
+}
+
+ulong detail::zimmert_twin_class_gamma_hundredths(
+        slong real_places,
+        slong complex_pairs) noexcept {
+    const slong degree = real_places + 2 * complex_pairs;
+    if (real_places < 0 || complex_pairs < 0 || degree < 3 ||
+        degree > kZimmertMaxDegree) {
+        return 0;
+    }
+    return kZimmertTwinClassGammaHundredths[degree - 3][complex_pairs];
+}
+
+bool detail::zimmert_twin_class_table_entry(flint::FmpzRef significand,
+                                            slong& scale,
+                                            ulong& gamma_hundredths,
+                                            slong real_places,
+                                            slong complex_pairs) noexcept {
+    const slong degree = real_places + 2 * complex_pairs;
+    if (real_places < 0 || complex_pairs < 0 || degree < 3 ||
+        degree > kZimmertMaxDegree) {
+        return false;
+    }
+    const ZimmertTwinClassEntry& entry =
+        kZimmertTwinClassTable[degree - 3][complex_pairs];
+    flint::Fmpz value;
+    if (entry.significand == nullptr ||
+        fmpz_set_str(value.raw(), entry.significand, 10) != 0) {
+        return false;
+    }
+    fmpz_swap(significand.raw(), value.raw());
+    scale = entry.scale;
+    gamma_hundredths = entry.gamma_hundredths;
     return true;
 }
 

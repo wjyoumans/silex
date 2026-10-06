@@ -46,10 +46,28 @@ bool zimmert_twin_class_log_lower_bound(flint::ArbRef out,
                                         slong complex_pairs,
                                         ulong gamma_hundredths) noexcept;
 
+// Gamma (in hundredths) used for the twin-class bound of this signature,
+// or 0 if the signature has none (n < 3, n > 20, or a negative signature).
+ulong zimmert_twin_class_gamma_hundredths(slong real_places,
+                                          slong complex_pairs) noexcept;
+
+// The precomputed twin-class table entry of this signature: the exact
+// decimal rational E = significand / 10^scale, stated to be at least
+// exp(-c) for c the lower endpoint of zimmert_twin_class_log_lower_bound at
+// gamma_hundredths.  The table is generated offline by
+// tools/zimmert_twin_class_table.cpp and verified by
+// test/t-generation-bound.cpp; nothing here re-checks it.  Fails, leaving
+// the outputs unchanged, for a signature without an entry.
+bool zimmert_twin_class_table_entry(flint::FmpzRef significand,
+                                    slong& scale,
+                                    ulong& gamma_hundredths,
+                                    slong real_places,
+                                    slong complex_pairs) noexcept;
+
 // Twin-class generation bound for 3 <= n <= 20: the smaller of
-// generation_bound and the ceiling of a rigorous upper bound for
-// sqrt|d| exp(-(G_{m,j} + n log pi)/2) at the tabulated gamma (Zimmert 1981,
-// Korollar 1, in the finite-m form of its proof).  For every ideal class K,
+// generation_bound and ceil(E sqrt|d|), E the precomputed table entry above,
+// an exact upper bound for exp(-(G_{m,j} + n log pi)/2) at the tabulated
+// gamma (Zimmert 1981, Korollar 1, in the finite-m form of its proof).  For every ideal class K,
 // K or D K^(-1) (D the class of the different) contains an integral ideal of
 // norm at most out.  So the prime ideals of norm at most out generate the
 // class group only if the class of the different lies in the subgroup they

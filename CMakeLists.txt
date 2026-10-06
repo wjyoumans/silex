@@ -342,6 +342,16 @@ if(SILEX_BUILD_BENCHMARK_ADAPTERS OR SILEX_BUILD_TESTS)
     silex_apply_target_warnings(silex-operation-instance)
 endif()
 
+if(SILEX_BUILD_TESTS)
+    # Offline generator of src/factor_base/zimmert_twin_class_table.inc.
+    add_executable(silex-zimmert-twin-class-table
+        tools/zimmert_twin_class_table.cpp)
+    target_link_libraries(silex-zimmert-twin-class-table PRIVATE Silex::silex)
+    target_include_directories(silex-zimmert-twin-class-table PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(silex-zimmert-twin-class-table)
+endif()
+
 include(CTest)
 if(SILEX_BUILD_TESTS)
     enable_testing()
