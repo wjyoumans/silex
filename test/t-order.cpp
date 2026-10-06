@@ -852,6 +852,42 @@ int test_general_conductor_quadratic() {
     silex::Ideal two = scalar_ideal(maximal, 2);
     assert(silex::detail::ideal_contract(copied, two, maximal));
     assert(copied.equal(two));
+
+    // Contraction of ideals of O_K that are not inside R = Z[sqrt(5)], so the
+    // intersection A ∩ R is a proper sublattice of A.  The maximal order has
+    // basis (1, (1+sqrt(5))/2); a+b*sqrt(5) lies in an ideal A of O_K iff
+    // the division below stays integral.  By hand (basis (1, sqrt(5)) of R):
+    //   O_K            -> R (unit ideal)
+    //   sqrt(5) O_K    -> a+b sqrt5 in it iff 5 | a: rows (5,0),(0,1)
+    //   2 O_K          -> iff a = b mod 2: rows (1,1),(0,2)
+    //   3 O_K          -> iff 3 | a and 3 | b: 3R, rows (3,0),(0,3), norm 9
+    sflint::FmpqMat basis(2, 2);
+    assert(maximal.get_basis(sflint::FmpqMatRef(basis)));
+    assert(fmpq_entry_is_si(basis, 0, 0, 1));
+    assert(fmpq_entry_is_si(basis, 0, 1, 0));
+    assert(fmpq_entry_is_frac_si(basis, 1, 0, 1, 2));
+    assert(fmpq_entry_is_frac_si(basis, 1, 1, 1, 2));
+    // sqrt(5) = -1 + 2 phi and sqrt(5) phi = 2 + phi, with phi = (1+sqrt5)/2;
+    // the HNF of rows (-1,2),(2,1) is (1,3),(0,5).
+    const slong sqrt5_rows[4] = {1, 3, 0, 5};
+    silex::Ideal contracted(equation);
+    assert(silex::detail::ideal_contract(
+            contracted, ideal_from_rows(maximal, sqrt5_rows), equation));
+    const slong sqrt5_expected[4] = {5, 0, 0, 1};
+    assert(contracted.equal(ideal_from_rows(equation, sqrt5_expected)));
+    assert(silex::detail::ideal_contract(
+            contracted, scalar_ideal(maximal, 1), equation));
+    assert(contracted.is_one());
+    const slong two_expected[4] = {1, 1, 0, 2};
+    assert(silex::detail::ideal_contract(
+            contracted, scalar_ideal(maximal, 2), equation));
+    assert(contracted.equal(ideal_from_rows(equation, two_expected)));
+    assert(silex::detail::ideal_contract(
+            contracted, scalar_ideal(maximal, 3), equation));
+    assert(contracted.equal(scalar_ideal(equation, 3)));
+    sflint::Fmpz contracted_norm;
+    assert(contracted.norm(sflint::FmpzRef(contracted_norm)));
+    assert(sflint::fmpz_equal_si(contracted_norm, 9));
     return 0;
 }
 
@@ -941,7 +977,21 @@ int test_conductor_and_contraction_failures() {
     silex::Order other_order = silex::test::equation_order(other);
     silex::Ideal other_out(other_order);
     assert(!silex::detail::order_conductor(other_out, other_order, maximal));
+    silex::Ideal other_before = scalar_ideal(other_order, 3);
+    other_out = scalar_ideal(other_order, 3);
+    assert(!silex::detail::order_conductor(other_out, other_order, maximal));
+    assert(other_out.equal(other_before));
     assert(!silex::detail::ideal_contract(other_out, before, other_order));
+    assert(other_out.equal(other_before));
+
+    // ideal_contract: output over the wrong order, or not defined.
+    silex::Ideal contract_wrong = scalar_ideal(maximal, 3);
+    assert(!silex::detail::ideal_contract(contract_wrong, two_order, order));
+    assert(contract_wrong.equal(before));
+    silex::Ideal contract_undefined;
+    assert(!silex::detail::ideal_contract(contract_undefined, two_order,
+                                          order));
+    assert(!contract_undefined.is_defined());
     return 0;
 }
 
