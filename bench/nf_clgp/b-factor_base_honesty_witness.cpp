@@ -527,9 +527,9 @@ bool build_witness_batch(WitnessBatch& batch,
     // The frozen candidate counts and expected patterns were built on the
     // primes between the working bound and the generic proven generation
     // bound n! ceil(sqrt|d|) 2^r2 / n^n.  factor_base_class_group_bound now
-    // returns the smaller of that bound and Zimmert's, which would drop
-    // primes from the batch, so the fixture keeps the former bound and the
-    // workload stays the same.
+    // returns the minimum of Zimmert's, Minkowski's and that former bound,
+    // which would drop primes from the batch, so the fixture keeps the former
+    // bound and the workload stays the same.
     if (!batch.base.build_relation_completion_base(
                 sflint::FmpzConstRef(active_bound)) ||
         !silex::test::former_generation_bound(required_bound,
