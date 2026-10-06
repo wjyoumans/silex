@@ -2402,6 +2402,180 @@ int test_relation_saturation_completes_prime_by_prime() {
     return 0;
 }
 
+// The two saturation-proof entry points differ, and these differences are
+// pinned here.  On Q(sqrt(-23)) with h_cand = 3:
+// - The class-order path runs the factor-base generation check itself and
+//   sets the unit and regulator proof states.  The index-bound path requires
+//   both to be verified already and leaves them unchanged when they are not.
+// - The class-order path proves only the primes dividing h_cand.  The
+//   index-bound path also proves every prime up to its bound.
+// - The class-order path keeps an ell that is already verified.  The
+//   index-bound path proves it again by the ell-local proof.
+// - A failed class-order attempt rolls back the states it set.
+int test_saturation_proof_paths_differ() {
+    silex::NumberField field = quadratic_field(-23);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(maximal));
+    assert(units.certification_status() == silex::CertificationMode::proven);
+
+    sflint::Fmpz aux_bound;
+    sflint::Fmpz index_bound;
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(aux_bound, 200));
+    assert(set_fmpz_si(index_bound, 2));
+    silex::ProofState proof_status = silex::ProofState::not_checked;
+    slong rank = -1;
+    slong target_rank = -1;
+    slong local_primes = -1;
+
+    // Preconditions and the states each path sets.
+    {
+        silex::ClassGroupContext context;
+        prepare_minus_23_candidate(context, maximal, 1, 3, false);
+        assert(context.unit_proof_status() == silex::ProofState::not_checked);
+        assert(context.factor_base_generation_checked_status() ==
+               silex::ProofState::not_checked);
+
+        assert(!CertificationAccess::
+                       try_prove_relation_saturation_index_bound_with_units(
+                               context, units,
+                               sflint::FmpzConstRef(index_bound),
+                               sflint::FmpzConstRef(aux_bound)));
+        assert(context.unit_proof_status() == silex::ProofState::not_checked);
+        assert(context.regulator_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(context.factor_base_generation_checked_status() ==
+               silex::ProofState::not_checked);
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::not_checked);
+        assert(context.relation_saturation_record_count() == 0);
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+
+        assert(CertificationAccess::try_prove_class_order_saturation_with_units(
+                context, units, sflint::FmpzConstRef(aux_bound)));
+        assert(context.unit_proof_status() == silex::ProofState::verified);
+        assert(context.regulator_proof_status() ==
+               silex::ProofState::verified);
+        assert(context.factor_base_generation_checked_status() ==
+               silex::ProofState::verified);
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+        // Only ell = 3 | h_cand; no prime below an index bound.
+        assert(context.relation_saturation_record_count() == 1);
+        assert(set_fmpz_si(ell, 2));
+        assert(!CertificationAccess::relation_saturation_proof_record(
+                context, sflint::FmpzConstRef(ell), proof_status, rank,
+                target_rank, local_primes));
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(context.analytic_class_regulator_status() ==
+               silex::ProofState::not_checked);
+    }
+
+    // The index-bound path, given the same prerequisites, also proves the
+    // primes up to its bound.
+    {
+        silex::ClassGroupContext context;
+        prepare_minus_23_candidate(context, maximal, 1, 3);
+        assert(context.try_certify_with_units(
+                units, silex::CertificationMode::unknown, 128));
+        assert(context.unit_proof_status() == silex::ProofState::verified);
+        assert(CertificationAccess::
+                       try_prove_relation_saturation_index_bound_with_units(
+                               context, units,
+                               sflint::FmpzConstRef(index_bound),
+                               sflint::FmpzConstRef(aux_bound)));
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(context.relation_saturation_record_count() == 2);
+        assert(set_fmpz_si(ell, 2));
+        assert(CertificationAccess::relation_saturation_proof_record(
+                context, sflint::FmpzConstRef(ell), proof_status, rank,
+                target_rank, local_primes));
+        assert(proof_status == silex::ProofState::verified);
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    // A failed class-order attempt (h_cand = 9 is unsaturated at 3) rolls
+    // back the generation check, the unit and regulator states, and the
+    // records it wrote.
+    {
+        silex::ClassGroupContext context;
+        prepare_minus_23_candidate(context, maximal, 3, 9, false);
+        assert(!CertificationAccess::try_prove_class_order_saturation_with_units(
+                context, units, sflint::FmpzConstRef(aux_bound)));
+        assert(context.unit_proof_status() == silex::ProofState::not_checked);
+        assert(context.regulator_proof_status() ==
+               silex::ProofState::not_checked);
+        assert(context.factor_base_generation_checked_status() ==
+               silex::ProofState::not_checked);
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::not_checked);
+        assert(context.relation_saturation_record_count() == 0);
+        assert(set_fmpz_si(ell, 3));
+        assert(!CertificationAccess::relation_saturation_proof_record(
+                context, sflint::FmpzConstRef(ell), proof_status, rank,
+                target_rank, local_primes));
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+    }
+
+    // An ell already verified by the exact class number (an exact-order
+    // proof record with local_primes = 0) is kept by the class-order path
+    // and proved again by the ell-local proof on the index-bound path.
+    sflint::Fmpz discriminant;
+    sflint::Fmpz exact_order;
+    assert(set_fmpz_si(discriminant, -23));
+    assert(set_fmpz_si(exact_order, 3));
+    assert(set_fmpz_si(ell, 3));
+    for (const bool index_bound_path : {false, true}) {
+        silex::ClassGroupContext context;
+        prepare_minus_23_candidate(context, maximal, 1, 3);
+        assert(CertificationAccess::
+                       try_certify_imaginary_quadratic_from_exact_order(
+                               context, silex::CertificationMode::proven,
+                               sflint::FmpzConstRef(discriminant),
+                               sflint::FmpzConstRef(exact_order)));
+        assert(CertificationAccess::relation_saturation_proof_record(
+                context, sflint::FmpzConstRef(ell), proof_status, rank,
+                target_rank, local_primes));
+        assert(proof_status == silex::ProofState::verified);
+        assert(local_primes == 0);
+
+        if (index_bound_path) {
+            assert(CertificationAccess::
+                           try_prove_relation_saturation_index_bound_with_units(
+                                   context, units,
+                                   sflint::FmpzConstRef(index_bound),
+                                   sflint::FmpzConstRef(aux_bound)));
+        } else {
+            assert(CertificationAccess::
+                           try_prove_class_order_saturation_with_units(
+                                   context, units,
+                                   sflint::FmpzConstRef(aux_bound)));
+        }
+        assert(CertificationAccess::relation_saturation_proof_record(
+                context, sflint::FmpzConstRef(ell), proof_status, rank,
+                target_rank, local_primes));
+        assert(proof_status == silex::ProofState::verified);
+        assert(index_bound_path ? local_primes > 0 : local_primes == 0);
+        assert(context.relation_saturation_record_count() ==
+               (index_bound_path ? 2 : 1));
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+    }
+
+    return 0;
+}
+
 // try_certify_class_unit_with_zeta keeps complete ell-local saturation
 // records.  On Q(sqrt(-23)), h_cand = 3, a saturation proof at ell = 3
 // covers every prime dividing h_cand; the later unconditional L(1, chi)
@@ -3422,6 +3596,7 @@ int main() {
     test_exact_order_certification_failure_restores_generation_check();
     test_saturation_promotion_requires_every_class_order_prime();
     test_relation_saturation_completes_prime_by_prime();
+    test_saturation_proof_paths_differ();
     test_class_unit_zeta_keeps_complete_saturation_records();
     test_try_certify_with_units_analytic_keeps_complete_saturation_records();
     test_analytic_class_unit_proof_requires_factor_base_generation();
