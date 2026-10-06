@@ -357,6 +357,27 @@ public:
     static bool defer_native_goal_publication(
             const ClassGroupContext& context) noexcept;
 
+    // The unconditional generation requirement recorded with the installed
+    // factor base: proven_generation_requirement for the context's order,
+    // evaluated once when the base was built
+    // (record_factor_base_generation_).  False, leaving `out` unchanged,
+    // when nothing is recorded or `order` is not the context's order; the
+    // caller then computes the requirement itself.
+    static bool recorded_generation_requirement(
+            flint::FmpzRef out,
+            const ClassGroupContext& context,
+            const Order& order) noexcept {
+        if (!context.has_factor_base() ||
+            !same_order_parent(&context.parent_, &order) ||
+            flint::fmpz_is_zero(flint::FmpzConstRef(
+                    context.factor_base_generation_bound_))) {
+            return false;
+        }
+        flint::fmpz_set(out, flint::FmpzConstRef(
+                                     context.factor_base_generation_bound_));
+        return true;
+    }
+
     // Record, or clear, in the attached class/unit transaction report the
     // unwitnessed required prime that ended a candidate attempt; no-ops
     // without a transaction.

@@ -13,6 +13,7 @@
 #include "zeta/zeta_internal.hpp"
 
 #include <cassert>
+#include <cstring>
 #include <type_traits>
 #include <utility>
 
@@ -3433,6 +3434,78 @@ int test_grh_provenance_records() {
     return 0;
 }
 
+struct GenerationRequirementLogCounts {
+    slong recorded = 0;
+    slong reused = 0;
+};
+
+void count_generation_requirement_logs(void* user,
+                                       silex::DiagnosticsModule,
+                                       silex::LogLevel,
+                                       const char*,
+                                       const char* message,
+                                       const char*) noexcept {
+    auto* counts = static_cast<GenerationRequirementLogCounts*>(user);
+    if (message == nullptr) {
+        return;
+    }
+    if (std::strcmp(message,
+                    "generation requirement zimmert_twin_class, "
+                    "different index_one") == 0) {
+        ++counts->recorded;
+    } else if (std::strcmp(message,
+                           "be_honest using the recorded generation "
+                           "requirement") == 0) {
+        ++counts->reused;
+    }
+}
+
+// A proven class/unit run evaluates the twin-class generation requirement
+// (Zimmert's G) once per factor-base build; the be_honest check reuses the
+// recorded requirement instead of evaluating G again.
+int test_honesty_reuses_recorded_generation_requirement() {
+    silex::NumberField field = cubic_field(1, 200);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz minkowski;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(minkowski),
+                                               maximal_order));
+
+    GenerationRequirementLogCounts counts;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_logging(
+            diagnostics, silex::LogLevel::detail,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            count_generation_requirement_logs, &counts);
+
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 500;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::proven;
+    options.diagnostics = &diagnostics;
+    silex::ClassGroupContext context;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            context, maximal_order, sflint::FmpzConstRef(minkowski), options,
+            128));
+    assert(context.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(context.factor_base_generation_basis() ==
+           silex::ClassGroupGenerationBasis::zimmert_twin_class);
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    assert(counts.recorded == 1);
+    assert(counts.reused == 1);
+#else
+    assert(counts.recorded == 0);
+    assert(counts.reused == 0);
+#endif
+    return 0;
+}
+
 // The GRH generation bound falls back to Bach's bound alone when the
 // Belabas-Diaz y Diaz-Friedman criterion cannot be computed or decided, and
 // the theorem that gave the bound reaches the grh record through the policy.
@@ -3674,6 +3747,7 @@ int main() {
     test_compute_candidate_preserves_on_failure();
     test_move_and_swap();
     test_grh_provenance_records();
+    test_honesty_reuses_recorded_generation_requirement();
     test_grh_generation_bound_bach_fallback();
     test_twin_class_generation_routes();
     return 0;

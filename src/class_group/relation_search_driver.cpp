@@ -304,13 +304,23 @@ AnalyticFinishDecision apply_honesty_check(
                 : AnalyticFinishDecision::failed;
     }
 
-    // The same requirement record_factor_base_generation_ records: the
-    // twin-class bound only with the different settled exactly.
+    // The requirement record_factor_base_generation_ recorded for the
+    // installed base (the twin-class bound only with the different settled
+    // exactly).  It is recomputed only when nothing is recorded for this
+    // order, so Zimmert's G is not evaluated a second time.
     flint::Fmpz required_bound;
-    GenerationDifferentRoute different_route = GenerationDifferentRoute::none;
-    if (!proven_generation_requirement(flint::FmpzRef(required_bound),
-                                       different_route, order)) {
-        return AnalyticFinishDecision::failed;
+    if (ClassGroupRelationSearchAccess::recorded_generation_requirement(
+                flint::FmpzRef(required_bound), context, order)) {
+        SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                  LogLevel::detail,
+                  "be_honest using the recorded generation requirement");
+    } else {
+        GenerationDifferentRoute different_route =
+                GenerationDifferentRoute::none;
+        if (!proven_generation_requirement(flint::FmpzRef(required_bound),
+                                           different_route, order)) {
+            return AnalyticFinishDecision::failed;
+        }
     }
     if (flint::fmpz_cmp(flint::FmpzConstRef(required_bound),
                         active_factor_base_bound) <= 0) {
