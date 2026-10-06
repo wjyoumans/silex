@@ -7387,8 +7387,8 @@ bool ClassGroupContext::record_factor_base_generation_(
     // The requirement is Zimmert's twin-class bound only together with an
     // exact treatment of the different (index_one or conductor_primes);
     // otherwise it is factor_base_class_group_bound.  It depends only on the
-    // order, so a class/unit transaction evaluates it at its first build and
-    // later builds of the same order reuse that value.
+    // order, so a class/unit transaction evaluates it for each new order and
+    // later builds of the same order reuse the most recent value.
     flint::Fmpz required;
     detail::GenerationDifferentRoute route =
             detail::GenerationDifferentRoute::none;
