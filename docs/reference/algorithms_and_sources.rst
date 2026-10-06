@@ -587,9 +587,24 @@ Zimmert's definitions give::
       - (b/2) [psi(1 + gamma/2) + psi(1/2 - gamma/2)]
 
 Silex evaluates this sum of digamma values with Arb at 128 bits, using
-``psi(x) = psi(x + k) - sum_{i<k} 1/(x + i)`` at negative arguments, and
-takes the twin-class bound ``B`` to be the ceiling of the upper endpoint of
-``sqrt|d| exp(-(G + n log pi)/2)``.  Zimmert's terms are singular at integer
+``psi(x) = psi(x + k) - sum_{i<k} 1/(x + i)`` at negative arguments, but
+only offline: the constant depends on the signature alone, so Silex stores a
+precomputed, test-verified table.  For each signature with ``3 <= n <= 20``,
+the generator ``tools/zimmert_twin_class_table.cpp`` (target
+``silex-zimmert-twin-class-table``) takes the upper endpoint of the Arb
+enclosure of ``exp(-(G + n log pi)/2)`` and rounds it up to an exact decimal
+rational ``E`` with 30 significant digits, written to
+``src/factor_base/zimmert_twin_class_table.inc``; to regenerate, build that
+target and redirect its output to that file.  At run time the twin-class
+bound ``B`` is ``ceil(E sqrt|d|)``, computed exactly with integers as
+``ceil(ceil(s sqrt|d|) / 10^k)`` for ``E = s / 10^k``.
+``test/t-generation-bound.cpp`` recomputes every entry with the Arb
+evaluation and checks that it is on the safe side (``E`` at least the upper
+endpoint ``U``, so ``B`` is at least Zimmert's ``sqrt|d| exp(-c)``) and
+tight (``E <= U (1 + 10^-25)``).  PARI's ``zimmertbound`` (below) likewise
+hard-codes a constant ``c`` per ``(n, r2)``, but as a C ``double`` given to
+about nine digits with no stated rounding direction, and evaluates
+``exp(-c) sqrt|d|`` in floating point.  Zimmert's terms are singular at integer
 ``gamma``; every other ``gamma > 0`` gives a valid bound, so ``gamma``
 affects only its size.  For each signature with ``3 <= n <= 20`` Silex fixes
 the ``gamma`` in hundredths, ``0 < gamma < 3`` and not an integer, that

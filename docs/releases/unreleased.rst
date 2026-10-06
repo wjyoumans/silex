@@ -111,7 +111,9 @@ Changed
   ``zimmert_twin_class`` by ``silex-class-unit-instance``) with that bound
   as ``factor_base_generation_certification_bound()``; other results still
   report ``minkowski_type``.  For example the bound drops from 295 to 263
-  for ``x^3 + x + 200``.  A ``grh`` request whose factor base reaches the
+  for ``x^3 + x + 200``.  Its constants come from a precomputed table of
+  exact upper bounds, generated offline from an Arb evaluation and checked
+  against it by the tests, so a run does not evaluate them.  A ``grh`` request whose factor base reaches the
   smaller bound now records unconditional (``proven``) generation where it
   used to record ``grh`` generation, as for the quartic field of
   ``x^4 - 8 x^3 + 3 x^2 + x + 4`` (bound 98 against 122, base 100).
