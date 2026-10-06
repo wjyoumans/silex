@@ -16,6 +16,7 @@
 
 #include "benchmark_contract.hpp"
 #include "../../test/lll_reference.hpp"
+#include "../../test/test_support.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/relation_candidate_internal.hpp"
@@ -523,11 +524,16 @@ bool build_witness_batch(WitnessBatch& batch,
     sflint::fmpz_set(
             sflint::FmpzRef(active_bound),
             sflint::FmpzConstRef(factor_base_plan.working_bound));
+    // The frozen candidate counts and expected patterns were built on the
+    // primes between the working bound and the generic proven generation
+    // bound n! ceil(sqrt|d|) 2^r2 / n^n.  factor_base_class_group_bound now
+    // returns the smaller of that bound and Zimmert's, which would drop
+    // primes from the batch, so the fixture keeps the former bound and the
+    // workload stays the same.
     if (!batch.base.build_relation_completion_base(
                 sflint::FmpzConstRef(active_bound)) ||
-        !silex::factor_base_class_group_bound(
-                sflint::FmpzRef(required_bound),
-                batch.field.maximal_order)) {
+        !silex::test::former_generation_bound(required_bound,
+                                              batch.field.maximal_order)) {
         return false;
     }
 
