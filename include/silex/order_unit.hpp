@@ -340,7 +340,7 @@ private:
     // checks the input torsion and has no stable-proof fallback;
     // index_bound_pass (a prove_index_bound pass, whose torsion is already
     // checked) uses the stable-proof fallback and skips the torsion check.
-    enum class LocalSaturationProofMode_ : unsigned char {
+    enum class LocalSaturationProofMode : unsigned char {
         standalone,
         index_bound_pass,
     };
@@ -353,7 +353,7 @@ private:
             flint::FmpzConstRef aux_bound,
             EmbeddingContext& embeddings,
             slong precision,
-            LocalSaturationProofMode_ mode) noexcept;
+            LocalSaturationProofMode mode) noexcept;
     bool saturate_local_with_kernel_(bool& changed,
                                      const OrderUnitGroup& group,
                                      flint::FmpzMatConstRef kernel,

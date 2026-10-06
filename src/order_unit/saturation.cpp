@@ -2370,7 +2370,7 @@ bool OrderUnitGroup::prove_local_saturated(ProofState& status,
                                            slong precision) noexcept {
     return prove_local_saturated_(status, changed, group, ell, aux_target_len,
                                   aux_bound, embeddings, precision,
-                                  LocalSaturationProofMode_::standalone);
+                                  LocalSaturationProofMode::standalone);
 }
 
 bool OrderUnitGroup::prove_local_saturated_(
@@ -2382,12 +2382,12 @@ bool OrderUnitGroup::prove_local_saturated_(
         flint::FmpzConstRef aux_bound,
         EmbeddingContext& embeddings,
         slong precision,
-        LocalSaturationProofMode_ mode) noexcept {
+        LocalSaturationProofMode mode) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.prove_local_saturated");
     const bool use_stable_proof_fallback =
-            mode == LocalSaturationProofMode_::index_bound_pass;
-    const bool check_torsion = mode == LocalSaturationProofMode_::standalone;
+            mode == LocalSaturationProofMode::index_bound_pass;
+    const bool check_torsion = mode == LocalSaturationProofMode::standalone;
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     if (!is_defined() || !group.is_set() ||
@@ -2851,7 +2851,7 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
                         pass_status, pass_changed, working,
                         flint::FmpzConstRef(ell), aux_target_len, aux_bound,
                         embeddings, precision,
-                        LocalSaturationProofMode_::index_bound_pass);
+                        LocalSaturationProofMode::index_bound_pass);
             }
             if (!pass_ok) {
                 return publish(working, ProofState::unavailable, any_changed);
