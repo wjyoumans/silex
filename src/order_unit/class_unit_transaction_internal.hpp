@@ -7,6 +7,7 @@
 #include <silex/order_unit.hpp>
 
 #include "../class_group/factor_base_honesty_failure_internal.hpp"
+#include "../factor_base/generation_different_route_internal.hpp"
 
 namespace silex::detail {
 
@@ -128,6 +129,17 @@ struct ClassUnitTransactionReport {
     void record_timing(ClassUnitStage stage, double elapsed_ms) noexcept;
 };
 
+// proven_generation_requirement(bound, route, order), kept by the first
+// factor-base build of a class/unit transaction so that later builds of the
+// same order reuse it (ClassGroupContext::record_factor_base_generation_).
+// The requirement depends only on the order, which `order` holds; nothing is
+// kept while `order` is undefined.
+struct TransactionGenerationRequirement {
+    Order order;
+    flint::Fmpz bound;
+    GenerationDifferentRoute route = GenerationDifferentRoute::none;
+};
+
 struct ClassUnitTransactionContext {
     ClassUnitTransactionReport& audit;
     RelationFactorBasePlan* relation_factor_base_plan = nullptr;
@@ -135,6 +147,7 @@ struct ClassUnitTransactionContext {
     flint::Fmpz imaginary_quadratic_exact_order;
     bool imaginary_quadratic_exact_order_valid = false;
     bool defer_relation_saturation_until_units = false;
+    TransactionGenerationRequirement generation_requirement{};
 };
 
 inline bool uses_class_unit_kernel(

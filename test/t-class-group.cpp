@@ -8,6 +8,7 @@
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/relation_search_internal.hpp"
+#include "factor_base/factor_base_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "test_support.hpp"
 #include "zeta/zeta_internal.hpp"
@@ -3435,7 +3436,12 @@ int test_grh_provenance_records() {
 }
 
 struct GenerationRequirementLogCounts {
+    // Factor-base builds that recorded the twin-class requirement.
     slong recorded = 0;
+    // Builds that took it from the class/unit transaction instead of
+    // evaluating it; recorded - kept counts the evaluations.
+    slong kept = 0;
+    // be_honest checks that used the recorded requirement.
     slong reused = 0;
 };
 
@@ -3454,15 +3460,30 @@ void count_generation_requirement_logs(void* user,
                     "different index_one") == 0) {
         ++counts->recorded;
     } else if (std::strcmp(message,
+                           "reusing the transaction generation "
+                           "requirement") == 0) {
+        ++counts->kept;
+    } else if (std::strcmp(message,
                            "be_honest using the recorded generation "
                            "requirement") == 0) {
         ++counts->reused;
     }
 }
 
+void attach_generation_requirement_counter(
+        silex::DiagnosticsContext& diagnostics,
+        GenerationRequirementLogCounts& counts) {
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_logging(
+            diagnostics, silex::LogLevel::detail,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            count_generation_requirement_logs, &counts);
+}
+
 // A proven class/unit run evaluates the twin-class generation requirement
-// (Zimmert's G) once per factor-base build; the be_honest check reuses the
-// recorded requirement instead of evaluating G again.
+// (Zimmert's G) once; the be_honest check reuses the requirement recorded
+// with the factor base instead of evaluating G again.
 int test_honesty_reuses_recorded_generation_requirement() {
     silex::NumberField field = cubic_field(1, 200);
     silex::Order equation_order = silex::test::equation_order(field);
@@ -3474,12 +3495,7 @@ int test_honesty_reuses_recorded_generation_requirement() {
 
     GenerationRequirementLogCounts counts;
     silex::DiagnosticsContext diagnostics;
-    silex::diagnostics_context_init(diagnostics);
-    silex::diagnostics_set_logging(
-            diagnostics, silex::LogLevel::detail,
-            silex::diagnostics_module_bit(
-                    silex::DiagnosticsModule::class_group),
-            count_generation_requirement_logs, &counts);
+    attach_generation_requirement_counter(diagnostics, counts);
 
     silex::ClassGroupComputeOptions options;
     options.max_candidates = 5000;
@@ -3497,12 +3513,118 @@ int test_honesty_reuses_recorded_generation_requirement() {
     assert(context.factor_base_generation_basis() ==
            silex::ClassGroupGenerationBasis::zimmert_twin_class);
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
-    assert(counts.recorded == 1);
-    assert(counts.reused == 1);
+    assert(counts.recorded >= 1);
+    assert(counts.recorded - counts.kept == 1);
+    assert(counts.reused >= 1);
 #else
     assert(counts.recorded == 0);
+    assert(counts.kept == 0);
     assert(counts.reused == 0);
 #endif
+
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    // The recorded requirement is the one proven_generation_requirement
+    // gives for the context's order.
+    sflint::Fmpz expected;
+    silex::detail::GenerationDifferentRoute route =
+            silex::detail::GenerationDifferentRoute::none;
+    assert(silex::detail::proven_generation_requirement(
+            sflint::FmpzRef(expected), route, maximal_order));
+    assert(route == silex::detail::GenerationDifferentRoute::index_one);
+    sflint::Fmpz recorded;
+    assert(Access::recorded_generation_requirement(
+            sflint::FmpzRef(recorded), context, maximal_order));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(recorded),
+                              sflint::FmpzConstRef(expected)));
+
+    // Another order, even the maximal order of the same field, is not the
+    // context's order: nothing is returned and `out` is left unchanged.
+    silex::Order other_order(field);
+    assert(other_order.maximal_order(equation_order));
+    sflint::Fmpz sentinel;
+    sflint::fmpz_set_si(sflint::FmpzRef(sentinel), -7);
+    sflint::Fmpz untouched;
+    sflint::fmpz_set_si(sflint::FmpzRef(untouched), -7);
+    assert(!Access::recorded_generation_requirement(
+            sflint::FmpzRef(untouched), context, other_order));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(untouched),
+                              sflint::FmpzConstRef(sentinel)));
+
+    // Without a factor base nothing is recorded.
+    silex::ClassGroupContext empty(maximal_order);
+    assert(!Access::recorded_generation_requirement(
+            sflint::FmpzRef(untouched), empty, maximal_order));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(untouched),
+                              sflint::FmpzConstRef(sentinel)));
+
+    // set_factor_base installs a base without recording a requirement.
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::ClassGroupContext installed(maximal_order);
+    assert(installed.set_factor_base(*base));
+    assert(installed.has_factor_base());
+    assert(!Access::recorded_generation_requirement(
+            sflint::FmpzRef(untouched), installed, maximal_order));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(untouched),
+                              sflint::FmpzConstRef(sentinel)));
+    return 0;
+}
+
+// Within one class/unit transaction a factor-base rebuild of the same order
+// reuses the requirement of the first build instead of evaluating G again;
+// without a transaction each build evaluates it.
+int test_transaction_keeps_generation_requirement() {
+    silex::NumberField field = cubic_field(1, 200);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz expected;
+    silex::detail::GenerationDifferentRoute route =
+            silex::detail::GenerationDifferentRoute::none;
+    assert(silex::detail::proven_generation_requirement(
+            sflint::FmpzRef(expected), route, maximal_order));
+    assert(route == silex::detail::GenerationDifferentRoute::index_one);
+    sflint::Fmpz small_bound;
+    sflint::Fmpz large_bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(small_bound), 7);
+    sflint::fmpz_set_si(sflint::FmpzRef(large_bound), 11);
+
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    for (const bool attach_transaction : {false, true}) {
+        GenerationRequirementLogCounts counts;
+        silex::DiagnosticsContext diagnostics;
+        attach_generation_requirement_counter(diagnostics, counts);
+        silex::detail::ClassUnitTransactionReport audit;
+        audit.reset();
+        silex::detail::ClassUnitTransactionContext run_context{
+                audit, nullptr, {}, {}, false};
+        silex::ClassGroupContext context(maximal_order);
+        context.set_diagnostics(&diagnostics);
+        if (attach_transaction) {
+            silex::detail::ClassUnitTransactionAccess::set_run_context(
+                    context, &run_context);
+        }
+        assert(context.build_factor_base(sflint::FmpzConstRef(small_bound)));
+        assert(context.build_factor_base(sflint::FmpzConstRef(large_bound)));
+        sflint::Fmpz recorded;
+        assert(Access::recorded_generation_requirement(
+                sflint::FmpzRef(recorded), context, maximal_order));
+        assert(sflint::fmpz_equal(sflint::FmpzConstRef(recorded),
+                                  sflint::FmpzConstRef(expected)));
+        if (attach_transaction) {
+            assert(run_context.generation_requirement.order.has_same_data(
+                    maximal_order));
+            silex::detail::ClassUnitTransactionAccess::set_run_context(
+                    context, nullptr);
+        }
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+        assert(counts.recorded == 2);
+        assert(counts.kept == (attach_transaction ? 1 : 0));
+#else
+        assert(counts.recorded == 0);
+        assert(counts.kept == 0);
+#endif
+    }
     return 0;
 }
 
@@ -3748,6 +3870,7 @@ int main() {
     test_move_and_swap();
     test_grh_provenance_records();
     test_honesty_reuses_recorded_generation_requirement();
+    test_transaction_keeps_generation_requirement();
     test_grh_generation_bound_bach_fallback();
     test_twin_class_generation_routes();
     return 0;

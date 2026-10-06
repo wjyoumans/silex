@@ -7386,13 +7386,38 @@ bool ClassGroupContext::record_factor_base_generation_(
 
     // The requirement is Zimmert's twin-class bound only together with an
     // exact treatment of the different (index_one or conductor_primes);
-    // otherwise it is factor_base_class_group_bound.
+    // otherwise it is factor_base_class_group_bound.  It depends only on the
+    // order, so a class/unit transaction evaluates it at its first build and
+    // later builds of the same order reuse that value.
     flint::Fmpz required;
     detail::GenerationDifferentRoute route =
             detail::GenerationDifferentRoute::none;
-    if (parent_.is_defined() &&
-        detail::proven_generation_requirement(flint::FmpzRef(required), route,
-                                              parent_)) {
+    detail::TransactionGenerationRequirement* kept =
+            class_unit_transaction_context_ != nullptr
+                    ? &class_unit_transaction_context_->generation_requirement
+                    : nullptr;
+    bool have_requirement = false;
+    if (parent_.is_defined()) {
+        if (kept != nullptr && kept->order.has_same_data(parent_)) {
+            flint::fmpz_set(flint::FmpzRef(required),
+                            flint::FmpzConstRef(kept->bound));
+            route = kept->route;
+            have_requirement = true;
+            SILEX_LOG(diagnostics_, DiagnosticsModule::class_group,
+                      LogLevel::detail,
+                      "reusing the transaction generation requirement");
+        } else if (detail::proven_generation_requirement(
+                           flint::FmpzRef(required), route, parent_)) {
+            have_requirement = true;
+            if (kept != nullptr) {
+                kept->order = parent_;
+                flint::fmpz_set(flint::FmpzRef(kept->bound),
+                                flint::FmpzConstRef(required));
+                kept->route = route;
+            }
+        }
+    }
+    if (have_requirement) {
         if (route != detail::GenerationDifferentRoute::none) {
             if (!ensure_private_storage_()) {
                 return false;
@@ -8210,6 +8235,7 @@ bool ClassGroupContext::build_factor_base(
     }
 
     candidate.has_base_ = true;
+    candidate.class_unit_transaction_context_ = class_unit_transaction_context_;
     if (!candidate.record_factor_base_generation_(bound)) {
         return false;
     }
@@ -8260,6 +8286,7 @@ bool ClassGroupContext::build_relation_factor_base_(
     // representative (with the generic decomposition path as its atomic
     // fallback), so its successful build is the canonical-bound coverage
     // receipt; do not decompose and compare every prime a second time.
+    candidate.class_unit_transaction_context_ = class_unit_transaction_context_;
     if (!candidate.record_factor_base_generation_(bound) ||
         (oriented_quadratic_base &&
          candidate.factor_base_generation_status_ == ProofState::verified &&
@@ -8304,6 +8331,7 @@ bool ClassGroupContext::build_search_factor_base_(
     }
 
     candidate.has_base_ = true;
+    candidate.class_unit_transaction_context_ = class_unit_transaction_context_;
     if (!candidate.record_factor_base_generation_(bound)) {
         return false;
     }
