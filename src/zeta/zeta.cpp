@@ -405,7 +405,15 @@ void quadratic_afe_gamma_direct(flint::Arb& out,
 // the anchors carry `guard` extra bits, an estimate of the binary length of
 // the number of chained anchors, so that the radii they pass on to the later
 // terms stay within the per-term tolerance of the direct evaluation.
-constexpr slong quadratic_afe_step_max_terms = 64;
+//
+// The cap on the number of Taylor terms M is a measured tuning value, not a
+// proof parameter: a block that would need more terms is not used, and its
+// values are evaluated directly.  At 64- and 128-bit precision blocks need at
+// most about 32 terms and stepping pays; at 512 bits they need about 60, and
+// stepping was measured to be slower than direct evaluation there, so a cap
+// of 32 keeps 512-bit evaluations on the direct route.  A cap of 16 was
+// measured to cost about 20% at 128 bits.
+constexpr slong quadratic_afe_step_max_terms = 32;
 constexpr ulong quadratic_afe_step_min_block = 4;
 constexpr ulong quadratic_afe_step_max_block = UWORD(1) << 20;
 constexpr double quadratic_afe_step_log2_ratio = 10.0;

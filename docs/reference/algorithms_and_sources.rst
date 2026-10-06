@@ -660,7 +660,9 @@ previous block, so by induction every value is a ball containing the exact
 ``Gamma(a, z_n)``.  ``B`` (so that ``rho v_max`` is about ``2^-10``), ``M``,
 and the extra precision carried by the anchors are chosen in floating point
 and affect only the width and the cost, not the validity, of the enclosure;
-where no block of at least four steps fits, the value is evaluated directly.
+where no block of at least four steps fits, or a block would need more than
+32 terms (as at 512-bit precision, where stepping was measured not to pay),
+the value is evaluated directly.
 
 When the ``L``-value ball is not finite and positive, the quadratic route
 falls back to Belabas--Friedman, and the value is then GRH-conditional like
