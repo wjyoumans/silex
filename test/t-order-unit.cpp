@@ -5283,6 +5283,93 @@ int test_unit_proofs_require_computed_torsion() {
     return 0;
 }
 
+// Positive-rank companion of test_unit_proofs_require_computed_torsion.  In
+// Q(zeta8) = Q(x), x^4 + 1 = 0 (rank 1, w = 8) the units are
+// <zeta8> x <1 + sqrt2> with sqrt2 = x - x^3.  A torsion under-claim of
+// {+-1} or {+-1, +-i} paired with 1 + sqrt2 generates a subgroup of index
+// 4 or 2: the ell = 2 torsion column then describes the wrong torsion and
+// hides zeta8.  prove_index_bound must reject both under-claims and prove
+// the group with the computed torsion, w = 8.
+int test_unit_proofs_require_computed_torsion_positive_rank() {
+    using OrderUnitGroupAccess = silex::detail::OrderUnitGroupAccess;
+
+    silex::NumberField field = quartic_field(0, 0, 0, 1);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element x(field);
+    assert(x.gen());
+    silex::Element x2(field);
+    assert(x2.multiply(x, x));
+    silex::Element x3(field);
+    assert(x3.multiply(x2, x));
+    silex::Element unit(field);
+    assert(unit.subtract(x, x3));
+    assert(unit.add_si(unit, 1));
+    silex::FactoredElement generator(field);
+    assert(generator.set_element(unit));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    const silex::FactoredElementSpan span(generators, 1);
+
+    const auto torsion_is = [](const silex::OrderUnitGroup& units, slong w) {
+        sflint::Fmpz stored;
+        return units.torsion_order(sflint::FmpzRef(stored)) &&
+               sflint::fmpz_equal_si(stored, w);
+    };
+
+    silex::OrderUnitGroup computed(order);
+    assert(computed.set_units(order, span, embeddings, 256));
+    assert(silex::detail::order_unit_torsion_is_computed(computed));
+    assert(computed.free_rank() == 1);
+    assert(torsion_is(computed, 8));
+
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 64));
+
+    // Under-claims: w = 2 with generator -1, w = 4 with generator x^2 = i.
+    for (slong w : {2, 4}) {
+        sflint::Fmpz torsion_order;
+        assert(set_fmpz_si(torsion_order, w));
+        silex::OrderElement torsion_generator(order);
+        if (w == 2) {
+            assert(torsion_generator.set_si(-1));
+        } else {
+            assert(torsion_generator.set_element(x2));
+        }
+        silex::OrderUnitGroup under(order);
+        assert(OrderUnitGroupAccess::set_units(
+                under, order, span, embeddings, 256, true, &torsion_order,
+                &torsion_generator));
+        assert(!silex::detail::order_unit_torsion_is_computed(under));
+        assert(under.free_rank() == 1);
+        assert(torsion_is(under, w));
+
+        silex::OrderUnitGroup out(order);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(!out.prove_index_bound(status, changed, under, 4,
+                                      sflint::FmpzConstRef(aux_bound), 2,
+                                      embeddings, 256));
+        assert(!out.is_set());
+        assert(status == silex::ProofState::not_checked);
+        assert(changed);
+    }
+
+    silex::OrderUnitGroup out(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = true;
+    assert(out.prove_index_bound(status, changed, computed, 4,
+                                 sflint::FmpzConstRef(aux_bound), 2,
+                                 embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(out.certification_status() == silex::CertificationMode::proven);
+    assert(out.free_rank() == 1);
+    assert(torsion_is(out, 8));
+
+    return 0;
+}
+
 // The cached-torsion test rejects any w with phi(w) not dividing the degree
 // before it computes a power, and otherwise requires a generator of exact
 // order w in the order.
@@ -7349,6 +7436,7 @@ int main() {
     test_cached_torsion_never_reaches_proven();
     test_rank_zero_quadratic_index_one_requires_computed_torsion();
     test_unit_proofs_require_computed_torsion();
+    test_unit_proofs_require_computed_torsion_positive_rank();
     test_cached_torsion_is_valid();
     test_prove_index_bound();
     test_prove_index_bound_nonmaximal_quadratic_sqrt5();
