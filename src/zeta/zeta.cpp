@@ -412,7 +412,8 @@ void quadratic_afe_gamma_direct(flint::Arb& out,
 // most about 32 terms and stepping pays; at 512 bits they need about 60, and
 // stepping was measured to be slower than direct evaluation there, so a cap
 // of 32 keeps 512-bit evaluations on the direct route.  A cap of 16 was
-// measured to cost about 20% at 128 bits.
+// measured to cost about 20% at 128 bits.  These measurements were taken at
+// |D| near 1e10 (D = -10000000019).
 constexpr slong quadratic_afe_step_max_terms = 32;
 constexpr ulong quadratic_afe_step_min_block = 4;
 constexpr ulong quadratic_afe_step_max_block = UWORD(1) << 20;
