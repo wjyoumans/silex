@@ -253,6 +253,7 @@ add_library(silex
     src/residue_field/degree_one_helpers.cpp
     src/residue_field/residue_field.cpp
     src/residue_ring/residue_ring.cpp
+    src/residue_ring/unit_group.cpp
     src/status/status.cpp
     src/sunit/sunit.cpp
     src/sunit/sunit_class_context.cpp
@@ -932,6 +933,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-residue-ring test/t-residue-ring.cpp)
     target_link_libraries(t-silex-residue-ring PRIVATE Silex::silex)
+    target_include_directories(t-silex-residue-ring PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-residue-ring)
     add_test(NAME silex-residue-ring COMMAND t-silex-residue-ring)
     list(APPEND SILEX_TEST_NAMES silex-residue-ring)
