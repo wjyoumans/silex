@@ -652,6 +652,64 @@ int test_unit_group_rational_moduli() {
         check_rational_modulus(order, 6, {6, 12});
         check_rational_modulus(order, 9, {3, 9, 18});
     }
+    // Unit modulus m = O: trivial group; discrete_log succeeds on every
+    // element, including 0, with an empty log, and exp returns a unit.
+    {
+        silex::Order order = maximal_order_of({-5, 0, 1});
+        check_rational_modulus(order, 1, {});
+        silex::Ideal unit(order);
+        assert(set_rational_principal(unit, 1));
+        silex::detail::ResidueUnitGroup group;
+        assert(group.set_modulus(unit));
+        silex::OrderElement zero(order);
+        assert(zero.set_si(0));
+        sflint::FmpzMat empty(1, 0);
+        assert(group.discrete_log(sflint::FmpzMatRef(empty), zero));
+        silex::OrderElement back(order);
+        assert(group.exp(back, sflint::FmpzMatConstRef(empty)));
+    }
+    // Degree-one field Q: (Z/12)^x = C2 x C2, (Z/9)^x = C6, (Z/7)^x = C6.
+    {
+        silex::Order order = maximal_order_of({0, 1});
+        check_rational_modulus(order, 12, {2, 2});
+        check_rational_modulus(order, 9, {6});
+        check_rational_modulus(order, 7, {6});
+        // Negative and large representatives round-trip.
+        silex::Ideal modulus(order);
+        assert(set_rational_principal(modulus, 12));
+        silex::detail::ResidueUnitGroup group;
+        assert(group.set_modulus(modulus));
+        silex::ResidueRing ring(modulus);
+        for (slong x = -25; x <= 25; ++x) {
+            silex::OrderElement element(order);
+            assert(element.set_si(x));
+            if (is_unit_mod(element, modulus)) {
+                check_dlog_round_trip(group, ring, element, {2, 2});
+            }
+        }
+    }
+    // Negative and large coordinates in a quadratic field.
+    {
+        silex::Order order = maximal_order_of({-5, 0, 1});
+        silex::Ideal modulus(order);
+        assert(set_rational_principal(modulus, 9));
+        silex::detail::ResidueUnitGroup group;
+        assert(group.set_modulus(modulus));
+        silex::ResidueRing ring(modulus);
+        const slong pairs[][2] = {{-100, 37}, {1000003, -77}, {-4, -5}};
+        for (const auto& pair : pairs) {
+            sflint::FmpzMat coordinates(1, 2);
+            sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0),
+                                pair[0]);
+            sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 1),
+                                pair[1]);
+            silex::OrderElement element(order);
+            assert(element.set_coordinates(
+                    sflint::FmpzMatConstRef(coordinates)));
+            assert(is_unit_mod(element, modulus));
+            check_dlog_round_trip(group, ring, element, {3, 24});
+        }
+    }
     return 0;
 }
 
@@ -816,7 +874,11 @@ int test_unit_group_failures() {
     silex::OrderElement foreign(equation);
     assert(foreign.one());
     sflint::FmpzMat log(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(log, 0, 0), 77);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(log, 0, 1), 78);
     assert(!group.discrete_log(sflint::FmpzMatRef(log), foreign));
+    assert(sflint::fmpz_equal_si(sflint::fmpz_mat_entry(log, 0, 0), 77));
+    assert(sflint::fmpz_equal_si(sflint::fmpz_mat_entry(log, 0, 1), 78));
     return 0;
 }
 
