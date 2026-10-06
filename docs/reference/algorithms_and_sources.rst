@@ -712,7 +712,10 @@ since the criterion's residue-degree route needs a monic integral one, for a
 residue-degree failure, when an interval comparison in its search cannot be
 decided, and when its search passes the range of a double.  Bach's theorem
 does not depend on the criterion, and Belabas--Diaz y Diaz--Friedman 2008,
-Section 3, itself takes Bach's bound once its search passes it.  A ``grh``
+Section 3, itself takes Bach's bound once its search passes it.  The search also
+stops, as an intentional deviation from that rule, once the criterion fails
+at a cutoff at or above Bach's bound; since the search statistic is
+non-decreasing in the cutoff, this leaves the minimum unchanged.  A ``grh``
 request on a non-monic presentation still fails closed today, because prime
 decomposition, and so the factor base, also needs a monic integral defining
 polynomial.

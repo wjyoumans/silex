@@ -525,9 +525,10 @@ bool check_bdf_search_stop() noexcept {
         // `out` unchanged; the bound the full search returns is above the
         // stop, so min(BDF, stop) is the stop.  This is how the GRH bound now
         // reaches Bach's bound without the full search.  With Bach's actual
-        // bound as the stop it happens only for t(K) > 12 (BDF 2008,
-        // Section 6), that is for enormous discriminants, so the stop here
-        // is set below Bach's bound.
+        // bound as the stop it happens only for t(K) > 12, or t(K) > 6 in
+        // degree 2 where Silex uses 6 log^2 D (BDF 2008, Section 1 after
+        // Definition 1.2, Section 3, Theorem 4.3), that is for enormous
+        // discriminants, so the stop here is set below Bach's bound.
         const slong stops[] = {100, c.last_failing_doubling};
         for (const slong stop_value : stops) {
             sflint::fmpz_set_si(sflint::FmpzRef(stop), stop_value);
