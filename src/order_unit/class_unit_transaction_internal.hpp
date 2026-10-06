@@ -129,9 +129,10 @@ struct ClassUnitTransactionReport {
     void record_timing(ClassUnitStage stage, double elapsed_ms) noexcept;
 };
 
-// proven_generation_requirement(bound, route, order), kept by the first
-// factor-base build of a class/unit transaction so that later builds of the
-// same order reuse it (ClassGroupContext::record_factor_base_generation_).
+// proven_generation_requirement(bound, route, order) of the most recently
+// evaluated order of a class/unit transaction, kept so that later
+// factor-base builds of the same order reuse it; a build of another order
+// evaluates and replaces it (ClassGroupContext::record_factor_base_generation_).
 // The requirement depends only on the order, which `order` holds; nothing is
 // kept while `order` is undefined.
 struct TransactionGenerationRequirement {

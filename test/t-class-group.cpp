@@ -3571,7 +3571,9 @@ int test_honesty_reuses_recorded_generation_requirement() {
 }
 
 // Within one class/unit transaction a factor-base rebuild of the same order
-// reuses the requirement of the first build instead of evaluating G again;
+// reuses the requirement of the first build instead of evaluating G again,
+// while a build of another order (here another maximal order of the same
+// field, with different data) evaluates it and replaces the kept value;
 // without a transaction each build evaluates it.
 int test_transaction_keeps_generation_requirement() {
     silex::NumberField field = cubic_field(1, 200);
@@ -3614,11 +3616,38 @@ int test_transaction_keeps_generation_requirement() {
         if (attach_transaction) {
             assert(run_context.generation_requirement.order.has_same_data(
                     maximal_order));
+        }
+
+        // A build of another order does not reuse the kept requirement: it
+        // evaluates G, gets the same value, and becomes the kept order.
+        silex::Order other_order(field);
+        assert(other_order.maximal_order(equation_order));
+        assert(!other_order.has_same_data(maximal_order));
+        silex::ClassGroupContext other_context(other_order);
+        other_context.set_diagnostics(&diagnostics);
+        if (attach_transaction) {
+            silex::detail::ClassUnitTransactionAccess::set_run_context(
+                    other_context, &run_context);
+        }
+        assert(other_context.build_factor_base(
+                sflint::FmpzConstRef(small_bound)));
+        sflint::Fmpz other_recorded;
+        assert(Access::recorded_generation_requirement(
+                sflint::FmpzRef(other_recorded), other_context, other_order));
+        assert(sflint::fmpz_equal(sflint::FmpzConstRef(other_recorded),
+                                  sflint::FmpzConstRef(expected)));
+        if (attach_transaction) {
+            assert(run_context.generation_requirement.order.has_same_data(
+                    other_order));
+            assert(!run_context.generation_requirement.order.has_same_data(
+                    maximal_order));
+            silex::detail::ClassUnitTransactionAccess::set_run_context(
+                    other_context, nullptr);
             silex::detail::ClassUnitTransactionAccess::set_run_context(
                     context, nullptr);
         }
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
-        assert(counts.recorded == 2);
+        assert(counts.recorded == 3);
         assert(counts.kept == (attach_transaction ? 1 : 0));
 #else
         assert(counts.recorded == 0);
