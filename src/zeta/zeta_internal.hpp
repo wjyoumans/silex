@@ -74,6 +74,30 @@ bool grh_factor_base_bound_with_diagnostics(
         const DiagnosticsContext* diagnostics,
         bool* bach_selected = nullptr) noexcept;
 
+// Outcome of the Belabas-Diaz y Diaz-Friedman search behind the GRH
+// generation bound.
+enum class BdfSearchOutcome {
+    // The criterion holds at the bound written to `out`.
+    found,
+    // The criterion failed at a cutoff at least the stop bound, so the
+    // bound the full search would find exceeds the stop bound.
+    stopped,
+    // The criterion could not be computed or decided; `out` is unchanged.
+    failed,
+};
+
+// The BDF search that `grh_factor_base_bound_with_diagnostics` runs with
+// Bach's bound as `stop_bound`; `stop_bound` may be null (no stop).
+// `evaluations`, when given, receives the number of evaluations of the
+// criterion's right side.  On `found`, `out` is the BDF bound; otherwise
+// `out` is unchanged.
+BdfSearchOutcome grh_bdf_factor_base_bound_search(
+        flint::FmpzRef out,
+        const Order& order,
+        const flint::Fmpz* stop_bound,
+        const DiagnosticsContext* diagnostics,
+        slong* evaluations = nullptr) noexcept;
+
 // `unconditional`, when given, is set to true exactly when the product came
 // from an unconditional route: degree one, or the quadratic L(1, chi) route
 // (explicit quadratic backend, maximal order, |D| fitting a ulong).  It is

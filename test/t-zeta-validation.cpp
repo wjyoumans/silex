@@ -420,6 +420,134 @@ bool check_residue_degree_differentials() noexcept {
                    quartic_anchors, 8, 7);
 }
 
+
+struct BdfStopCase {
+    slong degree;
+    slong coefficients[4];
+    slong discriminant;
+    // Bach's bound ceil(c log^2 |D|), c = 6 in degree two and 12 otherwise
+    // (Bach 1990, Theorem 4 and the remark following it), computed
+    // independently of Silex.
+    slong bach;
+    // The full BDF search: its bound and its number of evaluations.
+    slong bdf;
+    slong evaluations;
+    // Largest cutoff where the search finds the criterion failing (0: none).
+    slong last_failing_doubling;
+};
+
+// The BDF search behind the GRH generation bound stops once the criterion
+// fails at a cutoff at least Bach's bound.  The criterion's right side does
+// not decrease as the cutoff grows, so the full search would return a bound
+// above that cutoff, and the published bound min(BDF, Bach) is unchanged.
+bool check_bdf_search_stop() noexcept {
+    // x^3 + x + 200 and x^2 + x + 4 meet the criterion at the first cutoff,
+    // 100.  For x^3 + x + 1000003, x^2 + x + 1000003 and
+    // x^4 + 3x^2 + x + 10007 the doubling fails at 100 (and at 400 for the
+    // cubic and the quartic) before the criterion holds.
+    const BdfStopCase cases[] = {
+            {3, {200, 1, 0, 0}, -1080004, 2317, 50, 2, 0},
+            {2, {4, 1, 0, 0}, -15, 45, 50, 2, 0},
+            {3, {1000003, 1, 0, 0}, -27000162000247, 11478, 547, 10, 400},
+            {2, {1000003, 1, 0, 0}, -4000011, 1387, 175, 5, 100},
+            {4, {10007, 1, 3, 0}, 256422632363321, 13210, 557, 9, 400},
+    };
+    for (const BdfStopCase& c : cases) {
+        const FieldSetup setup = setup_from_coefficients(c.coefficients,
+                                                         c.degree);
+        sflint::Fmpz discriminant;
+        if (!setup.maximal_order.discriminant(
+                    sflint::FmpzRef(discriminant)) ||
+            !sflint::fmpz_equal_si(discriminant, c.discriminant)) {
+            return false;
+        }
+
+        // The full search, without a stop bound.
+        sflint::Fmpz bdf;
+        slong evaluations = 0;
+        if (silex::detail::grh_bdf_factor_base_bound_search(
+                    sflint::FmpzRef(bdf), setup.maximal_order, nullptr,
+                    nullptr, &evaluations) !=
+                    silex::detail::BdfSearchOutcome::found ||
+            !sflint::fmpz_equal_si(bdf, c.bdf) ||
+            evaluations != c.evaluations) {
+            return false;
+        }
+
+        // The published bound is min(BDF, Bach), as before; Bach is
+        // reported only when strictly smaller.
+        sflint::Fmpz bound;
+        bool bach_selected = c.bach >= c.bdf;
+        if (!silex::detail::grh_factor_base_bound_with_diagnostics(
+                    sflint::FmpzRef(bound), setup.maximal_order, nullptr,
+                    &bach_selected) ||
+            !sflint::fmpz_equal_si(bound, FLINT_MIN(c.bdf, c.bach)) ||
+            bach_selected != (c.bach < c.bdf)) {
+            return false;
+        }
+
+        // With Bach's bound as the stop, these fields never fail the
+        // criterion at a cutoff that large, so the search runs in full.
+        sflint::Fmpz stop;
+        sflint::Fmpz stopped_bdf;
+        sflint::fmpz_set_si(sflint::FmpzRef(stop), c.bach);
+        slong stop_evaluations = 0;
+        if (silex::detail::grh_bdf_factor_base_bound_search(
+                    sflint::FmpzRef(stopped_bdf), setup.maximal_order, &stop,
+                    nullptr, &stop_evaluations) !=
+                    silex::detail::BdfSearchOutcome::found ||
+            !sflint::fmpz_equal_si(stopped_bdf, c.bdf) ||
+            stop_evaluations != c.evaluations) {
+            return false;
+        }
+
+        // A stop at the BDF bound itself never stops: every cutoff where the
+        // criterion fails lies below the bound the search returns.  (The
+        // literal rule of BDF 2008, Section 3, which stops once the doubled
+        // cutoff passes the stop, would stop at 800 for the cubic and the
+        // quartic.)
+        sflint::fmpz_set_si(sflint::FmpzRef(stop), c.bdf);
+        sflint::fmpz_zero(sflint::FmpzRef(stopped_bdf));
+        if (silex::detail::grh_bdf_factor_base_bound_search(
+                    sflint::FmpzRef(stopped_bdf), setup.maximal_order, &stop,
+                    nullptr, &stop_evaluations) !=
+                    silex::detail::BdfSearchOutcome::found ||
+            !sflint::fmpz_equal_si(stopped_bdf, c.bdf) ||
+            stop_evaluations != c.evaluations) {
+            return false;
+        }
+
+        if (c.last_failing_doubling == 0) {
+            continue;
+        }
+        // A stop at or below a cutoff where the doubling fails ends the
+        // search there, after one evaluation per doubling step, and leaves
+        // `out` unchanged; the bound the full search returns is above the
+        // stop, so min(BDF, stop) is the stop.  This is how the GRH bound now
+        // reaches Bach's bound without the full search.  With Bach's actual
+        // bound as the stop it happens only for t(K) > 12 (BDF 2008,
+        // Section 6), that is for enormous discriminants, so the stop here
+        // is set below Bach's bound.
+        const slong stops[] = {100, c.last_failing_doubling};
+        for (const slong stop_value : stops) {
+            sflint::fmpz_set_si(sflint::FmpzRef(stop), stop_value);
+            sflint::fmpz_set_si(sflint::FmpzRef(stopped_bdf), 7);
+            stop_evaluations = 0;
+            if (silex::detail::grh_bdf_factor_base_bound_search(
+                        sflint::FmpzRef(stopped_bdf), setup.maximal_order,
+                        &stop, nullptr, &stop_evaluations) !=
+                        silex::detail::BdfSearchOutcome::stopped ||
+                !sflint::fmpz_equal_si(stopped_bdf, 7) ||
+                stop_evaluations != (stop_value == 100 ? 1 : 2) ||
+                stop_evaluations >= c.evaluations ||
+                stop_value >= c.bdf) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -434,7 +562,8 @@ int main() {
                    !check_cache_separation(cubic) ||
                    !check_transaction_failure_leaves_outputs_unset(cubic) ||
                    !check_transaction_failure_leaves_outputs_unset(quartic) ||
-                   !check_residue_degree_differentials()
+                   !check_residue_degree_differentials() ||
+                   !check_bdf_search_stop()
             ? 1
             : 0;
 }

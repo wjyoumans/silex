@@ -1624,16 +1624,35 @@ bool factor_base_bound_bdf_right_side(
     return flint::arb_is_finite(out);
 }
 
-bool factor_base_bound_bdf(flint::FmpzRef out,
-                                 const Order& order,
-                                 const DiagnosticsContext* diagnostics)
-        noexcept {
+// The Belabas-Diaz y Diaz-Friedman search (source anchor in
+// docs/reference/algorithms_and_sources.rst): doubling from 100 until the
+// criterion holds, then a dichotomy down to a step below 100.  `evaluations` counts the
+// evaluations of the criterion's right side.
+//
+// When `stop_bound` is given, the search stops as soon as the criterion
+// fails at a cutoff already at least `stop_bound`, and reports `stopped`.
+// The right side never decreases as the cutoff T grows: each weight
+// 1 - m log N / log T grows with T, a new term enters with weight zero, and
+// -(pi^2 n / 2 + 4 G r1) / log T grows with T.  So every cutoff where the
+// criterion holds, and in particular the bound the full search returns,
+// lies above every cutoff where it fails, hence above `stop_bound`: stopping
+// there leaves min(BDF, stop_bound) unchanged.  This is not the literal rule
+// of BDF 2008, Section 3, which stops once the doubled T passes
+// 12 log^2 |D|; that rule can lose a smaller valid T that the dichotomy
+// would find.
+detail::BdfSearchOutcome factor_base_bound_bdf_search_impl(
+        flint::FmpzRef out,
+        const Order& order,
+        const flint::Fmpz* stop_bound,
+        const DiagnosticsContext* diagnostics,
+        slong& evaluations) noexcept {
+    using detail::BdfSearchOutcome;
     if (out.raw() == nullptr || !order.is_maximal() || order.degree() <= 0) {
-        return false;
+        return BdfSearchOutcome::failed;
     }
     const NumberField* field = order.parent();
     if (field == nullptr) {
-        return false;
+        return BdfSearchOutcome::failed;
     }
 
     Signature signature;
@@ -1643,12 +1662,12 @@ bool factor_base_bound_bdf(flint::FmpzRef out,
     if (!signature.compute(*field) ||
         !order.discriminant(flint::FmpzRef(discriminant)) ||
         !bf_init_residue_degree_context(residue_context, order)) {
-        return false;
+        return BdfSearchOutcome::failed;
     }
     flint::fmpz_abs(flint::FmpzRef(abs_discriminant),
                     flint::FmpzConstRef(discriminant));
     if (flint::fmpz_sgn(flint::FmpzConstRef(abs_discriminant)) <= 0) {
-        return false;
+        return BdfSearchOutcome::failed;
     }
 
     flint::Arb target;
@@ -1682,7 +1701,7 @@ bool factor_base_bound_bdf(flint::FmpzRef out,
     flint::arb_sub(target, target, real_term,
                    kFactorBaseBoundPrecision);
     if (!flint::arb_is_finite(target)) {
-        return false;
+        return BdfSearchOutcome::failed;
     }
 
     std::vector<slong> residue_degrees;
@@ -1691,28 +1710,43 @@ bool factor_base_bound_bdf(flint::FmpzRef out,
             FLINT_MAX(order.degree(), WORD(1))));
     detail::ZetaBfResidueDegreeCache residue_degree_cache;
     flint::Arb right_side;
-    double x0 = 100.0;
-    double x1 = 2.0 * x0;
-    if (!factor_base_bound_bdf_right_side(
+    // Evaluates the right side at cutoff ceil(x).
+    const auto evaluate = [&](double x) noexcept {
+        ++evaluations;
+        return factor_base_bound_bdf_right_side(
                 right_side, order, residue_context, residue_degrees,
                 degree_scratch, residue_degree_cache, order.degree(),
-                signature.r1(), x0, diagnostics)) {
-        return false;
+                signature.r1(), x, diagnostics);
+    };
+    // True when the criterion fails at the cutoff ceil(x) just evaluated and
+    // that cutoff is at least `stop_bound`.  A successful evaluation has
+    // 2 <= ceil(x) < WORD_MAX.
+    const auto failed_past_stop = [&](double x) noexcept {
+        return stop_bound != nullptr && flint::arb_lt(right_side, target) &&
+               flint::fmpz_cmp_ui(flint::FmpzConstRef(*stop_bound),
+                                  static_cast<ulong>(std::ceil(x))) <= 0;
+    };
+    double x0 = 100.0;
+    double x1 = 2.0 * x0;
+    if (!evaluate(x0)) {
+        return BdfSearchOutcome::failed;
+    }
+    if (failed_past_stop(x0)) {
+        return BdfSearchOutcome::stopped;
     }
 
     while (flint::arb_lt(right_side, target)) {
         x0 = x1;
         x1 = 2.0 * x0;
-        if (!std::isfinite(x1) ||
-            !factor_base_bound_bdf_right_side(
-                    right_side, order, residue_context, residue_degrees,
-                    degree_scratch, residue_degree_cache, order.degree(),
-                    signature.r1(), x1, diagnostics)) {
-            return false;
+        if (!std::isfinite(x1) || !evaluate(x1)) {
+            return BdfSearchOutcome::failed;
+        }
+        if (failed_past_stop(x1)) {
+            return BdfSearchOutcome::stopped;
         }
     }
     if (!flint::arb_gt(right_side, target)) {
-        return false;
+        return BdfSearchOutcome::failed;
     }
 
     double distance = std::fabs(x0 - x1);
@@ -1722,25 +1756,41 @@ bool factor_base_bound_bdf(flint::FmpzRef out,
         } else if (flint::arb_gt(right_side, target)) {
             x1 = x0 - distance / 2.0;
         } else {
-            return false;
+            return BdfSearchOutcome::failed;
         }
         distance = std::fabs(x1 - x0);
         x0 = x1;
-        if (!factor_base_bound_bdf_right_side(
-                    right_side, order, residue_context, residue_degrees,
-                    degree_scratch, residue_degree_cache, order.degree(),
-                    signature.r1(), x0, diagnostics)) {
-            return false;
+        if (!evaluate(x0)) {
+            return BdfSearchOutcome::failed;
+        }
+        if (failed_past_stop(x0)) {
+            return BdfSearchOutcome::stopped;
         }
     }
 
     const double result = std::ceil(x0);
     if (!std::isfinite(result) || result < 0.0 ||
         result >= static_cast<double>(WORD_MAX)) {
-        return false;
+        return BdfSearchOutcome::failed;
     }
     flint::fmpz_set_ui(out, static_cast<ulong>(result));
-    return true;
+    return BdfSearchOutcome::found;
+}
+
+detail::BdfSearchOutcome factor_base_bound_bdf_search(
+        flint::FmpzRef out,
+        const Order& order,
+        const flint::Fmpz* stop_bound,
+        const DiagnosticsContext* diagnostics,
+        slong* evaluations = nullptr) noexcept {
+    slong count = 0;
+    const detail::BdfSearchOutcome outcome =
+            factor_base_bound_bdf_search_impl(out, order, stop_bound,
+                                              diagnostics, count);
+    if (evaluations != nullptr) {
+        *evaluations = count;
+    }
+    return outcome;
 }
 
 bool factor_base_bound_bach(flint::FmpzRef out,
@@ -1787,9 +1837,14 @@ bool grh_factor_base_bound_impl(
     // residue-degree failure, an Arb comparison that cannot decide, or a
     // search past the double range.  Bach 1990, Theorem 4 (and the remark
     // following it in degree two) holds without the BDF value, and BDF 2008,
-    // Section 3, itself takes Bach's bound once its search passes it.
+    // Section 3, itself takes Bach's bound once its search passes it.  The
+    // search also stops once the criterion fails at a cutoff at least Bach's
+    // bound; the BDF bound would then exceed Bach's (see
+    // `factor_base_bound_bdf_search_impl`), so the result is unchanged.
     const bool bdf_computed =
-            factor_base_bound_bdf(flint::FmpzRef(bdf), order, diagnostics);
+            factor_base_bound_bdf_search(flint::FmpzRef(bdf), order, &bach,
+                                         diagnostics) ==
+            detail::BdfSearchOutcome::found;
     const bool use_bach =
             !bdf_computed ||
             flint::fmpz_cmp(flint::FmpzConstRef(bdf),
@@ -3205,6 +3260,16 @@ bool grh_factor_base_bound_with_diagnostics(
         bool* bach_selected) noexcept {
     return grh_factor_base_bound_impl(out, order, diagnostics,
                                       bach_selected);
+}
+
+BdfSearchOutcome grh_bdf_factor_base_bound_search(
+        flint::FmpzRef out,
+        const Order& order,
+        const flint::Fmpz* stop_bound,
+        const DiagnosticsContext* diagnostics,
+        slong* evaluations) noexcept {
+    return factor_base_bound_bdf_search(out, order, stop_bound, diagnostics,
+                                        evaluations);
 }
 
 bool zeta_class_regulator_product_with_diagnostics(
