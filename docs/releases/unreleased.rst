@@ -245,7 +245,11 @@ Fixed
   unless verified records already cover every prime dividing the candidate
   class number, in which case they are kept; this includes the internal
   fallback that ``try_certify_with_units`` runs when the direct index-one
-  check fails.  Labels are unchanged.
+  check fails.  Labels are unchanged.  The internal Belabas-Friedman audit
+  route that class/unit validation uses when ``zeta_bf_max_cutoff`` is nonzero
+  follows the same rule in degree one.  Validation only takes that route for
+  orders of degree greater than two, so computations through it see no change
+  from this entry.
 
 - ``try_certify_class_unit_with_zeta_bf`` (and the ``--zeta-bf-audit`` option
   of the class/unit instance tool) no longer fails on an imaginary quadratic
