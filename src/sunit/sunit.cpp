@@ -127,6 +127,24 @@ bool publish_s_class_storage(
     return true;
 }
 
+// The S-regulator is the S-unit lattice regulator: the absolute value of a
+// maximal minor of the log-S embedding of a basis of U_S modulo torsion
+// (archimedean coordinates [K_v:R] log|x|_v, finite coordinates
+// -v_P(x) log N(P) for P in S).  The ordinary units have zero valuations, so
+// the minor factors as
+//
+//     R_S = R * [Z^S : v(U_S)] * prod_{P in S} log N(P),
+//
+// and the exact sequence U -> U_S -> Z^S -> Cl -> Cl_S -> 0 (Cohen, GTM 193,
+// Prop. 7.4.7) gives [Z^S : v(U_S)] = |<S> in Cl| = h / h_S.  This is
+// Bernard and Roux-Langlois, Twisted-PHS (ASIACRYPT 2020), Prop. 2.2, and
+// Bernard's thesis (Rennes 2022), Def. 2.5 and Prop. 2.6.  The index is
+// taken exactly as |det| of the published nonunit valuation HNF, whose rows
+// are v(g_i) for the nonunit generators and span v(U_S).
+//
+// The reference bnfsunit (bnfunits.c:217-233) instead returns
+// R * h_S * prod log N(P), which equals R_S * h_S^2 / h and agrees with R_S
+// only when h = h_S^2.
 bool compute_s_regulator(flint::Arb& out,
                          const detail::SUnitClassContext& context,
                          const OrderUnitGroup& ordinary_units,
@@ -136,17 +154,26 @@ bool compute_s_regulator(flint::Arb& out,
         return false;
     }
 
-    // reference bnfsunit preserves the ordinary regulator on its empty-S branch.
+    // With S empty, U_S = U and the S-regulator is the ordinary regulator.
     if (context.selected_primes.empty()) {
         return true;
     }
 
-    flint::Fmpz s_class_order;
-    if (!context.s_class_group.order(flint::FmpzRef(s_class_order)) ||
-        flint::fmpz_sgn(flint::FmpzConstRef(s_class_order)) <= 0) {
+    const slong selected_count =
+            static_cast<slong>(context.selected_primes.size());
+    if (flint::fmpz_mat_nrows(context.valuation_rows) != selected_count ||
+        flint::fmpz_mat_ncols(context.valuation_rows) != selected_count) {
         return false;
     }
-    flint::arb_mul_fmpz(out, out, flint::FmpzConstRef(s_class_order),
+    flint::Fmpz valuation_index;
+    flint::fmpz_mat_det(flint::FmpzRef(valuation_index),
+                        flint::FmpzMatConstRef(context.valuation_rows));
+    flint::fmpz_abs(flint::FmpzRef(valuation_index),
+                    flint::FmpzConstRef(valuation_index));
+    if (flint::fmpz_sgn(flint::FmpzConstRef(valuation_index)) <= 0) {
+        return false;
+    }
+    flint::arb_mul_fmpz(out, out, flint::FmpzConstRef(valuation_index),
                         precision);
 
     for (const PrimeIdeal& prime : context.selected_primes) {

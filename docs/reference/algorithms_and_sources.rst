@@ -1150,8 +1150,13 @@ S-class and S-unit publication
 
 ``src/sunit`` publishes proven S-class and S-unit data from proven ordinary
 class/unit inputs.  PARI 2.17.3 ``src/basemath/bnfunits.c:119-235`` supplies
-selected-prime class rows, HNF/kernel construction, valuation bases, nonunit
-generators, and the nonempty-S regulator formula.  Hecke 0.39.19
+selected-prime class rows, HNF/kernel construction, valuation bases, and
+nonunit generators.  The S-regulator is the S-unit lattice regulator
+``R h^(S) prod log N(P)`` of Bernard and Roux-Langlois (ASIACRYPT 2020,
+Prop. 2.2), with ``h^(S) = h / h_S`` taken exactly as the index of the
+nonunit valuation HNF; PARI's ``bnfsunit`` reports ``R h_S prod log N(P)``
+instead (``bnfunits.c:217-233``), which is ``h_S^2 / h`` times it.  See
+:doc:`sunit_groups`.  Hecke 0.39.19
 ``src/NumFieldOrd/NfOrd/Clgp/Sunits.jl:1-265`` supplies the corresponding
 class-group quotient, valuation-HNF, compact-generator, and combined-group
 maps.  Silex deliberately orders coordinates as torsion, ordinary free, then

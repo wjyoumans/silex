@@ -146,19 +146,47 @@ void assert_coordinates_equal(const silex::SUnitCoordinates& actual,
     }
 }
 
+// The S-regulator is the S-unit lattice regulator
+// R_S = R * (h / h_S) * prod_{P in S} log N(P).  The index h / h_S is checked
+// here twice: against the source class number h and the published S-class
+// number h_S, and against |det| of the published nonunit valuation lattice.
 void assert_regulator_formula(const ProvenFixture& fixture,
                               const silex::SClassGroup& s_class_group,
                               const silex::SUnitGroup& s_unit_group,
                               const std::vector<silex::PrimeIdeal>& selected,
                               slong precision) noexcept {
     sflint::Arb expected;
+    sflint::Arb reference_expected;
     sflint::Arb actual;
     assert(fixture.units.regulator(sflint::ArbRef(expected)));
+    sflint::Fmpz class_number;
+    sflint::Fmpz s_class_number;
+    sflint::Fmpz index;
+    sflint::Fmpz remainder;
+    assert(fixture.class_group.order(sflint::FmpzRef(class_number)));
+    assert(s_class_group.order(sflint::FmpzRef(s_class_number)));
+    ::fmpz_fdiv_qr(index.raw(), remainder.raw(), class_number.raw(),
+                   s_class_number.raw());
+    assert(sflint::fmpz_is_zero(sflint::FmpzConstRef(remainder)));
+    const slong nonunit_rank = s_unit_group.nonunit_rank();
+    assert(nonunit_rank == static_cast<slong>(selected.size()));
+    sflint::FmpzMat valuations(nonunit_rank, nonunit_rank);
+    assert(s_unit_group.nonunit_valuation_matrix(
+            sflint::FmpzMatRef(valuations)));
+    sflint::Fmpz lattice_index;
+    sflint::fmpz_mat_det(sflint::FmpzRef(lattice_index),
+                         sflint::FmpzMatConstRef(valuations));
+    sflint::fmpz_abs(sflint::FmpzRef(lattice_index),
+                     sflint::FmpzConstRef(lattice_index));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(lattice_index),
+                              sflint::FmpzConstRef(index)));
+
+    sflint::arb_set(reference_expected, expected);
     if (!selected.empty()) {
-        sflint::Fmpz class_order;
-        assert(s_class_group.order(sflint::FmpzRef(class_order)));
-        sflint::arb_mul_fmpz(expected, expected,
-                            sflint::FmpzConstRef(class_order), precision);
+        sflint::arb_mul_fmpz(expected, expected, sflint::FmpzConstRef(index),
+                             precision);
+        sflint::arb_mul_fmpz(reference_expected, reference_expected,
+                             sflint::FmpzConstRef(s_class_number), precision);
         for (const silex::PrimeIdeal& prime : selected) {
             sflint::Fmpz norm;
             sflint::Arb log_norm;
@@ -166,6 +194,8 @@ void assert_regulator_formula(const ProvenFixture& fixture,
             sflint::arb_log_fmpz(log_norm, sflint::FmpzConstRef(norm),
                                  precision);
             sflint::arb_mul(expected, expected, log_norm, precision);
+            sflint::arb_mul(reference_expected, reference_expected, log_norm,
+                            precision);
         }
     }
     assert(s_unit_group.regulator(sflint::ArbRef(actual)));
@@ -175,6 +205,21 @@ void assert_regulator_formula(const ProvenFixture& fixture,
     if (selected.empty()) {
         assert(::arb_equal(actual.raw(), expected.raw()));
     }
+
+    // For nonempty S, the reference bnfsunit reports R * h_S * prod log N(P),
+    // which is R_S * h_S^2 / h.  Convert explicitly before comparing with the
+    // reference formula.  (Its empty-S branch returns R, as Silex does.)
+    if (selected.empty()) {
+        return;
+    }
+    sflint::Arb converted;
+    sflint::arb_mul_fmpz(converted, actual,
+                         sflint::FmpzConstRef(s_class_number), precision);
+    sflint::arb_mul_fmpz(converted, converted,
+                         sflint::FmpzConstRef(s_class_number), precision);
+    sflint::arb_div_fmpz(converted, converted,
+                         sflint::FmpzConstRef(class_number), precision);
+    assert(sflint::arb_overlaps(converted, reference_expected));
 }
 
 void assert_public_s_class_witnesses(
@@ -1221,6 +1266,205 @@ int test_fail_closed_preserves_publication() {
     return 0;
 }
 
+std::vector<silex::PrimeIdeal> prime_above_with_degree(
+        const silex::Order& order,
+        slong rational_prime,
+        slong residue_degree) noexcept {
+    sflint::Fmpz p;
+    sflint::fmpz_set_si(sflint::FmpzRef(p), rational_prime);
+    silex::PrimeIdealList decomposition;
+    assert(silex::decompose_prime(
+            decomposition, order, sflint::FmpzConstRef(p)));
+    std::vector<silex::PrimeIdeal> out;
+    for (slong i = 0; i < decomposition.size(); ++i) {
+        const auto* prime = decomposition.at(i);
+        assert(prime != nullptr);
+        if (prime->residue_degree() == residue_degree) {
+            out.emplace_back(order);
+            assert(out.back().set(*prime));
+            break;
+        }
+    }
+    assert(out.size() == 1);
+    return out;
+}
+
+// Computes the S-unit groups and checks the S-regulator against an
+// independent enclosure of R * (h / h_S) * prod log N(P), the exact index
+// h / h_S, and reference bnfsunit(bnf, S)[4] after the explicit conversion
+// R_S * h_S^2 / h.  The reference decimals were computed with gp 2.17.4
+// (bnfinit(pol, 1), bnfcertify = 1), where |det| of a maximal minor of the
+// log-S embedding of bnf.fu and the bnfsunit generators equals R_S.
+void assert_lattice_regulator(ProvenFixture& fixture,
+                              const std::vector<silex::PrimeIdeal>& selected,
+                              slong expected_index,
+                              const sflint::Arb& expected,
+                              const char* reference_regulator) noexcept {
+    silex::SUnitComputeOptions options;
+    options.regulator_precision = 192;
+    silex::SUnitComputeResult result;
+    silex::SClassGroup s_class;
+    silex::SUnitGroup s_units;
+    assert(silex::compute_sunit_groups(
+            result, s_class, s_units, fixture.class_group, fixture.units,
+            silex::PrimeIdealSpan(selected.data(), selected.size()), options));
+    assert(result.success);
+    assert(s_units.regulator_proof_status() == silex::ProofState::verified);
+
+    sflint::Fmpz class_number;
+    sflint::Fmpz s_class_number;
+    assert(fixture.class_group.order(sflint::FmpzRef(class_number)));
+    assert(s_class.order(sflint::FmpzRef(s_class_number)));
+    sflint::Fmpz index;
+    ::fmpz_divexact(index.raw(), class_number.raw(), s_class_number.raw());
+    assert(sflint::fmpz_equal_si(index, expected_index));
+    assert_regulator_formula(fixture, s_class, s_units, selected, 192);
+
+    sflint::Arb actual;
+    assert(s_units.regulator(sflint::ArbRef(actual)));
+    assert(::arb_rel_accuracy_bits(actual.raw()) > 150);
+    assert(sflint::arb_overlaps(actual, expected));
+
+    // The reference bnfsunit number is
+    // R * h_S * prod log N(P) = R_S * h_S^2 / h.
+    sflint::Arb reference;
+    sflint::Arb converted;
+    assert(::arb_set_str(reference.raw(), reference_regulator, 192) == 0);
+    sflint::arb_mul_fmpz(converted, actual,
+                         sflint::FmpzConstRef(s_class_number), 192);
+    sflint::arb_mul_fmpz(converted, converted,
+                         sflint::FmpzConstRef(s_class_number), 192);
+    sflint::arb_div_fmpz(converted, converted,
+                         sflint::FmpzConstRef(class_number), 192);
+    assert(sflint::arb_overlaps(converted, reference));
+    // The two numbers agree exactly when h = h_S^2.
+    sflint::Fmpz s_class_square;
+    ::fmpz_mul(s_class_square.raw(), s_class_number.raw(),
+               s_class_number.raw());
+    assert(sflint::arb_overlaps(actual, reference) ==
+           sflint::fmpz_equal(sflint::FmpzConstRef(class_number),
+                              sflint::FmpzConstRef(s_class_square)));
+}
+
+int test_s_regulator_is_lattice_regulator() {
+    const slong prec = 192;
+    sflint::Arb log2;
+    sflint::Arb log3;
+    sflint::arb_log_ui(log2, 2, prec);
+    sflint::arb_log_ui(log3, 3, prec);
+
+    // Q(sqrt(-5)), S = {P2}: h = 2, h_S = 1, R = 1.  R_S = 2 log 2; bnfsunit
+    // reports log 2.
+    {
+        ProvenFixture fixture = proven_quadratic(-5);
+        sflint::Arb expected;
+        sflint::arb_mul_ui(expected, log2, 2, prec);
+        assert_lattice_regulator(
+                fixture, first_prime_above(fixture.order, 2), 2, expected,
+                "0.693147180559945309417232121458176568075500134360 "
+                "+/- 1e-45");
+    }
+
+    // Q(sqrt(10)), S = {P3}: h = 2, h_S = 1, R = log(3 + sqrt(10)).
+    // R_S = 2 R log 3 = 3.99553...; bnfsunit reports 1.99776...
+    {
+        ProvenFixture fixture = proven_quadratic(10);
+        sflint::Arb expected;
+        sflint::arb_sqrt_ui(expected, 10, prec);
+        sflint::arb_add_ui(expected, expected, 3, prec);
+        sflint::arb_log(expected, expected, prec);
+        sflint::arb_mul(expected, expected, log3, prec);
+        sflint::arb_mul_ui(expected, expected, 2, prec);
+        assert_lattice_regulator(
+                fixture, first_prime_above(fixture.order, 3), 2, expected,
+                "1.99776762639736135861263121339981102422964136956 "
+                "+/- 1e-45");
+    }
+
+    // Q(sqrt(-17)): h = 4 (cyclic), R = 1.  P3 has order 4 and P2 order 2.
+    {
+        ProvenFixture fixture = proven_quadratic(-17);
+        std::vector<silex::PrimeIdeal> p2 =
+                first_prime_above(fixture.order, 2);
+        std::vector<silex::PrimeIdeal> p3 =
+                first_prime_above(fixture.order, 3);
+
+        // S = {P3}: h_S = 1, R_S = 4 log 3; bnfsunit reports log 3.
+        sflint::Arb expected;
+        sflint::arb_mul_ui(expected, log3, 4, prec);
+        assert_lattice_regulator(
+                fixture, p3, 4, expected,
+                "1.09861228866810969139524523692252570464749055782 "
+                "+/- 1e-45");
+
+        // S = {P2, P3}: h_S = 1, R_S = 4 log 2 log 3; bnfsunit reports
+        // log 2 log 3.
+        std::vector<silex::PrimeIdeal> both;
+        both.emplace_back(fixture.order);
+        assert(both.back().set(p2[0]));
+        both.emplace_back(fixture.order);
+        assert(both.back().set(p3[0]));
+        sflint::arb_mul(expected, log2, log3, prec);
+        sflint::arb_mul_ui(expected, expected, 4, prec);
+        assert_lattice_regulator(
+                fixture, both, 4, expected,
+                "0.761500010418808986429122716836503885642301623352 "
+                "+/- 1e-45");
+
+        // Control, S = {P2}: h_S = 2, so h = h_S^2 and both numbers are
+        // 2 log 2.
+        sflint::arb_mul_ui(expected, log2, 2, prec);
+        assert_lattice_regulator(
+                fixture, p2, 2, expected,
+                "1.38629436111989061883446424291635313615100026872 "
+                "+/- 1e-45");
+    }
+
+    // Q(cbrt(11)): h = 2, h_S = 1, R = 5.58720...  The two primes above 2
+    // have residue degrees 1 and 2.
+    {
+        const slong coefficients[] = {-11, 0, 0, 1};
+        ProvenFixture fixture = proven_polynomial(coefficients, 3);
+        sflint::Arb expected;
+        assert(::arb_set_str(
+                       expected.raw(),
+                       "7.74551304011992573275575125211580859257590121591 +/- 1e-45",
+                       prec) == 0);
+        assert_lattice_regulator(
+                fixture, prime_above_with_degree(fixture.order, 2, 1), 2,
+                expected,
+                "3.87275652005996286637787562605790429628795060795 "
+                "+/- 1e-45");
+        assert(::arb_set_str(
+                       expected.raw(),
+                       "15.4910260802398514655115025042316171851518024318 +/- 1e-45",
+                       prec) == 0);
+        assert_lattice_regulator(
+                fixture, prime_above_with_degree(fixture.order, 2, 2), 2,
+                expected,
+                "7.74551304011992573275575125211580859257590121591 "
+                "+/- 1e-45");
+    }
+
+    // Q(sqrt(79)), S = {P3}: h = 3, h_S = 1, R = log(80 + 9 sqrt(79)).
+    // R_S = 3 R log 3 = 16.72681...; bnfsunit reports 5.57560...
+    {
+        ProvenFixture fixture = proven_quadratic(79);
+        sflint::Arb expected;
+        sflint::arb_sqrt_ui(expected, 79, prec);
+        sflint::arb_mul_ui(expected, expected, 9, prec);
+        sflint::arb_add_ui(expected, expected, 80, prec);
+        sflint::arb_log(expected, expected, prec);
+        sflint::arb_mul(expected, expected, log3, prec);
+        sflint::arb_mul_ui(expected, expected, 3, prec);
+        assert_lattice_regulator(
+                fixture, first_prime_above(fixture.order, 3), 3, expected,
+                "5.57560540348522828969528579318812692319700661068 "
+                "+/- 1e-45");
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1231,5 +1475,6 @@ int main() {
     assert(test_split_prime_order_lifetime_and_failed_publication() == 0);
     assert(test_rank_zero_nonunit_and_nontrivial_s_class() == 0);
     assert(test_fail_closed_preserves_publication() == 0);
+    assert(test_s_regulator_is_lattice_regulator() == 0);
     return 0;
 }

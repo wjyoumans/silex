@@ -48,6 +48,22 @@ Added
 Changed
 -------
 
+- **Breaking:** ``SUnitGroup::regulator`` now returns the regulator of the
+  S-unit lattice, ``R_S = R h/h_S prod log N(P)`` for nonempty ``S``: the
+  absolute value of a maximal minor of the log-S embedding of the free
+  generators, so ``h_S R_S = h R prod log N(P)``.  It previously returned
+  PARI ``bnfsunit``'s number ``R h_S prod log N(P)``, which equals
+  ``R_S h_S^2 / h`` and agrees with ``R_S`` only when ``h = h_S^2``.  For
+  example, ``Q(sqrt(-5))`` with ``S = {P2}`` now gives ``2 log 2`` (PARI and
+  0.1.1: ``log 2``), and ``Q(sqrt(10))`` with ``S = {P3}`` gives
+  ``3.99553...`` (PARI and 0.1.1: ``1.99776...``).  The index ``h / h_S`` is
+  exact: the absolute determinant of the nonunit valuation HNF.  To compare
+  with PARI, multiply by ``h_S^2 / h``.  Empty ``S`` still gives the ordinary
+  regulator, and the value is still an Arb enclosure with the same proof
+  status.  ``silex-class-unit-instance`` prints the new value as the S-unit
+  ``regulator_midpoint``.  Sources: Bernard and Roux-Langlois (ASIACRYPT
+  2020), Prop. 2.2.  See :doc:`../reference/sunit_groups`.
+
 - The GRH generation bound of a ``grh`` class/unit request falls back to
   Bach's bound alone when the Belabas-Diaz y Diaz-Friedman criterion cannot
   be computed or decided (for example for a non-monic defining polynomial,

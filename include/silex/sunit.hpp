@@ -151,6 +151,13 @@ public:
                                slong index) const noexcept;
     bool nonunit_valuation_matrix(flint::FmpzMatRef out) const noexcept;
 
+    // S-regulator: the S-unit lattice regulator
+    // R_S = R * (h / h_S) * prod_{P in S} log N(P), the absolute value of a
+    // maximal minor of the log-S embedding of the free generators.  h / h_S
+    // is the exact index of the nonunit valuation lattice in Z^S, so
+    // h_S * R_S = h * R * prod log N(P).  The reference bnfsunit reports
+    // R * h_S * prod log N(P) = R_S * h_S^2 / h instead; the two agree only
+    // when h = h_S^2.  Empty S gives the ordinary regulator.
     bool regulator(flint::ArbRef out) const noexcept;
     std::optional<flint::Arb> regulator() const noexcept;
     slong regulator_precision() const noexcept;
