@@ -447,12 +447,22 @@ bool build_sunit_class_context(
     if (order == nullptr || order->parent() == nullptr ||
         !order->is_maximal() || factor_base == nullptr ||
         !class_group.has_presentation() ||
-        class_group.certification_status() != CertificationMode::proven ||
+        (class_group.certification_status() != CertificationMode::proven &&
+         class_group.certification_status() != CertificationMode::grh) ||
         selected_primes.size() > static_cast<std::size_t>(WORD_MAX)) {
         fail(result, SUnitClassBuildStage::input_validation);
         return false;
     }
 
+    // The factor base is copied only as the prime list that the relation
+    // witnesses and the valuation checks below are expressed in; its
+    // generation records are not read.  Every step below is an exact identity
+    // relative to the class presentation, and the only label carried forward
+    // is class_group.certification_status().  A class group whose generation
+    // rests on GRH (factor_base_generation_certification() `grh`) is never
+    // labelled `proven` (ClassGroupContext keeps GRH generation out of a
+    // `proven` label), so GRH-only generation cannot reach a `proven` S-class
+    // group, S-unit group or S-regulator.
     SUnitClassContext candidate;
     candidate.order = *order;
     if (!candidate.factor_base.set(*factor_base) ||

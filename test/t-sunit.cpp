@@ -18,11 +18,14 @@ struct ProvenFixture {
     sflint::Fmpz factor_base_bound;
 };
 
-ProvenFixture proven_field(silex::NumberField field,
-                            slong requested_bound = 0,
-                            slong max_candidates = 4096,
-                            slong max_relations = 256,
-                            ulong bf_cutoff = 0) noexcept {
+// Computes the class group and units at the requested label, which both
+// must carry.
+ProvenFixture labelled_field(silex::NumberField field,
+                             silex::CertificationMode mode,
+                             slong requested_bound = 0,
+                             slong max_candidates = 4096,
+                             slong max_relations = 256,
+                             ulong bf_cutoff = 0) noexcept {
     ProvenFixture out;
     out.field = std::move(field);
     const silex::Order equation = silex::test::equation_order(out.field);
@@ -35,7 +38,7 @@ ProvenFixture proven_field(silex::NumberField field,
     options.max_candidates = max_candidates;
     options.max_relations = max_relations;
     options.zeta_bf_max_cutoff = bf_cutoff;
-    options.requested_certification = silex::CertificationMode::proven;
+    options.requested_certification = mode;
     assert(silex::factor_base_class_group_bound(
             sflint::FmpzRef(out.factor_base_bound), out.order));
     if (sflint::fmpz_cmp_ui(
@@ -49,11 +52,19 @@ ProvenFixture proven_field(silex::NumberField field,
     assert(out.units.compute_with_class_group(
             out.class_group, out.order,
             sflint::FmpzConstRef(out.factor_base_bound), options, 192));
-    assert(out.class_group.certification_status() ==
-           silex::CertificationMode::proven);
-    assert(out.units.certification_status() ==
-           silex::CertificationMode::proven);
+    assert(out.class_group.certification_status() == mode);
+    assert(out.units.certification_status() == mode);
     return out;
+}
+
+ProvenFixture proven_field(silex::NumberField field,
+                            slong requested_bound = 0,
+                            slong max_candidates = 4096,
+                            slong max_relations = 256,
+                            ulong bf_cutoff = 0) noexcept {
+    return labelled_field(std::move(field), silex::CertificationMode::proven,
+                          requested_bound, max_candidates, max_relations,
+                          bf_cutoff);
 }
 
 ProvenFixture proven_quadratic(slong radicand) noexcept {
@@ -1465,6 +1476,388 @@ int test_s_regulator_is_lattice_regulator() {
     return 0;
 }
 
+// Computes a second class/unit pair on fixture.order at the requested label,
+// so that tests can combine inputs of different labels on the same order.
+void compute_labelled_pair(silex::ClassGroupContext& class_group,
+                           silex::OrderUnitGroup& units,
+                           const ProvenFixture& fixture,
+                           silex::CertificationMode mode) noexcept {
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 4096;
+    options.max_relations = 256;
+    options.requested_certification = mode;
+    assert(units.compute_with_class_group(
+            class_group, fixture.order,
+            sflint::FmpzConstRef(fixture.factor_base_bound), options, 192));
+    assert(class_group.certification_status() == mode);
+    assert(units.certification_status() == mode);
+}
+
+// The prime above p at which a + b * gen has positive valuation.
+silex::PrimeIdeal prime_above_dividing(const ProvenFixture& fixture,
+                                       slong p,
+                                       slong a,
+                                       slong b) noexcept {
+    sflint::Fmpz rational_prime;
+    sflint::fmpz_set_si(sflint::FmpzRef(rational_prime), p);
+    silex::PrimeIdealList decomposition;
+    assert(silex::decompose_prime(decomposition, fixture.order,
+                                  sflint::FmpzConstRef(rational_prime)));
+    silex::Element generator(fixture.field);
+    silex::Element element(fixture.field);
+    silex::Element constant(fixture.field);
+    silex::Element linear(fixture.field);
+    assert(generator.gen() && constant.set_si(a) && linear.set_si(b) &&
+           linear.multiply(linear, generator) &&
+           element.add(constant, linear));
+    silex::PrimeIdeal out(fixture.order);
+    slong matches = 0;
+    for (slong i = 0; i < decomposition.size(); ++i) {
+        const silex::PrimeIdeal* prime = decomposition.at(i);
+        assert(prime != nullptr);
+        slong valuation = 0;
+        assert(prime->valuation(valuation, element));
+        if (valuation > 0) {
+            assert(out.set(*prime));
+            ++matches;
+        }
+    }
+    assert(matches == 1);
+    return out;
+}
+
+std::vector<silex::PrimeIdeal> copy_primes(
+        const silex::Order& order,
+        const std::vector<const silex::PrimeIdeal*>& primes) noexcept {
+    std::vector<silex::PrimeIdeal> out;
+    for (const silex::PrimeIdeal* prime : primes) {
+        out.emplace_back(order);
+        assert(out.back().set(*prime));
+    }
+    return out;
+}
+
+// Q(sqrt(-161)), class group Z/8 x Z/2, with S = {P2, P3}: P2 = (2, 1 + w)
+// is ramified and P3 = (3, w - 1) is split, where w = sqrt(-161).
+std::vector<silex::PrimeIdeal> q161_selected(
+        const ProvenFixture& fixture) noexcept {
+    silex::Element square(fixture.field);
+    assert(square.gen() && square.multiply(square, square) &&
+           square.equal_si(-161));
+    const silex::PrimeIdeal p2 = prime_above_dividing(fixture, 2, 1, 1);
+    const silex::PrimeIdeal p3 = prime_above_dividing(fixture, 3, -1, 1);
+    return copy_primes(fixture.order, {&p2, &p3});
+}
+
+bool compute_at(silex::SUnitComputeResult& result,
+                silex::SClassGroup& s_class,
+                silex::SUnitGroup& s_units,
+                const silex::ClassGroupContext& class_group,
+                const silex::OrderUnitGroup& units,
+                const std::vector<silex::PrimeIdeal>& selected,
+                silex::CertificationMode requested) noexcept {
+    silex::SUnitComputeOptions options;
+    options.regulator_precision = 192;
+    options.requested_certification = requested;
+    return silex::compute_sunit_groups(
+            result, s_class, s_units, class_group, units,
+            silex::PrimeIdealSpan(selected.data(), selected.size()), options);
+}
+
+void assert_published_labels(const silex::SClassGroup& s_class,
+                             const silex::SUnitGroup& s_units,
+                             silex::CertificationMode class_label,
+                             silex::CertificationMode unit_label,
+                             silex::CertificationMode s_unit_label) noexcept {
+    assert(s_class.is_defined() && s_units.is_defined());
+    assert(s_class.certification_status() == class_label);
+    assert(s_class.source_class_certification() == class_label);
+    assert(s_class.proof_status() == silex::ProofState::verified);
+    assert(s_units.certification_status() == s_unit_label);
+    assert(s_units.source_class_certification() == class_label);
+    assert(s_units.source_unit_certification() == unit_label);
+    assert(s_units.proof_status() == silex::ProofState::verified);
+    assert(s_units.regulator_proof_status() == silex::ProofState::verified);
+    assert(s_units.regulator().has_value());
+}
+
+// A `grh` request accepts `grh` or `proven` inputs.  Cl_S takes the class
+// label; U_S and R_S take the weaker of the class and unit labels; `proven`
+// inputs give `proven` outputs.  A `proven` request (the default) with any
+// `grh` input, or a request other than `grh` or `proven`, fails at
+// input_validation and leaves the outputs unchanged.
+int test_grh_request_label_rules() {
+    const silex::CertificationMode grh = silex::CertificationMode::grh;
+    const silex::CertificationMode proven = silex::CertificationMode::proven;
+    ProvenFixture fixture =
+            labelled_field(silex::test::quadratic_field(-161), grh);
+    silex::ClassGroupContext proven_class;
+    silex::OrderUnitGroup proven_units;
+    compute_labelled_pair(proven_class, proven_units, fixture, proven);
+    const std::vector<silex::PrimeIdeal> selected = q161_selected(fixture);
+
+    silex::SUnitComputeResult result;
+    silex::SClassGroup s_class;
+    silex::SUnitGroup s_units;
+    assert(compute_at(result, s_class, s_units, proven_class, proven_units,
+                      selected, proven));
+    assert_published_labels(s_class, s_units, proven, proven, proven);
+    sflint::FmpzMat proven_valuations(2, 2);
+    assert(s_units.nonunit_valuation_matrix(
+            sflint::FmpzMatRef(proven_valuations)));
+
+    struct Refused {
+        const silex::ClassGroupContext* class_group;
+        const silex::OrderUnitGroup* units;
+        silex::CertificationMode requested;
+    };
+    const Refused refused[] = {
+            {&fixture.class_group, &fixture.units, proven},
+            {&fixture.class_group, &proven_units, proven},
+            {&proven_class, &fixture.units, proven},
+            {&proven_class, &proven_units, silex::CertificationMode::unknown},
+            {&proven_class, &proven_units,
+             silex::CertificationMode::heuristic},
+    };
+    for (const Refused& input : refused) {
+        assert(!compute_at(result, s_class, s_units, *input.class_group,
+                           *input.units, selected, input.requested));
+        assert(!result.success);
+        assert(result.stage == silex::SUnitComputeStage::input_validation);
+        assert_published_labels(s_class, s_units, proven, proven, proven);
+    }
+    {
+        // The default request is `proven`.
+        silex::SUnitComputeOptions defaults;
+        assert(defaults.requested_certification == proven);
+        assert(!silex::compute_sunit_groups(
+                result, s_class, s_units, fixture.class_group, fixture.units,
+                silex::PrimeIdealSpan(selected.data(), selected.size())));
+        assert(result.stage == silex::SUnitComputeStage::input_validation);
+        assert_published_labels(s_class, s_units, proven, proven, proven);
+    }
+
+    struct Accepted {
+        const silex::ClassGroupContext* class_group;
+        const silex::OrderUnitGroup* units;
+        silex::CertificationMode class_label;
+        silex::CertificationMode unit_label;
+        silex::CertificationMode s_unit_label;
+    };
+    const Accepted accepted[] = {
+            {&fixture.class_group, &fixture.units, grh, grh, grh},
+            {&proven_class, &fixture.units, proven, grh, grh},
+            {&fixture.class_group, &proven_units, grh, proven, grh},
+            {&proven_class, &proven_units, proven, proven, proven},
+    };
+    for (const Accepted& input : accepted) {
+        silex::SClassGroup grh_class;
+        silex::SUnitGroup grh_units;
+        assert(compute_at(result, grh_class, grh_units, *input.class_group,
+                          *input.units, selected, grh));
+        assert(result.success);
+        assert(result.stage == silex::SUnitComputeStage::none);
+        assert_published_labels(grh_class, grh_units, input.class_label,
+                                input.unit_label, input.s_unit_label);
+        sflint::Fmpz order;
+        assert(grh_class.order(sflint::FmpzRef(order)));
+        assert(sflint::fmpz_equal_si(order, 2));
+        sflint::FmpzMat valuations(2, 2);
+        assert(grh_units.nonunit_valuation_matrix(
+                sflint::FmpzMatRef(valuations)));
+        ::fmpz_mat_hnf(valuations.raw(), valuations.raw());
+        sflint::FmpzMat expected(2, 2);
+        ::fmpz_mat_hnf(expected.raw(), proven_valuations.raw());
+        assert(sflint::fmpz_mat_equal(valuations, expected));
+    }
+    return 0;
+}
+
+// Checks a `grh` publication against reference bnfsunit data computed with
+// gp 2.17.4 (bnfinit(pol, 1); bnfcertify(bnf) = 1 for both fields below):
+//   U = bnfsunit(bnf, S);
+//   U[5]                                  \\ S-class group
+//   mathnf(matrix(#S, #U[1], i, j, nfeltval(bnf, U[1][j], S[i])))
+//   U[4] * bnf.no / U[5][1]^2             \\ R_S, see assert_lattice_regulator
+// The columns of that HNF, given here as the rows of reference_lattice, span
+// the valuation lattice v(U_S) in the coordinates of `selected`.
+void assert_grh_reference(ProvenFixture& fixture,
+                          const std::vector<silex::PrimeIdeal>& selected,
+                          slong s_class_invariant,
+                          slong s_unit_index,
+                          const slong* reference_lattice,
+                          const char* reference_s_regulator) noexcept {
+    silex::SUnitComputeResult result;
+    silex::SClassGroup s_class;
+    silex::SUnitGroup s_units;
+    assert(compute_at(result, s_class, s_units, fixture.class_group,
+                      fixture.units, selected,
+                      silex::CertificationMode::grh));
+    assert_published_labels(s_class, s_units, silex::CertificationMode::grh,
+                            silex::CertificationMode::grh,
+                            silex::CertificationMode::grh);
+
+    assert(s_class.invariant_count() == 1);
+    sflint::Fmpz invariant;
+    assert(s_class.invariant(sflint::FmpzRef(invariant), 0));
+    assert(sflint::fmpz_equal_si(invariant, s_class_invariant));
+    assert_public_s_class_witnesses(s_class);
+
+    const slong count = static_cast<slong>(selected.size());
+    assert(s_units.nonunit_rank() == count);
+    assert(s_units.ordinary_free_rank() == fixture.units.free_rank());
+    assert_public_nonunit_witnesses(s_class, s_units, selected, s_unit_index);
+    sflint::FmpzMat valuations(count, count);
+    sflint::FmpzMat reference(count, count);
+    assert(s_units.nonunit_valuation_matrix(sflint::FmpzMatRef(valuations)));
+    for (slong i = 0; i < count; ++i) {
+        for (slong j = 0; j < count; ++j) {
+            sflint::fmpz_set_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(reference), i,
+                                           j),
+                    reference_lattice[i * count + j]);
+        }
+    }
+    ::fmpz_mat_hnf(valuations.raw(), valuations.raw());
+    ::fmpz_mat_hnf(reference.raw(), reference.raw());
+    assert(sflint::fmpz_mat_equal(valuations, reference));
+
+    assert_regulator_formula(fixture, s_class, s_units, selected, 192);
+    sflint::Arb actual;
+    sflint::Arb expected;
+    assert(s_units.regulator(sflint::ArbRef(actual)));
+    assert(::arb_set_str(expected.raw(), reference_s_regulator, 192) == 0);
+    assert(sflint::arb_overlaps(actual, expected));
+}
+
+int test_grh_sunit_matches_reference() {
+    // Q(sqrt(-161)): Cl = Z/8 x Z/2.  S = {P2, P3}: Cl_S = Z/2, h / h_S = 8,
+    // R = 1, R_S = 8 log 2 log 3.
+    //   bnf = bnfinit(x^2 + 161, 1);
+    //   S = [P2, P3]  \\ the primes above 2, 3 dividing x + 1, x - 1
+    {
+        ProvenFixture fixture = labelled_field(
+                silex::test::quadratic_field(-161),
+                silex::CertificationMode::grh);
+        const slong lattice[] = {2, 0, 1, 4};
+        assert_grh_reference(
+                fixture, q161_selected(fixture), 2, 8, lattice,
+                "6.09200008335047189143298173469203108513841298681 "
+                "+/- 1e-45");
+    }
+
+    // Q(cbrt(43)): Cl = Z/12, R = 4.99140...  S = {P2, P2'} with residue
+    // degrees 1 and 2: Cl_S = Z/3, h / h_S = 4,
+    // R_S = 4 R log 2 log 4.  The class/unit pair is accepted through a
+    // Belabas-Friedman hR.
+    //   bnf = bnfinit(x^3 - 43, 1);
+    //   S = idealprimedec(bnf, 2)  \\ residue degrees [1, 2]
+    {
+        const slong coefficients[] = {-43, 0, 0, 1};
+        sflint::FmpqPoly polynomial;
+        for (slong i = 0; i <= 3; ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+        }
+        ProvenFixture fixture = labelled_field(
+                silex::test::field_by_polynomial(
+                        sflint::FmpqPolyConstRef(polynomial)),
+                silex::CertificationMode::grh, 0, 5000, 500, 20000);
+        assert(fixture.class_group.class_unit_completeness_certification() ==
+               silex::CertificationMode::grh);
+        const std::vector<silex::PrimeIdeal> p2 =
+                prime_above_with_degree(fixture.order, 2, 1);
+        const std::vector<silex::PrimeIdeal> p2_prime =
+                prime_above_with_degree(fixture.order, 2, 2);
+        const std::vector<silex::PrimeIdeal> selected =
+                copy_primes(fixture.order, {&p2[0], &p2_prime[0]});
+        const slong lattice[] = {4, 0, 1, 1};
+        assert_grh_reference(
+                fixture, selected, 3, 4, lattice,
+                "19.1850780889945590231495827377382586378205145946 "
+                "+/- 1e-45");
+    }
+    return 0;
+}
+
+// A rejection at valuation_solve (v(value) outside the published lattice)
+// rests on class completeness: it is `not_sunit` with a `proven` class group
+// and `unknown` with a `grh` one, whatever the unit label.  The residual
+// step needs `proven` ordinary units, so with `grh` units a value inside the
+// lattice fails there.
+int test_grh_membership_rests_on_class_completeness() {
+    const silex::CertificationMode grh = silex::CertificationMode::grh;
+    const silex::CertificationMode proven = silex::CertificationMode::proven;
+    ProvenFixture fixture =
+            labelled_field(silex::test::quadratic_field(-161), grh);
+    silex::ClassGroupContext proven_class;
+    silex::OrderUnitGroup proven_units;
+    compute_labelled_pair(proven_class, proven_units, fixture, proven);
+    const std::vector<silex::PrimeIdeal> selected = q161_selected(fixture);
+
+    // 3 = P3 * conj(P3) has valuations (0, 1) at S, outside v(U_S) (P3 is
+    // not principal), so it is not an S-unit.
+    silex::Element three(fixture.field);
+    assert(three.set_si(3));
+
+    struct Case {
+        const silex::ClassGroupContext* class_group;
+        const silex::OrderUnitGroup* units;
+        bool rejection_is_proven;
+    };
+    const Case cases[] = {
+            {&fixture.class_group, &fixture.units, false},
+            {&fixture.class_group, &proven_units, false},
+            {&proven_class, &fixture.units, true},
+            {&proven_class, &proven_units, true},
+    };
+    for (const Case& input : cases) {
+        silex::SUnitComputeResult result;
+        silex::SClassGroup s_class;
+        silex::SUnitGroup s_units;
+        assert(compute_at(result, s_class, s_units, *input.class_group,
+                          *input.units, selected, grh));
+
+        silex::SUnitCoordinates out;
+        out.defined = true;
+        silex::SUnitMembershipResult membership;
+        const bool returned = s_units.preimage(membership, out, three,
+                                               fixture.embeddings, 16, 256);
+        assert(membership.stage ==
+               silex::SUnitMembershipStage::valuation_solve);
+        if (input.rejection_is_proven) {
+            assert(returned && membership.success);
+            assert(membership.outcome ==
+                   silex::SUnitMembershipOutcome::not_sunit);
+        } else {
+            assert(!returned && !membership.success);
+            assert(membership.outcome ==
+                   silex::SUnitMembershipOutcome::unknown);
+        }
+        assert(out.defined);
+
+        if (input.units == &proven_units) {
+            silex::Element image(fixture.field);
+            assert_mixed_sunit_round_trips(image, s_units,
+                                           fixture.embeddings);
+        } else {
+            const slong no_ordinary[] = {0};
+            const slong nonunit[] = {1, -1};
+            silex::FactoredElement value(fixture.field);
+            assert(s_units.image(value,
+                                 coordinates(s_units, 1, no_ordinary,
+                                             nonunit)));
+            silex::SUnitCoordinates recovered;
+            assert(!s_units.preimage(membership, recovered, value,
+                                     fixture.embeddings, 16, 256));
+            assert(membership.outcome ==
+                   silex::SUnitMembershipOutcome::unknown);
+            assert(membership.stage ==
+                   silex::SUnitMembershipStage::residual_unit);
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1476,5 +1869,8 @@ int main() {
     assert(test_rank_zero_nonunit_and_nontrivial_s_class() == 0);
     assert(test_fail_closed_preserves_publication() == 0);
     assert(test_s_regulator_is_lattice_regulator() == 0);
+    assert(test_grh_request_label_rules() == 0);
+    assert(test_grh_sunit_matches_reference() == 0);
+    assert(test_grh_membership_rests_on_class_completeness() == 0);
     return 0;
 }

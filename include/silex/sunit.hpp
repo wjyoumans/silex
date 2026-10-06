@@ -30,6 +30,13 @@ enum class SUnitComputeStage {
 
 struct SUnitComputeOptions {
     slong regulator_precision = 128;
+    // The requested label.  `proven` (the default) requires a `proven` class
+    // group and `proven` ordinary units.  `grh` accepts `grh` or `proven`
+    // inputs.  Any other request, or an input label the request does not
+    // accept, fails at SUnitComputeStage::input_validation.  Labels are
+    // inherited, not capped: a `grh` request with `proven` inputs publishes
+    // `proven` groups (see compute_sunit_groups).
+    CertificationMode requested_certification = CertificationMode::proven;
     const DiagnosticsContext* diagnostics = nullptr;
 };
 
@@ -101,6 +108,11 @@ public:
             flint::FmpzMatRef out,
             slong index) const noexcept;
 
+    // The label of Cl_S: the class group's label, `grh` or `proven`
+    // (`unknown` when undefined).  proof_status() is `verified` for every
+    // published group: it records the exact verification of Cl_S relative to
+    // the class presentation (relation witnesses for S and the invariant
+    // witnesses), not an unconditional result.
     CertificationMode certification_status() const noexcept;
     CertificationMode source_class_certification() const noexcept;
     ProofState proof_status() const noexcept;
@@ -162,6 +174,12 @@ public:
     std::optional<flint::Arb> regulator() const noexcept;
     slong regulator_precision() const noexcept;
 
+    // The label of the S-units and of the S-regulator: `proven` when the
+    // class group and the ordinary units are both `proven`, `grh` otherwise
+    // (`unknown` when undefined).  proof_status() and
+    // regulator_proof_status() are `verified` for every published group: they
+    // record the exact verification of U_S / U and of the index h / h_S
+    // relative to the inputs, not an unconditional result.
     CertificationMode certification_status() const noexcept;
     CertificationMode source_class_certification() const noexcept;
     CertificationMode source_unit_certification() const noexcept;
@@ -175,6 +193,16 @@ public:
                const SUnitCoordinates& coordinates) const noexcept;
     bool image(Element& out,
                const SUnitCoordinates& coordinates) const noexcept;
+    // A `verified` outcome is an exact identity and holds for either label.
+    // A `not_sunit` outcome at SUnitMembershipStage::valuation_solve (the
+    // valuations at S lie outside the published valuation lattice) rests on
+    // the completeness of the class group, so it is returned only when
+    // source_class_certification() is `proven`; with a `grh` class group the
+    // call fails with outcome `unknown` at that stage instead.  A residual
+    // (value divided by its nonunit part) that is not a unit gives
+    // `not_sunit` for either label.  The residual step needs `proven`
+    // ordinary units: with `grh` ones (source_unit_certification()) a value
+    // that reaches it fails at SUnitMembershipStage::residual_unit.
     bool preimage(SUnitMembershipResult& result,
                   SUnitCoordinates& out,
                   const FactoredElement& value,
@@ -204,6 +232,12 @@ private:
 const char* sunit_compute_stage_name(SUnitComputeStage stage) noexcept;
 const char* sunit_membership_stage_name(SUnitMembershipStage stage) noexcept;
 
+// Computes Cl_S and U_S for the maximal order of class_group from a class
+// group and ordinary units of the same order, at the label requested in
+// options.requested_certification (SUnitComputeOptions).  The S-class group
+// takes the class group's label; the S-units and the S-regulator take the
+// weaker of the class and unit labels.  A failure publishes nothing and
+// leaves both outputs unchanged.
 bool compute_sunit_groups(
         SUnitComputeResult& result,
         SClassGroup& s_class_group,

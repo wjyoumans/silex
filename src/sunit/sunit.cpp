@@ -41,6 +41,31 @@ void membership_reject(SUnitMembershipResult& result,
     result.work_precision = 0;
 }
 
+// A `proven` request takes `proven` inputs only; a `grh` request takes `grh`
+// or `proven` inputs.  Any other request or input label is refused.
+bool accepts_input_label(CertificationMode requested,
+                         CertificationMode input) noexcept {
+    switch (requested) {
+        case CertificationMode::proven:
+            return input == CertificationMode::proven;
+        case CertificationMode::grh:
+            return input == CertificationMode::proven ||
+                   input == CertificationMode::grh;
+        default:
+            return false;
+    }
+}
+
+// The weaker of two accepted labels (`grh` or `proven`).  Labels are
+// inherited, not capped: two `proven` inputs give `proven`.
+CertificationMode weaker_label(CertificationMode left,
+                               CertificationMode right) noexcept {
+    return left == CertificationMode::proven &&
+                    right == CertificationMode::proven
+            ? CertificationMode::proven
+            : CertificationMode::grh;
+}
+
 bool copy_selected_primes(std::vector<PrimeIdeal>& out,
                           const Order& order,
                           PrimeIdealSpan input,
@@ -123,6 +148,9 @@ bool publish_s_class_storage(
             flint::FmpzMatConstRef(
                     context.s_class_power_selected_exponents));
     out.source_class_certification = context.source_class_certification;
+    // Cl_S = Cl / <S> is exact relative to the class presentation, so it
+    // carries the class group's label.
+    out.certification = context.source_class_certification;
     out.proof_status = context.s_class_proof_status;
     return true;
 }
@@ -259,6 +287,10 @@ bool publish_s_unit_storage(
             class_group.relation_saturation_status();
     out.source_unit_proof = class_group.unit_proof_status();
     out.source_regulator_proof = class_group.regulator_proof_status();
+    // U_S / U rests on the class presentation, the S-units also on the
+    // ordinary units, and R_S on both h and R: all take the weaker label.
+    out.certification = weaker_label(out.source_class_certification,
+                                     out.source_unit_certification);
     out.proof_status = context.s_unit_mod_units_proof_status;
     out.regulator_proof_status = ProofState::verified;
     return true;
@@ -441,6 +473,14 @@ bool preimage_core(SUnitMembershipResult& result,
         return false;
     }
     if (solve_status == ValuationSolveStatus::not_integral) {
+        // v(value) lies outside the published lattice v(U_S).  That lattice
+        // is all of v(U_S) only when the class presentation is complete, so
+        // the rejection rests on class completeness: it is `not_sunit` for a
+        // `proven` class group and `unknown` for a `grh` one.
+        if (storage.source_class_certification != CertificationMode::proven) {
+            membership_fail(result, SUnitMembershipStage::valuation_solve);
+            return false;
+        }
         membership_reject(result, SUnitMembershipStage::valuation_solve);
         return true;
     }
@@ -629,7 +669,7 @@ bool SClassGroup::invariant_generator_power_selected_exponents(
 
 CertificationMode SClassGroup::certification_status() const noexcept {
     return is_defined() && storage_->proof_status == ProofState::verified
-            ? CertificationMode::proven
+            ? storage_->certification
             : CertificationMode::unknown;
 }
 
@@ -783,7 +823,7 @@ slong SUnitGroup::regulator_precision() const noexcept {
 CertificationMode SUnitGroup::certification_status() const noexcept {
     return is_defined() && storage_->proof_status == ProofState::verified &&
                     storage_->regulator_proof_status == ProofState::verified
-            ? CertificationMode::proven
+            ? storage_->certification
             : CertificationMode::unknown;
 }
 
@@ -942,8 +982,10 @@ bool compute_sunit_groups(
     const Order* order = class_group.parent();
     if (order == nullptr || order->parent() == nullptr || !order->is_maximal() ||
         !same_order_parent(ordinary_units.parent(), order) ||
-        class_group.certification_status() != CertificationMode::proven ||
-        ordinary_units.certification_status() != CertificationMode::proven ||
+        !accepts_input_label(options.requested_certification,
+                             class_group.certification_status()) ||
+        !accepts_input_label(options.requested_certification,
+                             ordinary_units.certification_status()) ||
         options.regulator_precision <= 0) {
         compute_fail(result, SUnitComputeStage::input_validation);
         return false;
@@ -1031,7 +1073,16 @@ bool compute_sunit_groups(
                 static_cast<slong>(selected.size()) ||
         unit_candidate.storage_->proof_status != ProofState::verified ||
         unit_candidate.storage_->regulator_proof_status !=
-                ProofState::verified) {
+                ProofState::verified ||
+        class_candidate.storage_->certification !=
+                class_group.certification_status() ||
+        unit_candidate.storage_->certification !=
+                weaker_label(class_group.certification_status(),
+                             ordinary_units.certification_status()) ||
+        !accepts_input_label(options.requested_certification,
+                             class_candidate.storage_->certification) ||
+        !accepts_input_label(options.requested_certification,
+                             unit_candidate.storage_->certification)) {
         compute_fail(result, SUnitComputeStage::exact_verification);
         return false;
     }

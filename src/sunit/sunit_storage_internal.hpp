@@ -15,6 +15,8 @@ struct SClassGroupStorage {
     flint::FmpzMat power_selected_exponents{0, 0};
     CertificationMode source_class_certification =
             CertificationMode::unknown;
+    // The published label: the class group's label (`grh` or `proven`).
+    CertificationMode certification = CertificationMode::unknown;
     ProofState proof_status = ProofState::not_checked;
     bool defined = false;
 };
@@ -39,6 +41,10 @@ struct SUnitGroupStorage {
     ProofState source_relation_saturation = ProofState::not_checked;
     ProofState source_unit_proof = ProofState::not_checked;
     ProofState source_regulator_proof = ProofState::not_checked;
+    // The published label of the S-units and the S-regulator: `proven` only
+    // when the class group and the ordinary units are both `proven`, `grh`
+    // otherwise.
+    CertificationMode certification = CertificationMode::unknown;
     ProofState proof_status = ProofState::not_checked;
     ProofState regulator_proof_status = ProofState::not_checked;
     const DiagnosticsContext* diagnostics = nullptr;
