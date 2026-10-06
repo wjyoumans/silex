@@ -253,15 +253,17 @@ public:
     // - the unconditional analytic index-one routes (degree one or the
     //   quadratic L(1, chi) route) of a `proven` try_certify_with_units,
     //   including its promotion from an unconditional check stored
-    //   earlier (for example by a real-quadratic grh run), and of
-    //   try_certify_class_unit_with_zeta set it once they certify
-    //   `proven`, because index one with generation checked means
-    //   saturation at every prime.  They clear the per-prime records
-    //   unless verified records already cover every p | h_cand, so the
-    //   status can be `verified` with no records.  The exception is the
-    //   internal fallback try_analytic_index_bound_with_units_, which a
-    //   `proven` try_certify_with_units runs when the direct index-one
-    //   check fails: it always clears them;
+    //   earlier (for example by a real-quadratic grh run) and the internal
+    //   fallback try_analytic_index_bound_with_units_ it runs when the
+    //   direct index-one check fails, of try_certify_class_unit_with_zeta,
+    //   and, in degree one only (where hR = 1 exactly), of
+    //   try_certify_class_unit_with_zeta_bf and the internal
+    //   ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit
+    //   set it once they certify `proven`, because index one with
+    //   generation checked means saturation at every prime.  They clear
+    //   the per-prime records unless verified records already cover every
+    //   p | h_cand, which are kept, so the status can be `verified` with no
+    //   records;
     // - saturate_relations_bounded_with_units sets `verified` when its
     //   bounded search removed every prime from the candidate index and
     //   `unavailable` otherwise; its records describe that search, not an

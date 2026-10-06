@@ -4583,7 +4583,17 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
         return false;
     }
 
+    // In degree one hR = 1 exactly, so this is the unconditional analytic
+    // index-one argument of try_certify_analytic_class_regulator_ and the
+    // relations are saturated at every prime; complete verified ell-local
+    // records from an earlier saturation proof are kept.
     if (hr_unconditional) {
+        if (!context.relation_saturation_proof_complete_()) {
+            if (context.private_storage_ != nullptr) {
+                context.private_storage_->relation_saturation_records.clear();
+            }
+            context.relation_saturation_status_ = ProofState::verified;
+        }
         units.mark_certification_proven_();
     }
     return transaction.finish(true);
@@ -10207,7 +10217,17 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
         return false;
     }
 
+    // In degree one hR = 1 exactly, so this is the unconditional analytic
+    // index-one argument of try_certify_analytic_class_regulator_ and the
+    // relations are saturated at every prime; complete verified ell-local
+    // records from an earlier saturation proof are kept.
     if (hr_unconditional) {
+        if (!relation_saturation_proof_complete_()) {
+            if (private_storage_ != nullptr) {
+                private_storage_->relation_saturation_records.clear();
+            }
+            relation_saturation_status_ = ProofState::verified;
+        }
         units.mark_certification_proven_();
     }
     return transaction.finish(true);
@@ -10393,8 +10413,13 @@ bool ClassGroupContext::try_analytic_index_bound_with_units_(
         return false;
     }
 
-    private_storage_->relation_saturation_records.clear();
-    relation_saturation_status_ = ProofState::verified;
+    // The saturation argument of try_certify_analytic_class_regulator_:
+    // complete verified ell-local records from an earlier saturation proof
+    // are kept, and otherwise the per-prime records are cleared.
+    if (!relation_saturation_proof_complete_()) {
+        private_storage_->relation_saturation_records.clear();
+        relation_saturation_status_ = ProofState::verified;
+    }
     analytic_class_regulator_status_ = ProofState::verified;
     analytic_class_regulator_assumes_grh_ = false;
     return transaction.finish(try_promote_proven_certification_());
