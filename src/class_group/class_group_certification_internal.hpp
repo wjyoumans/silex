@@ -188,21 +188,6 @@ public:
             flint::FmpzConstRef index_bound,
             flint::FmpzConstRef aux_prime_bound) noexcept;
 
-    // The per-prime part shared by the two saturation proofs above: proves
-    // relation saturation at each prime of `required_ells`, in order, by
-    // the ell-local discrete-log proof and marks it verified.  With
-    // `skip_verified_ells` a prime that already carries a verified
-    // ell-record is kept instead.  Then requires the records to cover every
-    // prime dividing h_cand and sets the saturation status `verified`.  The
-    // caller checks the preconditions, sets any other proof state, and holds
-    // the certification transaction, which rolls back on false.
-    static bool prove_relation_saturation_ells(
-            ClassGroupContext& context,
-            const OrderUnitGroup& units,
-            const std::vector<flint::Fmpz>& required_ells,
-            flint::FmpzConstRef aux_prime_bound,
-            bool skip_verified_ells) noexcept;
-
     // The stored ell-local saturation proof record for `ell`, for tests and
     // audits; false when none is stored.
     static bool relation_saturation_proof_record(
@@ -227,6 +212,33 @@ public:
             slong work_precision) noexcept;
 
 private:
+    friend class silex::ClassGroupContext;
+
+    // The per-prime part shared by the two saturation proofs above: proves
+    // relation saturation at each prime of `required_ells`, in order, by
+    // the ell-local discrete-log proof and marks it verified.  With
+    // `skip_verified_ells` a prime that already carries a verified
+    // ell-record is kept instead.  Then requires the records to cover every
+    // prime dividing h_cand and sets the saturation status `verified`.
+    //
+    // It checks none of its preconditions; the caller must ensure that
+    //   - the context has a presentation;
+    //   - `units` is set and proven on the same parent order;
+    //   - factor-base generation is checked up to the required bound;
+    //   - the unit and regulator proof states are verified, or the caller
+    //     sets them to verified in the same transaction;
+    //   - the caller holds a CertificationTransaction_ and returns on false,
+    //     so that the transaction rolls back every change made here.
+    // `required_ells` need not contain every prime dividing h_cand for
+    // soundness, since the coverage check above rejects a missing prime,
+    // but it must contain all of them for the call to succeed.
+    static bool prove_relation_saturation_ells(
+            ClassGroupContext& context,
+            const OrderUnitGroup& units,
+            const std::vector<flint::Fmpz>& required_ells,
+            flint::FmpzConstRef aux_prime_bound,
+            bool skip_verified_ells) noexcept;
+
     // Stores a verified relation-saturation record, backed by an
     // exact-class-order proof record, at every prime dividing the verified
     // exact class order `exact_order`.  A prime that already carries a
