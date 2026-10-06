@@ -192,7 +192,7 @@ bool rank_zero_torsion(flint::FmpzRef best_order,
 
     const slong n = flint::fmpz_get_si(flint::FmpzConstRef(field_order));
     if (n == 2) {
-        // mu(K) = {1, -1} (every field with a real place, degree one
+        // mu(K) = {1, -1} (e.g. every field with a real place, degree one
         // included), and -1 lies in every order: the loop below would end
         // with the same order and generator.
         flint::fmpz_set_ui(best_order, 2);

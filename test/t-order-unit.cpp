@@ -2620,6 +2620,82 @@ int test_dependent_relation_denominator_step() {
     assert(possible);
     assert(step == 1);
 
+    // Negative coordinates give the same steps as positive ones.
+    set_arb_coordinate(coordinates, 0, -3, 7, -100);
+    set_arb_coordinate(coordinates, 1, -5, 14, -100);
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 128));
+    assert(possible);
+    assert(step == 14);
+    possible = true;
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 13, 128));
+    assert(!possible);
+
+    // A non-finite entry constrains nothing and is skipped.
+    set_arb_coordinate(coordinates, 0, -3, 7, -100);
+    ::arb_pos_inf(arb_mat_entry(coordinates.raw(), 1, 0));
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 128));
+    assert(possible);
+    assert(step == 7);
+    ::arb_indeterminate(arb_mat_entry(coordinates.raw(), 1, 0));
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 128));
+    assert(possible);
+    assert(step == 7);
+    ::arb_indeterminate(arb_mat_entry(coordinates.raw(), 0, 0));
+    assert(silex::detail::dependent_relation_denominator_step(
+            possible, step, coordinates, 20, 128));
+    assert(possible);
+    assert(step == 1);
+
+    // The skipped denominators rest on FLINT's rounding in
+    // arb_mat_scalar_mul_si: whenever the scan's integer test (that product
+    // followed by arb_get_unique_fmpz) succeeds for every entry, m must be a
+    // multiple of the step.  Pin this against the linked FLINT.
+    {
+        const slong precisions[] = {4, 8, 12, 20, 53, 128};
+        const slong errors[] = {-6, -20, -40, -100, -200};
+        const slong numerators[] = {1, -3, 5, 22, -77};
+        const slong denominators[] = {1, 3, 7, 14, 30};
+        const slong bound = 60;
+        for (slong precision : precisions) {
+            for (slong error : errors) {
+                for (slong a : numerators) {
+                    for (slong b : denominators) {
+                        sflint::ArbMat balls(2, 1);
+                        set_arb_coordinate(balls, 0, a, b, error);
+                        set_arb_coordinate(balls, 1, a + 1, b + 2, error);
+                        assert(silex::detail::
+                                       dependent_relation_denominator_step(
+                                               possible, step, balls, bound,
+                                               precision));
+                        for (slong m = 1; m <= bound; ++m) {
+                            sflint::ArbMat scaled(2, 1);
+                            ::arb_mat_set(scaled.raw(), balls.raw());
+                            ::arb_mat_scalar_mul_si(scaled.raw(), scaled.raw(),
+                                                    m, precision);
+                            sflint::Fmpz integer;
+                            bool passes = true;
+                            for (slong i = 0; i < 2; ++i) {
+                                passes = passes &&
+                                         ::arb_get_unique_fmpz(
+                                                 integer.raw(),
+                                                 arb_mat_entry(scaled.raw(),
+                                                               i, 0));
+                            }
+                            if (passes) {
+                                assert(possible);
+                                assert(m % step == 0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Shape and argument errors fail.
     sflint::ArbMat wide(2, 2);
     assert(!silex::detail::dependent_relation_denominator_step(
