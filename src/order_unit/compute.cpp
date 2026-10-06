@@ -184,38 +184,48 @@ bool rank_zero_torsion(flint::FmpzRef best_order,
     flint::Fmpz field_order;
     Element root(*field);
     Element power(*field);
-    OrderElement candidate(order);
-    if (!root.is_defined() || !power.is_defined() || !candidate.is_defined() ||
+    if (!root.is_defined() || !power.is_defined() ||
         !roots_of_unity(flint::FmpzRef(field_order), root, *field) ||
         !flint::fmpz_fits_si(flint::FmpzConstRef(field_order))) {
         return false;
     }
 
     const slong n = flint::fmpz_get_si(flint::FmpzConstRef(field_order));
+    if (n == 2) {
+        // mu(K) = {1, -1} (every field with a real place, degree one
+        // included), and -1 lies in every order: the loop below would end
+        // with the same order and generator.
+        flint::fmpz_set_ui(best_order, 2);
+        return best_generator.set_si(-1);
+    }
     if (n <= 0 || !best_generator.one()) {
         return false;
     }
 
-    // Only membership may skip a power: a coordinate computation that fails
-    // makes the whole call fail rather than silently leaving that root out,
-    // which would under-claim the torsion.
+    // The result is the first power of largest order that lies in the
+    // order, so a power whose order does not exceed the best so far cannot
+    // change it and is not tested.  Otherwise only membership may skip a
+    // power: a coordinate computation that fails makes the whole call fail
+    // rather than silently leaving that root out, which would under-claim
+    // the torsion.  The integral coordinates of a new best power set the
+    // generator directly, without a second coordinate computation.
     flint::FmpqMat coordinates(1, order.degree());
+    flint::FmpzMat integral(1, order.degree());
     slong best = 1;
     for (slong k = 0; k < n; ++k) {
+        const slong ord = n / gcd_slong(n, k);
+        if (ord <= best) {
+            continue;
+        }
         if (!compute_power(power, root, k) ||
             !order.coordinates(flint::FmpqMatRef(coordinates), power)) {
             return false;
         }
-        if (fmpq_mat_is_integral(coordinates.raw()) != 0) {
-            if (!candidate.set_element(power)) {
+        if (fmpq_mat_get_fmpz_mat(integral.raw(), coordinates.raw()) != 0) {
+            best = ord;
+            if (!best_generator.set_coordinates(
+                        flint::FmpzMatConstRef(integral))) {
                 return false;
-            }
-            const slong ord = n / gcd_slong(n, k);
-            if (ord > best) {
-                best = ord;
-                if (!best_generator.set(candidate)) {
-                    return false;
-                }
             }
         }
     }
