@@ -3798,6 +3798,66 @@ int test_class_regulator_index_bound_below_one_fails_closed() {
     return 0;
 }
 
+// Both index bounds fail closed only when the rigorous upper endpoint of the
+// quotient is below one (decision 2026-09-26).  This builds a numerator whose
+// quotient by an exact one is a nonzero-width enclosure [1 - 2r, 1]: midpoint
+// and lower endpoint below one, upper endpoint exactly one.  It must give
+// bound one, not fail.  arb_div rounds the radius up (mag_div), so the
+// midpoint is set to 1 - r, where r is the radius arb_div produces from the
+// numerator radius 1/4; both bounds divide exactly so at this precision.
+int test_index_bounds_accept_upper_endpoint_exactly_one() {
+    const slong prec = 128;
+    sflint::Arb one;
+    sflint::arb_set_si(one, 1);
+    sflint::Fmpq quarter;
+    sflint::fmpq_set_si(quarter, 1, 4);
+    sflint::Arb error;
+    sflint::arb_set_fmpq(error, quarter, prec);
+    sflint::Arb probe;
+    sflint::arb_set_si(probe, 0);
+    sflint::arb_add_error(probe, error);
+    sflint::Arb probe_quotient;
+    sflint::arb_div(probe_quotient, probe, one, prec);
+
+    sflint::Arf quotient_radius;
+    ::arf_set_mag(quotient_radius.raw(), arb_radref(probe_quotient.raw()));
+    sflint::Arf midpoint;
+    ::arf_one(midpoint.raw());
+    assert(::arf_sub(midpoint.raw(), midpoint.raw(), quotient_radius.raw(),
+                     prec, ARF_RND_DOWN) == 0);
+    sflint::Arb numerator;
+    ::arb_set_arf(numerator.raw(), midpoint.raw());
+    ::mag_set(arb_radref(numerator.raw()), arb_radref(probe.raw()));
+
+    // Precondition: the quotient enclosure the bounds compute has nonzero
+    // radius, contains 1/2, and has upper endpoint exactly one.
+    sflint::Arb quotient;
+    sflint::arb_div(quotient, numerator, one, prec);
+    assert(!::arb_is_exact(quotient.raw()));
+    assert(::arb_contains_si(quotient.raw(), 1));
+    sflint::Fmpq half;
+    sflint::fmpq_set_si(half, 1, 2);
+    assert(::arb_contains_fmpq(quotient.raw(), half.raw()));
+    sflint::Arf upper;
+    sflint::arb_get_ubound_arf(upper, quotient, prec);
+    assert(::arf_equal_si(upper.raw(), 1));
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 42));
+    assert(silex::detail::class_regulator_index_bound_from_candidate_product(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(numerator),
+            sflint::ArbConstRef(one), prec, nullptr));
+    assert(sflint::fmpz_equal_si(bound, 1));
+
+    assert(set_fmpz_si(bound, 42));
+    assert(silex::detail::unit_index_bound_from_regulator_quotient(
+            sflint::FmpzRef(bound), sflint::ArbConstRef(numerator),
+            sflint::ArbConstRef(one), prec));
+    assert(sflint::fmpz_equal_si(bound, 1));
+
+    return 0;
+}
+
 // The unit index bound is the floor of the upper endpoint of R_G / R_lower,
 // and fails closed when that endpoint is below one (decision 2026-09-26).
 int test_unit_index_bound_from_regulator_quotient() {
@@ -7201,6 +7261,7 @@ int main() {
     test_class_regulator_index_bound();
     test_class_regulator_index_bound_interval_boundary();
     test_class_regulator_index_bound_below_one_fails_closed();
+    test_index_bounds_accept_upper_endpoint_exactly_one();
     test_unit_index_bound_from_regulator_quotient();
     test_class_unit_regulator_certification();
     test_belabas_friedman_class_regulator_is_grh_conditional();
