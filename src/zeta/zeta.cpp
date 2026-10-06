@@ -448,6 +448,19 @@ public:
         active_ = false;
     }
 
+    // Turns stepping off for the rest of the sum, which then evaluates
+    // every value directly (for tests).
+    void disable() noexcept {
+        active_ = false;
+        exhausted_ = true;
+    }
+
+    // Caps the block length at `block`, at least the minimum block length
+    // (for tests).  A shorter block only changes cost and width.
+    void set_max_block(ulong block) noexcept {
+        max_block_ = FLINT_MAX(block, quadratic_afe_step_min_block);
+    }
+
     // Floating-point choice of the block length B and the number of terms M
     // for a block anchored at n, with anchor tolerance 2^target.  Returns
     // false when the block would be shorter than the minimum or need more
@@ -476,7 +489,7 @@ public:
             exhausted_ = rho == 1.0;
             return false;
         }
-        b = FLINT_MIN(b, static_cast<double>(quadratic_afe_step_max_block));
+        b = FLINT_MIN(b, static_cast<double>(max_block_));
         const double v = pi / qd * b * (2.0 * nd + b);
         const double log2_rho_v = std::log2(rho * v);
         const double a = 0.5 * static_cast<double>(shift_);
@@ -669,6 +682,7 @@ private:
     slong coefficient_prec_ = 0;
     slong terms_ = 1;
     ulong block_ = 0;
+    ulong max_block_ = quadratic_afe_step_max_block;
     ulong anchor_ = 0;
     ulong next_anchor_ = 0;
     double log2_k_ = 0.0;
@@ -682,14 +696,16 @@ private:
 // truncated at the first n whose tail bound is below `abs_tol`, which is then
 // added to the radius.  The gamma values come from the Taylor stepping above
 // where it applies, and directly from the closed forms otherwise; once no
-// block can start any more, the loop is FLINT's term loop again.
+// block can start any more, the loop is FLINT's term loop again.  `audit`,
+// when given, can turn stepping off and counts the blocks and stepped values.
 void quadratic_afe_sum(flint::Arb& res,
                        flint::FmpzConstRef discriminant,
                        ulong q,
                        int parity,
                        ulong s,
                        const mag_struct* abs_tol,
-                       slong prec) noexcept {
+                       slong prec,
+                       detail::QuadraticAfeStepAudit* audit) noexcept {
     const ulong shift = s + static_cast<ulong>(parity);
     const slong sprime = static_cast<slong>((shift + 1) / 2);
     const double aa = 0.5 * static_cast<double>(shift);
@@ -713,6 +729,9 @@ void quadratic_afe_sum(flint::Arb& res,
     flint::Arb z;
     flint::Arb term;
     QuadraticAfeGammaStepper stepper(shift, q);
+    if (audit != nullptr && !audit->stepping) {
+        stepper.disable();
+    }
 
     ::arb_zero(res.raw());
 
@@ -768,14 +787,22 @@ void quadratic_afe_sum(flint::Arb& res,
         } else if (stepper.active() && n == stepper.next_anchor()) {
             stepper.evaluate(term, n, anchor_target, anchor_wp);
             have_term = true;
+            if (audit != nullptr) {
+                ++audit->stepped_values[shift];
+            }
             if (!stepper.plan(n, anchor_target) ||
                 !stepper.start(n, term, anchor_wp)) {
                 stepper.stop();
+            } else if (audit != nullptr) {
+                ++audit->blocks[shift];
             }
         } else if (stepper.active()) {
             if (chi != 0) {
                 stepper.evaluate(term, n, target, wp);
                 have_term = true;
+                if (audit != nullptr) {
+                    ++audit->stepped_values[shift];
+                }
             }
         } else if (stepper.plan(n, anchor_target)) {
             quadratic_afe_gamma_direct(term, z, shift, n, q, anchor_wp,
@@ -783,6 +810,8 @@ void quadratic_afe_sum(flint::Arb& res,
             have_term = true;
             if (!stepper.start(n, term, anchor_wp)) {
                 stepper.stop();
+            } else if (audit != nullptr) {
+                ++audit->blocks[shift];
             }
         }
 
@@ -807,7 +836,9 @@ void quadratic_afe_sum(flint::Arb& res,
 bool quadratic_l1_afe(flint::Arb& out,
                       flint::FmpzConstRef discriminant,
                       ulong q,
-                      slong precision) noexcept {
+                      slong precision,
+                      detail::QuadraticAfeStepAudit* audit = nullptr)
+        noexcept {
     if (q < 3 || precision <= 0) {
         return false;
     }
@@ -842,8 +873,10 @@ bool quadratic_l1_afe(flint::Arb& out,
     flint::Arb s1;
     flint::Arb s2;
     flint::Arb t;
-    quadratic_afe_sum(s1, discriminant, q, parity, 1, tol1.raw(), prec1);
-    quadratic_afe_sum(s2, discriminant, q, parity, 0, tol2.raw(), prec2);
+    quadratic_afe_sum(s1, discriminant, q, parity, 1, tol1.raw(), prec1,
+                      audit);
+    quadratic_afe_sum(s2, discriminant, q, parity, 0, tol2.raw(), prec2,
+                      audit);
 
     // S1 + (pi / q)^(1/2) S2, divided by Gamma((1 + parity) / 2).
     ::arb_const_pi(t.raw(), prec);
@@ -3375,7 +3408,8 @@ int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept {
 
 bool quadratic_dirichlet_l1(flint::ArbRef out,
                             flint::FmpzConstRef discriminant,
-                            slong precision) noexcept {
+                            slong precision,
+                            QuadraticAfeStepAudit* audit) noexcept {
     flint::Fmpz abs_discriminant;
     flint::fmpz_abs(flint::FmpzRef(abs_discriminant), discriminant);
     if (!flint::fmpz_abs_fits_ui(flint::FmpzConstRef(abs_discriminant))) {
@@ -3384,10 +3418,65 @@ bool quadratic_dirichlet_l1(flint::ArbRef out,
     const ulong q =
             flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
     flint::Arb value;
-    if (!quadratic_l1_afe(value, discriminant, q, precision)) {
+    if (!quadratic_l1_afe(value, discriminant, q, precision, audit)) {
         return false;
     }
     flint::arb_set(out, flint::ArbConstRef(value));
+    return true;
+}
+
+bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
+                                 QuadraticAfeGammaStepCount& count,
+                                 ulong shift,
+                                 ulong q,
+                                 ulong first,
+                                 ulong max_block,
+                                 double target,
+                                 slong prec,
+                                 slong guard) noexcept {
+    count = QuadraticAfeGammaStepCount{};
+    if (shift > 2 || q < 1 || first < 1 || out.length() <= 0 || prec <= 0 ||
+        guard < 0 ||
+        static_cast<ulong>(out.length()) > UWORD_MAX - first) {
+        return false;
+    }
+    QuadraticAfeGammaStepper stepper(shift, q);
+    if (max_block != 0) {
+        stepper.set_max_block(max_block);
+    }
+    const double anchor_target = target - static_cast<double>(guard);
+    const slong anchor_prec = prec + guard;
+    const slong zprec = anchor_prec + 64;
+    flint::Arb z;
+    flint::Arb value;
+    for (slong i = 0; i < out.length(); ++i) {
+        const ulong n = first + static_cast<ulong>(i);
+        // The branches of `quadratic_afe_sum`, every index visited.
+        if (stepper.active() && n == stepper.next_anchor()) {
+            stepper.evaluate(value, n, anchor_target, anchor_prec);
+            ++count.stepped_values;
+            if (!stepper.plan(n, anchor_target) ||
+                !stepper.start(n, value, anchor_prec)) {
+                stepper.stop();
+            } else {
+                ++count.blocks;
+            }
+        } else if (stepper.active()) {
+            stepper.evaluate(value, n, target, prec);
+            ++count.stepped_values;
+        } else if (!stepper.exhausted() && stepper.plan(n, anchor_target)) {
+            quadratic_afe_gamma_direct(value, z, shift, n, q, anchor_prec,
+                                       zprec);
+            if (stepper.start(n, value, anchor_prec)) {
+                ++count.blocks;
+            } else {
+                stepper.stop();
+            }
+        } else {
+            quadratic_afe_gamma_direct(value, z, shift, n, q, prec, zprec);
+        }
+        ::arb_set(out.data() + i, value.raw());
+    }
     return true;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <silex/diagnostics.hpp>
+#include <silex/flint/arb_vec.hpp>
 #include <silex/zeta.hpp>
 
 #include <cstddef>
@@ -165,12 +166,53 @@ bool class_regulator_product_estimate_with_diagnostics(
 // character modulo |D|.
 int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept;
 
+// Test controls and counters of the Taylor stepping of the incomplete gamma
+// values Gamma(a, z) in `quadratic_dirichlet_l1`.  The counters are indexed
+// by shift = 2a: the sums use a = 1/2 and a = 0 for real D, a = 1 and
+// a = 1/2 for imaginary D.
+struct QuadraticAfeStepAudit {
+    // False turns stepping off, so that every value is evaluated directly,
+    // as the evaluation did before stepping was added.
+    bool stepping = true;
+    // Blocks started, and values taken from a block (an anchor carried
+    // over from the previous block included).
+    ulong blocks[3] = {0, 0, 0};
+    ulong stepped_values[3] = {0, 0, 0};
+};
+
 // L(1, chi_D) for a fundamental discriminant D with |D| >= 3 fitting a
 // ulong, by the approximate functional equation with chi_D evaluated as a
 // Kronecker symbol.  Returns false when D is outside that range or the
-// enclosure is not finite; D is not checked to be fundamental.
+// enclosure is not finite; D is not checked to be fundamental.  `audit`,
+// when given, is used and updated as described above.
 bool quadratic_dirichlet_l1(flint::ArbRef out,
                             flint::FmpzConstRef discriminant,
-                            slong precision) noexcept;
+                            slong precision,
+                            QuadraticAfeStepAudit* audit = nullptr) noexcept;
+
+struct QuadraticAfeGammaStepCount {
+    ulong blocks = 0;
+    ulong stepped_values = 0;
+};
+
+// Test entry for the stepper of `quadratic_dirichlet_l1` alone: writes
+// Gamma(shift / 2, pi n^2 / q) for n = first, ..., first + out.length() - 1
+// to `out`, taking the branches of that sum at every index.  A block is
+// planned with anchor tolerance 2^(target - guard) and anchored at a value
+// evaluated directly at precision prec + guard; values inside a block have
+// tolerance about 2^target at precision `prec`, and the last index of a
+// block becomes the next anchor.  Blocks are at most `max_block` long
+// (0: the default cap).  An index no block covers is evaluated directly.
+// Returns false on invalid arguments (shift > 2, q or first zero, an empty
+// `out`, or a negative precision or guard).
+bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
+                                 QuadraticAfeGammaStepCount& count,
+                                 ulong shift,
+                                 ulong q,
+                                 ulong first,
+                                 ulong max_block,
+                                 double target,
+                                 slong prec,
+                                 slong guard) noexcept;
 
 }  // namespace silex::detail

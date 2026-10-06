@@ -6,6 +6,7 @@
 #include <silex/order_unit.hpp>
 #include <silex/flint/acb.hpp>
 #include <silex/flint/arb.hpp>
+#include <silex/flint/arb_vec.hpp>
 #include <silex/flint/dirichlet.hpp>
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpz.hpp>
@@ -14,9 +15,11 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 
 #include <flint/acb_dirichlet.h>
 #include <flint/arb.h>
+#include <flint/arb_hypgeom.h>
 
 namespace {
 namespace sflint = silex::flint;
@@ -123,12 +126,32 @@ void check_large_character(const sflint::Fmpz& discriminant, ulong q) {
     assert(chi(q) == 0);
 }
 
+// Both sums of the evaluation for D used Taylor stepping of their
+// incomplete gamma values Gamma(a, z): a = 1 and a = 1/2 for imaginary D,
+// a = 1/2 and a = 0 for real D (counters indexed by shift = 2a).
+void assert_stepping_used(const silex::detail::QuadraticAfeStepAudit& audit,
+                          slong d) {
+    const ulong unused = d < 0 ? 0 : 2;
+    for (ulong shift = 0; shift < 3; ++shift) {
+        if (shift == unused) {
+            assert(audit.blocks[shift] == 0);
+            assert(audit.stepped_values[shift] == 0);
+        } else {
+            assert(audit.blocks[shift] > 0);
+            assert(audit.stepped_values[shift] > audit.blocks[shift]);
+        }
+    }
+}
+
 // 64-bit L(1, chi_D) enclosure for a large fundamental discriminant D, with
-// the elapsed time printed.
+// the elapsed time printed.  Both sums use stepping at these sizes.
 void large_l1(sflint::Arb& value, const sflint::Fmpz& discriminant, slong d) {
     const auto start = std::chrono::steady_clock::now();
+    silex::detail::QuadraticAfeStepAudit audit;
     assert(silex::detail::quadratic_dirichlet_l1(
-            sflint::ArbRef(value), sflint::FmpzConstRef(discriminant), 64));
+            sflint::ArbRef(value), sflint::FmpzConstRef(discriminant), 64,
+            &audit));
+    assert_stepping_used(audit, d);
     const double seconds = std::chrono::duration<double>(
                                    std::chrono::steady_clock::now() - start)
                                    .count();
@@ -363,6 +386,137 @@ void check_failure_paths() {
     check_fails_closed(d, -5);
 }
 
+
+// Gamma(shift / 2, pi n^2 / q) from the stepper of the quadratic L(1, chi)
+// sums, against FLINT's `arb_hypgeom_gamma_upper` at 256 bits, over several
+// chained blocks of the default length and over blocks forced to the
+// minimum length 4.
+struct GammaStepCase {
+    ulong shift;
+    ulong q;
+    ulong first;
+    slong count;
+    ulong max_block;
+    // A lower bound on the number of blocks started.
+    ulong min_blocks;
+};
+
+void check_gamma_stepping_against_hypgeom() {
+    const double target = -70.0;
+    const slong prec = 80;
+    const slong guard = 12;
+    const GammaStepCase cases[] = {
+            // a = 1 with z about 3e-4: default blocks of about 1500 indices.
+            {2, UWORD(10000000000), 1000, 4000, 0, 2},
+            {2, UWORD(10000000000), 1000, 41, 4, 10},
+            // a = 1/2 and a = 0 with z about 3.1, where rho = 1: default
+            // blocks of about 1500 indices.
+            {1, UWORD(100000000000000), 10000000, 4000, 0, 2},
+            {1, UWORD(100000000000000), 10000000, 41, 4, 10},
+            {0, UWORD(100000000000000), 10000000, 4000, 0, 2},
+            {0, UWORD(100000000000000), 10000000, 41, 4, 10},
+            // a = 1/2 and a = 0 with z about 0.13, where rho = 1 / z:
+            // default blocks of about 9 indices.
+            {1, UWORD(10000000000), 20000, 100, 0, 8},
+            {0, UWORD(10000000000), 20000, 100, 0, 8},
+    };
+    sflint::Arb z;
+    sflint::Arb a;
+    sflint::Arb reference;
+    for (const GammaStepCase& c : cases) {
+        sflint::ArbVec values(c.count);
+        silex::detail::QuadraticAfeGammaStepCount count;
+        assert(silex::detail::quadratic_afe_gamma_stepped(
+                values, count, c.shift, c.q, c.first, c.max_block, target,
+                prec, guard));
+        // Every value after the first, direct anchor comes from a block.
+        assert(count.stepped_values == static_cast<ulong>(c.count - 1));
+        assert(count.blocks >= c.min_blocks);
+        if (c.max_block != 0) {
+            assert(count.blocks >=
+                   static_cast<ulong>(c.count - 1) / c.max_block);
+        }
+
+        ::arb_set_ui(a.raw(), c.shift);
+        ::arb_mul_2exp_si(a.raw(), a.raw(), -1);
+        for (slong i = 0; i < c.count; ++i) {
+            const ulong n = c.first + static_cast<ulong>(i);
+            ::arb_const_pi(z.raw(), 256);
+            ::arb_mul_ui(z.raw(), z.raw(), n, 256);
+            ::arb_mul_ui(z.raw(), z.raw(), n, 256);
+            ::arb_div_ui(z.raw(), z.raw(), c.q, 256);
+            ::arb_hypgeom_gamma_upper(reference.raw(), a.raw(), z.raw(), 0,
+                                      256);
+            assert(radius_lt_2exp_si(reference, -200));
+            sflint::Arb value;
+            ::arb_set(value.raw(), values.data() + i);
+            assert(::arb_overlaps(value.raw(), reference.raw()) != 0);
+            assert(radius_lt_2exp_si(value, static_cast<slong>(target)));
+        }
+    }
+}
+
+// L(1, chi_D) with stepping against the evaluation with stepping turned off
+// (every gamma value evaluated directly, as before stepping was added).  The
+// two enclosures are bit-identical in every case below.
+struct StepComparisonCase {
+    slong discriminant;
+    slong precision;
+    // Whether both sums use stepping.  Below |D| about 1e10 the blocks are
+    // too short for most a, and at |D| about 1e8 at most a = 1 steps.
+    bool both_sums_step;
+};
+
+void check_stepping_matches_direct(const StepComparisonCase& c) {
+    sflint::Fmpz d;
+    sflint::fmpz_set_si(sflint::FmpzRef(d), c.discriminant);
+    sflint::Arb stepped;
+    sflint::Arb direct;
+    silex::detail::QuadraticAfeStepAudit on;
+    silex::detail::QuadraticAfeStepAudit off;
+    off.stepping = false;
+    assert(silex::detail::quadratic_dirichlet_l1(
+            sflint::ArbRef(stepped), sflint::FmpzConstRef(d), c.precision,
+            &on));
+    assert(silex::detail::quadratic_dirichlet_l1(
+            sflint::ArbRef(direct), sflint::FmpzConstRef(d), c.precision,
+            &off));
+    assert(::arb_equal(stepped.raw(), direct.raw()) != 0);
+    for (ulong shift = 0; shift < 3; ++shift) {
+        assert(off.blocks[shift] == 0);
+        assert(off.stepped_values[shift] == 0);
+    }
+    if (c.both_sums_step) {
+        assert_stepping_used(on, c.discriminant);
+    }
+}
+
+// Fourteen fundamental discriminants from -1019 to about 1e12 at 64 to 192
+// bits.  The cases that take more than about a second (up to about 90 s
+// for D = 1000000000061 without stepping) run with SILEX_TEST_SLOW=1.
+void check_stepping_before_after(bool slow) {
+    const std::initializer_list<StepComparisonCase> fast_cases = {
+            {-1019, 64, false},      {-100003, 128, false},
+            {100049, 192, false},    {-99999971, 64, false},
+            {-111546435, 64, false},
+    };
+    const std::initializer_list<StepComparisonCase> slow_cases = {
+            {99999989, 64, false},         {48612265, 128, false},
+            {-10000000019, 64, true},      {-10000000019, 128, true},
+            {-10000000019, 192, true},     {100000000057, 64, true},
+            {-100000000003, 64, true},     {-1000000000039, 64, true},
+            {1000000000061, 64, true},
+    };
+    for (const StepComparisonCase& c : fast_cases) {
+        check_stepping_matches_direct(c);
+    }
+    if (slow) {
+        for (const StepComparisonCase& c : slow_cases) {
+            check_stepping_matches_direct(c);
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -375,6 +529,8 @@ int main() {
 
     check_failure_paths();
     check_route_size_cap();
+    check_gamma_stepping_against_hypgeom();
+    check_stepping_before_after(slow_tests_enabled());
 
     sflint::Arb imaginary_l1;
     check_large_imaginary_discriminant(imaginary_l1, -10000000019, 39809);
