@@ -188,6 +188,21 @@ public:
             flint::FmpzConstRef index_bound,
             flint::FmpzConstRef aux_prime_bound) noexcept;
 
+    // The per-prime part shared by the two saturation proofs above: proves
+    // relation saturation at each prime of `required_ells`, in order, by
+    // the ell-local discrete-log proof and marks it verified.  With
+    // `skip_verified_ells` a prime that already carries a verified
+    // ell-record is kept instead.  Then requires the records to cover every
+    // prime dividing h_cand and sets the saturation status `verified`.  The
+    // caller checks the preconditions, sets any other proof state, and holds
+    // the certification transaction, which rolls back on false.
+    static bool prove_relation_saturation_ells(
+            ClassGroupContext& context,
+            const OrderUnitGroup& units,
+            const std::vector<flint::Fmpz>& required_ells,
+            flint::FmpzConstRef aux_prime_bound,
+            bool skip_verified_ells) noexcept;
+
     // The stored ell-local saturation proof record for `ell`, for tests and
     // audits; false when none is stored.
     static bool relation_saturation_proof_record(

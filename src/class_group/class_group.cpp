@@ -10300,6 +10300,80 @@ bool ClassGroupContext::try_prove_relation_saturation_with_units(
     return transaction.finish(true);
 }
 
+namespace {
+
+// The primes a relation-saturation proof must cover, in this order: every
+// prime up to `index_bound`, then every prime dividing `class_order` above
+// it.  A bound can only add primes; it never removes a prime dividing the
+// candidate class order.  With index_bound = 1 these are exactly the primes
+// dividing `class_order`, in the order fmpz_factor lists them.
+void relation_saturation_required_ells(
+        std::vector<flint::Fmpz>& out,
+        flint::FmpzConstRef class_order,
+        flint::FmpzConstRef index_bound) noexcept {
+    out.clear();
+    flint::Fmpz ell;
+    flint::fmpz_one(flint::FmpzRef(ell));
+    flint::fmpz_nextprime(flint::FmpzRef(ell), flint::FmpzConstRef(ell),
+                          true);
+    while (flint::fmpz_cmp(flint::FmpzConstRef(ell), index_bound) <= 0) {
+        out.emplace_back();
+        flint::fmpz_set(flint::FmpzRef(out.back()),
+                        flint::FmpzConstRef(ell));
+        flint::fmpz_nextprime(flint::FmpzRef(ell),
+                              flint::FmpzConstRef(ell), true);
+    }
+    if (flint::fmpz_is_one(class_order)) {
+        return;
+    }
+    flint::FmpzFactor factorization;
+    flint::fmpz_factor(flint::FmpzFactorRef(factorization), class_order);
+    for (slong i = 0;
+         i < flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
+         ++i) {
+        flint::fmpz_factor_get_fmpz(
+                flint::FmpzRef(ell),
+                flint::FmpzFactorConstRef(factorization), i);
+        if (flint::fmpz_cmp(flint::FmpzConstRef(ell), index_bound) <= 0) {
+            continue;
+        }
+        out.emplace_back();
+        flint::fmpz_set(flint::FmpzRef(out.back()),
+                        flint::FmpzConstRef(ell));
+    }
+}
+
+}  // namespace
+
+bool detail::ClassGroupCertificationAccess::prove_relation_saturation_ells(
+        ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        const std::vector<flint::Fmpz>& required_ells,
+        flint::FmpzConstRef aux_prime_bound,
+        bool skip_verified_ells) noexcept {
+    for (const flint::Fmpz& required : required_ells) {
+        if (skip_verified_ells &&
+            context.relation_saturation_ell_verified_(
+                    flint::FmpzConstRef(required))) {
+            continue;
+        }
+        if (!context.prove_relation_saturation_dlog_ell_(
+                    units, flint::FmpzConstRef(required), aux_prime_bound) ||
+            !context.relation_saturation_proof_verified_(
+                    flint::FmpzConstRef(required)) ||
+            !context.mark_relation_saturation_verified_(
+                    flint::FmpzConstRef(required))) {
+            return false;
+        }
+    }
+
+    if (!context.relation_saturation_covers_class_order_()) {
+        return false;
+    }
+    context.relation_saturation_status_ = ProofState::verified;
+    return true;
+}
+
 bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units_(
         const OrderUnitGroup& units,
         flint::FmpzConstRef index_bound,
@@ -10323,54 +10397,17 @@ bool ClassGroupContext::try_prove_relation_saturation_index_bound_with_units_(
     // The primes to prove are every prime up to the supplied index bound
     // together with every prime dividing the candidate class order.  A
     // supplied bound can only add primes; it never removes a prime p | h_cand
-    // required by the saturation proof of the class group.
+    // required by the saturation proof of the class group.  Every required
+    // prime is proved, including one that is already verified.
     std::vector<flint::Fmpz> required_ells;
-    flint::Fmpz ell;
-    flint::fmpz_one(flint::FmpzRef(ell));
-    flint::fmpz_nextprime(flint::FmpzRef(ell), flint::FmpzConstRef(ell),
-                          true);
-    while (flint::fmpz_cmp(flint::FmpzConstRef(ell), index_bound) <= 0) {
-        required_ells.emplace_back();
-        flint::fmpz_set(flint::FmpzRef(required_ells.back()),
-                        flint::FmpzConstRef(ell));
-        flint::fmpz_nextprime(flint::FmpzRef(ell),
-                              flint::FmpzConstRef(ell), true);
-    }
-    if (!flint::fmpz_is_one(flint::FmpzConstRef(class_order))) {
-        flint::FmpzFactor factorization;
-        flint::fmpz_factor(flint::FmpzFactorRef(factorization),
-                           flint::FmpzConstRef(class_order));
-        for (slong i = 0;
-             i < flint::fmpz_factor_num(
-                         flint::FmpzFactorConstRef(factorization));
-             ++i) {
-            flint::fmpz_factor_get_fmpz(
-                    flint::FmpzRef(ell),
-                    flint::FmpzFactorConstRef(factorization), i);
-            if (flint::fmpz_cmp(flint::FmpzConstRef(ell), index_bound) <= 0) {
-                continue;
-            }
-            required_ells.emplace_back();
-            flint::fmpz_set(flint::FmpzRef(required_ells.back()),
-                            flint::FmpzConstRef(ell));
-        }
-    }
-
-    for (const flint::Fmpz& required : required_ells) {
-        if (!prove_relation_saturation_dlog_ell_(
-                    units, flint::FmpzConstRef(required), aux_prime_bound) ||
-            !relation_saturation_proof_verified_(
-                    flint::FmpzConstRef(required)) ||
-            !mark_relation_saturation_verified_(
-                    flint::FmpzConstRef(required))) {
-            return false;
-        }
-    }
-
-    if (!relation_saturation_covers_class_order_()) {
+    relation_saturation_required_ells(required_ells,
+                                      flint::FmpzConstRef(class_order),
+                                      index_bound);
+    if (!detail::ClassGroupCertificationAccess::
+                prove_relation_saturation_ells(*this, units, required_ells,
+                                               aux_prime_bound, false)) {
         return false;
     }
-    relation_saturation_status_ = ProofState::verified;
     return transaction.finish(try_promote_proven_certification_());
 }
 
@@ -10460,37 +10497,19 @@ bool ClassGroupContext::try_prove_class_order_saturation_with_units_(
     unit_proof_status_ = ProofState::verified;
     regulator_proof_status_ = ProofState::verified;
 
-    if (!flint::fmpz_is_one(flint::FmpzConstRef(class_order))) {
-        flint::FmpzFactor factorization;
-        flint::fmpz_factor(flint::FmpzFactorRef(factorization),
-                           flint::FmpzConstRef(class_order));
-        flint::Fmpz ell;
-        for (slong i = 0;
-             i < flint::fmpz_factor_num(
-                         flint::FmpzFactorConstRef(factorization));
-             ++i) {
-            flint::fmpz_factor_get_fmpz(
-                    flint::FmpzRef(ell),
-                    flint::FmpzFactorConstRef(factorization), i);
-            if (relation_saturation_ell_verified_(
-                        flint::FmpzConstRef(ell))) {
-                continue;
-            }
-            if (!prove_relation_saturation_dlog_ell_(
-                        units, flint::FmpzConstRef(ell), aux_prime_bound) ||
-                !relation_saturation_proof_verified_(
-                        flint::FmpzConstRef(ell)) ||
-                !mark_relation_saturation_verified_(
-                        flint::FmpzConstRef(ell))) {
-                return false;
-            }
-        }
-    }
-
-    if (!relation_saturation_covers_class_order_()) {
+    // Index bound one: exactly the primes p | h_cand.  A prime that already
+    // carries a verified ell-record is kept, not proved again.
+    flint::Fmpz index_bound;
+    flint::fmpz_one(flint::FmpzRef(index_bound));
+    std::vector<flint::Fmpz> required_ells;
+    relation_saturation_required_ells(required_ells,
+                                      flint::FmpzConstRef(class_order),
+                                      flint::FmpzConstRef(index_bound));
+    if (!detail::ClassGroupCertificationAccess::
+                prove_relation_saturation_ells(*this, units, required_ells,
+                                               aux_prime_bound, true)) {
         return false;
     }
-    relation_saturation_status_ = ProofState::verified;
     return transaction.finish(try_promote_proven_certification_());
 }
 
