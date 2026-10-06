@@ -6819,6 +6819,85 @@ int test_saturation_selectors_agree() {
     return 0;
 }
 
+// Forces the source_shape_fallback pass of both saturation selectors.  In
+// Z[sqrt2] at ell = 3 the first q = 1 mod 3 is 7 (split, degree one).  With
+// bound 5 the first pass finds no candidate, so each selector falls back to
+// every prime ideal above every p <= 5: 2 is ramified (norm 2) and 3 inert
+// (norm 9), neither with 3 | N - 1, while 5 is inert with norm 25, so the
+// fallback selects the degree-two prime above 5.  With bound 7 the first
+// pass selects the prime above 7 and the fallback does not run.
+int test_saturation_selectors_source_shape_fallback() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+    silex::Element unit(field);
+    assert(set_integral_quadratic_coeffs_str(unit, "1", "1"));
+    silex::FactoredElement generator(field);
+    assert(generator.set_element(unit));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    silex::OrderUnitGroup group(order);
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 1),
+                           embeddings, 256));
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "unit_group.saturation_selector.source_shape_fallback";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    group.set_diagnostics(&diagnostics);
+    const auto expect_fallback_events = [&](slong expected) {
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(counter.count == expected);
+#else
+        (void)expected;
+        assert(counter.count == 0);
+#endif
+    };
+    const auto selected_prime_is = [](const silex::PrimeIdealList& primes,
+                                      slong q_value, slong degree) {
+        sflint::Fmpz q;
+        return primes.size() == 1 && primes.at(0) != nullptr &&
+               primes.at(0)->rational_prime(sflint::FmpzRef(q)) &&
+               sflint::fmpz_equal_si(q, q_value) &&
+               primes.at(0)->residue_degree() == degree;
+    };
+
+    sflint::Fmpz ell;
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(ell, 3));
+    for (slong bound_value : {5, 7}) {
+        const bool fallback = bound_value == 5;
+        const slong q_value = fallback ? 5 : 7;
+        const slong degree = fallback ? 2 : 1;
+        assert(set_fmpz_si(bound, bound_value));
+
+        counter.count = 0;
+        silex::PrimeIdealList public_primes;
+        assert(group.select_saturation_primes(public_primes,
+                                              sflint::FmpzConstRef(ell), 1,
+                                              sflint::FmpzConstRef(bound)));
+        assert(selected_prime_is(public_primes, q_value, degree));
+        expect_fallback_events(fallback ? 1 : 0);
+
+        counter.count = 0;
+        silex::PrimeIdealList kernel_primes;
+        sflint::FmpzMat kernel(0, 0);
+        assert(silex::detail::select_saturation_primes_with_kernel(
+                kernel_primes, kernel, group, sflint::FmpzConstRef(ell), 1,
+                sflint::FmpzConstRef(bound)));
+        assert(selected_prime_is(kernel_primes, q_value, degree));
+        assert(kernel_primes.at(0)->equal(*public_primes.at(0)));
+        expect_fallback_events(fallback ? 1 : 0);
+    }
+
+    group.set_diagnostics(nullptr);
+    return 0;
+}
+
 int test_saturate_bounded_real_quadratic() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order;
@@ -7288,6 +7367,7 @@ int main() {
     test_saturate_local_once_rank_zero_and_failures();
     test_select_saturation_primes();
     test_saturation_selectors_agree();
+    test_saturation_selectors_source_shape_fallback();
     test_saturate_bounded_real_quadratic();
     test_saturate_bounded_rank_zero_zero_pass_partial_and_failures();
     test_supplied_real_quadratic_units();
