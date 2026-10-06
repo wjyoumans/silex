@@ -4474,21 +4474,29 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
-    // h_cand equals the exact class number h and generation is verified, so
-    // the computed relation lattice has index h_cand / h = 1 in the full one
-    // and is saturated at every prime ell | h.  Store that as per-ell
-    // records, so the saturation proof is visible to later gates such as a
-    // Belabas-Friedman audit, which promotes only from stored records.
+    if (!publish_exact_class_order_proof(context, exact_order)) {
+        return false;
+    }
+    return transaction.finish(true);
+}
+
+// h_cand equals the exact class number h and generation is verified, so the
+// computed relation lattice has index h_cand / h = 1 in the full one and is
+// saturated at every prime ell | h.  That is stored as per-ell records, so
+// the saturation proof is visible to later gates such as a Belabas-Friedman
+// audit, which promotes only from stored records.
+bool ClassGroupCertificationAccess::publish_exact_class_order_proof(
+        ClassGroupContext& context,
+        flint::FmpzConstRef exact_order) noexcept {
     if (!record_exact_class_order_saturation(context, exact_order) ||
         !context.relation_saturation_covers_class_order_()) {
         return false;
     }
-
     context.certification_ = CertificationMode::proven;
     context.relation_saturation_status_ = ProofState::verified;
     context.unit_proof_status_ = ProofState::verified;
     context.regulator_proof_status_ = ProofState::verified;
-    return transaction.finish(true);
+    return true;
 }
 
 bool ClassGroupCertificationAccess::record_exact_class_order_saturation(
@@ -4535,6 +4543,11 @@ bool ClassGroupCertificationAccess::record_exact_class_order_saturation(
             flint::fmpz_set(flint::FmpzRef(proof->ell),
                             flint::FmpzConstRef(ell));
         }
+        // A proof record at ell that is not verified (a failed or unchecked
+        // ell-local test) is overwritten as verified by design: index
+        // h_cand / h = 1 proves saturation at ell, so that test cannot have
+        // found the relations unsaturated at ell (h_cand would then exceed
+        // h); it failed or was not run for another reason.
         proof->status = ProofState::verified;
         proof->rank = 0;
         proof->target_rank = 0;
@@ -4847,15 +4860,10 @@ bool ClassGroupCertificationAccess::
         // Index one against the exact class number: as in
         // try_certify_imaginary_quadratic_from_exact_order, the relations
         // are saturated at every prime ell | h, and that is stored per ell.
-        if (!record_exact_class_order_saturation(
-                    context, flint::FmpzConstRef(exact_order)) ||
-            !context.relation_saturation_covers_class_order_()) {
+        if (!publish_exact_class_order_proof(
+                    context, flint::FmpzConstRef(exact_order))) {
             return false;
         }
-        context.certification_ = CertificationMode::proven;
-        context.relation_saturation_status_ = ProofState::verified;
-        context.unit_proof_status_ = ProofState::verified;
-        context.regulator_proof_status_ = ProofState::verified;
         units.mark_certification_proven_();
     }
     flint::fmpz_set(out, flint::FmpzConstRef(index));

@@ -215,8 +215,18 @@ private:
     // Stores a verified relation-saturation record, backed by an
     // exact-class-order proof record, at every prime dividing the verified
     // exact class order `exact_order`.  A prime that already carries a
-    // verified ell-local proof keeps it.
+    // verified ell-local proof keeps it; any other proof record at that
+    // prime (failed or not checked) is overwritten as verified.
     static bool record_exact_class_order_saturation(
+            ClassGroupContext& context,
+            flint::FmpzConstRef exact_order) noexcept;
+    // Publishes the class group `proven` from h_cand equal to the exact
+    // class order `exact_order`, with generation verified: stores the
+    // per-prime saturation records, requires them to cover h_cand, and sets
+    // the certification and the saturation, unit, and regulator proof
+    // states.  The caller holds the certification transaction and commits
+    // it only on success.
+    static bool publish_exact_class_order_proof(
             ClassGroupContext& context,
             flint::FmpzConstRef exact_order) noexcept;
 };

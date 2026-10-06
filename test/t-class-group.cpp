@@ -2895,6 +2895,68 @@ int test_analytic_index_bound_keeps_complete_saturation_records() {
     return 0;
 }
 
+// The exact imaginary-quadratic route stores a proof at each ell | h only
+// where none is verified yet: an ell-local proof already verified at
+// ell | h is kept with its own data, and no second record is added.  On
+// Q(sqrt(-23)), h = 3, the ell = 3 proof runs the ell-local test (target
+// rank one), and try_certify_quadratic then certifies `proven` through the
+// exact class number.
+int test_exact_route_keeps_verified_ell_local_proof() {
+    silex::NumberField field = quadratic_field(-23);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(maximal));
+
+    silex::ClassGroupContext context;
+    prepare_minus_23_candidate(context, maximal, 1, 3);
+    assert(context.try_certify_with_units(
+            units, silex::CertificationMode::unknown, 128));
+
+    sflint::Fmpz aux_bound;
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(aux_bound, 200));
+    assert(set_fmpz_si(ell, 3));
+    assert(context.try_prove_relation_saturation_with_units(
+            units, sflint::FmpzConstRef(ell),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(context.certification_status() ==
+           silex::CertificationMode::unknown);
+
+    silex::ProofState status = silex::ProofState::not_checked;
+    slong rank = -1;
+    slong target_rank = -1;
+    slong local_primes = -1;
+    assert(CertificationAccess::relation_saturation_proof_record(
+            context, sflint::FmpzConstRef(ell), status, rank, target_rank,
+            local_primes));
+    assert(status == silex::ProofState::verified);
+    assert(target_rank > 0);
+    assert(local_primes > 0);
+
+    assert(context.try_certify_quadratic(silex::CertificationMode::proven));
+    assert(context.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::verified);
+    assert(context.relation_saturation_record_count() == 1);
+
+    silex::ProofState status_after = silex::ProofState::not_checked;
+    slong rank_after = -1;
+    slong target_rank_after = -1;
+    slong local_primes_after = -1;
+    assert(CertificationAccess::relation_saturation_proof_record(
+            context, sflint::FmpzConstRef(ell), status_after, rank_after,
+            target_rank_after, local_primes_after));
+    assert(status_after == silex::ProofState::verified);
+    assert(rank_after == rank);
+    assert(target_rank_after == target_rank);
+    assert(local_primes_after == local_primes);
+    return 0;
+}
+
 int test_compute_candidate_preserves_on_failure() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -3366,6 +3428,7 @@ int main() {
     test_relation_saturation_analytic_index_bound_with_units_degree_one();
     test_zeta_bf_degree_one_verifies_relation_saturation();
     test_analytic_index_bound_keeps_complete_saturation_records();
+    test_exact_route_keeps_verified_ell_local_proof();
     test_compute_candidate_preserves_on_failure();
     test_move_and_swap();
     test_grh_provenance_records();
