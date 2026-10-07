@@ -1603,6 +1603,8 @@ int main(int argc, char** argv) {
         prime_selection_success) {
         silex::SUnitComputeOptions sunit_options;
         sunit_options.regulator_precision = input_options.precision;
+        sunit_options.requested_certification =
+                requested_certification(input_options);
         sunit_options.diagnostics =
                 use_diagnostics ? &diagnostics : nullptr;
         sunit_success = silex::compute_sunit_groups(

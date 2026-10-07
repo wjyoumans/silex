@@ -304,6 +304,48 @@ def assert_sunit_instance(instance: dict[str, Any], row: dict[str, Any]) -> None
     }
 
 
+def assert_grh_mode_instance(
+    root: Path, proven: dict[str, Any], row: dict[str, Any]
+) -> None:
+    """Re-run a row with --mode grh: the class/unit pair, the S-class group
+    and the S-unit group carry the grh label, proof states stay verified
+    (exact relative to the inputs), the published groups match the proven
+    run, and the membership audit (mixed round trip through the grh units,
+    outside-support rejection) passes."""
+    cmd = list(proven["cmd"])
+    mode_index = cmd.index("--mode")
+    assert cmd[mode_index + 1] == "proven"
+    cmd[mode_index + 1] = "grh"
+    instance = run_json(cmd, root)
+    assert instance["success"] is True, row["id"]
+    assert instance["certification_status"] == "grh"
+    assert instance["class_group"]["certification"] == "grh"
+    assert instance["unit_group"]["certification"] == "grh"
+    sunit = instance["sunit"]
+    assert sunit["success"] is True
+    assert sunit["final_result_published"] is True
+    assert sunit["failure_stage"] is None
+    s_class = sunit["s_class_group"]
+    s_units = sunit["s_unit_group"]
+    for group in (s_class, s_units):
+        assert group["certification_status"] == "grh"
+        assert group["proof_status"] == "verified"
+    assert s_units["regulator_proof_status"] == "verified"
+    proven_sunit = proven["sunit"]
+    assert sunit["selected_primes"] == proven_sunit["selected_primes"]
+    for key in ("order", "invariants"):
+        assert s_class[key] == proven_sunit["s_class_group"][key]
+    for key in ("torsion_order", "ordinary_free_rank", "nonunit_rank",
+                "free_rank", "valuation_lattice_index"):
+        assert s_units[key] == proven_sunit["s_unit_group"][key]
+    assert math.isclose(
+        s_units["regulator_midpoint"],
+        proven_sunit["s_unit_group"]["regulator_midpoint"],
+        rel_tol=1e-12,
+    )
+    assert sunit["membership"] == proven_sunit["membership"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
@@ -353,6 +395,7 @@ def main() -> int:
             root,
         )
         assert_sunit_instance(instance, row)
+        assert_grh_mode_instance(root, instance, row)
         instances[field_id] = instance
 
     real_quadratic = instances["real_quadratic_210_first_over_2"]
