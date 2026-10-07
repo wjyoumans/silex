@@ -102,8 +102,9 @@ Changed
   :doc:`../reference/algorithms_and_sources`.
 
 - The Belabas-Diaz y Diaz-Friedman bound of a ``grh`` class/unit request is
-  now the smallest integer cutoff at which an interval comparison proves the
-  criterion (doubling from 2, then an exact bisection, as PARI 2.17.3
+  now a cutoff at which an interval comparison proves the criterion, the
+  smallest one unless an undecidable near-tie leaves a larger one
+  (doubling from 2, then an exact bisection, as PARI 2.17.3
   ``Buchall_param``), instead of the result of a search that doubled from
   100 and stopped at a step below 100 and so never returned less than about
   50.  The reported GRH generation bound
@@ -113,8 +114,8 @@ Changed
   is still doubled until it has more than 20 prime ideals.  A ``grh`` base
   can now stay below the Minkowski-type bound where it used to reach it, so
   factor-base generation of such a result is recorded as ``grh`` rather than
-  ``verified``, and a later zeta promotion of it fails closed, as documented
-  for any base that covers only the GRH bound.  Labels and failure rules are
+  ``proven`` in ``factor_base_generation_certification()``, and a later zeta
+  promotion of it fails closed, as documented for any base that covers only the GRH bound.  Labels and failure rules are
   unchanged.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
@@ -333,7 +334,7 @@ Fixed
   index one with verified generation means the relations are saturated at
   every prime.  It was ``not_checked`` on that route, for example on a real
   quadratic field with class number greater than one such as
-  ``x^2 - 40001``, and on an imaginary quadratic field certified through
+  ``x^2 - 12905``, and on an imaginary quadratic field certified through
   ``try_certify_with_units``.  These routes clear the per-prime records
   unless verified records already cover every prime dividing the candidate
   class number, in which case they are kept; this includes the internal

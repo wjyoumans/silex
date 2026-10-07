@@ -549,6 +549,41 @@ bool check_bdf_search_stop() noexcept {
                 return false;
             }
         }
+
+        // A stop between the last failing doubling and the bound is reached
+        // in the bisection: it ends at the failing midpoint bdf - 1, after
+        // the doublings and the bisection steps up to that midpoint, which is the
+        // last evaluation of the full search.  It is
+        // absent when no cutoff lies strictly between them.
+        const slong bisection_stop = c.bdf - 1;
+        if (bisection_stop > c.last_failing_doubling) {
+            slong expected = doublings + 1;
+            slong low = c.last_failing_doubling;
+            slong high = 2 * c.last_failing_doubling;
+            for (;;) {
+                const slong middle = low + (high - low) / 2;
+                ++expected;
+                if (middle >= c.bdf) {
+                    high = middle;
+                } else if (middle >= bisection_stop) {
+                    break;
+                } else {
+                    low = middle;
+                }
+            }
+            sflint::fmpz_set_si(sflint::FmpzRef(stop), bisection_stop);
+            sflint::fmpz_set_si(sflint::FmpzRef(stopped_bdf), 7);
+            stop_evaluations = 0;
+            if (silex::detail::grh_bdf_factor_base_bound_search(
+                        sflint::FmpzRef(stopped_bdf), setup.maximal_order,
+                        &stop, nullptr, &stop_evaluations) !=
+                        silex::detail::BdfSearchOutcome::stopped ||
+                !sflint::fmpz_equal_si(stopped_bdf, 7) ||
+                stop_evaluations != expected ||
+                stop_evaluations > c.evaluations) {
+                return false;
+            }
+        }
     }
     return true;
 }

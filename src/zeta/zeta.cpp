@@ -1660,7 +1660,7 @@ bool factor_base_bound_bdf_right_side(
 // The Belabas-Diaz y Diaz-Friedman search (source anchor in
 // docs/reference/algorithms_and_sources.rst): the smallest integer cutoff T
 // at which the Arb comparison proves the criterion of BDF 2008, Section 3,
-// found as reference buch2.c:Buchall_param (2.17.3, lines 3814-3821) finds
+// found as reference buch2.c:Buchall_param (2.17.3, lines 3810-3817) finds
 // LIMC2: doubling from 2 until the criterion holds, then an exact
 // bisection on the integers.  `evaluations` counts the evaluations of the
 // criterion's right side.  Unlike the reference GRHchk, which compares
@@ -1881,8 +1881,8 @@ bool grh_factor_base_bound_impl(
     // criterion cannot be computed or decided: a non-monic defining
     // polynomial (its residue-degree route needs a monic integral one), a
     // residue-degree failure, an Arb comparison that cannot decide, or a
-    // search past the double range.  Bach 1990, Theorem 4 (and the remark
-    // following it in degree two) holds without the BDF value, and BDF 2008,
+    // search past the cutoff limit of 2^52.  Bach 1990, Theorem 4 (and the
+    // remark following it in degree two) holds without the BDF value, and BDF 2008,
     // Section 3, itself takes Bach's bound once its search passes it.  The
     // search also stops once the criterion fails at a cutoff at least Bach's
     // bound; the BDF bound would then exceed Bach's (see
