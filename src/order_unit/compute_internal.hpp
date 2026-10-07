@@ -485,6 +485,17 @@ bool recompute_units_from_class_context(OrderUnitGroup& units,
                                         slong precision,
                                         const ValidationUnitRefreshOptions&
                                                 refresh_options = {}) noexcept;
+// The relation-saturation pass of class/unit validation against
+// `index_bound`, a bound on h_cand / h.  With `index_bound_is_exact` it is
+// the exact imaginary-quadratic index, which counts as unconditional only
+// when factor-base generation is verified up to the required bound.
+bool saturate_candidate_class_relations_with_units(
+        bool& changed,
+        ClassGroupContext& class_group,
+        const OrderUnitGroup& units,
+        const ClassGroupComputeOptions& options,
+        flint::FmpzConstRef index_bound,
+        bool index_bound_is_exact) noexcept;
 bool complete_requested_proven_relation_saturation(
         ClassGroupContext& class_group,
         OrderUnitGroup& units,

@@ -293,8 +293,9 @@ public:
     //   only once the resulting h_cand is 1 and never rescues a conditional
     //   bound.  The
     //   validation pass supplies the exact imaginary-quadratic index, which
-    //   is unconditional under a `proven` request (generation checked to
-    //   the Minkowski-type bound) and GRH-conditional under a `grh` request;
+    //   is unconditional when generation is verified up to the
+    //   Minkowski-type bound (always so under a `proven` request) and
+    //   GRH-conditional otherwise;
     //   a Belabas-Friedman analytic index bound only decides whether the
     //   pass runs and is never the bound it saturates against.
     // The bounded search leaves the status unchanged when the candidate

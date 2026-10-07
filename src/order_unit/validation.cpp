@@ -513,6 +513,30 @@ slong initial_relation_kernel_target(slong rank,
     return lower_target;
 }
 
+namespace {
+
+// True when factor-base generation is verified up to the required
+// Minkowski-type bound: the base was built to that bound and the
+// generation check covers it.  This is the generation test
+// try_promote_proven_certification_ applies before publishing `proven`.
+bool factor_base_generation_checked_to_required_bound(
+        const ClassGroupContext& class_group) noexcept {
+    flint::Fmpz required_bound;
+    flint::Fmpz checked_bound;
+    return class_group.factor_base_generation_status() ==
+                   ProofState::verified &&
+           class_group.factor_base_generation_checked_status() ==
+                   ProofState::verified &&
+           class_group.factor_base_generation_bound(
+                   flint::FmpzRef(required_bound)) &&
+           class_group.factor_base_generation_checked_bound(
+                   flint::FmpzRef(checked_bound)) &&
+           flint::fmpz_cmp(flint::FmpzConstRef(checked_bound),
+                           flint::FmpzConstRef(required_bound)) >= 0;
+}
+
+}  // namespace
+
 bool saturate_candidate_class_relations_with_units(
         bool& changed,
         ClassGroupContext& class_group,
@@ -539,14 +563,17 @@ bool saturate_candidate_class_relations_with_units(
     flint::Fmpz aux_bound;
     relation_saturation_aux_bound(aux_bound, options);
     // The exact imaginary-quadratic index h_cand / h bounds the saturation
-    // index only once the factor base generates the class group.  A proven
-    // request checked generation to the Minkowski-type bound
-    // (rank_zero_quadratic_class_index_bound), so the bound is
-    // unconditional; a grh request assumes generation under GRH.  The other
-    // branch saturates at the primes of h_cand itself, an unconditional
-    // bound; the analytic index bound only decides whether to run it.
+    // index only once the factor base generates the class group.  The bound
+    // is therefore unconditional exactly when generation is verified up to
+    // the required Minkowski-type bound, whatever the request: a proven
+    // request has checked it (rank_zero_quadratic_class_index_bound), and
+    // a grh request may have checked it on another route; otherwise a grh
+    // request assumes generation under GRH and the bound is conditional.
+    // The other branch saturates at the primes of h_cand itself, an
+    // unconditional bound; the analytic index bound only decides whether to
+    // run it.
     const bool exact_index_bound_unconditional =
-            options.requested_certification == CertificationMode::proven;
+            factor_base_generation_checked_to_required_bound(class_group);
     bool saturated = false;
     const slong remaining = options.max_relations - class_group.relation_count();
     const bool saturation_ok = index_bound_is_exact
