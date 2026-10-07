@@ -18,18 +18,9 @@
 
 namespace silex {
 
-namespace {
+using detail::RootRefinementStatus;
 
-enum class RootRefinementStatus {
-    success,
-    invalid_input,
-    not_isolated,
-    low_accuracy,
-    real_root_validation,
-    root_isolation,
-    root_pairing,
-    precision_cap
-};
+namespace {
 
 void profile_root_refinement_failure(
         const DiagnosticsContext* diagnostics,
@@ -178,9 +169,21 @@ bool restore_previous_root_order(acb_ptr roots,
     return true;
 }
 
+// Guard bits added to the requested precision for the first attempt from the
+// previous roots.  Root finding at exactly the requested precision returns
+// balls a few bits short of it, so that attempt always failed the accuracy
+// check and was repeated at double the precision.  This is a tuning constant
+// of the precision schedule, not a correctness condition: every attempt is
+// checked the same way.
+constexpr slong refine_guard_bits = 32;
+
 // Largest working precision tried from the previous roots, as a multiple of
-// the requested precision, before falling back to full isolation.
+// the starting working precision, before falling back to full isolation.
 constexpr slong refine_work_precision_factor = 8;
+
+}  // namespace
+
+namespace detail {
 
 RootRefinementStatus refine_roots_from_initial(
         acb_ptr roots,
@@ -201,12 +204,17 @@ RootRefinementStatus refine_roots_from_initial(
     flint::AcbPoly complex_polynomial;
     flint::AcbVec scratch(degree);
     RootRefinementStatus last_failure = RootRefinementStatus::invalid_input;
+    const slong start_precision = precision <= COEFF_MAX - refine_guard_bits
+                                          ? precision + refine_guard_bits
+                                          : COEFF_MAX;
     const slong max_work_precision =
-            precision <= COEFF_MAX / refine_work_precision_factor
-                    ? precision * refine_work_precision_factor
+            start_precision <= COEFF_MAX / refine_work_precision_factor
+                    ? start_precision * refine_work_precision_factor
                     : COEFF_MAX;
 
-    for (slong work_precision = precision; work_precision > 0;) {
+    // Deviation from the reference, whose first attempt is at the requested
+    // precision: start a few guard bits above it (see refine_guard_bits).
+    for (slong work_precision = start_precision; work_precision > 0;) {
         acb_poly_set_fmpq_poly(complex_polynomial.raw(), polynomial,
                                work_precision);
 
@@ -270,10 +278,6 @@ RootRefinementStatus refine_roots_from_initial(
     }
     return last_failure;
 }
-
-}  // namespace
-
-namespace detail {
 
 bool isolate_roots_in_previous_order(acb_ptr roots,
                                      acb_srcptr previous,
@@ -514,6 +518,20 @@ bool EmbeddingContext::refine(
         return false;
     }
 
+    // Stored roots already accurate to the request pass every check a
+    // refinement makes: they are isolated, validated and in place order, and
+    // the accuracy check depends only on the balls.  Keep them.  Refining
+    // them anyway costs FLINT 3.6.0 acb_poly_find_roots its full iteration
+    // budget: when every correction is zero, its early-stop test overflows
+    // and never fires.
+    if (roots_are_set_ && roots_have_accuracy(roots_.data(), degree_,
+                                              precision)) {
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                            "element.embedding.refine.accurate_roots");
+        prec_ = precision;
+        return true;
+    }
+
     flint::AcbVec next_roots(degree_);
     bool roots_refined = false;
     if (roots_are_set_) {
@@ -521,7 +539,8 @@ bool EmbeddingContext::refine(
                 diagnostics, DiagnosticsModule::element,
                 "element.embedding.refine.previous_roots_available");
         next_roots.set_from(flint::AcbVecConstRef(roots_));
-        const RootRefinementStatus refine_status = refine_roots_from_initial(
+        const RootRefinementStatus refine_status =
+                detail::refine_roots_from_initial(
                 next_roots.data(), roots_.data(),
                 parent_.raw_flint_field()->pol, degree_, sig_.r1(), precision,
                 diagnostics);

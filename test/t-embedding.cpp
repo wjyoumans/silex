@@ -87,14 +87,13 @@ bool satisfies_x3_minus(
     return sflint::acb_contains_zero(value);
 }
 
-// Real quadratic field with two roots 1 +/- sqrt(3) 2^-500.  Rounding the
-// constant coefficient 1 - 3 * 2^-1000 to fewer than about 1000 bits merges
-// the roots, so refining from 64 to 128 bits cannot isolate them from the
-// previous approximations until the working precision reaches 2048 bits
-// (checked with acb_poly_find_roots on FLINT 3.6.0).  That is beyond the 8x
-// refine cap, so the refine must fall back to full isolation.
-silex::NumberField close_real_roots_field() noexcept {
-    sflint::FmpqPoly polynomial;
+// x^2 - 2x + 1 - 3 * 2^-1000, with two real roots 1 +/- sqrt(3) 2^-500.
+// Rounding the constant coefficient to fewer than about 1000 bits merges the
+// roots, so refining to 128 bits from previous approximations cannot isolate
+// them until the working precision reaches 2048 bits (checked with
+// acb_poly_find_roots on FLINT 3.6.0).  That is beyond the 8x refine cap.
+void close_real_roots_polynomial(sflint::FmpqPoly& polynomial) noexcept {
+    sflint::fmpq_poly_zero(polynomial);
     sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
     sflint::fmpq_poly_set_coeff_si(polynomial, 1, -2);
 
@@ -105,7 +104,11 @@ silex::NumberField close_real_roots_field() noexcept {
     fmpz_sub_ui(fmpq_numref(constant), fmpq_denref(constant), 3);
     ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), 0, constant);
     fmpq_clear(constant);
+}
 
+silex::NumberField close_real_roots_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    close_real_roots_polynomial(polynomial);
     return field_by_polynomial(polynomial);
 }
 
@@ -550,6 +553,102 @@ int test_place_order_stable_across_refine() {
     return 0;
 }
 
+slong min_root_accuracy(const silex::EmbeddingContext& embeddings,
+                        slong degree) noexcept {
+    slong accuracy = WORD_MAX;
+    for (slong i = 0; i < degree; ++i) {
+        sflint::Acb root;
+        assert(embeddings.get_root(sflint::AcbRef(root), i));
+        accuracy = FLINT_MIN(accuracy, ::acb_rel_accuracy_bits(root.raw()));
+    }
+    return accuracy;
+}
+
+// A request at or below the accuracy the stored roots already have is met by
+// those roots: the refine keeps them unchanged and runs no root finding.
+// FLINT 3.6.0 acb_poly_find_roots does not stop early when every initial root
+// is already more accurate than the working precision, so refining such
+// roots ran all of its iterations.
+int test_refine_keeps_accurate_roots() {
+    silex::NumberField field = silex::test::close_imaginary_pairs_field();
+    silex::EmbeddingContext embeddings(field);
+    assert(embeddings.refine(64));
+    assert(embeddings.refine(128));
+
+    const slong accuracy = min_root_accuracy(embeddings, 4);
+    // The refined roots are more accurate than requested.
+    assert(accuracy > 128);
+
+    sflint::AcbVec before(4);
+    for (slong i = 0; i < 4; ++i) {
+        assert(embeddings.get_root(sflint::AcbRef(before.data() + i), i));
+    }
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    RefineProfileCounters counters;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::element),
+            refine_profile_callback, &counters);
+
+    assert(embeddings.refine(accuracy, &diagnostics));
+    assert(embeddings.precision() == accuracy);
+    for (slong i = 0; i < 4; ++i) {
+        sflint::Acb root;
+        assert(embeddings.get_root(sflint::AcbRef(root), i));
+        assert(::acb_equal(root.raw(), before.data() + i) != 0);
+    }
+    assert(counters.find_roots == 0);
+    assert(counters.full_roots_fallback == 0);
+
+    // Evaluation at the new precision uses the kept roots.
+    silex::Element theta(field);
+    assert(theta.gen());
+    sflint::AcbVec values(4);
+    assert(embeddings.evaluate_all(sflint::AcbVecRef(values), theta,
+                                   accuracy));
+    for (slong i = 0; i < 4; ++i) {
+        assert(::acb_overlaps(values.data() + i, before.data() + i) != 0);
+    }
+
+    // A request beyond the stored accuracy still refines.
+    assert(embeddings.refine(accuracy + 1));
+    assert(min_root_accuracy(embeddings, 4) >= accuracy + 1);
+    return 0;
+}
+
+// Refinement from the previous roots starts a few guard bits above the
+// requested precision, so a refine that succeeds from the previous roots
+// needs one root-finding call rather than a retry at double precision.
+int test_refine_from_previous_roots_single_attempt() {
+    silex::NumberField field = silex::test::close_imaginary_pairs_field();
+    silex::EmbeddingContext embeddings(field);
+    assert(embeddings.refine(64));
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    RefineProfileCounters counters;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::element),
+            refine_profile_callback, &counters);
+
+    for (slong precision = 256; precision <= 4096; precision *= 2) {
+        assert(embeddings.refine(precision, &diagnostics));
+        assert(embeddings.precision() == precision);
+        assert(min_root_accuracy(embeddings, 4) >= precision);
+    }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // One attempt per refine with FLINT 3.6.0.
+    assert(counters.find_roots == 5);
+    assert(counters.full_roots_fallback == 0);
+#else
+    assert(counters.events == 0);
+#endif
+    return 0;
+}
+
 int test_refine_precision_cap() {
     silex::NumberField field = close_real_roots_field();
     silex::EmbeddingContext embeddings(field);
@@ -561,6 +660,10 @@ int test_refine_precision_cap() {
         assert(embeddings.get_root(sflint::AcbRef(low.data() + i), i));
     }
     assert(::acb_overlaps(low.data() + 0, low.data() + 1) == 0);
+    // Isolating the close roots already made them far more accurate than
+    // 128 bits, so a public refine to 128 bits keeps them; the cap is
+    // exercised on the refinement from the previous roots directly.
+    assert(min_root_accuracy(embeddings, 2) >= 128);
 
     silex::DiagnosticsContext diagnostics;
     silex::diagnostics_context_init(diagnostics);
@@ -570,7 +673,30 @@ int test_refine_precision_cap() {
             silex::diagnostics_module_bit(silex::DiagnosticsModule::element),
             refine_profile_callback, &counters);
 
-    assert(embeddings.refine(128, &diagnostics));
+    sflint::FmpqPoly polynomial;
+    close_real_roots_polynomial(polynomial);
+    sflint::AcbVec roots(2);
+    ::_acb_vec_set(roots.data(), low.data(), 2);
+    const silex::detail::RootRefinementStatus status =
+            silex::detail::refine_roots_from_initial(
+                    roots.data(), low.data(), polynomial.raw(), 2, 2, 128,
+                    &diagnostics);
+
+    // At most the working precisions 160 = 128 + 32 guard bits, 320, 640
+    // and 1280 = 8 * 160 are tried from the previous roots.  With FLINT
+    // 3.6.0 all four fail to isolate the roots (the uncapped loop would go on
+    // to 2048 bits) and the refinement stops at the cap.
+    assert(status == silex::detail::RootRefinementStatus::precision_cap);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counters.events > 0);
+    assert(counters.find_roots == 4);
+#else
+    assert(counters.events == 0);
+#endif
+
+    // The public refine still returns roots at the requested accuracy in the
+    // published place order.
+    assert(embeddings.refine(128));
     assert(embeddings.precision() == 128);
     for (slong i = 0; i < 2; ++i) {
         sflint::Acb root;
@@ -580,21 +706,6 @@ int test_refine_precision_cap() {
         assert(::acb_overlaps(root.raw(), low.data() + i) != 0);
         assert(::acb_overlaps(root.raw(), low.data() + (1 - i)) == 0);
     }
-
-#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
-    // At most the working precisions 128, 256, 512 and 1024 = 8 * 128 are
-    // tried from the previous roots.  With FLINT 3.6.0 all four fail (the
-    // uncapped loop would go on to 2048) and the refine falls back to full
-    // isolation.  The exact count of attempts and the fallback itself depend
-    // on FLINT: the >= 1 assertion holds because all four precisions fail
-    // with FLINT 3.6.0, not because the cap forces a fallback.
-    assert(counters.events > 0);
-    assert(counters.find_roots >= 1);
-    assert(counters.find_roots <= 4);
-    assert(counters.full_roots_fallback >= 1);
-#else
-    assert(counters.events == 0);
-#endif
     return 0;
 }
 
@@ -687,6 +798,8 @@ int main() {
     assert(test_define_failure_preserves_context() == 0);
     assert(test_signature_before_refine() == 0);
     assert(test_place_order_stable_across_refine() == 0);
+    assert(test_refine_keeps_accurate_roots() == 0);
+    assert(test_refine_from_previous_roots_single_attempt() == 0);
     assert(test_refine_precision_cap() == 0);
     assert(test_full_isolation_retries_ambiguous_match() == 0);
     return 0;

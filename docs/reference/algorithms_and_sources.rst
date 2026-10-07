@@ -389,7 +389,7 @@ first isolation, and its fallback, use FLINT
 ``arb_fmpz_poly_complex_roots``.  The signature comes from FLINT
 ``fmpz_poly_signature`` and is computed when the context is defined.
 
-Silex deviates from the source in three intentional ways:
+Silex deviates from the source in five intentional ways:
 
 * No re-sort after refinement.  Hecke re-sorts with FLINT
   ``_acb_vec_sort_pretty``, whose ``acb_cmp_pretty`` comparator orders by
@@ -400,10 +400,23 @@ Silex deviates from the source in three intentional ways:
   balls, a new ball that overlaps exactly one previous ball encloses the same
   root.  Place order is therefore fixed once roots are set, which cached
   logarithmic embeddings rely on.
+* A guarded starting precision.  Hecke's first refinement attempt works at
+  the requested precision.  Root finding there returns balls a few bits short
+  of the requested accuracy, so that attempt fails and is repeated at double
+  the precision.  Silex starts 32 guard bits above the requested precision
+  and keeps the same acceptance checks and the doubling.  This changes only
+  the precision schedule, not what is verified.
 * A precision cap on refinement from previous roots.  Hecke doubles up to
   ``2^22`` bits and then raises an error.  Silex stops that loop at eight times
-  the requested precision and falls back to FLINT's certified isolation.  The
+  its starting precision and falls back to FLINT's certified isolation.  The
   factor is a tuning constant, not a correctness condition.
+* No refinement of roots that already meet the request.  When every stored
+  ball already has the requested relative accuracy, Silex keeps the stored
+  balls: they passed the isolation, real-root validation, and place-order
+  checks when they were stored, and the accuracy check depends only on the
+  balls.  Refining them anyway is slow with FLINT 3.6.0, whose
+  ``acb_poly_find_roots`` then runs its full iteration budget because every
+  correction is zero and its early-stop test never fires.
 * A retrying fallback.  When a full isolation does not yet match the previous
   balls one-to-one, Silex isolates again at double the precision.  This
   terminates because each root is at positive distance from the closed
