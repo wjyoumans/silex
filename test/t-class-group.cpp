@@ -3071,6 +3071,113 @@ int test_analytic_index_bound_keeps_complete_saturation_records() {
     return 0;
 }
 
+// The unconditional analytic index-one routes that do not keep a complete
+// saturation proof clear the ell-local proof records together with the
+// per-prime records, so no proof record is left beside the `verified`
+// status.  On Q(sqrt(-23)), h_cand = 3, a saturation proof at ell = 2
+// (ell | w = 2) leaves a verified ell = 2 record and proof record, which do
+// not cover ell = 3 | h_cand; each route then certifies `proven` and clears
+// both.
+int test_analytic_index_one_routes_clear_saturation_proof_records() {
+    silex::NumberField field = quadratic_field(-23);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(maximal));
+    assert(units.certification_status() == silex::CertificationMode::proven);
+
+    sflint::Fmpz aux_bound;
+    sflint::Fmpz two;
+    assert(set_fmpz_si(aux_bound, 200));
+    assert(set_fmpz_si(two, 2));
+    auto has_proof_record = [&](const silex::ClassGroupContext& context)
+            noexcept {
+        silex::ProofState status = silex::ProofState::not_checked;
+        slong rank = -1;
+        slong target_rank = -1;
+        slong local_primes = -1;
+        return CertificationAccess::relation_saturation_proof_record(
+                context, sflint::FmpzConstRef(two), status, rank,
+                target_rank, local_primes);
+    };
+    auto prepare_context = [&](silex::ClassGroupContext& context) noexcept {
+        prepare_minus_23_candidate(context, maximal, 1, 3);
+        assert(context.try_certify_with_units(
+                units, silex::CertificationMode::unknown, 128));
+        assert(context.try_prove_relation_saturation_with_units(
+                units, sflint::FmpzConstRef(two),
+                sflint::FmpzConstRef(aux_bound)));
+        assert(context.relation_saturation_record_count() == 1);
+        assert(context.relation_saturation_status() !=
+               silex::ProofState::verified);
+        assert(has_proof_record(context));
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+    };
+    auto assert_cleared = [&](const silex::ClassGroupContext& context)
+            noexcept {
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(context.relation_saturation_record_count() == 0);
+        assert(!has_proof_record(context));
+    };
+
+    // try_certify_with_units(proven): the L(1, chi) index-one check of
+    // try_certify_analytic_class_regulator_.
+    {
+        silex::ClassGroupContext context;
+        prepare_context(context);
+        assert(context.try_certify_with_units(
+                units, silex::CertificationMode::proven, 128));
+        assert_cleared(context);
+    }
+
+    // try_certify_with_units(proven): promotion from an unconditional
+    // analytic check recorded earlier.
+    {
+        silex::ClassGroupContext context;
+        prepare_context(context);
+        CertificationAccess::record_grh_acceptance_analytic_check(context,
+                                                                  true);
+        assert(context.analytic_class_regulator_certification() ==
+               silex::CertificationMode::proven);
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(context.try_certify_with_units(
+                units, silex::CertificationMode::proven, 128));
+        assert_cleared(context);
+    }
+
+    // try_certify_class_unit_with_zeta.
+    {
+        silex::ClassGroupContext context;
+        prepare_context(context);
+        assert(context.try_certify_class_unit_with_zeta(units, 128));
+        assert_cleared(context);
+    }
+
+    // The internal fallback try_analytic_index_bound_with_units_.
+    {
+        silex::ClassGroupContext context;
+        prepare_context(context);
+        sflint::Arb analytic_hR;
+        bool hr_unconditional = false;
+        assert(silex::detail::zeta_class_regulator_product_with_diagnostics(
+                sflint::ArbRef(analytic_hR), maximal, 128, nullptr, nullptr,
+                nullptr, &hr_unconditional));
+        assert(hr_unconditional);
+        assert(CertificationAccess::try_analytic_index_bound_with_units(
+                context, units, sflint::ArbConstRef(analytic_hR),
+                sflint::FmpzConstRef(aux_bound), 128, hr_unconditional));
+        assert_cleared(context);
+    }
+    return 0;
+}
+
 // The exact imaginary-quadratic route stores a proof at each ell | h only
 // where none is verified yet: an ell-local proof already verified at
 // ell | h is kept with its own data, and no second record is added.  On
@@ -3894,6 +4001,7 @@ int main() {
     test_relation_saturation_analytic_index_bound_with_units_degree_one();
     test_zeta_bf_degree_one_verifies_relation_saturation();
     test_analytic_index_bound_keeps_complete_saturation_records();
+    test_analytic_index_one_routes_clear_saturation_proof_records();
     test_exact_route_keeps_verified_ell_local_proof();
     test_compute_candidate_preserves_on_failure();
     test_move_and_swap();

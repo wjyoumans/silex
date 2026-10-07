@@ -4604,7 +4604,10 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
     if (hr_unconditional) {
         if (!context.relation_saturation_proof_complete_()) {
             if (context.private_storage_ != nullptr) {
-                context.private_storage_->relation_saturation_records.clear();
+                detail::ClassGroupContextStorage& storage =
+                        *context.private_storage_;
+                storage.relation_saturation_records.clear();
+                storage.relation_saturation_proof_records.clear();
             }
             context.relation_saturation_status_ = ProofState::verified;
         }
@@ -9884,6 +9887,7 @@ bool ClassGroupContext::try_certify_with_units(
             !relation_saturation_proof_complete_()) {
             if (private_storage_ != nullptr) {
                 private_storage_->relation_saturation_records.clear();
+                private_storage_->relation_saturation_proof_records.clear();
             }
             relation_saturation_status_ = ProofState::verified;
         }
@@ -10114,13 +10118,16 @@ bool ClassGroupContext::try_certify_analytic_class_regulator_(
     // required bound, gives h_cand * R_cand = h * R, where h_cand / h and
     // R_cand / R are the relation and unit indices, so both are one and the
     // relations are saturated at every prime.  The status is `verified`;
-    // this is not an ell-local proof, so the per-prime records are cleared
-    // unless complete verified ell-local records from an earlier saturation
-    // proof already cover every p | h_cand, which are kept
-    // (relation_saturation_status() in class_group.hpp).
+    // this is not an ell-local proof, so the per-prime records and their
+    // ell-local proof records are cleared, leaving no failed or partial
+    // proof record beside the `verified` status, unless complete verified
+    // ell-local records from an earlier saturation proof already cover
+    // every p | h_cand, which are kept (relation_saturation_status() in
+    // class_group.hpp).
     if (!relation_saturation_proof_complete_()) {
         if (private_storage_ != nullptr) {
             private_storage_->relation_saturation_records.clear();
+            private_storage_->relation_saturation_proof_records.clear();
         }
         relation_saturation_status_ = ProofState::verified;
     }
@@ -10149,6 +10156,7 @@ bool ClassGroupContext::try_certify_analytic_class_unit_regulator_(
         if (!relation_saturation_proof_complete_()) {
             if (private_storage_ != nullptr) {
                 private_storage_->relation_saturation_records.clear();
+                private_storage_->relation_saturation_proof_records.clear();
             }
             relation_saturation_status_ = ProofState::verified;
         }
@@ -10295,6 +10303,7 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
         if (!relation_saturation_proof_complete_()) {
             if (private_storage_ != nullptr) {
                 private_storage_->relation_saturation_records.clear();
+                private_storage_->relation_saturation_proof_records.clear();
             }
             relation_saturation_status_ = ProofState::verified;
         }
@@ -10522,9 +10531,11 @@ bool ClassGroupContext::try_analytic_index_bound_with_units_(
 
     // The saturation argument of try_certify_analytic_class_regulator_:
     // complete verified ell-local records from an earlier saturation proof
-    // are kept, and otherwise the per-prime records are cleared.
+    // are kept, and otherwise the per-prime records and their proof records
+    // are cleared.
     if (!relation_saturation_proof_complete_()) {
         private_storage_->relation_saturation_records.clear();
+        private_storage_->relation_saturation_proof_records.clear();
         relation_saturation_status_ = ProofState::verified;
     }
     analytic_class_regulator_status_ = ProofState::verified;
