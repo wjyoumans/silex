@@ -243,8 +243,9 @@ private:
     // `required_ells` need not contain every prime dividing h_cand for
     // soundness, since the coverage check above rejects a missing prime.
     // A prime p | h_cand left out of `required_ells` makes the call fail
-    // unless an earlier proof already left a verified ell-record at p,
-    // which the coverage check accepts.  Both callers pass every
+    // unless an earlier proof already left both a verified ell-record and
+    // a verified proof record at p, which the coverage check accepts (see
+    // relation_saturation_ell_verified_).  Both callers pass every
     // p | h_cand.
     static bool prove_relation_saturation_ells(
             ClassGroupContext& context,
