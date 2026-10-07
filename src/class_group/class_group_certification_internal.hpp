@@ -241,8 +241,11 @@ private:
     //   - the caller holds a CertificationTransaction_ and returns on false,
     //     so that the transaction rolls back every change made here.
     // `required_ells` need not contain every prime dividing h_cand for
-    // soundness, since the coverage check above rejects a missing prime,
-    // but it must contain all of them for the call to succeed.
+    // soundness, since the coverage check above rejects a missing prime.
+    // A prime p | h_cand left out of `required_ells` makes the call fail
+    // unless an earlier proof already left a verified ell-record at p,
+    // which the coverage check accepts.  Both callers pass every
+    // p | h_cand.
     static bool prove_relation_saturation_ells(
             ClassGroupContext& context,
             const OrderUnitGroup& units,
