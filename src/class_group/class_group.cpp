@@ -2390,12 +2390,221 @@ bool residue_dlog_kernel(flint::FmpzMat& out,
     return dlog_kernel_from_matrix(out, column, ell);
 }
 
-bool relation_dlog_column_with_units(flint::FmpzMat& out,
-                                     const ClassGroupContext& context,
-                                     const OrderUnitGroup& units,
-                                     bool include_torsion,
-                                     const PrimeIdeal& prime,
-                                     flint::FmpzConstRef ell) noexcept {
+// Local saturation with units reuses quotient logarithms through
+// detail::LocalSaturationDlogCache.  ResidueFieldQuotientLog::apply is the
+// homomorphism F_q^* -> Z/ell, x -> log_g(x^((q-1)/ell)), with values in
+// [0, ell).  A relation generator's entry is its apply image, exactly as
+// before.  A free unit u = prod_k b_k^{e_k} (its stored factorization) maps
+// to sum_k e_k * apply(b_k) mod ell, which equals apply of the residue
+// product prod_k red(b_k)^{e_k} that ResidueFieldElement::set_factored_element
+// formed before, whenever every b_k with e_k != 0 has a nonzero residue.  The
+// failure cases match the product route: a base that does not reduce fails,
+// and a zero residue fails unless its exponent is zero (red(b)^0 = 1).  The
+// only difference is that apply of a nonzero residue is never reached through
+// the product when its own apply fails, which cannot happen because x^c lies
+// in the order-ell subgroup that the log table enumerates.
+std::uint64_t local_saturation_element_hash(
+        flint::FmpqPoly& scratch, const Element& element) noexcept {
+    constexpr ulong modulus = (UWORD(1) << 61) - UWORD(1);
+    std::uint64_t hash = UWORD(1469598103934665603);
+    if (!element.get_fmpq_poly(flint::FmpqPolyRef(scratch))) {
+        return hash;
+    }
+    const slong length = fmpq_poly_length(scratch.raw());
+    hash ^= static_cast<std::uint64_t>(length);
+    hash *= UWORD(1099511628211);
+    hash ^= ::fmpz_fdiv_ui(fmpq_poly_denref(scratch.raw()), modulus);
+    hash *= UWORD(1099511628211);
+    for (slong i = 0; i < length; ++i) {
+        hash ^= ::fmpz_fdiv_ui(fmpq_poly_numref(scratch.raw()) + i, modulus);
+        hash *= UWORD(1099511628211);
+    }
+    return hash;
+}
+
+bool local_saturation_element_index(slong& index,
+                                    detail::LocalSaturationDlogCache& cache,
+                                    flint::FmpqPoly& scratch,
+                                    const Element& element) noexcept {
+    const NumberField* field = element.parent();
+    if (!element.is_defined() || field == nullptr) {
+        return false;
+    }
+    const std::uint64_t hash = local_saturation_element_hash(scratch, element);
+    const slong count = static_cast<slong>(cache.elements.size());
+    for (slong i = 0; i < count; ++i) {
+        const std::size_t at = static_cast<std::size_t>(i);
+        if (cache.element_hashes[at] == hash &&
+            cache.elements[at].equal(element)) {
+            index = i;
+            return true;
+        }
+    }
+
+    Element copy(*field);
+    if (!copy.is_defined() || !copy.set(element)) {
+        return false;
+    }
+    cache.elements.push_back(std::move(copy));
+    cache.element_hashes.push_back(hash);
+    index = count;
+    return true;
+}
+
+// Brings the cache in line with the context's relation generators and the
+// free unit generators, by value.  Relations only appended since the last
+// call are added; any other difference clears the cache.
+bool local_saturation_sync_cache(detail::LocalSaturationDlogCache& cache,
+                                 const ClassGroupContext& context,
+                                 const FactoredElement* unit_generators,
+                                 slong unit_count) noexcept {
+    const slong relation_len = context.relation_count();
+    if (relation_len < 0 || unit_count < 0 ||
+        (unit_count > 0 && unit_generators == nullptr)) {
+        return false;
+    }
+
+    slong cached = static_cast<slong>(cache.relation_elements.size());
+    bool matches = cached <= relation_len;
+    for (slong i = 0; matches && i < cached; ++i) {
+        const Element* generator = context.relation_generator_at(i);
+        if (generator == nullptr) {
+            return false;
+        }
+        matches = cache.elements[static_cast<std::size_t>(
+                                         cache.relation_elements[
+                                                 static_cast<std::size_t>(i)])]
+                          .equal(*generator);
+    }
+    if (matches && cache.units_recorded) {
+        matches = static_cast<slong>(cache.unit_terms.size()) == unit_count;
+        for (slong u = 0; matches && u < unit_count; ++u) {
+            const FactoredElement& unit = unit_generators[u];
+            const std::vector<detail::LocalSaturationDlogCache::UnitTerm>&
+                    terms = cache.unit_terms[static_cast<std::size_t>(u)];
+            matches = unit.length() == static_cast<slong>(terms.size());
+            for (slong k = 0; matches && k < unit.length(); ++k) {
+                const auto& term = terms[static_cast<std::size_t>(k)];
+                const Element* factor = unit.factor(k);
+                slong exponent = 0;
+                matches = factor != nullptr && unit.exponent(exponent, k) &&
+                          exponent == term.exponent &&
+                          cache.elements[static_cast<std::size_t>(
+                                                 term.element)]
+                                  .equal(*factor);
+            }
+        }
+    }
+    if (!matches) {
+        cache.clear();
+        cached = 0;
+    }
+
+    flint::FmpqPoly scratch;
+    for (slong i = cached; i < relation_len; ++i) {
+        const Element* generator = context.relation_generator_at(i);
+        slong index = 0;
+        if (generator == nullptr ||
+            !local_saturation_element_index(index, cache, scratch,
+                                            *generator)) {
+            return false;
+        }
+        cache.relation_elements.push_back(index);
+    }
+
+    if (!cache.units_recorded) {
+        cache.unit_terms.clear();
+        cache.unit_terms.resize(static_cast<std::size_t>(unit_count));
+        for (slong u = 0; u < unit_count; ++u) {
+            const FactoredElement& unit = unit_generators[u];
+            auto& terms = cache.unit_terms[static_cast<std::size_t>(u)];
+            terms.reserve(static_cast<std::size_t>(unit.length()));
+            for (slong k = 0; k < unit.length(); ++k) {
+                const Element* factor = unit.factor(k);
+                detail::LocalSaturationDlogCache::UnitTerm term;
+                if (factor == nullptr ||
+                    !unit.exponent(term.exponent, k) ||
+                    !local_saturation_element_index(term.element, cache,
+                                                    scratch, *factor)) {
+                    cache.unit_terms.clear();
+                    return false;
+                }
+                terms.push_back(term);
+            }
+        }
+        cache.units_recorded = true;
+    }
+    return true;
+}
+
+detail::LocalSaturationDlogEntry* local_saturation_dlog_entry(
+        detail::LocalSaturationDlogCache& cache,
+        const PrimeIdeal& prime,
+        flint::FmpzConstRef ell) noexcept {
+    for (detail::LocalSaturationDlogEntry& entry : cache.entries) {
+        const ResidueField* field = entry.quotient_log.parent();
+        const PrimeIdeal* entry_prime =
+                field == nullptr ? nullptr : field->prime();
+        if (entry_prime != nullptr &&
+            flint::fmpz_equal(flint::FmpzConstRef(entry.ell), ell) &&
+            entry_prime->equal(prime)) {
+            return &entry;
+        }
+    }
+
+    ResidueField residue_field(prime);
+    if (!residue_field.is_defined()) {
+        return nullptr;
+    }
+    detail::LocalSaturationDlogEntry entry;
+    entry.quotient_log = ResidueFieldQuotientLog(residue_field);
+    entry.image = ResidueFieldElement(residue_field);
+    if (!entry.quotient_log.is_defined() || !entry.image.is_defined() ||
+        !entry.quotient_log.set_ell(ell)) {
+        return nullptr;
+    }
+    flint::fmpz_set(flint::FmpzRef(entry.ell), ell);
+    cache.entries.push_back(std::move(entry));
+    return &cache.entries.back();
+}
+
+detail::LocalSaturationDlogEntry::State local_saturation_element_log(
+        detail::LocalSaturationDlogEntry& entry,
+        const detail::LocalSaturationDlogCache& cache,
+        slong index) noexcept {
+    using State = detail::LocalSaturationDlogEntry::State;
+    const std::size_t at = static_cast<std::size_t>(index);
+    if (entry.states.size() < cache.elements.size()) {
+        entry.states.resize(cache.elements.size(), State::unknown);
+        entry.logs.resize(cache.elements.size());
+    }
+    if (entry.states[at] != State::unknown) {
+        return entry.states[at];
+    }
+
+    State state = State::unit;
+    if (!entry.image.set_element(cache.elements[at])) {
+        state = State::unreducible;
+    } else if (entry.image.is_zero()) {
+        state = State::zero;
+    } else if (!entry.quotient_log.apply(flint::FmpzRef(entry.logs[at]),
+                                         entry.image)) {
+        state = State::failed;
+    }
+    entry.states[at] = state;
+    return state;
+}
+
+bool relation_dlog_column_with_units(
+        flint::FmpzMat& out,
+        detail::LocalSaturationDlogCache& cache,
+        const ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        const FactoredElement* unit_generators,
+        bool include_torsion,
+        const PrimeIdeal& prime,
+        flint::FmpzConstRef ell) noexcept {
+    using State = detail::LocalSaturationDlogEntry::State;
     const DiagnosticsContext* diagnostics = context.diagnostics();
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.relation_dlog_column_with_units");
@@ -2421,61 +2630,79 @@ bool relation_dlog_column_with_units(flint::FmpzMat& out,
         return false;
     }
 
-    ResidueField residue_field(prime);
-    if (!residue_field.is_defined()) {
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.relation_dlog_cache_sync_with_units");
+        if (!local_saturation_sync_cache(cache, context, unit_generators,
+                                         free_rank)) {
+            return false;
+        }
+    }
+
+    detail::LocalSaturationDlogEntry* entry = nullptr;
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.residue_quotient_log_setup_with_units");
+        entry = local_saturation_dlog_entry(cache, prime, ell);
+    }
+    if (entry == nullptr) {
         return false;
     }
 
     flint::FmpzMat candidate(rows, 1);
-    ResidueFieldElement image(residue_field);
-    ResidueFieldQuotientLog quotient_log(residue_field);
-    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::class_group,
-                        "class_group.residue_quotient_log_setup_with_units");
-    if (!quotient_log.is_defined() || !quotient_log.set_ell(ell)) {
-        return false;
-    }
-    for (slong i = 0; i < relation_len; ++i) {
-        const Element* relation_generator = context.relation_generator_at(i);
-        if (relation_generator == nullptr) {
-            return false;
-        }
-        {
-            SILEX_PROFILE_SCOPE(
-                    diagnostics, DiagnosticsModule::class_group,
-                    "class_group.relation_dlog_reduce_element_with_units");
-            if (!image.set_element(*relation_generator)) {
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.relation_dlog_apply_with_units");
+        for (slong i = 0; i < relation_len; ++i) {
+            const slong index =
+                    cache.relation_elements[static_cast<std::size_t>(i)];
+            if (local_saturation_element_log(*entry, cache, index) !=
+                State::unit) {
                 return false;
             }
+            flint::fmpz_set(flint::fmpz_mat_entry(candidate, i, 0),
+                            flint::FmpzConstRef(entry->logs[
+                                    static_cast<std::size_t>(index)]));
         }
-        {
-            SILEX_PROFILE_SCOPE(
-                    diagnostics, DiagnosticsModule::class_group,
-                    "class_group.relation_dlog_apply_with_units");
-            if (!quotient_log.apply(flint::fmpz_mat_entry(candidate, i, 0),
-                                    image)) {
-                return false;
-            }
-        }
-    }
 
-    for (slong i = 0; i < free_rank; ++i) {
-        FactoredElement generator(*field);
-        const slong row = relation_len + i;
-        if (!units.free_generator(generator, i) ||
-            !image.set_factored_element(generator) ||
-            !quotient_log.apply(flint::fmpz_mat_entry(candidate, row, 0),
-                                image)) {
-            return false;
+        flint::Fmpz sum;
+        for (slong u = 0; u < free_rank; ++u) {
+            flint::fmpz_zero(flint::FmpzRef(sum));
+            for (const auto& term :
+                 cache.unit_terms[static_cast<std::size_t>(u)]) {
+                const State state =
+                        local_saturation_element_log(*entry, cache,
+                                                     term.element);
+                if (term.exponent == 0) {
+                    if (state == State::unreducible) {
+                        return false;
+                    }
+                    continue;
+                }
+                if (state != State::unit) {
+                    return false;
+                }
+                ::fmpz_addmul_si(
+                        sum.raw(),
+                        entry->logs[static_cast<std::size_t>(term.element)]
+                                .raw(),
+                        term.exponent);
+            }
+            ::fmpz_mod(flint::fmpz_mat_entry(candidate, relation_len + u, 0)
+                               .raw(),
+                       sum.raw(), ell.raw());
         }
     }
 
     if (include_torsion) {
         OrderElement torsion(*order);
         if (!units.torsion_generator(torsion) ||
-            !image.set_order_element(torsion) ||
-            !quotient_log.apply(flint::fmpz_mat_entry(
-                                        candidate, relation_len + free_rank, 0),
-                                image)) {
+            !entry->image.set_order_element(torsion) ||
+            !entry->quotient_log.apply(
+                    flint::fmpz_mat_entry(candidate,
+                                          relation_len + free_rank, 0),
+                    entry->image)) {
             return false;
         }
     }
@@ -2485,8 +2712,10 @@ bool relation_dlog_column_with_units(flint::FmpzMat& out,
 }
 
 bool residue_dlog_kernel_with_units(flint::FmpzMat& out,
+                                    detail::LocalSaturationDlogCache& cache,
                                     const ClassGroupContext& context,
                                     const OrderUnitGroup& units,
+                                    const FactoredElement* unit_generators,
                                     bool include_torsion,
                                     const PrimeIdeal& prime,
                                     flint::FmpzConstRef ell) noexcept {
@@ -2499,8 +2728,9 @@ bool residue_dlog_kernel_with_units(flint::FmpzMat& out,
     }
 
     flint::FmpzMat column(0, 0);
-    if (!relation_dlog_column_with_units(column, context, units,
-                                         include_torsion, prime, ell)) {
+    if (!relation_dlog_column_with_units(column, cache, context, units,
+                                         unit_generators, include_torsion,
+                                         prime, ell)) {
         return false;
     }
 
@@ -10961,7 +11191,16 @@ bool ClassGroupContext::saturate_local_once_with_units_(
     flint::FmpzMat kernel(0, 0);
     SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.saturation_residue_dlog_with_units");
-    if (!residue_dlog_kernel_with_units(kernel, *this, units,
+    // The free generators are read in place (OrderUnitGroup befriends this
+    // class) so the per-prime cache check does not copy them.  Without
+    // private storage a call-local cache gives the same column.
+    detail::LocalSaturationDlogCache local_cache;
+    detail::LocalSaturationDlogCache& dlog_cache =
+            ensure_private_storage_()
+                    ? private_storage_->local_saturation_dlog_cache
+                    : local_cache;
+    if (!residue_dlog_kernel_with_units(kernel, dlog_cache, *this, units,
+                                        units.free_generators_.get(),
                                         include_torsion, prime, ell)) {
         return false;
     }

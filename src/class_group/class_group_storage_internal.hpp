@@ -1,13 +1,17 @@
 #pragma once
 
 #include <silex/class_group.hpp>
+#include <silex/element.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
+#include <silex/prime_ideal.hpp>
+#include <silex/residue_field.hpp>
 
 #include "relation_completion_scheduler_internal.hpp"
 #include "../factor_base/generation_different_route_internal.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -216,6 +220,59 @@ struct ReducedIdealLatticeCache {
     }
 };
 
+// Residue-field quotient logarithms reused by local class-relation
+// saturation with units (`saturate_local_once_with_units_`).  Every value is
+// the exact `ResidueFieldQuotientLog::apply` image of one number-field
+// element at one (prime, ell), so it stays valid while that element is
+// unchanged.  The saturation pass checks the relation generators and unit
+// factorizations against `elements` by value on every use and clears the
+// cache on any mismatch; the cache never decides which primes or kernel rows
+// are tried.
+struct LocalSaturationDlogEntry {
+    enum class State : unsigned char {
+        unknown,
+        unit,          // nonzero residue; `logs[i]` holds its quotient log
+        zero,          // the residue is zero
+        unreducible,   // the element does not reduce modulo the prime
+        failed,        // the quotient log of a nonzero residue failed
+    };
+
+    PrimeIdeal prime;
+    flint::Fmpz ell;
+    ResidueFieldQuotientLog quotient_log;
+    ResidueFieldElement image;
+    // Indexed like LocalSaturationDlogCache::elements.
+    std::vector<State> states;
+    std::vector<flint::Fmpz> logs;
+};
+
+struct LocalSaturationDlogCache {
+    struct UnitTerm {
+        slong element = 0;
+        slong exponent = 0;
+    };
+
+    // Distinct relation generators and unit-factor bases.
+    std::vector<Element> elements;
+    std::vector<std::uint64_t> element_hashes;
+    // Relation generator i is elements[relation_elements[i]].
+    std::vector<slong> relation_elements;
+    // Free unit generator u is the product of elements[t.element]^t.exponent
+    // over unit_terms[u], factor by factor in its stored order.
+    std::vector<std::vector<UnitTerm>> unit_terms;
+    bool units_recorded = false;
+    std::vector<LocalSaturationDlogEntry> entries;
+
+    void clear() noexcept {
+        elements.clear();
+        element_hashes.clear();
+        relation_elements.clear();
+        unit_terms.clear();
+        units_recorded = false;
+        entries.clear();
+    }
+};
+
 struct ClassGroupContextStorage {
     std::vector<PartialRelationEntry> partial_relations;
     std::vector<DirectPartialResidueBlockCacheEntry>
@@ -268,6 +325,7 @@ struct ClassGroupContextStorage {
     std::vector<RelationSaturationRecord> relation_saturation_records;
     std::vector<RelationSaturationProofRecord>
             relation_saturation_proof_records;
+    LocalSaturationDlogCache local_saturation_dlog_cache;
 
     void clear() noexcept {
         partial_relations.clear();
@@ -306,6 +364,7 @@ struct ClassGroupContextStorage {
         class_unit_completeness_basis = ClassUnitCompletenessBasis::none;
         relation_saturation_records.clear();
         relation_saturation_proof_records.clear();
+        local_saturation_dlog_cache.clear();
     }
 };
 
