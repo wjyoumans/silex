@@ -237,7 +237,6 @@ struct LocalSaturationDlogEntry {
         failed,        // the quotient log of a nonzero residue failed
     };
 
-    PrimeIdeal prime;
     flint::Fmpz ell;
     ResidueFieldQuotientLog quotient_log;
     ResidueFieldElement image;

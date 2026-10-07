@@ -2399,10 +2399,12 @@ bool residue_dlog_kernel(flint::FmpzMat& out,
 // product prod_k red(b_k)^{e_k} that ResidueFieldElement::set_factored_element
 // formed before, whenever every b_k with e_k != 0 has a nonzero residue.  The
 // failure cases match the product route: a base that does not reduce fails,
-// and a zero residue fails unless its exponent is zero (red(b)^0 = 1).  The
-// only difference is that apply of a nonzero residue is never reached through
-// the product when its own apply fails, which cannot happen because x^c lies
-// in the order-ell subgroup that the log table enumerates.
+// and a zero residue fails unless its exponent is zero (red(b)^0 = 1).  This
+// route also fails when apply fails on one base's nonzero residue, which the
+// product route would not try; apply does not fail there, because
+// x^((q-1)/ell) lies in the order-ell subgroup that apply enumerates.  The
+// cache changes only how the column is computed: every prime, pass and
+// kernel row is the same as without it.
 std::uint64_t local_saturation_element_hash(
         flint::FmpqPoly& scratch, const Element& element) noexcept {
     constexpr ulong modulus = (UWORD(1) << 61) - UWORD(1);
