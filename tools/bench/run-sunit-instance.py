@@ -260,6 +260,7 @@ def main() -> int:
         default=root / "test/data/sunit_fields.json",
     )
     parser.add_argument("--field-id", required=True)
+    parser.add_argument("--mode", choices=("proven", "grh"), default="proven")
     parser.add_argument("--precision", type=int, default=128)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--profile", action="store_true")
@@ -286,7 +287,7 @@ def main() -> int:
         "--coeffs",
         coeffs,
         "--mode",
-        "proven",
+        args.mode,
         "--precision",
         str(args.precision),
         "--compute-sunit",

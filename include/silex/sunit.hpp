@@ -200,9 +200,11 @@ public:
     // source_class_certification() is `proven`; with a `grh` class group the
     // call fails with outcome `unknown` at that stage instead.  A residual
     // (value divided by its nonunit part) that is not a unit gives
-    // `not_sunit` for either label.  The residual step needs `proven`
-    // ordinary units: with `grh` ones (source_unit_certification()) a value
-    // that reaches it fails at SUnitMembershipStage::residual_unit.
+    // `not_sunit` for either label, including with `grh` ordinary units
+    // (source_unit_certification()): the not-unit test is exact.  A residual
+    // unit outside the span of the given units fails with outcome `unknown`
+    // (an exact-verification or precision failure) and is never rejected as
+    // `not_sunit`.
     bool preimage(SUnitMembershipResult& result,
                   SUnitCoordinates& out,
                   const FactoredElement& value,

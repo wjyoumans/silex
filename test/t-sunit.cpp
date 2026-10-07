@@ -1905,6 +1905,47 @@ int test_grh_unit_preimage() {
 
 }  // namespace
 
+// x^3 + x + 200 (|D| = 1080004): the grh policy builds the factor base only
+// to the GRH generation bound (BDF, 50, base built to 100) while the
+// Minkowski-type bound is 463, so generation itself rests on GRH
+// (factor_base_generation_certification() is `grh`), not only the label.
+// The S-groups are then labelled `grh`, and a `proven` request is refused at
+// input_validation with the outputs untouched.  Smaller fields (for example
+// Q(sqrt(-161)), Q(cbrt(43))) have a GRH generation bound above the
+// Minkowski-type one and get `proven` generation, so they cannot show this.
+int test_grh_generation_labels_sunit_groups() {
+    const silex::CertificationMode grh = silex::CertificationMode::grh;
+    const silex::CertificationMode proven = silex::CertificationMode::proven;
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 200);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+    ProvenFixture fixture = labelled_field(
+            silex::test::field_by_polynomial(
+                    sflint::FmpqPolyConstRef(polynomial)),
+            grh, 0, 5000, 500, 20000);
+    assert(fixture.class_group.factor_base_generation_certification() == grh);
+    assert(fixture.class_group.factor_base_generation_status() !=
+           silex::ProofState::verified);
+    const std::vector<silex::PrimeIdeal> selected =
+            prime_above_with_degree(fixture.order, 2, 1);
+
+    silex::SUnitComputeResult result;
+    silex::SClassGroup s_class;
+    silex::SUnitGroup s_units;
+    assert(compute_at(result, s_class, s_units, fixture.class_group,
+                      fixture.units, selected, grh));
+    assert(result.success);
+    assert_published_labels(s_class, s_units, grh, grh, grh);
+
+    assert(!compute_at(result, s_class, s_units, fixture.class_group,
+                       fixture.units, selected, proven));
+    assert(!result.success);
+    assert(result.stage == silex::SUnitComputeStage::input_validation);
+    assert_published_labels(s_class, s_units, grh, grh, grh);
+    return 0;
+}
+
 int main() {
     assert(test_manifest_witness_replays() == 0);
     assert(test_exact_edge_unit_coordinates() == 0);
@@ -1918,5 +1959,6 @@ int main() {
     assert(test_grh_sunit_matches_reference() == 0);
     assert(test_grh_membership_rests_on_class_completeness() == 0);
     assert(test_grh_unit_preimage() == 0);
+    assert(test_grh_generation_labels_sunit_groups() == 0);
     return 0;
 }

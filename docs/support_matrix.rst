@@ -137,8 +137,12 @@ Other rank-zero and quadratic inputs may use the same exact source-backed
 implementation, but are not blanket completion guarantees for 0.1.1.
 
 S-class and S-unit publication is supported for a maximal absolute order from
-already ``proven`` ordinary class- and unit-group inputs for that same order,
-with a validated selected-prime list.  It does not independently broaden the
+already ``proven`` or ``grh`` ordinary class- and unit-group inputs for that
+same order, with a validated selected-prime list.  The request states which
+label is accepted (default ``proven``, which refuses ``grh`` inputs); the
+published S-groups carry the class label (``Cl_S``) or the weaker of the class
+and unit labels (``U_S``, ``R_S``), with proof states ``verified`` relative to
+the inputs.  It does not independently broaden the
 paired class/unit completion matrix.
 
 Unsupported or deferred

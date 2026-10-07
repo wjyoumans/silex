@@ -94,6 +94,46 @@ def check_timeout_protocol(root: Path, manifest: Path) -> None:
         assert payload["stderr"] == "partial stderr\n"
 
 
+def check_mode_option(root: Path, manifest: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="silex-sunit-mode-") as temporary:
+        temporary_path = Path(temporary)
+        fake_executable = temporary_path / "echo-instance"
+        fake_executable.write_text(
+            f"#!{sys.executable}\nprint('{{}}')\n", encoding="utf-8"
+        )
+        fake_executable.chmod(0o755)
+
+        def mode_of(extra: list[str]) -> str:
+            output = temporary_path / "mode.json"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(root / "tools/bench/run-sunit-instance.py"),
+                    "--exe",
+                    str(fake_executable),
+                    "--manifest",
+                    str(manifest),
+                    "--field-id",
+                    "cubic_x3_minus_2_empty_s",
+                    "--out",
+                    str(output),
+                    *extra,
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=5.0,
+            )
+            cmd = json.loads(output.read_text(encoding="utf-8"))["cmd"]
+            return cmd[cmd.index("--mode") + 1]
+
+        assert mode_of([]) == "proven"
+        assert mode_of(["--mode", "proven"]) == "proven"
+        assert mode_of(["--mode", "grh"]) == "grh"
+
+
 def check_repeated_rational_prime_selectors(
     root: Path, executable: Path, manifest: dict[str, Any]
 ) -> None:
@@ -378,6 +418,7 @@ def main() -> int:
     ] == ["2"]
 
     check_timeout_protocol(root, args.manifest)
+    check_mode_option(root, args.manifest)
     check_repeated_rational_prime_selectors(root, args.exe, manifest)
     check_outside_prime_search_extends_beyond_fixed_prefix(root, args.exe, manifest)
 

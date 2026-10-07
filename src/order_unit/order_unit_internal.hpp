@@ -90,6 +90,10 @@ struct OrdinaryUnitCoordinateResult {
 
 const char* ordinary_unit_coordinate_stage_name(
         OrdinaryUnitCoordinateStage stage) noexcept;
+// Both overloads accept `proven` and `grh` unit groups.  `not_unit` comes
+// only from the exact membership test, and a returned decomposition is
+// exactly verified, so both hold for either label.  A unit outside the span
+// of the group's units fails (unknown) and is not rejected.
 bool ordinary_unit_coordinates(
         OrdinaryUnitCoordinateResult& result,
         OrdinaryUnitCoordinates& out,

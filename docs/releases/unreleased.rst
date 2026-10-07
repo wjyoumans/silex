@@ -12,6 +12,25 @@ that release is prepared.
 Added
 -----
 
+- ``compute_sunit_groups`` accepts ``grh`` class-group and ordinary-unit
+  inputs.  The new option ``SUnitComputeOptions::requested_certification``
+  (default ``proven``) states the accepted label: a ``proven`` request fails
+  at ``SUnitComputeStage::input_validation`` for any ``grh`` input, a ``grh``
+  request accepts ``grh`` or ``proven`` inputs, and any other request fails at
+  ``input_validation``.  ``SClassGroup::certification_status()`` is the class
+  label; ``SUnitGroup::certification_status()`` is the weaker of the class and
+  unit labels; ``proven`` inputs give ``proven`` outputs.  ``proof_status()``
+  and ``regulator_proof_status()`` are ``verified`` for every published group
+  and mean exact verification relative to the inputs, not an unconditional
+  result; the ``grh`` label is in ``certification_status()``.  With a ``grh``
+  class group, ``SUnitGroup::preimage`` returns ``unknown`` (``success``
+  false, stage ``valuation_solve``) where a ``proven`` class group gives
+  ``not_sunit``; a residual that is not a unit stays ``not_sunit``, and
+  ``grh`` ordinary units are accepted in the residual step.
+  ``silex-class-unit-instance --compute-sunit`` now follows ``--mode``, so
+  ``grh`` rows publish ``grh`` S-groups.  Default requests are unchanged.  See
+  :doc:`../reference/sunit_groups`.
+
 - ``ClassGroupContext`` reports where GRH entered a class/unit result:
   ``factor_base_generation_certification()``,
   ``factor_base_generation_basis()`` and

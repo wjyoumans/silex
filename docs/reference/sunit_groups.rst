@@ -3,8 +3,9 @@ S-Class Groups and S-Unit Groups
 
 The public S-class/S-unit layer is declared in ``silex/sunit.hpp``.  It
 publishes owned, move-only ``SClassGroup`` and ``SUnitGroup`` results from an
-already proven ordinary ``ClassGroupContext`` and ``OrderUnitGroup``.  The
-entry point is ``compute_sunit_groups``.
+already certified ordinary ``ClassGroupContext`` and ``OrderUnitGroup``, each
+``proven`` or ``grh`` (see `Certification Labels`_).  The entry point is
+``compute_sunit_groups``.
 
 Construction Contract
 ---------------------
@@ -12,8 +13,10 @@ Construction Contract
 Construction requires:
 
 - a maximal order;
-- a proven class-group context with a finite presentation;
-- a proven ordinary unit group for the same order; and
+- a class-group context with a finite presentation whose label the request
+  accepts (``proven`` or ``grh``);
+- an ordinary unit group for the same order whose label the request accepts;
+  and
 - a list of distinct, defined prime ideals of that order.
 
 Both output objects are replaced atomically only after the S-class
@@ -96,7 +99,7 @@ archimedean places and ``-v_P(x) log N(P)`` at ``P`` in ``S``.  For nonempty
 
    R_S = R_K \, \frac{h}{h_S} \prod_{P \in S} \log N(P),
 
-where ``R_K`` is the proven ordinary regulator, ``h`` is the class number and
+where ``R_K`` is the ordinary regulator of the input unit group, ``h`` is the class number and
 ``h_S`` is the published S-class number.  Equivalently, the S-class number
 formula ``h_S R_S = h R_K prod log N(P)`` holds.  Silex never forms ``h /
 h_S`` from floating point: it is the exact index of the nonunit valuation
@@ -129,6 +132,38 @@ sequence ``U -> U_S -> Z^S -> Cl -> Cl_S -> 1`` (Cohen, *Advanced Topics in
 Computational Number Theory*, GTM 193, Propositions 7.4.4 and 7.4.7) gives
 ``h^(S) = [Z^S : v(U_S)] = h / h_S``.
 
+Certification Labels
+--------------------
+
+``SUnitComputeOptions::requested_certification`` (default ``proven``) states
+which label the caller will accept:
+
+- a ``proven`` request fails at ``SUnitComputeStage::input_validation`` if
+  the class group or the ordinary units are ``grh``;
+- a ``grh`` request accepts ``grh`` or ``proven`` inputs;
+- any other request (``unknown``, ``heuristic``) fails at
+  ``input_validation``; and
+- on failure the outputs are unchanged, as for every other failure.
+
+Labels are inherited, not capped: ``proven`` inputs give ``proven`` outputs
+even for a ``grh`` request.  ``SClassGroup::certification_status()`` is the
+class-group label.  ``SUnitGroup::certification_status()`` (and so the
+S-regulator) is the weaker of the class-group and unit-group labels.  Both
+source labels are reported by ``source_class_certification()`` and
+``source_unit_certification()``.
+
+Membership and coordinates depend on the label.  ``SUnitGroup::preimage``
+returns ``verified`` or ``not_sunit`` outcomes that are exact for either
+label, with one exception: a value whose valuations at ``S`` lie outside the
+published valuation lattice is rejected as ``not_sunit`` only with a
+``proven`` class group, because the lattice is all of ``v(U_S)`` only when
+the class presentation is complete.  With a ``grh`` class group the call
+fails (``success`` false, outcome ``unknown``, stage ``valuation_solve``) and
+leaves the output unchanged.  A residual (value divided by its nonunit part)
+that is not a unit is rejected as ``not_sunit`` for either label, including
+with ``grh`` ordinary units.  A residual unit outside the span of the given
+units fails (unknown) and is not rejected.
+
 Proof Metadata
 --------------
 
@@ -138,11 +173,20 @@ The public objects separate source and derived proof facts:
 - source relation-saturation, unit, and regulator proof states;
 - S-class, S-unit, and S-regulator proof states;
 
-Successful publication requires proven source groups and exact private
-S-class/mod-units proof records.
+Successful publication requires source groups whose labels the request
+accepts and exact private S-class/mod-units proof records.  The proof states
+(``proof_status()``, ``regulator_proof_status()``) are ``verified`` for every
+published group, ``grh`` ones included.  They mean exact verification
+relative to the inputs, not an unconditional result: the label that records
+whether GRH entered is ``certification_status()`` (see `Certification
+Labels`_).
 
 Source Lineage
 --------------
+
+The ``grh`` reference values in the tests were computed with PARI/GP 2.17.4
+``bnfsunit`` (``U[5]``, ``mathnf`` of the valuations, and
+``U[4] h / h_S^2`` for the regulator); the commands are in the test comments.
 
 PARI 2.17.3 ``src/basemath/bnfunits.c:119-235`` and Hecke
 ``src/NumFieldOrd/NfOrd/Clgp/Sunits.jl:1-265`` provide the selected-prime
