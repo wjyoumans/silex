@@ -4601,6 +4601,12 @@ bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(
     // index-one argument of try_certify_analytic_class_regulator_ and the
     // relations are saturated at every prime; complete verified ell-local
     // records from an earlier saturation proof are kept.
+    // The only caller, try_certify_candidate_with_zeta in class/unit
+    // validation, takes this route only for orders of degree greater than
+    // two, so this branch is not reached from it.  It is kept as defensive
+    // handling that matches the public try_certify_class_unit_with_zeta_bf,
+    // which makes the same degree-one argument, so that any degree-one
+    // caller gets the same result from both routes.
     if (hr_unconditional) {
         if (!context.relation_saturation_proof_complete_()) {
             if (context.private_storage_ != nullptr) {

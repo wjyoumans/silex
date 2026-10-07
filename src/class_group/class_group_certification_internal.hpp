@@ -209,7 +209,9 @@ public:
 
     // A Belabas-Friedman audit records a GRH-conditional analytic check; it
     // publishes `proven` only when saturation has already been proven (or in
-    // degree one, where hR = 1 exactly).
+    // degree one, where hR = 1 exactly).  Class/unit validation, the only
+    // caller, uses it only in degree greater than two; the degree-one
+    // branch is defensive and matches try_certify_class_unit_with_zeta_bf.
     static bool try_certify_class_unit_with_bf_audit(
             ClassGroupContext& context,
             OrderUnitGroup& units,
