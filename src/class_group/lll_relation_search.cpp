@@ -449,7 +449,9 @@ public:
                 return false;
             }
             // Inverses are built on first division (ensure_inverse_base);
-            // most base ideals are never divided out of the walk.
+            // most base ideals are never divided out of the walk.  The
+            // reference `random_init` inverts eagerly (`map(inv, R.base)`);
+            // this builds the same inverses lazily.
             base_.emplace_back(order);
             base_fractional_.emplace_back();
             inverse_base_.emplace_back();
@@ -557,7 +559,9 @@ public:
                 return false;
             }
             // Inverses are built on first division (ensure_inverse_base);
-            // most base ideals are never divided out of the walk.
+            // most base ideals are never divided out of the walk.  The
+            // reference `random_init` inverts eagerly (`map(inv, R.base)`);
+            // this builds the same inverses lazily.
             base_.emplace_back(order);
             base_fractional_.emplace_back();
             inverse_base_.emplace_back();
@@ -788,7 +792,7 @@ private:
         if (!ensure_inverse_base(index)) {
             return false;
         }
-        // reference `random_get` (Ideal.jl) takes `simplify(rand * ibase[i]).num`.  With
+        // reference `random_get` (src/NumFieldOrd/NfOrd/Ideal/Ideal.jl) takes `simplify(rand * ibase[i]).num`.  With
         // ibase[i] = N / d and P_i | rand (its exponent is positive),
         // rand * N = d * (rand / P_i), so dividing that integral product by d
         // gives the same integral ideal without re-validating fractional
@@ -807,6 +811,8 @@ private:
             !scaled_quotient.multiply(random_ideal_, inverse_numerator)) {
             return false;
         }
+        // Defensive: a proper prime's inverse always has den > 1, so this
+        // shortcut should not run.
         if (flint::fmpz_is_one(flint::FmpzConstRef(den))) {
             random_ideal_.swap(scaled_quotient);
             return true;
