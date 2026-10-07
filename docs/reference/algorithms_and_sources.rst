@@ -500,6 +500,18 @@ below ``1/B^2``, while every other fraction ``p/q`` with ``q <= b`` lies at
 distance at least ``1/(qb) >= 1/B^2`` from ``a/b``, so the simplest rational
 in the ball is ``a/b``.
 
+Reducing relation units modulo the unit group follows Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb
+coordinates of each unit against the generators' log matrix and divide by
+the rounded product, doubling the precision while the rounding fails.  The
+rounding differs at a half-integer.  Hecke accepts any coordinate ball of
+radius at most 0.1 and rounds its midpoint.  Silex needs a certified nearest
+integer, so an exact half-integer coordinate never rounds.  Once such a
+coordinate ball has radius at most 0.1 and contains a half-integer, Silex
+stops doubling and leaves the unit unreduced, the same result its precision
+ladder reached at the cap.  A near-tie that more precision would have moved
+off the half-integer is also left unreduced.
+
 Saturation-backed class-group proof follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_class_group_proof``: verify generation
 up to the proven generation requirement (the Minkowski-type bound, or

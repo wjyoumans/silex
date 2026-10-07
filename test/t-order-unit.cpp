@@ -640,6 +640,54 @@ int test_precision_doubling_cap_forced_failures() {
     return 0;
 }
 
+// An exact half-integer coordinate stops the reduce-mod-units precision
+// ladder.  In the cyclic cubic x^3 - 3x + 1 the units theta^2 and theta - 1
+// generate a rank-two group in which theta^3 has coordinates exactly
+// (3/2, 0).  No precision certifies a rounding of 3/2, and the zero
+// coordinate defeats the approximate rounding, so the ladder used to double
+// the precision to its cap before returning the value unreduced.  Once the
+// coordinate ball is narrow (radius at most 0.1) and contains the
+// half-integer, it now returns the value unreduced at once.
+int test_reduce_mod_units_half_integer_tie() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    silex::FactoredElement generators[] = {
+            silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+    assert(generators[0].push(theta, 2));
+    assert(generators[1].set_element(theta_minus_one));
+    silex::EmbeddingContext embeddings(cubic);
+    silex::OrderUnitGroup group;
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 64));
+    assert(group.free_rank() == 2);
+    const slong precision_before = embeddings.precision();
+
+    std::vector<silex::FactoredElement> values;
+    values.emplace_back(cubic);
+    assert(values[0].push(theta, 3));
+    assert(silex::detail::reduce_relation_units_modulo(
+            values, group, embeddings, 32));
+
+    // The value is returned unreduced: still theta^3.
+    silex::Element theta_cubed(cubic);
+    silex::Element value(cubic);
+    silex::Element theta_squared(cubic);
+    assert(theta_squared.multiply(theta, theta));
+    assert(theta_cubed.multiply(theta_squared, theta));
+    assert(values[0].evaluate(value));
+    assert(value.equal(theta_cubed));
+
+    // The ladder stopped well below its cap of
+    // kReduceModUnitsMaxPrecision bits.
+    assert(embeddings.precision() <= FLINT_MAX(precision_before, 1024));
+    return 0;
+}
+
 int test_degree_one_rank_zero_group() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -7717,6 +7765,7 @@ int main() {
     test_unit_extraction_cache_clear();
     test_precision_doubling_cap_default_value();
     test_precision_doubling_cap_forced_failures();
+    test_reduce_mod_units_half_integer_tie();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();
     test_compute_with_class_group_rank_zero();
