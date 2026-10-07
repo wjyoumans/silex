@@ -101,6 +101,23 @@ Changed
   monic integral defining polynomial.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The Belabas-Diaz y Diaz-Friedman bound of a ``grh`` class/unit request is
+  now the smallest integer cutoff at which an interval comparison proves the
+  criterion (doubling from 2, then an exact bisection, as PARI 2.17.3
+  ``Buchall_param``), instead of the result of a search that doubled from
+  100 and stopped at a step below 100 and so never returned less than about
+  50.  The reported GRH generation bound
+  (``factor_base_generation_certification_bound()`` with basis ``bdf``) and
+  the factor base built from it are smaller: for ``x^3 + x + 200`` the bound
+  is 19 instead of 50 and the base is built to 76 instead of 100.  The base
+  is still doubled until it has more than 20 prime ideals.  A ``grh`` base
+  can now stay below the Minkowski-type bound where it used to reach it, so
+  factor-base generation of such a result is recorded as ``grh`` rather than
+  ``verified``, and a later zeta promotion of it fails closed, as documented
+  for any base that covers only the GRH bound.  Labels and failure rules are
+  unchanged.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - **Breaking:** ``FiniteAbelianGroup::set_relation_matrix_with_hnf_basis``,
   public in 0.1.1, is no longer public API; it is now internal.
   ``FiniteAbelianGroup`` also has a new private member, so its layout changed

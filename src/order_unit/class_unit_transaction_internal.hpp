@@ -81,14 +81,10 @@ struct ClassUnitExecutionPolicy {
     slong unit_rank = -1;
     slong discriminant_bits = 0;
     flint::Fmpz selected_factor_base_bound;
-    // grh policy only: the factor-base restarts taken after a failed
-    // candidate computation (the reference LIMC schedule); each one enlarged
-    // selected_factor_base_bound.
-    slong grh_factor_base_restarts = 0;
     // grh policy only: the GRH generation bound min(BDF, Bach), or Bach's
     // bound alone when the BDF criterion cannot be computed or decided,
-    // before the selected bound is raised to reach N = [K : Q] prime ideals
-    // (or enlarged by a restart).
+    // before the selected bound is doubled to reach the minimum factor-base
+    // size.
     // Under GRH every prime ideal of norm at most this bound generates the
     // class group; zero on every other policy.
     flint::Fmpz grh_generation_bound;
@@ -185,10 +181,9 @@ bool native_hnf_unit_strategy_for_signature(
         slong degree,
         slong unit_rank) noexcept;
 // `out` is the GRH generation bound min(BDF, Bach) (Bach's alone when the
-// BDF criterion cannot be computed or decided), raised as the reference
-// LIMC = max(LIMC2, nthideal(N)) to the norm of the N-th smallest prime ideal
-// that is not inert, N = [K : Q], when that is larger.
-// `generation_bound`, when given, receives the unraised GRH bound, and
+// BDF criterion cannot be computed or decided), doubled until the
+// norm-bounded factor base has more than the minimum number of primes.
+// `generation_bound`, when given, receives the undoubled GRH bound, and
 // `generation_basis`, when given, the theorem that gave it (bdf or bach).
 bool grh_factor_base_bound(
         flint::Fmpz& out,

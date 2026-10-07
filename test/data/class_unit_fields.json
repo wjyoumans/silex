@@ -301,7 +301,19 @@
       "timeout_seconds": 10,
       "expected_success": true,
       "status": "grh_certification",
-      "source": "grh request on the field of quartic_disc1412343_proven whose GRH-sized base (100) reaches Zimmert's twin-class bound (98 < Minkowski-type 122): generation proven, completeness grh"
+      "source": "grh request on the field of quartic_disc1412343_proven: GRH-sized base below Zimmert's twin-class bound (98) and the Minkowski-type bound (122), generation and completeness grh"
+    },
+    {
+      "id": "quartic_disc1208000_grh",
+      "coefficients_low_to_high": [6, 4, -4, -6, 1],
+      "mode": "grh",
+      "expected_class_order": 4,
+      "expected_class_invariants": [4],
+      "expected_unit_rank": 2,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "x^4 - 6x^3 - 4x^2 + 4x + 6, disc -1208000, index 1: GRH-sized base (96) reaches Zimmert's twin-class bound (91 < Minkowski-type 113): generation proven, completeness grh"
     },
     {
       "id": "quintic_disc401370255_grh",
@@ -325,7 +337,19 @@
       "timeout_seconds": 10,
       "expected_success": true,
       "status": "grh_certification",
-      "source": "Unconditional generation in grh mode: x^2 - 10007, disc 40028, GRH factor-base bound equal to the Minkowski-type bound"
+      "source": "GRH-conditional factor-base generation fixture: x^2 - 10007, disc 40028, GRH factor-base bound (70) below the Minkowski-type bound (100)"
+    },
+    {
+      "id": "real_quadratic_31333_grh",
+      "coefficients_low_to_high": [-31333, 0, 1],
+      "mode": "grh",
+      "expected_class_order": 19,
+      "expected_class_invariants": [19],
+      "expected_unit_rank": 1,
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "Unconditional generation in grh mode: x^2 - 31333, disc 31333, GRH factor-base bound equal to the Minkowski-type bound (88)"
     },
     {
       "id": "imaginary_quadratic_100003_grh",

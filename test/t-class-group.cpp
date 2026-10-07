@@ -3456,11 +3456,10 @@ int test_grh_provenance_records() {
     // GRH provenance of a grh class/unit result, and the plumbing of the
     // GRH generation record.  x^3 + x + 200 (|D| = 1080004): the grh
     // policy's GRH generation bound is the BDF bound 19 (the smallest
-    // integer cutoff where the criterion holds), its base is built to 19
-    // (the third smallest norm of a prime ideal that is not inert is 3, so
-    // the raise to three ideals does not apply), and the Minkowski-type
-    // bound is 295, so generation rests on GRH; completeness rests on a
-    // Belabas-Friedman hR.
+    // integer cutoff where the criterion holds), its base is built to 76
+    // (19 doubled until the base has more than 20 prime ideals), and the
+    // Minkowski-type bound is 295, so generation rests on GRH; completeness
+    // rests on a Belabas-Friedman hR.
     silex::NumberField field = cubic_field(1, 200);
     silex::Order equation_order = silex::test::equation_order(field);
     silex::Order maximal_order(field);
@@ -3497,11 +3496,11 @@ int test_grh_provenance_records() {
            silex::ClassUnitCompletenessBasis::belabas_friedman);
 
     // Base completeness, checked against prime decomposition directly:
-    // every prime ideal of norm at most the build bound 19 is in the base,
+    // every prime ideal of norm at most the build bound 76 is in the base,
     // including both primes of a split pair, inert primes and ramified
-    // primes.  Under GRH these primes generate the class group because 19
+    // primes.  Under GRH these primes generate the class group because 76
     // is at least the GRH generation bound 19.
-    const slong grh_build_bound = 19;
+    const slong grh_build_bound = 76;
     assert(context.factor_base_build_bound(sflint::FmpzRef(value)));
     assert(sflint::fmpz_equal_si(value, grh_build_bound));
     const silex::FactorBase* grh_base = context.factor_base();
@@ -3538,9 +3537,9 @@ int test_grh_provenance_records() {
     assert(checked_ramified > 0);
 
     // Only the two GRH theorems are recordable, and the GRH bound must not
-    // exceed the build bound (19 here).
+    // exceed the build bound (76 here).
     sflint::Fmpz grh_bound;
-    assert(set_fmpz_si(grh_bound, 20));
+    assert(set_fmpz_si(grh_bound, 77));
     assert(!CertificationAccess::record_grh_factor_base_generation(
             context, sflint::FmpzConstRef(grh_bound),
             silex::ClassGroupGenerationBasis::bach));
@@ -3925,9 +3924,9 @@ int test_grh_generation_bound_bach_fallback() {
     // returned less than 50 and this field took Bach's bound; with the exact
     // cutoff no field small enough to test has Bach's bound below the BDF
     // bound, so the bach record is checked directly in
-    // test_grh_provenance_records.)  The two primes of norm 2 already give
-    // the base two ideals, so the raise to [K : Q] ideals does not apply.
-    // The base also reaches the Minkowski-type bound of so small a field,
+    // test_grh_provenance_records.)  The base is built to 80, the bound 5
+    // doubled until the base has more than 20 prime ideals.  The base also
+    // reaches the Minkowski-type bound of so small a field,
     // so the public generation basis is the unconditional one.
     silex::NumberField quadratic = shifted_quadratic_field(1, 4);
     silex::Order quadratic_equation = silex::test::equation_order(quadratic);
@@ -3943,7 +3942,7 @@ int test_grh_generation_bound_bach_fallback() {
             bound, quadratic_maximal, nullptr, &generation_bound, &basis));
     assert(basis == silex::ClassGroupGenerationBasis::bdf);
     assert(sflint::fmpz_equal_si(generation_bound, 5));
-    assert(sflint::fmpz_equal_si(bound, 5));
+    assert(sflint::fmpz_equal_si(bound, 80));
 
     silex::ClassGroupContext class_group;
     silex::OrderUnitGroup units;
@@ -3957,7 +3956,6 @@ int test_grh_generation_bound_bach_fallback() {
     assert(audit.policy.grh_generation_basis ==
            silex::ClassGroupGenerationBasis::bdf);
     assert(sflint::fmpz_equal_si(audit.policy.grh_generation_bound, 5));
-    assert(audit.policy.grh_factor_base_restarts == 0);
     assert(class_group.certification_status() ==
            silex::CertificationMode::grh);
     assert(units.certification_status() == silex::CertificationMode::grh);

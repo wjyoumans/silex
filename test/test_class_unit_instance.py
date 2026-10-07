@@ -162,12 +162,12 @@ def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
     # publish exactly the grh label. GRH coverage is never reported as
     # unconditional evidence: generation stays `unavailable` and relation
     # saturation is not `verified`. x^3 + x + 200: |D| = 1080004, bound
-    # 100 below both the Minkowski-type bound 295 and Zimmert's twin-class
+    # 76 below both the Minkowski-type bound 295 and Zimmert's twin-class
     # bound 263, class group Z/2. x^2 - 100003: D = 400012, bound
-    # 100 < 316, h = 1.
-    for coeffs, used, requested, order, invariants in (
-        ("200,1,0,1", "100", "295", "2", ["2"]),
-        ("-100003,0,1", "100", "316", "1", []),
+    # 160 < 316, h = 1.
+    for coeffs, generation, used, requested, order, invariants in (
+        ("200,1,0,1", "19", "76", "295", "2", ["2"]),
+        ("-100003,0,1", "40", "160", "316", "1", []),
     ):
         instance = run_json(
             [str(exe), "--coeffs", coeffs, "--mode", "grh"], root
@@ -193,14 +193,16 @@ def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
         assert class_group["analytic_class_regulator_certification"] == (
             "proven" if instance["degree"] == 2 else "grh"
         )
-        # Provenance: generation rests on the BDF bound (50 for both
-        # fields, below Bach's), completeness on the hR that accepted.
+        # Provenance: generation rests on the BDF bound (19 for the cubic,
+        # 40 for the quadratic, both below Bach's; the base is that bound
+        # doubled until it has more than 20 prime ideals), completeness on
+        # the hR that accepted.
         assert class_group["factor_base_generation_certification"] == "grh"
         assert class_group["factor_base_generation_basis"] == "bdf"
         assert class_group["generation_different_route"] is None
         assert class_group[
             "factor_base_generation_certification_bound"
-        ] == "50"
+        ] == generation
         if instance["degree"] == 2:
             assert class_group[
                 "class_unit_completeness_certification"
@@ -301,24 +303,25 @@ def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     # verifies with `>=`, so a GRH-sized factor base that reaches the
     # Minkowski-type bound exactly (not just strictly above it) records
     # unconditional (`verified`) generation, while the published label
-    # stays grh. x^2 - 40001: 40001 = 13 * 17 * 181 is
-    # squarefree and 1 mod 4, so D = 40001 and the real-quadratic branch of
-    # factor_base_class_group_bound gives floor(sqrt(40001) / 2) = 100,
-    # exactly the grh policy's selected bound here. h = 32, class group
-    # Z/16 x Z/2 (GP 2.17 quadclassunit(40001)).
+    # stays grh. x^2 - 31333: 31333 is prime and 1 mod 4, so D = 31333
+    # and the real-quadratic branch of factor_base_class_group_bound gives
+    # floor(sqrt(31333) / 2) = 88, exactly the grh policy's selected bound
+    # here (the BDF bound 22, doubled until the base has more than 20 prime
+    # ideals). h = 19, class group Z/19 (GP 2.17 quadclassunit(31333),
+    # bnfinit and bnfcertify).
     instance = run_json(
-        [str(exe), "--coeffs", "-40001,0,1", "--mode", "grh"], root
+        [str(exe), "--coeffs", "-31333,0,1", "--mode", "grh"], root
     )
     assert instance["success"] is True
     assert instance["final_result_published"] is True
     assert instance["certification_status"] == "grh"
-    assert instance["factor_base_bound"] == "100"
-    assert instance["requested_factor_base_bound"] == "100"
+    assert instance["factor_base_bound"] == "88"
+    assert instance["requested_factor_base_bound"] == "88"
     assert instance["class_group"]["factor_base_generation_status"] == (
         "verified"
     )
-    assert instance["class_group"]["order"] == "32"
-    assert instance["class_group"]["invariants"] == ["2", "16"]
+    assert instance["class_group"]["order"] == "19"
+    assert instance["class_group"]["invariants"] == ["19"]
     # Generation verified to the Minkowski-type bound is reported proven,
     # which tells this result apart from one whose generation rests on GRH
     # although both carry grh labels.
@@ -326,7 +329,7 @@ def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     assert class_group["factor_base_generation_certification"] == "proven"
     assert class_group["factor_base_generation_basis"] == "minkowski_type"
     assert class_group["generation_different_route"] is None
-    assert class_group["factor_base_generation_certification_bound"] == "100"
+    assert class_group["factor_base_generation_certification_bound"] == "88"
     assert class_group["class_unit_completeness_certification"] == "proven"
     assert class_group["class_unit_completeness_basis"] == (
         "unconditional_analytic"
@@ -354,7 +357,7 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "must_pass_fast"
     ]
-    assert len(manifest["fields"]) == 29
+    assert len(manifest["fields"]) == 31
     assert len(proven_rows) == 17
     exact_rows = {
         "degree_one_proven",
@@ -474,7 +477,7 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "grh_certification"
     ]
-    assert len(grh_rows) == 11
+    assert len(grh_rows) == 13
     # The proven generation requirement of the rows of degree 3..20. Each
     # of these defining polynomials is monic and integral with index 1
     # (GP 2.17 nfinit: disc equals poldisc), so the different is settled
@@ -485,6 +488,7 @@ def main() -> int:
     twin_class_requirement = {
         "cubic_x3_x_200_grh": 263,
         "quartic_disc1412343_grh": 98,
+        "quartic_disc1208000_grh": 91,
         "quintic_disc401370255_grh": 469,
     }
     grh_bounds: dict[str, tuple[int, int, int]] = {}
@@ -617,20 +621,23 @@ def main() -> int:
                 "belabas_friedman"
             )
     # Each GRH-generation row is below the proven requirement; the
-    # x^2 - 10007 row sits exactly on the Minkowski-type bound.
+    # x^2 - 31333 row sits exactly on the Minkowski-type bound.
     for field_id in (
         "cubic_x3_x_200_grh",
         "real_quadratic_100003_grh",
+        "quartic_disc1412343_grh",
         "quintic_disc401370255_grh",
+        "real_quadratic_10007_grh",
         "imaginary_quadratic_100003_grh",
     ):
         used, requirement, minkowski = grh_bounds[field_id]
         assert used < requirement
-    used, requirement, minkowski = grh_bounds["real_quadratic_10007_grh"]
+    used, requirement, minkowski = grh_bounds["real_quadratic_31333_grh"]
     assert used == requirement == minkowski
-    # The quartic row's base (100) is below the Minkowski-type bound (122)
-    # but reaches the twin-class bound (98), so its generation is proven.
-    used, requirement, minkowski = grh_bounds["quartic_disc1412343_grh"]
+    # The x^4 - 6x^3 - 4x^2 + 4x + 6 row's base (96) is below the
+    # Minkowski-type bound (113) but reaches the twin-class bound (91), so
+    # its generation is proven.
+    used, requirement, minkowski = grh_bounds["quartic_disc1208000_grh"]
     assert requirement <= used < minkowski
 
     # An actually GRH-conditional (`"grh"`-valued) analytic hR check is

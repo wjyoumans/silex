@@ -430,8 +430,8 @@ struct BdfStopCase {
     // independently of Silex.
     slong bach;
     // The full BDF search: its bound, the smallest integer cutoff where
-    // the criterion holds (recomputed independently of Silex in PARI/GP at
-    // 60 digits from the same sum over prime powers below the cutoff), and
+    // the criterion holds (recomputed independently of Silex at 60 digits
+    // from the same sum over prime powers below the cutoff), and
     // its number of evaluations: doubling from 2 reaches the first power of
     // two 2^j at least the bound in j evaluations, and the bisection of
     // (2^(j - 1), 2^j] takes j - 1 more.

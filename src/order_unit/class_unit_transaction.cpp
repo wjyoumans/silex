@@ -5,14 +5,13 @@
 
 #include <silex/signature.hpp>
 
-#include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <utility>
-#include <vector>
 
 namespace silex::detail {
 namespace {
+
+constexpr slong kMinimumFactorBaseSize = 20;
 
 std::size_t stage_index(ClassUnitStage stage) noexcept {
     return static_cast<std::size_t>(stage);
@@ -140,51 +139,6 @@ bool select_policy(
     return true;
 }
 
-// LIMCMAX = (long)(4 log^2 |D|) of reference buch2.c:Buchall_param (2.17.3,
-// line 3772), in doubles as there: the cap of the reference factor-base
-// restarts.  It is a sizing heuristic, not a generation bound.
-bool grh_factor_base_restart_cap(ulong& out,
-                                 const Order& order) noexcept {
-    flint::Fmpz discriminant;
-    if (!order.discriminant(flint::FmpzRef(discriminant)) ||
-        flint::fmpz_is_zero(flint::FmpzConstRef(discriminant))) {
-        return false;
-    }
-    flint::fmpz_abs(flint::FmpzRef(discriminant),
-                    flint::FmpzConstRef(discriminant));
-    const double log_discriminant = fmpz_dlog(discriminant.raw());
-    const double cap = 4.0 * log_discriminant * log_discriminant;
-    if (!std::isfinite(cap) || cap < 1.0 ||
-        cap >= static_cast<double>(WORD_MAX)) {
-        return false;
-    }
-    out = static_cast<ulong>(cap);
-    return true;
-}
-
-// The next factor-base bound after a failed grh candidate computation, as
-// the reference (2.17.3): a restart only while LIMC < LIMCMAX / 2
-// (buch2.c:Buchall_param, line 3953), then buch1.c:bnf_increase_LIMC (lines
-// 185-192): double while LIMC <= LIMCMAX / 13.333, otherwise add
-// max(1, LIMCMAX / 20), and clamp to LIMCMAX.
-bool next_grh_factor_base_bound(flint::Fmpz& bound, ulong cap) noexcept {
-    if (flint::fmpz_sgn(flint::FmpzConstRef(bound)) <= 0 ||
-        flint::fmpz_cmp_ui(flint::FmpzConstRef(bound), cap / 2) >= 0) {
-        return false;
-    }
-    ulong limc = flint::fmpz_get_ui(flint::FmpzConstRef(bound));
-    if (static_cast<double>(limc) <= static_cast<double>(cap) / 13.333) {
-        limc *= 2;
-    } else {
-        limc += FLINT_MAX(UWORD(1), cap / 20);
-    }
-    if (limc > cap) {
-        limc = cap;
-    }
-    flint::fmpz_set_ui(flint::FmpzRef(bound), limc);
-    return true;
-}
-
 }  // namespace
 
 bool grh_factor_base_bound(
@@ -206,59 +160,24 @@ bool grh_factor_base_bound(
         flint::fmpz_set(flint::FmpzRef(*generation_bound),
                         flint::FmpzConstRef(out));
     }
-    // Reference buch2.c:Buchall_param (2.17.3, lines 3826-3827)
-    // takes LIMC = max(LIMC2, nthideal(N)): the base contains at least
-    // N = [K : Q] prime ideals.  nthideal (lines 604-641) is the norm of the
-    // N-th smallest prime ideal over the primes that are not inert (an inert
-    // p, of residue degree N, is principal).  Probe bounds double until the
-    // norm-bounded base holds N such ideals; all ideals of norm at most the
-    // probe bound are then in it, so the N-th smallest norm is exact.
-    const slong degree = order.degree();
-    if (degree <= 0) {
-        return false;
-    }
-    flint::Fmpz probe_bound;
-    flint::fmpz_set(flint::FmpzRef(probe_bound), flint::FmpzConstRef(out));
-    std::vector<flint::Fmpz> norms;
     for (;;) {
         FactorBase probe(order);
         if (!probe.is_defined() || !probe.build_prime_ideal_norm_bounded(
-                                           flint::FmpzConstRef(probe_bound))) {
+                                           flint::FmpzConstRef(out))) {
             return false;
         }
-        norms.clear();
         for (slong i = 0; i < probe.length(); ++i) {
             const PrimeIdeal* prime = probe.prime_at(i);
             if (prime == nullptr || prime->residue_degree() <= 0) {
                 return false;
             }
-            if (prime->residue_degree() >= degree) {
-                continue;
-            }
-            flint::Fmpz norm;
-            if (!prime->norm(flint::FmpzRef(norm))) {
-                return false;
-            }
-            norms.push_back(std::move(norm));
         }
-        if (norms.size() >= static_cast<std::size_t>(degree)) {
-            break;
+        if (probe.length() > kMinimumFactorBaseSize) {
+            return true;
         }
-        flint::fmpz_mul_2exp(flint::FmpzRef(probe_bound),
-                             flint::FmpzConstRef(probe_bound), UWORD(1));
+        flint::fmpz_mul_2exp(flint::FmpzRef(out), flint::FmpzConstRef(out),
+                             UWORD(1));
     }
-    const auto nth = norms.begin() + (degree - 1);
-    std::nth_element(norms.begin(), nth, norms.end(),
-                     [](const flint::Fmpz& left, const flint::Fmpz& right) {
-                         return flint::fmpz_cmp(flint::FmpzConstRef(left),
-                                                flint::FmpzConstRef(right)) <
-                                0;
-                     });
-    if (flint::fmpz_cmp(flint::FmpzConstRef(*nth),
-                        flint::FmpzConstRef(out)) > 0) {
-        flint::fmpz_set(flint::FmpzRef(out), flint::FmpzConstRef(*nth));
-    }
-    return true;
 }
 
 void ClassUnitTransactionAccess::set_run_context(
@@ -431,48 +350,22 @@ bool compute_class_unit_transaction(
 
     ClassGroupContext candidate_class_group;
     OrderUnitGroup candidate_units;
-    ulong restart_cap = 0;
-    const bool restartable = audit.policy.factor_base_bound ==
-                    NativeFactorBaseBoundStrategy::grh &&
-            grh_factor_base_restart_cap(restart_cap, order);
-    bool success = false;
-    for (;;) {
-        ClassUnitTransactionContext transaction_context{
-                audit,
-                options.requested_certification == CertificationMode::proven
-                        ? &relation_factor_base_plan
-                        : nullptr,
-                {},
-                {},
-                false};
-        ClassUnitTransactionAccess::set_run_context(
-                candidate_class_group, &transaction_context);
-        success = candidate_units.compute_with_class_group(
-                candidate_class_group, order,
-                flint::FmpzConstRef(transaction_factor_base_bound),
-                transaction_options, precision);
-        ClassUnitTransactionAccess::set_run_context(candidate_class_group,
-                                                    nullptr);
-        // grh policy: when the candidate computation fails, enlarge the
-        // factor base on the reference schedule and start again from
-        // scratch (reference buch2.c:Buchall_param, 2.17.3, `goto START`
-        // when the relations do not suffice, line 3953, which restarts only
-        // while LIMC < LIMCMAX / 2; the new LIMC is buch1.c:
-        // bnf_increase_LIMC, lines 185-192).  The GRH generation bound is
-        // unchanged: the larger base still contains every prime ideal up
-        // to it.
-        if (success || !restartable ||
-            !next_grh_factor_base_bound(
-                    transaction_factor_base_bound, restart_cap)) {
-            break;
-        }
-        flint::fmpz_set(
-                flint::FmpzRef(audit.policy.selected_factor_base_bound),
-                flint::FmpzConstRef(transaction_factor_base_bound));
-        ++audit.policy.grh_factor_base_restarts;
-        candidate_class_group = ClassGroupContext();
-        candidate_units = OrderUnitGroup();
-    }
+    ClassUnitTransactionContext transaction_context{
+            audit,
+            options.requested_certification == CertificationMode::proven
+                    ? &relation_factor_base_plan
+                    : nullptr,
+            {},
+            {},
+            false};
+    ClassUnitTransactionAccess::set_run_context(
+            candidate_class_group, &transaction_context);
+    const bool success = candidate_units.compute_with_class_group(
+            candidate_class_group, order,
+            flint::FmpzConstRef(transaction_factor_base_bound),
+            transaction_options, precision);
+    ClassUnitTransactionAccess::set_run_context(candidate_class_group,
+                                                nullptr);
     if (!success) {
         audit.failure_stage = ClassUnitStage::total;
         audit.failure_reason = class_unit_computation_failure_reason(audit);

@@ -2441,12 +2441,12 @@ int test_grh_generation_below_minkowski_bound() {
             {"grh cubic x^3 + x + 200 below the Minkowski-type bound",
              {200, 1, 0},
              2,
-             100},
+             76},
             {"grh real quadratic x^2 - 100003 below the Minkowski-type "
              "bound",
              {-100003, 0},
              1,
-             100},
+             160},
     };
 
     for (const Row& row : rows) {
@@ -2548,8 +2548,11 @@ int test_grh_generation_below_minkowski_bound() {
 // grh acceptance route, which records the unconditional analytic check but
 // leaves relation saturation unchecked; try_certify_class_unit_with_zeta
 // then proves that grh pair through the same unconditional index-one
-// argument.  Expected class groups from GP 2.17 bnfinit and bnfcertify:
-// Q(sqrt(40001)) has Cl = Z/2 x Z/16 (h = 32) and Q(sqrt(210)) has
+// argument.  The grh run needs a factor base that reaches the
+// Minkowski-type bound: for x^2 - 12905 (D = 12905 = 5 * 29 * 89) the grh
+// base is built to 72 and that bound is floor(sqrt(12905) / 2) = 56.
+// Expected class groups from GP 2.17 bnfinit and bnfcertify:
+// Q(sqrt(12905)) has Cl = Z/2 x Z/8 (h = 16) and Q(sqrt(210)) has
 // Cl = Z/2 x Z/2 (h = 4).
 int test_real_quadratic_h_gt_one_proven_saturation() {
     struct Row {
@@ -2559,8 +2562,8 @@ int test_real_quadratic_h_gt_one_proven_saturation() {
         const char* name;
     };
     const Row rows[] = {
-            {40001, 32, {2, 16},
-             "real quadratic x^2 - 40001 saturation status"},
+            {12905, 16, {2, 8},
+             "real quadratic x^2 - 12905 saturation status"},
             {210, 4, {2, 2}, "real quadratic x^2 - 210 saturation status"},
     };
 
@@ -2629,7 +2632,7 @@ int test_real_quadratic_h_gt_one_proven_saturation() {
                 }
                 // No ell-local records: the analytic route, not a
                 // saturation proof at p = 2, set the status.  The
-                // invariants separate Z/2 x Z/16 from Z/4 x Z/8.
+                // invariants separate Z/2 x Z/8 from Z/4 x Z/4.
                 if (class_group.relation_saturation_record_count() != 0) {
                     std::cerr << row.name
                               << ": proven run kept saturation records\n";

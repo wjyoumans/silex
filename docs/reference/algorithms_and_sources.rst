@@ -903,12 +903,24 @@ A ``grh`` request for a paired class/unit transaction sizes the factor base
 with the GRH bound, the minimum of the Belabas--Diaz y Diaz--Friedman
 criterion and Bach's bound, as Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/FactorBaseBound.jl:factor_base_bound_grh`` does.
-When the Belabas--Diaz y Diaz--Friedman criterion cannot be computed or
-decided, the GRH bound is Bach's bound alone, and the generation record
-names Bach's theorem.  This happens for a non-monic defining polynomial,
-since the criterion's residue-degree route needs a monic integral one, for a
-residue-degree failure, when an interval comparison in its search cannot be
-decided, and when its search passes the range of a double.  Bach's theorem
+The Belabas--Diaz y Diaz--Friedman bound is the smallest integer cutoff at
+which an Arb comparison proves the criterion of Belabas--Diaz y
+Diaz--Friedman 2008, Section 3.  Silex finds it as PARI 2.17.3
+``src/basemath/buch2.c:Buchall_param`` (lines 3814-3821) finds its
+``LIMC2``: doubling the cutoff from 2 until the criterion holds, then an
+exact bisection on the integers.  Unlike PARI, which compares doubles with a
+small slack, every comparison is an interval comparison, and a cutoff where
+the bisection cannot decide the comparison counts as one where the criterion
+is not proven, so the result is always a proven cutoff.  Hecke's search
+instead doubles from 100 and stops its dichotomy at a step below 100, so its
+bound is never below about 50.  When the Belabas--Diaz y Diaz--Friedman
+criterion cannot be computed or decided, the GRH bound is Bach's bound
+alone, and the generation record names Bach's theorem.  This happens for a
+non-monic defining polynomial, since the criterion's residue-degree route
+needs a monic integral one, for a residue-degree failure, when an interval
+comparison in the doubling cannot be decided, and when the doubling passes
+``2^52``.  The factor base is then built to that GRH bound, doubled until
+the base has more than 20 prime ideals.  Bach's theorem
 does not depend on the criterion, and Belabas--Diaz y Diaz--Friedman 2008,
 Section 3, itself takes Bach's bound once its search passes it.  The search also
 stops, as an intentional deviation from that rule, once the criterion fails
