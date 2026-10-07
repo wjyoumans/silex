@@ -1781,9 +1781,8 @@ int test_grh_sunit_matches_reference() {
 
 // A rejection at valuation_solve (v(value) outside the published lattice)
 // rests on class completeness: it is `not_sunit` with a `proven` class group
-// and `unknown` with a `grh` one, whatever the unit label.  The residual
-// step needs `proven` ordinary units, so with `grh` units a value inside the
-// lattice fails there.
+// and `unknown` with a `grh` one, whatever the unit label.  Values inside the
+// lattice round-trip exactly whatever the labels.
 int test_grh_membership_rests_on_class_completeness() {
     const silex::CertificationMode grh = silex::CertificationMode::grh;
     const silex::CertificationMode proven = silex::CertificationMode::proven;
@@ -1835,26 +1834,72 @@ int test_grh_membership_rests_on_class_completeness() {
         }
         assert(out.defined);
 
-        if (input.units == &proven_units) {
-            silex::Element image(fixture.field);
-            assert_mixed_sunit_round_trips(image, s_units,
-                                           fixture.embeddings);
-        } else {
-            const slong no_ordinary[] = {0};
-            const slong nonunit[] = {1, -1};
-            silex::FactoredElement value(fixture.field);
-            assert(s_units.image(value,
-                                 coordinates(s_units, 1, no_ordinary,
-                                             nonunit)));
-            silex::SUnitCoordinates recovered;
-            assert(!s_units.preimage(membership, recovered, value,
-                                     fixture.embeddings, 16, 256));
-            assert(membership.outcome ==
-                   silex::SUnitMembershipOutcome::unknown);
-            assert(membership.stage ==
-                   silex::SUnitMembershipStage::residual_unit);
-        }
+        silex::Element image(fixture.field);
+        assert_mixed_sunit_round_trips(image, s_units, fixture.embeddings);
     }
+    return 0;
+}
+
+// With `grh` ordinary units of positive rank, preimage recovers coordinates
+// that verify exactly against the published generators, and a value whose
+// residual is not a unit is `not_sunit` (the residual test is the exact
+// principal-ideal test, so that rejection does not rest on the labels).  The
+// S-unit group keeps the `grh` label; the coordinates carry none.
+int test_grh_unit_preimage() {
+    const slong coefficients[] = {-43, 0, 0, 1};
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 3; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    ProvenFixture fixture = labelled_field(
+            silex::test::field_by_polynomial(
+                    sflint::FmpqPolyConstRef(polynomial)),
+            silex::CertificationMode::grh, 0, 5000, 500, 20000);
+    assert(fixture.units.free_rank() == 1);
+    const std::vector<silex::PrimeIdeal> p2 =
+            prime_above_with_degree(fixture.order, 2, 1);
+    const std::vector<silex::PrimeIdeal> p2_prime =
+            prime_above_with_degree(fixture.order, 2, 2);
+    const std::vector<silex::PrimeIdeal> selected =
+            copy_primes(fixture.order, {&p2[0], &p2_prime[0]});
+
+    silex::SUnitComputeResult result;
+    silex::SClassGroup s_class;
+    silex::SUnitGroup s_units;
+    // A proven request is refused for a grh class group: the S-class context
+    // reads only certification_status(), never the factor-base generation
+    // records, so a grh class group (whose factor base may rest on GRH
+    // generation) cannot reach a proven S-unit result.
+    assert(fixture.class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(!compute_at(result, s_class, s_units, fixture.class_group,
+                       fixture.units, selected,
+                       silex::CertificationMode::proven));
+    assert(result.stage == silex::SUnitComputeStage::input_validation);
+    assert(!s_class.is_defined() && !s_units.is_defined());
+    assert(compute_at(result, s_class, s_units, fixture.class_group,
+                      fixture.units, selected,
+                      silex::CertificationMode::grh));
+    assert(s_units.certification_status() == silex::CertificationMode::grh);
+    assert(s_units.ordinary_free_rank() == 1);
+
+    silex::Element image(fixture.field);
+    assert_mixed_sunit_round_trips(image, s_units, fixture.embeddings);
+
+    // 5 has valuation zero at S and is not a unit, so image * 5 has the
+    // valuations of image at S but is not an S-unit.
+    silex::Element five(fixture.field);
+    silex::Element shifted(fixture.field);
+    assert(five.set_si(5) && shifted.multiply(image, five));
+    silex::SUnitCoordinates untouched;
+    silex::SUnitMembershipResult membership;
+    assert(s_units.preimage(membership, untouched, shifted,
+                            fixture.embeddings, 16, 512));
+    assert(membership.success);
+    assert(membership.outcome == silex::SUnitMembershipOutcome::not_sunit);
+    assert(membership.stage == silex::SUnitMembershipStage::residual_unit);
+    assert(!untouched.defined);
+    assert(s_units.certification_status() == silex::CertificationMode::grh);
     return 0;
 }
 
@@ -1872,5 +1917,6 @@ int main() {
     assert(test_grh_request_label_rules() == 0);
     assert(test_grh_sunit_matches_reference() == 0);
     assert(test_grh_membership_rests_on_class_completeness() == 0);
+    assert(test_grh_unit_preimage() == 0);
     return 0;
 }

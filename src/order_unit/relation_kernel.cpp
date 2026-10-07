@@ -2362,8 +2362,16 @@ bool ordinary_unit_coordinates_core(
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     const slong rank = group.free_rank();
+    // A `grh` unit group is accepted as well as a `proven` one.  The not-unit
+    // answer comes from the unconditional principal-ideal test below, and a
+    // verified answer is checked exactly against the given generators, so
+    // either answer is exact relative to those generators.  Coordinates carry
+    // no label of their own: a caller that publishes a label takes it from
+    // the unit group.
+    const CertificationMode label = group.certification_status();
     if (!group.is_set() ||
-        group.certification_status() != CertificationMode::proven ||
+        (label != CertificationMode::proven &&
+         label != CertificationMode::grh) ||
         field == nullptr || rank < 0 || value.parent() == nullptr ||
         !value.parent()->has_same_data(*field) ||
         !expanded_value.has_parent(*field) || embeddings.parent() == nullptr ||

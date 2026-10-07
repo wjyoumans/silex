@@ -6,6 +6,7 @@
 #include "test_support.hpp"
 
 #include <cassert>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -29,7 +30,9 @@ UnitFixture quadratic_fixture(slong radicand) noexcept {
     return out;
 }
 
-UnitFixture cubic_disc81_fixture() noexcept {
+UnitFixture cubic_disc81_fixture(
+        silex::CertificationMode mode =
+                silex::CertificationMode::proven) noexcept {
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
     sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
@@ -55,14 +58,13 @@ UnitFixture cubic_disc81_fixture() noexcept {
     options.max_candidates = 5000;
     options.max_relations = 500;
     options.zeta_bf_max_cutoff = 20000;
-    options.requested_certification = silex::CertificationMode::proven;
+    options.requested_certification = mode;
     silex::ClassGroupContext class_group;
     assert(out.units.compute_with_class_group(
             class_group, out.order, sflint::FmpzConstRef(bound), options,
             128));
     assert(out.units.free_rank() == 2);
-    assert(out.units.certification_status() ==
-           silex::CertificationMode::proven);
+    assert(out.units.certification_status() == mode);
     return out;
 }
 
@@ -267,11 +269,75 @@ int test_higher_rank_and_precision_exhaustion() {
     return 0;
 }
 
+// A `grh` unit group is accepted: the not-unit answer is the unconditional
+// principal-ideal test and a verified answer is checked exactly against the
+// given generators.  A group with `unknown` certification (set_units) is
+// still refused at input_validation.
+int test_grh_units_accepted_unknown_refused() {
+    UnitFixture fixture = cubic_disc81_fixture(silex::CertificationMode::grh);
+    const slong expected[] = {-5, 4};
+    silex::FactoredElement target =
+            unit_from_coordinates(fixture, 1, expected);
+    silex::Element expanded(fixture.field);
+    assert(target.evaluate(expanded));
+
+    silex::detail::OrdinaryUnitCoordinateResult result;
+    silex::detail::OrdinaryUnitCoordinates coordinates;
+    assert(silex::detail::ordinary_unit_coordinates(
+            result, coordinates, fixture.units, target, fixture.embeddings,
+            16, 512));
+    assert_coordinates(result, coordinates, 1, expected, 2);
+
+    silex::detail::OrdinaryUnitCoordinates expanded_coordinates;
+    assert(silex::detail::ordinary_unit_coordinates(
+            result, expanded_coordinates, fixture.units, expanded,
+            fixture.embeddings, 16, 512));
+    assert_coordinates(result, expanded_coordinates, 1, expected, 2);
+
+    silex::Element two(fixture.field);
+    assert(two.set_si(2));
+    silex::detail::OrdinaryUnitCoordinates untouched;
+    assert(silex::detail::ordinary_unit_coordinates(
+            result, untouched, fixture.units, two, fixture.embeddings, 16,
+            512));
+    assert(result.success);
+    assert(result.outcome ==
+           silex::detail::OrdinaryUnitCoordinateOutcome::not_unit);
+    assert(!untouched.defined);
+    assert(fixture.units.certification_status() ==
+           silex::CertificationMode::grh);
+
+    std::vector<silex::FactoredElement> generators;
+    for (slong i = 0; i < fixture.units.free_rank(); ++i) {
+        generators.emplace_back(fixture.field);
+        assert(fixture.units.free_generator(generators.back(), i));
+    }
+    silex::OrderUnitGroup unlabelled(fixture.order);
+    assert(unlabelled.set_units(
+            fixture.order,
+            silex::FactoredElementSpan(generators.data(), generators.size()),
+            fixture.embeddings, 256));
+    assert(unlabelled.certification_status() ==
+           silex::CertificationMode::unknown);
+    silex::detail::OrdinaryUnitCoordinates refused;
+    assert(!silex::detail::ordinary_unit_coordinates(
+            result, refused, unlabelled, target, fixture.embeddings, 16,
+            512));
+    assert(!result.success);
+    assert(result.outcome ==
+           silex::detail::OrdinaryUnitCoordinateOutcome::unknown);
+    assert(result.stage ==
+           silex::detail::OrdinaryUnitCoordinateStage::input_validation);
+    assert(!refused.defined);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     assert(test_rank_zero_and_torsion_coordinates() == 0);
     assert(test_real_quadratic_round_trip_and_nonunit() == 0);
     assert(test_higher_rank_and_precision_exhaustion() == 0);
+    assert(test_grh_units_accepted_unknown_refused() == 0);
     return 0;
 }
