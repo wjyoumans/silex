@@ -1658,9 +1658,21 @@ bool factor_base_bound_bdf_right_side(
 }
 
 // The Belabas-Diaz y Diaz-Friedman search (source anchor in
-// docs/reference/algorithms_and_sources.rst): doubling from 100 until the
-// criterion holds, then a dichotomy down to a step below 100.  `evaluations` counts the
-// evaluations of the criterion's right side.
+// docs/reference/algorithms_and_sources.rst): the smallest integer cutoff T
+// at which the Arb comparison proves the criterion of BDF 2008, Section 3,
+// found as reference buch2.c:Buchall_param (2.17.3, lines 3814-3821) finds
+// LIMC2: doubling from 2 until the criterion holds, then an exact
+// bisection on the integers.  `evaluations` counts the evaluations of the
+// criterion's right side.  Unlike the reference GRHchk, which compares
+// doubles with a 1e-8 slack, every comparison here is an Arb comparison,
+// and the result is not clamped to the reference 4 log^2 |D| (the caller
+// takes the minimum with Bach's bound instead).
+//
+// The right side is monotone in T (below), so the bisection finds the
+// smallest such T.  This replaces the reference FactorBaseBound.jl
+// `_factor_base_bound_bdf(O, 100.0, 100.0)` search (doubling from 100, then
+// a dichotomy down to a step below 100), whose result was never below
+// about 50.
 //
 // When `stop_bound` is given, the search stops as soon as the criterion
 // fails at a cutoff already at least `stop_bound`, and reports `stopped`.
@@ -1671,7 +1683,7 @@ bool factor_base_bound_bdf_right_side(
 // lies above every cutoff where it fails, hence above `stop_bound`: stopping
 // there leaves min(BDF, stop_bound) unchanged.  This is not the literal rule
 // of BDF 2008, Section 3, which stops once the doubled T passes
-// 12 log^2 |D|; that rule can lose a smaller valid T that the dichotomy
+// 12 log^2 |D|; that rule can lose a smaller valid T that the bisection
 // would find.
 detail::BdfSearchOutcome factor_base_bound_bdf_search_impl(
         flint::FmpzRef out,
@@ -1743,70 +1755,71 @@ detail::BdfSearchOutcome factor_base_bound_bdf_search_impl(
             FLINT_MAX(order.degree(), WORD(1))));
     detail::ZetaBfResidueDegreeCache residue_degree_cache;
     flint::Arb right_side;
-    // Evaluates the right side at cutoff ceil(x).
-    const auto evaluate = [&](double x) noexcept {
+    // Evaluates the right side at the integer cutoff t >= 2 (exact as a
+    // double: t stays below 2^52 here).
+    const auto evaluate = [&](ulong t) noexcept {
         ++evaluations;
         return factor_base_bound_bdf_right_side(
                 right_side, order, residue_context, residue_degrees,
                 degree_scratch, residue_degree_cache, order.degree(),
-                signature.r1(), x, diagnostics);
+                signature.r1(), static_cast<double>(t), diagnostics);
     };
-    // True when the criterion fails at the cutoff ceil(x) just evaluated and
-    // that cutoff is at least `stop_bound`.  A successful evaluation has
-    // 2 <= ceil(x) < WORD_MAX.
-    const auto failed_past_stop = [&](double x) noexcept {
+    // True when the criterion fails at the cutoff t just evaluated and that
+    // cutoff is at least `stop_bound`.
+    const auto failed_past_stop = [&](ulong t) noexcept {
         return stop_bound != nullptr && flint::arb_lt(right_side, target) &&
-               flint::fmpz_cmp_ui(flint::FmpzConstRef(*stop_bound),
-                                  static_cast<ulong>(std::ceil(x))) <= 0;
+               flint::fmpz_cmp_ui(flint::FmpzConstRef(*stop_bound), t) <= 0;
     };
-    double x0 = 100.0;
-    double x1 = 2.0 * x0;
-    if (!evaluate(x0)) {
-        return BdfSearchOutcome::failed;
-    }
-    if (failed_past_stop(x0)) {
-        return BdfSearchOutcome::stopped;
-    }
+    constexpr ulong kMaximumCutoff = UWORD(1) << 52;
 
-    while (flint::arb_lt(right_side, target)) {
-        x0 = x1;
-        x1 = 2.0 * x0;
-        if (!std::isfinite(x1) || !evaluate(x1)) {
+    // Doubling from 2, as the reference doubles from max(c2 log^2 |D|, 1) = 1 with
+    // the default Bach constants.  A cutoff where the comparison cannot be
+    // decided ends the search (`failed`, so the caller takes Bach's bound).
+    ulong low = 1;  // T = 1 sums nothing and divides by log 1 = 0: fails.
+    ulong high = 2;
+    for (;;) {
+        if (!evaluate(high)) {
             return BdfSearchOutcome::failed;
         }
-        if (failed_past_stop(x1)) {
+        if (flint::arb_gt(right_side, target)) {
+            break;
+        }
+        if (!flint::arb_lt(right_side, target)) {
+            return BdfSearchOutcome::failed;
+        }
+        if (failed_past_stop(high)) {
             return BdfSearchOutcome::stopped;
         }
-    }
-    if (!flint::arb_gt(right_side, target)) {
-        return BdfSearchOutcome::failed;
+        if (high >= kMaximumCutoff) {
+            return BdfSearchOutcome::failed;
+        }
+        low = high;
+        high *= 2;
     }
 
-    double distance = std::fabs(x0 - x1);
-    while (!(flint::arb_gt(right_side, target) && distance < 100.0)) {
-        if (flint::arb_lt(right_side, target)) {
-            x1 = x0 + 3.0 * distance / 2.0;
-        } else if (flint::arb_gt(right_side, target)) {
-            x1 = x0 - distance / 2.0;
-        } else {
+    // Exact bisection on the integers, as the reference.  The criterion holds at
+    // `high`, and `low` is 1 or a cutoff where it was not certified.  A
+    // cutoff where the comparison cannot be decided counts as not certified,
+    // so `high` always is a cutoff where the Arb comparison proves the
+    // criterion; since the right side does not decrease with the cutoff,
+    // `high` ends as the smallest integer cutoff where it holds, unless an
+    // undecided comparison (a near-tie at 64 bits) moved `low` past it.
+    while (high - low > 1) {
+        const ulong middle = low + (high - low) / 2;
+        if (!evaluate(middle)) {
             return BdfSearchOutcome::failed;
         }
-        distance = std::fabs(x1 - x0);
-        x0 = x1;
-        if (!evaluate(x0)) {
-            return BdfSearchOutcome::failed;
+        if (flint::arb_gt(right_side, target)) {
+            high = middle;
+            continue;
         }
-        if (failed_past_stop(x0)) {
+        if (failed_past_stop(middle)) {
             return BdfSearchOutcome::stopped;
         }
+        low = middle;
     }
 
-    const double result = std::ceil(x0);
-    if (!std::isfinite(result) || result < 0.0 ||
-        result >= static_cast<double>(WORD_MAX)) {
-        return BdfSearchOutcome::failed;
-    }
-    flint::fmpz_set_ui(out, static_cast<ulong>(result));
+    flint::fmpz_set_ui(out, high);
     return BdfSearchOutcome::found;
 }
 

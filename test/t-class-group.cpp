@@ -3455,9 +3455,12 @@ int test_move_and_swap() {
 int test_grh_provenance_records() {
     // GRH provenance of a grh class/unit result, and the plumbing of the
     // GRH generation record.  x^3 + x + 200 (|D| = 1080004): the grh
-    // policy's GRH generation bound is the BDF bound 50, its base is built
-    // to 100, and the Minkowski-type bound is 295, so generation rests on
-    // GRH; completeness rests on a Belabas-Friedman hR.
+    // policy's GRH generation bound is the BDF bound 19 (the smallest
+    // integer cutoff where the criterion holds), its base is built to 19
+    // (the third smallest norm of a prime ideal that is not inert is 3, so
+    // the raise to three ideals does not apply), and the Minkowski-type
+    // bound is 295, so generation rests on GRH; completeness rests on a
+    // Belabas-Friedman hR.
     silex::NumberField field = cubic_field(1, 200);
     silex::Order equation_order = silex::test::equation_order(field);
     silex::Order maximal_order(field);
@@ -3487,18 +3490,18 @@ int test_grh_provenance_records() {
            silex::ClassGroupGenerationBasis::bdf);
     assert(context.factor_base_generation_certification_bound(
             sflint::FmpzRef(value)));
-    assert(sflint::fmpz_equal_si(value, 50));
+    assert(sflint::fmpz_equal_si(value, 19));
     assert(context.class_unit_completeness_certification() ==
            silex::CertificationMode::grh);
     assert(context.class_unit_completeness_basis() ==
            silex::ClassUnitCompletenessBasis::belabas_friedman);
 
     // Base completeness, checked against prime decomposition directly:
-    // every prime ideal of norm at most the build bound 100 is in the base,
+    // every prime ideal of norm at most the build bound 19 is in the base,
     // including both primes of a split pair, inert primes and ramified
-    // primes.  Under GRH these primes generate the class group because 100
-    // is at least the GRH generation bound 50.
-    const slong grh_build_bound = 100;
+    // primes.  Under GRH these primes generate the class group because 19
+    // is at least the GRH generation bound 19.
+    const slong grh_build_bound = 19;
     assert(context.factor_base_build_bound(sflint::FmpzRef(value)));
     assert(sflint::fmpz_equal_si(value, grh_build_bound));
     const silex::FactorBase* grh_base = context.factor_base();
@@ -3535,13 +3538,13 @@ int test_grh_provenance_records() {
     assert(checked_ramified > 0);
 
     // Only the two GRH theorems are recordable, and the GRH bound must not
-    // exceed the build bound (100 here).
+    // exceed the build bound (19 here).
     sflint::Fmpz grh_bound;
-    assert(set_fmpz_si(grh_bound, 101));
+    assert(set_fmpz_si(grh_bound, 20));
     assert(!CertificationAccess::record_grh_factor_base_generation(
             context, sflint::FmpzConstRef(grh_bound),
             silex::ClassGroupGenerationBasis::bach));
-    assert(set_fmpz_si(grh_bound, 60));
+    assert(set_fmpz_si(grh_bound, 15));
     assert(!CertificationAccess::record_grh_factor_base_generation(
             context, sflint::FmpzConstRef(grh_bound),
             silex::ClassGroupGenerationBasis::minkowski_type));
@@ -3561,7 +3564,7 @@ int test_grh_provenance_records() {
            silex::ClassGroupGenerationBasis::bach);
     assert(context.factor_base_generation_certification_bound(
             sflint::FmpzRef(value)));
-    assert(sflint::fmpz_equal_si(value, 60));
+    assert(sflint::fmpz_equal_si(value, 15));
     assert(context.factor_base_generation_status() !=
            silex::ProofState::verified);
 
@@ -3840,7 +3843,7 @@ int test_grh_generation_bound_bach_fallback() {
     // residue-degree route of the BDF criterion needs a monic integral
     // defining polynomial, so for the non-monic presentation BDF cannot be
     // computed and the bound is Bach's alone: ceil(12 log^2 1080004) = 2317
-    // (Bach 1990, Theorem 4).  The monic presentation keeps the BDF bound 50.
+    // (Bach 1990, Theorem 4).  The monic presentation keeps the BDF bound 19.
     silex::NumberField monic_field = cubic_field(1, 200);
     silex::Order monic_equation = silex::test::equation_order(monic_field);
     silex::Order monic_maximal(monic_field);
@@ -3849,7 +3852,7 @@ int test_grh_generation_bound_bach_fallback() {
     bool bach_selected = true;
     assert(silex::detail::grh_factor_base_bound_with_diagnostics(
             sflint::FmpzRef(bound), monic_maximal, nullptr, &bach_selected));
-    assert(sflint::fmpz_equal_si(bound, 50));
+    assert(sflint::fmpz_equal_si(bound, 19));
     assert(!bach_selected);
 
     sflint::FmpqPoly nonmonic_polynomial;
@@ -3913,14 +3916,19 @@ int test_grh_generation_bound_bach_fallback() {
         assert(!units.is_set());
     }
 
-    // End to end through the policy, a field where Bach's bound is the
-    // smaller: x^2 + x + 4 (D = -15, class group Z/2).  Bach's bound
-    // ceil(6 log^2 15) = 45 (Bach 1990, Theorem 4 and the remark following
-    // it) is below the BDF bound, whose dichotomy search never returns less
-    // than 50.  The grh policy records basis bach with that bound, and the
-    // class group's GRH generation record carries it.  The base also reaches
-    // the Minkowski-type bound of so small a field, so the public generation
-    // basis is the unconditional one.
+    // End to end through the policy: x^2 + x + 4 (D = -15, class group
+    // Z/2).  The BDF bound is 5, the smallest integer cutoff where the
+    // criterion holds, below Bach's bound ceil(6 log^2 15) = 45 (Bach 1990,
+    // Theorem 4 and the remark following it), so the grh policy records
+    // basis bdf with bound 5, and the class group's GRH generation record
+    // carries it.  (Before the BDF search reached integer resolution it never
+    // returned less than 50 and this field took Bach's bound; with the exact
+    // cutoff no field small enough to test has Bach's bound below the BDF
+    // bound, so the bach record is checked directly in
+    // test_grh_provenance_records.)  The two primes of norm 2 already give
+    // the base two ideals, so the raise to [K : Q] ideals does not apply.
+    // The base also reaches the Minkowski-type bound of so small a field,
+    // so the public generation basis is the unconditional one.
     silex::NumberField quadratic = shifted_quadratic_field(1, 4);
     silex::Order quadratic_equation = silex::test::equation_order(quadratic);
     silex::Order quadratic_maximal(quadratic);
@@ -3933,8 +3941,9 @@ int test_grh_generation_bound_bach_fallback() {
     sflint::Fmpz generation_bound;
     assert(silex::detail::grh_factor_base_bound(
             bound, quadratic_maximal, nullptr, &generation_bound, &basis));
-    assert(basis == silex::ClassGroupGenerationBasis::bach);
-    assert(sflint::fmpz_equal_si(generation_bound, 45));
+    assert(basis == silex::ClassGroupGenerationBasis::bdf);
+    assert(sflint::fmpz_equal_si(generation_bound, 5));
+    assert(sflint::fmpz_equal_si(bound, 5));
 
     silex::ClassGroupContext class_group;
     silex::OrderUnitGroup units;
@@ -3946,8 +3955,9 @@ int test_grh_generation_bound_bach_fallback() {
     assert(audit.policy.factor_base_bound ==
            silex::detail::NativeFactorBaseBoundStrategy::grh);
     assert(audit.policy.grh_generation_basis ==
-           silex::ClassGroupGenerationBasis::bach);
-    assert(sflint::fmpz_equal_si(audit.policy.grh_generation_bound, 45));
+           silex::ClassGroupGenerationBasis::bdf);
+    assert(sflint::fmpz_equal_si(audit.policy.grh_generation_bound, 5));
+    assert(audit.policy.grh_factor_base_restarts == 0);
     assert(class_group.certification_status() ==
            silex::CertificationMode::grh);
     assert(units.certification_status() == silex::CertificationMode::grh);
@@ -3957,7 +3967,7 @@ int test_grh_generation_bound_bach_fallback() {
     assert(CertificationAccess::grh_factor_base_generation_covered(
             class_group));
     assert(CertificationAccess::grh_factor_base_generation_basis(
-                   class_group) == silex::ClassGroupGenerationBasis::bach);
+                   class_group) == silex::ClassGroupGenerationBasis::bdf);
     assert(class_group.factor_base_generation_basis() ==
            silex::ClassGroupGenerationBasis::minkowski_type);
     return 0;

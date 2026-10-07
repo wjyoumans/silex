@@ -429,10 +429,15 @@ struct BdfStopCase {
     // (Bach 1990, Theorem 4 and the remark following it), computed
     // independently of Silex.
     slong bach;
-    // The full BDF search: its bound and its number of evaluations.
+    // The full BDF search: its bound, the smallest integer cutoff where
+    // the criterion holds (recomputed independently of Silex in PARI/GP at
+    // 60 digits from the same sum over prime powers below the cutoff), and
+    // its number of evaluations: doubling from 2 reaches the first power of
+    // two 2^j at least the bound in j evaluations, and the bisection of
+    // (2^(j - 1), 2^j] takes j - 1 more.
     slong bdf;
     slong evaluations;
-    // Largest cutoff where the search finds the criterion failing (0: none).
+    // Largest doubling cutoff where the criterion fails, 2^(j - 1).
     slong last_failing_doubling;
 };
 
@@ -441,16 +446,14 @@ struct BdfStopCase {
 // not decrease as the cutoff grows, so the full search would return a bound
 // above that cutoff, and the published bound min(BDF, Bach) is unchanged.
 bool check_bdf_search_stop() noexcept {
-    // x^3 + x + 200 and x^2 + x + 4 meet the criterion at the first cutoff,
-    // 100.  For x^3 + x + 1000003, x^2 + x + 1000003 and
-    // x^4 + 3x^2 + x + 10007 the doubling fails at 100 (and at 400 for the
-    // cubic and the quartic) before the criterion holds.
+    // The criterion fails at the first cutoff, 2, for every field, so the
+    // doubling fails at least once before it holds.
     const BdfStopCase cases[] = {
-            {3, {200, 1, 0, 0}, -1080004, 2317, 50, 2, 0},
-            {2, {4, 1, 0, 0}, -15, 45, 50, 2, 0},
-            {3, {1000003, 1, 0, 0}, -27000162000247, 11478, 547, 10, 400},
-            {2, {1000003, 1, 0, 0}, -4000011, 1387, 175, 5, 100},
-            {4, {10007, 1, 3, 0}, 256422632363321, 13210, 557, 9, 400},
+            {3, {200, 1, 0, 0}, -1080004, 2317, 19, 9, 16},
+            {2, {4, 1, 0, 0}, -15, 45, 5, 5, 4},
+            {3, {1000003, 1, 0, 0}, -27000162000247, 11478, 472, 17, 256},
+            {2, {1000003, 1, 0, 0}, -4000011, 1387, 123, 13, 64},
+            {4, {10007, 1, 3, 0}, 256422632363321, 13210, 550, 19, 512},
     };
     for (const BdfStopCase& c : cases) {
         const FieldSetup setup = setup_from_coefficients(c.coefficients,
@@ -504,8 +507,8 @@ bool check_bdf_search_stop() noexcept {
         // A stop at the BDF bound itself never stops: every cutoff where the
         // criterion fails lies below the bound the search returns.  (The
         // literal rule of BDF 2008, Section 3, which stops once the doubled
-        // cutoff passes the stop, would stop at 800 for the cubic and the
-        // quartic.)
+        // cutoff passes the stop, would stop at the first power of two past
+        // the bound.)
         sflint::fmpz_set_si(sflint::FmpzRef(stop), c.bdf);
         sflint::fmpz_zero(sflint::FmpzRef(stopped_bdf));
         if (silex::detail::grh_bdf_factor_base_bound_search(
@@ -517,9 +520,6 @@ bool check_bdf_search_stop() noexcept {
             return false;
         }
 
-        if (c.last_failing_doubling == 0) {
-            continue;
-        }
         // A stop at or below a cutoff where the doubling fails ends the
         // search there, after one evaluation per doubling step, and leaves
         // `out` unchanged; the bound the full search returns is above the
@@ -529,7 +529,11 @@ bool check_bdf_search_stop() noexcept {
         // degree 2 where Silex uses 6 log^2 D (BDF 2008, Section 1 after
         // Definition 1.2, Section 3, Theorem 4.3), that is for enormous
         // discriminants, so the stop here is set below Bach's bound.
-        const slong stops[] = {100, c.last_failing_doubling};
+        slong doublings = 0;
+        for (slong t = c.last_failing_doubling; t > 1; t /= 2) {
+            ++doublings;
+        }
+        const slong stops[] = {2, c.last_failing_doubling};
         for (const slong stop_value : stops) {
             sflint::fmpz_set_si(sflint::FmpzRef(stop), stop_value);
             sflint::fmpz_set_si(sflint::FmpzRef(stopped_bdf), 7);
@@ -539,7 +543,7 @@ bool check_bdf_search_stop() noexcept {
                         &stop, nullptr, &stop_evaluations) !=
                         silex::detail::BdfSearchOutcome::stopped ||
                 !sflint::fmpz_equal_si(stopped_bdf, 7) ||
-                stop_evaluations != (stop_value == 100 ? 1 : 2) ||
+                stop_evaluations != (stop_value == 2 ? 1 : doublings) ||
                 stop_evaluations >= c.evaluations ||
                 stop_value >= c.bdf) {
                 return false;
