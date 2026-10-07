@@ -1,4 +1,5 @@
 #include <silex/class_group.hpp>
+#include <silex/flint/fmpq_poly.hpp>
 #include <silex/ideal.hpp>
 #include <silex/ideal_factorization.hpp>
 
@@ -10,6 +11,7 @@
 #include "../order/order_internal.hpp"
 #include "../order_unit/class_unit_transaction_internal.hpp"
 
+#include <flint/fmpq_poly.h>
 #include <flint/fmpz.h>
 
 #include <algorithm>
@@ -446,16 +448,14 @@ public:
             if (index < 0 || index >= factor_base.length()) {
                 return false;
             }
+            // Inverses are built on first division (ensure_inverse_base);
+            // most base ideals are never divided out of the walk.
             base_.emplace_back(order);
-            base_fractional_.emplace_back(order);
-            inverse_base_.emplace_back(order);
+            base_fractional_.emplace_back();
+            inverse_base_.emplace_back();
             if (!base_.back().is_defined() ||
-                !base_fractional_.back().is_defined() ||
-                !inverse_base_.back().is_defined() ||
                 !factor_base.prime(prime, index) ||
-                !prime.get_ideal(base_.back()) ||
-                !base_fractional_.back().set_integral(base_.back()) ||
-                !inverse_base_.back().invert(base_fractional_.back())) {
+                !prime.get_ideal(base_.back())) {
                 return false;
             }
             base_indices_.push_back(index);
@@ -556,16 +556,14 @@ public:
             if (index < 0 || index >= factor_base.length()) {
                 return false;
             }
+            // Inverses are built on first division (ensure_inverse_base);
+            // most base ideals are never divided out of the walk.
             base_.emplace_back(order);
-            base_fractional_.emplace_back(order);
-            inverse_base_.emplace_back(order);
+            base_fractional_.emplace_back();
+            inverse_base_.emplace_back();
             if (!base_.back().is_defined() ||
-                !base_fractional_.back().is_defined() ||
-                !inverse_base_.back().is_defined() ||
                 !factor_base.prime(prime, index) ||
-                !prime.get_ideal(base_.back()) ||
-                !base_fractional_.back().set_integral(base_.back()) ||
-                !inverse_base_.back().invert(base_fractional_.back())) {
+                !prime.get_ideal(base_.back())) {
                 return false;
             }
             base_indices_.push_back(index);
@@ -758,25 +756,72 @@ private:
         return true;
     }
 
+    bool ensure_inverse_base(slong index) noexcept {
+        if (order_ == nullptr || index < 0 ||
+            index >= static_cast<slong>(base_.size()) ||
+            base_fractional_.size() != base_.size() ||
+            inverse_base_.size() != base_.size()) {
+            return false;
+        }
+        const std::size_t i = static_cast<std::size_t>(index);
+        if (inverse_base_[i].is_defined()) {
+            return true;
+        }
+        FractionalIdeal base_fractional(*order_);
+        FractionalIdeal inverse(*order_);
+        if (!base_fractional.is_defined() || !inverse.is_defined() ||
+            !detail::set_integral_ideal_known_hnf(base_fractional,
+                                                  base_[i]) ||
+            !inverse.invert(base_fractional)) {
+            return false;
+        }
+        base_fractional_[i].swap(base_fractional);
+        inverse_base_[i].swap(inverse);
+        return true;
+    }
+
     bool multiply_random_by_inverse_base(slong index) noexcept {
         if (order_ == nullptr || index < 0 ||
             index >= static_cast<slong>(inverse_base_.size())) {
             return false;
         }
-        FractionalIdeal random_fractional(*order_);
-        FractionalIdeal product(*order_);
-        Ideal numerator(*order_);
-        flint::Fmpz den;
-        if (!random_fractional.is_defined() || !product.is_defined() ||
-            !numerator.is_defined() ||
-            !random_fractional.set_integral(random_ideal_) ||
-            !product.multiply(
-                    random_fractional,
-                    inverse_base_[static_cast<std::size_t>(index)]) ||
-            !product.get_integral_den(numerator, flint::FmpzRef(den))) {
+        if (!ensure_inverse_base(index)) {
             return false;
         }
-        random_ideal_.swap(numerator);
+        // reference `random_get` (Ideal.jl) takes `simplify(rand * ibase[i]).num`.  With
+        // ibase[i] = N / d and P_i | rand (its exponent is positive),
+        // rand * N = d * (rand / P_i), so dividing that integral product by d
+        // gives the same integral ideal without re-validating fractional
+        // HNFs.  multiply_integral_ideal_by_element rejects a nonintegral
+        // result.
+        Ideal inverse_numerator(*order_);
+        Ideal scaled_quotient(*order_);
+        Ideal quotient(*order_);
+        flint::Fmpz den;
+        const NumberField* field = order_->parent();
+        if (field == nullptr || !inverse_numerator.is_defined() ||
+            !scaled_quotient.is_defined() || !quotient.is_defined() ||
+            !inverse_base_[static_cast<std::size_t>(index)].get_integral_den(
+                    inverse_numerator, flint::FmpzRef(den)) ||
+            flint::fmpz_sgn(flint::FmpzConstRef(den)) <= 0 ||
+            !scaled_quotient.multiply(random_ideal_, inverse_numerator)) {
+            return false;
+        }
+        if (flint::fmpz_is_one(flint::FmpzConstRef(den))) {
+            random_ideal_.swap(scaled_quotient);
+            return true;
+        }
+        Element den_inverse(*field);
+        flint::FmpqPoly constant;
+        ::fmpq_poly_set_fmpz(constant.raw(), den.raw());
+        ::fmpq_poly_inv(constant.raw(), constant.raw());
+        if (!den_inverse.is_defined() ||
+            !den_inverse.set_fmpq_poly(flint::FmpqPolyConstRef(constant)) ||
+            !detail::multiply_integral_ideal_by_element(
+                    quotient, scaled_quotient, den_inverse)) {
+            return false;
+        }
+        random_ideal_.swap(quotient);
         return true;
     }
 
