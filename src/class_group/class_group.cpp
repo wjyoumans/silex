@@ -2405,6 +2405,10 @@ bool residue_dlog_kernel(flint::FmpzMat& out,
 // x^((q-1)/ell) lies in the order-ell subgroup that apply enumerates.  The
 // cache changes only how the column is computed: every prime, pass and
 // kernel row is the same as without it.
+// Source: the reference mod_p (Saturate.jl) forms the residue product and
+// takes its discrete logarithm.  Summing logarithms is an equivalent
+// evaluation of the same homomorphism (identity above), so this deviates from
+// the reference only in evaluation order, not in the column computed.
 std::uint64_t local_saturation_element_hash(
         flint::FmpqPoly& scratch, const Element& element) noexcept {
     constexpr ulong modulus = (UWORD(1) << 61) - UWORD(1);
