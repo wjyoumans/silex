@@ -514,7 +514,11 @@ bound proves: with ``G`` the group generated so far and ``U`` the unit group,
 every denominator divides the least ``m`` with ``y^m`` in ``G`` modulo
 torsion, and ``m <= [U:G] <= B``, so ``m = B`` can occur.  The candidate
 relation is only a guess until it passes the exact power-root or torsion
-check.  An inconclusive attempt or a failed check doubles the
+check.  When adjoining ``y``, Silex decides the candidate as Hecke does, with
+the torsion check of ``Unit/Relation.jl:_check_relation_mod_torsion`` (a
+certified log screen, then exact expansion when the screen is
+inconclusive), and adjoins ``y`` itself; it extracts an ``m``-th root only
+when that check cannot complete.  An inconclusive attempt or a failed check doubles the
 precision.  Hecke's loop is unbounded; Silex stops at a fixed precision cap
 and then leaves the group unchanged.  The loop terminates below the cap in
 the usual case: when the true coordinate is ``a/b`` with ``b`` at most the

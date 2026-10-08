@@ -3203,6 +3203,81 @@ int test_dependent_relation_wrong_simplest_rational_rejected() {
     return 0;
 }
 
+// On the require_y_root path the exact torsion check decides a candidate
+// relation, as reference Unit/UnitGrpCtx.jl `_add_dependent_unit!` does with
+// `_check_relation_mod_torsion`; no m-th root is extracted.  For
+// y = -epsilon against <epsilon^3>, y^3 * (epsilon^3)^-1 = -1, so the
+// relation (-1, 3) holds with torsion exponent 1 and the root stays y.
+int test_dependent_relation_y_root_uses_torsion_check() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+    silex::FactoredElement generator(field);
+    assert(generator.push(epsilon, 3));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    silex::OrderUnitGroup group(order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            group, order, silex::FactoredElementSpan(generators, 1),
+            embeddings, 128, true));
+
+    silex::Element minus_epsilon(field);
+    assert(minus_epsilon.negate(epsilon));
+    silex::FactoredElement y(field);
+    assert(y.set_element(minus_epsilon));
+
+    constexpr slong kPrecision = 128;
+    sflint::ArbVec generator_log(2);
+    assert(generators[0].logarithmic_embedding(
+            sflint::ArbVecRef(generator_log), embeddings,
+            silex::LogEmbeddingMode::product, kPrecision));
+    sflint::ArbMat inverse(1, 1);
+    ::arb_inv(arb_mat_entry(inverse.raw(), 0, 0), generator_log.data(),
+              kPrecision);
+    sflint::Fmpz bound;
+    ::fmpz_set_si(bound.raw(), 3);
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ScopeCounter counter;
+    counter.label = "unit_group.dependent_relation_power_root";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            scope_begin_callback, &counter);
+    group.set_diagnostics(&diagnostics);
+
+    const slong expected[] = {-1, 3};
+    for (const bool require_torsion_exponent : {true, false}) {
+        silex::FactoredElement root(field);
+        sflint::FmpzMat relation(1, 2);
+        sflint::Fmpz torsion_exp;
+        ::fmpz_set_si(torsion_exp.raw(), 7);
+        bool recovered = false;
+        assert(silex::detail::dependent_relation_bounded_with_inverse(
+                recovered, root, relation, torsion_exp, group, y, embeddings,
+                inverse, sflint::FmpzConstRef(bound), kPrecision, true,
+                require_torsion_exponent));
+        assert(recovered);
+        assert(candidate_row_equals(relation, expected, 2));
+        silex::Element root_value(field);
+        assert(root.evaluate(root_value));
+        assert(root_value.equal(minus_epsilon));
+        if (require_torsion_exponent) {
+            assert(::fmpz_equal_si(torsion_exp.raw(), 1));
+        } else {
+            assert(::fmpz_equal_si(torsion_exp.raw(), 0) ||
+                   ::fmpz_equal_si(torsion_exp.raw(), 1));
+        }
+    }
+    assert(counter.count == 0);
+    group.set_diagnostics(nullptr);
+    return 0;
+}
+
 int test_saturate_row_rank_zero_and_failures() {
     silex::NumberField degree_one = degree_one_field();
     silex::Order degree_one_order;
@@ -7920,6 +7995,7 @@ int main() {
     test_rank_zero_torsion_generators();
     test_add_dependent_unit_large_denominator();
     test_dependent_relation_wrong_simplest_rational_rejected();
+    test_dependent_relation_y_root_uses_torsion_check();
     test_add_dependent_unit_precision_cap();
     test_saturate_row_rank_zero_and_failures();
     test_residue_dlog_kernel_real_quadratic();

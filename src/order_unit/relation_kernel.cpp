@@ -1754,7 +1754,27 @@ bool verify_dependent_relation_candidate(bool& recovered,
     const slong denominator = flint::fmpz_get_si(last);
 
     bool is_relation = false;
-    if (denominator >= 2) {
+    if (denominator >= 2 && require_y_root) {
+        // reference Unit/UnitGrpCtx.jl `_add_dependent_unit!` decides the
+        // candidate with `_check_relation_mod_torsion` (Unit/Relation.jl)
+        // and adjoins y itself; it extracts no m-th root.  The root path
+        // below would only confirm the same relation (its root must equal y
+        // up to torsion, and y is adjoined either way), so it runs only when
+        // the torsion check fails to complete.
+        if (!check_relation_mod_torsion(
+                    is_relation, flint::FmpzRef(torsion_exp), group, y,
+                    flint::FmpzMatConstRef(candidate), 0, &embeddings,
+                    require_torsion_exponent)) {
+            flint::Fmpz candidate_exp;
+            if (!relation_power_root(
+                        is_relation, root, candidate_exp, group, y,
+                        flint::FmpzMatConstRef(candidate), 0, true) ||
+                !is_relation) {
+                return false;
+            }
+            flint::fmpz_zero(flint::FmpzRef(torsion_exp));
+        }
+    } else if (denominator >= 2) {
         flint::Fmpz candidate_exp;
         const bool power_root_ok = relation_power_root(
                 is_relation, root, candidate_exp, group, y,
