@@ -71,9 +71,136 @@ bool has_radius_at_most_2exp(const arb_struct* value,
            ::mag_cmp_2exp_si(arb_radref(value), exponent) <= 0;
 }
 
+void set_cubic_element(silex::Element& element,
+                       slong constant,
+                       slong linear,
+                       slong quadratic) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, constant);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, linear);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, quadratic);
+    assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+}
+
+// The balanced product used by evaluation must give exactly the left-to-right
+// product of the factor powers, for small, large, and negative exponents and
+// for odd and even factor counts.
+void check_many_factor_evaluation() noexcept {
+    silex::NumberField field = cubic_field();
+    const slong exponents[] = {1,  -1, 2,  -3, 5, 9,   -9, 10,
+                               -11, 23, -24, 1, 3, -2, 7,  1,
+                               -1, 12, 4,  -5, 6, 1,   -17};
+    constexpr slong count = static_cast<slong>(sizeof(exponents) /
+                                               sizeof(exponents[0]));
+
+    for (slong length = 0; length <= count; ++length) {
+        silex::FactoredElement product(field);
+        silex::Element expected(field);
+        silex::Element factor(field);
+        silex::Element power(field);
+        silex::Element next(field);
+        silex::Element evaluated(field);
+        assert(expected.one());
+        for (slong i = 0; i < length; ++i) {
+            set_cubic_element(factor, 2 * i + 3, i % 4 - 1, (i % 3) - 1);
+            assert(product.push(factor, exponents[i]));
+            sflint::Fmpz exponent;
+            fmpz_set_si(exponent.raw(), exponents[i]);
+            assert(power.pow_fmpz(factor, sflint::FmpzConstRef(exponent)));
+            assert(next.multiply(expected, power));
+            assert(expected.set(next));
+        }
+        assert(product.evaluate(evaluated));
+        assert(evaluated.equal(expected));
+    }
+}
+
+// Power tests whose reduced leftover has several factors, so the leftover is
+// expanded by a balanced product rather than a single power.
+void check_multi_factor_leftover_roots() noexcept {
+    silex::NumberField field = cubic_field();
+    silex::Element base[6] = {
+            silex::Element(field), silex::Element(field),
+            silex::Element(field), silex::Element(field),
+            silex::Element(field), silex::Element(field)};
+    for (slong i = 0; i < 6; ++i) {
+        set_cubic_element(base[i], i + 2, 1, i % 2);
+    }
+    silex::Element partial(field);
+    silex::Element next(field);
+    assert(partial.one());
+    for (slong i = 0; i < 4; ++i) {
+        assert(next.multiply(partial, base[i]));
+        assert(partial.set(next));
+    }
+    silex::Element partial_square(field);
+    assert(partial_square.multiply(partial, partial));
+
+    bool is_power = true;
+    silex::FactoredElement input(field);
+    silex::FactoredElement root(field);
+    silex::FactoredElement check(field);
+    silex::Element input_value(field);
+    silex::Element check_value(field);
+
+    // Cubes: b0 b1 b2 b3 (b0 b1 b2 b3)^2 b4^7 b5^-6.
+    for (slong i = 0; i < 4; ++i) {
+        assert(input.push(base[i], 1));
+    }
+    assert(input.push(partial_square, 1));
+    assert(input.push(base[4], 6));
+    assert(input.push(base[5], -6));
+    assert(input.evaluate(input_value));
+    assert(input.is_power_si(is_power, root, 3,
+                             silex::FactoredRootStrategy::reduced));
+    assert(is_power);
+    assert(check.pow_si(root, 3));
+    assert(check.evaluate(check_value));
+    assert(check_value.equal(input_value));
+
+    assert(input.one());
+    for (slong i = 0; i < 4; ++i) {
+        assert(input.push(base[i], 1));
+    }
+    assert(input.push(base[4], 3));
+    // The exact cube test may report an unsupported certificate (false);
+    // when it answers, the leftover b0 b1 b2 b3 is not a cube.
+    is_power = true;
+    const bool answered = input.is_power_si(
+            is_power, root, 3, silex::FactoredRootStrategy::reduced);
+    assert(!answered || !is_power);
+
+    // Squares: b0 b1 b2 b3 (b0 b1 b2 b3) b4^4 b5^-2.
+    assert(input.one());
+    for (slong i = 0; i < 4; ++i) {
+        assert(input.push(base[i], 1));
+    }
+    assert(input.push(partial, 1));
+    assert(input.push(base[4], 4));
+    assert(input.push(base[5], -2));
+    assert(input.evaluate(input_value));
+    is_power = false;
+    assert(input.is_square(is_power, root));
+    assert(is_power);
+    assert(check.pow_si(root, 2));
+    assert(check.evaluate(check_value));
+    assert(check_value.equal(input_value));
+
+    assert(input.one());
+    for (slong i = 0; i < 5; ++i) {
+        assert(input.push(base[i], 1));
+    }
+    is_power = true;
+    const bool square_answered = input.is_square(is_power, root);
+    assert(!square_answered || !is_power);
+}
+
 }  // namespace
 
 int main() {
+    check_many_factor_evaluation();
+    check_multi_factor_leftover_roots();
+
     silex::NumberField field = degree_one_field();
     silex::NumberField other_field = degree_one_field();
 
