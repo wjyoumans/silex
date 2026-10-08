@@ -94,7 +94,8 @@ enum class ClassGroupGenerationBasis {
 // - unconditional_analytic: analytic index one against an unconditional hR
 //   (the quadratic L(1, chi) route).
 // - exact_class_number: the candidate class number equals the exact
-//   imaginary-quadratic class number.
+//   imaginary-quadratic class number.  No current route reports it: a `grh`
+//   imaginary-quadratic pair is accepted by the analytic index-one test.
 // - unconditional_certification: the class group and units were certified
 //   `proven` (saturation or an unconditional analytic check, see
 //   relation_saturation_status() and analytic_class_regulator_certification()),
@@ -239,8 +240,8 @@ public:
     // unconditional_certification),
     // relative to factor-base generation: `proven` for a `proven` class
     // group (basis unconditional_certification) and for a `grh` pair
-    // accepted through the exact imaginary-quadratic class number, an
-    // unconditional quadratic L(1, chi) hR, or the exact degree-one route;
+    // accepted through an unconditional quadratic L(1, chi) hR or the exact
+    // degree-one route;
     // `grh` for a `grh` pair accepted through a Belabas-Friedman hR (every
     // degree >= 3 field, a degree-two field outside the explicit quadratic
     // backend, and a quadratic field with |D| >= 2^44 or whose L(1, chi)
@@ -293,9 +294,8 @@ public:
     //   only once the resulting h_cand is 1 and never rescues a conditional
     //   bound.  The
     //   validation pass supplies the exact imaginary-quadratic index, which
-    //   is unconditional when generation is verified up to the
-    //   Minkowski-type bound (always so under a `proven` request) and
-    //   GRH-conditional otherwise;
+    //   is supplied only under a `proven` request, after generation is
+    //   verified up to the Minkowski-type bound, so it is unconditional;
     //   a Belabas-Friedman analytic index bound only decides whether the
     //   pass runs and is never the bound it saturates against.
     // The bounded search leaves the status unchanged when the candidate
@@ -316,8 +316,8 @@ public:
     // records that check here as well; the record is
     // informational and leaves the `grh` labels unchanged.  With a
     // Belabas-Friedman hR it also records that evaluation's audit data
-    // (zeta_bf_proof_record()).  The exact imaginary-quadratic and
-    // degree-one `grh` routes use no analytic check and record none.
+    // (zeta_bf_proof_record()).  The exact degree-one `grh` route uses no
+    // analytic check and records none.
     ProofState analytic_class_regulator_status() const noexcept;
     // `proven` for an unconditional analytic check, `grh` for a
     // Belabas-Friedman (GRH-conditional) check, and `unknown` when no

@@ -4882,17 +4882,6 @@ void ClassGroupCertificationAccess::record_grh_acceptance_analytic_check(
     }
 }
 
-void ClassGroupCertificationAccess::record_grh_acceptance_exact_class_number(
-        ClassGroupContext& context) noexcept {
-    if (!context.has_presentation() || !context.ensure_private_storage_()) {
-        return;
-    }
-    detail::ClassGroupContextStorage& storage = *context.private_storage_;
-    storage.class_unit_completeness = CertificationMode::proven;
-    storage.class_unit_completeness_basis =
-            ClassUnitCompletenessBasis::exact_class_number;
-}
-
 bool ClassGroupCertificationAccess::publish_grh_labels(
         ClassGroupContext& context,
         OrderUnitGroup& units,
@@ -5038,14 +5027,18 @@ bool ClassGroupCertificationAccess::
                 ClassGroupContext& context,
                 OrderUnitGroup& units,
                 CertificationMode requested) noexcept {
-    if ((requested != CertificationMode::grh &&
-         requested != CertificationMode::proven) ||
+    // Proven requests only.  A grh request takes h from the GRH relation
+    // lattice: generation under GRH from the base that contains every prime
+    // ideal up to min(BDF, Bach) (record_grh_factor_base_generation) and
+    // the analytic index test against hR, as in every other degree (Bach
+    // 1990, Thm 4; Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  It never
+    // lists reduced forms, whose time and memory grow like sqrt|D|.
+    if (requested != CertificationMode::proven ||
         !units.is_set() ||
         units.free_rank() != 0 ||
         !same_order_parent(units.parent(), context.parent()) ||
         !context.has_presentation() || !context.parent_.is_maximal() ||
-        (requested == CertificationMode::proven &&
-         context.factor_base_generation_status_ != ProofState::verified)) {
+        context.factor_base_generation_status_ != ProofState::verified) {
         return false;
     }
 
@@ -5063,25 +5056,13 @@ bool ClassGroupCertificationAccess::
     // state as it was.
     ClassGroupContext::CertificationTransaction_ transaction(context);
     flint::Fmpz required_bound;
-    if (requested == CertificationMode::grh) {
-        flint::Fmpz build_bound;
-        if (!context.factor_base_build_bound(flint::FmpzRef(build_bound)) ||
-            !detail::grh_factor_base_bound_with_diagnostics(
-                    flint::FmpzRef(required_bound), context.parent_,
-                    context.diagnostics()) ||
-            flint::fmpz_cmp(flint::FmpzConstRef(build_bound),
-                            flint::FmpzConstRef(required_bound)) < 0) {
-            return false;
-        }
-    }
     flint::Fmpz candidate_order;
     flint::Fmpz exact_order;
     flint::Fmpz index;
-    if ((requested == CertificationMode::proven &&
-         (!context.factor_base_generation_bound(
-                  flint::FmpzRef(required_bound)) ||
-          !context.check_factor_base_generation_bound(
-                  flint::FmpzConstRef(required_bound)))) ||
+    if (!context.factor_base_generation_bound(
+                flint::FmpzRef(required_bound)) ||
+        !context.check_factor_base_generation_bound(
+                flint::FmpzConstRef(required_bound)) ||
         !context.order(flint::FmpzRef(candidate_order)) ||
         !exact_imaginary_quadratic_class_order_for_run(
                 flint::FmpzRef(exact_order), context,
@@ -5097,11 +5078,8 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
-    // A grh request, and index > 1 under a proven request, publish nothing
-    // here, so the torsion is not checked.  At grh index one the caller
-    // publishes grh labels through publish_grh_labels, which checks it.
-    if (requested == CertificationMode::proven &&
-        flint::fmpz_is_one(flint::FmpzConstRef(index))) {
+    // Index > 1 publishes nothing here, so the torsion is not checked.
+    if (flint::fmpz_is_one(flint::FmpzConstRef(index))) {
         // Callers treat index one under a proven request as a certified
         // pair, so it is returned only after the pair is published proven.
         // The published unit group is proven only if its torsion is the

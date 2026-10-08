@@ -2303,6 +2303,67 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     return 0;
 }
 
+// A `grh` imaginary-quadratic transaction takes h from the GRH relation
+// lattice: generation under GRH to min(BDF, Bach) and the analytic
+// index-one test, without listing the reduced forms of discriminant D.
+// Listing them needs time and memory growing like sqrt|D| (about 1 GB at
+// |D| = 1e14).  D = -(10^14 + 319) = -73 * 257 * 12143 * 438953 is above
+// the 2^44 cap of the unconditional L(1, chi) route, so the index-one test
+// uses a Belabas-Friedman hR and completeness is `grh`.  h = 15815072,
+// class group Z/2 x Z/2 x Z/3953768 (GP 2.17 quadclassunit(D).cyc and
+// bnfinit(x^2 + 10^14 + 319).cyc).
+int test_imaginary_quadratic_grh_large_discriminant() {
+    const slong quadratic[] = {100000000000319, 0};
+    const char* name = "grh imaginary quadratic x^2 + 10^14 + 319";
+
+    FieldSetup setup = setup_from_coefficients(quadratic, 2);
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::grh)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)) &&
+           sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order),
+                               15815072) == 0);
+    const ulong expected_invariants[] = {2, 2, 3953768};
+    assert(class_group.invariant_count() == 3);
+    for (slong i = 0; i < 3; ++i) {
+        sflint::Fmpz invariant;
+        assert(class_group.invariant(sflint::FmpzRef(invariant), i) &&
+               sflint::fmpz_cmp_ui(sflint::FmpzConstRef(invariant),
+                                   expected_invariants[i]) == 0);
+    }
+    assert(units.is_set() && units.free_rank() == 0);
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    assert(class_group.factor_base_generation_certification() ==
+           silex::CertificationMode::grh);
+    assert(class_group.analytic_class_regulator_status() ==
+           silex::ProofState::verified);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::grh);
+    assert(class_group.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    assert(class_group.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::belabas_friedman);
+    return 0;
+}
+
 // A public generation check at a bound below the required generation bound
 // does not establish that the factor base generates the class group, so it
 // cannot stand in for the full check when the stored unconditional record
@@ -2701,6 +2762,7 @@ int main() {
     status |= test_random_quadratic_h4_proven_pair();
     status |= test_grh_cubic_records_bf_audit();
     status |= test_real_quadratic_grh_record_and_later_promotion();
+    status |= test_imaginary_quadratic_grh_large_discriminant();
     status |= test_low_bound_generation_check_does_not_promote();
     status |= test_grh_generation_below_minkowski_bound();
     status |= test_real_quadratic_h_gt_one_proven_saturation();

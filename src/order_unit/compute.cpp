@@ -2798,13 +2798,13 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         return false;
     }
     if (options.requested_certification == CertificationMode::grh &&
-        rank > 0 &&
         candidate_class_group.factor_base_generation_status() !=
                 ProofState::verified &&
         !detail::ClassGroupCertificationAccess::
                 grh_factor_base_generation_covered(candidate_class_group)) {
-        // A grh request of positive unit rank is accepted only by the
-        // analytic index-one test, which needs factor-base generation:
+        // A grh request is accepted only by the analytic index-one test
+        // (rank zero included: imaginary quadratic h comes from the GRH
+        // relation lattice, not from listing reduced forms), which needs factor-base generation:
         // unconditional (the base reaches the proven generation requirement:
         // factor_base_class_group_bound, or Zimmert's twin-class bound
         // where it applies) or, inside this grh request, under
@@ -2814,9 +2814,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         // order units".  The grh factor base is built once, above, and the
         // continuation below never rebuilds it or runs a generation proof,
         // so missing coverage here is final and the loop could only extend
-        // relations until max_relations.  Fail closed now.  Rank zero is
-        // excluded: the exact imaginary-quadratic grh route checks its own
-        // GRH coverage.
+        // relations until max_relations.  Fail closed now.
         // Unreachable under the current policy: every grh policy builds a
         // norm-bounded base for the LLL route, whose build writes the GRH
         // generation record or fails before this point.  Kept as a guard in
