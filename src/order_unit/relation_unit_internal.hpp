@@ -130,6 +130,12 @@ bool reduce_stored_relation_units(bool& changed,
                                OrderUnitGroup& group,
                                EmbeddingContext& embeddings,
                                slong precision) noexcept;
+// True when the reduce-mod-units precision ladder should stop on the
+// coordinate matrix `rows`: some entry is a ball of radius at most 0.1 that
+// contains a half-integer, and every entry that defeats the approximate
+// rounding at `precision` is a ball of radius at most 0.1.
+bool coordinate_rows_stop_at_half_integer_tie(const flint::ArbMat& rows,
+                                              slong precision) noexcept;
 bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
                             const OrderUnitGroup& group,
                             EmbeddingContext& embeddings,

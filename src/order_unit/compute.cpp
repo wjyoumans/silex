@@ -620,18 +620,26 @@ bool round_arb_approx_fmpz(flint::FmpzRef out,
     return true;
 }
 
-// True when `value` has radius at most 0.1 and contains a half-integer
-// n + 1/2.  Then no rounding of `value` to a nearest integer can be
-// certified, and a ball this narrow is an exact tie unless a higher precision
-// would move it off the half-integer.
-bool arb_is_narrow_half_integer_tie(const arb_struct* value) noexcept {
+// True when `value` is finite with radius at most 0.1, the radius up to which
+// the reference rounding of an Arb ball, Nemo
+// Base.round(::Type{ZZRingElem}, ::ArbFieldElem), rounds a ball to the integer
+// nearest its midpoint (docs/reference/algorithms_and_sources.rst).
+bool arb_is_narrow(const arb_struct* value) noexcept {
     if (value == nullptr || !arb_is_finite(value)) {
         return false;
     }
     flint::Arf radius;
     arf_set_mag(radius.raw(), arb_radref(value));
     arf_mul_ui(radius.raw(), radius.raw(), 10, ARF_PREC_EXACT, ARF_RND_DOWN);
-    if (arf_cmp_si(radius.raw(), 1) > 0) {
+    return arf_cmp_si(radius.raw(), 1) <= 0;
+}
+
+// True when `value` has radius at most 0.1 and contains a half-integer
+// n + 1/2.  Then no rounding of `value` to a nearest integer can be
+// certified.  The ball holds an exact tie, or a near-tie that a higher
+// precision would move off the half-integer.
+bool arb_is_narrow_half_integer_tie(const arb_struct* value) noexcept {
+    if (!arb_is_narrow(value)) {
         return false;
     }
 
@@ -865,18 +873,29 @@ bool reduce_mod_units_start_precision(
     return out > 0;
 }
 
-bool coordinate_rows_have_half_integer_tie(const flint::ArbMat& rows,
-                                            slong len,
-                                            slong rank) noexcept {
+bool coordinate_rows_stop_at_half_integer_tie(const flint::ArbMat& rows,
+                                              slong precision) noexcept {
+    // A wide coordinate ball that defeats the approximate rounding, such as
+    // a small nonzero coordinate whose ball still contains 0, may round at a
+    // higher precision, so only narrow balls may block the rounding here.
+    const slong len = arb_mat_nrows(rows.raw());
+    const slong rank = arb_mat_ncols(rows.raw());
+    bool tie = false;
+    flint::Fmpz rounded;
     for (slong i = 0; i < len; ++i) {
         for (slong j = 0; j < rank; ++j) {
-            if (arb_is_narrow_half_integer_tie(
-                        arb_mat_entry(rows.raw(), i, j))) {
-                return true;
+            const arb_struct* entry = arb_mat_entry(rows.raw(), i, j);
+            if (arb_is_narrow_half_integer_tie(entry)) {
+                tie = true;
+            }
+            if (!round_arb_approx_fmpz(flint::FmpzRef(rounded), entry,
+                                       precision) &&
+                !arb_is_narrow(entry)) {
+                return false;
             }
         }
     }
-    return false;
+    return tie;
 }
 
 bool reduction_coordinates(flint::FmpzMat& out,
@@ -975,8 +994,9 @@ bool reduction_coordinates(flint::FmpzMat& out,
                             flint::fmpz_mat_entry(candidate, i, j),
                             arb_mat_entry(coordinate_rows.raw(), i, j),
                             precision)) {
-                    half_integer_tie = coordinate_rows_have_half_integer_tie(
-                            coordinate_rows, len, rank);
+                    half_integer_tie =
+                            coordinate_rows_stop_at_half_integer_tie(
+                                    coordinate_rows, precision);
                     return false;
                 }
             }
@@ -1708,12 +1728,19 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
             continue;
         }
         // A coordinate that is a narrow ball around a half-integer cannot be
-        // rounded at any precision when it is an exact tie, and the ladder
-        // would end with the values unreduced.  Return them unreduced now
-        // instead of doubling the precision to the cap.  The reference
-        // Clgp/Map.jl::reduce_mod_units also stops at the first precision
-        // here, since its rounding accepts any ball of radius at most 0.1;
-        // it rounds the midpoint where Silex leaves the value unreduced.
+        // rounded at any precision when it is an exact tie.  When every
+        // coordinate that defeats the approximate rounding is also a narrow
+        // ball, return the values unreduced now instead of doubling the
+        // precision to the cap.  This matches the ladder's result at the cap
+        // when those balls hold an exact tie and exact zeros; it can differ
+        // in a near-tie, or beside a narrow ball around a small nonzero
+        // coordinate, that more precision would have settled.  The reference
+        // Clgp/Map.jl:reduce_mod_units also stops at the first precision
+        // here: its round(ZZMatrix, C) calls Nemo
+        // Base.round(::Type{ZZRingElem}, ::ArbFieldElem), which accepts any
+        // ball of radius at most 0.1 and rounds its midpoint, where Silex
+        // leaves the value unreduced (see
+        // docs/reference/algorithms_and_sources.rst).
         if (half_integer_tie) {
             SILEX_PROFILE_EVENT(group.diagnostics(),
                                 DiagnosticsModule::unit_group,

@@ -504,13 +504,18 @@ Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb
 coordinates of each unit against the generators' log matrix and divide by
 the rounded product, doubling the precision while the rounding fails.  The
-rounding differs at a half-integer.  Hecke accepts any coordinate ball of
-radius at most 0.1 and rounds its midpoint.  Silex needs a certified nearest
-integer, so an exact half-integer coordinate never rounds.  Once such a
-coordinate ball has radius at most 0.1 and contains a half-integer, Silex
-stops doubling and leaves the unit unreduced, the same result its precision
-ladder reached at the cap.  A near-tie that more precision would have moved
-off the half-integer is also left unreduced.
+rounding differs at a half-integer.  Hecke's ``round(ZZMatrix, C)`` calls
+Nemo ``src/HeckeMoreStuff.jl:Base.round(::Type{ZZRingElem}, ::ArbFieldElem)``,
+which accepts any coordinate ball of radius at most 0.1 and rounds its
+midpoint.  Silex needs a certified nearest integer, so an exact half-integer
+coordinate never rounds.  Silex stops doubling and leaves the unit unreduced
+once some coordinate ball has radius at most 0.1 and contains a
+half-integer, and every coordinate ball that defeats the approximate
+rounding (for example one that contains 0) also has radius at most 0.1.
+When those balls hold an exact tie and exact zeros, this is the result the
+precision ladder reached at the cap.  It can differ from the cap result in a
+near-tie, or beside a small nonzero coordinate whose narrow ball still
+contains 0, where more precision would have let the rounding succeed.
 
 Saturation-backed class-group proof follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_class_group_proof``: verify generation

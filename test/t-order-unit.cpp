@@ -647,7 +647,8 @@ int test_precision_doubling_cap_forced_failures() {
 // coordinate defeats the approximate rounding, so the ladder used to double
 // the precision to its cap before returning the value unreduced.  Once the
 // coordinate ball is narrow (radius at most 0.1) and contains the
-// half-integer, it now returns the value unreduced at once.
+// half-integer, and the zero coordinate's ball is narrow too, it now returns
+// the value unreduced at once.
 int test_reduce_mod_units_half_integer_tie() {
     silex::NumberField cubic = cubic_field(-3, 1);
     silex::Order order;
@@ -685,6 +686,51 @@ int test_reduce_mod_units_half_integer_tie() {
     // The ladder stopped well below its cap of
     // kReduceModUnitsMaxPrecision bits.
     assert(embeddings.precision() <= FLINT_MAX(precision_before, 1024));
+    return 0;
+}
+
+// The half-integer stop also requires every coordinate that defeats the
+// approximate rounding to be a narrow ball.  An exact tie 3/2 beside a small
+// nonzero coordinate whose wide ball still contains 0 keeps the ladder going:
+// more precision can exclude 0 from that ball, and then the approximate
+// rounding succeeds and reduces the value.
+int test_reduce_mod_units_half_integer_tie_stop_rule() {
+    const slong precision = 64;
+    sflint::ArbMat rows(1, 2);
+    arb_struct* tie = arb_mat_entry(rows.raw(), 0, 0);
+    arb_struct* other = arb_mat_entry(rows.raw(), 0, 1);
+    arb_set_ui(tie, 3);
+    arb_mul_2exp_si(tie, tie, -1);
+    arb_add_error_2exp_si(tie, -30);
+
+    // 1/32 +/- 1/4: a nonzero coordinate whose ball contains 0 and has
+    // radius above 0.1.  The ladder must continue.
+    arb_set_ui(other, 1);
+    arb_mul_2exp_si(other, other, -5);
+    arb_add_error_2exp_si(other, -2);
+    assert(!silex::detail::coordinate_rows_stop_at_half_integer_tie(
+            rows, precision));
+
+    // 1/32 +/- 1/16: the same coordinate as a narrow ball (radius at most
+    // 0.1).  The ladder stops; this near-zero case is left unreduced.
+    arb_set_ui(other, 1);
+    arb_mul_2exp_si(other, other, -5);
+    arb_add_error_2exp_si(other, -4);
+    assert(silex::detail::coordinate_rows_stop_at_half_integer_tie(
+            rows, precision));
+
+    // 0 +/- 2^-30: an exactly zero coordinate beside the tie.  The ladder
+    // stops.
+    arb_zero(other);
+    arb_add_error_2exp_si(other, -30);
+    assert(silex::detail::coordinate_rows_stop_at_half_integer_tie(
+            rows, precision));
+
+    // Without a half-integer tie the ladder continues.
+    arb_set_ui(tie, 1);
+    arb_add_error_2exp_si(tie, -30);
+    assert(!silex::detail::coordinate_rows_stop_at_half_integer_tie(
+            rows, precision));
     return 0;
 }
 
@@ -7766,6 +7812,7 @@ int main() {
     test_precision_doubling_cap_default_value();
     test_precision_doubling_cap_forced_failures();
     test_reduce_mod_units_half_integer_tie();
+    test_reduce_mod_units_half_integer_tie_stop_rule();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();
     test_compute_with_class_group_rank_zero();
