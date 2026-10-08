@@ -13,6 +13,7 @@
 #include <silex/order_element.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -576,6 +577,108 @@ int test_deterministic_failures_preserve_outputs() {
     return 0;
 }
 
+// Checks the scaled Gram matrix of a totally real power-basis lattice with
+// basis coordinates `basis` against the exact trace form: the Minkowski Gram
+// matrix of the power basis is Tr(theta^(i+j)), so `scaled_gram` must agree
+// with 2^denominator_bits * basis * Tr * basis^T up to rounding, which is
+// far below 2^-20 of the diagonal.  Power sums come from Newton's identities
+// for the monic polynomial with the given ascending coefficients.
+template <std::size_t N>
+bool scaled_gram_matches_trace_form(
+        const std::array<slong, N>& coefficients,
+        const sflint::FmpzMat& basis,
+        const sflint::FmpzMat& scaled_gram,
+        slong denominator_bits) noexcept {
+    const slong degree = static_cast<slong>(N) - 1;
+    if (degree <= 0 || coefficients[N - 1] != 1 ||
+        sflint::fmpz_mat_nrows(basis) != degree ||
+        sflint::fmpz_mat_ncols(basis) != degree ||
+        sflint::fmpz_mat_nrows(scaled_gram) != degree ||
+        sflint::fmpz_mat_ncols(scaled_gram) != degree) {
+        return false;
+    }
+
+    sflint::FmpzMat power_sums(1, 2 * degree - 1);
+    sflint::Fmpz coefficient;
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(power_sums, 0, 0), degree);
+    for (slong k = 1; k < 2 * degree - 1; ++k) {
+        sflint::FmpzRef sum = sflint::fmpz_mat_entry(power_sums, 0, k);
+        sflint::fmpz_zero(sum);
+        if (k <= degree) {
+            sflint::fmpz_set_si(sflint::FmpzRef(coefficient),
+                                k * coefficients[degree - k]);
+            sflint::fmpz_sub(sum, sflint::FmpzConstRef(sum.raw()),
+                             sflint::FmpzConstRef(coefficient));
+        }
+        for (slong i = 1; i <= std::min(k - 1, degree); ++i) {
+            sflint::fmpz_set_si(sflint::FmpzRef(coefficient),
+                                coefficients[degree - i]);
+            sflint::fmpz_submul(
+                    sum, sflint::FmpzConstRef(coefficient),
+                    sflint::fmpz_mat_entry(
+                            sflint::FmpzMatConstRef(power_sums), 0, k - i));
+        }
+    }
+
+    sflint::FmpzMat trace_form(degree, degree);
+    for (slong i = 0; i < degree; ++i) {
+        for (slong j = 0; j < degree; ++j) {
+            sflint::fmpz_set(sflint::fmpz_mat_entry(trace_form, i, j),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(power_sums), 0,
+                                     i + j));
+        }
+    }
+
+    sflint::FmpzMat basis_transpose(degree, degree);
+    sflint::FmpzMat product(degree, degree);
+    sflint::FmpzMat expected(degree, degree);
+    sflint::fmpz_mat_transpose(sflint::FmpzMatRef(basis_transpose),
+                               sflint::FmpzMatConstRef(basis));
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(product),
+                         sflint::FmpzMatConstRef(trace_form),
+                         sflint::FmpzMatConstRef(basis_transpose));
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(expected),
+                         sflint::FmpzMatConstRef(basis),
+                         sflint::FmpzMatConstRef(product));
+
+    sflint::Fmpz difference;
+    sflint::Fmpz bound;
+    for (slong i = 0; i < degree; ++i) {
+        for (slong j = 0; j < degree; ++j) {
+            // difference = scaled_gram - 2^bits * expected, times 2^20.
+            sflint::fmpz_mul_2exp(
+                    sflint::FmpzRef(difference),
+                    sflint::fmpz_mat_entry(
+                            sflint::FmpzMatConstRef(expected), i, j),
+                    static_cast<ulong>(denominator_bits));
+            sflint::fmpz_sub(sflint::FmpzRef(difference),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(scaled_gram), i,
+                                     j),
+                             sflint::FmpzConstRef(difference));
+            sflint::fmpz_mul_2exp(sflint::FmpzRef(difference),
+                                  sflint::FmpzConstRef(difference), 20);
+            // bound = 2^bits * (expected_ii + expected_jj).
+            sflint::fmpz_add(sflint::FmpzRef(bound),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(expected), i, i),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(expected), j,
+                                     j));
+            sflint::fmpz_mul_2exp(sflint::FmpzRef(bound),
+                                  sflint::FmpzConstRef(bound),
+                                  static_cast<ulong>(denominator_bits));
+            if (sflint::fmpz_sgn(sflint::FmpzConstRef(bound)) <= 0 ||
+                sflint::fmpz_cmpabs(sflint::FmpzConstRef(difference),
+                                    sflint::FmpzConstRef(bound)) > 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // Real subfield of Q(zeta_37), degree 18, in its power basis.  The
 // embeddings of theta^17 are near 2^17, so a fixed 64-bit relative
 // embedding guard misses the absolute rounding radius 0.1 * 2^-precision at
@@ -615,6 +718,19 @@ int test_large_power_basis_embeddings_round_at_first_precision() {
             data, unit_ideal, kFirstPrecision));
     assert(sflint::fmpz_equal(sflint::FmpzConstRef(data.gram_denominator),
                               sflint::FmpzConstRef(expected_denominator)));
+    // The unit ideal's HNF is the identity, so data.basis is its own
+    // transform from that HNF.
+    sflint::FmpzMat hnf(degree, degree);
+    sflint::FmpzMat identity(degree, degree);
+    assert(unit_ideal.get_hnf(sflint::FmpzMatRef(hnf)));
+    sflint::fmpz_mat_one(sflint::FmpzMatRef(identity));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(hnf),
+                                  sflint::FmpzMatConstRef(identity)));
+    assert(reduction_matrices_have_expected_properties(
+            unit_ideal, data.basis, data.basis, data.scaled_gram));
+    assert(scaled_gram_matches_trace_form(coefficients, data.basis,
+                                          data.scaled_gram,
+                                          kFirstPrecision / 2));
 
     sflint::FmpzMat weights(1, degree);
     sflint::fmpz_mat_zero(sflint::FmpzMatRef(weights));
