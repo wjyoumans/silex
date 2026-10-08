@@ -89,7 +89,7 @@ void check_many_factor_evaluation() noexcept {
     silex::NumberField field = cubic_field();
     const slong exponents[] = {1,  -1, 2,  -3, 5, 9,   -9, 10,
                                -11, 23, -24, 1, 3, -2, 7,  1,
-                               -1, 12, 4,  -5, 6, 1,   -17};
+                               -1, 12, 4,  -5, 6, 1,   -17, 1025};
     constexpr slong count = static_cast<slong>(sizeof(exponents) /
                                                sizeof(exponents[0]));
 
@@ -143,7 +143,7 @@ void check_multi_factor_leftover_roots() noexcept {
     silex::Element input_value(field);
     silex::Element check_value(field);
 
-    // Cubes: b0 b1 b2 b3 (b0 b1 b2 b3)^2 b4^7 b5^-6.
+    // Cubes: b0 b1 b2 b3 (b0 b1 b2 b3)^2 b4^6 b5^-6.
     for (slong i = 0; i < 4; ++i) {
         assert(input.push(base[i], 1));
     }
@@ -163,8 +163,10 @@ void check_multi_factor_leftover_roots() noexcept {
         assert(input.push(base[i], 1));
     }
     assert(input.push(base[4], 3));
-    // The exact cube test may report an unsupported certificate (false);
-    // when it answers, the leftover b0 b1 b2 b3 is not a cube.
+    // In this cubic field the exact cube test reports an unsupported
+    // certificate (false) for this non-cube, so this case only checks that the
+    // call does not crash or claim a power wrongly; the definite negative
+    // cases are in check_definite_non_powers.
     is_power = true;
     const bool answered = input.is_power_si(
             is_power, root, 3, silex::FactoredRootStrategy::reduced);
@@ -195,11 +197,41 @@ void check_multi_factor_leftover_roots() noexcept {
     assert(!square_answered || !is_power);
 }
 
+// Negative cases over Q, where the answer is definite: the leftover has
+// several factors and is not a power.
+void check_definite_non_powers() noexcept {
+    silex::NumberField field = degree_one_field();
+    silex::Element base[3] = {silex::Element(field), silex::Element(field),
+                              silex::Element(field)};
+    assert(base[0].set_si(2));
+    assert(base[1].set_si(3));
+    assert(base[2].set_si(5));
+    silex::FactoredElement input(field);
+    silex::FactoredElement root(field);
+    bool is_power = true;
+    // 2 * 3 * 5^2 is not a square.
+    assert(input.push(base[0], 1));
+    assert(input.push(base[1], 1));
+    assert(input.push(base[2], 2));
+    assert(input.is_square(is_power, root));
+    assert(!is_power);
+    // 2^3 * 3^3 * 5 is not a cube.
+    assert(input.one());
+    assert(input.push(base[0], 3));
+    assert(input.push(base[1], 3));
+    assert(input.push(base[2], 1));
+    is_power = true;
+    assert(input.is_power_si(is_power, root, 3,
+                             silex::FactoredRootStrategy::reduced));
+    assert(!is_power);
+}
+
 }  // namespace
 
 int main() {
     check_many_factor_evaluation();
     check_multi_factor_leftover_roots();
+    check_definite_non_powers();
 
     silex::NumberField field = degree_one_field();
     silex::NumberField other_field = degree_one_field();
