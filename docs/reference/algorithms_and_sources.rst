@@ -1334,7 +1334,16 @@ structural roots, explicit evaluation, logarithmic embeddings, and compact
 base representations.  PARI ``famat`` behavior and Hecke
 ``src/Misc/FactoredElem.jl`` and ``CompactRepresentation.jl`` supply the
 formal-product and compact-power baselines.  Exact expansion is explicit and
-is not a hidden side effect of structural operations.
+is not a hidden side effect of structural operations.  Expansion follows
+Hecke's ``evaluate(FacElem)`` (``_ev`` in ``src/Misc/FactoredElem.jl``),
+which halves exponents of absolute value at least 10 and squares the
+recursive part; the small powers, odd residual factors, and that square at
+each level are multiplied with a balanced product tree, as PARI's
+``gen_product`` (``src/basemath/bb_group.c``) does for ``gen_factorback`` and
+``nffactorback``, rather than into one running accumulator.  Field products
+are exact and canonical, so the expanded value does not depend on the
+multiplication order.  The reduced power and square tests expand only the
+leftover factors whose exponents are not multiples of the root degree.
 
 ``src/zeta`` follows the PARI analytic class-regulator and
 Belabas--Friedman-style bounds used by the class/unit proof consumers.  The

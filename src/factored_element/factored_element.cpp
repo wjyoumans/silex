@@ -3,8 +3,10 @@
 
 #include <flint/arb.h>
 
+#include <cstddef>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace silex {
 namespace {
@@ -247,6 +249,41 @@ bool split_formal_power(FactoredElement& quotient,
     return true;
 }
 
+// Multiplies `terms` together with a balanced product tree, consuming them.
+// Source trace: reference 2.17.3 src/basemath/bb_group.c `gen_product`, the
+// product step of `gen_factorback`/`nffactorback`: adjacent pairs are
+// multiplied level by level, so each operand of a large product is itself a
+// product of about half the terms instead of one growing accumulator times a
+// single factor.  The field product is exact and canonical, so the value is
+// the same as a left-to-right product.
+bool multiply_product_tree(Element& out,
+                           const NumberField& parent,
+                           std::vector<Element>& terms) noexcept {
+    if (terms.empty()) {
+        Element one(parent);
+        return one.one() && out.set(one);
+    }
+
+    Element product(parent);
+    std::size_t count = terms.size();
+    while (count > 1) {
+        std::size_t next = 0;
+        for (std::size_t i = 0; i + 1 < count; i += 2) {
+            if (!product.multiply(terms[i], terms[i + 1])) {
+                return false;
+            }
+            terms[next].swap(product);
+            ++next;
+        }
+        if (count % 2 != 0) {
+            terms[next].swap(terms[count - 1]);
+            ++next;
+        }
+        count = next;
+    }
+    return out.set(terms.front());
+}
+
 bool evaluate_entries(Element& out,
                             const NumberField& parent,
                             FactorSpan<Element> entries) noexcept {
@@ -268,27 +305,30 @@ bool evaluate_entries(Element& out,
                out.set(power);
     }
 
-    Element accumulator(parent);
-    Element power(parent);
-    Element product(parent);
-    if (!accumulator.one()) {
-        return false;
-    }
-
     // reference `evaluate(FacElem)` recursively halves large exponents and
     // multiplies the odd residual factors before squaring the recursive part.
+    // The small powers and odd residual factors of one level are collected
+    // and multiplied by `multiply_product_tree` instead of into a running
+    // accumulator.
+    std::vector<Element> terms;
+    terms.reserve(entries.size() + 1);
     FactoredElement halved(parent);
     for (const auto& entry : entries) {
+        if (entry.exponent == 0) {
+            continue;
+        }
         if (entry.exponent > -10 && entry.exponent < 10) {
-            if (entry.exponent == 0) {
+            terms.emplace_back(parent);
+            if (entry.exponent == 1) {
+                if (!terms.back().set(entry.factor)) {
+                    return false;
+                }
                 continue;
             }
             flint::Fmpz exponent;
             fmpz_set_si(exponent.raw(), entry.exponent);
-            if (!power.pow_fmpz(entry.factor,
-                                flint::FmpzConstRef(exponent)) ||
-                !product.multiply(accumulator, power) ||
-                !accumulator.set(product)) {
+            if (!terms.back().pow_fmpz(entry.factor,
+                                       flint::FmpzConstRef(exponent))) {
                 return false;
             }
             continue;
@@ -299,26 +339,24 @@ bool evaluate_entries(Element& out,
         if (divided != 0 && !halved.push(entry.factor, divided)) {
             return false;
         }
-        if (residual != 0 &&
-            (!product.multiply(accumulator, entry.factor) ||
-             !accumulator.set(product))) {
+        if (residual != 0) {
+            terms.emplace_back(parent);
+            if (!terms.back().set(entry.factor)) {
+                return false;
+            }
+        }
+    }
+
+    if (halved.length() != 0) {
+        Element half_value(parent);
+        terms.emplace_back(parent);
+        if (!evaluate_entries(half_value, parent, halved.factors()) ||
+            !terms.back().multiply(half_value, half_value)) {
             return false;
         }
     }
 
-    if (halved.length() == 0) {
-        return out.set(accumulator);
-    }
-
-    Element half_value(parent);
-    Element half_square(parent);
-    Element result(parent);
-    if (!evaluate_entries(half_value, parent, halved.factors()) ||
-        !half_square.multiply(half_value, half_value) ||
-        !result.multiply(half_square, accumulator)) {
-        return false;
-    }
-    return out.set(result);
+    return multiply_product_tree(out, parent, terms);
 }
 
 }  // namespace
