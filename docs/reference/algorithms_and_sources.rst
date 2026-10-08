@@ -475,6 +475,21 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+The ideal-lattice LLL step of relation search follows Hecke 0.39.19
+``src/NumFieldOrd/NfOrd/LLL.jl:_lll``, which rounds the scaled Minkowski Gram
+matrix from ``NfOrd.jl:minkowski_gram_mat_scaled``.  Hecke computes that
+matrix from ``minkowski_matrix(O, prec + 2)``, whose entries meet the
+absolute tolerance ``2^-(prec + 2)``.  Silex embeds at the relative precision
+``prec + 64`` and checks that every scaled entry rounds with radius at most
+``0.1``.  On high-degree power bases (for example the real cyclotomic fields
+of conductor 37 and 41) the large entries miss that check at every
+precision, so doubling ``prec`` never succeeds.  As an intentional deviation
+in the precision schedule only, when the rounding check fails Silex keeps
+``prec`` and raises the embedding precision by the measured shortfall,
+again while the shortfall keeps shrinking, before it falls back to doubling.
+Attempts that pass the rounding check are unchanged, and every relation is
+still verified exactly.
+
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
 ``Unit/Relation.jl:_find_rational_relation!``.  Silex computes the

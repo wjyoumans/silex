@@ -276,6 +276,15 @@ Changed
 Fixed
 -----
 
+- Class/unit computations no longer fail in relation search when the order's
+  Minkowski embedding has large entries, as for the power bases of the real
+  cyclotomic fields of conductor 37 and 41 (degree 18 and 20), which now
+  succeed with ``grh``.  The ideal-lattice reduction raised its working
+  precision without ever meeting its rounding check; it now raises the
+  embedding precision by the measured shortfall.  Computations whose
+  reductions passed that check are unchanged.  See "Class groups and order
+  units" in :doc:`../reference/algorithms_and_sources`.
+
 - ``FiniteAbelianGroup`` invariant generators now stay stable across witness
   requests.  A signed diagonal relation matrix such as ``diag(-2, 3)``
   previously could yield generators that changed between calls.
