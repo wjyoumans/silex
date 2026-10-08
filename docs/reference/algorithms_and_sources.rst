@@ -517,6 +517,14 @@ precision ladder reached at the cap.  It can differ from the cap result in a
 near-tie, or beside a small nonzero coordinate whose narrow ball still
 contains 0, where more precision would have let the rounding succeed.
 
+The approximate rounding itself ports ``round_approx(ZZMatrix, ArbMatrix)`` (Hecke v0.38.6)
+in the same file.  Its width check forms ``lower - upper`` (the floor of the
+lower bound minus the ceiling of the upper bound) and compares it with
+``sqrt(abs(x))``.  That difference is never positive, so the check never
+rejects; Hecke has the same sign and Silex keeps it.  A wide ball that
+excludes 0 rounds to its midpoint, and the rounding fails only for a ball
+that contains 0 or is not finite.
+
 Saturation-backed class-group proof follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_class_group_proof``: verify generation
 up to the proven generation requirement (the Minkowski-type bound, or

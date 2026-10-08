@@ -581,6 +581,15 @@ bool round_arb_to_nearest_fmpz(flint::FmpzRef out,
     return flint::arb_lt(absolute, half);
 }
 
+// Approximate rounding of an Arb ball to an integer, following the reference
+// approximate rounding (docs/reference/algorithms_and_sources.rst).  With
+// upper = ceil(upper bound) and lower = floor(lower bound) it forms
+// lower - upper and compares that with sqrt(|value|).  Since lower <= upper
+// the difference is never positive, so the comparison never rejects: a wide
+// ball that excludes 0 rounds to its midpoint div(upper + lower, 2).  Rounding
+// fails only for a non-finite ball or for a ball containing 0.  This sign is
+// kept because it is faithful to the reference and the published unit basis
+// depends on it.
 bool round_arb_approx_fmpz(flint::FmpzRef out,
                                  const arb_struct* value,
                                  slong precision) noexcept {

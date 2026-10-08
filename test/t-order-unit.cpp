@@ -31,6 +31,12 @@
 #include <utility>
 #include <vector>
 
+namespace silex::detail {
+// Defined in src/order_unit/compute.cpp; declared here to pin its behaviour.
+bool round_arb_approx_fmpz(flint::FmpzRef out, const arb_struct* value,
+                           slong precision) noexcept;
+}  // namespace silex::detail
+
 namespace {
 namespace sflint = silex::flint;
 
@@ -686,6 +692,41 @@ int test_reduce_mod_units_half_integer_tie() {
     // The ladder stopped well below its cap of
     // kReduceModUnitsMaxPrecision bits.
     assert(embeddings.precision() <= FLINT_MAX(precision_before, 1024));
+    return 0;
+}
+
+// round_arb_approx_fmpz is the reference approximate rounding.  Its width
+// check computes floor(lower) - ceil(upper), never positive, so it never
+// rejects.  A wide ball not containing 0 rounds to its midpoint; a ball
+// containing 0 is rejected.
+int test_round_arb_approx_width_check() {
+    const slong precision = 64;
+    sflint::Fmpz out;
+
+    // 100 +/- 40: wide (radius far above sqrt(100)), excludes 0.  Rounds
+    // to the midpoint.
+    sflint::Arb wide;
+    arb_set_ui(wide.raw(), 100);
+    arb_add_error_2exp_si(wide.raw(), 5);
+    arb_add_error_2exp_si(wide.raw(), 4);
+    assert(silex::detail::round_arb_approx_fmpz(sflint::FmpzRef(out),
+                                                wide.raw(), precision));
+    assert(fmpz_get_si(out.raw()) == 100);
+
+    // Narrow ball excluding 0.
+    sflint::Arb narrow;
+    arb_set_si(narrow.raw(), -7);
+    arb_add_error_2exp_si(narrow.raw(), -20);
+    assert(silex::detail::round_arb_approx_fmpz(sflint::FmpzRef(out),
+                                                narrow.raw(), precision));
+    assert(fmpz_get_si(out.raw()) == -7);
+
+    // A ball containing 0 is rejected.
+    sflint::Arb zero_ball;
+    arb_zero(zero_ball.raw());
+    arb_add_error_2exp_si(zero_ball.raw(), -1);
+    assert(!silex::detail::round_arb_approx_fmpz(sflint::FmpzRef(out),
+                                                 zero_ball.raw(), precision));
     return 0;
 }
 
@@ -7813,6 +7854,7 @@ int main() {
     test_precision_doubling_cap_forced_failures();
     test_reduce_mod_units_half_integer_tie();
     test_reduce_mod_units_half_integer_tie_stop_rule();
+    test_round_arb_approx_width_check();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();
     test_compute_with_class_group_rank_zero();
