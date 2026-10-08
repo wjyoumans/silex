@@ -25,8 +25,9 @@ constexpr slong kIdealLatticeRoundingGuardBits = 64;
 // Intentional deviation in the precision schedule only: when the rounding
 // check rejects an entry, the next attempt keeps `precision` and raises the
 // embedding precision by the measured shortfall.  It raises again at the
-// same precision only while the measured shortfall keeps shrinking;
-// otherwise precision doubles as before, keeping the raise.  Calls in which
+// same precision only while the measured shortfall at least halves, so a
+// first shortfall s allows at most about log2(s) + 1 raises; otherwise
+// precision doubles as before, keeping the raise.  Calls in which
 // every attempt passes the rounding check run exactly as before.
 enum class IdealLatticeReductionStatus {
     success,
@@ -54,7 +55,7 @@ class IdealLatticePrecisionSchedule {
         if (status == IdealLatticeReductionStatus::retry_embedding_precision &&
             embedding_shortfall_bits > 0 &&
             (last_shortfall_bits_ == 0 ||
-             embedding_shortfall_bits < last_shortfall_bits_) &&
+             2 * embedding_shortfall_bits <= last_shortfall_bits_) &&
             embedding_shortfall_bits <=
                     kIdealLatticeLllMaxPrecision - extra_embedding_bits_) {
             extra_embedding_bits_ += embedding_shortfall_bits;
