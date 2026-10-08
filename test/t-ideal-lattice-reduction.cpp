@@ -576,6 +576,65 @@ int test_deterministic_failures_preserve_outputs() {
     return 0;
 }
 
+// Real subfield of Q(zeta_37), degree 18, in its power basis.  The
+// embeddings of theta^17 are near 2^17, so a fixed 64-bit relative
+// embedding guard misses the absolute rounding radius 0.1 * 2^-precision at
+// every precision; precision doubling never closes that gap.  The LLL data
+// must build at the relation route's first precision, as the absolute
+// tolerance of the reference minkowski_gram_mat_scaled allows.
+int test_large_power_basis_embeddings_round_at_first_precision() {
+    constexpr std::array<slong, 19> coefficients = {
+            -1,  9,     45,   -120, -330, 462, 924, -792, -1287, 715,
+            1001, -364, -455, 105,  120,  -16, -17, 1,    1};
+    constexpr slong kFirstPrecision = 200;
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    const silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order order = silex::test::equation_order(field);
+    const slong degree = order.degree();
+    assert(degree == 18);
+
+    silex::Ideal unit_ideal(order);
+    assert(unit_ideal.is_defined());
+    assert(unit_ideal.one());
+
+    sflint::Fmpz expected_denominator;
+    sflint::fmpz_one(sflint::FmpzRef(expected_denominator));
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(expected_denominator),
+                          sflint::FmpzConstRef(expected_denominator),
+                          static_cast<ulong>(kFirstPrecision / 2));
+
+    silex::detail::relation_search::IdealLatticeLllData data;
+    assert(silex::detail::relation_search::build_ideal_lattice_lll_data(
+            data, unit_ideal, kFirstPrecision));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(data.gram_denominator),
+                              sflint::FmpzConstRef(expected_denominator)));
+
+    sflint::FmpzMat weights(1, degree);
+    sflint::fmpz_mat_zero(sflint::FmpzMatRef(weights));
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(weights, 0, 0), 16);
+    sflint::FmpzMat basis(degree, degree);
+    sflint::FmpzMat transform(degree, degree);
+    sflint::FmpzMat scaled_gram(degree, degree);
+    sflint::Fmpz gram_denominator;
+    assert(silex::detail::relation_search::
+                   build_weighted_ideal_lattice_reduction(
+                           basis, transform, scaled_gram, gram_denominator,
+                           unit_ideal, sflint::FmpzMatConstRef(weights),
+                           kFirstPrecision, nullptr, nullptr));
+    assert(reduction_matrices_have_expected_properties(
+            unit_ideal, basis, transform, scaled_gram));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(gram_denominator),
+                              sflint::FmpzConstRef(expected_denominator)));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -583,5 +642,7 @@ int main() {
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);
+    assert(test_large_power_basis_embeddings_round_at_first_precision() ==
+           0);
     return 0;
 }

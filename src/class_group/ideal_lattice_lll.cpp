@@ -17,10 +17,63 @@ namespace detail::relation_search {
 constexpr slong kIdealLatticeLllMaxPrecision = WORD(1) << 18;
 constexpr slong kIdealLatticeRoundingGuardBits = 64;
 
+// reference implementation NfOrd/NfOrd.jl:minkowski_gram_mat_scaled rounds
+// minkowski_matrix(O, prec + 2), whose entries meet the *absolute* tolerance
+// 2^-(prec + 2) (minkowski_map raises its working precision until they do).
+// Silex embeds at the relative precision `precision + 64`, which suffices
+// unless the embedded entries are large (high-degree power bases, weights).
+// Intentional deviation in the precision schedule only: when the rounding
+// check rejects an entry, the next attempt keeps `precision` and raises the
+// embedding precision by the measured shortfall.  It raises again at the
+// same precision only while the measured shortfall keeps shrinking;
+// otherwise precision doubles as before, keeping the raise.  Calls in which
+// every attempt passes the rounding check run exactly as before.
 enum class IdealLatticeReductionStatus {
     success,
     retry_precision,
+    retry_embedding_precision,
     failed
+};
+
+class IdealLatticePrecisionSchedule {
+  public:
+    explicit IdealLatticePrecisionSchedule(slong precision) noexcept
+        : active_precision_(precision) {}
+
+    slong active_precision() const noexcept { return active_precision_; }
+
+    slong embedding_precision() const noexcept {
+        return active_precision_ + kIdealLatticeRoundingGuardBits +
+               extra_embedding_bits_;
+    }
+
+    // Moves to the next attempt after a retry status.  Returns false when
+    // the precision cap is reached.
+    bool advance(IdealLatticeReductionStatus status,
+                 slong embedding_shortfall_bits) noexcept {
+        if (status == IdealLatticeReductionStatus::retry_embedding_precision &&
+            embedding_shortfall_bits > 0 &&
+            (last_shortfall_bits_ == 0 ||
+             embedding_shortfall_bits < last_shortfall_bits_) &&
+            embedding_shortfall_bits <=
+                    kIdealLatticeLllMaxPrecision - extra_embedding_bits_) {
+            extra_embedding_bits_ += embedding_shortfall_bits;
+            last_shortfall_bits_ = embedding_shortfall_bits;
+            return true;
+        }
+        if (active_precision_ > kIdealLatticeLllMaxPrecision / 2) {
+            return false;
+        }
+        active_precision_ *= 2;
+        last_shortfall_bits_ = 0;
+        return true;
+    }
+
+  private:
+    slong active_precision_;
+    slong extra_embedding_bits_ = 0;
+    // Shortfall that triggered the last raise at this precision; 0 if none.
+    slong last_shortfall_bits_ = 0;
 };
 
 static bool ideal_lattice_round_scaled_arb_to_fmpz(
@@ -51,6 +104,67 @@ static bool ideal_lattice_round_scaled_arb_to_fmpz(
     }
     flint::arf_get_fmpz(out, midpoint, ARF_RND_NEAR);
     return true;
+}
+
+// After ideal_lattice_scaled_embedding_rows rejects a radius, measures how
+// many more embedding bits bring every scaled radius above 0.1 below
+// 2^-4 < 0.1, assuming the absolute radius shrinks by one bit per bit of
+// embedding precision.  Returns false, leaving the plain precision
+// doubling in charge, when a ball is not finite or no shortfall is found.
+static bool ideal_lattice_rounding_shortfall_bits(
+        slong& out,
+        const flint::ArbMat& embedding_rows,
+        slong scale,
+        slong precision) noexcept {
+    out = 0;
+    const slong rows = flint::arb_mat_nrows_value(embedding_rows);
+    const slong cols = flint::arb_mat_ncols_value(embedding_rows);
+    flint::Arb scaled;
+    flint::Arb radius;
+    flint::Arf radius_upper;
+    flint::Arf midpoint;
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            flint::arb_mul_2exp_si(
+                    scaled,
+                    flint::arb_mat_entry_ref(embedding_rows, i, j).raw(),
+                    scale);
+            flint::arb_get_rad_arb(radius, scaled);
+            flint::arb_get_ubound_arf(radius_upper, radius, precision);
+            flint::arf_set(midpoint, arb_midref(scaled.raw()));
+            if (!flint::arf_is_finite(radius_upper) ||
+                !flint::arf_is_finite(midpoint)) {
+                out = 0;
+                return false;
+            }
+            const double radius_value =
+                    flint::arf_get_d(radius_upper, ARF_RND_UP);
+            if (std::isfinite(radius_value) && radius_value <= 0.1) {
+                continue;
+            }
+            // |radius| < 2^exponent, with exponent >= -3 here.
+            const slong exponent =
+                    ::arf_abs_bound_lt_2exp_si(radius_upper.raw());
+            if (exponent >= kIdealLatticeLllMaxPrecision) {
+                out = 0;
+                return false;
+            }
+            out = std::max(out, exponent + 4);
+        }
+    }
+    return out > 0;
+}
+
+static IdealLatticeReductionStatus ideal_lattice_rounding_retry_status(
+        slong& embedding_shortfall_bits,
+        const flint::ArbMat& embedding_rows,
+        slong scale,
+        slong precision) noexcept {
+    return ideal_lattice_rounding_shortfall_bits(
+                   embedding_shortfall_bits, embedding_rows, scale,
+                   precision)
+                   ? IdealLatticeReductionStatus::retry_embedding_precision
+                   : IdealLatticeReductionStatus::retry_precision;
 }
 
 static bool ideal_lattice_scaled_embedding_rows(
@@ -364,7 +478,8 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                               const Ideal& ideal,
                               const Order& order,
                               slong embedding_precision,
-                              slong precision) noexcept;
+                              slong precision,
+                              slong& embedding_shortfall_bits) noexcept;
 
 static IdealLatticeReductionStatus
 weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
@@ -376,6 +491,7 @@ weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                                        flint::FmpzMatConstRef weights,
                                        slong embedding_precision,
                                        slong precision,
+                                       slong& embedding_shortfall_bits,
                                        const DiagnosticsContext* diagnostics,
                                        detail::OrderMinkowskiEmbeddingCache* cache)
         noexcept {
@@ -394,7 +510,7 @@ weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
     if (ideal_lattice_weight_vector_is_zero(weights)) {
         return ideal_lattice_gram_lll_reduce(
                 reduced_basis, transform, reduced_gram, basis, ideal, order,
-                embedding_precision, precision);
+                embedding_precision, precision, embedding_shortfall_bits);
     }
 
     flint::FmpzMat pre_reduced_basis(degree, degree);
@@ -459,7 +575,9 @@ weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
         if (!ideal_lattice_scaled_minkowski_gram_numerator_without_diagonal(
                     original_gram, weighted_embedding_rows, precision,
                     precision)) {
-            return IdealLatticeReductionStatus::retry_precision;
+            return ideal_lattice_rounding_retry_status(
+                    embedding_shortfall_bits, weighted_embedding_rows,
+                    precision, precision);
         }
     }
     {
@@ -540,7 +658,8 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                               const Ideal& ideal,
                               const Order& order,
                               slong embedding_precision,
-                              slong precision) noexcept {
+                              slong precision,
+                              slong& embedding_shortfall_bits) noexcept {
     const slong degree = flint::fmpz_mat_nrows(basis);
     if (precision <= 0 || degree != flint::fmpz_mat_ncols(basis) ||
         embedding_precision <= 0 || order.degree() != degree ||
@@ -584,10 +703,14 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
     if (!detail::build_ideal_minkowski_embedding_rows(
                 order_embedding_rows,
                 flint::FmpzMatConstRef(order_basis), order,
-                embedding_precision) ||
-        !ideal_lattice_scaled_minkowski_gram_numerator(
-                order_gram, order_embedding_rows, precision, precision)) {
+                embedding_precision)) {
         return IdealLatticeReductionStatus::retry_precision;
+    }
+    if (!ideal_lattice_scaled_minkowski_gram_numerator(
+                order_gram, order_embedding_rows, precision, precision)) {
+        return ideal_lattice_rounding_retry_status(
+                embedding_shortfall_bits, order_embedding_rows, precision,
+                precision);
     }
     flint::fmpz_mat_transpose(
             flint::FmpzMatRef(pre_reduced_basis_transpose),
@@ -685,23 +808,27 @@ bool build_ideal_lattice_lll_data(
         return false;
     }
 
-    while (active_precision <= kIdealLatticeLllMaxPrecision) {
-        const slong embedding_precision =
-                active_precision + kIdealLatticeRoundingGuardBits;
+    IdealLatticePrecisionSchedule schedule(active_precision);
+    while (schedule.active_precision() <= kIdealLatticeLllMaxPrecision) {
+        active_precision = schedule.active_precision();
         flint::FmpzMat basis(degree, degree);
         flint::FmpzMat transform(degree, degree);
         flint::FmpzMat scaled_gram(degree, degree);
         flint::Fmpz gram_denominator;
 
+        slong embedding_shortfall_bits = 0;
         const IdealLatticeReductionStatus reduction_status =
                 ideal_lattice_gram_lll_reduce(
                         basis, transform, scaled_gram, original_basis, ideal,
-                        *order, embedding_precision, active_precision);
-        if (reduction_status == IdealLatticeReductionStatus::retry_precision) {
-            if (active_precision > kIdealLatticeLllMaxPrecision / 2) {
+                        *order, schedule.embedding_precision(),
+                        active_precision, embedding_shortfall_bits);
+        if (reduction_status == IdealLatticeReductionStatus::retry_precision ||
+            reduction_status ==
+                    IdealLatticeReductionStatus::retry_embedding_precision) {
+            if (!schedule.advance(reduction_status,
+                                  embedding_shortfall_bits)) {
                 return false;
             }
-            active_precision *= 2;
             continue;
         }
         if (reduction_status != IdealLatticeReductionStatus::success) {
@@ -761,19 +888,23 @@ bool build_weighted_ideal_lattice_reduction(
         return false;
     }
 
-    while (active_precision <= kIdealLatticeLllMaxPrecision) {
-        const slong embedding_precision =
-                active_precision + kIdealLatticeRoundingGuardBits;
+    IdealLatticePrecisionSchedule schedule(active_precision);
+    while (schedule.active_precision() <= kIdealLatticeLllMaxPrecision) {
+        active_precision = schedule.active_precision();
+        slong embedding_shortfall_bits = 0;
         const IdealLatticeReductionStatus reduction_status =
                 weighted_ideal_lattice_gram_lll_reduce(
                         basis, transform, scaled_gram, original_basis, ideal,
-                        *order, weights, embedding_precision,
-                        active_precision, diagnostics, cache);
-        if (reduction_status == IdealLatticeReductionStatus::retry_precision) {
-            if (active_precision > kIdealLatticeLllMaxPrecision / 2) {
+                        *order, weights, schedule.embedding_precision(),
+                        active_precision, embedding_shortfall_bits,
+                        diagnostics, cache);
+        if (reduction_status == IdealLatticeReductionStatus::retry_precision ||
+            reduction_status ==
+                    IdealLatticeReductionStatus::retry_embedding_precision) {
+            if (!schedule.advance(reduction_status,
+                                  embedding_shortfall_bits)) {
                 return false;
             }
-            active_precision *= 2;
             continue;
         }
         if (reduction_status != IdealLatticeReductionStatus::success) {
