@@ -486,7 +486,15 @@ of conductor 37 and 41) the large entries miss that check at every
 precision, so doubling ``prec`` never succeeds.  As an intentional deviation
 in the precision schedule only, when the rounding check fails Silex keeps
 ``prec`` and raises the embedding precision by the measured shortfall,
-again while the shortfall keeps shrinking, before it falls back to doubling.
+again while the shortfall at least halves, before it falls back to
+doubling.  A raise is kept when ``prec`` doubles.  The same schedule applies
+to the weighted reduction.  Hecke's weighted branch of ``_lll``
+(``LLL.jl:104-128``) differs from its unweighted one: it rounds
+``minkowski_matrix(K, prec)`` (``src/conjugates.jl:105-158``), BigFloat
+values at relative precision ``prec``, with ``round_scale!``
+(``Misc/Matrix.jl:405``) and no radius check.  Silex's radius check on that
+path is therefore already stricter than Hecke's, and the raise moves Silex
+toward Hecke's behavior there of rounding at the first precision.
 Attempts that pass the rounding check are unchanged, and every relation is
 still verified exactly.
 
