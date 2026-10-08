@@ -267,7 +267,8 @@ RootRefinementStatus refine_roots_from_initial(
         }
 
         // The reference doubles up to 2^22 bits.  Cap the attempts from the
-        // previous roots at a small multiple of the requested precision; the
+        // previous roots at refine_work_precision_factor times the starting
+        // precision (the requested precision plus refine_guard_bits); the
         // caller then falls back to full isolation.
         if (work_precision > max_work_precision / 2) {
             profile_root_refinement_failure(
