@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <optional>
 #include <utility>
@@ -2872,6 +2873,80 @@ int test_real_quadratic_h_gt_one_proven_saturation() {
     return 0;
 }
 
+// x^5 - 2x^4 + x^3 + x^2 - 3x + 1 (discriminant -11119), proven.  Source
+// relation completion (buch2.c:Buchall_param) sets
+// `cache.end = cache.last` after every small_norm pass, so after the
+// validation target grows the next request comes from the rank deficit
+// alone, and the relation-production prepass extends the first candidate.
+// This pins that route and the fundamental-unit basis it publishes.  With a
+// stale surplus target the extension made no progress, the candidate was
+// restarted, and the result had 12 relations, 9 relation-kernel units and
+// the free units 1 - x, -3 + x + x^2 - 2x^3 + x^4 and 1 - x + x^2.
+int test_quintic_disc11119_proven_prepass_route() {
+    const slong quintic_disc11119[] = {1, -3, 1, 1, -2};
+    const char* name = "quintic discriminant -11119 proven prepass route";
+    FieldSetup setup = setup_from_coefficients(quintic_disc11119, 5);
+
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::proven)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+    sflint::Fmpz class_order;
+    if (!class_group.order(sflint::FmpzRef(class_order)) ||
+        !sflint::fmpz_is_one(sflint::FmpzConstRef(class_order)) ||
+        !units.is_set() || units.free_rank() != 3 ||
+        class_group.certification_status() !=
+                silex::CertificationMode::proven ||
+        units.certification_status() != silex::CertificationMode::proven) {
+        std::cerr << name << ": unexpected class/unit data\n";
+        return 1;
+    }
+    if (class_group.relation_count() != 22 ||
+        class_group.relation_kernel_unit_count() != 19) {
+        std::cerr << name << ": unexpected route, relations="
+                  << class_group.relation_count() << " kernel_units="
+                  << class_group.relation_kernel_unit_count() << "\n";
+        return 1;
+    }
+    // FLINT strings of 2 - x + x^3 - x^4, 3 - x - x^2 + 2x^3 - x^4 and
+    // -2 + 2x - 2x^3 + x^4.
+    const char* const expected_units[] = {
+            "5  2 -1 0 1 -1", "5  3 -1 -1 2 -1", "5  -2 2 0 -2 1"};
+    for (slong i = 0; i < units.free_rank(); ++i) {
+        silex::FactoredElement generator(setup.field);
+        silex::Element expanded(setup.field);
+        sflint::FmpqPoly value;
+        if (!units.free_generator(generator, i) ||
+            !generator.evaluate(expanded) ||
+            !expanded.get_fmpq_poly(sflint::FmpqPolyRef(value))) {
+            std::cerr << name << ": unit " << i << " unavailable\n";
+            return 1;
+        }
+        char* text = ::fmpq_poly_get_str(value.raw());
+        const bool match = std::strcmp(text, expected_units[i]) == 0;
+        if (!match) {
+            std::cerr << name << ": unit " << i << " is " << text << "\n";
+        }
+        ::flint_free(text);
+        if (!match) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int main() {
     int status = 0;
     status |= test_public_paired_certification_request_validation();
@@ -2891,5 +2966,6 @@ int main() {
     status |= test_low_bound_generation_check_does_not_promote();
     status |= test_grh_generation_below_minkowski_bound();
     status |= test_real_quadratic_h_gt_one_proven_saturation();
+    status |= test_quintic_disc11119_proven_prepass_route();
     return status;
 }
