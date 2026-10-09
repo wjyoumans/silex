@@ -1224,12 +1224,15 @@ void word_quotient_log_shared_walk(
     }
 }
 
-}  // namespace
-
-bool residue_dlog_proof_matrix(flint::FmpzMat& out,
-                               const OrderUnitGroup& group,
-                               const PrimeIdeal& prime,
-                               flint::FmpzConstRef ell) noexcept {
+// residue_dlog_proof_matrix at `prime`.  `prime_field`, when not null, is
+// the residue field the caller already built from `prime`; it is used in
+// place of building the same field again.
+bool residue_dlog_proof_matrix_with_field(
+        flint::FmpzMat& out,
+        const OrderUnitGroup& group,
+        const PrimeIdeal& prime,
+        const ResidueField* prime_field,
+        flint::FmpzConstRef ell) noexcept {
     SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.residue_dlog_proof_matrix");
     const Order* order = group.parent();
@@ -1248,7 +1251,13 @@ bool residue_dlog_proof_matrix(flint::FmpzMat& out,
         return true;
     }
 
-    ResidueField residue_field(prime);
+    ResidueField local_field;
+    if (prime_field == nullptr) {
+        ResidueField built(prime);
+        local_field = std::move(built);
+        prime_field = &local_field;
+    }
+    const ResidueField& residue_field = *prime_field;
     if (!residue_field.is_defined()) {
         return false;
     }
@@ -1289,9 +1298,14 @@ bool residue_dlog_proof_matrix(flint::FmpzMat& out,
     word_quotient_log_shared_walk(candidate, resolved, images, residue_field,
                                   quotient_log, ell, group.diagnostics());
     for (std::size_t j = 0; j < images.size(); ++j) {
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.residue_dlog_proof_matrix.entry");
         if (resolved[j]) {
             continue;
         }
+        SILEX_PROFILE_EVENT(
+                group.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.residue_dlog_proof_matrix.entry_apply");
         if (!quotient_log.apply(
                     flint::fmpz_mat_entry(candidate, static_cast<slong>(j), 0),
                     images[j])) {
@@ -1301,6 +1315,16 @@ bool residue_dlog_proof_matrix(flint::FmpzMat& out,
 
     out = std::move(candidate);
     return true;
+}
+
+}  // namespace
+
+bool residue_dlog_proof_matrix(flint::FmpzMat& out,
+                               const OrderUnitGroup& group,
+                               const PrimeIdeal& prime,
+                               flint::FmpzConstRef ell) noexcept {
+    return residue_dlog_proof_matrix_with_field(out, group, prime, nullptr,
+                                                ell);
 }
 
 bool saturation_proof_prime_column_direct_degree_one(
@@ -1631,7 +1655,8 @@ bool saturation_proof_prime_column(flint::FmpzMat& out,
         return false;
     }
 
-    return residue_dlog_proof_matrix(out, group, prime, ell);
+    return residue_dlog_proof_matrix_with_field(out, group, prime,
+                                                &residue_field, ell);
 }
 
 bool saturation_proof_prime_rank_one_nonzero(
