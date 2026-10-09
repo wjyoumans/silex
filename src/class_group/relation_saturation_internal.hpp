@@ -101,6 +101,23 @@ bool saturation_process_candidates_once(
         RelationUnitExtractionState* unit_state = nullptr,
         slong precision = 0,
         slong max_class_relation_appends = WORD_MAX) noexcept;
+// Class-relation saturation with units: the candidate filter from the
+// stacked residue characters of reference
+// `Saturate.jl:compute_candidates_for_saturate`, as a reduced row echelon
+// basis modulo ell over the relation generators, free units and (when
+// include_torsion) the torsion generator.  See class_group.cpp.
+bool relation_saturation_candidate_filter(flint::FmpzMat& filter,
+                                          bool& available,
+                                          const ClassGroupContext& context,
+                                          const OrderUnitGroup& units,
+                                          bool include_torsion,
+                                          flint::FmpzConstRef ell) noexcept;
+bool relation_saturation_candidate_filter_contains(
+        bool& contains,
+        flint::FmpzMatConstRef filter,
+        flint::FmpzMatConstRef kernel,
+        slong row,
+        flint::FmpzConstRef ell) noexcept;
 bool saturate_class_unit_context(
         bool& success,
         SaturationCandidateProcessingResult& last_result,

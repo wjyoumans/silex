@@ -623,11 +623,13 @@ private:
             const Order& order,
             flint::FmpzConstRef factor_base_bound,
             const detail::ClassGroupRelationOptions& options) noexcept;
-    bool saturate_local_once_with_units_(bool& changed,
-                                         const OrderUnitGroup& units,
-                                         bool include_torsion,
-                                         const PrimeIdeal& prime,
-                                         flint::FmpzConstRef ell) noexcept;
+    bool saturate_local_once_with_units_(
+            bool& changed,
+            const OrderUnitGroup& units,
+            bool include_torsion,
+            const PrimeIdeal& prime,
+            flint::FmpzConstRef ell,
+            const flint::FmpzMat* candidate_filter) noexcept;
     bool saturate_local_with_units_(bool& changed,
                                     bool& index_cleared,
                                     const OrderUnitGroup& units,
