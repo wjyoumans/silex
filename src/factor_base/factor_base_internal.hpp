@@ -36,15 +36,34 @@ bool zimmert_generation_bound(flint::FmpzRef out,
                               slong real_places,
                               slong complex_pairs) noexcept;
 
-// Encloses (G_{m,j}(gamma) + n log pi) / 2 for gamma = gamma_hundredths/100,
-// where G_{m,j} is the left side of Zimmert's Hilfssatz (Zimmert 1981,
-// p. 378) for the function H of the proof of Satz 4 (pp. 379-380) with a fixed
-// number m of factors and j = ceil(1/2 + gamma).  Fails for an integer gamma,
-// gamma outside (0, 3), or r1 + r2 < 1.
+// Encloses (F_{a,b}(gamma) + n log pi) / 2 for gamma = gamma_hundredths/100,
+// a = r1 + r2, b = r2 and n = r1 + 2 r2, where F_{a,b} is Zimmert's series
+// (Zimmert 1981, p. 376) enclosed as by zimmert_f_enclosure.  Sets *terms
+// and *order, when not null, to the L and K used.  Fails for gamma outside
+// (0, 3) or r1 + r2 < 1.
 bool zimmert_twin_class_log_lower_bound(flint::ArbRef out,
                                         slong real_places,
                                         slong complex_pairs,
-                                        ulong gamma_hundredths) noexcept;
+                                        ulong gamma_hundredths,
+                                        slong* terms = nullptr,
+                                        slong* order = nullptr) noexcept;
+
+// Certified enclosure of Zimmert's F_{a,b}(gamma), gamma =
+// gamma_numerator/gamma_denominator > 0 (integers allowed), by part (iv) of
+// GB-zimmert-F-tail-bound (silex-research,
+// research/proofs/generation/GB-zimmert-F-tail-bound.md at commit 06191ff)
+// and the evaluation procedure of that proof file, each tail bounded by
+// 2^-128.  With terms = 0 on entry it chooses L and K as that proof file
+// describes; with terms > 0 it uses L = terms and K = order, failing unless
+// L > gamma/2, K >= 2 and (L, 0, K) is admissible.  On success sets terms
+// and order to the L and K used.  Fails for a < 1, b < 0 or gamma <= 0.
+bool zimmert_f_enclosure(flint::ArbRef out,
+                         slong& terms,
+                         slong& order,
+                         slong a,
+                         slong b,
+                         slong gamma_numerator,
+                         slong gamma_denominator) noexcept;
 
 // Gamma (in hundredths) used for the twin-class bound of this signature,
 // or 0 if the signature has none (n < 3, n > 20, or a negative signature).
@@ -66,8 +85,8 @@ bool zimmert_twin_class_table_entry(flint::FmpzRef significand,
 
 // Twin-class generation bound for 3 <= n <= 20: the smaller of
 // generation_bound and ceil(E sqrt|d|), E the precomputed table entry above,
-// an exact upper bound for exp(-(G_{m,j} + n log pi)/2) at the tabulated
-// gamma (Zimmert 1981, Korollar 1, in the finite-m form of its proof).  For
+// an exact upper bound for exp(-(F_{r1+r2,r2} + n log pi)/2) at the
+// tabulated gamma (Zimmert 1981, Korollar 1).  For
 // every ideal class K, K or D K^(-1) (D the class of the different) contains
 // an integral ideal of norm at most out, and the prime ideals of norm at most
 // out generate the class group with no hypothesis on D (GB-kor1-generation;

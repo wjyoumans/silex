@@ -1,12 +1,16 @@
 // Offline generator for src/factor_base/zimmert_twin_class_table.inc, the
 // precomputed constants of Zimmert's twin-class generation bound (H. Zimmert,
 // "Ideale kleiner Norm in Idealklassen und eine Regulatorabschaetzung",
-// Invent. Math. 62 (1981), 367-380, Korollar 1, in the finite-m form of the
-// proof of Satz 4).
+// Invent. Math. 62 (1981), 367-380, Korollar 1).
 //
 // For every signature (r1, r2) with 3 <= n = r1 + 2 r2 <= 20 and a tabulated
-// gamma, it encloses c = (G_{m,j}(gamma) + n log pi)/2 with the library's own
-// Arb evaluation (detail::zimmert_twin_class_log_lower_bound), encloses
+// gamma, it encloses c = (F_{a,b}(gamma) + n log pi)/2, a = r1 + r2, b = r2,
+// with the library's own Arb evaluation
+// (detail::zimmert_twin_class_log_lower_bound), which encloses Zimmert's
+// series F_{a,b} (p. 376) by the certified tail bound GB-zimmert-F-tail-bound
+// (silex-research, research/proofs/generation/GB-zimmert-F-tail-bound.md at
+// commit 06191ff), following the evaluation procedure of that proof file.  It
+// encloses
 // exp(-c) with arb_exp, takes the upper endpoint U of that ball and writes
 // the exact decimal rational E = s / 10^k with s = ceil(U 10^k) and k the
 // smallest scale giving s kDigits significant digits.  Every step rounds
@@ -46,14 +50,18 @@ constexpr slong kDigits = 30;
 
 // Sets significand and scale so that significand / 10^scale is the
 // smallest kDigits-digit decimal at least the upper endpoint of exp(-c).
+// Also sets terms and order to the L and K of the tail bound.
 bool table_entry(sflint::Fmpz& significand,
                  slong& scale,
+                 slong& terms,
+                 slong& order,
                  slong r1,
                  slong r2,
                  ulong gamma_hundredths) {
     sflint::Arb c;
     if (!silex::detail::zimmert_twin_class_log_lower_bound(
-                sflint::ArbRef(c), r1, r2, gamma_hundredths)) {
+                sflint::ArbRef(c), r1, r2, gamma_hundredths, &terms,
+                &order)) {
         return false;
     }
     sflint::Arb value;
@@ -100,12 +108,16 @@ int main() {
             "// rational s / 10^k, s with %ld significant digits, is the upper "
             "endpoint\n"
             "// of the Arb enclosure (%ld bits) of exp(-c), "
-            "c = (G_{m,j}(g) + n log pi)/2\n"
-            "// from zimmert_twin_class_log_lower_bound at g = gamma/100, "
-            "rounded up.\n"
-            "// Zimmert 1981, Korollar 1 (finite-m form); "
-            "test/t-generation-bound.cpp\n"
-            "// recomputes every entry and checks it is safe and tight.\n"
+            "c = (F_{a,b}(g) + n log pi)/2,\n"
+            "// a = r1 + r2, b = r2, from zimmert_twin_class_log_lower_bound "
+            "at\n"
+            "// g = gamma/100, rounded up.  F_{a,b} is enclosed by "
+            "GB-zimmert-F-tail-bound\n"
+            "// (silex-research @ 06191ff) with head length L and Taylor "
+            "order K.\n"
+            "// Zimmert 1981, Korollar 1; test/t-generation-bound.cpp "
+            "recomputes every\n"
+            "// entry and checks it is safe and tight.\n"
             "constexpr ZimmertTwinClassEntry kZimmertTwinClassTable[18][11] = "
             "{\n",
             static_cast<long>(kDigits), static_cast<long>(kPrecision));
@@ -122,17 +134,22 @@ int main() {
             }
             sflint::Fmpz significand;
             slong scale = 0;
-            if (!table_entry(significand, scale, r1, r2, gamma)) {
+            slong terms = 0;
+            slong order = 0;
+            if (!table_entry(significand, scale, terms, order, r1, r2,
+                             gamma)) {
                 std::fprintf(stderr,
                              "evaluation failed for r1 = %ld, r2 = %ld\n",
                              static_cast<long>(r1), static_cast<long>(r2));
                 return 1;
             }
             char* digits = fmpz_get_str(nullptr, 10, significand.raw());
-            std::printf("        {%lu, \"%s\", %ld},  // r1 = %ld, r2 = %ld\n",
+            std::printf("        {%lu, \"%s\", %ld},  // r1 = %ld, r2 = %ld"
+                        " (L = %ld, K = %ld)\n",
                         static_cast<unsigned long>(gamma), digits,
                         static_cast<long>(scale), static_cast<long>(r1),
-                        static_cast<long>(r2));
+                        static_cast<long>(r2), static_cast<long>(terms),
+                        static_cast<long>(order));
             flint_free(digits);
         }
         std::printf("    },\n");

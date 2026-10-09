@@ -60,9 +60,9 @@ constexpr ZimmertRow kZimmertRows[] = {
 
 // Zimmert 1981, Tabelle 3 (p. 377), every row with 3 <= n <= 20: the printed
 // gamma (hundredths) and the printed value digits * 10^exponent of
-// exp((F + n log pi)/2), rounded down.  The finite-m lower bound evaluated by
-// Silex must lie in [printed, printed + 10^exponent).  The same rows, with
-// F itself and the margins, are printed by test/zimmert_twin_class_oracle.py.
+// exp((F + n log pi)/2), rounded down.  Silex's enclosure of that constant
+// must lie in [printed, printed + 10^exponent).  The same rows, with the
+// margins, are printed by test/zimmert_twin_class_oracle.py.
 struct TwinTableRow {
     slong r1;
     slong r2;
@@ -83,20 +83,20 @@ constexpr TwinTableRow kZimmertTable3Rows[] = {
 // The twin-class generation bound at |d| = 10^30, from
 // test/zimmert_twin_class_oracle.py --bounds (mpmath, 40 digits).
 constexpr ZimmertRow kZimmertTwinRows[] = {
-    {3, 0, "179551258722812"},
-    {1, 1, "253049350890244"},
-    {4, 0, "54042633370230"},
-    {2, 1, "82011265496414"},
-    {0, 2, "120106805483435"},
-    {6, 0, "3653771524654"},
-    {0, 3, "15875003319015"},
-    {8, 0, "195454042501"},
-    {0, 4, "1753752398095"},
-    {10, 0, "9032610819"},
-    {0, 10, "671359"},
-    {16, 0, "529776"},
+    {3, 0, "179543323431641"},
+    {1, 1, "253040414206487"},
+    {4, 0, "54041713443025"},
+    {2, 1, "82010497502656"},
+    {0, 2, "120099755237859"},
+    {6, 0, "3653623151319"},
+    {0, 3, "15874536942412"},
+    {8, 0, "195442517658"},
+    {0, 4, "1753661445481"},
+    {10, 0, "9031932192"},
+    {0, 10, "671356"},
+    {16, 0, "529770"},
     {20, 0, "611"},
-    {1, 9, "1750324"},
+    {1, 9, "1750317"},
 };
 
 // Every class/unit fixture field of degree >= 3 in test/data and a corpus of
@@ -693,11 +693,13 @@ int test_zimmert_twin_class_pinned_values() {
 // 3 <= n <= 20 the entry exists, carries the tabulated gamma, and its exact
 // value E = s / 10^k satisfies U <= E <= U (1 + 10^-kTwinTableTolerance),
 // where U is the upper endpoint of the 128-bit Arb enclosure of exp(-c)
-// recomputed here from zimmert_twin_class_log_lower_bound.  E >= U >= exp(-c)
-// is the safe side: the run-time bound ceil(E sqrt|d|) is then at least the
-// theorem's sqrt|d| exp(-c).  The generator rounds U up to 30 significant
-// digits (relative gap below 10^-29; the enclosure itself is accurate to
-// about 2^-110), so 10^-25 leaves room for a slightly different enclosure
+// recomputed here from zimmert_twin_class_log_lower_bound, the certified
+// enclosure of c = (F + n log pi)/2 (GB-zimmert-F-tail-bound).
+// E >= U >= exp(-c) is the safe side: the run-time bound ceil(E sqrt|d|) is
+// then at least the theorem's sqrt|d| exp(-c).  The generator rounds U up to
+// 30 significant digits (relative gap below 10^-29; the enclosure itself is
+// accurate to about 2^-120), so 10^-25 leaves room for a slightly different
+// enclosure
 // radius under another FLINT build while keeping the table tight:
 // ceil(E sqrt|d|) can exceed ceil(U sqrt|d|), the value the former run-time
 // Arb evaluation produced up to its own rounding, only if an integer lies in
@@ -769,7 +771,9 @@ int test_zimmert_twin_class_verified_table() {
 }
 
 // The twin-class bound never exceeds generation_bound, is defined exactly
-// for 3 <= n <= 20, and rejects integer or out-of-range gamma.
+// for 3 <= n <= 20, and rejects gamma outside (0, 3).  Integer gamma is
+// accepted: F extends continuously there (GB-zimmert-F-tail-bound, part
+// (iii)), and the enclosure needs no special case.
 int test_zimmert_twin_class_domain() {
     const char* discriminants[] = {"23", "1000", "1000000007",
                                    "100000000000000000000"};
@@ -804,9 +808,16 @@ int test_zimmert_twin_class_domain() {
         }
     }
     sflint::Arb constant;
-    const ulong rejected_gammas[] = {0, 100, 200, 300, 450};
+    const ulong rejected_gammas[] = {0, 300, 450};
     for (ulong gamma : rejected_gammas) {
         if (silex::detail::zimmert_twin_class_log_lower_bound(
+                    sflint::ArbRef(constant), 3, 0, gamma)) {
+            return 1;
+        }
+    }
+    const ulong integer_gammas[] = {100, 200};
+    for (ulong gamma : integer_gammas) {
+        if (!silex::detail::zimmert_twin_class_log_lower_bound(
                     sflint::ArbRef(constant), 3, 0, gamma)) {
             return 1;
         }
@@ -821,6 +832,95 @@ int test_zimmert_twin_class_domain() {
     if (silex::detail::twin_class_generation_bound(
                 sflint::FmpzRef(bound),
                 sflint::FmpzConstRef(abs_discriminant), 2, 0)) {
+        return 1;
+    }
+    return 0;
+}
+
+// Zimmert's F_{a,b}(gamma) (p. 376) as enclosed by zimmert_f_enclosure
+// (GB-zimmert-F-tail-bound, part (iv)).  At non-integer gamma the expected
+// values are Zimmert's series summed directly by
+// test/zimmert_twin_class_oracle.py --self-check (mpmath nsum, no tail
+// estimate; nsum and Levin's transformation agree); at integer gamma, where
+// F is the continuous extension, they are the balls of silex-research's
+// zimmert_F (src/silex_research/zimmert.py at commit 06191ff, 128 bits).
+struct FEnclosureRow {
+    slong a;
+    slong b;
+    slong numerator;
+    slong denominator;
+    const char* value;
+    slong error_bits;  // |value - F| < 2^-error_bits
+};
+
+constexpr FEnclosureRow kFEnclosureRows[] = {
+    {3, 0, 153, 100, "0.000487830472574483870829948424647818842197", 120},
+    {1, 1, 182, 100, "-1.629146269721465997389016536729880835443", 120},
+    {20, 0, 36, 100, "33.351959734715381368703448116", 85},
+    {2, 2, 230, 100, "-0.586458985898003158518751793902", 95},
+    {2, 0, 1, 1, "-1.81257129920006115617569433814368101565", 120},
+    {1, 1, 2, 1, "-1.54626400006438097589207069697944921293", 120},
+};
+
+int test_zimmert_f_enclosure() {
+    sflint::Arb value;
+    sflint::Arb expected;
+    sflint::Arb coarse;
+    for (const FEnclosureRow& row : kFEnclosureRows) {
+        slong terms = 0;
+        slong order = 0;
+        if (!silex::detail::zimmert_f_enclosure(
+                    sflint::ArbRef(value), terms, order, row.a, row.b,
+                    row.numerator, row.denominator) ||
+            terms < 1 || order < 2 ||
+            arb_rel_accuracy_bits(value.raw()) < 100) {
+            return 1;
+        }
+        arb_set_str(expected.raw(), row.value, 256);
+        arb_add_error_2exp_si(expected.raw(), -row.error_bits);
+        if (arb_overlaps(value.raw(), expected.raw()) == 0) {
+            return 1;
+        }
+        // F does not depend on the admissible (L, K) used: a short head
+        // and a low order give a wider ball that still contains it.
+        terms = 40;
+        order = 6;
+        if (!silex::detail::zimmert_f_enclosure(
+                    sflint::ArbRef(coarse), terms, order, row.a, row.b,
+                    row.numerator, row.denominator) ||
+            terms != 40 || order != 6 ||
+            arb_contains(coarse.raw(), value.raw()) == 0 ||
+            arb_rel_accuracy_bits(coarse.raw()) >= 100) {
+            return 1;
+        }
+    }
+    // Inadmissible parameters at gamma = 23/10 (c = 28/5, rho = 15/56,
+    // sigma = 15/112): L must exceed gamma/2, K must be at least 2, and
+    // 2L + 2 must exceed (K - 1)/sigma.
+    const slong rejected[][2] = {{1, 6}, {40, 1}, {40, 12}};
+    for (const auto& parameters : rejected) {
+        slong terms = parameters[0];
+        slong order = parameters[1];
+        if (silex::detail::zimmert_f_enclosure(sflint::ArbRef(value), terms,
+                                               order, 2, 2, 23, 10)) {
+            return 1;
+        }
+    }
+    slong terms = 4;  // 2L + 2 = 10 > 1/sigma = 112/15
+    slong order = 2;
+    if (!silex::detail::zimmert_f_enclosure(sflint::ArbRef(value), terms,
+                                            order, 2, 2, 23, 10)) {
+        return 1;
+    }
+    // a >= 1, b >= 0 and gamma > 0 are required.
+    terms = 0;
+    order = 0;
+    if (silex::detail::zimmert_f_enclosure(sflint::ArbRef(value), terms,
+                                           order, 0, 1, 1, 2) ||
+        silex::detail::zimmert_f_enclosure(sflint::ArbRef(value), terms,
+                                           order, 1, -1, 1, 2) ||
+        silex::detail::zimmert_f_enclosure(sflint::ArbRef(value), terms,
+                                           order, 1, 0, 0, 1)) {
         return 1;
     }
     return 0;
@@ -915,7 +1015,7 @@ silex::Order cubic_maximal_order(slong c3, slong c1, slong c0) noexcept {
 // x^3 + x + 200 (|d| = 1080004, signature (1, 1), class group Z/2; indices
 // and prime norms from an independent computer algebra system), where the
 // Minkowski-type bound is ceil(6/27 (4/pi) sqrt(1080004)) = 295 and
-// Zimmert's twin-class bound is ceil(sqrt(1080004) / 3.95179...) = 263.
+// Zimmert's twin-class bound is ceil(sqrt(1080004) / 3.95193...) = 263.
 // Zimmert's Korollar 1 bound generates the class group with no hypothesis
 // on the class of the different (GB-kor1-generation), so every
 // presentation gets requirement 263 with route kor1_generation, whatever
@@ -1009,6 +1109,7 @@ int main() {
     assert(test_zimmert_twin_class_pinned_values() == 0);
     assert(test_zimmert_twin_class_verified_table() == 0);
     assert(test_zimmert_twin_class_domain() == 0);
+    assert(test_zimmert_f_enclosure() == 0);
     assert(test_proven_generation_requirement() == 0);
     return 0;
 }
