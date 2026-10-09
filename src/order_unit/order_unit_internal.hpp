@@ -10,6 +10,9 @@
 
 namespace silex {
 
+class ResidueField;
+class ResidueFieldElement;
+class ResidueFieldQuotientLog;
 class Signature;
 
 namespace detail {
@@ -477,6 +480,18 @@ bool residue_dlog_proof_matrix(flint::FmpzMat& out,
                                const OrderUnitGroup& group,
                                const PrimeIdeal& prime,
                                flint::FmpzConstRef ell) noexcept;
+// Fills the proof_rank x 1 column `out` with the quotient logs of `images`
+// (one residue-field element per row, all in `residue_field`) for the
+// quotient-log context `quotient_log` set to `ell`: the values
+// ResidueFieldQuotientLog::apply returns, with work shared across the column
+// on the word-size degree-one path.  Fails when any entry's apply would fail.
+bool residue_quotient_log_column(
+        flint::FmpzMat& out,
+        const std::vector<ResidueFieldElement>& images,
+        const ResidueField& residue_field,
+        const ResidueFieldQuotientLog& quotient_log,
+        flint::FmpzConstRef ell,
+        const DiagnosticsContext* diagnostics) noexcept;
 bool residue_dlog_matrix_direct_degree_one(flint::FmpzMat& out,
                                            const OrderUnitGroup& group,
                                            const PrimeIdeal& prime,

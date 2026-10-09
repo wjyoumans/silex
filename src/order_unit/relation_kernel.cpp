@@ -1224,6 +1224,46 @@ void word_quotient_log_shared_walk(
     }
 }
 
+}  // namespace
+
+bool residue_quotient_log_column(
+        flint::FmpzMat& out,
+        const std::vector<ResidueFieldElement>& images,
+        const ResidueField& residue_field,
+        const ResidueFieldQuotientLog& quotient_log,
+        flint::FmpzConstRef ell,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (flint::fmpz_mat_nrows(out) != static_cast<slong>(images.size()) ||
+        flint::fmpz_mat_ncols(out) != 1) {
+        return false;
+    }
+    // Every entry takes the quotient log of the same residue field and ell,
+    // so one walk over the powers of the quotient generator serves the whole
+    // column; entries it leaves unresolved take ResidueFieldQuotientLog::apply
+    // as before.
+    std::vector<bool> resolved(images.size(), false);
+    word_quotient_log_shared_walk(out, resolved, images, residue_field,
+                                  quotient_log, ell, diagnostics);
+    for (std::size_t j = 0; j < images.size(); ++j) {
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                            "unit_group.residue_dlog_proof_matrix.entry");
+        if (resolved[j]) {
+            continue;
+        }
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::unit_group,
+                "unit_group.residue_dlog_proof_matrix.entry_apply");
+        if (!quotient_log.apply(
+                    flint::fmpz_mat_entry(out, static_cast<slong>(j), 0),
+                    images[j])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+namespace {
+
 // residue_dlog_proof_matrix at `prime`.  `prime_field`, when not null, is
 // the residue field the caller already built from `prime`; it is used in
 // place of building the same field again.
@@ -1290,27 +1330,10 @@ bool residue_dlog_proof_matrix_with_field(
         }
     }
 
-    // Every entry takes the quotient log of the same residue field and ell,
-    // so one walk over the powers of the quotient generator serves the whole
-    // column; entries it leaves unresolved take ResidueFieldQuotientLog::apply
-    // as before.
-    std::vector<bool> resolved(images.size(), false);
-    word_quotient_log_shared_walk(candidate, resolved, images, residue_field,
-                                  quotient_log, ell, group.diagnostics());
-    for (std::size_t j = 0; j < images.size(); ++j) {
-        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
-                            "unit_group.residue_dlog_proof_matrix.entry");
-        if (resolved[j]) {
-            continue;
-        }
-        SILEX_PROFILE_EVENT(
-                group.diagnostics(), DiagnosticsModule::unit_group,
-                "unit_group.residue_dlog_proof_matrix.entry_apply");
-        if (!quotient_log.apply(
-                    flint::fmpz_mat_entry(candidate, static_cast<slong>(j), 0),
-                    images[j])) {
-            return false;
-        }
+    if (!residue_quotient_log_column(candidate, images, residue_field,
+                                     quotient_log, ell,
+                                     group.diagnostics())) {
+        return false;
     }
 
     out = std::move(candidate);

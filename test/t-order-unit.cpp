@@ -4179,6 +4179,107 @@ int test_residue_dlog_proof_matrix_matches_per_entry_quotient_log() {
     return checked >= 48 && torsion_columns > 0 ? 0 : 1;
 }
 
+// On a degree-one prime with word-size p the shared walk resolves every
+// nonzero entry, so the only entries a column leaves for
+// ResidueFieldQuotientLog::apply are zero residues, which apply rejects; a
+// unit group's column cannot produce one, so this drives
+// residue_quotient_log_column with chosen images.  A column mixing
+// walk-resolved entries with one zero entry must fail like the per-entry
+// quotient log, wherever the zero entry sits (ell = 7 at q = 71); the same
+// column without it must equal the per-entry values.
+int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    silex::Element theta_plus_two(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    assert(theta_plus_two.add_si(theta, 2));
+    const silex::Element* values[] = {&theta, &theta_minus_one,
+                                      &theta_plus_two};
+    const slong value_count = 3;
+
+    const slong cases[][2] = {{7, 71}};
+    slong checked = 0;
+    for (const auto& entry : cases) {
+        sflint::Fmpz ell;
+        sflint::Fmpz q;
+        assert(set_fmpz_si(ell, entry[0]) && set_fmpz_si(q, entry[1]));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order,
+                                      sflint::FmpzConstRef(q), 1));
+        assert(primes.size() == 3);
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            if (prime == nullptr) {
+                return 1;
+            }
+            silex::ResidueField residue_field(*prime);
+            silex::ResidueFieldQuotientLog quotient_log(residue_field);
+            assert(residue_field.is_defined() && residue_field.degree() == 1);
+            assert(quotient_log.set_ell(sflint::FmpzConstRef(ell)));
+
+            // Without a zero entry: every entry equals its own apply.
+            std::vector<silex::ResidueFieldElement> images;
+            for (slong k = 0; k < value_count; ++k) {
+                images.emplace_back(residue_field);
+                assert(images.back().set_element(*values[k]));
+                assert(!images.back().is_zero());
+            }
+            sflint::FmpzMat column(value_count, 1);
+            sflint::Fmpz expected;
+            bool matches = silex::detail::residue_quotient_log_column(
+                    column, images, residue_field, quotient_log,
+                    sflint::FmpzConstRef(ell), nullptr);
+            for (slong k = 0; matches && k < value_count; ++k) {
+                matches = quotient_log.apply(
+                                  sflint::FmpzRef(expected),
+                                  images[static_cast<std::size_t>(k)]) &&
+                          ::fmpz_equal(expected.raw(),
+                                       ::fmpz_mat_entry(column.raw(), k,
+                                                        0)) != 0;
+            }
+            assert(matches);
+            if (!matches) {
+                return 1;
+            }
+
+            // A zero entry at each position: apply rejects it, so the
+            // column fails.
+            for (slong zero_at = 0; zero_at <= value_count; ++zero_at) {
+                std::vector<silex::ResidueFieldElement> mixed;
+                for (slong k = 0; k <= value_count; ++k) {
+                    mixed.emplace_back(residue_field);
+                    if (k == zero_at) {
+                        assert(mixed.back().zero());
+                        assert(!quotient_log.apply(sflint::FmpzRef(expected),
+                                                   mixed.back()));
+                        continue;
+                    }
+                    const slong source = k < zero_at ? k : k - 1;
+                    assert(mixed.back().set_element(*values[source]));
+                }
+                sflint::FmpzMat mixed_column(value_count + 1, 1);
+                const bool rejected =
+                        !silex::detail::residue_quotient_log_column(
+                                mixed_column, mixed, residue_field,
+                                quotient_log, sflint::FmpzConstRef(ell),
+                                nullptr);
+                assert(rejected);
+                if (!rejected) {
+                    return 1;
+                }
+            }
+            ++checked;
+        }
+    }
+    assert(checked == 3);
+    return checked == 3 ? 0 : 1;
+}
+
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
     silex::OrderUnitGroup group = real_quadratic_unit_group();
     const silex::Order* order = group.parent();
@@ -8366,6 +8467,7 @@ int main() {
     test_direct_degree_one_proof_column_matches_residue_field();
     test_direct_degree_one_residue_dlog_matrix_matches_residue_field();
     test_residue_dlog_proof_matrix_matches_per_entry_quotient_log();
+    test_residue_quotient_log_column_mixes_resolved_and_apply_entries();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();
     test_unit_proof_records();
