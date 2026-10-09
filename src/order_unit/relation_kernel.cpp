@@ -1795,8 +1795,8 @@ bool verify_dependent_relation_candidate(bool& recovered,
     }
     if (is_relation) {
         // reference `_add_dependent_unit!` transforms `vcat(U.units, y)`.  The
-        // exact torsion-check fallback may leave an unrelated attempted power
-        // root in `root`, so the strict reference path must restore `y` here.
+        // torsion check does not write `root` when it decides, and the
+        // power-root fallback sets `root = y` or fails, so set it to `y` here.
         if ((denominator < 2 || require_y_root) && !root.set(y)) {
             return false;
         }
