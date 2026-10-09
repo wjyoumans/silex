@@ -55,7 +55,20 @@ inline ClassGroupRelationOptions class_group_relation_options(
     return options;
 }
 
+// The class number h(D) of the imaginary quadratic maximal order of
+// fundamental discriminant D < 0 with |D| < 2^63: counted from the reduced
+// forms for |D| < 2^44, from Dirichlet's class number formula with a
+// rigorous L(1, chi_D) enclosure (imaginary_quadratic_class_number_analytic)
+// above.  Returns false, leaving `out` unspecified, if neither gives h(D).
 bool imaginary_quadratic_class_number(
+        flint::FmpzRef out,
+        flint::FmpzConstRef discriminant) noexcept;
+
+// h(D) for a fundamental discriminant D < -4 with |D| < 2^63 from
+// h(D) = sqrt|D| L(1, chi_D) / pi, returned only when the ball enclosing it
+// contains exactly one integer; false otherwise.  D is not checked to be
+// fundamental.
+bool imaginary_quadratic_class_number_analytic(
         flint::FmpzRef out,
         flint::FmpzConstRef discriminant) noexcept;
 

@@ -50,6 +50,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <new>
 #include <type_traits>
@@ -62,7 +64,72 @@ bool relation_saturation_torsion_needed(bool& out,
                                         const OrderUnitGroup& units,
                                         flint::FmpzConstRef ell) noexcept;
 
+namespace {
+
+// Largest bit length of |D| at which the exact class number h(D) of an
+// imaginary quadratic maximal order is counted from the reduced forms of
+// discriminant D (FLINT qfb_reduced_forms, time and memory growing like
+// sqrt|D|): |D| < 2^44.  At and above 2^44 the listing is not used: a grh
+// class/unit request takes h from the GRH relation lattice
+// (rank_zero_quadratic_class_index_bound), and h(D) itself comes from
+// Dirichlet's class number formula with a rigorous L(1, chi_D) enclosure
+// (imaginary_quadratic_class_number_analytic below).  Below 2^44 the
+// listing is faster than either: measured per decade over |D| from 1e7 to
+// 1e14 in docs/development/class_number_route_cutoff.rst.
+constexpr ulong imaginary_quadratic_listing_max_abs_discriminant_bits = 44;
+
+}  // namespace
+
 namespace detail {
+
+// h(D) for a fundamental discriminant D < -4 from Dirichlet's class number
+// formula h(D) = w sqrt|D| L(1, chi_D) / (2 pi) with w = 2 (Davenport,
+// "Multiplicative Number Theory", 3rd ed., Chapter 6), with L(1, chi_D)
+// enclosed rigorously by the approximate functional equation of
+// detail::quadratic_dirichlet_l1 (FLINT acb_dirichlet_l_fmpq_afe, see
+// src/zeta/zeta.cpp).  The ball for h is computed in arb arithmetic from
+// that enclosure, so it contains the integer h(D); h(D) is returned only
+// when the ball contains exactly one integer.  The working precision is the
+// bit length of |D| plus 32, which exceeds the bit length of h(D) < |D|, and
+// is doubled once if the ball still holds more than one integer; otherwise
+// the call fails closed.  The time grows like sqrt(|D| prec) and the memory
+// is constant.
+bool imaginary_quadratic_class_number_analytic(
+        flint::FmpzRef out,
+        flint::FmpzConstRef discriminant) noexcept {
+    if (::fmpz_cmp_si(discriminant.raw(), -4) >= 0 ||
+        !flint::fmpz_fits_si(discriminant)) {
+        return false;
+    }
+    flint::Fmpz abs_discriminant;
+    flint::fmpz_abs(flint::FmpzRef(abs_discriminant), discriminant);
+    const ulong q = flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
+    const slong first_precision =
+            static_cast<slong>(::fmpz_bits(abs_discriminant.raw())) + 32;
+    for (slong precision = first_precision;
+         precision <= 2 * first_precision; precision *= 2) {
+        flint::Arb l_value;
+        if (!quadratic_dirichlet_l1(flint::ArbRef(l_value), discriminant,
+                                    precision) ||
+            !flint::arb_is_positive(l_value)) {
+            return false;
+        }
+        // w / (2 pi) = 1 / pi for D < -4.
+        flint::Arb class_number;
+        flint::Arb t;
+        flint::arb_sqrt_ui(t, q, precision);
+        flint::arb_mul(class_number, l_value, t, precision);
+        flint::arb_const_pi(t, precision);
+        flint::arb_div(class_number, class_number, t, precision);
+        flint::Fmpz unique;
+        if (::arb_get_unique_fmpz(unique.raw(), class_number.raw()) != 0 &&
+            flint::fmpz_sgn(flint::FmpzConstRef(unique)) > 0) {
+            flint::fmpz_set(out, flint::FmpzConstRef(unique));
+            return true;
+        }
+    }
+    return false;
+}
 
 bool imaginary_quadratic_class_number(flint::FmpzRef out,
                                       flint::FmpzConstRef discriminant)
@@ -70,6 +137,13 @@ bool imaginary_quadratic_class_number(flint::FmpzRef out,
     if (flint::fmpz_sgn(discriminant) >= 0 ||
         !flint::fmpz_fits_si(discriminant)) {
         return false;
+    }
+    // From 2^44 on, Dirichlet's formula instead of the listing, whose
+    // memory (about 1.4 GB at |D| = 1e14) can exhaust the process, and FLINT
+    // aborts on a failed allocation.
+    if (::fmpz_bits(discriminant.raw()) >
+        imaginary_quadratic_listing_max_abs_discriminant_bits) {
+        return imaginary_quadratic_class_number_analytic(out, discriminant);
     }
 
     struct ReducedForms {
@@ -869,6 +943,29 @@ bool reset_row_module(fmpz_smat::HnfContext& module, slong ncols) noexcept {
     return module.reset(ncols, kRowModuleModRankPrime);
 }
 
+// Whether one block of ncols * ncols words can be allocated now.  Each
+// relation module keeps dense ncols x ncols mod-p rank matrices
+// (fmpz_smat::ModRankContext, FLINT nmod_mat_init), and FLINT aborts the
+// process when such an allocation fails (flint_calloc).  Probing the same
+// allocation first lets a factor base too large for the available memory
+// fail closed instead; it refuses nothing that FLINT would allocate.
+bool dense_mod_rank_matrix_allocatable(slong ncols) noexcept {
+    if (ncols <= 0) {
+        return true;
+    }
+    const std::size_t n = static_cast<std::size_t>(ncols);
+    if (n > SIZE_MAX / sizeof(ulong) / n) {
+        return false;
+    }
+    // Volatile, so the compiler cannot elide the allocation and free pair.
+    void* volatile probe = std::calloc(n * n, sizeof(ulong));
+    if (probe == nullptr) {
+        return false;
+    }
+    std::free(probe);
+    return true;
+}
+
 bool reset_relation_modules(
         fmpz_smat::HnfContext& row_module,
         detail::ClassRelationModuleContext& relation_module,
@@ -876,6 +973,13 @@ bool reset_relation_modules(
         const DiagnosticsContext* diagnostics) noexcept {
     row_module.set_diagnostics(diagnostics);
     relation_module.set_diagnostics(diagnostics);
+    if (!dense_mod_rank_matrix_allocatable(ncols)) {
+        SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                  LogLevel::detail,
+                  "relation module mod-p rank matrix cannot be allocated "
+                  "for this factor base");
+        return false;
+    }
     return reset_row_module(row_module, ncols) &&
            relation_module.reset(ncols, kRowModuleModRankPrime);
 }
@@ -5035,17 +5139,17 @@ ClassGroupCertificationAccess::factor_base_generation_different_route(
 namespace {
 
 // Bit length of |D| from which a grh imaginary-quadratic request takes h
-// from the GRH relation lattice instead of listing the reduced forms of
-// discriminant D (FLINT qfb_reduced_forms, time and memory growing like
-// sqrt|D|): |D| >= 2^44.  Below it the listing is faster.  The lattice
-// route's index-one test there would use the unconditional L(1, chi) hR,
+// from the GRH relation lattice instead of the exact class number h(D)
+// (imaginary_quadratic_listing_max_abs_discriminant_bits): |D| >= 2^44.
+// Below it h(D) is counted from the reduced forms, which is faster.  The
+// lattice route's index-one test there would use the unconditional L(1, chi) hR,
 // whose approximate functional equation costs more than the listing at
 // every measured |D| < 2^44; at and above 2^44 it uses a Belabas-Friedman
 // hR (zeta.cpp, quadratic_route_max_abs_discriminant_bits) and is faster
 // than the listing at every measured |D|.  Measured per decade over |D|
 // from 1e7 to 1e14: docs/development/class_number_route_cutoff.rst.
 constexpr ulong grh_imaginary_quadratic_lattice_min_abs_discriminant_bits =
-        45;
+        imaginary_quadratic_listing_max_abs_discriminant_bits + 1;
 
 }  // namespace
 

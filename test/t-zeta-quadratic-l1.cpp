@@ -1,3 +1,4 @@
+#include "class_group/class_group_internal.hpp"
 #include "zeta/zeta_internal.hpp"
 
 #include <silex/class_group.hpp>
@@ -20,6 +21,7 @@
 #include <flint/acb_dirichlet.h>
 #include <flint/arb.h>
 #include <flint/arb_hypgeom.h>
+#include <flint/ulong_extras.h>
 
 namespace {
 namespace sflint = silex::flint;
@@ -386,6 +388,81 @@ void check_failure_paths() {
     check_fails_closed(d, -5);
 }
 
+// Whether D < 0 is a fundamental discriminant: D = 1 mod 4 squarefree, or
+// D = 4m with m = 2, 3 mod 4 squarefree.
+bool negative_fundamental_discriminant(ulong n) noexcept {
+    if (n % 4 == 3) {
+        return n_is_squarefree(n) != 0;
+    }
+    if (n % 4 != 0) {
+        return false;
+    }
+    const ulong m = n / 4;
+    return (m % 4 == 1 || m % 4 == 2) && n_is_squarefree(m) != 0;
+}
+
+ulong analytic_class_number(slong d) {
+    sflint::Fmpz discriminant;
+    sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+    sflint::Fmpz h;
+    assert(silex::detail::imaginary_quadratic_class_number_analytic(
+            sflint::FmpzRef(h), sflint::FmpzConstRef(discriminant)));
+    return sflint::fmpz_get_ui(sflint::FmpzConstRef(h));
+}
+
+// h(D) from Dirichlet's class number formula with the L(1, chi_D)
+// enclosure equals the count of reduced forms for every fundamental
+// discriminant -1000 <= D < -4, and the class numbers of larger D taken
+// from an independent class-number computation.  D >= -4 and D >= 0 fail
+// closed.
+void check_analytic_class_number() {
+    slong compared = 0;
+    for (ulong n = 5; n <= 1000; ++n) {
+        if (!negative_fundamental_discriminant(n)) {
+            continue;
+        }
+        const slong d = -static_cast<slong>(n);
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+        sflint::Fmpz listed;
+        assert(silex::detail::imaginary_quadratic_class_number(
+                sflint::FmpzRef(listed), sflint::FmpzConstRef(discriminant)));
+        assert(::fmpz_equal_ui(listed.raw(), analytic_class_number(d)) != 0);
+        ++compared;
+    }
+    assert(compared == 303);
+    assert(analytic_class_number(-10000019) == 1275);
+    assert(analytic_class_number(-1000000007) == 26629);
+    assert(analytic_class_number(-10000000019) == 39809);
+
+    for (const slong d : {-4L, -3L, 0L, 5L, 1009L}) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+        sflint::Fmpz h;
+        sflint::fmpz_set_si(sflint::FmpzRef(h), 7);
+        assert(!silex::detail::imaginary_quadratic_class_number_analytic(
+                sflint::FmpzRef(h), sflint::FmpzConstRef(discriminant)));
+    }
+}
+
+// Above |D| = 2^44 the exact class number comes from the class number
+// formula, not from listing reduced forms.  D = -(2^44 + 3) = -7 * 37 * 937
+// * 72490393 is fundamental with h(D) = 1148064, taken from an independent
+// class-number computation.
+void check_class_number_above_listing_cutoff() {
+    const auto start = std::chrono::steady_clock::now();
+    sflint::Fmpz discriminant;
+    sflint::fmpz_set_si(sflint::FmpzRef(discriminant), -17592186044419L);
+    sflint::Fmpz h;
+    assert(silex::detail::imaginary_quadratic_class_number(
+            sflint::FmpzRef(h), sflint::FmpzConstRef(discriminant)));
+    assert(::fmpz_equal_ui(h.raw(), 1148064) != 0);
+    const double seconds = std::chrono::duration<double>(
+                                   std::chrono::steady_clock::now() - start)
+                                   .count();
+    std::printf("h(D) for D = -17592186044419: %.2f s\n", seconds);
+}
+
 
 // Gamma(shift / 2, pi n^2 / q) from the stepper of the quadratic L(1, chi)
 // sums, against FLINT's `arb_hypgeom_gamma_upper` at 256 bits, over several
@@ -537,6 +614,7 @@ int main() {
     check_large_imaginary_discriminant_at(imaginary_l1, -10000000019, 39809,
                                           128);
     check_public_class_unit_with_zeta();
+    check_analytic_class_number();
 
     // |D| about 1e11 runs Taylor stepping of the incomplete gamma values over
     // most of both sums, including Gamma(0, z) = E_1(z), which only real D
@@ -556,6 +634,7 @@ int main() {
         // class-group and regulator computation.
         check_large_real_discriminant(1000000000061,
                                       "236155.816169219892016 +/- 1e-15");
+        check_class_number_above_listing_cutoff();
     }
     return 0;
 }
