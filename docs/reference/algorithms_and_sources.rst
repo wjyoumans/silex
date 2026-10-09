@@ -444,9 +444,10 @@ subalgebra, a separating element as in Hecke
 ``AlgAss/Decompose.jl:_dec_com_finite`` but taken from deterministic
 combinations, then the fixed idempotents themselves, and both stop when
 ``p`` raised to the number of primes above ``p`` exceeds 4096.  Beyond that
-bound Silex splits recursively as PARI 2.17.3
-``src/basemath/base2.c:primedec_aux`` does (lines 2316--2350, after Cohen,
-GTM 138, Algorithm 6.2.9): a piece that is not a field has a non-scalar fixed
+bound it next tries the Dedekind--Kummer route through a monogenic generator
+of the maximal order, and only if that search finds none does it split
+recursively as PARI 2.17.3 ``src/basemath/base2.c:primedec_aux`` does
+(lines 2316--2350, after Cohen, GTM 138, Algorithm 6.2.9): a piece that is not a field has a non-scalar fixed
 element whose minimal polynomial splits into distinct linear factors, and
 each root cuts off a smaller piece, with no bound on ``p`` and no
 randomness.  Silex keeps a piece as an idempotent ``e`` rather than PARI's
@@ -454,8 +455,9 @@ subspace, takes the first ``e k_j`` (``k_j`` the fixed-kernel basis) that is
 not a multiple of ``e``, and returns the fields in the order the idempotent
 enumeration lists them (by the base-``p`` combination index of their
 fixed-kernel coordinates).  The primitive idempotents are unique, so neither
-the prime ideals nor their order depend on the element chosen, and
-decompositions the bounded enumerations already produced are unchanged.
+the prime ideals nor their order depend on the element chosen.  Because the
+recursive split runs last, decompositions the bounded enumerations or a
+monogenic generator already produced are unchanged, prime order included.
 Unlike PARI, Silex does not split off Dedekind--Kummer factors before the
 radical when ``p`` divides the index.
 
