@@ -34,7 +34,6 @@ bool scoped_prime_ideal_valuation(
             valuation, prime, element, norm_valuation, diagnostics);
 }
 
-
 using IdealFactor = FactorPower<PrimeIdeal>;
 
 bool copy_append(std::vector<IdealFactor>& factors,

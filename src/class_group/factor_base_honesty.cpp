@@ -632,8 +632,6 @@ bool factor_base_reduces_prime_by_twisted_lattice_search(
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.honesty_reduces_prime_by_twisted_lattice_search");
-    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
-                        "class_group.honesty_reduces_prime_by_lattice_search");
     const Order* order = base.parent();
     if (order == nullptr || !same_order_parent(prime.parent(), order) ||
         base.contains(prime) || radius <= 0) {
