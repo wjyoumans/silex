@@ -101,21 +101,6 @@ bool saturation_process_candidates_once(
         RelationUnitExtractionState* unit_state = nullptr,
         slong precision = 0,
         slong max_class_relation_appends = WORD_MAX) noexcept;
-// The degree-one quotient-log row of saturation_candidates_from_relations at
-// (q, theta - root), from the exact fmpz evaluation and from the word-size
-// path used for q < 2^64; exposed so tests can compare them.
-bool degree_one_quotient_log_row_general(
-        flint::FmpzMat& out,
-        const std::vector<FactoredElement>& relations,
-        flint::FmpzConstRef q,
-        flint::FmpzConstRef root,
-        slong n) noexcept;
-bool degree_one_quotient_log_row_word_size(
-        flint::FmpzMat& out,
-        const std::vector<FactoredElement>& relations,
-        flint::FmpzConstRef q,
-        flint::FmpzConstRef root,
-        slong n) noexcept;
 // Class-relation saturation with units: the candidate filter from the
 // stacked residue characters of reference
 // `Saturate.jl:compute_candidates_for_saturate`, as a reduced row echelon

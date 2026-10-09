@@ -1227,11 +1227,9 @@ the published class group, generators and units, are those of the
 unfiltered scan.  Hecke instead tests the basis of the stacked kernel and
 doubles ``stable`` after a candidate that is not an ``ell``-th power; Silex
 keeps its own candidate order, so the stopping rule decides only how many
-power tests are skipped.  The filter is not used for non-maximal orders,
-for a defining polynomial that is not monic with integer coefficients (Hecke
-applies the index check that keeps the auxiliary primes regular only to such
-polynomials), or for an ``ell`` that does not fit a machine word, and the
-scan tests every row when the filter cannot be computed.
+power tests are skipped.  The filter is not used for non-maximal orders or
+for an ``ell`` that does not fit a machine word, and the scan tests every
+row when the filter cannot be computed.
 
 A ``proven`` unit computation from a class-group context runs its
 relation-kernel units through the index-bounded saturation pass
