@@ -1545,6 +1545,234 @@ bool components_from_fixed_idempotents(
     return true;
 }
 
+// Writes the coordinates of a Frobenius-fixed element in the first `nullity`
+// kernel columns.  The kernel columns are linearly independent, so the
+// coordinates are unique; reduced to [0, p) they are the base-p digits of the
+// combination index `set_kernel_combination` assigns to the element.
+bool fixed_kernel_coordinates(flint::FmpzVec& out,
+                              const flint::FmpzModMat& kernel,
+                              slong nullity,
+                              const flint::FmpzVec& element,
+                              const flint::FmpzModCtx& ctx) noexcept {
+    const slong n = element.length();
+    if (out.length() != nullity || nullity <= 0 || n <= 0) {
+        return false;
+    }
+
+    flint::FmpzModMat basis(n, nullity, ctx);
+    flint::FmpzModMat target(n, 1, ctx);
+    flint::FmpzModMat solution(nullity, 1, ctx);
+    flint::Fmpz entry;
+    for (slong row = 0; row < n; ++row) {
+        for (slong col = 0; col < nullity; ++col) {
+            fmpz_mod_mat_get_entry(entry.raw(), kernel.raw(), row, col,
+                                   ctx.raw());
+            fmpz_set(fmpz_mod_mat_entry(basis.raw(), row, col), entry.raw());
+        }
+        fmpz_set(fmpz_mod_mat_entry(target.raw(), row, 0),
+                 element.data() + row);
+    }
+
+    if (fmpz_mod_mat_can_solve(solution.raw(), basis.raw(), target.raw(),
+                               ctx.raw()) == 0) {
+        return false;
+    }
+    for (slong col = 0; col < nullity; ++col) {
+        fmpz_mod_mat_get_entry(out.data() + col, solution.raw(), col, 0,
+                               ctx.raw());
+    }
+    return true;
+}
+
+bool components_from_recursive_split(
+        std::vector<FiniteAlgebraComponent>& out,
+        const flint::FmpzModMat& kernel,
+        slong nullity,
+        const flint::FmpzVec& one,
+        const flint::FmpzMat& multiplication_table,
+        const flint::FmpzModCtx& ctx) noexcept {
+    // Source trace: reference 2.17.3 `src/basemath/base2.c:primedec_aux`
+    // (lines 2316-2350), after Cohen GTM 138 Algorithm 6.2.9 (splitting of
+    // the separable algebra O/(p, I_p)).  A piece of the etale algebra A that
+    // is not a field has a non-scalar Frobenius-fixed element a; its minimal
+    // polynomial is a product of distinct linear factors (x - r), and each
+    // root r cuts off a proper sub-piece.  The pieces go on a stack until
+    // every piece is a field.  There is no bound on p or on the number of
+    // pieces, and no randomness.
+    //
+    // The reference stores a piece as an F_p-subspace H of A and pushes
+    // H + (a - r).  Silex stores it as the idempotent e of the factor A/H, so
+    // the piece is eA, its fixed elements are e * Ker(Frobenius - 1), and the
+    // sub-pieces are the nonzero e * L_r(a) for the Lagrange polynomials L_r
+    // of the roots.  The non-scalar element is the first e * k_j (k_j the
+    // kernel columns) that is not in F_p * e.  The primitive idempotents of
+    // A are unique, so this choice changes neither the result nor its order:
+    // the components are returned in the order of their combination index,
+    // the order `components_from_fixed_idempotents` enumerates them in.
+    const slong n = one.length();
+    if (nullity <= 1 || n <= 0 || nullity > n) {
+        return false;
+    }
+
+    std::vector<flint::FmpzVec> pending;
+    std::vector<flint::FmpzVec> fields;
+    pending.emplace_back(n);
+    fmpz_vec_set(pending.back(), one);
+
+    flint::FmpzVec column(n);
+    flint::FmpzVec candidate(n);
+    flint::FmpzVec scaled(n);
+    flint::FmpzVec lagrange(n);
+    flint::FmpzModMat representation(n, n, ctx);
+    flint::FmpzModPoly minpoly(ctx);
+    flint::FmpzModPoly idempotent_polynomial(ctx);
+    flint::FmpzModPolyFactor factorization(ctx);
+    flint::Fmpz scalar;
+    flint::Fmpz pivot_inverse;
+    if (!minpoly.is_initialized() || !idempotent_polynomial.is_initialized()) {
+        return false;
+    }
+
+    while (!pending.empty()) {
+        // Every piece holds at least one of the `nullity` fields of A.
+        if (static_cast<slong>(fields.size() + pending.size()) > nullity) {
+            return false;
+        }
+        flint::FmpzVec piece = std::move(pending.back());
+        pending.pop_back();
+
+        slong pivot = -1;
+        for (slong i = 0; i < n; ++i) {
+            if (fmpz_is_zero(piece.data() + i) == 0) {
+                pivot = i;
+                break;
+            }
+        }
+        if (pivot < 0) {
+            return false;
+        }
+        fmpz_mod_inv(pivot_inverse.raw(), piece.data() + pivot, ctx.raw());
+
+        bool split = false;
+        for (slong col = 0; col < nullity && !split; ++col) {
+            for (slong row = 0; row < n; ++row) {
+                fmpz_mod_mat_get_entry(column.data() + row, kernel.raw(),
+                                       row, col, ctx.raw());
+            }
+            order_coords_mul_mod(candidate, piece, column,
+                                 multiplication_table, ctx);
+            fmpz_mod_mul(scalar.raw(), candidate.data() + pivot,
+                         pivot_inverse.raw(), ctx.raw());
+            fmpz_vec_zero(scaled);
+            fmpz_vec_scalar_addmul_mod(scaled, piece, scalar.raw(), ctx);
+            split = !fmpz_vec_equal(scaled, candidate);
+        }
+        if (!split) {
+            // The fixed elements of eA are F_p * e, so eA is a field.
+            fields.emplace_back(std::move(piece));
+            continue;
+        }
+
+        // `candidate` acts on each field of A as an element of F_p (zero
+        // outside eA), so its multiplication matrix is diagonalizable over
+        // F_p and its minimal polynomial is squarefree and splits.
+        if (!multiplication_matrix_mod(representation, candidate,
+                                       multiplication_table, ctx)) {
+            return false;
+        }
+        fmpz_mod_mat_minpoly(minpoly.raw(), representation.raw(), ctx.raw());
+        fmpz_mod_poly_factor(factorization.raw(), minpoly.raw(), ctx.raw());
+        for (slong i = 0; i < factorization.raw()->num; ++i) {
+            if (factorization.raw()->exp[i] != 1 ||
+                fmpz_mod_poly_degree(factorization.raw()->poly + i,
+                                     ctx.raw()) != 1) {
+                return false;
+            }
+        }
+
+        slong pieces = 0;
+        for (slong i = 0; i < factorization.raw()->num; ++i) {
+            if (!crt_idempotent_polynomial(idempotent_polynomial,
+                                           minpoly.raw(),
+                                           factorization.raw()->poly + i,
+                                           ctx)) {
+                return false;
+            }
+            algebra_poly_eval_mod(lagrange, idempotent_polynomial.raw(),
+                                  candidate, one, multiplication_table, ctx);
+            flint::FmpzVec child(n);
+            order_coords_mul_mod(child, piece, lagrange, multiplication_table,
+                                 ctx);
+            if (fmpz_vec_is_zero(child)) {
+                // A root taken only outside eA.
+                continue;
+            }
+            pending.emplace_back(std::move(child));
+            ++pieces;
+        }
+        if (pieces < 2) {
+            return false;
+        }
+    }
+
+    if (static_cast<slong>(fields.size()) != nullity) {
+        return false;
+    }
+
+    std::vector<flint::FmpzVec> keys;
+    std::vector<slong> rank;
+    keys.reserve(fields.size());
+    rank.reserve(fields.size());
+    for (slong i = 0; i < nullity; ++i) {
+        keys.emplace_back(nullity);
+        if (!fixed_kernel_coordinates(keys.back(), kernel, nullity,
+                                      fields[static_cast<std::size_t>(i)],
+                                      ctx)) {
+            return false;
+        }
+        rank.push_back(i);
+    }
+    // Combination index sum_j c_j p^j: compare the digits from the last
+    // kernel column down.  Distinct idempotents have distinct coordinates.
+    std::sort(rank.begin(), rank.end(),
+              [&keys, nullity](slong left, slong right) noexcept {
+                  const flint::FmpzVec& a =
+                          keys[static_cast<std::size_t>(left)];
+                  const flint::FmpzVec& b =
+                          keys[static_cast<std::size_t>(right)];
+                  for (slong col = nullity - 1; col >= 0; --col) {
+                      const int cmp = fmpz_cmp(a.data() + col,
+                                               b.data() + col);
+                      if (cmp != 0) {
+                          return cmp < 0;
+                      }
+                  }
+                  return false;
+              });
+
+    std::vector<FiniteAlgebraComponent> components;
+    components.reserve(fields.size());
+    slong dimension_sum = 0;
+    for (const slong index : rank) {
+        components.emplace_back(n);
+        FiniteAlgebraComponent& component = components.back();
+        fmpz_vec_set(component.idempotent,
+                     fields[static_cast<std::size_t>(index)]);
+        if (!component_basis_from_idempotent(
+                    component.basis, component.dimension,
+                    component.idempotent, multiplication_table, ctx)) {
+            return false;
+        }
+        dimension_sum += component.dimension;
+    }
+    if (dimension_sum != n) {
+        return false;
+    }
+
+    out.swap(components);
+    return true;
+}
+
 bool components_from_fixed_subspace(
         std::vector<FiniteAlgebraComponent>& out,
         const flint::FmpzModMat& kernel,
@@ -1560,8 +1788,13 @@ bool components_from_fixed_subspace(
     if (!find_separating_fixed_element(separator, factorization, minpoly,
                                        kernel, nullity, multiplication_table,
                                        p, ctx)) {
-        return components_from_fixed_idempotents(
-                out, kernel, nullity, multiplication_table, p, ctx);
+        // The bounded enumerations above stop when p^nullity exceeds 4096;
+        // the recursive split has no such bound and runs only after both.
+        return components_from_fixed_idempotents(out, kernel, nullity,
+                                                 multiplication_table, p,
+                                                 ctx) ||
+               components_from_recursive_split(out, kernel, nullity, one,
+                                               multiplication_table, ctx);
     }
 
     std::vector<FiniteAlgebraComponent> components;

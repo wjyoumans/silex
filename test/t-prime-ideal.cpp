@@ -919,6 +919,103 @@ int test_index2_quintic_mixed_ramified_prime_decomposition() {
     return 0;
 }
 
+void poly_from_coefficients(sflint::FmpqPoly& polynomial,
+                            const std::vector<slong>& low_to_high) noexcept {
+    sflint::fmpq_poly_zero(polynomial);
+    for (std::size_t i = 0; i < low_to_high.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       low_to_high[i]);
+    }
+}
+
+// Decomposes p in the maximal order of the field and checks the (e, f)
+// multiset, distinctness, norms and prod P^e = pO, and that a second call
+// returns the same ideals in the same order.
+int check_index_divisor_decomposition(const std::vector<slong>& low_to_high,
+                                      slong rational_prime,
+                                      slong count,
+                                      slong ramification_index,
+                                      slong residue_degree) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+    const slong degree = static_cast<slong>(low_to_high.size()) - 1;
+
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!maximal.is_equation_order());
+
+    sflint::Fmpz index;
+    assert(silex::order_index(sflint::FmpzRef(index), equation, maximal));
+    assert(fmpz_divisible_si(index.raw(), rational_prime) != 0);
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, rational_prime));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == count);
+    assert(count_with_ef(primes, ramification_index, residue_degree) ==
+           count);
+    assert(check_ef_sum(primes, degree));
+    assert(check_norms(primes));
+
+    std::vector<silex::Ideal> ideals;
+    for (slong i = 0; i < primes.size(); ++i) {
+        ideals.emplace_back(maximal);
+        assert(primes.at(i)->get_ideal(ideals.back()));
+        for (slong j = 0; j < i; ++j) {
+            assert(!ideals[static_cast<std::size_t>(j)].equal(ideals.back()));
+        }
+    }
+
+    silex::Ideal product(maximal);
+    assert(set_rational_principal(product, 1));
+    for (const silex::Ideal& ideal : ideals) {
+        for (slong k = 0; k < ramification_index; ++k) {
+            silex::Ideal next(maximal);
+            assert(next.multiply(product, ideal));
+            product = std::move(next);
+        }
+    }
+    silex::Ideal p_ideal(maximal);
+    assert(set_rational_principal(p_ideal, rational_prime));
+    assert(product.equal(p_ideal));
+
+    silex::PrimeIdealList again;
+    assert(silex::decompose_prime(again, maximal, sflint::FmpzConstRef(p)));
+    assert(again.size() == count);
+    for (slong i = 0; i < again.size(); ++i) {
+        silex::Ideal ideal(maximal);
+        assert(again.at(i)->get_ideal(ideal));
+        assert(ideal.equal(ideals[static_cast<std::size_t>(i)]));
+    }
+
+    return 0;
+}
+
+// p^(number of primes above p) exceeds the bounded enumeration in these
+// fields, so the recursive etale split decomposes p.  The (e, f) data match
+// reference 2.17.3 idealprimedec.
+int test_index_divisor_recursive_split_unramified_degree_one() {
+    // LMFDB 6.6.46411625.1, p = 47: six primes with e = f = 1.
+    return check_index_divisor_decomposition(
+            {-1, -16, 58, 17, -18, -1, 1}, 47, 6, 1, 1);
+}
+
+int test_index_divisor_recursive_split_unramified_degree_two() {
+    // Q(sqrt(-3), sqrt(-5), sqrt(-7)), p = 11: four primes with f = 2.
+    return check_index_divisor_decomposition(
+            {1201, 598, -524, -146, 69, 2, 4, -4, 1}, 11, 4, 1, 2);
+}
+
+int test_index_divisor_recursive_split_ramified() {
+    // Q(sqrt(5), sqrt(-7), sqrt(-11)), p = 11: four primes with e = 2.
+    return check_index_divisor_decomposition(
+            {144, -300, 259, -196, 162, -48, 24, -2, 1}, 11, 4, 2, 1);
+}
+
 int test_valuation_degree_one() {
     sflint::FmpqPoly polynomial;
     poly_x(polynomial);
@@ -2479,6 +2576,9 @@ int main() {
     assert(test_index8_quartic_ramified_prime_decomposition() == 0);
     assert(test_index2_quartic_mixed_ramified_prime_decomposition() == 0);
     assert(test_index2_quintic_mixed_ramified_prime_decomposition() == 0);
+    assert(test_index_divisor_recursive_split_unramified_degree_one() == 0);
+    assert(test_index_divisor_recursive_split_unramified_degree_two() == 0);
+    assert(test_index_divisor_recursive_split_ramified() == 0);
     assert(test_valuation_degree_one() == 0);
     assert(test_valuation_order_element_split_repeated() == 0);
     assert(test_valuation_order_element_ramified_unique_prime_norm() == 0);
