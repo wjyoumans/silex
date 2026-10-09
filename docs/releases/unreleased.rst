@@ -47,10 +47,11 @@ Added
   JSON object.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 - ``silex-class-unit-instance`` adds ``generation_different_route`` to its
-  ``class_group`` JSON object.  It names how the class of the different was
-  handled for the ``zimmert_twin_class`` generation basis, ``index_one`` or
-  ``conductor_primes`` (the spelling of the detail log), and is null for every
-  other basis.  Additive; the format is unchanged.
+  ``class_group`` JSON object.  It names how the class of the different is
+  handled for the ``zimmert_twin_class`` generation basis,
+  ``kor1_generation`` (the spelling of the detail log: no hypothesis on the
+  different is needed), and is null for every other basis.  Additive; the
+  format is unchanged.
 - ``silex-class-unit-instance`` reports ``failure_reason``
   ``factor_base_honesty_unwitnessed`` (``failure_stage`` ``total``) when a
   class/unit computation fails because the last candidate attempt stopped at
@@ -151,11 +152,11 @@ Changed
 
 - Proven class/unit computations in degree 3 to 20 can verify factor-base
   generation up to a smaller bound: Zimmert's twin-class bound (Zimmert
-  1981, Korollar 1, evaluated in the finite form of its proof), when the
-  defining polynomial is monic with integer coefficients and the class of
-  the different is settled exactly.  That holds when ``O_K = Z[theta]``,
-  where the different is principal, or when the bound is raised to cover
-  every prime ideal above the primes dividing ``[O_K : Z[theta]]``.  The
+  1981, Korollar 1, evaluated in the finite form of its proof), for every
+  defining polynomial.  The bound generates the class group with no
+  hypothesis on the class of the different, by the theorem
+  GB-kor1-generation of silex-research (commit 8926120), so non-monogenic
+  fields and non-monic defining polynomials get it too.  The
   bound is used only when it is below ``factor_base_class_group_bound``,
   which is unchanged.  Such results report the new generation basis
   ``ClassGroupGenerationBasis::zimmert_twin_class`` (printed as

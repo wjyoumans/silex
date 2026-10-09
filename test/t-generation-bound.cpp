@@ -915,15 +915,20 @@ silex::Order cubic_maximal_order(slong c3, slong c1, slong c0) noexcept {
 // x^3 + x + 200 (|d| = 1080004, signature (1, 1), class group Z/2; indices
 // and prime norms from an independent computer algebra system), where the
 // Minkowski-type bound is ceil(6/27 (4/pi) sqrt(1080004)) = 295 and
-// Zimmert's twin-class bound is ceil(sqrt(1080004) / 3.95179...) = 263:
-// - x^3 + x + 200 has index 1: route index_one, requirement 263;
-// - x^3 + 25 x + 25000 (theta = 5 alpha) has index 125, and every prime
-//   above 5 has norm 5: conductor_primes, requirement 263;
-// - x^3 + 289 x + 982600 (theta = 17 alpha) has index 17^3, with prime
-//   norms 17 and 289 above 17: conductor_primes, requirement 289;
+// Zimmert's twin-class bound is ceil(sqrt(1080004) / 3.95179...) = 263.
+// Zimmert's Korollar 1 bound generates the class group with no hypothesis
+// on the class of the different (GB-kor1-generation), so every
+// presentation gets requirement 263 with route kor1_generation, whatever
+// the polynomial order:
+// - x^3 + x + 200 has index 1;
+// - x^3 + 25 x + 25000 (theta = 5 alpha) has index 125, every prime above
+//   5 of norm 5;
+// - x^3 + 289 x + 982600 (theta = 17 alpha) has index 17^3, with a prime
+//   of norm 289 above 17 (the former conductor_primes route gave 289);
 // - x^3 + 361 x + 1371800 (theta = 19 alpha) has a prime of norm 361 above
-//   19, above the Minkowski-type bound: no route, requirement 295;
-// - 4 x^3 + x + 100 (beta = alpha / 2) is not monic: no route, 295.
+//   19, above the Minkowski-type bound (formerly no route, 295);
+// - 4 x^3 + x + 100 (beta = alpha / 2) is not monic (formerly no route,
+//   295).
 int test_proven_generation_requirement() {
     struct Row {
         slong c3;
@@ -934,11 +939,11 @@ int test_proven_generation_requirement() {
     };
     using Route = silex::detail::GenerationDifferentRoute;
     const Row rows[] = {
-            {1, 1, 200, 263, Route::index_one},
-            {1, 25, 25000, 263, Route::conductor_primes},
-            {1, 289, 982600, 289, Route::conductor_primes},
-            {1, 361, 1371800, 295, Route::none},
-            {4, 1, 100, 295, Route::none},
+            {1, 1, 200, 263, Route::kor1_generation},
+            {1, 25, 25000, 263, Route::kor1_generation},
+            {1, 289, 982600, 263, Route::kor1_generation},
+            {1, 361, 1371800, 263, Route::kor1_generation},
+            {4, 1, 100, 263, Route::kor1_generation},
     };
     sflint::Fmpz bound;
     sflint::Fmpz classical;
@@ -953,7 +958,7 @@ int test_proven_generation_requirement() {
             !sflint::fmpz_equal_si(classical, 295)) {
             return 1;
         }
-        Route route = Route::index_one;
+        Route route = Route::none;
         if (!silex::detail::proven_generation_requirement(
                     sflint::FmpzRef(bound), route, order) ||
             !sflint::fmpz_equal_si(bound, row.requirement) ||
@@ -971,7 +976,7 @@ int test_proven_generation_requirement() {
                                               quadratic_maximal)) {
         return 1;
     }
-    Route route = Route::index_one;
+    Route route = Route::kor1_generation;
     if (!silex::detail::proven_generation_requirement(
                 sflint::FmpzRef(bound), route, quadratic_maximal) ||
         !fmpz_equal(bound.raw(), classical.raw()) || route != Route::none) {
@@ -983,10 +988,10 @@ int test_proven_generation_requirement() {
     silex::Order equation = silex::test::equation_order(
             *cubic_maximal_order(1, 25, 25000).parent());
     fmpz_set_si(bound.raw(), 99);
-    route = Route::index_one;
+    route = Route::none;
     if (silex::detail::proven_generation_requirement(sflint::FmpzRef(bound),
                                                      route, equation) ||
-        !sflint::fmpz_equal_si(bound, 99) || route != Route::index_one) {
+        !sflint::fmpz_equal_si(bound, 99) || route != Route::none) {
         return 1;
     }
     return 0;

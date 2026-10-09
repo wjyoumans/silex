@@ -306,8 +306,8 @@ struct ClassGroupContextStorage {
     // How the unconditional generation requirement (the recorded
     // factor_base_generation_bound_, from proven_generation_requirement)
     // treats the class of the different: none for the
-    // factor_base_class_group_bound requirement, index_one or
-    // conductor_primes for Zimmert's twin-class requirement.
+    // factor_base_class_group_bound requirement, kor1_generation for
+    // Zimmert's twin-class requirement.
     // Written with that bound when the base is built, so certification
     // transactions do not restore it.
     GenerationDifferentRoute generation_different_route =

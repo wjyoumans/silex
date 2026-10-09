@@ -65,12 +65,11 @@ struct ClassGroupZetaBfProofRecord {
 // - zimmert_twin_class: unconditional; every prime ideal up to Zimmert's
 //   twin-class bound (Zimmert 1981, Korollar 1), which every ideal class K
 //   meets in K or in D K^(-1) for the different D, is in the base or was
-//   checked to lie in its span, and the class of D was shown to lie in that
-//   span exactly: the defining polynomial is monic integral and either
-//   O_K = Z[theta], so D = f'(theta) O_K is principal, or the bound also
-//   covers every prime ideal above each p | [O_K : Z[theta]], which
-//   includes the primes of the conductor of Z[theta].  Used only when it is
-//   smaller than the Minkowski-type bound.
+//   checked to lie in its span.  These primes generate the class group with
+//   no hypothesis on the class of D, for any defining polynomial
+//   (GB-kor1-generation; see "Class groups and order units" in the
+//   algorithms and sources reference).  Used only when it is smaller than
+//   the Minkowski-type bound.
 // - bdf: under the Riemann hypothesis for the L-functions of the nontrivial
 //   characters of the class group (Belabas-Diaz y Diaz-Friedman 2008,
 //   Corollary 2.2).

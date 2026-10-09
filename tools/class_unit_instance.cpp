@@ -261,10 +261,8 @@ const char* generation_basis_name(
 const char* different_route_name(
         silex::detail::GenerationDifferentRoute route) noexcept {
     switch (route) {
-    case silex::detail::GenerationDifferentRoute::index_one:
-        return "index_one";
-    case silex::detail::GenerationDifferentRoute::conductor_primes:
-        return "conductor_primes";
+    case silex::detail::GenerationDifferentRoute::kor1_generation:
+        return "kor1_generation";
     case silex::detail::GenerationDifferentRoute::none:
         break;
     }

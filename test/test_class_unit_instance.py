@@ -223,12 +223,13 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
     # A proven result: generation to the proven requirement and
     # unconditional completeness. The degree-one grh route is the exact
     # route relabelled grh: both components proven, label grh.
-    # x^3 + x + 200 has index 1 (its discriminant -1080004 is the field
-    # discriminant), so Zimmert's twin-class bound 263, below the
-    # Minkowski-type bound 295, is the requirement (different route
-    # index_one). Degree 1 is outside Zimmert's range 3..20.
+    # For x^3 + x + 200 Zimmert's twin-class bound 263, below the
+    # Minkowski-type bound 295, is the requirement, with no hypothesis on
+    # the class of the different (route kor1_generation). Degree 1 is
+    # outside Zimmert's range 3..20.
     for coeffs, mode, basis, bound, route in (
-        ("200,1,0,1", "proven", "zimmert_twin_class", "263", "index_one"),
+        ("200,1,0,1", "proven", "zimmert_twin_class", "263",
+         "kor1_generation"),
         ("0,1", "grh", "minkowski_type", "1", None),
     ):
         instance = run_json(
@@ -261,13 +262,14 @@ def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
         )
 
 
-def assert_twin_class_conductor_honesty_path(exe: Path, root: Path) -> None:
-    # The conductor_primes route through the relation-search honesty check.
-    # x^3 + 25x + 25000 defines the field of x^3 + x + 200 (|d| = 1080004,
-    # class group Z/2) with [O_K : Z[theta]] = 125, so the different is
-    # settled by covering the prime ideals above 5 (norms 5, 5, 5), and the
-    # requirement is max(263, 5) = 263, Zimmert's twin-class bound, below
-    # the Minkowski-type bound 295. A factor base of 19 lies below that
+def assert_twin_class_non_monogenic_honesty_path(exe: Path, root: Path) -> None:
+    # The twin-class requirement of a non-monogenic presentation through
+    # the relation-search honesty check. x^3 + 25x + 25000 defines the
+    # field of x^3 + x + 200 (|d| = 1080004, class group Z/2) with
+    # [O_K : Z[theta]] = 125; the requirement is Zimmert's twin-class bound
+    # 263, below the Minkowski-type bound 295, with no hypothesis on the
+    # class of the different (route kor1_generation). A factor base of 19
+    # lies below that
     # requirement, so generation up to 263 is verified only by the honesty
     # check (apply_honesty_check in relation_search_driver.cpp), which must
     # take the same requirement as the build-time record.
@@ -291,7 +293,7 @@ def assert_twin_class_conductor_honesty_path(exe: Path, root: Path) -> None:
     assert class_group["factor_base_generation_basis"] == (
         "zimmert_twin_class"
     )
-    assert class_group["generation_different_route"] == "conductor_primes"
+    assert class_group["generation_different_route"] == "kor1_generation"
     assert class_group["factor_base_generation_certification_bound"] == (
         "263"
     )
@@ -380,7 +382,7 @@ def main() -> int:
     assert_grh_generation_below_minkowski(args.exe, root)
     assert_grh_minkowski_equality_boundary(args.exe, root)
     assert_proven_and_degree_one_provenance(args.exe, root)
-    assert_twin_class_conductor_honesty_path(args.exe, root)
+    assert_twin_class_non_monogenic_honesty_path(args.exe, root)
     assert_proven_inert_prime_generation(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
@@ -511,11 +513,10 @@ def main() -> int:
         if row.get("status") == "grh_certification"
     ]
     assert len(grh_rows) == 13
-    # The proven generation requirement of the rows of degree 3..20. Each
-    # of these defining polynomials is monic and integral with index 1
-    # (GP 2.17 nfinit: disc equals poldisc), so the different is settled
-    # (route index_one) and Zimmert's twin-class bound (Korollar 1) is the
-    # requirement wherever it is below the Minkowski-type bound. Values
+    # The proven generation requirement of the rows of degree 3..20:
+    # Zimmert's twin-class bound (Korollar 1), with no hypothesis on the
+    # class of the different, wherever it is below the Minkowski-type
+    # bound. Values
     # from test/zimmert_twin_class_oracle.py: ceil(sqrt|d| / c) for the
     # signature's c. The quadratic rows keep the Minkowski-type bound.
     twin_class_requirement = {

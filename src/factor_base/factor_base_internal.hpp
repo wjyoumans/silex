@@ -67,13 +67,14 @@ bool zimmert_twin_class_table_entry(flint::FmpzRef significand,
 // Twin-class generation bound for 3 <= n <= 20: the smaller of
 // generation_bound and ceil(E sqrt|d|), E the precomputed table entry above,
 // an exact upper bound for exp(-(G_{m,j} + n log pi)/2) at the tabulated
-// gamma (Zimmert 1981, Korollar 1, in the finite-m form of its proof).  For every ideal class K,
-// K or D K^(-1) (D the class of the different) contains an integral ideal of
-// norm at most out.  So the prime ideals of norm at most out generate the
-// class group only if the class of the different lies in the subgroup they
-// generate; callers must establish that separately.  It is deliberately not
-// part of generation_bound or factor_base_class_group_bound, whose contract
-// is that every class contains a small ideal.  Fails, leaving out
+// gamma (Zimmert 1981, Korollar 1, in the finite-m form of its proof).  For
+// every ideal class K, K or D K^(-1) (D the class of the different) contains
+// an integral ideal of norm at most out, and the prime ideals of norm at most
+// out generate the class group with no hypothesis on D (GB-kor1-generation;
+// see proven_generation_requirement).  It does not promise a small ideal in
+// every class, so it is deliberately not part of generation_bound or
+// factor_base_class_group_bound, whose contract is that every class
+// contains a small ideal.  Fails, leaving out
 // unchanged, outside 3 <= n <= 20 or on the inputs generation_bound
 // rejects.
 bool twin_class_generation_bound(flint::FmpzRef out,
@@ -83,14 +84,12 @@ bool twin_class_generation_bound(flint::FmpzRef out,
 
 // The bound to which a proven request must verify factor-base generation
 // for the maximal order `order`, and how it treats the different.  It is
-// factor_base_class_group_bound unless Zimmert's twin-class bound (Zimmert
-// 1981, Korollar 1, finite-m form; 3 <= n <= 20) gives a strictly smaller
-// requirement with the different settled exactly:
-// - index_one: the requirement is the twin-class bound B;
-// - conductor_primes: it is max(B, largest norm of a prime ideal above any
-//   p | [O_K : Z[theta]]), so every prime ideal up to it generating the
-//   class group also puts the conductor primes in the generated subgroup.
-// Every prime ideal of norm at most `bound` then generates the class group.
+// factor_base_class_group_bound unless Zimmert's twin-class bound B (Zimmert
+// 1981, Korollar 1; 3 <= n <= 20) is strictly smaller, in which case it is B
+// with route kor1_generation, for any defining polynomial: by
+// GB-kor1-generation (silex-research, commit 8926120) B is a generation
+// bound with no hypothesis on the class of the different.  Every prime
+// ideal of norm at most `bound` then generates the class group.
 // Fails, leaving `bound` and `route` unchanged, when
 // factor_base_class_group_bound fails.  Never part of
 // factor_base_class_group_bound.

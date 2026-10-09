@@ -4,14 +4,12 @@
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/diagnostics.hpp>
-#include <silex/flint/fmpz_factor.hpp>
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arf.hpp>
 #include <silex/signature.hpp>
 
 #include <flint/arb.h>
 #include <flint/arf.h>
-#include <flint/fmpq_poly.h>
 #include <flint/fmpz.h>
 
 #include <algorithm>
@@ -540,8 +538,8 @@ struct ZimmertTwinClassEntry {
 // computed exactly in integers: with E = s / 10^k, ceil(s sqrt|d|) is the
 // integer square root of s^2 |d| rounded up, and
 // ceil(E sqrt|d|) = ceil(ceil(s sqrt|d|) / 10^k).  This is not a bound on
-// the smallest ideal of every class; it proves generation only together with
-// the class of the different (see the callers).
+// the smallest ideal of every class; it is a generation bound by
+// GB-kor1-generation (see proven_generation_requirement).
 bool zimmert_twin_class_bound(flint::Fmpz& out,
                               flint::FmpzConstRef abs_discriminant,
                               slong degree,
@@ -1445,69 +1443,19 @@ bool factor_base_class_group_bound(flint::FmpzRef out,
     return true;
 }
 
-namespace {
-
-// True when the stored defining polynomial of `field` is monic with integer
-// coefficients, so that its root theta is an algebraic integer and
-// Z[theta] is the equation order.
-bool field_polynomial_is_monic_integral(const NumberField& field) noexcept {
-    const nf_struct* raw = field.raw_flint_field();
-    if (raw == nullptr) {
-        return false;
-    }
-    const slong length = fmpq_poly_length(raw->pol);
-    return length >= 2 && fmpz_is_one(fmpq_poly_denref(raw->pol)) != 0 &&
-           fmpz_is_one(fmpq_poly_numref(raw->pol) + length - 1) != 0;
-}
-
-// The largest norm of a prime ideal of the maximal order `order` above a
-// rational prime dividing `index`.
-bool largest_prime_norm_above(flint::Fmpz& out,
-                              const Order& order,
-                              flint::FmpzConstRef index) noexcept {
-    flint::FmpzFactor factorization;
-    flint::fmpz_factor(flint::FmpzFactorRef(factorization), index);
-    const slong factor_count =
-            flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
-    flint::Fmpz largest;
-    flint::Fmpz p;
-    flint::Fmpz norm;
-    for (slong i = 0; i < factor_count; ++i) {
-        flint::fmpz_factor_get_fmpz(
-                flint::FmpzRef(p), flint::FmpzFactorConstRef(factorization),
-                i);
-        PrimeIdealList primes;
-        if (!decompose_prime(primes, order, flint::FmpzConstRef(p)) ||
-            primes.size() < 1) {
-            return false;
-        }
-        for (slong k = 0; k < primes.size(); ++k) {
-            const PrimeIdeal* prime = primes.at(k);
-            if (prime == nullptr || !prime->norm(flint::FmpzRef(norm))) {
-                return false;
-            }
-            if (fmpz_cmp(norm.raw(), largest.raw()) > 0) {
-                fmpz_set(largest.raw(), norm.raw());
-            }
-        }
-    }
-    fmpz_swap(out.raw(), largest.raw());
-    return true;
-}
-
-}  // namespace
-
 // Zimmert 1981, Korollar 1 gives, for every class K, an integral ideal of
-// norm at most B in K or in D K^(-1).  With every prime ideal of norm at
-// most the requirement in the generated subgroup H, K lies in H as soon as
-// [D] does.  For theta with monic minimal polynomial f in Z[x], Narkiewicz,
-// Elementary and Analytic Theory of Algebraic Numbers (3rd ed., 2004),
-// Proposition 4.18(i) (p. 152, with Proposition 4.17, p. 151) gives
-// f'(theta) O_K = F D for the conductor F = {x : x O_K in Z[theta]}, so
-// [D] = [F]^(-1).  F = O_K when the index is 1 (Corollary to Proposition
-// 4.18, p. 153), and otherwise every prime dividing F lies above some
-// p | [O_K : Z[theta]], because the index lies in F.  Anything else falls back
-// to the bound of factor_base_class_group_bound (Satz 2 and Minkowski).
+// norm at most B(gamma) in K or in D K^(-1), D the class of the different.
+// GB-kor1-generation (silex-research,
+// research/proofs/generation/GB-kor1-generation.md at commit 8926120) proves
+// that the prime ideals of norm at most B(gamma) generate the class group
+// with no hypothesis on [D], for every number field and every gamma > 0, and
+// that any certified B' >= B(gamma) may replace B(gamma).  The twin-class
+// bound ceil(E sqrt|d|) is such a B': every table entry E is at least the
+// certified upper bound c_up(r1, r2, gamma) >= exp(-(F + n log pi)/2) of
+// silex-research's src/silex_research/zimmert.py at that commit, at the
+// tabulated gamma (checked offline for all 117 entries).  So the
+// requirement is the twin-class bound whenever it is below
+// factor_base_class_group_bound, whatever the defining polynomial.
 bool detail::proven_generation_requirement(
         flint::FmpzRef bound,
         GenerationDifferentRoute& route,
@@ -1526,7 +1474,6 @@ bool detail::proven_generation_requirement(
     Signature sig;
     flint::Fmpz twin;
     if (degree >= 3 && degree <= kZimmertMaxDegree && field != nullptr &&
-        field_polynomial_is_monic_integral(*field) &&
         order.discriminant(flint::FmpzRef(discriminant)) &&
         fmpz_is_zero(discriminant.raw()) == 0 && sig.compute(*field)) {
         fmpz_abs(discriminant.raw(), discriminant.raw());
@@ -1537,27 +1484,8 @@ bool detail::proven_generation_requirement(
             if (fmpz_cmp_ui(twin.raw(), 1) < 0) {
                 fmpz_one(twin.raw());
             }
-            const Order equation = Order::equation_order(*field);
-            flint::Fmpz index;
-            flint::Fmpz conductor_norm;
-            if (equation.is_defined() &&
-                order_index(flint::FmpzRef(index), equation, order)) {
-                if (fmpz_is_one(index.raw()) != 0) {
-                    fmpz_set(chosen.raw(), twin.raw());
-                    chosen_route = GenerationDifferentRoute::index_one;
-                } else if (largest_prime_norm_above(
-                                   conductor_norm, order,
-                                   flint::FmpzConstRef(index))) {
-                    if (fmpz_cmp(conductor_norm.raw(), twin.raw()) < 0) {
-                        fmpz_set(conductor_norm.raw(), twin.raw());
-                    }
-                    if (fmpz_cmp(conductor_norm.raw(), classical.raw()) < 0) {
-                        fmpz_swap(chosen.raw(), conductor_norm.raw());
-                        chosen_route =
-                                GenerationDifferentRoute::conductor_primes;
-                    }
-                }
-            }
+            fmpz_swap(chosen.raw(), twin.raw());
+            chosen_route = GenerationDifferentRoute::kor1_generation;
         }
     }
 

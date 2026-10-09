@@ -3568,10 +3568,10 @@ int test_grh_provenance_records() {
            silex::ProofState::verified);
 
     // The proven partner: unconditional generation and completeness.
-    // x^3 + x + 200 has O_K = Z[theta] (its discriminant is the field
-    // discriminant), so the different is principal and generation rests on
-    // Zimmert's twin-class bound ceil(sqrt(1080004) / 3.9517...) = 263
-    // (Korollar 1, finite-m form), below the Minkowski-type bound 295.
+    // Generation rests on Zimmert's twin-class bound
+    // ceil(sqrt(1080004) / 3.9517...) = 263 (Korollar 1, finite-m form),
+    // below the Minkowski-type bound 295, with no hypothesis on the class of
+    // the different (GB-kor1-generation).
     options.requested_certification = silex::CertificationMode::proven;
     silex::ClassGroupContext proven;
     silex::OrderUnitGroup proven_units;
@@ -3586,7 +3586,7 @@ int test_grh_provenance_records() {
            silex::ClassGroupGenerationBasis::zimmert_twin_class);
     assert(CertificationAccess::factor_base_generation_different_route(
                    proven) ==
-           silex::detail::GenerationDifferentRoute::index_one);
+           silex::detail::GenerationDifferentRoute::kor1_generation);
     assert(sflint::fmpz_equal_si(minkowski, 295));
     assert(proven.factor_base_generation_certification_bound(
             sflint::FmpzRef(value)));
@@ -3633,7 +3633,7 @@ void count_generation_requirement_logs(void* user,
     }
     if (std::strcmp(message,
                     "generation requirement zimmert_twin_class, "
-                    "different index_one") == 0) {
+                    "different kor1_generation") == 0) {
         ++counts->recorded;
     } else if (std::strcmp(message,
                            "reusing the transaction generation "
@@ -3706,7 +3706,7 @@ int test_honesty_reuses_recorded_generation_requirement() {
             silex::detail::GenerationDifferentRoute::none;
     assert(silex::detail::proven_generation_requirement(
             sflint::FmpzRef(expected), route, maximal_order));
-    assert(route == silex::detail::GenerationDifferentRoute::index_one);
+    assert(route == silex::detail::GenerationDifferentRoute::kor1_generation);
     sflint::Fmpz recorded;
     assert(Access::recorded_generation_requirement(
             sflint::FmpzRef(recorded), context, maximal_order));
@@ -3761,7 +3761,7 @@ int test_transaction_keeps_generation_requirement() {
             silex::detail::GenerationDifferentRoute::none;
     assert(silex::detail::proven_generation_requirement(
             sflint::FmpzRef(expected), route, maximal_order));
-    assert(route == silex::detail::GenerationDifferentRoute::index_one);
+    assert(route == silex::detail::GenerationDifferentRoute::kor1_generation);
     sflint::Fmpz small_bound;
     sflint::Fmpz large_bound;
     sflint::fmpz_set_si(sflint::FmpzRef(small_bound), 7);
@@ -3971,13 +3971,13 @@ int test_grh_generation_bound_bach_fallback() {
     return 0;
 }
 
-// Proven generation on Zimmert's twin-class bound needs the class of the
-// different in the generated subgroup.  Two more presentations of the field
-// of x^3 + x + 200 (class group Z/2, Minkowski-type bound 295, twin-class
-// bound 263): x^3 + 25 x + 25000 (theta = 5 alpha, index 125, primes above 5
-// of norm 5) takes the conductor_primes route with requirement 263, while
-// x^3 + 361 x + 1371800 (theta = 19 alpha, a prime of norm 361 above 19)
-// keeps the Minkowski-type bound.  The class group is the same in every
+// Proven generation on Zimmert's twin-class bound needs no hypothesis on
+// the class of the different (GB-kor1-generation).  Two more presentations
+// of the field of x^3 + x + 200 (class group Z/2, Minkowski-type bound 295,
+// twin-class bound 263): x^3 + 25 x + 25000 (theta = 5 alpha, index 125,
+// primes above 5 of norm 5) and x^3 + 361 x + 1371800 (theta = 19 alpha, a
+// prime of norm 361 above 19, which formerly kept the Minkowski-type bound)
+// both take requirement 263.  The class group is the same in every
 // presentation.
 int test_twin_class_generation_routes() {
     struct Row {
@@ -3990,10 +3990,10 @@ int test_twin_class_generation_routes() {
     const Row rows[] = {
             {25, 25000, 263,
              silex::ClassGroupGenerationBasis::zimmert_twin_class,
-             silex::detail::GenerationDifferentRoute::conductor_primes},
-            {361, 1371800, 295,
-             silex::ClassGroupGenerationBasis::minkowski_type,
-             silex::detail::GenerationDifferentRoute::none},
+             silex::detail::GenerationDifferentRoute::kor1_generation},
+            {361, 1371800, 263,
+             silex::ClassGroupGenerationBasis::zimmert_twin_class,
+             silex::detail::GenerationDifferentRoute::kor1_generation},
     };
     for (const Row& row : rows) {
         silex::NumberField field = cubic_field(row.c1, row.c0);

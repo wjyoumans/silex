@@ -305,9 +305,8 @@ AnalyticFinishDecision apply_honesty_check(
     }
 
     // The requirement record_factor_base_generation_ recorded for the
-    // installed base (the twin-class bound only with the different settled
-    // exactly).  It is recomputed only when nothing is recorded for this
-    // order, so Zimmert's G is not evaluated a second time.
+    // installed base (the twin-class bound when it is smaller).  It is
+    // recomputed only when nothing is recorded for this order.
     flint::Fmpz required_bound;
     if (ClassGroupRelationSearchAccess::recorded_generation_requirement(
                 flint::FmpzRef(required_bound), context, order)) {

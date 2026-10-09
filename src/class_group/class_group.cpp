@@ -7653,11 +7653,11 @@ bool ClassGroupContext::record_factor_base_generation_(
                 detail::GenerationDifferentRoute::none;
     }
 
-    // The requirement is Zimmert's twin-class bound only together with an
-    // exact treatment of the different (index_one or conductor_primes);
-    // otherwise it is factor_base_class_group_bound.  It depends only on the
-    // order, so a class/unit transaction evaluates it for each new order and
-    // later builds of the same order reuse the most recent value.
+    // The requirement is Zimmert's twin-class bound (route kor1_generation)
+    // when that is smaller, otherwise factor_base_class_group_bound.  It
+    // depends only on the order, so a class/unit transaction evaluates it
+    // for each new order and later builds of the same order reuse the most
+    // recent value.
     flint::Fmpz required;
     detail::GenerationDifferentRoute route =
             detail::GenerationDifferentRoute::none;
@@ -7694,11 +7694,8 @@ bool ClassGroupContext::record_factor_base_generation_(
             private_storage_->generation_different_route = route;
             SILEX_LOG(diagnostics_, DiagnosticsModule::class_group,
                       LogLevel::detail,
-                      route == detail::GenerationDifferentRoute::index_one
-                              ? "generation requirement zimmert_twin_class, "
-                                "different index_one"
-                              : "generation requirement zimmert_twin_class, "
-                                "different conductor_primes");
+                      "generation requirement zimmert_twin_class, "
+                      "different kor1_generation");
         }
         flint::fmpz_set(flint::FmpzRef(factor_base_generation_bound_),
                         flint::FmpzConstRef(required));

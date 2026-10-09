@@ -57,7 +57,7 @@ public:
 
     // How the recorded unconditional generation requirement
     // (factor_base_generation_bound()) treats the class of the different:
-    // index_one or conductor_primes when it is Zimmert's twin-class bound,
+    // kor1_generation when it is Zimmert's twin-class bound,
     // none when it is factor_base_class_group_bound or nothing is recorded.
     static GenerationDifferentRoute factor_base_generation_different_route(
             const ClassGroupContext& context) noexcept;
