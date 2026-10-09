@@ -138,15 +138,27 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
             const slong add_need =
                     kRelationSurplus +
                     relation_kernel_units_target;
-            const bool prepass_ready =
-                    build_initial_subfactor_base(
-                            subfactor_base_schedule, *base,
-                            factor_base_bound) &&
+            bool prepass_ready = false;
+            {
+                SILEX_PROFILE_SCOPE(
+                        active_diagnostics, DiagnosticsModule::class_group,
+                        "class_group.contract_prepass_subfactor_base");
+                prepass_ready = build_initial_subfactor_base(
+                        subfactor_base_schedule, *base, factor_base_bound);
+            }
+            // The admission cache has its own scope inside.
+            prepass_ready =
+                    prepass_ready &&
                     !subfactor_base_schedule.subfactor_base.empty() &&
                     detail::initialize_relation_admission_cache(
-                            *this, cache, order, add_need) &&
-                    build_norm_prefilter(norm_prefilter, *base,
-                                         factor_base_bound, false);
+                            *this, cache, order, add_need);
+            if (prepass_ready) {
+                SILEX_PROFILE_SCOPE(
+                        active_diagnostics, DiagnosticsModule::class_group,
+                        "class_group.contract_prepass_norm_prefilter");
+                prepass_ready = build_norm_prefilter(
+                        norm_prefilter, *base, factor_base_bound, false);
+            }
             if (prepass_ready) {
                 RelationSearchControlState route_state;
                 route_state.accepted_relations = relation_count();
@@ -154,6 +166,10 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                 std::vector<slong> small_multiplier(
                         static_cast<std::size_t>(base->length()), 0);
                 auto store_live_state = [&]() noexcept {
+                    SILEX_PROFILE_SCOPE(
+                            active_diagnostics,
+                            DiagnosticsModule::class_group,
+                            "class_group.contract_prepass_store_live_state");
                     detail::RelationFinishState next_state;
                     next_state.cache = cache;
                     next_state.subfactor_base_schedule =
@@ -172,6 +188,10 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                 bool goal_reached = false;
                 auto compute_need =
                         [&](RelationNeedDecision& decision) noexcept {
+                    SILEX_PROFILE_SCOPE(
+                            active_diagnostics,
+                            DiagnosticsModule::class_group,
+                            "class_group.contract_prepass_compute_need");
                     return compute_relation_need(
                             decision, *this, *base,
                             relation_kernel_units_target);

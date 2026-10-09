@@ -130,6 +130,8 @@ bool factor_base_principal_witness(
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics,
         FactorBaseWitnessAudit* audit) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_principal_witness");
     if (audit != nullptr) *audit = FactorBaseWitnessAudit{};
     const Order* order = base.parent();
     if (order == nullptr || !same_order_parent(generator.parent(), order) ||
@@ -161,6 +163,8 @@ bool factor_base_scalar_witness(
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics,
         FactorBaseWitnessAudit* audit) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_scalar_witness");
     if (audit != nullptr) *audit = FactorBaseWitnessAudit{};
     const Order* order = base.parent();
     if (order == nullptr || order->parent() == nullptr ||
@@ -294,6 +298,8 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         RequiredPrimeWitnessExhaustion& exhaustion,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_enumerate_witness");
     const Order* order = base.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     if (field == nullptr || !same_order_parent(required_prime.parent(), order) ||
@@ -303,10 +309,14 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
     }
 
     FiniteIdealT2EnumerationData t2_context;
-    if (!build_finite_ideal_t2_enumeration_data_with_retry(
-                t2_context, ideal, diagnostics, embedding_cache,
-                effort.factor_attempts)) {
-        return RequiredPrimeWitnessSearchResult::failed;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.honesty_t2_enumeration_data");
+        if (!build_finite_ideal_t2_enumeration_data_with_retry(
+                    t2_context, ideal, diagnostics, embedding_cache,
+                    effort.factor_attempts)) {
+            return RequiredPrimeWitnessSearchResult::failed;
+        }
     }
 
     FiniteQuadraticFormEnumerationContext enumeration;
@@ -333,6 +343,8 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
     ++exhaustion.ideals;
     slong factor_attempts = 0;
     while (enumeration.next()) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.honesty_enumerate_candidate");
         if (!enumeration.current_row(flint::FmpzMatRef(coefficients))) {
             return RequiredPrimeWitnessSearchResult::failed;
         }
@@ -365,6 +377,8 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
             return RequiredPrimeWitnessSearchResult::failed;
         }
         bool matches = false;
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.honesty_factor_over_base_required_prime");
         if (!detail::order_element_factor_over_base_with_required_prime(
                     matches, order_element, base, required_prime,
                     diagnostics)) {
@@ -424,6 +438,8 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
     // Reset to the required prime before each bounded random
     // subfactor-base twist.
     for (slong trial = 0; trial < effort.random_tries; ++trial) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.honesty_random_twist");
         if (!current.set(required_ideal) || !back_multiplier.one()) {
             return RequiredPrimeWitnessSearchResult::failed;
         }
@@ -518,6 +534,8 @@ bool factor_base_reduces_prime_by_ideal_lattice_search(
         slong radius,
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_reduces_prime_by_ideal_lattice_search");
     const Order* order = base.parent();
     if (order == nullptr || order->parent() == nullptr ||
         radius <= 0 || !same_order_parent(prime.parent(), order) ||
@@ -612,6 +630,10 @@ bool factor_base_reduces_prime_by_twisted_lattice_search(
         slong twist_cap,
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_reduces_prime_by_twisted_lattice_search");
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_reduces_prime_by_lattice_search");
     const Order* order = base.parent();
     if (order == nullptr || !same_order_parent(prime.parent(), order) ||
         base.contains(prime) || radius <= 0) {
@@ -652,6 +674,8 @@ bool factor_base_reduces_prime_by_principal_search(
         slong twist_cap,
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_reduces_prime_by_principal_search");
     const Order* order = base.parent();
     if (order == nullptr || order->parent() == nullptr ||
         !same_order_parent(prime.parent(), order) || base.contains(prime)) {
@@ -710,6 +734,8 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
         ulong& random_state,
         FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_reduces_prime_by_random_subsearch");
     const Order* order = base.parent();
     if (order == nullptr || !same_order_parent(prime.parent(), order) ||
         subfactor_base_schedule == nullptr ||
@@ -852,8 +878,12 @@ bool factor_base_honest_for_rational_prime(bool& honest,
     }
 
     PrimeIdealList primes;
-    if (!decompose_prime(primes, *order, p)) {
-        return false;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.honesty_decompose_prime");
+        if (!decompose_prime(primes, *order, p)) {
+            return false;
+        }
     }
 
     std::vector<slong> proof_targets;
@@ -882,6 +912,8 @@ bool factor_base_honest_for_rational_prime(bool& honest,
              stage <= max_stage && !witnessed;
              ++stage) {
             effort = factor_base_witness_search_effort(stage);
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                                "class_group.honesty_witness_stage");
             if (use_direct_required_prime_witness) {
                 exhaustion = RequiredPrimeWitnessExhaustion{};
                 const RequiredPrimeWitnessSearchResult result =
@@ -957,6 +989,8 @@ bool factor_base_honesty_check(bool& honest,
                                FactorBaseHonestyScanAudit* audit,
                                FactorBaseWitnessPredicate predicate)
         noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.factor_base_honesty_check");
     honest = false;
     if (audit != nullptr) {
         *audit = FactorBaseHonestyScanAudit{};

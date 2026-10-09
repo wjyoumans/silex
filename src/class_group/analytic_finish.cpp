@@ -517,6 +517,8 @@ AnalyticFinishDecision apply_analytic_finish_check(
         bool factor_base_restart_available,
         HnfFinishWorkspace* finish_workspace,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.apply_analytic_finish_check");
     if (!goal_reached) {
         return AnalyticFinishDecision::incomplete;
     }

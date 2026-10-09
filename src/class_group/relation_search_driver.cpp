@@ -284,6 +284,8 @@ AnalyticFinishDecision apply_honesty_check(
         bool factor_base_restart_available,
         bool use_required_prime_factor_over_base,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.apply_honesty_check");
     if (!goal_reached) {
         return AnalyticFinishDecision::incomplete;
     }

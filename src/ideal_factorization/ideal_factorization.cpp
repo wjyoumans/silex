@@ -21,6 +21,20 @@
 namespace silex {
 namespace {
 
+// Profiling wrapper so the valuation callers appear as separate scopes.
+bool scoped_prime_ideal_valuation(
+        [[maybe_unused]] const char* label,
+        slong& valuation,
+        const PrimeIdeal& prime,
+        const OrderElement& element,
+        slong norm_valuation,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal, label);
+    return detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+            valuation, prime, element, norm_valuation, diagnostics);
+}
+
+
 using IdealFactor = FactorPower<PrimeIdeal>;
 
 bool copy_append(std::vector<IdealFactor>& factors,
@@ -219,17 +233,21 @@ bool factor_base_order_element_rational_valuation(
     }
 
     slong block_index = -1;
-    if (!base.rational_prime_block_index_for_prime(block_index,
-                                                   rational_prime)) {
-        return true;
-    }
-
     flint::Fmpz block_prime;
     slong block_length = 0;
-    if (!base.rational_prime_block_data(flint::FmpzRef(block_prime),
-                                        block_length, block_index) ||
-        !flint::fmpz_equal(flint::FmpzConstRef(block_prime), rational_prime)) {
-        return false;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                            "ideal.rational_valuation_block_lookup");
+        if (!base.rational_prime_block_index_for_prime(block_index,
+                                                       rational_prime)) {
+            return true;
+        }
+        if (!base.rational_prime_block_data(flint::FmpzRef(block_prime),
+                                            block_length, block_index) ||
+            !flint::fmpz_equal(flint::FmpzConstRef(block_prime),
+                               rational_prime)) {
+            return false;
+        }
     }
 
     for (slong offset = 0; offset < block_length && remaining > 0; ++offset) {
@@ -243,7 +261,8 @@ bool factor_base_order_element_rational_valuation(
         }
 
         slong valuation = -1;
-        if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+        if (!scoped_prime_ideal_valuation(
+                    "ideal_factorization.valuation_caller_prime_block",
                     valuation, *prime, element, norm_valuation, diagnostics) ||
             valuation < 0) {
             return false;
@@ -356,6 +375,8 @@ bool order_element_factor_over_base_with_required_prime_direct(
         const FactorBase& base,
         const PrimeIdeal& required_prime,
         const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                        "ideal.required_prime_direct");
     matches = false;
     const Order* order = element.parent();
     if (order == nullptr || order->parent() == nullptr ||
@@ -370,10 +391,18 @@ bool order_element_factor_over_base_with_required_prime_direct(
     Element ambient(*order->parent());
     flint::Fmpq norm;
     flint::Fmpz norm_abs;
-    if (!ambient.is_defined() || !element.get_element(ambient) ||
-        !ambient.norm(flint::FmpqRef(norm)) ||
-        fmpz_is_one(fmpq_denref(norm.raw())) == 0) {
-        return false;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                            "ideal.required_prime_direct_norm");
+        if (!ambient.is_defined() || !element.get_element(ambient)) {
+            return false;
+        }
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                            "ideal.required_prime_direct_norm_compute");
+        if (!ambient.norm(flint::FmpqRef(norm)) ||
+            fmpz_is_one(fmpq_denref(norm.raw())) == 0) {
+            return false;
+        }
     }
     fmpz_abs(norm_abs.raw(), fmpq_numref(norm.raw()));
     if (fmpz_is_zero(norm_abs.raw()) != 0) {
@@ -387,8 +416,12 @@ bool order_element_factor_over_base_with_required_prime_direct(
                 flint::FmpzRef(required_rational_prime))) {
         return false;
     }
-    flint::fmpz_factor(flint::FmpzFactorRef(factorization),
-                       flint::FmpzConstRef(norm_abs));
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                            "ideal.required_prime_direct_fmpz_factor");
+        flint::fmpz_factor(flint::FmpzFactorRef(factorization),
+                           flint::FmpzConstRef(norm_abs));
+    }
 
     bool required_prime_seen = false;
     for (slong i = 0;
@@ -412,7 +445,8 @@ bool order_element_factor_over_base_with_required_prime_direct(
                     flint::FmpzConstRef(required_rational_prime))) {
             required_prime_seen = true;
             slong required_valuation = -1;
-            if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+            if (!scoped_prime_ideal_valuation(
+                    "ideal_factorization.valuation_caller_required_prime",
                         required_valuation, required_prime, element,
                         norm_valuation, diagnostics)) {
                 return false;
@@ -427,6 +461,8 @@ bool order_element_factor_over_base_with_required_prime_direct(
         }
 
         bool accounted = false;
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                            "ideal.required_prime_direct_accounting");
         if (!factor_base_accounts_for_order_element_rational_valuation(
                     accounted, base, element,
                     flint::FmpzConstRef(rational_prime), norm_valuation,
@@ -1081,7 +1117,8 @@ bool order_element_factor_over_base_with_one_large_prime(
             }
 
             slong valuation = -1;
-            if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+            if (!scoped_prime_ideal_valuation(
+                    "ideal_factorization.valuation_caller_decomposed_cofactor",
                         valuation, *prime, element, norm_valuation,
                         diagnostics) ||
                 valuation < 0 || prime->residue_degree() <= 0) {
