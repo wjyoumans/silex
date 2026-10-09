@@ -13,7 +13,7 @@ namespace silex_tools {
 // the one place for structured detail about a failure: an object whose keys
 // depend on `failure_reason`, or null when that reason carries no detail.
 // class_unit_computation_failed carries `cause`, free text naming the last
-// unit-group validation outcome reached (absent detail is null when no
+// unit-group validation outcome reached (the detail is null when no
 // validation ran).  Otherwise only factor_base_honesty_unwitnessed carries
 // detail: the unwitnessed
 // required prime (`p`, a decimal string like every big integer in this
