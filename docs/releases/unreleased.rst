@@ -301,6 +301,23 @@ Changed
   unchanged.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The unconditional unit proof (``OrderUnitGroup::prove_index_bound`` and
+  ``proven`` class/unit validation) no longer fails at once when the
+  ``ell``-th root of a residue-character kernel row cannot be decided, which
+  happens mostly in degree 10 and higher.  As in Hecke's ``saturate!``, it treats
+  the row like a non-power and rescans with more auxiliary primes until the
+  kernel is empty.  ``proven`` class/unit computations that previously failed
+  this way now succeed, for example ``Q(zeta_13)`` at ``ell = 17``,
+  ``Q(zeta_17)``, ``Q(zeta_19)`` and ``Q(sqrt(-1), sqrt(-3), sqrt(5))``,
+  with the class number and regulator of PARI's ``bnfinit`` and
+  ``bnfcertify``.  The certification rule is unchanged: ``ell`` is verified
+  only by an empty character kernel, and roots are adjoined only after
+  exact verification.  The failure behavior changes: a row that really is an
+  ``ell``-th power but whose root cannot be computed now fails as
+  ``unavailable`` only after the ``2^16``-prime scan guard instead of at
+  once, so such a failure takes longer.  See "Class groups and order units"
+  in :doc:`../reference/algorithms_and_sources`.
+
 - ``OrderUnitGroup::prove_index_bound``, ``saturate_index_bounded``,
   ``saturate_index_bounded_adaptive`` and ``prove_local_saturated`` now check
   on entry that the unit group's torsion is the torsion Silex computes for

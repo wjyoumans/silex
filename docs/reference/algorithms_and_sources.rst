@@ -1150,7 +1150,18 @@ saturation loop in ``src/order_unit/compute.cpp``.  Silex first scans the
 primes ``q <= aux_bound`` (the caller's bound; 1000 in class/unit
 validation) and continues with the Hecke scan when that pre-scan selects no usable prime,
 when it leaves a nonempty kernel without adjoining a root, or when
-``ell >= aux_bound``.  The auxiliary bound is therefore not a proof
+``ell >= aux_bound``.  A kernel row whose ``ell``-th root Silex cannot
+decide (the compact root and the factored root both leave it undecided, for
+example because ``Element::is_power`` does not decide roots in degree 10 and
+higher) is treated like a row
+that is not an ``ell``-th power: the scan doubles ``stable`` and continues.
+This follows ``saturate!`` (Hecke v0.38.6 ``Saturate.jl``, lines 396-411),
+whose ``is_power`` reports ``false`` whenever it finds no root, and it does
+not change the certification rule: ``ell`` is verified only by an empty
+character kernel, and the group grows only by an exactly verified root.  A
+row that is an ``ell``-th power whose root Silex cannot compute stays in
+every kernel, so its proof fails closed as ``unavailable`` only at the
+resource guard below.  The auxiliary bound is therefore not a proof
 parameter; a unit proof record stores it as the pre-scan bound of the call,
 not as the largest prime used.  Hecke starts its scan at
 ``next_prime(2^60)``; Silex starts at ``q = ell + 1``, which changes only
@@ -1297,6 +1308,10 @@ without adjoining a root, plus one scan per adjoined root, and adjoined roots
 are bounded by the ``ell``-part of the finite index ``[O^x : U]`` (and by the
 caller's restart limit).  In total one ``ell`` examines at most about
 ``(17 + log2 d + log_ell [O^x : U]) * 2^16`` primes ``q``.
+The same bound covers kernel rows with an undecided root, which end a scan
+without adjoining a root.  If a scan ever ends because no prime ``q`` is left
+in the machine-word range, an undecided row fails closed at once, since a
+rescan would return the same kernel.
 
 Residue-character ``ell``-saturation of unit subgroups of a non-maximal order
 ``O`` is a Silex extension; neither primary source applies this proof to
