@@ -2992,8 +2992,15 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     candidate_class_group.class_unit_transaction_context_ =
             class_group.class_unit_transaction_context_;
     candidate_class_group.set_diagnostics(active_diagnostics);
-    if (!candidate_class_group.compute_tentative_candidate_(
-                order, factor_base_bound, local_options)) {
+    bool tentative_ok = false;
+    {
+        SILEX_PROFILE_SCOPE(
+                active_diagnostics, DiagnosticsModule::unit_group,
+                "unit_group.compute_with_relation_class_group.tentative_candidate");
+        tentative_ok = candidate_class_group.compute_tentative_candidate_(
+                order, factor_base_bound, local_options);
+    }
+    if (!tentative_ok) {
         return false;
     }
     if (options.requested_certification == CertificationMode::grh &&
@@ -3077,93 +3084,101 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         ValidateRefineSummary validate_summary;
         slong revalidate_passes_done = 0;
 
-        if (rank == 0) {
-            SILEX_PROFILE_EVENT(active_diagnostics,
-                                DiagnosticsModule::unit_group,
-                                "unit_group.rank_zero_units");
-            if (!candidate_units.compute(order)) {
-                return false;
-            }
-            candidate_units_ready = true;
-        } else if (order.degree() == 2 && !transaction &&
-                   candidate_units.compute(order)) {
-            candidate_units_ready = true;
-        } else if (options.requested_certification ==
-                           CertificationMode::proven &&
-                   refresh_options.use_class_relation_units) {
-            SILEX_PROFILE_EVENT(active_diagnostics,
-                                DiagnosticsModule::unit_group,
-                                "unit_group.class_relation_units");
-            if (!set_class_relation_units(
-                        candidate_units_ready, unit_improved,
-                        candidate_units, order, candidate_class_group,
-                        embeddings, analytic_cache, relation_unit_state,
-                        precision, rank, unit_add,
-                        refresh_options.validation_bf_max_cutoff,
-                        refresh_options.accept_grh_generation)) {
-                return false;
-            }
-            if (!candidate_units_ready) {
-                SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
-                          LogLevel::detail,
-                          "class/unit unit extraction did not yet "
-                          "produce a full-rank unit group");
-            }
-            if (unit_add == WORD_MAX) {
-                return false;
-            }
-            ++unit_add;
-        } else if (options.requested_certification ==
-                   CertificationMode::proven) {
-            SILEX_PROFILE_EVENT(active_diagnostics,
-                                DiagnosticsModule::unit_group,
-                                "unit_group.recompute_units");
-            if (!recompute_units_from_class_context(
-                        candidate_units, order, candidate_class_group,
-                        embeddings, analytic_cache, true,
-                        detail::ValidationRecomputeCause::
-                                initial_requested_proven,
-                        precision)) {
-                return false;
-            }
-            candidate_units_ready = true;
-        } else if (!do_units) {
-            SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
-                      LogLevel::detail,
-                      "class/unit loop skipped unit extraction");
-            if (candidate_units.is_set() &&
-                same_order_parent(candidate_units.parent(), &order) &&
-                candidate_units.free_rank() == rank) {
-                // reference's do_units flag only skips _unit_group_find_units;
-                // an already full-rank unit context is still validated against
-                // the extended class context in the same loop iteration.
+        {
+            SILEX_PROFILE_SCOPE(
+                    active_diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compute_with_relation_class_group.unit_extraction");
+            if (rank == 0) {
+                SILEX_PROFILE_EVENT(active_diagnostics,
+                                    DiagnosticsModule::unit_group,
+                                    "unit_group.rank_zero_units");
+                if (!candidate_units.compute(order)) {
+                    return false;
+                }
                 candidate_units_ready = true;
-            }
-        } else {
-            SILEX_PROFILE_EVENT(active_diagnostics,
-                                DiagnosticsModule::unit_group,
-                                "unit_group.class_relation_units");
-            if (!set_class_relation_units(
-                        candidate_units_ready, unit_improved,
-                        candidate_units, order, candidate_class_group,
-                        embeddings, analytic_cache, relation_unit_state,
-                        precision, rank, unit_add,
-                        refresh_options.validation_bf_max_cutoff,
-                        refresh_options.accept_grh_generation)) {
-                return false;
-            }
-            if (!candidate_units_ready) {
+            } else if (order.degree() == 2 && !transaction &&
+                       candidate_units.compute(order)) {
+                candidate_units_ready = true;
+            } else if (options.requested_certification ==
+                               CertificationMode::proven &&
+                       refresh_options.use_class_relation_units) {
+                SILEX_PROFILE_EVENT(active_diagnostics,
+                                    DiagnosticsModule::unit_group,
+                                    "unit_group.class_relation_units");
+                if (!set_class_relation_units(
+                            candidate_units_ready, unit_improved,
+                            candidate_units, order, candidate_class_group,
+                            embeddings, analytic_cache, relation_unit_state,
+                            precision, rank, unit_add,
+                            refresh_options.validation_bf_max_cutoff,
+                            refresh_options.accept_grh_generation)) {
+                    return false;
+                }
+                if (!candidate_units_ready) {
+                    SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
+                              LogLevel::detail,
+                              "class/unit unit extraction did not yet "
+                              "produce a full-rank unit group");
+                }
+                if (unit_add == WORD_MAX) {
+                    return false;
+                }
+                ++unit_add;
+            } else if (options.requested_certification ==
+                       CertificationMode::proven) {
+                SILEX_PROFILE_EVENT(active_diagnostics,
+                                    DiagnosticsModule::unit_group,
+                                    "unit_group.recompute_units");
+                if (!recompute_units_from_class_context(
+                            candidate_units, order, candidate_class_group,
+                            embeddings, analytic_cache, true,
+                            detail::ValidationRecomputeCause::
+                                    initial_requested_proven,
+                            precision)) {
+                    return false;
+                }
+                candidate_units_ready = true;
+            } else if (!do_units) {
                 SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                           LogLevel::detail,
-                          "class/unit unit extraction did not yet "
-                          "produce a full-rank unit group");
+                          "class/unit loop skipped unit extraction");
+                if (candidate_units.is_set() &&
+                    same_order_parent(candidate_units.parent(), &order) &&
+                    candidate_units.free_rank() == rank) {
+                    // reference's do_units flag only skips _unit_group_find_units;
+                    // an already full-rank unit context is still validated against
+                    // the extended class context in the same loop iteration.
+                    candidate_units_ready = true;
+                }
+            } else {
+                SILEX_PROFILE_EVENT(active_diagnostics,
+                                    DiagnosticsModule::unit_group,
+                                    "unit_group.class_relation_units");
+                if (!set_class_relation_units(
+                            candidate_units_ready, unit_improved,
+                            candidate_units, order, candidate_class_group,
+                            embeddings, analytic_cache, relation_unit_state,
+                            precision, rank, unit_add,
+                            refresh_options.validation_bf_max_cutoff,
+                            refresh_options.accept_grh_generation)) {
+                    return false;
+                }
+                if (!candidate_units_ready) {
+                    SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
+                              LogLevel::detail,
+                              "class/unit unit extraction did not yet "
+                              "produce a full-rank unit group");
+                }
+                if (unit_add == WORD_MAX) {
+                    return false;
+                }
+                ++unit_add;
             }
-            if (unit_add == WORD_MAX) {
-                return false;
-            }
-            ++unit_add;
         }
         auto validate_candidate = [&]() noexcept {
+            SILEX_PROFILE_SCOPE(
+                    active_diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compute_with_relation_class_group.validate_candidate");
             rank_complete = candidate_units.free_rank() == rank;
             if (options.requested_certification == CertificationMode::grh) {
                 if (try_validate_refine_loop(
@@ -3258,6 +3273,9 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
 
         if (certified &&
             options.requested_certification == CertificationMode::grh) {
+            SILEX_PROFILE_SCOPE(
+                    active_diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compute_with_relation_class_group.publish_grh_labels");
             // reference Clgp.jl:_class_unit_group publishes this completed pair
             // after analytic index-one validation and skips only the later
             // unconditional class- and unit-group proof passes.  Silex also
@@ -3271,7 +3289,12 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         }
 
         if (certified) {
-            class_group.swap(candidate_class_group);
+            {
+                SILEX_PROFILE_SCOPE(
+                        active_diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.compute_with_relation_class_group.publish_swap");
+                class_group.swap(candidate_class_group);
+            }
             class_group.set_diagnostics(active_diagnostics);
             swap(candidate_units);
             set_diagnostics(active_diagnostics);
@@ -3284,12 +3307,25 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         const slong relation_count_before =
                 candidate_class_group.relation_count();
         flint::Fmpz class_order_before;
-        if (!candidate_class_group.order(flint::FmpzRef(class_order_before))) {
-            return false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    active_diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compute_with_relation_class_group.class_order_before");
+            if (!candidate_class_group.order(
+                        flint::FmpzRef(class_order_before))) {
+                return false;
+            }
         }
         detail::ClassGroupRelationOptions extend_options = local_options;
-        if (!candidate_class_group.extend_tentative_relations_(
-                    order, factor_base_bound, extend_options)) {
+        bool extend_ok = false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    active_diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compute_with_relation_class_group.extend_relations");
+            extend_ok = candidate_class_group.extend_tentative_relations_(
+                    order, factor_base_bound, extend_options);
+        }
+        if (!extend_ok) {
             SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "class/unit continuation did not add a relation "
@@ -3304,8 +3340,14 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
             return false;
         }
         flint::Fmpz class_order_after;
-        if (!candidate_class_group.order(flint::FmpzRef(class_order_after))) {
-            return false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    active_diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compute_with_relation_class_group.class_order_after");
+            if (!candidate_class_group.order(
+                        flint::FmpzRef(class_order_after))) {
+                return false;
+            }
         }
         const bool class_order_unchanged =
                 flint::fmpz_equal(flint::FmpzConstRef(class_order_before),
