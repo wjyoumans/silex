@@ -1316,6 +1316,41 @@ of ``K``:
   ``D_K = -10051, -10571, -12167``).  Theorem B gives their regulators
   0.2052, 0.2132 and 0.2372, so Silex uses 0.2052 for ``(0, 3)``.
 
+In prime degree ``n``, ``OrderUnitGroup::regulator_index_bound`` also uses a
+bound that depends on the field discriminant ``d_K``.  It raises ``R_lower`` to
+the larger of the bounds above and this one:
+
+* M. Pohst and H. Zassenhaus, *Algorithmic Algebraic Number Theory*,
+  Cambridge University Press, 1989, Chapter 5, (6.22) (p. 366), excerpted
+  there from M. Pohst, *J. Number Theory* 9 (1977), 459--492, and
+  *Abh. Math. Sem. Univ. Hamburg* 47 (1978), 221--231, after R. Remak, *J.
+  Reine Angew. Math.* 167 (1932), 360--378: if ``K`` has no proper subfield
+  other than ``Q`` and ``|d_K| > c``, then with unit rank ``r = r1 + r2 - 1``
+  ``R >= ((3 log^2(|d_K|/c) / ((n-1) n (n+1) - 6 r2))^r 2^r2 /
+  (n gamma_r^r))^(1/2)``.  Here ``c = n^n``, replaced by ``4^floor(n/2)`` for
+  totally real fields with ``n <= 11`` (the remark after (6.22)).
+  ``gamma_r^r`` is Hermite's constant to the power ``r``: the exact values
+  ``1, 4/3, 2, 4, 8, 64/3, 64, 256`` for ``r <= 8`` (3.35a, p. 198), and
+  Blichfeldt's upper bound ``(2/pi)^r Gamma(2 + r/2)^2`` (3.35b, p. 199)
+  beyond, which only lowers the bound.
+
+Silex certifies that ``K`` has no proper subfield other than ``Q`` only by
+``n`` being prime, so the bound is never used in composite degree, even for
+primitive fields.  ``d_K`` is the discriminant of the maximal order, so the
+bound is used only when the unit group's order is known to be maximal; for
+any other order, and whenever ``r = 0`` or ``|d_K| <= c``, the signature
+bounds above are used unchanged.  The bound is evaluated with Arb from the
+exact integers ``|d_K|`` and ``c`` and its lower endpoint is used, at the same
+precision cap as the other terms.  The public ``unit_lower_regulator_bound``,
+which takes only the field, does not use it.  PARI
+(``src/basemath/buch3.c``, ``regulatorbound``) evaluates the same bound in
+floating point and also applies it in composite degree after a primitivity test on a
+partial factorization of ``d_K``; Silex does neither.  On the prime-degree
+fields of the proven corpus the bound never exceeds the regulator
+(``test/t-unit.cpp`` checks this against certified PARI regulators).  For
+example, the index bound for the quintic of discriminant ``-401370255`` falls
+from 1184 to 236.
+
 All of these bounds are non-decreasing in ``w``.  For an order ``O``, ``O^x``
 has finite index in ``O_K^x``, so ``Reg(O) >= R_K``, and the field's ``w`` is
 the right value to use.  If ``w`` cannot be computed, Silex uses ``w = 2``.  The

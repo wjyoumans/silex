@@ -87,6 +87,18 @@ Changed
   ``1 - x``, ``-3 + x + x^2 - 2x^3 + x^4`` and ``1 - x + x^2``.  The class
   group, regulator and ``proven`` labels are unchanged.
 
+- In prime degree, ``OrderUnitGroup::regulator_index_bound`` on an order
+  known to be maximal now also uses the discriminant-dependent regulator lower
+  bound of Pohst-Zassenhaus (6.22), taking the larger of it and the
+  signature bounds.  The unit-index scan of a ``proven`` unit computation
+  then checks fewer primes: for the quintic of discriminant ``-401370255`` the
+  index bound falls from 1184 to 236, for the cubic of discriminant
+  ``-1080004`` from 1063 to 84.  Published groups, regulators and labels are
+  unchanged; the unit proof records cover fewer primes.  Composite degrees,
+  non-maximal orders and ``unit_lower_regulator_bound`` are unchanged.  See
+  "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - ``grh`` class/unit computations on an imaginary quadratic field with
   ``|D| >= 2^44`` no longer list the reduced forms of discriminant ``D``,
   whose time and memory grow like ``sqrt(|D|)``.  They take ``h`` from the
