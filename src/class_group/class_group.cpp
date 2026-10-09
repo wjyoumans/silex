@@ -6303,6 +6303,11 @@ bool compact_power_root_from_presentation(
                 "class_group.compact_power_root_element_is_power");
         if (!scaled_remainder.is_power(remainder_is_power, remainder_root,
                                        flint::FmpzConstRef(exponent))) {
+            // Element::is_power left the reduced remainder undecided; the
+            // compact presentation itself succeeded.
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.compact_power_root_element_is_power_unsupported");
             return false;
         }
     }

@@ -997,6 +997,9 @@ bool kernel_row_root(bool& is_power,
         if (!product.is_power_si(is_power, candidate, exponent,
                                  FactoredRootStrategy::reduced,
                                  group.diagnostics())) {
+            SILEX_PROFILE_EVENT(group.diagnostics(),
+                                DiagnosticsModule::unit_group,
+                                "unit_group.kernel_row_root_unavailable");
             return false;
         }
         SILEX_PROFILE_EVENT(
