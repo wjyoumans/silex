@@ -76,6 +76,17 @@ Added
 Changed
 -------
 
+- The relation-production prepass drops its outstanding relation surplus
+  after each small-norm pass, as PARI's ``Buchall_param`` does
+  (``cache.end = cache.last``), so a later request asks only for the missing
+  rank.  It previously kept asking for the surplus and stopped without
+  collecting more relations.  The ``proven`` computation for
+  ``x^5 - 2x^4 + x^3 + x^2 - 3x + 1`` (discriminant ``-11119``) now publishes
+  the fundamental units ``2 - x + x^3 - x^4``,
+  ``3 - x - x^2 + 2x^3 - x^4`` and ``-2 + 2x - 2x^3 + x^4`` instead of
+  ``1 - x``, ``-3 + x + x^2 - 2x^3 + x^4`` and ``1 - x + x^2``.  The class
+  group, regulator and ``proven`` labels are unchanged.
+
 - ``grh`` class/unit computations on an imaginary quadratic field with
   ``|D| >= 2^44`` no longer list the reduced forms of discriminant ``D``,
   whose time and memory grow like ``sqrt(|D|)``.  They take ``h`` from the
