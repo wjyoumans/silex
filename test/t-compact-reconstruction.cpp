@@ -5,14 +5,19 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/fmpz_mod_ctx.hpp>
+#include <silex/flint/fmpz_mod_poly.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/number_field.hpp>
 #include <silex/order.hpp>
 
+#include "class_group/class_group_internal.hpp"
 #include "factored_element/compact_reconstruction_internal.hpp"
 #include "order_unit/compact_reconstruction_bound_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <span>
 #include <vector>
 
@@ -584,6 +589,190 @@ int test_coordinate_bound_supports_index_three_maximal_basis() {
     return 0;
 }
 
+silex::NumberField monic_field(std::span<const slong> coefficients) noexcept {
+    sflint::FmpqPoly polynomial;
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// Keys of the compact field-modulus cache: an entry is returned only for its
+// own field data, prime and threshold, and entries stay sorted when a miss
+// is stored before existing entries.
+int test_compact_field_modulus_cache_keys() {
+    const slong k_coefficients[] = {-1, -1, 0, 0, 1};
+    const slong l_coefficients[] = {-2, 0, 0, 0, 1};
+    const silex::NumberField k = monic_field(k_coefficients);
+    const silex::NumberField k_copy = k;
+    const silex::NumberField l = monic_field(l_coefficients);
+    assert(k.is_defined() && l.is_defined() && !k.has_same_data(l));
+
+    sflint::Fmpz p0;
+    sflint::Fmpz p1;
+    sflint::Fmpz p2;
+    fmpz_one(p0.raw());
+    fmpz_mul_2exp(p0.raw(), p0.raw(), 60);
+    fmpz_nextprime(p0.raw(), p0.raw(), 1);
+    fmpz_nextprime(p1.raw(), p0.raw(), 1);
+    fmpz_nextprime(p2.raw(), p1.raw(), 1);
+
+    sflint::FmpzModCtx ctx(p1.raw());
+    sflint::FmpzModPoly modulus(ctx);
+    assert(modulus.is_initialized());
+    fmpz_mod_poly_set_coeff_si(modulus.raw(), 4, 1, ctx.raw());
+    fmpz_mod_poly_set_coeff_si(modulus.raw(), 1, -1, ctx.raw());
+    fmpz_mod_poly_set_coeff_si(modulus.raw(), 0, -1, ctx.raw());
+
+    silex::detail::CompactFieldModulusCache cache;
+    std::size_t position = 99;
+    assert(silex::detail::compact_field_modulus_cache_find(
+                   position, cache, k, sflint::FmpzConstRef(p1), 3) ==
+           nullptr);
+    assert(position == 0 && cache.field.has_same_data(k));
+    silex::detail::compact_field_modulus_cache_store(
+            cache, position, sflint::FmpzConstRef(p1), 3, true, modulus,
+            ctx);
+
+    // Hit for the same key, through a copy sharing the field data.
+    const auto* hit = silex::detail::compact_field_modulus_cache_find(
+            position, cache, k_copy, sflint::FmpzConstRef(p1), 3);
+    assert(hit != nullptr && hit->usable && position == 0);
+    assert(fmpz_equal(hit->prime.raw(), p1.raw()));
+    sflint::FmpzPoly expected;
+    fmpz_mod_poly_get_fmpz_poly(expected.raw(), modulus.raw(), ctx.raw());
+    assert(fmpz_poly_equal(hit->modulus.raw(), expected.raw()));
+
+    // Misses after that hit: another prime, another threshold.
+    assert(silex::detail::compact_field_modulus_cache_find(
+                   position, cache, k, sflint::FmpzConstRef(p2), 3) ==
+           nullptr);
+    assert(position == 1);
+    silex::detail::compact_field_modulus_cache_store(
+            cache, position, sflint::FmpzConstRef(p2), 3, false, modulus,
+            ctx);
+    assert(silex::detail::compact_field_modulus_cache_find(
+                   position, cache, k, sflint::FmpzConstRef(p1), 4) ==
+           nullptr);
+    assert(position == 2);
+
+    // A miss before the first entry is stored in order.
+    assert(silex::detail::compact_field_modulus_cache_find(
+                   position, cache, k, sflint::FmpzConstRef(p0), 3) ==
+           nullptr);
+    assert(position == 0);
+    silex::detail::compact_field_modulus_cache_store(
+            cache, position, sflint::FmpzConstRef(p0), 3, false, modulus,
+            ctx);
+    assert(cache.entries.size() == 3);
+    const sflint::Fmpz* order[] = {&p0, &p1, &p2};
+    for (std::size_t i = 0; i < cache.entries.size(); ++i) {
+        assert(fmpz_equal(cache.entries[i].prime.raw(), order[i]->raw()));
+    }
+    hit = silex::detail::compact_field_modulus_cache_find(
+            position, cache, k, sflint::FmpzConstRef(p2), 3);
+    assert(hit != nullptr && !hit->usable && position == 2);
+    hit = silex::detail::compact_field_modulus_cache_find(
+            position, cache, k, sflint::FmpzConstRef(p1), 3);
+    assert(hit != nullptr && hit->usable && position == 1);
+
+    // Another field never sees these entries: the cache is reset.
+    assert(silex::detail::compact_field_modulus_cache_find(
+                   position, cache, l, sflint::FmpzConstRef(p1), 3) ==
+           nullptr);
+    assert(position == 0 && cache.entries.empty());
+    assert(cache.field.has_same_data(l));
+    return 0;
+}
+
+bool compact_power_root_squares_to(const silex::FactoredElement& root,
+                                   const silex::FactoredElement& input) {
+    const silex::NumberField* field = input.parent();
+    silex::Element root_value(*field);
+    silex::Element square(*field);
+    silex::Element value(*field);
+    return root.evaluate(root_value) &&
+           square.multiply(root_value, root_value) &&
+           input.evaluate(value) && square.equal(value);
+}
+
+// One field-modulus cache shared by several compact power-root calls: the
+// first call fills it, a repeated call adds no entry, and every call gives
+// the result of an uncached call.
+int test_compact_field_modulus_cache_shared_across_calls() {
+    // x^4 - x - 1 has degree above the threshold 3, so the auxiliary prime
+    // walk rejects primes where it has an irreducible quartic factor.
+    const slong coefficients[] = {-1, -1, 0, 0, 1};
+    const silex::NumberField field = monic_field(coefficients);
+    const silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+
+    silex::Element x(field);
+    silex::Element x_cubed(field);
+    silex::Element x_plus_one(field);
+    silex::Element one(field);
+    sflint::Fmpz three;
+    fmpz_set_si(three.raw(), 3);
+    assert(x.gen() && one.one() && x_plus_one.add(x, one) &&
+           x_cubed.pow_fmpz(x, sflint::FmpzConstRef(three)));
+
+    // x * x^3 * (x + 1)^2 = x^12 and x * x^3 * (x + 1)^4 = x^20 are squares
+    // of units with a nonempty formal leftover.
+    silex::FactoredElement square(field);
+    silex::FactoredElement other_square(field);
+    assert(square.push(x, 1) && square.push(x_cubed, 1) &&
+           square.push(x_plus_one, 2));
+    assert(other_square.push(x, 1) && other_square.push(x_cubed, 1) &&
+           other_square.push(x_plus_one, 4));
+
+    constexpr slong precision = 128;
+    silex::detail::CompactFieldModulusCache cache;
+    bool is_power = false;
+    silex::FactoredElement root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, root, order, square, 2, precision, precision, nullptr,
+            &cache));
+    assert(is_power && compact_power_root_squares_to(root, square));
+    const std::size_t filled = cache.entries.size();
+    assert(filled > 0 && cache.field.has_same_data(field));
+    bool saw_rejected = false;
+    for (const auto& entry : cache.entries) {
+        saw_rejected = saw_rejected || !entry.usable;
+    }
+    assert(saw_rejected);
+
+    silex::FactoredElement second_root(field);
+    is_power = false;
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, second_root, order, square, 2, precision, precision,
+            nullptr, &cache));
+    assert(is_power && compact_power_root_squares_to(second_root, square));
+    assert(cache.entries.size() == filled);
+
+    silex::FactoredElement uncached_root(field);
+    is_power = false;
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, uncached_root, order, square, 2, precision, precision,
+            nullptr, nullptr));
+    assert(is_power);
+    silex::Element cached_value(field);
+    silex::Element uncached_value(field);
+    assert(second_root.evaluate(cached_value) &&
+           uncached_root.evaluate(uncached_value) &&
+           cached_value.equal(uncached_value));
+
+    silex::FactoredElement other_root(field);
+    is_power = false;
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, other_root, order, other_square, 2, precision,
+            precision, nullptr, &cache));
+    assert(is_power && compact_power_root_squares_to(other_root, other_square));
+    assert(cache.entries.size() >= filled);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -600,5 +789,7 @@ int main() {
     assert(test_coordinate_bound_rejects_nonmaximal_order() == 0);
     assert(test_coordinate_bound_supports_reordered_basis() == 0);
     assert(test_coordinate_bound_supports_index_three_maximal_basis() == 0);
+    assert(test_compact_field_modulus_cache_keys() == 0);
+    assert(test_compact_field_modulus_cache_shared_across_calls() == 0);
     return 0;
 }

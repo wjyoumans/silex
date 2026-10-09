@@ -6,10 +6,13 @@
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_mod_ctx.hpp>
+#include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_poly.hpp>
 #include <silex/ideal.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <cstddef>
 #include <vector>
 
 #include "class_group_storage_internal.hpp"
@@ -143,6 +146,10 @@ bool class_group_ideal_relation_witness(
         const Ideal& ideal,
         const ClassGroupIdealRelationWitnessOptions& options = {}) noexcept;
 
+// One result of compact_field_modulus_mod_p: whether the defining polynomial
+// of the cache's field is usable modulo `prime` for `threshold`, and if so
+// its monic reduction with integer coefficients in [0, prime).  An entry
+// depends only on the defining polynomial, `prime` and `threshold`.
 struct CompactFieldModulusCacheEntry {
     flint::Fmpz prime;
     flint::FmpzPoly modulus;
@@ -150,10 +157,38 @@ struct CompactFieldModulusCacheEntry {
     bool usable = false;
 };
 
+// Cache of compact_field_modulus_mod_p results for one number field.
+// `field` shares (and so keeps alive) the field data the entries were
+// computed for; a lookup for a field without the same data clears the
+// cache first.  `entries` is sorted by (threshold, prime), with at most one
+// entry per pair.
 struct CompactFieldModulusCache {
-    const NumberField* field = nullptr;
+    NumberField field;
     std::vector<CompactFieldModulusCacheEntry> entries;
 };
+
+// Returns the entry of `cache` for (`prime`, `threshold`) over `field`, or
+// nullptr on a miss.  `position` receives the entry's index, or on a miss
+// the index at which compact_field_modulus_cache_store keeps the order.
+// The returned pointer is invalidated by the next store.
+const CompactFieldModulusCacheEntry* compact_field_modulus_cache_find(
+        std::size_t& position,
+        CompactFieldModulusCache& cache,
+        const NumberField& field,
+        flint::FmpzConstRef prime,
+        slong threshold) noexcept;
+
+// Records a result for (`prime`, `threshold`) at `position`, which must come
+// from a compact_field_modulus_cache_find miss for the same key with no
+// store in between.  `modulus` is read only when `usable` is true.
+void compact_field_modulus_cache_store(
+        CompactFieldModulusCache& cache,
+        std::size_t position,
+        flint::FmpzConstRef prime,
+        slong threshold,
+        bool usable,
+        const flint::FmpzModPoly& modulus,
+        const flint::FmpzModCtx& ctx) noexcept;
 
 bool compact_first_reduction(
         Ideal& reduced,

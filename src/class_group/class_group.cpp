@@ -5539,53 +5539,48 @@ bool compact_field_modulus_mod_p(
     return true;
 }
 
-bool compact_field_modulus_mod_p_cached(
-        bool& usable,
-        flint::FmpzModPoly& modulus,
+const CompactFieldModulusCacheEntry* compact_field_modulus_cache_find(
+        std::size_t& position,
+        CompactFieldModulusCache& cache,
         const NumberField& field,
-        const flint::FmpzModCtx& ctx,
+        flint::FmpzConstRef prime,
+        slong threshold) noexcept {
+    if (!cache.field.has_same_data(field)) {
+        cache.field = field;
+        cache.entries.clear();
+    }
+
+    const auto precedes = [&](const CompactFieldModulusCacheEntry& entry)
+            noexcept -> bool {
+        return entry.threshold < threshold ||
+               (entry.threshold == threshold &&
+                ::fmpz_cmp(entry.prime.raw(), prime.raw()) < 0);
+    };
+    // The auxiliary prime walk visits primes in increasing order from a
+    // fixed start, so a miss usually belongs after the last entry.
+    auto& entries = cache.entries;
+    if (entries.empty() || precedes(entries.back())) {
+        position = entries.size();
+        return nullptr;
+    }
+    const auto found = std::partition_point(
+            entries.begin(), entries.end(), precedes);
+    position = static_cast<std::size_t>(found - entries.begin());
+    if (found->threshold != threshold ||
+        ::fmpz_equal(found->prime.raw(), prime.raw()) == 0) {
+        return nullptr;
+    }
+    return &*found;
+}
+
+void compact_field_modulus_cache_store(
+        CompactFieldModulusCache& cache,
+        std::size_t position,
         flint::FmpzConstRef prime,
         slong threshold,
-        CompactFieldModulusCache* cache,
-        const DiagnosticsContext* diagnostics) noexcept {
-    usable = false;
-    if (!modulus.is_initialized()) {
-        return false;
-    }
-
-    if (cache == nullptr) {
-        usable = compact_field_modulus_mod_p(
-                modulus, field, ctx, threshold);
-        return true;
-    }
-
-    if (cache->field == nullptr || !cache->field->has_same_data(field)) {
-        cache->field = &field;
-        cache->entries.clear();
-    }
-
-    for (const auto& entry : cache->entries) {
-        if (entry.threshold != threshold ||
-            ::fmpz_equal(entry.prime.raw(), prime.raw()) == 0) {
-            continue;
-        }
-        if (!entry.usable) {
-            SILEX_PROFILE_EVENT(
-                    diagnostics, DiagnosticsModule::class_group,
-                    "class_group.compact_field_modulus_cache_reject");
-            return true;
-        }
-        SILEX_PROFILE_EVENT(
-                diagnostics, DiagnosticsModule::class_group,
-                "class_group.compact_field_modulus_cache_hit");
-        ::fmpz_mod_poly_set_fmpz_poly(
-                modulus.raw(), entry.modulus.raw(), ctx.raw());
-        usable = true;
-        return true;
-    }
-
-    usable = compact_field_modulus_mod_p(
-            modulus, field, ctx, threshold);
+        bool usable,
+        const flint::FmpzModPoly& modulus,
+        const flint::FmpzModCtx& ctx) noexcept {
     CompactFieldModulusCacheEntry entry;
     ::fmpz_set(entry.prime.raw(), prime.raw());
     entry.threshold = threshold;
@@ -5594,8 +5589,9 @@ bool compact_field_modulus_mod_p_cached(
         ::fmpz_mod_poly_get_fmpz_poly(
                 entry.modulus.raw(), modulus.raw(), ctx.raw());
     }
-    cache->entries.push_back(std::move(entry));
-    return true;
+    cache.entries.insert(
+            cache.entries.begin() + static_cast<std::ptrdiff_t>(position),
+            std::move(entry));
 }
 
 bool compact_modular_project_factored(
@@ -5997,6 +5993,23 @@ bool compact_evaluate_mod(
             return false;
         }
 
+        // A prime the cache already rejected is skipped before its residue
+        // context is built.
+        const CompactFieldModulusCacheEntry* cached = nullptr;
+        std::size_t cache_position = 0;
+        if (field_modulus_cache != nullptr) {
+            cached = compact_field_modulus_cache_find(
+                    cache_position, *field_modulus_cache, *field,
+                    flint::FmpzConstRef(p), threshold);
+            if (cached != nullptr && !cached->usable) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.compact_field_modulus_cache_reject");
+                ::fmpz_nextprime(p.raw(), p.raw(), 1);
+                continue;
+            }
+        }
+
         flint::FmpzModCtx ctx(p.raw());
         flint::FmpzModPoly modulus(ctx);
         flint::FmpzModPoly projected(ctx);
@@ -6009,11 +6022,21 @@ bool compact_evaluate_mod(
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::class_group,
                     "class_group.compact_evaluate_mod_field_modulus");
-            if (!compact_field_modulus_mod_p_cached(
-                        projected_ok, modulus, *field, ctx,
-                        flint::FmpzConstRef(p), threshold,
-                        field_modulus_cache, diagnostics)) {
-                return false;
+            if (cached != nullptr) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.compact_field_modulus_cache_hit");
+                ::fmpz_mod_poly_set_fmpz_poly(
+                        modulus.raw(), cached->modulus.raw(), ctx.raw());
+            } else {
+                projected_ok = compact_field_modulus_mod_p(
+                        modulus, *field, ctx, threshold);
+                if (field_modulus_cache != nullptr) {
+                    compact_field_modulus_cache_store(
+                            *field_modulus_cache, cache_position,
+                            flint::FmpzConstRef(p), threshold, projected_ok,
+                            modulus, ctx);
+                }
             }
         }
         if (projected_ok) {
