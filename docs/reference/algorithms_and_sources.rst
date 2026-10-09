@@ -1001,7 +1001,7 @@ class number, counted from the reduced forms returned by FLINT
 ``qfb_reduced_forms``, instead of an analytic value.  Its GRH dependence is in
 factor-base generation, which is checked only up to the GRH bound, and it
 records no analytic check.  Listing the reduced forms takes time and memory
-growing like ``sqrt(|D|)`` (about 1 GB at ``|D| = 1e14``), so from
+growing like ``sqrt(|D|)`` (about 1.4 GB at ``|D| = 1e14``), so from
 ``|D| >= 2^44`` an imaginary-quadratic ``grh`` request takes ``h`` from the
 GRH relation lattice and the analytic index-one test, like every other degree;
 there the test uses a Belabas--Friedman ``hR``, since ``2^44`` is also the cap

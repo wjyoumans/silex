@@ -2366,6 +2366,46 @@ int test_imaginary_quadratic_grh_large_discriminant() {
     return 0;
 }
 
+// Just above the cutoff: D = -(2^44 + 3) = -17592186044419 is the smallest
+// |D| tested here that takes the GRH relation lattice, so a cutoff moved
+// higher fails this row.  The completeness basis is the published
+// `belabas_friedman` one, as above 2^44 the unconditional L(1, chi) route
+// is unavailable.  h = 1148064 (GP 2.17 quadclassunit(D).no and
+// bnfinit(x^2 + 17592186044419).no).
+int test_imaginary_quadratic_grh_cutoff_boundary() {
+    const slong quadratic[] = {17592186044419, 0};
+    const char* name = "grh imaginary quadratic x^2 + 2^44 + 3";
+
+    FieldSetup setup = setup_from_coefficients(quadratic, 2);
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::grh)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)) &&
+           sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order),
+                               1148064) == 0);
+    assert(class_group.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    assert(class_group.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::belabas_friedman);
+    return 0;
+}
+
 // A public generation check at a bound below the required generation bound
 // does not establish that the factor base generates the class group, so it
 // cannot stand in for the full check when the stored unconditional record
@@ -2765,6 +2805,7 @@ int main() {
     status |= test_grh_cubic_records_bf_audit();
     status |= test_real_quadratic_grh_record_and_later_promotion();
     status |= test_imaginary_quadratic_grh_large_discriminant();
+    status |= test_imaginary_quadratic_grh_cutoff_boundary();
     status |= test_low_bound_generation_check_does_not_promote();
     status |= test_grh_generation_below_minkowski_bound();
     status |= test_real_quadratic_h_gt_one_proven_saturation();
