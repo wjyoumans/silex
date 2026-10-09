@@ -1172,6 +1172,113 @@ int test_valuation_order_element_ramified_nonunique_containment() {
     return 0;
 }
 
+// Definitional valuation for the containment cross-check: the largest
+// i <= bound with element in P^i, built from explicit ideal powers and the
+// generic Ideal::contains test.
+slong definitional_power_containment_valuation(
+        const silex::Order& order,
+        const silex::PrimeIdeal& prime,
+        const silex::OrderElement& element,
+        slong bound) {
+    silex::Ideal prime_ideal(order);
+    silex::Ideal power(order);
+    assert(prime.get_ideal(prime_ideal));
+    assert(power.set(prime_ideal));
+    slong value = 0;
+    while (value < bound && power.contains(element)) {
+        ++value;
+        silex::Ideal next(order);
+        assert(next.multiply(power, prime_ideal));
+        power.swap(next);
+    }
+    return value;
+}
+
+int test_valuation_power_containment_matches_definition() {
+    // The maximal orders of x^4 - 2x^3 + 5x^2 - 4x + 474 and x^6 + 7 differ
+    // from their equation orders, so the primes below include index
+    // divisors and ramified primes with e*f < n.
+    const std::vector<std::vector<slong>> fields = {
+            {474, -4, 5, -2, 1},
+            {7, 0, 0, 0, 0, 0, 1},
+    };
+    slong checked_positive = 0;
+    for (const std::vector<slong>& coefficients : fields) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial,
+                                           static_cast<slong>(i),
+                                           coefficients[i]);
+        }
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        const slong n = maximal.degree();
+
+        for (slong rational_prime : {2, 3, 5, 7, 11}) {
+            sflint::Fmpz p;
+            assert(set_fmpz_si(p, rational_prime));
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(primes, maximal,
+                                          sflint::FmpzConstRef(p)));
+            for (slong index = 0; index < primes.size(); ++index) {
+                const silex::PrimeIdeal* prime = primes.at(index);
+                assert(prime != nullptr);
+                for (slong t = 0; t < 24; ++t) {
+                    sflint::FmpzMat coordinates(1, n);
+                    bool nonzero = false;
+                    for (slong j = 0; j < n; ++j) {
+                        const slong c = ((5 * t + 3 * j + j * j * t) % 9) - 4;
+                        fmpz_set_si(fmpz_mat_entry(coordinates.raw(), 0, j),
+                                    c);
+                        nonzero = nonzero || c != 0;
+                    }
+                    if (!nonzero) {
+                        continue;
+                    }
+                    silex::OrderElement base(maximal);
+                    assert(base.set_coordinates(
+                            sflint::FmpzMatConstRef(coordinates)));
+                    // Powers of the sample and of p push the valuation
+                    // above one so the cached P^k bases are exercised.
+                    silex::OrderElement element(maximal);
+                    assert(element.set(base));
+                    for (slong k = 0; k < t % 3; ++k) {
+                        silex::OrderElement next(maximal);
+                        assert(next.multiply(element, base));
+                        element = std::move(next);
+                    }
+                    if (t % 4 == 1) {
+                        silex::OrderElement scale(maximal);
+                        silex::OrderElement next(maximal);
+                        assert(scale.set_si(rational_prime));
+                        assert(next.multiply(element, scale));
+                        element = std::move(next);
+                    }
+                    for (slong bound : {0, 1, 3, 7}) {
+                        slong fast = -1;
+                        assert(silex::detail::PrimeIdealAccess::
+                                       valuation_by_power_containment_for_testing(
+                                               fast, *prime, element,
+                                               bound));
+                        const slong expected =
+                                definitional_power_containment_valuation(
+                                        maximal, *prime, element, bound);
+                        assert(fast == expected);
+                        if (expected > 1) {
+                            ++checked_positive;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert(checked_positive > 0);
+    return 0;
+}
+
 int test_valuation_fractional_element_and_factored() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 2);
@@ -2333,6 +2440,7 @@ int main() {
     assert(test_valuation_order_element_ramified_split_coordinate_matrix() ==
            0);
     assert(test_valuation_order_element_ramified_nonunique_containment() == 0);
+    assert(test_valuation_power_containment_matches_definition() == 0);
     assert(test_valuation_fractional_element_and_factored() == 0);
     assert(test_extended_valuation_failure_preserves_output() == 0);
     assert(test_valuation_maximal_quadratic() == 0);

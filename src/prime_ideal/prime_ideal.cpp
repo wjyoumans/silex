@@ -554,6 +554,59 @@ struct IndexPrimeData {
     slong residue_degree = 0;
 };
 
+// Returns true when `basis` is square, upper triangular and has a nonzero
+// diagonal, the shape `Ideal` stores for a full-rank HNF.
+bool is_full_rank_upper_triangular(const fmpz_mat_t basis) noexcept {
+    const slong n = fmpz_mat_nrows(basis);
+    if (n <= 0 || fmpz_mat_ncols(basis) != n) {
+        return false;
+    }
+    for (slong i = 0; i < n; ++i) {
+        if (fmpz_is_zero(fmpz_mat_entry(basis, i, i)) != 0) {
+            return false;
+        }
+        for (slong j = 0; j < i; ++j) {
+            if (fmpz_is_zero(fmpz_mat_entry(basis, i, j)) == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Exact lattice membership against a full-rank upper triangular row basis B
+// (checked by `is_full_rank_upper_triangular`).  B is invertible, so v lies in
+// the row lattice of B iff the unique rational solution x of x B = v is
+// integral.  Because B is upper triangular, column j of x B = v reads
+// v_j = sum_{i <= j} x_i B_ij, so x_0, x_1, ... are determined one at a time
+// by dividing the reduced v_j by B_jj; v is in the lattice iff every such
+// division is exact.  This is the coordinate test of reference
+// `NumFieldOrd/NfOrd/Ideal/Ideal.jl:containment_by_matrices` (x in I iff
+// coordinates(x) * basis_mat_inv(I) is integral), evaluated by forward
+// substitution instead of a stored inverse.  `work` is a 1 x n scratch row.
+bool triangular_basis_contains_row(const fmpz_mat_t basis,
+                                   const fmpz_mat_t row,
+                                   fmpz_mat_t work) noexcept {
+    const slong n = fmpz_mat_ncols(basis);
+    fmpz_mat_set(work, row);
+    fmpz* v = fmpz_mat_row(work, 0);
+    flint::Fmpz quotient;
+    for (slong j = 0; j < n; ++j) {
+        if (fmpz_is_zero(v + j) != 0) {
+            continue;
+        }
+        const fmpz* pivot = fmpz_mat_entry(basis, j, j);
+        if (fmpz_divisible(v + j, pivot) == 0) {
+            return false;
+        }
+        fmpz_divexact(quotient.raw(), v + j, pivot);
+        for (slong l = j; l < n; ++l) {
+            fmpz_submul(v + l, quotient.raw(), fmpz_mat_entry(basis, j, l));
+        }
+    }
+    return true;
+}
+
 bool valuation_by_ideal_power_containment(slong& out,
                                           const Ideal& prime_ideal,
                                           const OrderElement& element,
@@ -2251,6 +2304,10 @@ struct PrimeIdeal::HenselValuationCache {
 
 struct PrimeIdeal::ContainmentPowerCache {
     std::vector<Ideal> powers;
+    // Entry k - 1 holds the HNF basis of P^k (k >= 1) when that basis is
+    // square upper triangular with a nonzero diagonal, and a 0 x 0 matrix
+    // otherwise; see `triangular_basis_contains_row`.
+    std::vector<flint::FmpzMat> triangular_bases;
 };
 
 struct PrimeIdeal::CoordinateValuationCache {
@@ -2669,10 +2726,66 @@ bool PrimeIdeal::valuation_by_power_containment(
         return true;
     }
 
+    // Membership precheck.  `Ideal::contains` decides a in P^k by computing
+    // the HNF of the stored basis and of the basis extended by a, and
+    // comparing them.  When the stored HNF basis of P^k is full-rank upper
+    // triangular (checked once per power and cached), membership is decided
+    // exactly by `triangular_basis_contains_row`, so both HNF computations
+    // are unnecessary and are skipped.  Any other basis shape, or a missing
+    // coordinate row, keeps the generic `Ideal::contains` test; both routes
+    // decide the same exact predicate, so the valuation is unchanged.
+    const slong n = parent_.degree();
+    flint::FmpzMat coordinates(1, n);
+    flint::FmpzMat work(1, n);
+    const bool have_coordinates =
+            n > 0 && element.get_coordinates(flint::FmpzMatRef(coordinates));
+    if (have_coordinates && containment_power_cache_ == nullptr) {
+        containment_power_cache_.reset(
+                new (std::nothrow) ContainmentPowerCache());
+    }
+    // Triangular basis of P^exponent from the cache, or nullptr when the
+    // generic test must be used.  Entries are filled in exponent order; the
+    // loop below asks for exponents 1, 2, ... in turn.
+    auto triangular_basis =
+            [&](slong exponent, const Ideal& power) noexcept
+            -> const flint::FmpzMat* {
+        if (!have_coordinates || containment_power_cache_ == nullptr) {
+            return nullptr;
+        }
+        std::vector<flint::FmpzMat>& bases =
+                containment_power_cache_->triangular_bases;
+        const std::size_t target = static_cast<std::size_t>(exponent - 1);
+        if (target == bases.size()) {
+            flint::FmpzMat basis(n, n);
+            if (!power.get_hnf(flint::FmpzMatRef(basis)) ||
+                !is_full_rank_upper_triangular(basis.raw())) {
+                basis = flint::FmpzMat(0, 0);
+            }
+            bases.push_back(std::move(basis));
+        }
+        if (target >= bases.size() ||
+            fmpz_mat_nrows(bases[target].raw()) != n) {
+            return nullptr;
+        }
+        return &bases[target];
+    };
+    auto power_contains = [&](slong exponent,
+                              const Ideal& power) noexcept {
+        const flint::FmpzMat* basis = triangular_basis(exponent, power);
+        if (basis != nullptr) {
+            return triangular_basis_contains_row(
+                    basis->raw(), coordinates.raw(), work.raw());
+        }
+        SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                diagnostics,
+                "prime_ideal.valuation_containment_generic_contains");
+        return power.contains(element);
+    };
+
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
                             "prime_ideal.valuation_containment_initial_contains");
-        if (!ideal_.contains(element)) {
+        if (!power_contains(1, ideal_)) {
             out = 0;
             return true;
         }
@@ -2690,7 +2803,7 @@ bool PrimeIdeal::valuation_by_power_containment(
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::prime_ideal,
                     "prime_ideal.valuation_containment_power_contains");
-            contained = power->contains(element);
+            contained = power_contains(value + 1, *power);
         }
         if (!contained) {
             break;
@@ -3537,6 +3650,14 @@ bool PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
     }
     return prime.set_data(flint::FmpzConstRef(prime.p_), prime.e_, prime.f_,
                           prime.ideal_, residue_polynomial, false);
+}
+
+bool PrimeIdealAccess::valuation_by_power_containment_for_testing(
+        slong& out,
+        const PrimeIdeal& prime,
+        const OrderElement& element,
+        slong bound) noexcept {
+    return prime.valuation_by_power_containment(out, element, bound, nullptr);
 }
 
 bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(

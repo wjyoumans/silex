@@ -104,6 +104,15 @@ public:
             PrimeIdeal& prime,
             flint::FmpzPolyConstRef residue_polynomial) noexcept;
 
+    // Test hook: runs the exact power-containment valuation fallback (the
+    // largest i <= `bound` with `element` in P^i) directly, bypassing the
+    // norm, Hensel and coordinate-divisibility routes.  For tests only.
+    static bool valuation_by_power_containment_for_testing(
+            slong& out,
+            const PrimeIdeal& prime,
+            const OrderElement& element,
+            slong bound) noexcept;
+
     // `norm_vp` must be the exact p-adic valuation of the absolute norm of
     // `element`; the result is wrong otherwise.
     static bool prime_ideal_valuation_with_norm_vp(
