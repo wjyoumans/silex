@@ -382,9 +382,10 @@ def assert_computation_failure_cause(exe: Path, root: Path) -> None:
     detail = instance["failure_detail"]
     assert isinstance(detail, dict)
     assert detail["cause"].startswith("last unit-group validation outcome: ")
-    # cyclotomic_real_31_deg15 (minimal polynomial of 2cos(2 pi / 31)) fails
-    # with the same reason on a path that records no outcome: detail is null.
-    coeffs = "-1,-8,28,84,-126,-252,210,330,-165,-220,66,78,-13,-14,1,1"
+    # Q(sqrt(-23), sqrt(-31), sqrt(-47)) (multiquadratic_m23_m31_m47) fails
+    # with the same reason before unit-group validation runs, a path that
+    # records no outcome: detail is null.
+    coeffs = "38188288,1822160,-1462612,-62792,24143,602,-220,-2,1"
     unrecorded = run_json([str(exe), "--coeffs", coeffs, "--mode", "proven"], root)
     assert unrecorded["success"] is False
     assert unrecorded["failure_reason"] == "class_unit_computation_failed"
