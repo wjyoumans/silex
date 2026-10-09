@@ -1194,6 +1194,51 @@ slong definitional_power_containment_valuation(
     return value;
 }
 
+int test_triangular_containment_shape_check() {
+    // The valuation prepass falls back to Ideal::contains for any stored
+    // basis that is not full-rank upper triangular.  FLINT always yields
+    // upper triangular HNF here, so the fallback is pinned by checking the
+    // shape check on hand-built matrices.
+    sflint::FmpzMat upper(2, 2);
+    sflint::FmpzMat lower(2, 2);
+    sflint::FmpzMat singular(2, 2);
+    sflint::FmpzMat row(1, 2);
+    fmpz_set_si(fmpz_mat_entry(upper.raw(), 0, 0), 2);
+    fmpz_set_si(fmpz_mat_entry(upper.raw(), 0, 1), 1);
+    fmpz_set_si(fmpz_mat_entry(upper.raw(), 1, 1), 3);
+    fmpz_set_si(fmpz_mat_entry(lower.raw(), 0, 0), 2);
+    fmpz_set_si(fmpz_mat_entry(lower.raw(), 1, 0), 1);
+    fmpz_set_si(fmpz_mat_entry(lower.raw(), 1, 1), 3);
+    fmpz_set_si(fmpz_mat_entry(singular.raw(), 0, 0), 2);
+    fmpz_set_si(fmpz_mat_entry(singular.raw(), 0, 1), 1);
+
+    bool shape_ok = false;
+    bool contains = true;
+    // (2, 1) is the first row of the upper basis.
+    fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), 2);
+    fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 1), 1);
+    assert(silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
+            shape_ok, contains, sflint::FmpzMatConstRef(upper),
+            sflint::FmpzMatConstRef(row)));
+    assert(shape_ok && contains);
+    // (0, 1) is not in the lattice.
+    fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), 0);
+    assert(silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
+            shape_ok, contains, sflint::FmpzMatConstRef(upper),
+            sflint::FmpzMatConstRef(row)));
+    assert(shape_ok && !contains);
+    // Lower triangular and singular matrices are rejected by the shape check.
+    assert(!silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
+            shape_ok, contains, sflint::FmpzMatConstRef(lower),
+            sflint::FmpzMatConstRef(row)));
+    assert(!shape_ok && !contains);
+    assert(!silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
+            shape_ok, contains, sflint::FmpzMatConstRef(singular),
+            sflint::FmpzMatConstRef(row)));
+    assert(!shape_ok && !contains);
+    return 0;
+}
+
 int test_valuation_power_containment_matches_definition() {
     // The maximal orders of x^4 - 2x^3 + 5x^2 - 4x + 474 and x^6 + 7 differ
     // from their equation orders, so the primes below include index
@@ -2440,6 +2485,7 @@ int main() {
     assert(test_valuation_order_element_ramified_split_coordinate_matrix() ==
            0);
     assert(test_valuation_order_element_ramified_nonunique_containment() == 0);
+    assert(test_triangular_containment_shape_check() == 0);
     assert(test_valuation_power_containment_matches_definition() == 0);
     assert(test_valuation_fractional_element_and_factored() == 0);
     assert(test_extended_valuation_failure_preserves_output() == 0);

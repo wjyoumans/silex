@@ -1,5 +1,6 @@
 #pragma once
 
+#include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/prime_ideal.hpp>
@@ -112,6 +113,17 @@ public:
             const PrimeIdeal& prime,
             const OrderElement& element,
             slong bound) noexcept;
+
+    // Test hook: runs the shape check and the triangular membership test used
+    // by the power-containment valuation on a caller-built `basis`.  Sets
+    // `shape_ok` to whether `basis` is square, upper triangular with nonzero
+    // diagonal; only then is `contains` (row in the row lattice of `basis`)
+    // computed, and the call returns true.  For tests only.
+    static bool triangular_containment_for_testing(
+            bool& shape_ok,
+            bool& contains,
+            flint::FmpzMatConstRef basis,
+            flint::FmpzMatConstRef row) noexcept;
 
     // `norm_vp` must be the exact p-adic valuation of the absolute norm of
     // `element`; the result is wrong otherwise.

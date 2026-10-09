@@ -2728,10 +2728,11 @@ bool PrimeIdeal::valuation_by_power_containment(
 
     // Membership precheck.  `Ideal::contains` decides a in P^k by computing
     // the HNF of the stored basis and of the basis extended by a, and
-    // comparing them.  When the stored HNF basis of P^k is full-rank upper
-    // triangular (checked once per power and cached), membership is decided
-    // exactly by `triangular_basis_contains_row`, so both HNF computations
-    // are unnecessary and are skipped.  Any other basis shape, or a missing
+    // comparing them.  The stored basis is already in HNF, so its HNF is
+    // only trimmed and copied; the HNF of the extended basis is the real
+    // cost.  When the stored HNF basis of P^k is full-rank upper triangular
+    // (checked once per power and cached), membership is decided exactly by
+    // `triangular_basis_contains_row`, so the extended-basis HNF is skipped.  Any other basis shape, or a missing
     // coordinate row, keeps the generic `Ideal::contains` test; both routes
     // decide the same exact predicate, so the valuation is unchanged.
     const slong n = parent_.degree();
@@ -3658,6 +3659,23 @@ bool PrimeIdealAccess::valuation_by_power_containment_for_testing(
         const OrderElement& element,
         slong bound) noexcept {
     return prime.valuation_by_power_containment(out, element, bound, nullptr);
+}
+
+bool PrimeIdealAccess::triangular_containment_for_testing(
+        bool& shape_ok,
+        bool& contains,
+        flint::FmpzMatConstRef basis,
+        flint::FmpzMatConstRef row) noexcept {
+    shape_ok = is_full_rank_upper_triangular(basis.raw());
+    contains = false;
+    if (!shape_ok || fmpz_mat_nrows(row.raw()) != 1 ||
+        fmpz_mat_ncols(row.raw()) != fmpz_mat_ncols(basis.raw())) {
+        return false;
+    }
+    flint::FmpzMat work(1, fmpz_mat_ncols(basis.raw()));
+    contains = triangular_basis_contains_row(basis.raw(), row.raw(),
+                                             work.raw());
+    return true;
 }
 
 bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
