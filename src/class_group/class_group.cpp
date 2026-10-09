@@ -1458,6 +1458,8 @@ bool saturation_candidates_from_relations(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.relation_saturation.quotient_log_row_"
                         "degree_one");
+                // Both callers start at next_prime(2^60), so q fits a word
+                // and the fmpz branch is only a fallback.
                 const bool row_available = word_size_q
                         ? degree_one_quotient_log_row_at_root_ui(
                                   log_row, prepared_inputs,
@@ -7124,6 +7126,26 @@ bool saturation_candidates(flint::FmpzMat& candidates,
             diagnostics);
 }
 
+bool degree_one_quotient_log_row_general(
+        flint::FmpzMat& out,
+        const std::vector<FactoredElement>& relations,
+        flint::FmpzConstRef q,
+        flint::FmpzConstRef root,
+        slong n) noexcept {
+    return degree_one_quotient_log_row_at_root(out, relations, q, root, n);
+}
+
+bool degree_one_quotient_log_row_word_size(
+        flint::FmpzMat& out,
+        const std::vector<FactoredElement>& relations,
+        flint::FmpzConstRef q,
+        flint::FmpzConstRef root,
+        slong n) noexcept {
+    std::vector<DegreeOneResidueInput> inputs;
+    return prepare_degree_one_residue_inputs(inputs, relations) &&
+           degree_one_quotient_log_row_at_root_ui(out, inputs, q, root, n);
+}
+
 // Candidate filter for the class-relation saturation with units
 // (ClassGroupContext::saturate_local_with_units_), from reference
 // `Saturate.jl:compute_candidates_for_saturate` (lines 130-203): the
@@ -7144,9 +7166,11 @@ bool saturation_candidates(flint::FmpzMat& candidates,
 // reduced row echelon basis of the kernel modulo ell; with 0 rows, only
 // exponent vectors that vanish modulo ell can give an ell-th power, and the
 // caller already skips those.
-// `available` is false when the port does not apply (a nonmaximal order, an
-// ell that does not fit a word) or fails; the caller then tests every row, as
-// before.
+// `available` is false when the port does not apply (a nonmaximal order, a
+// defining polynomial that is not monic integral, an ell that does not fit a
+// word) or fails; the caller then tests every row, as before.  The reference
+// applies the index check that keeps the auxiliary primes regular only for a
+// monic integral polynomial, so the filter is used only then.
 bool relation_saturation_candidate_filter(flint::FmpzMat& filter,
                                           bool& available,
                                           const ClassGroupContext& context,
@@ -7163,7 +7187,8 @@ bool relation_saturation_candidate_filter(flint::FmpzMat& filter,
         !flint::fmpz_is_prime(ell)) {
         return false;
     }
-    if (!order->is_maximal() || !flint::fmpz_fits_si(ell)) {
+    if (!order->is_maximal() || !defining_polynomial_is_nice(*field) ||
+        !flint::fmpz_fits_si(ell)) {
         return true;
     }
 
