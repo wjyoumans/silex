@@ -30,9 +30,9 @@ class EmbeddingContext;
 namespace detail {
 
 // Version of the context's logarithmic-embedding cache, or false when the
-// context has no cache yet.  The version stays the same while every cached
-// value stays the same, and versions are never reused across caches, so an
-// unchanged version means a repeated lookup returns the same values.
+// context has no cache yet.  The version stays the same while every lookup
+// returns the same result, and versions are never reused across caches, so
+// an unchanged version means a repeated lookup returns the same values.
 bool embedding_log_cache_version(std::uint64_t& out,
                                  const EmbeddingContext& embeddings) noexcept;
 
@@ -105,6 +105,9 @@ private:
                               slong precision,
                               flint::ArbVecConstRef values,
                               bool* updated_existing = nullptr) noexcept;
+    // Called when a lookup missed and the computation then failed: a later
+    // store of the same element can change what that lookup returns.
+    void failed_log_embedding_miss_() noexcept;
 
     friend bool detail::embedding_log_cache_version(
             std::uint64_t& out,

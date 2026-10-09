@@ -817,6 +817,54 @@ int test_factored_log_memo_matches_direct_call() {
     return 0;
 }
 
+// A factor log that fails at the starting precision and is stored only at
+// a doubled precision changes what a fresh call computes: the fresh call
+// then hits the doubled-precision entry and finishes at the starting
+// precision.  The memo must not return the result of the first call.
+int test_factored_log_memo_after_failed_factor_log() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Element theta(field);
+    silex::Element unit(field);
+    silex::Element factor(field);
+    assert(theta.gen());
+    assert(unit.add_si(theta, -1));
+    sflint::Fmpz exponent;
+    fmpz_set_si(exponent.raw(), 40);
+    assert(factor.pow_fmpz(unit, sflint::FmpzConstRef(exponent)));
+
+    silex::FactoredElement value(field);
+    assert(value.push(factor, 1));
+
+    silex::EmbeddingContext embeddings(field);
+    const slong places = 2;
+    const slong precision = 16;
+    const auto mode = silex::LogEmbeddingMode::product;
+    // Create the cache, so the memo has a version to store under.
+    sflint::ArbVec theta_logs(places);
+    assert(silex::logarithmic_embedding(sflint::ArbVecRef(theta_logs),
+                                        embeddings, theta, mode, 4096));
+    // The factor's conjugate (sqrt(2) - 1)^40 is too small to separate from
+    // 0 at the starting precision.
+    sflint::ArbVec factor_logs(places);
+    assert(!silex::logarithmic_embedding(sflint::ArbVecRef(factor_logs),
+                                         embeddings, factor, mode, precision));
+
+    silex::detail::FactoredLogMemo memo;
+    sflint::ArbVec first(places);
+    sflint::ArbVec memoized(places);
+    sflint::ArbVec direct(places);
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(first), &memo, value, embeddings, mode,
+            precision));
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, value, embeddings, mode,
+            precision));
+    assert(value.logarithmic_embedding(sflint::ArbVecRef(direct), embeddings,
+                                       mode, precision));
+    assert(arb_vecs_identical(memoized, direct));
+    return 0;
+}
+
 // round_arb_approx_fmpz ports the reference approximate rounding.  Its width
 // check computes floor(lower) - ceil(upper), never positive, so it never
 // rejects: a wide ball rounds to div(ceil(upper) + floor(lower), 2).  The
@@ -8083,6 +8131,7 @@ int main() {
     test_reduce_mod_units_half_integer_tie();
     test_reduce_mod_units_half_integer_tie_stop_rule();
     test_factored_log_memo_matches_direct_call();
+    test_factored_log_memo_after_failed_factor_log();
     test_round_arb_approx_width_check();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();

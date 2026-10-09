@@ -347,11 +347,19 @@ std::uint64_t fresh_log_cache_version() noexcept {
 class EmbeddingLogCache {
 public:
     // The version changes whenever a lookup could start returning different
-    // values: when an existing entry is replaced (a precision upgrade) or a
-    // store fails part way.  Adding a new entry keeps the version, since no
-    // earlier lookup could have found it.
+    // values: when an existing entry is replaced (a precision upgrade), when
+    // a store fails part way, and when a lookup missed and the computation
+    // then failed, since a later store of that element at another precision
+    // would turn the failed miss into a hit.  Adding a new entry otherwise
+    // keeps the version: an earlier lookup that it would now match missed
+    // and then either failed, which changed the version, or stored this
+    // element already, so the store is not new.
     std::uint64_t version() const noexcept {
         return version_;
+    }
+
+    void mark_changed() noexcept {
+        version_ = fresh_log_cache_version();
     }
 
     bool lookup(flint::ArbVecRef out,
@@ -727,6 +735,12 @@ bool EmbeddingContext::store_log_embedding_(
     }
     return log_embedding_cache_->store(parent_, element, mode, precision,
                                        values, updated_existing);
+}
+
+void EmbeddingContext::failed_log_embedding_miss_() noexcept {
+    if (log_embedding_cache_ != nullptr) {
+        log_embedding_cache_->mark_changed();
+    }
 }
 
 namespace detail {

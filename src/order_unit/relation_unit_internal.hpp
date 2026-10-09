@@ -94,26 +94,23 @@ struct FactoredLogMemoEntry {
 // distinct factors many times, so each distinct factor is stored once.
 //
 // A hit returns exactly the value FactoredElement::logarithmic_embedding
-// would compute again.  That call reads every factor log from the embedding
-// context's cache and sums them in a fixed order; a result is stored only
-// when the cache version did not change during the call, and returned only
-// while the version is still the same.  Every factor log then reads back
-// the same cached value, so the sum, its precision loop, and the side
-// effects on the context (none: no factor is recomputed) are unchanged.
+// would compute again.  A result is stored only when the embedding cache's
+// version did not change during the call, and returned only while the
+// version is still the same.  The version changes when a cached factor log
+// is upgraded, when a store fails, and when a factor log missed the cache
+// and then failed (a factor that fails at one precision and is stored at a
+// doubled one would otherwise make a fresh call finish earlier, at a
+// different rounding).  So in a stored call every factor log either hit the
+// cache or was computed and stored once at the precision it was asked for,
+// and a fresh call reads each one back from the cache at the same
+// precisions: the sum, its precision loop, and the side effects on the
+// context (none: no factor is recomputed) are unchanged.
 struct FactoredLogMemo {
     std::vector<Element> factors;
     std::vector<std::uint64_t> factor_hashes;
     std::vector<FactoredLogMemoEntry> entries;
     slong hits = 0;
     slong stores = 0;
-
-    void clear() noexcept {
-        factors.clear();
-        factor_hashes.clear();
-        entries.clear();
-        hits = 0;
-        stores = 0;
-    }
 };
 
 // FactoredElement::logarithmic_embedding through `memo` (a direct call when

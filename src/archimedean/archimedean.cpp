@@ -176,11 +176,15 @@ bool logarithmic_embedding(flint::ArbVecRef out,
         return true;
     }
 
+    // The lookup missed.  A failure from here on must change the cache
+    // version: a later store of this element at a higher precision would
+    // make the same lookup hit.
     const slong degree = embeddings.degree();
     flint::AcbVec values(degree);
     flint::ArbVec tmp(places);
     if (!embeddings.evaluate_all(flint::AcbVecRef(values), element,
                                  precision, diagnostics)) {
+        embeddings.failed_log_embedding_miss_();
         return false;
     }
 
@@ -196,6 +200,7 @@ bool logarithmic_embedding(flint::ArbVecRef out,
 
         if (arb_contains_zero(tmp.data() + i) != 0 ||
             arb_is_positive(tmp.data() + i) == 0) {
+            embeddings.failed_log_embedding_miss_();
             return false;
         }
 
@@ -203,6 +208,7 @@ bool logarithmic_embedding(flint::ArbVecRef out,
     }
 
     if (!out.set_from(flint::ArbVecConstRef(tmp))) {
+        embeddings.failed_log_embedding_miss_();
         return false;
     }
     bool updated_existing_cache_entry = false;
