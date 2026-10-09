@@ -14,16 +14,19 @@
 #include "../lat/fplll_backend_internal.hpp"
 
 #include <flint/fmpq_mat.h>
+#include <flint/fmpq_poly.h>
 
 #include <silex/class_group.hpp>
 #include <silex/flint/arf.hpp>
 #include <silex/flint/fmpq_mat.hpp>
+#include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_lll.hpp>
 #include <silex/signature.hpp>
 #include <silex/unit.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <span>
 #include <string>
@@ -234,9 +237,192 @@ bool rank_zero_torsion(flint::FmpzRef best_order,
     return true;
 }
 
+std::uint64_t factored_log_memo_fingerprint(
+        const FactoredElement& value) noexcept {
+    // FNV-1a over the length and exponents; it only screens entries, and
+    // every match is confirmed by comparing the factors.
+    std::uint64_t hash = UINT64_C(14695981039346656037);
+    const auto mix = [&hash](std::uint64_t word) noexcept {
+        hash ^= word;
+        hash *= UINT64_C(1099511628211);
+    };
+    const auto entries = value.factors();
+    mix(static_cast<std::uint64_t>(entries.size()));
+    for (const auto& entry : entries) {
+        mix(static_cast<std::uint64_t>(entry.exponent));
+    }
+    return hash;
+}
+
+bool factored_log_memo_matches(const FactoredLogMemo& memo,
+                               const FactoredLogMemoEntry& entry,
+                               const FactoredElement& value) noexcept {
+    const auto entries = value.factors();
+    if (entries.size() != entry.exponents.size() ||
+        entries.size() != entry.factor_indices.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        // Element::equal also requires the same parent field.
+        if (entries[i].exponent != entry.exponents[i] ||
+            !entries[i].factor.equal(
+                    memo.factors[entry.factor_indices[i]])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Screening hash of a factor's coefficients; equal elements hash equally.
+std::uint64_t factored_log_memo_factor_hash(flint::FmpqPoly& scratch,
+                                            const Element& element) noexcept {
+    constexpr ulong modulus = (UWORD(1) << 61) - UWORD(1);
+    std::uint64_t hash = UINT64_C(14695981039346656037);
+    if (!element.get_fmpq_poly(flint::FmpqPolyRef(scratch))) {
+        return hash;
+    }
+    const slong length = fmpq_poly_length(scratch.raw());
+    hash ^= static_cast<std::uint64_t>(length);
+    hash *= UINT64_C(1099511628211);
+    hash ^= ::fmpz_fdiv_ui(fmpq_poly_denref(scratch.raw()), modulus);
+    hash *= UINT64_C(1099511628211);
+    for (slong i = 0; i < length; ++i) {
+        hash ^= ::fmpz_fdiv_ui(fmpq_poly_numref(scratch.raw()) + i, modulus);
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+bool factored_log_memo_factor_index(std::size_t& index,
+                                    FactoredLogMemo& memo,
+                                    flint::FmpqPoly& scratch,
+                                    const Element& element) noexcept {
+    const NumberField* field = element.parent();
+    if (!element.is_defined() || field == nullptr) {
+        return false;
+    }
+    const std::uint64_t hash =
+            factored_log_memo_factor_hash(scratch, element);
+    for (std::size_t i = 0; i < memo.factors.size(); ++i) {
+        if (memo.factor_hashes[i] == hash && memo.factors[i].equal(element)) {
+            index = i;
+            return true;
+        }
+    }
+    Element copy(*field);
+    if (!copy.is_defined() || !copy.set(element)) {
+        return false;
+    }
+    memo.factors.push_back(std::move(copy));
+    memo.factor_hashes.push_back(hash);
+    index = memo.factors.size() - 1;
+    return true;
+}
+
+bool factored_log_memo_add_entry(FactoredLogMemoEntry*& out,
+                                 FactoredLogMemo& memo,
+                                 const FactoredElement& value,
+                                 std::uint64_t fingerprint) noexcept {
+    out = nullptr;
+    const auto entries = value.factors();
+    FactoredLogMemoEntry entry;
+    entry.fingerprint = fingerprint;
+    entry.factor_indices.reserve(entries.size());
+    entry.exponents.reserve(entries.size());
+    flint::FmpqPoly scratch;
+    for (const auto& factor : entries) {
+        std::size_t index = 0;
+        if (!factored_log_memo_factor_index(index, memo, scratch,
+                                            factor.factor)) {
+            return false;
+        }
+        entry.factor_indices.push_back(index);
+        entry.exponents.push_back(factor.exponent);
+    }
+    memo.entries.push_back(std::move(entry));
+    out = &memo.entries.back();
+    return true;
+}
+
+bool memoized_factored_log_embedding(
+        flint::ArbVecRef out,
+        FactoredLogMemo* memo,
+        const FactoredElement& value,
+        EmbeddingContext& embeddings,
+        LogEmbeddingMode mode,
+        slong precision,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (memo == nullptr) {
+        return value.logarithmic_embedding(out, embeddings, mode, precision,
+                                           diagnostics);
+    }
+
+    std::uint64_t version = 0;
+    const bool have_version =
+            embedding_log_cache_version(version, embeddings);
+    const std::uint64_t fingerprint = factored_log_memo_fingerprint(value);
+    FactoredLogMemoEntry* found = nullptr;
+    for (FactoredLogMemoEntry& entry : memo->entries) {
+        if (entry.fingerprint == fingerprint &&
+            factored_log_memo_matches(*memo, entry, value)) {
+            found = &entry;
+            break;
+        }
+    }
+    if (found != nullptr && have_version) {
+        for (const FactoredLogMemoValue& result : found->results) {
+            if (result.mode == mode && result.precision == precision &&
+                result.cache_version == version &&
+                result.logs.length() == out.length()) {
+                SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                                    "element.factored.log_memo.hit");
+                ++memo->hits;
+                return out.set_from(flint::ArbVecConstRef(result.logs));
+            }
+        }
+    }
+
+    if (!value.logarithmic_embedding(out, embeddings, mode, precision,
+                                     diagnostics)) {
+        return false;
+    }
+
+    // Store only when no cached factor log changed during the call, so a
+    // later call under the same version repeats it exactly.
+    std::uint64_t version_after = 0;
+    if (!have_version ||
+        !embedding_log_cache_version(version_after, embeddings) ||
+        version_after != version) {
+        return true;
+    }
+    if (found == nullptr &&
+        !factored_log_memo_add_entry(found, *memo, value, fingerprint)) {
+        return true;
+    }
+    // Results under an older cache version can no longer be returned.
+    std::erase_if(found->results,
+                  [version](const FactoredLogMemoValue& result) noexcept {
+                      return result.cache_version != version;
+                  });
+    FactoredLogMemoValue result(out.length());
+    result.mode = mode;
+    result.precision = precision;
+    result.cache_version = version;
+    if (!result.logs.set_from(flint::ArbVecConstRef(out.data(),
+                                                    out.length()))) {
+        return true;
+    }
+    found->results.push_back(std::move(result));
+    ++memo->stores;
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                        "element.factored.log_memo.store");
+    return true;
+}
+
 bool unit_candidate_log_key(RelationUnitCandidateSortKey& out,
                                   const FactoredElement& candidate,
                                   EmbeddingContext& embeddings,
+                                  FactoredLogMemo* memo,
                                   std::size_t original_index) noexcept {
     slong places = 0;
     if (!compact_places(places, embeddings) || places <= 0) {
@@ -244,8 +430,8 @@ bool unit_candidate_log_key(RelationUnitCandidateSortKey& out,
     }
 
     flint::ArbVec logs(places);
-    if (!candidate.logarithmic_embedding(
-                flint::ArbVecRef(logs), embeddings,
+    if (!memoized_factored_log_embedding(
+                flint::ArbVecRef(logs), memo, candidate, embeddings,
                 LogEmbeddingMode::product,
                 kUnitCandidateSortPrecision)) {
         return false;
@@ -274,7 +460,8 @@ bool unit_candidate_log_key(RelationUnitCandidateSortKey& out,
 
 bool sort_unit_candidates_by_log_height(
         std::vector<FactoredElement>& candidates,
-        EmbeddingContext& embeddings) noexcept {
+        EmbeddingContext& embeddings,
+        FactoredLogMemo* memo) noexcept {
     if (candidates.size() < 2) {
         return true;
     }
@@ -283,7 +470,7 @@ bool sort_unit_candidates_by_log_height(
     std::vector<std::size_t> order(candidates.size());
     for (std::size_t i = 0; i < candidates.size(); ++i) {
         if (!unit_candidate_log_key(keys[i], candidates[i], embeddings,
-                                          i)) {
+                                    memo, i)) {
             return false;
         }
         order[i] = i;
@@ -393,9 +580,10 @@ bool unit_candidate_torsion_status(
     }
 
     flint::ArbVec logs(places);
-    if (!candidate.logarithmic_embedding(flint::ArbVecRef(logs), embeddings,
-                                         LogEmbeddingMode::product,
-                                         log_precision)) {
+    if (!memoized_factored_log_embedding(
+                flint::ArbVecRef(logs), &extraction_state.factored_log_memo,
+                candidate, embeddings, LogEmbeddingMode::product,
+                log_precision)) {
         return false;
     }
     extraction_state.torsion_precision =
@@ -433,7 +621,8 @@ bool normalized_log_cutoff_row(flint::ArbMat& out,
                                      const FactoredElement& value,
                                      EmbeddingContext& embeddings,
                                      slong precision,
-                                     const DiagnosticsContext* diagnostics)
+                                     const DiagnosticsContext* diagnostics,
+                                     FactoredLogMemo* memo)
         noexcept {
     Signature sig;
     if (embeddings.is_set()) {
@@ -454,9 +643,9 @@ bool normalized_log_cutoff_row(flint::ArbMat& out,
     }
 
     flint::ArbVec logs(places);
-    if (!value.logarithmic_embedding(flint::ArbVecRef(logs), embeddings,
-                                     LogEmbeddingMode::product, precision,
-                                     diagnostics)) {
+    if (!memoized_factored_log_embedding(
+                flint::ArbVecRef(logs), memo, value, embeddings,
+                LogEmbeddingMode::product, precision, diagnostics)) {
         return false;
     }
 
@@ -487,7 +676,8 @@ bool normalized_log_cutoff_matrix(
         const std::vector<FactoredElement>& values,
         EmbeddingContext& embeddings,
         slong precision,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        FactoredLogMemo* memo) noexcept {
     if (flint::arb_mat_nrows_value(out) !=
                 static_cast<slong>(values.size()) ||
         precision <= 0) {
@@ -496,7 +686,7 @@ bool normalized_log_cutoff_matrix(
     for (slong i = 0; i < static_cast<slong>(values.size()); ++i) {
         if (!normalized_log_cutoff_row(
                     out, i, values[static_cast<std::size_t>(i)],
-                    embeddings, precision, diagnostics)) {
+                    embeddings, precision, diagnostics, memo)) {
             return false;
         }
     }
@@ -813,7 +1003,8 @@ bool reduce_mod_units_start_precision(
         const std::vector<FactoredElement>& values,
         const OrderUnitGroup& group,
         EmbeddingContext& embeddings,
-        slong start_precision) noexcept {
+        slong start_precision,
+        FactoredLogMemo* memo) noexcept {
     const DiagnosticsContext* diagnostics = group.diagnostics();
     out = start_precision;
     profile_reduce_precision(
@@ -838,7 +1029,7 @@ bool reduce_mod_units_start_precision(
                 "unit_group.reduce_mod_units.start_value_log_matrix");
         if (!normalized_log_cutoff_matrix(
                     value_logs, values, embeddings, start_precision,
-                    diagnostics)) {
+                    diagnostics, memo)) {
             return false;
         }
     }
@@ -920,7 +1111,8 @@ bool reduction_coordinates(flint::FmpzMat& out,
                                  bool& exact,
                                  bool& half_integer_tie,
                                  slong precision,
-                                 const flint::ArbMat* unit_log_inverse)
+                                 const flint::ArbMat* unit_log_inverse,
+                                 FactoredLogMemo* memo)
         noexcept {
     exact = false;
     half_integer_tie = false;
@@ -939,7 +1131,8 @@ bool reduction_coordinates(flint::FmpzMat& out,
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                             "unit_group.reduce_mod_units.value_log_matrix");
         if (!normalized_log_cutoff_matrix(
-                    value_logs, values, embeddings, precision, diagnostics)) {
+                    value_logs, values, embeddings, precision, diagnostics,
+                    memo)) {
             return false;
         }
     }
@@ -1706,9 +1899,13 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
         return false;
     }
 
+    FactoredLogMemo* const memo =
+            extraction_state != nullptr ? &extraction_state->factored_log_memo
+                                        : nullptr;
     slong precision = start_precision;
     if (!reduce_mod_units_start_precision(
-                precision, values, group, embeddings, start_precision)) {
+                precision, values, group, embeddings, start_precision,
+                memo)) {
         return false;
     }
 
@@ -1730,7 +1927,7 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
         bool half_integer_tie = false;
         if (reduction_coordinates(coefficients, values, group,
                                         embeddings, exact, half_integer_tie,
-                                        precision, unit_log_inverse)) {
+                                        precision, unit_log_inverse, memo)) {
             if (fmpz_matrix_is_zero(coefficients)) {
                 return true;
             }
@@ -2337,8 +2534,9 @@ bool improve_full_rank_class_relation_units(
                                     &extraction_state)) {
             return false;
         }
-        if (!sort_unit_candidates_by_log_height(candidates,
-                                                      embeddings)) {
+        if (!sort_unit_candidates_by_log_height(
+                    candidates, embeddings,
+                    &extraction_state.factored_log_memo)) {
             return false;
         }
         if (candidates.empty()) {
@@ -2498,8 +2696,9 @@ bool set_class_relation_units(bool& ready,
         if (not_larger_bound <= 0) {
             return true;
         }
-        if (!sort_unit_candidates_by_log_height(candidates,
-                                                      embeddings)) {
+        if (!sort_unit_candidates_by_log_height(
+                    candidates, embeddings,
+                    &extraction_state.factored_log_memo)) {
             return false;
         }
         std::vector<char> done(candidates.size(), 0);

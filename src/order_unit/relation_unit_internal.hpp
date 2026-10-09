@@ -1,10 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
 #include <silex/class_group.hpp>
 #include <silex/embedding.hpp>
+#include <silex/factored_element.hpp>
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpz.hpp>
@@ -57,6 +59,74 @@ struct ReduceUnitsInverseCacheEntry {
             const ReduceUnitsInverseCacheEntry&) = delete;
 };
 
+struct FactoredLogMemoValue {
+    LogEmbeddingMode mode = LogEmbeddingMode::plain;
+    slong precision = 0;
+    std::uint64_t cache_version = 0;
+    flint::ArbVec logs;
+
+    explicit FactoredLogMemoValue(slong places) noexcept
+        : logs(places) {
+    }
+
+    FactoredLogMemoValue(FactoredLogMemoValue&&) noexcept = default;
+    FactoredLogMemoValue& operator=(FactoredLogMemoValue&&) noexcept =
+            default;
+
+    FactoredLogMemoValue(const FactoredLogMemoValue&) = delete;
+    FactoredLogMemoValue& operator=(const FactoredLogMemoValue&) = delete;
+};
+
+// A memoized candidate, stored compactly: factor i is
+// FactoredLogMemo::factors[factor_indices[i]] with exponent exponents[i].
+struct FactoredLogMemoEntry {
+    std::uint64_t fingerprint = 0;
+    std::vector<std::size_t> factor_indices;
+    std::vector<slong> exponents;
+    std::vector<FactoredLogMemoValue> results;
+};
+
+// Logarithmic embeddings of relation-unit candidates, kept across the
+// candidate batches and validation rounds of one extraction.  The same
+// candidate (the same factors and exponents, in the same order) is embedded
+// again by the reduction, the sort, and the torsion test, and again when a
+// later round rebuilds it from the same relations.  Candidates repeat a few
+// distinct factors many times, so each distinct factor is stored once.
+//
+// A hit returns exactly the value FactoredElement::logarithmic_embedding
+// would compute again.  That call reads every factor log from the embedding
+// context's cache and sums them in a fixed order; a result is stored only
+// when the cache version did not change during the call, and returned only
+// while the version is still the same.  Every factor log then reads back
+// the same cached value, so the sum, its precision loop, and the side
+// effects on the context (none: no factor is recomputed) are unchanged.
+struct FactoredLogMemo {
+    std::vector<Element> factors;
+    std::vector<std::uint64_t> factor_hashes;
+    std::vector<FactoredLogMemoEntry> entries;
+    slong hits = 0;
+    slong stores = 0;
+
+    void clear() noexcept {
+        factors.clear();
+        factor_hashes.clear();
+        entries.clear();
+        hits = 0;
+        stores = 0;
+    }
+};
+
+// FactoredElement::logarithmic_embedding through `memo` (a direct call when
+// `memo` is null).  Same arguments, result, and failure as the direct call.
+bool memoized_factored_log_embedding(
+        flint::ArbVecRef out,
+        FactoredLogMemo* memo,
+        const FactoredElement& value,
+        EmbeddingContext& embeddings,
+        LogEmbeddingMode mode,
+        slong precision,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept;
+
 struct RelationUnitExtractionState {
     slong torsion_precision = kTorsionStartPrecision;
     slong rel_add_precision = kRelAddStartPrecision;
@@ -67,6 +137,7 @@ struct RelationUnitExtractionState {
             reduce_mod_units_inverses;
     std::vector<FactoredElement> reduce_mod_units_log_generators;
     RelationUnitCandidateBatchState unit_candidate_batch;
+    FactoredLogMemo factored_log_memo;
     flint::Fmpz validation_index_bound;
     flint::Arb expected_regulator;
     bool has_expected_regulator = false;

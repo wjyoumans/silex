@@ -12,6 +12,8 @@
 
 #include "embedding_internal.hpp"
 
+#include <atomic>
+#include <cstdint>
 #include <new>
 #include <utility>
 #include <vector>
@@ -330,8 +332,28 @@ bool isolate_roots_in_previous_order(acb_ptr roots,
 
 }  // namespace detail
 
+namespace {
+
+// Source of EmbeddingLogCache versions.  One counter for every cache keeps a
+// version from being reused by a later cache.
+std::atomic<std::uint64_t> next_log_cache_version{1};
+
+std::uint64_t fresh_log_cache_version() noexcept {
+    return next_log_cache_version.fetch_add(1, std::memory_order_relaxed);
+}
+
+}  // namespace
+
 class EmbeddingLogCache {
 public:
+    // The version changes whenever a lookup could start returning different
+    // values: when an existing entry is replaced (a precision upgrade) or a
+    // store fails part way.  Adding a new entry keeps the version, since no
+    // earlier lookup could have found it.
+    std::uint64_t version() const noexcept {
+        return version_;
+    }
+
     bool lookup(flint::ArbVecRef out,
                 const Element& element,
                 LogEmbeddingMode mode,
@@ -372,6 +394,7 @@ public:
                     return false;
                 }
                 if (entry.precision <= precision) {
+                    version_ = fresh_log_cache_version();
                     if (!entry.values.set_from(values)) {
                         return false;
                     }
@@ -385,7 +408,11 @@ public:
         Entry& entry = entries_.back();
         entry.mode = static_cast<int>(mode);
         entry.precision = precision;
-        return entry.element.set(element) && entry.values.set_from(values);
+        if (!entry.element.set(element) || !entry.values.set_from(values)) {
+            version_ = fresh_log_cache_version();
+            return false;
+        }
+        return true;
     }
 
 private:
@@ -402,6 +429,7 @@ private:
     };
 
     std::vector<Entry> entries_;
+    std::uint64_t version_ = fresh_log_cache_version();
 };
 
 EmbeddingContext::EmbeddingContext(const NumberField& parent) noexcept {
@@ -700,5 +728,19 @@ bool EmbeddingContext::store_log_embedding_(
     return log_embedding_cache_->store(parent_, element, mode, precision,
                                        values, updated_existing);
 }
+
+namespace detail {
+
+bool embedding_log_cache_version(std::uint64_t& out,
+                                 const EmbeddingContext& embeddings) noexcept {
+    out = 0;
+    if (embeddings.log_embedding_cache_ == nullptr) {
+        return false;
+    }
+    out = embeddings.log_embedding_cache_->version();
+    return true;
+}
+
+}  // namespace detail
 
 }  // namespace silex

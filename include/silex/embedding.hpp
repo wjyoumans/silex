@@ -10,6 +10,8 @@
 #include <silex/number_field.hpp>
 #include <silex/signature.hpp>
 
+#include <cstdint>
+
 namespace silex {
 
 namespace flint {
@@ -23,6 +25,18 @@ enum class LogEmbeddingMode {
 };
 
 class EmbeddingLogCache;
+class EmbeddingContext;
+
+namespace detail {
+
+// Version of the context's logarithmic-embedding cache, or false when the
+// context has no cache yet.  The version stays the same while every cached
+// value stays the same, and versions are never reused across caches, so an
+// unchanged version means a repeated lookup returns the same values.
+bool embedding_log_cache_version(std::uint64_t& out,
+                                 const EmbeddingContext& embeddings) noexcept;
+
+}  // namespace detail
 
 // Certified complex roots of a number field's defining polynomial.
 //
@@ -92,6 +106,9 @@ private:
                               flint::ArbVecConstRef values,
                               bool* updated_existing = nullptr) noexcept;
 
+    friend bool detail::embedding_log_cache_version(
+            std::uint64_t& out,
+            const EmbeddingContext& embeddings) noexcept;
     friend bool logarithmic_embedding(flint::ArbVecRef out,
                                       EmbeddingContext& embeddings,
                                       const Element& element,

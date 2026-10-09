@@ -26,6 +26,7 @@
 #include <flint/ulong_extras.h>
 
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -692,6 +693,127 @@ int test_reduce_mod_units_half_integer_tie() {
     // The ladder stopped well below its cap of
     // kReduceModUnitsMaxPrecision bits.
     assert(embeddings.precision() <= FLINT_MAX(precision_before, 1024));
+    return 0;
+}
+
+bool arb_vecs_identical(const sflint::ArbVec& left,
+                        const sflint::ArbVec& right) noexcept {
+    if (left.length() != right.length()) {
+        return false;
+    }
+    for (slong i = 0; i < left.length(); ++i) {
+        if (!arb_equal(left.data() + i, right.data() + i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The factored log memo returns exactly what a fresh
+// FactoredElement::logarithmic_embedding call computes.  It stores a result
+// only under a known embedding-cache version, returns it only while that
+// version holds, never confuses two candidates with the same exponents, and
+// recomputes once a factor log in the cache has been upgraded.
+int test_factored_log_memo_matches_direct_call() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+
+    silex::FactoredElement value(cubic);
+    assert(value.push(theta, 2));
+    assert(value.push(theta_minus_one, -1));
+    assert(value.push(theta, 1));
+    // Same length and exponents, different factors.
+    silex::FactoredElement other(cubic);
+    assert(other.push(theta_minus_one, 2));
+    assert(other.push(theta, -1));
+    assert(other.push(theta_minus_one, 1));
+
+    silex::EmbeddingContext embeddings(cubic);
+    const slong places = 3;
+    const slong precision = 64;
+    const auto mode = silex::LogEmbeddingMode::product;
+    std::uint64_t version = 0;
+    assert(!silex::detail::embedding_log_cache_version(version, embeddings));
+
+    silex::detail::FactoredLogMemo memo;
+    sflint::ArbVec first(places);
+    sflint::ArbVec memoized(places);
+    sflint::ArbVec direct(places);
+
+    // No cache version before the first call, so nothing is stored.
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(first), &memo, value, embeddings, mode,
+            precision));
+    assert(memo.stores == 0 && memo.hits == 0);
+    std::uint64_t version_before = 0;
+    assert(silex::detail::embedding_log_cache_version(version_before,
+                                                      embeddings));
+
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, value, embeddings, mode,
+            precision));
+    assert(memo.stores == 1 && memo.hits == 0);
+    // Two distinct factors, each stored once.
+    assert(memo.factors.size() == 2);
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, value, embeddings, mode,
+            precision));
+    assert(memo.hits == 1);
+    assert(value.logarithmic_embedding(sflint::ArbVecRef(direct), embeddings,
+                                       mode, precision));
+    assert(arb_vecs_identical(memoized, direct));
+    assert(arb_vecs_identical(first, direct));
+
+    // A different precision or mode is a different result.
+    sflint::ArbVec plain(places);
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(plain), &memo, value, embeddings,
+            silex::LogEmbeddingMode::plain, precision));
+    assert(memo.hits == 1);
+
+    // Same exponents, different factors: no hit.
+    sflint::ArbVec other_memoized(places);
+    sflint::ArbVec other_direct(places);
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(other_memoized), &memo, other, embeddings,
+            mode, precision));
+    assert(memo.hits == 1);
+    assert(other.logarithmic_embedding(sflint::ArbVecRef(other_direct),
+                                       embeddings, mode, precision));
+    assert(arb_vecs_identical(other_memoized, other_direct));
+    assert(!arb_vecs_identical(other_memoized, memoized));
+    // New cache entries do not change the version.
+    assert(silex::detail::embedding_log_cache_version(version, embeddings));
+    assert(version == version_before);
+
+    // Upgrading a cached factor log changes the version; the memo then
+    // recomputes, matching a fresh call under the upgraded cache.
+    sflint::ArbVec factor_logs(places);
+    assert(silex::logarithmic_embedding(sflint::ArbVecRef(factor_logs),
+                                        embeddings, theta, mode, 4096));
+    assert(silex::detail::embedding_log_cache_version(version, embeddings));
+    assert(version != version_before);
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, value, embeddings, mode,
+            precision));
+    assert(memo.hits == 1);
+    assert(value.logarithmic_embedding(sflint::ArbVecRef(direct), embeddings,
+                                       mode, precision));
+    assert(arb_vecs_identical(memoized, direct));
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, value, embeddings, mode,
+            precision));
+    assert(memo.hits == 2);
+    assert(arb_vecs_identical(memoized, direct));
+
+    // Without a memo the call is the direct call.
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), nullptr, value, embeddings, mode,
+            precision));
+    assert(arb_vecs_identical(memoized, direct));
     return 0;
 }
 
@@ -7960,6 +8082,7 @@ int main() {
     test_precision_doubling_cap_forced_failures();
     test_reduce_mod_units_half_integer_tie();
     test_reduce_mod_units_half_integer_tie_stop_rule();
+    test_factored_log_memo_matches_direct_call();
     test_round_arb_approx_width_check();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();
