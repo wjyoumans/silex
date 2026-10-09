@@ -1200,7 +1200,8 @@ bool saturation_candidates_from_relations(
         slong max_auxiliary_primes,
         detail::SaturationCandidateSearchResult* search_result =
                 nullptr,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept {
+        const DiagnosticsContext* diagnostics = nullptr,
+        bool append_field_torsion = true) noexcept {
     auxiliary_prime_count = 0;
     if (search_result != nullptr) {
         *search_result = detail::SaturationCandidateSearchResult{};
@@ -1228,7 +1229,10 @@ bool saturation_candidates_from_relations(
     if (!root_of_unity_order(flint::FmpzRef(torsion_order), field)) {
         return false;
     }
-    if (flint::fmpz_fdiv_ui(flint::FmpzConstRef(torsion_order),
+    // A caller whose inputs already carry its own torsion generator (the
+    // class-relation candidate filter) turns the field generator off.
+    if (append_field_torsion &&
+        flint::fmpz_fdiv_ui(flint::FmpzConstRef(torsion_order),
                             static_cast<ulong>(n)) == 0) {
         Element zeta(field);
         FactoredElement torsion(field);
@@ -6975,6 +6979,198 @@ bool saturation_candidates(flint::FmpzMat& candidates,
             diagnostics);
 }
 
+// Candidate filter for the class-relation saturation with units
+// (ClassGroupContext::saturate_local_with_units_), from reference
+// `Saturate.jl:compute_candidates_for_saturate` (lines 130-203): the
+// ell-th-power residue characters of the inputs at the degree-one primes
+// q = 1 mod ell, stacked until their common kernel is empty or its dimension
+// has stayed the same for more than `stable * (number of inputs)` primes, with
+// `stable = 3.5` as `saturate!` (lines 419-512) passes it.  The search is the
+// port above (saturation_candidates_from_relations).  The inputs are the
+// context's relation generators in storage order, the free unit generators and,
+// when `include_torsion`, the unit group's torsion generator: the column order
+// of the per-prime kernels in saturate_local_once_with_units_.
+//
+// Every character is a homomorphism on the inputs that vanishes on ell-th
+// powers, so an exponent vector whose product is an ell-th power lies in the
+// common kernel of any set of them.  The filter therefore only removes power
+// tests that would fail; it never changes which relation is appended.  The
+// stopping rule decides only how many tests are removed.  Published as the
+// reduced row echelon basis of the kernel modulo ell; with 0 rows, only
+// exponent vectors that vanish modulo ell can give an ell-th power, and the
+// caller already skips those.
+// `available` is false when the port does not apply (a nonmaximal order, an
+// ell that does not fit a word) or fails; the caller then tests every row, as
+// before.
+bool relation_saturation_candidate_filter(flint::FmpzMat& filter,
+                                          bool& available,
+                                          const ClassGroupContext& context,
+                                          const OrderUnitGroup& units,
+                                          bool include_torsion,
+                                          flint::FmpzConstRef ell) noexcept {
+    const DiagnosticsContext* diagnostics = context.diagnostics();
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.saturation_candidate_filter");
+    available = false;
+    const Order* order = context.parent();
+    const NumberField* field = order == nullptr ? nullptr : order->parent();
+    if (order == nullptr || field == nullptr || !units.is_set() ||
+        !flint::fmpz_is_prime(ell)) {
+        return false;
+    }
+    if (!order->is_maximal() || !flint::fmpz_fits_si(ell)) {
+        return true;
+    }
+
+    const slong relation_len = context.relation_count();
+    const slong free_rank = units.free_rank();
+    const slong width = relation_len + free_rank + (include_torsion ? 1 : 0);
+    if (width <= 0) {
+        return true;
+    }
+
+    std::vector<FactoredElement> inputs;
+    inputs.reserve(static_cast<std::size_t>(width));
+    Element generator(*field);
+    for (slong j = 0; j < relation_len; ++j) {
+        FactoredElement input(*field);
+        if (!context.relation_generator(generator, j) ||
+            !input.set_element(generator)) {
+            return true;
+        }
+        inputs.push_back(std::move(input));
+    }
+    for (slong u = 0; u < free_rank; ++u) {
+        FactoredElement input(*field);
+        if (!units.free_generator(input, u)) {
+            return true;
+        }
+        inputs.push_back(std::move(input));
+    }
+    if (include_torsion) {
+        OrderElement torsion(*order);
+        Element torsion_value(*field);
+        FactoredElement input(*field);
+        if (!units.torsion_generator(torsion) ||
+            !torsion.get_element(torsion_value) ||
+            !input.set_element(torsion_value)) {
+            return true;
+        }
+        inputs.push_back(std::move(input));
+    }
+
+    constexpr double kSaturateStable = 3.5;
+    flint::FmpzMat candidates(0, 0);
+    slong auxiliary_prime_count = 0;
+    flint::Fmpz start;
+    default_saturation_auxiliary_prime_start(start);
+    if (!saturation_candidates_from_relations(
+                candidates, auxiliary_prime_count, inputs, *order,
+                flint::fmpz_get_si(ell), kSaturateStable,
+                flint::FmpzConstRef(start), WORD_MAX, nullptr, diagnostics,
+                false)) {
+        return true;
+    }
+
+    // The port returns the kernel basis as columns (width x dimension), or
+    // 0 rows when the kernel is empty.
+    const slong dimension = flint::fmpz_mat_nrows(candidates) == 0
+            ? 0
+            : flint::fmpz_mat_ncols(candidates);
+    if (dimension > 0 && flint::fmpz_mat_nrows(candidates) != width) {
+        return true;
+    }
+    flint::FmpzModCtx ctx(ell.raw());
+    flint::FmpzModMat basis(dimension, width, ctx);
+    flint::FmpzModMat reduced(dimension, width, ctx);
+    for (slong i = 0; i < dimension; ++i) {
+        for (slong j = 0; j < width; ++j) {
+            fmpz_mod_mat_set_entry(
+                    basis.raw(), i, j,
+                    flint::fmpz_mat_entry(
+                            flint::FmpzMatConstRef(candidates), j, i)
+                            .raw(),
+                    ctx.raw());
+        }
+    }
+    const slong rank = dimension == 0
+            ? 0
+            : fmpz_mod_mat_rref(reduced.raw(), basis.raw(), ctx.raw());
+    flint::FmpzMat published(rank, width);
+    for (slong i = 0; i < rank; ++i) {
+        for (slong j = 0; j < width; ++j) {
+            fmpz_mod_mat_get_entry(
+                    flint::fmpz_mat_entry(published, i, j).raw(),
+                    reduced.raw(), i, j, ctx.raw());
+        }
+    }
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::class_group,
+                        rank == 0
+                                ? "class_group.saturation_candidate_filter."
+                                  "empty"
+                                : "class_group.saturation_candidate_filter."
+                                  "nonempty");
+    filter = std::move(published);
+    available = true;
+    return true;
+}
+
+// Whether row `row` of `kernel` lies, modulo ell, in the row span of the
+// reduced row echelon `filter` from relation_saturation_candidate_filter.
+bool relation_saturation_candidate_filter_contains(
+        bool& contains,
+        flint::FmpzMatConstRef filter,
+        flint::FmpzMatConstRef kernel,
+        slong row,
+        flint::FmpzConstRef ell) noexcept {
+    const slong width = flint::fmpz_mat_ncols(kernel);
+    if (!flint::fmpz_is_prime(ell) || row < 0 ||
+        row >= flint::fmpz_mat_nrows(kernel) ||
+        flint::fmpz_mat_ncols(filter) != width) {
+        return false;
+    }
+
+    std::vector<flint::Fmpz> residual(static_cast<std::size_t>(width));
+    for (slong j = 0; j < width; ++j) {
+        ::fmpz_mod(residual[static_cast<std::size_t>(j)].raw(),
+                   flint::fmpz_mat_entry(kernel, row, j).raw(), ell.raw());
+    }
+    flint::Fmpz coefficient;
+    for (slong i = 0; i < flint::fmpz_mat_nrows(filter); ++i) {
+        slong pivot = 0;
+        while (pivot < width &&
+               flint::fmpz_is_zero(flint::fmpz_mat_entry(filter, i, pivot))) {
+            ++pivot;
+        }
+        if (pivot == width) {
+            continue;
+        }
+        // Reduced row echelon: the pivot entry is 1 and the pivot column is
+        // zero in every other row.
+        flint::fmpz_set(flint::FmpzRef(coefficient),
+                        flint::FmpzConstRef(
+                                residual[static_cast<std::size_t>(pivot)]));
+        if (flint::fmpz_is_zero(flint::FmpzConstRef(coefficient))) {
+            continue;
+        }
+        for (slong j = pivot; j < width; ++j) {
+            flint::Fmpz& entry = residual[static_cast<std::size_t>(j)];
+            ::fmpz_submul(entry.raw(), coefficient.raw(),
+                          flint::fmpz_mat_entry(filter, i, j).raw());
+            ::fmpz_mod(entry.raw(), entry.raw(), ell.raw());
+        }
+    }
+
+    contains = true;
+    for (const flint::Fmpz& entry : residual) {
+        if (!flint::fmpz_is_zero(flint::FmpzConstRef(entry))) {
+            contains = false;
+            break;
+        }
+    }
+    return true;
+}
+
 bool saturation_process_candidates_once(
         SaturationCandidateProcessingResult& result,
         ClassGroupContext& context,
@@ -11198,7 +11394,8 @@ bool ClassGroupContext::saturate_local_once_with_units_(
         const OrderUnitGroup& units,
         bool include_torsion,
         const PrimeIdeal& prime,
-        flint::FmpzConstRef ell) noexcept {
+        flint::FmpzConstRef ell,
+        const flint::FmpzMat* candidate_filter) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.saturate_local_once_with_units");
     changed = false;
@@ -11246,6 +11443,20 @@ bool ClassGroupContext::saturate_local_once_with_units_(
     }
     for (slong i = 0; i < flint::fmpz_mat_nrows(kernel); ++i) {
         if (kernel_row_divisible(flint::FmpzMatConstRef(kernel), i, ell)) {
+            continue;
+        }
+        // A row outside the stacked-character kernel is not an ell-th power
+        // (see detail::relation_saturation_candidate_filter), so its power
+        // test would fail; skipping it leaves the appended relation as is.
+        bool in_filter = true;
+        if (candidate_filter != nullptr &&
+            detail::relation_saturation_candidate_filter_contains(
+                    in_filter, flint::FmpzMatConstRef(*candidate_filter),
+                    flint::FmpzMatConstRef(kernel), i, ell) &&
+            !in_filter) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics_, DiagnosticsModule::class_group,
+                    "class_group.saturation_candidate_filtered_with_units");
             continue;
         }
 
@@ -11326,6 +11537,28 @@ bool ClassGroupContext::saturate_local_with_units_(
     slong appends = 0;
     while (!cleared && appends < max_appends) {
         bool appended = false;
+        // Stack the residue characters at many primes before any power test
+        // (reference `Saturate.jl:compute_candidates_for_saturate`).  An
+        // empty kernel means no row below can pass its power test, so the
+        // scan would append nothing; otherwise the kernel filters the rows.
+        // The appended relations are those of the unfiltered scan.
+        flint::FmpzMat candidate_filter(0, 0);
+        bool filter_available = false;
+        if (!detail::relation_saturation_candidate_filter(
+                    candidate_filter, filter_available, *this, units,
+                    include_torsion, ell)) {
+            filter_available = false;
+        }
+        if (filter_available &&
+            flint::fmpz_mat_nrows(
+                    flint::FmpzMatConstRef(candidate_filter)) == 0) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics_, DiagnosticsModule::class_group,
+                    "class_group.saturate_local_with_units.empty_filter");
+            break;
+        }
+        const flint::FmpzMat* filter =
+                filter_available ? &candidate_filter : nullptr;
         flint::Fmpz q;
         flint::fmpz_set_ui(flint::FmpzRef(q), 2);
         while (flint::fmpz_cmp(flint::FmpzConstRef(q), aux_prime_bound) <= 0) {
@@ -11343,7 +11576,7 @@ bool ClassGroupContext::saturate_local_with_units_(
                     bool local_changed = false;
                     if (saturate_local_once_with_units_(
                                 local_changed, units, include_torsion, *prime,
-                                ell) &&
+                                ell, filter) &&
                         local_changed) {
                         appended = true;
                         break;
