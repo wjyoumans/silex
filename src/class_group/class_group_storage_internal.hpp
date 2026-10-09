@@ -313,8 +313,9 @@ struct ClassGroupContextStorage {
     GenerationDifferentRoute generation_different_route =
             GenerationDifferentRoute::none;
     // Relation and unit completeness of a `grh`-requested pair, written
-    // when the pair is accepted (record_grh_acceptance_analytic_check) or
-    // relabelled (publish_grh_labels).  Read only while the published label is `grh`;
+    // when the pair is accepted (record_grh_acceptance_analytic_check,
+    // record_grh_acceptance_exact_class_number) or relabelled
+    // (publish_grh_labels).  Read only while the published label is `grh`;
     // cleared with the other certification metadata and restored by
     // certification transactions.
     CertificationMode class_unit_completeness = CertificationMode::unknown;
