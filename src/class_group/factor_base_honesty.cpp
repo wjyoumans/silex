@@ -132,6 +132,8 @@ bool factor_base_principal_witness(
         FactorBaseWitnessAudit* audit) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.honesty_principal_witness");
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_principal_witness.entered");
     if (audit != nullptr) *audit = FactorBaseWitnessAudit{};
     const Order* order = base.parent();
     if (order == nullptr || !same_order_parent(generator.parent(), order) ||
@@ -146,10 +148,18 @@ bool factor_base_principal_witness(
         // failure falls back; a completed negative classification is final.
         bool matches = false;
         if (detail::order_element_factor_over_base_with_required_prime(
-                    matches, generator, base, prime, diagnostics)) return matches;
+                    matches, generator, base, prime, diagnostics)) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    matches ? "class_group.honesty_principal_witness.direct_match"
+                            : "class_group.honesty_principal_witness.direct_reject");
+            return matches;
+        }
     } else if (predicate != FactorBaseWitnessPredicate::full_factorization) {
         return false;
     }
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_principal_witness.reference_fallback");
     if (audit != nullptr) audit->used_reference = true;
     Ideal principal(*order);
     return principal.is_defined() && principal.set_principal(generator) &&

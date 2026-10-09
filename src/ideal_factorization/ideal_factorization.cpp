@@ -376,6 +376,8 @@ bool order_element_factor_over_base_with_required_prime_direct(
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
                         "ideal.required_prime_direct");
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::ideal,
+                        "ideal.required_prime_direct.stage_entered");
     matches = false;
     const Order* order = element.parent();
     if (order == nullptr || order->parent() == nullptr ||
@@ -451,10 +453,16 @@ bool order_element_factor_over_base_with_required_prime_direct(
                 return false;
             }
             if (required_valuation != 1) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::ideal,
+                        "ideal.required_prime_direct.reject_required_valuation");
                 return true;
             }
             remaining_valuation -= required_prime.residue_degree();
             if (remaining_valuation < 0) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::ideal,
+                        "ideal.required_prime_direct.reject_required_overshoot");
                 return true;
             }
         }
@@ -469,10 +477,18 @@ bool order_element_factor_over_base_with_required_prime_direct(
             return false;
         }
         if (!accounted) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::ideal,
+                    "ideal.required_prime_direct.reject_accounted");
             return true;
         }
     }
 
+    SILEX_PROFILE_EVENT(
+            diagnostics, DiagnosticsModule::ideal,
+            required_prime_seen
+                    ? "ideal.required_prime_direct.accepted"
+                    : "ideal.required_prime_direct.reject_required_absent");
     matches = required_prime_seen;
     return true;
 }
