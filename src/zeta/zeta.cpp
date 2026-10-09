@@ -3349,6 +3349,15 @@ bool bf_log_residue_index_one(flint::ArbRef out,
 // error bound assumes GRH (Belabas-Friedman 2015, Theorem 1).  `bf_audit`,
 // when given, receives the audit data of that fallback; it is written only
 // when the call succeeds on the fallback route.
+//
+// `accept_grh_residue` is set by callers serving a `grh` request, which
+// accepts a GRH-conditional hR.  It skips the quadratic L(1, chi) route and
+// takes the Belabas-Friedman residue in every degree above one, as the
+// reference `Clgp.jl:_class_unit_group` does through `zeta_log_residue`
+// (Zeta.jl) for every degree including two.  The L(1, chi) sum costs about sqrt(|D|)
+// terms, the Belabas-Friedman residue a cutoff set by the precision; and the
+// unconditionality it buys is not used by a `grh` result.  `unconditional`
+// is then false, as on the fallback route.
 bool zeta_residue_impl(flint::ArbRef out,
                        const Order& order,
                        slong precision,
@@ -3357,7 +3366,8 @@ bool zeta_residue_impl(flint::ArbRef out,
                        detail::ZetaBfResidueDegreeCache*
                                residue_degree_cache = nullptr,
                        bool* unconditional = nullptr,
-                       detail::ZetaBfRouteAudit* bf_audit = nullptr)
+                       detail::ZetaBfRouteAudit* bf_audit = nullptr,
+                       bool accept_grh_residue = false)
         noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.residue");
@@ -3373,7 +3383,8 @@ bool zeta_residue_impl(flint::ArbRef out,
     detail::ZetaBfRouteAudit local_audit;
     if (order.degree() == 1) {
         flint::arb_one(result);
-    } else if (!quadratic_residue(result, order, precision)) {
+    } else if (accept_grh_residue ||
+               !quadratic_residue(result, order, precision)) {
         route_unconditional = false;
         flint::Arb log_residue;
         if (!bf_log_residue_default(flint::ArbRef(log_residue),
@@ -3559,7 +3570,8 @@ bool zeta_class_regulator_product_impl(
         const FactorBase* residue_degree_base = nullptr,
         detail::ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
         bool* unconditional = nullptr,
-        detail::ZetaBfRouteAudit* bf_audit = nullptr)
+        detail::ZetaBfRouteAudit* bf_audit = nullptr,
+        bool accept_grh_residue = false)
         noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.class_regulator_product");
@@ -3581,7 +3593,8 @@ bool zeta_class_regulator_product_impl(
                                diagnostics, residue_degree_base,
                                residue_degree_cache, &route_unconditional,
                                bf_audit != nullptr ? &local_audit
-                                                   : nullptr) ||
+                                                   : nullptr,
+                               accept_grh_residue) ||
             !class_regulator_product_from_residue(
                     flint::ArbRef(result), order, flint::ArbConstRef(residue),
                     precision, diagnostics)) {
@@ -3756,12 +3769,14 @@ bool zeta_class_regulator_product_with_diagnostics(
         const FactorBase* residue_degree_base,
         ZetaBfResidueDegreeCache* residue_degree_cache,
         bool* unconditional,
-        ZetaBfRouteAudit* bf_audit) noexcept {
+        ZetaBfRouteAudit* bf_audit,
+        bool accept_grh_residue) noexcept {
     return zeta_class_regulator_product_impl(out, order, precision,
                                             diagnostics,
                                             residue_degree_base,
                                             residue_degree_cache,
-                                            unconditional, bf_audit);
+                                            unconditional, bf_audit,
+                                            accept_grh_residue);
 }
 
 bool zeta_unconditional_route_available(const Order& order) noexcept {

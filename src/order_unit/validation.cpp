@@ -77,10 +77,12 @@ bool analytic_class_regulator_product_for_validation(
         const FactorBase* residue_degree_base,
         ZetaBfResidueDegreeCache* residue_degree_cache,
         bool* unconditional,
-        ZetaBfRouteAudit* bf_audit) noexcept {
+        ZetaBfRouteAudit* bf_audit,
+        bool accept_grh_residue) noexcept {
     return detail::zeta_class_regulator_product_with_diagnostics(
             out, order, precision, diagnostics, residue_degree_base,
-            residue_degree_cache, unconditional, bf_audit);
+            residue_degree_cache, unconditional, bf_audit,
+            accept_grh_residue);
 }
 
 bool index_one_class_regulator_product_for_validation(
@@ -312,8 +314,12 @@ bool analytic_index_bound_for_validation(
         SILEX_PROFILE_SCOPE(
                 units.diagnostics(), DiagnosticsModule::unit_group,
                 "unit_group.validation_analytic_index_bound.ensure_product");
+        // `accept_grh_generation` is true exactly for a grh request, which
+        // also accepts a GRH-conditional hR: take the Belabas-Friedman
+        // residue there instead of the quadratic L(1, chi) sum.
         if (!analytic_cache.ensure(order, precision, units.diagnostics(),
-                                   class_group.factor_base())) {
+                                   class_group.factor_base(), false,
+                                   accept_grh_generation)) {
             return false;
         }
     }

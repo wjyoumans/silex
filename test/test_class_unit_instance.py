@@ -186,12 +186,12 @@ def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
         assert instance["unit_group"]["certification"] == "grh"
         assert class_group["factor_base_generation_status"] == "unavailable"
         assert class_group["relation_saturation_status"] != "verified"
-        # The real-quadratic hR comes from an unconditional L(1, chi)
-        # evaluation, the cubic one from a Belabas-Friedman bound; the
+        # A grh request takes the Belabas-Friedman hR for the real
+        # quadratic as for the cubic, so the analytic check is grh; the
         # published label is grh either way, since generation rests on GRH.
         assert class_group["analytic_class_regulator_status"] == "verified"
         assert class_group["analytic_class_regulator_certification"] == (
-            "proven" if instance["degree"] == 2 else "grh"
+            "grh"
         )
         # Provenance: generation rests on the BDF bound (19 for the cubic,
         # 40 for the quadratic, both below Bach's; the base is that bound
@@ -203,20 +203,10 @@ def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
         assert class_group[
             "factor_base_generation_certification_bound"
         ] == generation
-        if instance["degree"] == 2:
-            assert class_group[
-                "class_unit_completeness_certification"
-            ] == "proven"
-            assert class_group["class_unit_completeness_basis"] == (
-                "unconditional_analytic"
-            )
-        else:
-            assert class_group[
-                "class_unit_completeness_certification"
-            ] == "grh"
-            assert class_group["class_unit_completeness_basis"] == (
-                "belabas_friedman"
-            )
+        assert class_group["class_unit_completeness_certification"] == "grh"
+        assert class_group["class_unit_completeness_basis"] == (
+            "belabas_friedman"
+        )
 
 
 def assert_proven_and_degree_one_provenance(exe: Path, root: Path) -> None:
@@ -364,9 +354,11 @@ def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     assert class_group["factor_base_generation_basis"] == "minkowski_type"
     assert class_group["generation_different_route"] is None
     assert class_group["factor_base_generation_certification_bound"] == "88"
-    assert class_group["class_unit_completeness_certification"] == "proven"
+    # Completeness rests on the Belabas-Friedman hR that a grh request
+    # takes in every degree.
+    assert class_group["class_unit_completeness_certification"] == "grh"
     assert class_group["class_unit_completeness_basis"] == (
-        "unconditional_analytic"
+        "belabas_friedman"
     )
 
 
@@ -666,8 +658,9 @@ def main() -> int:
             )
             continue
         # Positive unit rank: the analytic index-one test accepts, with a
-        # Belabas-Friedman hR (GRH-conditional) above degree two and an
-        # unconditional L(1, chi) hR for real quadratic fields. Generation is
+        # Belabas-Friedman hR (GRH-conditional) in every degree: a grh
+        # request does not evaluate the unconditional L(1, chi) hR for real
+        # quadratic fields. Generation is
         # unconditional (`verified`) only when the GRH-sized base reaches
         # the proven requirement; below it, generation rests on GRH and
         # is never reported `verified`. Relation saturation is not proved
@@ -677,27 +670,17 @@ def main() -> int:
         ] == "verified"
         assert grh_instance["class_group"][
             "analytic_class_regulator_certification"
-        ] == ("proven" if grh_instance["degree"] == 2 else "grh")
+        ] == "grh"
         assert grh_instance["class_group"][
             "factor_base_generation_status"
         ] == ("verified" if used >= requirement else "unavailable")
         assert grh_instance["class_group"][
             "relation_saturation_status"
         ] != "verified"
-        if grh_instance["degree"] == 2:
-            assert provenance["class_unit_completeness_certification"] == (
-                "proven"
-            )
-            assert provenance["class_unit_completeness_basis"] == (
-                "unconditional_analytic"
-            )
-        else:
-            assert provenance["class_unit_completeness_certification"] == (
-                "grh"
-            )
-            assert provenance["class_unit_completeness_basis"] == (
-                "belabas_friedman"
-            )
+        assert provenance["class_unit_completeness_certification"] == "grh"
+        assert provenance["class_unit_completeness_basis"] == (
+            "belabas_friedman"
+        )
     # Each GRH-generation row is below the proven requirement; the
     # x^2 - 31333 row sits exactly on the Minkowski-type bound.
     for field_id in (
@@ -881,9 +864,10 @@ def main() -> int:
             grh_audited_instance["requested_factor_base_bound"]
         )
 
-    # A real-quadratic `grh` transaction is accepted by the analytic
-    # index-one test against the unconditional L(1, chi_D) hR, so the
-    # recorded check reads `proven` while both labels stay `grh`.
+    # A real-quadratic `grh` transaction written as x^2 - d is accepted by
+    # the analytic index-one test against a Belabas-Friedman hR, as in every
+    # other presentation and degree: the recorded check reads `grh`, with
+    # its BF audit record, and both labels stay `grh`.
     real_quadratic_grh = run_json(
         [str(args.exe), "--coeffs", "-5,0,1", "--mode", "grh"],
         root,
@@ -899,10 +883,10 @@ def main() -> int:
     ] == "verified"
     assert real_quadratic_grh["class_group"][
         "analytic_class_regulator_certification"
-    ] == "proven"
+    ] == "grh"
     assert real_quadratic_grh["class_group"][
         "zeta_bf_proof_status"
-    ] == "not_checked"
+    ] == "verified"
 
     # The same with a nontrivial class group: Q(sqrt(10)), h = 2, class
     # group Z/2, unit rank 1 (GP 2.17 quadclassunit(40)). The regulator is
@@ -923,10 +907,10 @@ def main() -> int:
     ] == "verified"
     assert real_quadratic_h2_grh["class_group"][
         "analytic_class_regulator_certification"
-    ] == "proven"
+    ] == "grh"
     assert real_quadratic_h2_grh["class_group"][
         "zeta_bf_proof_status"
-    ] == "not_checked"
+    ] == "verified"
 
     # A requested audit on x^2 + 5 (h = 2) in `proven` mode runs and
     # succeeds. The exact imaginary-quadratic route stores a verified

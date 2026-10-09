@@ -5,6 +5,7 @@
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/relation.hpp>
+#include <silex/zeta.hpp>
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/relation_search_internal.hpp"
@@ -3138,6 +3139,158 @@ int test_analytic_index_bound_keeps_complete_saturation_records() {
     return 0;
 }
 
+// A public generation check at a bound below the required generation bound
+// does not establish that the factor base generates the class group, so it
+// cannot stand in for the full check when a stored unconditional analytic
+// record would promote.  check_factor_base_generation_bound(1) records a
+// verified check at bound 1 once an earlier check has failed; the `proven`
+// label reached afterwards must rest on a check that covers the required
+// bound.  Q(sqrt(10)): h = 2.  A `grh` transaction records a
+// Belabas-Friedman check, so the unconditional record (the quadratic
+// L(1, chi) route) is stored here through the internal access.
+int test_low_bound_generation_check_does_not_promote() {
+    silex::NumberField field = quadratic_field(10);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), maximal_order));
+
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            class_group, maximal_order,
+            sflint::FmpzConstRef(factor_base_bound), options, 128));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::grh);
+    CertificationAccess::record_grh_acceptance_analytic_check(class_group,
+                                                              true);
+    assert(class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::proven);
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+
+    silex::ClassGroupContext proven_class_group;
+    silex::OrderUnitGroup proven_units;
+    silex::ClassGroupComputeOptions proven_options = options;
+    proven_options.requested_certification =
+            silex::CertificationMode::proven;
+    assert(proven_units.compute_with_class_group(
+            proven_class_group, maximal_order,
+            sflint::FmpzConstRef(factor_base_bound), proven_options, 128));
+    assert(proven_units.certification_status() ==
+           silex::CertificationMode::proven);
+
+    sflint::Fmpz generation_bound;
+    assert(class_group.factor_base_generation_bound(
+            sflint::FmpzRef(generation_bound)));
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(generation_bound), 1) >
+           0);
+    sflint::Fmpz build_bound;
+    assert(class_group.factor_base_build_bound(sflint::FmpzRef(build_bound)));
+
+    // A check beyond the build bound fails and clears the verified check;
+    // a check at bound 1 then verifies trivially.
+    sflint::Fmpz beyond_build;
+    sflint::fmpz_add_ui(sflint::FmpzRef(beyond_build),
+                        sflint::FmpzConstRef(build_bound), 1);
+    assert(!class_group.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(beyond_build)));
+    sflint::Fmpz one;
+    sflint::fmpz_one(sflint::FmpzRef(one));
+    assert(class_group.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(one)));
+    sflint::Fmpz checked_bound;
+    assert(class_group.factor_base_generation_checked_bound(
+            sflint::FmpzRef(checked_bound)));
+    assert(sflint::fmpz_is_one(checked_bound));
+
+    // Precision 1 disables the L(1, chi) recompute (the zeta product is
+    // unavailable there), so the stored record is the only analytic route,
+    // and with a check at bound 1 it must not promote.  The class group
+    // still becomes `proven` through the saturation route, which re-runs
+    // the generation check at the required bound and leaves its ell = 2
+    // record (h = 2); the stored record route leaves none.
+    // try_certify_with_units offers no way to switch the saturation route
+    // off, so the stored record route is seen only through these side
+    // effects.
+    {
+        sflint::Arb precision_one_hR;
+        assert(!silex::zeta_class_regulator_product(
+                sflint::ArbRef(precision_one_hR), maximal_order, 1));
+    }
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
+    assert(class_group.relation_saturation_record_count() == 0);
+    assert(class_group.try_certify_with_units(
+            proven_units, silex::CertificationMode::proven, 1));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(class_group.factor_base_generation_checked_bound(
+            sflint::FmpzRef(checked_bound)));
+    assert(sflint::fmpz_cmp(sflint::FmpzConstRef(checked_bound),
+                            sflint::FmpzConstRef(generation_bound)) >= 0);
+    assert(class_group.relation_saturation_record_count() == 1);
+    sflint::Fmpz record_ell;
+    silex::ProofState record_status = silex::ProofState::not_checked;
+    assert(class_group.relation_saturation_record(
+            sflint::FmpzRef(record_ell), record_status, 0));
+    assert(sflint::fmpz_equal_si(record_ell, 2));
+    assert(record_status == silex::ProofState::verified);
+    return 0;
+}
+
+// A `grh` request takes the Belabas-Friedman residue in degree two as in
+// every other degree; a `proven` request keeps the unconditional quadratic
+// L(1, chi) route first.  On x^2 - 10007 (D = 40028, maximal order) the
+// default route gives the unconditional value, and accept_grh_residue gives
+// a Belabas-Friedman value with its audit data that overlaps it.  The cache
+// recomputes a value taken that way for a request without the flag, and an
+// unconditional value serves both.
+int test_grh_request_takes_belabas_friedman_residue() {
+    silex::NumberField field = quadratic_field(10007);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+
+    sflint::Arb unconditional_hR;
+    bool unconditional = false;
+    assert(silex::detail::zeta_class_regulator_product_with_diagnostics(
+            sflint::ArbRef(unconditional_hR), maximal_order, 128, nullptr,
+            nullptr, nullptr, &unconditional));
+    assert(unconditional);
+
+    sflint::Arb grh_hR;
+    silex::detail::ZetaBfRouteAudit audit;
+    unconditional = true;
+    assert(silex::detail::zeta_class_regulator_product_with_diagnostics(
+            sflint::ArbRef(grh_hR), maximal_order, 128, nullptr, nullptr,
+            nullptr, &unconditional, &audit, true));
+    assert(!unconditional);
+    assert(audit.cutoff > 0 && audit.requested_precision == 128);
+    assert(::arb_overlaps(grh_hR.raw(), unconditional_hR.raw()) != 0);
+
+    silex::detail::AnalyticClassRegulatorCache cache;
+    assert(cache.ensure(maximal_order, 128, nullptr, nullptr, false, true));
+    assert(!cache.value_unconditional());
+    assert(cache.value_bf_audit() != nullptr);
+    // A request without the flag does not reuse the GRH value.
+    assert(cache.ensure(maximal_order, 128));
+    assert(cache.value_unconditional());
+    assert(cache.value_bf_audit() == nullptr);
+    // The unconditional value now serves a grh request as well.
+    assert(cache.ensure(maximal_order, 128, nullptr, nullptr, false, true));
+    assert(cache.value_unconditional());
+    return 0;
+}
+
 // The unconditional analytic index-one routes that do not keep a complete
 // saturation proof clear the ell-local proof records together with the
 // per-prime records, so no proof record is left beside the `verified`
@@ -4078,6 +4231,8 @@ int main() {
     test_zeta_bf_degree_one_verifies_relation_saturation();
     test_analytic_index_bound_keeps_complete_saturation_records();
     test_analytic_index_one_routes_clear_saturation_proof_records();
+    test_low_bound_generation_check_does_not_promote();
+    test_grh_request_takes_belabas_friedman_residue();
     test_exact_route_keeps_verified_ell_local_proof();
     test_compute_candidate_preserves_on_failure();
     test_move_and_swap();

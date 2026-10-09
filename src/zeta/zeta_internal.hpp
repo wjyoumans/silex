@@ -109,7 +109,10 @@ BdfSearchOutcome grh_bdf_factor_base_bound_search(
 // bound assumes GRH for zeta_K and zeta_Q (Belabas-Friedman 2015, Theorem 1).
 // `bf_audit`, when given, receives the audit data of that fallback; it is
 // written only on success on the fallback route and left unchanged
-// otherwise.
+// otherwise.  `accept_grh_residue`, for a caller serving a `grh` request,
+// skips the quadratic L(1, chi) route and takes the Belabas-Friedman residue
+// in every degree above one (`unconditional` is then false); the default
+// keeps the unconditional route first.
 bool zeta_class_regulator_product_with_diagnostics(
         flint::ArbRef out,
         const Order& order,
@@ -118,7 +121,8 @@ bool zeta_class_regulator_product_with_diagnostics(
         const FactorBase* residue_degree_base = nullptr,
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
         bool* unconditional = nullptr,
-        ZetaBfRouteAudit* bf_audit = nullptr) noexcept;
+        ZetaBfRouteAudit* bf_audit = nullptr,
+        bool accept_grh_residue = false) noexcept;
 
 // True when `zeta_class_regulator_product` has an unconditional route for
 // `order`: degree one, or the quadratic L(1, chi) route preconditions.  The

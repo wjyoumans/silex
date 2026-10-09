@@ -2158,12 +2158,14 @@ int test_grh_cubic_records_bf_audit() {
     return 0;
 }
 
-// A real-quadratic `grh` transaction records its unconditional L(1, chi)
-// check as `proven` but
-// never promotes its own labels.  A later explicit
-// try_certify_with_units(proven) with proven units may use that stored
-// record to promote the class group to `proven`; this is the one exception
-// to "the record never promotes labels".  Q(sqrt(10)): h = 2, class group
+// A real-quadratic `grh` transaction written as x^2 - d accepts against a
+// Belabas-Friedman hR, as every other presentation does: a `grh` request
+// takes the GRH residue (Belabas-Friedman 2015, Theorem 1) instead of the
+// unconditional L(1, chi) sum.  It records that check as `grh` and never
+// promotes its own labels.  A later explicit
+// try_certify_with_units(proven) with proven units still promotes the
+// class group, through the unconditional L(1, chi) hR it computes itself.
+// Q(sqrt(10)): h = 2, class group
 // Z/2, fundamental unit 3 + sqrt(10), regulator 1.8184464592320668...
 // (GP 2.17 quadclassunit(40) and bnfinit(x^2 - 10, 1)).
 int test_real_quadratic_grh_record_and_later_promotion() {
@@ -2208,16 +2210,22 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     ::arb_abs(regulator.raw(), regulator.raw());
     assert(::arb_overlaps(regulator.raw(), expected_regulator.raw()) != 0);
 
-    // The transaction records the unconditional check and keeps `grh`.
+    // The transaction records the Belabas-Friedman check, with its audit
+    // data, and keeps `grh`.
     assert(class_group.certification_status() ==
            silex::CertificationMode::grh);
     assert(units.certification_status() == silex::CertificationMode::grh);
     assert(class_group.analytic_class_regulator_status() ==
            silex::ProofState::verified);
     assert(class_group.analytic_class_regulator_certification() ==
-           silex::CertificationMode::proven);
+           silex::CertificationMode::grh);
     assert(class_group.zeta_bf_proof_status() ==
-           silex::ProofState::not_checked);
+           silex::ProofState::verified);
+    assert(class_group.zeta_bf_proof_record().has_value());
+    assert(class_group.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    assert(class_group.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::belabas_friedman);
     assert(class_group.unit_proof_status() ==
            silex::ProofState::not_checked);
 
@@ -2227,9 +2235,8 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     assert(class_group.certification_status() ==
            silex::CertificationMode::grh);
 
-    // Separately proven units for the same order may: the stored
-    // unconditional record, verified factor-base generation, and the
-    // proven units satisfy try_certify_with_units(proven).
+    // A `proven` request on the same order keeps the unconditional
+    // L(1, chi) route: its accepting check is recorded `proven`.
     silex::ClassGroupContext proven_class_group;
     silex::OrderUnitGroup proven_units;
     silex::ClassGroupComputeOptions proven_options = options;
@@ -2244,23 +2251,21 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     }
     assert(proven_units.certification_status() ==
            silex::CertificationMode::proven);
-    // Pin the mechanism, not only the outcome.  try_certify_with_units
-    // tries the stored record first; failing that, it recomputes
-    // L(1, chi) at the call's precision, and then tries saturation.  At
-    // precision 1 the zeta product is unavailable, so the recompute route
-    // cannot run, and the saturation route would leave per-prime records.
-    // A promotion with no saturation records therefore came from the
-    // stored record.  The stored unconditional index-one check, with
-    // generation checked to the required bound, saturates the relations at
-    // every prime, so the status is `verified` with no records kept.
-    {
-        sflint::Arb precision_one_hR;
-        assert(!silex::zeta_class_regulator_product(
-                sflint::ArbRef(precision_one_hR), setup.maximal_order, 1));
-    }
+    assert(proven_class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(proven_class_group.analytic_class_regulator_certification() ==
+           silex::CertificationMode::proven);
+
+    // Separately proven units may promote the `grh` class group.  The
+    // stored check assumes GRH and cannot promote by itself, so
+    // try_certify_with_units recomputes the unconditional L(1, chi) hR at
+    // the call's precision.  That index-one check, with generation checked
+    // to the required bound, saturates the relations at every prime, so the
+    // status is `verified` with no per-prime records (the saturation route
+    // would keep them), and the analytic check now reads `proven`.
     assert(class_group.relation_saturation_record_count() == 0);
     assert(class_group.try_certify_with_units(
-            proven_units, silex::CertificationMode::proven, 1));
+            proven_units, silex::CertificationMode::proven, 128));
     assert(class_group.relation_saturation_record_count() == 0);
     assert(class_group.relation_saturation_status() ==
            silex::ProofState::verified);
@@ -2275,7 +2280,8 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     assert(units.certification_status() == silex::CertificationMode::grh);
 
     // When verified ell-local records already prove saturation at every
-    // p | h_cand, the same stored-record promotion keeps them.
+    // p | h_cand, promotion at precision 1, where the zeta product is
+    // unavailable, runs through them and keeps them.
     silex::ClassGroupContext saturated_class_group;
     silex::OrderUnitGroup saturated_units;
     if (!saturated_units.compute_with_class_group(
@@ -2488,107 +2494,6 @@ int test_imaginary_quadratic_grh_refine_uses_exact_index() {
     return status;
 }
 
-// A public generation check at a bound below the required generation bound
-// does not establish that the factor base generates the class group, so it
-// cannot stand in for the full check when the stored unconditional record
-// would promote.  check_factor_base_generation_bound(1) records a verified
-// check at bound 1 once an earlier check has failed; the `proven` label
-// reached afterwards must rest on a check that covers the required bound.
-// Q(sqrt(10)) as in test_real_quadratic_grh_record_and_later_promotion.
-int test_low_bound_generation_check_does_not_promote() {
-    const slong quadratic[] = {-10, 0};
-    const char* name = "low-bound generation check x^2 - 10";
-
-    FieldSetup setup = setup_from_coefficients(quadratic, 2);
-    sflint::Fmpz factor_base_bound;
-    silex::ClassGroupComputeOptions options;
-    if (!configure_matrix_options(options, factor_base_bound,
-                                  setup.maximal_order,
-                                  silex::CertificationMode::grh)) {
-        std::cerr << name << ": options unavailable\n";
-        return 1;
-    }
-
-    silex::ClassGroupContext class_group;
-    silex::OrderUnitGroup units;
-    if (!units.compute_with_class_group(
-                class_group, setup.maximal_order,
-                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
-        std::cerr << name << ": class/unit computation failed\n";
-        return 1;
-    }
-    assert(class_group.certification_status() ==
-           silex::CertificationMode::grh);
-    assert(class_group.analytic_class_regulator_certification() ==
-           silex::CertificationMode::proven);
-
-    silex::ClassGroupContext proven_class_group;
-    silex::OrderUnitGroup proven_units;
-    silex::ClassGroupComputeOptions proven_options = options;
-    proven_options.requested_certification =
-            silex::CertificationMode::proven;
-    if (!proven_units.compute_with_class_group(
-                proven_class_group, setup.maximal_order,
-                sflint::FmpzConstRef(factor_base_bound), proven_options,
-                128)) {
-        std::cerr << name << ": proven unit computation failed\n";
-        return 1;
-    }
-    assert(proven_units.certification_status() ==
-           silex::CertificationMode::proven);
-
-    sflint::Fmpz generation_bound;
-    assert(class_group.factor_base_generation_bound(
-            sflint::FmpzRef(generation_bound)));
-    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(generation_bound), 1) >
-           0);
-    sflint::Fmpz build_bound;
-    assert(class_group.factor_base_build_bound(sflint::FmpzRef(build_bound)));
-
-    // A check beyond the build bound fails and clears the verified check;
-    // a check at bound 1 then verifies trivially.
-    sflint::Fmpz beyond_build;
-    sflint::fmpz_add_ui(sflint::FmpzRef(beyond_build),
-                        sflint::FmpzConstRef(build_bound), 1);
-    assert(!class_group.check_factor_base_generation_bound(
-            sflint::FmpzConstRef(beyond_build)));
-    sflint::Fmpz one;
-    sflint::fmpz_one(sflint::FmpzRef(one));
-    assert(class_group.check_factor_base_generation_bound(
-            sflint::FmpzConstRef(one)));
-    sflint::Fmpz checked_bound;
-    assert(class_group.factor_base_generation_checked_bound(
-            sflint::FmpzRef(checked_bound)));
-    assert(sflint::fmpz_is_one(checked_bound));
-
-    // Precision 1 disables the L(1, chi) recompute (see the test above), so
-    // the stored record is the only analytic route, and with a check at
-    // bound 1 it must not promote.  The class group still becomes `proven`
-    // through the saturation route, which re-runs the generation check at
-    // the required bound and leaves its ell = 2 record (h = 2); the stored
-    // record route leaves none.  try_certify_with_units offers no way to
-    // switch the saturation route off, so the stored record route is seen
-    // only through these side effects.
-    sflint::Fmpz class_order;
-    assert(class_group.order(sflint::FmpzRef(class_order)));
-    assert(sflint::fmpz_equal_si(class_order, 2));
-    assert(class_group.relation_saturation_record_count() == 0);
-    assert(class_group.try_certify_with_units(
-            proven_units, silex::CertificationMode::proven, 1));
-    assert(class_group.certification_status() ==
-           silex::CertificationMode::proven);
-    assert(class_group.factor_base_generation_checked_bound(
-            sflint::FmpzRef(checked_bound)));
-    assert(sflint::fmpz_cmp(sflint::FmpzConstRef(checked_bound),
-                            sflint::FmpzConstRef(generation_bound)) >= 0);
-    assert(class_group.relation_saturation_record_count() == 1);
-    auto record = class_group.relation_saturation_record(0);
-    assert(record.has_value());
-    assert(sflint::fmpz_equal_si(record->ell, 2));
-    assert(record->status == silex::ProofState::verified);
-    return 0;
-}
-
 }  // namespace
 
 // A grh request of positive unit rank may take factor-base generation from
@@ -2730,10 +2635,10 @@ int test_grh_generation_below_minkowski_bound() {
 // h_cand * R_cand = h * R forces both indices to be one, so the relations
 // are saturated at every prime and relation_saturation_status() reports
 // `verified` (class_group.hpp).  The `grh` run on the same field takes the
-// grh acceptance route, which records the unconditional analytic check but
-// leaves relation saturation unchecked; try_certify_class_unit_with_zeta
-// then proves that grh pair through the same unconditional index-one
-// argument.  The grh run needs a factor base that reaches the
+// grh acceptance route, which records a Belabas-Friedman analytic check
+// (`grh`) and leaves relation saturation unchecked;
+// try_certify_class_unit_with_zeta then proves that grh pair through the
+// same unconditional index-one argument, computing L(1, chi) itself.  The grh run needs a factor base that reaches the
 // Minkowski-type bound: for x^2 - 12905 (D = 12905 = 5 * 29 * 89) the grh
 // base is built to 72 and that bound is floor(sqrt(12905) / 2) = 56.
 // Expected class groups from GP 2.17 bnfinit and bnfcertify:
@@ -2792,11 +2697,12 @@ int test_real_quadratic_h_gt_one_proven_saturation() {
                 std::cerr << row.name << ": unexpected labels\n";
                 return 1;
             }
-            // Both runs record an unconditional analytic check.
+            // The proven run records an unconditional analytic check, the
+            // grh run a Belabas-Friedman one.
             if (class_group.analytic_class_regulator_status() !=
                         silex::ProofState::verified ||
                 class_group.analytic_class_regulator_certification() !=
-                        silex::CertificationMode::proven) {
+                        requested) {
                 std::cerr << row.name << ": missing analytic check\n";
                 return 1;
             }
@@ -2976,7 +2882,6 @@ int main() {
     status |= test_imaginary_quadratic_grh_large_discriminant();
     status |= test_imaginary_quadratic_grh_cutoff_boundary();
     status |= test_imaginary_quadratic_grh_refine_uses_exact_index();
-    status |= test_low_bound_generation_check_does_not_promote();
     status |= test_grh_generation_below_minkowski_bound();
     status |= test_real_quadratic_h_gt_one_proven_saturation();
     status |= test_quintic_disc11119_proven_prepass_route();

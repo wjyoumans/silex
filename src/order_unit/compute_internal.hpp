@@ -77,7 +77,8 @@ const char* validate_refine_outcome_profile_label(
 
 // `unconditional` reports whether the product came from an unconditional
 // route, and `bf_audit` receives the Belabas-Friedman audit data when it did
-// not (see zeta_class_regulator_product_with_diagnostics).
+// not; `accept_grh_residue` takes the Belabas-Friedman residue for a grh
+// request (see zeta_class_regulator_product_with_diagnostics).
 bool analytic_class_regulator_product_for_validation(
         flint::ArbRef out,
         const Order& order,
@@ -86,7 +87,8 @@ bool analytic_class_regulator_product_for_validation(
         const FactorBase* residue_degree_base,
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
         bool* unconditional = nullptr,
-        ZetaBfRouteAudit* bf_audit = nullptr) noexcept;
+        ZetaBfRouteAudit* bf_audit = nullptr,
+        bool accept_grh_residue = false) noexcept;
 
 // The grh index-one hR (zeta_class_regulator_product_index_one_with_
 // diagnostics): a Belabas-Friedman value with log radius below 1/4, enough
@@ -142,11 +144,18 @@ public:
         return validation_active_;
     }
 
+    // `accept_grh_residue` is set for a grh request, which accepts a
+    // GRH-conditional hR: the default route then takes the Belabas-Friedman
+    // residue instead of the quadratic L(1, chi) sum
+    // (zeta_class_regulator_product_with_diagnostics).  A value computed that
+    // way is not reused for a call without it, which keeps the unconditional
+    // route for proven requests; an unconditional value serves both.
     bool ensure(const Order& order,
                 slong precision,
                 const DiagnosticsContext* diagnostics = nullptr,
                 const FactorBase* residue_degree_base = nullptr,
-                bool cache_bf_residue_degrees = false) noexcept {
+                bool cache_bf_residue_degrees = false,
+                bool accept_grh_residue = false) noexcept {
         reset_for_order_if_needed_(order);
         index_one_active_ = false;
         if (validation_enabled_ && order.degree() > 2 &&
@@ -156,21 +165,27 @@ public:
             return true;
         }
         validation_active_ = false;
-        if (valid_ > 0 && precision_ >= precision) {
+        const bool value_serves_request =
+                accept_grh_residue || value_unconditional_ ||
+                !value_accept_grh_residue_;
+        if (valid_ > 0 && precision_ >= precision && value_serves_request) {
             return true;
         }
-        if (valid_ < 0 && precision_ == precision) {
+        if (valid_ < 0 && precision_ == precision &&
+            value_accept_grh_residue_ == accept_grh_residue) {
             return false;
         }
 
         value_unconditional_ = false;
         value_bf_audit_valid_ = false;
+        value_accept_grh_residue_ = accept_grh_residue;
         valid_ = analytic_class_regulator_product_for_validation(
                          flint::ArbRef(value_), order, precision, diagnostics,
                          residue_degree_base,
                          cache_bf_residue_degrees ? &bf_residue_degree_cache_
                                                   : nullptr,
-                         &value_unconditional_, &value_bf_audit_)
+                         &value_unconditional_, &value_bf_audit_,
+                         accept_grh_residue)
                 ? 1
                 : -1;
         value_bf_audit_valid_ = valid_ > 0 && !value_unconditional_ &&
@@ -188,8 +203,11 @@ public:
         valid_ = 1;
         // A seeded value (a Belabas-Friedman audit or a route estimate) is
         // never an unconditional hR, and carries no default-route audit.
+        // It serves every later request, as it is not a default-route
+        // value that a call without accept_grh_residue would recompute.
         value_unconditional_ = false;
         value_bf_audit_valid_ = false;
+        value_accept_grh_residue_ = false;
         validation_active_ = false;
         index_one_active_ = false;
     }
@@ -413,6 +431,8 @@ private:
     slong precision_ = 0;
     int valid_ = 0;
     bool value_unconditional_ = false;
+    // Whether value_ came from a call with accept_grh_residue (see ensure).
+    bool value_accept_grh_residue_ = false;
     ZetaBfRouteAudit value_bf_audit_;
     bool value_bf_audit_valid_ = false;
     flint::Arb bf_value_;
