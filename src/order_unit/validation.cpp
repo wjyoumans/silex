@@ -83,6 +83,19 @@ bool analytic_class_regulator_product_for_validation(
             residue_degree_cache, unconditional, bf_audit);
 }
 
+bool index_one_class_regulator_product_for_validation(
+        flint::ArbRef out,
+        ZetaBfRouteAudit& audit,
+        const Order& order,
+        slong precision,
+        const DiagnosticsContext* diagnostics,
+        const FactorBase* residue_degree_base,
+        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept {
+    return detail::zeta_class_regulator_product_index_one_with_diagnostics(
+            out, audit, order, precision, diagnostics, residue_degree_base,
+            residue_degree_cache);
+}
+
 bool bf_class_regulator_product_for_validation(
         flint::ArbRef out,
         flint::ArbRef error_bound,
@@ -261,6 +274,40 @@ bool analytic_index_bound_for_validation(
         bool accept_grh_generation) noexcept {
     SILEX_PROFILE_SCOPE(units.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.validation_analytic_index_bound");
+    // A grh request first tries a Belabas-Friedman hR that is only accurate
+    // enough to recognize index one (log radius below 1/4; Belabas-Friedman
+    // 2015, p. 1, footnote 1, and Theorem 7 for the cutoff).  Index one
+    // from it is accepted as is; any other outcome is recomputed below
+    // from the default hR, so every index bound above one, and every
+    // failure, comes from the same value as before.
+    if (accept_grh_generation) {
+        bool have_index_one_value = false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    units.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.validation_analytic_index_bound."
+                    "ensure_index_one_product");
+            have_index_one_value = analytic_cache.ensure_index_one(
+                    order, precision, units.diagnostics(),
+                    class_group.factor_base());
+        }
+        if (have_index_one_value) {
+            flint::Fmpz coarse_index_bound;
+            if (validation_index_bound_from_product(
+                        coarse_index_bound, units, class_group,
+                        analytic_cache.value(), precision,
+                        accept_grh_generation) &&
+                flint::fmpz_is_one(
+                        flint::FmpzConstRef(coarse_index_bound))) {
+                flint::fmpz_one(flint::FmpzRef(index_bound));
+                return true;
+            }
+            SILEX_PROFILE_EVENT(
+                    units.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.validation_analytic_index_bound."
+                    "index_one_product_refined");
+        }
+    }
     {
         SILEX_PROFILE_SCOPE(
                 units.diagnostics(), DiagnosticsModule::unit_group,

@@ -2911,6 +2911,436 @@ bool bf_log_residue_default(flint::ArbRef out,
     return true;
 }
 
+// The grh index-one route: a Belabas-Friedman log residue whose error is
+// only small enough for the analytic index-one test, with the cutoff chosen
+// by Belabas-Friedman 2015, Theorem 7 (p. 12) instead of Theorem 1.
+//
+// Target.  The index-one test needs an error below (1/2) log 2
+// (Belabas-Friedman 2015, p. 1, footnote 1); this route aims at 1/4, the
+// value of the reference buch2.c:primeneeded (`lim = 0.25`).  As in the
+// reference Zeta.jl:_residue_approx_bf, 2^-20 of the target is reserved
+// for the numerical radius of the BF term, the cutoff is the least one
+// whose truncation bound is below the rest, and the term starts at 64 bits
+// and doubles.
+//
+// Theorem 7 (same hypotheses as Theorem 1: GRH for zeta_K and zeta_Q; any
+// X > 9 and sigma > 1):
+//   |log kappa_K - f_K(X)| <= 2.324 (2 sigma - 1) / (sqrt(X) log(3X))
+//       * ( delta(K, sigma, X) (1 + 3.88 / log(X/9))
+//           + 4.26 (n - 1) beta(log(X/9)) / ((2 sigma - 1) sqrt(X)) ),
+//   delta(K, sigma, X) = log D + (C/2 + 1 - log(4 pi)/2) / (2 sigma - 1)
+//       + 2/(sigma - 1) + 2/sigma - 2 sum_{N p < X} log N p / (N p^sigma - 1)
+//       - n (log(2 pi) - Psi(sigma)) - r (Psi((sigma + 1)/2) - Psi(sigma/2))/2,
+// with C Euler's constant, r the number of real places, the sum over prime
+// ideals p of norm below X, and beta from (16) (p. 8):
+//   beta(t) = (1/2) (1/2 + 1/t) e^t log((e^t + 1)/(e^t - 1)).
+// sigma = 1 + 1/sqrt(log D) is the choice the paper suggests (p. 13); it is
+// rounded to an exact binary value so that the bound is evaluated at one
+// sigma.
+constexpr ulong kBfIndexOneTargetDenominator = UWORD(4);
+constexpr slong kBfIndexOneBoundPrecision = WORD(64);
+
+struct BfTheorem7Context {
+    flint::Arb sigma_scale;     // 2 sigma - 1
+    flint::Arb delta_constant;  // delta(K, sigma, X) without the prime sum
+    flint::Arb sigma;
+    slong degree = 0;
+};
+
+bool bf_theorem7_init(BfTheorem7Context& out,
+                      const Order& order,
+                      slong precision) noexcept {
+    const NumberField* field = order.parent();
+    Signature sig;
+    flint::Fmpz discriminant;
+    if (field == nullptr || !sig.compute(*field) ||
+        !order.discriminant(flint::FmpzRef(discriminant))) {
+        return false;
+    }
+    flint::Fmpz abs_discriminant;
+    flint::fmpz_abs(flint::FmpzRef(abs_discriminant),
+                    flint::FmpzConstRef(discriminant));
+    if (flint::fmpz_cmp_ui(flint::FmpzConstRef(abs_discriminant), 1) <= 0) {
+        return false;
+    }
+
+    flint::Arb log_discriminant;
+    flint::Arb temp;
+    flint::Arb sum;
+    flint::Arb digamma;
+    flint::arb_log_fmpz(log_discriminant,
+                        flint::FmpzConstRef(abs_discriminant), precision);
+
+    // sigma = 1 + 1/sqrt(log D), rounded to the exact midpoint.
+    flint::arb_sqrt(temp, log_discriminant, precision);
+    flint::arb_inv(temp, temp, precision);
+    flint::arb_add_ui(temp, temp, 1, precision);
+    ::arb_get_mid_arb(out.sigma.raw(), temp.raw());
+    flint::Arb one;
+    flint::arb_one(one);
+    if (!flint::arb_is_finite(out.sigma) || !flint::arb_gt(out.sigma, one)) {
+        return false;
+    }
+
+    flint::arb_mul_2exp_si(out.sigma_scale, out.sigma, 1);
+    ::arb_sub_ui(out.sigma_scale.raw(), out.sigma_scale.raw(), 1, precision);
+
+    // (C/2 + 1 - log(4 pi)/2) / (2 sigma - 1)
+    flint::Arb pi;
+    flint::Arb log_four_pi;
+    flint::arb_const_pi(pi, precision);
+    flint::arb_mul_ui(log_four_pi, pi, 4, precision);
+    flint::arb_log(log_four_pi, log_four_pi, precision);
+    ::arb_const_euler(sum.raw(), precision);
+    flint::arb_sub(sum, sum, log_four_pi, precision);
+    flint::arb_mul_2exp_si(sum, sum, -1);
+    flint::arb_add_ui(sum, sum, 1, precision);
+    flint::arb_div(sum, sum, out.sigma_scale, precision);
+    flint::arb_add(sum, sum, log_discriminant, precision);
+
+    // + 2/(sigma - 1) + 2/sigma
+    ::arb_sub_ui(temp.raw(), out.sigma.raw(), 1, precision);
+    flint::arb_inv(temp, temp, precision);
+    flint::arb_mul_2exp_si(temp, temp, 1);
+    flint::arb_add(sum, sum, temp, precision);
+    flint::arb_inv(temp, out.sigma, precision);
+    flint::arb_mul_2exp_si(temp, temp, 1);
+    flint::arb_add(sum, sum, temp, precision);
+
+    // - n (log(2 pi) - Psi(sigma))
+    flint::arb_mul_2exp_si(temp, pi, 1);
+    flint::arb_log(temp, temp, precision);
+    ::arb_digamma(digamma.raw(), out.sigma.raw(), precision);
+    flint::arb_sub(temp, temp, digamma, precision);
+    flint::arb_mul_ui(temp, temp, static_cast<ulong>(order.degree()),
+                      precision);
+    flint::arb_sub(sum, sum, temp, precision);
+
+    // - r (Psi((sigma + 1)/2) - Psi(sigma/2)) / 2
+    flint::Arb half_sigma;
+    flint::arb_mul_2exp_si(half_sigma, out.sigma, -1);
+    ::arb_digamma(digamma.raw(), half_sigma.raw(), precision);
+    ::arb_set_d(temp.raw(), 0.5);
+    flint::arb_add(temp, temp, half_sigma, precision);
+    ::arb_digamma(temp.raw(), temp.raw(), precision);
+    flint::arb_sub(temp, temp, digamma, precision);
+    flint::arb_mul_ui(temp, temp, static_cast<ulong>(sig.r1()), precision);
+    flint::arb_mul_2exp_si(temp, temp, -1);
+    flint::arb_sub(sum, sum, temp, precision);
+
+    flint::arb_set(out.delta_constant, sum);
+    out.degree = order.degree();
+    return flint::arb_is_finite(out.delta_constant);
+}
+
+// Adds `count` log N / (N^sigma - 1) to `sum`.
+void bf_theorem7_add_prime_ideals(flint::Arb& sum,
+                                  const BfTheorem7Context& context,
+                                  ulong norm,
+                                  ulong count,
+                                  slong precision) noexcept {
+    flint::Arb log_norm;
+    flint::Arb denominator;
+    flint::arb_log_ui(log_norm, norm, precision);
+    flint::arb_mul(denominator, log_norm, context.sigma, precision);
+    flint::arb_exp(denominator, denominator, precision);
+    ::arb_sub_ui(denominator.raw(), denominator.raw(), 1, precision);
+    flint::arb_div(log_norm, log_norm, denominator, precision);
+    flint::arb_mul_ui(log_norm, log_norm, count, precision);
+    flint::arb_add(sum, sum, log_norm, precision);
+}
+
+// The Theorem 7 bound at `cutoff` (a multiple of 9 above 9), where
+// `prime_sum` is the sum over prime ideals of norm below `cutoff`.  Fails
+// unless delta and the bound are finite and positive.
+bool bf_theorem7_error_bound(flint::Arb& out,
+                             const BfTheorem7Context& context,
+                             ulong cutoff,
+                             const flint::Arb& prime_sum,
+                             slong precision) noexcept {
+    if (cutoff % 9 != 0 || cutoff / 9 < 2) {
+        return false;
+    }
+    const ulong ratio = cutoff / 9;  // e^t for t = log(X/9)
+
+    flint::Arb delta;
+    flint::arb_mul_2exp_si(delta, prime_sum, 1);
+    flint::arb_sub(delta, context.delta_constant, delta, precision);
+    if (!flint::arb_is_finite(delta) || !flint::arb_is_positive(delta)) {
+        return false;
+    }
+
+    flint::Arb sqrt_cutoff;
+    flint::Arb log_ratio;
+    flint::Arb temp;
+    flint::Arb beta;
+    flint::Arb constant;
+    flint::arb_sqrt_ui(sqrt_cutoff, cutoff, precision);
+    flint::arb_log_ui(log_ratio, ratio, precision);
+
+    // delta (1 + 3.88 / log(X/9))
+    bf_const_decimal(constant, 388, 100, precision);
+    flint::arb_div(temp, constant, log_ratio, precision);
+    flint::arb_add_ui(temp, temp, 1, precision);
+    flint::arb_mul(delta, delta, temp, precision);
+
+    // beta(t) = (1/2)(1/2 + 1/t) (X/9) log((X/9 + 1)/(X/9 - 1))
+    flint::arb_log_ui(beta, ratio + 1, precision);
+    flint::arb_log_ui(temp, ratio - 1, precision);
+    flint::arb_sub(beta, beta, temp, precision);
+    flint::arb_mul_ui(beta, beta, ratio, precision);
+    flint::arb_inv(temp, log_ratio, precision);
+    ::arb_set_d(constant.raw(), 0.5);
+    flint::arb_add(temp, temp, constant, precision);
+    flint::arb_mul(beta, beta, temp, precision);
+    flint::arb_mul_2exp_si(beta, beta, -1);
+
+    // + 4.26 (n - 1) beta / ((2 sigma - 1) sqrt(X))
+    bf_const_decimal(constant, 426, 100, precision);
+    flint::arb_mul(beta, beta, constant, precision);
+    flint::arb_mul_ui(beta, beta, static_cast<ulong>(context.degree - 1),
+                      precision);
+    flint::arb_mul(temp, context.sigma_scale, sqrt_cutoff, precision);
+    flint::arb_div(beta, beta, temp, precision);
+    flint::arb_add(delta, delta, beta, precision);
+
+    // * 2.324 (2 sigma - 1) / (sqrt(X) log(3X))
+    bf_const_decimal(constant, 2324, 1000, precision);
+    flint::arb_mul(delta, delta, constant, precision);
+    flint::arb_mul(delta, delta, context.sigma_scale, precision);
+    bf_log_3cutoff(temp, cutoff, precision);
+    flint::arb_mul(temp, temp, sqrt_cutoff, precision);
+    flint::arb_div(out, delta, temp, precision);
+    return flint::arb_is_finite(out) && flint::arb_is_positive(out);
+}
+
+// Adds the prime ideals above `p` with norm below `cutoff` to `prime_sum`,
+// and queues those with norm p^f >= p^2 below `max_cutoff` in `pending`.
+// The residue degrees come from the same sources as bf_add_prime_terms,
+// with `max_cutoff` in place of the BF cutoff.
+bool bf_theorem7_add_prime(flint::Arb& prime_sum,
+                           std::vector<std::pair<ulong, ulong>>& pending,
+                           const BfTheorem7Context& context,
+                           const Order& order,
+                           const BfResidueDegreeContext& residue_context,
+                           std::vector<slong>& residue_degrees,
+                           std::vector<slong>& degree_scratch,
+                           ulong p,
+                           ulong max_cutoff,
+                           slong precision,
+                           const DiagnosticsContext* diagnostics,
+                           detail::ZetaBfResidueDegreeCache*
+                                   residue_degree_cache) noexcept {
+    SILEX_PROFILE_SCOPE(
+            diagnostics, DiagnosticsModule::unit_group,
+            "unit_group.zeta_bf.index_one.prime_decomposition_type");
+    slong linear_factor_count = -1;
+    bool have_complete_residue_degrees = false;
+    const bool only_degree_one_contributes = p > (max_cutoff - 1) / p;
+    if (only_degree_one_contributes) {
+        have_complete_residue_degrees = bf_residue_degree_cache_lookup(
+                residue_degrees, residue_degree_cache, p, diagnostics);
+        if (!have_complete_residue_degrees &&
+            bf_linear_residue_degree_count_from_defining_polynomial_ui(
+                    linear_factor_count, residue_context, p, diagnostics)) {
+            if (linear_factor_count < 0 ||
+                linear_factor_count > order.degree()) {
+                return false;
+            }
+            if (linear_factor_count > 0) {
+                bf_theorem7_add_prime_ideals(
+                        prime_sum, context, p,
+                        static_cast<ulong>(linear_factor_count), precision);
+            }
+            return true;
+        }
+    }
+    if (!have_complete_residue_degrees &&
+        !bf_prime_residue_degrees_ui(residue_degrees, residue_context, order,
+                                     degree_scratch, p, diagnostics,
+                                     residue_degree_cache)) {
+        return false;
+    }
+
+    ulong degree_one_count = 0;
+    for (slong residue_degree : residue_degrees) {
+        if (residue_degree <= 0 || residue_degree > order.degree()) {
+            return false;
+        }
+        if (residue_degree == 1) {
+            ++degree_one_count;
+            continue;
+        }
+        ulong norm = 0;
+        if (bf_power_ui_less_than(norm, p, residue_degree, max_cutoff)) {
+            pending.emplace_back(norm, UWORD(1));
+        }
+    }
+    if (degree_one_count > 0) {
+        bf_theorem7_add_prime_ideals(prime_sum, context, p,
+                                     degree_one_count, precision);
+    }
+    return true;
+}
+
+// The least cutoff X (a multiple of 9, from kBfMinCutoff up to
+// `max_cutoff`) whose Theorem 7 bound is below `tail_target`, scanning the
+// prime ideals in order of norm.  `prime_sum_limit`, when nonzero, stops the
+// scan at that cutoff instead and reports its bound whatever its size (the
+// test entry).
+bool bf_select_theorem7_cutoff(ulong& cutoff_out,
+                               flint::Arb& bound_out,
+                               const Order& order,
+                               const flint::Arb& tail_target,
+                               ulong max_cutoff,
+                               ulong prime_sum_limit,
+                               slong precision,
+                               const DiagnosticsContext* diagnostics,
+                               const FactorBase* residue_degree_base,
+                               detail::ZetaBfResidueDegreeCache*
+                                       residue_degree_cache) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.zeta_bf.index_one.select_cutoff");
+    ulong cutoff = bf_adjust_cutoff(kBfMinCutoff);
+    max_cutoff = bf_adjust_cutoff(max_cutoff);
+    if (prime_sum_limit != 0) {
+        if (prime_sum_limit % 9 != 0 || prime_sum_limit / 9 < 2) {
+            return false;
+        }
+        cutoff = prime_sum_limit;
+        max_cutoff = prime_sum_limit;
+    }
+    if (max_cutoff < cutoff) {
+        return false;
+    }
+
+    BfTheorem7Context context;
+    if (!bf_theorem7_init(context, order, precision)) {
+        return false;
+    }
+    BfResidueDegreeContext residue_context;
+    bf_init_residue_degree_context(residue_context, order,
+                                   residue_degree_base);
+    std::vector<slong> residue_degrees;
+    residue_degrees.reserve(static_cast<std::size_t>(order.degree()));
+    std::vector<slong> degree_scratch(static_cast<std::size_t>(
+            FLINT_MAX(order.degree(), WORD(1))));
+    std::vector<std::pair<ulong, ulong>> pending;
+    if (residue_degree_cache != nullptr) {
+        residue_degree_cache->lookup_hint = 0;
+    }
+
+    flint::Arb prime_sum;
+    flint::Arb bound;
+    flint::arb_zero(prime_sum);
+    ulong p = 2;
+    for (;;) {
+        for (; p < cutoff; p = n_nextprime(p, 1)) {
+            if (!bf_theorem7_add_prime(prime_sum, pending, context, order,
+                                       residue_context, residue_degrees,
+                                       degree_scratch, p, max_cutoff,
+                                       precision, diagnostics,
+                                       residue_degree_cache)) {
+                return false;
+            }
+        }
+        for (std::size_t i = 0; i < pending.size();) {
+            if (pending[i].first < cutoff) {
+                bf_theorem7_add_prime_ideals(prime_sum, context,
+                                             pending[i].first,
+                                             pending[i].second, precision);
+                pending[i] = pending.back();
+                pending.pop_back();
+            } else {
+                ++i;
+            }
+        }
+
+        if (!bf_theorem7_error_bound(bound, context, cutoff, prime_sum,
+                                     precision)) {
+            return false;
+        }
+        if (prime_sum_limit != 0 || flint::arb_lt(bound, tail_target)) {
+            cutoff_out = cutoff;
+            flint::arb_set(bound_out, bound);
+            return true;
+        }
+        if (cutoff >= max_cutoff) {
+            return false;
+        }
+        cutoff += 9;
+    }
+}
+
+// The grh index-one log residue: f_K(X) at the Theorem 7 cutoff plus that
+// bound, with a total radius below 1/4.  Fails, without writing `audit`,
+// when no cutoff up to the default maximum reaches the target.
+bool bf_log_residue_index_one(flint::ArbRef out,
+                              detail::ZetaBfRouteAudit& audit,
+                              const Order& order,
+                              slong precision,
+                              const DiagnosticsContext* diagnostics,
+                              const FactorBase* residue_degree_base,
+                              detail::ZetaBfResidueDegreeCache*
+                                      residue_degree_cache) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.zeta_bf.index_one.log_residue");
+    if (!supported_order(order, precision) || order.degree() <= 1) {
+        return false;
+    }
+
+    flint::Arb target;
+    flint::Arb numerical_radius_target;
+    flint::Arb tail_target;
+    flint::arb_one(target);
+    flint::arb_div_ui(target, target, kBfIndexOneTargetDenominator,
+                      kBfIndexOneBoundPrecision);
+    flint::arb_one(numerical_radius_target);
+    flint::arb_mul_2exp_si(numerical_radius_target, numerical_radius_target,
+                           -kValidationReserveBits);
+    flint::arb_sub(tail_target, target, numerical_radius_target,
+                   kBfIndexOneBoundPrecision);
+
+    ulong cutoff = 0;
+    flint::Arb error_bound;
+    if (!bf_select_theorem7_cutoff(cutoff, error_bound, order, tail_target,
+                                   kBfDefaultMaxCutoff, 0,
+                                   kBfIndexOneBoundPrecision, diagnostics,
+                                   residue_degree_base,
+                                   residue_degree_cache)) {
+        return false;
+    }
+
+    flint::Arb value;
+    slong work_precision = kValidationInitialWorkPrecision;
+    for (;;) {
+        if (!bf_term(value, order, cutoff, work_precision, diagnostics,
+                     residue_degree_base, residue_degree_cache)) {
+            return false;
+        }
+        if (bf_radius_lt(value, numerical_radius_target)) {
+            break;
+        }
+        if (work_precision >= kBfMaxWorkPrecision) {
+            return false;
+        }
+        work_precision = FLINT_MIN(2 * work_precision, kBfMaxWorkPrecision);
+    }
+
+    flint::arb_add_error(value, error_bound);
+    if (!flint::arb_is_finite(value) || !bf_radius_lt(value, target)) {
+        return false;
+    }
+
+    flint::arb_set(out, flint::ArbConstRef(value));
+    flint::arb_set(audit.error_bound, error_bound);
+    audit.cutoff = cutoff;
+    audit.max_cutoff = kBfDefaultMaxCutoff;
+    audit.requested_precision = precision;
+    audit.work_precision = work_precision;
+    return true;
+}
+
 }  // namespace
 
 // `unconditional`, when given, reports the route that produced the residue:
@@ -3378,6 +3808,66 @@ bool zeta_class_regulator_product_validation_with_diagnostics(
             out, error_bound, cutoff, work_precision, order, max_cutoff,
             precision, diagnostics, residue_degree_base,
             residue_degree_cache);
+}
+
+bool zeta_class_regulator_product_index_one_with_diagnostics(
+        flint::ArbRef out,
+        ZetaBfRouteAudit& audit,
+        const Order& order,
+        slong precision,
+        const DiagnosticsContext* diagnostics,
+        const FactorBase* residue_degree_base,
+        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept {
+    SILEX_PROFILE_SCOPE(
+            diagnostics, DiagnosticsModule::unit_group,
+            "unit_group.zeta_bf.index_one.class_regulator_product");
+    if (!supported_order(order, precision) || order.degree() <= 1 ||
+        zeta_unconditional_route_available(order)) {
+        return false;
+    }
+
+    flint::Arb log_residue;
+    ZetaBfRouteAudit local_audit;
+    if (!bf_log_residue_index_one(flint::ArbRef(log_residue), local_audit,
+                                  order, precision, diagnostics,
+                                  residue_degree_base,
+                                  residue_degree_cache)) {
+        return false;
+    }
+
+    flint::Arb residue;
+    flint::Arb product;
+    flint::arb_exp(residue, log_residue, precision);
+    if (!flint::arb_is_finite(residue) ||
+        !flint::arb_is_positive(residue) ||
+        !class_regulator_product_from_residue(
+                flint::ArbRef(product), order,
+                flint::ArbConstRef(residue), precision, diagnostics)) {
+        return false;
+    }
+
+    flint::arb_set(out, flint::ArbConstRef(product));
+    audit = std::move(local_audit);
+    return true;
+}
+
+bool zeta_bf_theorem7_error_bound(flint::ArbRef out,
+                                  const Order& order,
+                                  ulong cutoff,
+                                  slong precision) noexcept {
+    if (!supported_order(order, precision) || order.degree() <= 1) {
+        return false;
+    }
+    ulong selected = 0;
+    flint::Arb bound;
+    flint::Arb unused_target;
+    if (!bf_select_theorem7_cutoff(selected, bound, order, unused_target,
+                                   cutoff, cutoff, precision, nullptr,
+                                   nullptr, nullptr)) {
+        return false;
+    }
+    flint::arb_set(out, flint::ArbConstRef(bound));
+    return true;
 }
 
 bool zeta_bf_audit_cutoff_available(const Order& order,

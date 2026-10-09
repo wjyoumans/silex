@@ -88,6 +88,18 @@ bool analytic_class_regulator_product_for_validation(
         bool* unconditional = nullptr,
         ZetaBfRouteAudit* bf_audit = nullptr) noexcept;
 
+// The grh index-one hR (zeta_class_regulator_product_index_one_with_
+// diagnostics): a Belabas-Friedman value with log radius below 1/4, enough
+// for the analytic index-one test only.
+bool index_one_class_regulator_product_for_validation(
+        flint::ArbRef out,
+        ZetaBfRouteAudit& audit,
+        const Order& order,
+        slong precision,
+        const DiagnosticsContext* diagnostics,
+        const FactorBase* residue_degree_base,
+        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept;
+
 bool bf_class_regulator_product_for_validation(
         flint::ArbRef out,
         flint::ArbRef error_bound,
@@ -136,6 +148,7 @@ public:
                 const FactorBase* residue_degree_base = nullptr,
                 bool cache_bf_residue_degrees = false) noexcept {
         reset_for_order_if_needed_(order);
+        index_one_active_ = false;
         if (validation_enabled_ && order.degree() > 2 &&
             ensure_validation(
                     order, validation_max_cutoff_, precision,
@@ -178,28 +191,77 @@ public:
         value_unconditional_ = false;
         value_bf_audit_valid_ = false;
         validation_active_ = false;
+        index_one_active_ = false;
     }
 
     flint::ArbConstRef value() const noexcept {
-        return validation_active_
-                ? flint::ArbConstRef(validation_value_)
-                : flint::ArbConstRef(value_);
+        if (validation_active_) {
+            return flint::ArbConstRef(validation_value_);
+        }
+        return index_one_active_ ? flint::ArbConstRef(index_one_value_)
+                                 : flint::ArbConstRef(value_);
     }
 
     // True only when value() is an unconditional hR: degree one or the
     // quadratic L(1, chi) route.  Belabas-Friedman values, including the
     // validation enclosure, assume GRH and report false.
     bool value_unconditional() const noexcept {
-        return !validation_active_ && valid_ > 0 && value_unconditional_;
+        return !validation_active_ && !index_one_active_ && valid_ > 0 &&
+               value_unconditional_;
     }
 
     // The Belabas-Friedman audit data of value() when it came from the
-    // default zeta route's Belabas-Friedman fallback (not the validation
-    // enclosure, not a seeded value); nullptr otherwise.
+    // default zeta route's Belabas-Friedman fallback or from the grh
+    // index-one value (not the validation enclosure, not a seeded value);
+    // nullptr otherwise.
     const ZetaBfRouteAudit* value_bf_audit() const noexcept {
-        return !validation_active_ && valid_ > 0 && value_bf_audit_valid_
-                ? &value_bf_audit_
-                : nullptr;
+        if (validation_active_) {
+            return nullptr;
+        }
+        if (index_one_active_) {
+            return &index_one_audit_;
+        }
+        return valid_ > 0 && value_bf_audit_valid_ ? &value_bf_audit_
+                                                   : nullptr;
+    }
+
+    // Makes value() the grh index-one hR, a Belabas-Friedman value whose
+    // log radius is below 1/4 (index_one_class_regulator_product_for_
+    // validation), and returns true; the next ensure() or seed() switches
+    // back to the default value.  Returns false, leaving value() as it is,
+    // when the validation enclosure is enabled, when the default value is
+    // already cached at `precision` or more (it is at least as narrow), or
+    // when the index-one value is unavailable (an unconditional route, or
+    // no cutoff up to the default maximum reaches 1/4).  The caller must
+    // use the default value from ensure() for anything other than
+    // recognizing index one.
+    bool ensure_index_one(const Order& order,
+                          slong precision,
+                          const DiagnosticsContext* diagnostics = nullptr,
+                          const FactorBase* residue_degree_base =
+                                  nullptr) noexcept {
+        reset_for_order_if_needed_(order);
+        index_one_active_ = false;
+        if (validation_enabled_ || precision <= 0 ||
+            (valid_ > 0 && precision_ >= precision)) {
+            return false;
+        }
+        if (index_one_valid_ == 0 || index_one_precision_ != precision) {
+            index_one_precision_ = precision;
+            index_one_valid_ =
+                    index_one_class_regulator_product_for_validation(
+                            flint::ArbRef(index_one_value_),
+                            index_one_audit_, order, precision, diagnostics,
+                            residue_degree_base, &bf_residue_degree_cache_)
+                    ? 1
+                    : -1;
+        }
+        if (index_one_valid_ <= 0) {
+            return false;
+        }
+        validation_active_ = false;
+        index_one_active_ = true;
+        return true;
     }
 
     bool ensure_validation(
@@ -212,6 +274,7 @@ public:
             return false;
         }
         reset_for_order_if_needed_(order);
+        index_one_active_ = false;
         if (validation_valid_ != 0 &&
             validation_computed_max_cutoff_ == max_cutoff &&
             validation_precision_ == precision) {
@@ -328,6 +391,8 @@ public:
         bf_valid_ = 0;
         validation_valid_ = 0;
         validation_active_ = false;
+        index_one_valid_ = 0;
+        index_one_active_ = false;
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::unit_group,
                 "unit_group.validation_analytic_index_bound."
@@ -367,6 +432,11 @@ private:
     int validation_valid_ = 0;
     bool validation_enabled_ = false;
     bool validation_active_ = false;
+    flint::Arb index_one_value_;
+    ZetaBfRouteAudit index_one_audit_;
+    slong index_one_precision_ = 0;
+    int index_one_valid_ = 0;
+    bool index_one_active_ = false;
     ZetaBfResidueDegreeCache bf_residue_degree_cache_;
     Order bf_residue_degree_cache_order_;
     bool bf_residue_degree_cache_has_order_ = false;
@@ -381,6 +451,8 @@ private:
         bf_valid_ = 0;
         validation_valid_ = 0;
         validation_active_ = false;
+        index_one_valid_ = 0;
+        index_one_active_ = false;
     }
 
     void seed_order_(const Order& order) noexcept {
@@ -396,6 +468,8 @@ private:
         bf_valid_ = 0;
         validation_valid_ = 0;
         validation_active_ = false;
+        index_one_valid_ = 0;
+        index_one_active_ = false;
     }
 };
 

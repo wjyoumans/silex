@@ -55,7 +55,10 @@ struct ZetaBfResidueDegreeCache {
 // under GRH, Belabas-Friedman 2015, Theorem 1), the cutoff used, the
 // maximum cutoff the default route allows, and the requested and working
 // precisions.  The default route does not require the error bound to meet
-// the precision target, so `cutoff` may equal `max_cutoff`.
+// the precision target, so `cutoff` may equal `max_cutoff`.  The grh
+// index-one route (zeta_class_regulator_product_index_one_with_diagnostics)
+// fills the same fields, with the error bound of Belabas-Friedman 2015,
+// Theorem 7, below 1/4.
 struct ZetaBfRouteAudit {
     flint::Arb error_bound;
     ulong cutoff = 0;
@@ -147,6 +150,34 @@ bool zeta_class_regulator_product_validation_with_diagnostics(
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base = nullptr,
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr) noexcept;
+
+// The Belabas-Friedman hR for the grh analytic index-one test: the log
+// residue f_K(X) at the least cutoff X (a multiple of 9 up to the default
+// route's maximum) whose Belabas-Friedman 2015 Theorem 7 bound, with
+// sigma = 1 + 1/sqrt(log D), is below 1/4 - 2^-20, so that the log residue
+// has radius below 1/4, enough for the index-one test (Belabas-Friedman
+// 2015, p. 1, footnote 1: below (1/2) log 2).  Valid under GRH for zeta_K
+// and zeta_Q.  `audit` receives the Theorem 7 error bound, the cutoff, the
+// default route's maximum cutoff, and the precisions, and is written only
+// on success.  Fails, leaving the outputs unchanged, when `order` has an
+// unconditional route (zeta_unconditional_route_available) or no cutoff up
+// to the maximum reaches the target; callers then use the default route.
+bool zeta_class_regulator_product_index_one_with_diagnostics(
+        flint::ArbRef out,
+        ZetaBfRouteAudit& audit,
+        const Order& order,
+        slong precision,
+        const DiagnosticsContext* diagnostics,
+        const FactorBase* residue_degree_base = nullptr,
+        ZetaBfResidueDegreeCache* residue_degree_cache = nullptr) noexcept;
+
+// Test entry: the Belabas-Friedman 2015 Theorem 7 bound used above, at
+// `cutoff` (a multiple of 9, at least 18), with the prime-ideal sum over
+// the norms below `cutoff`.
+bool zeta_bf_theorem7_error_bound(flint::ArbRef out,
+                                  const Order& order,
+                                  ulong cutoff,
+                                  slong precision) noexcept;
 
 bool zeta_bf_audit_cutoff_available(const Order& order,
                                     ulong max_cutoff,

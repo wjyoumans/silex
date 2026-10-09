@@ -2081,7 +2081,7 @@ int test_random_quadratic_h4_proven_pair() {
 }
 
 // A `grh` cubic transaction is accepted by the analytic index-one test
-// against the default zeta route's Belabas-Friedman hR.  It records that
+// against the grh index-one Belabas-Friedman hR.  It records that
 // check as `grh` together with the Belabas-Friedman audit data, and both
 // labels stay `grh`.
 int test_grh_cubic_records_bf_audit() {
@@ -2134,34 +2134,26 @@ int test_grh_cubic_records_bf_audit() {
     // The default zeta route's maximum cutoff (zeta.cpp kBfDefaultMaxCutoff).
     assert(record->max_cutoff == 20000);
     assert(record->cutoff > 0 && record->cutoff <= record->max_cutoff);
-    assert(record->requested_precision > 0);
-    assert(record->work_precision >= record->requested_precision);
-    assert(sflint::arb_is_finite(record->error_bound));
-    assert(!sflint::arb_is_negative(record->error_bound));
-
-    // Tie the audit to the accepting value.  The transaction ran at
-    // precision 128, and the accepting hR is the public default zeta route
-    // at that precision.  That route adds the recorded error bound to the
-    // radius of log(residue), so the enclosure of log(hR) is at least that
-    // wide.
+    assert(record->cutoff % 9 == 0);
     assert(record->requested_precision == 128);
-    sflint::Arb log_hR;
-    assert(silex::zeta_class_regulator_product(
-            sflint::ArbRef(log_hR), setup.maximal_order,
-            record->requested_precision));
-    ::arb_log(log_hR.raw(), log_hR.raw(), record->requested_precision);
-    assert(sflint::arb_is_finite(log_hR));
-    ::arf_t bound_upper;
-    ::arf_t log_hR_radius;
-    ::arf_init(bound_upper);
-    ::arf_init(log_hR_radius);
-    ::arb_get_ubound_arf(bound_upper, record->error_bound.raw(), 256);
-    ::arf_set_mag(log_hR_radius, arb_radref(log_hR.raw()));
-    const bool bound_within_radius =
-            ::arf_cmp(bound_upper, log_hR_radius) <= 0;
-    ::arf_clear(bound_upper);
-    ::arf_clear(log_hR_radius);
-    assert(bound_within_radius);
+    assert(record->work_precision >= 64);
+    assert(sflint::arb_is_finite(record->error_bound));
+    assert(sflint::arb_is_positive(record->error_bound));
+
+    // The accepting hR is the grh index-one value: its cutoff is set by
+    // Belabas-Friedman 2015, Theorem 7, so that the error bound is below
+    // 1/4, which is enough for the index-one test.  It is coarser than the
+    // default zeta route, whose cutoff aims at 2^-4 at this precision.
+    sflint::Arb quarter;
+    sflint::arb_set_d(quarter, 0.25);
+    assert(sflint::arb_lt(record->error_bound, quarter));
+    std::optional<silex::ZetaBfAuditResult> default_route =
+            silex::zeta_class_regulator_product_bf_audit(
+                    setup.maximal_order, record->max_cutoff,
+                    record->requested_precision);
+    assert(default_route.has_value());
+    assert(record->cutoff < default_route->cutoff);
+    assert(sflint::arb_gt(record->error_bound, default_route->error_bound));
     return 0;
 }
 

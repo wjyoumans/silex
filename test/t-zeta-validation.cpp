@@ -15,6 +15,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 #include <flint/ulong_extras.h>
@@ -588,12 +589,188 @@ bool check_bdf_search_stop() noexcept {
     return true;
 }
 
+// The grh index-one route sets its cutoff by Belabas-Friedman 2015,
+// Theorem 7 (p. 12), with sigma = 1 + 1/sqrt(log D).  Reference values are
+// a floating-point gp evaluation of the same formula over the prime ideals
+// of norm below X (idealprimedec), to four decimals.
+bool theorem7_bound_near(const silex::Order& order,
+                         ulong cutoff,
+                         double expected) noexcept {
+    sflint::Arb bound;
+    if (!silex::detail::zeta_bf_theorem7_error_bound(
+                sflint::ArbRef(bound), order, cutoff, 128) ||
+        !sflint::arb_is_finite(bound)) {
+        return false;
+    }
+    sflint::Arb window;
+    sflint::arb_set_d(window, expected);
+    ::mag_set_d(arb_radref(window.raw()), 1e-4);
+    return sflint::arb_contains(window, bound);
+}
+
+bool check_theorem7_bound_reference() noexcept {
+    const slong simplest_cubic[] = {-1, -9, -6};
+    const slong octic[] = {-1, -1, 0, 0, 0, 0, 0, 0};
+    const FieldSetup cubic = setup_from_coefficients(simplest_cubic, 3);
+    const FieldSetup x8 = setup_from_coefficients(octic, 8);
+    sflint::Arb unused;
+    return theorem7_bound_near(cubic.maximal_order, 279, 0.3293) &&
+           theorem7_bound_near(cubic.maximal_order, 603, 0.1737) &&
+           theorem7_bound_near(x8.maximal_order, 279, 0.4289) &&
+           theorem7_bound_near(x8.maximal_order, 603, 0.2206) &&
+           // Theorem 7 needs X > 9; the BF term needs a multiple of 9.
+           !silex::detail::zeta_bf_theorem7_error_bound(
+                   sflint::ArbRef(unused), cubic.maximal_order, 9, 128) &&
+           !silex::detail::zeta_bf_theorem7_error_bound(
+                   sflint::ArbRef(unused), cubic.maximal_order, 280, 128);
+}
+
+// The index-one value: the least multiple of 9 whose Theorem 7 bound is
+// below 1/4 - 2^-20 (gp: 387 for the cubic, 522 for x^8 - x - 1, 531 for
+// the multiquadratic octic), a log radius below 1/4, and an enclosure
+// that meets the default route's hR.  Fields with an unconditional route
+// have none.
+bool check_index_one_product(const FieldSetup& setup,
+                             ulong expected_cutoff) noexcept {
+    sflint::Arb product;
+    silex::detail::ZetaBfRouteAudit audit;
+    if (!silex::detail::zeta_class_regulator_product_index_one_with_diagnostics(
+                sflint::ArbRef(product), audit, setup.maximal_order, 128,
+                nullptr) ||
+        audit.cutoff != expected_cutoff || audit.max_cutoff != 20000 ||
+        audit.requested_precision != 128 || audit.work_precision < 64 ||
+        !sflint::arb_is_finite(audit.error_bound) ||
+        !sflint::arb_is_positive(audit.error_bound)) {
+        return false;
+    }
+
+    sflint::Arb quarter;
+    sflint::Arb log_product;
+    sflint::arb_set_d(quarter, 0.25);
+    sflint::arb_log(log_product, product, 128);
+    if (!sflint::arb_lt(audit.error_bound, quarter) ||
+        !sflint::arb_is_finite(log_product) ||
+        !radius_lt(log_product, quarter)) {
+        return false;
+    }
+    sflint::Arb preceding_bound;
+    sflint::Arb tail_target;
+    sflint::arb_set_d(tail_target, 0.25 - 1.0 / 1048576.0);
+    if (!silex::detail::zeta_bf_theorem7_error_bound(
+                sflint::ArbRef(preceding_bound), setup.maximal_order,
+                expected_cutoff - 9, 64) ||
+        sflint::arb_lt(preceding_bound, tail_target)) {
+        return false;
+    }
+
+    sflint::Arb default_product;
+    return silex::zeta_class_regulator_product(
+                   sflint::ArbRef(default_product), setup.maximal_order,
+                   128) &&
+           sflint::arb_overlaps(product, default_product);
+}
+
+bool check_index_one_products() noexcept {
+    const slong simplest_cubic[] = {-1, -9, -6};
+    const slong octic[] = {-1, -1, 0, 0, 0, 0, 0, 0};
+    const slong multiquadratic[] = {1, 0, -3, 0, 8, 0, -3, 0};
+    const FieldSetup quadratic = quadratic_specialized_control();
+    sflint::Arb product;
+    sflint::arb_set_ui(product, 7);
+    silex::detail::ZetaBfRouteAudit audit;
+    audit.cutoff = 5;
+    return check_index_one_product(
+                   setup_from_coefficients(simplest_cubic, 3), 387) &&
+           check_index_one_product(setup_from_coefficients(octic, 8), 522) &&
+           check_index_one_product(
+                   setup_from_coefficients(multiquadratic, 8), 531) &&
+           !silex::detail::
+                   zeta_class_regulator_product_index_one_with_diagnostics(
+                           sflint::ArbRef(product), audit,
+                           quadratic.maximal_order, 128, nullptr) &&
+           audit.cutoff == 5 && ::arb_equal_si(product.raw(), 7) != 0;
+}
+
+// The analytic cache serves the index-one value until the next ensure(),
+// which returns the default value; the index-one value is not offered once
+// the default value is cached, nor when the validation enclosure is
+// enabled.
+bool check_index_one_cache(const FieldSetup& setup,
+                           ulong index_one_cutoff) noexcept {
+    silex::detail::AnalyticClassRegulatorCache cache;
+    if (!cache.ensure_index_one(setup.maximal_order, 128) ||
+        cache.value_unconditional()) {
+        return false;
+    }
+    const silex::detail::ZetaBfRouteAudit* audit = cache.value_bf_audit();
+    if (audit == nullptr || audit->cutoff != index_one_cutoff) {
+        return false;
+    }
+    sflint::Arb index_one_value;
+    sflint::arb_set(sflint::ArbRef(index_one_value), cache.value());
+
+    if (!cache.ensure(setup.maximal_order, 128)) {
+        return false;
+    }
+    audit = cache.value_bf_audit();
+    if (audit == nullptr || audit->cutoff == index_one_cutoff ||
+        ::arb_equal(cache.value().raw(), index_one_value.raw()) != 0 ||
+        cache.ensure_index_one(setup.maximal_order, 128) ||
+        cache.value_bf_audit() != audit) {
+        return false;
+    }
+
+    silex::detail::AnalyticClassRegulatorCache validation_cache;
+    validation_cache.configure_validation(20000);
+    return !validation_cache.ensure_index_one(setup.maximal_order, 128);
+}
+
+// A grh transaction accepted by the index-one test records the audit of
+// the index-one value, not of the default route.
+bool check_grh_transaction_records_index_one_audit(
+        const FieldSetup& setup) noexcept {
+    silex::ClassGroupComputeOptions options;
+    sflint::Fmpz factor_base_bound;
+    if (!configure_native_options(options, factor_base_bound,
+                                  setup.maximal_order)) {
+        return false;
+    }
+    options.requested_certification = silex::CertificationMode::grh;
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport report;
+    if (!silex::detail::compute_class_unit_transaction(
+                units, class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128,
+                report)) {
+        return false;
+    }
+    const std::optional<silex::ClassGroupZetaBfProofRecord> record =
+            class_group.zeta_bf_proof_record();
+
+    sflint::Arb product;
+    silex::detail::ZetaBfRouteAudit audit;
+    return record.has_value() &&
+           silex::detail::
+                   zeta_class_regulator_product_index_one_with_diagnostics(
+                           sflint::ArbRef(product), audit,
+                           setup.maximal_order, 128, nullptr) &&
+           record->cutoff == audit.cutoff &&
+           record->max_cutoff == audit.max_cutoff &&
+           record->requested_precision == audit.requested_precision &&
+           record->work_precision == audit.work_precision &&
+           ::arb_equal(record->error_bound.raw(), audit.error_bound.raw()) !=
+                   0;
+}
+
 }  // namespace
 
 int main() {
     const FieldSetup quadratic = quadratic_specialized_control();
     const FieldSetup cubic = cubic_blocker();
     const FieldSetup quartic = quartic_blocker();
+    const slong simplest_cubic_a6[] = {-1, -9, -6};
 
     return !check_failed_call_preserves_outputs(quadratic.maximal_order,
                                                 20000) ||
@@ -603,7 +780,14 @@ int main() {
                    !check_transaction_failure_leaves_outputs_unset(cubic) ||
                    !check_transaction_failure_leaves_outputs_unset(quartic) ||
                    !check_residue_degree_differentials() ||
-                   !check_bdf_search_stop()
+                   !check_bdf_search_stop() ||
+                   !check_theorem7_bound_reference() ||
+                   !check_index_one_products() ||
+                   !check_index_one_cache(
+                           setup_from_coefficients(simplest_cubic_a6, 3),
+                           387) ||
+                   !check_grh_transaction_records_index_one_audit(
+                           setup_from_coefficients(simplest_cubic_a6, 3))
             ? 1
             : 0;
 }
