@@ -4106,6 +4106,20 @@ int test_residue_dlog_proof_matrix_matches_per_entry_quotient_log() {
                 if (!matches) {
                     return 1;
                 }
+                // The public column path hands its own residue field to the
+                // shared-walk code; it must agree with the oracle too.
+                sflint::FmpzMat via_column(0, 0);
+                const bool column_matches =
+                        silex::detail::saturation_proof_prime_column(
+                                via_column, group, *prime,
+                                sflint::FmpzConstRef(ell)) &&
+                        sflint::fmpz_mat_equal(
+                                sflint::FmpzMatConstRef(via_column),
+                                sflint::FmpzMatConstRef(expected));
+                assert(column_matches);
+                if (!column_matches) {
+                    return 1;
+                }
                 ++checked;
                 torsion_columns += proof_rank > group.free_rank() ? 1 : 0;
             }
@@ -4113,6 +4127,52 @@ int test_residue_dlog_proof_matrix_matches_per_entry_quotient_log() {
                 ++primes_for_ell;
             }
         }
+    }
+    // Inert primes (residue degree 3 in this cyclic cubic): the shared walk
+    // declines and every entry takes ResidueFieldQuotientLog::apply.
+    slong higher_degree = 0;
+    const slong inert_primes[] = {2, 5, 13};
+    for (const slong q : inert_primes) {
+        sflint::Fmpz q_fmpz;
+        assert(set_fmpz_si(q_fmpz, q));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(
+                primes, order, sflint::FmpzConstRef(q_fmpz), 3));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            if (prime == nullptr || prime->residue_degree() < 2) {
+                continue;
+            }
+            for (const slong ell_si : {2, 3, 7, 31, 61}) {
+                if ((q * q * q - 1) % ell_si != 0) {
+                    continue;
+                }
+                sflint::Fmpz ell;
+                assert(set_fmpz_si(ell, ell_si));
+                sflint::FmpzMat shared(0, 0);
+                sflint::FmpzMat expected(0, 0);
+                const bool matches =
+                        silex::detail::residue_dlog_proof_matrix(
+                                shared, group, *prime,
+                                sflint::FmpzConstRef(ell)) &&
+                        per_entry_residue_dlog_proof_matrix_for_test(
+                                expected, group, *prime,
+                                sflint::FmpzConstRef(ell)) &&
+                        sflint::fmpz_mat_equal(
+                                sflint::FmpzMatConstRef(shared),
+                                sflint::FmpzMatConstRef(expected));
+                assert(matches);
+                if (!matches) {
+                    return 1;
+                }
+                ++higher_degree;
+            }
+        }
+    }
+    assert(higher_degree >= 4);
+    if (higher_degree < 4) {
+        return 1;
     }
     assert(checked >= 48);
     assert(torsion_columns > 0);
