@@ -1329,9 +1329,10 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                     // When that hR was a Belabas-Friedman value, also record
                     // its audit data.  A grh request never enables the
                     // validation enclosure (validation_bf_max_cutoff_for_
-                    // options), so the value is the default zeta route's
-                    // Belabas-Friedman fallback; a seeded value has no audit
-                    // data and records none.
+                    // options), so the value is either the coarse Theorem 7
+                    // index-one value that was accepted as index one, or the
+                    // default zeta route's value; a seeded value has no
+                    // audit data and records none.
                     // The record cannot fail here: the presentation exists,
                     // both precisions are positive, and the error bound is
                     // finite because the Belabas-Friedman value it was added

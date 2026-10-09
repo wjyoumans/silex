@@ -998,11 +998,15 @@ Belabas--Friedman ``hR`` that test holds under GRH (Belabas--Friedman 2015,
 Theorem 1).  In ``grh`` mode the test first evaluates ``hR`` coarsely: the
 Euler-product cutoff is the smallest one whose Theorem 7 error bound
 (Belabas--Friedman 2015, Theorem 7, with ``beta`` from equation (16) and
-``sigma = 1 + 1/sqrt(log D)``) is at most a relative error of 1/4, which is
-enough to decide an index below two (footnote 1 of the paper; PARI
-``buch2.c:primeneeded`` uses the same 0.25).  A margin of 2^-20 is reserved
-for numerical error.  If the scan finds no cutoff below 20007, the default
-zeta route is used instead.  With the quadratic ``L(1, chi_D)`` value the test itself is
+``sigma = 1 + 1/sqrt(log D)``) is below 1/4 - 2^-20, an absolute error on
+``log hR`` that is enough to decide an index below two (footnote 1 of the
+paper; PARI ``buch2.c:primeneeded`` uses the same 0.25).  The margin 2^-20
+is reserved for numerical error.  The coarse value is used only when it
+shows index one.  If the scan finds no cutoff up to 20007, or the coarse
+value does not show index one, it is discarded and the default zeta route
+computes the value (so such fields pay up to part of one extra analytic
+evaluation).  A field whose default route fails can therefore be accepted
+under GRH when the coarse value shows index one.  With the quadratic ``L(1, chi_D)`` value the test itself is
 unconditional, but the result still rests on GRH through generation unless
 the base reached the Minkowski-type bound.  Such an acceptance is not a
 relation-saturation proof: ``relation_saturation_status()`` is not set to

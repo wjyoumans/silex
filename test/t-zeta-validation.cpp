@@ -764,6 +764,50 @@ bool check_grh_transaction_records_index_one_audit(
                    0;
 }
 
+// When the coarse value does not show index one, the transaction discards
+// it and records the audit of the default route.  The degree-12 field
+// x^12 - x^11 - x^9 + ... + 1 has a coarse cutoff of 2547 but candidate
+// index bound above one at the first test.
+bool check_grh_transaction_refines_to_default_audit(
+        const FieldSetup& setup) noexcept {
+    constexpr ulong coarse_cutoff = 2547;
+    silex::detail::AnalyticClassRegulatorCache cache;
+    if (!cache.ensure_index_one(setup.maximal_order, 128)) {
+        return false;
+    }
+    const silex::detail::ZetaBfRouteAudit* audit = cache.value_bf_audit();
+    if (audit == nullptr || audit->cutoff != coarse_cutoff ||
+        !cache.ensure(setup.maximal_order, 128)) {
+        return false;
+    }
+    audit = cache.value_bf_audit();
+    if (audit == nullptr || audit->cutoff == coarse_cutoff) {
+        return false;
+    }
+    const ulong default_cutoff = audit->cutoff;
+
+    silex::ClassGroupComputeOptions options;
+    sflint::Fmpz factor_base_bound;
+    if (!configure_native_options(options, factor_base_bound,
+                                  setup.maximal_order)) {
+        return false;
+    }
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport report;
+    if (!silex::detail::compute_class_unit_transaction(
+                units, class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128,
+                report)) {
+        return false;
+    }
+    const std::optional<silex::ClassGroupZetaBfProofRecord> record =
+            class_group.zeta_bf_proof_record();
+    return record.has_value() && record->cutoff == default_cutoff &&
+           record->cutoff != coarse_cutoff;
+}
+
 }  // namespace
 
 int main() {
@@ -771,6 +815,7 @@ int main() {
     const FieldSetup cubic = cubic_blocker();
     const FieldSetup quartic = quartic_blocker();
     const slong simplest_cubic_a6[] = {-1, -9, -6};
+    const slong d12_coefficients[] = {1, 0, -2, 0, 2, 1, 1, 1, 2, -1, 0, -1};
 
     return !check_failed_call_preserves_outputs(quadratic.maximal_order,
                                                 20000) ||
@@ -787,7 +832,9 @@ int main() {
                            setup_from_coefficients(simplest_cubic_a6, 3),
                            387) ||
                    !check_grh_transaction_records_index_one_audit(
-                           setup_from_coefficients(simplest_cubic_a6, 3))
+                           setup_from_coefficients(simplest_cubic_a6, 3)) ||
+                   !check_grh_transaction_refines_to_default_audit(
+                           setup_from_coefficients(d12_coefficients, 12))
             ? 1
             : 0;
 }

@@ -219,12 +219,16 @@ Changed
   status is unaffected.
 
 - The analytic index-one test of a ``grh`` paired class/unit transaction in
-  degree three and higher now evaluates ``hR`` to a relative error of 1/4
-  with the Belabas-Friedman Theorem 7 error bound, instead of the full
-  default zeta route, and falls back to that route when no cutoff below
-  20007 reaches the target.  Accept/reject results are unchanged; the
-  recorded ``zeta_bf_proof_record()`` values (cutoff and error bound) are
-  now those of the coarse evaluation.  See "Class groups and order units" in
+  degree three and higher now first evaluates ``hR`` to an absolute error
+  below 1/4 on ``log hR`` with the Belabas-Friedman Theorem 7 error bound,
+  instead of the full default zeta route.  When that value shows index one it
+  is used, and the recorded ``zeta_bf_proof_record()`` values (cutoff and
+  error bound) are those of the coarse evaluation.  Otherwise (no cutoff up
+  to 20007, or the coarse value does not show index one) the coarse value is
+  discarded and the default zeta route is used, so such fields pay up to
+  part of one extra analytic evaluation.  Accept/reject results were
+  unchanged on the checked corpus, but a field whose default route fails can
+  now be accepted under GRH when the coarse value shows index one.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 - A ``grh`` paired class/unit transaction that is accepted by the analytic
