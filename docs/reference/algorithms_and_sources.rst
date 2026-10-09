@@ -1161,6 +1161,30 @@ built on them test every row of that kernel.  As in the proof routes, a
 root is adjoined only after the exact order-unit check, and these routines
 never record a verified proof status.
 
+The class-relation saturation with units
+(``ClassGroupContext::saturate_relations_bounded_with_units`` and the
+index-bounded pass of class/unit validation) scans the residue-character
+kernels at one prime at a time over the relation generators, the free units
+and, when ``ell`` divides ``w``, the torsion generator, and appends the first
+kernel row whose product is an ``ell``-th power.  Before each append round
+it stacks the ``ell``-th-power residue characters of the same inputs at the
+degree-one primes ``q = 1 mod ell`` from ``next_prime(2^60)`` up, as Hecke
+v0.38.6 ``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``:
+``compute_candidates_for_saturate`` (lines 130--203) does, with
+``stable = 3.5`` as ``saturate!`` (lines 419--512) passes it, until the
+common kernel is empty or its dimension has stayed the same for more than
+``stable`` times the number of inputs.  A row outside that common kernel
+modulo ``ell`` is skipped without a power test, and an empty common kernel
+ends the round.  Every character vanishes on ``ell``-th powers, so a skipped
+row would have failed its power test: the appended relations, and with them
+the published class group, generators and units, are those of the
+unfiltered scan.  Hecke instead tests the basis of the stacked kernel and
+doubles ``stable`` after a candidate that is not an ``ell``-th power; Silex
+keeps its own candidate order, so the stopping rule decides only how many
+power tests are skipped.  The filter is not used for non-maximal orders or
+for an ``ell`` that does not fit a machine word, and the scan tests every
+row when the filter cannot be computed.
+
 A ``proven`` unit computation from a class-group context runs its
 relation-kernel units through the index-bounded saturation pass
 (``set_relation_kernel_units_index_bounded_saturated``) before

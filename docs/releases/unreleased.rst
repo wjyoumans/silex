@@ -87,6 +87,18 @@ Changed
   order units" in :doc:`../reference/algorithms_and_sources` and
   :doc:`../development/class_number_route_cutoff`.
 
+- The class-relation saturation with units stacks the ``ell``-th-power
+  residue characters of the relation generators and units at many
+  degree-one primes before any power test, as Hecke's
+  ``compute_candidates_for_saturate`` does, and skips the candidates outside
+  their common kernel, which cannot be ``ell``-th powers.  The appended
+  relations, class groups, generators and units are unchanged.  In ``grh``
+  mode the power tests drop from 286 to 38 on the real subfield of
+  ``Q(zeta_29)`` and from 571 to 128 on ``Q(zeta_72)``; median time over
+  nine runs on a busy machine went from 8.83 s to 8.49 s and from 4.17 s to
+  3.87 s.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - **Breaking:** ``SUnitGroup::regulator`` now returns the regulator of the
   S-unit lattice, ``R_S = R h/h_S prod log N(P)`` for nonempty ``S``: the
   absolute value of a maximal minor of the log-S embedding of the free
