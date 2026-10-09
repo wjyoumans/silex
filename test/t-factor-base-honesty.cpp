@@ -268,8 +268,8 @@ int test_proof_targets_require_complete_decomposition() {
         return 1;
     }
 
-    // Keep the conservative singleton behavior on a complete inert
-    // decomposition: even an unramified principal ideal remains explicit.
+    // An inert prime is discharged: its only factor is pO_K, which is
+    // principal, so no factor-base membership is required.
     silex::NumberField singleton_field = quadratic_x2_minus_2();
     silex::Order singleton_order =
             silex::test::equation_order(singleton_field);
@@ -285,6 +285,20 @@ int test_proof_targets_require_complete_decomposition() {
         !silex::detail::select_factor_base_proof_targets(
                 targets, singleton, sflint::FmpzConstRef(three),
                 sflint::FmpzConstRef(nine)) ||
+        !targets.empty()) {
+        return 1;
+    }
+
+    // A totally ramified singleton, (2) = P^2 in Q(sqrt(2)), stays a target:
+    // the principal relation only gives 2[P] = 0.
+    sflint::Fmpz ramified_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(ramified_bound), UWORD(2));
+    if (!silex::decompose_prime(singleton, singleton_order,
+                                sflint::FmpzConstRef(two)) ||
+        singleton.size() != 1 || !prime_has_ef(singleton, 0, 2, 1) ||
+        !silex::detail::select_factor_base_proof_targets(
+                targets, singleton, sflint::FmpzConstRef(two),
+                sflint::FmpzConstRef(ramified_bound)) ||
         targets.size() != 1 || targets[0] != 0) {
         return 1;
     }

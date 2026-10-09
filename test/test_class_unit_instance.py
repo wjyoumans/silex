@@ -297,6 +297,30 @@ def assert_twin_class_conductor_honesty_path(exe: Path, root: Path) -> None:
     )
 
 
+def assert_proven_inert_prime_generation(exe: Path, root: Path) -> None:
+    # Simplest cubic a = 6, x^3 - 6x^2 - 9x - 1: 2 is inert (x^3 + x + 1 is
+    # irreducible mod 2) and its norm 8 lies below Zimmert's twin-class
+    # bound 12.  The relation-completion base omits inert primes, so the
+    # generation proof must discharge 2O_K as principal.  GP 2.17.4
+    # bnfinit and bnfcertify give h = 3, class group [3], unit rank 2.
+    instance = run_json(
+        [str(exe), "--coeffs", "-1,-9,-6,1", "--mode", "proven"], root
+    )
+    assert instance["success"] is True
+    assert instance["certification_status"] == "proven"
+    class_group = instance["class_group"]
+    assert class_group["order"] == "3"
+    assert class_group["invariants"] == ["3"]
+    assert class_group["factor_base_generation_status"] == "verified"
+    assert class_group["factor_base_generation_basis"] == (
+        "zimmert_twin_class"
+    )
+    assert class_group["factor_base_generation_certification_bound"] == (
+        "12"
+    )
+    assert instance["unit_group"]["free_rank"] == 2
+
+
 def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     # The equality boundary of unconditional generation in grh mode:
     # record_factor_base_generation_ (src/class_group/class_group.cpp)
@@ -349,6 +373,7 @@ def main() -> int:
     assert_grh_minkowski_equality_boundary(args.exe, root)
     assert_proven_and_degree_one_provenance(args.exe, root)
     assert_twin_class_conductor_honesty_path(args.exe, root)
+    assert_proven_inert_prime_generation(args.exe, root)
     instance_script = root / "tools/bench/run-class-unit-instance.py"
     manifest = json.loads(args.manifest.read_text())
 

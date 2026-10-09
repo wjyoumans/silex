@@ -294,6 +294,17 @@ Changed
 Fixed
 -----
 
+- A ``proven`` class/unit computation no longer fails when an inert rational
+  prime lies below the proven generation requirement.  Such a prime has a
+  single prime ideal ``pO_K``, which is principal; the generation proof now
+  treats it as covered, as it already did for the last unramified prime
+  ideal of a fully listed decomposition, instead of requiring it in a
+  relation-completion base that omits inert primes.  The simplest cubic fields
+  ``x^3 - a x^2 - (a + 3) x - 1`` for ``a = 6, 8, 10`` now succeed with
+  ``proven`` class numbers 3, 1, 1 and unit rank 2, matching PARI.  A totally
+  ramified prime with one prime ideal is still checked.  See "Class groups
+  and order units" in :doc:`../reference/algorithms_and_sources`.
+
 - Class/unit computations no longer fail in relation search when the order's
   Minkowski embedding has large entries, as for the power bases of the real
   cyclotomic fields of conductor 37 and 41 (degree 18 and 20), which now
