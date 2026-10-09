@@ -676,35 +676,31 @@ are integral ideals ``a`` in ``K`` and ``b`` in ``[D] K^(-1)``, where ``[D]``
 is the class of the different, with
 ``log(|d| / (N(a) N(b))) >= F_{r1+r2, r2}(gamma) + n log pi`` for every
 ``gamma > 0``.  Hence ``K`` or ``[D] K^(-1)`` contains an integral ideal of
-norm at most ``sqrt|d| exp(-(F + n log pi)/2)``.  Silex does not evaluate
-the series ``F_{a,b}`` of p. 376.  The proof of Satz 4 (pp. 379--380) applies
-the Hilfssatz (p. 378) to ``H = -Q_a^a Q_b^b U V``, where ``Q_a`` and ``Q_b``
-are products of ``m`` factors, and for every ``m >= 1`` it establishes the
-inequality with the left side ``G_{m,j}(gamma)`` of the Hilfssatz in place of
-``F``, for ``j`` the smallest integer with ``j >= 1/2 + gamma``; ``F`` is the
-limit as ``m`` tends to infinity.  Silex evaluates that finite-``m``
-inequality itself, with ``m = 128``, so it needs no estimate of a series
-tail.  With ``a = r1 + r2``, ``b = r2``, ``D = 2 (1 + 2 gamma)``,
-``y_l = (2l - 1 + gamma)/D``, ``y'_l = (2l + gamma)/D`` and
-``delta(y) = psi(y + 1/2) - psi(y)``, the logarithmic derivatives of
-Zimmert's definitions give::
-
-    G = a [sum_{l=1}^{m} ((4/D) delta(y_l) - 1/(2l-2-gamma) - 1/(2l-1+gamma))
-           + sum_{l=m+1}^{m+j} ((2/D) delta(y_l) - 1/(2l-2-gamma))]
-      + b [sum_{l=1}^{m} ((4/D) delta(y'_l) - 1/(2l-1-gamma) - 1/(2l+gamma))
-           + sum_{l=m+1}^{m+j} ((2/D) delta(y'_l) - 1/(2l-1-gamma))]
-      + (4/D) [psi(gamma/D) + psi((1+gamma)/D)
-               - psi((1+3 gamma)/D) - psi((2+3 gamma)/D)]
-      - (a/2) [psi(1/2 + gamma/2) + psi(-gamma/2)]
-      - (b/2) [psi(1 + gamma/2) + psi(1/2 - gamma/2)]
-
-Silex evaluates this sum of digamma values with Arb at 128 bits, using
-``psi(x) = psi(x + k) - sum_{i<k} 1/(x + i)`` at negative arguments, but
-only offline: the constant depends on the signature alone, so Silex stores a
-precomputed, test-verified table.  For each signature with ``3 <= n <= 20``,
-the generator ``tools/zimmert_twin_class_table.cpp`` (target
+norm at most ``sqrt|d| exp(-(F + n log pi)/2)``.  Silex evaluates ``F_{a,b}`` with a certified enclosure, using the theorem
+GB-zimmert-F-tail-bound of the silex-research repository,
+``research/proofs/generation/GB-zimmert-F-tail-bound.md`` at commit
+``06191ff``.  With ``a = r1 + r2``, ``b = r2``, ``c = 1 + 2 gamma`` and
+``h = 2c``, its part (iii) gives, for an integer ``L > gamma/2`` and every
+``gamma`` in ``(0, 2L)`` that is not an integer, ``F = S_L + a sum_{l>L}
+T(l) + b sum_{l>L} T(l + 1/2)``, where ``S_L`` is a finite sum of digamma
+values at positive arguments and ``T`` is the term of Zimmert's series.  Its
+part (i) bounds each tail ``sum_{l>L} T(l + delta)``, ``delta`` in
+``{0, 1/2}``, by an explicit main term ``mu(N, K)`` built from exact
+rational coefficients ``Phi_k`` (polynomials in ``gamma`` given by the
+theorem's recurrences) and an explicit error ``E(N, K)``, for any admissible
+``(L, delta, K)``; the bound holds for every real ``gamma > 0``, integers
+included, and part (iii) shows that ``F`` extends continuously to integer
+``gamma``.  The evaluation follows the theorem's procedure "Evaluation with a
+certified enclosure" with Arb at 128 bits, every digamma argument being an
+exact positive rational, and ``L`` and ``K`` chosen as in "Choosing L and
+K" (``L`` between 190 and 294 and ``K`` between 32 and 33 for the table
+below), with the admissibility conditions and the size of ``E`` rechecked in
+exact arithmetic.  The enclosure is used only offline: the constant depends
+on the signature alone, so Silex stores a precomputed, test-verified table.
+For each signature with ``3 <= n <= 20``, the generator
+``tools/zimmert_twin_class_table.cpp`` (target
 ``silex-zimmert-twin-class-table``) takes the upper endpoint of the Arb
-enclosure of ``exp(-(G + n log pi)/2)`` and rounds it up to an exact decimal
+enclosure of ``exp(-(F + n log pi)/2)`` and rounds it up to an exact decimal
 rational ``E`` with 30 significant digits, written to
 ``src/factor_base/zimmert_twin_class_table.inc``; to regenerate, build that
 target and redirect its output to that file.  At run time the twin-class
@@ -712,26 +708,24 @@ bound ``B`` is ``ceil(E sqrt|d|)``, computed exactly with integers as
 ``ceil(ceil(s sqrt|d|) / 10^k)`` for ``E = s / 10^k``.
 ``test/t-generation-bound.cpp`` recomputes every entry with the Arb
 evaluation and checks that it is on the safe side (``E`` at least the upper
-endpoint ``U``, so ``B`` is at least Zimmert's ``sqrt|d| exp(-c)``) and
-tight (``E <= U (1 + 10^-25)``).  PARI's ``zimmertbound`` (below) likewise
-hard-codes a constant ``c`` per ``(n, r2)``, but as a C ``double`` given to
-about nine digits with no stated rounding direction, and evaluates
-``exp(-c) sqrt|d|`` in floating point.  Zimmert's terms are singular at integer
-``gamma``; every other ``gamma > 0`` gives a valid bound, so ``gamma``
-affects only its size.  For each signature with ``3 <= n <= 20`` Silex fixes
-the ``gamma`` in hundredths, ``0 < gamma < 3`` and not an integer, that
-maximizes ``G``.  ``G_{m,j}`` converges to ``F`` as ``m`` grows; at
-``m = 128``, ``F - G < 3e-4`` at these ``gamma``.  The twin-class
-statement with ``G`` does not depend on how close ``G`` is to ``F``; the
-generation statement below uses that every table entry is at least a
-certified upper bound on the constant with ``F``.
+endpoint ``U``, so ``B`` is at least Zimmert's ``sqrt|d| exp(-(F + n log pi)/2)``) and tight (``E <= U (1 + 10^-25)``).  PARI's
+``zimmertbound`` (below) likewise hard-codes a constant ``c`` per
+``(n, r2)``, but as a C ``double`` given to about nine digits with no stated
+rounding direction, and evaluates ``exp(-c) sqrt|d|`` in floating point.
+Every ``gamma > 0`` gives a valid bound, so ``gamma`` affects only its size.
+For each signature with ``3 <= n <= 20`` Silex fixes the ``gamma`` in
+hundredths, ``0 < gamma < 3``, that maximizes ``F``
+(``test/zimmert_twin_class_oracle.py --gammas``); integers were excluded
+from that search in the oracle, and the maximizers it finds are the same
+when integers are included.  Relative to the earlier finite-``m``
+evaluation, no table entry is larger and every entry with ``gamma != 1/2``
+is smaller, by at most about ``1.3e-4`` relative.
 ``test/t-generation-bound.cpp`` checks the constant
-``exp((G + n log pi)/2)`` against all 16 rows of Tabelle 3 (p. 377) with
+``exp((F + n log pi)/2)`` against all 16 rows of Tabelle 3 (p. 377) with
 ``3 <= n <= 20`` (the printed value is a lower bound within one unit of its
 last digit) and pins ``B`` at ``|d| = 10^30``;
 ``test/zimmert_twin_class_oracle.py`` is the independent mpmath evaluation
-those values come from, and it also checks the closed form above against
-Zimmert's definitions of ``Q_a``, ``Q_b``, ``U`` and ``V``.
+those values come from.
 
 The twin-class bound is a generation bound with no hypothesis on the class
 ``[D]`` of the different.  Zimmert's Korollar 1 alone gives generation only
@@ -747,16 +741,17 @@ the class group (non-strict inequality).  Its proof combines Korollar 1
 with a twin-class generation lemma resting on Hecke's theorem that the
 class of the different is a square.  The proof file also states that any
 certified upper bound ``B' >= B(gamma)`` at a fixed ``gamma`` may replace
-``B(gamma)``.  Silex's bound is such a ``B'``: every entry ``E`` of its
-table is at least ``c_up(r1, r2, gamma)``, the certified upper bound on
-``exp(-(F + n log pi)/2)`` at the tabulated ``gamma`` that
-silex-research's ``src/silex_research/zimmert.py`` computes with Arb at
-128 bits, at the same commit.  This was checked with exact rational
-comparisons by ``tools/check_zimmert_twin_class_table.py`` (an offline tool
-that needs Sage and that silex-research commit) for all 117 signatures with ``3 <= n <= 20``; at
-``gamma = 1/2`` the two constants agree to about 30 digits, and elsewhere
-``E`` exceeds ``c_up`` by at most about ``1.3e-4`` relative.  So
-``ceil(E sqrt|d|) >= B(gamma)``.
+``B(gamma)``.  Silex's bound is such a ``B'``: every entry ``E`` is at
+least the upper endpoint of the certified enclosure of
+``exp(-(F + n log pi)/2)`` at the tabulated ``gamma`` described above, so
+``ceil(E sqrt|d|) >= B(gamma)``.  As an independent cross-check,
+``tools/check_zimmert_twin_class_table.py`` (an offline tool that needs Sage
+and silex-research commit ``06191ff``) compares every entry with
+``c_up(r1, r2, gamma)``, the certified upper bound computed by
+silex-research's ``src/silex_research/zimmert.py`` with Arb at 128 bits,
+using exact rational comparisons; for all 117 signatures with
+``3 <= n <= 20`` it finds ``E >= c_up``, with equality to the printed
+precision at ``gamma = 1/2``.
 
 Silex uses the twin-class route only when its bound is strictly below
 ``factor_base_class_group_bound``, for any defining polynomial: monic or

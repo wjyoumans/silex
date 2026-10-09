@@ -250,11 +250,11 @@ bool zimmert_bound(flint::Fmpz& out,
 
 // Parameter gamma of Zimmert's Korollar 1 (twin classes), in hundredths,
 // indexed by [n - 3][r2] for 3 <= n <= 20.  Korollar 1 (p. 376) holds for
-// every gamma > 0, and the finite-m inequality evaluated below for every
-// gamma > 0 that is not an integer, so gamma affects only the size of the
-// bound, never its validity.  Each entry maximises
-// zimmert_twin_class_log_lower_bound over 0 < gamma < 3 in steps of 1/100,
-// integers excluded (test/zimmert_twin_class_oracle.py --gammas).
+// every gamma > 0, and the certified enclosure of F evaluated below
+// (GB-zimmert-F-tail-bound) holds for every gamma > 0, so gamma affects only
+// the size of the bound, never its validity.  Each entry maximises F over
+// 0 < gamma < 3 in steps of 1/100 (integers excluded in the oracle,
+// test/zimmert_twin_class_oracle.py --gammas).
 constexpr unsigned char kZimmertTwinClassGammaHundredths[18][11] = {
     {153, 182},                                           // n = 3
     {116, 133, 153},                                      // n = 4
@@ -1861,9 +1861,11 @@ bool factor_base_class_group_bound(flint::FmpzRef out,
 // with no hypothesis on [D], for every number field and every gamma > 0, and
 // that any certified B' >= B(gamma) may replace B(gamma).  The twin-class
 // bound ceil(E sqrt|d|) is such a B': every table entry E is at least the
-// certified upper bound c_up(r1, r2, gamma) >= exp(-(F + n log pi)/2) of
-// silex-research's src/silex_research/zimmert.py at that commit, at the
-// tabulated gamma (checked for all 117 entries by
+// upper endpoint of Silex's own certified enclosure of
+// exp(-(F + n log pi)/2) at the tabulated gamma
+// (GB-zimmert-F-tail-bound, research/proofs/generation/ at commit 06191ff),
+// and at least the independent c_up of silex-research's
+// src/silex_research/zimmert.py (checked for all 117 entries by
 // tools/check_zimmert_twin_class_table.py).  So the
 // requirement is the twin-class bound whenever it is below
 // factor_base_class_group_bound, whatever the defining polynomial.

@@ -155,7 +155,8 @@ Changed
 
 - Proven class/unit computations in degree 3 to 20 can verify factor-base
   generation up to a smaller bound: Zimmert's twin-class bound (Zimmert
-  1981, Korollar 1, evaluated in the finite form of its proof), for every
+  1981, Korollar 1, with the series F enclosed by the certified tail bound
+  GB-zimmert-F-tail-bound of silex-research, commit 06191ff), for every
   defining polynomial.  The bound generates the class group with no
   hypothesis on the class of the different, by the theorem
   GB-kor1-generation of silex-research (commit 8926120), so non-monogenic
@@ -167,7 +168,7 @@ Changed
   as ``factor_base_generation_certification_bound()``; other results still
   report ``minkowski_type``.  For example the bound drops from 295 to 263
   for ``x^3 + x + 200``.  Its constants come from a precomputed table of
-  exact upper bounds, generated offline from an Arb evaluation and checked
+  exact upper bounds, generated offline from an Arb enclosure and checked
   against it by the tests, so a run does not evaluate them.  A ``grh`` request whose factor base reaches the
   smaller bound now records unconditional (``proven``) generation where it
   used to record ``grh`` generation, as for the quartic field of

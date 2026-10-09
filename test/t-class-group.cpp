@@ -3569,8 +3569,8 @@ int test_grh_provenance_records() {
 
     // The proven partner: unconditional generation and completeness.
     // Generation rests on Zimmert's twin-class bound
-    // ceil(sqrt(1080004) / 3.9517...) = 263 (Korollar 1, finite-m form),
-    // below the Minkowski-type bound 295, with no hypothesis on the class of
+    // ceil(sqrt(1080004) / 3.9517...) = 263 (Korollar 1, certified enclosure
+    // of F), below the Minkowski-type bound 295, with no hypothesis on the class of
     // the different (GB-kor1-generation).
     options.requested_certification = silex::CertificationMode::proven;
     silex::ClassGroupContext proven;

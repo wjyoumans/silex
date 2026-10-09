@@ -10,7 +10,7 @@
 # docs/reference/algorithms_and_sources.rst).
 #
 # Requires: Sage (python module sage.all) and a silex-research checkout at
-# commit 8926120.
+# commit 06191ff (zimmert.py is identical at 8926120).
 #
 # Run (from the repository root; the sage launcher runs .py files):
 #   sage tools/check_zimmert_twin_class_table.py \
