@@ -695,16 +695,18 @@ int test_reduce_mod_units_half_integer_tie() {
     return 0;
 }
 
-// round_arb_approx_fmpz is the reference approximate rounding.  Its width
+// round_arb_approx_fmpz ports the reference approximate rounding.  Its width
 // check computes floor(lower) - ceil(upper), never positive, so it never
-// rejects.  A wide ball not containing 0 rounds to its midpoint; a ball
-// containing 0 is rejected.
+// rejects: a wide ball rounds to div(ceil(upper) + floor(lower), 2).  The
+// rounding fails only through Silex's finiteness guard on sqrt(|value|),
+// which fires for a ball with 0 strictly inside it (the reference would
+// return 0 there); an exact 0 or a ball with endpoint 0 still rounds.
 int test_round_arb_approx_width_check() {
     const slong precision = 64;
     sflint::Fmpz out;
 
-    // 100 +/- 40: wide (radius far above sqrt(100)), excludes 0.  Rounds
-    // to the midpoint.
+    // 100 +/- 48: wide (radius far above sqrt(100)), excludes 0.  Rounds
+    // to div(148 + 52, 2) = 100.
     sflint::Arb wide;
     arb_set_ui(wide.raw(), 100);
     arb_add_error_2exp_si(wide.raw(), 5);
@@ -721,12 +723,41 @@ int test_round_arb_approx_width_check() {
                                                 narrow.raw(), precision));
     assert(fmpz_get_si(out.raw()) == -7);
 
-    // A ball containing 0 is rejected.
+    // 0 +/- 1/2 has 0 strictly inside: sqrt(|value|) is indeterminate and
+    // the guard rejects it.
     sflint::Arb zero_ball;
     arb_zero(zero_ball.raw());
     arb_add_error_2exp_si(zero_ball.raw(), -1);
     assert(!silex::detail::round_arb_approx_fmpz(sflint::FmpzRef(out),
                                                  zero_ball.raw(), precision));
+
+    // 1/4 +/- 1/2 also has 0 strictly inside and is rejected although its
+    // midpoint is positive.
+    sflint::Arb straddle;
+    arb_set_ui(straddle.raw(), 1);
+    arb_mul_2exp_si(straddle.raw(), straddle.raw(), -2);
+    arb_add_error_2exp_si(straddle.raw(), -1);
+    assert(!silex::detail::round_arb_approx_fmpz(sflint::FmpzRef(out),
+                                                 straddle.raw(), precision));
+
+    // An exact 0 rounds to 0.
+    sflint::Arb exact_zero;
+    arb_zero(exact_zero.raw());
+    fmpz_set_si(out.raw(), 5);
+    assert(silex::detail::round_arb_approx_fmpz(sflint::FmpzRef(out),
+                                                exact_zero.raw(), precision));
+    assert(fmpz_is_zero(out.raw()));
+
+    // 1/2 +/- 1/2 = [0, 1] touches 0 only at an endpoint, so sqrt(|value|)
+    // stays finite and it rounds to div(1 + 0, 2) = 0.
+    sflint::Arb touching;
+    arb_set_ui(touching.raw(), 1);
+    arb_mul_2exp_si(touching.raw(), touching.raw(), -1);
+    arb_add_error_2exp_si(touching.raw(), -1);
+    fmpz_set_si(out.raw(), 5);
+    assert(silex::detail::round_arb_approx_fmpz(sflint::FmpzRef(out),
+                                                touching.raw(), precision));
+    assert(fmpz_is_zero(out.raw()));
     return 0;
 }
 

@@ -511,19 +511,28 @@ midpoint.  Silex needs a certified nearest integer, so an exact half-integer
 coordinate never rounds.  Silex stops doubling and leaves the unit unreduced
 once some coordinate ball has radius at most 0.1 and contains a
 half-integer, and every coordinate ball that defeats the approximate
-rounding (for example one that contains 0) also has radius at most 0.1.
+rounding (for example one with 0 strictly inside it, see below) also has
+radius at most 0.1.
 When those balls hold an exact tie and exact zeros, this is the result the
 precision ladder reached at the cap.  It can differ from the cap result in a
 near-tie, or beside a small nonzero coordinate whose narrow ball still
 contains 0, where more precision would have let the rounding succeed.
 
-The approximate rounding itself ports ``round_approx(ZZMatrix, ArbMatrix)`` (Hecke v0.38.6)
-in the same file.  Its width check forms ``lower - upper`` (the floor of the
-lower bound minus the ceiling of the upper bound) and compares it with
-``sqrt(abs(x))``.  That difference is never positive, so the check never
-rejects; Hecke has the same sign and Silex keeps it.  A wide ball that
-excludes 0 rounds to its midpoint, and the rounding fails only for a ball
-that contains 0 or is not finite.
+The approximate rounding itself ports Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Map.jl:round_approx(ZZMatrix, ArbMatrix)``.  Its
+width check forms ``lower - upper`` (the floor of the lower bound minus the
+ceiling of the upper bound) and compares it with ``sqrt(abs(x))``.  That
+difference is never positive, so the check never rejects; Hecke has the same
+sign and Silex keeps it.  A wide ball rounds to ``div(upper + lower, 2)``.
+
+**Deviation** (documented in the code): Silex also fails the rounding
+when the ball or ``sqrt(abs(x))`` is not finite; Hecke has no such test.
+FLINT ``arb_abs`` keeps the radius, and ``arb_sqrt`` returns an indeterminate
+ball when that ball contains negative numbers.  So Silex fails for a ball
+with 0 strictly inside it, such as ``0 +/- 1/2``.  Hecke's ``>`` reaches
+FLINT ``arb_lt`` through Nemo, which is false for an indeterminate ball, so
+Hecke returns 0 there.  An exact 0, or a ball such as ``1/2 +/- 1/2`` whose endpoint is 0,
+rounds in both.  The half-integer stop rule above relies on this failure.
 
 Saturation-backed class-group proof follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Proof.jl:_class_group_proof``: verify generation
