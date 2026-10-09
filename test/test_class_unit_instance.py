@@ -298,27 +298,35 @@ def assert_twin_class_conductor_honesty_path(exe: Path, root: Path) -> None:
 
 
 def assert_proven_inert_prime_generation(exe: Path, root: Path) -> None:
-    # Simplest cubic a = 6, x^3 - 6x^2 - 9x - 1: 2 is inert (x^3 + x + 1 is
-    # irreducible mod 2) and its norm 8 lies below Zimmert's twin-class
-    # bound 12.  The relation-completion base omits inert primes, so the
-    # generation proof must discharge 2O_K as principal.  GP 2.17.4
-    # bnfinit and bnfcertify give h = 3, class group [3], unit rank 2.
-    instance = run_json(
-        [str(exe), "--coeffs", "-1,-9,-6,1", "--mode", "proven"], root
-    )
-    assert instance["success"] is True
-    assert instance["certification_status"] == "proven"
-    class_group = instance["class_group"]
-    assert class_group["order"] == "3"
-    assert class_group["invariants"] == ["3"]
-    assert class_group["factor_base_generation_status"] == "verified"
-    assert class_group["factor_base_generation_basis"] == (
-        "zimmert_twin_class"
-    )
-    assert class_group["factor_base_generation_certification_bound"] == (
-        "12"
-    )
-    assert instance["unit_group"]["free_rank"] == 2
+    # Simplest cubics, each with an inert prime of norm below Zimmert's
+    # twin-class bound.  The relation-completion base omits inert primes,
+    # so the generation proof must discharge pO_K as principal.
+    # a = 6, x^3 - 6x^2 - 9x - 1: 2 is inert, norm 8 < 12.
+    # a = 8, x^3 - 8x^2 - 11x - 1: h = 1, bound 18.
+    # a = 10, x^3 - 10x^2 - 13x - 1: h = 1, bound 25.
+    # GP 2.17.4 bnfinit and bnfcertify give h = 3, 1, 1, class groups
+    # [3], [], [], unit rank 2.
+    for coeffs, order, invariants, bound in (
+        ("-1,-9,-6,1", "3", ["3"], "12"),
+        ("-1,-11,-8,1", "1", [], "18"),
+        ("-1,-13,-10,1", "1", [], "25"),
+    ):
+        instance = run_json(
+            [str(exe), "--coeffs", coeffs, "--mode", "proven"], root
+        )
+        assert instance["success"] is True
+        assert instance["certification_status"] == "proven"
+        class_group = instance["class_group"]
+        assert class_group["order"] == order
+        assert class_group["invariants"] == invariants
+        assert class_group["factor_base_generation_status"] == "verified"
+        assert class_group["factor_base_generation_basis"] == (
+            "zimmert_twin_class"
+        )
+        assert class_group["factor_base_generation_certification_bound"] == (
+            bound
+        )
+        assert instance["unit_group"]["free_rank"] == 2
 
 
 def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:

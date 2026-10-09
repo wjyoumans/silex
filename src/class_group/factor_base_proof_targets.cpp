@@ -48,7 +48,10 @@ bool select_factor_base_proof_targets(
     // Source (2.17.3, the reference cited in
     // docs/reference/algorithms_and_sources.rst): src/basemath/buch2.c
     // be_honest and bnftestprimes skip the last unramified P | p, which
-    // leaves nothing to test for an inert p; buch2.c:FBgen keeps inert
+    // leaves nothing to test for an inert p.  The reference also skips it
+    // when the prime list is cut off at the norm bound (its P with norm
+    // above C2 are assumed in the subgroup); Silex skips only a complete
+    // decomposition, as the guard below requires.  buch2.c:FBgen keeps inert
     // primes out of the factor base ("a factor base contains only noninert
     // primes"), and buch2.c:bnfisprincipal0 returns the trivial class for
     // an inert prime ideal.
