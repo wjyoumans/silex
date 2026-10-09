@@ -610,8 +610,11 @@ bool saturate_candidate_class_relations_with_units(
     bool saturated = false;
     const slong remaining = options.max_relations - class_group.relation_count();
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    const bool log_saturation = log_enabled(
+            diagnostics, DiagnosticsModule::unit_group, LogLevel::detail);
     flint::Fmpz h_cand_before;
-    const bool have_h_before = class_group.order(flint::FmpzRef(h_cand_before));
+    const bool have_h_before = log_saturation
+            && class_group.order(flint::FmpzRef(h_cand_before));
 #endif
     const bool saturation_ok = index_bound_is_exact
             ? ClassGroupCertificationAccess::
@@ -631,8 +634,7 @@ bool saturate_candidate_class_relations_with_units(
     }
 
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
-    if (log_enabled(diagnostics, DiagnosticsModule::unit_group,
-                    LogLevel::detail)) {
+    if (log_saturation) {
         flint::Fmpz h_cand_after;
         const bool have_h_after = class_group.order(flint::FmpzRef(h_cand_after));
         std::string message = "saturation changed=";
