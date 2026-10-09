@@ -9,6 +9,7 @@
 #include <silex/unit.hpp>
 #include <silex/zeta.hpp>
 
+#include <cstdio>
 #include <string>
 
 namespace silex::detail {
@@ -153,6 +154,25 @@ namespace {
 // (record_grh_factor_base_generation) stand in for the unconditional
 // generation check.  Only a grh request may pass true for an acceptance
 // decision; that record is written only on a grh request's base.
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+std::string log_fmpz_text(flint::FmpzConstRef value) noexcept {
+    char* const text = ::fmpz_get_str(nullptr, 10, value.raw());
+    std::string out = text != nullptr ? text : "?";
+    if (text != nullptr) {
+        ::flint_free(text);
+    }
+    return out;
+}
+
+std::string log_arb_mid_rad(flint::ArbConstRef value) noexcept {
+    char buffer[96];
+    std::snprintf(buffer, sizeof(buffer), "mid=%.17g rad=%.6e",
+                  ::arf_get_d(arb_midref(value.raw()), ARF_RND_NEAR),
+                  ::mag_get_d(arb_radref(value.raw())));
+    return std::string(buffer);
+}
+#endif
+
 bool validation_index_bound_from_product(
         flint::Fmpz& index_bound,
         const OrderUnitGroup& units,
@@ -176,6 +196,19 @@ bool validation_index_bound_from_product(
                 class_group, precision)) {
         return false;
     }
+
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    if (log_enabled(units.diagnostics(), DiagnosticsModule::unit_group,
+                    LogLevel::detail)) {
+        std::string message = "index_bound_product candidate_hR ";
+        message += log_arb_mid_rad(
+                flint::ArbConstRef(candidate_class_regulator_product));
+        message += " analytic_hR ";
+        message += log_arb_mid_rad(analytic_class_regulator_product);
+        SILEX_LOG(units.diagnostics(), DiagnosticsModule::unit_group,
+                  LogLevel::detail, message.c_str());
+    }
+#endif
 
     const bool unconditional_generation =
             class_group.factor_base_generation_status() ==
@@ -576,6 +609,10 @@ bool saturate_candidate_class_relations_with_units(
             factor_base_generation_checked_to_required_bound(class_group);
     bool saturated = false;
     const slong remaining = options.max_relations - class_group.relation_count();
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    flint::Fmpz h_cand_before;
+    const bool have_h_before = class_group.order(flint::FmpzRef(h_cand_before));
+#endif
     const bool saturation_ok = index_bound_is_exact
             ? ClassGroupCertificationAccess::
                       saturate_relations_for_index_bound_with_units(
@@ -592,6 +629,22 @@ bool saturate_candidate_class_relations_with_units(
     if (!saturation_ok) {
         return false;
     }
+
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    if (log_enabled(diagnostics, DiagnosticsModule::unit_group,
+                    LogLevel::detail)) {
+        flint::Fmpz h_cand_after;
+        const bool have_h_after = class_group.order(flint::FmpzRef(h_cand_after));
+        std::string message = "saturation changed=";
+        message += changed ? "1" : "0";
+        message += " h_cand_before=";
+        message += have_h_before ? log_fmpz_text(h_cand_before) : "?";
+        message += " h_cand_after=";
+        message += have_h_after ? log_fmpz_text(h_cand_after) : "?";
+        SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
+                  LogLevel::detail, message.c_str());
+    }
+#endif
 
     if (changed) {
         flint::Fmpz required_bound;
@@ -1184,6 +1237,18 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
         }
         flint::fmpz_set(flint::FmpzRef(summary.last_index_bound),
                         flint::FmpzConstRef(index_bound));
+
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+        if (log_enabled(units.diagnostics(), DiagnosticsModule::unit_group,
+                        LogLevel::detail)) {
+            std::string message = "refine_pass pass=";
+            message += std::to_string(static_cast<long long>(pass));
+            message += " index_bound=";
+            message += log_fmpz_text(flint::FmpzConstRef(index_bound));
+            SILEX_LOG(units.diagnostics(), DiagnosticsModule::unit_group,
+                      LogLevel::detail, message.c_str());
+        }
+#endif
 
         if (flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) <= 0) {
             if (exact_quadratic_index || requested_grh) {
