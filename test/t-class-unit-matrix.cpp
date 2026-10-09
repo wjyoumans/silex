@@ -2468,13 +2468,15 @@ int check_imaginary_quadratic_grh_exact_route(slong constant,
 }
 
 // Below 2^44 a `grh` imaginary-quadratic transaction takes its index from
-// the exact class number.  On these two presentations the first relation
-// lattice has index two against h, so the refine loop saturates once and
-// measures the next index from the exact class number as well; the
-// completeness basis stays `exact_class_number`.  D = -(10^9 + 3):
-// h = 3680, Z/2 x Z/1840.  D = -(2^44 - 1) = -17592186044415:
-// h = 3384192, (Z/2)^5 x Z/105756.  (GP 2.17 quadclassunit(D).cyc and
-// bnfinit(x^2 - D).cyc.)
+// the exact class number.  Observed on D = -(10^9 + 3) with the instance
+// tool's --log: the refine loop is called three times (index 2, 2, 1), and
+// the exact-class-number index bound is reached twice, in unit-refinement
+// steps that return no_progress.  That was not observed for D = -(2^44 - 1).
+// The assertions below check only outputs, which are the same as before the
+// change, so this test does not pin the route; that needs a profiling-enabled
+// check (recorded follow-up).  D = -(10^9 + 3): h = 3680, Z/2 x Z/1840.
+// D = -(2^44 - 1) = -17592186044415: h = 3384192, (Z/2)^5 x Z/105756.
+// (GP 2.17 quadclassunit(D).cyc and bnfinit(x^2 - D).cyc.)
 int test_imaginary_quadratic_grh_refine_uses_exact_index() {
     const ulong k9_invariants[] = {2, 1840};
     const ulong below_cutoff_invariants[] = {2, 2, 2, 2, 2, 105756};
