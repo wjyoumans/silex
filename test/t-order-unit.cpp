@@ -32,15 +32,6 @@
 #include <utility>
 #include <vector>
 
-namespace silex::detail {
-// Defined in src/order_unit/compute.cpp; declared here to pin its behaviour.
-bool round_arb_approx_fmpz(flint::FmpzRef out, const arb_struct* value,
-                           slong precision) noexcept;
-bool apply_unit_reduction(std::vector<FactoredElement>& values,
-                          const OrderUnitGroup& group,
-                          const flint::FmpzMat& coefficients) noexcept;
-}  // namespace silex::detail
-
 namespace {
 namespace sflint = silex::flint;
 
@@ -802,6 +793,7 @@ int test_apply_unit_reduction_factor_list() {
                            embeddings, 64));
     assert(group.free_rank() == 2);
     slong largest = 0;
+    bool repeated = false;
     for (slong j = 0; j < 2; ++j) {
         silex::FactoredElement generator(cubic);
         assert(group.free_generator(generator, j));
@@ -811,8 +803,16 @@ int test_apply_unit_reduction_factor_list() {
                     entry.exponent < 0 ? -entry.exponent : entry.exponent;
             largest = magnitude > largest ? magnitude : largest;
         }
+        // Some free generator holds two equal factors (no merging).
+        const auto fs = generator.factors();
+        for (slong a = 0; a < generator.length(); ++a) {
+            for (slong b = a + 1; b < generator.length(); ++b) {
+                if (fs[a].factor.equal(fs[b].factor)) repeated = true;
+            }
+        }
     }
     assert(largest >= 2);
+    assert(repeated);
 
     std::vector<silex::FactoredElement> values;
     values.emplace_back(cubic);

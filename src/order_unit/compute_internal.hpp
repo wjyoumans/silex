@@ -529,6 +529,13 @@ bool try_validate_refine_extra_pass(slong& extra_passes_done,
                                     const ValidationUnitRefreshOptions&
                                             refresh_options = {}) noexcept;
 
+// Defined in compute.cpp; declared here for tests that pin their behaviour.
+bool round_arb_approx_fmpz(flint::FmpzRef out, const arb_struct* value,
+                           slong precision) noexcept;
+bool apply_unit_reduction(std::vector<FactoredElement>& values,
+                          const OrderUnitGroup& group,
+                          const flint::FmpzMat& coefficients) noexcept;
+
 }  // namespace detail
 
 }  // namespace silex
