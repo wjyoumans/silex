@@ -76,4 +76,31 @@ bool regulator_lower_bound_from_signature(flint::ArbRef out,
                                           flint::FmpzConstRef w,
                                           slong precision) noexcept;
 
+// Pohst-Zassenhaus 1989, (6.22) (p. 366), which excerpts it from Pohst 1977
+// and 1978 (Remak's method, Remak 1932): for a field K of degree n = r1 + 2 r2 with no proper subfield other than Q,
+// unit rank r = r1 + r2 - 1 and |d_K| > c,
+//   R >= ((3 log^2(|d_K| / c) / ((n-1) n (n+1) - 6 r2))^r
+//         * 2^r2 / (n gamma_r^r))^(1/2),
+// with c = 4^floor(n/2) when r2 = 0 and n <= 11 and c = n^n otherwise, and
+// gamma_r^r Hermite's constant to the power r: the exact values of
+// Pohst-Zassenhaus (3.35a) (p. 198) for r <= 8, else Blichfeldt's upper
+// bound (2/pi)^r Gamma(2 + r/2)^2, (3.35b) (p. 199).  Silex certifies that
+// K has no proper subfield other than Q only by n being prime, so the
+// function returns false unless n is prime, r >= 1 and |d_K| > c.
+// `field_discriminant` must be the discriminant of K (of its maximal order).
+bool regulator_lower_bound_remak_pohst(flint::ArbRef out,
+                                       slong r1,
+                                       slong r2,
+                                       flint::FmpzConstRef field_discriminant,
+                                       slong precision) noexcept;
+
+// unit_lower_regulator_bound, raised to the lower endpoint of
+// regulator_lower_bound_remak_pohst when `field_discriminant` is non-null
+// (it must then be the discriminant of `field`) and that bound applies.
+// With a null discriminant this is exactly unit_lower_regulator_bound.
+bool field_lower_regulator_bound(flint::ArbRef out,
+                                 const NumberField& field,
+                                 const flint::Fmpz* field_discriminant,
+                                 slong precision) noexcept;
+
 }  // namespace silex::detail

@@ -1,4 +1,5 @@
 #include <silex/flint/fmpq.hpp>
+#include <silex/order.hpp>
 #include <silex/unit.hpp>
 
 #include "element/element_internal.hpp"
@@ -1012,6 +1013,194 @@ int test_lower_regulator_bound_maximum() {
     return 0;
 }
 
+// Pohst-Zassenhaus (6.22) against GP 2.17 (\p 60):
+//   H(m) = if(m==1,1, m==2,4/3, m==3,2, m==4,4, m==5,8, m==6,64/3, m==7,64,
+//            m==8,256, (2/Pi)^m*gamma(2+m/2)^2);
+//   RP(d,r1,r2) = my(n=r1+2*r2, r=r1+r2-1,
+//                    c=if(r2==0&&n<=11, 4^(n\2), n^n));
+//                 sqrt((3*log(abs(d)/c)^2/((n-1)*n*(n+1)-6*r2))^r
+//                      * 2^r2/(n*H(r)));
+bool remak_pohst_near(slong r1,
+                      slong r2,
+                      const char* discriminant,
+                      const char* reference) noexcept {
+    sflint::Fmpz d;
+    sflint::Arb value;
+    if (::fmpz_set_str(d.raw(), discriminant, 10) != 0) {
+        return false;
+    }
+    return silex::detail::regulator_lower_bound_remak_pohst(
+                   sflint::ArbRef(value), r1, r2,
+                   sflint::FmpzConstRef(d.raw()), 256) &&
+           arb_near_decimal(value, reference);
+}
+
+bool remak_pohst_skipped(slong r1, slong r2, const char* discriminant,
+                         slong precision = 256) noexcept {
+    sflint::Fmpz d;
+    sflint::Arb sentinel;
+    if (::fmpz_set_str(d.raw(), discriminant, 10) != 0) {
+        return false;
+    }
+    sflint::arb_set_si(sflint::ArbRef(sentinel), 123);
+    return !silex::detail::regulator_lower_bound_remak_pohst(
+                   sflint::ArbRef(sentinel), r1, r2,
+                   sflint::FmpzConstRef(d.raw()), precision) &&
+           sflint::arb_contains_si(sentinel, 123);
+}
+
+int test_remak_pohst_term() {
+    // Q(sqrt2): c = 4, so the bound is log(8/4)/2.
+    assert(remak_pohst_near(2, 0, "8",
+                            "0.34657359027997265470861606072908828403775"));
+    // x^3+x^2-2x-1 (d = 49) and x^3-4x^2-8x-1 (d = 2213): c = 4.
+    assert(remak_pohst_near(3, 0, "49",
+                            "0.39235376380833159632657795915798577886745"));
+    assert(remak_pohst_near(3, 0, "2213",
+                            "2.4930909806229004743868692627199714464681"));
+    // Signature (1, 1): c = 27.
+    assert(remak_pohst_near(1, 1, "-31",
+                            "0.046050112826939057247809537924926698835822"));
+    // Signature (3, 1), r = 3.
+    assert(remak_pohst_near(3, 1, "-401370255",
+                            "3.1075393444952976419292495635366123211574"));
+    // Totally real degree 11 (the real subfield of Q(zeta_23)): c = 4^5,
+    // r = 10, Blichfeldt's bound for gamma_10^10.
+    assert(remak_pohst_near(11, 0, "41426511213649",
+                            "0.018339221533875687054903067913068401607238"));
+
+    // Side conditions: |d| > c is strict.
+    assert(remak_pohst_skipped(3, 0, "4"));
+    assert(remak_pohst_skipped(1, 1, "-27"));
+    assert(remak_pohst_skipped(1, 1, "-23"));
+    assert(remak_pohst_skipped(1, 2, "3125"));
+    // x^5-x-1: d = 2869 < 5^5.
+    assert(remak_pohst_skipped(1, 2, "2869"));
+    // x^13-x-1: d = 293959006143997 < 13^13 (c = n^n: not totally real).
+    assert(remak_pohst_skipped(1, 6, "293959006143997"));
+    // Unit rank zero.
+    assert(remak_pohst_skipped(0, 1, "-4"));
+    assert(remak_pohst_skipped(1, 0, "1"));
+    // Composite degree: primitivity is not certified, so the bound is never
+    // used, even where it would exceed the signature bound (GP: 1.384... for
+    // x^4+x^3+6x^2+7x+7 and 2.351... for x^6-4x^5-3x^4-2x^3+8x^2+x+8).
+    assert(remak_pohst_skipped(0, 2, "65016"));
+    assert(remak_pohst_skipped(2, 2, "20129259201"));
+    assert(remak_pohst_skipped(4, 0, "1000000"));
+    // Invalid input.
+    assert(remak_pohst_skipped(3, 0, "2213", 0));
+    assert(remak_pohst_skipped(-1, 2, "2213"));
+    return 0;
+}
+
+// field_lower_regulator_bound with d_K from Silex's maximal order, on
+// prime-degree corpus fields and two composite-degree controls.  GP 2.17:
+// K = bnfinit(f, 1) with bnfcertify(K) = 1; K.disc and K.reg (\p 40).  The
+// bound never exceeds R_K; in prime degree it is the larger of the
+// signature bound and Pohst-Zassenhaus (6.22); in composite degree it is
+// the signature bound exactly.  The index bounds are floor(R_K / bound).
+int test_field_lower_regulator_bound() {
+    struct RegulatorFixture {
+        slong coefficients[8];
+        slong length;
+        const char* discriminant;
+        const char* regulator;
+        slong signature_index_bound;
+        slong index_bound;
+    };
+    const RegulatorFixture fields[] = {
+            // Degree 3: (6.22) raises every bound here.
+            {{-2, 0, 0, 1}, 4, "-108",
+             "1.3473773483293841009181878914456530462830", 4, 2},
+            {{-1, -8, -4, 1}, 4, "2213",
+             "12.680820227134520936033682397377755442449", 24, 5},
+            {{16, -5, -11, 1}, 4, "97637",
+             "48.170533611612021651754436340151789172835", 92, 7},
+            {{200, 1, 0, 1}, 4, "-1080004",
+             "297.83531565518937879358021356882740907426", 1063, 84},
+            // Degree 5: |d| <= 5^5 (skipped), (6.22) below the signature
+            // bound, and three fields where it is above.
+            {{-1, -1, 0, 0, 0, 1}, 6, "2869",
+             "0.4323438788249735214954703548427138108001", 1, 1},
+            {{1, -3, 1, 1, -2, 1}, 6, "-11119",
+             "1.1965526760412351038299073459916544849864", 1, 1},
+            {{-3, 0, 0, 0, 0, 1}, 6, "253125",
+             "12.249655920988026179791447472138448535771", 47, 29},
+            {{3, -3, -3, -6, -7, 1}, 6, "-401370255",
+             "734.65403300200295476728211517178502268146", 1184, 236},
+            {{-1, 0, -15, 14, 6, 1}, 6, "432320249",
+             "23.928909931645736602255835337808662598302", 92, 7},
+            {{1, 8, 9, 10, 16, 1}, 6, "-1744918375",
+             "610.51737694756545908337651313275839650493", 984, 138},
+            // Degree 7.
+            {{-3, 0, 0, 0, 0, 0, 0, 1}, 8, "-600362847",
+             "116.79211729080111040365945625411536780788", 315, 315},
+            {{-3, 2, -3, 4, -3, 2, 1, 1}, 8, "-9574084639",
+             "86.070570868449256829072531724559652775582", 232, 151},
+            {{4, -3, 3, -1, 0, 0, -3, 1}, 8, "100059217373",
+             "584.85254728086468491677277971329131704451", 680, 680},
+            // Composite degree: unchanged although (6.22) would be larger.
+            {{7, 7, 6, 1, 1}, 5, "65016",
+             "9.2146272381572304890459924546157912944515", 30, 30},
+            {{8, 1, 8, -2, -3, -4, 1}, 7, "20129259201",
+             "1398.2698691382112093231690667243725779705", 2975, 2975},
+    };
+    for (const RegulatorFixture& entry : fields) {
+        silex::NumberField field =
+                integer_polynomial_field(entry.coefficients, entry.length);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        assert(maximal.is_maximal());
+        sflint::Fmpz discriminant;
+        sflint::Fmpz expected_discriminant;
+        assert(maximal.discriminant(sflint::FmpzRef(discriminant)));
+        assert(::fmpz_set_str(expected_discriminant.raw(), entry.discriminant,
+                              10) == 0);
+        assert(::fmpz_equal(discriminant.raw(),
+                            expected_discriminant.raw()) != 0);
+
+        sflint::Arb signature_bound;
+        sflint::Arb bound;
+        assert(silex::unit_lower_regulator_bound(
+                sflint::ArbRef(signature_bound), field, 256));
+        assert(silex::detail::field_lower_regulator_bound(
+                sflint::ArbRef(bound), field, &discriminant, 256));
+        assert(::arb_is_exact(bound.raw()) != 0);
+        assert(::arf_cmp(arb_midref(bound.raw()),
+                         arb_midref(signature_bound.raw())) >= 0);
+
+        sflint::Arb regulator;
+        assert(::arb_set_str(regulator.raw(), entry.regulator, 256) == 0);
+        assert(::arb_lt(bound.raw(), regulator.raw()) != 0);
+
+        assert(floor_regulator_quotient(entry.regulator, signature_bound) ==
+               entry.signature_index_bound);
+        assert(floor_regulator_quotient(entry.regulator, bound) ==
+               entry.index_bound);
+
+        // Without d_K the bound is the signature bound exactly.
+        sflint::Arb without;
+        assert(silex::detail::field_lower_regulator_bound(
+                sflint::ArbRef(without), field, nullptr, 256));
+        assert(::arb_equal(without.raw(), signature_bound.raw()) != 0);
+        if (n_is_prime(static_cast<ulong>(field.degree())) == 0) {
+            assert(::arb_equal(bound.raw(), signature_bound.raw()) != 0);
+        }
+    }
+
+    sflint::Arb sentinel;
+    sflint::arb_set_si(sflint::ArbRef(sentinel), 123);
+    silex::NumberField cubic = integer_polynomial_field(fields[1].coefficients,
+                                                        fields[1].length);
+    sflint::Fmpz discriminant;
+    ::fmpz_set_ui(discriminant.raw(), 2213);
+    assert(!silex::detail::field_lower_regulator_bound(
+            sflint::ArbRef(sentinel), cubic, &discriminant, 0));
+    assert(sflint::arb_contains_si(sentinel, 123));
+    return 0;
+}
+
 int test_log_matrix_regulator_and_independence() {
     silex::NumberField real_quadratic = quadratic_field(2);
     silex::EmbeddingContext embeddings(real_quadratic);
@@ -1099,6 +1288,8 @@ int main() {
     test_lower_regulator_bound();
     test_lower_regulator_bound_terms();
     test_lower_regulator_bound_maximum();
+    test_remak_pohst_term();
+    test_field_lower_regulator_bound();
     test_log_matrix_regulator_and_independence();
     return 0;
 }

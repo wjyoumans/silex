@@ -4,6 +4,7 @@
 #include "order_unit_internal.hpp"
 #include "precision_cap_internal.hpp"
 #include "../factored_element/wide_factored_internal.hpp"
+#include "../unit/unit_internal.hpp"
 
 #include <atomic>
 #include <limits>
@@ -1145,9 +1146,21 @@ bool OrderUnitGroup::regulator_index_bound(flint::FmpzRef out,
         return false;
     }
 
+    // The Pohst-Zassenhaus (6.22) term of the lower bound needs d_K and
+    // applies only in prime degree.  Silex holds d_K as the discriminant of
+    // a maximal order, so it is used only when this order is known to be
+    // maximal; otherwise the signature bound alone is used.
+    flint::Fmpz field_discriminant;
+    const bool have_field_discriminant =
+            n_is_prime(static_cast<ulong>(field->degree())) != 0 &&
+            order->is_maximal() &&
+            order->discriminant(flint::FmpzRef(field_discriminant));
+
     flint::Arb lower;
-    if (!unit_lower_regulator_bound(flint::ArbRef(lower), *field,
-                                    precision)) {
+    if (!detail::field_lower_regulator_bound(
+                flint::ArbRef(lower), *field,
+                have_field_discriminant ? &field_discriminant : nullptr,
+                precision)) {
         return false;
     }
 

@@ -4,6 +4,7 @@
 #include "unit_internal.hpp"
 
 #include <flint/arb_mat.h>
+#include <flint/ulong_extras.h>
 
 #include <silex/flint/arf.hpp>
 #include <silex/flint/arb_vec.hpp>
@@ -166,34 +167,7 @@ bool unit_rank(slong& rank, const NumberField& field) noexcept {
 bool unit_lower_regulator_bound(flint::ArbRef out,
                                 const NumberField& field,
                                 slong precision) noexcept {
-    if (!field.is_defined() || precision <= 0) {
-        return false;
-    }
-
-    Signature sig;
-    if (!sig.compute(field)) {
-        return false;
-    }
-
-    // Every bound used here is non-decreasing in w, so it is valid for any
-    // w <= w_K.  For an order O in K, O^x is a finite-index subgroup of
-    // O_K^x, so Reg(O) >= R_K and a lower bound for R_K bounds Reg(O); w is
-    // therefore the root-of-unity count of the field, not of the order.  If
-    // it cannot be computed, w = 2 (every number field contains -1) keeps
-    // the bound valid.
-    flint::Fmpz roots_order;
-    if (!root_of_unity_order(flint::FmpzRef(roots_order), field)) {
-        fmpz_set_ui(roots_order.raw(), 2);
-    }
-
-    flint::Arb bound;
-    if (!detail::regulator_lower_bound_from_signature(
-                flint::ArbRef(bound), sig.r1(), sig.r2(),
-                flint::FmpzConstRef(roots_order.raw()), precision)) {
-        return false;
-    }
-    arb_set(out.raw(), bound.raw());
-    return true;
+    return detail::field_lower_regulator_bound(out, field, nullptr, precision);
 }
 
 bool quadratic_fundamental_unit(Element& out,
@@ -915,6 +889,139 @@ bool regulator_lower_bound_from_signature(flint::ArbRef out,
         return false;
     }
     arb_set_arf(out.raw(), best.raw());
+    return true;
+}
+
+bool regulator_lower_bound_remak_pohst(flint::ArbRef out,
+                                       slong r1,
+                                       slong r2,
+                                       flint::FmpzConstRef field_discriminant,
+                                       slong precision) noexcept {
+    if (r1 < 0 || r2 < 0 || precision <= 0) {
+        return false;
+    }
+    const slong n = r1 + 2 * r2;
+    const slong r = r1 + r2 - 1;
+    // Prime degree certifies that Q is the only proper subfield, the
+    // primitivity hypothesis of (6.22).  Rank zero has no regulator bound
+    // to give.
+    if (n < 2 || r < 1 || n_is_prime(static_cast<ulong>(n)) == 0) {
+        return false;
+    }
+
+    // c = 4^floor(n/2) for totally real fields of degree at most 11 (the
+    // remark after (6.22)), else n^n; the bound needs |d_K| > c.
+    flint::Fmpz c;
+    if (r2 == 0 && n <= 11) {
+        fmpz_one(c.raw());
+        fmpz_mul_2exp(c.raw(), c.raw(), static_cast<ulong>(2 * (n / 2)));
+    } else {
+        fmpz_ui_pow_ui(c.raw(), static_cast<ulong>(n), static_cast<ulong>(n));
+    }
+    if (fmpz_cmpabs(field_discriminant.raw(), c.raw()) <= 0) {
+        return false;
+    }
+
+    // (n-1) n (n+1) - 6 r2, positive for every n >= 2 since r2 <= n/2.
+    flint::Fmpz denominator;
+    fmpz_set_si(denominator.raw(), n - 1);
+    fmpz_mul_si(denominator.raw(), denominator.raw(), n);
+    fmpz_mul_si(denominator.raw(), denominator.raw(), n + 1);
+    fmpz_sub_si(denominator.raw(), denominator.raw(), 6 * r2);
+    if (fmpz_sgn(denominator.raw()) <= 0) {
+        return false;
+    }
+
+    // 3 log^2(|d_K| / c) / ((n-1) n (n+1) - 6 r2)
+    flint::Arb value;
+    flint::Arb term;
+    arb_set_fmpz(value.raw(), field_discriminant.raw());
+    arb_abs(value.raw(), value.raw());
+    arb_div_fmpz(value.raw(), value.raw(), c.raw(), precision);
+    arb_log(value.raw(), value.raw(), precision);
+    arb_sqr(value.raw(), value.raw(), precision);
+    arb_mul_ui(value.raw(), value.raw(), 3, precision);
+    arb_div_fmpz(value.raw(), value.raw(), denominator.raw(), precision);
+
+    // ( ... )^r 2^r2 / n
+    arb_pow_ui(value.raw(), value.raw(), static_cast<ulong>(r), precision);
+    arb_mul_2exp_si(value.raw(), value.raw(), r2);
+    arb_div_si(value.raw(), value.raw(), n, precision);
+
+    // gamma_r^r: Pohst-Zassenhaus (3.35a) for r <= 8; Blichfeldt's upper
+    // bound (3.35b) beyond, which only lowers the bound.
+    constexpr ulong kHermiteNumerator[] = {1, 4, 2, 4, 8, 64, 64, 256};
+    constexpr ulong kHermiteDenominator[] = {1, 3, 1, 1, 1, 3, 1, 1};
+    if (r <= 8) {
+        arb_set_ui(term.raw(), kHermiteNumerator[r - 1]);
+        arb_div_ui(term.raw(), term.raw(), kHermiteDenominator[r - 1],
+                   precision);
+    } else {
+        flint::Arb factor;
+        arb_set_si(term.raw(), r + 4);
+        arb_mul_2exp_si(term.raw(), term.raw(), -1);
+        arb_gamma(term.raw(), term.raw(), precision);
+        arb_sqr(term.raw(), term.raw(), precision);
+        arb_const_pi(factor.raw(), precision);
+        arb_ui_div(factor.raw(), 2, factor.raw(), precision);
+        arb_pow_ui(factor.raw(), factor.raw(), static_cast<ulong>(r),
+                   precision);
+        arb_mul(term.raw(), term.raw(), factor.raw(), precision);
+    }
+    arb_div(value.raw(), value.raw(), term.raw(), precision);
+    arb_sqrt(value.raw(), value.raw(), precision);
+    return finish_bound(out, value);
+}
+
+bool field_lower_regulator_bound(flint::ArbRef out,
+                                 const NumberField& field,
+                                 const flint::Fmpz* field_discriminant,
+                                 slong precision) noexcept {
+    if (!field.is_defined() || precision <= 0) {
+        return false;
+    }
+
+    Signature sig;
+    if (!sig.compute(field)) {
+        return false;
+    }
+
+    // Every bound used here is non-decreasing in w, so it is valid for any
+    // w <= w_K.  For an order O in K, O^x is a finite-index subgroup of
+    // O_K^x, so Reg(O) >= R_K and a lower bound for R_K bounds Reg(O); w is
+    // therefore the root-of-unity count of the field, not of the order.  If
+    // it cannot be computed, w = 2 (every number field contains -1) keeps
+    // the bound valid.
+    flint::Fmpz roots_order;
+    if (!root_of_unity_order(flint::FmpzRef(roots_order), field)) {
+        fmpz_set_ui(roots_order.raw(), 2);
+    }
+
+    flint::Arb bound;
+    if (!regulator_lower_bound_from_signature(
+                flint::ArbRef(bound), sig.r1(), sig.r2(),
+                flint::FmpzConstRef(roots_order.raw()), precision)) {
+        return false;
+    }
+
+    // Pohst-Zassenhaus (6.22) needs d_K; it never lowers the bound, and it
+    // is skipped (the signature bound kept) whenever it does not apply.
+    if (field_discriminant != nullptr) {
+        const slong prec = precision < kRegulatorBoundPrecision
+                                   ? precision
+                                   : kRegulatorBoundPrecision;
+        flint::Arf best;
+        arf_set(best.raw(), arb_midref(bound.raw()));
+        bool have_best = true;
+        flint::Arb term;
+        if (regulator_lower_bound_remak_pohst(
+                    flint::ArbRef(term), sig.r1(), sig.r2(),
+                    flint::FmpzConstRef(field_discriminant->raw()), prec)) {
+            raise_lower_bound(best, have_best, term, prec);
+        }
+        arb_set_arf(bound.raw(), best.raw());
+    }
+    arb_set(out.raw(), bound.raw());
     return true;
 }
 

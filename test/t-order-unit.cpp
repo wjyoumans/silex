@@ -2733,12 +2733,13 @@ int test_relation_kernel_units_index_bounded_cubic_rank_target() {
             sflint::FmpzConstRef(aux_max), 2));
 
     sflint::Fmpz index_bound;
-    // GP: K = bnfinit(x^3-2*x-5, 1) has K.reg = 2.35861..., h = 2 and
-    // signature (1, 1); the refined group has regulator 9.43444... (index 4),
-    // and the Friedman 1989 Table 6 bound R >= 0.28 for signature (1, 1)
-    // gives floor(9.43444... / 0.28) = 33.
+    // GP: K = bnfinit(x^3-2*x-5, 1) has K.reg = 2.35861..., h = 2,
+    // signature (1, 1) and d_K = -643; the refined group has regulator
+    // 9.43444... (index 4).  The order is maximal and the degree prime, so
+    // the Pohst-Zassenhaus (6.22) bound R >= 1.05676... (above the Friedman
+    // 1989 Table 6 bound 0.28) gives floor(9.43444... / 1.05676...) = 8.
     assert(refined.regulator_index_bound(sflint::FmpzRef(index_bound), 128));
-    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(index_bound), 33));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(index_bound), 8));
 
     return 0;
 }
@@ -5042,6 +5043,38 @@ int test_regulator_index_bound() {
     // floor(2 log(1 + sqrt2) / 0.48) = floor(3.672...) = 3.
     assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(subgroup_bound), 3));
 
+    // Q(sqrt7): d_K = 28 and R_K = log(8 + 3 sqrt7) = 2.76865...  For the
+    // maximal order the Pohst-Zassenhaus (6.22) bound log(28/4)/2 =
+    // 0.97295... exceeds Table 6's 0.48: floor(2.76865... / 0.97295...) = 2.
+    // The order of conductor 3 has the same unit group, but it is not
+    // maximal, so it keeps the signature bound: floor(2.76865... / 0.48) = 5.
+    silex::NumberField sqrt7 = quadratic_field(7);
+    silex::Order sqrt7_maximal = silex::test::equation_order(sqrt7);
+    assert(sqrt7_maximal.is_maximal());
+    silex::OrderUnitGroup sqrt7_units;
+    assert(sqrt7_units.compute(sqrt7_maximal));
+    assert(sqrt7_units.regulator_index_bound(sflint::FmpzRef(bound), 160));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(bound), 2));
+    sflint::Fmpz three;
+    assert(set_fmpz_si(three, 3));
+    silex::Order sqrt7_conductor3 = silex::Order::quadratic_order(
+            sqrt7, sflint::FmpzConstRef(three));
+    assert(sqrt7_conductor3.maximality_known());
+    assert(!sqrt7_conductor3.is_maximal());
+    silex::Element sqrt7_unit(sqrt7);
+    assert(set_quadratic_coeffs(sqrt7_unit, 8, 1, 3, 1));
+    silex::FactoredElement sqrt7_generator(sqrt7);
+    assert(sqrt7_generator.set_element(sqrt7_unit));
+    silex::FactoredElement sqrt7_generators[] = {std::move(sqrt7_generator)};
+    silex::EmbeddingContext sqrt7_embeddings(sqrt7);
+    silex::OrderUnitGroup conductor3_units(sqrt7_conductor3);
+    assert(conductor3_units.set_units(
+            sqrt7_conductor3,
+            silex::FactoredElementSpan(sqrt7_generators, 1),
+            sqrt7_embeddings, 160));
+    assert(conductor3_units.regulator_index_bound(sflint::FmpzRef(bound), 160));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(bound), 5));
+
     sflint::Fmpz sentinel;
     assert(set_fmpz_si(sentinel, 42));
     silex::OrderUnitGroup unset(order);
@@ -7164,9 +7197,13 @@ int test_prove_index_bound_maximal_quadratic_sqrt5_control() {
 // x^3 - 4x^2 - 8x - 1 (discriminant 2213, totally real, Z[theta] maximal):
 // GP 2.17 `K = bnfinit(x^3-4*x^2-8*x-1, 1)` gives the fundamental units
 // theta and -4 theta^2 - theta + 6, class number one, and bnfcertify(K) = 1.
-// The regulator is 12.6808..., and the Friedman 1989 Table 6 bound for
-// signature (3, 0) is R >= 0.52, so the regulator index bound is
-// floor(12.6808... / 0.52) = 24.  With the pre-scan bound 200, ell = 13, 17
+// The regulator is 12.6808...  On the maximal order the Pohst-Zassenhaus
+// (6.22) bound R >= 2.4930... gives the regulator index bound
+// floor(12.6808... / 2.4930...) = 5.  The proofs below run on the equation
+// order, the same lattice but not known to be maximal, where the bound is
+// the Friedman 1989 Table 6 bound R >= 0.52 for signature (3, 0) and the
+// index bound is floor(12.6808... / 0.52) = 24.  With the pre-scan bound 200,
+// ell = 13, 17
 // and 19 each have a single degree-one prime q = 1 mod ell below the bound,
 // so the unit-rank-two local proof must continue past the pre-scan
 // (reference `saturate!` scan) and still verify every ell <= 24.
@@ -7178,8 +7215,10 @@ int test_prove_index_bound_cubic2213_past_prescan_bound() {
     sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
     silex::NumberField field = silex::test::field_by_polynomial(
             sflint::FmpqPolyConstRef(polynomial));
-    silex::Order order = silex::test::verified_maximal_order(
+    silex::Order maximal = silex::test::verified_maximal_order(
             silex::test::equation_order(field));
+    silex::Order order = silex::test::equation_order(field);
+    assert(!order.maximality_known());
     silex::EmbeddingContext embeddings(field);
 
     sflint::FmpqPoly theta_poly;
@@ -7200,6 +7239,15 @@ int test_prove_index_bound_cubic2213_past_prescan_bound() {
     assert(start.set_units(order, silex::FactoredElementSpan(generators, 2),
                            embeddings, 256));
     assert(start.free_rank() == 2);
+
+    silex::OrderUnitGroup maximal_start(maximal);
+    assert(maximal_start.set_units(
+            maximal, silex::FactoredElementSpan(generators, 2), embeddings,
+            256));
+    sflint::Fmpz maximal_index_bound;
+    assert(maximal_start.regulator_index_bound(
+            sflint::FmpzRef(maximal_index_bound), 256));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(maximal_index_bound), 5));
 
     sflint::Fmpz index_bound;
     assert(start.regulator_index_bound(sflint::FmpzRef(index_bound), 256));
