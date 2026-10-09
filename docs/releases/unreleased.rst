@@ -218,6 +218,15 @@ Changed
   ``select_saturation_primes``, so the two pick the same primes.  Proof
   status is unaffected.
 
+- The analytic index-one test of a ``grh`` paired class/unit transaction in
+  degree three and higher now evaluates ``hR`` to a relative error of 1/4
+  with the Belabas-Friedman Theorem 7 error bound, instead of the full
+  default zeta route, and falls back to that route when no cutoff below
+  20007 reaches the target.  Accept/reject results are unchanged; the
+  recorded ``zeta_bf_proof_record()`` values (cutoff and error bound) are
+  now those of the coarse evaluation.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - A ``grh`` paired class/unit transaction that is accepted by the analytic
   index-one test now records that check on the published class group.
   ``analytic_class_regulator_status()`` reads ``verified``, and
