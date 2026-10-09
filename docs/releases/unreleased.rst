@@ -72,6 +72,20 @@ Added
 Changed
 -------
 
+- ``grh`` class/unit computations on an imaginary quadratic field with
+  ``|D| >= 2^44`` no longer list the reduced forms of discriminant ``D``,
+  whose time and memory grow like ``sqrt(|D|)``.  They take ``h`` from the
+  GRH relation lattice and the analytic index-one test, as in every other
+  degree; for ``x^2 + 10^14 + 319`` this took 0.12 s and 22 MB instead of
+  3.2 s and 1.4 GB on a busy machine.  ``h``, the invariants and the labels
+  are unchanged.  For these fields completeness is now ``grh`` with basis
+  ``belabas_friedman`` (previously ``proven``, ``exact_class_number``), and
+  ``analytic_class_regulator_status()`` is ``verified`` with certification
+  ``grh`` (previously ``not_checked``).  Fields with ``|D| < 2^44`` keep the
+  exact class number and their output is unchanged.  See "Class groups and
+  order units" in :doc:`../reference/algorithms_and_sources` and
+  :doc:`../development/class_number_route_cutoff`.
+
 - **Breaking:** ``SUnitGroup::regulator`` now returns the regulator of the
   S-unit lattice, ``R_S = R h/h_S prod log N(P)`` for nonempty ``S``: the
   absolute value of a maximal minor of the log-S embedding of the free
