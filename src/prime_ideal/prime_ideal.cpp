@@ -1773,6 +1773,18 @@ bool components_from_recursive_split(
     return true;
 }
 
+// How `components_from_fixed_subspace` splits the etale algebra.  `bounded`
+// and `recursive` first look for a separating fixed element and, if there is
+// none, fall back to the bounded idempotent enumeration or to the recursive
+// split.  The `*_only` modes skip the separating element; they exist so tests
+// can compare the enumeration and the recursive split on one algebra.
+enum class FixedSplit : unsigned char {
+    bounded,
+    recursive,
+    enumeration_only,
+    recursive_only,
+};
+
 bool components_from_fixed_subspace(
         std::vector<FiniteAlgebraComponent>& out,
         const flint::FmpzModMat& kernel,
@@ -1780,20 +1792,27 @@ bool components_from_fixed_subspace(
         const flint::FmpzVec& one,
         const flint::FmpzMat& multiplication_table,
         flint::FmpzConstRef p,
-        const flint::FmpzModCtx& ctx) noexcept {
+        const flint::FmpzModCtx& ctx,
+        FixedSplit split) noexcept {
     const slong n = one.length();
     flint::FmpzVec separator(n);
     flint::FmpzModPoly minpoly(ctx);
     flint::FmpzModPolyFactor factorization(ctx);
-    if (!find_separating_fixed_element(separator, factorization, minpoly,
+    const bool direct = split == FixedSplit::enumeration_only ||
+                        split == FixedSplit::recursive_only;
+    if (direct ||
+        !find_separating_fixed_element(separator, factorization, minpoly,
                                        kernel, nullity, multiplication_table,
                                        p, ctx)) {
-        // The bounded enumerations above stop when p^nullity exceeds 4096;
-        // the recursive split has no such bound and runs only after both.
-        return components_from_fixed_idempotents(out, kernel, nullity,
-                                                 multiplication_table, p,
-                                                 ctx) ||
-               components_from_recursive_split(out, kernel, nullity, one,
+        // The bounded enumerations stop when p^nullity exceeds 4096; the
+        // recursive split has no such bound.
+        if (split == FixedSplit::bounded ||
+            split == FixedSplit::enumeration_only) {
+            return components_from_fixed_idempotents(out, kernel, nullity,
+                                                     multiplication_table, p,
+                                                     ctx);
+        }
+        return components_from_recursive_split(out, kernel, nullity, one,
                                                multiplication_table, ctx);
     }
 
@@ -2198,7 +2217,8 @@ bool ramification_index_from_containment(slong& out,
 bool unramified_maximal_index_divisor_prime_data(
         std::vector<IndexPrimeData>& out,
         const Order& order,
-        flint::FmpzConstRef p) noexcept {
+        flint::FmpzConstRef p,
+        FixedSplit split) noexcept {
     // Source trace: reference `Prime.jl:prime_dec_gen` forms `O / pradical(O,p)`,
     // `Polygons.jl:_decomposition` splits that finite algebra, and for
     // p not dividing the maximal-order discriminant sets every e to 1.  In
@@ -2251,7 +2271,7 @@ bool unramified_maximal_index_divisor_prime_data(
     std::vector<FiniteAlgebraComponent> components;
     if (!components_from_fixed_subspace(components, fixed_kernel, nullity,
                                         one_mod, multiplication_table, p,
-                                        ctx)) {
+                                        ctx, split)) {
         return false;
     }
 
@@ -2276,7 +2296,8 @@ bool unramified_maximal_index_divisor_prime_data(
 bool ramified_maximal_index_divisor_prime_data(
         std::vector<IndexPrimeData>& out,
         const Order& order,
-        flint::FmpzConstRef p) noexcept {
+        flint::FmpzConstRef p,
+        FixedSplit split) noexcept {
     // Source trace: reference `Prime.jl:prime_dec_gen` forms the p-radical and
     // decomposes O/(p, pradical); reference `base2.c:primedec_aux` builds the
     // same p-radical, splits the etale quotient, and recovers ramification
@@ -2363,7 +2384,7 @@ bool ramified_maximal_index_divisor_prime_data(
     std::vector<FiniteAlgebraComponent> components;
     if (!components_from_fixed_subspace(
                 components, fixed_kernel, fixed_nullity, quotient_one,
-                quotient_multiplication_table, p, ctx)) {
+                quotient_multiplication_table, p, ctx, split)) {
         return false;
     }
 
@@ -3894,6 +3915,28 @@ bool PrimeIdealAccess::valuation_by_power_containment_for_testing(
     return prime.valuation_by_power_containment(out, element, bound, nullptr);
 }
 
+bool PrimeIdealAccess::index_divisor_prime_ideals_for_testing(
+        std::vector<Ideal>& out,
+        const Order& order,
+        flint::FmpzConstRef p,
+        bool recursive_split) noexcept {
+    const FixedSplit split = recursive_split ? FixedSplit::recursive_only
+                                             : FixedSplit::enumeration_only;
+    std::vector<IndexPrimeData> primes;
+    if (!unramified_maximal_index_divisor_prime_data(primes, order, p,
+                                                     split) &&
+        !ramified_maximal_index_divisor_prime_data(primes, order, p, split)) {
+        return false;
+    }
+    std::vector<Ideal> ideals;
+    ideals.reserve(primes.size());
+    for (IndexPrimeData& prime : primes) {
+        ideals.push_back(std::move(prime.ideal));
+    }
+    out.swap(ideals);
+    return true;
+}
+
 bool PrimeIdealAccess::triangular_containment_for_testing(
         bool& shape_ok,
         bool& contains,
@@ -4416,14 +4459,12 @@ bool decompose_prime(PrimeIdealList& out,
             return true;
         }
 
-        std::vector<IndexPrimeData> unramified_primes;
-        if (unramified_maximal_index_divisor_prime_data(
-                    unramified_primes, order, p)) {
-            if (!candidates.reserve(
-                        static_cast<slong>(unramified_primes.size()))) {
+        auto publish_index_primes =
+                [&](std::vector<IndexPrimeData>& primes) noexcept -> bool {
+            if (!candidates.reserve(static_cast<slong>(primes.size()))) {
                 return false;
             }
-            for (IndexPrimeData& prime : unramified_primes) {
+            for (IndexPrimeData& prime : primes) {
                 if (!residue_degree_allowed(prime.residue_degree,
                                             max_residue_degree)) {
                     continue;
@@ -4437,41 +4478,40 @@ bool decompose_prime(PrimeIdealList& out,
             }
             out.swap(candidates);
             return true;
-        }
+        };
 
-        std::vector<IndexPrimeData> pradical_primes;
-        if (ramified_maximal_index_divisor_prime_data(
-                    pradical_primes, order, p)) {
-            if (!candidates.reserve(
-                        static_cast<slong>(pradical_primes.size()))) {
-                return false;
-            }
-            for (IndexPrimeData& prime : pradical_primes) {
-                if (!residue_degree_allowed(prime.residue_degree,
-                                            max_residue_degree)) {
-                    continue;
-                }
-                if (!candidates.append(order) ||
-                    !candidates.back()->set_data_no_residue(
-                            p, prime.ramification_index,
-                            prime.residue_degree, prime.ideal)) {
-                    return false;
-                }
-            }
-            out.swap(candidates);
-            return true;
+        std::vector<IndexPrimeData> index_primes;
+        if (unramified_maximal_index_divisor_prime_data(
+                    index_primes, order, p, FixedSplit::bounded) ||
+            ramified_maximal_index_divisor_prime_data(
+                    index_primes, order, p, FixedSplit::bounded)) {
+            return publish_index_primes(index_primes);
         }
 
         Element beta(*order.parent());
         flint::FmpzPoly chi;
+        bool monogenic = false;
         {
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::prime_ideal,
                     "prime_ideal.decompose_prime.find_monogenic_generator");
-            if (!beta.is_defined() ||
-                !find_monogenic_generator(chi, beta, order)) {
+            if (!beta.is_defined()) {
                 return false;
             }
+            monogenic = find_monogenic_generator(chi, beta, order);
+        }
+        if (!monogenic) {
+            // The recursive split has no bound on p, but it runs only after
+            // the bounded enumeration and the monogenic generator search have
+            // both failed, so every decomposition those give is unchanged,
+            // prime order included.
+            if (unramified_maximal_index_divisor_prime_data(
+                        index_primes, order, p, FixedSplit::recursive) ||
+                ramified_maximal_index_divisor_prime_data(
+                        index_primes, order, p, FixedSplit::recursive)) {
+                return publish_index_primes(index_primes);
+            }
+            return false;
         }
 
         flint::FmpzModPoly reduced(ctx);

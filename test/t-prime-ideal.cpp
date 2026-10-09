@@ -1016,6 +1016,133 @@ int test_index_divisor_recursive_split_ramified() {
             {144, -300, 259, -196, 162, -48, 24, -2, 1}, 11, 4, 2, 1);
 }
 
+// Decomposes p in the maximal order and checks each prime's e and full HNF,
+// in order.  `hnfs` holds one row-major HNF per prime.
+int check_index_divisor_decomposition_hnfs(
+        const std::vector<slong>& low_to_high,
+        slong rational_prime,
+        const std::vector<slong>& ramification_indices,
+        const std::vector<std::vector<slong>>& hnfs) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+    const slong degree = static_cast<slong>(low_to_high.size()) - 1;
+
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!maximal.is_equation_order());
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, rational_prime));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == static_cast<slong>(hnfs.size()));
+    for (slong i = 0; i < primes.size(); ++i) {
+        const std::vector<slong>& expected = hnfs[static_cast<std::size_t>(i)];
+        assert(primes.at(i)->ramification_index() ==
+               ramification_indices[static_cast<std::size_t>(i)]);
+        assert(primes.at(i)->residue_degree() == 1);
+        silex::Ideal ideal(maximal);
+        assert(primes.at(i)->get_ideal(ideal));
+        sflint::FmpzMat hnf(degree, degree);
+        assert(ideal.get_hnf(sflint::FmpzMatRef(hnf)));
+        for (slong row = 0; row < degree; ++row) {
+            for (slong col = 0; col < degree; ++col) {
+                assert(fmpz_mat_entry_is_si(
+                        hnf, row, col,
+                        expected[static_cast<std::size_t>(row * degree +
+                                                          col)]));
+            }
+        }
+    }
+    return 0;
+}
+
+// p^(number of primes) exceeds the bounded enumeration here too, but the
+// maximal order has a monogenic generator, so the Dedekind-Kummer path
+// decomposes p as before the recursive split was added and keeps its prime
+// order.  17^3 g(x/17) for g = y^3 - 6y^2 + 11y + 11, where 17 splits
+// completely.
+int test_index_divisor_monogenic_order_unchanged_unramified() {
+    return check_index_divisor_decomposition_hnfs(
+            {54043, 3179, -102, 1}, 17, {1, 1, 1},
+            {{1, 0, 15, 0, 1, 11, 0, 0, 17},
+             {1, 0, 16, 0, 1, 16, 0, 0, 17},
+             {1, 0, 4, 0, 1, 8, 0, 0, 17}});
+}
+
+// 17^4 g(x/17) for g = y (y - 1) (y - 2)^2 + 17: 17 = P1 P2 P3^2.
+int test_index_divisor_monogenic_order_unchanged_ramified() {
+    return check_index_divisor_decomposition_hnfs(
+            {1419857, -19652, 2312, -85, 1}, 17, {1, 1, 2},
+            {{17, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+             {1, 0, 0, 16, 0, 1, 0, 16, 0, 0, 1, 16, 0, 0, 0, 17},
+             {1, 0, 0, 2, 0, 1, 0, 4, 0, 0, 1, 8, 0, 0, 0, 17}});
+}
+
+// Splits O/(p, I_p) through the bounded idempotent enumeration and through
+// the recursive split (both without the separating element) and checks that
+// they give the same prime ideals in the same order, which is also the order
+// decompose_prime publishes.  p is smaller than the number of primes above
+// it, so a fixed element takes fewer values than there are fields and the
+// recursive split needs more than one level.
+int check_recursive_split_matches_enumeration(
+        const std::vector<slong>& low_to_high,
+        slong rational_prime,
+        slong count) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!maximal.is_equation_order());
+    assert(rational_prime < count);
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, rational_prime));
+    std::vector<silex::Ideal> enumerated;
+    std::vector<silex::Ideal> split;
+    assert(PrimeIdealAccess::index_divisor_prime_ideals_for_testing(
+            enumerated, maximal, sflint::FmpzConstRef(p), false));
+    assert(PrimeIdealAccess::index_divisor_prime_ideals_for_testing(
+            split, maximal, sflint::FmpzConstRef(p), true));
+    assert(static_cast<slong>(enumerated.size()) == count);
+    assert(split.size() == enumerated.size());
+
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == count);
+    for (std::size_t i = 0; i < split.size(); ++i) {
+        assert(split[i].equal(enumerated[i]));
+        silex::Ideal ideal(maximal);
+        assert(primes.at(static_cast<slong>(i))->get_ideal(ideal));
+        assert(ideal.equal(split[i]));
+        for (std::size_t j = 0; j < i; ++j) {
+            assert(!split[j].equal(split[i]));
+        }
+    }
+    return 0;
+}
+
+int test_recursive_split_matches_enumeration_unramified() {
+    // Q(sqrt(-7), sqrt(17)), p = 2: four primes with e = f = 1.
+    assert(check_recursive_split_matches_enumeration({36, 0, -5, 0, 1}, 2,
+                                                     4) == 0);
+    // Q(sqrt(-2), sqrt(7)), p = 3: four primes with e = f = 1.
+    return check_recursive_split_matches_enumeration({9, 0, 8, 0, 1}, 3, 4);
+}
+
+int test_recursive_split_matches_enumeration_ramified() {
+    // Q(sqrt(-3), sqrt(7), sqrt(-2)), p = 3: four primes with e = 2, f = 1.
+    return check_recursive_split_matches_enumeration(
+            {81, 0, -72, 0, 55, 0, -8, 0, 1}, 3, 4);
+}
+
 int test_valuation_degree_one() {
     sflint::FmpqPoly polynomial;
     poly_x(polynomial);
@@ -2579,6 +2706,10 @@ int main() {
     assert(test_index_divisor_recursive_split_unramified_degree_one() == 0);
     assert(test_index_divisor_recursive_split_unramified_degree_two() == 0);
     assert(test_index_divisor_recursive_split_ramified() == 0);
+    assert(test_index_divisor_monogenic_order_unchanged_unramified() == 0);
+    assert(test_index_divisor_monogenic_order_unchanged_ramified() == 0);
+    assert(test_recursive_split_matches_enumeration_unramified() == 0);
+    assert(test_recursive_split_matches_enumeration_ramified() == 0);
     assert(test_valuation_degree_one() == 0);
     assert(test_valuation_order_element_split_repeated() == 0);
     assert(test_valuation_order_element_ramified_unique_prime_norm() == 0);

@@ -5,6 +5,8 @@
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <vector>
+
 namespace silex::detail {
 
 enum class RetainedQuadraticPrimeKind {
@@ -124,6 +126,18 @@ public:
             bool& contains,
             flint::FmpzMatConstRef basis,
             flint::FmpzMatConstRef row) noexcept;
+
+    // Test hook: splits O/(p, I_p) for a prime p dividing the index of the
+    // maximal order `order` and writes its prime ideals in the order
+    // decompose_prime publishes them.  It skips the separating-element search
+    // and uses the bounded idempotent enumeration (`recursive_split` false)
+    // or the recursive split (true), so tests can compare the two on one
+    // algebra.  Returns false if the chosen method fails.  For tests only.
+    static bool index_divisor_prime_ideals_for_testing(
+            std::vector<Ideal>& out,
+            const Order& order,
+            flint::FmpzConstRef p,
+            bool recursive_split) noexcept;
 
     // `norm_vp` must be the exact p-adic valuation of the absolute norm of
     // `element`; the result is wrong otherwise.
