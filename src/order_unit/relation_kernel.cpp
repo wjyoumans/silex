@@ -16,6 +16,7 @@
 
 #include <flint/fmpz_mat.h>
 #include <flint/fmpz_mod_mat.h>
+#include <flint/nmod.h>
 #include <flint/ulong_extras.h>
 
 #include <silex/archimedean.hpp>
@@ -1124,6 +1125,107 @@ bool dlog_proof_rank(slong& out,
     return out >= 0;
 }
 
+namespace {
+
+// One pending entry of a residue_dlog_proof_matrix column on the word-size
+// degree-one path: `image` is the residue value raised to (p - 1) / ell.
+struct WordQuotientLogTarget {
+    ulong image = 0;
+    slong row = 0;
+};
+
+// Quotient logs of all `images` with respect to `quotient_log`, sharing one
+// walk over the powers of its quotient generator.  Each entry this resolves
+// is the value ResidueFieldQuotientLog::apply returns on its word-size
+// degree-one path (`quotient_log_mod_prime_apply_ui` in residue_field.cpp),
+// which walks zeta^0, zeta^1, ..., zeta^(ell - 1) for every element
+// separately and returns the first exponent i with zeta^i equal to the
+// element raised to (p - 1) / ell.  This walk visits the same powers in the
+// same order once and records, for each element, the first such i; the walk
+// stops early once every element is matched.  `resolved[j]` is set for the
+// entries written into row j of `out`; an entry this cannot resolve (field
+// not of degree one, a value off the word-size path, a zero residue, or no
+// match below ell) is left unset for the caller to pass to apply.
+void word_quotient_log_shared_walk(
+        flint::FmpzMat& out,
+        std::vector<bool>& resolved,
+        const std::vector<ResidueFieldElement>& images,
+        const ResidueField& residue_field,
+        const ResidueFieldQuotientLog& quotient_log,
+        flint::FmpzConstRef ell,
+        const DiagnosticsContext* diagnostics) noexcept {
+    flint::Fmpz p;
+    flint::Fmpz scalar;
+    ResidueFieldElement quotient_generator(residue_field);
+    if (residue_field.degree() != 1 ||
+        !residue_field.characteristic(flint::FmpzRef(p)) ||
+        !flint::fmpz_abs_fits_ui(flint::FmpzConstRef(p)) ||
+        !flint::fmpz_abs_fits_ui(ell) ||
+        !quotient_log.quotient_generator(quotient_generator) ||
+        !quotient_generator.degree_one_scalar(flint::FmpzRef(scalar)) ||
+        !flint::fmpz_abs_fits_ui(flint::FmpzConstRef(scalar))) {
+        return;
+    }
+
+    const ulong p_ui = flint::fmpz_get_ui(flint::FmpzConstRef(p));
+    const ulong ell_ui = flint::fmpz_get_ui(ell);
+    if (p_ui < 2 || ell_ui < 2 || (p_ui - 1) % ell_ui != 0) {
+        return;
+    }
+    const ulong zeta = flint::fmpz_get_ui(flint::FmpzConstRef(scalar)) % p_ui;
+    if (zeta == 0) {
+        return;
+    }
+
+    // The quotient-log context stores cofactor (q - 1) / ell, and q = p on a
+    // degree-one residue field.
+    const ulong cofactor = (p_ui - 1) / ell_ui;
+    const ulong p_inverse = n_preinvert_limb(p_ui);
+    std::vector<WordQuotientLogTarget> pending;
+    pending.reserve(images.size());
+    for (std::size_t j = 0; j < images.size(); ++j) {
+        if (!images[j].degree_one_scalar(flint::FmpzRef(scalar)) ||
+            !flint::fmpz_abs_fits_ui(flint::FmpzConstRef(scalar))) {
+            continue;
+        }
+        const ulong value =
+                flint::fmpz_get_ui(flint::FmpzConstRef(scalar)) % p_ui;
+        if (value == 0) {
+            continue;
+        }
+        WordQuotientLogTarget target;
+        target.image = n_powmod2_ui_preinv(value, cofactor, p_ui, p_inverse);
+        target.row = static_cast<slong>(j);
+        pending.push_back(target);
+    }
+    if (pending.empty()) {
+        return;
+    }
+
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.residue_dlog_proof_matrix.shared_walk");
+    nmod_t mod;
+    nmod_init(&mod, p_ui);
+    ulong current = 1 % p_ui;
+    for (ulong i = 0; i < ell_ui && !pending.empty(); ++i) {
+        std::size_t k = 0;
+        while (k < pending.size()) {
+            if (pending[k].image != current) {
+                ++k;
+                continue;
+            }
+            flint::fmpz_set_ui(
+                    flint::fmpz_mat_entry(out, pending[k].row, 0), i);
+            resolved[static_cast<std::size_t>(pending[k].row)] = true;
+            pending[k] = pending.back();
+            pending.pop_back();
+        }
+        current = nmod_mul(current, zeta, mod);
+    }
+}
+
+}  // namespace
+
 bool residue_dlog_proof_matrix(flint::FmpzMat& out,
                                const OrderUnitGroup& group,
                                const PrimeIdeal& prime,
@@ -1152,27 +1254,47 @@ bool residue_dlog_proof_matrix(flint::FmpzMat& out,
     }
 
     flint::FmpzMat candidate(proof_rank, 1);
-    ResidueFieldElement image(residue_field);
     ResidueFieldQuotientLog quotient_log(residue_field);
     if (!quotient_log.is_defined() || !quotient_log.set_ell(ell)) {
         return false;
     }
+
+    // Reduce every entry first: the free generators, then the torsion
+    // generator when ell divides the torsion order.
+    std::vector<ResidueFieldElement> images;
+    images.reserve(static_cast<std::size_t>(proof_rank));
     for (slong i = 0; i < rank; ++i) {
         FactoredElement generator(*field);
+        images.emplace_back(residue_field);
         if (!group.free_generator(generator, i) ||
-            !image.set_factored_element(generator) ||
-            !quotient_log.apply(flint::fmpz_mat_entry(candidate, i, 0),
-                                image)) {
+            !images.back().set_factored_element(generator)) {
             return false;
         }
     }
 
     if (proof_rank > rank) {
         OrderElement torsion(*order);
+        images.emplace_back(residue_field);
         if (!group.torsion_generator(torsion) ||
-            !image.set_order_element(torsion) ||
-            !quotient_log.apply(flint::fmpz_mat_entry(candidate, rank, 0),
-                                image)) {
+            !images.back().set_order_element(torsion)) {
+            return false;
+        }
+    }
+
+    // Every entry takes the quotient log of the same residue field and ell,
+    // so one walk over the powers of the quotient generator serves the whole
+    // column; entries it leaves unresolved take ResidueFieldQuotientLog::apply
+    // as before.
+    std::vector<bool> resolved(images.size(), false);
+    word_quotient_log_shared_walk(candidate, resolved, images, residue_field,
+                                  quotient_log, ell, group.diagnostics());
+    for (std::size_t j = 0; j < images.size(); ++j) {
+        if (resolved[j]) {
+            continue;
+        }
+        if (!quotient_log.apply(
+                    flint::fmpz_mat_entry(candidate, static_cast<slong>(j), 0),
+                    images[j])) {
             return false;
         }
     }

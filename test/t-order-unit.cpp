@@ -3990,6 +3990,135 @@ bool generic_residue_dlog_column_for_test(sflint::FmpzMat& out,
     return true;
 }
 
+// Per-entry oracle for residue_dlog_proof_matrix: every entry, including the
+// torsion entry when ell divides the torsion order, takes its own
+// ResidueFieldQuotientLog::apply.
+bool per_entry_residue_dlog_proof_matrix_for_test(
+        sflint::FmpzMat& out,
+        const silex::OrderUnitGroup& group,
+        const silex::PrimeIdeal& prime,
+        sflint::FmpzConstRef ell) noexcept {
+    const silex::Order* order = group.parent();
+    const silex::NumberField* field =
+            order == nullptr ? nullptr : order->parent();
+    const slong rank = group.free_rank();
+    slong proof_rank = 0;
+    if (!group.is_set() || field == nullptr ||
+        !silex::detail::dlog_proof_rank(proof_rank, group, ell)) {
+        return false;
+    }
+
+    silex::ResidueField residue_field(prime);
+    silex::ResidueFieldElement image(residue_field);
+    silex::ResidueFieldQuotientLog quotient_log(residue_field);
+    if (!residue_field.is_defined() || !quotient_log.is_defined() ||
+        !quotient_log.set_ell(ell)) {
+        return false;
+    }
+
+    sflint::FmpzMat candidate(proof_rank, 1);
+    for (slong i = 0; i < rank; ++i) {
+        silex::FactoredElement generator(*field);
+        if (!group.free_generator(generator, i) ||
+            !image.set_factored_element(generator) ||
+            !quotient_log.apply(sflint::fmpz_mat_entry(candidate, i, 0),
+                                image)) {
+            return false;
+        }
+    }
+    if (proof_rank > rank) {
+        silex::OrderElement torsion(*order);
+        if (!group.torsion_generator(torsion) ||
+            !image.set_order_element(torsion) ||
+            !quotient_log.apply(sflint::fmpz_mat_entry(candidate, rank, 0),
+                                image)) {
+            return false;
+        }
+    }
+
+    out = std::move(candidate);
+    return true;
+}
+
+// residue_dlog_proof_matrix shares one walk over the quotient-generator
+// powers across a column; every entry must equal the per-entry quotient log.
+// The cyclic cubic x^3 - 3x + 1 with units theta and theta - 1 gives two
+// free entries, plus the torsion entry -1 at ell = 2.
+int test_residue_dlog_proof_matrix_matches_per_entry_quotient_log() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    silex::FactoredElement generators[] = {
+            silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+    assert(generators[0].set_element(theta));
+    assert(generators[1].push(theta_minus_one, 3));
+    assert(generators[1].push(theta, -2));
+    silex::EmbeddingContext embeddings(cubic);
+    silex::OrderUnitGroup group;
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 64));
+    assert(group.free_rank() == 2);
+
+    const slong ells[] = {2, 3, 5, 7, 13, 31, 101, 1009};
+    slong checked = 0;
+    slong torsion_columns = 0;
+    for (const slong ell_si : ells) {
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, ell_si));
+        slong proof_rank = 0;
+        assert(silex::detail::dlog_proof_rank(
+                proof_rank, group, sflint::FmpzConstRef(ell)));
+        slong primes_for_ell = 0;
+        for (ulong q = static_cast<ulong>(ell_si) + 1; primes_for_ell < 6;
+             q += static_cast<ulong>(ell_si)) {
+            if (q == 3 || n_is_prime(q) == 0) {
+                continue;
+            }
+            sflint::Fmpz q_fmpz;
+            assert(set_fmpz_si(q_fmpz, static_cast<slong>(q)));
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(
+                    primes, order, sflint::FmpzConstRef(q_fmpz), 1));
+            for (slong i = 0; i < primes.size(); ++i) {
+                const silex::PrimeIdeal* prime = primes.at(i);
+                assert(prime != nullptr);
+                if (prime == nullptr) {
+                    return 1;
+                }
+                sflint::FmpzMat shared(0, 0);
+                sflint::FmpzMat expected(0, 0);
+                const bool matches =
+                        silex::detail::residue_dlog_proof_matrix(
+                                shared, group, *prime,
+                                sflint::FmpzConstRef(ell)) &&
+                        per_entry_residue_dlog_proof_matrix_for_test(
+                                expected, group, *prime,
+                                sflint::FmpzConstRef(ell)) &&
+                        sflint::fmpz_mat_nrows(shared) == proof_rank &&
+                        sflint::fmpz_mat_equal(
+                                sflint::FmpzMatConstRef(shared),
+                                sflint::FmpzMatConstRef(expected));
+                assert(matches);
+                if (!matches) {
+                    return 1;
+                }
+                ++checked;
+                torsion_columns += proof_rank > group.free_rank() ? 1 : 0;
+            }
+            if (primes.size() > 0) {
+                ++primes_for_ell;
+            }
+        }
+    }
+    assert(checked >= 48);
+    assert(torsion_columns > 0);
+    return checked >= 48 && torsion_columns > 0 ? 0 : 1;
+}
+
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
     silex::OrderUnitGroup group = real_quadratic_unit_group();
     const silex::Order* order = group.parent();
@@ -8176,6 +8305,7 @@ int main() {
     test_rank_one_degree_one_root_image_matches_prime_ideal();
     test_direct_degree_one_proof_column_matches_residue_field();
     test_direct_degree_one_residue_dlog_matrix_matches_residue_field();
+    test_residue_dlog_proof_matrix_matches_per_entry_quotient_log();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();
     test_unit_proof_records();
