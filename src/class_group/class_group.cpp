@@ -1130,6 +1130,138 @@ bool degree_one_quotient_log_row_at_root(
     return true;
 }
 
+// The factors of the exponent-reduced inputs of
+// saturation_candidates_from_relations as rational polynomials, copied once
+// so that each auxiliary prime reads them in place.
+struct DegreeOneResidueFactor {
+    flint::FmpqPoly polynomial;
+    slong exponent = 0;
+};
+
+using DegreeOneResidueInput = std::vector<DegreeOneResidueFactor>;
+
+bool prepare_degree_one_residue_inputs(
+        std::vector<DegreeOneResidueInput>& out,
+        const std::vector<FactoredElement>& relations) noexcept {
+    out.clear();
+    out.reserve(relations.size());
+    for (const FactoredElement& relation : relations) {
+        if (!relation.is_defined()) {
+            return false;
+        }
+        DegreeOneResidueInput input;
+        for (const auto& entry : relation.factors()) {
+            if (entry.exponent == 0) {
+                continue;
+            }
+            DegreeOneResidueFactor factor;
+            if (!entry.factor.get_fmpq_poly(
+                        flint::FmpqPolyRef(factor.polynomial))) {
+                return false;
+            }
+            factor.exponent = entry.exponent;
+            input.push_back(std::move(factor));
+        }
+        out.push_back(std::move(input));
+    }
+    return true;
+}
+
+// Word-size form of degree_one_quotient_log_row_at_root for q < 2^64: the
+// same row, from the same residues and the same quotient logarithm, with the
+// arithmetic in nmod and one inversion per input instead of one per
+// coefficient.
+bool degree_one_quotient_log_row_at_root_ui(
+        flint::FmpzMat& out,
+        const std::vector<DegreeOneResidueInput>& inputs,
+        flint::FmpzConstRef q,
+        flint::FmpzConstRef root,
+        slong n) noexcept {
+    if (inputs.empty() || n <= 1 || !n_is_prime(static_cast<ulong>(n)) ||
+        !flint::fmpz_abs_fits_ui(q) || flint::fmpz_sgn(q) <= 0 ||
+        !flint::fmpz_abs_fits_ui(root) || !flint::fmpz_is_prime(q)) {
+        return false;
+    }
+
+    flint::Fmpz ell;
+    flint::fmpz_set_si(flint::FmpzRef(ell), n);
+    flint::Fmpz cofactor;
+    flint::Fmpz quotient_generator;
+    if (!detail::quotient_log_mod_prime_setup(
+                cofactor, quotient_generator, q, flint::FmpzConstRef(ell))) {
+        return false;
+    }
+
+    const ulong p = flint::fmpz_get_ui(q);
+    nmod_t mod;
+    nmod_init(&mod, p);
+    const ulong p_inverse = n_preinvert_limb(p);
+    const ulong r = flint::fmpz_get_ui(root) % p;
+    const ulong cofactor_ui =
+            flint::fmpz_get_ui(flint::FmpzConstRef(cofactor));
+    const ulong generator_ui =
+            flint::fmpz_get_ui(flint::FmpzConstRef(quotient_generator));
+
+    flint::FmpzMat row(1, static_cast<slong>(inputs.size()));
+    for (slong j = 0; j < static_cast<slong>(inputs.size()); ++j) {
+        ulong numerator_product = 1 % p;
+        ulong denominator_product = 1 % p;
+        for (const DegreeOneResidueFactor& factor :
+             inputs[static_cast<std::size_t>(j)]) {
+            const fmpq_poly_struct* poly = factor.polynomial.raw();
+            const slong length = poly->length;
+            ulong numerator = 0;
+            for (slong i = length - 1; i >= 0; --i) {
+                numerator = nmod_add(nmod_mul(numerator, r, mod),
+                                     fmpz_fdiv_ui(poly->coeffs + i, p), mod);
+            }
+            const ulong denominator = fmpz_fdiv_ui(poly->den, p);
+            if (numerator == 0 || denominator == 0) {
+                return false;
+            }
+            const ulong magnitude = factor.exponent < 0
+                    ? static_cast<ulong>(-(factor.exponent + 1)) + 1
+                    : static_cast<ulong>(factor.exponent);
+            const ulong top =
+                    n_powmod2_ui_preinv(numerator, magnitude, p, p_inverse);
+            const ulong bottom =
+                    n_powmod2_ui_preinv(denominator, magnitude, p, p_inverse);
+            if (factor.exponent > 0) {
+                numerator_product = nmod_mul(numerator_product, top, mod);
+                denominator_product =
+                        nmod_mul(denominator_product, bottom, mod);
+            } else {
+                numerator_product = nmod_mul(numerator_product, bottom, mod);
+                denominator_product = nmod_mul(denominator_product, top, mod);
+            }
+        }
+        const ulong value = nmod_mul(numerator_product,
+                                     n_invmod(denominator_product, p), mod);
+        if (value == 0) {
+            return false;
+        }
+        // detail::quotient_log_mod_prime_apply in word arithmetic.
+        const ulong image =
+                n_powmod2_ui_preinv(value, cofactor_ui, p, p_inverse);
+        ulong current = 1 % p;
+        bool found = false;
+        for (slong i = 0; i < n; ++i) {
+            if (current == image) {
+                flint::fmpz_set_si(flint::fmpz_mat_entry(row, 0, j), i);
+                found = true;
+                break;
+            }
+            current = nmod_mul(current, generator_ui, mod);
+        }
+        if (!found) {
+            return false;
+        }
+    }
+
+    out = std::move(row);
+    return true;
+}
+
 bool reduce_saturation_candidate_space(flint::FmpzMat& candidates,
                                              flint::FmpzMatConstRef log_row,
                                              slong n) noexcept {
@@ -1246,6 +1378,11 @@ bool saturation_candidates_from_relations(
 
     const slong input_count =
             static_cast<slong>(reduced_relations.size());
+    // Word-size residues when every auxiliary prime fits a word; the general
+    // path otherwise.  Both give the same rows.
+    std::vector<DegreeOneResidueInput> prepared_inputs;
+    const bool prepared = prepare_degree_one_residue_inputs(
+            prepared_inputs, reduced_relations);
     flint::FmpzMat candidates(input_count, input_count);
     flint::fmpz_mat_one(flint::FmpzMatRef(candidates));
 
@@ -1285,6 +1422,8 @@ bool saturation_candidates_from_relations(
             continue;
         }
 
+        const bool word_size_q =
+                prepared && flint::fmpz_abs_fits_ui(flint::FmpzConstRef(q));
         std::vector<flint::Fmpz> degree_one_roots;
         {
             SILEX_PROFILE_SCOPE(
@@ -1319,10 +1458,16 @@ bool saturation_candidates_from_relations(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.relation_saturation.quotient_log_row_"
                         "degree_one");
-                if (!degree_one_quotient_log_row_at_root(
-                            log_row, reduced_relations,
-                            flint::FmpzConstRef(q),
-                            flint::FmpzConstRef(root), n)) {
+                const bool row_available = word_size_q
+                        ? degree_one_quotient_log_row_at_root_ui(
+                                  log_row, prepared_inputs,
+                                  flint::FmpzConstRef(q),
+                                  flint::FmpzConstRef(root), n)
+                        : degree_one_quotient_log_row_at_root(
+                                  log_row, reduced_relations,
+                                  flint::FmpzConstRef(q),
+                                  flint::FmpzConstRef(root), n);
+                if (!row_available) {
                     SILEX_PROFILE_EVENT(
                             diagnostics, DiagnosticsModule::class_group,
                             "class_group.relation_saturation.quotient_log_row_"
