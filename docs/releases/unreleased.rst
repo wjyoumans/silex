@@ -60,8 +60,10 @@ Added
   computation failures still report ``class_unit_computation_failed``, and
   results, labels and successful runs are unchanged.  A new top-level JSON
   field ``failure_detail`` holds structured detail about a failure, with keys
-  that depend on ``failure_reason``.  It is null except for
-  ``factor_base_honesty_unwitnessed``, where it names the unwitnessed prime
+  that depend on ``failure_reason``.  For ``class_unit_computation_failed``
+  it holds ``cause``, free text naming the last unit-group validation
+  outcome reached (null when validation never ran).  It is null except for
+  that reason and ``factor_base_honesty_unwitnessed``, where it names the unwitnessed prime
   (``p``, a decimal string, and ``residue_degree``), the witness search
   route (``search``, ``lattice`` or ``t2``), the stage of its last search
   (``stage`` and ``max_stage``), and that stage's caps: ``radius``,

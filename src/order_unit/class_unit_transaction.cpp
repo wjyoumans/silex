@@ -186,6 +186,15 @@ void ClassUnitTransactionAccess::set_run_context(
     context.class_unit_transaction_context_ = run_context;
 }
 
+void ClassUnitTransactionAccess::record_validation_outcome(
+        ClassGroupContext& context, const char* outcome_name) noexcept {
+    ClassUnitTransactionContext* const run_context =
+            context.class_unit_transaction_context_;
+    if (run_context != nullptr) {
+        run_context->audit.last_validation_outcome = outcome_name;
+    }
+}
+
 ZetaBfResidueDegreeCache*
 ClassUnitTransactionAccess::relation_factor_base_plan_residue_degrees(
         ClassGroupContext& context,
@@ -247,6 +256,7 @@ void ClassUnitTransactionReport::reset() noexcept {
     regulator_proof_status = ProofState::not_checked;
     final_result_published = false;
     factor_base_honesty_failure = FactorBaseHonestyFailure{};
+    last_validation_outcome = nullptr;
 }
 
 void ClassUnitTransactionReport::record_timing(ClassUnitStage stage,

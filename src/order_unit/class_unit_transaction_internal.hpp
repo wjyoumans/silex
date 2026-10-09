@@ -124,6 +124,10 @@ struct ClassUnitTransactionReport {
     // checkpoint ended it with no factor-base restart left.  Cleared when
     // each attempt starts; read only to name a failed transaction's reason.
     FactorBaseHonestyFailure factor_base_honesty_failure{};
+    // Name (a static string) of the last unit-group validation outcome of
+    // the candidate computation, or nullptr when validation never ran.  Read
+    // only to describe a class_unit_computation_failed transaction.
+    const char* last_validation_outcome = nullptr;
 
     void reset() noexcept;
     void record_timing(ClassUnitStage stage, double elapsed_ms) noexcept;
@@ -164,6 +168,10 @@ public:
     static void set_run_context(
             ClassGroupContext& context,
             ClassUnitTransactionContext* run_context) noexcept;
+    // Records the validation outcome name (static string) in the run
+    // context's report, if any.
+    static void record_validation_outcome(ClassGroupContext& context,
+                                          const char* outcome_name) noexcept;
     static ZetaBfResidueDegreeCache*
     relation_factor_base_plan_residue_degrees(
             ClassGroupContext& context,

@@ -4039,6 +4039,12 @@ bool OrderUnitGroup::compute_with_class_group(
                     active_diagnostics, DiagnosticsModule::unit_group,
                     detail::validate_refine_outcome_profile_label(
                             validate_summary.outcome));
+            if (compute_ok) {
+                detail::ClassUnitTransactionAccess::record_validation_outcome(
+                        candidate_class_group,
+                        detail::validate_refine_outcome_name(
+                                validate_summary.outcome));
+            }
 
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
             if (log_enabled(active_diagnostics, DiagnosticsModule::unit_group,

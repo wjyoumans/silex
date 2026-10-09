@@ -147,7 +147,7 @@ def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
         assert instance["maximal_order_defined"] is False
         assert instance["failure_reason"] == "input_or_options_unavailable"
         # failure_detail is null for every reason other than
-        # factor_base_honesty_unwitnessed.
+        # factor_base_honesty_unwitnessed and class_unit_computation_failed.
         assert "failure_detail" in instance
         assert instance["failure_detail"] is None
 
@@ -370,6 +370,20 @@ def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
     )
 
 
+def assert_computation_failure_cause(exe: Path, root: Path) -> None:
+    # Phi_13: proven validation ends with an unpublished index-one result, so
+    # the transaction fails with class_unit_computation_failed and the cause
+    # must reach failure_detail.
+    instance = run_json(
+        [str(exe), "--coeffs", ",".join(["1"] * 13), "--mode", "proven"], root
+    )
+    assert instance["success"] is False
+    assert instance["failure_reason"] == "class_unit_computation_failed"
+    detail = instance["failure_detail"]
+    assert isinstance(detail, dict)
+    assert detail["cause"].startswith("last unit-group validation outcome: ")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
@@ -379,6 +393,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     assert_marked_phase_failures(args.exe, root)
     assert_fail_closed_inputs(args.exe, root)
+    assert_computation_failure_cause(args.exe, root)
     assert_grh_generation_below_minkowski(args.exe, root)
     assert_grh_minkowski_equality_boundary(args.exe, root)
     assert_proven_and_degree_one_provenance(args.exe, root)

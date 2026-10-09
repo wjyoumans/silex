@@ -1365,7 +1365,12 @@ the previous search, so results that succeeded at stage 0 are unchanged.
 In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``
 object is the one place for structured failure detail; its keys depend on
 ``failure_reason``, and it is null for every reason other than
-``factor_base_honesty_unwitnessed``.  For that reason it gives the
+``factor_base_honesty_unwitnessed`` and ``class_unit_computation_failed``.
+For ``class_unit_computation_failed`` it is an object with one key,
+``cause``, free text naming the last unit-group validation outcome the
+computation reached (for example ``index_one_publication_failed``); it is
+null when the computation failed before validation ran.  For
+``factor_base_honesty_unwitnessed`` it gives the
 unwitnessed prime as ``p``, a decimal string such as ``"3"`` like every big
 integer in this JSON, and ``residue_degree``, the route as ``search``
 (``lattice`` or ``t2``), the last stage searched and the last stage allowed

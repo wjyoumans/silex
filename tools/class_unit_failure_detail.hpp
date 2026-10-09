@@ -12,7 +12,10 @@ namespace silex_tools {
 // Writes the value of the class/unit instance JSON field `failure_detail`,
 // the one place for structured detail about a failure: an object whose keys
 // depend on `failure_reason`, or null when that reason carries no detail.
-// Only factor_base_honesty_unwitnessed carries detail: the unwitnessed
+// class_unit_computation_failed carries `cause`, free text naming the last
+// unit-group validation outcome reached (absent detail is null when no
+// validation ran).  Otherwise only factor_base_honesty_unwitnessed carries
+// detail: the unwitnessed
 // required prime (`p`, a decimal string like every big integer in this
 // JSON, and `residue_degree`), its witness search route (`search`,
 // "lattice" or "t2"), the stage of its last search against the last stage
@@ -25,6 +28,16 @@ inline void write_class_unit_failure_detail_json(
         const silex::detail::ClassUnitTransactionReport& report) {
     const silex::detail::FactorBaseHonestyFailure& failure =
             report.factor_base_honesty_failure;
+    if (report.failure_reason != nullptr &&
+        std::strcmp(report.failure_reason,
+                    "class_unit_computation_failed") == 0 &&
+        report.last_validation_outcome != nullptr) {
+        // Free text; the only characters it can hold are the static outcome
+        // names and fixed prose, so no JSON escaping is needed.
+        out << "{\n    \"cause\": \"last unit-group validation outcome: "
+            << report.last_validation_outcome << "\"\n  }";
+        return;
+    }
     if (report.failure_reason == nullptr ||
         std::strcmp(report.failure_reason,
                     "factor_base_honesty_unwitnessed") != 0 ||
