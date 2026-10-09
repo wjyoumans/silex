@@ -371,11 +371,30 @@ def assert_grh_minkowski_equality_boundary(exe: Path, root: Path) -> None:
 
 
 def assert_computation_failure_cause(exe: Path, root: Path) -> None:
-    # Phi_13: proven validation ends with an unpublished index-one result, so
-    # the transaction fails with class_unit_computation_failed and the cause
-    # must reach failure_detail.
-    instance = run_json(
+    # Phi_13 proves: the unit proof at ell = 17 meets kernel rows whose roots
+    # stay undecided in degree 12 and rescans with more primes, as the reference
+    # saturate! does, until the character kernel is empty.  GP 2.17:
+    # bnfinit(polcyclo(13), 1) has h = 1 and bnfcertify returns 1.
+    proven = run_json(
         [str(exe), "--coeffs", ",".join(["1"] * 13), "--mode", "proven"], root
+    )
+    assert proven["success"] is True
+    assert proven["certification_status"] == "proven"
+    assert proven["class_group"]["order"] == "1"
+    # x^3 - 6x^2 - 9x - 1 with a 12-relation cap: proven validation stops
+    # without progress, so the transaction fails with
+    # class_unit_computation_failed and the cause must reach failure_detail.
+    instance = run_json(
+        [
+            str(exe),
+            "--coeffs",
+            "-1,-9,-6,1",
+            "--mode",
+            "proven",
+            "--max-relations",
+            "12",
+        ],
+        root,
     )
     assert instance["success"] is False
     assert instance["failure_reason"] == "class_unit_computation_failed"

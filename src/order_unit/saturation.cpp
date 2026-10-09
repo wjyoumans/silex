@@ -479,15 +479,20 @@ enum class ProofPrimeScanResult {
 // end of the machine-word range of q.
 inline constexpr slong kStableProofMaxAuxPrimes = slong{1} << 16;
 
+// `range_exhausted` is set when the scan returns a nonempty kernel because no
+// rational prime q = 1 mod ell is left in the machine-word range, so a later
+// scan with a larger threshold would return the same kernel.
 bool select_stable_proof_primes(
         slong& local_prime_count,
         bool& certified,
+        bool& range_exhausted,
         flint::FmpzMat& kernel,
         const OrderUnitGroup& group,
         flint::FmpzConstRef ell,
         double stable_threshold) noexcept {
     SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.stable_proof_primes");
+    range_exhausted = false;
     const Order* order = group.parent();
     slong proof_rank = 0;
     if (!group.is_set() || order == nullptr ||
@@ -842,6 +847,7 @@ bool select_stable_proof_primes(
 
     kernel = std::move(current_kernel);
     certified = false;
+    range_exhausted = true;
     SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.stable_scan.exhausted_with_kernel");
     return true;
@@ -883,12 +889,13 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
 
     slong local_prime_count = 0;
     bool certified = false;
+    bool range_exhausted = false;
     flint::FmpzMat kernel(0, rank);
     SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.proof_prime_selection");
     if (!select_stable_proof_primes(
-                local_prime_count, certified, kernel, group, ell,
-                stable_threshold)) {
+                local_prime_count, certified, range_exhausted, kernel, group,
+                ell, stable_threshold)) {
         step.status = StableRelationSaturationStatus::unavailable;
         return true;
     }
@@ -936,10 +943,27 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
         if (!detail::kernel_row_root(is_power, root, group,
                                      flint::FmpzMatConstRef(kernel), row,
                                      ell, &field_modulus_cache)) {
+            // No exactly verified root: the compact presentation and the
+            // factored fallback both left the row undecided.  The pinned
+            // reference `saturate!` (Saturate.jl:396-411) treats every
+            // candidate for which `is_power` returns no root as a non-power:
+            // it stops testing candidates, doubles `stable` and rescans with
+            // more primes q = 1 mod ell.  Do the same.  This never certifies
+            // the row: ell is verified only by a later scan with an empty
+            // kernel, or the group grows only by an exactly verified root.
+            // A row that is an ell-th power whose root cannot be computed
+            // stays in every kernel, so the rescans end at the
+            // kStableProofMaxAuxPrimes guard and ell fails closed as
+            // `unavailable`.  When the scan has already used every prime of
+            // the machine-word range, a rescan would return the same kernel,
+            // so fail closed at once.
             SILEX_PROFILE_EVENT(
                     out.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_relation_saturation.root_unavailable");
-            step.status = StableRelationSaturationStatus::unavailable;
+            step.status = saw_root_outside_order || range_exhausted
+                                  ? StableRelationSaturationStatus::unavailable
+                                  : StableRelationSaturationStatus::
+                                            wasted_non_power;
             return true;
         }
         if (!is_power) {

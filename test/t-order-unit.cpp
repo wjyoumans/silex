@@ -7270,6 +7270,64 @@ int test_prove_index_bound_cubic2213_past_prescan_bound() {
     return 0;
 }
 
+// Q(zeta_13), f = x^12 + x^11 + ... + 1 (Z[zeta] maximal).  The cyclotomic
+// units u_a = 1 + zeta + ... + zeta^(a-1), a = 2..6, are fundamental: GP 2.17
+// `K = bnfinit(polcyclo(13), 1)` gives class number one, bnfcertify(K) = 1,
+// and the log-embedding determinant of u_2..u_6 equals K.reg.  At ell = 17 the
+// stable scan stops with a nonempty character kernel whose row roots stay
+// undecided (degree 12), so the proof follows the reference `saturate!`
+// (Saturate.jl:396-411): it doubles `stable` and rescans until the kernel is
+// empty, instead of failing at once.
+int test_prove_index_bound_cyclotomic13_undecided_root() {
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 12; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+
+    std::vector<silex::FactoredElement> generators;
+    for (slong a = 2; a <= 6; ++a) {
+        sflint::FmpqPoly unit_poly;
+        for (slong i = 0; i < a; ++i) {
+            sflint::fmpq_poly_set_coeff_si(unit_poly, i, 1);
+        }
+        silex::Element unit(field);
+        assert(unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)));
+        generators.emplace_back(field);
+        assert(generators.back().set_element(unit));
+    }
+    silex::OrderUnitGroup start(order);
+    assert(start.set_units(order,
+                           silex::FactoredElementSpan(generators.data(),
+                                                      generators.size()),
+                           embeddings, 256));
+    assert(start.free_rank() == 5);
+
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 1000));
+    silex::OrderUnitGroup proved(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = true;
+    assert(proved.prove_index_bound(status, changed, start, 1,
+                                    sflint::FmpzConstRef(aux_bound), 2,
+                                    embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(!changed);
+    assert(proved.certification_status() == silex::CertificationMode::proven);
+    assert(has_unit_proof_record(proved, 17, silex::ProofState::verified,
+                                 false));
+    // GP: \p 110; K.reg
+    assert(regulator_contains(
+            proved,
+            "120.7840313626563127293175827399128565840801560246896328383867"
+            "406585225412356786592960914162040943733"));
+    return 0;
+}
+
 // x^4 + 4x^3 + x^2 + 2x - 3 (discriminant -70640, signature (2, 1), Z[theta]
 // maximal): GP 2.17 `K = bnfinit(f, 1)` gives class number one, w = 2,
 // bnfcertify(K) = 1 and K.reg = 14.46098754389304356...; the units
@@ -8864,6 +8922,7 @@ int main() {
     test_prove_index_bound_maximal_quadratic_sqrt5_control();
     test_prove_index_bound_cubic2213_past_prescan_bound();
     test_prove_index_bound_quartic70640();
+    test_prove_index_bound_cyclotomic13_undecided_root();
     test_prove_torsion_twisted_saturation_root();
     test_saturate_torsion_twisted_non_proof();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
