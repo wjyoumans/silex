@@ -2913,6 +2913,19 @@ int test_quintic_disc11119_proven_prepass_route() {
         std::cerr << name << ": unexpected class/unit data\n";
         return 1;
     }
+    // Regulator 1.1965526760412351038 (GP 2.17 bnfinit(x^5 - 2*x^4 + x^3 +
+    // x^2 - 3*x + 1, 1).reg).
+    sflint::Arb regulator;
+    sflint::Arb expected_regulator;
+    // The decimal is truncated, so widen it to a 2^-60 ball.
+    if (!units.regulator(sflint::ArbRef(regulator)) ||
+        ::arb_set_str(expected_regulator.raw(), "1.1965526760412351038",
+                      128) != 0 ||
+        (::arb_add_error_2exp_si(expected_regulator.raw(), -60), false) ||
+        ::arb_overlaps(regulator.raw(), expected_regulator.raw()) == 0) {
+        std::cerr << name << ": regulator does not match GP\n";
+        return 1;
+    }
     if (class_group.relation_count() != 22 ||
         class_group.relation_kernel_unit_count() != 19) {
         std::cerr << name << ": unexpected route, relations="
