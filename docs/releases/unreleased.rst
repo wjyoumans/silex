@@ -322,6 +322,18 @@ Changed
 Fixed
 -----
 
+- ``decompose_prime`` on a maximal order no longer fails at a prime ``p``
+  dividing the index when ``p`` raised to the number of primes above ``p``
+  exceeds 4096, as for ``p = 47`` in the sextic field of LMFDB 6.6.46411625.1
+  (six primes) or ``p = 11`` in ``Q(sqrt(-3), sqrt(-5), sqrt(-7))`` (four
+  primes).  Beyond the bounded enumerations it now splits the residue algebra
+  recursively, as PARI's ``idealprimedec`` does; decompositions that
+  succeeded before are unchanged, prime order included.  The ``grh``
+  class/unit computations of seven corpus fields that failed when choosing
+  the factor-base bound now succeed with the expected class numbers and unit
+  ranks.  See "Local algebra and relations" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - A ``proven`` class/unit computation no longer fails when an inert rational
   prime lies below the proven generation requirement.  Such a prime has a
   single prime ideal ``pO_K``, which is principal; the generation proof now
