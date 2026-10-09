@@ -4179,14 +4179,90 @@ int test_residue_dlog_proof_matrix_matches_per_entry_quotient_log() {
     return checked >= 48 && torsion_columns > 0 ? 0 : 1;
 }
 
-// On a degree-one prime with word-size p the shared walk resolves every
-// nonzero entry, so the only entries a column leaves for
-// ResidueFieldQuotientLog::apply are zero residues, which apply rejects; a
-// unit group's column cannot produce one, so this drives
-// residue_quotient_log_column with chosen images.  A column mixing
-// walk-resolved entries with one zero entry must fail like the per-entry
-// quotient log, wherever the zero entry sits (ell = 7 at q = 71); the same
-// column without it must equal the per-entry values.
+// At or above the reference table cutoff (ell of 19 bits or more) a
+// degree-one column takes its quotient logs by baby-step giant-step with one
+// baby-step table; every entry must still equal the per-entry quotient log.
+// ell = 262139 (18 bits) stays on the shared walk, while 262147 and 1048583
+// (19 and 21 bits) take baby-step giant-step.  The cyclic cubic
+// x^3 - 3x + 1 splits completely at each q used, giving three degree-one
+// primes per q.
+int test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    silex::FactoredElement generators[] = {
+            silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+    assert(generators[0].set_element(theta));
+    assert(generators[1].push(theta_minus_one, 3));
+    assert(generators[1].push(theta, -2));
+    silex::EmbeddingContext embeddings(cubic);
+    silex::OrderUnitGroup group;
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 64));
+
+    const slong ells[] = {262139, 262147, 1048583};
+    slong checked = 0;
+    for (const slong ell_si : ells) {
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, ell_si));
+        slong primes_for_ell = 0;
+        for (ulong q = static_cast<ulong>(ell_si) + 1; primes_for_ell < 2;
+             q += static_cast<ulong>(ell_si)) {
+            if (n_is_prime(q) == 0) {
+                continue;
+            }
+            sflint::Fmpz q_fmpz;
+            assert(set_fmpz_si(q_fmpz, static_cast<slong>(q)));
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(
+                    primes, order, sflint::FmpzConstRef(q_fmpz), 1));
+            for (slong i = 0; i < primes.size(); ++i) {
+                const silex::PrimeIdeal* prime = primes.at(i);
+                assert(prime != nullptr);
+                if (prime == nullptr) {
+                    return 1;
+                }
+                sflint::FmpzMat shared(0, 0);
+                sflint::FmpzMat expected(0, 0);
+                const bool matches =
+                        silex::detail::residue_dlog_proof_matrix(
+                                shared, group, *prime,
+                                sflint::FmpzConstRef(ell)) &&
+                        per_entry_residue_dlog_proof_matrix_for_test(
+                                expected, group, *prime,
+                                sflint::FmpzConstRef(ell)) &&
+                        sflint::fmpz_mat_nrows(shared) == 2 &&
+                        sflint::fmpz_mat_equal(
+                                sflint::FmpzMatConstRef(shared),
+                                sflint::FmpzMatConstRef(expected));
+                assert(matches);
+                if (!matches) {
+                    return 1;
+                }
+                ++checked;
+            }
+            if (primes.size() > 0) {
+                ++primes_for_ell;
+            }
+        }
+    }
+    assert(checked == 18);
+    return checked == 18 ? 0 : 1;
+}
+
+// On a degree-one prime with word-size p the shared walk (or baby-step
+// giant-step) resolves every nonzero entry, so the only entries a column
+// leaves for ResidueFieldQuotientLog::apply are zero residues, which apply
+// rejects; a unit group's column cannot produce one, so this drives
+// residue_quotient_log_column with chosen images.  A column mixing resolved
+// entries with one zero entry must fail like the per-entry quotient log,
+// wherever the zero entry sits and on both routes (ell = 7 at q = 71 walks,
+// ell = 262147 at q = 1048589 takes baby-step giant-step); the same column
+// without it must equal the per-entry values.
 int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
     silex::NumberField cubic = cubic_field(-3, 1);
     silex::Order order;
@@ -4201,7 +4277,7 @@ int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
                                       &theta_plus_two};
     const slong value_count = 3;
 
-    const slong cases[][2] = {{7, 71}};
+    const slong cases[][2] = {{7, 71}, {262147, 1048589}};
     slong checked = 0;
     for (const auto& entry : cases) {
         sflint::Fmpz ell;
@@ -4276,8 +4352,8 @@ int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
             ++checked;
         }
     }
-    assert(checked == 3);
-    return checked == 3 ? 0 : 1;
+    assert(checked == 6);
+    return checked == 6 ? 0 : 1;
 }
 
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
@@ -8467,6 +8543,7 @@ int main() {
     test_direct_degree_one_proof_column_matches_residue_field();
     test_direct_degree_one_residue_dlog_matrix_matches_residue_field();
     test_residue_dlog_proof_matrix_matches_per_entry_quotient_log();
+    test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log();
     test_residue_quotient_log_column_mixes_resolved_and_apply_entries();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();

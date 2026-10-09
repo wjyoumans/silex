@@ -1134,18 +1134,100 @@ struct WordQuotientLogTarget {
     slong row = 0;
 };
 
-// Quotient logs of all `images` with respect to `quotient_log`, sharing one
-// walk over the powers of its quotient generator.  Each entry this resolves
-// is the value ResidueFieldQuotientLog::apply returns on its word-size
-// degree-one path (`quotient_log_mod_prime_apply_ui` in residue_field.cpp),
-// which walks zeta^0, zeta^1, ..., zeta^(ell - 1) for every element
-// separately and returns the first exponent i with zeta^i equal to the
-// element raised to (p - 1) / ell.  This walk visits the same powers in the
-// same order once and records, for each element, the first such i; the walk
-// stops early once every element is matched.  `resolved[j]` is set for the
-// entries written into row j of `out`; an entry this cannot resolve (field
-// not of degree one, a value off the word-size path, a zero residue, or no
-// match below ell) is left unset for the caller to pass to apply.
+// One baby step of word_quotient_log_baby_giant: zeta^exponent.
+struct WordQuotientLogBabyStep {
+    ulong value = 0;
+    ulong exponent = 0;
+};
+
+// Reference `mod_p` (NumFieldOrd/NfOrd/Clgp/Saturate.jl:6-46 at the pinned
+// v0.38.6 revision) fills one table of all generator powers per prime when
+// `nbits(pp) < 19` (line 32) and otherwise takes each logarithm by
+// `baby_step_giant_step` (line 43), whose baby-step table is shared by every
+// element of the prime.  Its table holds pp entries, the order of the
+// l-primary part it works in; the table here holds ell entries, the order of
+// the quotient generator, so the same bit cutoff is applied to ell.
+constexpr flint_bitcnt_t kWordQuotientLogTableBits = 19;
+
+// Quotient logs of `pending` by baby-step giant-step with one baby-step
+// table, as reference `baby_step_giant_step`
+// (NumFieldOrd/NfOrd/ResidueRingMultGrp.jl:716-738 at the same revision): m =
+// isqrt(ell) + 1, baby steps zeta^0, ..., zeta^m, and giant steps by
+// zeta^(-m) for i = 0, ..., m - 1, the logarithm being i m + j mod ell.  The
+// caller has checked that ell is prime and zeta has order ell, so the
+// logarithm is the unique exponent in [0, ell) and equals the one the walk
+// returns.  An entry not found is left unresolved for the caller.
+void word_quotient_log_baby_giant(
+        flint::FmpzMat& out,
+        std::vector<bool>& resolved,
+        const std::vector<WordQuotientLogTarget>& pending,
+        ulong zeta,
+        ulong p_ui,
+        ulong ell_ui,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.residue_dlog_proof_matrix.baby_giant");
+    nmod_t mod;
+    nmod_init(&mod, p_ui);
+    nmod_t ell_mod;
+    nmod_init(&ell_mod, ell_ui);
+    const ulong m = n_sqrt(ell_ui) + 1;
+    std::vector<WordQuotientLogBabyStep> baby_steps;
+    baby_steps.reserve(static_cast<std::size_t>(m) + 1);
+    ulong current = 1 % p_ui;
+    for (ulong j = 0; j <= m; ++j) {
+        WordQuotientLogBabyStep step;
+        step.value = current;
+        step.exponent = j;
+        baby_steps.push_back(step);
+        current = nmod_mul(current, zeta, mod);
+    }
+    // zeta^0, ..., zeta^m are distinct because m < ell, the order of zeta.
+    std::sort(baby_steps.begin(), baby_steps.end(),
+              [](const WordQuotientLogBabyStep& left,
+                 const WordQuotientLogBabyStep& right) {
+                  return left.value < right.value;
+              });
+    // zeta^(-m) = zeta^(ell - m) since zeta has order ell.
+    const ulong giant = nmod_pow_ui(zeta, ell_ui - m, mod);
+    for (const WordQuotientLogTarget& target : pending) {
+        ulong y = target.image;
+        for (ulong i = 0; i < m; ++i) {
+            const auto found = std::lower_bound(
+                    baby_steps.begin(), baby_steps.end(), y,
+                    [](const WordQuotientLogBabyStep& step, ulong value) {
+                        return step.value < value;
+                    });
+            if (found != baby_steps.end() && found->value == y) {
+                // i < m and found->exponent <= m are both below ell.
+                const ulong exponent = nmod_add(nmod_mul(i, m, ell_mod),
+                                                found->exponent, ell_mod);
+                flint::fmpz_set_ui(
+                        flint::fmpz_mat_entry(out, target.row, 0), exponent);
+                resolved[static_cast<std::size_t>(target.row)] = true;
+                break;
+            }
+            y = nmod_mul(y, giant, mod);
+        }
+    }
+}
+
+// Quotient logs of all `images` with respect to `quotient_log`, sharing work
+// across the column.  Each entry this resolves is the value
+// ResidueFieldQuotientLog::apply returns on its word-size degree-one path
+// (`quotient_log_mod_prime_apply_ui` in residue_field.cpp), which walks
+// zeta^0, zeta^1, ..., zeta^(ell - 1) for every element separately and
+// returns the first exponent i with zeta^i equal to the element raised to
+// (p - 1) / ell.  Below the reference cutoff (kWordQuotientLogTableBits) one
+// walk visits the same powers in the same order once and records, for each
+// element, the first such i; the walk stops early once every element is
+// matched.  At or above it, when ell is prime and zeta has order ell, the
+// logarithms are taken by word_quotient_log_baby_giant instead; the
+// logarithm is then unique in [0, ell), so the values are the same.
+// `resolved[j]` is set for the entries written into row j of `out`; an
+// entry this cannot resolve (field not of degree one, a value off the
+// word-size path, a zero residue, or no match below ell) is left unset for
+// the caller to pass to apply.
 void word_quotient_log_shared_walk(
         flint::FmpzMat& out,
         std::vector<bool>& resolved,
@@ -1202,6 +1284,14 @@ void word_quotient_log_shared_walk(
         return;
     }
 
+    if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogTableBits &&
+        zeta != 1 && n_is_prime(ell_ui) != 0 &&
+        n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1) {
+        word_quotient_log_baby_giant(out, resolved, pending, zeta, p_ui,
+                                     ell_ui, diagnostics);
+        return;
+    }
+
     SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.residue_dlog_proof_matrix.shared_walk");
     nmod_t mod;
@@ -1238,9 +1328,10 @@ bool residue_quotient_log_column(
         return false;
     }
     // Every entry takes the quotient log of the same residue field and ell,
-    // so one walk over the powers of the quotient generator serves the whole
-    // column; entries it leaves unresolved take ResidueFieldQuotientLog::apply
-    // as before.
+    // so one walk over the powers of the quotient generator, or one
+    // baby-step table at or above the reference cutoff, serves the whole
+    // column; entries left unresolved take ResidueFieldQuotientLog::apply as
+    // before.
     std::vector<bool> resolved(images.size(), false);
     word_quotient_log_shared_walk(out, resolved, images, residue_field,
                                   quotient_log, ell, diagnostics);
