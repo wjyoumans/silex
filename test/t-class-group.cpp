@@ -18,8 +18,10 @@
 
 #include <cassert>
 #include <cstring>
+#include <initializer_list>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 static_assert(std::is_nothrow_default_constructible_v<
               silex::ClassGroupContext>);
@@ -2039,6 +2041,112 @@ int test_relation_saturation_candidate_filter_minus_23() {
             contains, sflint::FmpzMatConstRef(filter),
             sflint::FmpzMatConstRef(rows), 1, sflint::FmpzConstRef(ell)));
     assert(!contains);
+    return 0;
+}
+
+// The filter is not used when the defining polynomial is not monic integral:
+// the auxiliary primes are then not known to avoid the index.  Q given by
+// 2x + 1 has a maximal order and a unit group, but the filter reports itself
+// unavailable.
+int test_relation_saturation_candidate_filter_needs_nice_polynomial() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 2);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    sflint::FmpqMat basis(1, 1);
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 0, 0), 1, 1);
+    silex::Order base_order = silex::Order::from_basis(
+            field, sflint::FmpqMatConstRef(basis));
+    assert(base_order.is_defined());
+    silex::Order order(field);
+    assert(order.maximal_order(base_order));
+    assert(order.is_maximal());
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(order));
+    silex::ClassGroupContext context(order);
+
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(ell, 2));
+    sflint::FmpzMat filter(0, 0);
+    bool available = true;
+    assert(silex::detail::relation_saturation_candidate_filter(
+            filter, available, context, units, true,
+            sflint::FmpzConstRef(ell)));
+    assert(!available);
+    return 0;
+}
+
+// The word-size degree-one quotient-log row equals the exact fmpz row, and
+// fails in the same cases.  In Q(theta), theta^2 = theta - 6, the prime
+// q = 13 = 1 mod 3 has the degree-one root 9; the inputs have negative
+// exponents and rational coefficients.
+int test_degree_one_quotient_log_row_word_size_matches_general() {
+    silex::NumberField field = shifted_quadratic_field(-1, 6);
+    auto element = [&field](slong c0, slong c1, slong den) {
+        sflint::FmpqPoly poly;
+        sflint::fmpq_poly_zero(poly);
+        sflint::fmpq_poly_set_coeff_si(poly, 0, c0);
+        sflint::fmpq_poly_set_coeff_si(poly, 1, c1);
+        fmpq_poly_scalar_div_si(poly.raw(), poly.raw(), den);
+        silex::Element out(field);
+        assert(out.set_fmpq_poly(sflint::FmpqPolyConstRef(poly)));
+        return out;
+    };
+    auto factored = [&field](std::vector<silex::FactoredElement>& out,
+                             const silex::Element& a, slong ea,
+                             const silex::Element& b, slong eb) {
+        silex::FactoredElement value(field);
+        assert(value.one());
+        assert(value.push(a, ea));
+        assert(value.push(b, eb));
+        out.push_back(std::move(value));
+    };
+
+    std::vector<silex::FactoredElement> inputs;
+    factored(inputs, element(1, 1, 2), -3, element(3, 0, 1), 1);
+    factored(inputs, element(0, 1, 1), 2, element(-5, 1, 1), -1);
+    factored(inputs, element(7, 0, 5), 1, element(2, 3, 7), -2);
+
+    sflint::Fmpz q;
+    sflint::Fmpz root;
+    assert(set_fmpz_si(q, 13));
+    assert(set_fmpz_si(root, 9));
+    sflint::FmpzMat general(0, 0);
+    sflint::FmpzMat word(0, 0);
+    assert(silex::detail::degree_one_quotient_log_row_general(
+            general, inputs, sflint::FmpzConstRef(q),
+            sflint::FmpzConstRef(root), 3));
+    assert(silex::detail::degree_one_quotient_log_row_word_size(
+            word, inputs, sflint::FmpzConstRef(q),
+            sflint::FmpzConstRef(root), 3));
+    assert(sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(word)) == 3);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(general),
+                                  sflint::FmpzMatConstRef(word)));
+    bool nonzero = false;
+    for (slong j = 0; j < 3; ++j) {
+        nonzero = nonzero ||
+                  !sflint::fmpz_is_zero(sflint::fmpz_mat_entry(
+                          sflint::FmpzMatConstRef(word), 0, j));
+    }
+    assert(nonzero);
+
+    // q divides a coefficient denominator, or a factor vanishes at the root:
+    // both paths fail.
+    std::vector<silex::FactoredElement> bad_denominator;
+    factored(bad_denominator, element(0, 1, 13), -1, element(3, 0, 1), 1);
+    std::vector<silex::FactoredElement> zero_value;
+    factored(zero_value, element(-9, 1, 1), -2, element(3, 0, 1), 1);
+    for (const auto* bad : {&bad_denominator, &zero_value}) {
+        assert(!silex::detail::degree_one_quotient_log_row_general(
+                general, *bad, sflint::FmpzConstRef(q),
+                sflint::FmpzConstRef(root), 3));
+        assert(!silex::detail::degree_one_quotient_log_row_word_size(
+                word, *bad, sflint::FmpzConstRef(q),
+                sflint::FmpzConstRef(root), 3));
+    }
     return 0;
 }
 
@@ -4380,6 +4488,8 @@ int main() {
     test_relation_saturation_index_bound_with_units_degree_one();
     test_relation_saturation_index_bound_checks_nondivisor_primes();
     test_relation_saturation_candidate_filter_minus_23();
+    test_relation_saturation_candidate_filter_needs_nice_polynomial();
+    test_degree_one_quotient_log_row_word_size_matches_general();
     test_relation_saturation_index_bounded_status_needs_unconditional_bound();
     test_validation_exact_index_saturation_status_follows_generation();
     test_exact_order_certification_failure_restores_generation_check();
