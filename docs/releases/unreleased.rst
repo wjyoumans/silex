@@ -97,7 +97,9 @@ Changed
   their common kernel, which cannot be ``ell``-th powers.  The appended
   relations, class groups, generators and units are unchanged.  In ``grh``
   mode the power tests drop from 286 to 38 on the real subfield of
-  ``Q(zeta_29)`` and from 571 to 128 on ``Q(zeta_72)``.  See "Class groups and order units" in
+  ``Q(zeta_29)`` and from 571 to 128 on ``Q(zeta_72)``; median time over
+  nine runs on a busy machine went from 8.83 s to 8.49 s and from 4.17 s to
+  3.87 s.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 - **Breaking:** ``SUnitGroup::regulator`` now returns the regulator of the
