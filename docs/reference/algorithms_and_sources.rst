@@ -694,9 +694,9 @@ included, and part (iii) shows that ``F`` extends continuously to integer
 certified enclosure" with Arb at 128 bits, every digamma argument being an
 exact positive rational, and ``L`` and ``K`` chosen as in "Choosing L and
 K" (``L`` between 190 and 294 and ``K`` between 32 and 33 for the table
-below), with the admissibility conditions and the size of ``E`` rechecked in
-exact arithmetic.  The enclosure is used only offline: the constant depends
-on the signature alone, so Silex stores a precomputed, test-verified table.
+below), with the admissibility conditions rechecked in exact arithmetic
+and the size of ``E`` rechecked through the upper endpoint of an Arb ball.  The enclosure is used only
+offline: the constant depends on the signature alone, so Silex stores a precomputed, test-verified table.
 For each signature with ``3 <= n <= 20``, the generator
 ``tools/zimmert_twin_class_table.cpp`` (target
 ``silex-zimmert-twin-class-table``) takes the upper endpoint of the Arb
@@ -715,10 +715,12 @@ rounding direction, and evaluates ``exp(-c) sqrt|d|`` in floating point.
 Every ``gamma > 0`` gives a valid bound, so ``gamma`` affects only its size.
 For each signature with ``3 <= n <= 20`` Silex fixes the ``gamma`` in
 hundredths, ``0 < gamma < 3``, that maximizes ``F``
-(``test/zimmert_twin_class_oracle.py --gammas``); integers were excluded
-from that search in the oracle, and the maximizers it finds are the same
-when integers are included.  Relative to the earlier finite-``m``
-evaluation, no table entry is larger and every entry with ``gamma != 1/2``
+(``test/zimmert_twin_class_oracle.py --gammas``); integers are excluded
+from that search in the oracle, which cannot evaluate integer ``gamma``.
+The integer case was checked once, outside the repository, with
+silex-research's ``zimmert_F``: for all 117 signatures, ``F`` at
+``gamma = 1`` and ``2`` never exceeds the tabulated value.  Relative to the earlier
+finite-``m`` evaluation, no table entry is larger and every entry with ``gamma != 1/2``
 is smaller, by at most about ``1.3e-4`` relative.
 ``test/t-generation-bound.cpp`` checks the constant
 ``exp((F + n log pi)/2)`` against all 16 rows of Tabelle 3 (p. 377) with
