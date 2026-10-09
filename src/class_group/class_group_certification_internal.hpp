@@ -63,15 +63,18 @@ public:
             const ClassGroupContext& context) noexcept;
 
     // Exact imaginary-quadratic index h_cand / h for a rank-zero maximal
-    // order, under a proven request only; any other request returns false
-    // without listing reduced forms (a grh request takes h from the GRH
-    // relation lattice and the analytic index test).  True with index one
-    // means the class group and `units` have been published proven (this
-    // requires the torsion of `units` to be the computed torsion).  False
-    // leaves the certification state as it was, including the factor-base
-    // generation check it runs first.  Index > 1 publishes no label and is
-    // only a saturation target for the caller, which keeps the generation
-    // check.
+    // order.  Under a proven request, true with index one means the class
+    // group and `units` have been published proven (this requires the
+    // torsion of `units` to be the computed torsion).  False leaves the
+    // certification state as it was, including the factor-base generation
+    // check a proven request runs first.  Index > 1, or any index under a
+    // grh request, publishes no label and is only a saturation target or
+    // acceptance test for the caller; a proven request then keeps its
+    // generation check.  A grh request needs the base's GRH generation
+    // record (grh_factor_base_generation_covered) and returns false without
+    // listing reduced forms when |D| >= 2^44: there h comes from the GRH
+    // relation lattice and the analytic index test (the cutoff and its
+    // measurement are next to the definition).
     static bool rank_zero_quadratic_class_index_bound(
             flint::FmpzRef out,
             ClassGroupContext& context,
@@ -125,7 +128,7 @@ public:
     // unit/regulator proof states, or any other proof record.  A Belabas-Friedman check recorded here never serves as
     // a proof component.  The caller must have accepted the pair by the
     // analytic index-one test against that hR; the exact imaginary-quadratic
-    // route (proven requests only) uses no analytic value.  An
+    // route, which uses no analytic value, records nothing.  An
     // unconditional record stored here can later let an explicit
     // try_certify_with_units(proven) promote the class group (see
     // analytic_class_regulator_certification() in class_group.hpp); this
@@ -139,6 +142,14 @@ public:
     static void record_grh_acceptance_analytic_check(
             ClassGroupContext& context,
             bool hr_unconditional) noexcept;
+
+    // Records that a `grh`-requested pair was accepted by index one against
+    // the exact imaginary-quadratic class number
+    // (rank_zero_quadratic_class_index_bound, |D| < 2^44): completeness
+    // `proven` with basis exact_class_number.  Like the analytic record, it
+    // never changes certification labels.
+    static void record_grh_acceptance_exact_class_number(
+            ClassGroupContext& context) noexcept;
 
     // Publishes the grh labels on a completed class/unit pair.  GRH is
     // assumed only by the analytic hR check; the torsion does not depend on

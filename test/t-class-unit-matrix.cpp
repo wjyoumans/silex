@@ -2303,13 +2303,15 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     return 0;
 }
 
-// A `grh` imaginary-quadratic transaction takes h from the GRH relation
-// lattice: generation under GRH to min(BDF, Bach) and the analytic
-// index-one test, without listing the reduced forms of discriminant D.
-// Listing them needs time and memory growing like sqrt|D| (about 1 GB at
-// |D| = 1e14).  D = -(10^14 + 319) = -73 * 257 * 12143 * 438953 is above
-// the 2^44 cap of the unconditional L(1, chi) route, so the index-one test
-// uses a Belabas-Friedman hR and completeness is `grh`.  h = 15815072,
+// From |D| >= 2^44 a `grh` imaginary-quadratic transaction takes h from the
+// GRH relation lattice: generation under GRH to min(BDF, Bach) and the
+// analytic index-one test, without listing the reduced forms of
+// discriminant D.  Listing them needs time and memory growing like sqrt|D|
+// (about 1.4 GB at |D| = 1e14).  D = -(10^14 + 319) = -73 * 257 * 12143 *
+// 438953 is above the 2^44 cap of the unconditional L(1, chi) route, so the
+// index-one test uses a Belabas-Friedman hR and completeness is `grh`.
+// (Below 2^44 the exact class number is listed; the rank-zero grh rows of
+// test/data/class_unit_fields.json cover that route.)  h = 15815072,
 // class group Z/2 x Z/2 x Z/3953768 (GP 2.17 quadclassunit(D).cyc and
 // bnfinit(x^2 + 10^14 + 319).cyc).
 int test_imaginary_quadratic_grh_large_discriminant() {

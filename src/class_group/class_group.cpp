@@ -4882,6 +4882,17 @@ void ClassGroupCertificationAccess::record_grh_acceptance_analytic_check(
     }
 }
 
+void ClassGroupCertificationAccess::record_grh_acceptance_exact_class_number(
+        ClassGroupContext& context) noexcept {
+    if (!context.has_presentation() || !context.ensure_private_storage_()) {
+        return;
+    }
+    detail::ClassGroupContextStorage& storage = *context.private_storage_;
+    storage.class_unit_completeness = CertificationMode::proven;
+    storage.class_unit_completeness_basis =
+            ClassUnitCompletenessBasis::exact_class_number;
+}
+
 bool ClassGroupCertificationAccess::publish_grh_labels(
         ClassGroupContext& context,
         OrderUnitGroup& units,
@@ -5021,24 +5032,37 @@ ClassGroupCertificationAccess::factor_base_generation_different_route(
             : GenerationDifferentRoute::none;
 }
 
+namespace {
+
+// Bit length of |D| from which a grh imaginary-quadratic request takes h
+// from the GRH relation lattice instead of listing the reduced forms of
+// discriminant D (FLINT qfb_reduced_forms, time and memory growing like
+// sqrt|D|): |D| >= 2^44.  Below it the listing is faster.  The lattice
+// route's index-one test there would use the unconditional L(1, chi) hR,
+// whose approximate functional equation costs more than the listing at
+// every measured |D| < 2^44; at and above 2^44 it uses a Belabas-Friedman
+// hR (zeta.cpp, quadratic_route_max_abs_discriminant_bits) and is faster
+// than the listing at every measured |D|.  Measured per decade over |D|
+// from 1e7 to 1e14: docs/development/class_number_route_cutoff.rst.
+constexpr ulong grh_imaginary_quadratic_lattice_min_abs_discriminant_bits =
+        45;
+
+}  // namespace
+
 bool ClassGroupCertificationAccess::
         rank_zero_quadratic_class_index_bound(
                 flint::FmpzRef out,
                 ClassGroupContext& context,
                 OrderUnitGroup& units,
                 CertificationMode requested) noexcept {
-    // Proven requests only.  A grh request takes h from the GRH relation
-    // lattice: generation under GRH from the base that contains every prime
-    // ideal up to min(BDF, Bach) (record_grh_factor_base_generation) and
-    // the analytic index test against hR, as in every other degree (Bach
-    // 1990, Thm 4; Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  It never
-    // lists reduced forms, whose time and memory grow like sqrt|D|.
-    if (requested != CertificationMode::proven ||
+    if ((requested != CertificationMode::grh &&
+         requested != CertificationMode::proven) ||
         !units.is_set() ||
         units.free_rank() != 0 ||
         !same_order_parent(units.parent(), context.parent()) ||
         !context.has_presentation() || !context.parent_.is_maximal() ||
-        context.factor_base_generation_status_ != ProofState::verified) {
+        (requested == CertificationMode::proven &&
+         context.factor_base_generation_status_ != ProofState::verified)) {
         return false;
     }
 
@@ -5049,6 +5073,17 @@ bool ClassGroupCertificationAccess::
         flint::fmpz_sgn(flint::FmpzConstRef(discriminant)) >= 0) {
         return false;
     }
+    // A grh request at or above the cutoff takes h from the GRH relation
+    // lattice instead: generation under GRH from the base that contains
+    // every prime ideal up to min(BDF, Bach) (record_grh_factor_base_generation)
+    // and the analytic index test against hR, as in every other degree
+    // (Bach 1990, Thm 4; Belabas-Diaz y Diaz-Friedman 2008, Cor 2.2).  It
+    // never lists reduced forms, whose time and memory grow like sqrt|D|.
+    if (requested == CertificationMode::grh &&
+        ::fmpz_bits(flint::FmpzConstRef(discriminant).raw()) >=
+                grh_imaginary_quadratic_lattice_min_abs_discriminant_bits) {
+        return false;
+    }
 
     // The transaction covers the generation check below, which writes the
     // checked bound, status, and per-prime records, and the index-one
@@ -5056,13 +5091,21 @@ bool ClassGroupCertificationAccess::
     // state as it was.
     ClassGroupContext::CertificationTransaction_ transaction(context);
     flint::Fmpz required_bound;
+    // Under a grh request, generation is assumed under GRH from the record
+    // the grh base build writes: it holds only when the base contains every
+    // prime ideal up to the GRH bound min(BDF, Bach) of this order.
+    if (requested == CertificationMode::grh &&
+        !grh_factor_base_generation_covered(context)) {
+        return false;
+    }
     flint::Fmpz candidate_order;
     flint::Fmpz exact_order;
     flint::Fmpz index;
-    if (!context.factor_base_generation_bound(
-                flint::FmpzRef(required_bound)) ||
-        !context.check_factor_base_generation_bound(
-                flint::FmpzConstRef(required_bound)) ||
+    if ((requested == CertificationMode::proven &&
+         (!context.factor_base_generation_bound(
+                  flint::FmpzRef(required_bound)) ||
+          !context.check_factor_base_generation_bound(
+                  flint::FmpzConstRef(required_bound)))) ||
         !context.order(flint::FmpzRef(candidate_order)) ||
         !exact_imaginary_quadratic_class_order_for_run(
                 flint::FmpzRef(exact_order), context,
@@ -5078,8 +5121,11 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
-    // Index > 1 publishes nothing here, so the torsion is not checked.
-    if (flint::fmpz_is_one(flint::FmpzConstRef(index))) {
+    // A grh request, and index > 1 under a proven request, publish nothing
+    // here, so the torsion is not checked.  At grh index one the caller
+    // publishes grh labels through publish_grh_labels, which checks it.
+    if (requested == CertificationMode::proven &&
+        flint::fmpz_is_one(flint::FmpzConstRef(index))) {
         // Callers treat index one under a proven request as a certified
         // pair, so it is returned only after the pair is published proven.
         // The published unit group is proven only if its torsion is the

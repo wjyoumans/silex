@@ -595,12 +595,13 @@ bool saturate_candidate_class_relations_with_units(
 
     flint::Fmpz aux_bound;
     relation_saturation_aux_bound(aux_bound, options);
-    // The exact imaginary-quadratic index h_cand / h, supplied only under a
-    // proven request (rank_zero_quadratic_class_index_bound, which checks
-    // generation up to the required Minkowski-type bound first), bounds the
-    // saturation index only once the factor base generates the class group,
-    // so the bound is unconditional exactly when that generation check
-    // holds.
+    // The exact imaginary-quadratic index h_cand / h bounds the saturation
+    // index only once the factor base generates the class group.  The bound
+    // is therefore unconditional exactly when generation is verified up to
+    // the required Minkowski-type bound, whatever the request: a proven
+    // request has checked it (rank_zero_quadratic_class_index_bound), and
+    // a grh request may have checked it on another route; otherwise a grh
+    // request assumes generation under GRH and the bound is conditional.
     // The other branch saturates at the primes of h_cand itself, an
     // unconditional bound; the analytic index bound only decides whether to
     // run it.
@@ -1222,11 +1223,12 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
             return false;
         }
 
-        // The exact imaginary-quadratic index serves proven requests only.
-        // A grh request takes h from the GRH relation lattice through the
-        // analytic index test below and never lists reduced forms.
+        // Under a grh request the exact imaginary-quadratic index is
+        // available only for |D| < 2^44; above it h comes from the GRH
+        // relation lattice through the analytic index test below, without
+        // listing reduced forms (rank_zero_quadratic_class_index_bound).
         bool exact_quadratic_index = false;
-        if (order.degree() == 2 && !requested_grh) {
+        if (order.degree() == 2) {
             exact_quadratic_index = ClassGroupCertificationAccess::
                     rank_zero_quadratic_class_index_bound(
                             flint::FmpzRef(index_bound), class_group, units,
@@ -1272,8 +1274,7 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                     // Record the analytic check that accepted the pair, with
                     // its own conditionality.  Informational only; the
                     // labels stay `grh`.  The exact imaginary-quadratic
-                    // index (proven requests only) uses no analytic value
-                    // and records nothing.
+                    // index uses no analytic value and records nothing.
                     ClassGroupCertificationAccess::
                             record_grh_acceptance_analytic_check(
                                     class_group,
@@ -1301,6 +1302,14 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                                         bf_audit->requested_precision,
                                         bf_audit->work_precision));
                     }
+                }
+                if (exact_quadratic_index && requested_grh) {
+                    // Index one against the exact class number: the
+                    // relations and units are complete unconditionally,
+                    // relative to generation.  The labels stay `grh`.
+                    ClassGroupCertificationAccess::
+                            record_grh_acceptance_exact_class_number(
+                                    class_group);
                 }
                 summary.outcome = ValidateRefineOutcome::proven;
                 return true;

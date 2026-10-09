@@ -600,11 +600,31 @@ def main() -> int:
                 "bach",
             )
             assert generation_bound <= used
-        # Every grh row, imaginary quadratic included (whose h comes from
-        # the GRH relation lattice, never from listing reduced forms), is
-        # accepted by the analytic index-one test, with a Belabas-Friedman
-        # hR (GRH-conditional) above degree two and an unconditional
-        # L(1, chi) hR for quadratic fields with |D| < 2^44. Generation is
+        if row["expected_unit_rank"] == 0:
+            # Rank-zero grh rows are imaginary quadratic with |D| < 2^44 and
+            # take the exact imaginary-quadratic `grh` route: the index
+            # comes from the exact class number, not from an analytic hR,
+            # and its GRH dependence is in factor-base generation (checked
+            # only up to the GRH bound). That route records no analytic
+            # check, so these rows stay `not_checked`/`unknown`. (From
+            # |D| >= 2^44 h comes from the GRH relation lattice and the
+            # analytic index-one test; t-class-unit-matrix covers that.)
+            assert grh_instance["class_group"][
+                "analytic_class_regulator_status"
+            ] == "not_checked"
+            assert grh_instance["class_group"][
+                "analytic_class_regulator_certification"
+            ] == "unknown"
+            assert provenance["class_unit_completeness_certification"] == (
+                "proven"
+            )
+            assert provenance["class_unit_completeness_basis"] == (
+                "exact_class_number"
+            )
+            continue
+        # Positive unit rank: the analytic index-one test accepts, with a
+        # Belabas-Friedman hR (GRH-conditional) above degree two and an
+        # unconditional L(1, chi) hR for real quadratic fields. Generation is
         # unconditional (`verified`) only when the GRH-sized base reaches
         # the proven requirement; below it, generation rests on GRH and
         # is never reported `verified`. Relation saturation is not proved

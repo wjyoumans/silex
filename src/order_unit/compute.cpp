@@ -2802,9 +2802,10 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                 ProofState::verified &&
         !detail::ClassGroupCertificationAccess::
                 grh_factor_base_generation_covered(candidate_class_group)) {
-        // A grh request is accepted only by the analytic index-one test
-        // (rank zero included: imaginary quadratic h comes from the GRH
-        // relation lattice, not from listing reduced forms), which needs factor-base generation:
+        // A grh request is accepted only by the analytic index-one test or,
+        // for an imaginary quadratic field with |D| < 2^44, by the exact
+        // class number; both need factor-base generation (the exact route
+        // reads the same GRH record, rank_zero_quadratic_class_index_bound):
         // unconditional (the base reaches the proven generation requirement:
         // factor_base_class_group_bound, or Zimmert's twin-class bound
         // where it applies) or, inside this grh request, under
