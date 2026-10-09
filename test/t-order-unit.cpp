@@ -36,6 +36,9 @@ namespace silex::detail {
 // Defined in src/order_unit/compute.cpp; declared here to pin its behaviour.
 bool round_arb_approx_fmpz(flint::FmpzRef out, const arb_struct* value,
                            slong precision) noexcept;
+bool apply_unit_reduction(std::vector<FactoredElement>& values,
+                          const OrderUnitGroup& group,
+                          const flint::FmpzMat& coefficients) noexcept;
 }  // namespace silex::detail
 
 namespace {
@@ -693,6 +696,177 @@ int test_reduce_mod_units_half_integer_tie() {
     // The ladder stopped well below its cap of
     // kReduceModUnitsMaxPrecision bits.
     assert(embeddings.precision() <= FLINT_MAX(precision_before, 1024));
+    return 0;
+}
+
+// The reduction step value * prod_j g_j^(-c_j) as it was first written:
+// copy the generator, raise it to -c_j, multiply and copy back.  The test
+// below pins apply_unit_reduction to the factor list this builds, including
+// its two exits: false when a scaled factor exponent overflows slong (as
+// pow_si reports), and true with the values unchanged when -c_j itself does
+// not fit an slong.
+bool reference_apply_unit_reduction(
+        std::vector<silex::FactoredElement>& values,
+        const silex::OrderUnitGroup& group,
+        const sflint::FmpzMat& coefficients) noexcept {
+    const silex::NumberField* field = group.parent()->parent();
+    const slong rank = group.free_rank();
+    std::vector<silex::FactoredElement> reduced;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        reduced.emplace_back(*field);
+        if (!reduced.back().set(values[i])) {
+            return false;
+        }
+        for (slong j = 0; j < rank; ++j) {
+            const sflint::FmpzConstRef coefficient = sflint::fmpz_mat_entry(
+                    coefficients, static_cast<slong>(i), j);
+            if (sflint::fmpz_is_zero(coefficient)) {
+                continue;
+            }
+            sflint::Fmpz exponent;
+            sflint::fmpz_neg(sflint::FmpzRef(exponent), coefficient);
+            if (!sflint::fmpz_fits_si(sflint::FmpzConstRef(exponent))) {
+                return true;
+            }
+            silex::FactoredElement unit(*field);
+            silex::FactoredElement power(*field);
+            silex::FactoredElement product(*field);
+            if (!group.free_generator(unit, j) ||
+                !power.pow_si(unit, sflint::fmpz_get_si(
+                                            sflint::FmpzConstRef(exponent))) ||
+                !product.multiply(reduced.back(), power) ||
+                !reduced.back().set(product)) {
+                return false;
+            }
+        }
+    }
+    values = std::move(reduced);
+    return true;
+}
+
+bool same_factor_lists(const std::vector<silex::FactoredElement>& left,
+                       const std::vector<silex::FactoredElement>& right) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        const auto a = left[i].factors();
+        const auto b = right[i].factors();
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (std::size_t k = 0; k < a.size(); ++k) {
+            if (a[k].exponent != b[k].exponent ||
+                !a[k].factor.equal(b[k].factor)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+std::vector<silex::FactoredElement> copy_factored_values(
+        const std::vector<silex::FactoredElement>& values) {
+    std::vector<silex::FactoredElement> out;
+    for (const auto& value : values) {
+        out.emplace_back(*value.parent());
+        assert(out.back().set(value));
+    }
+    return out;
+}
+
+// apply_unit_reduction appends each generator's factors, with exponent
+// -c_j * e, to the reduced value in place.  It must build exactly the
+// factor list of the copy/pow/multiply/set path above (no merging of equal
+// factors), and keep that path's failure and early-exit behaviour.
+int test_apply_unit_reduction_factor_list() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    // Multi-factor generators with a repeated factor: theta^2 (theta-1) and
+    // (theta-1)^-1 theta^3 (theta-1)^2, of log coordinates (2,1) and (3,1).
+    silex::FactoredElement generators[] = {
+            silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+    assert(generators[0].push(theta, 2));
+    assert(generators[0].push(theta_minus_one, 1));
+    assert(generators[1].push(theta_minus_one, -1));
+    assert(generators[1].push(theta, 3));
+    assert(generators[1].push(theta_minus_one, 2));
+    silex::EmbeddingContext embeddings(cubic);
+    silex::OrderUnitGroup group;
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 64));
+    assert(group.free_rank() == 2);
+    slong largest = 0;
+    for (slong j = 0; j < 2; ++j) {
+        silex::FactoredElement generator(cubic);
+        assert(group.free_generator(generator, j));
+        assert(generator.length() >= 2);
+        for (const auto& entry : generator.factors()) {
+            const slong magnitude =
+                    entry.exponent < 0 ? -entry.exponent : entry.exponent;
+            largest = magnitude > largest ? magnitude : largest;
+        }
+    }
+    assert(largest >= 2);
+
+    std::vector<silex::FactoredElement> values;
+    values.emplace_back(cubic);
+    assert(values[0].push(theta, 5));
+    assert(values[0].push(theta_minus_one, -2));
+    values.emplace_back(cubic);
+    assert(values[1].push(theta_minus_one, 3));
+    values.emplace_back(cubic);
+    assert(values[2].push(theta, 1));
+
+    // Mixed signs and a zero row and entry.
+    sflint::FmpzMat coefficients(3, 2);
+    set_zmat_entry_si(coefficients, 0, 0, 1);
+    set_zmat_entry_si(coefficients, 0, 1, -2);
+    set_zmat_entry_si(coefficients, 2, 0, -3);
+    set_zmat_entry_si(coefficients, 2, 1, 4);
+    std::vector<silex::FactoredElement> actual = copy_factored_values(values);
+    std::vector<silex::FactoredElement> expected =
+            copy_factored_values(values);
+    assert(silex::detail::apply_unit_reduction(actual, group, coefficients));
+    assert(reference_apply_unit_reduction(expected, group, coefficients));
+    assert(same_factor_lists(actual, expected));
+    assert(actual[0].length() > values[0].length());
+
+    // A scaled exponent past slong fails, as pow_si does, with the values
+    // unchanged even though row 0 was already reduced.
+    sflint::FmpzMat overflow(3, 2);
+    set_zmat_entry_si(overflow, 0, 0, 1);
+    set_zmat_entry_si(overflow, 1, 0, -(WORD(1) << 62));
+    set_zmat_entry_si(overflow, 1, 1, -(WORD(1) << 62));
+    actual = copy_factored_values(values);
+    expected = copy_factored_values(values);
+    assert(!reference_apply_unit_reduction(expected, group, overflow));
+    assert(!silex::detail::apply_unit_reduction(actual, group, overflow));
+    assert(same_factor_lists(actual, values));
+    assert(same_factor_lists(expected, values));
+
+    // -c_j that does not fit an slong returns true with the values
+    // unchanged.
+    sflint::FmpzMat unfit(3, 2);
+    set_zmat_entry_si(unfit, 0, 1, 1);
+    set_zmat_entry_si(unfit, 1, 0, std::numeric_limits<slong>::min());
+    actual = copy_factored_values(values);
+    expected = copy_factored_values(values);
+    assert(reference_apply_unit_reduction(expected, group, unfit));
+    assert(silex::detail::apply_unit_reduction(actual, group, unfit));
+    assert(same_factor_lists(actual, values));
+    assert(same_factor_lists(expected, values));
+
+    // A coefficient matrix of the wrong shape is rejected.
+    sflint::FmpzMat wrong(2, 2);
+    actual = copy_factored_values(values);
+    assert(!silex::detail::apply_unit_reduction(actual, group, wrong));
+    assert(same_factor_lists(actual, values));
     return 0;
 }
 
@@ -8525,6 +8699,7 @@ int main() {
     test_precision_doubling_cap_default_value();
     test_precision_doubling_cap_forced_failures();
     test_reduce_mod_units_half_integer_tie();
+    test_apply_unit_reduction_factor_list();
     test_reduce_mod_units_half_integer_tie_stop_rule();
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_after_failed_factor_log();

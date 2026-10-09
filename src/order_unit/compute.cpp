@@ -1242,11 +1242,28 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
         return false;
     }
 
+    // value_i * prod_j g_j^(-c_ij), built by appending the factors of each
+    // g_j, with exponents scaled by -c_ij, to the copy of value_i in place.
+    // This is the factor list free_generator, pow_si, multiply and set build
+    // (multiply concatenates left then right factors and merges nothing),
+    // without re-copying the growing reduced value at every step.  The exits
+    // are those of that path: false when a scaled exponent overflows slong
+    // (pow_si) or a copy fails, and true with `values` unchanged when -c_ij
+    // does not fit an slong.  Each generator is copied once, on first use.
+    std::vector<FactoredElement> generators;
+    generators.reserve(static_cast<std::size_t>(rank));
+    for (slong j = 0; j < rank; ++j) {
+        generators.emplace_back(*field);
+    }
+    std::vector<bool> generator_loaded(static_cast<std::size_t>(rank), false);
+
     std::vector<FactoredElement> reduced;
     reduced.reserve(values.size());
+    flint::Fmpz scaled;
     for (slong i = 0; i < len; ++i) {
         reduced.emplace_back(*field);
-        if (!reduced.back().set(values[static_cast<std::size_t>(i)])) {
+        FactoredElement& value = reduced.back();
+        if (!value.set(values[static_cast<std::size_t>(i)])) {
             return false;
         }
         for (slong j = 0; j < rank; ++j) {
@@ -1262,16 +1279,27 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
                 return true;
             }
 
-            FactoredElement unit(*field);
-            FactoredElement power(*field);
-            FactoredElement product(*field);
-            if (!group.free_generator(unit, j) ||
-                !power.pow_si(unit,
-                              flint::fmpz_get_si(
-                                      flint::FmpzConstRef(exponent))) ||
-                !product.multiply(reduced.back(), power) ||
-                !reduced.back().set(product)) {
-                return false;
+            const std::size_t index = static_cast<std::size_t>(j);
+            if (!generator_loaded[index]) {
+                if (!group.free_generator(generators[index], j)) {
+                    return false;
+                }
+                generator_loaded[index] = true;
+            }
+            for (const auto& entry : generators[index].factors()) {
+                flint::fmpz_set_si(flint::FmpzRef(scaled), entry.exponent);
+                flint::fmpz_mul(flint::FmpzRef(scaled),
+                                flint::FmpzConstRef(scaled),
+                                flint::FmpzConstRef(exponent));
+                if (!flint::fmpz_fits_si(flint::FmpzConstRef(scaled))) {
+                    return false;
+                }
+                const slong factor_exponent =
+                        flint::fmpz_get_si(flint::FmpzConstRef(scaled));
+                if (factor_exponent != 0 &&
+                    !value.push(entry.factor, factor_exponent)) {
+                    return false;
+                }
             }
         }
     }
