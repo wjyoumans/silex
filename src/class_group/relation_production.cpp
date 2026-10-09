@@ -243,6 +243,13 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                                 cache, subfactor_base_schedule, route_state, 0,
                                 true,
                                 small_multiplier, true);
+                        // Source relation completion (Buchall_param) sets
+                        // `cache.end = cache.last` after every small_norm
+                        // pass: the initial relation surplus only sizes the
+                        // first request, and the next need comes from the
+                        // rank deficit alone.  Drop the stale target so
+                        // update_need does not keep demanding the surplus.
+                        cache.target_relation_count = relation_count();
                         if (relation_count() != before) {
                             route_state.small_fail = 0;
                         } else {
@@ -432,6 +439,9 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                                 cache, subfactor_base_schedule, route_state,
                                 small_norm_multiplier_index, false,
                                 small_multiplier, true);
+                        // As in the first pass: drop the outstanding
+                        // surplus after small_norm (`cache.end = cache.last`).
+                        cache.target_relation_count = relation_count();
                         if (relation_count() != before) {
                             route_state.small_fail = 0;
                         } else {
