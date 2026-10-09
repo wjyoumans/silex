@@ -171,6 +171,22 @@ public:
         units.mark_certification_proven_();
     }
 
+    // OrderUnitGroup::saturate_local_with_kernel_ for tests of the shared
+    // field-modulus cache.
+    static bool saturate_local_with_kernel(
+            OrderUnitGroup& out,
+            bool& changed,
+            const OrderUnitGroup& group,
+            flint::FmpzMatConstRef kernel,
+            flint::FmpzConstRef ell,
+            EmbeddingContext& embeddings,
+            slong precision,
+            CompactFieldModulusCache* field_modulus_cache) noexcept {
+        return out.saturate_local_with_kernel_(changed, group, kernel, ell,
+                                               embeddings, precision,
+                                               field_modulus_cache);
+    }
+
     // The bodies of OrderUnitGroup::saturate_index_bounded and
     // saturate_index_bounded_adaptive.  After the argument checks, and
     // before any work, `check_torsion` requires order_unit_torsion_is_computed

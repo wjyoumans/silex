@@ -81,6 +81,7 @@ private:
 namespace detail {
 
 class ClassGroupCertificationAccess;
+struct CompactFieldModulusCache;
 
 struct UnitProofRecordData {
     flint::Fmpz ell;
@@ -353,13 +354,20 @@ private:
             flint::FmpzConstRef aux_bound,
             EmbeddingContext& embeddings,
             slong precision,
-            LocalSaturationProofMode mode) noexcept;
-    bool saturate_local_with_kernel_(bool& changed,
-                                     const OrderUnitGroup& group,
-                                     flint::FmpzMatConstRef kernel,
-                                     flint::FmpzConstRef ell,
-                                     EmbeddingContext& embeddings,
-                                     slong precision) noexcept;
+            LocalSaturationProofMode mode,
+            detail::CompactFieldModulusCache* field_modulus_cache =
+                    nullptr) noexcept;
+    // `field_modulus_cache`, when not null, is a caller-owned cache shared
+    // across saturation calls on the same field; null uses a call-local one.
+    bool saturate_local_with_kernel_(
+            bool& changed,
+            const OrderUnitGroup& group,
+            flint::FmpzMatConstRef kernel,
+            flint::FmpzConstRef ell,
+            EmbeddingContext& embeddings,
+            slong precision,
+            detail::CompactFieldModulusCache* field_modulus_cache =
+                    nullptr) noexcept;
     bool prove_local_saturated_stable_in_place_(
             ProofState& status,
             bool& changed,
@@ -369,7 +377,9 @@ private:
             flint::FmpzConstRef aux_bound,
             EmbeddingContext& embeddings,
             slong precision,
-            slong stable_proof_record_prefix_len) noexcept;
+            slong stable_proof_record_prefix_len,
+            detail::CompactFieldModulusCache* field_modulus_cache =
+                    nullptr) noexcept;
     bool compute_with_relation_class_group_(
             ClassGroupContext& class_group,
             const Order& order,

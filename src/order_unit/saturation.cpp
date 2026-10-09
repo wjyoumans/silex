@@ -866,7 +866,9 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
                                   flint::FmpzConstRef ell,
                                   double stable_threshold,
                                   EmbeddingContext& embeddings,
-                                  slong precision) noexcept {
+                                  slong precision,
+                                  detail::CompactFieldModulusCache&
+                                          field_modulus_cache) noexcept {
     step = StableRelationSaturationStep{};
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
@@ -897,7 +899,6 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
         return true;
     }
 
-    detail::CompactFieldModulusCache field_modulus_cache;
     bool saw_candidate = false;
     // A kernel row whose l-th root lies in O_K but not in the order O stays
     // in the residue-character kernel: at every degree-one prime p of O not
@@ -1952,7 +1953,8 @@ bool OrderUnitGroup::saturate_local_with_kernel_(
         flint::FmpzMatConstRef kernel,
         flint::FmpzConstRef ell,
         EmbeddingContext& embeddings,
-        slong precision) noexcept {
+        slong precision,
+        detail::CompactFieldModulusCache* field_modulus_cache) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.saturate_local_with_kernel");
     const Order* order = group.parent();
@@ -1969,7 +1971,10 @@ bool OrderUnitGroup::saturate_local_with_kernel_(
         return false;
     }
 
-    detail::CompactFieldModulusCache field_modulus_cache;
+    detail::CompactFieldModulusCache local_field_modulus_cache;
+    detail::CompactFieldModulusCache& row_field_modulus_cache =
+            field_modulus_cache != nullptr ? *field_modulus_cache
+                                           : local_field_modulus_cache;
     bool saw_failure = false;
     for (slong i = 0; i < flint::fmpz_mat_nrows(kernel); ++i) {
         SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
@@ -1979,7 +1984,7 @@ bool OrderUnitGroup::saturate_local_with_kernel_(
         bool row_changed = false;
         if (saturate_row_with_cache(row_candidate, row_changed, group,
                                     kernel, i, ell, embeddings, precision,
-                                    &field_modulus_cache)) {
+                                    &row_field_modulus_cache)) {
             if (row_changed) {
                 SILEX_PROFILE_EVENT(
                         diagnostics_, DiagnosticsModule::unit_group,
@@ -2040,6 +2045,9 @@ bool OrderUnitGroup::saturate_bounded(bool& changed,
     }
     working.set_diagnostics(diagnostics_);
 
+    // One field-modulus cache for every pass; its entries depend only on
+    // the field, the prime and the threshold.
+    detail::CompactFieldModulusCache field_modulus_cache;
     bool any_changed = false;
     if (max_passes == 0) {
         if (!set(working)) {
@@ -2080,7 +2088,7 @@ bool OrderUnitGroup::saturate_bounded(bool& changed,
                             "unit_group.saturation_precomputed_kernel");
         if (!pass_result.saturate_local_with_kernel_(
                     pass_changed, working, flint::FmpzMatConstRef(kernel),
-                    ell, embeddings, precision)) {
+                    ell, embeddings, precision, &field_modulus_cache)) {
             SILEX_PROFILE_EVENT(
                     diagnostics_, DiagnosticsModule::unit_group,
                     "unit_group.saturate_bounded.local_saturation_failed");
@@ -2382,9 +2390,14 @@ bool OrderUnitGroup::prove_local_saturated_(
         flint::FmpzConstRef aux_bound,
         EmbeddingContext& embeddings,
         slong precision,
-        LocalSaturationProofMode mode) noexcept {
+        LocalSaturationProofMode mode,
+        detail::CompactFieldModulusCache* field_modulus_cache) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.prove_local_saturated");
+    detail::CompactFieldModulusCache local_field_modulus_cache;
+    detail::CompactFieldModulusCache* const shared_field_modulus_cache =
+            field_modulus_cache != nullptr ? field_modulus_cache
+                                           : &local_field_modulus_cache;
     const bool use_stable_proof_fallback =
             mode == LocalSaturationProofMode::index_bound_pass;
     const bool check_torsion = mode == LocalSaturationProofMode::standalone;
@@ -2483,7 +2496,8 @@ bool OrderUnitGroup::prove_local_saturated_(
             StableRelationSaturationStep step;
             if (!stable_relation_saturation_step(
                         pass_result, step, working, ell, stable_threshold,
-                        embeddings, precision)) {
+                        embeddings, precision,
+                        *shared_field_modulus_cache)) {
                 return publish(working, ProofState::unavailable,
                                step.local_primes, stable_changed);
             }
@@ -2562,7 +2576,7 @@ bool OrderUnitGroup::prove_local_saturated_(
                             "unit_group.proof_precomputed_kernel");
         pass_ok = pass_result.saturate_local_with_kernel_(
                 pass_changed, working, flint::FmpzMatConstRef(local_kernel),
-                ell, embeddings, precision);
+                ell, embeddings, precision, shared_field_modulus_cache);
     } else if (first_prime != nullptr) {
         SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::unit_group,
                             "unit_group.proof_precomputed_kernel_unusable");
@@ -2578,7 +2592,7 @@ bool OrderUnitGroup::prove_local_saturated_(
                   pass_result.saturate_local_with_kernel_(
                           pass_changed, working,
                           flint::FmpzMatConstRef(free_kernel), ell,
-                          embeddings, precision);
+                          embeddings, precision, shared_field_modulus_cache);
     }
 
     const slong free_rank = working.free_rank();
@@ -2619,7 +2633,7 @@ bool OrderUnitGroup::prove_local_saturated_(
             pass_ok = pass_result.saturate_local_with_kernel_(
                     pass_changed, working,
                     flint::FmpzMatConstRef(twisted_kernel), ell, embeddings,
-                    precision);
+                    precision, shared_field_modulus_cache);
         }
     }
 
@@ -2660,7 +2674,8 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
         flint::FmpzConstRef aux_bound,
         EmbeddingContext& embeddings,
         slong precision,
-        slong stable_proof_record_prefix_len) noexcept {
+        slong stable_proof_record_prefix_len,
+        detail::CompactFieldModulusCache* field_modulus_cache) noexcept {
     SILEX_PROFILE_SCOPE(
             diagnostics_, DiagnosticsModule::unit_group,
             "unit_group.prove_local_saturated_stable_in_place");
@@ -2695,6 +2710,10 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
         return true;
     };
 
+    detail::CompactFieldModulusCache local_field_modulus_cache;
+    detail::CompactFieldModulusCache& step_field_modulus_cache =
+            field_modulus_cache != nullptr ? *field_modulus_cache
+                                           : local_field_modulus_cache;
     constexpr double kInitialStable = 3.5;
     double stable_threshold = kInitialStable;
     bool stable_changed = false;
@@ -2708,7 +2727,7 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
         StableRelationSaturationStep step;
         if (!stable_relation_saturation_step(
                     pass_result, step, group, ell, stable_threshold,
-                    embeddings, precision)) {
+                    embeddings, precision, step_field_modulus_cache)) {
             return publish_in_place(ProofState::unavailable,
                                     step.local_primes, stable_changed);
         }
@@ -2780,6 +2799,11 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
         return false;
     }
 
+    // One field-modulus cache for every ell-local pass and restart below.
+    // Its entries depend only on the field, the prime and the threshold,
+    // never on the unit group or order, so roots adjoined between passes
+    // leave them valid.
+    detail::CompactFieldModulusCache field_modulus_cache;
     OrderUnitGroup working(*order);
     OrderUnitGroup pass_result(*order);
     working.set_diagnostics(diagnostics_);
@@ -2845,13 +2869,14 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
                         pass_status, pass_changed, working,
                         flint::FmpzConstRef(ell), aux_target_len, aux_bound,
                         embeddings, precision,
-                        stable_proof_record_prefix_len);
+                        stable_proof_record_prefix_len, &field_modulus_cache);
             } else {
                 pass_ok = pass_result.prove_local_saturated_(
                         pass_status, pass_changed, working,
                         flint::FmpzConstRef(ell), aux_target_len, aux_bound,
                         embeddings, precision,
-                        LocalSaturationProofMode::index_bound_pass);
+                        LocalSaturationProofMode::index_bound_pass,
+                        &field_modulus_cache);
             }
             if (!pass_ok) {
                 return publish(working, ProofState::unavailable, any_changed);

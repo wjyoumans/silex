@@ -15,6 +15,7 @@
 #include <silex/zeta.hpp>
 
 #include "class_group/class_group_certification_internal.hpp"
+#include "class_group/class_group_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/relation_unit_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
@@ -28,6 +29,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -2956,6 +2958,92 @@ int test_saturate_row_real_quadratic_square() {
            silex::CertificationMode::unknown);
     assert(check_first_free_generator_square(saturated, epsilon2));
 
+    return 0;
+}
+
+// One field-modulus cache shared by two saturation calls, as
+// prove_index_bound shares it across its passes: the first call fills it,
+// the second adds no entry, and both give the result of an uncached call.
+int test_saturate_local_with_kernel_shares_field_modulus_cache() {
+    using OrderUnitGroupAccess = silex::detail::OrderUnitGroupAccess;
+
+    // x^4 - x - 1 (signature (2, 1), torsion +-1) has the units x and x - 1.
+    sflint::FmpqPoly polynomial;
+    const slong coefficients[] = {-1, -1, 0, 0, 1};
+    for (slong i = 0; i < 5; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element x(field);
+    silex::Element one(field);
+    silex::Element x_minus_one(field);
+    assert(x.gen() && one.one() && x_minus_one.subtract(x, one));
+
+    // x^2 in a compact form with several bases, and x - 1.
+    silex::FactoredElement x_squared(field);
+    silex::FactoredElement other(field);
+    assert(x_squared.push(x, 3) && x_squared.push(x_minus_one, 2) &&
+           x_squared.push(x_minus_one, -2) && x_squared.push(x, -1));
+    assert(other.set_element(x_minus_one));
+    silex::FactoredElement generators[] = {std::move(x_squared),
+                                           std::move(other)};
+    silex::OrderUnitGroup group(order);
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 128));
+    assert(group.free_rank() == 2);
+
+    // ell = 2 divides the torsion order, so the kernel has a torsion column.
+    sflint::FmpzMat kernel(1, 3);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(kernel, 0, 0), 1);
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(ell, 2));
+
+    silex::OrderUnitGroup uncached(order);
+    bool uncached_changed = false;
+    assert(OrderUnitGroupAccess::saturate_local_with_kernel(
+            uncached, uncached_changed, group,
+            sflint::FmpzMatConstRef(kernel), sflint::FmpzConstRef(ell),
+            embeddings, 128, nullptr));
+    assert(uncached_changed);
+    assert(check_first_free_generator(uncached, x));
+
+    silex::detail::CompactFieldModulusCache cache;
+    silex::OrderUnitGroup first(order);
+    bool first_changed = false;
+    assert(OrderUnitGroupAccess::saturate_local_with_kernel(
+            first, first_changed, group, sflint::FmpzMatConstRef(kernel),
+            sflint::FmpzConstRef(ell), embeddings, 128, &cache));
+    const std::size_t filled = cache.entries.size();
+    assert(filled > 0 && cache.field.has_same_data(field));
+    assert(first_changed && check_first_free_generator(first, x));
+
+    silex::OrderUnitGroup second(order);
+    bool second_changed = false;
+    assert(OrderUnitGroupAccess::saturate_local_with_kernel(
+            second, second_changed, group, sflint::FmpzMatConstRef(kernel),
+            sflint::FmpzConstRef(ell), embeddings, 128, &cache));
+    assert(cache.entries.size() == filled);
+    assert(second_changed && check_first_free_generator(second, x));
+
+    silex::FactoredElement expected(field);
+    silex::FactoredElement actual(field);
+    silex::Element expected_value(field);
+    silex::Element actual_value(field);
+    for (const silex::OrderUnitGroup* result : {&first, &second}) {
+        assert(result->free_rank() == uncached.free_rank());
+        for (slong i = 0; i < uncached.free_rank(); ++i) {
+            assert(uncached.free_generator(expected, i) &&
+                   result->free_generator(actual, i) &&
+                   expected.evaluate(expected_value) &&
+                   actual.evaluate(actual_value) &&
+                   expected_value.equal(actual_value));
+        }
+    }
     return 0;
 }
 
@@ -8732,6 +8820,7 @@ int main() {
     test_relation_kernel_unit_failures_preserve_output();
     test_saturate_row_real_quadratic_square();
     test_saturate_row_no_root_and_divisible_copy();
+    test_saturate_local_with_kernel_shares_field_modulus_cache();
     test_dependent_relation_rational_candidate();
     test_dependent_relation_denominator_step();
     test_dependent_relation_min_denominator_scan();
