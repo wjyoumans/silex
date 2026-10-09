@@ -4243,6 +4243,36 @@ int test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log() {
                 if (!matches) {
                     return 1;
                 }
+                if (ell_si == 262147 && q == 1048589 && i == 0) {
+                    // External spot value.  The prime has root r = 688049 of
+                    // x^3 - 3x + 1 and quotient generator zeta = 16; the
+                    // column's theta entry is the discrete log of
+                    // r^((q-1)/ell) = r^4 to base zeta.  gp:
+                    //   znlog(Mod(688049,1048589)^4, Mod(16,1048589), 262147)
+                    // returns 94028 (and Mod(16,1048589)^262147 == 1).
+                    silex::ResidueField rf(*prime);
+                    silex::ResidueFieldQuotientLog ql(rf);
+                    silex::ResidueFieldElement zeta_el(rf);
+                    silex::ResidueFieldElement img(rf);
+                    sflint::Fmpz zs;
+                    sflint::Fmpz rs;
+                    assert(ql.set_ell(sflint::FmpzConstRef(ell)) &&
+                           ql.quotient_generator(zeta_el) &&
+                           zeta_el.degree_one_scalar(sflint::FmpzRef(zs)) &&
+                           img.set_element(theta) &&
+                           img.degree_one_scalar(sflint::FmpzRef(rs)));
+                    assert(sflint::fmpz_get_si(sflint::FmpzConstRef(zs)) ==
+                           16);
+                    assert(sflint::fmpz_get_si(sflint::FmpzConstRef(rs)) ==
+                           688049);
+                    const slong spot = sflint::fmpz_get_si(
+                            sflint::fmpz_mat_entry(
+                                    sflint::FmpzMatConstRef(shared), 0, 0));
+                    assert(spot == 94028);
+                    if (spot != 94028) {
+                        return 1;
+                    }
+                }
                 ++checked;
             }
             if (primes.size() > 0) {

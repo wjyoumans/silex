@@ -1124,6 +1124,16 @@ not as the largest prime used.  Hecke starts its scan at
 which valid characters are used.  Roots are adjoined only after the exact
 order-unit check described below.
 
+Each auxiliary prime contributes one column of ``ell``-th-power residue
+characters, the quotient logarithms of the unit images, following Hecke
+``Saturate.jl:mod_p`` (lines 6-46).  Hecke fills a table of all generator
+powers when ``nbits(pp) < 19`` (line 32) and otherwise takes each logarithm by
+``baby_step_giant_step`` (``ResidueRingMultGrp.jl``, lines 716-738, line 43 of
+``mod_p``).  Silex works in the order-``ell`` quotient, where its linear walk
+costs ``ell`` steps against Hecke's ``pp`` table entries, so it applies the
+19-bit cutoff to ``ell`` instead of ``pp``; this is a cost adaptation only,
+since both routes return the unique logarithm in ``[0, ell)``.
+
 When ``ell`` divides the torsion order, the candidates include the torsion
 generator ``zeta``, as in Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``: ``compute_candidates_for_saturate``

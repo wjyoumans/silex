@@ -484,7 +484,10 @@ bool residue_dlog_proof_matrix(flint::FmpzMat& out,
 // (one residue-field element per row, all in `residue_field`) for the
 // quotient-log context `quotient_log` set to `ell`: the values
 // ResidueFieldQuotientLog::apply returns, with work shared across the column
-// on the word-size degree-one path.  Fails when any entry's apply would fail.
+// on the word-size degree-one path.  Fails when `out` is not images.size() x 1
+// or when any entry's apply would fail; on failure `out` may be partly
+// written, so a caller must pass a scratch matrix and publish it only on
+// success.
 bool residue_quotient_log_column(
         flint::FmpzMat& out,
         const std::vector<ResidueFieldElement>& images,
