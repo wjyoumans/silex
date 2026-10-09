@@ -19,6 +19,18 @@
 namespace {
 namespace sflint = silex::flint;
 
+#if defined(__SANITIZE_ADDRESS__)
+constexpr bool address_sanitizer_build = true;
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+constexpr bool address_sanitizer_build = true;
+#else
+constexpr bool address_sanitizer_build = false;
+#endif
+#else
+constexpr bool address_sanitizer_build = false;
+#endif
+
 void diagnostic_log_callback(void*,
                              silex::DiagnosticsModule module,
                              silex::LogLevel level,
@@ -2406,6 +2418,81 @@ int test_imaginary_quadratic_grh_cutoff_boundary() {
     return 0;
 }
 
+int check_imaginary_quadratic_grh_exact_route(slong constant,
+                                              ulong expected_order,
+                                              const ulong* expected_invariants,
+                                              slong invariant_count,
+                                              const char* name) {
+    const slong quadratic[] = {constant, 0};
+    FieldSetup setup = setup_from_coefficients(quadratic, 2);
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::grh)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)) &&
+           sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order),
+                               expected_order) == 0);
+    assert(class_group.invariant_count() == invariant_count);
+    for (slong i = 0; i < invariant_count; ++i) {
+        sflint::Fmpz invariant;
+        assert(class_group.invariant(sflint::FmpzRef(invariant), i) &&
+               sflint::fmpz_cmp_ui(sflint::FmpzConstRef(invariant),
+                                   expected_invariants[i]) == 0);
+    }
+    assert(units.is_set() && units.free_rank() == 0);
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    assert(class_group.analytic_class_regulator_status() ==
+           silex::ProofState::not_checked);
+    assert(class_group.class_unit_completeness_certification() ==
+           silex::CertificationMode::proven);
+    assert(class_group.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::exact_class_number);
+    return 0;
+}
+
+// Below 2^44 a `grh` imaginary-quadratic transaction takes its index from
+// the exact class number.  On these two presentations the first relation
+// lattice has index two against h, so the refine loop saturates once and
+// measures the next index from the exact class number as well; the
+// completeness basis stays `exact_class_number`.  D = -(10^9 + 3):
+// h = 3680, Z/2 x Z/1840.  D = -(2^44 - 1) = -17592186044415:
+// h = 3384192, (Z/2)^5 x Z/105756.  (GP 2.17 quadclassunit(D).cyc and
+// bnfinit(x^2 - D).cyc.)
+int test_imaginary_quadratic_grh_refine_uses_exact_index() {
+    const ulong k9_invariants[] = {2, 1840};
+    const ulong below_cutoff_invariants[] = {2, 2, 2, 2, 2, 105756};
+    int status = 0;
+    status |= check_imaginary_quadratic_grh_exact_route(
+            1000000003, 3680, k9_invariants, 2,
+            "grh imaginary quadratic x^2 + 10^9 + 3");
+    // Listing the 3384192 reduced forms takes seconds unoptimized but over
+    // three minutes under AddressSanitizer, past the 60 s test timeout, so
+    // sanitizer builds run only the first row, which takes the same route.
+    if (!address_sanitizer_build) {
+        status |= check_imaginary_quadratic_grh_exact_route(
+                17592186044415, 3384192, below_cutoff_invariants, 6,
+                "grh imaginary quadratic x^2 + 2^44 - 1");
+    }
+    return status;
+}
+
 // A public generation check at a bound below the required generation bound
 // does not establish that the factor base generates the class group, so it
 // cannot stand in for the full check when the stored unconditional record
@@ -2806,6 +2893,7 @@ int main() {
     status |= test_real_quadratic_grh_record_and_later_promotion();
     status |= test_imaginary_quadratic_grh_large_discriminant();
     status |= test_imaginary_quadratic_grh_cutoff_boundary();
+    status |= test_imaginary_quadratic_grh_refine_uses_exact_index();
     status |= test_low_bound_generation_check_does_not_promote();
     status |= test_grh_generation_below_minkowski_bound();
     status |= test_real_quadratic_h_gt_one_proven_saturation();

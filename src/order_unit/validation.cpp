@@ -1431,9 +1431,24 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
             return false;
         }
 
-        bool next_check_available = analytic_index_bound_for_validation(
-                next_index_bound, scratch_units, class_group, analytic_cache,
-                order, precision, requested_grh);
+        // The refined index only decides whether this pass made progress.
+        // Under a grh request in degree two it comes from the exact class
+        // number where the pass check above does (|D| < 2^44), so no
+        // unconditional L(1, chi) hR is evaluated just to measure progress;
+        // above the cutoff, or when that route is unavailable, it comes from
+        // the analytic index bound as before.
+        bool next_check_available = false;
+        if (requested_grh && order.degree() == 2) {
+            next_check_available = ClassGroupCertificationAccess::
+                    rank_zero_quadratic_class_index_bound(
+                            flint::FmpzRef(next_index_bound), class_group,
+                            scratch_units, options.requested_certification);
+        }
+        if (!next_check_available) {
+            next_check_available = analytic_index_bound_for_validation(
+                    next_index_bound, scratch_units, class_group,
+                    analytic_cache, order, precision, requested_grh);
+        }
         if (next_check_available) {
             flint::fmpz_set(flint::FmpzRef(summary.last_index_bound),
                             flint::FmpzConstRef(next_index_bound));
