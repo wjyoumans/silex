@@ -726,8 +726,9 @@ certified upper bound ``B' >= B(gamma)`` at a fixed ``gamma`` may replace
 table is at least ``c_up(r1, r2, gamma)``, the certified upper bound on
 ``exp(-(F + n log pi)/2)`` at the tabulated ``gamma`` that
 silex-research's ``src/silex_research/zimmert.py`` computes with Arb at
-128 bits, at the same commit.  This was checked offline with exact rational
-comparisons for all 117 signatures with ``3 <= n <= 20``; at
+128 bits, at the same commit.  This was checked with exact rational
+comparisons by ``tools/check_zimmert_twin_class_table.py`` (an offline tool
+that needs Sage and that silex-research commit) for all 117 signatures with ``3 <= n <= 20``; at
 ``gamma = 1/2`` the two constants agree to about 30 digits, and elsewhere
 ``E`` exceeds ``c_up`` by at most about ``1.3e-4`` relative.  So
 ``ceil(E sqrt|d|) >= B(gamma)``.

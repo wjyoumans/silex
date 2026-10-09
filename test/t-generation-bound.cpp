@@ -988,10 +988,11 @@ int test_proven_generation_requirement() {
     silex::Order equation = silex::test::equation_order(
             *cubic_maximal_order(1, 25, 25000).parent());
     fmpz_set_si(bound.raw(), 99);
-    route = Route::none;
+    route = Route::kor1_generation;  // a value the function never writes on failure
     if (silex::detail::proven_generation_requirement(sflint::FmpzRef(bound),
                                                      route, equation) ||
-        !sflint::fmpz_equal_si(bound, 99) || route != Route::none) {
+        !sflint::fmpz_equal_si(bound, 99) ||
+        route != Route::kor1_generation) {
         return 1;
     }
     return 0;

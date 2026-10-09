@@ -1453,7 +1453,8 @@ bool factor_base_class_group_bound(flint::FmpzRef out,
 // bound ceil(E sqrt|d|) is such a B': every table entry E is at least the
 // certified upper bound c_up(r1, r2, gamma) >= exp(-(F + n log pi)/2) of
 // silex-research's src/silex_research/zimmert.py at that commit, at the
-// tabulated gamma (checked offline for all 117 entries).  So the
+// tabulated gamma (checked for all 117 entries by
+// tools/check_zimmert_twin_class_table.py).  So the
 // requirement is the twin-class bound whenever it is below
 // factor_base_class_group_bound, whatever the defining polynomial.
 bool detail::proven_generation_requirement(
