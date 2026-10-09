@@ -29,6 +29,35 @@ bool reduce_polynomial(flint::FmpzModPoly& out,
     return true;
 }
 
+// The residue image of an element in F_p[x]/(modulus), where x is the
+// prime's residue variable. The caller checks the element's parent.
+bool element_residue_image(flint::FmpzModPoly& out,
+                           const PrimeIdeal& prime,
+                           const flint::Fmpz& p,
+                           const flint::FmpzModCtx& ctx,
+                           const flint::FmpzModPoly& modulus,
+                           const Element& element) noexcept {
+    // Map the element to the stored residue polynomial's variable (alpha, or
+    // omega on the direct maximal-quadratic path) through the order basis,
+    // not by reading order coordinates as power-basis coefficients.
+    flint::FmpzPoly scaled;
+    flint::Fmpz denominator;
+    flint::Fmpz denominator_inverse;
+
+    if (!detail::residue_variable_numerator(scaled, denominator, prime,
+                                            element) ||
+        fmpz_divisible(denominator.raw(), p.raw()) != 0 ||
+        fmpz_invmod(denominator_inverse.raw(), denominator.raw(),
+                    p.raw()) == 0) {
+        return false;
+    }
+
+    reduce_polynomial(out, flint::FmpzPolyConstRef(scaled), ctx, modulus);
+    fmpz_mod_poly_scalar_mul_fmpz(out.raw(), out.raw(),
+                                  denominator_inverse.raw(), ctx.raw());
+    return true;
+}
+
 bool set_residue_field_element_from_index(
         ResidueFieldElement& out,
         const ResidueField& parent,
@@ -418,27 +447,11 @@ bool ResidueFieldElement::set_element(const Element& element) noexcept {
         return false;
     }
 
-    // Map the element to the stored residue polynomial's variable (alpha, or
-    // omega on the direct maximal-quadratic path) through the order basis,
-    // not by reading order coordinates as power-basis coefficients.
-    flint::FmpzPoly scaled;
-    flint::Fmpz denominator;
-    flint::Fmpz denominator_inverse;
     flint::FmpzModPoly reduced(parent_.ctx_);
-
-    if (!detail::residue_variable_numerator(scaled, denominator,
-                                            parent_.prime_, element) ||
-        fmpz_divisible(denominator.raw(), parent_.p_.raw()) != 0 ||
-        fmpz_invmod(denominator_inverse.raw(), denominator.raw(),
-                    parent_.p_.raw()) == 0) {
+    if (!element_residue_image(reduced, parent_.prime_, parent_.p_,
+                               parent_.ctx_, parent_.modulus_, element)) {
         return false;
     }
-
-    reduce_polynomial(reduced, flint::FmpzPolyConstRef(scaled),
-                      parent_.ctx_, parent_.modulus_);
-    fmpz_mod_poly_scalar_mul_fmpz(reduced.raw(), reduced.raw(),
-                                  denominator_inverse.raw(),
-                                  parent_.ctx_.raw());
     fmpz_mod_poly_swap(rep_.raw(), reduced.raw(), parent_.ctx_.raw());
     return true;
 }
@@ -453,30 +466,60 @@ bool ResidueFieldElement::set_factored_element(
         return false;
     }
 
-    ResidueFieldElement product(parent_);
-    ResidueFieldElement factor(parent_);
-    ResidueFieldElement power(parent_);
-    flint::Fmpz exponent_value;
-    if (!product.one()) {
-        return false;
-    }
+    // prod_k red(b_k)^{e_k}, the same value as set_element, pow_fmpz and
+    // multiply applied factor by factor, computed on bare polynomials in this
+    // element's field: no per-factor residue-field copies or prime-ideal
+    // comparisons. The negative-exponent factors are collected into one
+    // product and inverted once; a factor that vanishes at the prime with a
+    // negative exponent fails, as pow_fmpz does.
+    const NumberField& field = *parent_.parent_order()->parent();
+    const flint::FmpzModCtx& ctx = parent_.ctx_;
+    const flint::FmpzModPoly& modulus = parent_.modulus_;
+    flint::FmpzModPoly numerator(ctx);
+    flint::FmpzModPoly denominator(ctx);
+    flint::FmpzModPoly factor(ctx);
+    flint::FmpzModPoly power(ctx);
+    flint::Fmpz abs_exponent;
+    bool has_negative = false;
+    fmpz_mod_poly_one(numerator.raw(), ctx.raw());
+    fmpz_mod_poly_one(denominator.raw(), ctx.raw());
 
     for (slong i = 0; i < element.length(); ++i) {
         const Element* factor_element = element.factor(i);
         slong exponent = 0;
         if (factor_element == nullptr ||
             !element.exponent(exponent, i) ||
-            !factor.set_element(*factor_element)) {
+            !factor_element->has_parent(field) ||
+            !element_residue_image(factor, parent_.prime_, parent_.p_, ctx,
+                                   modulus, *factor_element)) {
             return false;
         }
-        fmpz_set_si(exponent_value.raw(), exponent);
-        if (!power.pow_fmpz(factor, flint::FmpzConstRef(exponent_value)) ||
-            !product.multiply(product, power)) {
+        const bool negative = exponent < 0;
+        if (negative && fmpz_mod_poly_is_zero(factor.raw(), ctx.raw()) != 0) {
             return false;
         }
+        fmpz_set_si(abs_exponent.raw(), exponent);
+        fmpz_abs(abs_exponent.raw(), abs_exponent.raw());
+        fmpz_mod_poly_powmod_fmpz_binexp(power.raw(), factor.raw(),
+                                         abs_exponent.raw(), modulus.raw(),
+                                         ctx.raw());
+        flint::FmpzModPoly& target = negative ? denominator : numerator;
+        fmpz_mod_poly_mulmod(target.raw(), target.raw(), power.raw(),
+                             modulus.raw(), ctx.raw());
+        has_negative = has_negative || negative;
     }
 
-    return set(product);
+    if (has_negative) {
+        if (fmpz_mod_poly_invmod(power.raw(), denominator.raw(),
+                                 modulus.raw(), ctx.raw()) == 0) {
+            return false;
+        }
+        fmpz_mod_poly_mulmod(numerator.raw(), numerator.raw(), power.raw(),
+                             modulus.raw(), ctx.raw());
+    }
+
+    fmpz_mod_poly_swap(rep_.raw(), numerator.raw(), ctx.raw());
+    return true;
 }
 
 bool ResidueFieldElement::get_polynomial(

@@ -1047,6 +1047,142 @@ int test_set_element_homomorphism_on_index_maximal_order() {
     return 0;
 }
 
+// The product prod_k red(b_k)^{e_k} computed one factor at a time with the
+// public element operations: the reference for set_factored_element.
+bool factored_image_oracle(silex::ResidueFieldElement& out,
+                           const silex::ResidueField& residue_field,
+                           const std::vector<const silex::Element*>& bases,
+                           const std::vector<slong>& exponents) noexcept {
+    silex::ResidueFieldElement product(residue_field);
+    silex::ResidueFieldElement factor(residue_field);
+    silex::ResidueFieldElement power(residue_field);
+    sflint::Fmpz exponent;
+    if (!product.one()) {
+        return false;
+    }
+    for (size_t k = 0; k < bases.size(); ++k) {
+        fmpz_set_si(exponent, exponents[k]);
+        if (!factor.set_element(*bases[k]) ||
+            !power.pow_fmpz(factor, sflint::FmpzConstRef(exponent)) ||
+            !product.multiply(product, power)) {
+            return false;
+        }
+    }
+    return out.set(product);
+}
+
+int test_set_factored_element_matches_factorwise_product() {
+    // Every prime above 3..13 of the index-2 cubic order, with residue
+    // degrees 1 and above, positive and negative exponents, factors that
+    // vanish at the prime, and a factor whose denominator is divisible by p.
+    sflint::FmpqPoly polynomial;
+    poly_cubic_disc1724(polynomial);
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    std::vector<silex::Element> elements;
+    elements.emplace_back(field);
+    assert(elements.back().gen());
+    for (const slong constant : {1, -2, 5}) {
+        elements.emplace_back(field);
+        element_linear_over(elements.back(), constant, 1, 2);
+    }
+    elements.emplace_back(field);
+    element_linear_over(elements.back(), 4, -3, 7);
+    elements.emplace_back(field);
+    assert(elements.back().multiply(elements[1], elements[2]));
+
+    const slong exponents[] = {3, -2, 1, -1, 5, -4};
+    const slong rational_primes[] = {3, 5, 7, 11, 13};
+    slong checked = 0;
+    slong saw_degree_above_one = 0;
+    for (const slong q : rational_primes) {
+        sflint::Fmpz p;
+        fmpz_set_si(p, q);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, maximal,
+                                      sflint::FmpzConstRef(p)));
+        silex::Element p_element(field);
+        silex::Element over_p(field);
+        assert(p_element.set_si(q));
+        element_linear_over(over_p, 1, 1, q);
+        for (slong i = 0; i < primes.size(); ++i) {
+            silex::ResidueField residue_field;
+            assert(residue_field.set_prime(*primes.at(i)));
+            if (residue_field.degree() > 1) {
+                ++saw_degree_above_one;
+            }
+            silex::ResidueFieldElement image(residue_field);
+            silex::ResidueFieldElement expected(residue_field);
+            silex::ResidueFieldElement sentinel(residue_field);
+            assert(sentinel.set_element(elements[0]));
+
+            // Prefixes of the factor list, so each length is checked.
+            for (size_t length = 0; length <= elements.size(); ++length) {
+                silex::FactoredElement factored(field);
+                std::vector<const silex::Element*> bases;
+                std::vector<slong> powers;
+                for (size_t k = 0; k < length; ++k) {
+                    if (q == 7 && k == 4) {
+                        continue;  // 7 divides the denominator of (4-3a)/7
+                    }
+                    assert(factored.push(elements[k], exponents[k]));
+                    bases.push_back(&elements[k]);
+                    powers.push_back(exponents[k]);
+                }
+                if (!factored_image_oracle(expected, residue_field, bases,
+                                           powers)) {
+                    // A factor is not a unit at this prime with a negative
+                    // exponent: both must fail and keep the output.
+                    assert(image.set(sentinel));
+                    assert(!image.set_factored_element(factored));
+                    assert(image.equal(sentinel));
+                    continue;
+                }
+                assert(image.set(sentinel));
+                assert(image.set_factored_element(factored));
+                assert(image.equal(expected));
+                ++checked;
+            }
+
+            // p vanishes at the prime: a positive power gives zero.
+            {
+                silex::FactoredElement factored(field);
+                assert(factored.push(elements[1], 2));
+                assert(factored.push(p_element, 3));
+                assert(image.set(sentinel));
+                assert(image.set_factored_element(factored));
+                assert(image.is_zero());
+            }
+            // A negative power of p is not defined in the residue field.
+            {
+                silex::FactoredElement factored(field);
+                assert(factored.push(elements[1], 2));
+                assert(factored.push(p_element, -1));
+                assert(factored.push(elements[2], 1));
+                assert(image.set(sentinel));
+                assert(!image.set_factored_element(factored));
+                assert(image.equal(sentinel));
+            }
+            // A denominator divisible by p fails at any exponent.
+            {
+                silex::FactoredElement factored(field);
+                assert(factored.push(elements[1], -1));
+                assert(factored.push(over_p, 2));
+                assert(image.set(sentinel));
+                assert(!image.set_factored_element(factored));
+                assert(image.equal(sentinel));
+            }
+        }
+    }
+    assert(checked >= 40);
+    assert(saw_degree_above_one >= 1);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1060,5 +1196,6 @@ int main() {
     assert(test_quotient_logs_mod_three() == 0);
     assert(test_generic_nonpower_basis_set_element() == 0);
     assert(test_set_element_homomorphism_on_index_maximal_order() == 0);
+    assert(test_set_factored_element_matches_factorwise_product() == 0);
     return 0;
 }
