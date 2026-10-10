@@ -2026,7 +2026,7 @@ void prepare_minus_23_index_two_candidate(silex::ClassGroupContext& context,
 }
 
 // On the Q(sqrt(-23)) candidate above (h_cand = 6, h = 3) the relations are
-// already 3-saturated, so at ell = 3 (no torsion column: w = 4) no nonzero
+// already 3-saturated, so at ell = 3 (no torsion column: w = 2) no nonzero
 // exponent vector mod 3 makes the relation generators a cube and the stacked
 // kernel is empty.  At ell = 2 the generator 4 is a square, so (1, 0, 0, 0, 0)
 // lies in the kernel and 3 (not a square in K) does not.

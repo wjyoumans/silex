@@ -1363,9 +1363,16 @@ run power tests, and no clock enters.  Stacking stops by the rule of Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``,
 ``compute_candidates_for_saturate`` (lines 130--203): when the common kernel
 is empty or its dimension has stayed the same for more than ``stable`` times
-the number of inputs.  ``stable`` starts at 1.5, the default of that routine,
-and doubles after a failed power test, as ``saturate!`` (lines 419--512)
-does, which lets a stopped stack grow again.  A row outside the common
+the number of inputs.  ``stable`` starts at 1.5, the default of that
+routine; ``saturate!`` (lines 419--509) calls it with ``stable = 3.5``, so
+1.5 is a Silex choice.  ``stable`` doubles after a failed power test, as in
+``saturate!`` (line 503), but only after a failed test on a row that the
+stack let through once it had stopped with a nonempty common kernel; a
+failure while the stack is still growing leaves ``stable`` unchanged.  The
+doubling lets the stopped stack grow again.  Each append round builds a new
+stack with ``stable`` back at 1.5, whereas the doubled ``stable`` of
+``saturate!`` carries over to its later rounds.  These departures change
+only how many power tests are skipped.  A row outside the common
 kernel modulo ``ell`` is skipped without a power test, and an empty common
 kernel ends the round.  Every character vanishes on ``ell``-th powers, so a
 skipped row would have failed its power test, and a stack that stops at any

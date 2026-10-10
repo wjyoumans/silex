@@ -163,8 +163,9 @@ struct RelationSaturationCandidateFilter {
     bool q_loaded = false;
     std::vector<flint::Fmpz> roots;
     std::size_t next_root = 0;
-    // The stacked characters as independent rows modulo ell in reduced
-    // echelon form (pivot entry 1); the kernel dimension is width - rank.
+    // The stacked characters modulo ell as independent rows, each reduced
+    // against the earlier ones (pivot entry 1); the kernel dimension is
+    // width - rank.
     std::vector<std::vector<ulong>> rows;
     std::vector<slong> pivots;
 };

@@ -7334,14 +7334,14 @@ bool degree_one_quotient_log_row_word_size(
 // are removed.
 //
 // Cost gate: the reference stacks every prime before its first power test
-// (with `stable = 3.5` from `saturate!`, lines 419-512), which costs more than
+// (with `stable = 3.5` from `saturate!`, lines 419-509), which costs more than
 // the power tests it removes on small fields.  Here a candidate that the
 // current stack does not rule out first stacks one more degree-one prime
 // (relation_saturation_candidate_filter_grow), so the stack never holds more
 // primes than the unfiltered scan would run power tests.  It stops by the
 // reference rule with `stable` starting at the reference default 1.5
 // (line 130) and doubled after a failed power test, as `saturate!` does after
-// a wasted candidate (line 506).
+// a wasted candidate (line 503).
 //
 // `available` is false when the port does not apply (a nonmaximal order, a
 // defining polynomial that is not monic integral, an ell that does not fit a
@@ -7636,7 +7636,7 @@ bool relation_saturation_candidate_filter_kernel_empty(
 
 // A candidate that the stopped stack let through failed its power test:
 // double `stable` and let the stack grow again (reference `saturate!`,
-// line 506).
+// line 503).
 void relation_saturation_candidate_filter_failed_power_test(
         RelationSaturationCandidateFilter& filter) noexcept {
     if (!filter.available || !filter.stopped ||

@@ -157,7 +157,8 @@ Changed
   divisibility check and the current stack, and skips the candidates outside
   the common kernel, which cannot be ``ell``-th powers.  Stacking stops by
   Hecke's ``compute_candidates_for_saturate`` rule with ``stable`` starting
-  at 1.5 and doubling after a failed power test.  The appended relations,
+  at 1.5 and doubling after a failed power test on a candidate that the
+  stopped stack let through.  The appended relations,
   class groups, generators and units are unchanged.  See "Class groups and
   order units" in :doc:`../reference/algorithms_and_sources`.
 
