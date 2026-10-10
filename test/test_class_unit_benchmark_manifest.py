@@ -66,14 +66,14 @@ def main() -> int:
     assert "source-neutral" in manifest["fixture_contract"]
     fields = manifest["fields"]
     assert isinstance(fields, list)
-    assert len(fields) == 31
+    assert len(fields) == 32
     assert len({row["id"] for row in fields}) == len(fields)
     assert all(row["expected_success"] is True for row in fields)
     assert all(row["mode"] in {"proven", "grh"} for row in fields)
 
     proven = [row for row in fields if row["status"] == "must_pass_fast"]
     grh = [row for row in fields if row["status"] == "grh_certification"]
-    assert len(proven) == 17
+    assert len(proven) == 18
     assert len(grh) == 13
     assert all(row["mode"] == "proven" for row in proven)
     assert all(row["mode"] == "grh" for row in grh)
@@ -98,6 +98,7 @@ def main() -> int:
         "imaginary_quadratic_disc3_alternate_proven",
         "imaginary_quadratic_disc4_proven",
         "real_quadratic_210_proven",
+        "real_quadratic_disc416012_proven",
     }
     additions = {
         "degree_one_proven": ([0, 1], 1, [], 0, [1, 0], "1"),
@@ -112,6 +113,9 @@ def main() -> int:
         ),
         "real_quadratic_210_proven": (
             [-210, 0, 1], 4, [2, 2], 1, [2, 0], "840"
+        ),
+        "real_quadratic_disc416012_proven": (
+            [-104002, 2, 1], 1, [], 1, [2, 0], "416012"
         ),
     }
     by_id = {row["id"]: row for row in proven}

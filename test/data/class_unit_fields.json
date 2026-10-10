@@ -208,6 +208,20 @@
       "source": "Existing canonical real quadratic 210 proven transaction replay"
     },
     {
+      "id": "real_quadratic_disc416012_proven",
+      "coefficients_low_to_high": [-104002, 2, 1],
+      "mode": "proven",
+      "expected_class_order": 1,
+      "expected_class_invariants": [],
+      "expected_unit_rank": 1,
+      "expected_signature": [2, 0],
+      "maximal_order_discriminant": "416012",
+      "timeout_seconds": 20,
+      "expected_success": true,
+      "status": "must_pass_fast",
+      "source": "Regression for relation-kernel unit candidates whose raw Smith-form kernel rows hold exponents outside a signed machine word; certified independently: h = 1, regulator 242.0117..."
+    },
+    {
       "id": "imaginary_quadratic_34_grh",
       "coefficients_low_to_high": [34, 0, 1],
       "mode": "grh",

@@ -471,8 +471,8 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "must_pass_fast"
     ]
-    assert len(manifest["fields"]) == 31
-    assert len(proven_rows) == 17
+    assert len(manifest["fields"]) == 32
+    assert len(proven_rows) == 18
     exact_rows = {
         "degree_one_proven",
         "imaginary_quadratic_disc3_proven",
