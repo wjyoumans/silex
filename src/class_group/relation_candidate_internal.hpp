@@ -28,7 +28,8 @@ struct OrderCoordinateElementConversion {
 // length n against the stored powers r_i^j.  The integer is recovered by
 // symmetric CRT once the product of the primes used exceeds twice the
 // Hadamard bound |Res(f, a)| <= ||f||_2^deg(a) ||a||_2^n, the bound FLINT's
-// _fmpz_poly_resultant_modular uses.  Split primes are searched lazily;
+// _fmpz_poly_resultant_modular uses (FLINT src/fmpz_poly/resultant_modular.c,
+// citing Theorem 7 of doi:10.1016/j.laa.2009.08.012).  Split primes are searched lazily;
 // when they do not cover a candidate's bound, the caller computes
 // fmpz_poly_resultant instead, so the value is always the exact resultant.
 struct SplitPrimeResultant {
@@ -47,7 +48,8 @@ struct SplitPrimeResultant {
     flint::Fmpz crt_scratch;
 
     // Enables the evaluator for f when deg(f) is large enough for the
-    // search to pay off; otherwise leaves it disabled.
+    // search to pay off; otherwise leaves it disabled.  A reset with the
+    // same f while enabled keeps the split primes found so far.
     void reset(const fmpz_poly_struct* monic_field_polynomial) noexcept;
 
     // Sets out = Res(f, a) and handled = true when the split primes cover

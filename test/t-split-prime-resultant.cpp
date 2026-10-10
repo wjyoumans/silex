@@ -5,6 +5,7 @@
 
 #include <flint/fmpz_poly.h>
 
+#include <cstddef>
 #include <cstdio>
 
 namespace {
@@ -68,7 +69,10 @@ void set_random_polynomial(sflint::FmpzPoly& out,
 
 // Compares the split-prime value with fmpz_poly_resultant over random
 // coordinate polynomials; returns the number of handled candidates or -1
-// on a mismatch.
+// on a mismatch.  This catches sign and CRT errors and grossly short
+// bounds, but random candidates lie many bits below the Hadamard bound, so
+// a bound short by a few bits would still pass: the bound's correctness
+// rests on the Hadamard argument in the source, not on these tests.
 slong compare_with_resultant(relation_search::SplitPrimeResultant& evaluator,
                              const sflint::FmpzPoly& field,
                              ulong seed,
@@ -121,10 +125,15 @@ int test_cyclotomic_matches_resultant() {
             count) {
             return 1;
         }
-        // Large coefficients: some bounds exceed the split primes; the ones
-        // that are covered still match.
-        if (compare_with_resultant(evaluator, field,
-                                   static_cast<ulong>(m) + 1, 40, 200) < 0) {
+        // Large coefficients: some bounds exceed the split primes, so the
+        // search runs out and those candidates fall back; the ones that are
+        // covered still match.
+        constexpr slong large_count = 40;
+        const slong large_handled = compare_with_resultant(
+                evaluator, field, static_cast<ulong>(m) + 1, large_count,
+                200);
+        if (large_handled <= 0 || large_handled >= large_count ||
+            !evaluator.search_exhausted) {
             return 1;
         }
     }
@@ -227,13 +236,55 @@ int test_disabled_and_exhausted_cases() {
     return handled || evaluator.tested_primes > 4 * 16 ? 1 : 0;
 }
 
+int test_reset_keeps_split_primes_for_same_field() {
+    sflint::FmpzPoly field;
+    set_prime_cyclotomic(field, 17);
+    relation_search::SplitPrimeResultant evaluator;
+    evaluator.reset(field.raw());
+    if (compare_with_resultant(evaluator, field, 5, 20, 40) != 20) {
+        return 1;
+    }
+    const std::size_t found = evaluator.moduli.size();
+    const slong tested = evaluator.tested_primes;
+    if (found == 0) {
+        return 1;
+    }
+
+    // Rebuilding the prefilter for the same f keeps the primes found and
+    // does not search again for them.
+    evaluator.reset(field.raw());
+    if (!evaluator.enabled || evaluator.moduli.size() != found ||
+        evaluator.tested_primes != tested) {
+        return 1;
+    }
+    if (compare_with_resultant(evaluator, field, 5, 20, 40) != 20 ||
+        evaluator.moduli.size() != found ||
+        evaluator.tested_primes != tested) {
+        return 1;
+    }
+
+    // A different f starts a fresh search.
+    sflint::FmpzPoly other;
+    set_prime_cyclotomic(other, 41);
+    evaluator.reset(other.raw());
+    if (!evaluator.enabled || !evaluator.moduli.empty() ||
+        evaluator.tested_primes != 0 ||
+        compare_with_resultant(evaluator, other, 7, 20, 12) != 20) {
+        return 1;
+    }
+    // No field polynomial disables the evaluator.
+    evaluator.reset(nullptr);
+    return evaluator.enabled || !evaluator.moduli.empty() ? 1 : 0;
+}
+
 }  // namespace
 
 int main() {
     return test_cyclotomic_matches_resultant() != 0 ||
                    test_real_abelian_matches_resultant() != 0 ||
                    test_constant_and_zero_polynomials() != 0 ||
-                   test_disabled_and_exhausted_cases() != 0
+                   test_disabled_and_exhausted_cases() != 0 ||
+                   test_reset_keeps_split_primes_for_same_field() != 0
             ? 1
             : 0;
 }

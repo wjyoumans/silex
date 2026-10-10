@@ -21,9 +21,11 @@ namespace detail::relation_search {
 
 namespace {
 
-// Below this degree the per-row cost of the exact prefilter resultants is a
-// few milliseconds on the grh corpus, so the split-prime search does not pay
-// for itself; those fields keep fmpz_poly_resultant only.
+// Measured speed threshold, not from a source, and revisable: below this
+// degree the per-row cost of the exact prefilter resultants is a few
+// milliseconds on the grh corpus, so the split-prime search does not pay
+// for itself; those fields keep fmpz_poly_resultant only.  Either path
+// gives the same exact resultant, so the value never depends on it.
 constexpr slong kSplitPrimeResultantMinDegree = 16;
 
 // Split primes are taken from [2^27, 2^28).  For p < 2^28,
@@ -40,12 +42,22 @@ constexpr slong kSplitPrimeDotChunk = 255;
 // primes are rare.  Stopping only routes candidates to the exact
 // fmpz_poly_resultant.
 constexpr slong kSplitPrimeSearchFactor = 4;
+// Measured speed threshold, not from a source, and revisable: at most this
+// many split primes are kept; candidates whose bound needs more fall back
+// to the exact fmpz_poly_resultant.
 constexpr std::size_t kMaxSplitPrimes = 64;
 
 }  // namespace
 
 void SplitPrimeResultant::reset(
         const fmpz_poly_struct* monic_field_polynomial) noexcept {
+    // Rebuilding the prefilter for the same f keeps the split primes
+    // already found and the search state, so the search is not repeated.
+    if (enabled && monic_field_polynomial != nullptr &&
+        fmpz_poly_equal(field_polynomial.raw(), monic_field_polynomial) !=
+                0) {
+        return;
+    }
     enabled = false;
     search_exhausted = false;
     degree = 0;
