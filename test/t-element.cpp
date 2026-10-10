@@ -5,7 +5,13 @@
 
 #include "test_support.hpp"
 
+#include <flint/fmpq.h>
+#include <flint/fmpq_poly.h>
+#include <flint/fmpz.h>
+#include <flint/nf_elem.h>
+
 #include <cassert>
+#include <cstdint>
 #include <initializer_list>
 #include <utility>
 
@@ -591,9 +597,156 @@ void test_invert_zero_divisors() noexcept {
             sflint::FmpqPolyConstRef(nonmonic)), nonmonic_reducible, 1);
 }
 
+
+// Element::norm computes the norm in fields x^n + c (n even, n >= 4) by
+// repeated Graeffe halving of the defining polynomial (see
+// src/element/element.cpp).  The result must be the same canonical rational
+// as FLINT's nf_elem_norm, which every other field uses.
+std::uint64_t next_random(std::uint64_t& state) noexcept {
+    state += 0x9e3779b97f4a7c15ULL;
+    std::uint64_t z = state;
+    z = (z ^ (z >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27U)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31U);
+}
+
+void random_integer(fmpz_t out, std::uint64_t& state, ulong max_bits) noexcept {
+    const ulong bits = static_cast<ulong>(next_random(state) % (max_bits + 1));
+    fmpz_zero(out);
+    for (ulong done = 0; done < bits; done += 32) {
+        fmpz_mul_2exp(out, out, 32);
+        fmpz_add_ui(out, out, static_cast<ulong>(next_random(state) >> 32U));
+    }
+    if (bits > 0) {
+        fmpz_fdiv_r_2exp(out, out, bits);
+    }
+    if ((next_random(state) & 1U) != 0) {
+        fmpz_neg(out, out);
+    }
+}
+
+void check_norm_matches_flint(const silex::NumberField& field,
+                              const sflint::FmpqPoly& polynomial) noexcept {
+    silex::Element element(field);
+    assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    sflint::Fmpq norm;
+    sflint::Fmpq expected;
+    assert(element.norm(sflint::FmpqRef(norm)));
+    nf_elem_norm(expected.raw(), element.raw_flint_element(),
+                 field.raw_flint_field());
+    assert(fmpq_equal(norm.raw(), expected.raw()) != 0);
+}
+
+silex::NumberField binomial_field(slong degree, const fmpz_t constant) noexcept {
+    sflint::FmpqPoly polynomial;
+    fmpq_poly_set_coeff_si(polynomial.raw(), degree, 1);
+    fmpq_poly_set_coeff_fmpz(polynomial.raw(), 0, constant);
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+slong check_binomial_norms(slong degree,
+                           const fmpz_t constant,
+                           slong count,
+                           std::uint64_t& state) noexcept {
+    silex::NumberField field = binomial_field(degree, constant);
+    sflint::FmpqPoly polynomial;
+    sflint::Fmpz numerator;
+    sflint::Fmpz denominator;
+    sflint::Fmpq coefficient;
+    for (slong i = 0; i < count; ++i) {
+        fmpq_poly_zero(polynomial.raw());
+        const slong length =
+                static_cast<slong>(next_random(state) % (degree + 1));
+        const ulong shape = static_cast<ulong>(next_random(state) % 4);
+        const ulong max_bits = shape == 0 ? 4 : (shape == 1 ? 40 : 200);
+        for (slong k = 0; k < length; ++k) {
+            if (shape == 3 && next_random(state) % 3 != 0) {
+                continue;
+            }
+            random_integer(numerator.raw(), state, max_bits);
+            random_integer(denominator.raw(), state, 24);
+            fmpz_abs(denominator.raw(), denominator.raw());
+            fmpz_add_ui(denominator.raw(), denominator.raw(), 1);
+            fmpq_set_fmpz_frac(coefficient.raw(), numerator.raw(),
+                               denominator.raw());
+            fmpq_poly_set_coeff_fmpq(polynomial.raw(), k, coefficient.raw());
+        }
+        check_norm_matches_flint(field, polynomial);
+    }
+    return count;
+}
+
+void test_binomial_field_norm_matches_flint() noexcept {
+    // Known values in Q(alpha), alpha^12 = -7: N(alpha) = 7 and
+    // N(1 + alpha) = f(-1) = 8.
+    sflint::Fmpz constant;
+    fmpz_set_si(constant.raw(), 7);
+    silex::NumberField field = binomial_field(12, constant.raw());
+    silex::Element alpha(field);
+    silex::Element shifted(field);
+    sflint::Fmpq norm;
+    assert(alpha.gen());
+    assert(alpha.norm(sflint::FmpqRef(norm)));
+    assert(sflint::fmpq_equal_si(norm, 7));
+    assert(shifted.add_si(alpha, 1));
+    assert(shifted.norm(sflint::FmpqRef(norm)));
+    assert(sflint::fmpq_equal_si(norm, 8));
+    assert(shifted.zero());
+    assert(shifted.norm(sflint::FmpqRef(norm)));
+    assert(sflint::fmpq_equal_si(norm, 0));
+
+    // Irreducible x^n + c (Eisenstein, or cyclotomic for c = 1), plus odd
+    // and non-binomial controls that take the generic path.
+    struct Case {
+        slong degree;
+        slong constant;
+    };
+    const Case cases[] = {
+            {4, 2},   {4, -6},  {4, 1},   {6, 5},   {6, -3},  {8, -2},
+            {8, 5},   {8, 1},   {10, 5},  {12, 7},  {12, -10}, {14, 3},
+            {16, -2}, {16, 1},  {18, 6},  {24, -5}, {7, -3},  {5, 2},
+    };
+    std::uint64_t state = 0x5eed1e5ULL;
+    slong checked = 0;
+    for (const Case& entry : cases) {
+        fmpz_set_si(constant.raw(), entry.constant);
+        checked += check_binomial_norms(
+                entry.degree, constant.raw(), 600, state);
+    }
+
+    // Constants beyond one word: 3 (2^70 + 1) and -2 (2^64 + 1), Eisenstein
+    // at 3 and 2.
+    fmpz_one(constant.raw());
+    fmpz_mul_2exp(constant.raw(), constant.raw(), 70);
+    fmpz_add_ui(constant.raw(), constant.raw(), 1);
+    fmpz_mul_ui(constant.raw(), constant.raw(), 3);
+    checked += check_binomial_norms(8, constant.raw(), 300, state);
+    fmpz_one(constant.raw());
+    fmpz_mul_2exp(constant.raw(), constant.raw(), 64);
+    fmpz_add_ui(constant.raw(), constant.raw(), 1);
+    fmpz_mul_si(constant.raw(), constant.raw(), -2);
+    checked += check_binomial_norms(6, constant.raw(), 300, state);
+
+    // Non-binomial even-degree control: x^4 + x + 2 (irreducible) takes the
+    // generic path.
+    sflint::FmpqPoly control;
+    fmpq_poly_set_coeff_si(control.raw(), 4, 1);
+    fmpq_poly_set_coeff_si(control.raw(), 1, 1);
+    fmpq_poly_set_coeff_si(control.raw(), 0, 2);
+    silex::NumberField control_field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(control));
+    sflint::FmpqPoly element_poly;
+    fmpq_poly_set_coeff_si(element_poly.raw(), 3, -2);
+    fmpq_poly_set_coeff_si(element_poly.raw(), 0, 5);
+    check_norm_matches_flint(control_field, element_poly);
+
+    assert(checked >= 10000);
+}
 }  // namespace
 
 int main() {
+    test_binomial_field_norm_matches_flint();
     test_invert_zero_divisors();
     test_power_skips_primes_dividing_exponent();
     test_power_huge_exponent_is_bounded();

@@ -3,6 +3,9 @@
 #include "element_internal.hpp"
 
 #include <silex/diagnostics.hpp>
+#include <silex/flint/fmpz_poly.hpp>
+
+#include <flint/fmpz_vec.h>
 
 namespace silex {
 
@@ -488,6 +491,131 @@ bool Element::trace(flint::FmpqRef out) const noexcept {
     return true;
 }
 
+namespace {
+
+// Private shape test for Element::norm: true when the FLINT field polynomial
+// is x^n + c with integer c != 0 and n even, n >= 4.  Degrees 1 and 2 use
+// FLINT's linear and quadratic element representations and keep their
+// existing paths.
+bool is_even_binomial_field(const nf_struct* field) noexcept {
+    if ((field->flag & (NF_LINEAR | NF_QUADRATIC)) != 0) {
+        return false;
+    }
+    const fmpq_poly_struct* polynomial = field->pol;
+    const slong degree = polynomial->length - 1;
+    if (degree < 4 || degree % 2 != 0 ||
+        fmpz_is_one(polynomial->den) == 0 ||
+        fmpz_is_one(polynomial->coeffs + degree) == 0 ||
+        fmpz_is_zero(polynomial->coeffs) != 0) {
+        return false;
+    }
+    for (slong i = degree - 1; i > 0; --i) {
+        if (fmpz_is_zero(polynomial->coeffs + i) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Exact norm of `element` in a field defined by f = x^n + c with n even, as
+// checked by is_even_binomial_field.
+//
+// FLINT 3.6 `src/nf_elem/norm.c` (`_nf_elem_norm`, generic branch) computes
+// the norm of a = Z/d (Z integral, d its denominator) as the resultant
+// Res(f, a); for monic integral f this is Res(f, Z) / d^n, the product of
+// Z(alpha) over the roots alpha of f.  Write f = h(x^2) with
+// h = y^(n/2) + c, and Z(x) = E(x^2) + x O(x^2).  The roots of f are the two
+// square roots +-sqrt(beta) of each root beta of h, so
+//
+//     Res(f, Z) = prod_beta Z(sqrt(beta)) Z(-sqrt(beta))
+//               = prod_beta G(beta) = Res(h, G),
+//     G(y) = E(y)^2 - y O(y)^2,
+//
+// where G is the Graeffe transform of Z, G(x^2) = Z(x) Z(-x) (source anchor
+// in docs/reference/algorithms_and_sources.rst, "Number fields, orders, and
+// ideals").
+// Since h is monic, G may be replaced by its remainder modulo h, which
+// folds y^k to -c y^(k - n/2).  This is the norm transitivity
+// N_{K/Q} = N_{Q(alpha^2)/Q} o N_{K/Q(alpha^2)} for alpha a root of f.  The
+// step repeats while the degree is even (12 -> 6 -> 3); the remaining odd
+// degree uses FLINT's integer resultant.  Every step is exact integer
+// arithmetic, and fmpq_set_fmpz_frac gives the same canonical rational as
+// nf_elem_norm.
+void even_binomial_norm(flint::FmpqRef out,
+                        const nf_struct* field,
+                        const nf_elem_t element) noexcept {
+    const fmpq_poly_struct* value = NF_ELEM(element);
+    const slong length = value->length;
+    if (length == 0) {
+        fmpq_zero(out.raw());
+        return;
+    }
+
+    const fmpz* constant = field->pol->coeffs;
+    const slong field_degree = field->pol->length - 1;
+    slong degree = field_degree;
+
+    flint::FmpzPoly current;
+    flint::FmpzPoly even;
+    flint::FmpzPoly odd;
+    fmpz_poly_fit_length(current.raw(), length);
+    _fmpz_vec_set(current.raw()->coeffs, value->coeffs, length);
+    _fmpz_poly_set_length(current.raw(), length);
+
+    while (degree % 2 == 0) {
+        const slong half = degree / 2;
+        const slong current_length = current.raw()->length;
+        const slong even_length = (current_length + 1) / 2;
+        const slong odd_length = current_length / 2;
+
+        fmpz_poly_fit_length(even.raw(), even_length);
+        fmpz_poly_fit_length(odd.raw(), odd_length);
+        for (slong k = 0; k < even_length; ++k) {
+            fmpz_set(even.raw()->coeffs + k, current.raw()->coeffs + 2 * k);
+        }
+        for (slong k = 0; k < odd_length; ++k) {
+            fmpz_set(odd.raw()->coeffs + k,
+                     current.raw()->coeffs + 2 * k + 1);
+        }
+        _fmpz_poly_set_length(even.raw(), even_length);
+        _fmpz_poly_set_length(odd.raw(), odd_length);
+        _fmpz_poly_normalise(even.raw());
+        _fmpz_poly_normalise(odd.raw());
+
+        fmpz_poly_sqr(even.raw(), even.raw());
+        fmpz_poly_sqr(odd.raw(), odd.raw());
+        fmpz_poly_shift_left(odd.raw(), odd.raw(), 1);
+        fmpz_poly_sub(current.raw(), even.raw(), odd.raw());
+
+        fmpz* coeffs = current.raw()->coeffs;
+        const slong product_length = current.raw()->length;
+        for (slong k = product_length - 1; k >= half; --k) {
+            if (fmpz_is_zero(coeffs + k) == 0) {
+                fmpz_submul(coeffs + (k - half), coeffs + k, constant);
+                fmpz_zero(coeffs + k);
+            }
+        }
+        if (product_length > half) {
+            _fmpz_poly_set_length(current.raw(), half);
+        }
+        _fmpz_poly_normalise(current.raw());
+        degree = half;
+    }
+
+    flint::FmpzPoly modulus;
+    fmpz_poly_set_coeff_ui(modulus.raw(), static_cast<ulong>(degree), 1);
+    fmpz_poly_set_coeff_fmpz(modulus.raw(), 0, constant);
+
+    flint::Fmpz resultant;
+    flint::Fmpz denominator;
+    fmpz_poly_resultant(resultant.raw(), modulus.raw(), current.raw());
+    fmpz_pow_ui(denominator.raw(), value->den,
+                static_cast<ulong>(field_degree));
+    fmpq_set_fmpz_frac(out.raw(), resultant.raw(), denominator.raw());
+}
+
+}  // namespace
+
 bool Element::norm(flint::FmpqRef out) const noexcept {
     if (!is_defined()) {
         return false;
@@ -510,6 +638,11 @@ bool Element::norm(flint::FmpqRef out) const noexcept {
         fmpq_mul(term.raw(), linear.raw(), linear.raw());
         fmpq_mul_fmpz(term.raw(), term.raw(), radicand.raw());
         fmpq_sub(out.raw(), out.raw(), term.raw());
+        return true;
+    }
+
+    if (is_even_binomial_field(field)) {
+        even_binomial_norm(out, field, value_.raw());
         return true;
     }
 
