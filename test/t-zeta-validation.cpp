@@ -636,8 +636,14 @@ bool check_theorem7_bound_reference() noexcept {
 //
 // Independent oracle for 81 (gp 2.17.4, realprecision 60): with
 // nf = nfinit(x^2 - 5), n = 2, r = 2, D = 5, sigma = 1 + 1/sqrt(log D),
-// s2 = 2 sigma - 1, delta0 the constant part of delta as in the Theorem 7
-// formula above, S(X) = sum over idealprimedec prime ideals of norm N < X
+// s2 = 2 sigma - 1, delta0 the part of delta (Belabas-Friedman 2015,
+// Theorem 7, p. 12; also at src/zeta/zeta.cpp:2926-2937) that does not
+// depend on X,
+//   delta0 = log D + (C/2 + 1 - log(4 pi)/2)/s2 + 2/(sigma - 1) + 2/sigma
+//            - n (log 2 pi - psi(sigma))
+//            - r (psi((sigma + 1)/2) - psi(sigma/2))/2,
+// with C Euler's constant, psi the digamma function, and r the number of
+// real places, S(X) = sum over idealprimedec prime ideals of norm N < X
 // of log N / (N^sigma - 1), d = delta0 - 2 S(X), t = log(X/9),
 // beta = (1/2 + 1/t)(X/9) log((X/9 + 1)/(X/9 - 1))/2, and
 //   b(X) = 2.324 s2 / (sqrt(X) log(3X))
@@ -647,7 +653,9 @@ bool check_theorem7_bound_reference() noexcept {
 // (b = 0.249044782...) and 522 (b = 0.249374529...) for the cubic and
 // x^8 - x - 1, matching the values above.  Because the search is the least
 // multiple of 9, X = 72 fails with b(72) = 0.25265, the minimality that the
-// preceding-bound check below tests in Silex.
+// preceding-bound check below tests in Silex.  Silex scans from 72 (its
+// minimum cutoff 70 rounded up to a multiple of 9); the oracle's wider range
+// also rules out X = 18, ..., 63 (b = 2.13, 0.98, 0.61, 0.45, 0.36, 0.29).
 bool check_index_one_product(const FieldSetup& setup,
                              ulong expected_cutoff) noexcept {
     sflint::Arb product;
