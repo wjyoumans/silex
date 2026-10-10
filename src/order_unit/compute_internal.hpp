@@ -165,6 +165,12 @@ public:
             return true;
         }
         validation_active_ = false;
+        // The flag changes the route only where the default route has the
+        // quadratic L(1, chi) sum; elsewhere the value is the same either
+        // way, so it is recorded without the flag and serves every call.
+        const bool route_accepts_grh_residue =
+                accept_grh_residue &&
+                zeta_unconditional_route_available(order);
         const bool value_serves_request =
                 accept_grh_residue || value_unconditional_ ||
                 !value_accept_grh_residue_;
@@ -172,13 +178,13 @@ public:
             return true;
         }
         if (valid_ < 0 && precision_ == precision &&
-            value_accept_grh_residue_ == accept_grh_residue) {
+            value_accept_grh_residue_ == route_accepts_grh_residue) {
             return false;
         }
 
         value_unconditional_ = false;
         value_bf_audit_valid_ = false;
-        value_accept_grh_residue_ = accept_grh_residue;
+        value_accept_grh_residue_ = route_accepts_grh_residue;
         valid_ = analytic_class_regulator_product_for_validation(
                          flint::ArbRef(value_), order, precision, diagnostics,
                          residue_degree_base,
