@@ -96,7 +96,16 @@ working precisions, and evaluates the character with Kronecker symbols and
 the incomplete gamma values in closed form; the source comment and the public
 algorithm/source map record the deviations.
 
-Copyright (C) 2021 Fredrik Johansson.
+The row-addition step of the relation-module checkpoint HNF, `hnf_add_rows` in
+`src/class_group/class_relation_module_context.cpp`, follows the `add_rows`
+step of the Pernet-Stein algorithm in FLINT 3.6.0
+`src/fmpz_mat/hnf_pernet_stein.c`. The adaptation keeps FLINT's extended-gcd
+row update and adds a divisible-entry shortcut, a pivot-index walk, and skipped
+reductions; the source comment records the deviations.
+
+Copyright (C) 2021 Fredrik Johansson (`l_fmpq_afe.c`).
+
+Copyright (C) 2014, 2015 Alex J. Best (`hnf_pernet_stein.c`).
 
 FLINT is free software licensed under the GNU Lesser General Public License,
 version 3 or, at your option, any later version (`LGPL-3.0-or-later`).

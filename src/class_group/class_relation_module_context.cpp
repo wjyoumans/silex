@@ -107,12 +107,25 @@ void reduce_above_hnf_pivots(fmpz_mat_t hnf,
 // remaining rows are zero.  This is the row-addition step of Pernet and
 // Stein's HNF algorithm as FLINT implements it (FLINT 3.6.0
 // src/fmpz_mat/hnf_pernet_stein.c, add_rows): each new row is eliminated
-// against the pivot rows with unimodular extended-gcd row operations, a
-// surviving row becomes a new pivot row, and entries above the pivots are
+// against the pivot rows with unimodular extended-gcd row operations (a
+// plain row subtraction when the pivot divides the entry, a local shortcut
+// where FLINT always calls fmpz_xgcd), a surviving row becomes a new pivot row, and entries above the pivots are
 // reduced again.  C. Pernet and W. Stein, "Fast computation of Hermite normal
 // forms of random integer matrices", J. Number Theory 130 (2010), 1675-1683.
 // The canonical row HNF of a lattice is unique, so the result equals
 // fmpz_mat_hnf of the stacked rows.
+//
+// The code below is derived from that FLINT routine:
+//
+//   Copyright (C) 2014, 2015 Alex J. Best
+//   This file is part of FLINT, licensed under the GNU Lesser General Public
+//   License, version 3 or (at your option) any later version
+//   (LGPL-3.0-or-later); see <https://www.gnu.org/licenses/>.
+//
+// The adaptation is distributed with Silex under GPL-3.0-or-later.
+// Intentional deviations from FLINT: the divisible-entry shortcut above, a
+// pivot-index walk with bubble insertion of new pivot rows, and skipped
+// reductions when entries are already reduced.
 bool hnf_add_rows(slong& rank, fmpz_mat_t matrix, slong hnf_rows) noexcept {
     rank = 0;
     const slong rows = ::fmpz_mat_nrows(matrix);

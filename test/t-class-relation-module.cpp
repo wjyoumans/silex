@@ -230,7 +230,8 @@ int test_checkpoints_follow_canonical_hnf_across_partial_rank() {
         fill_phase_row(rows, i, phase_first_column[(i * 4) / row_count],
                        state);
     }
-    // Repeat a few rows, scaled, so dependent rows refine the lattice.
+    // Repeat a few rows, scaled: these lie in the lattice already, so they
+    // reduce to zero rows with negative entries.
     for (slong i = 6; i < row_count; i += 7) {
         for (slong j = 0; j < ambient_dim; ++j) {
             ::fmpz_mul_si(::fmpz_mat_entry(rows.raw(), i, j),
