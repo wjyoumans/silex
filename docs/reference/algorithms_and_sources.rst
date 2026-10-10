@@ -899,8 +899,10 @@ below.  The ball contains ``h(D)``, and ``h(D)`` is taken only when the ball
 contains exactly one integer, which must be positive; the working precision
 is the bit length of ``|D|`` plus 32 bits, doubled once if the ball still
 holds more than one integer, after which the computation fails closed.  At
-``|D| = 1e14 + 31`` this gives ``h = 14414435``, PARI's value, in about
-100 s and 14 MB.
+``|D| = 1e14 + 31`` a direct call of this function gives ``h = 14414435``,
+PARI's value, in about 100 s and 14 MB.  A full proven run does not reach
+this step at such sizes today: ``x^2 + n`` fields above about ``4e11`` fail
+first at the factor-base size limit (``factor_base_size_limit_exceeded``).
 With generation verified up to the Minkowski-type bound and ``h_cand = h``,
 the computed relation lattice has index one in the full one, so it is
 saturated at every prime.  The route stores a verified relation-saturation
@@ -1537,7 +1539,11 @@ at the candidate cap or the step limit.  When such a final failure ends the
 last candidate attempt of a class/unit transaction, the transaction fails
 with reason ``factor_base_honesty_unwitnessed`` instead of
 ``class_unit_computation_failed``, as ``silex-class-unit-instance`` prints in
-``failure_reason``; the failure itself and every label are unchanged.  Every
+``failure_reason``; the failure itself and every label are unchanged.  A
+factor base over the fixed size limit of ``2^14`` generators is refused
+before any matrix is allocated, and the transaction then reports
+``factor_base_size_limit_exceeded``; any other computation failure reports
+``class_unit_computation_failed``.  Every
 candidate at every stage passes the same exact witness check, and stage 0 is
 the previous search, so results that succeeded at stage 0 are unchanged.
 

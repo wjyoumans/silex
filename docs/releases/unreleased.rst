@@ -56,8 +56,10 @@ Added
   ``factor_base_honesty_unwitnessed`` (``failure_stage`` ``total``) when a
   class/unit computation fails because the last candidate attempt stopped at
   a required prime that the factor-base honesty witness search could not
-  witness at its final caps, with no factor-base restart left.  Other
-  computation failures still report ``class_unit_computation_failed``, and
+  witness at its final caps, with no factor-base restart left.  It reports
+  ``factor_base_size_limit_exceeded`` when the factor base would exceed the
+  size limit described below.  Other computation failures still report
+  ``class_unit_computation_failed``, and
   results, labels and successful runs are unchanged.  A new top-level JSON
   field ``failure_detail`` holds structured detail about a failure, with keys
   that depend on ``failure_reason``.  For ``class_unit_computation_failed``
@@ -125,14 +127,19 @@ Changed
   arithmetic, instead of listing the reduced forms of discriminant ``D``
   (time and memory growing like ``sqrt(|D|)``).  The value is taken only
   when the ball contains exactly one positive integer, and otherwise the
-  computation fails closed.  At ``|D| = 1e14 + 31`` the formula gives
-  ``h = 14414435``, PARI's value, in about 100 s and 14 MB.  Fields with
-  ``|D| < 2^44`` and all labels are unchanged.
+  computation fails closed.  At ``|D| = 1e14 + 31`` a direct call of the
+  function gives ``h = 14414435``, PARI's value, in about 100 s and 14 MB.
+  No full proven run reaches this step today: ``x^2 + n`` fields above about
+  ``4e11`` fail first at the factor-base size limit (next entry), and the
+  ``x^2 + x + c`` presentation at ``1e14`` did not finish.  The formula is
+  checked directly by the slow test ``t-zeta-quadratic-l1`` (run with
+  ``SILEX_TEST_SLOW``).  Fields with ``|D| < 2^44`` and all labels are
+  unchanged.
 
 - A class-group factor base with more than ``2^14`` generators is refused
-  before any matrix is allocated: ``ClassGroupContext::build_factor_base``
-  and ``set_factor_base`` return false, and a class/unit transaction fails
-  with ``failure_reason`` ``factor_base_size_limit_exceeded`` in
+  before any matrix is allocated: ``ClassGroupContext::build_factor_base``,
+  ``set_factor_base`` and ``set_relation_matrix`` return false, and a
+  class/unit transaction fails with ``failure_reason`` ``factor_base_size_limit_exceeded`` in
   ``silex-class-unit-instance``.  The limit is a fixed Silex choice, so the
   same fields fail the same way on every machine.  Previously the dense
   relation matrices (2 GiB each at ``2^14``) were allocated, and FLINT
