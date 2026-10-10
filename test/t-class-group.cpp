@@ -752,7 +752,9 @@ int test_relation_kernel_unit_follows_republished_presentation() {
     assert(base != nullptr);
     silex::Relation relation(*base);
     silex::Element alpha(field);
-    const slong generators[] = {4, 2, 8, 32};
+    // Exponent rows 8, 4, 2, 1: each strictly enlarges the relation
+    // lattice, so the native policy keeps every one.
+    const slong generators[] = {256, 16, 4, 2};
     silex::FactoredElement unit_witness(field);
     silex::Element unit_value(field);
     silex::FractionalIdeal unit_ideal(order);

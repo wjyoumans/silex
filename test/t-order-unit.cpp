@@ -1413,6 +1413,10 @@ int test_compute_with_class_group_proven_saturated_generator() {
     sflint::Fmpz index_bound;
     assert(initial.regulator_index_bound(sflint::FmpzRef(index_bound), 160));
     assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(index_bound), 2) >= 0);
+    // The relation-kernel candidates come from an LLL-reduced kernel basis,
+    // and here the best candidate is already a fundamental unit even though
+    // the regulator bound alone does not show it.
+    assert(first_free_generator_is_pm_unit_power_pm1(initial, epsilon));
 
     sflint::Fmpz aux_start;
     sflint::Fmpz aux_max;
@@ -1425,7 +1429,9 @@ int test_compute_with_class_group_proven_saturated_generator() {
             changed, stable, order, class_group, embeddings, 160, 160, 1,
             sflint::FmpzConstRef(aux_start), sflint::FmpzConstRef(aux_max),
             2));
-    assert(changed);
+    // Saturation finds no proper superlattice of an already saturated
+    // group, so the generator is kept.
+    assert(!changed);
     assert(first_free_generator_is_pm_unit_power_pm1(saturated, epsilon));
 
     return 0;
@@ -2639,8 +2645,14 @@ int test_relation_kernel_units_index_bounded_rank_one() {
     assert(group.is_set());
     assert(silex::same_order_parent(group.parent(), &equation_order));
     assert(group.free_rank() == 1);
-    assert(group.certification_status() == silex::CertificationMode::unknown);
     assert(check_first_free_generator_is_order_unit(group, equation_order));
+    // The relation-kernel candidates come from an LLL-reduced kernel basis,
+    // and the best one is the fundamental unit 1 + sqrt(2).  The regulator
+    // index bound of that group is 1, so the index-one check proves it.
+    silex::Element epsilon(field);
+    assert(set_quadratic_coeffs(epsilon, 1, 1, 1, 1));
+    assert(first_free_generator_is_pm_unit_power_pm1(group, epsilon));
+    assert(group.certification_status() == silex::CertificationMode::proven);
 
     return 0;
 }
@@ -2680,7 +2692,10 @@ int test_relation_kernel_units_index_bounded_quartic_power_root() {
     assert(direct.class_regulator_index_bound(
             sflint::FmpzRef(direct_bound), context,
             sflint::ArbConstRef(analytic_hR), 128));
-    assert(sflint::fmpz_equal_si(direct_bound, 11));
+    // The six candidates come from an LLL-reduced kernel basis; the units
+    // they generate have class-regulator index bound 3 (11 for the raw
+    // Smith-form kernel rows).
+    assert(sflint::fmpz_equal_si(direct_bound, 3));
 
     silex::OrderUnitGroup index_bounded(order);
     sflint::Fmpz bounded_value;
