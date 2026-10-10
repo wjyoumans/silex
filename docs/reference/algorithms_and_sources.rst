@@ -1352,14 +1352,22 @@ The class-relation saturation with units
 index-bounded pass of class/unit validation) scans the residue-character
 kernels at one prime at a time over the relation generators, the free units
 and, when ``ell`` divides ``w``, the torsion generator, and appends the first
-kernel row whose product is an ``ell``-th power.  Before each append round
+kernel row whose product is an ``ell``-th power.  In each append round
 it keeps a stack of the ``ell``-th-power residue characters of the same
 inputs at degree-one primes ``q = 1 mod ell`` from ``next_prime(2^60)`` up,
 and grows it lazily: a candidate that passes the divisibility check and that
 the current stack does not rule out first adds one more prime, and is tested
 only if the common kernel including that prime does not rule it out either.
 The stack therefore never holds more primes than the unfiltered scan would
-run power tests, and no clock enters.  Stacking stops by the rule of Hecke
+run power tests, and no clock enters.  The stack starts only after the
+round has run as many power tests as there are inputs; until then every
+candidate that passes the divisibility check is power tested.  This count
+gate is a Silex heuristic, not in Hecke, whose ``saturate!`` stacks every
+prime before its first power test: on small fields a failed power test costs
+less than the degree-one prime the stack adds for it, and the count was
+chosen by measurement on the native class-group benchmark rows.  Like the
+stopping rule, it changes only how many power tests are skipped.  Stacking
+stops by the rule of Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``,
 ``compute_candidates_for_saturate`` (lines 130--203): when the common kernel
 is empty or its dimension has stayed the same for more than ``stable`` times

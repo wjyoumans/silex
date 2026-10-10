@@ -155,7 +155,9 @@ Changed
   residue characters of the relation generators and units at degree-one
   primes, grown one prime at a time for each candidate that survives the
   divisibility check and the current stack, and skips the candidates outside
-  the common kernel, which cannot be ``ell``-th powers.  Stacking stops by
+  the common kernel, which cannot be ``ell``-th powers.  The stack starts
+  only after the round has run as many power tests as there are inputs, a
+  Silex heuristic that Hecke does not have.  Stacking stops by
   Hecke's ``compute_candidates_for_saturate`` rule with ``stable`` starting
   at 1.5 and doubling after a failed power test on a candidate that the
   stopped stack let through.  The appended relations,
