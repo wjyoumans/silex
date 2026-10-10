@@ -132,7 +132,9 @@ Quadratic fields use ``a^2 - d b^2``.  When the defining polynomial is
 ``f = x^n + c`` with integer ``c`` and even ``n >= 4``, the norm is computed
 by halving the degree.  FLINT 3.6 ``src/nf_elem/norm.c`` (``_nf_elem_norm``,
 generic branch) computes the norm of ``Z/d`` as a resultant: for monic
-integral ``f`` it is ``Res(f, Z) / d^n``, the product of ``Z(alpha)`` over
+integral ``f`` it is ``Res(f, Z) / d^n`` (Cohen, *A Course in Computational
+Algebraic Number Theory*, GTM 138, Proposition 4.3.4: ``N(a) = d^(-n)
+R(T, A)`` for ``a = A(theta)/d``), the product of ``Z(alpha)`` over
 the roots ``alpha`` of ``f``.  Write ``f = h(x^2)`` with ``h = y^(n/2) + c``
 and ``Z(x) = E(x^2) + x O(x^2)``.  The roots of ``f`` are the two square
 roots of each root ``beta`` of ``h``, so ``Res(f, Z) = Res(h, G)``, where
@@ -141,7 +143,10 @@ roots of each root ``beta`` of ``h``, so ``Res(f, Z) = Res(h, G)``, where
 ``ZX_graeffe``; GP ``polgraeffe``).  ``G`` is first reduced modulo ``h``,
 and the step repeats while the degree is even; for ``x^12 + 7`` it goes
 from degree 12 to 6 to 3, and the last step is FLINT's integer resultant.
-This is transitivity of the norm through ``Q(alpha^2)``.  The arithmetic is
+The identity ``Res(f, Z) = Res(h, G)`` is the proof; it does not need ``h``
+to be irreducible.  (When ``f`` is irreducible, ``h`` is too, because
+``[K : Q(alpha^2)] <= 2``, and the step is transitivity of the norm through
+``Q(alpha^2)``.)  The arithmetic is
 exact and the result is the same canonical rational that ``nf_elem_norm``
 returns, which a randomized differential test checks.
 
