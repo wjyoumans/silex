@@ -304,6 +304,13 @@ bool extend_quadratic_prime_degree_cache(
     return true;
 }
 
+// True when the cache holds a prime above `bound`, which is exactly when
+// extending it to `bound` succeeded.
+bool prime_degree_cache_covers(const PrimeDegreeCache& cache,
+                               slong bound) noexcept {
+    return !cache.entries.empty() && cache.entries.back().prime > bound;
+}
+
 // Preserve grouped residue-degree order and the in-place update of the
 // retained lower-bound values. Sorted prime-ideal norms are not equivalent.
 bool insert_nth_ideal_group(std::vector<flint::Fmpz>& values,
@@ -509,6 +516,17 @@ bool compute_analytic_bound(flint::Fmpz& out,
     while (!analytic_bound_satisfied(prime_cache, order, degree,
                                      real_embeddings, log_discriminant,
                                      high, diagnostics)) {
+        // The search below returns a value above every failing `high` and
+        // the result is clamped to max_bound, so once the criterion fails at
+        // some `high >= max_bound` the result is max_bound.  Stop doubling
+        // there.  The cache check keeps a failed cache extension (which
+        // also reads as "not satisfied") on the old path, so its failure
+        // behaviour is unchanged.
+        if (high >= max_bound &&
+            prime_degree_cache_covers(prime_cache, high)) {
+            flint::fmpz_set_si(flint::FmpzRef(out), max_bound);
+            return true;
+        }
         low = high;
         if (high > std::numeric_limits<slong>::max() / 2) {
             return false;
@@ -568,6 +586,13 @@ bool compute_quadratic_analytic_bound(
     slong low = 1;
     slong high = 1;
     while (!bound_satisfied(high)) {
+        // Same cap as compute_analytic_bound: the result would be clamped
+        // to max_bound.
+        if (high >= max_bound &&
+            prime_degree_cache_covers(prime_cache, high)) {
+            flint::fmpz_set_si(flint::FmpzRef(out), max_bound);
+            return true;
+        }
         low = high;
         if (high > std::numeric_limits<slong>::max() / 2) {
             return false;

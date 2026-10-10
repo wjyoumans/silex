@@ -384,6 +384,45 @@ int test_discriminant_minus_three_exact_plan() {
     return 0;
 }
 
+// For discriminant -3 the analytic bound's cap floor(4 log(3)^2) = 4 is
+// below the bound the analytic criterion asks for, so both analytic-bound
+// searches (generic and imaginary quadratic) fail the criterion at 4 and
+// stop at the cap.  The working bounds are then the nth-ideal bound 7 and
+// the imaginary quadratic floor 20, the same values as before the doubling
+// was capped.
+int test_discriminant_minus_three_analytic_bound_cap() {
+    FieldSetup setup = imaginary_quadratic_minus_three();
+    silex::detail::RelationFactorBasePlan generic_plan;
+    if (!silex::detail::relation_search::build_relation_factor_base_plan(
+                generic_plan, setup.maximal_order, nullptr) ||
+        !generic_plan.valid ||
+        !sflint::fmpz_equal_si(
+                sflint::FmpzConstRef(generic_plan.working_bound), 7)) {
+        return 1;
+    }
+    const auto* generic_cache =
+            silex::detail::relation_factor_base_plan_residue_degrees(
+                    generic_plan, setup.maximal_order);
+    if (generic_cache == nullptr ||
+        !cache_shape_is_valid(*generic_cache, 2) ||
+        generic_cache->entries.back().p != 11) {
+        return 1;
+    }
+
+    silex::detail::RelationFactorBasePlan quadratic_plan;
+    return silex::detail::relation_search::
+                           build_maximal_imaginary_quadratic_factor_base_plan(
+                                   quadratic_plan, setup.maximal_order,
+                                   nullptr) &&
+                           quadratic_plan.valid &&
+                           sflint::fmpz_equal_si(
+                                   sflint::FmpzConstRef(
+                                           quadratic_plan.working_bound),
+                                   20)
+                   ? 0
+                   : 1;
+}
+
 // Expected values come from the reference implementation itself: a C
 // harness containing verbatim copies of the static routines is_bad and
 // nthidealquad from src/basemath/buch1.c:364-386 of the 2.17.3 release,
@@ -497,6 +536,7 @@ int main() {
                    test_producer_cache_matches_fresh_bf_evaluation() != 0 ||
                    test_restart_bound_progression() != 0 ||
                    test_discriminant_minus_three_exact_plan() != 0 ||
+                   test_discriminant_minus_three_analytic_bound_cap() != 0 ||
                    test_quadratic_nth_suitable_ideal_matches_reference() != 0 ||
                    test_quadratic_working_bound_floor_matches_reference() !=
                            0 ||
