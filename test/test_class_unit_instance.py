@@ -426,11 +426,22 @@ def assert_computation_failure_cause(exe: Path, root: Path) -> None:
     detail = instance["failure_detail"]
     assert isinstance(detail, dict)
     assert detail["cause"].startswith("last unit-group validation outcome: ")
-    # Q(sqrt(-23), sqrt(-31), sqrt(-47)) (multiquadratic_m23_m31_m47) fails
-    # with the same reason before unit-group validation runs, a path that
-    # records no outcome: detail is null.
-    coeffs = "38188288,1822160,-1462612,-62792,24143,602,-220,-2,1"
-    unrecorded = run_json([str(exe), "--coeffs", coeffs, "--mode", "proven"], root)
+    # The same x^3 - 6x^2 - 9x - 1 with a one-relation cap fails with the same
+    # reason before unit-group validation runs, a path that records no
+    # outcome: detail is null.  The cap is meant to make it fail; a corpus
+    # row with a known gap would start succeeding when the gap closes.
+    unrecorded = run_json(
+        [
+            str(exe),
+            "--coeffs",
+            "-1,-9,-6,1",
+            "--mode",
+            "proven",
+            "--max-relations",
+            "1",
+        ],
+        root,
+    )
     assert unrecorded["success"] is False
     assert unrecorded["failure_reason"] == "class_unit_computation_failed"
     assert unrecorded["failure_detail"] is None

@@ -1649,6 +1649,15 @@ names: ``radius``, ``twists`` and ``random_tries`` on the lattice route, or
 ``random_tries``, ``factor_attempts`` and ``element_steps`` on the T2 route.
 The residue degree, stages and caps are JSON numbers.
 
+After each small-norm pass, the relation-production prepass drops the
+outstanding relation surplus.  PARI 2.17.3
+``src/basemath/buch2.c:Buchall_param`` (lines 3938-3946) runs ``small_norm``
+and then sets ``cache.end = cache.last``, so the surplus sized into the
+initial request (``cache.end - cache.last``, line 3872) is not demanded again
+and the next request comes from the rank deficit alone.  Silex sets
+``cache.target_relation_count`` to the current relation count after each of
+its two small-norm passes in ``src/class_group/relation_production.cpp``.
+
 Two exact edge routes have narrower routine-level anchors.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_deg1`` and the degree-at-most-one branch in
 ``Buchall_param`` publish the trivial class group, regulator one, torsion
