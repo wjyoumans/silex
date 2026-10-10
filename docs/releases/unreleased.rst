@@ -403,10 +403,8 @@ Changed
   above the chosen prime and above up to 40 further unramified primes; a
   residue that is not an ``n``-th power proves the input is not an ``n``-th
   power.  Inputs with no such residue are handled as before, and ``true``
-  answers and their roots are unchanged.  On the ``grh`` rows
-  ``multiquadratic_m3_m5_m7`` and ``lmfdb_8_8_73116160000_2`` this removes
-  about half of the run time; their results are unchanged.  See "Element
-  powers and roots" in :doc:`../reference/algorithms_and_sources`.
+  answers and their roots are unchanged.  See "Element powers and roots"
+  in :doc:`../reference/algorithms_and_sources`.
 
 Fixed
 -----

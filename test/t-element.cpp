@@ -518,8 +518,10 @@ void test_power_prelift_residue_disproof() noexcept {
         assert(value.set_si(c));
         bool is_square = true;
         silex::Element root(field);
+        assert(root.set_si(7));
         assert(value.is_square(is_square, root));
         assert(!is_square);
+        assert(root.equal_si(7));
     }
     silex::Element one_plus_theta = element_from_coefficients(field, {1, 1});
     silex::Element structured(field);
@@ -658,13 +660,102 @@ void test_power_prelift_disproof_differential() noexcept {
                 assert(check.pow_fmpz(new_root, sflint::FmpzConstRef(n)));
                 assert(check.equal(value));
             }
-            if (kind == 1 || kind == 3) {
-                // A genuine power is never disproved.
+            if (kind == 1 || kind == 3 ||
+                ((kind == 2 || kind == 4) && scalar == -1 &&
+                 test_case.exponent % 2 == 1)) {
+                // A genuine power is never disproved; for odd n,
+                // -1 = (-1)^n makes c b^n a genuine power when c = -1.
                 assert(!new_answer.known || new_answer.is_power);
             }
         }
     }
     assert(unknown_to_no > 0);
+}
+
+// The named cases of test_power_prelift_residue_disproof are unknown on the
+// lift-only path, so it is the pre-lift disproof that decides them; on the
+// production path they are a definite "no" and the root is untouched.
+void assert_prelift_decides(const silex::Element& value,
+                            slong exponent) noexcept {
+    silex::Element root(*value.parent());
+    assert(root.set_si(7));
+    const PowerAnswer lift_only = hensel_power_answer(
+            value, exponent, silex::detail::PreLiftResidueDisproof::disabled,
+            root);
+    assert(!lift_only.known);
+    const PowerAnswer production = hensel_power_answer(
+            value, exponent, silex::detail::PreLiftResidueDisproof::enabled,
+            root);
+    assert(production.known && !production.is_power);
+    assert(root.equal_si(7));
+}
+
+void test_power_prelift_named_cases_unknown_without_disproof() noexcept {
+    silex::NumberField cubic = cubic_field();
+    for (std::initializer_list<slong> c :
+         {std::initializer_list<slong>{-1}, {6}, {1, 1}, {3, 1}}) {
+        assert_prelift_decides(element_from_coefficients(cubic, c), 2);
+    }
+    for (std::initializer_list<slong> c :
+         {std::initializer_list<slong>{3}, {1, 1}, {3, 1}}) {
+        assert_prelift_decides(element_from_coefficients(cubic, c), 3);
+    }
+    silex::NumberField field = multiquadratic_m3_m5_m7_field();
+    for (slong c : {2, 3, -1, 6}) {
+        silex::Element value(field);
+        assert(value.set_si(c));
+        assert_prelift_decides(value, 2);
+    }
+    silex::Element one_plus_theta = element_from_coefficients(field, {1, 1});
+    silex::Element structured(field);
+    silex::Element two(field);
+    assert(two.set_si(2));
+    assert(structured.multiply(one_plus_theta, one_plus_theta));
+    assert(structured.multiply(structured, two));
+    assert_prelift_decides(structured, 2);
+}
+
+// Independent oracle for "no": each element below is not an n-th power in its
+// field according to an independent computer algebra system: with
+// K = nfinit(<field polynomial>) and a the element as a polynomial in the
+// generator, nfroots(K, x^n - Mod(a, K.pol)) is empty.  The production answer must be a definite "no".
+void test_power_gp_nonpowers() noexcept {
+    struct Case {
+        std::initializer_list<slong> field;
+        slong exponent;
+        std::initializer_list<slong> element;
+    };
+    const Case cases[] = {
+            {{-2, 0, 0, 1}, 2, {3, 0, 1}},
+            {{-2, 0, 0, 1}, 2, {-1, 2}},
+            {{-2, 0, 0, 1}, 3, {5, 1}},
+            {{-2, 0, 0, 1}, 3, {2, -1, 1}},
+            {{1, 0, -10, 0, 1}, 2, {2, 1}},
+            {{1, 0, -10, 0, 1}, 2, {5, -3, 0, 1}},
+            {{1, 0, -10, 0, 1}, 2, {-1, 0, 3}},
+            {{1, 0, -10, 0, 1}, 2, {-1}},
+            {{1, 0, -10, 0, 1}, 2, {5}},
+            {{-3, 1, 0, 0, 0, 1}, 5, {2, 1}},
+            {{-3, 1, 0, 0, 0, 1}, 5, {-1, 0, 1}},
+            {{-3, 1, 0, 0, 0, 1}, 5, {2}},
+            {{1201, 598, -524, -146, 69, 2, 4, -4, 1}, 2, {3, 1}},
+            {{1201, 598, -524, -146, 69, 2, 4, -4, 1}, 2, {-5, 0, 1}},
+            {{1201, 598, -524, -146, 69, 2, 4, -4, 1}, 2, {1, 0, 0, 2}},
+            {{1201, 598, -524, -146, 69, 2, 4, -4, 1}, 2, {5}},
+    };
+    for (const Case& test_case : cases) {
+        silex::NumberField field = field_from_coefficients(test_case.field);
+        silex::Element value =
+                element_from_coefficients(field, test_case.element);
+        sflint::Fmpz n;
+        sflint::fmpz_set_si(sflint::FmpzRef(n), test_case.exponent);
+        silex::Element root(field);
+        assert(root.set_si(7));
+        bool is_power = true;
+        assert(value.is_power(is_power, root, sflint::FmpzConstRef(n)));
+        assert(!is_power);
+        assert(root.equal_si(7));
+    }
 }
 
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
@@ -955,6 +1046,8 @@ int main() {
     test_power_non_integral_unit_norm_roots();
     test_power_prelift_residue_disproof();
     test_power_prelift_disproof_differential();
+    test_power_prelift_named_cases_unknown_without_disproof();
+    test_power_gp_nonpowers();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 
