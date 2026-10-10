@@ -1652,9 +1652,11 @@ The residue degree, stages and caps are JSON numbers.
 After each small-norm pass, the relation-production prepass drops the
 outstanding relation surplus.  PARI 2.17.3
 ``src/basemath/buch2.c:Buchall_param`` (lines 3938-3946) runs ``small_norm``
-and then sets ``cache.end = cache.last``, so the surplus sized into the
-initial request (``cache.end - cache.last``, line 3872) is not demanded again
-and the next request comes from the rank deficit alone.  Silex sets
+and then sets ``cache.end = cache.last``, so the surplus
+(``RELSUP + RU-1``, passed to ``init_rel`` at line 3871 and included in the
+initial request recorded at line 3872) is not demanded again; the next
+request is the recomputed ``need`` from the current rank and unit deficits
+(lines 4047-4061).  Silex sets
 ``cache.target_relation_count`` to the current relation count after each of
 its two small-norm passes in ``src/class_group/relation_production.cpp``.
 
