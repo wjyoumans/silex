@@ -619,6 +619,18 @@ if(SILEX_BUILD_TESTS)
     list(APPEND SILEX_TEST_NAMES
         silex-ideal-minkowski-embedding)
 
+    add_executable(t-silex-split-prime-resultant
+        test/t-split-prime-resultant.cpp)
+    target_link_libraries(t-silex-split-prime-resultant
+        PRIVATE Silex::silex)
+    target_include_directories(
+        t-silex-split-prime-resultant PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-split-prime-resultant)
+    add_test(NAME silex-split-prime-resultant
+        COMMAND t-silex-split-prime-resultant)
+    list(APPEND SILEX_TEST_NAMES silex-split-prime-resultant)
+
     add_executable(t-silex-finite-quadratic-form-enumeration
         test/t-finite-quadratic-form-enumeration.cpp)
     target_link_libraries(t-silex-finite-quadratic-form-enumeration

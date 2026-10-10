@@ -8,10 +8,230 @@
 #include "relation_search_internal.hpp"
 #include "../relation/relation_internal.hpp"
 
+#include <silex/flint/nmod_poly_factor.hpp>
+
+#include <flint/fmpz_vec.h>
+#include <flint/ulong_extras.h>
+
+#include <cstddef>
 #include <utility>
 
 namespace silex {
 namespace detail::relation_search {
+
+namespace {
+
+// Below this degree the per-row cost of the exact prefilter resultants is a
+// few milliseconds on the grh corpus, so the split-prime search does not pay
+// for itself; those fields keep fmpz_poly_resultant only.
+constexpr slong kSplitPrimeResultantMinDegree = 16;
+
+// Split primes are taken from [2^27, 2^28).  For p < 2^28,
+// 255 * (p - 1)^2 < 2^64, so up to 255 products of reduced residues
+// accumulate in one word before a reduction.
+constexpr ulong kSplitPrimeSearchStart = UWORD(1) << 27;
+constexpr ulong kSplitPrimeSearchEnd = UWORD(1) << 28;
+constexpr slong kSplitPrimeDotChunk = 255;
+
+// By Chebotarev, primes splitting completely in f have density
+// 1/|Gal(f)| <= 1/deg(f).  The search stops once
+// kSplitPrimeSearchFactor * deg(f) primes per split prime found (plus one)
+// have been tested, which bounds the work spent on fields where such
+// primes are rare.  Stopping only routes candidates to the exact
+// fmpz_poly_resultant.
+constexpr slong kSplitPrimeSearchFactor = 4;
+constexpr std::size_t kMaxSplitPrimes = 64;
+
+}  // namespace
+
+void SplitPrimeResultant::reset(
+        const fmpz_poly_struct* monic_field_polynomial) noexcept {
+    enabled = false;
+    search_exhausted = false;
+    degree = 0;
+    field_norm_squared_bits = 0;
+    last_tested_prime = kSplitPrimeSearchStart;
+    tested_primes = 0;
+    moduli.clear();
+    root_powers.clear();
+    residues.clear();
+    if (monic_field_polynomial == nullptr) {
+        return;
+    }
+
+    const slong field_degree = fmpz_poly_degree(monic_field_polynomial);
+    if (field_degree < kSplitPrimeResultantMinDegree ||
+        fmpz_is_one(fmpz_poly_lead(monic_field_polynomial)) == 0) {
+        return;
+    }
+
+    fmpz_poly_set(field_polynomial.raw(), monic_field_polynomial);
+    _fmpz_vec_dot(coordinate_norm_squared.raw(),
+                  monic_field_polynomial->coeffs,
+                  monic_field_polynomial->coeffs,
+                  monic_field_polynomial->length);
+    field_norm_squared_bits = fmpz_bits(coordinate_norm_squared.raw());
+    degree = field_degree;
+    residues.assign(static_cast<std::size_t>(field_degree), 0);
+    enabled = true;
+}
+
+bool SplitPrimeResultant::add_next_split_prime() noexcept {
+    const auto n = static_cast<std::size_t>(degree);
+    while (!search_exhausted) {
+        const auto found = static_cast<slong>(moduli.size());
+        if (moduli.size() >= kMaxSplitPrimes ||
+            tested_primes >=
+                    kSplitPrimeSearchFactor * degree * (found + 1)) {
+            search_exhausted = true;
+            break;
+        }
+        const ulong p = n_nextprime(last_tested_prime, 1);
+        if (p >= kSplitPrimeSearchEnd) {
+            search_exhausted = true;
+            break;
+        }
+        last_tested_prime = p;
+        ++tested_primes;
+
+        // f splits into distinct linear factors modulo p exactly when
+        // f divides x^p - x in F_p[x]; deg(f) >= 2 here, so x mod f = x.
+        flint::NmodPoly reduced(p);
+        flint::NmodPoly reversed_inverse(p);
+        flint::NmodPoly frobenius(p);
+        fmpz_poly_get_nmod_poly(reduced.raw(), field_polynomial.raw());
+        nmod_poly_reverse(reversed_inverse.raw(), reduced.raw(), degree + 1);
+        nmod_poly_inv_series(reversed_inverse.raw(), reversed_inverse.raw(),
+                             degree + 1);
+        nmod_poly_powmod_x_ui_preinv(frobenius.raw(), p, reduced.raw(),
+                                     reversed_inverse.raw());
+        if (nmod_poly_length(frobenius.raw()) != 2 ||
+            nmod_poly_get_coeff_ui(frobenius.raw(), 0) != 0 ||
+            nmod_poly_get_coeff_ui(frobenius.raw(), 1) != 1) {
+            continue;
+        }
+
+        flint::NmodPolyFactor roots;
+        nmod_poly_roots(roots.raw(), reduced.raw(), 0);
+        if (roots.raw()->num != degree) {
+            continue;
+        }
+
+        nmod_t mod;
+        nmod_init(&mod, p);
+        const std::size_t base = root_powers.size();
+        root_powers.resize(base + n * n);
+        bool linear = true;
+        for (std::size_t i = 0; i < n && linear; ++i) {
+            const nmod_poly_struct* factor =
+                    roots.raw()->p + static_cast<slong>(i);
+            if (nmod_poly_length(factor) != 2 ||
+                nmod_poly_get_coeff_ui(factor, 1) != 1) {
+                linear = false;
+                break;
+            }
+            const ulong root =
+                    nmod_neg(nmod_poly_get_coeff_ui(factor, 0), mod);
+            ulong power = 1;
+            for (std::size_t j = 0; j < n; ++j) {
+                root_powers[base + i * n + j] = power;
+                power = nmod_mul(power, root, mod);
+            }
+        }
+        if (!linear) {
+            root_powers.resize(base);
+            continue;
+        }
+        moduli.push_back(mod);
+        return true;
+    }
+    return false;
+}
+
+void SplitPrimeResultant::resultant(
+        bool& handled,
+        fmpz_t out,
+        const fmpz_poly_struct* coordinate_polynomial) noexcept {
+    handled = false;
+    if (!enabled || coordinate_polynomial == nullptr) {
+        return;
+    }
+    const slong length = coordinate_polynomial->length;
+    if (length <= 0 || length > degree) {
+        return;
+    }
+
+    // Hadamard bound on the Sylvester matrix:
+    // |Res(f, a)| <= ||f||_2^(len(a) - 1) ||a||_2^deg(f) < 2^half_bits.
+    _fmpz_vec_dot(coordinate_norm_squared.raw(),
+                  coordinate_polynomial->coeffs,
+                  coordinate_polynomial->coeffs, length);
+    const flint_bitcnt_t doubled_bits =
+            static_cast<flint_bitcnt_t>(length - 1) *
+                    field_norm_squared_bits +
+            static_cast<flint_bitcnt_t>(degree) *
+                    fmpz_bits(coordinate_norm_squared.raw());
+    const flint_bitcnt_t half_bits = (doubled_bits + 1) / 2;
+    // The symmetric residue is the integer once the modulus exceeds twice
+    // the bound: fmpz_bits(modulus) >= half_bits + 2 gives
+    // modulus >= 2^(half_bits + 1).
+    const flint_bitcnt_t modulus_bits = half_bits + 2;
+
+    const auto n = static_cast<std::size_t>(degree);
+    const auto used_length = static_cast<std::size_t>(length);
+    fmpz_one(modulus.raw());
+    fmpz_zero(out);
+    std::size_t used = 0;
+    while (fmpz_bits(modulus.raw()) < modulus_bits) {
+        if (used == moduli.size() && !add_next_split_prime()) {
+            return;
+        }
+        const nmod_t mod = moduli[used];
+        const ulong* powers = root_powers.data() + used * n * n;
+        for (std::size_t j = 0; j < used_length; ++j) {
+            residues[j] = fmpz_fdiv_ui(
+                    coordinate_polynomial->coeffs + static_cast<slong>(j),
+                    mod.n);
+        }
+
+        // Res(f, a) = prod_i a(r_i) mod p for monic f = prod_i (x - r_i).
+        ulong value = 1;
+        for (std::size_t i = 0; i < n && value != 0; ++i) {
+            const ulong* row = powers + i * n;
+            ulong evaluation = 0;
+            for (std::size_t start = 0; start < used_length;
+                 start += static_cast<std::size_t>(kSplitPrimeDotChunk)) {
+                std::size_t end =
+                        start + static_cast<std::size_t>(kSplitPrimeDotChunk);
+                if (end > used_length) {
+                    end = used_length;
+                }
+                ulong accumulator = 0;
+                for (std::size_t j = start; j < end; ++j) {
+                    accumulator += row[j] * residues[j];
+                }
+                evaluation = nmod_add(
+                        evaluation,
+                        n_mod2_preinv(accumulator, mod.n, mod.ninv), mod);
+            }
+            value = nmod_mul(value, evaluation, mod);
+        }
+
+        if (used == 0) {
+            fmpz_set_ui(out, value);
+            if (value > mod.n / 2) {
+                fmpz_sub_ui(out, out, mod.n);
+            }
+        } else {
+            fmpz_CRT_ui(crt_scratch.raw(), out, modulus.raw(), value, mod.n,
+                        1);
+            fmpz_swap(out, crt_scratch.raw());
+        }
+        fmpz_mul_ui(modulus.raw(), modulus.raw(), mod.n);
+        ++used;
+    }
+    handled = true;
+}
 
 bool OrderCoordinateElementConversion::reset(
         const Order& next_order) noexcept {
@@ -162,6 +382,10 @@ bool build_norm_prefilter(NormPrefilter& out,
             order->is_equation_order() && raw_field != nullptr &&
             fmpq_poly_to_monic_integral_fmpz_poly(out.field_polynomial,
                                                   raw_field->pol);
+    out.split_prime_resultant.reset(
+            out.has_equation_order_norm_polynomial
+                    ? out.field_polynomial.raw()
+                    : nullptr);
 
     out.valid = true;
     return true;
@@ -270,9 +494,16 @@ bool norm_prefilter_accepts_integral_equation_coordinates(
                 "class_group.coordinate_candidate_prefilter.coordinate_norm");
         integral_coordinates_to_polynomial(prefilter->coordinate_polynomial,
                                            coordinates);
-        fmpz_poly_resultant(prefilter->norm_resultant_scratch.raw(),
-                            prefilter->field_polynomial.raw(),
-                            prefilter->coordinate_polynomial.raw());
+        bool split_prime_handled = false;
+        prefilter->split_prime_resultant.resultant(
+                split_prime_handled,
+                prefilter->norm_resultant_scratch.raw(),
+                prefilter->coordinate_polynomial.raw());
+        if (!split_prime_handled) {
+            fmpz_poly_resultant(prefilter->norm_resultant_scratch.raw(),
+                                prefilter->field_polynomial.raw(),
+                                prefilter->coordinate_polynomial.raw());
+        }
         flint::fmpq_set_fmpz(
                 flint::FmpqRef(prefilter->norm_scratch),
                 flint::FmpzConstRef(prefilter->norm_resultant_scratch));
