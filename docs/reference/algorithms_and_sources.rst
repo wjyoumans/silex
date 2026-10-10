@@ -176,6 +176,17 @@ extraction and multiplication.  Hecke v0.38.6
 coordinate-solve treatment of order bases whose first element is not one.
 Silex uses row HNF throughout, so upstream column indices are not copied.
 
+The relation search inverts each search-base prime ideal P of a maximal order
+with ``detail::prime_ideal_inverse_num_den`` instead of the general inverse.
+It follows PARI 2.17.3 ``src/basemath/base4.c:pr_inv_p`` and ``pr_inv``
+(p P^(-1) = p Z_K + t Z_K) with ``src/basemath/base2.c:get_pr`` (t a kernel
+vector modulo p, "Z_K + t/p Z_K = P^(-1)"), and Hecke
+``src/NumFieldOrd/NfOrd/Ideal/Prime.jl:anti_uniformizer``.  Silex takes the
+common kernel modulo p of y -> y b over the HNF rows b of P, stopping at
+dimension log_p N(P), and accepts p Z_K + t Z_K only if its index is
+p^(n - f); otherwise the general inverse runs.  Silex's implementation is its
+own; tests compare the numerator HNF and denominator with the general inverse.
+
 The extraction checks equality of the complete ideal lattice, not merely
 norm equality.  Reduced multiplication matrices are used only during search;
 the exact multiplication matrix is reconstructed before forming the product.

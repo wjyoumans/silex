@@ -1422,7 +1422,7 @@ bool multiply_integral_ideal_by_element(
 // multiplication table of t, and `base2.c:get_pr` takes
 // t = `FpM_deplin(zk_multable(nf, u), p)`, a kernel vector modulo p of
 // multiplication by u for P = p Z_K + u Z_K ("Z_K + t/p Z_K = P^(-1)").
-// reference Hecke `anti_uniformizer` (NfOrd/Ideal/Prime.jl) keeps the same
+// The reference `anti_uniformizer` keeps the same
 // kernel of the uniformizer's representation matrix modulo p as its
 // alternative route.  This routine takes the kernel over the HNF rows of I
 // instead of one two-element generator, so it needs no stored generator.

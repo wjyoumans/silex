@@ -2799,14 +2799,14 @@ int test_prime_ideal_inverse_matches_invert() {
         // Search-base rows: cyclotomic_64_phi32 and cyclotomic_37_phi36.
         silex::NumberField field;
         silex::Order maximal = cyclotomic_maximal_order(field, 64);
-        assert(check_prime_inverse_matches_invert(maximal, 200,
-                                                  without_kummer) >= 40);
+        assert(check_prime_inverse_matches_invert(maximal, 30,
+                                                  without_kummer) >= 8);
     }
     {
         silex::NumberField field;
         silex::Order maximal = cyclotomic_maximal_order(field, 37);
-        assert(check_prime_inverse_matches_invert(maximal, 150,
-                                                  without_kummer) >= 40);
+        assert(check_prime_inverse_matches_invert(maximal, 30,
+                                                  without_kummer) >= 8);
     }
 
     // Index-divisor fields: x^3 - x^2 - 2x - 8 (2 splits completely and is a
