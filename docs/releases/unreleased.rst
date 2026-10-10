@@ -497,6 +497,24 @@ Fixed
   "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- A class/unit computation no longer exhausts memory while extracting units
+  from the relation kernel when the raw kernel coefficients do not fit in a
+  machine word, as for ``x^2 + 2x - 104002`` and ``x^2 - x - 25000000``, which
+  now finish ``proven`` with ``h = 1`` and ``h = 720``.  Unit candidates now
+  come from an LLL-reduced basis of the relation kernel, as in Hecke's
+  ``find_candidates``; the reduced basis spans the same kernel lattice.  An
+  intermediate unit-group candidate may differ from before, and is often
+  closer to a fundamental system; no published unit basis changed on the
+  test or benchmark corpora.  In the unit-extraction power routine, a power of
+  a factored element with an exponent outside a machine word now fails
+  instead of being expanded unless the base is a root of unity, which is
+  raised to the exponent modulo the order of the roots of unity; the
+  separate copy used by the relation-HNF witness still expands such powers.
+  The setters ``OrderUnitGroup::set_relation_kernel_units*`` may return
+  different generators and stronger (sound) labels than before: in
+  Q(sqrt 2), ``set_relation_kernel_units_index_bounded`` now publishes
+  ``proven`` where it published ``unknown``.
+
 - The unit computation no longer fails with a class-unit computation error
   when the unit-basis transform needs exponents that do not fit in a machine
   word, as in the grh run of the real cyclotomic field of conductor 136
