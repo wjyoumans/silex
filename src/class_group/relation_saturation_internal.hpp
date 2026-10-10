@@ -105,6 +105,19 @@ bool saturation_process_candidates_once(
         RelationUnitExtractionState* unit_state = nullptr,
         slong precision = 0,
         slong max_class_relation_appends = WORD_MAX) noexcept;
+// The candidate search of saturation_candidates from the given relations,
+// starting at auxiliary_prime_start and using at most max_auxiliary_primes
+// auxiliary primes; exposed so tests can reach a chosen auxiliary prime.
+bool saturation_candidates_from_relations_from_prime(
+        flint::FmpzMat& candidates,
+        slong& auxiliary_prime_count,
+        const std::vector<FactoredElement>& relations,
+        const Order& order,
+        slong n,
+        double stable,
+        flint::FmpzConstRef auxiliary_prime_start,
+        slong max_auxiliary_primes,
+        SaturationCandidateSearchResult* search_result = nullptr) noexcept;
 // The degree-one quotient-log row of saturation_candidates_from_relations at
 // (q, theta - root), from the exact fmpz evaluation and from the word-size
 // path used for q < 2^64; exposed so tests can compare them.

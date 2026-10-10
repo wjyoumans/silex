@@ -1109,6 +1109,26 @@ bool order_index_divisor(bool& out,
     return true;
 }
 
+// lc(F) * disc(F) for the primitive integral multiple F of the defining
+// polynomial, used when the polynomial is not monic integral, where
+// order_index_divisor does not apply.  For a prime q not dividing it, theta is
+// q-integral and Z_(q)[theta] is q-maximal (its discriminant is disc(F) up to
+// a q-unit), so by Dedekind-Kummer the simple roots r of F modulo q are the
+// degree-one primes (q, theta - r) of O_K.
+bool defining_polynomial_bad_prime_product(flint::Fmpz& out,
+                                           const NumberField& field) noexcept {
+    const nf_struct* raw_field = field.raw_flint_field();
+    if (raw_field == nullptr || fmpq_poly_degree(raw_field->pol) < 1) {
+        return false;
+    }
+
+    flint::FmpzPoly numerator;
+    fmpq_poly_get_numerator(numerator.raw(), raw_field->pol);
+    fmpz_poly_discriminant(out.raw(), numerator.raw());
+    fmpz_mul(out.raw(), out.raw(), fmpz_poly_lead(numerator.raw()));
+    return !flint::fmpz_is_zero(flint::FmpzConstRef(out));
+}
+
 bool next_saturation_auxiliary_prime(
         flint::Fmpz& out,
         flint::FmpzConstRef lower_bound,
@@ -1481,6 +1501,19 @@ bool saturation_candidates_from_relations(
     if (!order.discriminant(flint::FmpzRef(discriminant))) {
         return false;
     }
+    // Reference `Saturate.jl:compute_candidates_for_saturate` rejects index
+    // divisors only for a nice (monic integral) polynomial and otherwise
+    // takes `prime_decomposition(OK, q, 1)`.  Silex reads the degree-one
+    // primes from the roots of the defining polynomial, so for a polynomial
+    // that is not nice it skips q | lc(f) * disc(f) instead; skipping an
+    // auxiliary prime only leaves the candidate space larger.
+    const bool nice_polynomial = defining_polynomial_is_nice(field);
+    flint::Fmpz polynomial_bad_primes;
+    if (!nice_polynomial &&
+        !defining_polynomial_bad_prime_product(polynomial_bad_primes,
+                                               field)) {
+        return false;
+    }
 
     const double threshold = stable * static_cast<double>(input_count);
     slong stable_count = 1;
@@ -1502,7 +1535,11 @@ bool saturation_candidates_from_relations(
         }
         if (is_index_divisor ||
             flint::fmpz_divisible(flint::FmpzConstRef(discriminant),
-                                  flint::FmpzConstRef(q))) {
+                                  flint::FmpzConstRef(q)) ||
+            (!nice_polynomial &&
+             flint::fmpz_divisible(
+                     flint::FmpzConstRef(polynomial_bad_primes),
+                     flint::FmpzConstRef(q)))) {
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::class_group,
                     "class_group.relation_saturation.auxiliary_prime_rejected");
@@ -1523,7 +1560,8 @@ bool saturation_candidates_from_relations(
                     "roots");
             // This is the degree-one specialization of reference
             // `prime_decomposition(OK, q, 1)` for the already-filtered
-            // non-index, non-discriminant auxiliary prime.
+            // auxiliary prime: not an index or discriminant prime, and not a
+            // divisor of lc(f) * disc(f) when f is not monic integral.
             if (!degree_one_roots_for_auxiliary_prime(
                         degree_one_roots, order, flint::FmpzConstRef(q))) {
                 return false;
@@ -7273,6 +7311,21 @@ bool saturation_candidates(flint::FmpzMat& candidates,
             candidates, auxiliary_prime_count, relations, *order, n, stable,
             flint::FmpzConstRef(start), WORD_MAX, search_result,
             diagnostics);
+}
+
+bool saturation_candidates_from_relations_from_prime(
+        flint::FmpzMat& candidates,
+        slong& auxiliary_prime_count,
+        const std::vector<FactoredElement>& relations,
+        const Order& order,
+        slong n,
+        double stable,
+        flint::FmpzConstRef auxiliary_prime_start,
+        slong max_auxiliary_primes,
+        SaturationCandidateSearchResult* search_result) noexcept {
+    return saturation_candidates_from_relations(
+            candidates, auxiliary_prime_count, relations, order, n, stable,
+            auxiliary_prime_start, max_auxiliary_primes, search_result);
 }
 
 bool degree_one_quotient_log_row_general(

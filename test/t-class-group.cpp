@@ -17,6 +17,8 @@
 #include "test_support.hpp"
 #include "zeta/zeta_internal.hpp"
 
+#include <flint/nmod_mat.h>
+
 #include <cassert>
 #include <cstring>
 #include <initializer_list>
@@ -2239,6 +2241,93 @@ int test_degree_one_quotient_log_row_word_size_matches_general() {
                 word, *bad, sflint::FmpzConstRef(q),
                 sflint::FmpzConstRef(root), 3));
     }
+    return 0;
+}
+
+// The saturation candidate search skips an auxiliary prime q that divides
+// lc(f) * disc(f) when the defining polynomial f is not monic integral.  In
+// K = Q(theta), 3 theta^2 = 7 q0^2 with q0 = next_prime(2^60), the roots of f
+// modulo q0 do not give degree-one primes: f = 3 x^2 mod q0, and the root 0
+// would read 21 = (3 theta / q0)^2 as the non-square 21 mod q0 (q0 is inert in
+// Q(sqrt(21))).  The search must not use q0, so the true square 21 stays in
+// the candidate space.
+int test_saturation_candidates_skip_bad_prime_of_nonmonic_polynomial() {
+    sflint::Fmpz q0;
+    fmpz_one(q0.raw());
+    fmpz_mul_2exp(q0.raw(), q0.raw(), 60);
+    sflint::fmpz_nextprime(sflint::FmpzRef(q0), sflint::FmpzConstRef(q0));
+    sflint::Fmpz small;
+    assert(set_fmpz_si(small, 21));
+    assert(fmpz_jacobi(small.raw(), q0.raw()) == -1);
+    assert(set_fmpz_si(small, -1));
+    assert(fmpz_jacobi(small.raw(), q0.raw()) == 1);
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::Fmpz c0;
+    fmpz_mul(c0.raw(), q0.raw(), q0.raw());
+    fmpz_mul_si(c0.raw(), c0.raw(), -7);
+    fmpq_poly_set_coeff_fmpz(polynomial.raw(), 0, c0.raw());
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 3);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    // Z[s] with s = 3 theta / q0, s^2 = 21, in theta coordinates.
+    sflint::FmpqMat basis(2, 2);
+    fmpq_mat_zero(basis.raw());
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 0, 0), 1, 1);
+    fmpz_set_ui(fmpq_mat_entry_num(basis.raw(), 1, 1), 3);
+    fmpz_set(fmpq_mat_entry_den(basis.raw(), 1, 1), q0.raw());
+    silex::Order input = silex::Order::from_basis(
+            field, sflint::FmpqMatConstRef(basis));
+    assert(input.is_defined());
+    silex::Order order(field);
+    assert(order.maximal_order(input));
+    assert(order.is_maximal());
+
+    silex::Element value(field);
+    assert(value.set_si(21));
+    silex::FactoredElement relation(field);
+    assert(relation.one());
+    assert(relation.push(value, 1));
+    std::vector<silex::FactoredElement> relations;
+    relations.push_back(std::move(relation));
+
+    // Inputs (21, -1): the field torsion generator is appended for ell = 2.
+    sflint::FmpzMat candidates(0, 0);
+    slong auxiliary_prime_count = 0;
+    assert(silex::detail::saturation_candidates_from_relations_from_prime(
+            candidates, auxiliary_prime_count, relations, order, 2, 100.0,
+            sflint::FmpzConstRef(q0), 1));
+    assert(auxiliary_prime_count == 1);
+    const slong rows = sflint::fmpz_mat_nrows(
+            sflint::FmpzMatConstRef(candidates));
+    const slong cols = sflint::fmpz_mat_ncols(
+            sflint::FmpzMatConstRef(candidates));
+    assert(rows == 2);
+
+    // (1, 0) lies in the column span modulo 2.
+    nmod_mat_t span;
+    nmod_mat_t augmented;
+    nmod_mat_init(span, rows, cols, 2);
+    nmod_mat_init(augmented, rows, cols + 1, 2);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            const ulong entry = fmpz_fdiv_ui(
+                    sflint::fmpz_mat_entry(
+                            sflint::FmpzMatConstRef(candidates), i, j)
+                            .raw(),
+                    2);
+            nmod_mat_set_entry(span, i, j, entry);
+            nmod_mat_set_entry(augmented, i, j, entry);
+        }
+    }
+    nmod_mat_set_entry(augmented, 0, cols, 1);
+    nmod_mat_set_entry(augmented, 1, cols, 0);
+    const slong span_rank = nmod_mat_rank(span);
+    const slong augmented_rank = nmod_mat_rank(augmented);
+    nmod_mat_clear(augmented);
+    nmod_mat_clear(span);
+    assert(span_rank == augmented_rank);
     return 0;
 }
 
@@ -5085,6 +5174,7 @@ int main() {
     test_relation_saturation_candidate_filter_minus_23();
     test_relation_saturation_candidate_filter_needs_nice_polynomial();
     test_degree_one_quotient_log_row_word_size_matches_general();
+    test_saturation_candidates_skip_bad_prime_of_nonmonic_polynomial();
     test_relation_saturation_index_bounded_status_needs_unconditional_bound();
     test_validation_exact_index_saturation_status_follows_generation();
     test_exact_order_certification_failure_restores_generation_check();
