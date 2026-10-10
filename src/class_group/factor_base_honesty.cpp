@@ -501,9 +501,28 @@ struct PrimeReductionVisitContext {
     flint::FmpzMat* basis = nullptr;
     const DiagnosticsContext* diagnostics = nullptr;
     FactorBaseWitnessPredicate predicate = FactorBaseWitnessPredicate::selected;
+    // Ready only for the direct predicate; see visit_prime_reduction_candidate.
+    detail::RequiredPrimeNormPrefilter* norm_prefilter = nullptr;
     bool found = false;
     bool failed = false;
 };
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+// The direct classification of a candidate the norm prefilter rejected:
+// a completed non-match by the norm cofactor.
+bool norm_prefilter_reject_agrees_with_direct(
+        const PrimeReductionVisitContext& visit,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    OrderElement element(*visit.order);
+    bool matches = true;
+    detail::RequiredPrimeDirectAudit audit;
+    return element.is_defined() && element.set_coordinates(coordinates) &&
+           detail::order_element_factor_over_base_with_required_prime(
+                   matches, element, *visit.base, *visit.prime, nullptr,
+                   &audit) &&
+           !matches && audit.rejected_by_cofactor;
+}
+#endif
 
 int visit_prime_reduction_candidate(const fmpz_mat_t coefficients, void* user) {
     PrimeReductionVisitContext* visit =
@@ -518,6 +537,29 @@ int visit_prime_reduction_candidate(const fmpz_mat_t coefficients, void* user) {
     coordinates_from_lattice_combination(
             coordinates, flint::FmpzMatConstRef(coefficients),
             flint::FmpzMatConstRef(*visit->basis));
+
+    // The direct predicate rejects an element whose norm is not smooth over
+    // the factor-base and required rational primes (buch2.c:can_factor).
+    // Decide that from the coordinates before building the element; every
+    // other candidate takes the unchanged path below.
+    if (visit->norm_prefilter != nullptr && visit->norm_prefilter->ready) {
+        bool rejected = false;
+        if (detail::required_prime_norm_prefilter_rejects(
+                    rejected, *visit->norm_prefilter,
+                    flint::FmpzMatConstRef(coordinates)) &&
+            rejected) {
+            SILEX_PROFILE_EVENT(
+                    visit->diagnostics, DiagnosticsModule::class_group,
+                    "class_group.honesty_principal_witness.norm_prefilter_reject");
+            SILEX_DEBUG_CHECK(
+                    visit->diagnostics, DiagnosticsModule::class_group,
+                    DebugLevel::expensive,
+                    "honesty norm prefilter rejection matches the direct test",
+                    norm_prefilter_reject_agrees_with_direct(
+                            *visit, flint::FmpzMatConstRef(coordinates)));
+            return 1;
+        }
+    }
 
     OrderElement order_element(*visit->order);
     if (!order_element.is_defined() ||
@@ -537,12 +579,29 @@ int visit_prime_reduction_candidate(const fmpz_mat_t coefficients, void* user) {
     return 1;
 }
 
+// Prepares the norm prefilter for the lattice-search candidates of one
+// required prime. It applies only where factor_base_principal_witness takes
+// the direct order-element test.
+void init_honesty_norm_prefilter(
+        detail::RequiredPrimeNormPrefilter& norm_prefilter,
+        const FactorBase& base,
+        const PrimeIdeal& prime,
+        FactorBaseWitnessPredicate predicate) noexcept {
+    norm_prefilter.ready = false;
+    if (predicate == FactorBaseWitnessPredicate::selected ||
+        predicate == FactorBaseWitnessPredicate::order_element_direct) {
+        (void) detail::required_prime_norm_prefilter_init(
+                norm_prefilter, base, prime);
+    }
+}
+
 bool factor_base_reduces_prime_by_ideal_lattice_search(
         const FactorBase& base,
         const PrimeIdeal& prime,
         const Ideal& ideal,
         slong radius,
         FactorBaseWitnessPredicate predicate,
+        detail::RequiredPrimeNormPrefilter& norm_prefilter,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.honesty_reduces_prime_by_ideal_lattice_search");
@@ -596,6 +655,7 @@ bool factor_base_reduces_prime_by_ideal_lattice_search(
     visit.basis = &basis;
     visit.diagnostics = diagnostics;
     visit.predicate = predicate;
+    visit.norm_prefilter = &norm_prefilter;
     for (slong tries = 0; tries < 4 && !visit.found && !visit.failed;
          ++tries) {
         flint::arb_set_fmpz(bound_sq, max_diag);
@@ -627,10 +687,12 @@ bool factor_base_reduces_prime_by_lattice_search(const FactorBase& base,
     }
 
     Ideal ideal(*order);
+    detail::RequiredPrimeNormPrefilter norm_prefilter;
+    init_honesty_norm_prefilter(norm_prefilter, base, prime, predicate);
     return ideal.is_defined() && prime.get_ideal(ideal) &&
            factor_base_reduces_prime_by_ideal_lattice_search(
                    base, prime, ideal, radius,
-                   predicate, diagnostics);
+                   predicate, norm_prefilter, diagnostics);
 }
 
 bool factor_base_reduces_prime_by_twisted_lattice_search(
@@ -660,6 +722,8 @@ bool factor_base_reduces_prime_by_twisted_lattice_search(
         return false;
     }
 
+    detail::RequiredPrimeNormPrefilter norm_prefilter;
+    init_honesty_norm_prefilter(norm_prefilter, base, prime, predicate);
     for (slong i = 0; i < max_twists; ++i) {
         if (!base.prime(twist_prime, i) ||
             !twist_prime.get_ideal(twist_ideal) ||
@@ -668,7 +732,7 @@ bool factor_base_reduces_prime_by_twisted_lattice_search(
         }
         if (factor_base_reduces_prime_by_ideal_lattice_search(
                     base, prime, product, radius,
-                    predicate, diagnostics)) {
+                    predicate, norm_prefilter, diagnostics)) {
             return true;
         }
     }
@@ -763,6 +827,8 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
         return false;
     }
 
+    detail::RequiredPrimeNormPrefilter norm_prefilter;
+    init_honesty_norm_prefilter(norm_prefilter, base, prime, predicate);
     for (slong trial = 0; trial < random_tries; ++trial) {
         if (!current.set(prime_ideal)) {
             return false;
@@ -795,7 +861,7 @@ bool factor_base_reduces_prime_by_random_subfactor_base_search(
 
         if (factor_base_reduces_prime_by_ideal_lattice_search(
                     base, prime, current, radius,
-                    predicate, diagnostics)) {
+                    predicate, norm_prefilter, diagnostics)) {
             return true;
         }
     }

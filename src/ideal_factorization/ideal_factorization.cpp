@@ -4,6 +4,7 @@
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpz_factor.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/order_element.hpp>
 
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
@@ -1314,6 +1315,149 @@ bool order_element_factor_over_base_with_required_prime(
         return false;
     }
     matches = direct_matches;
+    return true;
+}
+
+bool required_prime_norm_prefilter_init(
+        RequiredPrimeNormPrefilter& prefilter,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime) noexcept {
+    prefilter.ready = false;
+    prefilter.degree = 0;
+    // The preconditions of order_element_factor_over_base_with_required_prime_direct
+    // for an element of base.parent(); when one fails the direct path reports
+    // an evaluation failure, which the prefilter leaves to it.
+    const Order* order = base.parent();
+    if (order == nullptr || order->parent() == nullptr ||
+        !order->is_maximal() ||
+        !same_order_parent(required_prime.parent(), order) ||
+        !required_prime.has_prime_data() ||
+        required_prime.residue_degree() <= 0 ||
+        base.contains(required_prime)) {
+        return false;
+    }
+    const slong n = order->degree();
+    if (n < 2 || n > 4) {
+        return false;
+    }
+
+    // The direct cofactor test removes these primes from |N|; it is skipped
+    // when one cannot be read, and so is the prefilter.
+    flint::Fmpz p;
+    slong block_length = 0;
+    if (!required_prime.rational_prime(flint::FmpzRef(p)) ||
+        fmpz_cmp_ui(p.raw(), 2) < 0) {
+        return false;
+    }
+    ::fmpz_set(prefilter.smooth_product.raw(), p.raw());
+    const slong block_count = base.rational_prime_block_count();
+    for (slong block = 0; block < block_count; ++block) {
+        if (!base.rational_prime_block_data(flint::FmpzRef(p), block_length,
+                                            block) ||
+            fmpz_cmp_ui(p.raw(), 2) < 0) {
+            return false;
+        }
+        ::fmpz_mul(prefilter.smooth_product.raw(),
+                   prefilter.smooth_product.raw(), p.raw());
+    }
+
+    // Multiplication table of the order basis w_0, ..., w_(n-1).
+    OrderElement left(*order);
+    OrderElement right(*order);
+    OrderElement product(*order);
+    flint::FmpzMat unit(1, n);
+    flint::FmpzMat coordinates(1, n);
+    flint::FmpzMat table(n * n, n);
+    if (!left.is_defined() || !right.is_defined() || !product.is_defined()) {
+        return false;
+    }
+    for (slong i = 0; i < n; ++i) {
+        ::fmpz_mat_zero(unit.raw());
+        ::fmpz_one(fmpz_mat_entry(unit.raw(), 0, i));
+        if (!left.set_coordinates(flint::FmpzMatConstRef(unit))) {
+            return false;
+        }
+        for (slong j = i; j < n; ++j) {
+            ::fmpz_mat_zero(unit.raw());
+            ::fmpz_one(fmpz_mat_entry(unit.raw(), 0, j));
+            if (!right.set_coordinates(flint::FmpzMatConstRef(unit)) ||
+                !product.multiply(left, right) ||
+                !product.get_coordinates(flint::FmpzMatRef(coordinates))) {
+                return false;
+            }
+            for (slong r = 0; r < n; ++r) {
+                const fmpz* entry = fmpz_mat_entry(coordinates.raw(), 0, r);
+                ::fmpz_set(fmpz_mat_entry(table.raw(), i * n + j, r), entry);
+                ::fmpz_set(fmpz_mat_entry(table.raw(), j * n + i, r), entry);
+            }
+        }
+    }
+    prefilter.multiplication_table = std::move(table);
+    prefilter.multiplication_matrix = flint::FmpzMat(n, n);
+    prefilter.degree = n;
+    prefilter.ready = true;
+    return true;
+}
+
+bool required_prime_norm_prefilter_norm(
+        flint::FmpzRef out,
+        RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    const slong n = prefilter.degree;
+    if (!prefilter.ready || ::fmpz_mat_nrows(coordinates.raw()) != 1 ||
+        ::fmpz_mat_ncols(coordinates.raw()) != n) {
+        return false;
+    }
+    // Source: the norm of a is the determinant of the Q-linear map x -> a x
+    // (Cohen, A Course in Computational Algebraic Number Theory, GTM 138,
+    // Section 4.3), here in the order basis, where its matrix is integral.
+    // Column j holds the coordinates of a w_j = sum_i a_i w_i w_j, as in
+    // reference 2.17.3 src/basemath/base3.c:zk_multable. The determinant is
+    // exact integer arithmetic, so the value equals Element::norm.
+    fmpz_mat_struct* matrix = prefilter.multiplication_matrix.raw();
+    const fmpz_mat_struct* table = prefilter.multiplication_table.raw();
+    const fmpz_mat_struct* a = coordinates.raw();
+    for (slong r = 0; r < n; ++r) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz* entry = fmpz_mat_entry(matrix, r, j);
+            ::fmpz_zero(entry);
+            for (slong i = 0; i < n; ++i) {
+                ::fmpz_addmul(entry, fmpz_mat_entry(a, 0, i),
+                              fmpz_mat_entry(table, i * n + j, r));
+            }
+        }
+    }
+    ::fmpz_mat_det(out.raw(), matrix);
+    return true;
+}
+
+bool required_prime_norm_prefilter_rejects(
+        bool& rejected,
+        RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    rejected = false;
+    if (!required_prime_norm_prefilter_norm(
+                flint::FmpzRef(prefilter.norm), prefilter, coordinates)) {
+        return false;
+    }
+    if (::fmpz_is_zero(prefilter.norm.raw()) != 0) {
+        return true;
+    }
+    // Source: buch2.c:can_factor rejects when Z_ppo(N, F->prodZ) is not 1;
+    // reference 2.17.3 src/basemath/base4.c:Z_ppo divides out gcd(x, f)
+    // until it is 1. The cofactor is 1 exactly when the direct path's
+    // cofactor, |N| with every factor-base rational prime and the required
+    // rational prime removed, is 1.
+    ::fmpz_abs(prefilter.cofactor.raw(), prefilter.norm.raw());
+    ::fmpz_gcd(prefilter.divisor.raw(), prefilter.cofactor.raw(),
+               prefilter.smooth_product.raw());
+    while (::fmpz_is_one(prefilter.divisor.raw()) == 0) {
+        ::fmpz_divexact(prefilter.cofactor.raw(), prefilter.cofactor.raw(),
+                        prefilter.divisor.raw());
+        ::fmpz_gcd(prefilter.divisor.raw(), prefilter.cofactor.raw(),
+                   prefilter.divisor.raw());
+    }
+    rejected = ::fmpz_is_one(prefilter.cofactor.raw()) == 0;
     return true;
 }
 

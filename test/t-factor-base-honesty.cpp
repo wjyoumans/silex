@@ -557,6 +557,152 @@ int test_required_prime_direct_rejects_nonsmooth_cofactor() {
     return 0;
 }
 
+FieldSetup maximal_order_setup(const std::vector<slong>& coefficients) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    FieldSetup setup;
+    setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    if (!setup.maximal_order.maximal_order(equation_order) ||
+        !setup.maximal_order.is_maximal()) {
+        return FieldSetup{};
+    }
+    return setup;
+}
+
+// Every nonzero coordinate vector in [-radius, radius]^n: the prefilter norm
+// equals Element::norm, and the prefilter rejects exactly the elements the
+// direct order-element test rejects by their norm cofactor. The box must hold
+// witnesses, which a prefilter that dropped the required prime would reject.
+int check_norm_prefilter_against_direct(const FieldSetup& setup,
+                                        slong base_bound,
+                                        slong required_rational_prime,
+                                        slong radius) {
+    const silex::Order& order = setup.maximal_order;
+    const slong n = order.degree();
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), base_bound);
+    silex::FactorBase base(order);
+    silex::PrimeIdeal required(order);
+    if (!order.is_maximal() || !base.is_defined() ||
+        !base.build(sflint::FmpzConstRef(bound)) ||
+        !first_prime_above(required, order, required_rational_prime) ||
+        base.contains(required)) {
+        return 1;
+    }
+    silex::detail::RequiredPrimeNormPrefilter prefilter;
+    if (!silex::detail::required_prime_norm_prefilter_init(prefilter, base,
+                                                          required) ||
+        !prefilter.ready || prefilter.degree != n) {
+        return 1;
+    }
+
+    sflint::FmpzMat coordinates(1, n);
+    silex::OrderElement element(order);
+    silex::Element ambient(*order.parent());
+    sflint::Fmpq field_norm;
+    sflint::Fmpz prefilter_norm;
+    std::vector<slong> digits(static_cast<std::size_t>(n), -radius);
+    slong rejected_count = 0, kept_count = 0, witness_count = 0;
+    for (;;) {
+        bool nonzero = false;
+        for (slong i = 0; i < n; ++i) {
+            sflint::fmpz_set_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0,
+                                           i),
+                    digits[static_cast<std::size_t>(i)]);
+            nonzero = nonzero || digits[static_cast<std::size_t>(i)] != 0;
+        }
+        if (nonzero) {
+            bool matches = true;
+            bool rejected = false;
+            silex::detail::RequiredPrimeDirectAudit audit;
+            if (!element.set_coordinates(
+                        sflint::FmpzMatConstRef(coordinates)) ||
+                !element.get_element(ambient) ||
+                !ambient.norm(sflint::FmpqRef(field_norm)) ||
+                !silex::detail::required_prime_norm_prefilter_norm(
+                        sflint::FmpzRef(prefilter_norm), prefilter,
+                        sflint::FmpzMatConstRef(coordinates)) ||
+                fmpz_is_one(fmpq_denref(field_norm.raw())) == 0 ||
+                fmpz_equal(fmpq_numref(field_norm.raw()),
+                           prefilter_norm.raw()) == 0 ||
+                !silex::detail::required_prime_norm_prefilter_rejects(
+                        rejected, prefilter,
+                        sflint::FmpzMatConstRef(coordinates)) ||
+                !silex::detail::order_element_factor_over_base_with_required_prime(
+                        matches, element, base, required, nullptr, &audit) ||
+                rejected != audit.rejected_by_cofactor ||
+                (rejected && matches)) {
+                return 1;
+            }
+            rejected ? ++rejected_count : ++kept_count;
+            witness_count += matches ? 1 : 0;
+        }
+        slong i = 0;
+        while (i < n && digits[static_cast<std::size_t>(i)] == radius) {
+            digits[static_cast<std::size_t>(i)] = -radius;
+            ++i;
+        }
+        if (i == n) {
+            break;
+        }
+        ++digits[static_cast<std::size_t>(i)];
+    }
+    return rejected_count > 0 && kept_count > rejected_count / 1000 &&
+                   witness_count > 0
+           ? 0
+           : 1;
+}
+
+int test_required_prime_norm_prefilter_matches_direct() {
+    // Degree 2 with a non-equation maximal order basis, degree 3, and two
+    // quartics, one of them Q(sqrt 2, sqrt 3).
+    const FieldSetup quadratic = maximal_order_setup({7, 0, 1});
+    const FieldSetup cubic = cubic_x3_minus_2();
+    const FieldSetup biquadratic = maximal_order_setup({1, 0, -10, 0, 1});
+    const FieldSetup quartic = truncated_decomposition_counterexample_fixture();
+    if (check_norm_prefilter_against_direct(quadratic, 7, 11, 20) != 0 ||
+        check_norm_prefilter_against_direct(cubic, 7, 11, 5) != 0 ||
+        check_norm_prefilter_against_direct(biquadratic, 7, 23, 3) != 0 ||
+        check_norm_prefilter_against_direct(quartic, 7, 11, 3) != 0) {
+        return 1;
+    }
+
+    // Not ready outside degrees 2 to 4, or when the required prime is in the
+    // base: those keep the direct path.
+    const FieldSetup quintic = ramified_last_fixture();
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 7);
+    silex::FactorBase quintic_base(quintic.maximal_order);
+    silex::PrimeIdeal quintic_required(quintic.maximal_order);
+    silex::FactorBase quadratic_base(quadratic.maximal_order);
+    silex::PrimeIdeal in_base(quadratic.maximal_order);
+    silex::detail::RequiredPrimeNormPrefilter prefilter;
+    if (quintic.maximal_order.degree() != 5 ||
+        !quintic_base.build(sflint::FmpzConstRef(bound)) ||
+        !first_prime_above(quintic_required, quintic.maximal_order, 11) ||
+        quintic_base.contains(quintic_required) ||
+        silex::detail::required_prime_norm_prefilter_init(
+                prefilter, quintic_base, quintic_required) ||
+        prefilter.ready || !quadratic_base.build(sflint::FmpzConstRef(bound)) ||
+        !first_prime_above(in_base, quadratic.maximal_order, 2) ||
+        !quadratic_base.contains(in_base) ||
+        silex::detail::required_prime_norm_prefilter_init(
+                prefilter, quadratic_base, in_base) ||
+        prefilter.ready) {
+        return 1;
+    }
+    return 0;
+}
+
 int test_selected_witness_edge_cases() {
     namespace search = silex::detail::relation_search;
     using Mode = search::FactorBaseWitnessPredicate;
@@ -911,9 +1057,41 @@ int test_ideal_transforms_preserve_principal_witness() {
     return 0;
 }
 
+void norm_prefilter_reject_callback(void* user,
+                                    silex::DiagnosticsModule,
+                                    silex::ProfileEvent event,
+                                    const char*,
+                                    const char* label) noexcept {
+    if (label != nullptr && event == silex::ProfileEvent::event &&
+        std::strcmp(label,
+                    "class_group.honesty_principal_witness.norm_prefilter_reject") ==
+                0) {
+        ++static_cast<RejectCofactorCounter*>(user)->count;
+    }
+}
+
 int test_legacy_scan_predicate_equivalence() {
     namespace search = silex::detail::relation_search;
     using Mode = search::FactorBaseWitnessPredicate;
+    // The direct predicates use the lattice-search norm prefilter; in a
+    // debug-check build each of its rejections is checked against the direct
+    // order-element test.
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    diagnostics.debug_level = silex::DebugLevel::expensive;
+    diagnostics.debug_modules = silex::diagnostics_all_modules;
+    slong debug_failures = 0;
+    diagnostics.debug_failure_user = &debug_failures;
+    diagnostics.debug_failure_callback = [](
+            void* user, silex::DiagnosticsModule, silex::DebugLevel,
+            const char*, const char*, int, const char*, const char*) noexcept {
+        ++*static_cast<slong*>(user);
+    };
+    RejectCofactorCounter prefilter_rejects;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            norm_prefilter_reject_callback, &prefilter_rejects);
     for (slong fixture = 0; fixture < 4; ++fixture) {
         FieldSetup setup = fixture == 0 ? cubic_x3_minus_2()
                 : fixture == 1 ? truncated_decomposition_counterexample_fixture()
@@ -938,8 +1116,8 @@ int test_legacy_scan_predicate_equivalence() {
             const bool ok = search::factor_base_honesty_check(
                     honest, base, sflint::FmpzConstRef(active),
                     sflint::FmpzConstRef(required), nullptr, UWORD(42), false,
-                    128, search::FactorBaseWitnessEscalation::none, nullptr,
-                    &audit, mode);
+                    128, search::FactorBaseWitnessEscalation::none,
+                    &diagnostics, &audit, mode);
             if (ok != expected_ok || honest != expected_honest ||
                 audit.rational_prime_checks != expected.rational_prime_checks ||
                 audit.checks_at_or_below_active_bound != expected.checks_at_or_below_active_bound ||
@@ -950,6 +1128,10 @@ int test_legacy_scan_predicate_equivalence() {
         if (fixture == 1 && (!expected_ok || expected_honest ||
                 expected.witness_targets != 2 || expected.witnessed_targets != 1)) return 1;
     }
+    if (debug_failures != 0) return 1;
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    if (prefilter_rejects.count == 0) return 1;
+#endif
     return 0;
 }
 
@@ -1672,6 +1854,7 @@ int main() {
                            0 ||
                    test_required_prime_direct_rejects_nonsmooth_cofactor() !=
                            0 ||
+                   test_required_prime_norm_prefilter_matches_direct() != 0 ||
                    test_ideal_transforms_preserve_principal_witness() != 0 ||
                    test_truncated_decomposition_withholds_honesty() != 0 ||
                    test_generation_bound_checker_rejects_missing_truncated_target() !=
