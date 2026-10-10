@@ -2501,11 +2501,12 @@ constexpr slong kPreLiftDisproofExtraPrimes = 40;
 // sound; exhausting it leaves the call unsupported.  A true power is never
 // disproved and always runs to the bound, at a distinct-degree factorisation
 // per prime (a fraction of a millisecond in degree 20), so the bound is the
-// same as kPreLiftDisproofExtraPrimes.  For a large prime n a residue can
+// same as kPreLiftDisproofExtraPrimes.  A residue can
 // fail to be an n-th power only at a factor whose residue field order q has
 // gcd(n, q - 1) > 1, so a prime p with gcd(n, p^f - 1) = 1 for every
 // f <= N is skipped exactly, without factoring, and is not counted
-// (residue_degree_can_disprove_power).  On the compact-root kernel rows of
+// (residue_degree_can_disprove_power); the outer 256-attempt cap still counts
+// skipped primes and ends the scan for a large n.  On the compact-root kernel rows of
 // the proven runs on Q(zeta_25) and Q(zeta_44), 9 non-powers each needed 9
 // to 218 admissible primes without that skip; with it, all 18 are disproved
 // within the bound.

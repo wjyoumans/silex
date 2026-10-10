@@ -375,13 +375,15 @@ only with ``false``.
   never disproved, so it and every input with no disproving residue within
   the prime bound still return failure (unsupported).  The bound 40 (the
   same as the pre-lift disproof) is a resource limit only, and any value is
-  sound.  Every true power runs to the bound.  For a large prime ``n`` a
+  sound.  Every true power runs to the bound.  A
   residue can fail to be an ``n``-th power only in a residue field of order
   ``q`` with ``gcd(n, q - 1) > 1`` (``F_q^*`` is cyclic of order ``q - 1``;
   Lidl and Niederreiter, *Finite Fields*, Theorem 2.8), and every residue
   degree is at most ``N``.  So a prime ``p`` with ``gcd(n, p^f - 1) = 1``
   for every ``f <= N`` cannot disprove the input; Silex skips it exactly,
-  without factoring, and does not count it towards the bound.  Without that
+  without factoring, and does not count it towards the bound.  The scan also stops after 256
+  attempts, skipped primes included, and for a large ``n`` that attempt cap
+  is the bound that ends it.  Without that
   skip, the 9 non-powers each of the compact-root kernel rows of the
   ``proven`` runs on ``Q(zeta_25)`` and ``Q(zeta_44)`` needed 9 to 218
   admissible primes; with it, all 18 are disproved within the bound.
