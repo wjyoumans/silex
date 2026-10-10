@@ -9,6 +9,7 @@
 #include <silex/zeta.hpp>
 
 #include "class_group/class_group_certification_internal.hpp"
+#include "class_group/class_group_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
@@ -731,6 +732,91 @@ int test_relation_kernel_unit_witness() {
     assert(!context.relation_kernel_unit(unit_witness, 1));
     assert(!context.invariant_generator_power_witness(unit_witness, 0));
 
+    return 0;
+}
+
+// relation_kernel_unit reads a reduced kernel cached with the presentation;
+// appending a relation and publishing again must rebuild it, so every
+// index of the new kernel yields a unit witness.
+int test_relation_kernel_unit_follows_republished_presentation() {
+    silex::NumberField field = degree_one_field();
+    silex::Order order;
+    order = silex::test::equation_order(field);
+
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 2));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Relation relation(*base);
+    silex::Element alpha(field);
+    const slong generators[] = {4, 2, 8, 32};
+    silex::FactoredElement unit_witness(field);
+    silex::Element unit_value(field);
+    silex::FractionalIdeal unit_ideal(order);
+    sflint::FmpzMat row(1, 1);
+    for (slong count = 1; count <= 4; ++count) {
+        assert(alpha.set_si(generators[count - 1]));
+        assert(relation.set_generator(alpha));
+        assert(context.append_relation(relation));
+        assert(context.publish_presentation());
+        assert(context.relation_count() == count);
+        assert(context.relation_kernel_unit_count() == count - 1);
+        for (slong i = 0; i < count - 1; ++i) {
+            assert(context.relation_kernel_unit(unit_witness, i));
+            assert(unit_witness.evaluate(unit_value));
+            assert(unit_ideal.set_principal(unit_value));
+            assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(row),
+                                                 unit_ideal, *base));
+            assert(mat_entry_is_si(row, 0, 0, 0));
+        }
+        assert(!context.relation_kernel_unit(unit_witness, count - 1));
+    }
+    return 0;
+}
+
+// An exponent outside slong is never expanded for a base that is not a
+// root of unity: x^e would have height |e| h(x) > 2^63 h(x).  The power
+// fails closed and leaves the accumulator unchanged.  A root of unity is
+// raised to e modulo the order of the roots of unity instead.
+int test_compact_power_fmpz_exponent_guard() {
+    silex::NumberField field = silex::test::quadratic_field(-1);
+    sflint::Fmpz huge;
+    sflint::fmpz_set_ui(sflint::FmpzRef(huge), 1);
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(huge), sflint::FmpzConstRef(huge),
+                          64);
+    sflint::fmpz_add_ui(sflint::FmpzRef(huge), sflint::FmpzConstRef(huge), 3);
+
+    silex::Element value(field);
+    silex::Element expected(field);
+    silex::FactoredElement base(field);
+    silex::FactoredElement accumulator(field);
+    assert(value.set_si(2));
+    assert(base.set_element(value));
+    assert(accumulator.one());
+    assert(!silex::detail::multiply_factored_element_power_fmpz(
+            accumulator, base, sflint::FmpzConstRef(huge)));
+    assert(accumulator.length() == 0);
+
+    // i^(2^64 + 3) = i^3 = -i and i^-(2^64 + 3) = i.
+    assert(value.gen());
+    assert(base.set_element(value));
+    assert(silex::detail::multiply_factored_element_power_fmpz(
+            accumulator, base, sflint::FmpzConstRef(huge)));
+    assert(accumulator.evaluate(value));
+    assert(expected.gen());
+    assert(expected.negate(expected));
+    assert(value.equal(expected));
+
+    sflint::fmpz_neg(sflint::FmpzRef(huge), sflint::FmpzConstRef(huge));
+    assert(accumulator.one());
+    assert(silex::detail::multiply_factored_element_power_fmpz(
+            accumulator, base, sflint::FmpzConstRef(huge)));
+    assert(accumulator.evaluate(value));
+    assert(expected.gen());
+    assert(value.equal(expected));
     return 0;
 }
 
@@ -5251,6 +5337,8 @@ int main() {
     test_append_rejects_wrong_factor_base();
     test_set_relation_matrix_preserves_on_failure();
     test_relation_kernel_unit_witness();
+    test_relation_kernel_unit_follows_republished_presentation();
+    test_compact_power_fmpz_exponent_guard();
     test_goal_publication_waits_for_kernel_target();
     test_relation_sources_reset_with_factor_base();
     test_append_tracks_rank_and_skips_nonrefining_dependent_rows();

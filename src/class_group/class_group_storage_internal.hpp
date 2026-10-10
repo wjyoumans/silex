@@ -325,6 +325,17 @@ struct ClassGroupContextStorage {
     std::vector<RelationSaturationProofRecord>
             relation_saturation_proof_records;
     LocalSaturationDlogCache local_saturation_dlog_cache;
+    // LLL-reduced basis of the relation kernel of the published
+    // presentation, read by ClassGroupContext::relation_kernel_unit.
+    // Rebuilt on first use after the presentation changes; every write of
+    // the presentation resets the flag.
+    flint::FmpzMat reduced_relation_kernel{0, 0};
+    bool reduced_relation_kernel_valid = false;
+
+    void invalidate_reduced_relation_kernel() noexcept {
+        reduced_relation_kernel = flint::FmpzMat(0, 0);
+        reduced_relation_kernel_valid = false;
+    }
 
     void clear() noexcept {
         partial_relations.clear();
@@ -364,6 +375,7 @@ struct ClassGroupContextStorage {
         relation_saturation_records.clear();
         relation_saturation_proof_records.clear();
         local_saturation_dlog_cache.clear();
+        invalidate_reduced_relation_kernel();
     }
 };
 
