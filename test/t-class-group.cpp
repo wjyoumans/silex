@@ -4565,6 +4565,46 @@ int test_grh_generation_bound_bach_fallback() {
     assert(probe_base.length() > 20);
     assert(probe_base.equal(rebuilt_base));
 
+    // The transaction takes the probe base over only for a matching order
+    // and bound; every other case yields nullptr (a fresh build).
+    {
+        silex::detail::ClassUnitTransactionReport takeover_audit;
+        silex::detail::ClassUnitTransactionContext takeover{takeover_audit};
+        sflint::Fmpz other_bound;
+        sflint::fmpz_set_ui(sflint::FmpzRef(other_bound), 81);
+        silex::Order other_order(quadratic);
+        assert(other_order.maximal_order(quadratic_equation));
+        assert(silex::detail::grh_norm_bounded_base_for(
+                       nullptr, quadratic_maximal,
+                       sflint::FmpzConstRef(bound)) == nullptr);
+        // Nothing stored yet.
+        assert(silex::detail::grh_norm_bounded_base_for(
+                       &takeover, quadratic_maximal,
+                       sflint::FmpzConstRef(bound)) == nullptr);
+        takeover.grh_norm_bounded_base = &probe_base;
+        takeover.grh_norm_bounded_base_bound = &probe_bound;
+        assert(silex::detail::grh_norm_bounded_base_for(
+                       &takeover, quadratic_maximal,
+                       sflint::FmpzConstRef(bound)) == &probe_base);
+        assert(silex::detail::grh_norm_bounded_base_for(
+                       &takeover, quadratic_maximal,
+                       sflint::FmpzConstRef(other_bound)) == nullptr);
+        assert(silex::detail::grh_norm_bounded_base_for(
+                       &takeover, other_order,
+                       sflint::FmpzConstRef(bound)) == nullptr);
+        // A taken (cleared) base is not handed out again.
+        silex::FactorBase taken;
+        takeover.grh_norm_bounded_base = &taken;
+        assert(silex::detail::grh_norm_bounded_base_for(
+                       &takeover, quadratic_maximal,
+                       sflint::FmpzConstRef(bound)) == nullptr);
+        takeover.grh_norm_bounded_base = &probe_base;
+        takeover.grh_norm_bounded_base_bound = nullptr;
+        assert(silex::detail::grh_norm_bounded_base_for(
+                       &takeover, quadratic_maximal,
+                       sflint::FmpzConstRef(bound)) == nullptr);
+    }
+
     silex::ClassGroupContext class_group;
     silex::OrderUnitGroup units;
     silex::detail::ClassUnitTransactionReport audit;
