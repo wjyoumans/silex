@@ -1,4 +1,5 @@
 #include <silex/class_group.hpp>
+#include <silex/embedding.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/ideal_factorization.hpp>
 #include <silex/order_element.hpp>
@@ -4544,6 +4545,501 @@ int test_factor_base_size_limit_fails_closed() {
     return 0;
 }
 
+// The two index routes of a rank-zero or quadratic class/unit pair compare
+// the candidate with the same normalization as the value they test against.
+// The analytic route divides the candidate product h_cand R_cand
+// (OrderUnitGroup::class_regulator_product, without w) by the zeta value
+// res w sqrt|D| / (2^r1 (2 pi)^r2) = h R (class_regulator_product_from_
+// residue, src/zeta/zeta.cpp), so w enters only the analytic side, where
+// the class number formula puts it.  The exact imaginary-quadratic route
+// divides h_cand by h(D), the number of reduced primitive forms of the
+// fundamental discriminant D (FLINT qfb_reduced_forms counts primitive
+// forms only), which is the class number of the maximal order.  On proven
+// pairs with w = 4, w = 6, h = 3, a real quadratic and a mixed-signature
+// cubic field, the candidate product lies in the zeta value, both routes
+// give index one, and the zeta value matches an independent h R.
+int test_class_unit_index_routes_share_normalization() {
+    struct Case {
+        silex::NumberField field;
+        slong class_number;
+        slong torsion;
+        bool exact_quadratic;
+    };
+    std::vector<Case> cases;
+    cases.push_back({quadratic_field(-1), 1, 4, true});
+    cases.push_back({shifted_quadratic_field(-1, 1), 1, 6, true});
+    cases.push_back({shifted_quadratic_field(-1, 6), 3, 2, true});
+    cases.push_back({quadratic_field(10), 2, 2, false});
+    cases.push_back({cubic_field(0, -2), 1, 2, false});
+
+    const slong precision = 256;
+    for (Case& item : cases) {
+        silex::Order equation = silex::test::equation_order(item.field);
+        silex::Order order(item.field);
+        assert(order.maximal_order(equation));
+        sflint::Fmpz bound;
+        assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                   order));
+        if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+            sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+        }
+        silex::ClassGroupComputeOptions options;
+        options.max_candidates = 5000;
+        options.max_relations = 500;
+        options.requested_certification = silex::CertificationMode::proven;
+        silex::ClassGroupContext context;
+        silex::OrderUnitGroup units;
+        assert(units.compute_with_class_group(
+                context, order, sflint::FmpzConstRef(bound), options,
+                128));
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+        sflint::Fmpz value;
+        assert(context.order(sflint::FmpzRef(value)));
+        assert(sflint::fmpz_equal_si(value, item.class_number));
+        assert(units.torsion_order(sflint::FmpzRef(value)));
+        assert(sflint::fmpz_equal_si(value, item.torsion));
+
+        sflint::Arb candidate;
+        sflint::Arb analytic;
+        assert(units.class_regulator_product(sflint::ArbRef(candidate),
+                                             context, precision));
+        assert(silex::zeta_class_regulator_product(
+                sflint::ArbRef(analytic), order, precision));
+        assert(::arb_overlaps(candidate.raw(), analytic.raw()) != 0);
+
+        // Independent h R: h times log of a fundamental unit, 3 + sqrt(10)
+        // for Q(sqrt(10)) and 1 + 2^(1/3) + 2^(2/3) for Q(2^(1/3)); R = 1
+        // for the imaginary quadratic fields.
+        sflint::Arb reference;
+        if (item.exact_quadratic) {
+            ::arb_set_si(reference.raw(), item.class_number);
+        } else if (order.degree() == 2) {
+            ::arb_sqrt_ui(reference.raw(), 10, precision);
+            ::arb_add_ui(reference.raw(), reference.raw(), 3, precision);
+            ::arb_log(reference.raw(), reference.raw(), precision);
+            ::arb_mul_si(reference.raw(), reference.raw(),
+                         item.class_number, precision);
+        } else {
+            sflint::Arb cube_root;
+            ::arb_set_ui(cube_root.raw(), 2);
+            ::arb_root_ui(cube_root.raw(), cube_root.raw(), 3, precision);
+            ::arb_mul(reference.raw(), cube_root.raw(), cube_root.raw(),
+                      precision);
+            ::arb_add(reference.raw(), reference.raw(), cube_root.raw(),
+                      precision);
+            ::arb_add_ui(reference.raw(), reference.raw(), 1, precision);
+            ::arb_log(reference.raw(), reference.raw(), precision);
+            ::arb_mul_si(reference.raw(), reference.raw(),
+                         item.class_number, precision);
+        }
+        assert(::arb_overlaps(analytic.raw(), reference.raw()) != 0);
+
+        sflint::Fmpz index;
+        assert(set_fmpz_si(index, 42));
+        assert(units.class_regulator_index_bound(
+                sflint::FmpzRef(index), context,
+                sflint::ArbConstRef(analytic), precision));
+        assert(sflint::fmpz_is_one(sflint::FmpzConstRef(index)));
+
+        if (item.exact_quadratic) {
+            assert(set_fmpz_si(index, 42));
+            assert(CertificationAccess::rank_zero_quadratic_class_index_bound(
+                    sflint::FmpzRef(index), context, units,
+                    silex::CertificationMode::proven));
+            assert(sflint::fmpz_is_one(sflint::FmpzConstRef(index)));
+            assert(context.certification_status() ==
+                   silex::CertificationMode::proven);
+        }
+    }
+    return 0;
+}
+
+// The exact imaginary-quadratic route has no clamp of its own: an h_cand
+// below h is not divisible by h, so the route returns false and publishes
+// nothing, and the analytic route fails closed on the same candidate
+// (quotient h_cand / h = 1/2 < 1).  Q(sqrt(-14)) has h = 4.  The base up to
+// 2 holds only the ramified prime above 2, of order 2 in the class group,
+// and the relation (2) = p^2 gives h_cand = 2.  The GRH generation record
+// for that base is written directly and is false: it stands for a wrong
+// generation assumption, the case in which h_cand < h can occur.  A grh
+// validation run then ends without accepting the pair.
+int test_exact_quadratic_index_below_one_fails_closed() {
+    silex::NumberField field = quadratic_field(-14);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(order));
+    assert(units.certification_status() == silex::CertificationMode::proven);
+
+    auto prepare = [&](silex::ClassGroupContext& context) noexcept {
+        sflint::Fmpz bound;
+        assert(set_fmpz_si(bound, 2));
+        context = silex::ClassGroupContext(order);
+        assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+        const silex::FactorBase* base = context.factor_base();
+        assert(base != nullptr);
+        silex::Relation relation(*base);
+        silex::Element two(field);
+        assert(two.set_si(2));
+        assert(relation.set_generator(two));
+        assert(context.append_relation(relation));
+        assert(context.publish_presentation());
+        sflint::Fmpz class_order;
+        assert(context.order(sflint::FmpzRef(class_order)));
+        assert(sflint::fmpz_equal_si(class_order, 2));
+        assert(CertificationAccess::record_grh_factor_base_generation(
+                context, sflint::FmpzConstRef(bound),
+                silex::ClassGroupGenerationBasis::bach));
+        assert(CertificationAccess::grh_factor_base_generation_covered(
+                context));
+    };
+
+    // Exact route: no index, nothing published.
+    {
+        silex::ClassGroupContext context;
+        prepare(context);
+        sflint::Fmpz index;
+        assert(set_fmpz_si(index, 42));
+        assert(!CertificationAccess::rank_zero_quadratic_class_index_bound(
+                sflint::FmpzRef(index), context, units,
+                silex::CertificationMode::grh));
+        assert(sflint::fmpz_equal_si(index, 42));
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(context.class_unit_completeness_certification() ==
+               silex::CertificationMode::unknown);
+
+        // Analytic route on the same candidate: the zeta value is h = 4.
+        sflint::Arb analytic;
+        assert(silex::zeta_class_regulator_product(sflint::ArbRef(analytic),
+                                                   order, 128));
+        assert(::arb_contains_si(analytic.raw(), 4) != 0);
+        assert(!units.class_regulator_index_bound(
+                sflint::FmpzRef(index), context,
+                sflint::ArbConstRef(analytic), 128));
+        assert(sflint::fmpz_equal_si(index, 42));
+    }
+
+    // grh validation loop: neither route accepts the pair.
+    {
+        silex::ClassGroupContext context;
+        prepare(context);
+        silex::OrderUnitGroup loop_units;
+        assert(loop_units.compute(order));
+        silex::OrderUnitGroup scratch(order);
+        silex::EmbeddingContext embeddings(field);
+        silex::ClassGroupComputeOptions options;
+        options.requested_certification = silex::CertificationMode::grh;
+        options.max_relations = 64;
+        silex::detail::AnalyticClassRegulatorCache analytic_cache;
+        silex::detail::ValidateRefineSummary summary;
+        assert(!silex::detail::try_validate_refine_loop(
+                context, loop_units, scratch, order, options, embeddings,
+                analytic_cache, summary, 128, false));
+        assert(summary.outcome ==
+               silex::detail::ValidateRefineOutcome::analytic_unavailable);
+        assert(context.certification_status() ==
+               silex::CertificationMode::unknown);
+        assert(context.class_unit_completeness_certification() ==
+               silex::CertificationMode::unknown);
+        sflint::Fmpz class_order;
+        assert(context.order(sflint::FmpzRef(class_order)));
+        assert(sflint::fmpz_equal_si(class_order, 2));
+    }
+    return 0;
+}
+
+// End to end through the validation loop (try_validate_refine_loop): the
+// exact imaginary-quadratic index is an unconditional saturation bound only
+// when factor-base generation is checked to the required bound.  On the
+// Q(sqrt(-23)) candidate with h_cand = 6, h = 3, a grh run assumes
+// generation under GRH, takes the exact index 2, clears ell = 2 and then
+// accepts index one; relation saturation ends `unavailable`, below
+// `verified`.  The same candidate under a proven request checks generation
+// first and ends `verified` and `proven`.  The grh generation record that
+// the grh base build writes is written directly here for the hand-built
+// base; primes of norm at most 3 do generate this class group (Minkowski
+// bound (2 / pi) sqrt(23) < 3.1).
+int test_validation_loop_exact_index_status_follows_request() {
+    silex::NumberField field = shifted_quadratic_field(-1, 6);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    for (const silex::CertificationMode requested :
+         {silex::CertificationMode::grh, silex::CertificationMode::proven}) {
+        const bool grh = requested == silex::CertificationMode::grh;
+        silex::ClassGroupContext context;
+        prepare_minus_23_index_two_candidate(context, order);
+        if (grh) {
+            sflint::Fmpz grh_bound;
+            assert(set_fmpz_si(grh_bound, 3));
+            assert(CertificationAccess::record_grh_factor_base_generation(
+                    context, sflint::FmpzConstRef(grh_bound),
+                    silex::ClassGroupGenerationBasis::bach));
+        }
+        assert(context.factor_base_generation_checked_status() ==
+               silex::ProofState::not_checked);
+
+        silex::OrderUnitGroup units;
+        assert(units.compute(order));
+        silex::OrderUnitGroup scratch(order);
+        silex::EmbeddingContext embeddings(field);
+        silex::ClassGroupComputeOptions options;
+        options.requested_certification = requested;
+        options.max_relations = 64;
+        silex::detail::AnalyticClassRegulatorCache analytic_cache;
+        silex::detail::ValidateRefineSummary summary;
+        assert(silex::detail::try_validate_refine_loop(
+                context, units, scratch, order, options, embeddings,
+                analytic_cache, summary, 128, false));
+        assert(summary.outcome == silex::detail::ValidateRefineOutcome::proven);
+        assert(summary.class_progress);
+        sflint::Fmpz class_order;
+        assert(context.order(sflint::FmpzRef(class_order)));
+        assert(sflint::fmpz_equal_si(class_order, 3));
+
+        if (grh) {
+            // The caller publishes the grh labels; the saturation status
+            // stays below `verified`.
+            assert(context.certification_status() ==
+                   silex::CertificationMode::unknown);
+            assert(CertificationAccess::publish_grh_labels(context, units,
+                                                           nullptr));
+            assert(context.certification_status() ==
+                   silex::CertificationMode::grh);
+            assert(context.relation_saturation_status() ==
+                   silex::ProofState::unavailable);
+            assert(context.class_unit_completeness_certification() ==
+                   silex::CertificationMode::proven);
+            assert(context.class_unit_completeness_basis() ==
+                   silex::ClassUnitCompletenessBasis::exact_class_number);
+        } else {
+            assert(context.certification_status() ==
+                   silex::CertificationMode::proven);
+            assert(context.relation_saturation_status() ==
+                   silex::ProofState::verified);
+            assert(units.certification_status() ==
+                   silex::CertificationMode::proven);
+        }
+    }
+    return 0;
+}
+
+// Asserts that two class/unit results report the same certification and
+// provenance.
+void assert_same_class_unit_provenance(const silex::ClassGroupContext& left,
+                                       const silex::OrderUnitGroup& left_units,
+                                       const silex::ClassGroupContext& right,
+                                       const silex::OrderUnitGroup& right_units)
+        noexcept {
+    assert(left.certification_status() == right.certification_status());
+    assert(left_units.certification_status() ==
+           right_units.certification_status());
+    assert(left.factor_base_generation_certification() ==
+           right.factor_base_generation_certification());
+    assert(left.factor_base_generation_basis() ==
+           right.factor_base_generation_basis());
+    sflint::Fmpz left_bound;
+    sflint::Fmpz right_bound;
+    const bool left_has_bound =
+            left.factor_base_generation_certification_bound(
+                    sflint::FmpzRef(left_bound));
+    const bool right_has_bound =
+            right.factor_base_generation_certification_bound(
+                    sflint::FmpzRef(right_bound));
+    assert(left_has_bound == right_has_bound);
+    assert(!left_has_bound ||
+           sflint::fmpz_equal(sflint::FmpzConstRef(left_bound),
+                              sflint::FmpzConstRef(right_bound)));
+    assert(left.factor_base_generation_checked_status() ==
+           right.factor_base_generation_checked_status());
+    assert(left.class_unit_completeness_certification() ==
+           right.class_unit_completeness_certification());
+    assert(left.class_unit_completeness_basis() ==
+           right.class_unit_completeness_basis());
+    assert(left.analytic_class_regulator_status() ==
+           right.analytic_class_regulator_status());
+    assert(left.analytic_class_regulator_certification() ==
+           right.analytic_class_regulator_certification());
+    assert(left.zeta_bf_proof_status() == right.zeta_bf_proof_status());
+    assert(left.relation_saturation_status() ==
+           right.relation_saturation_status());
+    assert(left.unit_proof_status() == right.unit_proof_status());
+    assert(left.regulator_proof_status() == right.regulator_proof_status());
+}
+
+// Reusing a context does not carry provenance from one result to the next.
+// Q(sqrt(10)), h = 2.  The same context and unit group run grh, then
+// proven, then grh again, and each result reports what a fresh run with that
+// request reports.  A relation appended after a grh acceptance clears the
+// labels and the completeness record.  A failed certification attempt
+// inside a transaction (an index test against a wrong hR, which runs the
+// generation check and sets the unit proof states before it fails) leaves
+// every field as it was.
+int test_class_unit_provenance_after_context_reuse() {
+    silex::NumberField field = quadratic_field(10);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                               order));
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+
+    auto run = [&](silex::ClassGroupContext& context,
+                   silex::OrderUnitGroup& units,
+                   silex::CertificationMode requested) noexcept {
+        options.requested_certification = requested;
+        assert(units.compute_with_class_group(
+                context, order, sflint::FmpzConstRef(bound), options, 128));
+        assert(context.certification_status() == requested);
+    };
+
+    silex::ClassGroupContext fresh_grh;
+    silex::OrderUnitGroup fresh_grh_units;
+    run(fresh_grh, fresh_grh_units, silex::CertificationMode::grh);
+    assert(fresh_grh.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    assert(fresh_grh.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::belabas_friedman);
+    silex::ClassGroupContext fresh_proven;
+    silex::OrderUnitGroup fresh_proven_units;
+    run(fresh_proven, fresh_proven_units, silex::CertificationMode::proven);
+    assert(fresh_proven.class_unit_completeness_certification() ==
+           silex::CertificationMode::proven);
+
+    silex::ClassGroupContext reused;
+    silex::OrderUnitGroup reused_units;
+    run(reused, reused_units, silex::CertificationMode::grh);
+    assert_same_class_unit_provenance(reused, reused_units, fresh_grh,
+                                      fresh_grh_units);
+    run(reused, reused_units, silex::CertificationMode::proven);
+    assert_same_class_unit_provenance(reused, reused_units, fresh_proven,
+                                      fresh_proven_units);
+    run(reused, reused_units, silex::CertificationMode::grh);
+    assert_same_class_unit_provenance(reused, reused_units, fresh_grh,
+                                      fresh_grh_units);
+
+    // A failed transaction restores every field, including the completeness
+    // record.  The index test against twice the true hR fails (quotient
+    // 1/2) after it has checked generation and set the unit proof states.
+    assert(reused.factor_base_generation_status() ==
+           silex::ProofState::verified);
+    {
+        sflint::Arb wrong_hR;
+        assert(silex::zeta_class_regulator_product(sflint::ArbRef(wrong_hR),
+                                                   order, 128));
+        ::arb_mul_2exp_si(wrong_hR.raw(), wrong_hR.raw(), 1);
+        sflint::Fmpz aux_bound;
+        assert(set_fmpz_si(aux_bound, 31));
+        assert(!CertificationAccess::try_analytic_index_bound_with_units(
+                reused, fresh_proven_units, sflint::ArbConstRef(wrong_hR),
+                sflint::FmpzConstRef(aux_bound), 128, true));
+    }
+    assert_same_class_unit_provenance(reused, reused_units, fresh_grh,
+                                      fresh_grh_units);
+
+    // A relation appended after the grh acceptance: the presentation is
+    // republished with no label and no completeness record.  (2) is the
+    // square of the ramified prime above 2.
+    {
+        const silex::FactorBase* base = reused.factor_base();
+        assert(base != nullptr);
+        silex::Relation relation(*base);
+        silex::Element two(field);
+        assert(two.set_si(2));
+        assert(relation.set_generator(two));
+        assert(reused.append_relation(relation));
+        assert(reused.publish_presentation());
+    }
+    assert(reused.certification_status() ==
+           silex::CertificationMode::unknown);
+    assert(reused.class_unit_completeness_certification() ==
+           silex::CertificationMode::unknown);
+    assert(reused.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::none);
+    assert(reused.analytic_class_regulator_status() ==
+           silex::ProofState::not_checked);
+    assert(reused.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+    return 0;
+}
+
+// A real-quadratic pair accepted against a GRH-conditional hR records
+// completeness `grh` with basis `belabas_friedman` although the order has
+// the unconditional L(1, chi) route: the record follows the route that
+// produced the value.  The value is seeded into the validation cache, as
+// when the L(1, chi) evaluation fails and the zeta route falls back to
+// Belabas-Friedman (a seeded value is never unconditional).  Q(sqrt(10)),
+// h = 2.
+int test_real_quadratic_conditional_hr_records_belabas_friedman() {
+    silex::NumberField field = quadratic_field(10);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(silex::detail::zeta_unconditional_route_available(order));
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                               order));
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+
+    // An unlabelled candidate with generation checked to the required
+    // bound, and proven units.
+    silex::ClassGroupContext context;
+    silex::ClassGroupCandidateOptions candidate_options;
+    candidate_options.max_candidates = 5000;
+    candidate_options.max_relations = 500;
+    assert(context.compute_candidate(order, sflint::FmpzConstRef(bound),
+                                     candidate_options));
+    sflint::Fmpz class_order;
+    assert(context.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
+    sflint::Fmpz required_bound;
+    assert(context.factor_base_generation_bound(
+            sflint::FmpzRef(required_bound)));
+    assert(context.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(required_bound)));
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(order));
+    silex::OrderUnitGroup scratch(order);
+    silex::EmbeddingContext embeddings(field);
+    options.requested_certification = silex::CertificationMode::grh;
+    options.max_relations = 500;
+    silex::detail::AnalyticClassRegulatorCache analytic_cache;
+    sflint::Arb seeded;
+    assert(silex::zeta_class_regulator_product(sflint::ArbRef(seeded), order,
+                                               128));
+    analytic_cache.seed(order, sflint::ArbConstRef(seeded), 128);
+    assert(!analytic_cache.value_unconditional());
+    silex::detail::ValidateRefineSummary summary;
+    assert(silex::detail::try_validate_refine_loop(
+            context, units, scratch, order, options, embeddings,
+            analytic_cache, summary, 128, false));
+    assert(summary.outcome == silex::detail::ValidateRefineOutcome::proven);
+    assert(context.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    assert(context.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::belabas_friedman);
+    assert(context.analytic_class_regulator_certification() ==
+           silex::CertificationMode::grh);
+    assert(CertificationAccess::publish_grh_labels(context, units, nullptr));
+    assert(context.certification_status() == silex::CertificationMode::grh);
+    assert(context.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    return 0;
+}
+
 int main() {
     test_certification_metadata_defaults_and_invalidation();
     test_factor_base_generation_metadata();
@@ -4606,5 +5102,10 @@ int main() {
     test_grh_generation_bound_bach_fallback();
     test_twin_class_generation_routes();
     test_factor_base_size_limit_fails_closed();
+    test_class_unit_index_routes_share_normalization();
+    test_exact_quadratic_index_below_one_fails_closed();
+    test_validation_loop_exact_index_status_follows_request();
+    test_class_unit_provenance_after_context_reuse();
+    test_real_quadratic_conditional_hr_records_belabas_friedman();
     return 0;
 }
