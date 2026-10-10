@@ -582,6 +582,50 @@ int test_finish_workspace_requires_factor_base() {
     return 0;
 }
 
+// Local saturation compares the kernel relation's factor base with the
+// context base once per residue-dlog kernel; a mismatch, an undefined relation,
+// or a context without a factor base must still be rejected, and filling the
+// relation from a candidate on the context base must keep it matched.
+int test_saturation_kernel_relation_base_check() {
+    silex::NumberField field;
+    silex::Order order;
+    silex::ClassGroupContext context = relation_context(field, order);
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+
+    silex::Relation relation(*base);
+    assert(silex::detail::saturation_kernel_relation_base_matches(
+            relation, context));
+    silex::Relation candidate(*base);
+    silex::Element generator(field);
+    assert(generator.set_si(6));
+    assert(candidate.set_generator(generator));
+    assert(relation.set(candidate));
+    assert(silex::detail::saturation_kernel_relation_base_matches(
+            relation, context));
+
+    silex::ClassGroupContext larger(order);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 5);
+    assert(larger.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(larger.factor_base()->length() == 3);
+    silex::Relation mismatched(*larger.factor_base());
+    assert(mismatched.is_defined());
+    assert(!silex::detail::saturation_kernel_relation_base_matches(
+            mismatched, context));
+    assert(!silex::detail::saturation_kernel_relation_base_matches(
+            relation, larger));
+
+    silex::Relation undefined;
+    assert(!silex::detail::saturation_kernel_relation_base_matches(
+            undefined, context));
+
+    silex::ClassGroupContext no_base(order);
+    assert(!silex::detail::saturation_kernel_relation_base_matches(
+            relation, no_base));
+    return 0;
+}
+
 int test_default_completion_populates_finish_workspace() {
     silex::NumberField field = cubic_discriminant_81_field();
     const silex::Order equation_order =
@@ -645,6 +689,7 @@ int main() {
     assert(test_rank_deficient_failure_is_transactional() == 0);
     assert(test_incremental_finish_workspace_lifecycle() == 0);
     assert(test_finish_workspace_requires_factor_base() == 0);
+    assert(test_saturation_kernel_relation_base_check() == 0);
     assert(test_default_completion_populates_finish_workspace() == 0);
     assert(test_corrupted_known_row_rejected() == 0);
     assert(test_extra_prime_outside_factor_base_rejected() == 0);

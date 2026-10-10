@@ -317,4 +317,11 @@ bool class_relation_witnessed_hnf_basis(
         WitnessedClassRelationHnfBasis& out,
         const ClassGroupContext& context) noexcept;
 
+// Whether `relation` is defined over a factor base equal to the context's.
+// Local saturation evaluates this once per residue-dlog kernel and fails every
+// nondivisible kernel row when it is false.
+bool saturation_kernel_relation_base_matches(
+        const Relation& relation,
+        const ClassGroupContext& context) noexcept;
+
 }  // namespace silex::detail

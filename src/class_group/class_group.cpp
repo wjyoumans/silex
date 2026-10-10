@@ -3020,16 +3020,21 @@ bool saturation_relation_product(FactoredElement& product,
     return true;
 }
 
+// `relation_base_verified` is the caller's once-per-kernel result of
+// detail::saturation_kernel_relation_base_matches(relation, context); the
+// relation's factor base cannot change across rows because Relation::set
+// copies from a candidate built on the context base.
 bool saturation_relation(Relation& relation,
                          bool& is_relation,
                          const ClassGroupContext& context,
                          flint::FmpzMatConstRef kernel,
                          slong row,
-                         flint::FmpzConstRef ell) noexcept {
+                         flint::FmpzConstRef ell,
+                         bool relation_base_verified) noexcept {
     const FactorBase* base = context.factor_base();
     const Order* order = context.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (!same_factor_base(relation.factor_base(), base) ||
+    if (!relation_base_verified || base == nullptr ||
         field == nullptr || !flint::fmpz_is_prime(ell) ||
         !flint::fmpz_fits_si(ell) ||
         flint::fmpz_mat_ncols(kernel) != context.relation_count()) {
@@ -3093,11 +3098,12 @@ bool saturation_relation_with_units(Relation& relation,
                                     slong row,
                                     const OrderUnitGroup& units,
                                     bool include_torsion,
-                                    flint::FmpzConstRef ell) noexcept {
+                                    flint::FmpzConstRef ell,
+                                    bool relation_base_verified) noexcept {
     const FactorBase* base = context.factor_base();
     const Order* order = context.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (!same_factor_base(relation.factor_base(), base) ||
+    if (!relation_base_verified || base == nullptr ||
         field == nullptr || !flint::fmpz_is_prime(ell) ||
         !flint::fmpz_fits_si(ell)) {
         return false;
@@ -10978,6 +10984,16 @@ bool ClassGroupContext::try_prove_class_order_saturation_with_units_(
     return transaction.finish(try_promote_proven_certification_());
 }
 
+namespace detail {
+
+bool saturation_kernel_relation_base_matches(
+        const Relation& relation,
+        const ClassGroupContext& context) noexcept {
+    return same_factor_base(relation.factor_base(), context.factor_base());
+}
+
+}  // namespace detail
+
 bool ClassGroupContext::relation_row_refines_(
         const Relation& relation) noexcept {
     if (!has_factor_base() || !same_factor_base(relation.factor_base(), &base_)) {
@@ -11034,18 +11050,24 @@ bool ClassGroupContext::saturate_local_once_(
         return false;
     }
 
+    // One relation buffer per kernel: its factor base is compared with the
+    // context base once here instead of once per kernel row.  A mismatch (or
+    // an undefined relation) still fails every nondivisible row.
+    Relation relation(*base);
+    const bool relation_base_verified =
+            relation.is_defined() &&
+            detail::saturation_kernel_relation_base_matches(relation, *this);
     for (slong i = 0; i < flint::fmpz_mat_nrows(kernel); ++i) {
         if (kernel_row_divisible(flint::FmpzMatConstRef(kernel), i, ell)) {
             continue;
         }
 
-        Relation relation(*base);
         bool is_relation = false;
         SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::class_group,
                             "class_group.saturation_relation_candidate");
-        if (!relation.is_defined() ||
-            !saturation_relation(relation, is_relation, *this,
-                                 flint::FmpzMatConstRef(kernel), i, ell)) {
+        if (!saturation_relation(relation, is_relation, *this,
+                                 flint::FmpzMatConstRef(kernel), i, ell,
+                                 relation_base_verified)) {
             saw_failure = true;
             continue;
         }
@@ -11373,6 +11395,9 @@ bool ClassGroupContext::saturate_local_once_with_units_(
     if (!relation.is_defined()) {
         return false;
     }
+    // Compared once per kernel; a mismatch still fails every nondivisible row.
+    const bool relation_base_verified =
+            detail::saturation_kernel_relation_base_matches(relation, *this);
     for (slong i = 0; i < flint::fmpz_mat_nrows(kernel); ++i) {
         if (kernel_row_divisible(flint::FmpzMatConstRef(kernel), i, ell)) {
             continue;
@@ -11398,7 +11423,7 @@ bool ClassGroupContext::saturate_local_once_with_units_(
                     relation, is_relation, *this,
                     flint::FmpzMatConstRef(relation_rows),
                     flint::FmpzMatConstRef(kernel), i, units,
-                    include_torsion, ell)) {
+                    include_torsion, ell, relation_base_verified)) {
             saw_failure = true;
             continue;
         }
