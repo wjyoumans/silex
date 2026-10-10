@@ -16,6 +16,7 @@
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/class_group_internal.hpp"
+#include "factored_element/wide_factored_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/relation_unit_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
@@ -8838,6 +8839,168 @@ int test_set_move_and_access_failures() {
     return 0;
 }
 
+// Wide-exponent unit-basis transform (T-157).  In the cyclic cubic
+// x^3 + x^2 - 2x - 1 let v1 = theta and v2 = theta^2 - 2 (conjugate units).
+// With w = v2, w2 = v2^2 (a distinct base) and K = 2k, k = 2^40, the stored
+// units u1 = v1 w^(-2k) and u2 = v1^-1 w2^k w under T = [[K+1, K], [1, 1]]
+// give u1^(K+1) u2^K = v1 w^(-4k^2) w2^(2k^2) = v1 and u1 u2 = v2, with
+// merged exponents of size 2^82 that overflow slong.
+struct WideTransformCase {
+    silex::NumberField field;
+    silex::Order order;
+    silex::Element v1;
+    silex::Element v2;
+    std::vector<silex::FactoredElement> units;
+    sflint::FmpzMat transform{2, 2};
+
+    explicit WideTransformCase(bool with_w2)
+        : field(make_wide_case_field()),
+          order(field),
+          v1(field),
+          v2(field) {
+        silex::Order equation = silex::test::equation_order(field);
+        assert(order.maximal_order(equation));
+        silex::Element theta(field);
+        silex::Element two(field);
+        silex::Element theta_squared(field);
+        assert(theta.gen());
+        assert(v1.set(theta));
+        assert(theta_squared.multiply(theta, theta));
+        assert(v2.add_si(theta_squared, -2));
+        silex::Element w2(field);
+        assert(w2.multiply(v2, v2));
+        const slong k = slong(1) << 40;
+        silex::FactoredElement u1(field);
+        silex::FactoredElement u2(field);
+        assert(u1.push(v1, 1));
+        assert(u1.push(v2, -2 * k));
+        assert(u2.push(v1, -1));
+        if (with_w2) {
+            assert(u2.push(w2, k));
+            assert(u2.push(v2, 1));
+        } else {
+            assert(u2.push(v2, 2 * k + 1));
+        }
+        units.push_back(std::move(u1));
+        units.push_back(std::move(u2));
+        const slong big = 2 * k;
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(transform, 0, 0), big + 1);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(transform, 0, 1), big);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(transform, 1, 0), 1);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(transform, 1, 1), 1);
+    }
+
+    static silex::NumberField make_wide_case_field() {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_zero(polynomial);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -2);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+        return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    }
+};
+
+bool factored_equals(const silex::FactoredElement& value,
+                     const silex::Element& expected) {
+    silex::Element evaluated(*value.parent());
+    return value.evaluate(evaluated) && evaluated.equal(expected);
+}
+
+int test_transform_factored_units_wide_exponents() {
+    WideTransformCase c(true);
+    silex::EmbeddingContext embeddings(c.field);
+
+    // The word-size transform overflows on these exponents and leaves the
+    // units unchanged.
+    std::vector<silex::FactoredElement> word_units;
+    for (const auto& unit : c.units) {
+        word_units.emplace_back(c.field);
+        assert(word_units.back().set(unit));
+    }
+    assert(!silex::detail::transform_factored_units(word_units, c.transform));
+
+    silex::detail::WideFactoredUnits wide;
+    bool has_wide = false;
+    assert(silex::detail::transform_factored_units_wide(
+            c.units, wide, has_wide, c.transform, c.order, embeddings,
+            nullptr));
+    assert(has_wide);
+    assert(silex::detail::wide_factored_units_exceed_slong(wide));
+    slong max_bits = 0;
+    for (slong i = 0; i < sflint::fmpz_mat_nrows(wide.exponents); ++i) {
+        for (slong j = 0; j < sflint::fmpz_mat_ncols(wide.exponents); ++j) {
+            max_bits = FLINT_MAX(
+                    max_bits,
+                    slong(::fmpz_bits(
+                            ::fmpz_mat_entry(wide.exponents.raw(), i, j))));
+        }
+    }
+    assert(max_bits == 83);  // 4k^2 = 2^82
+    assert(c.units.size() == 2);
+    assert(factored_equals(c.units[0], c.v1));
+    assert(factored_equals(c.units[1], c.v2));
+    return 0;
+}
+
+// With w only (no w2) the merged exponents fit in slong: the products
+// themselves are the units and nothing wide is stored.
+int test_transform_factored_units_wide_merge_fits() {
+    WideTransformCase c(false);
+    silex::EmbeddingContext embeddings(c.field);
+    silex::detail::WideFactoredUnits wide;
+    bool has_wide = true;
+    assert(silex::detail::transform_factored_units_wide(
+            c.units, wide, has_wide, c.transform, c.order, embeddings,
+            nullptr));
+    assert(!has_wide);
+    assert(c.units.size() == 2);
+    assert(factored_equals(c.units[0], c.v1));
+    assert(factored_equals(c.units[1], c.v2));
+    return 0;
+}
+
+int test_group_wide_free_generators() {
+    WideTransformCase c(true);
+    silex::EmbeddingContext embeddings(c.field);
+    silex::detail::WideFactoredUnits wide;
+    bool has_wide = false;
+    assert(silex::detail::transform_factored_units_wide(
+            c.units, wide, has_wide, c.transform, c.order, embeddings,
+            nullptr));
+    assert(has_wide);
+
+    silex::OrderUnitGroup group;
+    assert(silex::detail::OrderUnitGroupAccess::set_units_with_wide_form(
+            group, c.order,
+            silex::FactoredElementSpan(c.units.data(), 2), wide, embeddings,
+            256));
+    assert(group.is_set());
+    assert(group.free_rank() == 2);
+    const silex::detail::WideFactoredUnits* stored =
+            silex::detail::OrderUnitGroupAccess::wide_free_generators(group);
+    assert(stored != nullptr);
+    assert(silex::detail::wide_factored_units_exceed_slong(*stored));
+
+    // A copy keeps the wide form.
+    silex::OrderUnitGroup copy;
+    assert(copy.set(group));
+    assert(silex::detail::OrderUnitGroupAccess::wide_free_generators(copy) !=
+           nullptr);
+
+    for (slong i = 0; i < 2; ++i) {
+        silex::FactoredElement generator(c.field);
+        assert(group.free_generator(generator, i));
+        assert(generator.length() == 1);
+        slong exponent = 0;
+        assert(generator.exponent(exponent, 0));
+        assert(exponent == 1);
+        assert(factored_equals(generator, i == 0 ? c.v1 : c.v2));
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -8945,5 +9108,8 @@ int main() {
     test_positive_rank_failure_preserves_output();
     test_group_keeps_parent_order_alive();
     test_set_move_and_access_failures();
+    test_transform_factored_units_wide_exponents();
+    test_transform_factored_units_wide_merge_fits();
+    test_group_wide_free_generators();
     return 0;
 }
