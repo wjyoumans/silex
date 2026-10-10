@@ -574,6 +574,38 @@ bool set_class_relation_units(bool& ready,
                                     slong outer_add,
                                     ulong validation_bf_max_cutoff,
                                     bool accept_grh_generation) noexcept;
+// Replacement for the a priori denominator bound of add_dependent_unit
+// (OrderUnitGroup::regulator_index_bound) when that bound does not fit in
+// slong, the width the rational-reconstruction search takes.  Only a grh
+// request supplies one.  The value is the class/unit index bound
+// hR_cand / hR from class_unit_index_bound_for_improvement, which bounds
+// the unit index [U:G] under GRH once the factor base generates the class
+// group (see "Class groups and order units" in
+// docs/reference/algorithms_and_sources.rst).  With the context pointers
+// set, add_dependent_unit computes it for the current group on the first
+// overflow and again after each adjoined unit; without them it uses
+// `bound` as given when `usable` is set.  Every relation it finds is still
+// checked exactly, so a bound that is too small only misses relations.
+struct DependentUnitIndexFallback {
+    const ClassGroupContext* class_group = nullptr;
+    AnalyticClassRegulatorCache* analytic_cache = nullptr;
+    const Order* order = nullptr;
+    slong precision = 0;
+    flint::Fmpz bound;
+    bool computed = false;
+    bool usable = false;
+};
+
+// add_dependent_unit, with `fallback` (nullable) replacing an a priori
+// denominator bound that does not fit in slong.
+bool add_dependent_unit(bool& changed,
+                        OrderUnitGroup& group,
+                        const FactoredElement& candidate,
+                        EmbeddingContext& embeddings,
+                        RelationUnitExtractionState& extraction_state,
+                        slong precision,
+                        DependentUnitIndexFallback* fallback) noexcept;
+
 bool recompute_units_from_class_context(OrderUnitGroup& units,
                                         const Order& order,
                                         const ClassGroupContext& class_group,

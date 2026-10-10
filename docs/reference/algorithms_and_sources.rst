@@ -604,6 +604,22 @@ below ``1/B^2``, while every other fraction ``p/q`` with ``q <= b`` lies at
 distance at least ``1/(qb) >= 1/B^2`` from ``a/b``, so the simplest rational
 in the ball is ``a/b``.
 
+Hecke's ``B`` is the a priori bound ``R_G / R_low``, with ``R_G`` the
+regulator of ``G`` and ``R_low`` the unconditional lower regulator bound,
+and it may have any size.  Silex's search takes a word-size ``B``, so when
+the a priori bound does not fit in ``slong`` the attempt leaves the group
+unchanged, except in a ``grh`` class/unit request.  There, while the class
+group relations improve the units, the bound is replaced by the class/unit
+index bound ``ceil(h_cand R_G / hR)`` that validation uses, with ``hR`` the
+GRH-conditional Belabas-Friedman value, provided the factor base generates
+the class group unconditionally or under GRH and the replacement fits in
+``slong``.  Under GRH ``h`` divides ``h_cand``, so ``[U:G] = R_G / R`` is at
+most ``h_cand R_G / hR`` and the closed range above still holds.  The bound
+is recomputed for the current group after each adjoined unit.  It is a
+Silex choice, not Hecke's; candidate relations are still verified exactly,
+so a bound that is too small only misses relations.  ``proven`` requests and
+the other callers keep the a priori bound.
+
 The unit-basis transform that follows a reduction applies the integer matrix
 to the stored factored units.  Hecke keeps factored elements as ``FacElem``
 dictionaries with ``ZZRingElem`` exponents (``FactoredElem.jl:_transform``,

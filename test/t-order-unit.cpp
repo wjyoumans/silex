@@ -3552,6 +3552,98 @@ int test_add_dependent_unit_large_denominator() {
     return 0;
 }
 
+int test_add_dependent_unit_overflowing_index_bound_fallback() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+
+    // <epsilon^N> has index N above 2^62 in the unit group mod torsion,
+    // and its a priori regulator index bound does not fit in slong.
+    constexpr slong kIndex = (WORD(1) << 62) + (WORD(1) << 61) + 135;
+    silex::FactoredElement generator(field);
+    assert(generator.push(epsilon, kIndex));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    silex::OrderUnitGroup group(order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            group, order, silex::FactoredElementSpan(generators, 1),
+            embeddings, 128, true));
+    sflint::Fmpz index_bound;
+    assert(group.regulator_index_bound(sflint::FmpzRef(index_bound), 128));
+    assert(::fmpz_fits_si(index_bound.raw()) == 0);
+
+    silex::FactoredElement candidate(field);
+    assert(candidate.set_element(epsilon));
+    sflint::Arb starting_regulator;
+    assert(group.regulator(sflint::ArbRef(starting_regulator)));
+
+    // Without a fallback the search does not run and the group is kept.
+    silex::detail::RelationUnitExtractionState state;
+    bool changed = true;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128));
+    assert(!changed);
+    changed = true;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128,
+                                             nullptr));
+    assert(!changed);
+
+    // A fallback below the true index only misses the relation.
+    silex::detail::DependentUnitIndexFallback small;
+    ::fmpz_set_si(small.bound.raw(), kIndex / 2);
+    small.computed = true;
+    small.usable = true;
+    changed = true;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128,
+                                             &small));
+    assert(!changed);
+    sflint::Arb regulator;
+    assert(group.regulator(sflint::ArbRef(regulator)));
+    assert(::arb_equal(regulator.raw(), starting_regulator.raw()) != 0);
+
+    // An unusable fallback is ignored.
+    silex::detail::DependentUnitIndexFallback unusable;
+    ::fmpz_set_si(unusable.bound.raw(), kIndex);
+    unusable.computed = true;
+    changed = true;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128,
+                                             &unusable));
+    assert(!changed);
+
+    // A word-size fallback at least the index replaces the overflowing
+    // bound, and adjoining epsilon recovers the full unit group.
+    silex::detail::DependentUnitIndexFallback fallback;
+    ::fmpz_set_si(fallback.bound.raw(), kIndex);
+    fallback.computed = true;
+    fallback.usable = true;
+    changed = false;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128,
+                                             &fallback));
+    assert(changed);
+    assert(group.free_rank() == 1);
+
+    silex::OrderUnitGroup expected(order);
+    silex::FactoredElement fundamental(field);
+    assert(fundamental.set_element(epsilon));
+    silex::FactoredElement fundamental_generators[] = {
+            std::move(fundamental)};
+    assert(expected.set_units(
+            order, silex::FactoredElementSpan(fundamental_generators, 1),
+            embeddings, 128));
+    sflint::Arb expected_regulator;
+    assert(group.regulator(sflint::ArbRef(regulator)));
+    assert(expected.regulator(sflint::ArbRef(expected_regulator)));
+    assert(::arb_overlaps(regulator.raw(), expected_regulator.raw()) != 0);
+    return 0;
+}
+
 int test_dependent_relation_wrong_simplest_rational_rejected() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order;
@@ -9364,6 +9456,7 @@ int main() {
     test_dependent_relation_min_denominator_scan();
     test_rank_zero_torsion_generators();
     test_add_dependent_unit_large_denominator();
+    test_add_dependent_unit_overflowing_index_bound_fallback();
     test_dependent_relation_wrong_simplest_rational_rejected();
     test_dependent_relation_y_root_uses_torsion_check();
     test_add_dependent_unit_precision_cap();

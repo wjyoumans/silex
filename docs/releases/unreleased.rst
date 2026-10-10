@@ -451,6 +451,18 @@ Changed
 Fixed
 -----
 
+- A ``grh`` class/unit computation now improves its candidate units when the
+  a priori unit index bound ``R / R_low`` does not fit in a machine word, as
+  for ``Q(zeta_41)`` (degree 40).  Such a computation previously never
+  adjoined a dependent unit and kept extending relations; the grh run of
+  ``Q(zeta_41)`` did not finish and now succeeds with class group
+  ``[11, 11]`` and unit rank 19, agreeing with PARI.  The search then uses
+  the GRH-conditional class/unit index bound that validation computes.
+  ``proven`` requests, and ``grh`` computations whose a priori bound fits,
+  are unchanged.  See
+  "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The unit computation no longer fails with a class-unit computation error
   when the unit-basis transform needs exponents that do not fit in a machine
   word, as in the grh run of the real cyclotomic field of conductor 136

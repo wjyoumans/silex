@@ -2333,12 +2333,77 @@ bool search_dependent_relation(
     }
 }
 
+bool class_unit_index_bound_for_improvement(
+        flint::Fmpz& out,
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong precision,
+        bool accept_grh_generation) noexcept;
+
+namespace {
+
+// The fallback denominator bound of add_dependent_unit (see
+// DependentUnitIndexFallback).  It is used only when it fits in slong and
+// exceeds one, and, when computed here, only when the factor base generates
+// the class group unconditionally or under the GRH record of this grh
+// request, the case in which hR_cand / hR bounds the unit index.
+bool dependent_unit_fallback_bound(flint::Fmpz& out,
+                                   const OrderUnitGroup& group,
+                                   DependentUnitIndexFallback* fallback) noexcept {
+    if (fallback == nullptr) {
+        return false;
+    }
+    if (!fallback->computed && fallback->class_group != nullptr &&
+        fallback->analytic_cache != nullptr && fallback->order != nullptr) {
+        fallback->computed = true;
+        const ClassGroupContext& class_group = *fallback->class_group;
+        const bool generation =
+                (class_group.factor_base_generation_status() ==
+                         ProofState::verified &&
+                 class_group.factor_base_generation_checked_status() ==
+                         ProofState::verified) ||
+                ClassGroupCertificationAccess::
+                        grh_factor_base_generation_covered(class_group);
+        fallback->usable =
+                generation &&
+                class_unit_index_bound_for_improvement(
+                        fallback->bound, group, class_group,
+                        *fallback->analytic_cache, *fallback->order,
+                        fallback->precision, true);
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.dependent_unit_grh_index_bound");
+    }
+    if (!fallback->computed || !fallback->usable ||
+        flint::fmpz_cmp_ui(flint::FmpzConstRef(fallback->bound), 1) <= 0 ||
+        !flint::fmpz_fits_si(flint::FmpzConstRef(fallback->bound))) {
+        return false;
+    }
+    flint::fmpz_set(flint::FmpzRef(out),
+                    flint::FmpzConstRef(fallback->bound));
+    return true;
+}
+
+}  // namespace
+
 bool add_dependent_unit(bool& changed,
                               OrderUnitGroup& group,
                               const FactoredElement& candidate,
                               EmbeddingContext& embeddings,
                               RelationUnitExtractionState& extraction_state,
                               slong precision) noexcept {
+    return add_dependent_unit(changed, group, candidate, embeddings,
+                              extraction_state, precision, nullptr);
+}
+
+bool add_dependent_unit(bool& changed,
+                        OrderUnitGroup& group,
+                        const FactoredElement& candidate,
+                        EmbeddingContext& embeddings,
+                        RelationUnitExtractionState& extraction_state,
+                        slong precision,
+                        DependentUnitIndexFallback* fallback) noexcept {
     changed = false;
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
@@ -2351,11 +2416,18 @@ bool add_dependent_unit(bool& changed,
         return false;
     }
 
+    // reference `_add_dependent_unit!` takes the a priori bound of any
+    // size; the Silex search takes a word-size bound, so a bound that does
+    // not fit leaves the group unchanged unless a grh request supplied the
+    // analytic fallback.
     flint::Fmpz denominator_bound;
     if (!group.regulator_index_bound(flint::FmpzRef(denominator_bound),
                                      precision) ||
-        flint::fmpz_cmp_ui(flint::FmpzConstRef(denominator_bound), 1) <= 0 ||
-        !flint::fmpz_fits_si(flint::FmpzConstRef(denominator_bound))) {
+        flint::fmpz_cmp_ui(flint::FmpzConstRef(denominator_bound), 1) <= 0) {
+        return true;
+    }
+    if (!flint::fmpz_fits_si(flint::FmpzConstRef(denominator_bound)) &&
+        !dependent_unit_fallback_bound(denominator_bound, group, fallback)) {
         return true;
     }
 
@@ -2388,6 +2460,10 @@ bool add_dependent_unit(bool& changed,
     }
     if (changed) {
         group.swap(refined);
+        if (fallback != nullptr && fallback->class_group != nullptr) {
+            // The larger group has a smaller index; recompute on demand.
+            fallback->computed = false;
+        }
         bool stored_units_reduced = false;
         if (!reduce_stored_relation_units(stored_units_reduced, group,
                                        embeddings, relation_precision)) {
@@ -2731,6 +2807,15 @@ bool improve_full_rank_class_relation_units(
         return false;
     }
 
+    // Only a grh request replaces an overflowing a priori bound.
+    DependentUnitIndexFallback grh_fallback_state;
+    grh_fallback_state.class_group = &class_group;
+    grh_fallback_state.analytic_cache = &analytic_cache;
+    grh_fallback_state.order = &order;
+    grh_fallback_state.precision = precision;
+    DependentUnitIndexFallback* const grh_fallback =
+            accept_grh_generation ? &grh_fallback_state : nullptr;
+
     RelationUnitCandidateBatchState& batch_state =
             extraction_state.unit_candidate_batch;
     slong add = outer_add + 2;
@@ -2794,8 +2879,8 @@ bool improve_full_rank_class_relation_units(
 
             bool changed = false;
             if (!add_dependent_unit(changed, out, candidate,
-                                          embeddings, extraction_state,
-                                          precision)) {
+                                    embeddings, extraction_state, precision,
+                                    grh_fallback)) {
                 return false;
             }
             if (changed) {
@@ -2894,6 +2979,15 @@ bool set_class_relation_units(bool& ready,
         return true;
     }
 
+    // Only a grh request replaces an overflowing a priori bound.
+    DependentUnitIndexFallback grh_fallback_state;
+    grh_fallback_state.class_group = &class_group;
+    grh_fallback_state.analytic_cache = &analytic_cache;
+    grh_fallback_state.order = &order;
+    grh_fallback_state.precision = precision;
+    DependentUnitIndexFallback* const grh_fallback =
+            accept_grh_generation ? &grh_fallback_state : nullptr;
+
     RelationUnitCandidateBatchState& batch_state =
             extraction_state.unit_candidate_batch;
     IncrementalUnitContext partial_units;
@@ -2981,7 +3075,8 @@ bool set_class_relation_units(bool& ready,
                             "unit_group.set_class_relation_units.add_dependent_unit");
                     if (!add_dependent_unit(
                                 changed, out, candidate, embeddings,
-                                extraction_state, precision)) {
+                                extraction_state, precision,
+                                grh_fallback)) {
                         return false;
                     }
                 }
@@ -3098,7 +3193,8 @@ bool set_class_relation_units(bool& ready,
                             "unit_group.set_class_relation_units.add_dependent_unit");
                     if (!add_dependent_unit(
                                 changed, out, candidates[i], embeddings,
-                                extraction_state, precision)) {
+                                extraction_state, precision,
+                                grh_fallback)) {
                         return false;
                     }
                 }
