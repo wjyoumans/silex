@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -446,10 +447,11 @@ bool symmetric_eigenvalue_bounds(double& min_eigenvalue,
     return min_eigenvalue > 0.0 && std::isfinite(max_eigenvalue);
 }
 
-bool equation_order_norm_change_constants(double& c1,
-                                                double& c2,
-                                                const NumberField& parent,
-                                                slong precision) noexcept {
+bool compute_equation_order_norm_change_constants(
+        double& c1,
+        double& c2,
+        const NumberField& parent,
+        slong precision) noexcept {
     const slong degree = parent.degree();
     if (degree <= 0) {
         return false;
@@ -514,6 +516,119 @@ bool equation_order_norm_change_constants(double& c1,
     c2 = 1.0 / min_eigenvalue;
     return std::isfinite(c1) && std::isfinite(c2) &&
            c1 > 0.0 && c2 > 0.0;
+}
+
+// Memo of the radicand-independent Hensel data: the norm-change constants
+// below and the reconstruction lattice of power_reconstruction_data.  Every
+// is_square / is_power call on a field recomputes both from scratch although
+// neither reads the radicand: the constants depend only on the field and the
+// working precision, the reconstruction data only on the lifted prime factor
+// and its modulus p^k.  The class-group saturation stage asks thousands of
+// such questions in one field, mostly with the same prime and lift exponents.
+//
+// Exactness: an entry is keyed by every input its computation reads, compared
+// for exact equality, and both computations are deterministic, so a hit
+// returns bit for bit what recomputation would return.  Only successful
+// computations are stored; a failure is recomputed each time.
+//
+// Lifetime and thread safety: both caches are thread_local, so a thread only
+// ever sees entries it computed itself, no locking is needed, and entries are
+// released when the thread exits.  Each cache holds a bounded number of
+// entries (round-robin replacement once full), so memory stays bounded however
+// many fields a thread visits.  A lookup copies the entry out and an insertion
+// happens only after the computation has returned, so no reference into a
+// cache is held across a call that could reach the cache again.
+thread_local detail::HenselDataCacheCounters hensel_data_cache_counters_tls;
+
+template <class Entry>
+class BoundedEntryCache {
+public:
+    explicit BoundedEntryCache(std::size_t capacity) noexcept
+        : capacity_(capacity) {}
+
+    std::vector<Entry>& entries() noexcept { return entries_; }
+
+    void insert(Entry entry) noexcept {
+        if (entries_.size() < capacity_) {
+            entries_.push_back(std::move(entry));
+            return;
+        }
+        entries_[next_replacement_] = std::move(entry);
+        next_replacement_ = (next_replacement_ + 1) % capacity_;
+    }
+
+private:
+    std::size_t capacity_;
+    std::size_t next_replacement_ = 0;
+    std::vector<Entry> entries_;
+};
+
+// Key: the defining polynomial, backend and precision, which are all that
+// compute_equation_order_norm_change_constants reads (EmbeddingContext and
+// the power-basis elements are built from the field alone).
+struct NormChangeConstantsEntry {
+    flint::FmpqPoly polynomial;
+    NumberFieldBackendKind backend = NumberFieldBackendKind::generic;
+    slong precision = 0;
+    double c1 = 0.0;
+    double c2 = 0.0;
+};
+
+// A thread rarely works in more than a few fields at once.
+constexpr std::size_t kNormChangeConstantsCacheCapacity = 8;
+
+BoundedEntryCache<NormChangeConstantsEntry>&
+norm_change_constants_cache() noexcept {
+    thread_local BoundedEntryCache<NormChangeConstantsEntry> cache(
+            kNormChangeConstantsCacheCapacity);
+    return cache;
+}
+
+// c1, c2 of compute_equation_order_norm_change_constants, memoized per thread
+// (see the cache comment above).
+bool equation_order_norm_change_constants(
+        double& c1,
+        double& c2,
+        const NumberField& parent,
+        slong precision,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                        "element.power_hensel_norm_change_constants");
+    const nf_struct* raw_field = parent.raw_flint_field();
+    if (raw_field == nullptr) {
+        return false;
+    }
+    const NumberFieldBackendKind backend = parent.backend_kind();
+    auto& cache = norm_change_constants_cache();
+    for (const NormChangeConstantsEntry& entry : cache.entries()) {
+        if (entry.precision == precision && entry.backend == backend &&
+            fmpq_poly_equal(entry.polynomial.raw(), raw_field->pol) != 0) {
+            c1 = entry.c1;
+            c2 = entry.c2;
+            ++hensel_data_cache_counters_tls.norm_change_constants_hits;
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.power_hensel_norm_change_constants.cache_hit");
+            return true;
+        }
+    }
+
+    ++hensel_data_cache_counters_tls.norm_change_constants_misses;
+    SILEX_PROFILE_EVENT(
+            diagnostics, DiagnosticsModule::element,
+            "element.power_hensel_norm_change_constants.cache_miss");
+    if (!compute_equation_order_norm_change_constants(c1, c2, parent,
+                                                      precision)) {
+        return false;
+    }
+    NormChangeConstantsEntry entry;
+    fmpq_poly_set(entry.polynomial.raw(), raw_field->pol);
+    entry.backend = backend;
+    entry.precision = precision;
+    entry.c1 = c1;
+    entry.c2 = c2;
+    cache.insert(std::move(entry));
+    return true;
 }
 
 slong bit_length_slong(slong value) noexcept {
@@ -633,7 +748,8 @@ bool friedrich_fieker_lifting_exponent(
         const std::vector<flint::Arb>& root_bounds,
         const flint::Fmpz& prime,
         slong residue_degree,
-        slong precision) noexcept {
+        slong precision,
+        const DiagnosticsContext* diagnostics) noexcept {
     const NumberField* parent = &parent_field;
     if (residue_degree <= 0 || fmpz_fits_si(prime.raw()) == 0 ||
         fmpz_sgn(prime.raw()) <= 0) {
@@ -643,7 +759,7 @@ bool friedrich_fieker_lifting_exponent(
     double c1 = 0.0;
     double c2 = 0.0;
     if (!equation_order_norm_change_constants(
-                c1, c2, *parent, precision)) {
+                c1, c2, *parent, precision, diagnostics)) {
         return false;
     }
 
@@ -761,7 +877,7 @@ bool pure_power_lifting_exponent(
     }
     return friedrich_fieker_lifting_exponent(out, *parent, root_bounds,
                                              prime, residue_degree,
-                                             precision);
+                                             precision, diagnostics);
 }
 
 bool lifting_chain(std::vector<slong>& out,
@@ -1908,6 +2024,57 @@ bool verify_power_root(const Element& candidate,
     }
 }
 
+// Key: the degree, the modulus p^k (which is also the modulus of `ctx`, see
+// power_reconstruction_data) and the lifted factor's coefficients reduced
+// mod p^k, which are all that get_basis, fmpz_lll and fmpz_mat_inv read.
+// The lifted factor is the Hensel lift of a factor of f mod p to p^k, so it
+// depends on (field, prime, factor, k) and never on the radicand.
+struct ReconstructionDataEntry {
+    slong degree = 0;
+    flint::Fmpz modulus;
+    flint::FmpzPoly lifted_factor;
+    flint::FmpzMat basis{0, 0};
+    flint::FmpzMat inverse_num{0, 0};
+    flint::Fmpz inverse_den;
+};
+
+// One field, one prime, its factors and the lift exponents of the chains in
+// use; see the cache comment above equation_order_norm_change_constants.
+constexpr std::size_t kReconstructionDataCacheCapacity = 256;
+
+BoundedEntryCache<ReconstructionDataEntry>&
+reconstruction_data_cache() noexcept {
+    thread_local BoundedEntryCache<ReconstructionDataEntry> cache(
+            kReconstructionDataCacheCapacity);
+    return cache;
+}
+
+bool compute_power_reconstruction_data(
+        flint::FmpzMat& basis,
+        flint::FmpzMat& inverse_num,
+        flint::Fmpz& inverse_den,
+        slong degree,
+        const flint::FmpzModPoly& lifted_factor,
+        const flint::FmpzModCtx& ctx,
+        const fmpz_t precision_modulus) noexcept {
+    if (!get_basis(basis, precision_modulus, degree, lifted_factor, ctx)) {
+        return false;
+    }
+
+    flint::FmpzMat transform(degree, degree);
+    fmpz_mat_one(transform.raw());
+    flint::FmpzLll lll;
+    fmpz_lll(basis.raw(), transform.raw(), lll.raw());
+
+    return flint::fmpz_mat_inv(flint::FmpzMatRef(inverse_num),
+                               flint::FmpzRef(inverse_den),
+                               flint::FmpzMatConstRef(basis));
+}
+
+// LLL-reduced basis of the reconstruction lattice and its inverse, memoized
+// per thread (see the cache comment above equation_order_norm_change_
+// constants).  The memo is used only when `ctx` has modulus
+// `precision_modulus`, as at every caller.
 bool power_reconstruction_data(
         flint::FmpzMat& basis,
         flint::FmpzMat& inverse_num,
@@ -1923,20 +2090,56 @@ bool power_reconstruction_data(
         flint::fmpz_mat_nrows(basis) != degree ||
         flint::fmpz_mat_ncols(basis) != degree ||
         flint::fmpz_mat_nrows(inverse_num) != degree ||
-        flint::fmpz_mat_ncols(inverse_num) != degree ||
-        !get_basis(basis, precision_modulus, degree, lifted_factor,
-                         ctx)) {
+        flint::fmpz_mat_ncols(inverse_num) != degree) {
         return false;
     }
+    if (ctx.raw() == nullptr ||
+        fmpz_equal(fmpz_mod_ctx_modulus(ctx.raw()), precision_modulus) == 0) {
+        return compute_power_reconstruction_data(
+                basis, inverse_num, inverse_den, degree, lifted_factor, ctx,
+                precision_modulus);
+    }
 
-    flint::FmpzMat transform(degree, degree);
-    fmpz_mat_one(transform.raw());
-    flint::FmpzLll lll;
-    fmpz_lll(basis.raw(), transform.raw(), lll.raw());
+    flint::FmpzPoly key_factor;
+    fmpz_mod_poly_get_fmpz_poly(key_factor.raw(), lifted_factor.raw(),
+                                ctx.raw());
+    auto& cache = reconstruction_data_cache();
+    for (const ReconstructionDataEntry& entry : cache.entries()) {
+        if (entry.degree == degree &&
+            fmpz_equal(entry.modulus.raw(), precision_modulus) != 0 &&
+            fmpz_poly_equal(entry.lifted_factor.raw(), key_factor.raw()) !=
+                    0) {
+            fmpz_mat_set(basis.raw(), entry.basis.raw());
+            fmpz_mat_set(inverse_num.raw(), entry.inverse_num.raw());
+            fmpz_set(inverse_den.raw(), entry.inverse_den.raw());
+            ++hensel_data_cache_counters_tls.reconstruction_data_hits;
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.power_hensel_reconstruction_data.cache_hit");
+            return true;
+        }
+    }
 
-    return flint::fmpz_mat_inv(flint::FmpzMatRef(inverse_num),
-                               flint::FmpzRef(inverse_den),
-                               flint::FmpzMatConstRef(basis));
+    ++hensel_data_cache_counters_tls.reconstruction_data_misses;
+    SILEX_PROFILE_EVENT(
+            diagnostics, DiagnosticsModule::element,
+            "element.power_hensel_reconstruction_data.cache_miss");
+    if (!compute_power_reconstruction_data(basis, inverse_num, inverse_den,
+                                           degree, lifted_factor, ctx,
+                                           precision_modulus)) {
+        return false;
+    }
+    ReconstructionDataEntry entry;
+    entry.degree = degree;
+    fmpz_set(entry.modulus.raw(), precision_modulus);
+    entry.lifted_factor = std::move(key_factor);
+    entry.basis = flint::FmpzMat(degree, degree);
+    entry.inverse_num = flint::FmpzMat(degree, degree);
+    fmpz_mat_set(entry.basis.raw(), basis.raw());
+    fmpz_mat_set(entry.inverse_num.raw(), inverse_num.raw());
+    fmpz_set(entry.inverse_den.raw(), inverse_den.raw());
+    cache.insert(std::move(entry));
+    return true;
 }
 
 bool pure_power_hensel_step(
@@ -2808,7 +3011,7 @@ bool lift_cyclotomic_root(Element& root,
                                         derivative_polynomial, precision) ||
         !friedrich_fieker_lifting_exponent(
                 target_lift_exponent, field, root_bounds, prime,
-                residue.residue_degree, precision) ||
+                residue.residue_degree, precision, nullptr) ||
         !lifting_chain(lift_chain, target_lift_exponent)) {
         return false;
     }
@@ -2933,6 +3136,10 @@ bool lift_cyclotomic_root(Element& root,
 }  // namespace
 
 namespace detail {
+
+HenselDataCacheCounters hensel_data_cache_counters() noexcept {
+    return hensel_data_cache_counters_tls;
+}
 
 bool has_exact_order(const Element& z, ulong m) noexcept {
     const NumberField* parent = z.parent();

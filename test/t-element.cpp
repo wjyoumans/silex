@@ -719,6 +719,65 @@ void test_power_prelift_named_cases_unknown_without_disproof() noexcept {
 // field according to an independent computer algebra system: with
 // K = nfinit(<field polynomial>) and a the element as a polynomial in the
 // generator, nfroots(K, x^n - Mod(a, K.pol)) is empty.  The production answer must be a definite "no".
+// The radicand-independent Hensel data (norm-change constants and the
+// reconstruction lattice) is memoized per thread in src/element/hensel.cpp.
+// Roots of radicands of different heights need different lift exponents and
+// so different lattices; every root must still verify, and a second pass over
+// the same radicands must be served from the memo without recomputation.
+void test_power_hensel_data_cache_reuse() noexcept {
+    // Q(sqrt 2, sqrt 3): every prime has residue degree at most 2, so square
+    // roots also take the lifting path instead of the full-degree one.
+    silex::NumberField field = field_from_coefficients({1, 0, -10, 0, 1});
+    const silex::Element bases[] = {
+            element_from_coefficients(field, {1, 1}),
+            element_from_coefficients(field, {123456, -98765, 4321, 77}),
+            element_from_coefficients(field, {3, -2, 1}),
+            element_from_coefficients(field, {-55555555, 1, 0, 7777777}),
+            element_from_coefficients(field, {0, 5, 0, -1}),
+    };
+    const auto run_pass = [&field, &bases]() noexcept {
+        for (slong n : {2, 3}) {
+            sflint::Fmpz exponent;
+            sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+            for (const silex::Element& base : bases) {
+                silex::Element value(field);
+                assert(value.pow_fmpz(base, sflint::FmpzConstRef(exponent)));
+                silex::Element root(field);
+                bool is_power = false;
+                assert(silex::detail::pure_power_hensel_root(
+                        is_power, root, value, n, nullptr));
+                assert(is_power);
+                silex::Element check(field);
+                assert(check.pow_fmpz(root, sflint::FmpzConstRef(exponent)));
+                assert(check.equal(value));
+            }
+        }
+    };
+
+    const silex::detail::HenselDataCacheCounters before =
+            silex::detail::hensel_data_cache_counters();
+    run_pass();
+    const silex::detail::HenselDataCacheCounters first =
+            silex::detail::hensel_data_cache_counters();
+    assert(first.reconstruction_data_hits + first.reconstruction_data_misses >
+           before.reconstruction_data_hits + before.reconstruction_data_misses);
+    assert(first.norm_change_constants_hits +
+                   first.norm_change_constants_misses >
+           before.norm_change_constants_hits +
+                   before.norm_change_constants_misses);
+
+    run_pass();
+    const silex::detail::HenselDataCacheCounters second =
+            silex::detail::hensel_data_cache_counters();
+    assert(second.reconstruction_data_misses ==
+           first.reconstruction_data_misses);
+    assert(second.reconstruction_data_hits > first.reconstruction_data_hits);
+    assert(second.norm_change_constants_misses ==
+           first.norm_change_constants_misses);
+    assert(second.norm_change_constants_hits >
+           first.norm_change_constants_hits);
+}
+
 void test_power_gp_nonpowers() noexcept {
     struct Case {
         std::initializer_list<slong> field;
@@ -1048,6 +1107,7 @@ int main() {
     test_power_prelift_disproof_differential();
     test_power_prelift_named_cases_unknown_without_disproof();
     test_power_gp_nonpowers();
+    test_power_hensel_data_cache_reuse();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 

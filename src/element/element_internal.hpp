@@ -18,6 +18,18 @@ bool ensure_parent(Element& out, const NumberField& field) noexcept;
 // src/unit/roots_of_unity.cpp.
 bool has_exact_order(const Element& z, ulong m) noexcept;
 
+// Per-thread counts of the radicand-independent Hensel data memo in
+// src/element/hensel.cpp (norm-change constants of the Friedrich-Fieker
+// lifting exponent and the power-root reconstruction lattice).  Diagnostic
+// only: the memo never changes a computed value.
+struct HenselDataCacheCounters {
+    slong norm_change_constants_hits = 0;
+    slong norm_change_constants_misses = 0;
+    slong reconstruction_data_hits = 0;
+    slong reconstruction_data_misses = 0;
+};
+HenselDataCacheCounters hensel_data_cache_counters() noexcept;
+
 // Entry points into the private Hensel-lifting and root-reconstruction
 // machinery of `src/element/hensel.cpp`: exact square/power roots over Q
 // and quadratic fields, pure-power Hensel lifting for `Element::is_square` /
