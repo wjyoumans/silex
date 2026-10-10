@@ -1525,8 +1525,9 @@ caller's restart limit).  In total one ``ell`` examines at most about
 ``(17 + log2 d + log_ell [O^x : U]) * 2^16`` primes ``q``.
 The same bound covers kernel rows with an undecided root, which end a scan
 without adjoining a root.  If a scan ever ends because no prime ``q`` is left
-in the machine-word range, an undecided row fails closed at once, since a
-rescan would return the same kernel.
+in the machine-word range, a row that is not an ``ell``-th power and a row
+with an undecided root both fail closed at once, since a rescan would return
+the same kernel.
 
 Residue-character ``ell``-saturation of unit subgroups of a non-maximal order
 ``O`` is a Silex extension; neither primary source applies this proof to
