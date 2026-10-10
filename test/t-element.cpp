@@ -828,6 +828,53 @@ void test_power_gp_nonpowers() noexcept {
     }
 }
 
+// Degree 10 and higher: the Hensel root finder is not ported there, but the
+// residue disproof is exact in every degree.  Q(zeta_25) and Q(zeta_44) both
+// have degree 20.  Each non-power was checked independently with `nfroots` (no
+// root of x^n - a).  1 + zeta is a cyclotomic unit (norm Phi_25(-1) = 1),
+// so the norm alone cannot disprove it.  zeta_25 is not a fifth power: a
+// fifth root would be a root of unity of order 125, which is not in the
+// field.
+void test_power_degree_twenty_cyclotomic_residue_disproof() noexcept {
+    silex::NumberField phi25 = field_from_coefficients(
+            {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+    silex::NumberField phi44 = field_from_coefficients(
+            {1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0,
+             1});
+    for (slong exponent : {2, 3, 5}) {
+        assert_definitely_not_power(element_from_coefficients(phi25, {1, 1}),
+                                    exponent);
+        assert_definitely_not_power(element_from_coefficients(phi44, {1, 1}),
+                                    exponent);
+    }
+    assert_definitely_not_power(element_from_coefficients(phi25, {2, 1}), 3);
+    assert_definitely_not_power(element_from_coefficients(phi25, {0, 1}), 5);
+    assert_definitely_not_power(element_from_coefficients(phi44, {1, 0, 1}),
+                                3);
+
+    // True powers in degree 20.  A rational cube is still found.
+    sflint::Fmpz three;
+    sflint::fmpz_set_si(sflint::FmpzRef(three), 3);
+    silex::Element eight(phi25);
+    assert(eight.set_si(8));
+    assert_is_power_with_root(eight, three);
+
+    // zeta_25 = (zeta_25^17)^3 and (1 + zeta_25)^3 are cubes, but no root
+    // finder is ported in degree 20, and no residue can disprove a true
+    // power: the query stays unsupported and leaves the root unchanged.
+    silex::Element zeta = element_from_coefficients(phi25, {0, 1});
+    silex::Element one_plus_zeta = element_from_coefficients(phi25, {1, 1});
+    silex::Element cube(phi25);
+    assert(cube.pow_fmpz(one_plus_zeta, sflint::FmpzConstRef(three)));
+    for (const silex::Element* value : {&zeta, &cube}) {
+        silex::Element root(phi25);
+        assert(root.set_si(7));
+        bool is_power = false;
+        assert(!value->is_power(is_power, root, sflint::FmpzConstRef(three)));
+        assert(root.equal_si(7));
+    }
+}
+
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
     sflint::FmpqPoly polynomial;
     sflint::Fmpq coefficient;
@@ -1118,6 +1165,7 @@ int main() {
     test_power_prelift_disproof_differential();
     test_power_prelift_named_cases_unknown_without_disproof();
     test_power_gp_nonpowers();
+    test_power_degree_twenty_cyclotomic_residue_disproof();
     test_power_hensel_data_cache_reuse();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();

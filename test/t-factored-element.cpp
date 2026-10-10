@@ -166,14 +166,13 @@ void check_multi_factor_leftover_roots() noexcept {
         assert(input.push(base[i], 1));
     }
     assert(input.push(base[4], 3));
-    // In this cubic field the exact cube test reports an unsupported
-    // certificate (false) for this non-cube, so this case only checks that the
-    // call does not crash or claim a power wrongly; the definite negative
-    // cases are in check_definite_non_powers.
+    // b0 b1 b2 b3 b4^3 is not a cube (an independent `nfroots` finds no root of
+    // x^3 - a; its ideal valuations are not all divisible by 3).  A residue
+    // field disproves it, so the answer is a definite "not a cube".
     is_power = true;
     const bool answered = input.is_power_si(
             is_power, root, 3, silex::FactoredRootStrategy::reduced);
-    assert(!answered || !is_power);
+    assert(answered && !is_power);
 
     // Squares: b0 b1 b2 b3 (b0 b1 b2 b3) b4^4 b5^-2.
     assert(input.one());
@@ -195,9 +194,11 @@ void check_multi_factor_leftover_roots() noexcept {
     for (slong i = 0; i < 5; ++i) {
         assert(input.push(base[i], 1));
     }
+    // b0 b1 b2 b3 b4 is not a square (an independent `nfroots` finds no root of
+    // x^2 - a); a residue field disproves it.
     is_power = true;
     const bool square_answered = input.is_square(is_power, root);
-    assert(!square_answered || !is_power);
+    assert(square_answered && !is_power);
 }
 
 // Negative cases over Q, where the answer is definite: the leftover has

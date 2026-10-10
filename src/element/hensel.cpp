@@ -3412,8 +3412,7 @@ bool pure_power_residue_disproves(bool& is_power,
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.power_residue_disproof");
     const NumberField* parent = input.parent();
-    if (parent == nullptr || parent->degree() <= 1 ||
-        parent->degree() >= 10 || exponent <= 1) {
+    if (parent == nullptr || parent->degree() <= 1 || exponent <= 1) {
         return false;
     }
 
@@ -3432,6 +3431,43 @@ bool pure_power_residue_disproves(bool& is_power,
     // This bound only limits an optional disproof search.  Exhaustion leaves
     // the caller in the existing unsupported/fail-closed state.
     constexpr slong max_prime_attempts = 256;
+
+    if (parent->degree() >= 10) {
+        // Degree 10 and higher, where pure_power_hensel_root is not ported.
+        // reference v0.38.6 `_roots_hensel` (Hensel.jl lines 159-161)
+        // returns no roots as soon as y^n - a has no root modulo a prime
+        // factor of a good prime, and in degree >= 10 it examines further
+        // factors before lifting (STABILIZED = 2, lines 102-106).  Silex
+        // applies that residue check, as the exact membership test of
+        // pre_lift_residue_disproves (reference Fq_ispower) under the same
+        // admissibility conditions (1)-(3) stated above
+        // kPreLiftDisproofExtraPrimes (monic integral f; Dedekind-Kummer,
+        // Cohen GTM 138 Theorem 4.8.13), to every factor of every admissible
+        // prime: a residue that is not an n-th power proves that `input` is
+        // not an n-th power.  The argument has no condition on the degree.
+        // Silex extension: the reference stops after a few factors and then
+        // lifts; Silex has no lift here and scans further primes instead.
+        // A true power is never disproved, so it stays unsupported, as does
+        // any input with no disproving residue within the prime bound.
+        if (!fmpq_poly_is_monic_integral(raw_field->pol)) {
+            return false;
+        }
+        for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
+            fmpz_nextprime(prime.raw(), prime.raw(), 1);
+            bool admissible = false;
+            if (residue_disproves_power_at_prime(
+                        admissible, raw_field->pol, element_polynomial.raw(),
+                        parent->degree(), prime.raw(), exponent)) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::element,
+                        "element.power_residue_disproof.high_degree_nonpower");
+                is_power = false;
+                return true;
+            }
+        }
+        return false;
+    }
+
     for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
         fmpz_nextprime(prime.raw(), prime.raw(), 1);
         flint::FmpzModCtx ctx(prime.raw());
