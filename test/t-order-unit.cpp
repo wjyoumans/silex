@@ -9526,6 +9526,10 @@ int test_rebasis_keeps_group_torsion() {
                                                            embeddings, 256));
         assert(changed);
         assert(torsion_order_is(group, 2));
+        // The propagated under-claimed torsion is rejected by the guard
+        // that proven publication relies on; computed torsion passes.
+        assert(silex::detail::order_unit_torsion_is_computed(computed));
+        assert(!silex::detail::order_unit_torsion_is_computed(group));
     }
 
     // Adjoining u2 = sqrt(u2^2) to <u2^2, u3>: the relation row
@@ -9562,6 +9566,8 @@ int test_rebasis_keeps_group_torsion() {
         assert(changed);
         assert(torsion_order_is(out, 2));
         assert(same_regulator(out, computed_out));
+        assert(silex::detail::order_unit_torsion_is_computed(computed_out));
+        assert(!silex::detail::order_unit_torsion_is_computed(out));
     }
     return 0;
 }
