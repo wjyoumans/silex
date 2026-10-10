@@ -127,6 +127,24 @@ zero norm (FLINT ``nf_elem_norm``) in the quadratic representation, and in the
 generic representation through the gcd of the same ``fmpq_poly_xgcd`` call
 that FLINT's generic ``_nf_elem_inv`` branch (``src/nf_elem/inv.c``) makes.
 
+``Element::norm`` uses FLINT ``nf_elem_norm`` except in two field shapes.
+Quadratic fields use ``a^2 - d b^2``.  When the defining polynomial is
+``f = x^n + c`` with integer ``c`` and even ``n >= 4``, the norm is computed
+by halving the degree.  FLINT 3.6 ``src/nf_elem/norm.c`` (``_nf_elem_norm``,
+generic branch) computes the norm of ``Z/d`` as a resultant: for monic
+integral ``f`` it is ``Res(f, Z) / d^n``, the product of ``Z(alpha)`` over
+the roots ``alpha`` of ``f``.  Write ``f = h(x^2)`` with ``h = y^(n/2) + c``
+and ``Z(x) = E(x^2) + x O(x^2)``.  The roots of ``f`` are the two square
+roots of each root ``beta`` of ``h``, so ``Res(f, Z) = Res(h, G)``, where
+``G(y) = E(y)^2 - y O(y)^2`` is the Graeffe transform of ``Z``,
+``G(x^2) = Z(x) Z(-x)`` (PARI 2.17.3 ``src/basemath/rootpol.c``,
+``ZX_graeffe``; GP ``polgraeffe``).  ``G`` is first reduced modulo ``h``,
+and the step repeats while the degree is even; for ``x^12 + 7`` it goes
+from degree 12 to 6 to 3, and the last step is FLINT's integer resultant.
+This is transitivity of the norm through ``Q(alpha^2)``.  The arithmetic is
+exact and the result is the same canonical rational that ``nf_elem_norm``
+returns, which a randomized differential test checks.
+
 ``src/order`` implements validated order bases, trace forms, discriminants,
 multiplication tables, indices, p-maximal overorders, and global maximal-order
 construction.  PARI ``src/basemath/base2.c`` (including the ``nfmaxord``
