@@ -1551,8 +1551,24 @@ bool reduce_unit_log_rows(flint::FmpzMat& reduced,
     return unit_lll_result_is_valid(reduced, transform, scaled);
 }
 
+// True when some exponent of `unit` times `entry` does not fit in slong,
+// the only way FactoredElement::pow_si fails on a defined unit and entry.
+bool factored_power_overflows(const FactoredElement& unit,
+                              flint::FmpzConstRef entry) noexcept {
+    flint::Fmpz scaled;
+    for (const auto& factor : unit.factors()) {
+        fmpz_mul_si(scaled.raw(), entry.raw(), factor.exponent);
+        if (fmpz_fits_si(scaled.raw()) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool transform_factored_units(std::vector<FactoredElement>& units,
-                                    const flint::FmpzMat& transform) noexcept {
+                              const flint::FmpzMat& transform,
+                              bool& overflowed) noexcept {
+    overflowed = false;
     const slong rank = static_cast<slong>(units.size());
     if (rank <= 0 || flint::fmpz_mat_nrows(transform) != rank ||
         flint::fmpz_mat_ncols(transform) != rank ||
@@ -1575,14 +1591,18 @@ bool transform_factored_units(std::vector<FactoredElement>& units,
                 continue;
             }
             if (!flint::fmpz_fits_si(entry)) {
+                overflowed = true;
                 return false;
             }
 
             FactoredElement power(field);
             FactoredElement product(field);
-            if (!power.pow_si(units[static_cast<std::size_t>(j)],
-                              flint::fmpz_get_si(entry)) ||
-                !product.multiply(transformed.back(), power) ||
+            const FactoredElement& unit = units[static_cast<std::size_t>(j)];
+            if (!power.pow_si(unit, flint::fmpz_get_si(entry))) {
+                overflowed = factored_power_overflows(unit, entry);
+                return false;
+            }
+            if (!product.multiply(transformed.back(), power) ||
                 !transformed.back().set(product)) {
                 return false;
             }
@@ -1776,8 +1796,11 @@ bool reduce_stored_units_vector(bool& changed,
             !row_norm_product_bits(after_bits, reduced)) {
             return false;
         }
-        if (transform_factored_units(units, transform)) {
+        bool overflowed = false;
+        if (transform_factored_units(units, transform, overflowed)) {
             has_wide = false;
+        } else if (!overflowed) {
+            return false;
         } else {
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::unit_group,

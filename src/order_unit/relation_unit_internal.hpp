@@ -199,9 +199,11 @@ bool reduce_stored_relation_units(bool& changed,
                                EmbeddingContext& embeddings,
                                slong precision) noexcept;
 // Sets units[i] to prod_j units[j]^transform[i, j] with word-size factored
-// exponents.  Fails, leaving units unchanged, when an exponent overflows.
+// exponents.  Fails, leaving units unchanged, when an exponent overflows or
+// the inputs are invalid; `overflowed` is true only in the first case.
 bool transform_factored_units(std::vector<FactoredElement>& units,
-                              const flint::FmpzMat& transform) noexcept;
+                              const flint::FmpzMat& transform,
+                              bool& overflowed) noexcept;
 // The same transform with exponents of any size (reference `_transform`,
 // FactoredElem.jl:339-365), used when transform_factored_units overflows.
 // When the merged exponents fit in slong, units gets those products and
