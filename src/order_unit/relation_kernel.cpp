@@ -955,20 +955,20 @@ bool adjoinable_root_is_order_unit(const Order& order,
 
 namespace {
 
-// Whether Element::is_power (src/element/element.cpp) can decide whether a
-// non-rational element of `field` is an `exponent`-th power.  Exponent 2
-// goes to Element::is_square.  For an exponent >= 3 the only routes for a
-// non-rational input are pure_power_hensel_root and
-// pure_power_residue_disproves (src/element/hensel.cpp), and both return
-// "unsupported" for a field of degree >= 10 before they look at the input.
-// So for exponent >= 3 and degree >= 10, Element::is_power decides only
-// rational constants (is_power_rational_constant), and then only that a
-// rational exponent-th power is a power: a decided answer is never "not a
-// power".  The bound must follow those guards; a test pins it.
+// Whether Element::is_power (src/element/element.cpp) can find an
+// `exponent`-th root of a non-rational element of `field`.  Exponent 2 goes
+// to Element::is_square.  For an exponent >= 3 the only route that finds a
+// root of a non-rational input is pure_power_hensel_root
+// (src/element/hensel.cpp), which returns "unsupported" for a field of
+// degree >= 10 before it looks at the input; there
+// pure_power_residue_disproves can only prove that the input is not a
+// power.  So for exponent >= 3 and degree >= 10, Element::is_power finds a
+// root only of a rational constant (is_power_rational_constant).  The bound
+// must follow the pure_power_hensel_root guard; a test pins it.
 constexpr slong kElementPowerRouteDegreeLimit = 10;
 
-bool element_power_test_decides_non_rational(const NumberField& field,
-                                             slong exponent) noexcept {
+bool element_power_test_roots_non_rational(const NumberField& field,
+                                           slong exponent) noexcept {
     return exponent <= 2 || field.degree() < kElementPowerRouteDegreeLimit;
 }
 
@@ -1023,14 +1023,14 @@ KernelRowRootResult kernel_row_root(
 
     const slong exponent = flint::fmpz_get_si(ell);
     if (mode == KernelRowRootMode::defer_undecidable &&
-        !element_power_test_decides_non_rational(*field, exponent) &&
+        !element_power_test_roots_non_rational(*field, exponent) &&
         !factored_is_formal_power(product, exponent)) {
-        // Both root routes below end in Element::is_power, which here can
-        // only confirm a rational l-th power remainder.  A non-power is
-        // never decided, so the attempt can end only in `undecided` or in
-        // the root of a true l-th power, which the caller still meets after
-        // a rescan.  Skip the compact presentation and the factored
-        // expansion.
+        // Both root routes below end in Element::is_power, which here finds
+        // a root only of a rational l-th power remainder.  The attempt can
+        // end only in a non-power, in `undecided` (the caller rescans after
+        // either, as after `deferred`), or in the root of a true l-th
+        // power, which the caller still meets at a later scan.  Skip the
+        // compact presentation and the factored expansion.
         SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.kernel_row_root_deferred");
         return KernelRowRootResult::deferred;

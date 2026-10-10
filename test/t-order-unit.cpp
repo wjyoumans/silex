@@ -7759,14 +7759,14 @@ int test_kernel_row_root_three_way_result() {
 }
 
 // KernelRowRootMode::defer_undecidable skips the root attempt only where
-// Element::is_power cannot decide a non-rational l-th power (l >= 3, degree
-// >= 10) and the row product is not a formal l-th power.
+// Element::is_power cannot find the root of a non-rational l-th power
+// (l >= 3, degree >= 10) and the row product is not a formal l-th power.
 int test_kernel_row_root_defers_undecidable_rows() {
     {
         // The premise: in degree 12, Element::is_power with exponent 3
         // leaves a non-rational cube undecided and decides a rational one.
-        // If Element::is_power learns to decide here, update
-        // element_power_test_decides_non_rational (relation_kernel.cpp).
+        // If Element::is_power learns to find such roots here, update
+        // element_power_test_roots_non_rational (relation_kernel.cpp).
         silex::NumberField field = cyclotomic13_field();
         sflint::FmpqPoly theta_poly;
         sflint::fmpq_poly_set_coeff_si(theta_poly, 1, 1);

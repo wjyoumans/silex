@@ -1332,16 +1332,21 @@ character kernel, and the group grows only by an exactly verified root.  A
 row that is an ``ell``-th power whose root Silex cannot compute stays in
 every kernel, so its proof fails closed as ``unavailable`` only at the
 resource guard below.  For ``ell >= 3`` in degree 10 and higher,
-``Element::is_power`` decides only rational constants, so a root attempt
-can end only undecided or with the root of a true ``ell``-th power.  Until
-the first doubling of ``stable`` for such an ``ell``, the scan therefore
-does not attempt a row that is not a formal ``ell``-th power of its
-factored generators; it treats the row as undecided and rescans with the
-doubled ``stable`` at once.  Rows of later scans are attempted as usual.  This changes only when
-a row is tested, not which rows can be rooted: Hecke tests each candidate
-before doubling, but a true ``ell``-th power stays in every later kernel,
-so it reaches the root test one scan later.  When the scan has used the
-whole prime range, rows are attempted at once, as before.  The auxiliary bound is therefore not a proof
+``Element::is_power`` finds a root only of a rational constant, so a root
+attempt can end only in a non-power, undecided (the scan doubles
+``stable`` after either), or with the root of a true ``ell``-th power.
+Until the first doubling of ``stable`` for such an ``ell``, the scan
+therefore does not attempt a row that is not a formal ``ell``-th power of
+its factored generators; it treats the row as undecided and rescans with
+the doubled ``stable`` at once.  Rows of later scans are attempted as
+usual.  The rows that can be rooted are the same: Hecke tests each
+candidate before doubling, but a true ``ell``-th power stays in every later
+kernel, so it still reaches the root test at a later scan.  Such a root is
+then accepted at a larger ``stable``, possibly from another kernel row, so
+the published unit generators and the ``local_primes`` of the unit proof
+record may differ from those of an attempt in the first scan; the
+certification rule is unchanged.  When the scan has used the whole prime
+range, rows are attempted at once, as before.  The auxiliary bound is therefore not a proof
 parameter; a unit proof record stores it as the pre-scan bound of the call,
 not as the largest prime used.  Hecke starts its scan at
 ``next_prime(2^60)``; Silex starts at ``q = ell + 1``, which changes only

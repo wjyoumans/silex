@@ -499,14 +499,15 @@ enum class KernelRowRootResult : unsigned char {
     deferred,
 };
 // `attempt` tests every row.  `defer_undecidable` skips the root attempt,
-// returning `deferred`, when Element::is_power can decide an l-th power in
-// this field only for rational constants (l >= 3 and field degree >= 10,
-// see element_power_test_decides_non_rational in relation_kernel.cpp) and
-// the row product is not a formal l-th power.  Such an attempt can end only
-// in `undecided` or in a root of a true l-th power, and a true l-th power
-// stays in every later character kernel, so the stable proof step uses it
-// until its first doubling of `stable` for an ell and tests the row after
-// the rescan instead.
+// returning `deferred`, when Element::is_power finds an l-th root in this
+// field only for rational constants (l >= 3 and field degree >= 10, see
+// element_power_test_roots_non_rational in relation_kernel.cpp) and the row
+// product is not a formal l-th power.  Such an attempt can end only in a
+// non-power, in `undecided`, or in a root of a true l-th power; the stable
+// proof step rescans after the first two as after a deferred row, and a
+// true l-th power stays in every later character kernel.  So the step uses
+// this mode until its first doubling of `stable` for an ell and tests the
+// row at a later scan instead.
 enum class KernelRowRootMode : unsigned char {
     attempt,
     defer_undecidable,

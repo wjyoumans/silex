@@ -937,16 +937,20 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
     // larger threshold once such a row was seen.
     bool saw_root_outside_order = false;
     // Until the first doubling of `stable` for this ell (the callers pass
-    // defer_undecidable_roots), a row whose root test can only end
-    // undecided or in the root of a true ell-th power is deferred, not
-    // tested: Element::is_power decides no non-power in that field and
-    // exponent (see kernel_row_root).  The deferred row is handled like an
-    // undecided one below, so `stable` doubles and the rescan uses more
-    // primes q; the rescan's rows are tested as usual.  A true ell-th power
-    // stays in every kernel, so it still reaches the root test, one scan
-    // later; a non-power that more primes remove costs no root test.  When
-    // the range is exhausted a rescan would return the same kernel, so the
-    // rows are tested at once, as before.
+    // defer_undecidable_roots), a row whose root test can end only in a
+    // non-power, undecided, or in the root of a true ell-th power is
+    // deferred, not tested: Element::is_power finds no root of a
+    // non-rational element in that field and exponent (see
+    // kernel_row_root).  The deferred row is handled like an undecided one
+    // below, so `stable` doubles and the rescan uses more primes q; the
+    // rescan's rows are tested as usual.  A true ell-th power stays in every
+    // kernel, so it still reaches the root test at a later scan; a
+    // non-power that more primes remove costs no root test.  The root is
+    // then accepted at a larger `stable`, possibly from another kernel row,
+    // so the published generators and the proof record's local primes may
+    // differ from those of a first-scan attempt.  When the range is
+    // exhausted a rescan would return the same kernel, so the rows are
+    // tested at once, as before.
     const detail::KernelRowRootMode root_mode =
             defer_undecidable_roots && !range_exhausted
                     ? detail::KernelRowRootMode::defer_undecidable
