@@ -519,9 +519,14 @@ bool compute_analytic_bound(flint::Fmpz& out,
         // The search below returns a value above every failing `high` and
         // the result is clamped to max_bound, so once the criterion fails at
         // some `high >= max_bound` the result is max_bound.  Stop doubling
-        // there.  The cache check keeps a failed cache extension (which
-        // also reads as "not satisfied") on the old path, so its failure
-        // behaviour is unchanged.
+        // there.  The cache check keeps a failed cache extension at the
+        // current `high` (which also reads as "not satisfied") on the old
+        // path, so such a failure still fails.  Failures that the old loop
+        // would only have met extending the cache above the cap are no
+        // longer reached.  The exported prime cache may also be shorter in
+        // a cap case (it stops at the first prime above the capping
+        // `high`); it is a performance-only cache, so results are
+        // unchanged.
         if (high >= max_bound &&
             prime_degree_cache_covers(prime_cache, high)) {
             flint::fmpz_set_si(flint::FmpzRef(out), max_bound);

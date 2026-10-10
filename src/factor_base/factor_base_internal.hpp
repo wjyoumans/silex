@@ -54,9 +54,13 @@ bool zimmert_twin_class_log_lower_bound(flint::ArbRef out,
 // research/proofs/generation/GB-zimmert-F-tail-bound.md at commit 06191ff)
 // and the evaluation procedure of that proof file.  With terms <= 0 on
 // entry it chooses L and K as that proof file describes, each tail bounded
-// by 2^-128, failing when no admissible (L, K) with L <= 2^16
-// (kZimmertMaxTailTerms) and K <= 64 (kZimmertMaxTailOrder) meets that
-// bound.  With terms > 0 it uses L = terms and K = order (the ball is still
+// by 2^-128, failing when the proof's search finds no admissible pair
+// meeting that bound.  The search starts at the proof's lower estimate for
+// L (failing at once if that estimate is not finite or exceeds 2^16,
+// kZimmertMaxTailTerms), grows L by about a quarter each step up to 2^16,
+// tries K up to 64 (kZimmertMaxTailOrder) and stops at the first K that is
+// not admissible for a given L; it is not exhaustive, so an admissible
+// pair meeting the bound may exist and not be found.  With terms > 0 it uses L = terms and K = order (the ball is still
 // valid but may be wider), failing unless 2 <= K <= 64, L <= 2^16,
 // L > gamma/2, and both (L, 0, K) and (L, 1/2, K) are admissible (the
 // second follows from the first, since admissibility only needs
