@@ -4556,8 +4556,12 @@ int test_factor_base_size_limit_fails_closed() {
 // fundamental discriminant D (FLINT qfb_reduced_forms counts primitive
 // forms only), which is the class number of the maximal order.  On proven
 // pairs with w = 4, w = 6, h = 3, a real quadratic and a mixed-signature
-// cubic field, the candidate product lies in the zeta value, both routes
-// give index one, and the zeta value matches an independent h R.
+// cubic field, the candidate product lies in the zeta value, the exact route
+// gives index one, the analytic accessor gives its conservative bound 2, and
+// the zeta value matches an independent h R.  Q(sqrt(-11)) = Q[x]/(x^2 + 11)
+// has polynomial discriminant -44 (h(-44) = 3) but field discriminant -11
+// (h = 1), so reading D from the equation order changes the exact index to 3
+// and the zeta value by a factor of 2.
 int test_class_unit_index_routes_share_normalization() {
     struct Case {
         silex::NumberField field;
@@ -4571,6 +4575,7 @@ int test_class_unit_index_routes_share_normalization() {
     cases.push_back({shifted_quadratic_field(-1, 6), 3, 2, true});
     cases.push_back({quadratic_field(10), 2, 2, false});
     cases.push_back({cubic_field(0, -2), 1, 2, false});
+    cases.push_back({quadratic_field(-11), 1, 2, true});
 
     const slong precision = 256;
     for (Case& item : cases) {
@@ -4642,13 +4647,13 @@ int test_class_unit_index_routes_share_normalization() {
         assert(units.class_regulator_index_bound(
                 sflint::FmpzRef(index), context,
                 sflint::ArbConstRef(analytic), precision));
-        // The analytic route takes the outward-rounded ceiling of the upper
-        // endpoint of the quotient enclosure (order_unit.cpp), so a true
-        // index one may be reported as one or, when the enclosure reaches
-        // just above one, two.  A wrong normalization (a factor w or 2^r1)
-        // would give a different value.
-        assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(index), 1) >= 0);
-        assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(index), 2) <= 0);
+        // The public accessor takes the ceiling of the upper endpoint of the
+        // quotient enclosure and is conservative on purpose (order_unit.cpp),
+        // so a true index one is reported as 2.  This pins that ceiling: a
+        // quotient too large by a factor of 2 would give 3, and one too small
+        // would fail closed.  The radius-independent check of the
+        // normalization is the pair of overlap assertions above.
+        assert(sflint::fmpz_equal_si(index, 2));
 
         if (item.exact_quadratic) {
             assert(set_fmpz_si(index, 42));
