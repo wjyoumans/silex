@@ -701,8 +701,9 @@ bool zimmert_head_term(flint::Arb& sum,
 // (iv) of GB-zimmert-F-tail-bound and the evaluation procedure of its proof
 // file (steps 1-5), with the tails bounded by 2^-kZimmertTailBits each.
 // Sets terms and order to the L and K used.  If terms > 0 on entry, uses
-// the given L and K instead, failing unless L >= 1, L > gamma/2, K >= 2 and
-// (L, 0, K) is admissible.
+// the given L and K instead, failing unless 2 <= K <= kZimmertMaxTailOrder,
+// L <= kZimmertMaxTailTerms, L > gamma/2, and (L, 0, K) and (L, 1/2, K) are
+// admissible.
 bool zimmert_f_enclosure(flint::Arb& out,
                          slong& terms,
                          slong& order,

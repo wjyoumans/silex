@@ -52,14 +52,20 @@ bool zimmert_twin_class_log_lower_bound(flint::ArbRef out,
 // gamma_numerator/gamma_denominator > 0 (integers allowed), by part (iv) of
 // GB-zimmert-F-tail-bound (silex-research,
 // research/proofs/generation/GB-zimmert-F-tail-bound.md at commit 06191ff)
-// and the evaluation procedure of that proof file.  With terms = 0 on entry
-// it chooses L and K as that proof file describes, each tail bounded by
-// 2^-128; with terms > 0 it uses L = terms and K = order (the ball is still
-// valid but may be wider), failing unless
-// L > gamma/2, K >= 2 and (L, 0, K) is admissible.  On success sets terms
-// and order to the L and K used.  Fails for a < 1, b < 0 or gamma <= 0, when
-// the numerator or denominator of gamma exceeds 2^16 (kZimmertMaxTailTerms),
-// or when no admissible (L, K) with K <= 64 is found.
+// and the evaluation procedure of that proof file.  With terms <= 0 on
+// entry it chooses L and K as that proof file describes, each tail bounded
+// by 2^-128, failing when no admissible (L, K) with L <= 2^16
+// (kZimmertMaxTailTerms) and K <= 64 (kZimmertMaxTailOrder) meets that
+// bound.  With terms > 0 it uses L = terms and K = order (the ball is still
+// valid but may be wider), failing unless 2 <= K <= 64, L <= 2^16,
+// L > gamma/2, and both (L, 0, K) and (L, 1/2, K) are admissible (the
+// second follows from the first, since admissibility only needs
+// N = 2(L + 1 + delta) large enough).  On success sets terms and order to
+// the L and K used.  In either case fails for a < 1, b < 0, a numerator or
+// denominator of gamma that is <= 0 or exceeds 2^16, or when an internal
+// check fails: a ball that is not finite (or, for the M_Phi denominator,
+// not positive), or the Phi_0 = 0, Phi_1 = -c^2/4 check of the proof's
+// Statement.
 bool zimmert_f_enclosure(flint::ArbRef out,
                          slong& terms,
                          slong& order,
