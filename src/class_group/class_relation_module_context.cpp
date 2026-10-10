@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace silex::detail {
 namespace {
@@ -56,6 +57,172 @@ slong trimmed_nonzero_rows(flint::FmpzMatConstRef matrix) noexcept {
         }
     }
     return rows;
+}
+
+slong fmpz_mat_row_first_nonzero_from(const fmpz_mat_t matrix,
+                                      slong row,
+                                      slong first_column) noexcept {
+    const slong cols = ::fmpz_mat_ncols(matrix);
+    for (slong j = first_column; j < cols; ++j) {
+        if (::fmpz_is_zero(::fmpz_mat_entry(matrix, row, j)) == 0) {
+            return j;
+        }
+    }
+    return -1;
+}
+
+// Reduces every entry above a pivot into [0, pivot), the normalization of
+// FLINT's canonical row HNF (fmpz_mat_hnf).  Reducing row i2 by pivot row i
+// changes row i2 only in columns from pivots[i] on, so one pass with i
+// increasing leaves every earlier pivot column reduced.
+void reduce_above_hnf_pivots(fmpz_mat_t hnf,
+                             const std::vector<slong>& pivots) noexcept {
+    const slong cols = ::fmpz_mat_ncols(hnf);
+    const slong rank = static_cast<slong>(pivots.size());
+    flint::Fmpz quotient;
+    for (slong i = 1; i < rank; ++i) {
+        const slong pivot_col = pivots[static_cast<std::size_t>(i)];
+        const fmpz* pivot = ::fmpz_mat_entry(hnf, i, pivot_col);
+        for (slong above = 0; above < i; ++above) {
+            const fmpz* entry = ::fmpz_mat_entry(hnf, above, pivot_col);
+            if (::fmpz_sgn(entry) >= 0 && ::fmpz_cmp(entry, pivot) < 0) {
+                continue;
+            }
+            ::fmpz_fdiv_q(quotient.raw(), entry, pivot);
+            for (slong j = pivot_col; j < cols; ++j) {
+                const fmpz* pivot_row_entry = ::fmpz_mat_entry(hnf, i, j);
+                if (::fmpz_is_zero(pivot_row_entry) == 0) {
+                    ::fmpz_submul(::fmpz_mat_entry(hnf, above, j),
+                                  quotient.raw(), pivot_row_entry);
+                }
+            }
+        }
+    }
+}
+
+// Folds rows [hnf_rows, nrows) of `matrix` into the canonical row HNF held in
+// its first hnf_rows rows.  On success the first `rank` rows are the canonical
+// row HNF of all rows (FLINT's fmpz_mat_hnf normalization: positive pivots in
+// strictly increasing columns, entries above a pivot in [0, pivot)) and the
+// remaining rows are zero.  This is the row-addition step of Pernet and
+// Stein's HNF algorithm as FLINT implements it (FLINT 3.6.0
+// src/fmpz_mat/hnf_pernet_stein.c, add_rows): each new row is eliminated
+// against the pivot rows with unimodular extended-gcd row operations, a
+// surviving row becomes a new pivot row, and entries above the pivots are
+// reduced again.  C. Pernet and W. Stein, "Fast computation of Hermite normal
+// forms of random integer matrices", J. Number Theory 130 (2010), 1675-1683.
+// The canonical row HNF of a lattice is unique, so the result equals
+// fmpz_mat_hnf of the stacked rows.
+bool hnf_add_rows(slong& rank, fmpz_mat_t matrix, slong hnf_rows) noexcept {
+    rank = 0;
+    const slong rows = ::fmpz_mat_nrows(matrix);
+    const slong cols = ::fmpz_mat_ncols(matrix);
+    if (hnf_rows < 0 || hnf_rows > rows || hnf_rows > cols) {
+        return false;
+    }
+
+    std::vector<slong> pivots;
+    pivots.reserve(static_cast<std::size_t>(std::min(rows, cols)));
+    for (slong i = 0; i < hnf_rows; ++i) {
+        const slong first =
+                pivots.empty() ? 0 : pivots.back() + 1;
+        const slong pivot_col =
+                fmpz_mat_row_first_nonzero_from(matrix, i, 0);
+        if (pivot_col < first ||
+            ::fmpz_sgn(::fmpz_mat_entry(matrix, i, pivot_col)) <= 0) {
+            return false;
+        }
+        pivots.push_back(pivot_col);
+    }
+    rank = hnf_rows;
+
+    flint::Fmpz gcd;
+    flint::Fmpz pivot_coeff;
+    flint::Fmpz row_coeff;
+    flint::Fmpz pivot_cofactor;
+    flint::Fmpz row_cofactor;
+    flint::Fmpz combined;
+    for (slong source = hnf_rows; source < rows; ++source) {
+        // Rows [rank, source) are zero, so moving the new row up to `rank`
+        // keeps the pivot rows contiguous.
+        if (source != rank) {
+            ::fmpz_mat_swap_rows(matrix, nullptr, rank, source);
+        }
+        const slong added = rank;
+        bool pivot_rows_changed = false;
+        slong pivot_index = 0;
+        slong lead = fmpz_mat_row_first_nonzero_from(matrix, added, 0);
+        while (lead >= 0) {
+            while (pivot_index < rank &&
+                   pivots[static_cast<std::size_t>(pivot_index)] < lead) {
+                ++pivot_index;
+            }
+            if (pivot_index == rank ||
+                pivots[static_cast<std::size_t>(pivot_index)] != lead) {
+                break;
+            }
+
+            fmpz* pivot = ::fmpz_mat_entry(matrix, pivot_index, lead);
+            fmpz* entry = ::fmpz_mat_entry(matrix, added, lead);
+            if (::fmpz_divisible(entry, pivot) != 0) {
+                ::fmpz_divexact(row_cofactor.raw(), entry, pivot);
+                for (slong j = lead; j < cols; ++j) {
+                    const fmpz* pivot_row_entry =
+                            ::fmpz_mat_entry(matrix, pivot_index, j);
+                    if (::fmpz_is_zero(pivot_row_entry) == 0) {
+                        ::fmpz_submul(::fmpz_mat_entry(matrix, added, j),
+                                      row_cofactor.raw(), pivot_row_entry);
+                    }
+                }
+            } else {
+                // [pivot_row; added] <- [s t; -b/g a/g] [pivot_row; added]
+                // with s a + t b = g = gcd(a, b): determinant one, new pivot g.
+                ::fmpz_xgcd(gcd.raw(), pivot_coeff.raw(), row_coeff.raw(),
+                            pivot, entry);
+                ::fmpz_divexact(pivot_cofactor.raw(), pivot, gcd.raw());
+                ::fmpz_divexact(row_cofactor.raw(), entry, gcd.raw());
+                for (slong j = lead; j < cols; ++j) {
+                    fmpz* pivot_row_entry =
+                            ::fmpz_mat_entry(matrix, pivot_index, j);
+                    fmpz* added_entry = ::fmpz_mat_entry(matrix, added, j);
+                    ::fmpz_mul(combined.raw(), pivot_coeff.raw(),
+                               pivot_row_entry);
+                    ::fmpz_addmul(combined.raw(), row_coeff.raw(),
+                                  added_entry);
+                    ::fmpz_mul(added_entry, added_entry,
+                               pivot_cofactor.raw());
+                    ::fmpz_submul(added_entry, row_cofactor.raw(),
+                                  pivot_row_entry);
+                    ::fmpz_swap(pivot_row_entry, combined.raw());
+                }
+                pivot_rows_changed = true;
+            }
+            ++pivot_index;
+            lead = fmpz_mat_row_first_nonzero_from(matrix, added, lead + 1);
+        }
+
+        if (lead < 0) {
+            // The new row lies in the span of the pivot rows; it is now zero.
+            if (pivot_rows_changed) {
+                reduce_above_hnf_pivots(matrix, pivots);
+            }
+            continue;
+        }
+
+        if (::fmpz_sgn(::fmpz_mat_entry(matrix, added, lead)) < 0) {
+            for (slong j = lead; j < cols; ++j) {
+                fmpz* added_entry = ::fmpz_mat_entry(matrix, added, j);
+                ::fmpz_neg(added_entry, added_entry);
+            }
+        }
+        for (slong i = added; i > pivot_index; --i) {
+            ::fmpz_mat_swap_rows(matrix, nullptr, i, i - 1);
+        }
+        pivots.insert(pivots.begin() + pivot_index, lead);
+        ++rank;
+        reduce_above_hnf_pivots(matrix, pivots);
+    }
+    return true;
 }
 
 }  // namespace
@@ -446,6 +613,7 @@ bool ClassRelationModuleContext::rebuild_checkpoint() noexcept {
     if (out_row != dense_rows) {
         return false;
     }
+    slong incremental_rank = -1;
     if (old_rows == ambient_dim_ && old_rows > 0) {
         // Adding rows enlarges a full-rank lattice, so its new index divides
         // the retained checkpoint index.  This is FLINT's modular-HNF modulus
@@ -459,12 +627,20 @@ bool ClassRelationModuleContext::rebuild_checkpoint() noexcept {
         }
         ::fmpz_mat_hnf_modular(hnf.raw(), dense.raw(),
                                checkpoint_index.raw());
+    } else if (old_rows > 0) {
+        // The retained checkpoint rows are already a canonical HNF, so only
+        // the new rows need eliminating against them.
+        if (!hnf_add_rows(incremental_rank, dense.raw(), old_rows)) {
+            return false;
+        }
+        hnf.swap(dense);
     } else {
         ::fmpz_mat_hnf(hnf.raw(), dense.raw());
     }
     const slong hnf_rows = trimmed_nonzero_rows(
             flint::FmpzMatConstRef(hnf));
-    if (hnf_rows < 0) {
+    if (hnf_rows < 0 ||
+        (incremental_rank >= 0 && incremental_rank != hnf_rows)) {
         return false;
     }
 
