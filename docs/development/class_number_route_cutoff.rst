@@ -214,7 +214,8 @@ Lowering the cutoff to 2^34
 The measurement on an idle machine (``machine-idle.sh`` reported IDLE before
 the build, before the sweep and after it) used two Release builds that differ
 only in the constant (45 and 34), one process per run, GCC, FLINT 3.6.0.  It
-covered 11 bins of ``n`` for ``x^2 + n`` (bit length 30, 32, 33, 34, 35, 36,
+covered 11 bins of ``n`` for ``x^2 + n`` (the bins are labelled by ``n``;
+for ``n = 3 mod 4`` this is ``|D|``, otherwise ``|D| = 4n``) (bit length 30, 32, 33, 34, 35, 36,
 38, 40, 42, 43, and 43.9), 8 fields per bin, 5 interleaved repetitions per
 field with the order alternating.  The class-group invariants agreed between
 the routes on all 88 fields, and the completeness basis was
@@ -277,7 +278,7 @@ per-field medians:
      - 8 of 8
 
 The lattice route is faster on the sum in every bin from 33 up and on every
-field from bin 35 up.  In bin 34 one field is about 9% slower, within its
+field from bin 35 up (bins by ``n``).  In bin 34 one field is about 9% slower, within its
 repetition spread.  Bin 33 has a per-field ratio up to 1.19, so the evidence
 below 2^34 is weaker; the cutoff ``2^34`` is the conservative choice, and
 ``|D| < 2^34`` keeps the exact route.  The two routes agree on the invariants

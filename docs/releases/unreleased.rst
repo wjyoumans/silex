@@ -126,12 +126,16 @@ Changed
   instead of the exact class number (the cutoff of the previous entry moves
   from ``2^44`` to ``2^34``).  ``grh`` is faster for these fields: on an idle
   machine the sum over sampled fields is about 0.83 times the exact route's
-  time in the bin from ``2^34``, and about 0.26 times near ``2^44``.  ``h``,
-  the invariants and the labels are unchanged, but the completeness basis of
-  these fields changes: completeness is now ``grh`` with basis
-  ``belabas_friedman`` (previously ``proven``, ``exact_class_number``), and
-  ``analytic_class_regulator_status()`` is ``verified`` with certification
-  ``grh`` (previously ``not_checked``).  Fields with ``|D| < 2^34`` keep the
+  time in the bin from ``n = 2^34``, and about 0.26 times near ``2^44`` (the
+  sampled fields are ``x^2 + n``).  ``h``, the invariants and the invariant
+  generator matrix are unchanged (compared on ``D = -(2^34 - 1)``,
+  ``D = -(2^34 + 3)`` and ``D = -(2^40 + 3)``, which agree between the two
+  routes), but the completeness record of these fields changes: completeness
+  is now ``grh`` with basis ``belabas_friedman`` (previously ``proven``,
+  ``exact_class_number``), ``analytic_class_regulator_status()`` is
+  ``verified`` (previously ``not_checked``),
+  ``analytic_class_regulator_certification()`` is ``grh``, and
+  ``zeta_bf_proof_record()`` is now populated (previously none).  Fields with ``|D| < 2^34`` keep the
   exact class number and their output is unchanged; ``proven`` requests are
   unaffected (their cutoff stays ``2^44``).  See
   :doc:`../development/class_number_route_cutoff`.

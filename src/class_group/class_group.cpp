@@ -67,13 +67,14 @@ namespace {
 // Largest bit length of |D| at which the exact class number h(D) of an
 // imaginary quadratic maximal order is counted from the reduced forms of
 // discriminant D (FLINT qfb_reduced_forms, time and memory growing like
-// sqrt|D|): |D| < 2^44.  At and above 2^44 the listing is not used: a grh
-// class/unit request takes h from the GRH relation lattice
-// (rank_zero_quadratic_class_index_bound), and h(D) itself comes from
-// Dirichlet's class number formula with a rigorous L(1, chi_D) enclosure
+// sqrt|D|): |D| < 2^44.  This cutoff governs the proven route, that is the
+// imaginary_quadratic_class_number switch.  At and above 2^44 the listing is
+// not used there: h(D) comes from Dirichlet's class number formula with a
+// rigorous L(1, chi_D) enclosure
 // (imaginary_quadratic_class_number_analytic below).  Below 2^44 the
-// listing is faster than either: measured per decade over |D| from 1e7 to
-// 1e14 in docs/development/class_number_route_cutoff.rst.
+// listing is faster than that formula: measured per decade over |D| from 1e7
+// to 1e14 in docs/development/class_number_route_cutoff.rst.  A grh
+// class/unit request has its own, lower cutoff, defined below.
 constexpr ulong imaginary_quadratic_listing_max_abs_discriminant_bits = 44;
 
 }  // namespace
@@ -5355,10 +5356,9 @@ namespace {
 // bit length >= 35, i.e. |D| >= 2^34.  Below it h(D) is counted from the
 // reduced forms.  This is independent of the cutoff 2^44 of the proven
 // class number route (imaginary_quadratic_listing_max_abs_discriminant_bits).
-// The lattice route's index-one test uses a Belabas-Friedman hR from 2^44 on
-// and the unconditional L(1, chi) hR below it (zeta.cpp,
-// quadratic_route_max_abs_discriminant_bits); the completeness basis is
-// belabas_friedman for every field on the lattice route.  Measured on an idle
+// On the lattice route the index-one test of a grh request uses a
+// Belabas-Friedman hR, and the completeness basis is belabas_friedman for
+// every field on it.  Measured on an idle
 // machine, single process, 11 bins of |D| from about 2^30 to 2^44, 8 fields
 // per bin, 5 interleaved reps: the lattice route is faster on the per-bin
 // sums from |D| about 2^33 up (ratio 0.83 in the bin from 2^34, 0.26 near

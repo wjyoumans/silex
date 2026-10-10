@@ -3380,7 +3380,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         !detail::ClassGroupCertificationAccess::
                 grh_factor_base_generation_covered(candidate_class_group)) {
         // A grh request is accepted only by the analytic index-one test or,
-        // for an imaginary quadratic field with |D| < 2^44, by the exact
+        // for an imaginary quadratic field with |D| < 2^34, by the exact
         // class number; both need factor-base generation (the exact route
         // reads the same GRH record, rank_zero_quadratic_class_index_bound):
         // unconditional (the base reaches the proven generation requirement:

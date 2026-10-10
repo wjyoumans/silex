@@ -1277,7 +1277,7 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
         }
 
         // Under a grh request the exact imaginary-quadratic index is
-        // available only for |D| < 2^44; above it h comes from the GRH
+        // available only for |D| < 2^34; above it h comes from the GRH
         // relation lattice through the analytic index test below, without
         // listing reduced forms (rank_zero_quadratic_class_index_bound).
         bool exact_quadratic_index = false;
@@ -1487,7 +1487,7 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
 
         // The refined index only decides whether this pass made progress.
         // Under a grh request in degree two it comes from the exact class
-        // number where the pass check above does (|D| < 2^44), so no
+        // number where the pass check above does (|D| < 2^34), so no
         // unconditional L(1, chi) hR is evaluated just to measure progress;
         // above the cutoff, or when that route is unavailable, it comes from
         // the analytic index bound as before.

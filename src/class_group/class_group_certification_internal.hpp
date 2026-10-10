@@ -72,7 +72,7 @@ public:
     // acceptance test for the caller; a proven request then keeps its
     // generation check.  A grh request needs the base's GRH generation
     // record (grh_factor_base_generation_covered) and returns false without
-    // listing reduced forms when |D| >= 2^44: there h comes from the GRH
+    // listing reduced forms when |D| >= 2^34: there h comes from the GRH
     // relation lattice and the analytic index test (the cutoff and its
     // measurement are next to the definition).
     static bool rank_zero_quadratic_class_index_bound(
@@ -145,7 +145,7 @@ public:
 
     // Records that a `grh`-requested pair was accepted by index one against
     // the exact imaginary-quadratic class number
-    // (rank_zero_quadratic_class_index_bound, |D| < 2^44): completeness
+    // (rank_zero_quadratic_class_index_bound, |D| < 2^34): completeness
     // `proven` with basis exact_class_number.  Like the analytic record, it
     // never changes certification labels.
     static void record_grh_acceptance_exact_class_number(

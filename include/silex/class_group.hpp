@@ -95,7 +95,7 @@ enum class ClassGroupGenerationBasis {
 //   (the quadratic L(1, chi) route).
 // - exact_class_number: the candidate class number equals the exact
 //   imaginary-quadratic class number (`grh` imaginary-quadratic pairs with
-//   |D| < 2^44; above that the pair is accepted by the analytic index-one
+//   |D| < 2^34; above that the pair is accepted by the analytic index-one
 //   test).
 // - unconditional_certification: the class group and units were certified
 //   `proven` (saturation or an unconditional analytic check, see
@@ -242,13 +242,13 @@ public:
     // relative to factor-base generation: `proven` for a `proven` class
     // group (basis unconditional_certification) and for a `grh` pair
     // accepted through the exact imaginary-quadratic class number (|D| <
-    // 2^44), an unconditional quadratic L(1, chi) hR (a `proven` request),
+    // 2^34), an unconditional quadratic L(1, chi) hR (a `proven` request),
     // or the exact degree-one route;
     // `grh` for a `grh` pair accepted through a Belabas-Friedman hR (every
     // degree >= 3 field, a degree-two field outside the explicit quadratic
     // backend, every quadratic field of a `grh` request (including
     // x^2 - d) whose acceptance is not the exact route, and a quadratic field
-    // with |D| >= 2^44 or whose L(1, chi) evaluation fell back to
+    // with |D| >= 2^34 or whose L(1, chi) evaluation fell back to
     // Belabas-Friedman); `unknown` otherwise.  A
     // `grh` result whose generation and completeness are both `proven` keeps
     // the `grh` label.
@@ -298,7 +298,7 @@ public:
     //   only once the resulting h_cand is 1 and never rescues a conditional
     //   bound.  The
     //   validation pass supplies the exact imaginary-quadratic index (under
-    //   a `grh` request only for |D| < 2^44), which is unconditional when
+    //   a `grh` request only for |D| < 2^34), which is unconditional when
     //   generation is verified up to the Minkowski-type bound (always so
     //   under a `proven` request) and GRH-conditional otherwise;
     //   a Belabas-Friedman analytic index bound only decides whether the
@@ -315,14 +315,14 @@ public:
     // route of a `proven` request; a Belabas-Friedman hR (every degree >= 3
     // field, a degree-two field outside the explicit quadratic backend, every
     // quadratic field of a `grh` request including x^2 - d, and a quadratic
-    // field with |D| >= 2^44 or whose L(1, chi) evaluation fails and falls
+    // field with |D| >= 2^34 or whose L(1, chi) evaluation fails and falls
     // back to Belabas-Friedman) assumes GRH.  Use
     // analytic_class_regulator_certification() to read which one was used.
     // A `grh` class/unit transaction accepted by the analytic index-one test
     // records that check here as well; the record is
     // informational and leaves the `grh` labels unchanged.  With a
     // Belabas-Friedman hR it also records that evaluation's audit data
-    // (zeta_bf_proof_record()).  The exact imaginary-quadratic (|D| < 2^44)
+    // (zeta_bf_proof_record()).  The exact imaginary-quadratic (|D| < 2^34)
     // and degree-one `grh` routes use no analytic check and record none.
     ProofState analytic_class_regulator_status() const noexcept;
     // `proven` for an unconditional analytic check, `grh` for a

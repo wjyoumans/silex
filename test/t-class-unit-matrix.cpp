@@ -20,18 +20,6 @@
 namespace {
 namespace sflint = silex::flint;
 
-#if defined(__SANITIZE_ADDRESS__)
-constexpr bool address_sanitizer_build = true;
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-constexpr bool address_sanitizer_build = true;
-#else
-constexpr bool address_sanitizer_build = false;
-#endif
-#else
-constexpr bool address_sanitizer_build = false;
-#endif
-
 void diagnostic_log_callback(void*,
                              silex::DiagnosticsModule module,
                              silex::LogLevel level,
