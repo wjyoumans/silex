@@ -7,8 +7,11 @@
 #include <silex/diagnostics.hpp>
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_mod_ctx.hpp>
+#include <silex/flint/fmpz_mod_mat.hpp>
 #include <silex/lat.hpp>
 
+#include "prime_inverse_internal.hpp"
 #include "two_generator_internal.hpp"
 
 #include <utility>
@@ -1411,6 +1414,198 @@ bool multiply_integral_ideal_by_element(
     }
 
     out.swap(candidate);
+    return true;
+}
+
+// Source trace: reference `base4.c:pr_inv_p` returns p P^{-1} as
+// `ZM_hnfmodid(tau, p)`, the HNF of p Z_K + t Z_K where tau is the
+// multiplication table of t, and `base2.c:get_pr` takes
+// t = `FpM_deplin(zk_multable(nf, u), p)`, a kernel vector modulo p of
+// multiplication by u for P = p Z_K + u Z_K ("Z_K + t/p Z_K = P^(-1)").
+// reference Hecke `anti_uniformizer` (NfOrd/Ideal/Prime.jl) keeps the same
+// kernel of the uniformizer's representation matrix modulo p as its
+// alternative route.  This routine takes the kernel over the HNF rows of I
+// instead of one two-element generator, so it needs no stored generator.
+//
+// For O maximal and p O contained in I, p I^{-1} = {y in O : y I in p O}.
+// Its image in O/pO is the common kernel modulo p of y -> y b over the HNF
+// rows b of I, and has F_p-dimension f = log_p N(I) because
+// [p I^{-1} : p O] = N(I).  Every partial kernel contains that image, so the
+// running intersection equals it as soon as its dimension is f.  For t in
+// the kernel, p O + t O lies in p I^{-1}; it is equal when its index in O is
+// N(p I^{-1}) = p^(n - f), which is checked.  Since I != O, p I^{-1} is not
+// contained in p O, so (p I^{-1}, p) is already the normalized
+// numerator/denominator pair.
+bool prime_ideal_inverse_num_den(Ideal& numerator,
+                                 flint::FmpzRef den,
+                                 const Ideal& ideal) noexcept {
+    const Order* parent = ideal.parent();
+    if (parent == nullptr || !ideal.has_hnf() || !parent->is_maximal() ||
+        numerator.parent() == nullptr ||
+        !numerator.parent()->has_same_data(*parent) || den.raw() == nullptr) {
+        return false;
+    }
+
+    const slong n = parent->degree();
+    flint::FmpzMat hnf(n, n);
+    if (n <= 0 || !ideal.get_hnf(flint::FmpzMatRef(hnf))) {
+        return false;
+    }
+
+    // The diagonal of the HNF of an ideal containing p O is in {1, p}, and
+    // N(I) = p^f with f the number of entries p.
+    flint::Fmpz p;
+    slong f = 0;
+    for (slong i = 0; i < n; ++i) {
+        const fmpz* diagonal = fmpz_mat_entry(hnf.raw(), i, i);
+        if (fmpz_is_one(diagonal) != 0) {
+            continue;
+        }
+        if (f == 0) {
+            fmpz_set(p.raw(), diagonal);
+        } else if (fmpz_equal(p.raw(), diagonal) == 0) {
+            return false;
+        }
+        ++f;
+    }
+    if (f == 0 || fmpz_cmp_si(p.raw(), 1) <= 0 ||
+        fmpz_is_prime(p.raw()) != 1) {
+        return false;
+    }
+
+    // Check p O in I: reduce each p e_j by the upper-triangular HNF rows.
+    {
+        flint::FmpzMat residual(1, n);
+        flint::Fmpz quotient;
+        for (slong j = 0; j < n; ++j) {
+            fmpz_mat_zero(residual.raw());
+            fmpz_set(fmpz_mat_entry(residual.raw(), 0, j), p.raw());
+            for (slong i = j; i < n; ++i) {
+                fmpz* entry = fmpz_mat_entry(residual.raw(), 0, i);
+                if (fmpz_is_zero(entry) != 0) {
+                    continue;
+                }
+                const fmpz* pivot = fmpz_mat_entry(hnf.raw(), i, i);
+                if (fmpz_divisible(entry, pivot) == 0) {
+                    return false;
+                }
+                fmpz_divexact(quotient.raw(), entry, pivot);
+                for (slong c = i; c < n; ++c) {
+                    fmpz_submul(fmpz_mat_entry(residual.raw(), 0, c),
+                                quotient.raw(),
+                                fmpz_mat_entry(hnf.raw(), i, c));
+                }
+            }
+        }
+    }
+
+    Order order(*parent);
+    flint::FmpzMat table(n * n, n);
+    if (!order.multiplication_table(flint::FmpzMatRef(table))) {
+        return false;
+    }
+
+    // Rows of `kernel` span the current kernel in O/pO (order coordinates).
+    flint::FmpzModCtx context(p.raw());
+    flint::FmpzModMat kernel(n, n, context);
+    fmpz_mod_mat_one(kernel.raw(), context.raw());
+    bool kernel_is_identity = true;
+    slong k = n;
+    flint::FmpzMat row(1, n);
+    flint::FmpzMat multiplication(n, n);
+    for (slong i = 0; i < n && k > f; ++i) {
+        bool row_is_zero = true;
+        for (slong c = 0; c < n; ++c) {
+            fmpz* entry = fmpz_mat_entry(row.raw(), 0, c);
+            fmpz_mod(entry, fmpz_mat_entry(hnf.raw(), i, c), p.raw());
+            row_is_zero = row_is_zero && fmpz_is_zero(entry) != 0;
+        }
+        if (row_is_zero) {
+            continue;
+        }
+
+        // Row r of `multiplication` is the coordinate row of e_r * b.
+        multiplication_from_coordinates(flint::FmpzMatRef(multiplication),
+                                        flint::FmpzMatConstRef(row),
+                                        flint::FmpzMatConstRef(table));
+        flint::FmpzModMat image(k, n, context);
+        if (kernel_is_identity) {
+            fmpz_mod_mat_set_fmpz_mat(image.raw(), multiplication.raw(),
+                                      context.raw());
+        } else {
+            flint::FmpzModMat multiplication_mod(n, n, context);
+            fmpz_mod_mat_set_fmpz_mat(multiplication_mod.raw(),
+                                      multiplication.raw(), context.raw());
+            fmpz_mod_mat_mul(image.raw(), kernel.raw(),
+                             multiplication_mod.raw(), context.raw());
+        }
+
+        // Left kernel of image: columns of null span {z : z image = 0}.
+        flint::FmpzModMat image_transpose(n, k, context);
+        flint::FmpzModMat null(k, k, context);
+        fmpz_mod_mat_transpose(image_transpose.raw(), image.raw(),
+                               context.raw());
+        const slong nullity = fmpz_mod_mat_nullspace(
+                null.raw(), image_transpose.raw(), context.raw());
+        if (nullity < f) {
+            return false;
+        }
+        if (nullity == k) {
+            continue;
+        }
+
+        flint::FmpzModMat combination(nullity, k, context);
+        for (slong a = 0; a < nullity; ++a) {
+            for (slong b = 0; b < k; ++b) {
+                fmpz_set(fmpz_mod_mat_entry(combination.raw(), a, b),
+                         fmpz_mod_mat_entry(null.raw(), b, a));
+            }
+        }
+        flint::FmpzModMat next(nullity, n, context);
+        fmpz_mod_mat_mul(next.raw(), combination.raw(), kernel.raw(),
+                         context.raw());
+        fmpz_mod_mat_swap(kernel.raw(), next.raw(), context.raw());
+        kernel_is_identity = false;
+        k = nullity;
+    }
+    if (k != f) {
+        return false;
+    }
+
+    flint::FmpzMat generator_coordinates(1, n);
+    for (slong c = 0; c < n; ++c) {
+        fmpz_set(fmpz_mat_entry(generator_coordinates.raw(), 0, c),
+                 fmpz_mod_mat_entry(kernel.raw(), 0, c));
+    }
+    OrderElement generator(order);
+    Ideal candidate(*parent);
+    flint::FmpzMat candidate_hnf(n, n);
+    if (!generator.is_defined() || !candidate.is_defined() ||
+        !generator.set_coordinates(
+                flint::FmpzMatConstRef(generator_coordinates)) ||
+        !set_known_two_generator_ideal(candidate, flint::FmpzConstRef(p),
+                                       generator) ||
+        !candidate.get_hnf(flint::FmpzMatRef(candidate_hnf))) {
+        return false;
+    }
+
+    // [O : p O + t O] = p^(n - f) gives p O + t O = p I^{-1}.  Every
+    // diagonal entry divides p because p O is contained in p O + t O.
+    slong p_count = 0;
+    for (slong i = 0; i < n; ++i) {
+        const fmpz* diagonal = fmpz_mat_entry(candidate_hnf.raw(), i, i);
+        if (fmpz_equal(diagonal, p.raw()) != 0) {
+            ++p_count;
+        } else if (fmpz_is_one(diagonal) == 0) {
+            return false;
+        }
+    }
+    if (p_count != n - f) {
+        return false;
+    }
+
+    numerator.swap(candidate);
+    fmpz_set(den.raw(), p.raw());
     return true;
 }
 

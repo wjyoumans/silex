@@ -1,3 +1,7 @@
+#include <flint/fmpq_poly.h>
+#include <flint/fmpz_poly.h>
+#include <flint/ulong_extras.h>
+
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
@@ -6,6 +10,7 @@
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_ring.hpp>
 
+#include "ideal/prime_inverse_internal.hpp"
 #include "order/order_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
 #include "residue_field/residue_field_internal.hpp"
@@ -2685,6 +2690,228 @@ int test_kummer_generator_reduces_to_zero_and_residues_span() {
     return 0;
 }
 
+// The prime-ideal inverse route used by the relation search must return
+// exactly the normalized numerator and denominator of
+// FractionalIdeal::invert.  Returns the number of ideals compared and counts
+// prime ideals without a stored Kummer generator.
+slong check_prime_inverse_matches_invert(const silex::Order& maximal,
+                                         slong prime_bound,
+                                         slong& without_kummer) {
+    const slong n = maximal.degree();
+    slong compared = 0;
+    sflint::FmpzMat generator(1, n);
+    for (slong value = 2; value < prime_bound; ++value) {
+        if (n_is_prime(static_cast<ulong>(value)) == 0) {
+            continue;
+        }
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, value));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, maximal,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal& prime = *primes.at(i);
+            if (!prime.kummer_generator_coordinates(
+                        sflint::FmpzMatRef(generator))) {
+                ++without_kummer;
+            }
+            silex::Ideal ideal(maximal);
+            assert(prime.get_ideal(ideal));
+
+            silex::FractionalIdeal fractional(maximal);
+            silex::FractionalIdeal inverse(maximal);
+            silex::Ideal old_numerator(maximal);
+            sflint::Fmpz old_den;
+            assert(fractional.set_integral(ideal));
+            assert(inverse.invert(fractional));
+            assert(inverse.get_integral_den(old_numerator,
+                                            sflint::FmpzRef(old_den)));
+
+            silex::Ideal new_numerator(maximal);
+            sflint::Fmpz new_den;
+            assert(silex::detail::prime_ideal_inverse_num_den(
+                    new_numerator, sflint::FmpzRef(new_den), ideal));
+
+            sflint::FmpzMat old_hnf(n, n);
+            sflint::FmpzMat new_hnf(n, n);
+            assert(old_numerator.get_hnf(sflint::FmpzMatRef(old_hnf)));
+            assert(new_numerator.get_hnf(sflint::FmpzMatRef(new_hnf)));
+            assert(fmpz_mat_equal(old_hnf.raw(), new_hnf.raw()) != 0);
+            assert(sflint::fmpz_equal(sflint::FmpzConstRef(old_den),
+                                      sflint::FmpzConstRef(new_den)));
+            assert(sflint::fmpz_equal(sflint::FmpzConstRef(new_den),
+                                      sflint::FmpzConstRef(p)));
+            ++compared;
+        }
+
+        // A product of two distinct primes above p also contains p O.  The
+        // route may decline it (one kernel vector need not generate), but
+        // whatever it accepts is exact.
+        if (primes.size() >= 2) {
+            silex::Ideal first(maximal);
+            silex::Ideal second(maximal);
+            silex::Ideal product(maximal);
+            assert(primes.at(0)->get_ideal(first));
+            assert(primes.at(1)->get_ideal(second));
+            assert(product.multiply(first, second));
+            silex::FractionalIdeal fractional(maximal);
+            silex::FractionalIdeal inverse(maximal);
+            silex::Ideal old_numerator(maximal);
+            sflint::Fmpz old_den;
+            assert(fractional.set_integral(product));
+            assert(inverse.invert(fractional));
+            assert(inverse.get_integral_den(old_numerator,
+                                            sflint::FmpzRef(old_den)));
+            silex::Ideal new_numerator(maximal);
+            sflint::Fmpz new_den;
+            if (!silex::detail::prime_ideal_inverse_num_den(
+                        new_numerator, sflint::FmpzRef(new_den), product)) {
+                continue;
+            }
+            sflint::FmpzMat old_hnf(n, n);
+            sflint::FmpzMat new_hnf(n, n);
+            assert(old_numerator.get_hnf(sflint::FmpzMatRef(old_hnf)));
+            assert(new_numerator.get_hnf(sflint::FmpzMatRef(new_hnf)));
+            assert(fmpz_mat_equal(old_hnf.raw(), new_hnf.raw()) != 0);
+            assert(sflint::fmpz_equal(sflint::FmpzConstRef(old_den),
+                                      sflint::FmpzConstRef(new_den)));
+            ++compared;
+        }
+    }
+    return compared;
+}
+
+silex::Order cyclotomic_maximal_order(silex::NumberField& field,
+                                      ulong conductor) {
+    sflint::FmpzPoly cyclotomic;
+    fmpz_poly_cyclotomic(cyclotomic.raw(), conductor);
+    sflint::FmpqPoly polynomial;
+    fmpq_poly_set_fmpz_poly(polynomial.raw(), cyclotomic.raw());
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    return maximal;
+}
+
+int test_prime_ideal_inverse_matches_invert() {
+    slong without_kummer = 0;
+    {
+        // Search-base rows: cyclotomic_64_phi32 and cyclotomic_37_phi36.
+        silex::NumberField field;
+        silex::Order maximal = cyclotomic_maximal_order(field, 64);
+        assert(check_prime_inverse_matches_invert(maximal, 200,
+                                                  without_kummer) >= 40);
+    }
+    {
+        silex::NumberField field;
+        silex::Order maximal = cyclotomic_maximal_order(field, 37);
+        assert(check_prime_inverse_matches_invert(maximal, 150,
+                                                  without_kummer) >= 40);
+    }
+
+    // Index-divisor fields: x^3 - x^2 - 2x - 8 (2 splits completely and is a
+    // common index divisor), cubic_disc1724 and the index-3 quartic.  Their
+    // primes above the index divisors carry no Kummer generator.
+    const slong before_index_fields = without_kummer;
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_zero(polynomial);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 2, -1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -2);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, -8);
+        silex::NumberField field;
+        silex::Order equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        assert(check_prime_inverse_matches_invert(maximal, 200,
+                                                  without_kummer) >= 40);
+    }
+    {
+        sflint::FmpqPoly polynomial;
+        poly_cubic_disc1724(polynomial);
+        silex::NumberField field;
+        silex::Order equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        assert(check_prime_inverse_matches_invert(maximal, 100,
+                                                  without_kummer) >= 20);
+    }
+    {
+        sflint::FmpqPoly polynomial;
+        poly_index3_quartic(polynomial);
+        silex::NumberField field;
+        silex::Order equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        assert(check_prime_inverse_matches_invert(maximal, 100,
+                                                  without_kummer) >= 20);
+    }
+    assert(without_kummer > before_index_fields);
+    return 0;
+}
+
+// The route declines inputs outside its contract and leaves its outputs
+// unchanged: an order not known to be maximal, the unit ideal, and an
+// ideal not containing p O.
+int test_prime_ideal_inverse_declines_outside_contract() {
+    sflint::FmpqPoly polynomial;
+    poly_cubic_disc1724(polynomial);
+    silex::NumberField field;
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!equation.is_maximal());
+
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, 5));
+    silex::PrimeIdealList equation_primes;
+    assert(silex::decompose_prime(equation_primes, equation,
+                                  sflint::FmpzConstRef(p)));
+    silex::Ideal equation_prime(equation);
+    assert(equation_primes.at(0)->get_ideal(equation_prime));
+
+    silex::Ideal numerator(equation);
+    sflint::Fmpz den;
+    assert(set_fmpz_si(den, 7));
+    assert(numerator.one());
+    assert(!silex::detail::prime_ideal_inverse_num_den(
+            numerator, sflint::FmpzRef(den), equation_prime));
+    assert(numerator.is_one() && sflint::fmpz_equal_si(den, 7));
+
+    silex::Ideal unit(maximal);
+    silex::Ideal maximal_numerator(maximal);
+    assert(unit.one());
+    assert(maximal_numerator.one());
+    assert(!silex::detail::prime_ideal_inverse_num_den(
+            maximal_numerator, sflint::FmpzRef(den), unit));
+    assert(maximal_numerator.is_one() && sflint::fmpz_equal_si(den, 7));
+
+    // P^2 for a prime P of degree 1 with P^2 not dividing p O has norm p^2
+    // and does not contain p O.
+    silex::PrimeIdealList maximal_primes;
+    assert(silex::decompose_prime(maximal_primes, maximal,
+                                  sflint::FmpzConstRef(p)));
+    slong degree_one = -1;
+    for (slong i = 0; i < maximal_primes.size(); ++i) {
+        if (maximal_primes.at(i)->residue_degree() == 1 &&
+            maximal_primes.at(i)->ramification_index() == 1) {
+            degree_one = i;
+            break;
+        }
+    }
+    if (degree_one >= 0) {
+        silex::Ideal prime(maximal);
+        silex::Ideal square(maximal);
+        assert(maximal_primes.at(degree_one)->get_ideal(prime));
+        assert(square.multiply(prime, prime));
+        assert(!silex::detail::prime_ideal_inverse_num_den(
+                maximal_numerator, sflint::FmpzRef(den), square));
+        assert(maximal_numerator.is_one() && sflint::fmpz_equal_si(den, 7));
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -2736,5 +2963,7 @@ int main() {
     assert(test_kummer_generator_reduces_to_zero_and_residues_span() == 0);
     assert(test_degree_one_root_follows_recorded_convention() == 0);
     assert(test_alpha_convention_kept_after_marking_maximal() == 0);
+    assert(test_prime_ideal_inverse_matches_invert() == 0);
+    assert(test_prime_ideal_inverse_declines_outside_contract() == 0);
     return 0;
 }

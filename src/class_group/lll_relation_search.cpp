@@ -8,6 +8,7 @@
 #include "lll_relation_search_internal.hpp"
 #include "relation_candidate_internal.hpp"
 #include "relation_search_internal.hpp"
+#include "../ideal/prime_inverse_internal.hpp"
 #include "../order/order_internal.hpp"
 #include "../order_unit/class_unit_transaction_internal.hpp"
 
@@ -440,8 +441,8 @@ public:
             return false;
         }
         base_.reserve(indices.size());
-        base_fractional_.reserve(indices.size());
-        inverse_base_.reserve(indices.size());
+        inverse_numerators_.reserve(indices.size());
+        inverse_denominators_.reserve(indices.size());
         base_indices_.reserve(indices.size());
         exponents_.assign(indices.size(), 0);
         for (slong index : indices) {
@@ -453,8 +454,8 @@ public:
             // reference `random_init` inverts eagerly (`map(inv, R.base)`);
             // this builds the same inverses lazily.
             base_.emplace_back(order);
-            base_fractional_.emplace_back();
-            inverse_base_.emplace_back();
+            inverse_numerators_.emplace_back();
+            inverse_denominators_.emplace_back();
             if (!base_.back().is_defined() ||
                 !factor_base.prime(prime, index) ||
                 !prime.get_ideal(base_.back())) {
@@ -499,9 +500,9 @@ public:
         const bool has_cached_environment =
                 state.random_ideal.is_defined() &&
                 state.base_ideals.size() == state.base_indices.size() &&
-                state.base_fractional_ideals.size() ==
+                state.inverse_base_numerators.size() ==
                         state.base_indices.size() &&
-                state.inverse_base_ideals.size() ==
+                state.inverse_base_denominators.size() ==
                         state.base_indices.size();
 
         order_ = &order;
@@ -514,14 +515,14 @@ public:
             base_indices_.swap(state.base_indices);
             exponents_.swap(state.exponents);
             base_.swap(state.base_ideals);
-            base_fractional_.swap(state.base_fractional_ideals);
-            inverse_base_.swap(state.inverse_base_ideals);
+            inverse_numerators_.swap(state.inverse_base_numerators);
+            inverse_denominators_.swap(state.inverse_base_denominators);
             random_ideal_.swap(state.random_ideal);
             state.defined = false;
             if (base_.empty() || base_indices_.empty() ||
                 base_.size() != base_indices_.size() ||
-                base_fractional_.size() != base_indices_.size() ||
-                inverse_base_.size() != base_indices_.size() ||
+                inverse_numerators_.size() != base_indices_.size() ||
+                inverse_denominators_.size() != base_indices_.size() ||
                 exponents_.size() != base_indices_.size() ||
                 random_ideal_.parent() == nullptr ||
                 !random_ideal_.parent()->has_same_data(order)) {
@@ -550,8 +551,8 @@ public:
             return false;
         }
         base_.reserve(state.base_indices.size());
-        base_fractional_.reserve(state.base_indices.size());
-        inverse_base_.reserve(state.base_indices.size());
+        inverse_numerators_.reserve(state.base_indices.size());
+        inverse_denominators_.reserve(state.base_indices.size());
         base_indices_.reserve(state.base_indices.size());
         exponents_ = state.exponents;
         for (slong index : state.base_indices) {
@@ -563,8 +564,8 @@ public:
             // reference `random_init` inverts eagerly (`map(inv, R.base)`);
             // this builds the same inverses lazily.
             base_.emplace_back(order);
-            base_fractional_.emplace_back();
-            inverse_base_.emplace_back();
+            inverse_numerators_.emplace_back();
+            inverse_denominators_.emplace_back();
             if (!base_.back().is_defined() ||
                 !factor_base.prime(prime, index) ||
                 !prime.get_ideal(base_.back())) {
@@ -605,14 +606,14 @@ public:
         state.base_indices.clear();
         state.exponents.clear();
         state.base_ideals.clear();
-        state.base_fractional_ideals.clear();
-        state.inverse_base_ideals.clear();
+        state.inverse_base_numerators.clear();
+        state.inverse_base_denominators.clear();
         state.random_ideal.clear();
         state.base_indices.swap(base_indices_);
         state.exponents.swap(exponents_);
         state.base_ideals.swap(base_);
-        state.base_fractional_ideals.swap(base_fractional_);
-        state.inverse_base_ideals.swap(inverse_base_);
+        state.inverse_base_numerators.swap(inverse_numerators_);
+        state.inverse_base_denominators.swap(inverse_denominators_);
         state.random_ideal.swap(random_ideal_);
         flint::fmpz_set(flint::FmpzRef(state.lower_bound),
                         flint::FmpzConstRef(lower_bound_));
@@ -735,8 +736,8 @@ private:
     void clear() noexcept {
         order_ = nullptr;
         base_.clear();
-        base_fractional_.clear();
-        inverse_base_.clear();
+        inverse_numerators_.clear();
+        inverse_denominators_.clear();
         base_indices_.clear();
         exponents_.clear();
         random_ideal_.clear();
@@ -763,30 +764,45 @@ private:
     bool ensure_inverse_base(slong index) noexcept {
         if (order_ == nullptr || index < 0 ||
             index >= static_cast<slong>(base_.size()) ||
-            base_fractional_.size() != base_.size() ||
-            inverse_base_.size() != base_.size()) {
+            inverse_numerators_.size() != base_.size() ||
+            inverse_denominators_.size() != base_.size()) {
             return false;
         }
         const std::size_t i = static_cast<std::size_t>(index);
-        if (inverse_base_[i].is_defined()) {
+        if (inverse_numerators_[i].has_hnf()) {
             return true;
         }
-        FractionalIdeal base_fractional(*order_);
-        FractionalIdeal inverse(*order_);
-        if (!base_fractional.is_defined() || !inverse.is_defined() ||
-            !detail::set_integral_ideal_known_hnf(base_fractional,
-                                                  base_[i]) ||
-            !inverse.invert(base_fractional)) {
+        // Every search-base ideal is a prime ideal of a maximal order, so
+        // the prime-ideal route gives p P^{-1} / p directly.  It returns
+        // exactly the normalized numerator and denominator of
+        // FractionalIdeal::invert, which remains the route for any input it
+        // declines.
+        Ideal numerator(*order_);
+        flint::Fmpz den;
+        if (!numerator.is_defined()) {
             return false;
         }
-        base_fractional_[i].swap(base_fractional);
-        inverse_base_[i].swap(inverse);
+        if (!detail::prime_ideal_inverse_num_den(numerator,
+                                                 flint::FmpzRef(den),
+                                                 base_[i])) {
+            FractionalIdeal base_fractional(*order_);
+            FractionalIdeal inverse(*order_);
+            if (!base_fractional.is_defined() || !inverse.is_defined() ||
+                !detail::set_integral_ideal_known_hnf(base_fractional,
+                                                      base_[i]) ||
+                !inverse.invert(base_fractional) ||
+                !inverse.get_integral_den(numerator, flint::FmpzRef(den))) {
+                return false;
+            }
+        }
+        inverse_numerators_[i].swap(numerator);
+        inverse_denominators_[i].swap(den);
         return true;
     }
 
     bool multiply_random_by_inverse_base(slong index) noexcept {
         if (order_ == nullptr || index < 0 ||
-            index >= static_cast<slong>(inverse_base_.size())) {
+            index >= static_cast<slong>(inverse_numerators_.size())) {
             return false;
         }
         if (!ensure_inverse_base(index)) {
@@ -798,15 +814,15 @@ private:
         // gives the same integral ideal without re-validating fractional
         // HNFs.  multiply_integral_ideal_by_element rejects a nonintegral
         // result.
-        Ideal inverse_numerator(*order_);
+        const Ideal& inverse_numerator =
+                inverse_numerators_[static_cast<std::size_t>(index)];
+        const flint::Fmpz& den =
+                inverse_denominators_[static_cast<std::size_t>(index)];
         Ideal scaled_quotient(*order_);
         Ideal quotient(*order_);
-        flint::Fmpz den;
         const NumberField* field = order_->parent();
-        if (field == nullptr || !inverse_numerator.is_defined() ||
-            !scaled_quotient.is_defined() || !quotient.is_defined() ||
-            !inverse_base_[static_cast<std::size_t>(index)].get_integral_den(
-                    inverse_numerator, flint::FmpzRef(den)) ||
+        if (field == nullptr || !scaled_quotient.is_defined() ||
+            !quotient.is_defined() ||
             flint::fmpz_sgn(flint::FmpzConstRef(den)) <= 0 ||
             !scaled_quotient.multiply(random_ideal_, inverse_numerator)) {
             return false;
@@ -833,8 +849,10 @@ private:
 
     const Order* order_ = nullptr;
     std::vector<Ideal> base_;
-    std::vector<FractionalIdeal> base_fractional_;
-    std::vector<FractionalIdeal> inverse_base_;
+    // inverse_numerators_[i] / inverse_denominators_[i] is base_[i]^{-1};
+    // undefined numerators are not built yet.
+    std::vector<Ideal> inverse_numerators_;
+    std::vector<flint::Fmpz> inverse_denominators_;
     std::vector<slong> base_indices_;
     std::vector<slong> exponents_;
     Ideal random_ideal_;

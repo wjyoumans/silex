@@ -183,8 +183,8 @@ struct RandomIdealSearchState {
     std::vector<slong> base_indices;
     std::vector<slong> exponents;
     std::vector<Ideal> base_ideals;
-    std::vector<FractionalIdeal> base_fractional_ideals;
-    std::vector<FractionalIdeal> inverse_base_ideals;
+    std::vector<Ideal> inverse_base_numerators;
+    std::vector<flint::Fmpz> inverse_base_denominators;
     Ideal random_ideal;
     flint::Fmpz lower_bound;
     flint::Fmpz upper_bound;
@@ -337,8 +337,8 @@ struct ClassGroupContextStorage {
         random_ideal_search_state.base_indices.clear();
         random_ideal_search_state.exponents.clear();
         random_ideal_search_state.base_ideals.clear();
-        random_ideal_search_state.base_fractional_ideals.clear();
-        random_ideal_search_state.inverse_base_ideals.clear();
+        random_ideal_search_state.inverse_base_numerators.clear();
+        random_ideal_search_state.inverse_base_denominators.clear();
         random_ideal_search_state.random_ideal.clear();
         flint::fmpz_zero(
                 flint::FmpzRef(random_ideal_search_state.lower_bound));
