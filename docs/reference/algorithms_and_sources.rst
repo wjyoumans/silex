@@ -375,12 +375,16 @@ only with ``false``.
   never disproved, so it and every input with no disproving residue within
   the prime bound still return failure (unsupported).  The bound 40 (the
   same as the pre-lift disproof) is a resource limit only, and any value is
-  sound.  Every true power runs to the bound, and for a large prime ``n`` a
+  sound.  Every true power runs to the bound.  For a large prime ``n`` a
   residue can fail to be an ``n``-th power only in a residue field of order
-  ``q`` with ``gcd(n, q - 1) > 1``, so disproofs can need many primes: of
-  the compact-root kernel rows of the ``proven`` runs on ``Q(zeta_25)`` and
-  ``Q(zeta_44)``, 9 each are disproved within 256 primes, after 9 to 218
-  admissible primes, and 4 and 2 of them within 40.
+  ``q`` with ``gcd(n, q - 1) > 1`` (``F_q^*`` is cyclic of order ``q - 1``;
+  Lidl and Niederreiter, *Finite Fields*, Theorem 2.8), and every residue
+  degree is at most ``N``.  So a prime ``p`` with ``gcd(n, p^f - 1) = 1``
+  for every ``f <= N`` cannot disprove the input; Silex skips it exactly,
+  without factoring, and does not count it towards the bound.  Without that
+  skip, the 9 non-powers each of the compact-root kernel rows of the
+  ``proven`` runs on ``Q(zeta_25)`` and ``Q(zeta_44)`` needed 9 to 218
+  admissible primes; with it, all 18 are disproved within the bound.
 * Residue roots follow PARI 2.17.3
   ``src/basemath/bb_group.c:gen_Shanks_sqrtn`` (lines 899-953): the Bezout
   exponent of ``n`` modulo ``q - 1`` gives the unique root when

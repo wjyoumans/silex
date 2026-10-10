@@ -2503,10 +2503,12 @@ constexpr slong kPreLiftDisproofExtraPrimes = 40;
 // per prime (a fraction of a millisecond in degree 20), so the bound is the
 // same as kPreLiftDisproofExtraPrimes.  For a large prime n a residue can
 // fail to be an n-th power only at a factor whose residue field order q has
-// gcd(n, q - 1) > 1, which can need many primes: on the compact-root kernel
-// rows of the proven runs on Q(zeta_25) and Q(zeta_44), 9 non-powers each
-// are disproved within 256 primes, after 9 to 218 admissible primes, and 4
-// and 2 of them within 40.
+// gcd(n, q - 1) > 1, so a prime p with gcd(n, p^f - 1) = 1 for every
+// f <= N is skipped exactly, without factoring, and is not counted
+// (residue_degree_can_disprove_power).  On the compact-root kernel rows of
+// the proven runs on Q(zeta_25) and Q(zeta_44), 9 non-powers each needed 9
+// to 218 admissible primes without that skip; with it, all 18 are disproved
+// within the bound.
 constexpr slong kHighDegreeDisproofPrimes = 40;
 
 // Reduces the rational polynomial `polynomial` modulo the word prime of
@@ -2528,6 +2530,36 @@ bool fmpq_poly_reduce_nmod(flint::NmodPoly& out,
                                  out.raw()->mod.ninv));
     }
     return true;
+}
+
+// True when some residue field of order q = p^f, 1 <= f <= degree, has
+// gcd(n, q - 1) > 1.  When this is false, no residue at any prime above p
+// can disprove that a is an n-th power, so the caller may skip p without
+// factoring f mod p.  Exactness: if p satisfies (1) above, f mod p is
+// squarefree of degree N = `degree`, so every irreducible factor g_i has
+// degree at most N and every residue field O_K / P_i = F_p[x] / (g_i) has
+// order q = p^deg(g_i) with deg(g_i) in [1, N].  As stated above
+// residue_disproves_power_at_prime, F_q^* is cyclic of order q - 1, so x ->
+// x^n maps F_q^* onto its subgroup of index gcd(n, q - 1); when that gcd is 1
+// every nonzero residue is an n-th power (Lidl and Niederreiter, Finite
+// Fields, Theorem 2.8, cyclicity of F_q^*), and
+// residue_disproves_power_at_prime skips that residue degree.  Hence
+// residue_disproves_power_at_prime returns false at every p for which this
+// returns false, admissible or not.
+bool residue_degree_can_disprove_power(ulong p, slong degree,
+                                       slong exponent) noexcept {
+    const ulong n = static_cast<ulong>(exponent);
+    const ulong base = p % n;
+    ulong power = 1;  // p^f mod n
+    for (slong f = 1; f <= degree; ++f) {
+        power = n_mulmod2(power, base, n);
+        // gcd(n, p^f - 1) = gcd(n, (p^f - 1) mod n), with gcd(n, 0) = n.
+        const ulong reduced = power == 0 ? n - 1 : power - 1;
+        if (n_gcd(n, reduced) > 1) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Residue test at one rational prime p (see above).  Sets `admissible` when
@@ -3471,6 +3503,15 @@ bool pure_power_residue_disproves(bool& is_power,
                                 admissible_primes < kHighDegreeDisproofPrimes;
              ++attempt) {
             fmpz_nextprime(prime.raw(), prime.raw(), 1);
+            // Exact skip (see residue_degree_can_disprove_power): no residue
+            // above this prime can disprove the input, so it is not
+            // factored and does not count towards the bound.
+            if (fmpz_abs_fits_ui(prime.raw()) == 0 ||
+                !residue_degree_can_disprove_power(fmpz_get_ui(prime.raw()),
+                                                   parent->degree(),
+                                                   exponent)) {
+                continue;
+            }
             bool admissible = false;
             if (residue_disproves_power_at_prime(
                         admissible, raw_field->pol, element_polynomial.raw(),

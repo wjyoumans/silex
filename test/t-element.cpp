@@ -852,6 +852,13 @@ void test_power_degree_twenty_cyclotomic_residue_disproof() noexcept {
     assert_definitely_not_power(element_from_coefficients(phi44, {1, 0, 1}),
                                 3);
 
+    // 1 + zeta is not a 43rd power in either field (`nfroots` finds no root
+    // of x^43 - (1 + zeta)).  Its first disproving residue lies beyond the
+    // first 40 admissible primes; the primes p with gcd(43, p^f - 1) = 1 for
+    // every f <= 20 cannot disprove it and are skipped without counting.
+    assert_definitely_not_power(element_from_coefficients(phi25, {1, 1}), 43);
+    assert_definitely_not_power(element_from_coefficients(phi44, {1, 1}), 43);
+
     // True powers in degree 20.  A rational cube is still found.
     sflint::Fmpz three;
     sflint::fmpz_set_si(sflint::FmpzRef(three), 3);
