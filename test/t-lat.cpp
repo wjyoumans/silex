@@ -12,6 +12,7 @@
 #include "lat/lll_internal.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -272,6 +273,226 @@ int test_contains() {
     fmpz_clear(vec + 1);
     fmpz_clear(vec + 0);
     return 0;
+}
+
+// Deterministic pseudorandom source for the differential contains tests.
+struct ContainsRng {
+    std::uint64_t state;
+
+    slong next(slong lo, slong hi) noexcept {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        return lo + static_cast<slong>((state >> 33) %
+                                       static_cast<std::uint64_t>(hi - lo + 1));
+    }
+};
+
+slong hnf_nonzero_rows(const fmpz_mat_t hnf) noexcept {
+    slong rows = fmpz_mat_nrows(hnf);
+    while (rows > 0 && fmpz_mat_is_zero_row(hnf, rows - 1) != 0) {
+        --rows;
+    }
+    return rows;
+}
+
+// The containment rule Lat::contains used before its echelon back-substitution
+// path: v lies in the row lattice of B iff HNF(B) and HNF(B; v) agree after
+// trailing zero rows are dropped.
+bool reference_hnf_contains(const fmpz_mat_t basis, const fmpz* vector) {
+    const slong rows = fmpz_mat_nrows(basis);
+    const slong cols = fmpz_mat_ncols(basis);
+    silex::flint::FmpzMat hnf(rows, cols);
+    silex::flint::FmpzMat extended(rows + 1, cols);
+    silex::flint::FmpzMat extended_hnf(rows + 1, cols);
+    fmpz_mat_hnf(hnf.raw(), basis);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            fmpz_set(fmpz_mat_entry(extended.raw(), i, j),
+                     fmpz_mat_entry(basis, i, j));
+        }
+    }
+    for (slong j = 0; j < cols; ++j) {
+        fmpz_set(fmpz_mat_entry(extended.raw(), rows, j), vector + j);
+    }
+    fmpz_mat_hnf(extended_hnf.raw(), extended.raw());
+    const slong rank = hnf_nonzero_rows(hnf.raw());
+    if (hnf_nonzero_rows(extended_hnf.raw()) != rank) {
+        return false;
+    }
+    for (slong i = 0; i < rank; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            if (fmpz_equal(fmpz_mat_entry(hnf.raw(), i, j),
+                           fmpz_mat_entry(extended_hnf.raw(), i, j)) == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void random_lattice_basis(fmpz_mat_t basis, ContainsRng& rng, slong kind) {
+    const slong rows = fmpz_mat_nrows(basis);
+    const slong cols = fmpz_mat_ncols(basis);
+    fmpz_mat_zero(basis);
+    if (kind == 1) {
+        // Rank-deficient: rows are small combinations of fewer generators.
+        const slong rank = rng.next(0, rows < cols ? rows : cols);
+        silex::flint::FmpzMat gens(rank, cols);
+        for (slong i = 0; i < rank; ++i) {
+            for (slong j = 0; j < cols; ++j) {
+                fmpz_set_si(fmpz_mat_entry(gens.raw(), i, j), rng.next(-6, 6));
+            }
+        }
+        for (slong i = 0; i < rows; ++i) {
+            for (slong k = 0; k < rank; ++k) {
+                silex::flint::Fmpz c;
+                fmpz_set_si(c.raw(), rng.next(-3, 3));
+                for (slong j = 0; j < cols; ++j) {
+                    fmpz_addmul(fmpz_mat_entry(basis, i, j),
+                                fmpz_mat_entry(gens.raw(), k, j), c.raw());
+                }
+            }
+        }
+        return;
+    }
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            fmpz* entry = fmpz_mat_entry(basis, i, j);
+            if (kind == 3 && rng.next(0, 2) != 0) {
+                continue;
+            }
+            fmpz_set_si(entry, rng.next(-9, 9));
+            if (kind == 2 && j % 2 == 0) {
+                // Multi-limb entries on alternate columns.
+                fmpz_mul_2exp(entry, entry, 80);
+                fmpz_add_si(entry, entry, rng.next(-9, 9));
+            }
+        }
+    }
+}
+
+int check_contains_against_reference(const silex::lat::Lat& lattice,
+                                      const fmpz_mat_t basis,
+                                      const fmpz* vector,
+                                      slong& members,
+                                      slong& nonmembers) {
+    const bool expected = reference_hnf_contains(basis, vector);
+    if (lattice.contains(vector) != expected) {
+        return 1;
+    }
+    ++(expected ? members : nonmembers);
+    return 0;
+}
+
+// Differential test of Lat::contains against the HNF-comparison rule over
+// random full-rank, rank-deficient, multi-limb, sparse, empty and zero-width
+// lattices, each stored three ways: the raw basis (not flagged HNF), its
+// square-padded HNF with trailing zero rows, and the trimmed HNF from
+// Lat::hnf.
+int test_contains_matches_hnf_reference() {
+    ContainsRng rng{0x5113c0de};
+    slong members = 0;
+    slong nonmembers = 0;
+    slong raw_non_hnf = 0;
+    for (slong trial = 0; trial < 600; ++trial) {
+        const slong cols = rng.next(0, 6);
+        const slong rows = rng.next(0, 8);
+        const slong kind = rng.next(0, 3);
+        silex::flint::FmpzMat basis(rows, cols);
+        random_lattice_basis(basis.raw(), rng, kind);
+        silex::flint::FmpzMat hnf(rows, cols);
+        fmpz_mat_hnf(hnf.raw(), basis.raw());
+
+        silex::lat::Lat raw(cols);
+        silex::lat::Lat padded(cols);
+        silex::lat::Lat trimmed(cols);
+        if (!raw.set_basis(silex::flint::FmpzMatConstRef(basis)) ||
+            !padded.set_basis(silex::flint::FmpzMatConstRef(hnf)) ||
+            !raw.hnf(trimmed) || !padded.is_hnf() || !trimmed.is_hnf()) {
+            return 1;
+        }
+        raw_non_hnf += raw.is_hnf() ? 0 : 1;
+
+        silex::flint::FmpzMat vector(1, cols);
+        // A 1 x 0 FLINT row may be a null pointer, which contains() rejects,
+        // so zero-width lattices are probed through a separate (empty) array.
+        silex::flint::Fmpz zero_width;
+        fmpz* v = cols > 0 ? fmpz_mat_row(vector.raw(), 0) : zero_width.raw();
+        silex::flint::Fmpz c;
+        for (slong sample = 0; sample < 12; ++sample) {
+            // Shapes: 0 lattice combination, 1 combination plus a unit
+            // perturbation, 2 arbitrary vector, 3 combination divided by 2 or
+            // 3 when exact (non-integral coordinates), and the zero vector.
+            const slong shape = sample % 5;
+            fmpz_mat_zero(vector.raw());
+            if (shape == 0 || shape == 1 || shape == 3) {
+                for (slong i = 0; i < rows; ++i) {
+                    fmpz_set_si(c.raw(), rng.next(-5, 5));
+                    for (slong j = 0; j < cols; ++j) {
+                        fmpz_addmul(v + j, fmpz_mat_entry(basis.raw(), i, j),
+                                    c.raw());
+                    }
+                }
+            }
+            if (shape == 1 && cols > 0) {
+                fmpz_add_si(v + rng.next(0, cols - 1), v + rng.next(0, cols - 1),
+                            rng.next(1, 3));
+            }
+            if (shape == 2) {
+                for (slong j = 0; j < cols; ++j) {
+                    fmpz_set_si(v + j, rng.next(-12, 12));
+                }
+            }
+            if (shape == 3) {
+                const slong divisor = rng.next(2, 3);
+                bool exact = true;
+                for (slong j = 0; j < cols; ++j) {
+                    exact = exact && fmpz_divisible_si(v + j, divisor) != 0;
+                }
+                if (exact) {
+                    for (slong j = 0; j < cols; ++j) {
+                        fmpz_divexact_si(v + j, v + j, divisor);
+                    }
+                }
+            }
+            if (check_contains_against_reference(raw, basis.raw(), v,
+                                                 members, nonmembers) != 0 ||
+                check_contains_against_reference(padded, basis.raw(), v,
+                                                 members, nonmembers) != 0 ||
+                check_contains_against_reference(trimmed, basis.raw(), v,
+                                                 members, nonmembers) != 0 ||
+                (cols > 0 &&
+                 !raw.contains_row(silex::flint::FmpzMatConstRef(vector), 0) !=
+                         !raw.contains(v))) {
+                return 1;
+            }
+        }
+    }
+
+    // A non-square echelon basis whose first pivot is not in column 0.
+    silex::flint::FmpzMat echelon(2, 3);
+    set_entry_si(echelon.raw(), 0, 1, 2);
+    set_entry_si(echelon.raw(), 0, 2, 1);
+    set_entry_si(echelon.raw(), 1, 2, 3);
+    silex::lat::Lat shifted(3);
+    if (!shifted.set_basis(silex::flint::FmpzMatConstRef(echelon)) ||
+        !shifted.is_hnf()) {
+        return 1;
+    }
+    const slong probes[6][3] = {{0, 4, 5}, {1, 0, 0}, {0, 2, 4},
+                                {0, 1, 0}, {0, 0, 1}, {0, -2, 2}};
+    silex::flint::FmpzMat probe(1, 3);
+    for (const auto& entries : probes) {
+        for (slong j = 0; j < 3; ++j) {
+            set_entry_si(probe.raw(), 0, j, entries[j]);
+        }
+        slong unused = 0;
+        if (check_contains_against_reference(shifted, echelon.raw(),
+                                             fmpz_mat_row(probe.raw(), 0),
+                                             unused, unused) != 0) {
+            return 1;
+        }
+    }
+    return (members > 0 && nonmembers > 0 && raw_non_hnf > 0) ? 0 : 1;
 }
 
 int test_sum_intersection_index() {
@@ -1481,7 +1702,9 @@ int test_lll_certified_routes() {
 
 int main() {
     return test_init_set_swap_basis() != 0 || test_hnf_and_transform() != 0 ||
-                   test_contains() != 0 || test_sum_intersection_index() != 0 ||
+                   test_contains() != 0 ||
+                   test_contains_matches_hnf_reference() != 0 ||
+                   test_sum_intersection_index() != 0 ||
                    test_saturate() != 0 || test_lll_reduce() != 0 ||
                    test_lll_basis_only_contract() != 0 ||
                    test_lll_certifier_boundaries() != 0 ||

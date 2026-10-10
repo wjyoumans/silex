@@ -7,6 +7,7 @@
 #include "../src/ideal/two_generator_internal.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <cstdio>
 #include <string_view>
 #include <utility>
@@ -2081,6 +2082,221 @@ int dump_product_fixtures() {
 
 }  // namespace
 
+// Deterministic pseudorandom source for the differential containment tests.
+struct ContainsRng {
+    std::uint64_t state;
+
+    slong next(slong lo, slong hi) noexcept {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        return lo + static_cast<slong>((state >> 33) %
+                                       static_cast<std::uint64_t>(hi - lo + 1));
+    }
+};
+
+// The containment rule Ideal::contains and Ideal::set_hnf used before the
+// echelon back-substitution path in Lat::contains: a row lies in the lattice
+// of the n x n basis iff HNF(basis) and HNF(basis; row) agree after trailing
+// zero rows are dropped.
+bool reference_hnf_contains(const sflint::FmpzMat& basis,
+                            const sflint::FmpzMat& row) {
+    const slong n = fmpz_mat_ncols(basis.raw());
+    sflint::FmpzMat hnf(n, n);
+    sflint::FmpzMat extended(n + 1, n);
+    sflint::FmpzMat extended_hnf(n + 1, n);
+    fmpz_mat_hnf(hnf.raw(), basis.raw());
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(extended.raw(), i, j),
+                     fmpz_mat_entry(basis.raw(), i, j));
+        }
+    }
+    for (slong j = 0; j < n; ++j) {
+        fmpz_set(fmpz_mat_entry(extended.raw(), n, j),
+                 fmpz_mat_entry(row.raw(), 0, j));
+    }
+    fmpz_mat_hnf(extended_hnf.raw(), extended.raw());
+    if (fmpz_mat_is_zero_row(extended_hnf.raw(), n) == 0) {
+        return false;
+    }
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            if (fmpz_equal(fmpz_mat_entry(hnf.raw(), i, j),
+                           fmpz_mat_entry(extended_hnf.raw(), i, j)) == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Reference acceptance rule of Ideal::set_hnf: the input normalizes to a
+// nonsingular HNF whose lattice is closed under multiplication by every order
+// basis element, with membership decided by reference_hnf_contains.
+bool reference_set_hnf_accepts(const silex::Order& order,
+                               const sflint::FmpzMat& input,
+                               sflint::FmpzMat& normalized) {
+    const slong n = order.degree();
+    fmpz_mat_hnf(normalized.raw(), input.raw());
+    sflint::Fmpz det;
+    fmpz_mat_det(det.raw(), normalized.raw());
+    if (fmpz_is_zero(det.raw()) != 0) {
+        return false;
+    }
+    silex::OrderElement gen(order);
+    silex::OrderElement omega(order);
+    silex::OrderElement product(order);
+    sflint::FmpzMat row(1, n);
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(row.raw(), 0, j),
+                     fmpz_mat_entry(normalized.raw(), i, j));
+        }
+        assert(gen.set_coordinates(sflint::FmpzMatConstRef(row)));
+        for (slong j = 0; j < n; ++j) {
+            fmpz_mat_zero(row.raw());
+            fmpz_one(fmpz_mat_entry(row.raw(), 0, j));
+            assert(omega.set_coordinates(sflint::FmpzMatConstRef(row)));
+            assert(product.multiply(gen, omega));
+            assert(product.get_coordinates(sflint::FmpzMatRef(row)));
+            if (!reference_hnf_contains(normalized, row)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Differential test of Ideal::contains(OrderElement) and Ideal::set_hnf
+// against the HNF-comparison rule, on the product fixtures (maximal and
+// equation orders, degrees 2-8) and their sums and products.  Elements are
+// ideal combinations, perturbed combinations, arbitrary rows and halved
+// combinations; set_hnf candidates are the ideal HNF, a unimodular scramble
+// of it, twice it, a perturbed entry, a random triangular matrix and a
+// singular matrix.
+int test_contains_and_set_hnf_match_hnf_reference() {
+    ContainsRng rng{0x7179c0de};
+    slong members = 0;
+    slong nonmembers = 0;
+    slong accepted = 0;
+    slong rejected = 0;
+    for (slong degree : {2, 3, 4, 6, 8}) {
+        for (slong kind = 0; kind < 5; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            silex::Ideal sum(order), product(order);
+            assert(sum.add(left, right));
+            assert(product.multiply(left, right));
+            const slong n = order.degree();
+            for (const silex::Ideal* ideal : {&left, &right, &sum, &product}) {
+                sflint::FmpzMat hnf(n, n);
+                assert(ideal->get_hnf(sflint::FmpzMatRef(hnf)));
+
+                sflint::FmpzMat row(1, n);
+                sflint::Fmpz c;
+                silex::OrderElement element(order);
+                for (slong sample = 0; sample < 16; ++sample) {
+                    const slong shape = sample % 4;
+                    fmpz_mat_zero(row.raw());
+                    if (shape != 2) {
+                        for (slong i = 0; i < n; ++i) {
+                            fmpz_set_si(c.raw(), rng.next(-4, 4));
+                            for (slong j = 0; j < n; ++j) {
+                                fmpz_addmul(fmpz_mat_entry(row.raw(), 0, j),
+                                            fmpz_mat_entry(hnf.raw(), i, j),
+                                            c.raw());
+                            }
+                        }
+                    }
+                    if (shape == 1) {
+                        fmpz_add_si(fmpz_mat_entry(row.raw(), 0, rng.next(0, n - 1)),
+                                    fmpz_mat_entry(row.raw(), 0, rng.next(0, n - 1)),
+                                    rng.next(1, 3));
+                    } else if (shape == 2) {
+                        for (slong j = 0; j < n; ++j) {
+                            fmpz_set_si(fmpz_mat_entry(row.raw(), 0, j),
+                                        rng.next(-30, 30));
+                        }
+                    } else if (shape == 3) {
+                        bool even = true;
+                        for (slong j = 0; j < n; ++j) {
+                            even = even && fmpz_is_even(fmpz_mat_entry(row.raw(), 0, j)) != 0;
+                        }
+                        for (slong j = 0; even && j < n; ++j) {
+                            fmpz_divexact_si(fmpz_mat_entry(row.raw(), 0, j),
+                                             fmpz_mat_entry(row.raw(), 0, j), 2);
+                        }
+                    }
+                    assert(element.set_coordinates(sflint::FmpzMatConstRef(row)));
+                    const bool expected = reference_hnf_contains(hnf, row);
+                    if (ideal->contains(element) != expected) {
+                        return 1;
+                    }
+                    ++(expected ? members : nonmembers);
+                }
+
+                for (slong candidate_kind = 0; candidate_kind < 6; ++candidate_kind) {
+                    sflint::FmpzMat candidate(n, n);
+                    fmpz_mat_set(candidate.raw(), hnf.raw());
+                    if (candidate_kind == 1) {
+                        for (slong step = 0; step < 3 * n; ++step) {
+                            const slong target = rng.next(0, n - 1);
+                            const slong source = rng.next(0, n - 1);
+                            if (target == source) {
+                                continue;
+                            }
+                            fmpz_set_si(c.raw(), rng.next(-2, 2));
+                            for (slong j = 0; j < n; ++j) {
+                                fmpz_addmul(fmpz_mat_entry(candidate.raw(), target, j),
+                                            fmpz_mat_entry(candidate.raw(), source, j),
+                                            c.raw());
+                            }
+                        }
+                    } else if (candidate_kind == 2) {
+                        fmpz_mat_scalar_mul_si(candidate.raw(), candidate.raw(), 2);
+                    } else if (candidate_kind == 3) {
+                        const slong i = rng.next(0, n - 2);
+                        const slong j = rng.next(i + 1, n - 1);
+                        fmpz_add_ui(fmpz_mat_entry(candidate.raw(), i, j),
+                                    fmpz_mat_entry(candidate.raw(), i, j), 1);
+                    } else if (candidate_kind == 4) {
+                        fmpz_mat_zero(candidate.raw());
+                        for (slong i = 0; i < n; ++i) {
+                            const slong diagonal = rng.next(1, 3);
+                            fmpz_set_si(fmpz_mat_entry(candidate.raw(), i, i), diagonal);
+                            for (slong k = 0; k < i; ++k) {
+                                fmpz_set_si(fmpz_mat_entry(candidate.raw(), k, i),
+                                            rng.next(0, diagonal - 1));
+                            }
+                        }
+                    } else if (candidate_kind == 5) {
+                        fmpz_mat_zero(candidate.raw());
+                        for (slong j = 0; j < n; ++j) {
+                            fmpz_set(fmpz_mat_entry(candidate.raw(), 0, j),
+                                     fmpz_mat_entry(hnf.raw(), 0, j));
+                        }
+                    }
+                    sflint::FmpzMat normalized(n, n);
+                    const bool expected = reference_set_hnf_accepts(order, candidate, normalized);
+                    silex::Ideal out(order);
+                    if (out.set_hnf(sflint::FmpzMatConstRef(candidate)) != expected) {
+                        return 1;
+                    }
+                    if (expected) {
+                        sflint::FmpzMat got(n, n);
+                        if (!out.get_hnf(sflint::FmpzMatRef(got)) ||
+                            fmpz_mat_equal(got.raw(), normalized.raw()) == 0) {
+                            return 1;
+                        }
+                    }
+                    ++(expected ? accepted : rejected);
+                }
+            }
+        }
+    }
+    return members > 0 && nonmembers > 0 && accepted > 0 && rejected > 0 ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--dump-product-fixtures")
         return dump_product_fixtures();
@@ -2145,6 +2361,7 @@ int main(int argc, char** argv) {
     assert(test_fractional_principal_nontrivial_order_basis() == 0);
     assert(test_quadratic_principal_and_validation() == 0);
     assert(test_set_hnf_validation() == 0);
+    assert(test_contains_and_set_hnf_match_hnf_reference() == 0);
     assert(test_integral_noninvertible_norm_trap() == 0);
     assert(test_fractional_inverse_quadratic() == 0);
     assert(test_fractional_inverse_nontrivial_order_basis() == 0);

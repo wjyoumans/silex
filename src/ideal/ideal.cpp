@@ -148,7 +148,9 @@ bool hnf_is_ideal(const Order& order, flint::FmpzMatConstRef hnf) noexcept {
     OrderElement product(order);
     flint::FmpzMat row(1, n);
     flint::FmpzMat omega_row(1, n);
-    if (!gen.is_defined() || !omega.is_defined() || !product.is_defined()) {
+    lat::Lat lattice(n);
+    if (!gen.is_defined() || !omega.is_defined() || !product.is_defined() ||
+        !lattice.set_basis(hnf)) {
         return false;
     }
 
@@ -163,7 +165,7 @@ bool hnf_is_ideal(const Order& order, flint::FmpzMatConstRef hnf) noexcept {
             if (!omega.set_coordinates(flint::FmpzMatConstRef(omega_row)) ||
                 !product.multiply(gen, omega) ||
                 !product.get_coordinates(flint::FmpzMatRef(row)) ||
-                !hnf_lattice_contains(hnf, flint::FmpzMatConstRef(row))) {
+                !lattice.contains_row(flint::FmpzMatConstRef(row), 0)) {
                 return false;
             }
         }

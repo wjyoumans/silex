@@ -81,6 +81,69 @@ slong nonzero_rows(const fmpz_mat_t matrix) noexcept {
     return rows;
 }
 
+// Exact membership of `vector` in the row lattice of `basis`, a matrix in
+// row echelon form (each nonzero row's first nonzero entry lies strictly right
+// of the previous row's, zero rows last), such as a FLINT HNF.  The nonzero
+// rows are independent, so a lattice vector has unique coordinates x with
+// x B = v.  Walking the pivots left to right, column p_i of the residual
+// determines x_i = r_{p_i} / B_{i,p_i}, which must be an integer, and every
+// non-pivot column must already be zero because no remaining row reaches it.
+// This is back-substitution against an existing HNF (one O(rows * n) pass)
+// in place of comparing the HNFs of B and B + v; it has the same result, as
+// equal HNFs mean equal lattices.  A zero row followed by a nonzero row is
+// rejected, matching the `nonzero_rows` check in `Lat::hnf`.  The same
+// approach is `triangular_basis_contains_row` in prime_ideal.cpp, which is
+// restricted to square full-rank triangular bases.
+bool echelon_basis_contains(const fmpz_mat_t basis,
+                            const fmpz* vector) noexcept {
+    const slong rows = fmpz_mat_nrows(basis);
+    const slong cols = fmpz_mat_ncols(basis);
+    flint::FmpzMat residual_row(1, cols);
+    fmpz* residual = fmpz_mat_row(residual_row.raw(), 0);
+    for (slong j = 0; j < cols; ++j) {
+        fmpz_set(residual + j, vector + j);
+    }
+
+    flint::Fmpz quotient;
+    slong col = 0;
+    for (slong i = 0; i < rows; ++i) {
+        const fmpz* basis_row = fmpz_mat_row(basis, i);
+        slong pivot = col;
+        while (pivot < cols && fmpz_is_zero(basis_row + pivot) != 0) {
+            ++pivot;
+        }
+        if (pivot == cols) {
+            for (slong k = i + 1; k < rows; ++k) {
+                if (fmpz_mat_is_zero_row(basis, k) == 0) {
+                    return false;
+                }
+            }
+            break;
+        }
+        for (; col < pivot; ++col) {
+            if (fmpz_is_zero(residual + col) == 0) {
+                return false;
+            }
+        }
+        if (fmpz_is_zero(residual + pivot) == 0) {
+            if (fmpz_divisible(residual + pivot, basis_row + pivot) == 0) {
+                return false;
+            }
+            fmpz_divexact(quotient.raw(), residual + pivot, basis_row + pivot);
+            for (slong l = pivot; l < cols; ++l) {
+                fmpz_submul(residual + l, quotient.raw(), basis_row + l);
+            }
+        }
+        col = pivot + 1;
+    }
+    for (; col < cols; ++col) {
+        if (fmpz_is_zero(residual + col) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool hnf_basis(fmpz_mat_t out, const fmpz_mat_t basis) noexcept {
     flint::FmpzMat full(fmpz_mat_nrows(basis), fmpz_mat_ncols(basis));
     fmpz_mat_hnf(full.raw(), basis);
@@ -673,28 +736,15 @@ bool Lat::contains(const fmpz* vector) const noexcept {
     if (vector == nullptr) {
         return false;
     }
+    if (is_hnf_) {
+        return echelon_basis_contains(basis_.raw(), vector);
+    }
 
     Lat hnf_lattice(ambient_dim_);
-    Lat hnf_candidate(ambient_dim_);
     if (!hnf(hnf_lattice)) {
         return false;
     }
-
-    flint::FmpzMat candidate(hnf_lattice.nrows() + 1, ambient_dim_);
-    if (hnf_lattice.nrows() > 0) {
-        flint::FmpzMatWindow top(
-                candidate, 0, 0, hnf_lattice.nrows(), ambient_dim_);
-        flint::fmpz_mat_set(top.ref(), hnf_lattice.basis_);
-    }
-    for (slong j = 0; j < ambient_dim_; ++j) {
-        flint::fmpz_set(
-                flint::fmpz_mat_entry(candidate, hnf_lattice.nrows(), j), vector + j);
-    }
-    hnf_candidate.set_basis(candidate);
-    if (!hnf_candidate.hnf(hnf_candidate)) {
-        return false;
-    }
-    return fmpz_mat_equal(hnf_lattice.basis_.raw(), hnf_candidate.basis_.raw()) != 0;
+    return echelon_basis_contains(hnf_lattice.basis_.raw(), vector);
 }
 
 bool Lat::contains_row(flint::FmpzMatConstRef matrix, slong row) const noexcept {
