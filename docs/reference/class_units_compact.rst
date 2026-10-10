@@ -66,8 +66,8 @@ these two gates then succeed only when the units are already proven and the
 class group already has an unconditional proof component for this presentation:
 relation saturation proven at every prime dividing the candidate class number,
 or an unconditional analytic check recorded earlier (degree one or the
-quadratic ``L(1, chi)`` route, including one stored by a real-quadratic ``grh``
-run); they never use that value to mark units proven.
+quadratic ``L(1, chi)`` route, which a ``grh`` run on ``x^2 - d`` no longer
+stores); they never use that value to mark units proven.
 ``try_certify_with_units`` requires proven units and never evaluates a
 Belabas-Friedman ``hR``, so its ``zeta_bf_max_cutoff`` argument is ignored.
 A ``proven`` request uses the analytic product only when it is
@@ -191,12 +191,15 @@ The class-group proof metadata is deliberately componentized:
   GRH (``grh``); a ``grh`` check never contributes to a ``proven`` label.
   A ``grh`` paired transaction accepted by the analytic index-one test
   records that check too, as information only: its class-group and unit
-  labels stay ``grh`` even when the check itself reads ``proven`` (quadratic
-  ``L(1, chi)``), and a Belabas-Friedman check also stores its BF zeta
-  audit record.  A stored ``proven`` check from a real-quadratic ``grh``
-  run can later let an explicit ``try_certify_with_units(units, proven)``
-  with proven units promote the class group; the transaction itself never
-  promotes.  The exact imaginary-quadratic and degree-one ``grh`` routes
+  labels stay ``grh``, and a Belabas-Friedman check also stores its BF zeta
+  audit record.  A ``grh`` request takes the Belabas-Friedman ``hR`` for a
+  quadratic field written as ``x^2 - d`` too, so it records a ``grh`` check
+  (``analytic_class_regulator_certification()`` ``grh``, completeness basis
+  ``belabas_friedman``, ``zeta_bf_proof_status()`` ``verified``) and no
+  ``proven`` one.  A later ``try_certify_with_units(units, proven)`` with
+  proven units computes ``L(1, chi)`` itself at a usable precision; a
+  ``proven`` check stored by another route can still promote; the
+  transaction itself never promotes.  The exact imaginary-quadratic and degree-one ``grh`` routes
   record no analytic check;
 - GRH provenance reports, for each published class group, whether
   factor-base generation (``factor_base_generation_certification()``,

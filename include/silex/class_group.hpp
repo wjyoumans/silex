@@ -241,12 +241,14 @@ public:
     // relative to factor-base generation: `proven` for a `proven` class
     // group (basis unconditional_certification) and for a `grh` pair
     // accepted through the exact imaginary-quadratic class number (|D| <
-    // 2^44), an unconditional quadratic L(1, chi) hR, or the exact
-    // degree-one route;
+    // 2^44), an unconditional quadratic L(1, chi) hR (a `proven` request),
+    // or the exact degree-one route;
     // `grh` for a `grh` pair accepted through a Belabas-Friedman hR (every
     // degree >= 3 field, a degree-two field outside the explicit quadratic
-    // backend, and a quadratic field with |D| >= 2^44 or whose L(1, chi)
-    // evaluation fell back to Belabas-Friedman); `unknown` otherwise.  A
+    // backend, every quadratic field of a `grh` request (including
+    // x^2 - d) whose acceptance is not the exact route, and a quadratic field
+    // with |D| >= 2^44 or whose L(1, chi) evaluation fell back to
+    // Belabas-Friedman); `unknown` otherwise.  A
     // `grh` result whose generation and completeness are both `proven` keeps
     // the `grh` label.
     CertificationMode class_unit_completeness_certification() const noexcept;
@@ -267,7 +269,7 @@ public:
     // - the unconditional analytic index-one routes (degree one or the
     //   quadratic L(1, chi) route) of a `proven` try_certify_with_units,
     //   including its promotion from an unconditional check stored
-    //   earlier (for example by a real-quadratic grh run) and the internal
+    //   earlier (a `grh` run on x^2 - d no longer stores one) and the internal
     //   fallback try_analytic_index_bound_with_units_ it runs when the
     //   direct index-one check fails, of try_certify_class_unit_with_zeta,
     //   and, in degree one only (where hR = 1 exactly), of
@@ -309,10 +311,11 @@ public:
     // `verified` once an analytic class-regulator check (hR from the zeta
     // function) has passed for the current presentation.  The check is
     // unconditional only for degree one and for the quadratic L(1, chi)
-    // route; a Belabas-Friedman hR (every degree >= 3 field, a degree-two
-    // field outside the explicit quadratic backend, and a quadratic field
-    // with |D| >= 2^44 or whose L(1, chi) evaluation fails and falls back to
-    // Belabas-Friedman) assumes GRH.  Use
+    // route of a `proven` request; a Belabas-Friedman hR (every degree >= 3
+    // field, a degree-two field outside the explicit quadratic backend, every
+    // quadratic field of a `grh` request including x^2 - d, and a quadratic
+    // field with |D| >= 2^44 or whose L(1, chi) evaluation fails and falls
+    // back to Belabas-Friedman) assumes GRH.  Use
     // analytic_class_regulator_certification() to read which one was used.
     // A `grh` class/unit transaction accepted by the analytic index-one test
     // records that check here as well; the record is
@@ -327,13 +330,14 @@ public:
     // a later Belabas-Friedman audit of the same presentation keeps the
     // `proven` label.  This is the conditionality of the analytic check
     // only, not of the result: a `grh` transaction accepted through an
-    // unconditional hR (quadratic L(1, chi)) reports `proven` here while
-    // certification_status() stays `grh`.  The `grh` transaction itself
+    // unconditional hR (quadratic L(1, chi), no longer taken by a `grh`
+    // request) reports `proven` here while certification_status() stays
+    // `grh`.  The `grh` transaction itself
     // never promotes a label.  The one exception to "the record never
     // promotes" is a later explicit try_certify_with_units(units, proven)
-    // with proven `units`: a stored `proven` record (a real-quadratic `grh`
-    // run, whose factor-base generation is verified to the Minkowski-type
-    // bound) then counts as the unconditional analytic check and can promote
+    // with proven `units`: a stored `proven` record (not one from a `grh` run
+    // on x^2 - d, which stores a Belabas-Friedman record; the call then
+    // computes L(1, chi) itself at a usable precision) then counts as the unconditional analytic check and can promote
     // the class group to `proven`.  A GRH-conditional check never
     // serves as a proof component and never makes the class group or the
     // units `proven`: a `proven` label then requires factor-base
@@ -397,8 +401,8 @@ public:
     // has an unconditional proof component for this presentation: relation
     // saturation proven at every prime dividing the candidate class number, or
     // an unconditional analytic check recorded earlier (degree one or the
-    // quadratic L(1, chi) route, including one stored by a real-quadratic grh
-    // run); then they only record the GRH-conditional analytic check.
+    // quadratic L(1, chi) route, which a `grh` run on x^2 - d no longer
+    // stores); then they only record the GRH-conditional analytic check.
     // Otherwise they fail and leave both objects unchanged.
     bool try_certify_class_unit_with_zeta(OrderUnitGroup& units,
                                           slong precision) noexcept;

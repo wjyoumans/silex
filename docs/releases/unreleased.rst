@@ -238,15 +238,17 @@ Changed
   ``analytic_class_regulator_status()`` reads ``verified``, and
   ``analytic_class_regulator_certification()`` gives the check's own
   conditionality: ``grh`` for a Belabas-Friedman ``hR`` and ``proven`` for
-  the quadratic ``L(1, chi)`` value.  With a Belabas-Friedman ``hR`` the
+  the quadratic ``L(1, chi)`` value (no longer reached by a ``grh`` request;
+  see the x^2 - d entry under Changed).  With a Belabas-Friedman ``hR`` the
   evaluation's BF audit data is recorded too, so ``zeta_bf_proof_status()``
   reads ``verified`` and ``zeta_bf_proof_record()`` gives its error bound,
   cutoff, and precisions.  The record is informational.  The transaction
   keeps the class-group and unit labels at ``grh``, and that change leaves
   the public zeta and BF gates unchanged.  The one exception: a ``proven``
-  record stored by a real-quadratic ``grh`` run lets a later explicit
+  record stored by another route lets a later explicit
   ``try_certify_with_units(units, proven)`` with proven units promote the
-  class group to ``proven``.  The exact imaginary-quadratic and degree-one
+  class group to ``proven``; a ``grh`` run on ``x^2 - d`` stores no such
+  record.  The exact imaginary-quadratic and degree-one
   ``grh`` routes use no analytic check and record none.  See "Class groups
   and order units" in :doc:`../reference/algorithms_and_sources`.
 
@@ -291,7 +293,7 @@ Changed
   already has an unconditional proof component for this presentation: relation
   saturation proven at every prime dividing the candidate class number, or an
   unconditional analytic check recorded earlier (degree one or the quadratic
-  ``L(1, chi)`` route, including one stored by a real-quadratic ``grh`` run),
+  ``L(1, chi)`` route, which a ``grh`` run on ``x^2 - d`` no longer stores),
   and then they only record the GRH-conditional check; otherwise they return
   ``false`` and leave both objects unchanged.
   ``try_certify_class_unit_with_zeta_bf`` uses a Belabas-Friedman value for
@@ -349,6 +351,27 @@ Changed
   precision, an evaluation now takes 10.0 s instead of 123 s for a real field
   (12.4x) and 12.5 s instead of 34.7 s for an imaginary field (2.8x), on one
   core of a Ryzen AI 9 HX PRO 370.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
+- A ``grh`` class/unit request on a quadratic field written as ``x^2 - d``
+  now takes the Belabas-Friedman ``hR`` for the analytic index-one test, as
+  Hecke (``Clgp.jl``, ``zeta_log_residue``) and PARI (``buch1.c``,
+  ``compute_invresquad``) do, instead of the unconditional ``L(1, chi_D)``
+  value, whose cost grows like ``sqrt(|D|)``.  On the real quadratic
+  benchmark rows the residue step fell from 38 to 138 ms to about 8 ms
+  (``|D|`` of 4e4 to 4e5; one run, not a timing claim).  The class number,
+  regulator and generators are unchanged.  Three published informational
+  fields of such a ``grh`` result change: ``class_unit_completeness_basis()``
+  is ``belabas_friedman`` instead of ``unconditional_analytic``,
+  ``class_unit_completeness_certification()`` and
+  ``analytic_class_regulator_certification()`` are ``grh`` instead of
+  ``proven``, and ``zeta_bf_proof_status()`` is ``verified`` instead of
+  ``not_checked``, with the BF audit record stored.  Consequently a ``grh``
+  run no longer stores a ``proven`` analytic record, a later
+  ``try_certify_with_units(units, proven)`` computes ``L(1, chi)`` itself
+  (at a usable precision) to promote, and ``unconditional_analytic`` is no
+  longer reachable through public transactions.  ``proven`` requests and the
+  public zeta gates are unchanged.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 Fixed
@@ -411,7 +434,7 @@ Fixed
 - A ``proven`` class/unit result certified by the unconditional analytic
   index-one test (degree one or the quadratic ``L(1, chi)`` value, through
   ``try_certify_with_units``, including its promotion from an
-  unconditional check stored earlier by a real-quadratic ``grh`` run,
+  unconditional check stored earlier by another route,
   ``try_certify_class_unit_with_zeta``, or, in degree one, where
   ``hR = 1`` exactly, ``try_certify_class_unit_with_zeta_bf``) now
   reports ``relation_saturation_status()`` as ``verified``, as documented:

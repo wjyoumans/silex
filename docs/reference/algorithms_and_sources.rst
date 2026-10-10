@@ -1003,30 +1003,43 @@ shows index one.  If the scan finds no cutoff up to 20007, or the coarse
 value does not show index one, it is discarded and the default zeta route
 computes the value (so such fields pay up to part of one extra analytic
 evaluation).  A field whose default route fails can therefore be accepted
-under GRH when the coarse value shows index one.  With the quadratic ``L(1, chi_D)`` value the test itself is
-unconditional, but the result still rests on GRH through generation unless
-the base reached the Minkowski-type bound.  Such an acceptance is not a
+under GRH when the coarse value shows index one.
+A ``grh`` request takes that ``hR`` in every degree above one,
+including a quadratic field written as ``x^2 - d``, which also has the
+unconditional ``L(1, chi_D)`` route; ``proven`` requests and the public zeta
+gates keep that route first.  Hecke v0.39.17 ``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group`` takes
+the Belabas--Friedman residue (``zeta_log_residue``, ``Zeta.jl``) for every
+degree including two, and PARI 2.17.3 ``quadclassunit`` a GRH-conditional
+Euler product (``src/basemath/buch1.c:compute_invresquad``); neither has an
+unconditional evaluation on this path.  A ``grh`` result does not use the
+unconditionality of ``L(1, chi_D)``, whose cost grows like ``sqrt(|D|)``,
+while the Belabas--Friedman cutoff is set by the precision: on the real
+quadratic benchmark rows the residue took about 7 ms from ``|D| = 4e4`` to
+``1e14``, against 35 to 120 ms for ``L(1, chi_D)`` at ``|D| = 4e4`` to
+``4e5``.  Below ``|D|`` of a few thousand ``L(1, chi_D)`` is a few
+milliseconds cheaper; Silex keeps no small-``|D|`` crossover, so the
+recorded completeness basis of a ``grh`` result does not depend on ``|D|``
+or on how the field is presented.  Such an acceptance is not a
 relation-saturation proof: ``relation_saturation_status()`` is not set to
 ``verified`` by it.
 The pair is published with both labels ``grh``, and the analytic check that
 accepted it is recorded on the published class group with its own
-conditionality.  ``analytic_class_regulator_certification()`` is ``grh`` for
-a Belabas--Friedman ``hR`` and ``proven`` for the unconditional quadratic
-``L(1, chi)`` value.  With a Belabas--Friedman ``hR`` (in degree three and
-higher, the default zeta route's Belabas--Friedman evaluation) the BF audit
-data of that evaluation is recorded as well: its error bound, cutoff,
-maximum cutoff, and precisions (``zeta_bf_proof_record()``).  The record is
+conditionality.  ``analytic_class_regulator_certification()`` is ``grh``,
+since the accepting ``hR`` is a Belabas--Friedman value (the default zeta
+route's Belabas--Friedman evaluation), and the BF audit data of that
+evaluation is recorded as well: its error bound, cutoff, maximum cutoff, and
+precisions (``zeta_bf_proof_record()``).  The record is
 informational.  The ``grh`` transaction never changes or promotes the
 class-group or unit labels, and the record does not change the public zeta
 and BF gates, which still fail closed in degree three and higher unless
-saturation is proven.  There is one exception to "the record never promotes
-labels": a ``proven`` record stored by a real-quadratic ``grh`` run can later
-let an explicit ``try_certify_with_units(units, proven)`` with proven units
-promote the class group to ``proven``.  This is sound, because the index-one
-test against the unconditional ``L(1, chi_D)`` value, with generation verified
-up to the Minkowski-type bound, gives ``h_cand = h`` and ``R_cand = R_K``
-unconditionally.  A ``grh`` run whose base covers only the GRH bound has no
-unconditional generation, so that promotion fails for it.  For an
+saturation is proven.  A later explicit
+``try_certify_with_units(units, proven)`` with proven units can still promote
+a real-quadratic ``grh`` class group to ``proven``: it evaluates the
+unconditional ``L(1, chi_D)`` value itself, and the index-one test against
+it, with generation verified up to the Minkowski-type bound, gives
+``h_cand = h`` and ``R_cand = R_K`` unconditionally.  A ``grh`` run whose
+base covers only the GRH bound has no unconditional generation, so that
+promotion fails for it.  For an
 imaginary quadratic field with ``|D| < 2^44`` the ``grh`` route uses an exact
 class number, counted from the reduced forms returned by FLINT
 ``qfb_reduced_forms``, instead of an analytic value.  Its GRH dependence is in
@@ -1035,10 +1048,9 @@ records no analytic check.  Listing the reduced forms takes time and memory
 growing like ``sqrt(|D|)`` (about 1.4 GB at ``|D| = 1e14``), so from
 ``|D| >= 2^44`` an imaginary-quadratic ``grh`` request takes ``h`` from the
 GRH relation lattice and the analytic index-one test, like every other degree;
-there the test uses a Belabas--Friedman ``hR``, since ``2^44`` is also the cap
-of the unconditional ``L(1, chi_D)`` route.  Below ``2^44`` that test would use
-the unconditional ``L(1, chi_D)`` value, which is slower than listing the
-forms; the cutoff was measured from ``|D| = 1e7`` to ``1e14``
+there the test uses a Belabas--Friedman ``hR``.  The cutoff was measured from
+``|D| = 1e7`` to ``1e14``, when that test still used the unconditional
+``L(1, chi_D)`` value below ``2^44``, which was slower than listing the forms
 (:doc:`../development/class_number_route_cutoff`).  The
 degree-one ``grh`` route uses the exact degree-one route described below and
 records none either.
@@ -1063,8 +1075,10 @@ generating factor base.  It is ``grh``, basis ``belabas_friedman``, when the
 pair was accepted against a Belabas--Friedman ``hR``, whose error bound
 assumes the Riemann hypothesis for ``zeta_K`` and for ``zeta_Q``
 (Belabas--Friedman 2015, Theorem 1).  It is ``proven`` when the pair was
-accepted against the unconditional quadratic ``L(1, chi_D)`` value
-(``unconditional_analytic``) or the exact imaginary-quadratic class number
+accepted against an unconditional ``hR`` (``unconditional_analytic``, which no
+public transaction reaches now that a ``grh`` request takes the
+Belabas--Friedman value) or the exact imaginary-quadratic
+class number
 (``exact_class_number``, ``|D| < 2^44``), and for a ``proven`` class group or
 the exact
 degree-one route (``unconditional_certification``).
@@ -1086,14 +1100,7 @@ two components are both ``proven`` still reads ``grh``.  Per route:
    * - Imaginary quadratic, ``|D| >= 2^44``, Belabas--Friedman
      - ``grh`` or ``proven``
      - ``grh`` (``belabas_friedman``)
-   * - Real quadratic, ``L(1, chi_D)``
-     - ``grh`` or ``proven``
-     - ``proven`` (``unconditional_analytic``)
-   * - Real quadratic, ``L(1, chi_D)`` failed or ``|D| >= 2^44``,
-       Belabas--Friedman fallback
-     - ``grh`` or ``proven``
-     - ``grh`` (``belabas_friedman``)
-   * - Degree two outside the explicit quadratic backend
+   * - Real quadratic, Belabas--Friedman (any presentation and ``|D|``)
      - ``grh`` or ``proven``
      - ``grh`` (``belabas_friedman``)
    * - Degree three and higher
