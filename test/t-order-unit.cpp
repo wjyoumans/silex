@@ -7489,6 +7489,267 @@ int test_prove_index_bound_cyclotomic13_undecided_root() {
     return 0;
 }
 
+// Resets the stable proof scan limits when a test leaves its scope.
+struct StableProofScanLimitsForTesting {
+    StableProofScanLimitsForTesting(slong max_aux_primes,
+                                    ulong max_q) noexcept {
+        silex::detail::set_stable_proof_scan_limits_for_testing(
+                max_aux_primes, max_q);
+    }
+    ~StableProofScanLimitsForTesting() {
+        silex::detail::set_stable_proof_scan_limits_for_testing(0, 0);
+    }
+    StableProofScanLimitsForTesting(const StableProofScanLimitsForTesting&) =
+            delete;
+    StableProofScanLimitsForTesting& operator=(
+            const StableProofScanLimitsForTesting&) = delete;
+};
+
+// Q(zeta_13) with the cyclotomic units u_2^17, u_3, ..., u_6 (see
+// test_prove_index_bound_cyclotomic13_undecided_root): a subgroup of index 17
+// in the full unit group, so it is not 17-saturated, and the 17th root of
+// the first generator is u_2, which Silex cannot compute in degree 12.
+silex::NumberField cyclotomic13_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 12; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+bool set_cyclotomic13_u2_power17_group(
+        silex::OrderUnitGroup& out,
+        const silex::Order& order,
+        const silex::NumberField& field,
+        silex::EmbeddingContext& embeddings) noexcept {
+    std::vector<silex::FactoredElement> generators;
+    for (slong a = 2; a <= 6; ++a) {
+        sflint::FmpqPoly unit_poly;
+        for (slong i = 0; i < a; ++i) {
+            sflint::fmpq_poly_set_coeff_si(unit_poly, i, 1);
+        }
+        silex::Element unit(field);
+        if (!unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly))) {
+            return false;
+        }
+        if (a == 2) {
+            // The expanded element u_2^17, so no factored exponent
+            // reveals the root.
+            sflint::Fmpz exponent;
+            silex::Element power(field);
+            if (!set_fmpz_si(exponent, 17) ||
+                !power.pow_fmpz(unit, sflint::FmpzConstRef(exponent))) {
+                return false;
+            }
+            unit = std::move(power);
+        }
+        generators.emplace_back(field);
+        if (!generators.back().set_element(unit)) {
+            return false;
+        }
+    }
+    return out.set_units(order,
+                         silex::FactoredElementSpan(generators.data(),
+                                                    generators.size()),
+                         embeddings, 256) &&
+           out.free_rank() == 5;
+}
+
+// Q(sqrt 118) with the fundamental unit eps = 306917 + 28254 sqrt(118).  GP:
+// K = bnfinit(x^2 - 118, 1); K.fu gives eps up to sign, and eps is a cube
+// at both primes above q = 13 and q = 19, the split primes q = 1 mod 3
+// below 31, but not at the primes above q = 31.
+bool set_quadratic118_fundamental_unit_group(
+        silex::OrderUnitGroup& out,
+        const silex::Order& order,
+        const silex::NumberField& field,
+        silex::EmbeddingContext& embeddings) noexcept {
+    sflint::FmpqPoly unit_poly;
+    sflint::fmpq_poly_set_coeff_si(unit_poly, 0, 306917);
+    sflint::fmpq_poly_set_coeff_si(unit_poly, 1, 28254);
+    silex::Element unit(field);
+    silex::FactoredElement generator(field);
+    return unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)) &&
+           generator.set_element(unit) &&
+           out.set_units(order, silex::FactoredElementSpan(&generator, 1),
+                         embeddings, 256) &&
+           out.free_rank() == 1;
+}
+
+silex::NumberField quadratic118_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -118);
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// kernel_row_root tells an error apart from an undecided root, so the proof
+// scan fails closed at once on an error and rescans only an undecided row.
+int test_kernel_row_root_three_way_result() {
+    {
+        silex::NumberField field = quadratic118_field();
+        silex::Order order = silex::test::verified_maximal_order(
+                silex::test::equation_order(field));
+        silex::EmbeddingContext embeddings(field);
+        silex::OrderUnitGroup group(order);
+        assert(set_quadratic118_fundamental_unit_group(group, order, field,
+                                                       embeddings));
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, 3));
+        sflint::FmpzMat rows(2, 1);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 0, 0), 1);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 1, 0), 3);
+
+        // eps is not a cube (it is fundamental): decided, not a power.
+        silex::FactoredElement root(field);
+        bool is_power = true;
+        assert(silex::detail::kernel_row_root(
+                       is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                       sflint::FmpzConstRef(ell)) ==
+               silex::detail::KernelRowRootResult::decided);
+        assert(!is_power);
+        // eps^3 is a cube: decided, with an exactly verified root.
+        is_power = false;
+        assert(silex::detail::kernel_row_root(
+                       is_power, root, group, sflint::FmpzMatConstRef(rows), 1,
+                       sflint::FmpzConstRef(ell)) ==
+               silex::detail::KernelRowRootResult::decided);
+        assert(is_power);
+
+        // Errors: a row out of range, a kernel width that is neither the
+        // free rank nor the free rank plus one, and a composite exponent.
+        assert(silex::detail::kernel_row_root(
+                       is_power, root, group, sflint::FmpzMatConstRef(rows), 2,
+                       sflint::FmpzConstRef(ell)) ==
+               silex::detail::KernelRowRootResult::error);
+        sflint::FmpzMat wide(1, 3);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(wide, 0, 0), 1);
+        assert(silex::detail::kernel_row_root(
+                       is_power, root, group, sflint::FmpzMatConstRef(wide), 0,
+                       sflint::FmpzConstRef(ell)) ==
+               silex::detail::KernelRowRootResult::error);
+        sflint::Fmpz composite;
+        assert(set_fmpz_si(composite, 9));
+        assert(silex::detail::kernel_row_root(
+                       is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                       sflint::FmpzConstRef(composite)) ==
+               silex::detail::KernelRowRootResult::error);
+    }
+
+    // u_2^17 is a 17th power, but its root u_2 is not computed in degree 12:
+    // undecided, not an error.
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup group(order);
+    assert(set_cyclotomic13_u2_power17_group(group, order, field, embeddings));
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(ell, 17));
+    sflint::FmpzMat rows(1, 5);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 0, 0), 1);
+    silex::FactoredElement root(field);
+    bool is_power = false;
+    assert(silex::detail::kernel_row_root(
+                   is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                   sflint::FmpzConstRef(ell)) ==
+           silex::detail::KernelRowRootResult::undecided);
+    return 0;
+}
+
+// A kernel row that is not an ell-th power, met when the scan has used every
+// prime q of its range, fails closed as `unavailable`: a rescan would return
+// the same kernel, so doubling `stable` would never end.  The test hook ends
+// the q range at 30, so the ell = 3 scan sees only q = 13 and q = 19, where
+// eps is a cube; without the limit the scan reaches q = 31 and proves ell = 3.
+int test_prove_index_bound_non_power_range_exhausted() {
+    silex::NumberField field = quadratic118_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup start(order);
+    assert(set_quadratic118_fundamental_unit_group(start, order, field,
+                                                   embeddings));
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 30));
+
+    {
+        silex::OrderUnitGroup proved(order);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(proved.prove_index_bound(status, changed, start, 1,
+                                        sflint::FmpzConstRef(aux_bound), 2,
+                                        embeddings, 256));
+        assert(status == silex::ProofState::verified);
+        sflint::Fmpz ell3;
+        assert(set_fmpz_si(ell3, 3));
+        assert(proved.unit_proof_verified(sflint::FmpzConstRef(ell3)));
+    }
+
+    const StableProofScanLimitsForTesting limits(0, 30);
+    silex::OrderUnitGroup proved(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = true;
+    assert(proved.prove_index_bound(status, changed, start, 1,
+                                    sflint::FmpzConstRef(aux_bound), 2,
+                                    embeddings, 256));
+    assert(status == silex::ProofState::unavailable);
+    assert(!changed);
+    assert(proved.certification_status() != silex::CertificationMode::proven);
+    const slong last = proved.unit_proof_record_count() - 1;
+    // Two degree-one primes above each of q = 13 and q = 19.
+    assert(check_unit_proof_record(proved, last, 3,
+                                   silex::ProofState::unavailable, 30, 4,
+                                   false));
+    return 0;
+}
+
+// The undecided-root rescans of a group that is not 17-saturated: the row
+// for u_2^17 stays in every character kernel, so the proof fails closed as
+// `unavailable` and never certifies ell = 17.  Both stops are tested through
+// the test hook: the per-scan guard (here 256 primes q instead of 2^16,
+// which takes minutes) and the end of the q range (here q <= 2000), where
+// the undecided row fails closed at once instead of rescanning forever.
+int test_prove_index_bound_undecided_root_not_saturated() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup start(order);
+    assert(set_cyclotomic13_u2_power17_group(start, order, field, embeddings));
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 1000));
+    sflint::Fmpz ell17;
+    assert(set_fmpz_si(ell17, 17));
+
+    for (int run = 0; run < 2; ++run) {
+        // run 0: guard; run 1: end of range.  At q <= 2000 the primes
+        // q = 1 mod 17 that split in Q(zeta_13) are 443 and 1327 (q = 1
+        // mod 221), 24 degree-one primes.  A scan stopped by the guard
+        // records no local primes.
+        const StableProofScanLimitsForTesting limits(run == 0 ? 256 : 0,
+                                                     run == 0 ? 0 : 2000);
+        silex::OrderUnitGroup proved(order);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(proved.prove_index_bound(status, changed, start, 1,
+                                        sflint::FmpzConstRef(aux_bound), 2,
+                                        embeddings, 256));
+        assert(status == silex::ProofState::unavailable);
+        assert(!changed);
+        assert(proved.certification_status() !=
+               silex::CertificationMode::proven);
+        assert(!proved.unit_proof_verified(sflint::FmpzConstRef(ell17)));
+        const slong last = proved.unit_proof_record_count() - 1;
+        assert(check_unit_proof_record(proved, last, 17,
+                                       silex::ProofState::unavailable, 1000,
+                                       run == 0 ? 0 : 24, false));
+    }
+    return 0;
+}
+
 // The stronger regulator bound must not change the published generators.
 // x^3 - 4x^2 - 8x - 1 (discriminant 2213): the units theta^2 and
 // -4 theta^2 - theta + 6 span a subgroup of index 2 in the fundamental
@@ -9659,6 +9920,9 @@ int main() {
     test_saturate_index_bounded_generators_independent_of_bound();
     test_prove_index_bound_quartic70640();
     test_prove_index_bound_cyclotomic13_undecided_root();
+    test_kernel_row_root_three_way_result();
+    test_prove_index_bound_non_power_range_exhausted();
+    test_prove_index_bound_undecided_root_not_saturated();
     test_prove_torsion_twisted_saturation_root();
     test_saturate_torsion_twisted_non_proof();
     test_prove_index_bound_nonmaximal_quadratic_sqrt18();
