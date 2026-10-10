@@ -1,6 +1,7 @@
 #include <silex/prime_ideal.hpp>
 
 #include "prime_ideal_internal.hpp"
+#include "../order/order_internal.hpp"
 
 #include <silex/diagnostics.hpp>
 #include <silex/factored_element.hpp>
@@ -944,10 +945,12 @@ bool maximal_order_has_nonindex_defining_polynomial_prime(
         return false;
     }
 
-    Order equation = Order::equation_order(*field);
+    // The index [order : Z[theta]] is cached in the order (reference
+    // `NfOrd.jl:is_index_divisor` reads the cached `index(O)`), so repeated
+    // decompositions do not rebuild the equation order.
     flint::Fmpz index;
-    if (!equation.is_defined() ||
-        !order_index(flint::FmpzRef(index), equation, order)) {
+    if (!detail::OrderAccess::equation_order_index(flint::FmpzRef(index),
+                                                   order)) {
         return false;
     }
 

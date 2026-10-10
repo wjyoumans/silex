@@ -28,6 +28,8 @@
 
 #include <utility>
 
+#include "order_internal.hpp"
+
 namespace silex {
 
 namespace detail {
@@ -42,6 +44,11 @@ struct OrderData {
     mutable flint::ArbMat minkowski_embedding_rows_{0, 0};
     mutable EmbeddingContext minkowski_embedding_context_;
     mutable flint::Fmpz discriminant_;
+    // [this order : Z[theta]], filled on first use by
+    // OrderAccess::equation_order_index.  It depends only on the basis and
+    // the parent field, which never change for one OrderData: set_basis and
+    // the factories build a fresh OrderData, so a new basis starts uncached.
+    mutable flint::Fmpz equation_order_index_;
     bool has_basis_ = false;
     bool has_basis_inv_ = false;
     mutable bool has_trace_mat_ = false;
@@ -49,6 +56,7 @@ struct OrderData {
     mutable slong minkowski_embedding_precision_ = 0;
     mutable bool has_minkowski_embedding_rows_ = false;
     mutable bool has_discriminant_ = false;
+    mutable bool has_equation_order_index_ = false;
     bool maximality_is_known_ = false;
     bool maximal_ = false;
     OrderSpecialization specialization_;
@@ -778,12 +786,16 @@ bool Order::set(const Order& other) noexcept {
     fmpz_mat_set(copy.data_->trace_mat_.raw(), other.data_->trace_mat_.raw());
     fmpz_mat_set(copy.data_->mul_table_.raw(), other.data_->mul_table_.raw());
     fmpz_set(copy.data_->discriminant_.raw(), other.data_->discriminant_.raw());
+    fmpz_set(copy.data_->equation_order_index_.raw(),
+             other.data_->equation_order_index_.raw());
 
     copy.data_->has_basis_ = other.data_->has_basis_;
     copy.data_->has_basis_inv_ = other.data_->has_basis_inv_;
     copy.data_->has_trace_mat_ = other.data_->has_trace_mat_;
     copy.data_->has_mul_table_ = other.data_->has_mul_table_;
     copy.data_->has_discriminant_ = other.data_->has_discriminant_;
+    copy.data_->has_equation_order_index_ =
+            other.data_->has_equation_order_index_;
     copy.data_->maximality_is_known_ = other.data_->maximality_is_known_;
     copy.data_->maximal_ = other.data_->maximal_;
     copy.data_->specialization_ = other.data_->specialization_;
@@ -1309,5 +1321,31 @@ bool order_index(flint::FmpzRef out,
     fmpz_abs(out.raw(), det.raw());
     return true;
 }
+
+namespace detail {
+
+bool OrderAccess::equation_order_index(flint::FmpzRef out,
+                                       const Order& order) noexcept {
+    if (!order.has_basis()) {
+        return false;
+    }
+
+    OrderData& data = *order.data_;
+    if (!data.has_equation_order_index_) {
+        Order equation = Order::equation_order(data.parent_);
+        flint::Fmpz index;
+        if (!equation.is_defined() ||
+            !order_index(flint::FmpzRef(index), equation, order)) {
+            return false;
+        }
+        fmpz_set(data.equation_order_index_.raw(), index.raw());
+        data.has_equation_order_index_ = true;
+    }
+
+    fmpz_set(out.raw(), data.equation_order_index_.raw());
+    return true;
+}
+
+}  // namespace detail
 
 }  // namespace silex

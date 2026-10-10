@@ -6,6 +6,7 @@
 #include "order/order_internal.hpp"
 #include "test_support.hpp"
 
+#include <flint/fmpq_mat.h>
 #include <flint/fmpz.h>
 #include <flint/fmpz_mat.h>
 
@@ -995,6 +996,80 @@ int test_conductor_and_contraction_failures() {
     return 0;
 }
 
+// The cached index [O : Z[theta]] equals a fresh order_index computation, on
+// a cache hit, through handle copies and Order::set, and a new basis on the
+// same handle (or on a copy) is not answered from the old order's cache.
+bool cached_index_is(const silex::Order& order, slong expected) noexcept {
+    sflint::Fmpz cached;
+    sflint::Fmpz fresh;
+    silex::Order equation = silex::Order::equation_order(*order.parent());
+    return silex::detail::OrderAccess::equation_order_index(
+                   sflint::FmpzRef(cached), order) &&
+           order_index(sflint::FmpzRef(fresh), equation, order) &&
+           fmpz_equal(cached.raw(), fresh.raw()) != 0 &&
+           sflint::fmpz_equal_si(cached, expected);
+}
+
+int test_cached_equation_order_index() {
+    // Q(cbrt 54) = Q(cbrt 2): disc(x^3 - 54) = -78732 = -108 * 27^2, so the
+    // maximal order has index 27 over Z[cbrt 54].
+    sflint::FmpqPoly polynomial;
+    poly_x3_minus(polynomial, 54);
+    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    assert(cached_index_is(equation, 1));
+    assert(cached_index_is(maximal, 27));
+    assert(cached_index_is(maximal, 27));  // cache hit
+
+    silex::Order shared = maximal;  // same data, same cache
+    assert(shared.has_same_data(maximal));
+    assert(cached_index_is(shared, 27));
+
+    silex::Order copied;
+    assert(copied.set(maximal));  // deep copy carries the cached value
+    assert(!copied.has_same_data(maximal));
+    assert(cached_index_is(copied, 27));
+
+    // A new basis on a handle whose order has a cached index.
+    sflint::FmpqMat identity(3, 3);
+    fmpq_mat_one(identity.raw());
+    assert(copied.set_basis(sflint::FmpqMatConstRef(identity)));
+    assert(cached_index_is(copied, 1));
+    assert(cached_index_is(maximal, 27));
+
+    sflint::FmpqMat maximal_basis(3, 3);
+    assert(maximal.get_basis(sflint::FmpqMatRef(maximal_basis)));
+    silex::Order rebuilt = silex::Order::from_basis(
+            field, sflint::FmpqMatConstRef(maximal_basis));
+    assert(rebuilt.is_defined());
+    assert(cached_index_is(rebuilt, 27));
+    assert(shared.set_basis(sflint::FmpqMatConstRef(identity)));
+    assert(cached_index_is(shared, 1));
+    assert(cached_index_is(maximal, 27));
+
+    // An order that does not contain Z[theta] has no index; nothing is
+    // cached, and a repeated call fails the same way.
+    silex::NumberField quadratic = quadratic_field(5);
+    sflint::Fmpz four;
+    sflint::fmpz_set_si(sflint::FmpzRef(four), 4);
+    silex::Order small =
+            silex::Order::quadratic_order(quadratic, sflint::FmpzConstRef(four));
+    assert(small.is_defined());
+    sflint::Fmpz index;
+    assert(!silex::detail::OrderAccess::equation_order_index(
+            sflint::FmpzRef(index), small));
+    assert(!silex::detail::OrderAccess::equation_order_index(
+            sflint::FmpzRef(index), small));
+
+    silex::Order undefined;
+    assert(!silex::detail::OrderAccess::equation_order_index(
+            sflint::FmpzRef(index), undefined));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1014,5 +1089,6 @@ int main() {
     assert(test_general_conductor_quadratic() == 0);
     assert(test_general_conductor_cubic() == 0);
     assert(test_conductor_and_contraction_failures() == 0);
+    assert(test_cached_equation_order_index() == 0);
     return 0;
 }

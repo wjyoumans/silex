@@ -28,19 +28,37 @@ inline bool order_has_parented_basis(const Order& order) noexcept {
     return order.is_defined() && order.has_basis() && order.parent() != nullptr;
 }
 
-// Noninstalled maximality hook.  Public code cannot assert or withdraw
-// maximality: Order records it only where it is computed (maximal_order,
-// quadratic conductor metadata, degree one).  This hook writes the shared flag
-// without any check, so every handle sharing the order's data sees the change.
-// It exists for tests that must build states the public API cannot reach, such
-// as an order whose maximality is withdrawn after dependent objects were
-// built; library code must not use it to label an order maximal.
+// Noninstalled access to Order internals.
 class OrderAccess {
 public:
+    // Maximality hook.  Public code cannot assert or withdraw maximality:
+    // Order records it only where it is computed (maximal_order, quadratic
+    // conductor metadata, degree one).  This hook writes the shared flag
+    // without any check, so every handle sharing the order's data sees the
+    // change.  It exists for tests that must build states the public API
+    // cannot reach, such as an order whose maximality is withdrawn after
+    // dependent objects were built; library code must not use it to label an
+    // order maximal.
     static void set_maximality_unchecked(Order& order,
                                          bool is_maximal) noexcept {
         order.record_maximality(is_maximal);
     }
+
+    // Index [order : Z[theta]] of the equation order of the parent field in
+    // `order`, as order_index(Order::equation_order(parent), order) computes
+    // it.  The value is cached in the order's shared data on first success, in
+    // the same unsynchronized way as the trace matrix and discriminant, so
+    // later calls skip rebuilding the equation order.  Order::set copies the
+    // cache; set_basis and the factories start a new, uncached order.  Fails
+    // when `order` has no basis, the equation order is not defined (the field
+    // polynomial is not monic integral), or `order` does not contain Z[theta];
+    // nothing is cached on failure.  Mirrors the order index cached on first
+    // use by reference v0.38.6 src/NumFieldOrd/NfOrd/NfOrd.jl:326 `index`,
+    // which `is_index_divisor` (NfOrd.jl:352) reads; reference 2.17.3
+    // src/basemath/base2.c:2260 `primedec_aux` likewise reads the stored
+    // `nf_get_index`.
+    static bool equation_order_index(flint::FmpzRef out,
+                                     const Order& order) noexcept;
 };
 
 }  // namespace silex::detail
