@@ -380,6 +380,13 @@ Changed
 Fixed
 -----
 
+- The unit computation no longer fails with a class-unit computation error
+  when the unit-basis transform needs exponents that do not fit in a machine
+  word, as in the grh run of the real cyclotomic field of conductor 136
+  (degree 32).  The transform now uses exponents of any size, and
+  ``OrderUnitGroup::free_generator`` returns an equal unit rebuilt in
+  word-size form, a documented deviation from Hecke.
+
 - ``decompose_prime`` on a maximal order no longer fails at a prime ``p``
   dividing the index when ``p`` raised to the number of primes above ``p``
   exceeds 4096, as for ``p = 47`` in the sextic field of LMFDB 6.6.46411625.1

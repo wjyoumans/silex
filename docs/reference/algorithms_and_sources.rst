@@ -575,6 +575,23 @@ below ``1/B^2``, while every other fraction ``p/q`` with ``q <= b`` lies at
 distance at least ``1/(qb) >= 1/B^2`` from ``a/b``, so the simplest rational
 in the ball is ``a/b``.
 
+The unit-basis transform that follows a reduction applies the integer matrix
+to the stored factored units.  Hecke keeps factored elements as ``FacElem``
+dictionaries with ``ZZRingElem`` exponents (``FactoredElem.jl:_transform``,
+339-365; ``Reduction.jl``, 88-112), so the transform never overflows.
+Silex's public ``FactoredElement`` has word-size exponents.  The transform
+first runs in word-size form; when an exponent overflows, Silex repeats it
+with integer exponents of any size, merging equal bases as a ``FacElem``
+dictionary does.  When the merged exponents fit in ``slong``, those products
+are the new units.  Otherwise the group keeps the wide form in private
+storage, and ``free_generator`` returns the equal unit rebuilt in word-size
+form by the bounded compact reconstruction, which ports PARI 2.17.3
+``buch2.c`` ``vec_chinese_units`` (1214-1240), ``chinese_unit`` and
+``FlxqX_chinese_unit`` (1026-1100), the bounds ``log2fubound`` and
+``log2Mbound`` (1180-1212), and ``ZM_remove_unused`` (1104-1118).  Returning
+the rebuilt unit instead of the wide factored form is a deviation from
+Hecke; the unit is equal, so no published value changes.
+
 Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb
 coordinates of each unit against the generators' log matrix and divide by
