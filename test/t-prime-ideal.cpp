@@ -2805,7 +2805,7 @@ int test_prime_ideal_inverse_matches_invert() {
     {
         silex::NumberField field;
         silex::Order maximal = cyclotomic_maximal_order(field, 37);
-        assert(check_prime_inverse_matches_invert(maximal, 30,
+        assert(check_prime_inverse_matches_invert(maximal, 40,
                                                   without_kummer) >= 8);
     }
 
@@ -2887,28 +2887,62 @@ int test_prime_ideal_inverse_declines_outside_contract() {
             maximal_numerator, sflint::FmpzRef(den), unit));
     assert(maximal_numerator.is_one() && sflint::fmpz_equal_si(den, 7));
 
-    // P^2 for a prime P of degree 1 with P^2 not dividing p O has norm p^2
-    // and does not contain p O.
-    silex::PrimeIdealList maximal_primes;
-    assert(silex::decompose_prime(maximal_primes, maximal,
-                                  sflint::FmpzConstRef(p)));
-    slong degree_one = -1;
-    for (slong i = 0; i < maximal_primes.size(); ++i) {
-        if (maximal_primes.at(i)->residue_degree() == 1 &&
-            maximal_primes.at(i)->ramification_index() == 1) {
-            degree_one = i;
-            break;
+    // P^2 for an unramified prime P of degree 1 has norm p^2 and does not
+    // contain p O (P^2 does not divide p O), so the route must decline.  An
+    // entry p^2 on the HNF diagonal is declined by the diagonal check; at
+    // p = 2 the diagonal is (2, 2, 1), in {1, p}, so only the containment
+    // check declines it.  Both kinds are asserted to occur.  The containment
+    // check is backed up by later checks (kernel dimension, index of
+    // p O + t O), so no ideal isolates it; the case guards the combined
+    // decline.
+    slong squares_checked = 0;
+    slong containment_declines = 0;
+    for (slong prime = 2; prime < 60; ++prime) {
+        if (n_is_prime(static_cast<ulong>(prime)) == 0) {
+            continue;
+        }
+        sflint::Fmpz q;
+        assert(set_fmpz_si(q, prime));
+        silex::PrimeIdealList primes;
+        if (!silex::decompose_prime(primes, maximal,
+                                    sflint::FmpzConstRef(q))) {
+            continue;
+        }
+        for (slong i = 0; i < primes.size(); ++i) {
+            if (primes.at(i)->residue_degree() != 1 ||
+                primes.at(i)->ramification_index() != 1) {
+                continue;
+            }
+            silex::Ideal prime_ideal(maximal);
+            silex::Ideal square(maximal);
+            assert(primes.at(i)->get_ideal(prime_ideal));
+            assert(square.multiply(prime_ideal, prime_ideal));
+            assert(!silex::detail::prime_ideal_inverse_num_den(
+                    maximal_numerator, sflint::FmpzRef(den), square));
+            assert(maximal_numerator.is_one() &&
+                   sflint::fmpz_equal_si(den, 7));
+            // Record the squares whose HNF diagonal lies in {1, q}: they
+            // pass the diagonal check and are declined only because q O is
+            // not contained in them.
+            sflint::FmpzMat hnf(3, 3);
+            assert(square.get_hnf(sflint::FmpzMatRef(hnf)));
+            bool diagonal_in_one_q = true;
+            for (slong d = 0; d < 3; ++d) {
+                const fmpz* entry = fmpz_mat_entry(hnf.raw(), d, d);
+                diagonal_in_one_q = diagonal_in_one_q &&
+                        (fmpz_is_one(entry) != 0 ||
+                         fmpz_equal_si(entry, prime) != 0);
+            }
+            if (diagonal_in_one_q) {
+                ++containment_declines;
+            }
+            ++squares_checked;
         }
     }
-    if (degree_one >= 0) {
-        silex::Ideal prime(maximal);
-        silex::Ideal square(maximal);
-        assert(maximal_primes.at(degree_one)->get_ideal(prime));
-        assert(square.multiply(prime, prime));
-        assert(!silex::detail::prime_ideal_inverse_num_den(
-                maximal_numerator, sflint::FmpzRef(den), square));
-        assert(maximal_numerator.is_one() && sflint::fmpz_equal_si(den, 7));
-    }
+    // The loop must find unramified degree-one primes, so this case cannot
+    // silently skip.
+    assert(squares_checked >= 3);
+    assert(containment_declines >= 1);
     return 0;
 }
 
