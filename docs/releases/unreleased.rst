@@ -119,6 +119,41 @@ Changed
   order units" in :doc:`../reference/algorithms_and_sources` and
   :doc:`../development/class_number_route_cutoff`.
 
+- ``proven`` class/unit computations on an imaginary quadratic field with
+  ``|D| >= 2^44`` take the exact class number ``h(D)`` from Dirichlet's
+  class number formula with a rigorous ``L(1, chi_D)`` enclosure in ball
+  arithmetic, instead of listing the reduced forms of discriminant ``D``
+  (time and memory growing like ``sqrt(|D|)``).  The value is taken only
+  when the ball contains exactly one positive integer, and otherwise the
+  computation fails closed.  At ``|D| = 1e14 + 31`` the formula gives
+  ``h = 14414435``, PARI's value, in about 100 s and 14 MB.  Fields with
+  ``|D| < 2^44`` and all labels are unchanged.
+
+- A class-group factor base with more than ``2^14`` generators is refused
+  before any matrix is allocated: ``ClassGroupContext::build_factor_base``
+  and ``set_factor_base`` return false, and a class/unit transaction fails
+  with ``failure_reason`` ``factor_base_size_limit_exceeded`` in
+  ``silex-class-unit-instance``.  The limit is a fixed Silex choice, so the
+  same fields fail the same way on every machine.  Previously the dense
+  relation matrices (2 GiB each at ``2^14``) were allocated, and FLINT
+  aborted the process when the allocation failed.  For ``proven`` requests
+  this affects imaginary quadratic fields with ``|D|`` above about
+  ``4e11``, whose factor base reaches ``sqrt(|D| / 3)``: for
+  ``x^2 + 10^14 + 31`` the run now fails with that reason in about 3 s
+  instead of aborting.  Largest factor-base size seen in the test suite is
+  380 and on the succeeding benchmark corpus rows 34, so no existing
+  fixture changes.
+
+- The class-relation saturation with units stacks the ``ell``-th-power
+  residue characters of the relation generators and units at many
+  degree-one primes before any power test, as Hecke's
+  ``compute_candidates_for_saturate`` does, and skips the candidates outside
+  their common kernel, which cannot be ``ell``-th powers.  The appended
+  relations, class groups, generators and units are unchanged.  In ``grh``
+  mode the power tests drop from 286 to 38 on the real subfield of
+  ``Q(zeta_29)`` and from 571 to 128 on ``Q(zeta_72)``.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - **Breaking:** ``SUnitGroup::regulator`` now returns the regulator of the
   S-unit lattice, ``R_S = R h/h_S prod log N(P)`` for nonempty ``S``: the
   absolute value of a maximal minor of the log-S embedding of the free

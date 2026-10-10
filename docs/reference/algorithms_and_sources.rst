@@ -884,11 +884,23 @@ PARI 2.17.3 ``src/basemath/buch2.c:bad_check`` also rejects a quotient below
 precision where Silex fails.
 
 The exact imaginary-quadratic ``proven`` route uses the same index argument
-with the exact class number ``h = h(D)``, counted from the reduced forms
-returned by FLINT ``qfb_reduced_forms``, in place of ``ell``-local tests.
+with the exact class number ``h = h(D)`` in place of ``ell``-local tests.
 Here ``D`` is the fundamental discriminant of the maximal order (the route
-applies to maximal orders only), so every form of discriminant ``D`` is
-primitive and the count of reduced forms is the class number of the order.
+applies to maximal orders only).  For ``|D| < 2^44`` ``h(D)`` is counted from
+the reduced forms returned by FLINT ``qfb_reduced_forms``; every form of
+discriminant ``D`` is primitive, so the count of reduced forms is the class
+number of the order.  The listing takes time and memory growing like
+``sqrt(|D|)`` (about 1.4 GB at ``|D| = 1e14``), so for ``|D| >= 2^44``
+``h(D)`` comes instead from Dirichlet's class number formula
+``h(D) = w sqrt(|D|) L(1, chi_D) / (2 pi)``, with ``w = 2`` for ``D < -4``
+(Davenport, *Multiplicative Number Theory*, 3rd ed., Chapter 6), evaluated
+in ball arithmetic from the rigorous ``L(1, chi_D)`` enclosure described
+below.  The ball contains ``h(D)``, and ``h(D)`` is taken only when the ball
+contains exactly one integer, which must be positive; the working precision
+is the bit length of ``|D|`` plus 32 bits, doubled once if the ball still
+holds more than one integer, after which the computation fails closed.  At
+``|D| = 1e14 + 31`` this gives ``h = 14414435``, PARI's value, in about
+100 s and 14 MB.
 With generation verified up to the Minkowski-type bound and ``h_cand = h``,
 the computed relation lattice has index one in the full one, so it is
 saturated at every prime.  The route stores a verified relation-saturation
@@ -898,6 +910,22 @@ internally by a proof record that names the exact class number, not an
 ``ell``-local proof keeps it.  Later gates, such as the Belabas--Friedman
 audit, therefore see the same per-prime saturation records as for a
 saturation-backed proof and can promote from them.
+
+The relation modules of a class-group context keep dense ``n x n``
+matrices modulo a word-size prime for a factor base of ``n`` generators
+(three per context, 2 GiB each at ``n = 2^14``), and FLINT aborts the
+process when such an allocation fails.  A factor base with more than
+``2^14`` generators is therefore refused before anything is allocated:
+building or installing it fails, and a class/unit transaction fails with
+reason ``factor_base_size_limit_exceeded``, as ``silex-class-unit-instance``
+prints in ``failure_reason``.  The limit is a fixed Silex choice with no
+upstream source, so the same fields fail the same way on every machine.  The
+proven base of the exact imaginary-quadratic route reaches the Minkowski-type
+bound ``sqrt(|D| / 3)`` and passes the limit between ``|D| = 4e11`` and
+``5e11``: for ``x^2 + n`` with ``n = 10^12 + 39`` (``23592`` generators) and
+``n = 10^14 + 31`` (about ``2e5``) a ``proven`` request now fails with that
+reason in under 4 s.  Before, the first ran for more than 10 minutes with
+8 GB of memory and the second aborted.
 
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly

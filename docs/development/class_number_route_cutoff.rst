@@ -17,6 +17,12 @@ number from one of two routes, chosen by the bit length of the discriminant
   unconditional value, whose approximate functional equation costs more
   than listing the forms.
 
+The same constant selects the route for the exact class number ``h(D)`` that
+``proven`` requests use: below ``2^44`` it is counted from the reduced forms,
+and from ``2^44`` on it comes from the class number formula with a rigorous
+``L(1, chi_D)`` enclosure (see "Class groups and order units" in
+:doc:`../reference/algorithms_and_sources`).
+
 This page records the measurement that set the cutoff.  The requirement was
 that the combined route be no slower than the reduced-form listing alone at
 any measured ``|D|`` from ``1e7`` to ``1e14``, with at least two
