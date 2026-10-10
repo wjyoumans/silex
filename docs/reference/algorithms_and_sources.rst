@@ -1754,7 +1754,16 @@ falls back to the existing full ideal factorization predicate.
 
 This routing change preserves Silex's scalar/lattice candidate search,
 random draws, bounds, proof-target selection, and certification labels.
-It does not select the separate T2 witness search.  The noninstalled
+It does not select the separate T2 witness search.  The relation-search
+honesty checkpoint, however, searches witnesses with that T2 route, as the
+reference does: ``buch2.c:Fincke_Pohst_ideal`` enumerates small elements
+of the required prime ideal by T2 norm and stops after ``maxtry_FACT`` =
+500 factored candidates, and ``be_honest`` retries with at most
+``maxtry_HONEST`` = 50 random sub-factor-base twists.  The scalar/lattice
+search has no candidate cap: in high degree it could run on one prime with
+no smooth element until the caller's time limit.  Every T2 candidate passes
+the same exact norm-accounting check, so a witness proves the same thing on
+either route.  The noninstalled
 reference selector and scan audit support differential tests without a
 public option or persistent cache.  Frozen quartic and quintic benchmark
 batches contain 672 and 3937 candidates respectively; each classification

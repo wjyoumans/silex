@@ -52,7 +52,6 @@ AnalyticFinishDecision apply_honesty_check(
         const SubfactorBaseSchedule* subfactor_base_schedule,
         flint::FmpzConstRef active_factor_base_bound,
         bool factor_base_restart_available,
-        bool use_required_prime_factor_over_base,
         const DiagnosticsContext* diagnostics) noexcept;
 
 bool collect_small_norm_relations(

@@ -1922,6 +1922,20 @@ int test_bounded_escalation_reports_final_caps() {
             : 1;
 }
 
+// The final-stage T2 caps recorded for an unwitnessed degree-one prime
+// above p: the stage-0 caps (50 random tries, 500 factored candidates and
+// 10^6 enumeration steps per ideal) doubled at each of the three stages.
+bool final_stage_t2_failure(
+        const silex::detail::FactorBaseHonestyFailure& failure,
+        slong p) noexcept {
+    return failure.recorded && sflint::fmpz_equal_si(failure.p, p) &&
+           failure.residue_degree == 1 && failure.direct_witness_search &&
+           failure.stage == search::kFactorBaseHonestyEscalationStages &&
+           failure.max_stage == search::kFactorBaseHonestyEscalationStages &&
+           failure.random_tries == 400 && failure.factor_attempts == 4000 &&
+           failure.element_steps == 8000000;
+}
+
 namespace driver = silex::detail::relation_search;
 
 struct HonestyCheckpointRun {
@@ -1935,10 +1949,12 @@ struct HonestyCheckpointRun {
 // group is Z/2 x Z/2; the base holds only the ramified prime above 2, and the
 // ramified prime above 3 lies in another nontrivial class (neither 3 nor 6 is
 // a norm x^2 + 21 y^2), so no search effort can witness it and the scan always
-// stops there.
+// stops there.  The sub-factor base for the random twists is that prime.
 bool run_honesty_checkpoint(HonestyCheckpointRun& run,
                             bool factor_base_restart_available,
-                            bool attach_transaction) noexcept {
+                            bool attach_transaction,
+                            const silex::DiagnosticsContext* diagnostics =
+                                    nullptr) noexcept {
     FieldSetup setup = imaginary_quadratic_fixture(21);
     sflint::Fmpz active_bound;
     sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), 2);
@@ -1964,10 +1980,14 @@ bool run_honesty_checkpoint(HonestyCheckpointRun& run,
                 context, &transaction);
     }
     silex::detail::RelationSearchControlState route_state;
+    silex::detail::SubfactorBaseSchedule schedule;
+    schedule.subfactor_base.push_back(0);
+    schedule.excluded_indices.assign(
+            static_cast<std::size_t>(context.factor_base()->length()), 0);
     run.decision = driver::apply_honesty_check(
-            context, route_state, true, setup.maximal_order, nullptr,
+            context, route_state, true, setup.maximal_order, &schedule,
             sflint::FmpzConstRef(active_bound),
-            factor_base_restart_available, false, nullptr);
+            factor_base_restart_available, diagnostics);
     silex::detail::ClassUnitTransactionAccess::set_run_context(context,
                                                                nullptr);
     return true;
@@ -1979,25 +1999,47 @@ bool run_honesty_checkpoint(HonestyCheckpointRun& run,
 // factor_base_honesty_unwitnessed.  With a restart available the checkpoint
 // asks for it and records nothing; clearing the record at the next attempt
 // restores class_unit_computation_failed.
+//
+// The checkpoint searches witnesses with the capped T2 enumeration of
+// buch2.c:be_honest: each ideal stops after maxtry_FACT = 500 factored
+// candidates (Fincke_Pohst_ideal), and the prime is retried with at most
+// maxtry_HONEST = 50 random sub-factor-base twists.  The prime above 3 has
+// no witness, so every ideal searched stops at the candidate cap: the 51 of
+// stage 0 before the restart request, and the 401 of the final stage, at
+// the doubled cap, before the terminal failure.  The uncapped
+// scalar/lattice search would log search=lattice instead.
 int test_terminal_honesty_failure_names_transaction_reason() {
+    HonestyLogCapture capture;
+    silex::DiagnosticsContext diagnostics;
+    enable_honesty_log(diagnostics, capture);
     HonestyCheckpointRun terminal;
-    if (!run_honesty_checkpoint(terminal, false, true) ||
-        terminal.decision != driver::AnalyticFinishDecision::failed) {
+    if (!run_honesty_checkpoint(terminal, false, true, &diagnostics) ||
+        terminal.decision != driver::AnalyticFinishDecision::failed ||
+        !logged_caps(capture,
+                     "stage=3/3 search=t2 random_tries=400 "
+                     "factor_attempts=4000 element_steps=8000000 "
+                     "ideals=401 factor_attempt_cap_hits=401 "
+                     "element_step_cap_hits=0")) {
         return 1;
     }
     const silex::detail::FactorBaseHonestyFailure& failure =
             terminal.audit.factor_base_honesty_failure;
-    if (!final_stage_lattice_failure(failure, 3) ||
+    if (!final_stage_t2_failure(failure, 3) ||
         std::strcmp(silex::detail::class_unit_computation_failure_reason(
                             terminal.audit),
                     "factor_base_honesty_unwitnessed") != 0) {
         return 1;
     }
 
+    capture = HonestyLogCapture{};
     HonestyCheckpointRun restart;
-    if (!run_honesty_checkpoint(restart, true, true) ||
+    if (!run_honesty_checkpoint(restart, true, true, &diagnostics) ||
         restart.decision !=
                 driver::AnalyticFinishDecision::restart_factor_base ||
+        !logged_caps(capture,
+                     "stage=0/0 search=t2 random_tries=50 "
+                     "factor_attempts=500 element_steps=1000000 ideals=51 "
+                     "factor_attempt_cap_hits=51 element_step_cap_hits=0") ||
         restart.audit.factor_base_honesty_failure.recorded ||
         std::strcmp(silex::detail::class_unit_computation_failure_reason(
                             restart.audit),
@@ -2040,7 +2082,7 @@ int test_terminal_honesty_failure_names_transaction_reason() {
 int test_later_attempt_clears_honesty_failure() {
     HonestyCheckpointRun earlier;
     if (!run_honesty_checkpoint(earlier, false, true) ||
-        !final_stage_lattice_failure(
+        !final_stage_t2_failure(
                 earlier.audit.factor_base_honesty_failure, 3)) {
         return 1;
     }
@@ -2297,6 +2339,26 @@ int test_failure_detail_json() {
     report.failure_stage = silex::detail::ClassUnitStage::total;
     report.failure_reason =
             silex::detail::class_unit_computation_failure_reason(report);
+    const bool checkpoint =
+            failure_detail_json(report) ==
+            "{\n"
+            "    \"p\": \"3\",\n"
+            "    \"residue_degree\": 1,\n"
+            "    \"search\": \"t2\",\n"
+            "    \"stage\": 3,\n"
+            "    \"max_stage\": 3,\n"
+            "    \"random_tries\": 400,\n"
+            "    \"factor_attempts\": 4000,\n"
+            "    \"element_steps\": 8000000\n"
+            "  }";
+
+    // The lattice route's caps, as a direct scan caller may still record.
+    silex::detail::FactorBaseHonestyFailure& failure =
+            report.factor_base_honesty_failure;
+    failure.direct_witness_search = false;
+    failure.radius = 64;
+    failure.max_twists = 128;
+    failure.random_tries = 400;
     const bool lattice =
             failure_detail_json(report) ==
             "{\n"
@@ -2310,8 +2372,6 @@ int test_failure_detail_json() {
             "    \"random_tries\": 400\n"
             "  }";
 
-    silex::detail::FactorBaseHonestyFailure& failure =
-            report.factor_base_honesty_failure;
     // 2^89 - 1, a prime beyond any machine word, prints in full.
     if (!sflint::fmpz_set_str(sflint::FmpzRef(failure.p),
                               "618970019642690137449562111")) {
@@ -2351,7 +2411,10 @@ int test_failure_detail_json() {
             silex::detail::class_unit_computation_failure_reason(
                     restart.audit);
     const bool generic = failure_detail_json(restart.audit) == "null";
-    return lattice && t2 && other_reason && no_reason && generic ? 0 : 1;
+    return checkpoint && lattice && t2 && other_reason && no_reason &&
+                           generic
+            ? 0
+            : 1;
 }
 
 // Escalation runs only where an unwitnessed prime is final: a caller with a

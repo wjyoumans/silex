@@ -195,6 +195,22 @@ Changed
   380 and on the succeeding benchmark corpus rows 34, so no existing
   fixture changes.
 
+- The ``proven`` factor-base honesty check of class-group relation search
+  looks for each required prime's witness with the capped T2 enumeration of
+  PARI's ``be_honest`` (at most 500 factored candidates per ideal and 50
+  random sub-factor-base twists, ``maxtry_FACT`` and ``maxtry_HONEST`` in
+  ``buch2.c``) instead of the uncapped scalar/lattice search.  A prime with
+  no witness within the caps now ends in a factor-base restart or, without
+  one, fails closed with ``failure_reason``
+  ``factor_base_honesty_unwitnessed`` (``failure_detail`` ``search``
+  ``t2``) instead of searching until the caller's time limit.  Every
+  witness passes the same exact check as before, and results and labels of
+  the benchmark corpus's 65 succeeding ``proven`` rows are unchanged.  Three
+  fields that ran past a 600 s limit, ``Q(zeta_31)^+`` and
+  ``Q(sqrt(-3), sqrt(-5), sqrt(-7))`` and ``Q(sqrt(5), sqrt(-7), sqrt(-11))``,
+  now finish ``proven``, with the class groups and regulators of PARI's
+  certified ``bnfinit``.
+
 - The class-relation saturation with units keeps a stack of ``ell``-th-power
   residue characters of the relation generators and units at degree-one
   primes, grown one prime at a time for each candidate that survives the

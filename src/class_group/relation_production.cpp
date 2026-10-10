@@ -326,7 +326,7 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                         finish_decision = apply_honesty_check(
                                 *this, route_state, goal_reached, order,
                                 &subfactor_base_schedule, factor_base_bound,
-                                false, false, active_diagnostics);
+                                false, active_diagnostics);
                     }
                     if (finish_decision == AnalyticFinishDecision::finished) {
                         execution_storage.analytic_finish_precision =

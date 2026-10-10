@@ -282,7 +282,6 @@ AnalyticFinishDecision apply_honesty_check(
         const SubfactorBaseSchedule* subfb_state,
         flint::FmpzConstRef active_factor_base_bound,
         bool factor_base_restart_available,
-        bool use_required_prime_factor_over_base,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.apply_honesty_check");
@@ -366,13 +365,21 @@ AnalyticFinishDecision apply_honesty_check(
     // one an unwitnessed prime fails the route, so escalate first.
     const FactorBaseWitnessEscalation escalation =
             factor_base_witness_escalation(factor_base_restart_available);
+    // Search each required prime's witness with the capped T2 enumeration,
+    // as the reference does: buch2.c:Fincke_Pohst_ideal stops after
+    // maxtry_FACT = 500 factored candidates per ideal, and be_honest retries
+    // with at most maxtry_HONEST = 50 random sub-factor-base twists.  The
+    // scalar/lattice search has no candidate cap and in high degree can run
+    // without end on a prime with no smooth element; with the caps such a
+    // prime ends in a factor-base restart or, without one, fails closed.
+    constexpr bool kCappedRequiredPrimeWitnessSearch = true;
     bool honest = false;
     FactorBaseHonestyScanAudit scan_audit;
     if (base == nullptr ||
         !factor_base_honesty_check(
                 honest, *base, active_factor_base_bound,
                 flint::FmpzConstRef(required_bound), subfb_state,
-                random_seed, use_required_prime_factor_over_base,
+                random_seed, kCappedRequiredPrimeWitnessSearch,
                 route_state.analytic_finish_precision, escalation,
                 diagnostics, &scan_audit)) {
         return AnalyticFinishDecision::failed;
@@ -714,7 +721,6 @@ bool ClassGroupContext::run_relation_search_route_(
                 *this, route_state, goal_reached, order, &subfb_state,
                 flint::FmpzConstRef(active_factor_base_bound),
                 factor_base_restart_to_max_available(),
-                false,
                 active_diagnostics);
         return decision;
     };
