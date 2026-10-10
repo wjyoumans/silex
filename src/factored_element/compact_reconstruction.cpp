@@ -30,7 +30,8 @@ struct PreparedFactor {
 
     const Element* representative = nullptr;
     // Arbitrary-size exponents: reference FlxqV_factorback takes t_INT
-    // exponents (buch2.c:1039), so a wide exponent matrix reconstructs too.
+    // exponents (polarit2.c:1275-1298), so a wide exponent matrix
+    // reconstructs too.
     std::vector<flint::Fmpz> exponents;
     flint::FmpqPoly power_polynomial;
     bool needs_inverse = false;

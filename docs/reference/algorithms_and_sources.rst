@@ -590,7 +590,12 @@ form by the bounded compact reconstruction, which ports PARI 2.17.3
 ``FlxqX_chinese_unit`` (1026-1100), the bounds ``log2fubound`` and
 ``log2Mbound`` (1180-1212), and ``ZM_remove_unused`` (1104-1118).  Returning
 the rebuilt unit instead of the wide factored form is a deviation from
-Hecke; the unit is equal, so no published value changes.
+Hecke; the unit is equal, so no published value changes.  Equality rests on
+the coordinate bound, not on a separate check afterwards: PARI evaluates
+``log2Mbound`` and ``log2fubound`` in doubles, while Silex evaluates them
+with Arb balls and raises the precision until the ceiling of the bound is
+stable, and the CRT runs until the modulus exceeds twice that bound, so the
+centred coordinates are exact.
 
 Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb

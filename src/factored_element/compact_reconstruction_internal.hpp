@@ -64,7 +64,8 @@ struct WideFactoredUnits;
 // The same reconstruction for a batch with arbitrary-size exponents: output
 // i is prod_k inputs.bases[k]^inputs.exponents[i, k].  This is the shape of
 // reference vec_chinese_units itself, whose exponent matrix is a ZM and whose
-// FlxqV_factorback takes t_INT exponents (buch2.c:1026-1043, 1214-1240).
+// FlxqV_factorback (defined at polarit2.c:1275-1298, called at
+// buch2.c:1039) takes t_INT exponents (buch2.c:1026-1043, 1214-1240).
 // The caller certifies the same two facts as above.
 bool bounded_compact_reconstruct(
         BoundedCompactReconstructionReport& report, std::vector<Element>& out,
