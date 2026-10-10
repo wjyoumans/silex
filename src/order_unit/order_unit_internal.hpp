@@ -489,11 +489,27 @@ void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,
 // could decide whether the row product is an l-th power.  `error`: invalid
 // arguments, an unusable kernel width, or a failure building the row product
 // or copying the root; callers fail closed at once instead of treating the
-// row as undecided.
+// row as undecided.  `deferred`: only with
+// KernelRowRootMode::defer_undecidable, the row was not tested (see below);
+// callers treat it like `undecided`.
 enum class KernelRowRootResult : unsigned char {
     error,
     undecided,
     decided,
+    deferred,
+};
+// `attempt` tests every row.  `defer_undecidable` skips the root attempt,
+// returning `deferred`, when Element::is_power can decide an l-th power in
+// this field only for rational constants (l >= 3 and field degree >= 10,
+// see element_power_test_decides_non_rational in relation_kernel.cpp) and
+// the row product is not a formal l-th power.  Such an attempt can end only
+// in `undecided` or in a root of a true l-th power, and a true l-th power
+// stays in every later character kernel, so the stable proof step uses it
+// until its first doubling of `stable` for an ell and tests the row after
+// the rescan instead.
+enum class KernelRowRootMode : unsigned char {
+    attempt,
+    defer_undecidable,
 };
 KernelRowRootResult kernel_row_root(
         bool& is_power,
@@ -502,7 +518,8 @@ KernelRowRootResult kernel_row_root(
         flint::FmpzMatConstRef kernel_rows,
         slong row,
         flint::FmpzConstRef ell,
-        CompactFieldModulusCache* field_modulus_cache = nullptr) noexcept;
+        CompactFieldModulusCache* field_modulus_cache = nullptr,
+        KernelRowRootMode mode = KernelRowRootMode::attempt) noexcept;
 // Character kernel of the free generators and, when l divides the torsion
 // order, the torsion generator: dlog_proof_rank() columns, as the candidate
 // set of reference `compute_candidates_for_saturate`.  This is the kernel of

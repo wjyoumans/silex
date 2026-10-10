@@ -7659,6 +7659,99 @@ int test_kernel_row_root_three_way_result() {
     return 0;
 }
 
+// KernelRowRootMode::defer_undecidable skips the root attempt only where
+// Element::is_power cannot decide a non-rational l-th power (l >= 3, degree
+// >= 10) and the row product is not a formal l-th power.
+int test_kernel_row_root_defers_undecidable_rows() {
+    {
+        // The premise: in degree 12, Element::is_power with exponent 3
+        // leaves a non-rational cube undecided and decides a rational one.
+        // If Element::is_power learns to decide here, update
+        // element_power_test_decides_non_rational (relation_kernel.cpp).
+        silex::NumberField field = cyclotomic13_field();
+        sflint::FmpqPoly theta_poly;
+        sflint::fmpq_poly_set_coeff_si(theta_poly, 1, 1);
+        sflint::fmpq_poly_set_coeff_si(theta_poly, 0, 2);
+        silex::Element base(field);
+        silex::Element cube(field);
+        silex::Element root(field);
+        sflint::Fmpz three;
+        assert(set_fmpz_si(three, 3));
+        assert(base.set_fmpq_poly(sflint::FmpqPolyConstRef(theta_poly)));
+        assert(cube.pow_fmpz(base, sflint::FmpzConstRef(three)));
+        bool is_power = false;
+        assert(!cube.is_power(is_power, root, sflint::FmpzConstRef(three)));
+        silex::Element eight(field);
+        sflint::Fmpz eight_value;
+        assert(set_fmpz_si(eight_value, 8));
+        assert(eight.set_fmpz(sflint::FmpzConstRef(eight_value)));
+        assert(eight.is_power(is_power, root, sflint::FmpzConstRef(three)));
+        assert(is_power);
+    }
+
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup group(order);
+    assert(set_cyclotomic13_u2_power17_group(group, order, field, embeddings));
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(ell, 17));
+    sflint::FmpzMat rows(2, 5);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 0, 0), 1);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 1, 1), 17);
+    silex::FactoredElement root(field);
+    bool is_power = false;
+    // u_2^17 (expanded): degree 12 and l = 17, so the row is deferred
+    // instead of ending undecided after the full attempt.
+    assert(silex::detail::kernel_row_root(
+                   is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                   sflint::FmpzConstRef(ell), nullptr,
+                   silex::detail::KernelRowRootMode::defer_undecidable) ==
+           silex::detail::KernelRowRootResult::deferred);
+    // u_3^17 is a formal 17th power: still tested, and decided with the
+    // formal root u_3.
+    assert(silex::detail::kernel_row_root(
+                   is_power, root, group, sflint::FmpzMatConstRef(rows), 1,
+                   sflint::FmpzConstRef(ell), nullptr,
+                   silex::detail::KernelRowRootMode::defer_undecidable) ==
+           silex::detail::KernelRowRootResult::decided);
+    assert(is_power);
+    silex::FactoredElement u3(field);
+    assert(group.free_generator(u3, 1));
+    std::vector<silex::FactoredElement> got;
+    std::vector<silex::FactoredElement> want;
+    got.emplace_back(field);
+    want.emplace_back(field);
+    assert(got.back().set(root));
+    assert(want.back().set(u3));
+    assert(same_factor_lists(got, want));
+
+    // Degree 2: Element::is_power decides cubes, so the row is tested.
+    silex::NumberField quadratic = quadratic118_field();
+    silex::Order quadratic_order = silex::test::verified_maximal_order(
+            silex::test::equation_order(quadratic));
+    silex::EmbeddingContext quadratic_embeddings(quadratic);
+    silex::OrderUnitGroup quadratic_group(quadratic_order);
+    assert(set_quadratic118_fundamental_unit_group(
+            quadratic_group, quadratic_order, quadratic,
+            quadratic_embeddings));
+    sflint::Fmpz ell3;
+    assert(set_fmpz_si(ell3, 3));
+    sflint::FmpzMat eps_row(1, 1);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(eps_row, 0, 0), 1);
+    silex::FactoredElement quadratic_root(quadratic);
+    is_power = true;
+    assert(silex::detail::kernel_row_root(
+                   is_power, quadratic_root, quadratic_group,
+                   sflint::FmpzMatConstRef(eps_row), 0,
+                   sflint::FmpzConstRef(ell3), nullptr,
+                   silex::detail::KernelRowRootMode::defer_undecidable) ==
+           silex::detail::KernelRowRootResult::decided);
+    assert(!is_power);
+    return 0;
+}
+
 // A kernel row that is not an ell-th power, met when the scan has used every
 // prime q of its range, fails closed as `unavailable`: a rescan would return
 // the same kernel, so doubling `stable` would never end.  The test hook ends
@@ -9921,6 +10014,7 @@ int main() {
     test_prove_index_bound_quartic70640();
     test_prove_index_bound_cyclotomic13_undecided_root();
     test_kernel_row_root_three_way_result();
+    test_kernel_row_root_defers_undecidable_rows();
     test_prove_index_bound_non_power_range_exhausted();
     test_prove_index_bound_undecided_root_not_saturated();
     test_prove_torsion_twisted_saturation_root();

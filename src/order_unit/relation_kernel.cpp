@@ -953,6 +953,41 @@ bool adjoinable_root_is_order_unit(const Order& order,
            evaluated_is_order_unit(order, expanded);
 }
 
+namespace {
+
+// Whether Element::is_power (src/element/element.cpp) can decide whether a
+// non-rational element of `field` is an `exponent`-th power.  Exponent 2
+// goes to Element::is_square.  For an exponent >= 3 the only routes for a
+// non-rational input are pure_power_hensel_root and
+// pure_power_residue_disproves (src/element/hensel.cpp), and both return
+// "unsupported" for a field of degree >= 10 before they look at the input.
+// So for exponent >= 3 and degree >= 10, Element::is_power decides only
+// rational constants (is_power_rational_constant), and then only that a
+// rational exponent-th power is a power: a decided answer is never "not a
+// power".  The bound must follow those guards; a test pins it.
+constexpr slong kElementPowerRouteDegreeLimit = 10;
+
+bool element_power_test_decides_non_rational(const NumberField& field,
+                                             slong exponent) noexcept {
+    return exponent <= 2 || field.degree() < kElementPowerRouteDegreeLimit;
+}
+
+// Whether every factor exponent of `product` is divisible by `exponent`, so
+// compact_unit_presentation_power_root and FactoredElement::is_power_si
+// both return the formal root at once without calling Element::is_power
+// (their formal splits leave no leftover exactly in this case).
+bool factored_is_formal_power(const FactoredElement& product,
+                              slong exponent) noexcept {
+    for (const auto& entry : product.factors()) {
+        if (entry.exponent % exponent != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 KernelRowRootResult kernel_row_root(
         bool& is_power,
         FactoredElement& root,
@@ -960,7 +995,8 @@ KernelRowRootResult kernel_row_root(
         flint::FmpzMatConstRef kernel_rows,
         slong row,
         flint::FmpzConstRef ell,
-        CompactFieldModulusCache* field_modulus_cache) noexcept {
+        CompactFieldModulusCache* field_modulus_cache,
+        KernelRowRootMode mode) noexcept {
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     if (!group.is_set() || field == nullptr || root.parent() == nullptr ||
@@ -986,6 +1022,19 @@ KernelRowRootResult kernel_row_root(
     }
 
     const slong exponent = flint::fmpz_get_si(ell);
+    if (mode == KernelRowRootMode::defer_undecidable &&
+        !element_power_test_decides_non_rational(*field, exponent) &&
+        !factored_is_formal_power(product, exponent)) {
+        // Both root routes below end in Element::is_power, which here can
+        // only confirm a rational l-th power remainder.  A non-power is
+        // never decided, so the attempt can end only in `undecided` or in
+        // the root of a true l-th power, which the caller still meets after
+        // a rescan.  Skip the compact presentation and the factored
+        // expansion.
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.kernel_row_root_deferred");
+        return KernelRowRootResult::deferred;
+    }
     SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.kernel_row_root_compact_attempt");
     if (!detail::compact_unit_presentation_power_root(

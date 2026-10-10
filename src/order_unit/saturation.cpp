@@ -890,6 +890,7 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
                                   const OrderUnitGroup& group,
                                   flint::FmpzConstRef ell,
                                   double stable_threshold,
+                                  bool defer_undecidable_roots,
                                   EmbeddingContext& embeddings,
                                   slong precision,
                                   detail::CompactFieldModulusCache&
@@ -935,6 +936,21 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
     // O, so keep scanning, but never report `verified` or retry with a
     // larger threshold once such a row was seen.
     bool saw_root_outside_order = false;
+    // Until the first doubling of `stable` for this ell (the callers pass
+    // defer_undecidable_roots), a row whose root test can only end
+    // undecided or in the root of a true ell-th power is deferred, not
+    // tested: Element::is_power decides no non-power in that field and
+    // exponent (see kernel_row_root).  The deferred row is handled like an
+    // undecided one below, so `stable` doubles and the rescan uses more
+    // primes q; the rescan's rows are tested as usual.  A true ell-th power
+    // stays in every kernel, so it still reaches the root test, one scan
+    // later; a non-power that more primes remove costs no root test.  When
+    // the range is exhausted a rescan would return the same kernel, so the
+    // rows are tested at once, as before.
+    const detail::KernelRowRootMode root_mode =
+            defer_undecidable_roots && !range_exhausted
+                    ? detail::KernelRowRootMode::defer_undecidable
+                    : detail::KernelRowRootMode::attempt;
     for (slong row = 0; row < flint::fmpz_mat_nrows(kernel); ++row) {
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.stable_relation_saturation.row_inspected");
@@ -962,7 +978,7 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
         const detail::KernelRowRootResult root_result =
                 detail::kernel_row_root(is_power, root, group,
                                         flint::FmpzMatConstRef(kernel), row,
-                                        ell, &field_modulus_cache);
+                                        ell, &field_modulus_cache, root_mode);
         if (root_result == detail::KernelRowRootResult::error) {
             // An internal error, not an undecided root: a rescan cannot
             // help, so fail closed at once.
@@ -970,6 +986,18 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
                     out.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_relation_saturation.root_error");
             return false;
+        }
+        if (root_result == detail::KernelRowRootResult::deferred) {
+            // Not tested (see root_mode above); `range_exhausted` is false
+            // here, so this rescans exactly as an undecided row does.
+            SILEX_PROFILE_EVENT(
+                    out.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_relation_saturation.root_deferred");
+            step.status = saw_root_outside_order
+                                  ? StableRelationSaturationStatus::unavailable
+                                  : StableRelationSaturationStatus::
+                                            wasted_non_power;
+            return true;
         }
         if (root_result == detail::KernelRowRootResult::undecided) {
             // No exactly verified root: the compact presentation and the
@@ -2558,11 +2586,12 @@ bool OrderUnitGroup::prove_local_saturated_(
         constexpr double kInitialStable = 3.5;
         double stable_threshold = kInitialStable;
         bool stable_changed = false;
+        bool rescanned = false;
         for (;;) {
             StableRelationSaturationStep step;
             if (!stable_relation_saturation_step(
                         pass_result, step, working, ell, stable_threshold,
-                        embeddings, precision,
+                        !rescanned, embeddings, precision,
                         *shared_field_modulus_cache)) {
                 return publish(working, ProofState::unavailable,
                                step.local_primes, stable_changed);
@@ -2590,6 +2619,7 @@ bool OrderUnitGroup::prove_local_saturated_(
             if (step.status ==
                 StableRelationSaturationStatus::wasted_non_power) {
                 stable_threshold *= 2.0;
+                rescanned = true;
                 continue;
             }
 
@@ -2783,6 +2813,7 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
     constexpr double kInitialStable = 3.5;
     double stable_threshold = kInitialStable;
     bool stable_changed = false;
+    bool rescanned = false;
     for (;;) {
         OrderUnitGroup pass_result(*order);
         pass_result.set_diagnostics(diagnostics_);
@@ -2793,7 +2824,8 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
         StableRelationSaturationStep step;
         if (!stable_relation_saturation_step(
                     pass_result, step, group, ell, stable_threshold,
-                    embeddings, precision, step_field_modulus_cache)) {
+                    !rescanned, embeddings, precision,
+                    step_field_modulus_cache)) {
             return publish_in_place(ProofState::unavailable,
                                     step.local_primes, stable_changed);
         }
@@ -2819,6 +2851,7 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
 
         if (step.status == StableRelationSaturationStatus::wasted_non_power) {
             stable_threshold *= 2.0;
+            rescanned = true;
             continue;
         }
 
