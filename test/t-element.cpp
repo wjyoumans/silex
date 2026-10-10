@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <utility>
+#include <vector>
 
 namespace sflint = silex::flint;
 
@@ -715,10 +716,6 @@ void test_power_prelift_named_cases_unknown_without_disproof() noexcept {
     assert_prelift_decides(structured, 2);
 }
 
-// Independent oracle for "no": each element below is not an n-th power in its
-// field according to an independent computer algebra system: with
-// K = nfinit(<field polynomial>) and a the element as a polynomial in the
-// generator, nfroots(K, x^n - Mod(a, K.pol)) is empty.  The production answer must be a definite "no".
 // The radicand-independent Hensel data (norm-change constants and the
 // reconstruction lattice) is memoized per thread in src/element/hensel.cpp.
 // Roots of radicands of different heights need different lift exponents and
@@ -735,7 +732,10 @@ void test_power_hensel_data_cache_reuse() noexcept {
             element_from_coefficients(field, {-55555555, 1, 0, 7777777}),
             element_from_coefficients(field, {0, 5, 0, -1}),
     };
-    const auto run_pass = [&field, &bases]() noexcept {
+    std::vector<silex::Element> saved_roots;
+    const auto run_pass =
+            [&field, &bases, &saved_roots](bool first_pass) noexcept {
+        std::size_t index = 0;
         for (slong n : {2, 3}) {
             sflint::Fmpz exponent;
             sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
@@ -750,13 +750,20 @@ void test_power_hensel_data_cache_reuse() noexcept {
                 silex::Element check(field);
                 assert(check.pow_fmpz(root, sflint::FmpzConstRef(exponent)));
                 assert(check.equal(value));
+                if (first_pass) {
+                    saved_roots.emplace_back(field);
+                    assert(saved_roots.back().set(root));
+                } else {
+                    assert(root.equal(saved_roots[index]));
+                }
+                ++index;
             }
         }
     };
 
     const silex::detail::HenselDataCacheCounters before =
             silex::detail::hensel_data_cache_counters();
-    run_pass();
+    run_pass(true);
     const silex::detail::HenselDataCacheCounters first =
             silex::detail::hensel_data_cache_counters();
     assert(first.reconstruction_data_hits + first.reconstruction_data_misses >
@@ -766,7 +773,7 @@ void test_power_hensel_data_cache_reuse() noexcept {
            before.norm_change_constants_hits +
                    before.norm_change_constants_misses);
 
-    run_pass();
+    run_pass(false);
     const silex::detail::HenselDataCacheCounters second =
             silex::detail::hensel_data_cache_counters();
     assert(second.reconstruction_data_misses ==
@@ -778,6 +785,10 @@ void test_power_hensel_data_cache_reuse() noexcept {
            first.norm_change_constants_hits);
 }
 
+// Independent oracle for "no": each element below is not an n-th power in its
+// field according to an independent computer algebra system: with
+// K = nfinit(<field polynomial>) and a the element as a polynomial in the
+// generator, nfroots(K, x^n - Mod(a, K.pol)) is empty.  The production answer must be a definite "no".
 void test_power_gp_nonpowers() noexcept {
     struct Case {
         std::initializer_list<slong> field;
