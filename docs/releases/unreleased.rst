@@ -456,8 +456,8 @@ Fixed
 
 - The class-relation saturation candidate search no longer uses an auxiliary
   prime ``q`` that divides ``lc(F) * disc(F)`` when the defining polynomial is
-  not monic with integer coefficients (``F`` is its primitive integral
-  multiple).  A root of the polynomial modulo such a ``q`` need not give a
+  not monic with integer coefficients (``F`` is its integer numerator, which
+  keeps the content).  A root of the polynomial modulo such a ``q`` need not give a
   degree-one prime, and its ``ell``-th-power character could rule out a true
   ``ell``-th power.  Skipping the prime only leaves the candidate space
   larger.  Monic integral polynomials, including every field in the test

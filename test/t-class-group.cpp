@@ -2331,6 +2331,54 @@ int test_saturation_candidates_skip_bad_prime_of_nonmonic_polynomial() {
     return 0;
 }
 
+// A defining polynomial with non-trivial content, f = q0 (x^2 - 21), has the
+// integer numerator f itself.  q0 divides its content, so f is zero modulo q0
+// and the root search would abort on it; the search must reject q0 and go on
+// to the next prime.
+int test_saturation_candidates_skip_content_prime_of_nonmonic_polynomial() {
+    sflint::Fmpz q0;
+    fmpz_one(q0.raw());
+    fmpz_mul_2exp(q0.raw(), q0.raw(), 60);
+    sflint::fmpz_nextprime(sflint::FmpzRef(q0), sflint::FmpzConstRef(q0));
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::Fmpz c0;
+    fmpz_mul_si(c0.raw(), q0.raw(), -21);
+    fmpq_poly_set_coeff_fmpz(polynomial.raw(), 0, c0.raw());
+    fmpq_poly_set_coeff_fmpz(polynomial.raw(), 2, q0.raw());
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    // Maximal order Z[(1 + theta) / 2], theta^2 = 21.
+    sflint::FmpqMat basis(2, 2);
+    fmpq_mat_zero(basis.raw());
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 0, 0), 1, 1);
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 0), 1, 2);
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 1), 1, 2);
+    silex::Order input = silex::Order::from_basis(
+            field, sflint::FmpqMatConstRef(basis));
+    assert(input.is_defined());
+    silex::Order order(field);
+    assert(order.maximal_order(input));
+    assert(order.is_maximal());
+
+    silex::Element value(field);
+    assert(value.set_si(21));
+    silex::FactoredElement relation(field);
+    assert(relation.one());
+    assert(relation.push(value, 1));
+    std::vector<silex::FactoredElement> relations;
+    relations.push_back(std::move(relation));
+
+    sflint::FmpzMat candidates(0, 0);
+    slong auxiliary_prime_count = 0;
+    assert(silex::detail::saturation_candidates_from_relations_from_prime(
+            candidates, auxiliary_prime_count, relations, order, 2, 100.0,
+            sflint::FmpzConstRef(q0), 1));
+    assert(auxiliary_prime_count == 1);
+    return 0;
+}
+
 // Index-bounded saturation (the internal class/unit validation pass) clears
 // the primes of a bound on h_cand / h.  Clearing them proves saturation only
 // when the bound holds unconditionally; with a GRH-conditional bound the
@@ -5175,6 +5223,7 @@ int main() {
     test_relation_saturation_candidate_filter_needs_nice_polynomial();
     test_degree_one_quotient_log_row_word_size_matches_general();
     test_saturation_candidates_skip_bad_prime_of_nonmonic_polynomial();
+    test_saturation_candidates_skip_content_prime_of_nonmonic_polynomial();
     test_relation_saturation_index_bounded_status_needs_unconditional_bound();
     test_validation_exact_index_saturation_status_follows_generation();
     test_exact_order_certification_failure_restores_generation_check();

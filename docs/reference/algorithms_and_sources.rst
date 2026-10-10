@@ -1399,14 +1399,16 @@ over an auxiliary prime ``q`` from the roots of the defining polynomial ``f``
 modulo ``q``.  For a monic integral ``f`` it rejects index and discriminant
 primes, so each simple root ``r`` gives the prime ``(q, theta - r)``.  For any
 other ``f`` that check does not apply, and a root modulo ``q | lc(F) *
-disc(F)`` (``F`` the primitive integral multiple of ``f``) need not give a
+disc(F)`` (``F`` the integer numerator of ``f``, which keeps its content) need not give a
 degree-one prime, so its character could rule out a true ``ell``-th power.
 Hecke ``compute_candidates_for_saturate`` takes
 ``prime_decomposition(OK, q, 1)`` in that case.  Silex skips every such ``q``:
 for ``q`` not dividing ``lc(F) * disc(F)``, ``theta`` is ``q``-integral and
 ``Z_(q)[theta]`` is ``q``-maximal, so the Dedekind-Kummer theorem applies.
 Skipping an auxiliary prime only leaves the candidate space larger.  Monic
-integral polynomials are unaffected.
+integral polynomials are unaffected.  When ``f`` has non-integral
+coefficients the search fails (closed), because the roots of ``f`` modulo
+``q`` cannot be read.
 
 A ``proven`` unit computation from a class-group context runs its
 relation-kernel units through the index-bounded saturation pass

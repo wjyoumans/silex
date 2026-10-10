@@ -1109,8 +1109,12 @@ bool order_index_divisor(bool& out,
     return true;
 }
 
-// lc(F) * disc(F) for the primitive integral multiple F of the defining
-// polynomial, used when the polynomial is not monic integral, where
+// A multiple of lc(F) * disc(F), where F is the primitive integral multiple of
+// the defining polynomial: the helper uses the integer numerator of f, which
+// keeps its content, so the product is c^(2n-1) * lc(F) * disc(F) for the
+// content c.  Keeping the content is deliberate: a prime q dividing it would
+// make the numerator vanish modulo q, and the root search rejects the zero
+// polynomial.  Used when the polynomial is not monic integral, where
 // order_index_divisor does not apply.  For a prime q not dividing it, theta is
 // q-integral and Z_(q)[theta] is q-maximal (its discriminant is disc(F) up to
 // a q-unit), so by Dedekind-Kummer the simple roots r of F modulo q are the
@@ -1505,7 +1509,8 @@ bool saturation_candidates_from_relations(
     // divisors only for a nice (monic integral) polynomial and otherwise
     // takes `prime_decomposition(OK, q, 1)`.  Silex reads the degree-one
     // primes from the roots of the defining polynomial, so for a polynomial
-    // that is not nice it skips q | lc(f) * disc(f) instead; skipping an
+    // that is not nice it skips q dividing lc(F) * disc(F) instead (F the
+    // integer numerator of f); skipping an
     // auxiliary prime only leaves the candidate space larger.
     const bool nice_polynomial = defining_polynomial_is_nice(field);
     flint::Fmpz polynomial_bad_primes;
@@ -1561,7 +1566,8 @@ bool saturation_candidates_from_relations(
             // This is the degree-one specialization of reference
             // `prime_decomposition(OK, q, 1)` for the already-filtered
             // auxiliary prime: not an index or discriminant prime, and not a
-            // divisor of lc(f) * disc(f) when f is not monic integral.
+            // divisor of lc(F) * disc(F) (F the integer numerator of f) when f is
+            // not monic integral.
             if (!degree_one_roots_for_auxiliary_prime(
                         degree_one_roots, order, flint::FmpzConstRef(q))) {
                 return false;
