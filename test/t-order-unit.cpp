@@ -3616,6 +3616,26 @@ int test_add_dependent_unit_overflowing_index_bound_fallback() {
                                              &unusable));
     assert(!changed);
 
+    // A fallback computed from a class group context with neither verified
+    // generation nor a GRH generation record is not usable, so the group is
+    // kept.
+    silex::ClassGroupContext bare_class_group;
+    silex::detail::AnalyticClassRegulatorCache bare_cache;
+    silex::detail::DependentUnitIndexFallback computed_fallback;
+    computed_fallback.class_group = &bare_class_group;
+    computed_fallback.analytic_cache = &bare_cache;
+    computed_fallback.order = &order;
+    computed_fallback.precision = 128;
+    changed = true;
+    assert(silex::detail::add_dependent_unit(changed, group, candidate,
+                                             embeddings, state, 128,
+                                             &computed_fallback));
+    assert(!changed);
+    assert(computed_fallback.computed);
+    assert(!computed_fallback.usable);
+    assert(group.regulator(sflint::ArbRef(regulator)));
+    assert(::arb_equal(regulator.raw(), starting_regulator.raw()) != 0);
+
     // A word-size fallback at least the index replaces the overflowing
     // bound, and adjoining epsilon recovers the full unit group.
     silex::detail::DependentUnitIndexFallback fallback;

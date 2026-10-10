@@ -610,8 +610,11 @@ and it may have any size.  Silex's search takes a word-size ``B``, so when
 the a priori bound does not fit in ``slong`` the attempt leaves the group
 unchanged, except in a ``grh`` class/unit request.  There, while the class
 group relations improve the units, the bound is replaced by the class/unit
-index bound ``ceil(h_cand R_G / hR)`` that validation uses, with ``hR`` the
-GRH-conditional Belabas-Friedman value, provided the factor base generates
+index bound, the outward-rounded ceiling of the upper endpoint of the ball
+quotient ``h_cand R_G / hR``, with ``hR`` the GRH-conditional
+Belabas-Friedman value.  The fallback always uses the class/unit validation
+estimate, whereas validation may use the Belabas-Friedman validation
+estimate instead.  The replacement is made provided the factor base generates
 the class group unconditionally or under GRH and the replacement fits in
 ``slong``.  Under GRH ``h`` divides ``h_cand``, so ``[U:G] = R_G / R`` is at
 most ``h_cand R_G / hR`` and the closed range above still holds.  The bound
