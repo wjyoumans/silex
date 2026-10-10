@@ -388,11 +388,11 @@ def assert_computation_failure_cause(exe: Path, root: Path) -> None:
     assert proven["certification_status"] == "proven"
     assert proven["class_group"]["order"] == "1"
     # Q(sqrt(-1), sqrt(-3), sqrt(5)), x^8 - 3x^6 + 8x^4 - 3x^2 + 1 (degree 8):
-    # a stable-scan kernel row of its unit proof used to stay undecided for
-    # another reason than the degree (the Hensel root failed the exact check)
-    # and proved only by the rescan; the compact presentation now decides the
-    # row is not a power.  Either way the proof must succeed with the GP
-    # values.  GP 2.17: bnfinit(pol, 1) has h = 1 and regulator
+    # this pins the published result for the field, not the history of this
+    # polynomial: the proof must succeed with the GP values.  (The row whose
+    # Hensel root failed the exact check was seen on another defining
+    # polynomial of the field; here the compact presentation decides it.)
+    # GP 2.17: bnfinit(pol, 1) has h = 1 and regulator
     # 10.461390098444553736850, and bnfcertify returns 1.
     proven = run_json(
         [str(exe), "--coeffs", "1,0,-3,0,8,0,-3,0,1", "--mode", "proven"],
