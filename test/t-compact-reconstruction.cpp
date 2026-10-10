@@ -16,6 +16,12 @@
 #include "order_unit/compact_reconstruction_bound_internal.hpp"
 #include "test_support.hpp"
 
+#include <flint/flint.h>
+#include <flint/fmpz.h>
+#include <flint/nmod_mat.h>
+#include <flint/nmod_poly.h>
+#include <flint/ulong_extras.h>
+
 #include <cassert>
 #include <cstddef>
 #include <span>
@@ -773,9 +779,207 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     return 0;
 }
 
+// Reference evaluation of the modular power products: one independent binary
+// powering per (output, base) and a running product, the evaluation that the
+// shared-table interleaved evaluation replaces.
+void reference_power_products(
+        sflint::NmodMat& out,
+        const std::vector<silex::detail::ModularPowerProductFactor>& factors,
+        const sflint::NmodPoly& modulus) {
+    const ulong prime = modulus.raw()->mod.n;
+    for (slong column = 0; column < nmod_mat_nrows(out.raw()); ++column) {
+        sflint::NmodPoly value(prime);
+        sflint::NmodPoly power(prime);
+        sflint::NmodPoly product(prime);
+        sflint::Fmpz magnitude;
+        nmod_poly_one(value.raw());
+        for (const auto& factor : factors) {
+            const sflint::Fmpz& exponent =
+                    (*factor.exponents)[static_cast<std::size_t>(column)];
+            if (fmpz_is_zero(exponent.raw()) != 0) {
+                continue;
+            }
+            const sflint::NmodPoly& base = fmpz_sgn(exponent.raw()) < 0
+                                                   ? *factor.inverse
+                                                   : *factor.base;
+            fmpz_abs(magnitude.raw(), exponent.raw());
+            if (fmpz_abs_fits_ui(magnitude.raw()) != 0) {
+                nmod_poly_powmod_ui_binexp(power.raw(), base.raw(),
+                                           fmpz_get_ui(magnitude.raw()),
+                                           modulus.raw());
+            } else {
+                nmod_poly_powmod_fmpz_binexp(power.raw(), base.raw(),
+                                             magnitude.raw(), modulus.raw());
+            }
+            nmod_poly_mulmod(product.raw(), value.raw(), power.raw(),
+                             modulus.raw());
+            value.swap(product);
+        }
+        for (slong i = 0; i < nmod_mat_ncols(out.raw()); ++i) {
+            nmod_mat_entry(out.raw(), column, i) =
+                    nmod_poly_get_coeff_ui(value.raw(), i);
+        }
+    }
+}
+
+struct PowerProductCase {
+    std::vector<sflint::NmodPoly> bases;
+    std::vector<sflint::NmodPoly> inverses;
+    std::vector<std::vector<sflint::Fmpz>> exponents;
+    std::vector<bool> has_inverse;
+};
+
+// Bases are random reduced residues that are invertible modulo the modulus
+// when allow_negative is set; exponent bit sizes are drawn up to max_bits
+// (zero included), with random signs when allow_negative is set.
+void random_power_product_case(PowerProductCase& out, flint_rand_t state,
+                               const sflint::NmodPoly& modulus,
+                               std::size_t base_count,
+                               std::size_t output_count,
+                               flint_bitcnt_t max_bits, bool allow_negative) {
+    const ulong prime = modulus.raw()->mod.n;
+    const slong length = nmod_poly_length(modulus.raw());
+    for (std::size_t k = 0; k < base_count; ++k) {
+        out.bases.emplace_back(prime);
+        out.inverses.emplace_back(prime);
+        while (true) {
+            nmod_poly_randtest(out.bases.back().raw(), state, length - 1);
+            if (!allow_negative ||
+                nmod_poly_invmod(out.inverses.back().raw(),
+                                 out.bases.back().raw(),
+                                 modulus.raw()) != 0) {
+                break;
+            }
+        }
+        out.exponents.emplace_back(output_count);
+        bool negative = false;
+        for (sflint::Fmpz& exponent : out.exponents.back()) {
+            const flint_bitcnt_t bits = n_randint(state, max_bits + 1);
+            if (bits != 0) {
+                fmpz_randbits(exponent.raw(), state, bits);
+            }
+            if (!allow_negative) {
+                fmpz_abs(exponent.raw(), exponent.raw());
+            }
+            negative = negative || fmpz_sgn(exponent.raw()) < 0;
+        }
+        out.has_inverse.push_back(negative);
+    }
+}
+
+void assert_power_products_match_reference(const PowerProductCase& input,
+                                           const sflint::NmodPoly& modulus,
+                                           std::size_t output_count) {
+    std::vector<silex::detail::ModularPowerProductFactor> factors;
+    for (std::size_t k = 0; k < input.bases.size(); ++k) {
+        factors.push_back({&input.bases[k],
+                           input.has_inverse[k] ? &input.inverses[k] : nullptr,
+                           &input.exponents[k]});
+    }
+    const ulong prime = modulus.raw()->mod.n;
+    const slong degree = nmod_poly_degree(modulus.raw());
+    sflint::NmodMat expected(static_cast<slong>(output_count), degree, prime);
+    sflint::NmodMat actual(static_cast<slong>(output_count), degree, prime);
+    reference_power_products(expected, factors, modulus);
+    silex::detail::modular_power_products(actual, factors, modulus);
+    assert(nmod_mat_equal(expected.raw(), actual.raw()) != 0);
+}
+
+void random_monic_modulus(sflint::NmodPoly& modulus, flint_rand_t state,
+                          slong degree) {
+    nmod_poly_randtest_monic(modulus.raw(), state, degree + 1);
+}
+
+int test_modular_power_products_match_independent_powering() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    const ulong primes[] = {UWORD(5), UWORD(101),
+                            n_nextprime(UWORD(1) << 40, 1),
+                            n_nextprime(UWORD(1) << (FLINT_BITS - 1), 1)};
+    struct Shape {
+        slong degree;
+        std::size_t bases;
+        std::size_t outputs;
+        flint_bitcnt_t max_bits;
+    };
+    // A single base, a single output, word-size and wide exponents, many
+    // bases (the wide unit rebuild shape), and degree one.
+    const Shape shapes[] = {{1, 1, 1, 3},   {1, 4, 3, 70},  {2, 1, 5, 1},
+                            {3, 1, 1, 130}, {5, 7, 6, 64},  {8, 3, 9, 200},
+                            {32, 59, 4, 73}, {6, 40, 12, 9}, {4, 12, 2, 66}};
+    for (ulong prime : primes) {
+        for (const Shape& shape : shapes) {
+            for (int sign_mode = 0; sign_mode < 2; ++sign_mode) {
+                sflint::NmodPoly modulus(prime);
+                random_monic_modulus(modulus, state, shape.degree);
+                PowerProductCase input;
+                random_power_product_case(input, state, modulus, shape.bases,
+                                          shape.outputs, shape.max_bits,
+                                          sign_mode == 1);
+                assert_power_products_match_reference(input, modulus,
+                                                       shape.outputs);
+            }
+        }
+    }
+
+    // Edge cases on one modulus: an output whose exponents are all zero, a
+    // zero base, the base one, exponents +-1, and magnitudes at the word
+    // boundary (2^64 - 1 and 2^64) and of a single high bit.
+    const ulong prime = n_nextprime(UWORD(1) << (FLINT_BITS - 1), 1);
+    sflint::NmodPoly modulus(prime);
+    random_monic_modulus(modulus, state, 6);
+    PowerProductCase input;
+    random_power_product_case(input, state, modulus, 4, 6, 8, true);
+    for (auto& row : input.exponents) {
+        fmpz_zero(row[0].raw());
+    }
+    fmpz_set_si(input.exponents[0][1].raw(), 1);
+    fmpz_set_si(input.exponents[1][1].raw(), -1);
+    fmpz_set_ui(input.exponents[0][2].raw(), UWORD_MAX);
+    fmpz_set_ui(input.exponents[1][2].raw(), UWORD_MAX);
+    fmpz_neg(input.exponents[1][2].raw(), input.exponents[1][2].raw());
+    fmpz_one(input.exponents[2][3].raw());
+    fmpz_mul_2exp(input.exponents[2][3].raw(), input.exponents[2][3].raw(),
+                  FLINT_BITS);
+    fmpz_neg(input.exponents[3][3].raw(), input.exponents[2][3].raw());
+    fmpz_set_si(input.exponents[3][4].raw(), -64);
+    input.has_inverse.assign(input.bases.size(), false);
+    for (std::size_t k = 0; k < input.bases.size(); ++k) {
+        for (const sflint::Fmpz& exponent : input.exponents[k]) {
+            if (fmpz_sgn(exponent.raw()) < 0) {
+                input.has_inverse[k] = true;
+            }
+        }
+    }
+    assert_power_products_match_reference(input, modulus, 6);
+
+    PowerProductCase special;
+    for (int k = 0; k < 2; ++k) {
+        special.bases.emplace_back(prime);
+        special.inverses.emplace_back(prime);
+        special.exponents.emplace_back(3);
+        special.has_inverse.push_back(false);
+    }
+    nmod_poly_zero(special.bases[0].raw());
+    nmod_poly_one(special.bases[1].raw());
+    fmpz_set_ui(special.exponents[0][0].raw(), 7);
+    fmpz_set_ui(special.exponents[1][0].raw(), 5);
+    fmpz_set_ui(special.exponents[1][1].raw(), UWORD_MAX);
+    fmpz_set_ui(special.exponents[0][2].raw(), 1);
+    assert_power_products_match_reference(special, modulus, 3);
+
+    // No factors at all: every output is one.
+    PowerProductCase empty;
+    assert_power_products_match_reference(empty, modulus, 2);
+
+    flint_rand_clear(state);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
+    assert(test_modular_power_products_match_independent_powering() == 0);
     assert(test_shared_exponent_matrix_and_centered_crt() == 0);
     assert(test_denominator_prime_exclusion() == 0);
     assert(test_field_polynomial_denominator_prime_exclusion() == 0);

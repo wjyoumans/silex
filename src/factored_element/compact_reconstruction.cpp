@@ -242,6 +242,99 @@ bool reduce_factor_polynomials(std::vector<flint::NmodPoly>& bases,
     return true;
 }
 
+// Odd powers base^1, base^3, ..., base^(2^width - 1) of one base (or of its
+// inverse) modulo the modulus: the sliding-window table of Handbook of
+// Applied Cryptography, Algorithm 14.85 step 1.
+struct OddPowerTable {
+    std::vector<flint::NmodPoly> odd_powers;
+    ulong width = 0;
+};
+
+// One window of a sliding-window recoding: multiply by odd_power at bit
+// position `position` of the left-to-right evaluation.
+struct WindowStep {
+    flint_bitcnt_t position = 0;
+    const flint::NmodPoly* odd_power = nullptr;
+};
+
+// Window width minimizing the operation count of Handbook of Applied
+// Cryptography Note 14.87 for a table shared by exponents of total bit
+// length total_bits: the table costs one squaring and 2^(w-1) - 1
+// multiplications when w > 1, and a t-bit exponent needs about t / (w + 1)
+// window multiplications.  Squarings belong to the interleaved evaluation and
+// do not depend on w.  The width changes only the cost, never the product.
+ulong sliding_window_width(flint_bitcnt_t total_bits,
+                           flint_bitcnt_t maximum_bits) noexcept {
+    constexpr ulong maximum_width = 16;
+    const double bits = static_cast<double>(total_bits);
+    ulong best_width = 1;
+    double best_cost = bits / 2.0;
+    for (ulong width = 2;
+         width <= maximum_width && width <= static_cast<ulong>(maximum_bits);
+         ++width) {
+        const double cost = static_cast<double>(UWORD(1) << (width - 1)) +
+                            bits / static_cast<double>(width + 1);
+        if (cost < best_cost) {
+            best_cost = cost;
+            best_width = width;
+        }
+    }
+    return best_width;
+}
+
+void build_odd_power_table(OddPowerTable& table, const flint::NmodPoly& base,
+                           ulong width, const flint::NmodPoly& modulus) noexcept {
+    const ulong prime = modulus.raw()->mod.n;
+    const std::size_t size = static_cast<std::size_t>(UWORD(1) << (width - 1));
+    table.width = width;
+    table.odd_powers.clear();
+    table.odd_powers.reserve(size);
+    table.odd_powers.emplace_back(prime);
+    nmod_poly_set(table.odd_powers.back().raw(), base.raw());
+    if (size == 1) {
+        return;
+    }
+    flint::NmodPoly square(prime);
+    nmod_poly_mulmod(square.raw(), base.raw(), base.raw(), modulus.raw());
+    for (std::size_t i = 1; i < size; ++i) {
+        table.odd_powers.emplace_back(prime);
+        nmod_poly_mulmod(table.odd_powers.back().raw(),
+                         table.odd_powers[i - 1].raw(), square.raw(),
+                         modulus.raw());
+    }
+}
+
+// Left-to-right sliding-window recoding of a positive magnitude
+// (Handbook of Applied Cryptography, Algorithm 14.85 step 3): each maximal
+// window of at most table.width bits that starts and ends with a one becomes
+// one multiplication by the matching odd power at the window's lowest bit.
+void append_window_steps(std::vector<WindowStep>& steps,
+                         const flint::Fmpz& magnitude,
+                         const OddPowerTable& table) noexcept {
+    slong high = static_cast<slong>(fmpz_bits(magnitude.raw())) - 1;
+    while (high >= 0) {
+        if (fmpz_tstbit(magnitude.raw(), static_cast<ulong>(high)) == 0) {
+            --high;
+            continue;
+        }
+        slong low = std::max<slong>(high - static_cast<slong>(table.width) + 1,
+                                    0);
+        while (fmpz_tstbit(magnitude.raw(), static_cast<ulong>(low)) == 0) {
+            ++low;
+        }
+        ulong value = 0;
+        for (slong bit = high; bit >= low; --bit) {
+            value = (value << 1) |
+                    static_cast<ulong>(
+                            fmpz_tstbit(magnitude.raw(),
+                                        static_cast<ulong>(bit)));
+        }
+        steps.push_back(WindowStep{static_cast<flint_bitcnt_t>(low),
+                                   &table.odd_powers[(value - 1) / 2]});
+        high = low - 1;
+    }
+}
+
 bool build_prime_residues(BoundedCompactReconstructionReport& report,
                           flint::NmodMat& residues,
                           const std::vector<PreparedFactor>& factors,
@@ -292,39 +385,16 @@ bool build_prime_residues(BoundedCompactReconstructionReport& report,
             factors.empty()
                     ? static_cast<std::size_t>(nmod_mat_nrows(residues.raw()))
                     : factors.front().exponents.size();
+    std::vector<ModularPowerProductFactor> power_factors(factors.size());
+    for (std::size_t row = 0; row < factors.size(); ++row) {
+        power_factors[row].base = &bases[row];
+        power_factors[row].inverse =
+                factors[row].needs_inverse ? &inverses[row] : nullptr;
+        power_factors[row].exponents = &factors[row].exponents;
+    }
     flint::NmodMat power_residues(static_cast<slong>(output_count), degree,
                                   prime);
-    for (std::size_t column = 0; column < output_count; ++column) {
-        flint::NmodPoly value(prime);
-        flint::NmodPoly power(prime);
-        flint::NmodPoly product(prime);
-        flint::Fmpz magnitude;
-        nmod_poly_one(value.raw());
-        for (std::size_t row = 0; row < factors.size(); ++row) {
-            const flint::Fmpz& exponent = factors[row].exponents[column];
-            if (fmpz_is_zero(exponent.raw()) != 0) {
-                continue;
-            }
-            const flint::NmodPoly& base =
-                    fmpz_sgn(exponent.raw()) < 0 ? inverses[row] : bases[row];
-            fmpz_abs(magnitude.raw(), exponent.raw());
-            if (fmpz_abs_fits_ui(magnitude.raw()) != 0) {
-                nmod_poly_powmod_ui_binexp(power.raw(), base.raw(),
-                                           fmpz_get_ui(magnitude.raw()),
-                                           modulus.raw());
-            } else {
-                nmod_poly_powmod_fmpz_binexp(power.raw(), base.raw(),
-                                             magnitude.raw(), modulus.raw());
-            }
-            nmod_poly_mulmod(product.raw(), value.raw(), power.raw(),
-                             modulus.raw());
-            value.swap(product);
-        }
-        for (slong i = 0; i < degree; ++i) {
-            nmod_mat_entry(power_residues.raw(), static_cast<slong>(column),
-                           i) = nmod_poly_get_coeff_ui(value.raw(), i);
-        }
-    }
+    modular_power_products(power_residues, power_factors, modulus);
 
     // If rows of B are the selected order basis in power coordinates, then
     // power_row * B^-1 is the order-coordinate row. This is reference's invzk
@@ -381,6 +451,107 @@ bool publish_reconstructed_elements(std::vector<Element>& out,
 }
 
 }  // namespace
+
+void modular_power_products(
+        flint::NmodMat& power_residues,
+        std::span<const ModularPowerProductFactor> factors,
+        const flint::NmodPoly& modulus) noexcept {
+    const ulong prime = modulus.raw()->mod.n;
+    const slong output_count = nmod_mat_nrows(power_residues.raw());
+    const slong degree = nmod_mat_ncols(power_residues.raw());
+
+    // One table per base and exponent sign that occurs, built once and
+    // shared by every output.
+    std::vector<OddPowerTable> positive_tables(factors.size());
+    std::vector<OddPowerTable> negative_tables(factors.size());
+    for (std::size_t row = 0; row < factors.size(); ++row) {
+        flint_bitcnt_t positive_bits = 0;
+        flint_bitcnt_t negative_bits = 0;
+        flint_bitcnt_t positive_maximum = 0;
+        flint_bitcnt_t negative_maximum = 0;
+        for (const flint::Fmpz& exponent : *factors[row].exponents) {
+            const flint_bitcnt_t bits = fmpz_bits(exponent.raw());
+            if (fmpz_sgn(exponent.raw()) > 0) {
+                positive_bits += bits;
+                positive_maximum = std::max(positive_maximum, bits);
+            } else if (fmpz_sgn(exponent.raw()) < 0) {
+                negative_bits += bits;
+                negative_maximum = std::max(negative_maximum, bits);
+            }
+        }
+        if (positive_bits != 0) {
+            build_odd_power_table(
+                    positive_tables[row], *factors[row].base,
+                    sliding_window_width(positive_bits, positive_maximum),
+                    modulus);
+        }
+        if (negative_bits != 0) {
+            build_odd_power_table(
+                    negative_tables[row], *factors[row].inverse,
+                    sliding_window_width(negative_bits, negative_maximum),
+                    modulus);
+        }
+    }
+
+    std::vector<WindowStep> steps;
+    flint::NmodPoly value(prime);
+    flint::NmodPoly product(prime);
+    flint::Fmpz magnitude;
+    for (slong column = 0; column < output_count; ++column) {
+        const std::size_t index = static_cast<std::size_t>(column);
+        steps.clear();
+        for (std::size_t row = 0; row < factors.size(); ++row) {
+            const flint::Fmpz& exponent = (*factors[row].exponents)[index];
+            if (fmpz_is_zero(exponent.raw()) != 0) {
+                continue;
+            }
+            fmpz_abs(magnitude.raw(), exponent.raw());
+            append_window_steps(steps, magnitude,
+                                fmpz_sgn(exponent.raw()) < 0
+                                        ? negative_tables[row]
+                                        : positive_tables[row]);
+        }
+        std::sort(steps.begin(), steps.end(),
+                  [](const WindowStep& left, const WindowStep& right) {
+                      return left.position > right.position;
+                  });
+
+        // Interleaved left-to-right evaluation: one squaring per bit position
+        // below the highest window, shared by all bases of this output.
+        nmod_poly_one(value.raw());
+        bool started = false;
+        std::size_t next = 0;
+        if (!steps.empty()) {
+            for (slong position = static_cast<slong>(steps.front().position);
+                 position >= 0; --position) {
+                if (started) {
+                    nmod_poly_mulmod(product.raw(), value.raw(), value.raw(),
+                                     modulus.raw());
+                    value.swap(product);
+                }
+                while (next < steps.size() &&
+                       steps[next].position ==
+                               static_cast<flint_bitcnt_t>(position)) {
+                    if (started) {
+                        nmod_poly_mulmod(product.raw(), value.raw(),
+                                         steps[next].odd_power->raw(),
+                                         modulus.raw());
+                        value.swap(product);
+                    } else {
+                        nmod_poly_set(value.raw(),
+                                      steps[next].odd_power->raw());
+                        started = true;
+                    }
+                    ++next;
+                }
+            }
+        }
+        for (slong i = 0; i < degree; ++i) {
+            nmod_mat_entry(power_residues.raw(), column, i) =
+                    nmod_poly_get_coeff_ui(value.raw(), i);
+        }
+    }
+}
 
 const char* bounded_compact_reconstruction_status_name(
         BoundedCompactReconstructionStatus status) noexcept {

@@ -3,6 +3,8 @@
 #include <silex/element.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/nmod_mat.hpp>
+#include <silex/flint/nmod_poly.hpp>
 #include <silex/order.hpp>
 
 #include <cstddef>
@@ -58,6 +60,29 @@ bool bounded_compact_reconstruct(
         const Order& order, std::span<const FactoredElement> inputs,
         flint::FmpzConstRef certified_coordinate_bound,
         const BoundedCompactReconstructionOptions& options = {}) noexcept;
+
+// One factor of a batch of modular power products: the base reduced modulo
+// the modulus, its inverse modulo the modulus (required when some exponent is
+// negative, otherwise may be null), and one exponent per output.
+struct ModularPowerProductFactor {
+    const flint::NmodPoly* base = nullptr;
+    const flint::NmodPoly* inverse = nullptr;
+    const std::vector<flint::Fmpz>* exponents = nullptr;
+};
+
+// Row i of power_residues receives the coefficients, in the power basis, of
+// prod_k base_k^exponents_k[i] in (Z/pZ)[x]/(modulus), where modulus is monic
+// of degree power_residues.ncols.  The product is an element of that ring, so
+// the result does not depend on how it is evaluated.  Each base's odd powers
+// are tabulated once and shared by every output, and the exponentiations of
+// one output are interleaved so that they share their squarings: interleaved
+// sliding-window exponentiation (Moller, "Algorithms for multi-exponentiation",
+// SAC 2001; sliding windows as in Menezes, van Oorschot and Vanstone,
+// Handbook of Applied Cryptography, Algorithm 14.85 and Note 14.87).
+void modular_power_products(
+        flint::NmodMat& power_residues,
+        std::span<const ModularPowerProductFactor> factors,
+        const flint::NmodPoly& modulus) noexcept;
 
 struct WideFactoredUnits;
 
