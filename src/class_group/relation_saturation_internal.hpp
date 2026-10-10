@@ -191,6 +191,15 @@ bool relation_saturation_candidate_filter_kernel_empty(
         const RelationSaturationCandidateFilter& filter) noexcept;
 void relation_saturation_candidate_filter_failed_power_test(
         RelationSaturationCandidateFilter& filter) noexcept;
+void relation_saturation_candidate_filter_screen(
+        bool& ruled_out,
+        RelationSaturationCandidateFilter& filter,
+        const ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        bool include_torsion,
+        flint::FmpzConstRef ell,
+        flint::FmpzMatConstRef kernel,
+        slong row) noexcept;
 bool saturate_class_unit_context(
         bool& success,
         SaturationCandidateProcessingResult& last_result,

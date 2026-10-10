@@ -3275,35 +3275,14 @@ bool saturation_relation_with_units(Relation& relation,
     }
 
     // A candidate on which a stacked residue character is nonzero is not an
-    // ell-th power (detail::relation_saturation_candidate_filter_start), so
-    // its power test would fail and skipping it leaves the appended relation
-    // as is.  A candidate that the current stack does not rule out first
-    // stacks one more prime: the cost gate of the filter.  The filter starts
-    // only once the round has run as many power tests as there are inputs
-    // (the kernel columns), a Silex count gate that Hecke does not have.
-    if (filter != nullptr &&
-        (filter->started ||
-         filter->power_tests >= flint::fmpz_mat_ncols(kernel))) {
-        if (!filter->started &&
-            !detail::relation_saturation_candidate_filter_start(
-                    *filter, context, units, include_torsion, ell)) {
-            filter->available = false;
-        }
+    // ell-th power, so its power test would fail and skipping it leaves the
+    // appended relation as is
+    // (detail::relation_saturation_candidate_filter_screen).
+    if (filter != nullptr) {
         bool ruled_out = false;
-        if (filter->available &&
-            !detail::relation_saturation_candidate_filter_rules_out(
-                    ruled_out, *filter, kernel, row)) {
-            filter->available = false;
-            ruled_out = false;
-        }
-        if (filter->available && !ruled_out && !filter->stopped) {
-            if (!detail::relation_saturation_candidate_filter_grow(*filter) ||
-                !detail::relation_saturation_candidate_filter_rules_out(
-                        ruled_out, *filter, kernel, row)) {
-                filter->available = false;
-                ruled_out = false;
-            }
-        }
+        detail::relation_saturation_candidate_filter_screen(
+                ruled_out, *filter, context, units, include_torsion, ell,
+                kernel, row);
         if (ruled_out) {
             SILEX_PROFILE_EVENT(
                     context.diagnostics(), DiagnosticsModule::class_group,
@@ -3313,9 +3292,6 @@ bool saturation_relation_with_units(Relation& relation,
         }
     }
 
-    if (filter != nullptr) {
-        ++filter->power_tests;
-    }
     FactoredElement product(*field);
     FactoredElement root(*field);
     {
@@ -7664,6 +7640,49 @@ void relation_saturation_candidate_filter_failed_power_test(
                      filter.stable * static_cast<double>(filter.width);
     SILEX_PROFILE_EVENT(filter.diagnostics, DiagnosticsModule::class_group,
                         "class_group.saturation_candidate_filter.doubled");
+}
+
+// Screens the kernel row `row` before its power test.  A candidate that the
+// current stack does not rule out first stacks one more prime: the cost gate
+// of the filter.  The filter starts only once the round has run as many power
+// tests as there are inputs (the kernel columns), a Silex count gate that the
+// reference does not have; until then nothing is ruled out.  A row that is
+// not ruled out is counted as a power test, which the caller then runs.
+void relation_saturation_candidate_filter_screen(
+        bool& ruled_out,
+        RelationSaturationCandidateFilter& filter,
+        const ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        bool include_torsion,
+        flint::FmpzConstRef ell,
+        flint::FmpzMatConstRef kernel,
+        slong row) noexcept {
+    ruled_out = false;
+    if (filter.started ||
+        filter.power_tests >= flint::fmpz_mat_ncols(kernel)) {
+        if (!filter.started &&
+            !relation_saturation_candidate_filter_start(
+                    filter, context, units, include_torsion, ell)) {
+            filter.available = false;
+        }
+        if (filter.available &&
+            !relation_saturation_candidate_filter_rules_out(
+                    ruled_out, filter, kernel, row)) {
+            filter.available = false;
+            ruled_out = false;
+        }
+        if (filter.available && !ruled_out && !filter.stopped) {
+            if (!relation_saturation_candidate_filter_grow(filter) ||
+                !relation_saturation_candidate_filter_rules_out(
+                        ruled_out, filter, kernel, row)) {
+                filter.available = false;
+                ruled_out = false;
+            }
+        }
+    }
+    if (!ruled_out) {
+        ++filter.power_tests;
+    }
 }
 
 bool saturation_process_candidates_once(
