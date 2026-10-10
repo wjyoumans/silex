@@ -321,6 +321,15 @@ struct ClassGroupContextStorage {
     CertificationMode class_unit_completeness = CertificationMode::unknown;
     ClassUnitCompletenessBasis class_unit_completeness_basis =
             ClassUnitCompletenessBasis::none;
+    // Set when the published imaginary quadratic class group was certified
+    // `proven` by its structure certificate, which proves that the factor
+    // base generates the class group without a generation bound; the
+    // generation status stays as built.  Read by
+    // factor_base_generation_certification() (basis structure_certificate).
+    // It describes the published presentation, so it is cleared with the
+    // other certification metadata and restored by certification
+    // transactions.
+    bool generation_structure_certified = false;
     std::vector<RelationSaturationRecord> relation_saturation_records;
     std::vector<RelationSaturationProofRecord>
             relation_saturation_proof_records;
@@ -372,6 +381,7 @@ struct ClassGroupContextStorage {
         generation_different_route = GenerationDifferentRoute::none;
         class_unit_completeness = CertificationMode::unknown;
         class_unit_completeness_basis = ClassUnitCompletenessBasis::none;
+        generation_structure_certified = false;
         relation_saturation_records.clear();
         relation_saturation_proof_records.clear();
         local_saturation_dlog_cache.clear();

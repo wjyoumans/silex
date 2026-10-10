@@ -76,12 +76,22 @@ struct ClassGroupZetaBfProofRecord {
 //   Corollary 2.2).
 // - bach: under the Riemann hypothesis for zeta_K and those L-functions
 //   (Bach 1990, Theorem 4 and the remark following it).
+// - structure_certificate: unconditional; imaginary quadratic `proven`
+//   class groups only, with no generation bound.  The published invariant
+//   generators g_j, products of factor-base primes with invariants d_j,
+//   satisfy, in exact reduced binary quadratic form arithmetic: the product
+//   of the d_j is the exact class number h, g_j^(d_j) is principal, and for
+//   every prime ell dividing h no nonzero F_ell-combination of the
+//   g_j^(d_j / ell) with ell | d_j is principal.  The map from the direct sum
+//   of the Z/d_j to the class group is then injective between groups of
+//   order h, so the g_j, hence the factor base, generate the class group.
 enum class ClassGroupGenerationBasis {
     none = 0,
     minkowski_type = 1,
     bdf = 2,
     bach = 3,
-    zimmert_twin_class = 4
+    zimmert_twin_class = 4,
+    structure_certificate = 5
 };
 
 // The result that establishes relation and unit completeness of a published
@@ -219,7 +229,10 @@ public:
     // when there is none, even if a factor base exists):
     // `proven` when factor_base_generation_status() is `verified` (basis
     // minkowski_type, or zimmert_twin_class when the recorded requirement is
-    // the twin-class bound), `grh` when a `grh` class/unit request built the base
+    // the twin-class bound), or when a `proven` imaginary quadratic class
+    // group was certified by its structure certificate (basis
+    // structure_certificate; factor_base_generation_status() then stays as
+    // built, since no generation bound was checked), `grh` when a `grh` class/unit request built the base
     // to contain every prime ideal up to the GRH generation bound
     // min(BDF, Bach), or Bach's bound alone when the BDF criterion cannot be
     // computed or decided, and generation is not also unconditional (basis
@@ -233,7 +246,8 @@ public:
     // (factor_base_generation_bound(), the Minkowski-type or twin-class
     // bound) for `proven`, the GRH generation
     // bound before the factor-base size doubling for `grh`.  False when the
-    // certification is `unknown`.
+    // certification is `unknown` or the basis is structure_certificate,
+    // which has no bound.
     bool factor_base_generation_certification_bound(
             flint::FmpzRef out) const noexcept;
     // Where relation and unit completeness rests for the published pair

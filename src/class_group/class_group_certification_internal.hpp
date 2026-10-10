@@ -13,11 +13,19 @@ public:
             ClassGroupContext& context,
             flint::FmpzConstRef discriminant) noexcept;
 
+    // Certifies a `proven` imaginary quadratic class group whose order is
+    // the exact class number `exact_order`.  With verified factor-base
+    // generation the generation bound is rechecked first.  Without it, and
+    // only when `structure_certificate` is true, the published generators
+    // are checked directly (basis structure_certificate, see
+    // ClassGroupGenerationBasis): no generation bound is used.  False
+    // leaves the certification state as it was.
     static bool try_certify_imaginary_quadratic_from_exact_order(
             ClassGroupContext& context,
             CertificationMode requested,
             flint::FmpzConstRef discriminant,
-            flint::FmpzConstRef exact_order) noexcept;
+            flint::FmpzConstRef exact_order,
+            bool structure_certificate = false) noexcept;
 
     static bool record_factor_base_honesty_proof(
             ClassGroupContext& context,

@@ -14,6 +14,7 @@
 #include <silex/flint/fmpz_mod_mat.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
+#include <silex/flint/qfb.hpp>
 #include <silex/ideal_factorization.hpp>
 #include <silex/lat.hpp>
 #include <silex/order_element.hpp>
@@ -4893,6 +4894,7 @@ struct ClassGroupContext::CertificationSnapshot_ {
     CertificationMode class_unit_completeness = CertificationMode::unknown;
     ClassUnitCompletenessBasis class_unit_completeness_basis =
             ClassUnitCompletenessBasis::none;
+    bool generation_structure_certified = false;
 };
 
 // Restores every certification field on scope exit unless finish() is
@@ -4925,6 +4927,394 @@ private:
     CertificationSnapshot_ saved_;
     bool committed_ = false;
 };
+
+namespace {
+
+// Structure certificate of a published imaginary quadratic class group.
+//
+// The ideal-form correspondence (Cohen, GTM 138, Section 5.2): with a fixed
+// square root sqrt(D) of the fundamental discriminant D < 0, the ideal
+// a Z + ((-b + sqrt(D)) / 2) Z of norm a corresponds to the positive
+// definite form (a, b, (b^2 - D) / (4a)), and this induces an isomorphism
+// from the class group of the maximal order onto the form class group of
+// discriminant D, in which a class is trivial exactly when its reduced form
+// is the principal form.  Every check below is on reduced forms, so it is
+// exact.  It reads only the published presentation (invariants and
+// invariant-generator matrix) and the factor-base primes, not the relations.
+class QuadraticStructureCertificate {
+public:
+    QuadraticStructureCertificate(const ClassGroupContext& context,
+                                  flint::FmpzConstRef discriminant,
+                                  flint::FmpzConstRef class_number) noexcept
+            : context_(context) {
+        flint::fmpz_set(flint::FmpzRef(discriminant_), discriminant);
+        flint::fmpz_set(flint::FmpzRef(class_number_), class_number);
+        flint::Fmpz magnitude;
+        flint::fmpz_abs(flint::FmpzRef(magnitude), discriminant);
+        ::fmpz_root(fourth_root_.raw(), magnitude.raw(), 4);
+    }
+
+    // True when the published generators g_j with invariants d_j satisfy:
+    // prod d_j = h, g_j^(d_j) = 1, and for every prime ell | h no nonzero
+    // F_ell-combination of the g_j^(d_j / ell) with ell | d_j is trivial.
+    // Then the map sum_j Z/d_j -> Cl is well defined, and its kernel, a
+    // finite group, has no element of prime order, so it is injective;
+    // both sides have order h, so it is an isomorphism and the g_j generate
+    // Cl.  False on any failed check or computation.
+    bool verify() noexcept;
+
+private:
+    bool omega_(Element& out) const noexcept;
+    bool prime_form_(flint::Qfb& out, slong index,
+                     const Element& omega) const noexcept;
+    void compose_(flint::Qfb& out, const flint::Qfb& left,
+                  const flint::Qfb& right) const noexcept;
+    void square_(flint::Qfb& out, const flint::Qfb& input) const noexcept;
+    void principal_(flint::Qfb& out) const noexcept;
+    bool is_principal_(const flint::Qfb& form) const noexcept;
+    void pow_(flint::Qfb& out, const flint::Qfb& base,
+              flint::FmpzConstRef exponent) const noexcept;
+    bool combinations_nontrivial_(
+            const std::vector<flint::Qfb>& forms,
+            ulong ell) const noexcept;
+
+    const ClassGroupContext& context_;
+    flint::Fmpz discriminant_;
+    flint::Fmpz class_number_;
+    flint::Fmpz fourth_root_;
+};
+
+// The integral generator omega = (delta + sqrt(D)) / 2 of the maximal
+// order, delta = D mod 2: (1 + theta) / 2 with sqrt(D) = theta when the
+// radicand d = theta^2 is 1 mod 4 (D = d), and theta with sqrt(D) = 2 theta
+// otherwise (D = 4 d).  Fails unless D is that discriminant.
+bool QuadraticStructureCertificate::omega_(Element& out) const noexcept {
+    const Order* order = context_.parent();
+    const NumberField* field = order == nullptr ? nullptr : order->parent();
+    flint::Fmpz radicand;
+    flint::Fmpz expected;
+    if (field == nullptr ||
+        field->backend_kind() != NumberFieldBackendKind::quadratic ||
+        !field->quadratic_radicand(flint::FmpzRef(radicand))) {
+        return false;
+    }
+    const bool one_mod_four =
+            flint::fmpz_fdiv_ui(flint::FmpzConstRef(radicand), 4) == 1;
+    if (one_mod_four) {
+        flint::fmpz_set(flint::FmpzRef(expected),
+                        flint::FmpzConstRef(radicand));
+    } else {
+        flint::fmpz_mul_ui(flint::FmpzRef(expected),
+                           flint::FmpzConstRef(radicand), 4);
+    }
+    if (!flint::fmpz_equal(flint::FmpzConstRef(expected),
+                           flint::FmpzConstRef(discriminant_))) {
+        return false;
+    }
+    Element theta(*field);
+    Element shifted(*field);
+    if (!out.is_defined() || !theta.is_defined() || !shifted.is_defined() ||
+        !theta.gen()) {
+        return false;
+    }
+    if (one_mod_four) {
+        return shifted.add_si(theta, 1) && out.scalar_div_si(shifted, 2);
+    }
+    return out.set(theta);
+}
+
+// The reduced form of factor-base prime `index`.  A degree-one prime P over
+// p with omega = s mod P contains omega - s, so P = p Z + (omega - s) Z
+// (both have index p in Z + omega Z); omega - s = (-b + sqrt(D)) / 2 with
+// b = 2 s - delta, which gives the form (p, b, (b^2 - D) / (4 p)).
+// Membership of omega - s is checked by an exact valuation, and
+// 4 p | b^2 - D exactly.
+bool QuadraticStructureCertificate::prime_form_(
+        flint::Qfb& out,
+        slong index,
+        const Element& omega) const noexcept {
+    const FactorBase* base = context_.factor_base();
+    const PrimeIdeal* prime = base == nullptr ? nullptr : base->prime_at(index);
+    const NumberField* field = context_.parent()->parent();
+    if (prime == nullptr || prime->residue_degree() != 1) {
+        return false;
+    }
+    const flint::Fmpz* root = detail::linear_residue_root_ptr(*prime);
+    flint::Fmpz p;
+    flint::Fmpz norm;
+    if (root == nullptr || !prime->rational_prime(flint::FmpzRef(p)) ||
+        !prime->norm(flint::FmpzRef(norm)) ||
+        !flint::fmpz_equal(flint::FmpzConstRef(norm),
+                           flint::FmpzConstRef(p))) {
+        return false;
+    }
+
+    Element shift(*field);
+    Element shifted(*field);
+    slong valuation = 0;
+    if (!shift.is_defined() || !shifted.is_defined() ||
+        !shift.set_fmpz(flint::FmpzConstRef(*root)) ||
+        !shifted.subtract(omega, shift) ||
+        !prime->valuation(valuation, shifted) || valuation < 1) {
+        return false;
+    }
+
+    flint::Fmpz b;
+    flint::Fmpz c;
+    flint::Fmpz four_p;
+    flint::fmpz_mul_ui(flint::FmpzRef(b), flint::FmpzConstRef(*root), 2);
+    if (::fmpz_is_odd(discriminant_.raw()) != 0) {
+        flint::fmpz_sub_ui(flint::FmpzRef(b), flint::FmpzConstRef(b), 1);
+    }
+    flint::fmpz_mul(flint::FmpzRef(c), flint::FmpzConstRef(b),
+                    flint::FmpzConstRef(b));
+    flint::fmpz_sub(flint::FmpzRef(c), flint::FmpzConstRef(c),
+                    flint::FmpzConstRef(discriminant_));
+    flint::fmpz_mul_ui(flint::FmpzRef(four_p), flint::FmpzConstRef(p), 4);
+    if (!flint::fmpz_divisible(flint::FmpzConstRef(c),
+                               flint::FmpzConstRef(four_p))) {
+        return false;
+    }
+    flint::fmpz_divexact(flint::FmpzRef(c), flint::FmpzConstRef(c),
+                         flint::FmpzConstRef(four_p));
+
+    flint::Qfb form;
+    ::fmpz_set(form.raw()->a, p.raw());
+    ::fmpz_set(form.raw()->b, b.raw());
+    ::fmpz_set(form.raw()->c, c.raw());
+    flint::qfb_reduce(flint::QfbRef(out), flint::QfbConstRef(form),
+                      flint::FmpzConstRef(discriminant_));
+    return true;
+}
+
+void QuadraticStructureCertificate::compose_(
+        flint::Qfb& out,
+        const flint::Qfb& left,
+        const flint::Qfb& right) const noexcept {
+    flint::Qfb composed;
+    flint::qfb_nucomp(flint::QfbRef(composed), flint::QfbConstRef(left),
+                      flint::QfbConstRef(right),
+                      flint::FmpzConstRef(discriminant_),
+                      flint::FmpzConstRef(fourth_root_));
+    flint::qfb_reduce(flint::QfbRef(out), flint::QfbConstRef(composed),
+                      flint::FmpzConstRef(discriminant_));
+}
+
+void QuadraticStructureCertificate::square_(
+        flint::Qfb& out,
+        const flint::Qfb& input) const noexcept {
+    flint::Qfb squared;
+    ::qfb_nudupl(squared.raw(), input.raw(), discriminant_.raw(),
+                 fourth_root_.raw());
+    flint::qfb_reduce(flint::QfbRef(out), flint::QfbConstRef(squared),
+                      flint::FmpzConstRef(discriminant_));
+}
+
+void QuadraticStructureCertificate::principal_(
+        flint::Qfb& out) const noexcept {
+    flint::qfb_principal_form(flint::QfbRef(out),
+                              flint::FmpzConstRef(discriminant_));
+}
+
+bool QuadraticStructureCertificate::is_principal_(
+        const flint::Qfb& form) const noexcept {
+    return flint::qfb_is_principal_form(flint::QfbConstRef(form),
+                                        flint::FmpzConstRef(discriminant_));
+}
+
+// base^exponent for exponent >= 0, by binary powering on reduced forms.
+void QuadraticStructureCertificate::pow_(
+        flint::Qfb& out,
+        const flint::Qfb& base,
+        flint::FmpzConstRef exponent) const noexcept {
+    flint::Qfb result;
+    principal_(result);
+    const flint_bitcnt_t bits = ::fmpz_bits(exponent.raw());
+    for (flint_bitcnt_t i = bits; i > 0; --i) {
+        square_(result, result);
+        if (::fmpz_tstbit(exponent.raw(), i - 1) != 0) {
+            compose_(result, result, base);
+        }
+    }
+    flint::qfb_set(flint::QfbRef(out), flint::QfbConstRef(result));
+}
+
+// True when no nonzero F_ell-combination of `forms` is principal.  A
+// combination is principal exactly when its nonzero scalar multiples are,
+// so only the vectors whose first nonzero coordinate is 1 are tested:
+// (ell^r - 1) / (ell - 1) of them for r forms.
+bool QuadraticStructureCertificate::combinations_nontrivial_(
+        const std::vector<flint::Qfb>& forms,
+        ulong ell) const noexcept {
+    const std::size_t r = forms.size();
+    if (r == 1) {
+        return !is_principal_(forms[0]);
+    }
+    // Two forms with an ell-combination need ell^2 | h, so the power tables
+    // hold fewer than r sqrt(h) forms.
+    std::vector<std::vector<flint::Qfb>> powers(r);
+    for (std::size_t k = 0; k < r; ++k) {
+        powers[k].resize(static_cast<std::size_t>(ell));
+        principal_(powers[k][0]);
+        for (ulong c = 1; c < ell; ++c) {
+            compose_(powers[k][c], powers[k][c - 1], forms[k]);
+        }
+    }
+    std::vector<ulong> digits(r, 0);
+    flint::Qfb product;
+    for (std::size_t lead = 0; lead < r; ++lead) {
+        // Coordinate `lead` is 1, those before it are 0, and those after it
+        // run over all of F_ell.
+        std::fill(digits.begin(), digits.end(), UWORD(0));
+        bool done = false;
+        while (!done) {
+            flint::qfb_set(flint::QfbRef(product),
+                           flint::QfbConstRef(forms[lead]));
+            for (std::size_t m = lead + 1; m < r; ++m) {
+                if (digits[m] != 0) {
+                    compose_(product, product, powers[m][digits[m]]);
+                }
+            }
+            if (is_principal_(product)) {
+                return false;
+            }
+            done = true;
+            for (std::size_t k = r - 1; k > lead; --k) {
+                if (++digits[k] < ell) {
+                    done = false;
+                    break;
+                }
+                digits[k] = 0;
+            }
+        }
+    }
+    return true;
+}
+
+bool QuadraticStructureCertificate::verify() noexcept {
+    const FactorBase* base = context_.factor_base();
+    if (!context_.has_presentation() || context_.parent() == nullptr ||
+        base == nullptr ||
+        flint::fmpz_sgn(flint::FmpzConstRef(discriminant_)) >= 0 ||
+        flint::fmpz_sgn(flint::FmpzConstRef(class_number_)) <= 0) {
+        return false;
+    }
+    const slong invariant_count = context_.invariant_count();
+    const slong generator_count = context_.generator_count();
+    if (invariant_count < 0 || generator_count != base->length()) {
+        return false;
+    }
+
+    std::vector<flint::Fmpz> invariants(
+            static_cast<std::size_t>(invariant_count));
+    flint::Fmpz product;
+    flint::fmpz_one(flint::FmpzRef(product));
+    for (slong j = 0; j < invariant_count; ++j) {
+        flint::Fmpz& invariant = invariants[static_cast<std::size_t>(j)];
+        if (!context_.invariant(flint::FmpzRef(invariant), j) ||
+            flint::fmpz_sgn(flint::FmpzConstRef(invariant)) <= 0) {
+            return false;
+        }
+        flint::fmpz_mul(flint::FmpzRef(product), flint::FmpzConstRef(product),
+                        flint::FmpzConstRef(invariant));
+    }
+    if (!flint::fmpz_equal(flint::FmpzConstRef(product),
+                           flint::FmpzConstRef(class_number_))) {
+        return false;
+    }
+    if (invariant_count == 0) {
+        return true;
+    }
+
+    flint::FmpzMat coordinates(invariant_count, generator_count);
+    Element omega(*context_.parent()->parent());
+    if (!context_.invariant_generator_matrix(
+                flint::FmpzMatRef(coordinates)) ||
+        !omega_(omega)) {
+        return false;
+    }
+
+    // g_j as reduced forms.  Exponents are reduced modulo h, which every
+    // class order divides.
+    std::vector<flint::Qfb> prime_forms(
+            static_cast<std::size_t>(generator_count));
+    std::vector<char> prime_form_ready(
+            static_cast<std::size_t>(generator_count), 0);
+    std::vector<flint::Qfb> generators(
+            static_cast<std::size_t>(invariant_count));
+    flint::Fmpz exponent;
+    flint::Qfb power;
+    for (slong j = 0; j < invariant_count; ++j) {
+        flint::Qfb& generator = generators[static_cast<std::size_t>(j)];
+        principal_(generator);
+        for (slong i = 0; i < generator_count; ++i) {
+            ::fmpz_mod(exponent.raw(),
+                       flint::fmpz_mat_entry(
+                               flint::FmpzMatConstRef(coordinates), j, i)
+                               .raw(),
+                       class_number_.raw());
+            if (flint::fmpz_is_zero(flint::FmpzConstRef(exponent))) {
+                continue;
+            }
+            const std::size_t slot = static_cast<std::size_t>(i);
+            if (prime_form_ready[slot] == 0) {
+                if (!prime_form_(prime_forms[slot], i, omega)) {
+                    return false;
+                }
+                prime_form_ready[slot] = 1;
+            }
+            pow_(power, prime_forms[slot], flint::FmpzConstRef(exponent));
+            compose_(generator, generator, power);
+        }
+        // g_j^(d_j) = 1.
+        pow_(power, generator,
+             flint::FmpzConstRef(invariants[static_cast<std::size_t>(j)]));
+        if (!is_principal_(power)) {
+            return false;
+        }
+    }
+
+    flint::FmpzFactor factorization;
+    flint::fmpz_factor(flint::FmpzFactorRef(factorization),
+                       flint::FmpzConstRef(class_number_));
+    flint::Fmpz ell;
+    flint::Fmpz cofactor;
+    for (slong f = 0;
+         f < flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
+         ++f) {
+        flint::fmpz_factor_get_fmpz(flint::FmpzRef(ell),
+                                    flint::FmpzFactorConstRef(factorization),
+                                    f);
+        std::vector<flint::Qfb> forms;
+        for (slong j = 0; j < invariant_count; ++j) {
+            const flint::Fmpz& invariant =
+                    invariants[static_cast<std::size_t>(j)];
+            if (!flint::fmpz_divisible(flint::FmpzConstRef(invariant),
+                                       flint::FmpzConstRef(ell))) {
+                continue;
+            }
+            flint::fmpz_divexact(flint::FmpzRef(cofactor),
+                                 flint::FmpzConstRef(invariant),
+                                 flint::FmpzConstRef(ell));
+            forms.emplace_back();
+            pow_(forms.back(), generators[static_cast<std::size_t>(j)],
+                 flint::FmpzConstRef(cofactor));
+        }
+        // Every ell | h divides some d_j, since prod d_j = h.
+        if (forms.empty() ||
+            (forms.size() >= 2 &&
+             !flint::fmpz_abs_fits_ui(flint::FmpzConstRef(ell))) ||
+            !combinations_nontrivial_(
+                    forms, forms.size() >= 2
+                            ? flint::fmpz_get_ui(flint::FmpzConstRef(ell))
+                            : UWORD(0))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
 
 namespace detail {
 
@@ -5015,10 +5405,13 @@ bool ClassGroupCertificationAccess::
                 ClassGroupContext& context,
                 CertificationMode requested,
                 flint::FmpzConstRef discriminant,
-                flint::FmpzConstRef exact_order) noexcept {
+                flint::FmpzConstRef exact_order,
+                bool structure_certificate) noexcept {
+    const bool generation_verified =
+            context.factor_base_generation_status_ == ProofState::verified;
     if (requested != CertificationMode::proven ||
         !context.has_presentation() || !context.parent_.is_maximal() ||
-        context.factor_base_generation_status_ != ProofState::verified ||
+        (!generation_verified && !structure_certificate) ||
         flint::fmpz_sgn(discriminant) >= 0 ||
         flint::fmpz_sgn(exact_order) <= 0 ||
         !detail::order_supports_exact_quadratic_class_certificate(
@@ -5037,13 +5430,27 @@ bool ClassGroupCertificationAccess::
                 flint::FmpzRef(context_discriminant)) ||
         !flint::fmpz_equal(
                 flint::FmpzConstRef(context_discriminant), discriminant) ||
-        !context.factor_base_generation_bound(
-                flint::FmpzRef(required_bound)) ||
-        !context.check_factor_base_generation_bound(
-                flint::FmpzConstRef(required_bound)) ||
+        (generation_verified &&
+         (!context.factor_base_generation_bound(
+                  flint::FmpzRef(required_bound)) ||
+          !context.check_factor_base_generation_bound(
+                  flint::FmpzConstRef(required_bound)))) ||
         !context.order(flint::FmpzRef(class_order)) ||
         !flint::fmpz_equal(flint::FmpzConstRef(class_order), exact_order)) {
         return false;
+    }
+
+    if (!generation_verified) {
+        // No generation bound: the published generators themselves are
+        // checked to give the whole class group of order h.  Then the
+        // factor base generates it, and the argument below (relation index
+        // h_cand / h = 1) applies unchanged.
+        QuadraticStructureCertificate certificate(
+                context, discriminant, exact_order);
+        if (!certificate.verify() || !context.ensure_private_storage_()) {
+            return false;
+        }
+        context.private_storage_->generation_structure_certified = true;
     }
 
     if (!publish_exact_class_order_proof(context, exact_order)) {
@@ -8368,6 +8775,7 @@ void ClassGroupContext::reset_certification_metadata_() noexcept {
                 CertificationMode::unknown;
         private_storage_->class_unit_completeness_basis =
                 ClassUnitCompletenessBasis::none;
+        private_storage_->generation_structure_certified = false;
     }
     analytic_class_regulator_status_ = ProofState::not_checked;
     analytic_class_regulator_assumes_grh_ = false;
@@ -8691,12 +9099,15 @@ void ClassGroupContext::save_certification_state_(
     out.relation_saturation_proof_records.clear();
     out.class_unit_completeness = CertificationMode::unknown;
     out.class_unit_completeness_basis = ClassUnitCompletenessBasis::none;
+    out.generation_structure_certified = false;
     if (private_storage_ == nullptr) {
         return;
     }
     out.class_unit_completeness = private_storage_->class_unit_completeness;
     out.class_unit_completeness_basis =
             private_storage_->class_unit_completeness_basis;
+    out.generation_structure_certified =
+            private_storage_->generation_structure_certified;
     for (const detail::FactorBaseGenerationRecord& record :
          private_storage_->factor_base_generation_records) {
         out.factor_base_generation_records.emplace_back();
@@ -8760,6 +9171,8 @@ void ClassGroupContext::restore_certification_state_(
     private_storage_->class_unit_completeness = saved.class_unit_completeness;
     private_storage_->class_unit_completeness_basis =
             saved.class_unit_completeness_basis;
+    private_storage_->generation_structure_certified =
+            saved.generation_structure_certified;
 }
 
 bool append_factor_base_generation_record(
@@ -10672,7 +11085,9 @@ CertificationMode ClassGroupContext::factor_base_generation_certification()
     if (!has_presentation()) {
         return CertificationMode::unknown;
     }
-    if (factor_base_generation_status_ == ProofState::verified) {
+    if (factor_base_generation_status_ == ProofState::verified ||
+        (private_storage_ != nullptr &&
+         private_storage_->generation_structure_certified)) {
         return CertificationMode::proven;
     }
     return detail::ClassGroupCertificationAccess::
@@ -10685,6 +11100,9 @@ ClassGroupGenerationBasis ClassGroupContext::factor_base_generation_basis()
         const noexcept {
     switch (factor_base_generation_certification()) {
     case CertificationMode::proven:
+        if (factor_base_generation_status_ != ProofState::verified) {
+            return ClassGroupGenerationBasis::structure_certificate;
+        }
         return private_storage_ != nullptr &&
                        private_storage_->generation_different_route !=
                                detail::GenerationDifferentRoute::none
@@ -10701,7 +11119,9 @@ bool ClassGroupContext::factor_base_generation_certification_bound(
         flint::FmpzRef out) const noexcept {
     switch (factor_base_generation_certification()) {
     case CertificationMode::proven:
-        return factor_base_generation_bound(out);
+        // The structure certificate has no bound to report.
+        return factor_base_generation_status_ == ProofState::verified &&
+               factor_base_generation_bound(out);
     case CertificationMode::grh:
         flint::fmpz_set(out, flint::FmpzConstRef(
                                      private_storage_->grh_generation_bound));
