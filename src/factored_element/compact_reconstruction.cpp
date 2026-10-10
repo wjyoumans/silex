@@ -257,12 +257,16 @@ struct WindowStep {
     const flint::NmodPoly* odd_power = nullptr;
 };
 
-// Window width minimizing the operation count of Handbook of Applied
-// Cryptography Note 14.87 for a table shared by exponents of total bit
-// length total_bits: the table costs one squaring and 2^(w-1) - 1
-// multiplications when w > 1, and a t-bit exponent needs about t / (w + 1)
-// window multiplications.  Squarings belong to the interleaved evaluation and
-// do not depend on w.  The width changes only the cost, never the product.
+// Window width minimizing the operation count for a table shared by exponents
+// of total bit length total_bits.  Cost model: the table costs one squaring
+// and 2^(w-1) - 1 multiplications when w > 1 (Handbook of Applied
+// Cryptography Table 14.16, row for Algorithm 14.83, whose precomputation is
+// that of Algorithm 14.85 step 1), and a t-bit exponent needs about t / (w + 1)
+// window multiplications (Moller, "Algorithms for multi-exponentiation",
+// Section 3.1, expected number of multiplications).  Squarings belong to the
+// interleaved evaluation and vary with w by less than w per exponent (Moller
+// gives b - max w_i up to b - 1), so they are left out of the choice.  The
+// width changes only the cost, never the product.
 ulong sliding_window_width(flint_bitcnt_t total_bits,
                            flint_bitcnt_t maximum_bits) noexcept {
     constexpr ulong maximum_width = 16;

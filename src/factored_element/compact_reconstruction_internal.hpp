@@ -77,8 +77,9 @@ struct ModularPowerProductFactor {
 // are tabulated once and shared by every output, and the exponentiations of
 // one output are interleaved so that they share their squarings: interleaved
 // sliding-window exponentiation (Moller, "Algorithms for multi-exponentiation",
-// SAC 2001; sliding windows as in Menezes, van Oorschot and Vanstone,
-// Handbook of Applied Cryptography, Algorithm 14.85 and Note 14.87).
+// SAC 2001, Section 3.1, the basic interleaving exponentiation method;
+// sliding windows as in Menezes, van Oorschot and Vanstone, Handbook of
+// Applied Cryptography, Algorithm 14.85 and Table 14.16).
 void modular_power_products(
         flint::NmodMat& power_residues,
         std::span<const ModularPowerProductFactor> factors,
