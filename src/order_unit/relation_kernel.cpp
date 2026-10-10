@@ -1908,7 +1908,8 @@ bool adjoin_verified_dependent_relation(bool& changed,
                                         flint::FmpzMatConstRef rel,
                                         slong row,
                                         EmbeddingContext& embeddings,
-                                        slong precision) noexcept {
+                                        slong precision,
+                                        bool defer_regulator) noexcept {
     SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.dependent_relation_adjoin");
     const Order* order = group.parent();
@@ -1960,11 +1961,28 @@ bool adjoin_verified_dependent_relation(bool& changed,
         return false;
     }
 
+    // The torsion is that of the order, which the new basis does not
+    // change, so the group's torsion is passed as the cache instead of
+    // recomputing it; set_units still checks it with
+    // cached_torsion_is_valid.
+    flint::Fmpz torsion_order;
+    OrderElement torsion_generator(*order);
+    if (!torsion_generator.is_defined() ||
+        !group.torsion_order(flint::FmpzRef(torsion_order)) ||
+        !group.torsion_generator(torsion_generator)) {
+        return false;
+    }
+
     changed = true;
+    const FactoredElementSpan basis(generators.data(), generators.size());
+    if (defer_regulator) {
+        return OrderUnitGroupAccess::set_units_deferred_regulator(
+                out, *order, basis, embeddings, precision, true,
+                &torsion_order, &torsion_generator);
+    }
     return order_unit_group_set_units_internal(
-            out, *order,
-            FactoredElementSpan(generators.data(), generators.size()),
-            embeddings, precision, true);
+            out, *order, basis, embeddings, precision, true, &torsion_order,
+            &torsion_generator);
 }
 
 bool dependent_relation_rank_zero(bool& recovered,

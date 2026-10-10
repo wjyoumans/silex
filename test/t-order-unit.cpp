@@ -9430,6 +9430,273 @@ int test_reduce_stored_units_keeps_wide_form() {
     return 0;
 }
 
+// Q(zeta_7), f = x^6 + x^5 + ... + 1 (Z[zeta] maximal): signature (0, 3),
+// unit rank 2, torsion of order 14.  The cyclotomic units u2 = 1 + zeta and
+// u3 = 1 + zeta + zeta^2 are independent.
+struct Cyclotomic7Units {
+    silex::NumberField field;
+    silex::Order order;
+    silex::Element u2;
+    silex::Element u3;
+
+    Cyclotomic7Units()
+        : field(make_field()),
+          order(silex::test::equation_order(field)),
+          u2(field),
+          u3(field) {
+        assert(set_partial_sum(u2, 2));
+        assert(set_partial_sum(u3, 3));
+    }
+
+    static silex::NumberField make_field() {
+        sflint::FmpqPoly polynomial;
+        for (slong i = 0; i <= 6; ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+        }
+        return silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+    }
+
+    // 1 + zeta + ... + zeta^(a-1).
+    static bool set_partial_sum(silex::Element& out, slong a) {
+        sflint::FmpqPoly polynomial;
+        for (slong i = 0; i < a; ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+        }
+        return out.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial));
+    }
+
+    // {u2^e2, u2^e21 u3}.
+    std::vector<silex::FactoredElement> basis(slong e2, slong e21) const {
+        std::vector<silex::FactoredElement> out;
+        out.emplace_back(field);
+        assert(out.back().push(u2, e2));
+        out.emplace_back(field);
+        if (e21 != 0) {
+            assert(out.back().push(u2, e21));
+        }
+        assert(out.back().push(u3, 1));
+        return out;
+    }
+};
+
+bool same_regulator(const silex::OrderUnitGroup& left,
+                    const silex::OrderUnitGroup& right) {
+    const auto a = left.regulator();
+    const auto b = right.regulator();
+    return a.has_value() && b.has_value() &&
+           ::arb_equal(a->raw(), b->raw()) != 0;
+}
+
+bool same_free_generator_values(const silex::OrderUnitGroup& left,
+                                const silex::OrderUnitGroup& right) {
+    if (left.free_rank() != right.free_rank()) {
+        return false;
+    }
+    for (slong i = 0; i < left.free_rank(); ++i) {
+        silex::FactoredElement a(*left.parent()->parent());
+        silex::FactoredElement b(*right.parent()->parent());
+        silex::Element a_value(*left.parent()->parent());
+        silex::Element b_value(*right.parent()->parent());
+        if (!left.free_generator(a, i) || !right.free_generator(b, i) ||
+            !a.evaluate(a_value) || !b.evaluate(b_value) ||
+            !a_value.equal(b_value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A basis installed with its regulator deferred and then reduced gets the
+// group, and the regulator to the last bit, of installing it with the
+// regulator and then reducing.  The regulator is computed once: on the
+// reduced basis when the reduction changes the basis, and on the installed
+// one when it keeps it.
+int test_reduce_stored_units_deferred_regulator() {
+    using silex::detail::OrderUnitGroupAccess;
+    Cyclotomic7Units c;
+    silex::EmbeddingContext embeddings(c.field);
+    const std::vector<silex::FactoredElement> skewed = c.basis(1, 5);
+    const silex::FactoredElementSpan skewed_span(skewed.data(),
+                                                 skewed.size());
+
+    silex::OrderUnitGroup expected(c.order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            expected, c.order, skewed_span, embeddings, 256, true));
+    bool changed = false;
+    assert(silex::detail::reduce_stored_relation_units(changed, expected,
+                                                       embeddings, 256));
+    assert(changed);
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ScopeCounter counter;
+    counter.label = "unit_group.set_units_regulator";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            scope_begin_callback, &counter);
+    silex::OrderUnitGroup deferred(c.order);
+    deferred.set_diagnostics(&diagnostics);
+    assert(OrderUnitGroupAccess::set_units_deferred_regulator(
+            deferred, c.order, skewed_span, embeddings, 256, true, nullptr,
+            nullptr));
+    assert(deferred.is_set());
+    assert(deferred.free_rank() == 2);
+    assert(!OrderUnitGroupAccess::has_regulator(deferred));
+    assert(!deferred.regulator().has_value());
+    changed = false;
+    assert(silex::detail::reduce_stored_relation_units(
+            changed, deferred, embeddings, 256, 256));
+    assert(changed);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count == 1);
+#else
+    assert(counter.count == 0);
+#endif
+    deferred.set_diagnostics(nullptr);
+    assert(same_regulator(deferred, expected));
+    assert(same_free_generator_values(deferred, expected));
+
+    // Bring the basis to one the reduction keeps.
+    for (slong i = 0; i < 8 && changed; ++i) {
+        assert(silex::detail::reduce_stored_relation_units(changed, expected,
+                                                           embeddings, 256));
+    }
+    assert(!changed);
+    std::vector<silex::FactoredElement> kept_units;
+    for (slong i = 0; i < expected.free_rank(); ++i) {
+        kept_units.emplace_back(c.field);
+        assert(expected.free_generator(kept_units.back(), i));
+    }
+    const silex::FactoredElementSpan kept_span(kept_units.data(),
+                                               kept_units.size());
+    silex::OrderUnitGroup kept_expected(c.order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            kept_expected, c.order, kept_span, embeddings, 256, true));
+
+    counter.count = 0;
+    counter.label = "unit_group.deferred_regulator";
+    silex::OrderUnitGroup kept(c.order);
+    kept.set_diagnostics(&diagnostics);
+    assert(OrderUnitGroupAccess::set_units_deferred_regulator(
+            kept, c.order, kept_span, embeddings, 256, true, nullptr,
+            nullptr));
+    changed = true;
+    assert(silex::detail::reduce_stored_relation_units(changed, kept,
+                                                       embeddings, 256, 256));
+    assert(!changed);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count == 1);
+#else
+    assert(counter.count == 0);
+#endif
+    kept.set_diagnostics(nullptr);
+    assert(same_regulator(kept, kept_expected));
+    assert(same_free_generator_values(kept, kept_expected));
+
+    // A deferred precision on a group that has its regulator, or a deferred
+    // regulator completed twice, fails and leaves the group unchanged.
+    assert(!silex::detail::reduce_stored_relation_units(
+            changed, kept_expected, embeddings, 256, 256));
+    assert(!OrderUnitGroupAccess::complete_deferred_regulator(
+            kept, embeddings, 256));
+    assert(same_regulator(kept, kept_expected));
+    return 0;
+}
+
+// The internal re-basis steps keep the torsion stored in the group instead
+// of recomputing it.  The cached-torsion hook accepts the under-claimed pair
+// (2, -1) in Q(zeta_7), whose torsion has order 14, so a recomputation would
+// show as order 14.
+int test_rebasis_keeps_group_torsion() {
+    Cyclotomic7Units c;
+    silex::EmbeddingContext embeddings(c.field);
+    sflint::Fmpz two;
+    sflint::fmpz_set_si(sflint::FmpzRef(two), 2);
+    silex::OrderElement minus_one(c.order);
+    assert(minus_one.set_si(-1));
+
+    const auto torsion_order_is = [](const silex::OrderUnitGroup& group,
+                                     slong expected) {
+        const auto order = group.torsion_order();
+        return order.has_value() &&
+               sflint::fmpz_equal_si(sflint::FmpzConstRef(*order), expected);
+    };
+
+    // Reduction of a skewed basis.
+    {
+        const std::vector<silex::FactoredElement> skewed = c.basis(1, 5);
+        const silex::FactoredElementSpan span(skewed.data(), skewed.size());
+        silex::OrderUnitGroup computed(c.order);
+        assert(silex::detail::order_unit_group_set_units_internal(
+                computed, c.order, span, embeddings, 256, true));
+        assert(torsion_order_is(computed, 14));
+
+        silex::OrderUnitGroup group(c.order);
+        assert(silex::detail::order_unit_group_set_units_internal(
+                group, c.order, span, embeddings, 256, true, &two,
+                &minus_one));
+        assert(torsion_order_is(group, 2));
+        bool changed = false;
+        assert(silex::detail::reduce_stored_relation_units(changed, group,
+                                                           embeddings, 256));
+        assert(changed);
+        assert(torsion_order_is(group, 2));
+    }
+
+    // Adjoining u2 = sqrt(u2^2) to <u2^2, u3>: the relation row
+    // (-1, 0, 2) says root^2 = u2^2.
+    {
+        const std::vector<silex::FactoredElement> square = c.basis(2, 0);
+        const silex::FactoredElementSpan span(square.data(), square.size());
+        silex::FactoredElement root(c.field);
+        assert(root.set_element(c.u2));
+        sflint::FmpzMat rel(1, 3);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(rel, 0, 0), -1);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(rel, 0, 2), 2);
+
+        silex::OrderUnitGroup computed(c.order);
+        assert(silex::detail::order_unit_group_set_units_internal(
+                computed, c.order, span, embeddings, 256, true));
+        silex::OrderUnitGroup computed_out(c.order);
+        bool changed = false;
+        assert(silex::detail::adjoin_verified_dependent_relation(
+                changed, computed_out, computed, root,
+                sflint::FmpzMatConstRef(rel), 0, embeddings, 256));
+        assert(changed);
+        assert(torsion_order_is(computed_out, 14));
+
+        silex::OrderUnitGroup group(c.order);
+        assert(silex::detail::order_unit_group_set_units_internal(
+                group, c.order, span, embeddings, 256, true, &two,
+                &minus_one));
+        silex::OrderUnitGroup out(c.order);
+        changed = false;
+        assert(silex::detail::adjoin_verified_dependent_relation(
+                changed, out, group, root, sflint::FmpzMatConstRef(rel), 0,
+                embeddings, 256));
+        assert(changed);
+        assert(torsion_order_is(out, 2));
+        assert(same_regulator(out, computed_out));
+
+        // With the regulator deferred, the adjoined group has none until
+        // the reduction that follows computes it.
+        silex::OrderUnitGroup deferred(c.order);
+        changed = false;
+        assert(silex::detail::adjoin_verified_dependent_relation(
+                changed, deferred, computed, root,
+                sflint::FmpzMatConstRef(rel), 0, embeddings, 256, true));
+        assert(changed);
+        assert(!silex::detail::OrderUnitGroupAccess::has_regulator(deferred));
+        assert(torsion_order_is(deferred, 14));
+        assert(silex::detail::reduce_stored_relation_units(
+                changed, deferred, embeddings, 256, 256));
+        assert(silex::detail::OrderUnitGroupAccess::has_regulator(deferred));
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -9545,6 +9812,8 @@ int main() {
     test_transform_factored_units_wide_failure();
     test_group_wide_form_failure_move_clear();
     test_reduce_stored_units_keeps_wide_form();
+    test_reduce_stored_units_deferred_regulator();
+    test_rebasis_keeps_group_torsion();
     test_group_wide_free_generators();
     return 0;
 }

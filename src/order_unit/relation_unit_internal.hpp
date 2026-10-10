@@ -194,10 +194,18 @@ bool add_dependent_unit(bool& changed,
                               EmbeddingContext& embeddings,
                               RelationUnitExtractionState& extraction_state,
                               slong precision) noexcept;
+// LLL-reduces the stored free generators of `group` (reference
+// `U.units = reduce(U.units, p)`); `changed` reports a new basis.  A positive
+// `deferred_regulator_precision` says that `group` was set by
+// OrderUnitGroupAccess::set_units_deferred_regulator at that precision: a
+// new basis gets its regulator from set_units as before, and a kept basis
+// gets the regulator set_units would have computed for it.  On failure the
+// group is unchanged, so a deferred regulator is still missing.
 bool reduce_stored_relation_units(bool& changed,
                                OrderUnitGroup& group,
                                EmbeddingContext& embeddings,
-                               slong precision) noexcept;
+                               slong precision,
+                               slong deferred_regulator_precision = 0) noexcept;
 // Sets units[i] to prod_j units[j]^transform[i, j] with word-size factored
 // exponents.  Fails, leaving units unchanged, when an exponent overflows or
 // the inputs are invalid; `overflowed` is true only in the first case.

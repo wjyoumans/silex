@@ -123,10 +123,13 @@ bool compute_power(Element& out,
 // (rank_zero_torsion): the public setters compute it, set() copies it, and
 // the saturation routines keep it or recompute it when they adjoin a root.
 // The only way to install other torsion is the cached-torsion hook below,
-// and its internal callers pass either torsion computed by rank_zero_torsion
-// for the same order (the rank-one relation-kernel scan) or the roots of
-// unity of the field whose generator lies in the order, which is then the
-// torsion of the order (HNF unit publication).  A cached pair is checked to
+// and its internal callers pass torsion computed by rank_zero_torsion for
+// the same order (the rank-one relation-kernel scan), the roots of unity of
+// the field whose generator lies in the order, which is then the torsion of
+// the order (HNF unit publication), or the torsion already stored in the
+// group whose basis they change, which by this invariant is the computed
+// torsion (adjoin_verified_dependent_relation and
+// reduce_stored_relation_units).  A cached pair is checked to
 // be a cyclic group of roots of unity in the order, not to be all of them,
 // so under-claimed torsion (for example -1 on Z[i]) is accepted there.
 //
@@ -162,6 +165,36 @@ public:
             bool trusted,
             const flint::Fmpz* cached_torsion_order,
             const OrderElement* cached_torsion_generator) noexcept;
+
+    // set_units without its last step, the regulator: the group is set with
+    // its torsion and checked, independent generators, but has no regulator
+    // until complete_deferred_regulator computes it.  For internal re-basis
+    // paths whose next step is reduce_stored_relation_units, which keeps
+    // either this basis or a reduced one; the regulator is then computed
+    // once, on the basis that is kept.
+    static bool set_units_deferred_regulator(
+            OrderUnitGroup& out,
+            const Order& order,
+            FactoredElementSpan generators,
+            EmbeddingContext& embeddings,
+            slong precision,
+            bool trusted,
+            const flint::Fmpz* cached_torsion_order,
+            const OrderElement* cached_torsion_generator) noexcept;
+
+    // True when `group` is set and has its regulator.
+    static bool has_regulator(const OrderUnitGroup& group) noexcept {
+        return group.is_set() && group.has_regulator_;
+    }
+
+    // Computes the regulator that set_units would have computed for the
+    // generators of a group set by set_units_deferred_regulator with the
+    // same `precision`.  Fails, leaving `group` unchanged, when the group is
+    // not set, already has a regulator, keeps a wide form, or the regulator
+    // computation fails.
+    static bool complete_deferred_regulator(OrderUnitGroup& group,
+                                            EmbeddingContext& embeddings,
+                                            slong precision) noexcept;
 
     // set_units for a trusted unit-basis transform whose result needs
     // exponents wider than slong.  `rebuilt[i]` is the word-size unit equal
@@ -236,6 +269,18 @@ public:
             slong max_passes,
             slong precision,
             bool check_torsion) noexcept;
+
+private:
+    static bool set_units_body(
+            OrderUnitGroup& out,
+            const Order& order,
+            FactoredElementSpan generators,
+            EmbeddingContext& embeddings,
+            slong precision,
+            bool trusted,
+            const flint::Fmpz* cached_torsion_order,
+            const OrderElement* cached_torsion_generator,
+            bool compute_regulator) noexcept;
 };
 
 inline bool order_unit_group_set_units_internal(
@@ -610,6 +655,11 @@ bool saturation_proof_prime_known_rank_one_torsion_nonzero(
 bool copy_selected_primes(PrimeIdealList& out,
                           const Order& order,
                           const std::vector<PrimeIdeal>& selected) noexcept;
+// Adjoins the verified root of relation row `row` to `group`.  The new
+// basis keeps the torsion of `group` (cached, still checked by
+// cached_torsion_is_valid).  With `defer_regulator`, a changed `out` is set
+// by set_units_deferred_regulator at `precision`, for a caller that passes
+// it to reduce_stored_relation_units with that deferred precision next.
 bool adjoin_verified_dependent_relation(bool& changed,
                                         OrderUnitGroup& out,
                                         const OrderUnitGroup& group,
@@ -617,7 +667,8 @@ bool adjoin_verified_dependent_relation(bool& changed,
                                         flint::FmpzMatConstRef rel,
                                         slong row,
                                         EmbeddingContext& embeddings,
-                                        slong precision) noexcept;
+                                        slong precision,
+                                        bool defer_regulator = false) noexcept;
 bool dependent_relation_bounded_min_denominator(
         bool& recovered,
         FactoredElement& root,
