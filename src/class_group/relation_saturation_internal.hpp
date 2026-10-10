@@ -137,7 +137,9 @@ using DegreeOneResidueInput = std::vector<DegreeOneResidueFactor>;
 // The stack grows one degree-one prime at a time, only when a candidate that
 // the current stack does not rule out is about to take its power test, and
 // stops by the reference rule with `stable` starting at 1.5 and doubling
-// after a failed power test.  See class_group.cpp.
+// after a failed power test.  It starts only after the round has run
+// `width` power tests (`power_tests`), a Silex count gate that the reference
+// does not have.  See class_group.cpp.
 struct RelationSaturationCandidateFilter {
     bool started = false;
     // False when the filter does not apply or failed; every candidate is
@@ -151,6 +153,8 @@ struct RelationSaturationCandidateFilter {
     double stable = 1.5;
     slong stable_count = 1;
     slong stacked_prime_count = 0;
+    // Power tests run in this round, counted before the filter starts too.
+    slong power_tests = 0;
     const Order* order = nullptr;
     const DiagnosticsContext* diagnostics = nullptr;
     std::vector<FactoredElement> inputs;

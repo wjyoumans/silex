@@ -3278,8 +3278,12 @@ bool saturation_relation_with_units(Relation& relation,
     // ell-th power (detail::relation_saturation_candidate_filter_start), so
     // its power test would fail and skipping it leaves the appended relation
     // as is.  A candidate that the current stack does not rule out first
-    // stacks one more prime: the cost gate of the filter.
-    if (filter != nullptr) {
+    // stacks one more prime: the cost gate of the filter.  The filter starts
+    // only once the round has run as many power tests as there are inputs
+    // (the kernel columns), a Silex count gate that Hecke does not have.
+    if (filter != nullptr &&
+        (filter->started ||
+         filter->power_tests >= flint::fmpz_mat_ncols(kernel))) {
         if (!filter->started &&
             !detail::relation_saturation_candidate_filter_start(
                     *filter, context, units, include_torsion, ell)) {
@@ -3309,6 +3313,9 @@ bool saturation_relation_with_units(Relation& relation,
         }
     }
 
+    if (filter != nullptr) {
+        ++filter->power_tests;
+    }
     FactoredElement product(*field);
     FactoredElement root(*field);
     {
@@ -7342,6 +7349,14 @@ bool degree_one_quotient_log_row_word_size(
 // reference rule with `stable` starting at the reference default 1.5
 // (line 130) and doubled after a failed power test, as `saturate!` does after
 // a wasted candidate (line 503).
+//
+// Count gate (a Silex heuristic, not in the reference): the filter starts only
+// after the round (one scan of saturate_local_with_units_ over the auxiliary
+// primes, up to the next appended relation) has run as many power tests as
+// there are inputs; until then every divisible candidate is power tested, as
+// without the filter.  On small fields a failed power test costs less than
+// the degree-one prime the lazy stack adds for it.  The count was chosen by
+// measurement on the native class-group benchmark rows.
 //
 // `available` is false when the port does not apply (a nonmaximal order, a
 // defining polynomial that is not monic integral, an ell that does not fit a
