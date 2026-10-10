@@ -7556,6 +7556,105 @@ bool set_cyclotomic13_u2_power17_group(
            out.free_rank() == 5;
 }
 
+// u_2 = 1 + zeta_13 in Q(zeta_13) (see cyclotomic13_field).
+bool set_cyclotomic13_u2(silex::Element& out) noexcept {
+    sflint::FmpqPoly unit_poly;
+    sflint::fmpq_poly_set_coeff_si(unit_poly, 0, 1);
+    sflint::fmpq_poly_set_coeff_si(unit_poly, 1, 1);
+    return out.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly));
+}
+
+// For an odd prime ell, as set_cyclotomic13_u2_power17_group, but the first
+// `powered` generators u_a (a = 2, ..., powered + 1) are replaced by
+// -u_a^ell = (-u_a)^ell, stored as the factors u_a^ell and (-1)^1: a
+// subgroup of index ell^powered in the full unit group.  The ell kernel row
+// of such a generator is an ell-th power but not a formal one: the formal
+// split leaves the rational -1, which Element::is_power roots in any
+// degree, so the root -u_a is computed, unlike the root of the expanded
+// u_2^17.
+bool set_cyclotomic13_minus_unit_power_group(
+        silex::OrderUnitGroup& out,
+        const silex::Order& order,
+        const silex::NumberField& field,
+        silex::EmbeddingContext& embeddings,
+        slong ell,
+        slong powered) noexcept {
+    silex::Element minus_one(field);
+    sflint::Fmpz minus_one_value;
+    if (!set_fmpz_si(minus_one_value, -1) ||
+        !minus_one.set_fmpz(sflint::FmpzConstRef(minus_one_value))) {
+        return false;
+    }
+    std::vector<silex::FactoredElement> generators;
+    for (slong a = 2; a <= 6; ++a) {
+        sflint::FmpqPoly unit_poly;
+        for (slong i = 0; i < a; ++i) {
+            sflint::fmpq_poly_set_coeff_si(unit_poly, i, 1);
+        }
+        silex::Element unit(field);
+        if (!unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly))) {
+            return false;
+        }
+        generators.emplace_back(field);
+        const bool pushed = a <= powered + 1
+                                    ? generators.back().push(unit, ell) &&
+                                             generators.back().push(
+                                                     minus_one, 1)
+                                   : generators.back().set_element(unit);
+        if (!pushed) {
+            return false;
+        }
+    }
+    return out.set_units(order,
+                         silex::FactoredElementSpan(generators.data(),
+                                                    generators.size()),
+                         embeddings, 256) &&
+           out.free_rank() == 5;
+}
+
+// Counts the stable proof's deferred and accepted kernel-row roots in the
+// first prove_local_saturated_stable_in_place_ pass of a run: with
+// prove_index_bound, the pass for the smallest ell >= aux_bound.
+struct FirstStablePassRootEvents {
+    bool active = false;
+    slong passes = 0;
+    slong deferred = 0;
+    slong accepted = 0;
+};
+
+void first_stable_pass_root_callback(void* user,
+                                     silex::DiagnosticsModule,
+                                     silex::ProfileEvent event,
+                                     const char*,
+                                     const char* label) noexcept {
+    FirstStablePassRootEvents* events =
+            static_cast<FirstStablePassRootEvents*>(user);
+    if (label == nullptr) {
+        return;
+    }
+    if (std::strcmp(label,
+                    "unit_group.prove_local_saturated_stable_in_place") == 0) {
+        if (event == silex::ProfileEvent::begin_scope) {
+            events->active = events->passes == 0;
+        } else if (event == silex::ProfileEvent::end_scope) {
+            events->active = false;
+            ++events->passes;
+        }
+        return;
+    }
+    if (!events->active || event != silex::ProfileEvent::event) {
+        return;
+    }
+    if (std::strcmp(label,
+                    "unit_group.stable_relation_saturation.root_deferred") ==
+        0) {
+        ++events->deferred;
+    } else if (std::strcmp(label, "unit_group.stable_relation_saturation."
+                                  "accepted_root") == 0) {
+        ++events->accepted;
+    }
+}
+
 // Q(sqrt 118) with the fundamental unit eps = 306917 + 28254 sqrt(118).  GP:
 // K = bnfinit(x^2 - 118, 1); K.fu gives eps up to sign, and eps is a cube
 // at both primes above q = 13 and q = 19, the split primes q = 1 mod 3
@@ -7796,6 +7895,161 @@ int test_prove_index_bound_non_power_range_exhausted() {
     assert(check_unit_proof_record(proved, last, 3,
                                    silex::ProofState::unavailable, 30, 4,
                                    false));
+    return 0;
+}
+
+// A deferred row that is a true power is rooted after the rescan (decision
+// for deferred root attempts).  In Q(zeta_13), the group of
+// set_cyclotomic13_minus_unit_power_group with ell = 17 and one powered
+// generator has index 17, and aux_bound = 17
+// sends ell = 17 to the stable proof.  Degree 12 and ell = 17, so the first
+// scan, at stable = 3.5, defers the non-formal row of -u_2^17 without
+// testing it; the rescan at stable = 7 tests it and accepts the root -u_2,
+// and the next scan has an empty kernel.  An attempt in the first scan
+// would accept the same root at stable = 3.5.  The proof record then has
+// the same local primes either way, since a verifying scan stops at the
+// first prime that empties the kernel, whatever `stable` is; the published
+// generators may differ.  The resource guard (4096 primes q per scan, far
+// above what this proof needs) makes a scan that never tests the row fail
+// closed quickly instead of after 2^16 primes q.
+int test_prove_index_bound_roots_power_after_deferred_rescan() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup start(order);
+    assert(set_cyclotomic13_minus_unit_power_group(start, order, field,
+                                                   embeddings, 17, 1));
+    sflint::Fmpz ell17;
+    assert(set_fmpz_si(ell17, 17));
+
+    // The row is deferred under defer_undecidable, and rooted when tested.
+    sflint::FmpzMat rows(1, 5);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 0, 0), 1);
+    silex::FactoredElement root(field);
+    bool is_power = false;
+    assert(silex::detail::kernel_row_root(
+                   is_power, root, start, sflint::FmpzMatConstRef(rows), 0,
+                   sflint::FmpzConstRef(ell17), nullptr,
+                   silex::detail::KernelRowRootMode::defer_undecidable) ==
+           silex::detail::KernelRowRootResult::deferred);
+    assert(silex::detail::kernel_row_root(
+                   is_power, root, start, sflint::FmpzMatConstRef(rows), 0,
+                   sflint::FmpzConstRef(ell17)) ==
+           silex::detail::KernelRowRootResult::decided);
+    assert(is_power);
+    silex::Element u2(field);
+    silex::Element minus_u2(field);
+    silex::Element root_value(field);
+    assert(set_cyclotomic13_u2(u2));
+    assert(minus_u2.negate(u2));
+    assert(root.evaluate(root_value));
+    assert(root_value.equal(minus_u2));
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    FirstStablePassRootEvents events;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            first_stable_pass_root_callback, &events);
+    const StableProofScanLimitsForTesting limits(4096, 0);
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 17));
+    silex::OrderUnitGroup proved(order);
+    proved.set_diagnostics(&diagnostics);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = false;
+    assert(proved.prove_index_bound(status, changed, start, 1,
+                                    sflint::FmpzConstRef(aux_bound), 2,
+                                    embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(changed);
+    assert(proved.certification_status() == silex::CertificationMode::proven);
+    // The ell = 17 record: verified, the group changed, and 13 degree-one
+    // primes (12 above q = 443 and the first above q = 1327).
+    bool found = false;
+    for (slong i = 0; i < proved.unit_proof_record_count(); ++i) {
+        found = found || check_unit_proof_record(
+                                 proved, i, 17, silex::ProofState::verified,
+                                 17, 13, true);
+    }
+    assert(found);
+    // The root was adjoined: the regulator is that of the full unit group.
+    // GP: \p 110; K.reg
+    assert(regulator_contains(
+            proved,
+            "120.7840313626563127293175827399128565840801560246896328383867"
+            "406585225412356786592960914162040943733"));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The ell = 17 pass deferred the row once, then accepted its root.
+    assert(events.deferred == 1);
+    assert(events.accepted == 1);
+#endif
+    return 0;
+}
+
+// When the stable scan has used every prime q of its range, rows are
+// tested at once, not deferred: a rescan would return the same kernel.  In
+// Q(zeta_13), every generator of the group of
+// set_cyclotomic13_minus_unit_power_group with ell = 19 and five powered
+// generators is a 19th power, so the ell = 19 character kernel stays full
+// (dimension 5), and the scan stops only after more than 3.5 * 5 primes
+// without a change in it.  The test hook ends the q range at 2000: the
+// primes ell <= 17 are still proved (ell = 17 needs the first degree-one
+// prime above q = 1327), and the ell = 19 scan, sent to the stable proof by
+// aux_bound = 19, sees only the 12 degree-one primes above q = 1483 (the
+// first prime q = 1 mod 19 that splits in Q(zeta_13)) and ends with the
+// range exhausted.  The first row, -u_2^19, is then rooted in that first
+// scan; a deferral would have rescanned first.  The published result is
+// the same either way, so only the profile events, counted in builds with
+// profiling enabled, tell the two apart.  After the root the next row
+// tested is not a 19th power, and the range is still exhausted, so ell = 19
+// fails closed as `unavailable`.
+int test_prove_index_bound_range_exhausted_tests_rows_at_once() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup start(order);
+    assert(set_cyclotomic13_minus_unit_power_group(start, order, field,
+                                                   embeddings, 19, 5));
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    FirstStablePassRootEvents events;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            first_stable_pass_root_callback, &events);
+    const StableProofScanLimitsForTesting limits(0, 2000);
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 19));
+    silex::OrderUnitGroup proved(order);
+    proved.set_diagnostics(&diagnostics);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = false;
+    assert(proved.prove_index_bound(status, changed, start, 1,
+                                    sflint::FmpzConstRef(aux_bound), 2,
+                                    embeddings, 256));
+    assert(status == silex::ProofState::unavailable);
+    assert(changed);
+    assert(proved.certification_status() != silex::CertificationMode::proven);
+    sflint::Fmpz ell17;
+    sflint::Fmpz ell19;
+    assert(set_fmpz_si(ell17, 17));
+    assert(set_fmpz_si(ell19, 19));
+    assert(proved.unit_proof_verified(sflint::FmpzConstRef(ell17)));
+    const slong last = proved.unit_proof_record_count() - 1;
+    // The 12 degree-one primes above q = 1483.
+    assert(check_unit_proof_record(proved, last, 19,
+                                   silex::ProofState::unavailable, 19, 12,
+                                   false));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The ell = 19 pass tested the row at once and accepted its root.
+    assert(events.deferred == 0);
+    assert(events.accepted == 1);
+#endif
     return 0;
 }
 
@@ -10016,6 +10270,8 @@ int main() {
     test_kernel_row_root_three_way_result();
     test_kernel_row_root_defers_undecidable_rows();
     test_prove_index_bound_non_power_range_exhausted();
+    test_prove_index_bound_roots_power_after_deferred_rescan();
+    test_prove_index_bound_range_exhausted_tests_rows_at_once();
     test_prove_index_bound_undecided_root_not_saturated();
     test_prove_torsion_twisted_saturation_root();
     test_saturate_torsion_twisted_non_proof();
