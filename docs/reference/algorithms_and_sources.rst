@@ -1463,6 +1463,13 @@ integral polynomials are unaffected.  When ``f`` has non-integral
 coefficients the search fails (closed), because the roots of ``f`` modulo
 ``q`` cannot be read.
 
+Unit candidates from the relation kernel are formed from an LLL-reduced
+basis of the saturated kernel, following Hecke.jl ``find_candidates``
+(commit 44b5409, ``FindUnits.jl:53-58``: ``solve_dixon_sf``, then
+``saturate``, then ``lll!``).  Silex deviates in the input to the reduction:
+it reduces the full saturated Smith kernel, whereas Hecke reduces the
+saturated kernel of a random subset of the relations.
+
 A ``proven`` unit computation from a class-group context runs its
 relation-kernel units through the index-bounded saturation pass
 (``set_relation_kernel_units_index_bounded_saturated``) before
