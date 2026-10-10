@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include <silex/class_group.hpp>
+#include <silex/factored_element.hpp>
+#include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 
 namespace silex {
@@ -116,23 +120,72 @@ bool degree_one_quotient_log_row_word_size(
         flint::FmpzConstRef q,
         flint::FmpzConstRef root,
         slong n) noexcept;
+// The factors of the exponent-reduced inputs of the degree-one residue
+// characters, as rational polynomials, copied once so that each auxiliary
+// prime reads them in place.
+struct DegreeOneResidueFactor {
+    flint::FmpqPoly polynomial;
+    slong exponent = 0;
+};
+
+using DegreeOneResidueInput = std::vector<DegreeOneResidueFactor>;
+
 // Class-relation saturation with units: the candidate filter from the
 // stacked residue characters of reference
-// `Saturate.jl:compute_candidates_for_saturate`, as a reduced row echelon
-// basis modulo ell over the relation generators, free units and (when
-// include_torsion) the torsion generator.  See class_group.cpp.
-bool relation_saturation_candidate_filter(flint::FmpzMat& filter,
-                                          bool& available,
-                                          const ClassGroupContext& context,
-                                          const OrderUnitGroup& units,
-                                          bool include_torsion,
-                                          flint::FmpzConstRef ell) noexcept;
-bool relation_saturation_candidate_filter_contains(
-        bool& contains,
-        flint::FmpzMatConstRef filter,
-        flint::FmpzMatConstRef kernel,
-        slong row,
+// `Saturate.jl:compute_candidates_for_saturate`, over the relation
+// generators, free units and (when include_torsion) the torsion generator.
+// The stack grows one degree-one prime at a time, only when a candidate that
+// the current stack does not rule out is about to take its power test, and
+// stops by the reference rule with `stable` starting at 1.5 and doubling
+// after a failed power test.  See class_group.cpp.
+struct RelationSaturationCandidateFilter {
+    bool started = false;
+    // False when the filter does not apply or failed; every candidate is
+    // then power tested.
+    bool available = false;
+    // The reference stopping rule holds: the kernel dimension has stayed the
+    // same for more than `stable * width` degree-one primes.
+    bool stopped = false;
+    slong ell = 0;
+    slong width = 0;
+    double stable = 1.5;
+    slong stable_count = 1;
+    slong stacked_prime_count = 0;
+    const Order* order = nullptr;
+    const DiagnosticsContext* diagnostics = nullptr;
+    std::vector<FactoredElement> inputs;
+    std::vector<DegreeOneResidueInput> prepared_inputs;
+    bool prepared = false;
+    flint::Fmpz discriminant;
+    flint::Fmpz equation_index;
+    bool equation_index_known = false;
+    flint::Fmpz q;
+    bool q_loaded = false;
+    std::vector<flint::Fmpz> roots;
+    std::size_t next_root = 0;
+    // The stacked characters as independent rows modulo ell in reduced
+    // echelon form (pivot entry 1); the kernel dimension is width - rank.
+    std::vector<std::vector<ulong>> rows;
+    std::vector<slong> pivots;
+};
+
+bool relation_saturation_candidate_filter_start(
+        RelationSaturationCandidateFilter& filter,
+        const ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        bool include_torsion,
         flint::FmpzConstRef ell) noexcept;
+bool relation_saturation_candidate_filter_grow(
+        RelationSaturationCandidateFilter& filter) noexcept;
+bool relation_saturation_candidate_filter_rules_out(
+        bool& ruled_out,
+        const RelationSaturationCandidateFilter& filter,
+        flint::FmpzMatConstRef kernel,
+        slong row) noexcept;
+bool relation_saturation_candidate_filter_kernel_empty(
+        const RelationSaturationCandidateFilter& filter) noexcept;
+void relation_saturation_candidate_filter_failed_power_test(
+        RelationSaturationCandidateFilter& filter) noexcept;
 bool saturate_class_unit_context(
         bool& success,
         SaturationCandidateProcessingResult& last_result,

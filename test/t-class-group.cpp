@@ -1900,10 +1900,29 @@ int test_relation_saturation_bounded_append_with_units_degree_one() {
     return 0;
 }
 
+// Stacks residue characters until the reference stopping rule holds.
+void grow_candidate_filter_to_stop(
+        silex::detail::RelationSaturationCandidateFilter& filter) {
+    while (filter.available && !filter.stopped) {
+        const slong before = filter.stacked_prime_count;
+        assert(silex::detail::relation_saturation_candidate_filter_grow(filter));
+        // One degree-one prime per call: the cost gate stacks no more.
+        assert(filter.stacked_prime_count == before + 1);
+    }
+}
+
+slong candidate_filter_kernel_dimension(
+        const silex::detail::RelationSaturationCandidateFilter& filter) {
+    return filter.width - static_cast<slong>(filter.rows.size());
+}
+
 // The stacked residue-character filter of the class-relation saturation
 // with units.  Over Q with the single relation -4 and the torsion generator
 // -1 at ell = 2, only (-4) * (-1) = 4 is a square, so the common kernel of the
-// quadratic characters is spanned by (1, 1); a row outside it is filtered.
+// quadratic characters is spanned by (1, 1); a row outside it is ruled out.
+// The stack stops once the dimension has stayed the same for more than
+// stable * width = 1.5 * 2 primes; a failed power test doubles stable and
+// lets it grow to more than 3 * 2.
 int test_relation_saturation_candidate_filter_degree_one() {
     silex::NumberField field = degree_one_field();
     silex::Order order = silex::test::equation_order(field);
@@ -1928,20 +1947,13 @@ int test_relation_saturation_candidate_filter_degree_one() {
 
     sflint::Fmpz ell;
     assert(set_fmpz_si(ell, 2));
-    sflint::FmpzMat filter(0, 0);
-    bool available = false;
-    assert(silex::detail::relation_saturation_candidate_filter(
-            filter, available, context, units, true,
-            sflint::FmpzConstRef(ell)));
-    assert(available);
-    assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(filter)) == 1);
-    assert(sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(filter)) == 2);
-    assert(sflint::fmpz_equal_si(
-            sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(filter), 0, 0),
-            1));
-    assert(sflint::fmpz_equal_si(
-            sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(filter), 0, 1),
-            1));
+    silex::detail::RelationSaturationCandidateFilter filter;
+    assert(silex::detail::relation_saturation_candidate_filter_start(
+            filter, context, units, true, sflint::FmpzConstRef(ell)));
+    assert(filter.available);
+    assert(filter.width == 2);
+    assert(filter.stable == 1.5);
+    assert(filter.rows.empty() && !filter.stopped);
 
     // Rows (3, 1) = (1, 1) mod 2 and (1, 0), (0, 1) as exponent vectors.
     sflint::FmpzMat rows(3, 2);
@@ -1949,15 +1961,35 @@ int test_relation_saturation_candidate_filter_degree_one() {
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 0, 1), 1);
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 1, 0), 1);
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 2, 1), 1);
-    const bool expected[] = {true, false, false};
+    // An empty stack rules nothing out.
     for (slong i = 0; i < 3; ++i) {
-        bool contains = !expected[i];
-        assert(silex::detail::relation_saturation_candidate_filter_contains(
-                contains, sflint::FmpzMatConstRef(filter),
-                sflint::FmpzMatConstRef(rows), i,
-                sflint::FmpzConstRef(ell)));
-        assert(contains == expected[i]);
+        bool ruled_out = true;
+        assert(silex::detail::relation_saturation_candidate_filter_rules_out(
+                ruled_out, filter, sflint::FmpzMatConstRef(rows), i));
+        assert(!ruled_out);
     }
+
+    grow_candidate_filter_to_stop(filter);
+    assert(filter.stopped);
+    assert(candidate_filter_kernel_dimension(filter) == 1);
+    assert(!silex::detail::relation_saturation_candidate_filter_kernel_empty(
+            filter));
+    assert(filter.stable_count == 4);
+    const bool expected_ruled_out[] = {false, true, true};
+    for (slong i = 0; i < 3; ++i) {
+        bool ruled_out = !expected_ruled_out[i];
+        assert(silex::detail::relation_saturation_candidate_filter_rules_out(
+                ruled_out, filter, sflint::FmpzMatConstRef(rows), i));
+        assert(ruled_out == expected_ruled_out[i]);
+    }
+
+    silex::detail::relation_saturation_candidate_filter_failed_power_test(
+            filter);
+    assert(filter.stable == 3.0);
+    assert(!filter.stopped);
+    grow_candidate_filter_to_stop(filter);
+    assert(filter.stable_count == 7);
+    assert(candidate_filter_kernel_dimension(filter) == 1);
     return 0;
 }
 
@@ -1994,7 +2026,7 @@ void prepare_minus_23_index_two_candidate(silex::ClassGroupContext& context,
 }
 
 // On the Q(sqrt(-23)) candidate above (h_cand = 6, h = 3) the relations are
-// already 3-saturated, so at ell = 3 (no torsion column: w = 2) no nonzero
+// already 3-saturated, so at ell = 3 (no torsion column: w = 4) no nonzero
 // exponent vector mod 3 makes the relation generators a cube and the stacked
 // kernel is empty.  At ell = 2 the generator 4 is a square, so (1, 0, 0, 0, 0)
 // lies in the kernel and 3 (not a square in K) does not.
@@ -2013,34 +2045,38 @@ int test_relation_saturation_candidate_filter_minus_23() {
 
     sflint::Fmpz ell;
     assert(set_fmpz_si(ell, 3));
-    sflint::FmpzMat filter(0, 0);
-    bool available = false;
-    assert(silex::detail::relation_saturation_candidate_filter(
-            filter, available, context, units, false,
-            sflint::FmpzConstRef(ell)));
-    assert(available);
-    assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(filter)) == 0);
+    silex::detail::RelationSaturationCandidateFilter filter;
+    assert(silex::detail::relation_saturation_candidate_filter_start(
+            filter, context, units, false, sflint::FmpzConstRef(ell)));
+    assert(filter.available);
+    assert(filter.width == 4);
+    grow_candidate_filter_to_stop(filter);
+    assert(silex::detail::relation_saturation_candidate_filter_kernel_empty(
+            filter));
+    // An empty kernel ends the stack; a failed test does not reopen it.
+    silex::detail::relation_saturation_candidate_filter_failed_power_test(
+            filter);
+    assert(filter.stopped && filter.stable == 1.5);
 
     assert(set_fmpz_si(ell, 2));
-    assert(silex::detail::relation_saturation_candidate_filter(
-            filter, available, context, units, true,
-            sflint::FmpzConstRef(ell)));
-    assert(available);
-    assert(sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(filter)) == 5);
-    const slong rank = sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(filter));
-    assert(rank >= 1 && rank < 5);
+    silex::detail::RelationSaturationCandidateFilter square_filter;
+    assert(silex::detail::relation_saturation_candidate_filter_start(
+            square_filter, context, units, true, sflint::FmpzConstRef(ell)));
+    assert(square_filter.available);
+    assert(square_filter.width == 5);
+    grow_candidate_filter_to_stop(square_filter);
+    const slong dimension = candidate_filter_kernel_dimension(square_filter);
+    assert(dimension >= 1 && dimension < 5);
     sflint::FmpzMat rows(2, 5);
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 0, 0), 1);
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 1, 1), 1);
-    bool contains = false;
-    assert(silex::detail::relation_saturation_candidate_filter_contains(
-            contains, sflint::FmpzMatConstRef(filter),
-            sflint::FmpzMatConstRef(rows), 0, sflint::FmpzConstRef(ell)));
-    assert(contains);
-    assert(silex::detail::relation_saturation_candidate_filter_contains(
-            contains, sflint::FmpzMatConstRef(filter),
-            sflint::FmpzMatConstRef(rows), 1, sflint::FmpzConstRef(ell)));
-    assert(!contains);
+    bool ruled_out = true;
+    assert(silex::detail::relation_saturation_candidate_filter_rules_out(
+            ruled_out, square_filter, sflint::FmpzMatConstRef(rows), 0));
+    assert(!ruled_out);
+    assert(silex::detail::relation_saturation_candidate_filter_rules_out(
+            ruled_out, square_filter, sflint::FmpzMatConstRef(rows), 1));
+    assert(ruled_out);
     return 0;
 }
 
@@ -2070,12 +2106,14 @@ int test_relation_saturation_candidate_filter_needs_nice_polynomial() {
 
     sflint::Fmpz ell;
     assert(set_fmpz_si(ell, 2));
-    sflint::FmpzMat filter(0, 0);
-    bool available = true;
-    assert(silex::detail::relation_saturation_candidate_filter(
-            filter, available, context, units, true,
-            sflint::FmpzConstRef(ell)));
-    assert(!available);
+    silex::detail::RelationSaturationCandidateFilter filter;
+    filter.available = true;
+    assert(silex::detail::relation_saturation_candidate_filter_start(
+            filter, context, units, true, sflint::FmpzConstRef(ell)));
+    assert(filter.started);
+    assert(!filter.available);
+    assert(silex::detail::relation_saturation_candidate_filter_grow(filter));
+    assert(filter.stacked_prime_count == 0);
     return 0;
 }
 

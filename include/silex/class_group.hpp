@@ -32,6 +32,7 @@ namespace detail {
 struct ClassUnitTransactionContext;
 struct ClassGroupRelationOptions;
 struct ClassGroupContextStorage;
+struct RelationSaturationCandidateFilter;
 class ClassGroupCertificationAccess;
 class ClassGroupRelationAccess;
 class ClassGroupFinishAccess;
@@ -629,7 +630,8 @@ private:
             bool include_torsion,
             const PrimeIdeal& prime,
             flint::FmpzConstRef ell,
-            const flint::FmpzMat* candidate_filter) noexcept;
+            detail::RelationSaturationCandidateFilter* candidate_filter)
+            noexcept;
     bool saturate_local_with_units_(bool& changed,
                                     bool& index_cleared,
                                     const OrderUnitGroup& units,
