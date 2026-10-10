@@ -1004,22 +1004,24 @@ value does not show index one, it is discarded and the default zeta route
 computes the value (so such fields pay up to part of one extra analytic
 evaluation).  A field whose default route fails can therefore be accepted
 under GRH when the coarse value shows index one.
-A ``grh`` request takes that ``hR`` in every degree above one,
-including a quadratic field written as ``x^2 - d``, which also has the
-unconditional ``L(1, chi_D)`` route; ``proven`` requests and the public zeta
-gates keep that route first.  Hecke v0.39.17 ``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group`` takes
-the Belabas--Friedman residue (``zeta_log_residue``, ``Zeta.jl``) for every
-degree including two, and PARI 2.17.3 ``quadclassunit`` a GRH-conditional
-Euler product (``src/basemath/buch1.c:compute_invresquad``); neither has an
-unconditional evaluation on this path.  A ``grh`` result does not use the
-unconditionality of ``L(1, chi_D)``, whose cost grows like ``sqrt(|D|)``,
-while the Belabas--Friedman cutoff is set by the precision: on the real
-quadratic benchmark rows the residue took about 7 ms from ``|D| = 4e4`` to
-``1e14``, against 35 to 120 ms for ``L(1, chi_D)`` at ``|D| = 4e4`` to
-``4e5``.  Below ``|D|`` of a few thousand ``L(1, chi_D)`` is a few
-milliseconds cheaper; Silex keeps no small-``|D|`` crossover, so the
-recorded completeness basis of a ``grh`` result does not depend on ``|D|``
-or on how the field is presented.  Such an acceptance is not a
+A ``grh`` request takes the coarse value, and the default route's
+Belabas--Friedman ``hR`` when the coarse value does not show index one, in
+every degree above one, including a quadratic field written as ``x^2 - d``,
+which also has the unconditional ``L(1, chi_D)`` route; ``proven`` requests
+and the public zeta gates keep that route first.  Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group`` takes the
+Belabas--Friedman residue (``zeta_log_residue``, ``Zeta.jl``) for every
+degree including two.  PARI 2.17.3 ``quadclassunit``, which is
+GRH-conditional, approximates ``hR`` by a truncated Euler product with no
+explicit error bound (``src/basemath/buch1.c:compute_invresquad``).
+Neither has an unconditional evaluation on this path.  A ``grh`` result
+does not use the unconditionality of ``L(1, chi_D)``, whose cost grows like
+``sqrt(|D|)``, while the Belabas--Friedman cutoff is set by the precision:
+on the real quadratic benchmark rows from ``|D| = 840`` to ``4e5`` the
+coarse value took under about 1 ms, against 35 to 120 ms for
+``L(1, chi_D)`` at ``|D| = 4e4`` to ``4e5``.  Silex has no ``|D|``
+crossover, so the recorded completeness basis of a ``grh`` result does not
+depend on ``|D|`` or on how the field is presented.  Such an acceptance is not a
 relation-saturation proof: ``relation_saturation_status()`` is not set to
 ``verified`` by it.
 The pair is published with both labels ``grh``, and the analytic check that

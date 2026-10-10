@@ -354,12 +354,15 @@ Changed
   :doc:`../reference/algorithms_and_sources`.
 
 - A ``grh`` class/unit request on a quadratic field written as ``x^2 - d``
-  now takes the Belabas-Friedman ``hR`` for the analytic index-one test, as
-  Hecke (``Clgp.jl``, ``zeta_log_residue``) and PARI (``buch1.c``,
-  ``compute_invresquad``) do, instead of the unconditional ``L(1, chi_D)``
-  value, whose cost grows like ``sqrt(|D|)``.  On the real quadratic
-  benchmark rows the residue step fell from 38 to 138 ms to about 8 ms
-  (``|D|`` of 4e4 to 4e5; one run, not a timing claim).  The class number,
+  now takes a Belabas-Friedman ``hR`` for the analytic index-one test, first
+  the coarse index-one value, as for every other presentation, instead of
+  the unconditional ``L(1, chi_D)`` value, whose cost grows like
+  ``sqrt(|D|)``.  Hecke (``Clgp.jl``, ``zeta_log_residue``) takes the
+  Belabas-Friedman residue in every degree, and PARI's GRH-conditional
+  ``quadclassunit`` a truncated Euler product approximation
+  (``buch1.c``, ``compute_invresquad``).  On the real quadratic benchmark
+  rows the analytic step fell from 38 to 138 ms to about 1 ms (``|D|`` of
+  4e4 to 4e5; one run, not a timing claim).  The class number,
   regulator and generators are unchanged.  Three published informational
   fields of such a ``grh`` result change: ``class_unit_completeness_basis()``
   is ``belabas_friedman`` instead of ``unconditional_analytic``,

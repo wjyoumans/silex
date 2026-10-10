@@ -335,10 +335,11 @@ public:
     // `grh`.  The `grh` transaction itself
     // never promotes a label.  The one exception to "the record never
     // promotes" is a later explicit try_certify_with_units(units, proven)
-    // with proven `units`: a stored `proven` record (not one from a `grh` run
-    // on x^2 - d, which stores a Belabas-Friedman record; the call then
-    // computes L(1, chi) itself at a usable precision) then counts as the unconditional analytic check and can promote
-    // the class group to `proven`.  A GRH-conditional check never
+    // with proven `units`: a stored `proven` record then counts as the
+    // unconditional analytic check and can promote the class group to
+    // `proven`.  A `grh` run on x^2 - d stores a Belabas-Friedman record,
+    // not a `proven` one, so for it the call computes L(1, chi) itself at a
+    // usable precision.  A GRH-conditional check never
     // serves as a proof component and never makes the class group or the
     // units `proven`: a `proven` label then requires factor-base
     // generation, proven units, and verified relation saturation at every
