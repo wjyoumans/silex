@@ -751,6 +751,60 @@ int test_large_power_basis_embeddings_round_at_first_precision() {
     return 0;
 }
 
+// A degree-10 field given by a polynomial with coefficients near 2^18, so
+// the maximal-order basis
+// embeddings reach about 2^34 while the ideal lattices have short vectors
+// near 2^7.  Rounding those embeddings at the first full-rank scale (2^4)
+// leaves an LLL transform whose rounding error dominates the reduced
+// vectors: for a prime above 89 the double Gram-Schmidt of the resulting
+// Gram matrix has a nonpositive last pivot at every working precision.  The
+// T2 enumeration data must build for every prime above 89.
+int test_skewed_basis_t2_enumeration_data_builds() {
+    constexpr std::array<slong, 11> coefficients = {
+            238831, -228566, -128567, 146666, -15113, -13352,
+            2746,   334,     -97,     -2,     1};
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    const silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation_order));
+    assert(order.is_maximal());
+    const slong degree = order.degree();
+    assert(degree == 10);
+
+    sflint::Fmpz p;
+    sflint::fmpz_set_ui(sflint::FmpzRef(p), UWORD(89));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+    assert(primes.size() == degree);
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        assert(prime != nullptr);
+        silex::Ideal prime_ideal(order);
+        assert(prime_ideal.is_defined());
+        assert(prime->get_ideal(prime_ideal));
+
+        silex::detail::relation_search::FiniteIdealT2EnumerationData data;
+        assert(silex::detail::relation_search::
+                       build_finite_ideal_t2_enumeration_data_with_retry(
+                               data, prime_ideal, nullptr, nullptr));
+        assert(sflint::fmpz_mat_nrows(data.basis) == degree);
+        assert(sflint::fmpz_mat_ncols(data.basis) == degree);
+        assert(data.quadratic_form_data.size() ==
+               static_cast<std::size_t>(degree * degree));
+        assert(std::isfinite(data.initial_bound_value));
+        assert(data.initial_bound_value > 0.0);
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -760,5 +814,6 @@ int main() {
     assert(test_deterministic_failures_preserve_outputs() == 0);
     assert(test_large_power_basis_embeddings_round_at_first_precision() ==
            0);
+    assert(test_skewed_basis_t2_enumeration_data_builds() == 0);
     return 0;
 }
