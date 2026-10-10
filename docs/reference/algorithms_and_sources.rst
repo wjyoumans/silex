@@ -314,7 +314,9 @@ private port of the pure-power Hensel root finder for monic integral fields of
 degree less than 10.  A definite ``true`` is published only after the lifted
 candidate ``c`` satisfies ``c^n == a`` exactly, and a definite ``false`` only
 after a residue disproof (below); every unported or unverified case returns
-failure (unsupported) and leaves the caller's root unchanged.
+failure (unsupported) and leaves the caller's root unchanged.  In degree 10
+and higher there is no lift, so only the residue disproof can answer, and
+only with ``false``.
 
 * Hensel lifting follows Hecke v0.38.6
   ``src/NumFieldOrd/NfOrd/Hensel.jl:_roots_hensel`` (lines 57-232, with
@@ -359,6 +361,19 @@ failure (unsupported) and leaves the caller's root unchanged.
   odd residue degree, and the class-group saturation rows
   ``multiquadratic_m3_m5_m7`` and ``lmfdb_8_8_73116160000_2`` need up to 21
   and 36 further primes.
+* **Silex extension**: residue disproof in degree 10 and higher.  When the
+  monic integral defining polynomial has degree at least 10 and no earlier
+  path decided, Silex applies the same residue test (and the same
+  admissibility argument) to every factor of each of the first 256 primes
+  from 5 upward, and answers ``false`` at the first residue that is not an
+  ``n``-th power.  This corresponds to Hecke v0.38.6 ``_roots_hensel``
+  (``Hensel.jl`` lines 159-161), which returns no roots as soon as
+  ``y^n - a`` has no root modulo a factor of a good prime, and which in
+  degree 10 and higher examines further factors before lifting
+  (``STABILIZED = 2``, lines 102-106).  Hecke stops after a few factors and
+  then lifts; Silex has no lift here and scans more primes.  A true power is
+  never disproved, so it and every input with no disproving residue within
+  the prime bound still return failure (unsupported).
 * Residue roots follow PARI 2.17.3
   ``src/basemath/bb_group.c:gen_Shanks_sqrtn`` (lines 899-953): the Bezout
   exponent of ``n`` modulo ``q - 1`` gives the unique root when
@@ -1284,8 +1299,8 @@ validation) and continues with the Hecke scan when that pre-scan selects no usab
 when it leaves a nonempty kernel without adjoining a root, or when
 ``ell >= aux_bound``.  A kernel row whose ``ell``-th root Silex cannot
 decide (the compact root and the factored root both leave it undecided, for
-example because ``Element::is_power`` does not decide roots in degree 10 and
-higher) is treated like a row
+example because ``Element::is_power`` decides in degree 10 and higher only
+by residue disproof, never by a root) is treated like a row
 that is not an ``ell``-th power: the scan doubles ``stable`` and continues.
 This follows ``saturate!`` (Hecke v0.38.6 ``Saturate.jl``, lines 396-411),
 whose ``is_power`` reports ``false`` whenever it finds no root, and it does
