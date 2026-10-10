@@ -1827,18 +1827,10 @@ bool reduce_stored_units_vector(bool& changed,
 bool reduce_stored_relation_units(bool& changed,
                                OrderUnitGroup& group,
                                EmbeddingContext& embeddings,
-                               slong precision,
-                               slong deferred_regulator_precision) noexcept {
+                               slong precision) noexcept {
     changed = false;
-    const bool deferred = deferred_regulator_precision > 0;
-    if (deferred && (!group.is_set() ||
-                     OrderUnitGroupAccess::has_regulator(group))) {
-        return false;
-    }
     if (!group.is_set() || group.free_rank() <= 0) {
-        return !deferred ||
-               OrderUnitGroupAccess::complete_deferred_regulator(
-                       group, embeddings, deferred_regulator_precision);
+        return true;
     }
 
     const Order* order = group.parent();
@@ -1856,11 +1848,7 @@ bool reduce_stored_relation_units(bool& changed,
         return false;
     }
     if (!changed) {
-        // The basis is kept: its regulator, deferred by the caller, is the
-        // one set_units would have computed before the reduction.
-        return !deferred ||
-               OrderUnitGroupAccess::complete_deferred_regulator(
-                       group, embeddings, deferred_regulator_precision);
+        return true;
     }
 
     OrderUnitGroup reduced(*order);
@@ -2467,38 +2455,25 @@ bool add_dependent_unit(bool& changed,
     }
     extraction_state.rel_add_precision = relation_precision;
 
-    // The new basis is reduced at once, so its regulator is deferred to the
-    // reduction, which computes it once, on the basis it keeps.  The
-    // outcomes are those of adjoining with the regulator and then reducing:
-    // when the regulator of the adjoined basis is needed (the reduction
-    // keeps it or fails) and cannot be computed, the adjoin fails.
     OrderUnitGroup refined(*order);
     refined.set_diagnostics(group.diagnostics());
     if (!refined.is_defined() ||
         !adjoin_verified_dependent_relation(
                 changed, refined, group, root,
                 flint::FmpzMatConstRef(relation), 0, embeddings,
-                precision, true)) {
+                precision)) {
         changed = false;
         return true;
     }
     if (changed) {
-        bool stored_units_reduced = false;
-        const bool reduced = reduce_stored_relation_units(
-                stored_units_reduced, refined, embeddings,
-                relation_precision, precision);
-        if (!OrderUnitGroupAccess::has_regulator(refined) &&
-            !OrderUnitGroupAccess::complete_deferred_regulator(
-                    refined, embeddings, precision)) {
-            changed = false;
-            return true;
-        }
         group.swap(refined);
         if (fallback != nullptr && fallback->class_group != nullptr) {
             // The larger group has a smaller index; recompute on demand.
             fallback->computed = false;
         }
-        if (!reduced) {
+        bool stored_units_reduced = false;
+        if (!reduce_stored_relation_units(stored_units_reduced, group,
+                                       embeddings, relation_precision)) {
             changed = false;
             return false;
         }
@@ -3151,21 +3126,18 @@ bool set_class_relation_units(bool& ready,
                 OrderUnitGroup full_rank_units(order);
                 full_rank_units.set_diagnostics(out.diagnostics());
                 bool stored_units_reduced = false;
-                // The first full-rank basis is reduced at once, so its
-                // regulator is deferred to the reduction, which computes it
-                // once, on the basis it keeps.
                 if (!full_rank_units.is_defined() ||
-                    !OrderUnitGroupAccess::set_units_deferred_regulator(
+                    !order_unit_group_set_units_internal(
                             full_rank_units, order,
                             FactoredElementSpan(partial_units.units.data(),
                                                 partial_units.units.size()),
                             // reference trusts relation-kernel candidates here
                             // after `add_unit!` has accepted independence; its
                             // `_isunit` check is only an assertion.
-                            embeddings, precision, true, nullptr, nullptr) ||
+                            embeddings, precision, true) ||
                     !reduce_stored_relation_units(
                             stored_units_reduced, full_rank_units, embeddings,
-                            extraction_state.torsion_precision, precision)) {
+                            extraction_state.torsion_precision)) {
                     return false;
                 }
                 if (stored_units_reduced) {

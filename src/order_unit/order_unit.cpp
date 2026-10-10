@@ -1180,71 +1180,6 @@ bool OrderUnitGroupAccess::set_units(
         bool trusted,
         const flint::Fmpz* cached_torsion_order,
         const OrderElement* cached_torsion_generator) noexcept {
-    return set_units_body(out, order, generators, embeddings, precision,
-                          trusted, cached_torsion_order,
-                          cached_torsion_generator, true);
-}
-
-bool OrderUnitGroupAccess::set_units_deferred_regulator(
-        OrderUnitGroup& out,
-        const Order& order,
-        FactoredElementSpan generators,
-        EmbeddingContext& embeddings,
-        slong precision,
-        bool trusted,
-        const flint::Fmpz* cached_torsion_order,
-        const OrderElement* cached_torsion_generator) noexcept {
-    return set_units_body(out, order, generators, embeddings, precision,
-                          trusted, cached_torsion_order,
-                          cached_torsion_generator, false);
-}
-
-bool OrderUnitGroupAccess::complete_deferred_regulator(
-        OrderUnitGroup& group,
-        EmbeddingContext& embeddings,
-        slong precision) noexcept {
-    SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.deferred_regulator");
-    if (!group.is_set() || group.has_regulator_ ||
-        group.wide_free_generators_ != nullptr || precision <= 0 ||
-        embeddings.parent() == nullptr || group.parent() == nullptr ||
-        group.parent()->parent() == nullptr ||
-        !embeddings.parent()->has_same_data(*group.parent()->parent()) ||
-        group.free_generator_count_ < 0 ||
-        (group.free_generator_count_ > 0 &&
-         group.free_generators_ == nullptr)) {
-        return false;
-    }
-
-    // The same call, on equal generators and at the same precision, as the
-    // regulator step of set_units.
-    flint::Arb regulator;
-    if (!compact_regulator_adaptive(
-                flint::ArbRef(regulator), embeddings,
-                FactoredElementSpan(group.free_generators_.get(),
-                                    static_cast<std::size_t>(
-                                            group.free_generator_count_)),
-                precision, kRegulatorAbsTolerance, group.diagnostics())) {
-        SILEX_LOG(group.diagnostics(), DiagnosticsModule::unit_group,
-                  LogLevel::detail,
-                  "deferred regulator computation failed");
-        return false;
-    }
-    flint::arb_set(group.regulator_, regulator);
-    group.has_regulator_ = true;
-    return true;
-}
-
-bool OrderUnitGroupAccess::set_units_body(
-        OrderUnitGroup& out,
-        const Order& order,
-        FactoredElementSpan generators,
-        EmbeddingContext& embeddings,
-        slong precision,
-        bool trusted,
-        const flint::Fmpz* cached_torsion_order,
-        const OrderElement* cached_torsion_generator,
-        bool compute_regulator) noexcept {
     SILEX_PROFILE_SCOPE(out.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.set_units_internal");
     if (!order.is_defined() || order.parent() == nullptr || !order.has_basis() ||
@@ -1360,7 +1295,7 @@ bool OrderUnitGroupAccess::set_units_body(
             return false;
         }
     }
-    if (compute_regulator) {
+    {
         SILEX_PROFILE_SCOPE(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.set_units_regulator");
         if (!compact_regulator_adaptive(
@@ -1375,7 +1310,7 @@ bool OrderUnitGroupAccess::set_units_body(
         }
     }
 
-    candidate.has_regulator_ = compute_regulator;
+    candidate.has_regulator_ = true;
     candidate.certification_ = CertificationMode::unknown;
     candidate.is_set_ = true;
 
