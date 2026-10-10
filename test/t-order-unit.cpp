@@ -5584,6 +5584,68 @@ bool real_quadratic_two_units(silex::OrderUnitGroup& out,
            out.certification_status() == silex::CertificationMode::unknown;
 }
 
+// The finite-index loop of reference Clgp.jl:_class_unit_group saturates and
+// then re-runs _validate_class_unit_group, which reads the class number of the
+// current relation module (class_group_current_h).  On Z[sqrt(2)] with the
+// factor base {(sqrt(2))} and the single relation 2 = sqrt(2)^2, the
+// tentative class group is Z/2.  Saturation at 2 finds sqrt(2) and appends it
+// as a class relation, which clears the stored presentation.  The loop must
+// validate against the rebuilt presentation instead of reading the
+// "presentation unavailable" result as index one.
+int test_small_index_saturation_revalidates_appended_class_relation() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    assert(order.is_maximal());
+
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 2));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(context.generator_count() == 1);
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Relation relation(*base);
+    silex::Element two(field);
+    assert(two.set_si(2));
+    assert(relation.set_generator(two));
+    assert(context.append_relation(relation));
+    assert(context.publish_presentation());
+    sflint::Fmpz class_order;
+    assert(context.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
+
+    silex::EmbeddingContext embeddings(field);
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+    silex::OrderUnitGroup units(order);
+    assert(real_quadratic_two_units(units, order, embeddings, epsilon));
+    assert(units.free_rank() == 1);
+
+    silex::detail::RelationUnitExtractionState state;
+    silex::detail::ValidateRefineSummary summary;
+    silex::detail::AnalyticClassRegulatorCache analytic_cache;
+    ::fmpz_set_si(summary.last_index_bound.raw(), 2);
+    const slong relations_before = context.relation_count();
+    bool validated = false;
+    bool attempted = false;
+    assert(silex::detail::unknown_small_index_saturation(
+            validated, attempted, state, summary, context, units, embeddings,
+            analytic_cache, order, 1, 128, nullptr, false));
+    assert(attempted);
+    assert(context.relation_count() > relations_before);
+    assert(context.has_presentation());
+    assert(summary.outcome !=
+           silex::detail::ValidateRefineOutcome::local_rank_unavailable);
+    assert(context.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 1));
+    assert(validated);
+    assert(summary.outcome == silex::detail::ValidateRefineOutcome::proven);
+    assert(sflint::fmpz_equal_si(summary.last_index_bound, 1));
+
+    return 0;
+}
+
 int test_class_unit_regulator_certification() {
     using CertificationAccess =
             silex::detail::ClassGroupCertificationAccess;
@@ -10232,6 +10294,7 @@ int main() {
     test_relation_kernel_units_index_bounded_cubic_rank_target();
     test_relation_kernel_units_index_bounded_saturated();
     test_relation_kernel_units_rank_zero_delegates();
+    test_small_index_saturation_revalidates_appended_class_relation();
     test_relation_kernel_unit_failures_preserve_output();
     test_saturate_row_real_quadratic_square();
     test_saturate_row_no_root_and_divisible_copy();

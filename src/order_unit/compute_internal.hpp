@@ -684,6 +684,20 @@ bool round_arb_approx_fmpz(flint::FmpzRef out, const arb_struct* value,
 bool apply_unit_reduction(std::vector<FactoredElement>& values,
                           const OrderUnitGroup& group,
                           const flint::FmpzMat& coefficients) noexcept;
+bool unknown_small_index_saturation(
+        bool& validated,
+        bool& attempted,
+        RelationUnitExtractionState& extraction_state,
+        ValidateRefineSummary& summary,
+        ClassGroupContext& class_group,
+        OrderUnitGroup& units,
+        EmbeddingContext& embeddings,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong expected_rank,
+        slong precision,
+        const DiagnosticsContext* diagnostics,
+        bool accept_grh_generation) noexcept;
 
 }  // namespace detail
 
