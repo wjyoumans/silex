@@ -5351,17 +5351,20 @@ ClassGroupCertificationAccess::factor_base_generation_different_route(
 namespace {
 
 // Bit length of |D| from which a grh imaginary-quadratic request takes h
-// from the GRH relation lattice instead of the exact class number h(D)
-// (imaginary_quadratic_listing_max_abs_discriminant_bits): |D| >= 2^44.
-// Below it h(D) is counted from the reduced forms, which is faster.  The
-// lattice route's index-one test there would use the unconditional L(1, chi) hR,
-// whose approximate functional equation costs more than the listing at
-// every measured |D| < 2^44; at and above 2^44 it uses a Belabas-Friedman
-// hR (zeta.cpp, quadratic_route_max_abs_discriminant_bits) and is faster
-// than the listing at every measured |D|.  Measured per decade over |D|
-// from 1e7 to 1e14: docs/development/class_number_route_cutoff.rst.
-constexpr ulong grh_imaginary_quadratic_lattice_min_abs_discriminant_bits =
-        imaginary_quadratic_listing_max_abs_discriminant_bits + 1;
+// from the GRH relation lattice instead of the exact class number h(D):
+// bit length >= 35, i.e. |D| >= 2^34.  Below it h(D) is counted from the
+// reduced forms.  This is independent of the cutoff 2^44 of the proven
+// class number route (imaginary_quadratic_listing_max_abs_discriminant_bits).
+// The lattice route's index-one test uses a Belabas-Friedman hR from 2^44 on
+// and the unconditional L(1, chi) hR below it (zeta.cpp,
+// quadratic_route_max_abs_discriminant_bits); the completeness basis is
+// belabas_friedman for every field on the lattice route.  Measured on an idle
+// machine, single process, 11 bins of |D| from about 2^30 to 2^44, 8 fields
+// per bin, 5 interleaved reps: the lattice route is faster on the per-bin
+// sums from |D| about 2^33 up (ratio 0.83 in the bin from 2^34, 0.26 near
+// 2^44) and faster on every field from about 2^35.  The cutoff 2^34 is
+// the conservative choice.  See docs/development/class_number_route_cutoff.rst.
+constexpr ulong grh_imaginary_quadratic_lattice_min_abs_discriminant_bits = 35;
 
 }  // namespace
 

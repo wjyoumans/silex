@@ -1204,17 +1204,16 @@ it, with generation verified up to the Minkowski-type bound, gives
 ``h_cand = h`` and ``R_cand = R_K`` unconditionally.  A ``grh`` run whose
 base covers only the GRH bound has no unconditional generation, so that
 promotion fails for it.  For an
-imaginary quadratic field with ``|D| < 2^44`` the ``grh`` route uses an exact
+imaginary quadratic field with ``|D| < 2^34`` the ``grh`` route uses an exact
 class number, counted from the reduced forms returned by FLINT
 ``qfb_reduced_forms``, instead of an analytic value.  Its GRH dependence is in
 factor-base generation, which is checked only up to the GRH bound, and it
 records no analytic check.  Listing the reduced forms takes time and memory
 growing like ``sqrt(|D|)`` (about 1.4 GB at ``|D| = 1e14``), so from
-``|D| >= 2^44`` an imaginary-quadratic ``grh`` request takes ``h`` from the
+``|D| >= 2^34`` an imaginary-quadratic ``grh`` request takes ``h`` from the
 GRH relation lattice and the analytic index-one test, like every other degree;
-there the test uses a Belabas--Friedman ``hR``.  The cutoff was measured from
-``|D| = 1e7`` to ``1e14``, when that test still used the unconditional
-``L(1, chi_D)`` value below ``2^44``, which was slower than listing the forms
+there the test uses a Belabas--Friedman ``hR``.  The cutoff ``2^34`` was
+measured on an idle machine over ``|D|`` from about ``2^30`` to ``2^44``
 (:doc:`../development/class_number_route_cutoff`).  The
 degree-one ``grh`` route uses the exact degree-one route described below and
 records none either.
@@ -1243,7 +1242,7 @@ accepted against an unconditional ``hR`` (``unconditional_analytic``, which no
 public transaction reaches now that a ``grh`` request takes the
 Belabas--Friedman value) or the exact imaginary-quadratic
 class number
-(``exact_class_number``, ``|D| < 2^44``), and for a ``proven`` class group or
+(``exact_class_number``; a ``grh`` request with ``|D| < 2^34``), and for a ``proven`` class group or
 the exact
 degree-one route (``unconditional_certification``).
 ``certification_status()`` stays the requested label: a ``grh`` result whose
@@ -1258,10 +1257,10 @@ two components are both ``proven`` still reads ``grh``.  Per route:
    * - Degree one
      - ``proven`` (``minkowski_type``)
      - ``proven`` (``unconditional_certification``)
-   * - Imaginary quadratic, ``|D| < 2^44``, exact class number
+   * - Imaginary quadratic, ``|D| < 2^34``, exact class number
      - ``grh``, or ``proven`` when the base reaches the proven bound
      - ``proven`` (``exact_class_number``)
-   * - Imaginary quadratic, ``|D| >= 2^44``, Belabas--Friedman
+   * - Imaginary quadratic, ``|D| >= 2^34``, Belabas--Friedman
      - ``grh`` or ``proven``
      - ``grh`` (``belabas_friedman``)
    * - Real quadratic, Belabas--Friedman (any presentation and ``|D|``)

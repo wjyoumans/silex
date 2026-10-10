@@ -2314,14 +2314,14 @@ int test_real_quadratic_grh_record_and_later_promotion() {
     return 0;
 }
 
-// From |D| >= 2^44 a `grh` imaginary-quadratic transaction takes h from the
+// From |D| >= 2^34 a `grh` imaginary-quadratic transaction takes h from the
 // GRH relation lattice: generation under GRH to min(BDF, Bach) and the
 // analytic index-one test, without listing the reduced forms of
 // discriminant D.  Listing them needs time and memory growing like sqrt|D|
 // (about 1.4 GB at |D| = 1e14).  D = -(10^14 + 319) = -73 * 257 * 12143 *
 // 438953 is above the 2^44 cap of the unconditional L(1, chi) route, so the
 // index-one test uses a Belabas-Friedman hR and completeness is `grh`.
-// (Below 2^44 the exact class number is listed; the rank-zero grh rows of
+// (Below 2^34 the exact class number is listed; the rank-zero grh rows of
 // test/data/class_unit_fields.json cover that route.)  h = 15815072,
 // class group Z/2 x Z/2 x Z/3953768 (GP 2.17 quadclassunit(D).cyc and
 // bnfinit(x^2 + 10^14 + 319).cyc).
@@ -2377,11 +2377,8 @@ int test_imaginary_quadratic_grh_large_discriminant() {
     return 0;
 }
 
-// Just above the cutoff: D = -(2^44 + 3) = -17592186044419 is the smallest
-// |D| tested here that takes the GRH relation lattice, so a cutoff moved
-// higher fails this row.  The completeness basis is the published
-// `belabas_friedman` one, as above 2^44 the unconditional L(1, chi) route
-// is unavailable.  h = 1148064 (GP 2.17 quadclassunit(D).no and
+// Above the 2^44 cap of the unconditional L(1, chi) route: D = -(2^44 + 3) =
+// -17592186044419.  The completeness basis is `belabas_friedman`.  h = 1148064 (GP 2.17 quadclassunit(D).no and
 // bnfinit(x^2 + 17592186044419).no).
 int test_imaginary_quadratic_grh_cutoff_boundary() {
     const slong quadratic[] = {17592186044419, 0};
@@ -2466,32 +2463,77 @@ int check_imaginary_quadratic_grh_exact_route(slong constant,
     return 0;
 }
 
-// Below 2^44 a `grh` imaginary-quadratic transaction takes its index from
-// the exact class number.  Observed on D = -(10^9 + 3) with the instance
-// tool's --log: the refine loop is called three times (index 2, 2, 1), and
-// the exact-class-number index bound is reached twice, in unit-refinement
-// steps that return no_progress.  That was not observed for D = -(2^44 - 1).
-// The assertions below check only outputs, which are the same as before the
-// change, so this test does not pin the route; that needs a profiling-enabled
-// check (recorded follow-up).  D = -(10^9 + 3): h = 3680, Z/2 x Z/1840.
-// D = -(2^44 - 1) = -17592186044415: h = 3384192, (Z/2)^5 x Z/105756.
-// (GP 2.17 quadclassunit(D).cyc and bnfinit(x^2 - D).cyc.)
+// Below 2^34 a `grh` imaginary-quadratic transaction takes its index from
+// the exact class number; from 2^34 on it takes the GRH relation lattice
+// (grh_imaginary_quadratic_lattice_min_abs_discriminant_bits = 35).  Both
+// rows below are checked on the route and on the completeness basis, which
+// differs between the routes: `exact_class_number` with
+// analytic_class_regulator_status not_checked, versus `belabas_friedman`
+// with that status verified.  D = -(10^9 + 3): h = 3680, Z/2 x Z/1840.
+// D = -(2^34 - 1) = -17179869183 is the largest tested |D| on the exact
+// route: h = 63424, Z/2 x Z/31712.  (GP 2.17 quadclassunit(D).cyc and
+// bnfinit(x^2 - D).cyc.)
 int test_imaginary_quadratic_grh_refine_uses_exact_index() {
     const ulong k9_invariants[] = {2, 1840};
-    const ulong below_cutoff_invariants[] = {2, 2, 2, 2, 2, 105756};
+    const ulong below_cutoff_invariants[] = {2, 31712};
     int status = 0;
     status |= check_imaginary_quadratic_grh_exact_route(
             1000000003, 3680, k9_invariants, 2,
             "grh imaginary quadratic x^2 + 10^9 + 3");
-    // Listing the 3384192 reduced forms takes seconds unoptimized but over
-    // three minutes under AddressSanitizer, past the 60 s test timeout, so
-    // sanitizer builds run only the first row, which takes the same route.
-    if (!address_sanitizer_build) {
-        status |= check_imaginary_quadratic_grh_exact_route(
-                17592186044415, 3384192, below_cutoff_invariants, 6,
-                "grh imaginary quadratic x^2 + 2^44 - 1");
-    }
+    status |= check_imaginary_quadratic_grh_exact_route(
+            17179869183, 63424, below_cutoff_invariants, 2,
+            "grh imaginary quadratic x^2 + 2^34 - 1");
     return status;
+}
+
+// Just above the lowered cutoff: D = -(2^34 + 3) = -17179869187 is the
+// smallest tested |D| on the lattice route, so a cutoff moved higher fails
+// this row; the row above pins the exact side.  h = 21452, Z/2 x Z/10726
+// (GP 2.17 quadclassunit(D).cyc and bnfinit(x^2 + 17179869187).cyc).
+int test_imaginary_quadratic_grh_lowered_cutoff_boundary() {
+    const slong quadratic[] = {17179869187, 0};
+    const char* name = "grh imaginary quadratic x^2 + 2^34 + 3";
+
+    FieldSetup setup = setup_from_coefficients(quadratic, 2);
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::grh)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)) &&
+           sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order),
+                               21452) == 0);
+    assert(class_group.invariant_count() == 2);
+    const ulong expected_invariants[] = {2, 10726};
+    for (slong i = 0; i < 2; ++i) {
+        sflint::Fmpz invariant;
+        assert(class_group.invariant(sflint::FmpzRef(invariant), i) &&
+               sflint::fmpz_cmp_ui(sflint::FmpzConstRef(invariant),
+                                   expected_invariants[i]) == 0);
+    }
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(class_group.analytic_class_regulator_status() ==
+           silex::ProofState::verified);
+    assert(class_group.class_unit_completeness_certification() ==
+           silex::CertificationMode::grh);
+    assert(class_group.class_unit_completeness_basis() ==
+           silex::ClassUnitCompletenessBasis::belabas_friedman);
+    return 0;
 }
 
 }  // namespace
@@ -2881,6 +2923,7 @@ int main() {
     status |= test_real_quadratic_grh_record_and_later_promotion();
     status |= test_imaginary_quadratic_grh_large_discriminant();
     status |= test_imaginary_quadratic_grh_cutoff_boundary();
+    status |= test_imaginary_quadratic_grh_lowered_cutoff_boundary();
     status |= test_imaginary_quadratic_grh_refine_uses_exact_index();
     status |= test_grh_generation_below_minkowski_bound();
     status |= test_real_quadratic_h_gt_one_proven_saturation();

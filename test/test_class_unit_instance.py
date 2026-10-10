@@ -681,13 +681,13 @@ def main() -> int:
             )
             assert generation_bound <= used
         if row["expected_unit_rank"] == 0:
-            # Rank-zero grh rows are imaginary quadratic with |D| < 2^44 and
+            # Rank-zero grh rows are imaginary quadratic with |D| < 2^34 and
             # take the exact imaginary-quadratic `grh` route: the index
             # comes from the exact class number, not from an analytic hR,
             # and its GRH dependence is in factor-base generation (checked
             # only up to the GRH bound). That route records no analytic
             # check, so these rows stay `not_checked`/`unknown`. (From
-            # |D| >= 2^44 h comes from the GRH relation lattice and the
+            # |D| >= 2^34 h comes from the GRH relation lattice and the
             # analytic index-one test; t-class-unit-matrix covers that.)
             assert grh_instance["class_group"][
                 "analytic_class_regulator_status"

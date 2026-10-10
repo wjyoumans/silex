@@ -4,29 +4,28 @@ Class number route cutoff
 A ``grh`` class/unit request on an imaginary quadratic field takes the class
 number from one of two routes, chosen by the bit length of the discriminant
 (``grh_imaginary_quadratic_lattice_min_abs_discriminant_bits`` in
-``src/class_group/class_group.cpp``):
+``src/class_group/class_group.cpp``, value 35):
 
-- ``|D| < 2^44``: the exact class number, counted from the reduced forms of
+- ``|D| < 2^34``: the exact class number, counted from the reduced forms of
   discriminant ``D`` (FLINT ``qfb_reduced_forms``), whose time and memory grow
-  like ``sqrt(|D|)``.
-- ``|D| >= 2^44``: the GRH relation lattice and the analytic index-one test,
-  which never lists forms.  At these sizes the test uses a Belabas--Friedman
-  ``hR``, because ``2^44`` is also the cap of the unconditional quadratic
-  ``L(1, chi_D)`` route (``quadratic_route_max_abs_discriminant_bits`` in
-  ``src/zeta/zeta.cpp``).  Below the cap the test would use that
-  unconditional value, whose approximate functional equation costs more
-  than listing the forms.
+  like ``sqrt(|D|)``.  The completeness basis is ``exact_class_number``.
+- ``|D| >= 2^34``: the GRH relation lattice and the analytic index-one test,
+  which never lists forms.  The completeness basis is ``belabas_friedman``.
 
-The same constant selects the route for the exact class number ``h(D)`` that
-``proven`` requests use: below ``2^44`` it is counted from the reduced forms,
-and from ``2^44`` on it comes from the class number formula with a rigorous
-``L(1, chi_D)`` enclosure (see "Class groups and order units" in
-:doc:`../reference/algorithms_and_sources`).
+The cutoff was ``2^44`` before it was lowered to ``2^34`` (see "Lowering the
+cutoff to 2^34" below).  The exact class number ``h(D)`` that ``proven``
+requests use has its own cutoff, unchanged at ``2^44``
+(``imaginary_quadratic_listing_max_abs_discriminant_bits``): below it ``h(D)``
+is counted from the reduced forms, and from ``2^44`` on it comes from the class
+number formula with a rigorous ``L(1, chi_D)`` enclosure (see "Class groups
+and order units" in :doc:`../reference/algorithms_and_sources`).
 
-This page records the measurement that set the cutoff.  The requirement was
+The first measurement, below, set the cutoff ``2^44``.  Its requirement was
 that the combined route be no slower than the reduced-form listing alone at
 any measured ``|D|`` from ``1e7`` to ``1e14``, with at least two
-discriminants per decade.
+discriminants per decade.  That measurement was on a busy machine, and the
+lattice route's index-one test then used a different ``hR`` below ``2^44``;
+the idle-machine measurement at the end of this page supersedes the cutoff.
 
 Setup
 -----
@@ -208,3 +207,82 @@ routes; that cost does not come from listing forms and is not studied here.
 A second, interleaved run of main
 and combined at ``n = 10^10 + 3`` and ``n = 10^12 + 3`` (three runs each)
 gave medians of 5.07 s and 5.09 s, and 25.87 s and 25.92 s.
+
+Lowering the cutoff to 2^34
+---------------------------
+
+The measurement on an idle machine (``machine-idle.sh`` reported IDLE before
+the build, before the sweep and after it) used two Release builds that differ
+only in the constant (45 and 34), one process per run, GCC, FLINT 3.6.0.  It
+covered 11 bins of ``n`` for ``x^2 + n`` (bit length 30, 32, 33, 34, 35, 36,
+38, 40, 42, 43, and 43.9), 8 fields per bin, 5 interleaved repetitions per
+field with the order alternating.  The class-group invariants agreed between
+the routes on all 88 fields, and the completeness basis was
+``exact_class_number`` on the exact route and ``belabas_friedman`` on the
+lattice route.  The ratio is lattice time over exact time, as sums of
+per-field medians:
+
+.. list-table::
+   :header-rows: 1
+
+   * - bin (bits of ``n``)
+     - exact: s
+     - lattice: s
+     - ratio
+     - lattice wins
+   * - 33
+     - 0.562
+     - 0.494
+     - 0.878
+     - 6 of 8
+   * - 34
+     - 0.701
+     - 0.583
+     - 0.832
+     - 7 of 8
+   * - 35
+     - 0.724
+     - 0.539
+     - 0.745
+     - 8 of 8
+   * - 36
+     - 0.875
+     - 0.564
+     - 0.645
+     - 8 of 8
+   * - 38
+     - 1.808
+     - 1.274
+     - 0.705
+     - 8 of 8
+   * - 40
+     - 2.669
+     - 1.487
+     - 0.557
+     - 8 of 8
+   * - 42
+     - 4.913
+     - 2.457
+     - 0.500
+     - 8 of 8
+   * - 43
+     - 5.310
+     - 1.790
+     - 0.337
+     - 8 of 8
+   * - 43.9
+     - 7.460
+     - 1.914
+     - 0.257
+     - 8 of 8
+
+The lattice route is faster on the sum in every bin from 33 up and on every
+field from bin 35 up.  In bin 34 one field is about 9% slower, within its
+repetition spread.  Bin 33 has a per-field ratio up to 1.19, so the evidence
+below 2^34 is weaker; the cutoff ``2^34`` is the conservative choice, and
+``|D| < 2^34`` keeps the exact route.  The two routes agree on the invariants
+at every field measured.  A test pins the route and the completeness basis at
+``|D| = 2^34 - 1`` (exact) and ``|D| = 2^34 + 3`` (lattice)
+(``test_imaginary_quadratic_grh_refine_uses_exact_index`` and
+``test_imaginary_quadratic_grh_lowered_cutoff_boundary`` in
+``test/t-class-unit-matrix.cpp``).
