@@ -1078,6 +1078,9 @@ bool FactoredElement::logarithmic_embedding(
             const std::size_t d = distinct_index[k];
             arb_ptr row = rows.data() + static_cast<slong>(d) * places;
             if (row_ready[d] == 0) {
+                // Profile counts here and for the cache hits below are per
+                // distinct factor per pass, not per entry, so they are not
+                // comparable with profiles taken before this memoization.
                 SILEX_PROFILE_SCOPE(
                         diagnostics, DiagnosticsModule::element,
                         "element.factored.logarithmic_embedding_factor");
