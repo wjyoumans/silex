@@ -476,14 +476,33 @@ bool kernel_rows_torsion_column(bool& has_torsion_column,
                                 const OrderUnitGroup& group,
                                 flint::FmpzMatConstRef kernel_rows,
                                 flint::FmpzConstRef ell) noexcept;
-bool kernel_row_root(bool& is_power,
-                     FactoredElement& root,
-                     const OrderUnitGroup& group,
-                     flint::FmpzMatConstRef kernel_rows,
-                     slong row,
-                     flint::FmpzConstRef ell,
-                     CompactFieldModulusCache* field_modulus_cache =
-                             nullptr) noexcept;
+// Test hook for the stable residue-character proof scan of
+// prove_index_bound (saturation.cpp): a positive `max_aux_primes` replaces
+// the per-scan guard of 2^16 examined primes q, and a nonzero `max_q`
+// replaces the machine-word upper end of the q range, so a test can reach
+// the guard or the end of the range quickly.  Zero restores each default.
+void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,
+                                              ulong max_q) noexcept;
+// Outcome of kernel_row_root.  `decided`: `is_power` is set and, when it is
+// true, `root` holds an exactly verified l-th root of the row product.
+// `undecided`: neither the compact presentation nor the factored fallback
+// could decide whether the row product is an l-th power.  `error`: invalid
+// arguments, an unusable kernel width, or a failure building the row product
+// or copying the root; callers fail closed at once instead of treating the
+// row as undecided.
+enum class KernelRowRootResult : unsigned char {
+    error,
+    undecided,
+    decided,
+};
+KernelRowRootResult kernel_row_root(
+        bool& is_power,
+        FactoredElement& root,
+        const OrderUnitGroup& group,
+        flint::FmpzMatConstRef kernel_rows,
+        slong row,
+        flint::FmpzConstRef ell,
+        CompactFieldModulusCache* field_modulus_cache = nullptr) noexcept;
 // Character kernel of the free generators and, when l divides the torsion
 // order, the torsion generator: dlog_proof_rank() columns, as the candidate
 // set of reference `compute_candidates_for_saturate`.  This is the kernel of

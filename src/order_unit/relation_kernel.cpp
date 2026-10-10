@@ -953,25 +953,26 @@ bool adjoinable_root_is_order_unit(const Order& order,
            evaluated_is_order_unit(order, expanded);
 }
 
-bool kernel_row_root(bool& is_power,
-                     FactoredElement& root,
-                     const OrderUnitGroup& group,
-                     flint::FmpzMatConstRef kernel_rows,
-                     slong row,
-                     flint::FmpzConstRef ell,
-                     CompactFieldModulusCache* field_modulus_cache) noexcept {
+KernelRowRootResult kernel_row_root(
+        bool& is_power,
+        FactoredElement& root,
+        const OrderUnitGroup& group,
+        flint::FmpzMatConstRef kernel_rows,
+        slong row,
+        flint::FmpzConstRef ell,
+        CompactFieldModulusCache* field_modulus_cache) noexcept {
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     if (!group.is_set() || field == nullptr || root.parent() == nullptr ||
         !root.parent()->has_same_data(*field) ||
         row < 0 || row >= flint::fmpz_mat_nrows(kernel_rows) ||
         !flint::fmpz_is_prime(ell) || !flint::fmpz_fits_si(ell)) {
-        return false;
+        return KernelRowRootResult::error;
     }
     bool has_torsion_column = false;
     if (!kernel_rows_torsion_column(has_torsion_column, group, kernel_rows,
                                     ell)) {
-        return false;
+        return KernelRowRootResult::error;
     }
 
     FactoredElement product(*field);
@@ -980,7 +981,7 @@ bool kernel_row_root(bool& is_power,
         SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.kernel_row_root_product");
         if (!kernel_row_product(product, group, kernel_rows, row)) {
-            return false;
+            return KernelRowRootResult::error;
         }
     }
 
@@ -1000,7 +1001,7 @@ bool kernel_row_root(bool& is_power,
             SILEX_PROFILE_EVENT(group.diagnostics(),
                                 DiagnosticsModule::unit_group,
                                 "unit_group.kernel_row_root_unavailable");
-            return false;
+            return KernelRowRootResult::undecided;
         }
         SILEX_PROFILE_EVENT(
                 group.diagnostics(), DiagnosticsModule::unit_group,
@@ -1015,10 +1016,11 @@ bool kernel_row_root(bool& is_power,
                         : "unit_group.kernel_row_root_compact_not_power");
     }
     if (!is_power) {
-        return true;
+        return KernelRowRootResult::decided;
     }
 
-    return root.set(candidate);
+    return root.set(candidate) ? KernelRowRootResult::decided
+                               : KernelRowRootResult::error;
 }
 
 bool residue_dlog_matrix(flint::FmpzMat& out,

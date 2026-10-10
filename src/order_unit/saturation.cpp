@@ -4,6 +4,7 @@
 #include "../class_group/class_group_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
+#include <atomic>
 #include <cstdio>
 #include <limits>
 #include <utility>
@@ -479,6 +480,14 @@ enum class ProofPrimeScanResult {
 // end of the machine-word range of q.
 inline constexpr slong kStableProofMaxAuxPrimes = slong{1} << 16;
 
+// Test-only overrides of the per-scan guard kStableProofMaxAuxPrimes and of
+// the upper end of the q range (the machine-word maximum); zero means off.
+// Production code only reads them, through
+// set_stable_proof_scan_limits_for_testing.  Relaxed atomics so a reader on
+// another thread never races with a test setting them.
+std::atomic<slong> g_stable_proof_max_aux_primes_override{0};
+std::atomic<ulong> g_stable_proof_max_q_override{0};
+
 // `range_exhausted` is set when the scan returns a nonempty kernel because no
 // rational prime q = 1 mod ell is left in the machine-word range, so a later
 // scan with a larger threshold would return the same kernel.
@@ -643,10 +652,16 @@ bool select_stable_proof_primes(
     // dividing disc(O) gives a valid character, so neither choice changes the
     // proof condition (an empty kernel).  No auxiliary bound limits the scan;
     // only the kStableProofMaxAuxPrimes resource guard does.
+    const slong max_aux_primes_override =
+            g_stable_proof_max_aux_primes_override.load(
+                    std::memory_order_relaxed);
+    const slong max_aux_primes = max_aux_primes_override > 0
+                                         ? max_aux_primes_override
+                                         : kStableProofMaxAuxPrimes;
     slong examined_primes = 0;
     auto process_prime_q =
             [&](flint::FmpzConstRef q) noexcept -> ProofPrimeScanResult {
-        if (examined_primes >= kStableProofMaxAuxPrimes) {
+        if (examined_primes >= max_aux_primes) {
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_scan.resource_limit");
@@ -782,7 +797,11 @@ bool select_stable_proof_primes(
         return ProofPrimeScanResult::keep_scanning;
     };
 
-    const ulong max_q_ui = std::numeric_limits<ulong>::max();
+    const ulong max_q_override =
+            g_stable_proof_max_q_override.load(std::memory_order_relaxed);
+    const ulong max_q_ui = max_q_override > 0
+                                   ? max_q_override
+                                   : std::numeric_limits<ulong>::max();
     bool used_machine_scan = false;
     if (flint::fmpz_abs_fits_ui(ell)) {
         const ulong ell_ui = flint::fmpz_get_ui(ell);
@@ -940,9 +959,19 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
         bool is_power = false;
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.saturation_row_root");
-        if (!detail::kernel_row_root(is_power, root, group,
-                                     flint::FmpzMatConstRef(kernel), row,
-                                     ell, &field_modulus_cache)) {
+        const detail::KernelRowRootResult root_result =
+                detail::kernel_row_root(is_power, root, group,
+                                        flint::FmpzMatConstRef(kernel), row,
+                                        ell, &field_modulus_cache);
+        if (root_result == detail::KernelRowRootResult::error) {
+            // An internal error, not an undecided root: a rescan cannot
+            // help, so fail closed at once.
+            SILEX_PROFILE_EVENT(
+                    out.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_relation_saturation.root_error");
+            return false;
+        }
+        if (root_result == detail::KernelRowRootResult::undecided) {
             // No exactly verified root: the compact presentation and the
             // factored fallback both left the row undecided.  The pinned
             // reference `saturate!` (Saturate.jl:396-411) treats every
@@ -967,10 +996,14 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
             return true;
         }
         if (!is_power) {
+            // As for an undecided row: once the scan has used every prime
+            // of the machine-word range, a rescan with a larger threshold
+            // would return the same kernel and the same non-power, so fail
+            // closed at once instead of doubling `stable` forever.
             SILEX_PROFILE_EVENT(
                     out.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_relation_saturation.root_not_power");
-            step.status = saw_root_outside_order
+            step.status = saw_root_outside_order || range_exhausted
                                   ? StableRelationSaturationStatus::unavailable
                                   : StableRelationSaturationStatus::
                                             wasted_non_power;
@@ -1236,6 +1269,14 @@ bool select_saturation_primes_with_kernel(
                                         dlog_matrix, target_len, ell);
 }
 
+void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,
+                                              ulong max_q) noexcept {
+    g_stable_proof_max_aux_primes_override.store(
+            max_aux_primes > 0 ? max_aux_primes : 0,
+            std::memory_order_relaxed);
+    g_stable_proof_max_q_override.store(max_q, std::memory_order_relaxed);
+}
+
 }  // namespace detail
 
 namespace {
@@ -1454,8 +1495,9 @@ bool saturate_row_with_cache(
     bool is_power = false;
     SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.saturation_row_root");
-    if (!detail::kernel_row_root(is_power, root, group, kernel_rows, row, ell,
-                                 field_modulus_cache)) {
+    if (detail::kernel_row_root(is_power, root, group, kernel_rows, row, ell,
+                                field_modulus_cache) !=
+        detail::KernelRowRootResult::decided) {
         SILEX_PROFILE_EVENT(out.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.saturation_row_root_unavailable");
         return false;
