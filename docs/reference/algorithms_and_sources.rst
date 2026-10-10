@@ -1346,8 +1346,9 @@ which takes only the field, does not use it.  PARI
 (``src/basemath/buch3.c``, ``regulatorbound``) evaluates the same bound in
 floating point and also applies it in composite degree after a primitivity test on a
 partial factorization of ``d_K``; Silex does neither.  On the prime-degree
-fields of the proven corpus the bound never exceeds the regulator
-(``test/t-unit.cpp`` checks this against certified PARI regulators).  For
+fields of ``test_field_lower_regulator_bound`` in ``test/t-unit.cpp`` (14 fields)
+the bound never exceeds the regulator, which the test checks against certified
+PARI regulators.  For
 example, the index bound for the quintic of discriminant ``-401370255`` falls
 from 1184 to 236.
 

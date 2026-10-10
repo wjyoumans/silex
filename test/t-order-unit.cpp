@@ -7377,6 +7377,79 @@ int test_prove_index_bound_cyclotomic13_undecided_root() {
     return 0;
 }
 
+// The stronger regulator bound must not change the published generators.
+// x^3 - 4x^2 - 8x - 1 (discriminant 2213): the units theta^2 and
+// -4 theta^2 - theta + 6 span a subgroup of index 2 in the fundamental
+// units (see above).  saturate_index_bounded scans every prime ell up to
+// the regulator index bound: 5 on the maximal order (Pohst-Zassenhaus
+// (6.22)), 24 on the equation order, which is not known to be maximal and
+// keeps the signature bound.  Z[theta] is the maximal order, so both runs
+// saturate the same lattice and must publish identical generators.
+int test_saturate_index_bounded_generators_independent_of_bound() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, -4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -8);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order maximal = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::Order equation = silex::test::equation_order(field);
+    assert(!equation.maximality_known());
+    silex::EmbeddingContext embeddings(field);
+
+    sflint::FmpqPoly theta_poly;
+    sflint::fmpq_poly_set_coeff_si(theta_poly, 2, 1);
+    sflint::FmpqPoly second_poly;
+    sflint::fmpq_poly_set_coeff_si(second_poly, 2, -4);
+    sflint::fmpq_poly_set_coeff_si(second_poly, 1, -1);
+    sflint::fmpq_poly_set_coeff_si(second_poly, 0, 6);
+    silex::Element theta_squared(field);
+    silex::Element second(field);
+    assert(theta_squared.set_fmpq_poly(sflint::FmpqPolyConstRef(theta_poly)));
+    assert(second.set_fmpq_poly(sflint::FmpqPolyConstRef(second_poly)));
+    silex::FactoredElement generators[] = {silex::FactoredElement(field),
+                                           silex::FactoredElement(field)};
+    assert(generators[0].set_element(theta_squared));
+    assert(generators[1].set_element(second));
+
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 1000));
+    std::vector<silex::FactoredElement> published[2];
+    const silex::Order* orders[2] = {&maximal, &equation};
+    for (int run = 0; run < 2; ++run) {
+        const silex::Order& order = *orders[run];
+        silex::OrderUnitGroup start(order);
+        assert(start.set_units(order, silex::FactoredElementSpan(generators, 2),
+                               embeddings, 256));
+        sflint::Fmpz index_bound;
+        assert(start.regulator_index_bound(sflint::FmpzRef(index_bound), 256));
+        assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(index_bound),
+                                     run == 0 ? 10 : 48));
+        silex::OrderUnitGroup out(order);
+        bool changed = false;
+        bool stable = false;
+        assert(out.saturate_index_bounded(changed, stable, start, embeddings,
+                                          4, sflint::FmpzConstRef(aux_bound),
+                                          4, 256));
+        assert(changed);
+        assert(out.free_rank() == 2);
+        for (slong j = 0; j < 2; ++j) {
+            silex::FactoredElement unit(field);
+            assert(out.free_generator(unit, j));
+            published[run].emplace_back(field);
+            assert(published[run].back().set(unit));
+        }
+        assert(regulator_contains(
+                out,
+                "12.68082022713452093603368239737775544244960210761943928030154"
+                "4077156925247307418251826663747356303483"));
+    }
+    assert(same_factor_lists(published[0], published[1]));
+    return 0;
+}
+
 // x^4 + 4x^3 + x^2 + 2x - 3 (discriminant -70640, signature (2, 1), Z[theta]
 // maximal): GP 2.17 `K = bnfinit(f, 1)` gives class number one, w = 2,
 // bnfcertify(K) = 1 and K.reg = 14.46098754389304356...; the units
@@ -9328,6 +9401,7 @@ int main() {
     test_adjoin_dependent_relation_nonmaximal_root();
     test_prove_index_bound_maximal_quadratic_sqrt5_control();
     test_prove_index_bound_cubic2213_past_prescan_bound();
+    test_saturate_index_bounded_generators_independent_of_bound();
     test_prove_index_bound_quartic70640();
     test_prove_index_bound_cyclotomic13_undecided_root();
     test_prove_torsion_twisted_saturation_root();

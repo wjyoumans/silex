@@ -94,8 +94,14 @@ Changed
   then checks fewer primes: for the quintic of discriminant ``-401370255`` the
   index bound falls from 1184 to 236, for the cubic of discriminant
   ``-1080004`` from 1063 to 84.  Published groups, regulators and labels are
-  unchanged; the unit proof records cover fewer primes.  Composite degrees,
-  non-maximal orders and ``unit_lower_regulator_bound`` are unchanged.  See
+  unchanged on the test corpus; ``OrderUnitGroup::regulator_index_bound`` and
+  the unit proof records (``unit_proof_record_count`` and
+  ``unit_proof_record``) change: the records cover fewer primes.  For direct
+  callers of ``OrderUnitGroup::set_relation_kernel_units_index_bounded`` and
+  ``OrderUnitGroup::saturate_index_bounded``, which label a group ``proven``
+  when the index bound reaches 1, the smaller bound can make that happen more
+  often.  Composite degrees, non-maximal orders and
+  ``unit_lower_regulator_bound`` are unchanged.  See
   "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
