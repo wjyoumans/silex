@@ -92,6 +92,12 @@ struct UnitProofRecordData {
 };
 
 class OrderUnitGroupAccess;
+struct WideFactoredUnits;
+
+// Deletes the private wide-exponent storage, whose type is incomplete here.
+struct WideFactoredUnitsDelete {
+    void operator()(WideFactoredUnits* units) const noexcept;
+};
 
 }  // namespace detail
 
@@ -401,6 +407,12 @@ private:
     flint::Fmpz torsion_order_;
     OrderElement torsion_generator_;
     std::unique_ptr<FactoredElement[]> free_generators_;
+    // Set only when the stored generators came from a unit-basis transform
+    // whose exponents do not fit in slong: the stored wide form, one row per
+    // free generator.  free_generators_ then holds the equal word-size units
+    // rebuilt from it, which free_generator returns.
+    std::unique_ptr<detail::WideFactoredUnits, detail::WideFactoredUnitsDelete>
+            wide_free_generators_;
     slong free_generator_count_ = 0;
     slong free_generator_capacity_ = 0;
     flint::Arb regulator_;

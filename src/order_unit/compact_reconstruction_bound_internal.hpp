@@ -43,4 +43,16 @@ bool compact_unit_coordinate_bound(
         EmbeddingContext& embeddings,
         const CompactCoordinateBoundOptions& options = {}) noexcept;
 
+struct WideFactoredUnits;
+
+// The same bound for a batch with arbitrary-size exponents.  The bound uses
+// only the units' log embeddings (reference log2fubound) and the order basis
+// (log2Mbound), so the representation of the units does not matter; the logs
+// are formed as exponent matrix times base logs.
+bool compact_unit_coordinate_bound(
+        CompactCoordinateBoundReport& report, flint::FmpzRef out,
+        const Order& order, const WideFactoredUnits& generators,
+        EmbeddingContext& embeddings,
+        const CompactCoordinateBoundOptions& options = {}) noexcept;
+
 }  // namespace silex::detail

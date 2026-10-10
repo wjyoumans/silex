@@ -198,6 +198,24 @@ bool reduce_stored_relation_units(bool& changed,
                                OrderUnitGroup& group,
                                EmbeddingContext& embeddings,
                                slong precision) noexcept;
+// Sets units[i] to prod_j units[j]^transform[i, j] with word-size factored
+// exponents.  Fails, leaving units unchanged, when an exponent overflows.
+bool transform_factored_units(std::vector<FactoredElement>& units,
+                              const flint::FmpzMat& transform) noexcept;
+// The same transform with exponents of any size (reference `_transform`,
+// FactoredElem.jl:339-365), used when transform_factored_units overflows.
+// When the merged exponents fit in slong, units gets those products and
+// has_wide is false.  Otherwise units gets equal word-size units rebuilt by
+// the bounded compact reconstruction (reference vec_chinese_units), wide gets
+// the transformed products, and has_wide is true.  `order` must be the
+// maximal order and the units a full-rank system of its units.
+bool transform_factored_units_wide(std::vector<FactoredElement>& units,
+                                   WideFactoredUnits& wide, bool& has_wide,
+                                   const flint::FmpzMat& transform,
+                                   const Order& order,
+                                   EmbeddingContext& embeddings,
+                                   const DiagnosticsContext* diagnostics)
+        noexcept;
 // True when the reduce-mod-units precision ladder should stop on the
 // coordinate matrix `rows`: some entry is a ball of radius at most 0.1 that
 // contains a half-integer, and every entry that defeats the approximate

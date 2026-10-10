@@ -1,6 +1,7 @@
 #include "compact_reconstruction_bound_internal.hpp"
 
 #include "order_unit_internal.hpp"
+#include "../factored_element/wide_factored_internal.hpp"
 
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/arf.hpp>
@@ -16,6 +17,94 @@ namespace silex::detail {
 namespace {
 
 using OptionalOrderBasisTransform = std::optional<flint::FmpzMat>;
+
+// The units whose logarithms feed log2fubound: word-size factored
+// generators, or a batch with arbitrary-size exponents.
+struct UnitLogSource {
+    FactoredElementSpan generators;
+    const WideFactoredUnits* wide = nullptr;
+
+    std::size_t count() const noexcept {
+        return wide == nullptr
+                       ? generators.size()
+                       : static_cast<std::size_t>(
+                                 flint::fmpz_mat_nrows(wide->exponents));
+    }
+};
+
+bool unit_source_has_field(const UnitLogSource& source,
+                           const NumberField& field) noexcept {
+    if (source.wide == nullptr) {
+        for (const FactoredElement& generator : source.generators) {
+            if (!generator.is_defined() || generator.parent() == nullptr ||
+                !generator.parent()->has_same_data(field)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (flint::fmpz_mat_ncols(source.wide->exponents) !=
+        static_cast<slong>(source.wide->bases.size())) {
+        return false;
+    }
+    for (const Element& base : source.wide->bases) {
+        if (!base.is_defined() || !base.has_parent(field)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Product-mode log rows of the source units.  A wide unit's row is
+// sum_k e_k * log(base_k); Arb tracks the cancellation in that sum, and the
+// caller raises the precision until the bound is stable.
+bool unit_source_log_matrix(flint::ArbMat& out, EmbeddingContext& embeddings,
+                            const UnitLogSource& source,
+                            slong precision) noexcept {
+    if (source.wide == nullptr) {
+        return compact_log_matrix(out, embeddings, source.generators,
+                                  precision);
+    }
+
+    const WideFactoredUnits& wide = *source.wide;
+    const NumberField* field = embeddings.parent();
+    slong places = 0;
+    if (field == nullptr || !compact_places(places, embeddings) ||
+        flint::arb_mat_nrows_value(out) !=
+                flint::fmpz_mat_nrows(wide.exponents) ||
+        flint::arb_mat_ncols_value(out) != places) {
+        return false;
+    }
+
+    std::vector<FactoredElement> bases;
+    bases.reserve(wide.bases.size());
+    for (const Element& base : wide.bases) {
+        bases.emplace_back(*field);
+        if (!bases.back().is_defined() || !bases.back().set_element(base)) {
+            return false;
+        }
+    }
+    flint::ArbMat base_logs(static_cast<slong>(bases.size()), places);
+    if (!compact_log_matrix(base_logs, embeddings,
+                            FactoredElementSpan(bases.data(), bases.size()),
+                            precision)) {
+        return false;
+    }
+
+    const slong rows = flint::fmpz_mat_nrows(wide.exponents);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < places; ++j) {
+            arb_struct* entry = arb_mat_entry(out.raw(), i, j);
+            arb_zero(entry);
+            for (slong k = 0; k < static_cast<slong>(bases.size()); ++k) {
+                arb_addmul_fmpz(entry, arb_mat_entry(base_logs.raw(), k, j),
+                                fmpz_mat_entry(wide.exponents.raw(), i, k),
+                                precision);
+            }
+        }
+    }
+    return true;
+}
 
 bool order_basis_begins_with_one(const Order& order) noexcept {
     const slong degree = order.degree();
@@ -221,7 +310,7 @@ bool normalize_order_basis(flint::FmpzMat& normalized_to_original,
     return true;
 }
 
-bool validate_inputs(const Order& order, FactoredElementSpan generators,
+bool validate_inputs(const Order& order, const UnitLogSource& generators,
                      EmbeddingContext& embeddings,
                      const CompactCoordinateBoundOptions& options,
                      Signature& sig, flint::Fmpz& absolute_discriminant,
@@ -252,14 +341,9 @@ bool validate_inputs(const Order& order, FactoredElementSpan generators,
     }
 
     const slong rank = sig.r1() + sig.r2() - 1;
-    if (rank < 0 || generators.size() != static_cast<std::size_t>(rank)) {
+    if (rank < 0 || generators.count() != static_cast<std::size_t>(rank) ||
+        !unit_source_has_field(generators, *field)) {
         return false;
-    }
-    for (const FactoredElement& generator : generators) {
-        if (!generator.is_defined() || generator.parent() == nullptr ||
-            !generator.parent()->has_same_data(*field)) {
-            return false;
-        }
     }
 
     if (embeddings.is_defined()) {
@@ -366,19 +450,19 @@ bool compute_log2_minkowski_bound(flint::Arb& out, const Order& order,
 }
 
 bool compute_log2_unit_bound(flint::Arb& out, EmbeddingContext& embeddings,
-                             FactoredElementSpan generators,
+                             const UnitLogSource& generators,
                              const Signature& sig, const flint::Arb& log_two,
                              slong precision) noexcept {
     const slong places = sig.r1() + sig.r2();
-    flint::ArbMat logs(static_cast<slong>(generators.size()), places);
-    if (!compact_log_matrix(logs, embeddings, generators, precision)) {
+    flint::ArbMat logs(static_cast<slong>(generators.count()), places);
+    if (!unit_source_log_matrix(logs, embeddings, generators, precision)) {
         return false;
     }
 
     flint::Arb maximum;
     flint::Arb entry;
     flint::arb_zero(maximum);
-    for (slong row = 0; row < static_cast<slong>(generators.size()); ++row) {
+    for (slong row = 0; row < static_cast<slong>(generators.count()); ++row) {
         for (slong column = 0; column < places; ++column) {
             flint::arb_set(entry, arb_mat_entry(logs.raw(), row, column));
             // Product-mode complex logs are 2*log|sigma(u)|, matching reference's
@@ -394,7 +478,8 @@ bool compute_log2_unit_bound(flint::Arb& out, EmbeddingContext& embeddings,
 }
 
 bool compute_bound_interval(CompactCoordinateBoundReport& report,
-                            const Order& order, FactoredElementSpan generators,
+                            const Order& order,
+                            const UnitLogSource& generators,
                             EmbeddingContext& embeddings, const Signature& sig,
                             flint::FmpzConstRef absolute_discriminant,
                             const OptionalOrderBasisTransform&
@@ -454,9 +539,11 @@ void publish_status(CompactCoordinateBoundReport& report,
 
 }  // namespace
 
-bool compact_unit_coordinate_bound(
+namespace {
+
+bool compact_unit_coordinate_bound_from_source(
         CompactCoordinateBoundReport& report, flint::FmpzRef out,
-        const Order& order, FactoredElementSpan generators,
+        const Order& order, const UnitLogSource& generators,
         EmbeddingContext& embeddings,
         const CompactCoordinateBoundOptions& options) noexcept {
     Signature sig;
@@ -522,6 +609,29 @@ bool compact_unit_coordinate_bound(
             precision *= 2;
         }
     }
+}
+
+}  // namespace
+
+bool compact_unit_coordinate_bound(
+        CompactCoordinateBoundReport& report, flint::FmpzRef out,
+        const Order& order, FactoredElementSpan generators,
+        EmbeddingContext& embeddings,
+        const CompactCoordinateBoundOptions& options) noexcept {
+    return compact_unit_coordinate_bound_from_source(
+            report, out, order, UnitLogSource{generators, nullptr},
+            embeddings, options);
+}
+
+bool compact_unit_coordinate_bound(
+        CompactCoordinateBoundReport& report, flint::FmpzRef out,
+        const Order& order, const WideFactoredUnits& generators,
+        EmbeddingContext& embeddings,
+        const CompactCoordinateBoundOptions& options) noexcept {
+    return compact_unit_coordinate_bound_from_source(
+            report, out, order,
+            UnitLogSource{FactoredElementSpan(), &generators}, embeddings,
+            options);
 }
 
 }  // namespace silex::detail

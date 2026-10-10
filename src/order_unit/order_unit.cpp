@@ -3,6 +3,7 @@
 #include "compute_internal.hpp"
 #include "order_unit_internal.hpp"
 #include "precision_cap_internal.hpp"
+#include "../factored_element/wide_factored_internal.hpp"
 
 #include <atomic>
 #include <limits>
@@ -590,6 +591,7 @@ void OrderUnitGroup::swap(OrderUnitGroup& other) noexcept {
     std::swap(torsion_order_, other.torsion_order_);
     torsion_generator_.swap(other.torsion_generator_);
     free_generators_.swap(other.free_generators_);
+    wide_free_generators_.swap(other.wide_free_generators_);
     std::swap(free_generator_count_, other.free_generator_count_);
     std::swap(free_generator_capacity_, other.free_generator_capacity_);
     std::swap(regulator_, other.regulator_);
@@ -683,6 +685,7 @@ bool OrderUnitGroup::append_free_generator_copy_(
 
 void OrderUnitGroup::clear_free_generators_() noexcept {
     free_generators_.reset();
+    wide_free_generators_.reset();
     free_generator_count_ = 0;
     free_generator_capacity_ = 0;
 }
@@ -787,6 +790,15 @@ bool OrderUnitGroup::set(const OrderUnitGroup& other) noexcept {
     }
     for (slong i = 0; i < other.free_generator_count_; ++i) {
         if (!copy.append_free_generator_copy_(other.free_generators_[i])) {
+            return false;
+        }
+    }
+    if (other.wide_free_generators_ != nullptr) {
+        copy.wide_free_generators_.reset(
+                new (std::nothrow) detail::WideFactoredUnits);
+        if (copy.wide_free_generators_ == nullptr ||
+            !detail::wide_factored_units_copy(*copy.wide_free_generators_,
+                                              *other.wide_free_generators_)) {
             return false;
         }
     }
@@ -1289,6 +1301,37 @@ bool OrderUnitGroupAccess::set_units(
     candidate.certification_ = CertificationMode::unknown;
     candidate.is_set_ = true;
 
+    out.swap(candidate);
+    return true;
+}
+
+bool OrderUnitGroupAccess::set_units_with_wide_form(
+        OrderUnitGroup& out,
+        const Order& order,
+        FactoredElementSpan rebuilt,
+        WideFactoredUnits& wide,
+        EmbeddingContext& embeddings,
+        slong precision) noexcept {
+    if (flint::fmpz_mat_nrows(wide.exponents) !=
+                static_cast<slong>(rebuilt.size()) ||
+        flint::fmpz_mat_ncols(wide.exponents) !=
+                static_cast<slong>(wide.bases.size())) {
+        return false;
+    }
+
+    OrderUnitGroup candidate;
+    candidate.set_diagnostics(out.diagnostics());
+    if (!set_units(candidate, order, rebuilt, embeddings, precision, true,
+                   nullptr, nullptr)) {
+        return false;
+    }
+    candidate.wide_free_generators_.reset(new (std::nothrow)
+                                                  WideFactoredUnits);
+    if (candidate.wide_free_generators_ == nullptr) {
+        return false;
+    }
+    candidate.wide_free_generators_->bases.swap(wide.bases);
+    candidate.wide_free_generators_->exponents.swap(wide.exponents);
     out.swap(candidate);
     return true;
 }

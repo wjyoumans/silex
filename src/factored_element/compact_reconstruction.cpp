@@ -1,4 +1,5 @@
 #include "compact_reconstruction_internal.hpp"
+#include "wide_factored_internal.hpp"
 
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
@@ -25,10 +26,12 @@ namespace {
 struct PreparedFactor {
     PreparedFactor(const Element& representative_value,
                    std::size_t output_count) noexcept
-        : representative(&representative_value), exponents(output_count, 0) {}
+        : representative(&representative_value), exponents(output_count) {}
 
     const Element* representative = nullptr;
-    std::vector<slong> exponents;
+    // Arbitrary-size exponents: reference FlxqV_factorback takes t_INT
+    // exponents (buch2.c:1039), so a wide exponent matrix reconstructs too.
+    std::vector<flint::Fmpz> exponents;
     flint::FmpqPoly power_polynomial;
     bool needs_inverse = false;
 };
@@ -57,9 +60,21 @@ bool checked_add_slong(slong& out, slong value) noexcept {
     return true;
 }
 
+bool checked_add_exponent(flint::Fmpz& out, slong value) noexcept {
+    // Word-size inputs keep their checked slong sum.
+    slong sum = fmpz_get_si(out.raw());
+    if (!checked_add_slong(sum, value)) {
+        return false;
+    }
+    fmpz_set_si(out.raw(), sum);
+    return true;
+}
+
 bool exponent_row_is_zero(const PreparedFactor& factor) noexcept {
     return std::all_of(factor.exponents.begin(), factor.exponents.end(),
-                       [](slong exponent) { return exponent == 0; });
+                       [](const flint::Fmpz& exponent) {
+                           return fmpz_is_zero(exponent.raw()) != 0;
+                       });
 }
 
 bool prepare_exponent_matrix(BoundedCompactReconstructionReport& report,
@@ -98,11 +113,49 @@ bool prepare_exponent_matrix(BoundedCompactReconstructionReport& report,
                 factors.emplace_back(entry.factor, inputs.size());
                 match = std::prev(factors.end());
             }
-            if (!checked_add_slong(match->exponents[column], entry.exponent)) {
+            if (!checked_add_exponent(match->exponents[column],
+                                      entry.exponent)) {
                 report.status =
                         BoundedCompactReconstructionStatus::exponent_overflow;
                 return false;
             }
+        }
+    }
+
+    factors.erase(std::remove_if(factors.begin(), factors.end(),
+                                 exponent_row_is_zero),
+                  factors.end());
+    report.factor_rows = factors.size();
+    return true;
+}
+
+bool prepare_wide_exponent_matrix(BoundedCompactReconstructionReport& report,
+                                  std::vector<PreparedFactor>& factors,
+                                  const Order& order,
+                                  const WideFactoredUnits& inputs) noexcept {
+    const NumberField* field = order.parent();
+    const slong outputs = flint::fmpz_mat_nrows(inputs.exponents);
+    if (field == nullptr || outputs < 0 ||
+        flint::fmpz_mat_ncols(inputs.exponents) !=
+                static_cast<slong>(inputs.bases.size())) {
+        return false;
+    }
+
+    for (std::size_t column = 0; column < inputs.bases.size(); ++column) {
+        const Element& base = inputs.bases[column];
+        if (!base.is_defined() || !base.has_parent(*field)) {
+            return false;
+        }
+        factors.emplace_back(base, static_cast<std::size_t>(outputs));
+        PreparedFactor& factor = factors.back();
+        for (slong row = 0; row < outputs; ++row) {
+            const fmpz* exponent = fmpz_mat_entry(
+                    inputs.exponents.raw(), row, static_cast<slong>(column));
+            if (fmpz_sgn(exponent) < 0 && base.equal_si(0)) {
+                return false;
+            }
+            fmpz_set(factor.exponents[static_cast<std::size_t>(row)].raw(),
+                     exponent);
         }
     }
 
@@ -120,9 +173,11 @@ bool prepare_power_polynomials(std::vector<PreparedFactor>& factors) noexcept {
                     flint::FmpqPolyRef(factor.power_polynomial))) {
             return false;
         }
-        factor.needs_inverse =
-                std::any_of(factor.exponents.begin(), factor.exponents.end(),
-                            [](slong exponent) { return exponent < 0; });
+        factor.needs_inverse = std::any_of(
+                factor.exponents.begin(), factor.exponents.end(),
+                [](const flint::Fmpz& exponent) {
+                    return fmpz_sgn(exponent.raw()) < 0;
+                });
     }
     return true;
 }
@@ -172,14 +227,6 @@ bool reduce_order_basis(flint::NmodMat& out, const flint::FmpqMat& basis,
         }
     }
     return true;
-}
-
-ulong exponent_magnitude(slong exponent) noexcept {
-    if (exponent >= 0) {
-        return static_cast<ulong>(exponent);
-    }
-    ulong magnitude = static_cast<ulong>(-(exponent + 1));
-    return magnitude + 1;
 }
 
 bool reduce_factor_polynomials(std::vector<flint::NmodPoly>& bases,
@@ -250,17 +297,24 @@ bool build_prime_residues(BoundedCompactReconstructionReport& report,
         flint::NmodPoly value(prime);
         flint::NmodPoly power(prime);
         flint::NmodPoly product(prime);
+        flint::Fmpz magnitude;
         nmod_poly_one(value.raw());
         for (std::size_t row = 0; row < factors.size(); ++row) {
-            const slong exponent = factors[row].exponents[column];
-            if (exponent == 0) {
+            const flint::Fmpz& exponent = factors[row].exponents[column];
+            if (fmpz_is_zero(exponent.raw()) != 0) {
                 continue;
             }
             const flint::NmodPoly& base =
-                    exponent < 0 ? inverses[row] : bases[row];
-            nmod_poly_powmod_ui_binexp(power.raw(), base.raw(),
-                                       exponent_magnitude(exponent),
-                                       modulus.raw());
+                    fmpz_sgn(exponent.raw()) < 0 ? inverses[row] : bases[row];
+            fmpz_abs(magnitude.raw(), exponent.raw());
+            if (fmpz_abs_fits_ui(magnitude.raw()) != 0) {
+                nmod_poly_powmod_ui_binexp(power.raw(), base.raw(),
+                                           fmpz_get_ui(magnitude.raw()),
+                                           modulus.raw());
+            } else {
+                nmod_poly_powmod_fmpz_binexp(power.raw(), base.raw(),
+                                             magnitude.raw(), modulus.raw());
+            }
             nmod_poly_mulmod(product.raw(), value.raw(), power.raw(),
                              modulus.raw());
             value.swap(product);
@@ -348,36 +402,16 @@ const char* bounded_compact_reconstruction_status_name(
     return "unknown";
 }
 
-bool bounded_compact_reconstruct(
-        BoundedCompactReconstructionReport& report, std::vector<Element>& out,
-        const Order& order, std::span<const FactoredElement> inputs,
-        flint::FmpzConstRef certified_coordinate_bound,
-        const BoundedCompactReconstructionOptions& options) noexcept {
-    reset_report(report);
+namespace {
+
+bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
+                          std::vector<Element>& out, const Order& order,
+                          std::vector<PreparedFactor>& factors,
+                          std::size_t output_count,
+                          flint::FmpzConstRef certified_coordinate_bound,
+                          const BoundedCompactReconstructionOptions& options)
+        noexcept {
     const NumberField* field = order.parent();
-    if (!order.is_defined() || field == nullptr || !order.has_basis() ||
-        order.degree() <= 0 || fmpz_sgn(certified_coordinate_bound.raw()) < 0 ||
-        inputs.size() >
-                static_cast<std::size_t>(std::numeric_limits<slong>::max()) ||
-        options.prime_search_start >= UWORD_MAX_PRIME) {
-        return false;
-    }
-
-    if (inputs.empty()) {
-        std::vector<Element> empty;
-        out.swap(empty);
-        report.status = BoundedCompactReconstructionStatus::success;
-        return true;
-    }
-
-    std::vector<PreparedFactor> factors;
-    if (!prepare_exponent_matrix(report, factors, order, inputs)) {
-        if (report.status !=
-            BoundedCompactReconstructionStatus::exponent_overflow) {
-            report.status = BoundedCompactReconstructionStatus::invalid_input;
-        }
-        return false;
-    }
     if (!prepare_power_polynomials(factors)) {
         report.status = BoundedCompactReconstructionStatus::
                 coordinate_conversion_failed;
@@ -400,7 +434,7 @@ bool bounded_compact_reconstruct(
     fmpz_mul_2exp(twice_bound.raw(), certified_coordinate_bound.raw(), 1);
     flint::Fmpz modulus;
     fmpz_one(modulus.raw());
-    flint::FmpzMat reconstructed(static_cast<slong>(inputs.size()), degree);
+    flint::FmpzMat reconstructed(static_cast<slong>(output_count), degree);
 
     ulong prime_cursor = options.prime_search_start;
     while (fmpz_cmp(modulus.raw(), twice_bound.raw()) <= 0 ||
@@ -414,7 +448,7 @@ bool bounded_compact_reconstruct(
         report.last_prime = prime;
         ++report.prime_trials;
 
-        flint::NmodMat residues(static_cast<slong>(inputs.size()), degree,
+        flint::NmodMat residues(static_cast<slong>(output_count), degree,
                                 prime);
         if (!build_prime_residues(report, residues, factors,
                                   defining_polynomial, order_basis, degree,
@@ -450,4 +484,70 @@ bool bounded_compact_reconstruct(
     return true;
 }
 
+}  // namespace
+
+bool bounded_compact_reconstruct(
+        BoundedCompactReconstructionReport& report, std::vector<Element>& out,
+        const Order& order, std::span<const FactoredElement> inputs,
+        flint::FmpzConstRef certified_coordinate_bound,
+        const BoundedCompactReconstructionOptions& options) noexcept {
+    reset_report(report);
+    const NumberField* field = order.parent();
+    if (!order.is_defined() || field == nullptr || !order.has_basis() ||
+        order.degree() <= 0 || fmpz_sgn(certified_coordinate_bound.raw()) < 0 ||
+        inputs.size() >
+                static_cast<std::size_t>(std::numeric_limits<slong>::max()) ||
+        options.prime_search_start >= UWORD_MAX_PRIME) {
+        return false;
+    }
+
+    if (inputs.empty()) {
+        std::vector<Element> empty;
+        out.swap(empty);
+        report.status = BoundedCompactReconstructionStatus::success;
+        return true;
+    }
+
+    std::vector<PreparedFactor> factors;
+    if (!prepare_exponent_matrix(report, factors, order, inputs)) {
+        if (report.status !=
+            BoundedCompactReconstructionStatus::exponent_overflow) {
+            report.status = BoundedCompactReconstructionStatus::invalid_input;
+        }
+        return false;
+    }
+    return reconstruct_prepared(report, out, order, factors, inputs.size(),
+                                certified_coordinate_bound, options);
+}
+
+bool bounded_compact_reconstruct(
+        BoundedCompactReconstructionReport& report, std::vector<Element>& out,
+        const Order& order, const WideFactoredUnits& inputs,
+        flint::FmpzConstRef certified_coordinate_bound,
+        const BoundedCompactReconstructionOptions& options) noexcept {
+    reset_report(report);
+    const NumberField* field = order.parent();
+    const slong outputs = flint::fmpz_mat_nrows(inputs.exponents);
+    if (!order.is_defined() || field == nullptr || !order.has_basis() ||
+        order.degree() <= 0 || fmpz_sgn(certified_coordinate_bound.raw()) < 0 ||
+        outputs < 0 || options.prime_search_start >= UWORD_MAX_PRIME) {
+        return false;
+    }
+
+    if (outputs == 0) {
+        std::vector<Element> empty;
+        out.swap(empty);
+        report.status = BoundedCompactReconstructionStatus::success;
+        return true;
+    }
+
+    std::vector<PreparedFactor> factors;
+    if (!prepare_wide_exponent_matrix(report, factors, order, inputs)) {
+        report.status = BoundedCompactReconstructionStatus::invalid_input;
+        return false;
+    }
+    return reconstruct_prepared(report, out, order, factors,
+                                static_cast<std::size_t>(outputs),
+                                certified_coordinate_bound, options);
+}
 }  // namespace silex::detail

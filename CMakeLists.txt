@@ -215,6 +215,7 @@ add_library(silex
     src/class_group/relation_candidate.cpp
     src/class_group/relation_search.cpp
     src/factored_element/compact_reconstruction.cpp
+    src/factored_element/wide_factored.cpp
     src/factored_element/factored_element.cpp
     src/factor_base/factor_base.cpp
     src/archimedean/archimedean.cpp

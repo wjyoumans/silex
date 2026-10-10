@@ -163,6 +163,26 @@ public:
             const flint::Fmpz* cached_torsion_order,
             const OrderElement* cached_torsion_generator) noexcept;
 
+    // set_units for a trusted unit-basis transform whose result needs
+    // exponents wider than slong.  `rebuilt[i]` is the word-size unit equal
+    // to row i of `wide` (rebuilt by the bounded compact reconstruction); it
+    // becomes free generator i, and free_generator returns it.  `wide` is
+    // kept as the stored wide form and is left empty on success.
+    static bool set_units_with_wide_form(
+            OrderUnitGroup& out,
+            const Order& order,
+            FactoredElementSpan rebuilt,
+            WideFactoredUnits& wide,
+            EmbeddingContext& embeddings,
+            slong precision) noexcept;
+
+    // The stored wide form of the free generators, or null when they are
+    // stored with word-size exponents only.
+    static const WideFactoredUnits* wide_free_generators(
+            const OrderUnitGroup& group) noexcept {
+        return group.is_set() ? group.wide_free_generators_.get() : nullptr;
+    }
+
     // Marks a set group proven without any check.  Internal proof routes
     // call this only after their own proof succeeds; tests use it to build a
     // proven-labelled group whose later rejection must come from the

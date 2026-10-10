@@ -10,6 +10,7 @@
 #include "../class_group/class_group_internal.hpp"
 #include "../class_group/relation_saturation_internal.hpp"
 #include "../factored_element/compact_reconstruction_internal.hpp"
+#include "../factored_element/wide_factored_internal.hpp"
 #include "../lat/flatter_backend_internal.hpp"
 #include "../lat/fplll_backend_internal.hpp"
 
@@ -1593,13 +1594,144 @@ bool transform_factored_units(std::vector<FactoredElement>& units,
     return true;
 }
 
+// Rebuilds word-size units equal to the rows of `wide`, each as a single
+// field element with exponent one.
+//
+// Source trace: the bounded compact reconstruction ports the second reference, version 2.17.3,
+// src/basemath/buch2.c `vec_chinese_units` (1214-1240): one batch-wide
+// coordinate bound log2Mbound + log2fubound (1180-1212), then CRT over
+// machine-word primes in `chinese_unit` / `FlxqX_chinese_unit` (1026-1100),
+// whose exponent matrix has integers of any size.  The units are units of
+// the maximal order, so the bound holds for each of them.
+//
+// Deviation from the first reference: it keeps the transformed units as FacElem with
+// ZZRingElem exponents (FactoredElem.jl:339-365, Reduction.jl:88-112) and
+// never expands them here.  Silex's public FactoredElement has word-size
+// exponents, so the group keeps the wide form privately and its free
+// generators are these rebuilt, equal units.
+bool rebuild_wide_unit_generators(std::vector<FactoredElement>& out,
+                                  const Order& order,
+                                  const WideFactoredUnits& wide,
+                                  EmbeddingContext& embeddings,
+                                  const DiagnosticsContext* diagnostics)
+        noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.reduce_stored_units.rebuild_wide");
+    flint::Fmpz coordinate_bound;
+    CompactCoordinateBoundReport bound_report;
+    std::vector<Element> reconstructed;
+    BoundedCompactReconstructionReport reconstruction_report;
+    if (!compact_unit_coordinate_bound(bound_report,
+                                       flint::FmpzRef(coordinate_bound), order,
+                                       wide, embeddings) ||
+        !bounded_compact_reconstruct(reconstruction_report, reconstructed,
+                                     order, wide,
+                                     flint::FmpzConstRef(coordinate_bound))) {
+        return false;
+    }
+
+    const NumberField* field = order.parent();
+    if (field == nullptr ||
+        static_cast<slong>(reconstructed.size()) !=
+                flint::fmpz_mat_nrows(wide.exponents)) {
+        return false;
+    }
+    std::vector<FactoredElement> candidate;
+    candidate.reserve(reconstructed.size());
+    for (const Element& value : reconstructed) {
+        candidate.emplace_back(*field);
+        if (!candidate.back().is_defined() ||
+            !candidate.back().set_element(value)) {
+            return false;
+        }
+    }
+    out.swap(candidate);
+    return true;
+}
+
+// Word-size units for the rows of `wide` whose exponents all fit in slong:
+// the merged formal products themselves, as a FacElem dictionary holds them.
+bool wide_units_to_factored(std::vector<FactoredElement>& out,
+                            const WideFactoredUnits& wide,
+                            const NumberField& field) noexcept {
+    const slong rows = flint::fmpz_mat_nrows(wide.exponents);
+    std::vector<FactoredElement> candidate;
+    candidate.reserve(static_cast<std::size_t>(rows));
+    for (slong i = 0; i < rows; ++i) {
+        candidate.emplace_back(field);
+        if (!candidate.back().is_defined() || !candidate.back().one()) {
+            return false;
+        }
+        for (std::size_t k = 0; k < wide.bases.size(); ++k) {
+            const fmpz* exponent = fmpz_mat_entry(wide.exponents.raw(), i,
+                                                  static_cast<slong>(k));
+            if (fmpz_is_zero(exponent) != 0) {
+                continue;
+            }
+            if (fmpz_fits_si(exponent) == 0 ||
+                !candidate.back().push(wide.bases[k],
+                                       fmpz_get_si(exponent))) {
+                return false;
+            }
+        }
+    }
+    out.swap(candidate);
+    return true;
+}
+
+// Applies the unit-basis transform when its exponents overflow slong in
+// transform_factored_units.  The transform is exact with integer exponents
+// of any size, as reference `_transform` (FactoredElem.jl:339-365).  When the
+// merged exponents fit in slong, `units` gets those products and has_wide is
+// false; otherwise `units` gets the rebuilt word-size units and `wide` the
+// wide form, with has_wide true.
+bool transform_factored_units_wide(std::vector<FactoredElement>& units,
+                                   WideFactoredUnits& wide, bool& has_wide,
+                                   const flint::FmpzMat& transform,
+                                   const Order& order,
+                                   EmbeddingContext& embeddings,
+                                   const DiagnosticsContext* diagnostics)
+        noexcept {
+    const NumberField* field = order.parent();
+    WideFactoredUnits transformed;
+    std::vector<FactoredElement> next;
+    if (field == nullptr ||
+        !wide_factored_units_transform(
+                transformed,
+                std::span<const FactoredElement>(units.data(), units.size()),
+                flint::FmpzMatConstRef(transform))) {
+        return false;
+    }
+    if (!wide_factored_units_exceed_slong(transformed)) {
+        if (!wide_units_to_factored(next, transformed, *field)) {
+            return false;
+        }
+        units.swap(next);
+        has_wide = false;
+        return true;
+    }
+    if (!rebuild_wide_unit_generators(next, order, transformed, embeddings,
+                                      diagnostics)) {
+        return false;
+    }
+    units.swap(next);
+    wide.bases.swap(transformed.bases);
+    wide.exponents.swap(transformed.exponents);
+    has_wide = true;
+    return true;
+}
+
 bool reduce_stored_units_vector(bool& changed,
                                       std::vector<FactoredElement>& units,
+                                      WideFactoredUnits& wide,
+                                      bool& has_wide,
+                                      const Order& order,
                                       EmbeddingContext& embeddings,
                                       slong precision,
                                       const DiagnosticsContext* diagnostics)
         noexcept {
     changed = false;
+    has_wide = false;
     if (units.empty()) {
         return true;
     }
@@ -1641,9 +1773,20 @@ bool reduce_stored_units_vector(bool& changed,
         flint_bitcnt_t before_bits = 0;
         flint_bitcnt_t after_bits = 0;
         if (!row_norm_product_bits(before_bits, scaled) ||
-            !row_norm_product_bits(after_bits, reduced) ||
-            !transform_factored_units(units, transform)) {
+            !row_norm_product_bits(after_bits, reduced)) {
             return false;
+        }
+        if (transform_factored_units(units, transform)) {
+            has_wide = false;
+        } else {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.reduce_stored_units.transform_wide");
+            if (!transform_factored_units_wide(units, wide, has_wide,
+                                               transform, order, embeddings,
+                                               diagnostics)) {
+                return false;
+            }
         }
         changed = true;
         if (after_bits >= before_bits) {
@@ -1673,9 +1816,12 @@ bool reduce_stored_relation_units(bool& changed,
     }
 
     std::vector<FactoredElement> units;
+    WideFactoredUnits wide;
+    bool has_wide = false;
     if (!copy_unit_generators(units, group) ||
-        !reduce_stored_units_vector(changed, units, embeddings,
-                                          precision, group.diagnostics())) {
+        !reduce_stored_units_vector(changed, units, wide, has_wide, *order,
+                                    embeddings, precision,
+                                    group.diagnostics())) {
         return false;
     }
     if (!changed) {
@@ -1684,6 +1830,19 @@ bool reduce_stored_relation_units(bool& changed,
 
     OrderUnitGroup reduced(*order);
     reduced.set_diagnostics(group.diagnostics());
+    if (has_wide) {
+        // The rebuilt units equal the transformed ones; the group keeps the
+        // wide form and stores the rebuilt units as its generators.
+        if (!reduced.is_defined() ||
+            !OrderUnitGroupAccess::set_units_with_wide_form(
+                    reduced, *order,
+                    FactoredElementSpan(units.data(), units.size()), wide,
+                    embeddings, precision)) {
+            return false;
+        }
+        group.swap(reduced);
+        return true;
+    }
     if (!reduced.is_defined() ||
         !order_unit_group_set_units_internal(
                 reduced, *order,
