@@ -364,16 +364,23 @@ only with ``false``.
 * **Silex extension**: residue disproof in degree 10 and higher.  When the
   monic integral defining polynomial has degree at least 10 and no earlier
   path decided, Silex applies the same residue test (and the same
-  admissibility argument) to every factor of each of the first 256 primes
-  from 5 upward, and answers ``false`` at the first residue that is not an
-  ``n``-th power.  This corresponds to Hecke v0.38.6 ``_roots_hensel``
-  (``Hensel.jl`` lines 159-161), which returns no roots as soon as
+  admissibility argument) to every factor of each of the first 40
+  admissible primes from 5 upward, and answers ``false`` at the first
+  residue that is not an ``n``-th power.  This corresponds to Hecke v0.38.6
+  ``_roots_hensel`` (``Hensel.jl`` lines 159-161), which returns no roots as soon as
   ``y^n - a`` has no root modulo a factor of a good prime, and which in
   degree 10 and higher examines further factors before lifting
   (``STABILIZED = 2``, lines 102-106).  Hecke stops after a few factors and
   then lifts; Silex has no lift here and scans more primes.  A true power is
   never disproved, so it and every input with no disproving residue within
-  the prime bound still return failure (unsupported).
+  the prime bound still return failure (unsupported).  The bound 40 (the
+  same as the pre-lift disproof) is a resource limit only, and any value is
+  sound.  Every true power runs to the bound, and for a large prime ``n`` a
+  residue can fail to be an ``n``-th power only in a residue field of order
+  ``q`` with ``gcd(n, q - 1) > 1``, so disproofs can need many primes: of
+  the compact-root kernel rows of the ``proven`` runs on ``Q(zeta_25)`` and
+  ``Q(zeta_44)``, 9 each are disproved within 256 primes, after 9 to 218
+  admissible primes, and 4 and 2 of them within 40.
 * Residue roots follow PARI 2.17.3
   ``src/basemath/bb_group.c:gen_Shanks_sqrtn`` (lines 899-953): the Bezout
   exponent of ``n`` modulo ``q - 1`` gives the unique root when

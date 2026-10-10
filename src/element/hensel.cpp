@@ -2496,6 +2496,19 @@ bool try_pure_power_root_at_prime(
 // power per residue degree).
 constexpr slong kPreLiftDisproofExtraPrimes = 40;
 
+// Resource bound only: how many admissible primes the residue disproof in
+// degree 10 and higher examines (pure_power_residue_disproves).  Any value is
+// sound; exhausting it leaves the call unsupported.  A true power is never
+// disproved and always runs to the bound, at a distinct-degree factorisation
+// per prime (a fraction of a millisecond in degree 20), so the bound is the
+// same as kPreLiftDisproofExtraPrimes.  For a large prime n a residue can
+// fail to be an n-th power only at a factor whose residue field order q has
+// gcd(n, q - 1) > 1, which can need many primes: on the compact-root kernel
+// rows of the proven runs on Q(zeta_25) and Q(zeta_44), 9 non-powers each
+// are disproved within 256 primes, after 9 to 218 admissible primes, and 4
+// and 2 of them within 40.
+constexpr slong kHighDegreeDisproofPrimes = 40;
+
 // Reduces the rational polynomial `polynomial` modulo the word prime of
 // `out`; false when a coefficient is not p-integral.
 bool fmpq_poly_reduce_nmod(flint::NmodPoly& out,
@@ -3446,13 +3459,17 @@ bool pure_power_residue_disproves(bool& is_power,
         // prime: a residue that is not an n-th power proves that `input` is
         // not an n-th power.  The argument has no condition on the degree.
         // Silex extension: the reference stops after a few factors and then
-        // lifts; Silex has no lift here and scans further primes instead.
-        // A true power is never disproved, so it stays unsupported, as does
-        // any input with no disproving residue within the prime bound.
+        // lifts; Silex has no lift here and scans up to
+        // kHighDegreeDisproofPrimes admissible primes instead.  A true power
+        // is never disproved, so it stays unsupported, as does any input with
+        // no disproving residue within that bound.
         if (!fmpq_poly_is_monic_integral(raw_field->pol)) {
             return false;
         }
-        for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
+        slong admissible_primes = 0;
+        for (slong attempt = 0; attempt < max_prime_attempts &&
+                                admissible_primes < kHighDegreeDisproofPrimes;
+             ++attempt) {
             fmpz_nextprime(prime.raw(), prime.raw(), 1);
             bool admissible = false;
             if (residue_disproves_power_at_prime(
@@ -3463,6 +3480,9 @@ bool pure_power_residue_disproves(bool& is_power,
                         "element.power_residue_disproof.high_degree_nonpower");
                 is_power = false;
                 return true;
+            }
+            if (admissible) {
+                ++admissible_primes;
             }
         }
         return false;

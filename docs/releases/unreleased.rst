@@ -447,9 +447,12 @@ Changed
   Before the Hensel lift, the residue of the input is tested at every prime
   above the chosen prime and above up to 40 further unramified primes; a
   residue that is not an ``n``-th power proves the input is not an ``n``-th
-  power.  Inputs with no such residue are handled as before, and ``true``
-  answers and their roots are unchanged.  See "Element powers and roots"
-  in :doc:`../reference/algorithms_and_sources`.
+  power.  In degree 10 and higher, where there is no Hensel lift, the
+  same residue test runs at up to 40 unramified primes, so ``is_power`` and
+  ``is_square`` there also return a definite ``false`` when a residue
+  disproves the input.  Inputs with no such residue are handled as before,
+  and ``true`` answers and their roots are unchanged.  See "Element powers
+  and roots" in :doc:`../reference/algorithms_and_sources`.
 
 Fixed
 -----
