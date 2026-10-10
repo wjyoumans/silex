@@ -1,4 +1,6 @@
+#include <silex/archimedean.hpp>
 #include <silex/factored_element.hpp>
+#include <silex/flint/arb_vec.hpp>
 #include <silex/flint/arb.hpp>
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_poly.hpp>
@@ -8,6 +10,7 @@
 #include "test_support.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <limits>
 #include <utility>
 
@@ -228,8 +231,183 @@ void check_definite_non_powers() noexcept {
 
 }  // namespace
 
+// The per-entry factored log: the factor log of every entry, in order, at the
+// bucketed precision of FactoredElement::logarithmic_embedding (target plus
+// exponent and factor-count guard bits, rounded up to a power of two), summed
+// entry by entry with its own exponent, then each coordinate rounded to the
+// shortest form within 2^-precision.  Valid when the first pass meets the
+// target, which the callers' small inputs do.
+bool per_entry_factored_log(sflint::ArbVec& out,
+                            silex::EmbeddingContext& embeddings,
+                            const silex::FactoredElement& value,
+                            silex::LogEmbeddingMode mode,
+                            slong precision,
+                            slong places) noexcept {
+    const auto bits = [](ulong x) noexcept {
+        slong count = 0;
+        while (x != 0) {
+            ++count;
+            x >>= 1;
+        }
+        return count;
+    };
+    slong exponent_bits = 0;
+    for (const auto& entry : value.factors()) {
+        const slong b = bits(entry.exponent < 0
+                                     ? -static_cast<ulong>(entry.exponent)
+                                     : static_cast<ulong>(entry.exponent));
+        exponent_bits = b > exponent_bits ? b : exponent_bits;
+    }
+    const slong work = precision + exponent_bits +
+                       bits(static_cast<ulong>(value.factors().size()));
+    slong factor_precision = 1;
+    while (factor_precision <= work) {
+        factor_precision *= 2;
+    }
+
+    sflint::ArbVec row(places);
+    _arb_vec_zero(out.data(), places);
+    bool first = true;
+    for (const auto& entry : value.factors()) {
+        if (!silex::logarithmic_embedding(sflint::ArbVecRef(row), embeddings,
+                                          entry.factor, mode,
+                                          factor_precision)) {
+            return false;
+        }
+        for (slong j = 0; j < places; ++j) {
+            if (first) {
+                ::arb_mul_si(out.data() + j, row.data() + j, entry.exponent,
+                             factor_precision);
+            } else {
+                ::arb_addmul_si(out.data() + j, row.data() + j,
+                                entry.exponent, factor_precision);
+            }
+            if (!has_radius_at_most_2exp(out.data() + j, -precision)) {
+                return false;
+            }
+        }
+        first = false;
+    }
+    for (slong j = 0; j < places; ++j) {
+        arb_struct* coordinate = out.data() + j;
+        if (::arb_rel_accuracy_bits(coordinate) < 0 ||
+            ::arb_is_exact(coordinate) != 0) {
+            continue;
+        }
+        slong rounding = ::arb_bits(coordinate) / 2;
+        if (rounding < 2) {
+            continue;
+        }
+        sflint::Arb rounded;
+        ::arb_set_round(rounded.raw(), coordinate, rounding);
+        while (has_radius_at_most_2exp(rounded.raw(), -precision) &&
+               rounding > 4) {
+            ::arb_set(coordinate, rounded.raw());
+            rounding /= 2;
+            ::arb_set_round(rounded.raw(), rounded.raw(), rounding);
+        }
+    }
+    return true;
+}
+
+// A factored element that repeats equal factors (as separate copies, built
+// along different paths, interleaved with other factors) has the log
+// embedding of the per-entry sum, bit for bit: looking each distinct factor
+// up once per pass changes neither the terms nor their order.
+void check_factored_log_of(const silex::NumberField& field,
+                           const silex::FactoredElement& value,
+                           slong places) noexcept {
+    for (const silex::LogEmbeddingMode mode :
+         {silex::LogEmbeddingMode::plain,
+          silex::LogEmbeddingMode::product}) {
+        for (const slong precision : {slong(30), slong(64), slong(200)}) {
+            silex::EmbeddingContext embeddings(field);
+            silex::EmbeddingContext reference_embeddings(field);
+            sflint::ArbVec logs(places);
+            sflint::ArbVec expected(places);
+            assert(value.logarithmic_embedding(sflint::ArbVecRef(logs),
+                                               embeddings, mode, precision));
+            assert(per_entry_factored_log(expected, reference_embeddings,
+                                          value, mode, precision, places));
+            for (slong j = 0; j < places; ++j) {
+                assert(::arb_equal(logs.data() + j, expected.data() + j) !=
+                       0);
+                assert(has_radius_at_most_2exp(logs.data() + j, -precision));
+            }
+        }
+    }
+}
+
+void check_repeated_factor_logs() noexcept {
+    // Degree one, quadratic and cubic fields: the three FLINT element layouts.
+    silex::NumberField rational = degree_one_field();
+    silex::Element two(rational);
+    silex::Element other_two(rational);
+    silex::Element three(rational);
+    assert(two.set_si(2));
+    assert(three.set_si_over_si(3, 7));
+    assert(other_two.set_si_over_si(6, 3));
+    silex::FactoredElement rational_value(rational);
+    assert(rational_value.push(two, 3));
+    assert(rational_value.push(three, -2));
+    assert(rational_value.push(other_two, -5));
+    assert(rational_value.push(three, 1));
+    assert(rational_value.push(two, 4));
+    check_factored_log_of(rational, rational_value, 1);
+
+    silex::NumberField quadratic = quadratic_field(2);
+    silex::Element unit_like(quadratic);
+    silex::Element theta(quadratic);
+    silex::Element same_unit(quadratic);
+    silex::Element shifted(quadratic);
+    set_one_plus_theta(unit_like);
+    assert(theta.gen());
+    assert(same_unit.add_si(theta, 1));
+    assert(shifted.add_si(theta, 5));
+    silex::FactoredElement quadratic_value(quadratic);
+    assert(quadratic_value.push(unit_like, 7));
+    assert(quadratic_value.push(shifted, 2));
+    assert(quadratic_value.push(same_unit, -3));
+    assert(quadratic_value.push(shifted, -1));
+    assert(quadratic_value.push(unit_like, 1));
+    check_factored_log_of(quadratic, quadratic_value, 2);
+
+    silex::NumberField cubic = cubic_field();
+    silex::Element cubic_theta(cubic);
+    silex::Element a(cubic);
+    silex::Element same_a(cubic);
+    silex::Element b(cubic);
+    silex::Element c(cubic);
+    set_cubic_element(a, 1, 1, 0);
+    assert(cubic_theta.gen());
+    assert(same_a.add_si(cubic_theta, 1));
+    set_cubic_element(b, 3, -1, 1);
+    set_cubic_element(c, -5, 2, 7);
+    silex::FactoredElement cubic_value(cubic);
+    assert(cubic_value.push(a, 3));
+    assert(cubic_value.push(b, -2));
+    assert(cubic_value.push(same_a, 5));
+    assert(cubic_value.push(b, 1));
+    assert(cubic_value.push(a, -4));
+    assert(cubic_value.push(c, 2));
+    check_factored_log_of(cubic, cubic_value, 2);
+
+    // Hundreds of entries over three distinct factors, as unit candidates
+    // built from relation products have.
+    silex::FactoredElement long_value(cubic);
+    const silex::Element* const bases[] = {&a, &b, &same_a, &c};
+    for (slong i = 0; i < 300; ++i) {
+        const slong exponent = (i % 7) - 3;
+        if (exponent != 0) {
+            assert(long_value.push(*bases[(i * 5) % 4], exponent));
+        }
+    }
+    check_factored_log_of(cubic, long_value, 2);
+}
+
 int main() {
     check_many_factor_evaluation();
+    check_repeated_factor_logs();
     check_multi_factor_leftover_roots();
     check_definite_non_powers();
 

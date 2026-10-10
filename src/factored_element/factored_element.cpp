@@ -2,8 +2,12 @@
 #include "../order_unit/precision_cap_internal.hpp"
 
 #include <flint/arb.h>
+#include <flint/nf.h>
+#include <flint/nf_elem.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -191,6 +195,84 @@ void profile_factored_log_shape(const DiagnosticsContext* diagnostics,
                 diagnostics, DiagnosticsModule::element,
                 "element.factored.logarithmic_embedding.max_exp_bits.gt32");
     }
+}
+
+// Screening hash of a factor's stored coefficients.  It only routes the
+// search in distinct_factor_indices, where every match is confirmed with
+// Element::equal, so two equal factors that hash apart are merely looked up
+// separately.
+std::uint64_t factor_screen_hash(const Element& factor,
+                                 const nf_struct* field) noexcept {
+    std::uint64_t hash = UINT64_C(14695981039346656037);
+    const auto mix = [&hash](const fmpz* value) noexcept {
+        hash ^= static_cast<std::uint64_t>(
+                ::fmpz_fdiv_ui(value, UWORD(4294967291)));
+        hash *= UINT64_C(1099511628211);
+    };
+    const nf_elem_struct* value = factor.raw_flint_element();
+    if ((field->flag & NF_LINEAR) != 0) {
+        mix(LNF_ELEM_NUMREF(value));
+        mix(LNF_ELEM_DENREF(value));
+    } else if ((field->flag & NF_QUADRATIC) != 0) {
+        mix(QNF_ELEM_NUMREF(value));
+        mix(QNF_ELEM_NUMREF(value) + 1);
+        mix(QNF_ELEM_DENREF(value));
+    } else {
+        const slong length = NF_ELEM(value)->length;
+        hash ^= static_cast<std::uint64_t>(length);
+        hash *= UINT64_C(1099511628211);
+        for (slong i = 0; i < length; ++i) {
+            mix(NF_ELEM_NUMREF(value) + i);
+        }
+        mix(NF_ELEM_DENREF(value));
+    }
+    return hash;
+}
+
+// Maps each entry to the index of its factor among the distinct factors of
+// `entries`, numbered in order of first occurrence; `first[d]` is the first
+// entry whose factor is distinct factor d.  Factors are compared with
+// Element::equal, the comparison the embedding log cache uses.
+bool distinct_factor_indices(std::vector<std::size_t>& index,
+                             std::vector<std::size_t>& first,
+                             FactorSpan<Element> entries,
+                             const NumberField& parent) noexcept {
+    const std::size_t count = entries.size();
+    std::size_t buckets = 1;
+    while (buckets < 2 * count) {
+        if (buckets > std::numeric_limits<std::size_t>::max() / 4) {
+            return false;
+        }
+        buckets *= 2;
+    }
+    constexpr std::size_t empty = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> table(buckets, empty);
+    std::vector<std::uint64_t> hashes;
+    index.assign(count, 0);
+    first.clear();
+    const nf_struct* field = parent.raw_flint_field();
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::uint64_t hash =
+                factor_screen_hash(entries[i].factor, field);
+        std::size_t slot = static_cast<std::size_t>(hash) & (buckets - 1);
+        for (;;) {
+            const std::size_t distinct = table[slot];
+            if (distinct == empty) {
+                table[slot] = first.size();
+                index[i] = first.size();
+                first.push_back(i);
+                hashes.push_back(hash);
+                break;
+            }
+            if (hashes[distinct] == hash &&
+                entries[first[distinct]].factor.equal(entries[i].factor)) {
+                index[i] = distinct;
+                break;
+            }
+            slot = (slot + 1) & (buckets - 1);
+        }
+    }
+    return true;
 }
 
 slong floor_half_slong(slong value) noexcept {
@@ -938,11 +1020,34 @@ bool FactoredElement::logarithmic_embedding(
                                max_exponent_bits);
 
     flint::ArbVec sum(places);
-    flint::ArbVec row(places);
     if (entries.empty()) {
         _arb_vec_zero(sum.data(), places);
         return out.set_from(flint::ArbVecConstRef(sum));
     }
+
+    // Unit candidates repeat a few distinct factors many times (a product of
+    // relation units appends the factor lists of its operands and merges
+    // nothing), so each distinct factor's log is looked up once per pass and
+    // reused for its later entries.  The sum below still takes every entry
+    // in order with its own exponent, so the result is the one the per-entry
+    // loop computes: a repeated lookup in that loop is a cache hit returning
+    // the row its first lookup in the pass returned or stored at the same
+    // precision.  (Only when that store failed would the per-entry loop
+    // recompute the row instead.)
+    std::vector<std::size_t> distinct_index;
+    std::vector<std::size_t> distinct_first;
+    if (!distinct_factor_indices(distinct_index, distinct_first, entries,
+                                 parent_)) {
+        return false;
+    }
+    const std::size_t distinct_count = distinct_first.size();
+    if (places <= 0 ||
+        distinct_count > static_cast<std::size_t>(
+                std::numeric_limits<slong>::max() / places)) {
+        return false;
+    }
+    flint::ArbVec rows(static_cast<slong>(distinct_count) * places);
+    std::vector<unsigned char> row_ready(distinct_count, 0);
 
     // Source trace: reference NfOrd/FacElem.jl:116-120 and :149-205 bucket factor
     // logs, add exponent and factor-count guard bits, and double working
@@ -964,27 +1069,34 @@ bool FactoredElement::logarithmic_embedding(
             return false;
         }
         _arb_vec_zero(sum.data(), places);
+        std::fill(row_ready.begin(), row_ready.end(),
+                  static_cast<unsigned char>(0));
         bool first = true;
         bool precision_too_low = false;
-        for (const auto& entry : entries) {
-            {
+        for (std::size_t k = 0; k < entries.size(); ++k) {
+            const auto& entry = entries[k];
+            const std::size_t d = distinct_index[k];
+            arb_ptr row = rows.data() + static_cast<slong>(d) * places;
+            if (row_ready[d] == 0) {
                 SILEX_PROFILE_SCOPE(
                         diagnostics, DiagnosticsModule::element,
                         "element.factored.logarithmic_embedding_factor");
                 if (!silex::logarithmic_embedding(
-                            flint::ArbVecRef(row), embeddings, entry.factor,
-                            mode, factor_precision, diagnostics)) {
+                            flint::ArbVecRef(row, places), embeddings,
+                            entry.factor, mode, factor_precision,
+                            diagnostics)) {
                     precision_too_low = true;
                     break;
                 }
+                row_ready[d] = 1;
             }
 
             for (slong j = 0; j < places; ++j) {
                 if (first) {
-                    arb_mul_si(sum.data() + j, row.data() + j,
+                    arb_mul_si(sum.data() + j, row + j,
                                entry.exponent, factor_precision);
                 } else {
-                    arb_addmul_si(sum.data() + j, row.data() + j,
+                    arb_addmul_si(sum.data() + j, row + j,
                                   entry.exponent, factor_precision);
                 }
                 if (!arb_has_radius_at_most_2exp(
