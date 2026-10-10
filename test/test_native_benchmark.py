@@ -43,6 +43,7 @@ EXPECTED_TARGETS = {
     "b-silex-nf_prime_idl",
     "b-silex-zeta_bf_linear_factor_count",
     "b-silex-zeta_bf_prime_scratch",
+    "b-silex-zeta_grh_factor_base_bound",
 }
 
 

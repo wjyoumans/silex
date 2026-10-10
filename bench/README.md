@@ -90,6 +90,8 @@ Current targets:
 - `b-silex-nf_prime_idl`: prime-ideal reduction and valuation operations.
 - `b-silex-zeta_bf_linear_factor_count`: finite-field linear-factor kernels.
 - `b-silex-zeta_bf_prime_scratch`: per-prime zeta scratch kernels.
+- `b-silex-zeta_grh_factor_base_bound`: GRH generation bound, Bach fallback
+  (BDF not computable) and BDF control rows.
 
 For timing, build or preserve the baseline before implementation and use
 separate fresh Release trees with identical compiler, dependency, and option

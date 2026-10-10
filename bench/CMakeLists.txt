@@ -134,6 +134,10 @@ silex_add_benchmark(b-silex-zeta_bf_linear_factor_count
         zeta/b-bf_linear_factor_count.cpp)
 silex_add_benchmark(b-silex-zeta_bf_prime_scratch
         zeta/b-bf_prime_scratch.cpp)
+silex_add_benchmark(b-silex-zeta_grh_factor_base_bound
+        zeta/b-grh_factor_base_bound.cpp)
+target_include_directories(b-silex-zeta_grh_factor_base_bound
+        PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
 # Release semantic coverage is intentionally explicit.  The role audit below
 # compares this classification with each executable's --benchmark_list_tests
@@ -350,6 +354,9 @@ silex_benchmark_release_rows(b-silex-zeta_bf_linear_factor_count
     BM_bf_linear_factor_count/sextic_control_array_binexp
     BM_bf_linear_factor_count/sextic_control_roots
     BM_bf_linear_factor_count/sextic_control_distinct_degree)
+silex_benchmark_release_rows(b-silex-zeta_grh_factor_base_bound
+    BM_grh_factor_base_bound_bach_fallback
+    BM_grh_factor_base_bound_bdf_control)
 silex_benchmark_release_rows(b-silex-zeta_bf_prime_scratch
     BM_bf_prime_scratch/cubic_blocker_per_prime
     BM_bf_prime_scratch/cubic_blocker_per_term

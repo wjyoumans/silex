@@ -106,8 +106,10 @@ Native workload surface
    * - ``b-silex-nf_idl``, ``b-silex-nf_prime_idl``
      - Factor-over-base, local reduction, and valuation rows.
    * - ``b-silex-zeta_bf_linear_factor_count``,
-       ``b-silex-zeta_bf_prime_scratch``
-     - Zeta finite-field and per-prime scratch kernels.
+       ``b-silex-zeta_bf_prime_scratch``,
+       ``b-silex-zeta_grh_factor_base_bound``
+     - Zeta finite-field and per-prime scratch kernels, and the GRH
+       factor-base bound (Bach fallback).
    * - ``b-silex-fmpz_smat_*``, ``b-silex-status``
      - Native regression and smoke coverage.
 

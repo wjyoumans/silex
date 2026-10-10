@@ -627,12 +627,27 @@ bool check_theorem7_bound_reference() noexcept {
 
 // The index-one value: the least multiple of 9 whose Theorem 7 bound is
 // below 1/4 - 2^-20 (gp: 387 for the cubic, 522 for x^8 - x - 1, 531 for
-// the multiquadratic octic; 81 for x^2 - 5, from Silex with the
-// minimality check below), a log radius below 1/4, and an enclosure
+// the multiquadratic octic; 81 for x^2 - 5), a log radius below 1/4, and an
+// enclosure
 // that meets the default route's hR.  A quadratic order with the
 // unconditional L(1, chi) route has one too, as grh requests take it in
 // every degree above one; its default hR is the L(1, chi) value, an
 // independent check.  Degree one has none.
+//
+// Independent oracle for 81 (gp 2.17.4, realprecision 60): with
+// nf = nfinit(x^2 - 5), n = 2, r = 2, D = 5, sigma = 1 + 1/sqrt(log D),
+// s2 = 2 sigma - 1, delta0 the constant part of delta as in the Theorem 7
+// formula above, S(X) = sum over idealprimedec prime ideals of norm N < X
+// of log N / (N^sigma - 1), d = delta0 - 2 S(X), t = log(X/9),
+// beta = (1/2 + 1/t)(X/9) log((X/9 + 1)/(X/9 - 1))/2, and
+//   b(X) = 2.324 s2 / (sqrt(X) log(3X))
+//          * (d (1 + 3.88/t) + 4.26 (n - 1) beta / (s2 sqrt(X))),
+// the least X = 18, 27, ... with d > 0 and b(X) < 1/4 - 2^-20 is
+// X = 81, b(81) = 0.22147147143...; the same script gives 387
+// (b = 0.249044782...) and 522 (b = 0.249374529...) for the cubic and
+// x^8 - x - 1, matching the values above.  Because the search is the least
+// multiple of 9, X = 72 fails with b(72) = 0.25265, the minimality that the
+// preceding-bound check below tests in Silex.
 bool check_index_one_product(const FieldSetup& setup,
                              ulong expected_cutoff) noexcept {
     sflint::Arb product;
