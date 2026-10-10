@@ -1588,8 +1588,9 @@ norm-accounting criterion above, so the lattice searches apply that rejection
 from the order-basis coordinates before any element is built.  The absolute
 norm of ``a = sum c_i w_i`` is the determinant of the multiplication-by-``a``
 matrix on the order basis (Cohen, *A Course in Computational Algebraic Number
-Theory*, GTM 138, section 4.3, ``N(a) = det(x -> a x)``), assembled from the
-precomputed table of ``w_i w_j`` coordinates; the layout follows PARI 2.17.3
+Theory*, GTM 138, section 4.3, ``N(a) = det(x -> a x)``, and the determinant
+is independent of the Q-basis, so the order basis may be used), assembled from
+the precomputed table of ``w_i w_j`` coordinates; the layout follows PARI 2.17.3
 ``src/basemath/base3.c:zk_multable``.  The smoothness test is the one of
 ``buch2.c:can_factor`` and ``base4.c:Z_ppo``: dividing out the part of the
 norm supported on the product of the factor-base rational primes and the

@@ -584,17 +584,46 @@ FieldSetup maximal_order_setup(const std::vector<slong>& coefficients) noexcept 
 int check_norm_prefilter_against_direct(const FieldSetup& setup,
                                         slong base_bound,
                                         slong required_rational_prime,
-                                        slong radius) {
+                                        slong radius,
+                                        bool shared_rational_prime = false) {
     const silex::Order& order = setup.maximal_order;
     const slong n = order.degree();
     sflint::Fmpz bound;
     sflint::fmpz_set_si(sflint::FmpzRef(bound), base_bound);
     silex::FactorBase base(order);
     silex::PrimeIdeal required(order);
-    if (!order.is_maximal() || !base.is_defined() ||
-        !base.build(sflint::FmpzConstRef(bound)) ||
-        !first_prime_above(required, order, required_rational_prime) ||
-        base.contains(required)) {
+    if (!order.is_maximal() || !base.is_defined()) {
+        return 1;
+    }
+    if (shared_rational_prime) {
+        // Norm-bounded base: it holds the degree-one prime above the required
+        // rational prime but not the required residue-degree-two prime, so
+        // that rational prime occurs twice in the smooth product.
+        sflint::Fmpz p;
+        sflint::fmpz_set_si(sflint::FmpzRef(p), required_rational_prime);
+        silex::PrimeIdealList primes;
+        const silex::PrimeIdeal* above = nullptr;
+        bool found = false;
+        if (!base.build_prime_ideal_norm_bounded(
+                    sflint::FmpzConstRef(bound)) ||
+            !silex::decompose_prime(primes, order, sflint::FmpzConstRef(p))) {
+            return 1;
+        }
+        for (slong i = 0; i < primes.size(); ++i) {
+            above = primes.at(i);
+            if (above != nullptr && above->residue_degree() == 2) {
+                found = required.set(*above);
+            }
+        }
+        if (!found || !base.contains(*primes.at(0)) ||
+            primes.at(0)->residue_degree() != 1) {
+            return 1;
+        }
+    } else if (!base.build(sflint::FmpzConstRef(bound)) ||
+               !first_prime_above(required, order, required_rational_prime)) {
+        return 1;
+    }
+    if (base.contains(required)) {
         return 1;
     }
     silex::detail::RequiredPrimeNormPrefilter prefilter;
@@ -602,6 +631,14 @@ int check_norm_prefilter_against_direct(const FieldSetup& setup,
                                                           required) ||
         !prefilter.ready || prefilter.degree != n) {
         return 1;
+    }
+    if (shared_rational_prime) {
+        sflint::Fmpz twice;
+        sflint::fmpz_set_si(sflint::FmpzRef(twice),
+                            required_rational_prime * required_rational_prime);
+        if (!fmpz_divisible(prefilter.smooth_product.raw(), twice.raw())) {
+            return 1;
+        }
     }
 
     sflint::FmpzMat coordinates(1, n);
@@ -671,6 +708,7 @@ int test_required_prime_norm_prefilter_matches_direct() {
     const FieldSetup quartic = truncated_decomposition_counterexample_fixture();
     if (check_norm_prefilter_against_direct(quadratic, 7, 11, 20) != 0 ||
         check_norm_prefilter_against_direct(cubic, 7, 11, 5) != 0 ||
+        check_norm_prefilter_against_direct(cubic, 5, 5, 5, true) != 0 ||
         check_norm_prefilter_against_direct(biquadratic, 7, 23, 3) != 0 ||
         check_norm_prefilter_against_direct(quartic, 7, 11, 3) != 0) {
         return 1;
