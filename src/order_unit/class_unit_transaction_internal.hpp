@@ -128,6 +128,12 @@ struct ClassUnitTransactionReport {
     // the candidate computation, or nullptr when validation never ran.  Read
     // only to describe a class_unit_computation_failed transaction.
     const char* last_validation_outcome = nullptr;
+    // Whether the most recent class-group candidate attempt ended because its
+    // factor base had more generators than the relation modules allow
+    // (class_group.cpp, kRelationModuleMaxColumns).  Cleared with
+    // factor_base_honesty_failure; read only to name a failed transaction's
+    // reason.
+    bool factor_base_size_limit_exceeded = false;
 
     void reset() noexcept;
     void record_timing(ClassUnitStage stage, double elapsed_ms) noexcept;
@@ -180,8 +186,10 @@ public:
 
 const char* class_unit_stage_name(ClassUnitStage stage) noexcept;
 // The failure_reason of a transaction whose class/unit computation failed:
-// factor_base_honesty_unwitnessed when the last candidate attempt ended at an
-// unwitnessed required prime with no factor-base restart left, otherwise
+// factor_base_size_limit_exceeded when the last candidate attempt ended
+// because its factor base exceeded the relation module size limit,
+// factor_base_honesty_unwitnessed when it ended at an unwitnessed required
+// prime with no factor-base restart left, otherwise
 // class_unit_computation_failed.
 const char* class_unit_computation_failure_reason(
         const ClassUnitTransactionReport& audit) noexcept;

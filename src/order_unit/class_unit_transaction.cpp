@@ -234,11 +234,15 @@ void ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
     if (run_context != nullptr) {
         run_context->audit.factor_base_honesty_failure =
                 FactorBaseHonestyFailure{};
+        run_context->audit.factor_base_size_limit_exceeded = false;
     }
 }
 
 const char* class_unit_computation_failure_reason(
         const ClassUnitTransactionReport& audit) noexcept {
+    if (audit.factor_base_size_limit_exceeded) {
+        return "factor_base_size_limit_exceeded";
+    }
     return audit.factor_base_honesty_failure.recorded
             ? "factor_base_honesty_unwitnessed"
             : "class_unit_computation_failed";
@@ -257,6 +261,7 @@ void ClassUnitTransactionReport::reset() noexcept {
     final_result_published = false;
     factor_base_honesty_failure = FactorBaseHonestyFailure{};
     last_validation_outcome = nullptr;
+    factor_base_size_limit_exceeded = false;
 }
 
 void ClassUnitTransactionReport::record_timing(ClassUnitStage stage,

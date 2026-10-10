@@ -4185,6 +4185,53 @@ int test_twin_class_generation_routes() {
     return 0;
 }
 
+// A factor base with more generators than the relation modules allow
+// (2^14) is refused before their dense mod-p matrices are allocated, the
+// same way on every machine: the context keeps no base, and an attached
+// class/unit transaction names the reason factor_base_size_limit_exceeded
+// until the next attempt clears it.
+int test_factor_base_size_limit_fails_closed() {
+    silex::NumberField field = degree_one_field();
+    silex::Order order = silex::test::equation_order(field);
+    // pi(200000) = 17984 primes of Q, one prime ideal each.
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 200000));
+    silex::FactorBase base(order);
+    assert(base.is_defined() &&
+           base.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(bound)));
+    assert(base.length() > (WORD(1) << 14));
+
+    silex::ClassGroupContext detached(order);
+    assert(!detached.set_factor_base(base));
+    assert(!detached.has_factor_base());
+
+    silex::detail::ClassUnitTransactionReport audit;
+    silex::detail::ClassUnitTransactionContext transaction{
+            audit, nullptr, {}, {}, false};
+    silex::ClassGroupContext context(order);
+    silex::detail::ClassUnitTransactionAccess::set_run_context(
+            context, &transaction);
+    assert(!context.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(!context.has_factor_base());
+    assert(audit.factor_base_size_limit_exceeded);
+    assert(std::strcmp(
+                   silex::detail::class_unit_computation_failure_reason(
+                           audit),
+                   "factor_base_size_limit_exceeded") == 0);
+    silex::detail::ClassGroupRelationSearchAccess::
+            clear_factor_base_honesty_failure(context);
+    assert(!audit.factor_base_size_limit_exceeded);
+    assert(std::strcmp(
+                   silex::detail::class_unit_computation_failure_reason(
+                           audit),
+                   "class_unit_computation_failed") == 0);
+    assert(!context.set_factor_base(base));
+    assert(audit.factor_base_size_limit_exceeded);
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               nullptr);
+    return 0;
+}
+
 int main() {
     test_certification_metadata_defaults_and_invalidation();
     test_factor_base_generation_metadata();
@@ -4241,5 +4288,6 @@ int main() {
     test_transaction_keeps_generation_requirement();
     test_grh_generation_bound_bach_fallback();
     test_twin_class_generation_routes();
+    test_factor_base_size_limit_fails_closed();
     return 0;
 }

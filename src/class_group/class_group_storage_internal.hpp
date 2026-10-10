@@ -438,7 +438,8 @@ public:
 
     // Record, or clear, in the attached class/unit transaction report the
     // unwitnessed required prime that ended a candidate attempt; no-ops
-    // without a transaction.
+    // without a transaction.  Clearing also clears the report's
+    // factor-base size-limit flag, so each attempt starts clean.
     static void record_factor_base_honesty_failure(
             ClassGroupContext& context,
             FactorBaseHonestyFailure&& failure) noexcept;

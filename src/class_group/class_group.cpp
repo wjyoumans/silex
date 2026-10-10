@@ -50,8 +50,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <new>
 #include <type_traits>
@@ -943,41 +941,35 @@ bool reset_row_module(fmpz_smat::HnfContext& module, slong ncols) noexcept {
     return module.reset(ncols, kRowModuleModRankPrime);
 }
 
-// Whether one block of ncols * ncols words can be allocated now.  Each
-// relation module keeps dense ncols x ncols mod-p rank matrices
-// (fmpz_smat::ModRankContext, FLINT nmod_mat_init), and FLINT aborts the
-// process when such an allocation fails (flint_calloc).  Probing the same
-// allocation first lets a factor base too large for the available memory
-// fail closed instead; it refuses nothing that FLINT would allocate.
-bool dense_mod_rank_matrix_allocatable(slong ncols) noexcept {
-    if (ncols <= 0) {
-        return true;
-    }
-    const std::size_t n = static_cast<std::size_t>(ncols);
-    if (n > SIZE_MAX / sizeof(ulong) / n) {
-        return false;
-    }
-    // Volatile, so the compiler cannot elide the allocation and free pair.
-    void* volatile probe = std::calloc(n * n, sizeof(ulong));
-    if (probe == nullptr) {
-        return false;
-    }
-    std::free(probe);
-    return true;
-}
+// Largest factor base, in generators, for which a class-group context
+// builds its relation modules: 2^14.  Each reset allocates three dense
+// ncols x ncols mod-p matrices (the row module's and the relation module's
+// fmpz_smat::ModRankContext and the relation module's checkpoint, FLINT
+// nmod_mat), 2 GiB each at this limit, and FLINT aborts the process when
+// such an allocation fails (flint_calloc).  A larger base fails closed
+// before allocating, with reason factor_base_size_limit_exceeded in a
+// class/unit transaction, so it fails the same way on every machine.  The
+// largest base of the test suite and the benchmark corpus has fewer than
+// 400 generators; the proven base of an imaginary quadratic field, up to
+// sqrt(|D| / 3), passes the limit between |D| = 4e11 and 5e11 (about 2.4e4
+// generators at |D| = 1e12).
+constexpr slong kRelationModuleMaxColumns = WORD(1) << 14;
 
 bool reset_relation_modules(
         fmpz_smat::HnfContext& row_module,
         detail::ClassRelationModuleContext& relation_module,
         slong ncols,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        detail::ClassUnitTransactionContext* run_context) noexcept {
     row_module.set_diagnostics(diagnostics);
     relation_module.set_diagnostics(diagnostics);
-    if (!dense_mod_rank_matrix_allocatable(ncols)) {
+    if (ncols > kRelationModuleMaxColumns) {
         SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                   LogLevel::detail,
-                  "relation module mod-p rank matrix cannot be allocated "
-                  "for this factor base");
+                  "factor base exceeds the relation module size limit");
+        if (run_context != nullptr) {
+            run_context->audit.factor_base_size_limit_exceeded = true;
+        }
         return false;
     }
     return reset_row_module(row_module, ncols) &&
@@ -8628,7 +8620,8 @@ bool ClassGroupContext::build_factor_base(
         !reset_relation_modules(candidate.row_module_,
                                 candidate.relation_module_,
                                 candidate.base_.length(),
-                                candidate.diagnostics_)) {
+                                candidate.diagnostics_,
+                                class_unit_transaction_context_)) {
         return false;
     }
 
@@ -8674,7 +8667,8 @@ bool ClassGroupContext::build_relation_factor_base_(
         !reset_relation_modules(candidate.row_module_,
                                 candidate.relation_module_,
                                 candidate.base_.length(),
-                                candidate.diagnostics_)) {
+                                candidate.diagnostics_,
+                                class_unit_transaction_context_)) {
         return false;
     }
 
@@ -8724,7 +8718,8 @@ bool ClassGroupContext::build_search_factor_base_(
         !reset_relation_modules(candidate.row_module_,
                                 candidate.relation_module_,
                                 candidate.base_.length(),
-                                candidate.diagnostics_)) {
+                                candidate.diagnostics_,
+                                class_unit_transaction_context_)) {
         return false;
     }
 
@@ -8756,7 +8751,8 @@ bool ClassGroupContext::set_factor_base(const FactorBase& base_in) noexcept {
         !reset_relation_modules(candidate.row_module_,
                                 candidate.relation_module_,
                                 candidate.base_.length(),
-                                candidate.diagnostics_)) {
+                                candidate.diagnostics_,
+                                class_unit_transaction_context_)) {
         return false;
     }
 
@@ -9734,7 +9730,8 @@ bool ClassGroupContext::set_relation_matrix(
         !reset_relation_modules(candidate.row_module_,
                                 candidate.relation_module_,
                                 candidate.base_.length(),
-                                candidate.diagnostics_)) {
+                                candidate.diagnostics_,
+                                class_unit_transaction_context_)) {
         return false;
     }
     candidate.has_base_ = true;
