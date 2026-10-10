@@ -3836,8 +3836,7 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
     SILEX_PROFILE_SCOPE(
             diagnostics, DiagnosticsModule::unit_group,
             "unit_group.zeta_bf.index_one.class_regulator_product");
-    if (!supported_order(order, precision) || order.degree() <= 1 ||
-        zeta_unconditional_route_available(order)) {
+    if (!supported_order(order, precision) || order.degree() <= 1) {
         return false;
     }
 

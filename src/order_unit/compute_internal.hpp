@@ -249,8 +249,8 @@ public:
     // back to the default value.  Returns false, leaving value() as it is,
     // when the validation enclosure is enabled, when the default value is
     // already cached at `precision` or more (it is at least as narrow), or
-    // when the index-one value is unavailable (an unconditional route, or
-    // no cutoff up to the default maximum reaches 1/4).  The caller must
+    // when the index-one value is unavailable (degree one, or no cutoff up
+    // to the default maximum reaches 1/4).  The caller must
     // use the default value from ensure() for anything other than
     // recognizing index one.
     bool ensure_index_one(const Order& order,

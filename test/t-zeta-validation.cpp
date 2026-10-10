@@ -627,9 +627,12 @@ bool check_theorem7_bound_reference() noexcept {
 
 // The index-one value: the least multiple of 9 whose Theorem 7 bound is
 // below 1/4 - 2^-20 (gp: 387 for the cubic, 522 for x^8 - x - 1, 531 for
-// the multiquadratic octic), a log radius below 1/4, and an enclosure
-// that meets the default route's hR.  Fields with an unconditional route
-// have none.
+// the multiquadratic octic; 81 for x^2 - 5, from Silex with the
+// minimality check below), a log radius below 1/4, and an enclosure
+// that meets the default route's hR.  A quadratic order with the
+// unconditional L(1, chi) route has one too, as grh requests take it in
+// every degree above one; its default hR is the L(1, chi) value, an
+// independent check.  Degree one has none.
 bool check_index_one_product(const FieldSetup& setup,
                              ulong expected_cutoff) noexcept {
     sflint::Arb product;
@@ -674,7 +677,13 @@ bool check_index_one_products() noexcept {
     const slong simplest_cubic[] = {-1, -9, -6};
     const slong octic[] = {-1, -1, 0, 0, 0, 0, 0, 0};
     const slong multiquadratic[] = {1, 0, -3, 0, 8, 0, -3, 0};
+    const slong linear[] = {0};
     const FieldSetup quadratic = quadratic_specialized_control();
+    if (!silex::detail::zeta_unconditional_route_available(
+                quadratic.maximal_order)) {
+        return false;
+    }
+    const FieldSetup rationals = setup_from_coefficients(linear, 1);
     sflint::Arb product;
     sflint::arb_set_ui(product, 7);
     silex::detail::ZetaBfRouteAudit audit;
@@ -684,10 +693,11 @@ bool check_index_one_products() noexcept {
            check_index_one_product(setup_from_coefficients(octic, 8), 522) &&
            check_index_one_product(
                    setup_from_coefficients(multiquadratic, 8), 531) &&
+           check_index_one_product(quadratic, 81) &&
            !silex::detail::
                    zeta_class_regulator_product_index_one_with_diagnostics(
                            sflint::ArbRef(product), audit,
-                           quadratic.maximal_order, 128, nullptr) &&
+                           rationals.maximal_order, 128, nullptr) &&
            audit.cutoff == 5 && ::arb_equal_si(product.raw(), 7) != 0;
 }
 
@@ -726,7 +736,9 @@ bool check_index_one_cache(const FieldSetup& setup,
 }
 
 // A grh transaction accepted by the index-one test records the audit of
-// the index-one value, not of the default route.
+// the index-one value, not of the default route.  This holds for x^2 - d
+// as well, although that presentation also has the unconditional L(1, chi)
+// route.
 bool check_grh_transaction_records_index_one_audit(
         const FieldSetup& setup) noexcept {
     silex::ClassGroupComputeOptions options;
@@ -816,6 +828,7 @@ int main() {
     const FieldSetup quartic = quartic_blocker();
     const slong simplest_cubic_a6[] = {-1, -9, -6};
     const slong d12_coefficients[] = {1, 0, -2, 0, 2, 1, 1, 1, 2, -1, 0, -1};
+    const slong x2_minus_210[] = {-210, 0};
 
     return !check_failed_call_preserves_outputs(quadratic.maximal_order,
                                                 20000) ||
@@ -833,6 +846,8 @@ int main() {
                            387) ||
                    !check_grh_transaction_records_index_one_audit(
                            setup_from_coefficients(simplest_cubic_a6, 3)) ||
+                   !check_grh_transaction_records_index_one_audit(
+                           setup_from_coefficients(x2_minus_210, 2)) ||
                    !check_grh_transaction_refines_to_default_audit(
                            setup_from_coefficients(d12_coefficients, 12))
             ? 1

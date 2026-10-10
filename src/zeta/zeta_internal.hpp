@@ -161,11 +161,13 @@ bool zeta_class_regulator_product_validation_with_diagnostics(
 // sigma = 1 + 1/sqrt(log D), is below 1/4 - 2^-20, so that the log residue
 // has radius below 1/4, enough for the index-one test (Belabas-Friedman
 // 2015, p. 1, footnote 1: below (1/2) log 2).  Valid under GRH for zeta_K
-// and zeta_Q.  `audit` receives the Theorem 7 error bound, the cutoff, the
-// default route's maximum cutoff, and the precisions, and is written only
-// on success.  Fails, leaving the outputs unchanged, when `order` has an
-// unconditional route (zeta_unconditional_route_available) or no cutoff up
-// to the maximum reaches the target; callers then use the default route.
+// and zeta_Q, in every degree above one, including a quadratic order that
+// also has the unconditional L(1, chi) route: its only caller serves grh
+// requests, which accept a GRH-conditional hR.  `audit` receives the
+// Theorem 7 error bound, the cutoff, the default route's maximum cutoff,
+// and the precisions, and is written only on success.  Fails, leaving the
+// outputs unchanged, in degree one or when no cutoff up to the maximum
+// reaches the target; callers then use the default route.
 bool zeta_class_regulator_product_index_one_with_diagnostics(
         flint::ArbRef out,
         ZetaBfRouteAudit& audit,
