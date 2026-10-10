@@ -1583,6 +1583,23 @@ arbitrary-precision input does not enlarge the search: the initial rational
 prime retains its machine-integer eligibility check, and the scalar loop,
 candidate order, bounds, random draws, and non-scalar path are unchanged.
 
+For degrees 2 to 4 the direct honesty path rejects most candidates by the
+norm-accounting criterion above, so the lattice searches apply that rejection
+from the order-basis coordinates before any element is built.  The absolute
+norm of ``a = sum c_i w_i`` is the determinant of the multiplication-by-``a``
+matrix on the order basis (Cohen, *A Course in Computational Algebraic Number
+Theory*, GTM 138, section 4.3, ``N(a) = det(x -> a x)``), assembled from the
+precomputed table of ``w_i w_j`` coordinates; the layout follows PARI 2.17.3
+``src/basemath/base3.c:zk_multable``.  The smoothness test is the one of
+``buch2.c:can_factor`` and ``base4.c:Z_ppo``: dividing out the part of the
+norm supported on the product of the factor-base rational primes and the
+required prime's rational prime must leave a unit, and a nonzero norm with a
+larger cofactor cannot be a smooth witness.  The prefilter only rejects a
+candidate that the direct path rejects by that same cofactor test; every
+other candidate, every unsupported or unreadable case, and degree 5 and above
+continue through the direct path unchanged, so accepted witnesses, search
+order, bounds, random draws and labels are unchanged.
+
 The honesty witness search for each required prime starts at fixed caps:
 lattice radius 8, 16 twists, 50 random sub-factor-base tries (PARI 2.17.3
 ``src/basemath/buch2.c:be_honest``, ``maxtry_HONEST``), and, on the T2 route,
