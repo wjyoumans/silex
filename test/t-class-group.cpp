@@ -4489,8 +4489,11 @@ int test_grh_generation_bound_bach_fallback() {
     // monic integral defining polynomial.  The bound above now succeeds, so
     // the request still fails at policy selection, in the factor-base probe.
     // The failure publishes nothing.
+    silex::FactorBase failed_probe_base;
     assert(!silex::detail::grh_factor_base_bound(bound, nonmonic_maximal,
-                                                 nullptr, nullptr, nullptr));
+                                                 nullptr, nullptr, nullptr,
+                                                 &failed_probe_base));
+    assert(!failed_probe_base.is_defined());
     silex::ClassGroupComputeOptions options;
     options.max_candidates = 5000;
     options.max_relations = 500;
@@ -4546,6 +4549,21 @@ int test_grh_generation_bound_bach_fallback() {
     assert(basis == silex::ClassGroupGenerationBasis::bdf);
     assert(sflint::fmpz_equal_si(generation_bound, 5));
     assert(sflint::fmpz_equal_si(bound, 80));
+    // The probe base handed out with the bound is the norm-bounded base at
+    // that bound, the one the transaction's strict search build takes over.
+    silex::FactorBase probe_base;
+    sflint::Fmpz probe_bound;
+    assert(silex::detail::grh_factor_base_bound(probe_bound,
+                                                quadratic_maximal, nullptr,
+                                                nullptr, nullptr,
+                                                &probe_base));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(probe_bound),
+                              sflint::FmpzConstRef(bound)));
+    silex::FactorBase rebuilt_base(quadratic_maximal);
+    assert(rebuilt_base.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(probe_base.length() > 20);
+    assert(probe_base.equal(rebuilt_base));
 
     silex::ClassGroupContext class_group;
     silex::OrderUnitGroup units;

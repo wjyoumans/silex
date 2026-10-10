@@ -383,6 +383,84 @@ int test_lll_relation_base_order() {
     return 0;
 }
 
+// The norm ordering applied to a prebuilt norm-bounded base (the grh
+// policy's probe base) keeps the same prime ideals, sorts them by norm,
+// largest first, with ties in build order, and keeps each rational-prime
+// block and its completeness.
+int test_lll_relation_base_from_norm_bounded() {
+    silex::NumberField quartic = quartic_field();
+    silex::Order quartic_equation = silex::test::equation_order(quartic);
+    silex::Order quartic_maximal(quartic);
+    assert(quartic_maximal.maximal_order(quartic_equation));
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 40));
+    silex::FactorBase built(quartic_maximal);
+    silex::FactorBase ordered(quartic_maximal);
+    assert(built.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(bound)));
+    assert(ordered.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(silex::detail::FactorBaseBlockAccess::
+                   order_lll_relation_base_by_norm(ordered));
+    assert(ordered.length() == built.length());
+    assert(ordered.rational_prime_block_count() ==
+           built.rational_prime_block_count());
+    assert(all_block_completeness_matches_decomposition(ordered));
+
+    silex::PrimeIdeal current(quartic_maximal);
+    sflint::Fmpz previous_norm;
+    sflint::Fmpz current_norm;
+    slong previous_index = -1;
+    bool has_tie = false;
+    for (slong i = 0; i < ordered.length(); ++i) {
+        assert(ordered.prime(current, i));
+        assert(ordered.index(current) == i);
+        const slong built_index = built.index(current);
+        assert(built_index >= 0);
+        assert(current.norm(sflint::FmpzRef(current_norm)));
+        if (i > 0) {
+            const int cmp = sflint::fmpz_cmp(
+                    sflint::FmpzConstRef(previous_norm),
+                    sflint::FmpzConstRef(current_norm));
+            assert(cmp >= 0);
+            if (cmp == 0) {
+                has_tie = true;
+                assert(built_index > previous_index);
+            }
+        }
+        sflint::fmpz_set(sflint::FmpzRef(previous_norm),
+                         sflint::FmpzConstRef(current_norm));
+        previous_index = built_index;
+    }
+    assert(has_tie);
+
+    for (slong block = 0; block < ordered.rational_prime_block_count();
+         ++block) {
+        sflint::Fmpz ordered_prime;
+        sflint::Fmpz built_prime;
+        slong ordered_length = 0;
+        slong built_length = 0;
+        bool ordered_complete = false;
+        bool built_complete = false;
+        assert(ordered.rational_prime_block_data(
+                sflint::FmpzRef(ordered_prime), ordered_length, block));
+        assert(built.rational_prime_block_data(
+                sflint::FmpzRef(built_prime), built_length, block));
+        assert(sflint::fmpz_equal(sflint::FmpzConstRef(ordered_prime),
+                                  sflint::FmpzConstRef(built_prime)));
+        assert(ordered_length == built_length);
+        assert(silex::detail::FactorBaseBlockAccess::
+                       rational_prime_block_is_complete(
+                               ordered_complete, ordered, block));
+        assert(silex::detail::FactorBaseBlockAccess::
+                       rational_prime_block_is_complete(
+                               built_complete, built, block));
+        assert(ordered_complete == built_complete);
+    }
+
+    return 0;
+}
+
 int test_class_group_bound() {
     sflint::Fmpz bound;
 
@@ -513,6 +591,7 @@ int main() {
     assert(test_generic_cubic() == 0);
     assert(test_prime_ideal_norm_bounded_shape() == 0);
     assert(test_lll_relation_base_order() == 0);
+    assert(test_lll_relation_base_from_norm_bounded() == 0);
     assert(test_class_group_bound() == 0);
     assert(test_failure_preserves_output() == 0);
     assert(test_keeps_parent_order_alive() == 0);

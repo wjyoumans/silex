@@ -13,6 +13,13 @@ public:
             bool& complete,
             const FactorBase& base,
             slong block_index) noexcept;
+    // The ordering step of the LLL relation base: sorts the primes by norm,
+    // largest first, ties kept in their current order, and rebuilds the
+    // rational-prime blocks.  Applied to the result of
+    // build_prime_ideal_norm_bounded(bound) it gives exactly the base
+    // build_lll_relation_base_impl(bound, true) builds.  Fails, possibly
+    // leaving base unchanged, if a norm cannot be computed or a copy fails.
+    static bool order_lll_relation_base_by_norm(FactorBase& base) noexcept;
 };
 
 // Proven generation bound used by factor_base_class_group_bound for degree

@@ -1425,18 +1425,23 @@ bool FactorBase::build_lll_relation_base_impl(
                 : !build(bound)) {
         return false;
     }
+    return detail::FactorBaseBlockAccess::order_lll_relation_base_by_norm(
+            *this);
+}
 
+bool detail::FactorBaseBlockAccess::order_lll_relation_base_by_norm(
+        FactorBase& base) noexcept {
     struct NormIndex {
         slong index = 0;
         flint::Fmpz norm;
     };
 
     std::vector<NormIndex> order;
-    order.reserve(primes_.size());
-    for (slong i = 0; i < static_cast<slong>(primes_.size()); ++i) {
+    order.reserve(base.primes_.size());
+    for (slong i = 0; i < static_cast<slong>(base.primes_.size()); ++i) {
         NormIndex entry;
         entry.index = i;
-        if (!primes_[static_cast<std::size_t>(i)].norm(
+        if (!base.primes_[static_cast<std::size_t>(i)].norm(
                     flint::FmpzRef(entry.norm))) {
             return false;
         }
@@ -1455,18 +1460,18 @@ bool FactorBase::build_lll_relation_base_impl(
               });
 
     std::vector<PrimeIdeal> sorted;
-    sorted.reserve(primes_.size());
+    sorted.reserve(base.primes_.size());
     for (const NormIndex& entry : order) {
-        PrimeIdeal copy(parent_);
+        PrimeIdeal copy(base.parent_);
         if (!copy.is_defined() ||
-            !copy.set(primes_[static_cast<std::size_t>(entry.index)])) {
+            !copy.set(base.primes_[static_cast<std::size_t>(entry.index)])) {
             return false;
         }
         sorted.emplace_back(std::move(copy));
     }
 
-    primes_.swap(sorted);
-    return rebuild_blocks();
+    base.primes_.swap(sorted);
+    return base.rebuild_blocks();
 }
 
 bool FactorBase::build_prime_ideal_norm_bounded_impl(

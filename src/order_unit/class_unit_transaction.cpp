@@ -27,6 +27,7 @@ bool select_policy(
         ClassUnitExecutionPolicy& policy,
         flint::Fmpz& selected_bound,
         RelationFactorBasePlan& relation_factor_base_plan,
+        FactorBase& grh_norm_bounded_base,
         const Order& order,
         flint::FmpzConstRef requested_bound,
         const ClassGroupComputeOptions& options) noexcept {
@@ -61,7 +62,8 @@ bool select_policy(
         if (!grh_factor_base_bound(
                     selected_bound, order, options.diagnostics,
                     &policy.grh_generation_bound,
-                    &policy.grh_generation_basis)) {
+                    &policy.grh_generation_basis,
+                    &grh_norm_bounded_base)) {
             return false;
         }
         policy.factor_base_bound =
@@ -146,7 +148,8 @@ bool grh_factor_base_bound(
         const Order& order,
         const DiagnosticsContext* diagnostics,
         flint::Fmpz* generation_bound,
-        ClassGroupGenerationBasis* generation_basis) noexcept {
+        ClassGroupGenerationBasis* generation_basis,
+        FactorBase* norm_bounded_base) noexcept {
     bool bach_selected = false;
     if (!grh_factor_base_bound_with_diagnostics(
                 flint::FmpzRef(out), order, diagnostics, &bach_selected)) {
@@ -173,11 +176,31 @@ bool grh_factor_base_bound(
             }
         }
         if (probe.length() > kMinimumFactorBaseSize) {
+            if (norm_bounded_base != nullptr) {
+                norm_bounded_base->swap(probe);
+            }
             return true;
         }
         flint::fmpz_mul_2exp(flint::FmpzRef(out), flint::FmpzConstRef(out),
                              UWORD(1));
     }
+}
+
+FactorBase* grh_norm_bounded_base_for(
+        ClassUnitTransactionContext* context,
+        const Order& order,
+        flint::FmpzConstRef bound) noexcept {
+    if (context == nullptr || context->grh_norm_bounded_base == nullptr ||
+        context->grh_norm_bounded_base_bound == nullptr ||
+        !context->grh_norm_bounded_base->is_defined() ||
+        !same_order_parent(context->grh_norm_bounded_base->parent(),
+                           &order) ||
+        !flint::fmpz_equal(
+                flint::FmpzConstRef(*context->grh_norm_bounded_base_bound),
+                bound)) {
+        return nullptr;
+    }
+    return context->grh_norm_bounded_base;
 }
 
 void ClassUnitTransactionAccess::set_run_context(
@@ -345,12 +368,13 @@ bool compute_class_unit_transaction(
     ClassGroupComputeOptions transaction_options = options;
     flint::Fmpz transaction_factor_base_bound;
     RelationFactorBasePlan relation_factor_base_plan;
+    FactorBase grh_norm_bounded_base;
     const auto factor_base_bound_start =
             std::chrono::steady_clock::now();
     if (!select_policy(
                 audit.policy, transaction_factor_base_bound,
-                relation_factor_base_plan, order, factor_base_bound,
-                transaction_options)) {
+                relation_factor_base_plan, grh_norm_bounded_base, order,
+                factor_base_bound, transaction_options)) {
         audit.failure_stage = ClassUnitStage::factor_base_bound;
         audit.failure_reason = "execution_policy_selection_failed";
         audit.record_timing(
@@ -373,6 +397,11 @@ bool compute_class_unit_transaction(
             {},
             {},
             false};
+    if (grh_norm_bounded_base.is_defined()) {
+        transaction_context.grh_norm_bounded_base = &grh_norm_bounded_base;
+        transaction_context.grh_norm_bounded_base_bound =
+                &transaction_factor_base_bound;
+    }
     ClassUnitTransactionAccess::set_run_context(
             candidate_class_group, &transaction_context);
     const bool success = candidate_units.compute_with_class_group(

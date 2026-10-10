@@ -1518,8 +1518,13 @@ bool ClassGroupContext::compute_tentative_candidate_(
     SILEX_PROFILE_EVENT(active_diagnostics, DiagnosticsModule::class_group,
                         "class_group.build_factor_base");
     if (!candidate.is_defined() ||
-        !candidate.build_search_factor_base_(factor_base_bound,
-                                            strict_transaction)) {
+        !candidate.build_search_factor_base_(
+                factor_base_bound, strict_transaction,
+                strict_transaction
+                        ? detail::grh_norm_bounded_base_for(
+                                  class_unit_transaction_context_, order,
+                                  factor_base_bound)
+                        : nullptr)) {
         return false;
     }
     // The strict build contains every prime ideal of norm at most

@@ -9337,9 +9337,15 @@ bool ClassGroupContext::build_relation_factor_base_(
     return true;
 }
 
+// With incomplete set, norm_bounded_base may supply the result of
+// FactorBase::build_prime_ideal_norm_bounded(bound) for this order, already
+// built (the grh policy's probe base).  It is taken over and left empty, and
+// only the norm ordering of build_lll_relation_base_impl(bound, true) is
+// applied, so the base is the one that call would build.
 bool ClassGroupContext::build_search_factor_base_(
         flint::FmpzConstRef bound,
-        bool incomplete) noexcept {
+        bool incomplete,
+        FactorBase* norm_bounded_base) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.build_search_factor_base");
     if (!is_defined()) {
@@ -9351,10 +9357,19 @@ bool ClassGroupContext::build_search_factor_base_(
     if (!candidate.is_defined()) {
         return false;
     }
-    const bool base_ok = incomplete
-            ? candidate.base_.build_lll_relation_base_impl(
-                      bound, true)
-            : candidate.base_.build_lll_relation_base(bound);
+    bool base_ok = false;
+    if (incomplete && norm_bounded_base != nullptr &&
+        norm_bounded_base->is_defined()) {
+        candidate.base_.swap(*norm_bounded_base);
+        norm_bounded_base->clear();
+        base_ok = detail::FactorBaseBlockAccess::
+                order_lll_relation_base_by_norm(candidate.base_);
+    } else {
+        base_ok = incomplete
+                ? candidate.base_.build_lll_relation_base_impl(
+                          bound, true)
+                : candidate.base_.build_lll_relation_base(bound);
+    }
     if (!base_ok) {
         return false;
     }

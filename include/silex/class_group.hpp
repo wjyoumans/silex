@@ -545,7 +545,8 @@ private:
     bool build_relation_factor_base_(flint::FmpzConstRef bound) noexcept;
     bool build_search_factor_base_(
             flint::FmpzConstRef bound,
-            bool incomplete = false) noexcept;
+            bool incomplete = false,
+            FactorBase* norm_bounded_base = nullptr) noexcept;
     void reset_partial_relations_() noexcept;
     void configure_partial_relations_(
             const detail::ClassGroupRelationOptions& options) noexcept;

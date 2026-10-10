@@ -159,6 +159,13 @@ struct ClassUnitTransactionContext {
     bool imaginary_quadratic_exact_order_valid = false;
     bool defer_relation_saturation_until_units = false;
     TransactionGenerationRequirement generation_requirement{};
+    // grh policy only: the norm-bounded factor base grh_factor_base_bound
+    // built at the selected bound while choosing it, and that bound.  The
+    // strict search-base build at that bound takes the base over instead of
+    // decomposing every rational prime again (see
+    // grh_norm_bounded_base_for); it is left empty once taken.
+    FactorBase* grh_norm_bounded_base = nullptr;
+    const flint::Fmpz* grh_norm_bounded_base_bound = nullptr;
 };
 
 inline bool uses_class_unit_kernel(
@@ -168,6 +175,15 @@ inline bool uses_class_unit_kernel(
            context->audit.policy.relations ==
                    NativeRelationStrategy::lll;
 }
+
+// The base kept in `context` by grh_factor_base_bound when it can stand in
+// for FactorBase::build_prime_ideal_norm_bounded(bound) on `order`: it is
+// defined, belongs to the same order data, and was built at exactly
+// `bound`.  nullptr otherwise.
+FactorBase* grh_norm_bounded_base_for(
+        ClassUnitTransactionContext* context,
+        const Order& order,
+        flint::FmpzConstRef bound) noexcept;
 
 class ClassUnitTransactionAccess {
 public:
@@ -201,12 +217,17 @@ bool native_hnf_unit_strategy_for_signature(
 // norm-bounded factor base has more than the minimum number of primes.
 // `generation_bound`, when given, receives the undoubled GRH bound, and
 // `generation_basis`, when given, the theorem that gave it (bdf or bach).
+// `norm_bounded_base`, when given, receives on success the factor base built
+// by build_prime_ideal_norm_bounded(out) for that size test (every prime
+// ideal in it checked to have positive residue degree); it is left
+// unchanged on failure.
 bool grh_factor_base_bound(
         flint::Fmpz& out,
         const Order& order,
         const DiagnosticsContext* diagnostics = nullptr,
         flint::Fmpz* generation_bound = nullptr,
-        ClassGroupGenerationBasis* generation_basis = nullptr) noexcept;
+        ClassGroupGenerationBasis* generation_basis = nullptr,
+        FactorBase* norm_bounded_base = nullptr) noexcept;
 
 bool compute_class_unit_transaction(
         OrderUnitGroup& units,
