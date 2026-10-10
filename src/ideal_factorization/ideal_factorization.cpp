@@ -418,6 +418,46 @@ bool order_element_factor_over_base_with_required_prime_direct(
         return false;
     }
     {
+        // Source: buch2.c:can_factor returns 0 when Z_ppo(N, F->prodZ), the
+        // part of N prime to every factor-base rational prime, is not 1,
+        // before absZ_factor. The required prime's rational prime is removed
+        // too. A nonunit cofactor has a rational prime with no base or
+        // required prime ideal above it, which the accounting loop below
+        // would reject after the full factorization. If a block cannot be
+        // read, the prefilter is skipped and the full path decides.
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                            "ideal.required_prime_direct_cofactor");
+        flint::Fmpz cofactor;
+        flint::fmpz_set(flint::FmpzRef(cofactor),
+                        flint::FmpzConstRef(norm_abs));
+        bool cofactor_complete =
+                fmpz_cmp_ui(required_rational_prime.raw(), 2) >= 0;
+        if (cofactor_complete) {
+            ::fmpz_remove(cofactor.raw(), cofactor.raw(),
+                          required_rational_prime.raw());
+        }
+        slong block_length = 0;
+        const slong block_count = base.rational_prime_block_count();
+        for (slong block = 0; cofactor_complete && block < block_count &&
+                              fmpz_is_one(cofactor.raw()) == 0;
+             ++block) {
+            if (!base.rational_prime_block_data(
+                        flint::FmpzRef(rational_prime), block_length, block) ||
+                fmpz_cmp_ui(rational_prime.raw(), 2) < 0) {
+                cofactor_complete = false;
+                break;
+            }
+            ::fmpz_remove(cofactor.raw(), cofactor.raw(),
+                          rational_prime.raw());
+        }
+        if (cofactor_complete && fmpz_is_one(cofactor.raw()) == 0) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::ideal,
+                    "ideal.required_prime_direct.reject_cofactor");
+            return true;
+        }
+    }
+    {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
                             "ideal.required_prime_direct_fmpz_factor");
         flint::fmpz_factor(flint::FmpzFactorRef(factorization),

@@ -452,6 +452,76 @@ int test_required_prime_predicates_match_full_factorization() {
     return 0;
 }
 
+// Source: buch2.c:can_factor rejects a norm whose part prime to the factor
+// base primes is not 1 (Z_ppo against prodZ) before calling absZ_factor. The
+// cofactor below is the product of the Mersenne primes 2^127 - 1 and
+// 2^521 - 1, which a full integer factorization cannot split in practice, so
+// this case only returns when the prefilter rejects it first. A smooth norm
+// with large exponents still reaches the full classification and matches.
+int test_required_prime_direct_rejects_nonsmooth_cofactor() {
+    silex::NumberField field = quadratic_x2_minus_2();
+    silex::Order order = silex::test::equation_order(field);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(bound), UWORD(7));
+    silex::FactorBase base(order);
+    silex::PrimeIdeal required_prime(order);
+    if (!order.is_maximal() || !base.is_defined() ||
+        !base.build(sflint::FmpzConstRef(bound)) ||
+        !first_prime_above(required_prime, order, 11) ||
+        base.contains(required_prime)) {
+        return 1;
+    }
+
+    sflint::Fmpz two, m127, m521, value;
+    sflint::fmpz_set_ui(sflint::FmpzRef(two), UWORD(2));
+    sflint::fmpz_pow_ui(sflint::FmpzRef(m127), sflint::FmpzConstRef(two), 127);
+    sflint::fmpz_sub_ui(sflint::FmpzRef(m127), sflint::FmpzConstRef(m127), 1);
+    sflint::fmpz_pow_ui(sflint::FmpzRef(m521), sflint::FmpzConstRef(two), 521);
+    sflint::fmpz_sub_ui(sflint::FmpzRef(m521), sflint::FmpzConstRef(m521), 1);
+
+    sflint::FmpzMat coordinates(1, order.degree());
+    silex::OrderElement generator(order);
+    silex::Ideal principal(order);
+    if (!generator.is_defined() || !principal.is_defined()) {
+        return 1;
+    }
+
+    // 11 * 2^5 * 7^3 * (2^127 - 1) * (2^521 - 1): required prime and base
+    // primes present, but the cofactor is not 1, so it is not a witness.
+    sflint::fmpz_mul(sflint::FmpzRef(value), sflint::FmpzConstRef(m127),
+                     sflint::FmpzConstRef(m521));
+    sflint::fmpz_mul_ui(sflint::FmpzRef(value), sflint::FmpzConstRef(value),
+                        UWORD(11) * UWORD(32) * UWORD(343));
+    sflint::fmpz_set(
+            sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 0),
+            sflint::FmpzConstRef(value));
+    bool matches = true;
+    if (!generator.set_coordinates(sflint::FmpzMatConstRef(coordinates)) ||
+        !silex::detail::order_element_factor_over_base_with_required_prime(
+                matches, generator, base, required_prime) ||
+        matches) {
+        return 1;
+    }
+
+    // 11 * 2^5 * 7^3 is smooth over the base, so the prefilter passes it on
+    // and the full classification accepts it, as the ideal path does.
+    sflint::fmpz_set_ui(
+            sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 0),
+            UWORD(11) * UWORD(32) * UWORD(343));
+    matches = false;
+    bool ideal_matches = false;
+    if (!generator.set_coordinates(sflint::FmpzMatConstRef(coordinates)) ||
+        !principal.set_principal(generator) ||
+        !silex::detail::order_element_factor_over_base_with_required_prime(
+                matches, generator, base, required_prime) ||
+        !silex::detail::ideal_factor_over_base_with_required_prime(
+                ideal_matches, principal, base, required_prime) ||
+        !matches || !ideal_matches) {
+        return 1;
+    }
+    return 0;
+}
+
 int test_selected_witness_edge_cases() {
     namespace search = silex::detail::relation_search;
     using Mode = search::FactorBaseWitnessPredicate;
@@ -1564,6 +1634,8 @@ int main() {
     assert(test_legacy_scan_predicate_equivalence() == 0);
     return test_proof_targets_require_complete_decomposition() != 0 ||
                    test_required_prime_predicates_match_full_factorization() !=
+                           0 ||
+                   test_required_prime_direct_rejects_nonsmooth_cofactor() !=
                            0 ||
                    test_ideal_transforms_preserve_principal_witness() != 0 ||
                    test_truncated_decomposition_withholds_honesty() != 0 ||
