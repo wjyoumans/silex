@@ -34,12 +34,19 @@ bool ideal_factor_over_base_with_required_prime(
         const PrimeIdeal& required_prime,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
 
+// Records which path classified the element; for tests, independent of
+// profiling builds.
+struct RequiredPrimeDirectAudit {
+    bool rejected_by_cofactor = false;
+};
+
 bool order_element_factor_over_base_with_required_prime(
         bool& matches,
         const OrderElement& element,
         const FactorBase& base,
         const PrimeIdeal& required_prime,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
+        const DiagnosticsContext* diagnostics = nullptr,
+        RequiredPrimeDirectAudit* audit = nullptr) noexcept;
 
 // Evaluation success is separate from classification. Requires a nonzero
 // integral scalar and a known maximal order; input objects are not modified.

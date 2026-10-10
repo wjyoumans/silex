@@ -373,7 +373,8 @@ bool order_element_factor_over_base_with_required_prime_direct(
         const OrderElement& element,
         const FactorBase& base,
         const PrimeIdeal& required_prime,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        detail::RequiredPrimeDirectAudit* audit) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
                         "ideal.required_prime_direct");
     SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::ideal,
@@ -454,6 +455,9 @@ bool order_element_factor_over_base_with_required_prime_direct(
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::ideal,
                     "ideal.required_prime_direct.reject_cofactor");
+            if (audit != nullptr) {
+                audit->rejected_by_cofactor = true;
+            }
             return true;
         }
     }
@@ -1288,11 +1292,13 @@ bool order_element_factor_over_base_with_required_prime(
         const OrderElement& element,
         const FactorBase& base,
         const PrimeIdeal& required_prime,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        RequiredPrimeDirectAudit* audit) noexcept {
     bool direct_matches = false;
     const bool direct_ok =
             order_element_factor_over_base_with_required_prime_direct(
-                    direct_matches, element, base, required_prime, diagnostics);
+                    direct_matches, element, base, required_prime, diagnostics,
+                    audit);
 
 #if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
     SILEX_DEBUG_CHECK(

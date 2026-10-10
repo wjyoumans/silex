@@ -455,8 +455,9 @@ int test_required_prime_predicates_match_full_factorization() {
 // Source: buch2.c:can_factor rejects a norm whose part prime to the factor
 // base primes is not 1 (Z_ppo against prodZ) before calling absZ_factor. The
 // cofactor below is the product of the Mersenne primes 2^61 - 1 and 2^89 - 1.
-// The test asserts that the reject_cofactor event was recorded (profiling
-// builds). A smooth norm with large exponents still reaches the full
+// The test asserts that the prefilter rejected it, through the internal audit
+// in every build and through the reject_cofactor event in profiling builds.
+// A smooth norm with large exponents still reaches the full
 // classification and matches.
 struct RejectCofactorCounter {
     slong count = 0;
@@ -505,7 +506,7 @@ int test_required_prime_direct_rejects_nonsmooth_cofactor() {
     // 11 * 2^5 * 7^3 * (2^61 - 1) * (2^89 - 1): required prime and base
     // primes present, but the cofactor is not 1, so it is not a witness. The
     // cofactor primes are small enough that the full factorization returns
-    // quickly, so a missing prefilter shows up as a missing event.
+    // quickly, so a missing prefilter shows up as an unset audit flag.
     sflint::fmpz_mul(sflint::FmpzRef(value), sflint::FmpzConstRef(m61),
                      sflint::FmpzConstRef(m89));
     sflint::fmpz_mul_ui(sflint::FmpzRef(value), sflint::FmpzConstRef(value),
@@ -521,10 +522,12 @@ int test_required_prime_direct_rejects_nonsmooth_cofactor() {
             diagnostics, true,
             silex::diagnostics_module_bit(silex::DiagnosticsModule::ideal),
             reject_cofactor_callback, &reject_counter);
+    silex::detail::RequiredPrimeDirectAudit audit;
     if (!generator.set_coordinates(sflint::FmpzMatConstRef(coordinates)) ||
         !silex::detail::order_element_factor_over_base_with_required_prime(
-                matches, generator, base, required_prime, &diagnostics) ||
-        matches) {
+                matches, generator, base, required_prime, &diagnostics,
+                &audit) ||
+        matches || !audit.rejected_by_cofactor) {
         return 1;
     }
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
@@ -540,10 +543,12 @@ int test_required_prime_direct_rejects_nonsmooth_cofactor() {
             UWORD(11) * UWORD(32) * UWORD(343));
     matches = false;
     bool ideal_matches = false;
+    audit = silex::detail::RequiredPrimeDirectAudit{};
     if (!generator.set_coordinates(sflint::FmpzMatConstRef(coordinates)) ||
         !principal.set_principal(generator) ||
         !silex::detail::order_element_factor_over_base_with_required_prime(
-                matches, generator, base, required_prime) ||
+                matches, generator, base, required_prime, nullptr, &audit) ||
+        audit.rejected_by_cofactor ||
         !silex::detail::ideal_factor_over_base_with_required_prime(
                 ideal_matches, principal, base, required_prime) ||
         !matches || !ideal_matches) {
