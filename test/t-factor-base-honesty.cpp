@@ -454,10 +454,26 @@ int test_required_prime_predicates_match_full_factorization() {
 
 // Source: buch2.c:can_factor rejects a norm whose part prime to the factor
 // base primes is not 1 (Z_ppo against prodZ) before calling absZ_factor. The
-// cofactor below is the product of the Mersenne primes 2^127 - 1 and
-// 2^521 - 1, which a full integer factorization cannot split in practice, so
-// this case only returns when the prefilter rejects it first. A smooth norm
-// with large exponents still reaches the full classification and matches.
+// cofactor below is the product of the Mersenne primes 2^61 - 1 and 2^89 - 1.
+// The test asserts that the reject_cofactor event was recorded (profiling
+// builds). A smooth norm with large exponents still reaches the full
+// classification and matches.
+struct RejectCofactorCounter {
+    slong count = 0;
+};
+
+void reject_cofactor_callback(void* user,
+                              silex::DiagnosticsModule,
+                              silex::ProfileEvent event,
+                              const char*,
+                              const char* label) noexcept {
+    if (label != nullptr && event == silex::ProfileEvent::event &&
+        std::strcmp(label, "ideal.required_prime_direct.reject_cofactor") ==
+                0) {
+        ++static_cast<RejectCofactorCounter*>(user)->count;
+    }
+}
+
 int test_required_prime_direct_rejects_nonsmooth_cofactor() {
     silex::NumberField field = quadratic_x2_minus_2();
     silex::Order order = silex::test::equation_order(field);
@@ -472,12 +488,12 @@ int test_required_prime_direct_rejects_nonsmooth_cofactor() {
         return 1;
     }
 
-    sflint::Fmpz two, m127, m521, value;
+    sflint::Fmpz two, m61, m89, value;
     sflint::fmpz_set_ui(sflint::FmpzRef(two), UWORD(2));
-    sflint::fmpz_pow_ui(sflint::FmpzRef(m127), sflint::FmpzConstRef(two), 127);
-    sflint::fmpz_sub_ui(sflint::FmpzRef(m127), sflint::FmpzConstRef(m127), 1);
-    sflint::fmpz_pow_ui(sflint::FmpzRef(m521), sflint::FmpzConstRef(two), 521);
-    sflint::fmpz_sub_ui(sflint::FmpzRef(m521), sflint::FmpzConstRef(m521), 1);
+    sflint::fmpz_pow_ui(sflint::FmpzRef(m61), sflint::FmpzConstRef(two), 61);
+    sflint::fmpz_sub_ui(sflint::FmpzRef(m61), sflint::FmpzConstRef(m61), 1);
+    sflint::fmpz_pow_ui(sflint::FmpzRef(m89), sflint::FmpzConstRef(two), 89);
+    sflint::fmpz_sub_ui(sflint::FmpzRef(m89), sflint::FmpzConstRef(m89), 1);
 
     sflint::FmpzMat coordinates(1, order.degree());
     silex::OrderElement generator(order);
@@ -486,22 +502,36 @@ int test_required_prime_direct_rejects_nonsmooth_cofactor() {
         return 1;
     }
 
-    // 11 * 2^5 * 7^3 * (2^127 - 1) * (2^521 - 1): required prime and base
-    // primes present, but the cofactor is not 1, so it is not a witness.
-    sflint::fmpz_mul(sflint::FmpzRef(value), sflint::FmpzConstRef(m127),
-                     sflint::FmpzConstRef(m521));
+    // 11 * 2^5 * 7^3 * (2^61 - 1) * (2^89 - 1): required prime and base
+    // primes present, but the cofactor is not 1, so it is not a witness. The
+    // cofactor primes are small enough that the full factorization returns
+    // quickly, so a missing prefilter shows up as a missing event.
+    sflint::fmpz_mul(sflint::FmpzRef(value), sflint::FmpzConstRef(m61),
+                     sflint::FmpzConstRef(m89));
     sflint::fmpz_mul_ui(sflint::FmpzRef(value), sflint::FmpzConstRef(value),
                         UWORD(11) * UWORD(32) * UWORD(343));
     sflint::fmpz_set(
             sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 0),
             sflint::FmpzConstRef(value));
     bool matches = true;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    RejectCofactorCounter reject_counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::ideal),
+            reject_cofactor_callback, &reject_counter);
     if (!generator.set_coordinates(sflint::FmpzMatConstRef(coordinates)) ||
         !silex::detail::order_element_factor_over_base_with_required_prime(
-                matches, generator, base, required_prime) ||
+                matches, generator, base, required_prime, &diagnostics) ||
         matches) {
         return 1;
     }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    if (reject_counter.count != 1) {
+        return 1;
+    }
+#endif
 
     // 11 * 2^5 * 7^3 is smooth over the base, so the prefilter passes it on
     // and the full classification accepts it, as the ideal path does.
