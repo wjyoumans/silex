@@ -395,6 +395,19 @@ Changed
   public zeta gates are unchanged.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- ``Element::is_power`` and ``Element::is_square`` (and the factored-element
+  root tests built on them) now answer ``false`` for many inputs they
+  previously reported as unsupported, such as ``2^(1/3)`` as a cube in
+  ``Q(2^(1/3))`` or ``2`` as a square in ``Q(sqrt(-3), sqrt(-5), sqrt(-7))``.
+  Before the Hensel lift, the residue of the input is tested at every prime
+  above the chosen prime and above up to 40 further unramified primes; a
+  residue that is not an ``n``-th power proves the input is not an ``n``-th
+  power.  Inputs with no such residue are handled as before, and ``true``
+  answers and their roots are unchanged.  On the ``grh`` rows
+  ``multiquadratic_m3_m5_m7`` and ``lmfdb_8_8_73116160000_2`` this removes
+  about half of the run time; their results are unchanged.  See "Element
+  powers and roots" in :doc:`../reference/algorithms_and_sources`.
+
 Fixed
 -----
 

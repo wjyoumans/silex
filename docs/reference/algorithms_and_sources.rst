@@ -312,8 +312,9 @@ Element powers and roots
 exactly, route quadratic squares through the radicand, and otherwise use a
 private port of the pure-power Hensel root finder for monic integral fields of
 degree less than 10.  A definite ``true`` is published only after the lifted
-candidate ``c`` satisfies ``c^n == a`` exactly; every unported or unverified
-case returns failure (unsupported) and leaves the caller's root unchanged.
+candidate ``c`` satisfies ``c^n == a`` exactly, and a definite ``false`` only
+after a residue disproof (below); every unported or unverified case returns
+failure (unsupported) and leaves the caller's root unchanged.
 
 * Hensel lifting follows Hecke v0.38.6
   ``src/NumFieldOrd/NfOrd/Hensel.jl:_roots_hensel`` (lines 57-232, with
@@ -330,6 +331,34 @@ case returns failure (unsupported) and leaves the caller's root unchanged.
   ``src/basemath/FpX.c:Fq_ispower`` (lines 2509-2523): ``a`` is an ``n``-th
   power in ``F_q^*`` exactly when ``a^((q - 1)/gcd(q - 1, n)) = 1``.  A failed
   test at a good prime proves that ``a`` is not an ``n``-th power in ``K``.
+* **Silex extension** (not in Hecke): pre-lift residue disproof.  Hecke tests
+  only the first factor of the first good prime before lifting (in degree
+  below 10), and when no lifted candidate verifies it answers ``false``;
+  Silex instead fails closed there.  So that such inputs still get an exact
+  answer without the lift, Silex first applies the residue test to every
+  factor of the chosen prime and of up to 40 further admissible primes, and
+  answers ``false`` at the first residue that is not an ``n``-th power; if
+  there is none, the lift runs exactly as before.  A rational prime ``p`` is
+  admissible when the monic integral defining polynomial ``f`` is
+  squarefree modulo ``p`` and the power-basis coordinates of ``a`` are
+  ``p``-integral; only factors ``g`` of ``f mod p`` with ``a mod g`` nonzero
+  are tested.  Argument: ``p`` does not divide ``disc(f)``, so ``p`` is
+  unramified and prime to ``[O_K : Z[theta]]``, and by Dedekind-Kummer
+  (Cohen, *A Course in Computational Algebraic Number Theory*, Theorem
+  4.8.13) ``P = (p, g(theta))`` is a prime of ``O_K`` with
+  ``O_K / P = F_p[x] / (g)``.  ``a`` lies in ``Z_(p)[theta]`` and is a
+  ``P``-unit, so if ``a = b^n`` with ``b`` in ``K`` then ``b`` is a
+  ``P``-unit and ``a mod P = (b mod P)^n``.  A residue that fails the test
+  above therefore proves that ``a`` is not an ``n``-th power; ``p | n`` is
+  allowed.  The test runs on each block of the distinct-degree factorisation
+  of ``f mod p`` (with the factors where ``a`` vanishes divided out), which by
+  the Chinese remainder theorem is equivalent to testing each factor of that
+  degree.  The bound 40 is a resource limit only, and any value is sound: for
+  ``n = 2`` a rational number is a square in every ``F_(p^f)`` with ``f``
+  even, so ``c b^2`` with ``c`` in ``Q`` can be disproved only at primes of
+  odd residue degree, and the class-group saturation rows
+  ``multiquadratic_m3_m5_m7`` and ``lmfdb_8_8_73116160000_2`` need up to 21
+  and 36 further primes.
 * Residue roots follow PARI 2.17.3
   ``src/basemath/bb_group.c:gen_Shanks_sqrtn`` (lines 899-953): the Bezout
   exponent of ``n`` modulo ``q - 1`` gives the unique root when

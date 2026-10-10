@@ -13,12 +13,16 @@
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/flint/fmpz_poly.hpp>
+#include <silex/flint/nmod_poly.hpp>
+#include <silex/flint/nmod_poly_factor.hpp>
 
 #include <flint/fmpz_vec.h>
 #include <flint/fmpz_mod_poly.h>
 #include <flint/fmpz_poly.h>
 #include <flint/fq_poly.h>
 #include <flint/fq_poly_factor.h>
+#include <flint/nmod_poly.h>
+#include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
 
 #include <algorithm>
@@ -2233,6 +2237,193 @@ bool try_pure_power_root_at_prime(
     return false;
 }
 
+// Pre-lift residue disproof for pure_power_hensel_prime_search.  Silex
+// extension, not in the reference: `_roots_hensel` (reference v0.38.6
+// `src/NumFieldOrd/NfOrd/Hensel.jl` lines 57-232) tests only the first
+// factor of the first good prime before lifting when the degree is below 10.
+// Lifting to the Friedrich-Fieker exponent is expensive and, when no lifted
+// candidate verifies, Silex fails closed instead of answering "not a power".
+// So before lifting, the residue of the radicand is tested at every factor of
+// the chosen prime and of a few further admissible primes; one non-power
+// residue is an exact proof that the radicand is not an n-th power in K.
+// Finding none changes nothing: the lift runs as before.
+//
+// Admissible primes and why a non-power residue proves non-power.  Let
+// K = Q(theta) with theta a root of the monic integral f of degree N, and let
+// a in K be the radicand.  A rational prime p is used only when
+//   (1) f mod p is squarefree (of degree N, as f is monic), so p does not
+//       divide disc(f); hence p is unramified in K and does not divide
+//       [O_K : Z[theta]], and by Dedekind-Kummer (Cohen, GTM 138, Theorem
+//       4.8.13) p O_K is the product of the distinct primes
+//       P_i = (p, g_i(theta)) for the monic irreducible factors g_i of
+//       f mod p, with O_K / P_i = F_p[x] / (g_i) via theta -> x;
+//   (2) every power-basis coordinate of a is p-integral, so a lies in
+//       Z_(p)[theta], inside the valuation ring of every P_i, and its residue
+//       mod P_i is a(x) mod (p, g_i);
+//   (3) only factors g_i with a(x) mod g_i nonzero are tested, so
+//       v_{P_i}(a) = 0 there.
+// If a = b^n with b in K, then n v_{P_i}(b) = v_{P_i}(a) = 0, so b is a
+// P_i-unit and reducing modulo P_i gives a residue b' with b'^n = a mod P_i.
+// Hence a mod P_i is an n-th power in F_q^*, q = p^deg(g_i).  Since F_q^* is
+// cyclic of order q - 1, the residue is an n-th power exactly when its
+// ((q - 1) / gcd(n, q - 1))-th power is 1.  A residue failing that test
+// therefore proves that a is not an n-th power in K.  Nothing in the argument
+// needs p to be coprime to n.  The radicand of the prime search is input * d^n
+// (d = 1 on the integral path), an n-th power exactly when input is.
+//
+// The factors are not split: for each degree f, the distinct-degree
+// factorisation gives the product G of the factors of degree f, and
+// G' = G / gcd(a, G) is the product of those where a is nonzero (G is
+// squarefree).  By the Chinese remainder theorem F_p[x] / (G') is the product
+// of the fields F_p[x] / (g_i), all of order q = p^f, so
+// a^((q - 1) / gcd(n, q - 1)) mod G' is 1 exactly when it is 1 at every
+// such g_i.  A value other than 1 is therefore a non-power residue at some
+// P_i.
+//
+// Resource bound only: how many further admissible primes are examined after
+// the chosen one.  Any value is sound; exhausting it leaves the call on the
+// unchanged lifting path.  Disproofs can be rare: for n = 2 every element of
+// F_p is a square in F_{p^f} when f is even, so c * b^2 with c in Q can only
+// be disproved at the P_i of odd residue degree, and in a multiquadratic
+// field of degree N (residue degrees at most 2) only at the primes that split
+// completely, about 1/N of them.  The grh class saturation rows
+// multiquadratic_m3_m5_m7 and lmfdb_8_8_73116160000_2 need up to 21 and 36
+// further primes; 40 settles all of their undecided squares, while one prime
+// costs a few microseconds (a distinct-degree factorisation and one modular
+// power per residue degree).
+constexpr slong kPreLiftDisproofExtraPrimes = 40;
+
+// Reduces the rational polynomial `polynomial` modulo the word prime of
+// `out`; false when a coefficient is not p-integral.
+bool fmpq_poly_reduce_nmod(flint::NmodPoly& out,
+                           const fmpq_poly_t polynomial) noexcept {
+    const ulong prime = out.raw()->mod.n;
+    const ulong denominator = fmpz_fdiv_ui(polynomial->den, prime);
+    if (denominator == 0) {
+        return false;
+    }
+    const ulong inverse = n_invmod(denominator, prime);
+    nmod_poly_zero(out.raw());
+    for (slong i = 0; i < polynomial->length; ++i) {
+        const ulong coefficient = fmpz_fdiv_ui(polynomial->coeffs + i, prime);
+        nmod_poly_set_coeff_ui(
+                out.raw(), i,
+                n_mulmod2_preinv(coefficient, inverse, prime,
+                                 out.raw()->mod.ninv));
+    }
+    return true;
+}
+
+// Residue test at one rational prime p (see above).  Sets `admissible` when
+// p satisfies conditions (1) and (2), and returns true only when some factor
+// of f mod p with a nonzero residue has a residue that is not an n-th power.
+bool residue_disproves_power_at_prime(bool& admissible,
+                                      const fmpq_poly_t field_polynomial,
+                                      const fmpq_poly_t element_polynomial,
+                                      slong degree,
+                                      const fmpz_t prime,
+                                      slong exponent) noexcept {
+    admissible = false;
+    if (exponent <= 1 || degree <= 0 || fmpz_sgn(prime) <= 0 ||
+        fmpz_abs_fits_ui(prime) == 0) {
+        return false;
+    }
+    const ulong p = fmpz_get_ui(prime);
+    flint::NmodPoly field_mod(p);
+    flint::NmodPoly element(p);
+    if (!fmpq_poly_reduce_nmod(field_mod, field_polynomial) ||
+        nmod_poly_degree(field_mod.raw()) != degree ||
+        nmod_poly_is_squarefree(field_mod.raw()) == 0 ||
+        !fmpq_poly_reduce_nmod(element, element_polynomial)) {
+        return false;
+    }
+    admissible = true;
+    nmod_poly_make_monic(field_mod.raw(), field_mod.raw());
+
+    flint::NmodPolyFactor blocks;
+    std::vector<slong> block_degrees(static_cast<std::size_t>(degree) + 1, 0);
+    slong* block_degree_data = block_degrees.data();
+    nmod_poly_factor_distinct_deg(blocks.raw(), field_mod.raw(),
+                                  &block_degree_data);
+
+    flint::NmodPoly common(p);
+    flint::NmodPoly quotient(p);
+    flint::NmodPoly residue(p);
+    flint::NmodPoly power(p);
+    flint::Fmpz group_order;
+    flint::Fmpz gcd;
+    for (slong i = 0; i < blocks.raw()->num; ++i) {
+        const nmod_poly_struct* block = blocks.raw()->p + i;
+        const slong residue_degree = block_degrees[static_cast<std::size_t>(i)];
+        if (residue_degree <= 0) {
+            continue;
+        }
+        nmod_poly_rem(residue.raw(), element.raw(), block);
+        nmod_poly_gcd(common.raw(), residue.raw(), block);
+        nmod_poly_div(quotient.raw(), block, common.raw());
+        if (nmod_poly_degree(quotient.raw()) <= 0) {
+            continue;
+        }
+        nmod_poly_rem(residue.raw(), residue.raw(), quotient.raw());
+
+        fmpz_set_ui(group_order.raw(), p);
+        fmpz_pow_ui(group_order.raw(), group_order.raw(),
+                    static_cast<ulong>(residue_degree));
+        fmpz_sub_ui(group_order.raw(), group_order.raw(), 1);
+        fmpz_set_si(gcd.raw(), exponent);
+        fmpz_gcd(gcd.raw(), gcd.raw(), group_order.raw());
+        if (fmpz_is_one(gcd.raw()) != 0) {
+            // Every element of F_q^* is an n-th power.
+            continue;
+        }
+        fmpz_divexact(group_order.raw(), group_order.raw(), gcd.raw());
+        nmod_poly_powmod_fmpz_binexp(power.raw(), residue.raw(),
+                                     group_order.raw(), quotient.raw());
+        if (nmod_poly_is_one(power.raw()) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// True when a residue at a factor of the chosen prime or of one of the next
+// kPreLiftDisproofExtraPrimes admissible primes disproves that
+// `element_polynomial` is an n-th power.
+bool pre_lift_residue_disproves(const flint::FmpqPoly& element_polynomial,
+                                const nf_struct* raw_field,
+                                slong degree,
+                                const flint::Fmpz& chosen_prime,
+                                slong exponent,
+                                const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                        "element.power_prelift_residue_disproof");
+    bool admissible = false;
+    if (residue_disproves_power_at_prime(admissible, raw_field->pol,
+                                         element_polynomial.raw(), degree,
+                                         chosen_prime.raw(), exponent)) {
+        return true;
+    }
+
+    flint::Fmpz prime;
+    fmpz_set(prime.raw(), chosen_prime.raw());
+    slong admissible_primes = 0;
+    constexpr slong max_prime_attempts = 256;
+    for (slong attempt = 0; attempt < max_prime_attempts &&
+                            admissible_primes < kPreLiftDisproofExtraPrimes;
+         ++attempt) {
+        fmpz_nextprime(prime.raw(), prime.raw(), 1);
+        if (residue_disproves_power_at_prime(admissible, raw_field->pol,
+                                             element_polynomial.raw(), degree,
+                                             prime.raw(), exponent)) {
+            return true;
+        }
+        if (admissible) {
+            ++admissible_primes;
+        }
+    }
+    return false;
+}
+
 // Prime search and Hensel lift of pure_power_hensel_root for the radicand
 // `radicand` = input * d^n, whose power-basis coordinates are
 // `element_polynomial`; root_scale = 1/d, or nullptr when radicand is input
@@ -2248,6 +2439,7 @@ bool pure_power_hensel_prime_search(
         const NumberField* parent,
         const nf_struct* raw_field,
         slong exponent,
+        detail::PreLiftResidueDisproof pre_lift,
         const DiagnosticsContext* diagnostics) noexcept {
     flint::Fmpz prime;
     fmpz_set_ui(prime.raw(), 3);
@@ -2306,6 +2498,18 @@ bool pure_power_hensel_prime_search(
                 return true;
             }
             if (status == ResiduePowerStatus::power) {
+                // Exact disproof before the lift; see
+                // pre_lift_residue_disproves for the admissible primes.
+                if (pre_lift == detail::PreLiftResidueDisproof::enabled &&
+                    pre_lift_residue_disproves(
+                            element_polynomial, raw_field, parent->degree(),
+                            prime, exponent, diagnostics)) {
+                    SILEX_PROFILE_EVENT(
+                            diagnostics, DiagnosticsModule::element,
+                            "element.power_prelift_residue_disproof.nonpower");
+                    is_power = false;
+                    return true;
+                }
                 if (try_pure_power_root_at_prime(
                             root, radicand, input, root_scale,
                             element_polynomial, raw_field, prime,
@@ -2861,7 +3065,8 @@ bool pure_power_hensel_root(bool& is_power,
                                   Element& root,
                                   const Element& input,
                                   slong exponent,
-                                  const DiagnosticsContext* diagnostics) noexcept {
+                                  const DiagnosticsContext* diagnostics,
+                                  PreLiftResidueDisproof pre_lift) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.power_hensel_root");
     // Private port of reference `_roots_hensel(y^n - a, ispure=true,
@@ -2961,13 +3166,13 @@ bool pure_power_hensel_root(bool& is_power,
             return pure_power_hensel_prime_search(
                     is_power, root, scaled_radicand, input, &scale,
                     element_polynomial, parent, raw_field, exponent,
-                    diagnostics);
+                    pre_lift, diagnostics);
         }
     }
 
     return pure_power_hensel_prime_search(
             is_power, root, input, input, nullptr, element_polynomial,
-            parent, raw_field, exponent, diagnostics);
+            parent, raw_field, exponent, pre_lift, diagnostics);
 }
 
 bool pure_square_hensel_root(bool& is_square,

@@ -57,13 +57,26 @@ bool is_power_rational_constant(bool& is_power,
                                 const Element& input,
                                 flint::FmpzConstRef exponent) noexcept;
 
+// Whether pure_power_hensel_root first looks for a non-power residue at
+// further primes before lifting (see src/element/hensel.cpp,
+// pre_lift_residue_disproves).  `disabled` exists only so tests can compare
+// against the lift-only answers; production callers use the default.
+enum class PreLiftResidueDisproof {
+    enabled,
+    disabled
+};
+
 // Hensel-lifted `exponent`-th (respectively square) root of `input` in a
 // monic integral field of degree < 10, verified exactly before publication.
-bool pure_power_hensel_root(bool& is_power,
-                            Element& root,
-                            const Element& input,
-                            slong exponent,
-                            const DiagnosticsContext* diagnostics) noexcept;
+// A definite "not a power" comes only from an exact residue disproof.
+bool pure_power_hensel_root(
+        bool& is_power,
+        Element& root,
+        const Element& input,
+        slong exponent,
+        const DiagnosticsContext* diagnostics,
+        PreLiftResidueDisproof pre_lift =
+                PreLiftResidueDisproof::enabled) noexcept;
 bool pure_square_hensel_root(bool& is_square,
                              Element& root,
                              const Element& input,

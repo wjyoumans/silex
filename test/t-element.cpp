@@ -4,6 +4,7 @@
 #include <silex/number_field.hpp>
 
 #include "test_support.hpp"
+#include "../src/element/element_internal.hpp"
 
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
@@ -468,6 +469,204 @@ void test_power_non_integral_unit_norm_roots() noexcept {
     }
 }
 
+// x^8 - 4x^7 + 4x^6 + 2x^5 + 69x^4 - 146x^3 - 524x^2 + 598x + 1201, a
+// defining polynomial of Q(sqrt(-3), sqrt(-5), sqrt(-7)) (the grh benchmark
+// row multiquadratic_m3_m5_m7).  Its rational squares are the products of
+// -3, -5 and -7 times rational squares.
+silex::NumberField multiquadratic_m3_m5_m7_field() noexcept {
+    return field_from_coefficients({1201, 598, -524, -146, 69, 2, 4, -4, 1});
+}
+
+void assert_definitely_not_power(const silex::Element& value,
+                                 slong exponent) noexcept {
+    sflint::Fmpz n;
+    sflint::fmpz_set_si(sflint::FmpzRef(n), exponent);
+    silex::Element root(*value.parent());
+    assert(root.set_si(7));
+    bool is_power = true;
+    assert(value.is_power(is_power, root, sflint::FmpzConstRef(n)));
+    assert(!is_power);
+    assert(root.equal_si(7));
+}
+
+// Elements whose residue is an n-th power at the first factor of the first
+// good prime, so the Hensel lift runs and verifies no candidate.  Before the
+// pre-lift residue disproof these queries failed (unknown); a non-power
+// residue at a further prime now proves "not a power".  Each value is
+// checked to be no n-th power by hand: -1, 6 are not squares in the real
+// field Q(2^(1/3)) of odd degree (a rational square of K has square norm,
+// N(-1) = -1, N(6) = 216 = 6^3; and 6 = b^2 forces sqrt(6) in K, impossible
+// in a cubic field); 1 + theta has norm 3 and 3 + theta norm 29, neither a
+// rational square or cube.  2, 3, -1, 6 are not squares in
+// Q(sqrt(-3), sqrt(-5), sqrt(-7)), whose rational square classes are those
+// of -3, -5, -7 and their products, and 2 (1 + theta)^2 is a square there
+// only if 2 is.
+void test_power_prelift_residue_disproof() noexcept {
+    silex::NumberField cubic = cubic_field();
+    for (std::initializer_list<slong> c :
+         {std::initializer_list<slong>{-1}, {6}, {1, 1}, {3, 1}}) {
+        assert_definitely_not_power(element_from_coefficients(cubic, c), 2);
+    }
+    for (std::initializer_list<slong> c :
+         {std::initializer_list<slong>{3}, {1, 1}, {3, 1}}) {
+        assert_definitely_not_power(element_from_coefficients(cubic, c), 3);
+    }
+
+    silex::NumberField field = multiquadratic_m3_m5_m7_field();
+    for (slong c : {2, 3, -1, 6}) {
+        silex::Element value(field);
+        assert(value.set_si(c));
+        bool is_square = true;
+        silex::Element root(field);
+        assert(value.is_square(is_square, root));
+        assert(!is_square);
+    }
+    silex::Element one_plus_theta = element_from_coefficients(field, {1, 1});
+    silex::Element structured(field);
+    silex::Element two(field);
+    assert(two.set_si(2));
+    assert(structured.multiply(one_plus_theta, one_plus_theta));
+    assert(structured.multiply(structured, two));
+    assert_definitely_not_power(structured, 2);
+
+    // Genuine squares still answer yes with a verified root.
+    for (slong c : {-3, 15, -105}) {
+        silex::Element value(field);
+        assert(value.set_si(c));
+        assert(structured.multiply(one_plus_theta, one_plus_theta));
+        assert(value.multiply(value, structured));
+        sflint::Fmpz two;
+        sflint::fmpz_set_si(sflint::FmpzRef(two), 2);
+        assert_is_power_with_root(value, two);
+    }
+}
+
+// The exact answers of the lift-only path (pre-lift disproof disabled) and
+// of the production path, each followed by the residue disproof that
+// Element::is_power runs after a failed lift.
+struct PowerAnswer {
+    bool known = false;
+    bool is_power = false;
+};
+
+PowerAnswer hensel_power_answer(const silex::Element& value,
+                                slong exponent,
+                                silex::detail::PreLiftResidueDisproof mode,
+                                silex::Element& root) noexcept {
+    PowerAnswer answer;
+    bool flag = false;
+    if (silex::detail::pure_power_hensel_root(flag, root, value, exponent,
+                                              nullptr, mode)) {
+        answer.known = true;
+        answer.is_power = flag;
+        return answer;
+    }
+    flag = true;
+    if (silex::detail::pure_power_residue_disproves(flag, value, exponent,
+                                                    nullptr)) {
+        assert(!flag);
+        answer.known = true;
+        answer.is_power = false;
+    }
+    return answer;
+}
+
+ulong next_test_random(ulong& state) noexcept {
+    state = state * 6364136223846793005UL + 1442695040888963407UL;
+    return state >> 33;
+}
+
+// Randomised differential test of the pre-lift residue disproof against the
+// lift-only answers: it may only turn an unknown into "not a power".  Every
+// definite answer stays, a found root is the same verified root, and no
+// unknown or "no" becomes "yes".
+void test_power_prelift_disproof_differential() noexcept {
+    struct Case {
+        silex::NumberField field;
+        slong exponent;
+        int samples;
+    };
+    Case cases[] = {
+            {cubic_field(), 2, 60},
+            {cubic_field(), 3, 60},
+            {field_from_coefficients({1, 0, -10, 0, 1}), 2, 60},
+            {field_from_coefficients({-3, 1, 0, 0, 0, 1}), 5, 30},
+            {multiquadratic_m3_m5_m7_field(), 2, 16},
+    };
+    ulong state = 237;
+    int unknown_to_no = 0;
+    for (Case& test_case : cases) {
+        const silex::NumberField& field = test_case.field;
+        const slong degree = field.degree();
+        sflint::Fmpz n;
+        sflint::fmpz_set_si(sflint::FmpzRef(n), test_case.exponent);
+        for (int sample = 0; sample < test_case.samples; ++sample) {
+            sflint::FmpqPoly coefficients;
+            for (slong i = 0; i < degree; ++i) {
+                sflint::fmpq_poly_set_coeff_si(
+                        coefficients, i,
+                        static_cast<slong>(next_test_random(state) % 15) - 7);
+            }
+            silex::Element base(field);
+            assert(base.set_fmpq_poly(
+                    sflint::FmpqPolyConstRef(coefficients)));
+            if (base.equal_si(0)) {
+                continue;
+            }
+            // Kinds: b, b^n, c b^n with c in {2, 3, -1, 6}, and the
+            // non-integral (b/3)^n and c (b/3)^n.
+            const ulong kind = next_test_random(state) % 5;
+            const slong scalars[] = {2, 3, -1, 6};
+            const slong scalar =
+                    scalars[next_test_random(state) % 4];
+            silex::Element value(field);
+            if (kind == 0) {
+                assert(value.set(base));
+            } else {
+                if (kind >= 3) {
+                    assert(base.scalar_div_si(base, 3));
+                }
+                assert(value.pow_fmpz(base, sflint::FmpzConstRef(n)));
+                if (kind == 2 || kind == 4) {
+                    silex::Element factor(field);
+                    assert(factor.set_si(scalar));
+                    assert(value.multiply(value, factor));
+                }
+            }
+
+            silex::Element old_root(field);
+            silex::Element new_root(field);
+            const PowerAnswer old_answer = hensel_power_answer(
+                    value, test_case.exponent,
+                    silex::detail::PreLiftResidueDisproof::disabled,
+                    old_root);
+            const PowerAnswer new_answer = hensel_power_answer(
+                    value, test_case.exponent,
+                    silex::detail::PreLiftResidueDisproof::enabled, new_root);
+            if (old_answer.known) {
+                assert(new_answer.known);
+                assert(new_answer.is_power == old_answer.is_power);
+                if (old_answer.is_power) {
+                    assert(new_root.equal(old_root));
+                }
+            } else if (new_answer.known) {
+                assert(!new_answer.is_power);
+                ++unknown_to_no;
+            }
+            if (new_answer.known && new_answer.is_power) {
+                silex::Element check(field);
+                assert(check.pow_fmpz(new_root, sflint::FmpzConstRef(n)));
+                assert(check.equal(value));
+            }
+            if (kind == 1 || kind == 3) {
+                // A genuine power is never disproved.
+                assert(!new_answer.known || new_answer.is_power);
+            }
+        }
+    }
+    assert(unknown_to_no > 0);
+}
+
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
     sflint::FmpqPoly polynomial;
     sflint::Fmpq coefficient;
@@ -754,6 +953,8 @@ int main() {
     test_power_huge_exponent_unit_candidates();
     test_power_height_check_keeps_roots();
     test_power_non_integral_unit_norm_roots();
+    test_power_prelift_residue_disproof();
+    test_power_prelift_disproof_differential();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 
@@ -1260,11 +1461,15 @@ int main() {
             full_residue_root, sflint::FmpzConstRef(exponent)));
     assert(full_residue_check.equal(full_residue_square));
 
+    // theta = 2^(1/3) is not a cube: N(theta) = 2 is not a rational cube.
+    // The first good prime leaves it undecided after the lift; the pre-lift
+    // residue disproof at a further prime now answers "not a power" (this
+    // query used to fail), and the root stays untouched.
     sflint::fmpz_set_ui(exponent, 3);
     is_power = true;
-    assert(!cubic_x.is_power(is_power, cubic_root,
-                             sflint::FmpzConstRef(exponent)));
-    assert(is_power);
+    assert(cubic_x.is_power(is_power, cubic_root,
+                            sflint::FmpzConstRef(exponent)));
+    assert(!is_power);
     assert(cubic_root.equal_si(7));
 
     return 0;
