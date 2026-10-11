@@ -5587,11 +5587,12 @@ bool real_quadratic_two_units(silex::OrderUnitGroup& out,
 // The finite-index loop of reference Clgp.jl:_class_unit_group saturates and
 // then re-runs _validate_class_unit_group, which reads the class number of the
 // current relation module (class_group_current_h).  On Z[sqrt(2)] with the
-// factor base {(sqrt(2))} and the single relation 2 = sqrt(2)^2, the
-// tentative class group is Z/2.  Saturation at 2 finds sqrt(2) and appends it
-// as a class relation, which clears the stored presentation.  The loop must
-// validate against the rebuilt presentation instead of reading the
-// "presentation unavailable" result as index one.
+// factor base over the primes up to 7 and the relations sqrt(2), 3, 5,
+// 11 + 6 sqrt(2) = (3 + sqrt(2))^2 and 3 - sqrt(2), the tentative class group
+// is Z/2.  Saturation at 2 finds 3 + sqrt(2) and appends it as a class
+// relation, which clears the stored presentation.  The loop must validate
+// against the rebuilt presentation instead of reading "presentation
+// unavailable" as a result.
 int test_small_index_saturation_revalidates_appended_class_relation() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order;
@@ -5600,16 +5601,20 @@ int test_small_index_saturation_revalidates_appended_class_relation() {
 
     silex::ClassGroupContext context(order);
     sflint::Fmpz bound;
-    assert(set_fmpz_si(bound, 2));
+    assert(set_fmpz_si(bound, 7));
     assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
-    assert(context.generator_count() == 1);
+    assert(context.generator_count() == 5);
     const silex::FactorBase* base = context.factor_base();
     assert(base != nullptr);
-    silex::Relation relation(*base);
-    silex::Element two(field);
-    assert(two.set_si(2));
-    assert(relation.set_generator(two));
-    assert(context.append_relation(relation));
+    const slong coefficients[5][2] = {
+            {0, 1}, {3, 0}, {5, 0}, {11, 6}, {3, -1}};
+    for (const auto& pair : coefficients) {
+        silex::Relation relation(*base);
+        silex::Element generator(field);
+        assert(set_quadratic_coeffs(generator, pair[0], 1, pair[1], 1));
+        assert(relation.set_generator(generator));
+        assert(context.append_relation(relation));
+    }
     assert(context.publish_presentation());
     sflint::Fmpz class_order;
     assert(context.order(sflint::FmpzRef(class_order)));
@@ -5635,13 +5640,11 @@ int test_small_index_saturation_revalidates_appended_class_relation() {
     assert(attempted);
     assert(context.relation_count() > relations_before);
     assert(context.has_presentation());
-    assert(summary.outcome !=
-           silex::detail::ValidateRefineOutcome::local_rank_unavailable);
-    assert(context.order(sflint::FmpzRef(class_order)));
-    assert(sflint::fmpz_equal_si(class_order, 1));
-    assert(validated);
     assert(summary.outcome == silex::detail::ValidateRefineOutcome::proven);
     assert(sflint::fmpz_equal_si(summary.last_index_bound, 1));
+    assert(validated);
+    assert(context.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 1));
 
     return 0;
 }

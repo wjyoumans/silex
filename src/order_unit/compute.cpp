@@ -2651,6 +2651,16 @@ bool next_prime_slong(slong& next, slong current) noexcept {
     return next > current;
 }
 
+// Saturation appends class relations under the keep policy, which clears the
+// stored presentation.  reference _validate_class_unit_group (Clgp.jl:110)
+// reads the class number of the current relation module through
+// class_group_current_h (Clgp.jl:173-177), saturated relations included, so
+// the presentation is rebuilt before the candidate is validated again.
+bool rebuild_saturated_presentation(ClassGroupContext& class_group) noexcept {
+    return class_group.has_presentation() ||
+           class_group.publish_presentation();
+}
+
 bool unknown_saturation_at_two(
         bool& validated,
         RelationUnitExtractionState& extraction_state,
@@ -2692,6 +2702,9 @@ bool unknown_saturation_at_two(
     }
 
     extraction_state.saturation_at_two_done = true;
+    if (!rebuild_saturated_presentation(class_group)) {
+        return false;
+    }
     return unknown_candidate_validated(
             validated, extraction_state, summary, units, class_group, order,
             analytic_cache, expected_rank, precision, accept_grh_generation);
@@ -2750,6 +2763,9 @@ bool unknown_small_index_saturation(
             SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "small-index saturation source assertion failed");
+            return false;
+        }
+        if (!rebuild_saturated_presentation(class_group)) {
             return false;
         }
 
