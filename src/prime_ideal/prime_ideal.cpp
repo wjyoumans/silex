@@ -873,6 +873,76 @@ bool residue_degree_allowed(slong residue_degree,
     return max_residue_degree <= 0 || residue_degree <= max_residue_degree;
 }
 
+// Order-free records of a full index-divisor decomposition, for
+// OrderAccess::store_index_divisor_decomposition.
+bool index_prime_records(std::vector<detail::IndexDivisorPrimeRecord>& out,
+                         const std::vector<IndexPrimeData>& primes) noexcept {
+    std::vector<detail::IndexDivisorPrimeRecord> records;
+    records.reserve(primes.size());
+    for (const IndexPrimeData& prime : primes) {
+        const slong n = prime.ideal.degree();
+        records.emplace_back();
+        detail::IndexDivisorPrimeRecord& record = records.back();
+        record.hnf = flint::FmpzMat(n, n);
+        if (n <= 0 || !prime.ideal.get_hnf(flint::FmpzMatRef(record.hnf))) {
+            return false;
+        }
+        const OrderElement* generator = prime.ideal.known_principal_generator();
+        if (generator != nullptr) {
+            record.principal_generator = flint::FmpzMat(1, n);
+            if (!generator->get_coordinates(
+                        flint::FmpzMatRef(record.principal_generator))) {
+                return false;
+            }
+            record.has_principal_generator = true;
+        }
+        record.ramification_index = prime.ramification_index;
+        record.residue_degree = prime.residue_degree;
+    }
+    out.swap(records);
+    return true;
+}
+
+// Rebuilds, in stored order, the primes of `records` whose residue degree
+// passes `max_residue_degree`.  An ideal stored with a known principal
+// generator is rebuilt from that generator, as it was first built; any other
+// is rebuilt from its HNF through the checked Ideal::set_hnf.  Both give the
+// ideal first published, since the HNF of a full-rank lattice is unique.
+bool index_prime_data_from_records(
+        std::vector<IndexPrimeData>& out,
+        const Order& order,
+        const std::vector<detail::IndexDivisorPrimeRecord>& records,
+        slong max_residue_degree) noexcept {
+    std::vector<IndexPrimeData> data;
+    data.reserve(records.size());
+    for (const detail::IndexDivisorPrimeRecord& record : records) {
+        if (!residue_degree_allowed(record.residue_degree,
+                                    max_residue_degree)) {
+            continue;
+        }
+        data.emplace_back(order);
+        IndexPrimeData& prime = data.back();
+        if (!prime.ideal.is_defined()) {
+            return false;
+        }
+        if (record.has_principal_generator) {
+            OrderElement generator(order);
+            if (!generator.is_defined() ||
+                !generator.set_coordinates(flint::FmpzMatConstRef(
+                        record.principal_generator)) ||
+                !prime.ideal.set_principal(generator)) {
+                return false;
+            }
+        } else if (!prime.ideal.set_hnf(flint::FmpzMatConstRef(record.hnf))) {
+            return false;
+        }
+        prime.ramification_index = record.ramification_index;
+        prime.residue_degree = record.residue_degree;
+    }
+    out.swap(data);
+    return true;
+}
+
 bool maximal_order_has_nonindex_defining_polynomial_prime(
         const Order& order,
         flint::FmpzConstRef p) noexcept {
@@ -1264,6 +1334,16 @@ bool find_separating_fixed_element(
     }
     const slong p_si = fmpz_get_si(p.raw());
     if (p_si <= 1) {
+        return false;
+    }
+    // A candidate is accepted below only when its minimal polynomial factors
+    // over F_p into `nullity` distinct monic linear factors, that is, when it
+    // has `nullity` distinct roots in F_p.  F_p has only p elements, so no
+    // candidate can pass when nullity > p and the enumeration is skipped; the
+    // result (false) is the one the loop would return.  This is the bound
+    // stated in components_from_fixed_idempotents: one separating element
+    // cannot split more components than the base field has elements.
+    if (nullity > p_si) {
         return false;
     }
 
@@ -4354,12 +4434,42 @@ bool decompose_prime(PrimeIdealList& out,
             return true;
         };
 
+        // Per-order cache of the decomposition of p, following reference
+        // v0.38.6 src/NumFieldOrd/NfOrd/Ideal/Prime.jl:213-232, which keeps
+        // index-divisor decompositions in `O.index_div`.  Every branch below
+        // builds the whole decomposition before the residue-degree filter:
+        // the bounded and recursive splits take no degree bound and
+        // publish_index_primes filters their lists; the monogenic branch
+        // builds every factor's ideal and filters the same way.  The stored
+        // list is therefore the unfiltered decomposition, in published order,
+        // and filtering it on read gives what this call would compute.  It
+        // depends only on the order and p, and the order is maximal here.  A
+        // record that cannot be rebuilt falls back to the computation.
+        if (const std::vector<detail::IndexDivisorPrimeRecord>* cached =
+                    detail::OrderAccess::index_divisor_decomposition(order, p);
+            cached != nullptr) {
+            std::vector<IndexPrimeData> restored;
+            if (index_prime_data_from_records(restored, order, *cached,
+                                              max_residue_degree)) {
+                return publish_index_primes(restored);
+            }
+        }
+        auto store_and_publish_index_primes =
+                [&](std::vector<IndexPrimeData>& primes) noexcept -> bool {
+            std::vector<detail::IndexDivisorPrimeRecord> records;
+            if (index_prime_records(records, primes)) {
+                detail::OrderAccess::store_index_divisor_decomposition(
+                        order, p, std::move(records));
+            }
+            return publish_index_primes(primes);
+        };
+
         std::vector<IndexPrimeData> index_primes;
         if (unramified_maximal_index_divisor_prime_data(
                     index_primes, order, p, FixedSplit::bounded) ||
             ramified_maximal_index_divisor_prime_data(
                     index_primes, order, p, FixedSplit::bounded)) {
-            return publish_index_primes(index_primes);
+            return store_and_publish_index_primes(index_primes);
         }
 
         Element beta(*order.parent());
@@ -4383,7 +4493,7 @@ bool decompose_prime(PrimeIdealList& out,
                         index_primes, order, p, FixedSplit::recursive) ||
                 ramified_maximal_index_divisor_prime_data(
                         index_primes, order, p, FixedSplit::recursive)) {
-                return publish_index_primes(index_primes);
+                return store_and_publish_index_primes(index_primes);
             }
             return false;
         }
@@ -4401,17 +4511,20 @@ bool decompose_prime(PrimeIdealList& out,
             return false;
         }
 
-        if (!candidates.reserve(factorization.raw()->num)) {
-            return false;
-        }
+        // Every factor's ideal is built, so the whole decomposition can be
+        // stored; publish_index_primes then applies the residue-degree
+        // filter.  A factor the filter drops does not fail the call when its
+        // ideal cannot be built: the decomposition is then not stored.
+        std::vector<IndexPrimeData> monogenic_primes;
+        monogenic_primes.reserve(
+                static_cast<std::size_t>(factorization.raw()->num));
+        bool complete = true;
         for (slong i = 0; i < factorization.raw()->num; ++i) {
             const slong residue_degree =
                     fmpz_mod_poly_degree(factorization.raw()->poly + i,
                                          ctx.raw());
-            if (!residue_degree_allowed(residue_degree,
-                                        max_residue_degree)) {
-                continue;
-            }
+            const bool allowed =
+                    residue_degree_allowed(residue_degree, max_residue_degree);
 
             Element generator_element(*order.parent());
             OrderElement generator(order);
@@ -4423,17 +4536,24 @@ bool decompose_prime(PrimeIdealList& out,
                                               beta, ctx) ||
                 !generator.set_element(generator_element) ||
                 !detail::set_known_two_generator_ideal(
-                        candidate_ideal, p, generator) ||
-                !candidates.append(order) ||
-                !candidates.back()->set_data_no_residue(
-                        p, factorization.raw()->exp[i],
-                        residue_degree, candidate_ideal)) {
-                return false;
+                        candidate_ideal, p, generator)) {
+                if (allowed) {
+                    return false;
+                }
+                complete = false;
+                continue;
             }
+            monogenic_primes.emplace_back(order);
+            IndexPrimeData& prime = monogenic_primes.back();
+            prime.ideal.swap(candidate_ideal);
+            prime.ramification_index = factorization.raw()->exp[i];
+            prime.residue_degree = residue_degree;
         }
 
-        out.swap(candidates);
-        return true;
+        if (complete) {
+            return store_and_publish_index_primes(monogenic_primes);
+        }
+        return publish_index_primes(monogenic_primes);
     }
 
     flint::FmpzModPoly reduced(ctx);

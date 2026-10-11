@@ -28,7 +28,9 @@
 #include <silex/ideal.hpp>
 #include <silex/order_element.hpp>
 
+#include <memory>
 #include <utility>
+#include <vector>
 
 #include "order_internal.hpp"
 
@@ -59,6 +61,16 @@ struct OrderData {
     mutable bool has_minkowski_embedding_rows_ = false;
     mutable bool has_discriminant_ = false;
     mutable bool has_equation_order_index_ = false;
+    // Decompositions of index-divisor primes, filled by decompose_prime
+    // through OrderAccess::store_index_divisor_decomposition.  Like the index
+    // above they depend only on the basis and the parent field.  Each entry
+    // is boxed so a stored decomposition never moves.
+    struct IndexDivisorDecomposition {
+        flint::Fmpz p;
+        std::vector<IndexDivisorPrimeRecord> primes;
+    };
+    mutable std::vector<std::unique_ptr<IndexDivisorDecomposition>>
+            index_divisor_decompositions_;
     bool maximality_is_known_ = false;
     bool maximal_ = false;
     OrderSpecialization specialization_;
@@ -1410,6 +1422,33 @@ bool OrderAccess::equation_order_index(flint::FmpzRef out,
 
     fmpz_set(out.raw(), data.equation_order_index_.raw());
     return true;
+}
+
+const std::vector<IndexDivisorPrimeRecord>*
+OrderAccess::index_divisor_decomposition(const Order& order,
+                                         flint::FmpzConstRef p) noexcept {
+    if (!order.has_basis()) {
+        return nullptr;
+    }
+    for (const auto& entry : order.data_->index_divisor_decompositions_) {
+        if (fmpz_equal(entry->p.raw(), p.raw()) != 0) {
+            return &entry->primes;
+        }
+    }
+    return nullptr;
+}
+
+void OrderAccess::store_index_divisor_decomposition(
+        const Order& order,
+        flint::FmpzConstRef p,
+        std::vector<IndexDivisorPrimeRecord>&& primes) noexcept {
+    if (!order.has_basis() || index_divisor_decomposition(order, p) != nullptr) {
+        return;
+    }
+    auto entry = std::make_unique<OrderData::IndexDivisorDecomposition>();
+    fmpz_set(entry->p.raw(), p.raw());
+    entry->primes = std::move(primes);
+    order.data_->index_divisor_decompositions_.push_back(std::move(entry));
 }
 
 }  // namespace detail

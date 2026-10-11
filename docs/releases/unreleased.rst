@@ -532,6 +532,14 @@ Changed
   integral defining polynomial, and return the input order at primes where it
   is ``p``-maximal.  Results are unchanged.
 
+- ``decompose_prime`` on a maximal order keeps the decomposition of each
+  prime dividing the index ``[O : Z[theta]]`` with the order, before any
+  residue-degree bound, and later calls for that prime on the same order
+  rebuild the primes from it instead of splitting ``O/pO`` again.  When a
+  prime has more prime ideals above it than ``p`` itself, the split no longer
+  searches for a separating element, which cannot exist.  Decompositions,
+  prime order included, are unchanged.
+
 Fixed
 -----
 

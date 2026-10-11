@@ -1088,6 +1088,170 @@ int test_index_divisor_monogenic_order_unchanged_ramified() {
              {1, 0, 0, 2, 0, 1, 0, 4, 0, 0, 1, 8, 0, 0, 0, 17}});
 }
 
+// Compares two decompositions of one prime over two orders with the same
+// basis, prime by prime: e, f, the HNF, the known principal generator, and
+// the residue polynomial and Kummer generator when present.
+bool same_decomposition(const silex::PrimeIdealList& left,
+                        const silex::Order& left_order,
+                        const silex::PrimeIdealList& right,
+                        const silex::Order& right_order) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    const slong n = left_order.degree();
+    for (slong i = 0; i < left.size(); ++i) {
+        const silex::PrimeIdeal& a = *left.at(i);
+        const silex::PrimeIdeal& b = *right.at(i);
+        if (a.ramification_index() != b.ramification_index() ||
+            a.residue_degree() != b.residue_degree()) {
+            return false;
+        }
+        silex::Ideal ideal_a(left_order);
+        silex::Ideal ideal_b(right_order);
+        sflint::FmpzMat hnf_a(n, n);
+        sflint::FmpzMat hnf_b(n, n);
+        if (!a.get_ideal(ideal_a) || !b.get_ideal(ideal_b) ||
+            !ideal_a.get_hnf(sflint::FmpzMatRef(hnf_a)) ||
+            !ideal_b.get_hnf(sflint::FmpzMatRef(hnf_b)) ||
+            fmpz_mat_equal(hnf_a.raw(), hnf_b.raw()) == 0) {
+            return false;
+        }
+        const silex::OrderElement* generator_a =
+                ideal_a.known_principal_generator();
+        const silex::OrderElement* generator_b =
+                ideal_b.known_principal_generator();
+        if ((generator_a == nullptr) != (generator_b == nullptr)) {
+            return false;
+        }
+        if (generator_a != nullptr) {
+            sflint::FmpzMat coordinates_a(1, n);
+            sflint::FmpzMat coordinates_b(1, n);
+            if (!generator_a->get_coordinates(
+                        sflint::FmpzMatRef(coordinates_a)) ||
+                !generator_b->get_coordinates(
+                        sflint::FmpzMatRef(coordinates_b)) ||
+                fmpz_mat_equal(coordinates_a.raw(), coordinates_b.raw()) ==
+                        0) {
+                return false;
+            }
+        }
+        sflint::FmpzPoly residue_a;
+        sflint::FmpzPoly residue_b;
+        const bool has_residue_a =
+                a.residue_polynomial(sflint::FmpzPolyRef(residue_a));
+        if (has_residue_a !=
+                    b.residue_polynomial(sflint::FmpzPolyRef(residue_b)) ||
+            (has_residue_a &&
+             fmpz_poly_equal(residue_a.raw(), residue_b.raw()) == 0)) {
+            return false;
+        }
+        sflint::FmpzMat kummer_a(1, n);
+        sflint::FmpzMat kummer_b(1, n);
+        const bool has_kummer_a =
+                a.kummer_generator_coordinates(sflint::FmpzMatRef(kummer_a));
+        if (has_kummer_a != b.kummer_generator_coordinates(
+                                    sflint::FmpzMatRef(kummer_b)) ||
+            (has_kummer_a &&
+             fmpz_mat_equal(kummer_a.raw(), kummer_b.raw()) == 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// decompose_prime keeps the whole decomposition of an index-divisor prime in
+// the order's shared data and applies the residue-degree bound on read.  For
+// each p, calls on one order with the bounds in `bounds`, in turn (the first
+// fills the cache, possibly under a bound that drops primes), must give what
+// the first call on a fresh maximal order gives for the same bound, prime
+// order included, and the cache must hold the unbounded decomposition.
+int check_index_divisor_cache_matches_fresh(
+        const std::vector<slong>& low_to_high,
+        const std::vector<slong>& rational_primes,
+        const std::vector<slong>& bounds) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+    silex::Order cached(field);
+    assert(cached.maximal_order(equation));
+    assert(!cached.is_equation_order());
+
+    for (const slong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, rational_prime));
+        assert(silex::detail::OrderAccess::index_divisor_decomposition(
+                       cached, sflint::FmpzConstRef(p)) == nullptr);
+
+        silex::Order unbounded_order(field);
+        assert(unbounded_order.maximal_order(equation));
+        silex::PrimeIdealList unbounded;
+        assert(silex::decompose_prime(unbounded, unbounded_order,
+                                      sflint::FmpzConstRef(p)));
+
+        for (const slong bound : bounds) {
+            silex::PrimeIdealList from_cache;
+            assert(silex::decompose_prime(from_cache, cached,
+                                          sflint::FmpzConstRef(p), bound));
+            const std::vector<silex::detail::IndexDivisorPrimeRecord>* stored =
+                    silex::detail::OrderAccess::index_divisor_decomposition(
+                            cached, sflint::FmpzConstRef(p));
+            assert(stored != nullptr);
+            assert(static_cast<slong>(stored->size()) == unbounded.size());
+
+            silex::Order fresh(field);
+            assert(fresh.maximal_order(equation));
+            assert(!fresh.has_same_data(cached));
+            silex::PrimeIdealList direct;
+            assert(silex::decompose_prime(direct, fresh,
+                                          sflint::FmpzConstRef(p), bound));
+            assert(same_decomposition(from_cache, cached, direct, fresh));
+        }
+    }
+    return 0;
+}
+
+// Q(sqrt(-23), sqrt(-31), sqrt(-47)): 2 splits into eight primes and 3 into
+// four primes of degree two.  Both have more primes than p, so no separating
+// fixed element exists and find_separating_fixed_element returns at once;
+// p^g <= 4096, so the bounded enumeration splits them.  Each cached p is
+// keyed separately on the one order.
+int test_index_divisor_cache_more_primes_than_p() {
+    return check_index_divisor_cache_matches_fresh(
+            {38188288, 1822160, -1462612, -62792, 24143, 602, -220, -2, 1},
+            {2, 3}, {1, 0, 2});
+}
+
+// Q(sqrt(-3), sqrt(-5), sqrt(-7)), p = 11: 11^4 > 4096, so the recursive
+// split decomposes p.
+int test_index_divisor_cache_recursive_split() {
+    return check_index_divisor_cache_matches_fresh(
+            {1201, 598, -524, -146, 69, 2, 4, -4, 1}, {11}, {1, 0, 2});
+}
+
+// The monogenic Dedekind-Kummer branch: 17^3 > 4096 primes of degree one,
+// with and without a ramified prime, and 17^4 g(x/17) for
+// g = y (y - 1) (y^2 + 3) + 17, where 17 has primes of degree 1, 1 and 2.
+// The first call under bound 1 drops the degree-two prime.
+int test_index_divisor_cache_monogenic() {
+    assert(check_index_divisor_cache_matches_fresh({54043, 3179, -102, 1},
+                                                   {17}, {1, 0}) == 0);
+    assert(check_index_divisor_cache_matches_fresh(
+                   {1419857, -19652, 2312, -85, 1}, {17}, {1, 0}) == 0);
+    return check_index_divisor_cache_matches_fresh(
+            {1419857, -14739, 867, -17, 1}, {17}, {1, 0, 2});
+}
+
+// x^3 + 4x + 8 = 8 g(x/2) with g = y^3 + y + 1 irreducible modulo 2 and of
+// odd discriminant: 2 divides the index and is inert, so its one prime is
+// 2O, built with a known principal generator, which the cache keeps.
+int test_index_divisor_cache_inert_principal() {
+    return check_index_divisor_cache_matches_fresh({8, 4, 0, 1}, {2},
+                                                   {1, 0, 3});
+}
+
 // Splits O/(p, I_p) through the bounded idempotent enumeration and through
 // the recursive split (both without the separating element) and checks that
 // they give the same prime ideals in the same order, which is also the order
@@ -3129,6 +3293,10 @@ int main() {
     assert(test_index_divisor_recursive_split_ramified() == 0);
     assert(test_index_divisor_monogenic_order_unchanged_unramified() == 0);
     assert(test_index_divisor_monogenic_order_unchanged_ramified() == 0);
+    assert(test_index_divisor_cache_more_primes_than_p() == 0);
+    assert(test_index_divisor_cache_recursive_split() == 0);
+    assert(test_index_divisor_cache_monogenic() == 0);
+    assert(test_index_divisor_cache_inert_principal() == 0);
     assert(test_recursive_split_matches_enumeration_unramified() == 0);
     assert(test_recursive_split_matches_enumeration_ramified() == 0);
     assert(test_valuation_degree_one() == 0);

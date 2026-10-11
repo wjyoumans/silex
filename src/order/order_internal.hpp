@@ -1,8 +1,28 @@
 #pragma once
 
+#include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_mat.hpp>
 #include <silex/order.hpp>
 
+#include <vector>
+
 namespace silex::detail {
+
+// One prime ideal of a decomposition cached by
+// OrderAccess::store_index_divisor_decomposition, held without an Order
+// handle: the cache lives in the order's shared data, and an Ideal or
+// PrimeIdeal there would own a handle to that same data and never be freed.
+// `hnf` is the ideal's HNF in the order basis; `principal_generator` holds the
+// 1 x n coordinates of the ideal's known principal generator when
+// `has_principal_generator` is set, so a restored ideal carries the same
+// generator as the one first published.
+struct IndexDivisorPrimeRecord {
+    flint::FmpzMat hnf{0, 0};
+    flint::FmpzMat principal_generator{0, 0};
+    slong ramification_index = 0;
+    slong residue_degree = 0;
+    bool has_principal_generator = false;
+};
 
 // Conductor {x in order : x * overorder is contained in order} of `order` in
 // an overorder, as an ideal of `order`.  `out` must already be defined over
@@ -59,6 +79,28 @@ public:
     // `nf_get_index`.
     static bool equation_order_index(flint::FmpzRef out,
                                      const Order& order) noexcept;
+
+    // Full decomposition of the prime p in `order`, before any residue-degree
+    // filter, as decompose_prime last stored it for this order data, in the
+    // order decompose_prime published it.  Returns null when nothing is
+    // stored for p.  decompose_prime stores only decompositions of maximal
+    // non-equation orders taken through its index-divisor branch.  The
+    // records live in the order's shared data in the same unsynchronized way
+    // as the equation order index; the pointer stays valid while the order
+    // data lives, since later stores for other primes never move it.
+    // Order::set, set_basis and the factories start with nothing stored.
+    // Mirrors the per-order index-divisor decomposition cache of reference
+    // v0.38.6 src/NumFieldOrd/NfOrd/Ideal/Prime.jl:213-232 (`O.index_div`).
+    static const std::vector<IndexDivisorPrimeRecord>*
+    index_divisor_decomposition(const Order& order,
+                                flint::FmpzConstRef p) noexcept;
+
+    // Stores `primes` as the decomposition of p in `order`, unless one is
+    // already stored for p.  Silent when `order` has no basis.
+    static void store_index_divisor_decomposition(
+            const Order& order,
+            flint::FmpzConstRef p,
+            std::vector<IndexDivisorPrimeRecord>&& primes) noexcept;
 };
 
 }  // namespace silex::detail
