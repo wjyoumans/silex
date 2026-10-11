@@ -635,9 +635,15 @@ DirectLargePrimeStatus direct_partial_relation_row(
         return DirectLargePrimeStatus::unsupported;
     };
 
-    DirectLargePrimeStatus status = direct_large_prime_from_norm(
-            out_rational_large_prime, generator, base, factor_base_bound,
-            known_norm, known_integral_coordinates);
+    DirectLargePrimeStatus status = DirectLargePrimeStatus::unsupported;
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.direct_partial_relation_row.norm_screen");
+        status = direct_large_prime_from_norm(
+                out_rational_large_prime, generator, base, factor_base_bound,
+                known_norm, known_integral_coordinates);
+    }
     if (status != DirectLargePrimeStatus::found) {
         if (status == DirectLargePrimeStatus::unsupported) {
             SILEX_PROFILE_EVENT(
@@ -657,12 +663,20 @@ DirectLargePrimeStatus direct_partial_relation_row(
     }
 
     OrderElement integral_generator(*order);
-    if (!integral_generator.is_defined() ||
-        (known_integral_coordinates == nullptr
-                 ? !integral_generator.set_element(generator)
-                 : !integral_generator.set_coordinates(
-                           flint::FmpzMatConstRef(
-                                   known_integral_coordinates)))) {
+    bool integral_generator_ok = false;
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.direct_partial_relation_row.integral_generator");
+        integral_generator_ok =
+                integral_generator.is_defined() &&
+                (known_integral_coordinates == nullptr
+                         ? integral_generator.set_element(generator)
+                         : integral_generator.set_coordinates(
+                                   flint::FmpzMatConstRef(
+                                           known_integral_coordinates)));
+    }
+    if (!integral_generator_ok) {
         return unsupported(
                 "class_group.partial_relation_direct_large_prime_unsupported_integral_generator");
     }
@@ -670,6 +684,8 @@ DirectLargePrimeStatus direct_partial_relation_row(
     flint::Fmpq norm;
     const fmpq* norm_value = known_norm;
     if (norm_value == nullptr) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.direct_partial_relation_row.norm");
         if (!generator.norm(flint::FmpqRef(norm))) {
             return unsupported(
                     "class_group.partial_relation_direct_large_prime_unsupported_norm");
@@ -687,6 +703,9 @@ DirectLargePrimeStatus direct_partial_relation_row(
     flint::FmpzMat coordinates(1, order->degree());
     const fmpz_mat_struct* coordinate_rows = known_integral_coordinates;
     if (coordinate_rows == nullptr) {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.direct_partial_relation_row.coordinates");
         if (!integral_generator.get_coordinates(
                     flint::FmpzMatRef(coordinates))) {
             return unsupported(
@@ -698,6 +717,9 @@ DirectLargePrimeStatus direct_partial_relation_row(
     flint::FmpzPoly input_polynomial_storage;
     const fmpz_poly_struct* input_polynomial = known_integral_polynomial;
     if (input_polynomial == nullptr) {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.direct_partial_relation_row.input_polynomial");
         direct_partial_coordinates_to_polynomial(
                 input_polynomial_storage,
                 flint::FmpzMatConstRef(coordinate_rows));
@@ -730,10 +752,15 @@ DirectLargePrimeStatus direct_partial_relation_row(
             continue;
         }
 
-        detail::DirectPartialResidueBlockCacheEntry* residue_block =
-                direct_partial_residue_block_cache(
-                        residue_block_cache, base, block_index,
-                        flint::FmpzConstRef(p), length);
+        detail::DirectPartialResidueBlockCacheEntry* residue_block = nullptr;
+        {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.direct_partial_relation_row.residue_block_cache");
+            residue_block = direct_partial_residue_block_cache(
+                    residue_block_cache, base, block_index,
+                    flint::FmpzConstRef(p), length);
+        }
         if (residue_block == nullptr ||
             !residue_block->input.is_initialized() ||
             !residue_block->remainder.is_initialized() ||
@@ -746,12 +773,21 @@ DirectLargePrimeStatus direct_partial_relation_row(
             return unsupported(
                     "class_group.partial_relation_direct_large_prime_unsupported_residue_block_cache");
         }
-        ::fmpz_mod_poly_set_fmpz_poly(residue_block->input.raw(),
-                                      input_polynomial,
-                                      residue_block->context.raw());
+        {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.direct_partial_relation_row.block_input_reduce");
+            ::fmpz_mod_poly_set_fmpz_poly(residue_block->input.raw(),
+                                          input_polynomial,
+                                          residue_block->context.raw());
+        }
 
         hits.clear();
         bool block_supported = true;
+        {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.direct_partial_relation_row.residue_reduction");
         for (std::size_t offset = 0;
              offset < residue_block->residue_polynomials.size(); ++offset) {
             bool residue_zero = false;
@@ -774,6 +810,8 @@ DirectLargePrimeStatus direct_partial_relation_row(
                         residue_block->prime_indices[offset],
                         residue_block->residue_degrees[offset]});
             }
+        }
+
         }
 
         if (!block_supported) {
@@ -811,6 +849,9 @@ DirectLargePrimeStatus direct_partial_relation_row(
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.partial_relation_direct_large_prime_path_exact_valuation");
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.direct_partial_relation_row.exact_valuation");
         slong exact_remaining_vp = remaining_vp;
         Ideal exact_valuation_principal(*order);
         bool have_exact_valuation_principal = false;
@@ -896,9 +937,15 @@ DirectLargePrimeStatus direct_partial_relation_row(
                 "class_group.partial_relation_direct_large_prime_unsupported_leftover_mismatch");
     }
 
-    status = direct_large_prime_residue_key(
-            out_residue_key, generator, base,
-            flint::FmpzConstRef(out_rational_large_prime), input_polynomial);
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.direct_partial_relation_row.residue_key");
+        status = direct_large_prime_residue_key(
+                out_residue_key, generator, base,
+                flint::FmpzConstRef(out_rational_large_prime),
+                input_polynomial);
+    }
     if (status != DirectLargePrimeStatus::found) {
         if (status == DirectLargePrimeStatus::unsupported) {
             SILEX_PROFILE_EVENT(

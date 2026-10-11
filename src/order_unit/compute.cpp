@@ -2426,14 +2426,23 @@ bool add_dependent_unit(bool& changed,
     // not fit leaves the group unchanged unless a grh request supplied the
     // analytic fallback.
     flint::Fmpz denominator_bound;
-    if (!group.regulator_index_bound(flint::FmpzRef(denominator_bound),
-                                     precision) ||
-        flint::fmpz_cmp_ui(flint::FmpzConstRef(denominator_bound), 1) <= 0) {
-        return true;
+    {
+        SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.add_dependent_unit.index_bound");
+        if (!group.regulator_index_bound(flint::FmpzRef(denominator_bound),
+                                         precision) ||
+            flint::fmpz_cmp_ui(flint::FmpzConstRef(denominator_bound), 1) <=
+                    0) {
+            return true;
+        }
     }
-    if (!flint::fmpz_fits_si(flint::FmpzConstRef(denominator_bound)) &&
-        !dependent_unit_fallback_bound(denominator_bound, group, fallback)) {
-        return true;
+    if (!flint::fmpz_fits_si(flint::FmpzConstRef(denominator_bound))) {
+        SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.add_dependent_unit.fallback_bound");
+        if (!dependent_unit_fallback_bound(denominator_bound, group,
+                                           fallback)) {
+            return true;
+        }
     }
 
     FactoredElement root(*field);
@@ -2441,11 +2450,16 @@ bool add_dependent_unit(bool& changed,
     flint::Fmpz torsion_exp;
     bool recovered = false;
     slong relation_precision = extraction_state.rel_add_precision;
-    if (!search_dependent_relation(
+    bool search_ok = false;
+    {
+        SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.add_dependent_unit.search_relation");
+        search_ok = search_dependent_relation(
                 recovered, root, relation, torsion_exp, extraction_state,
                 group, candidate, embeddings,
-                flint::FmpzConstRef(denominator_bound),
-                relation_precision)) {
+                flint::FmpzConstRef(denominator_bound), relation_precision);
+    }
+    if (!search_ok) {
         return true;
     }
     if (!recovered) {
@@ -2455,11 +2469,17 @@ bool add_dependent_unit(bool& changed,
 
     OrderUnitGroup refined(*order);
     refined.set_diagnostics(group.diagnostics());
-    if (!refined.is_defined() ||
-        !adjoin_verified_dependent_relation(
-                changed, refined, group, root,
-                flint::FmpzMatConstRef(relation), 0, embeddings,
-                precision)) {
+    bool adjoin_ok = false;
+    {
+        SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.add_dependent_unit.adjoin_relation");
+        adjoin_ok = refined.is_defined() &&
+                    adjoin_verified_dependent_relation(
+                            changed, refined, group, root,
+                            flint::FmpzMatConstRef(relation), 0, embeddings,
+                            precision);
+    }
+    if (!adjoin_ok) {
         changed = false;
         return true;
     }
@@ -2470,8 +2490,16 @@ bool add_dependent_unit(bool& changed,
             fallback->computed = false;
         }
         bool stored_units_reduced = false;
-        if (!reduce_stored_relation_units(stored_units_reduced, group,
-                                       embeddings, relation_precision)) {
+        bool reduce_ok = false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.add_dependent_unit.reduce_stored_units");
+            reduce_ok = reduce_stored_relation_units(
+                    stored_units_reduced, group, embeddings,
+                    relation_precision);
+        }
+        if (!reduce_ok) {
             changed = false;
             return false;
         }

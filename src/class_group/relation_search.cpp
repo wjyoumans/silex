@@ -28,11 +28,21 @@ bool publish_and_check_compute_goal(ClassGroupContext& context,
                     defer_native_goal_publication(context) &&
             requested_certification != CertificationMode::proven;
     if (!defer_presentation) {
-        if (!context.publish_presentation()) {
+        bool published = false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    context.diagnostics(), DiagnosticsModule::class_group,
+                    "class_group.coordinate_candidate_publish.publish_presentation");
+            published = context.publish_presentation();
+        }
+        if (!published) {
             return false;
         }
 
         if (requested_certification == CertificationMode::proven) {
+            SILEX_PROFILE_SCOPE(
+                    context.diagnostics(), DiagnosticsModule::class_group,
+                    "class_group.coordinate_candidate_publish.certify_quadratic");
             return context.try_certify_quadratic(requested_certification);
         }
 
@@ -42,8 +52,15 @@ bool publish_and_check_compute_goal(ClassGroupContext& context,
     // Both source baselines keep the full-rank relation module current while
     // deferring group/SNF publication.  For a full-rank m-by-n relation
     // matrix, m - n is the exact relation-kernel dimension.
-    if (!detail::ClassGroupRelationSearchAccess::
-                sync_row_module_checkpoint(context)) {
+    bool synced = false;
+    {
+        SILEX_PROFILE_SCOPE(
+                context.diagnostics(), DiagnosticsModule::class_group,
+                "class_group.coordinate_candidate_publish.sync_row_module");
+        synced = detail::ClassGroupRelationSearchAccess::
+                sync_row_module_checkpoint(context);
+    }
+    if (!synced) {
         return false;
     }
     if (detail::ClassGroupRelationSearchAccess::relation_kernel_row_count(
@@ -51,8 +68,13 @@ bool publish_and_check_compute_goal(ClassGroupContext& context,
                 target_relation_kernel_units) {
         return false;
     }
-    if (!context.publish_presentation()) {
-        return false;
+    {
+        SILEX_PROFILE_SCOPE(
+                context.diagnostics(), DiagnosticsModule::class_group,
+                "class_group.coordinate_candidate_publish.publish_presentation_deferred");
+        if (!context.publish_presentation()) {
+            return false;
+        }
     }
     return true;
 }
