@@ -608,6 +608,16 @@ Fixed
   manifest.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- Proven mode no longer fails in the finite-ideal T2 enumeration on fields
+  such as the real cyclotomic field of conductor 11 and degree 10, where the
+  ideal-lattice reduction ran on embeddings rounded too coarsely and every
+  precision retry repeated the same input.  The reduction now repeats from a
+  finer rounding scale when its result fails a Gram-Schmidt check or Hecke's
+  ideal-LLL acceptance bounds.  The enumerated elements and the bounds are
+  unchanged.  On rows whose ideal bases are now reduced better, the published
+  ``regulator_radius`` can change (still a valid enclosure; the regulator,
+  units, class group and labels are the same).
+
 - The class-relation saturation candidate search no longer uses an auxiliary
   prime ``q`` that divides ``lc(F) * disc(F)`` when the defining polynomial is
   not monic with integer coefficients (``F`` is its integer numerator, which

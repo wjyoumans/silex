@@ -627,6 +627,22 @@ toward Hecke's behavior there of rounding at the first precision.
 Attempts that pass the rounding check are unchanged, and every relation is
 still verified exactly.
 
+The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
+rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:
+RM_round_maxrank`` does.  PARI rounds the embeddings of a T2-reduced integral
+basis; Silex's order basis is not reduced, so the rounding error times the LLL
+transform can swamp the reduced vectors (for the degree-one primes above 89 in
+the real cyclotomic field of conductor 11 and degree 10, the last
+Gram-Schmidt pivot was about ``-1e-8`` at every precision and the ten
+precision retries repeated the same input).  As an intentional deviation,
+when the double-precision Gram-Schmidt test fails, or the reduced basis
+misses Hecke's ideal-LLL acceptance bounds (``LLL.jl:_lll``: the bound on
+``|b_1|^2`` and the bound on the product of the ``|b_i|^2``, with ``d`` the
+determinant of the Gram matrix), Silex reduces the same lattice again from
+the next finer full-rank scale (4, 8, ... up to the working precision).
+When no finer scale is left, a basis that has quadratic-form data is kept.
+The lattice, the enumerated elements and the bound rule are unchanged.
+
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
 ``Unit/Relation.jl:_find_rational_relation!``.  Silex computes the
