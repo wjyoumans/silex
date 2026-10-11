@@ -613,8 +613,9 @@ Fixed
   ideal-lattice reduction ran on embeddings rounded too coarsely and every
   precision retry repeated the same input.  The reduction now repeats from a
   finer rounding scale when its result fails a Gram-Schmidt check or Hecke's
-  ideal-LLL acceptance bounds.  The enumerated elements and the bounds are
-  unchanged.  On rows whose ideal bases are now reduced better, the published
+  ideal-LLL acceptance bounds.  The lattice and the bound rule are unchanged;
+  the bound value and the enumeration order follow the new reduced basis.  On
+  rows whose ideal bases are now reduced better, the published
   ``regulator_radius`` can change (still a valid enclosure; the regulator,
   units, class group and labels are the same).
 

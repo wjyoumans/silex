@@ -640,8 +640,10 @@ misses Hecke's ideal-LLL acceptance bounds (``LLL.jl:_lll``: the bound on
 ``|b_1|^2`` and the bound on the product of the ``|b_i|^2``, with ``d`` the
 determinant of the Gram matrix), Silex reduces the same lattice again from
 the next finer full-rank scale (4, 8, ... up to the working precision).
-When no finer scale is left, a basis that has quadratic-form data is kept.
-The lattice, the enumerated elements and the bound rule are unchanged.
+When a finer reduction fails, or no finer scale is left, the first reduced
+basis that had quadratic-form data is kept.  The lattice and the bound rule
+are unchanged; the bound value and the enumeration order follow the new
+reduced basis.
 
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
