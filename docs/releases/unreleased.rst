@@ -575,6 +575,18 @@ Changed
   that decomposing it would have raised no longer fails the build; the prime
   contributes nothing to the factor base either way.
 
+- The validation loop of a ``grh`` class/unit computation no longer repeats
+  a bounded class-relation saturation pass that appended no relation while
+  the candidate class number, the number of factor-base generators and the
+  candidate regulator (within a certified factor two) are unchanged; it
+  keeps the result of the earlier pass (``relation_saturation_status()``
+  ``unavailable``) instead.  The skip assumes that the repeated pass would
+  again append nothing, which is not proven; published results are
+  unchanged on the class/unit benchmark corpus.  If a skipped pass would
+  itself have failed, the computation now keeps the earlier ``unavailable``
+  result instead of failing.  The skip never adds a proof label, and
+  ``proven`` requests are unchanged.
+
 Fixed
 -----
 
