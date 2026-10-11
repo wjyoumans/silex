@@ -8452,6 +8452,12 @@ bool saturation_process_candidates_once(
             // candidate therefore always takes reference's other branch,
             // `_ispower(a, n; decom=fac_a)`, with its decomposition row; the
             // power question is the same, since a = structural^n * leftover.
+            // The residual gate below also relies on the leftover being a
+            // unit: for a unit candidate the leftover is a unit only while
+            // `structural` carries no non-unit base with an exponent
+            // outside [0, n) (saturation relations are single elements
+            // with kernel coefficients lifted into [0, n), so leftover =
+            // element unless equal generators merge).
             FactoredElement structural(*field);
             FactoredElement leftover(*field);
             if (!structural.is_defined() || !leftover.is_defined() ||
@@ -8472,7 +8478,8 @@ bool saturation_process_candidates_once(
                         "class_group.saturation_compact_power_test");
 
                 // One embedding context per candidate, shared by the two
-                // log bounds and the compact presentation, as in
+                // log bounds (taken only for a unit candidate) and the
+                // compact presentation, as in
                 // compact_unit_presentation_power_root.
                 EmbeddingContext candidate_embeddings(*field);
                 bool use_residual = false;

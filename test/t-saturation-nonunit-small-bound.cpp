@@ -49,7 +49,7 @@ bool run(slong generator, bool expect_power) {
 
     silex::detail::SaturationCandidateProcessingResult result;
     const bool ok = silex::detail::saturation_process_candidates_once(
-            result, context, sflint::FmpzMatConstRef(candidates), 2, false, nullptr, nullptr,
+            result, context, sflint::FmpzMatConstRef(candidates), 2, true, nullptr, nullptr,
             nullptr, 128);
     std::printf("generator=%ld process_candidates_once ok=%d saw_power=%d "
                 "saw_non_power=%d tested=%ld compact=%ld structural=%ld\n",
@@ -59,8 +59,30 @@ bool run(slong generator, bool expect_power) {
                 static_cast<long>(result.compact_power_candidates),
                 static_cast<long>(result.structural_power_candidates));
     std::fflush(stdout);
-    return ok && result.saw_power == expect_power &&
-           result.saw_non_power == !expect_power;
+    if (!ok || result.saw_power != expect_power ||
+        result.saw_non_power != !expect_power) {
+        return false;
+    }
+    // The compact branch ran, not the structural shortcut.
+    if (result.compact_power_candidates != 1 ||
+        result.structural_power_candidates != 0) {
+        return false;
+    }
+    if (!expect_power) {
+        return result.appended_class_relations == 0;
+    }
+    // The appended relation's generator is an n-th root of the candidate.
+    if (result.appended_class_relations != 1) {
+        return false;
+    }
+    silex::Element root(field);
+    silex::Element square(field);
+    if (context.relation_count() < 2 ||
+        !context.relation_generator(root, context.relation_count() - 1) ||
+        !square.multiply(root, root)) {
+        return false;
+    }
+    return square.equal(alpha);
 }
 }  // namespace
 
