@@ -9,7 +9,9 @@
 #include "test_support.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -555,6 +557,170 @@ int test_norm_bounded_build_with_decomposition_cache() {
     return 0;
 }
 
+silex::NumberField monic_field(const slong* coefficients,
+                               slong degree) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i <= degree; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    return silex::test::field_by_polynomial(
+        sflint::FmpqPolyConstRef(polynomial));
+}
+
+std::size_t skipped_entry_count(
+        const silex::detail::PrimeDecompositionCache& cache) noexcept {
+    std::size_t count = 0;
+    for (const slong degree : cache.skipped_smallest_residue_degree) {
+        if (degree > 0) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+// Builds over one cache at the doubling bounds 2, 4, ..., 2^steps, as the
+// grh factor-base probe does, and checks each against a fresh build without
+// a cache: the same prime ideals in the same order, the same blocks and the
+// same completeness flags.  Returns the number of placeholders after each
+// build in skipped[0..steps-1] and whether any placeholder was later filled.
+bool doubling_builds_match_fresh(const silex::Order& order,
+                                 slong steps,
+                                 std::size_t* skipped,
+                                 bool& filled_placeholder) noexcept {
+    silex::detail::PrimeDecompositionCache cache;
+    filled_placeholder = false;
+    std::vector<slong> previous;
+    for (slong step = 0; step < steps; ++step) {
+        sflint::Fmpz bound;
+        sflint::fmpz_one(sflint::FmpzRef(bound));
+        sflint::fmpz_mul_2exp(sflint::FmpzRef(bound),
+                              sflint::FmpzConstRef(bound),
+                              static_cast<ulong>(step + 1));
+        silex::FactorBase cached(order);
+        silex::FactorBase fresh(order);
+        if (!silex::detail::FactorBaseBlockAccess::
+                    build_prime_ideal_norm_bounded_cached(
+                            cached, sflint::FmpzConstRef(bound), cache) ||
+            !fresh.build_prime_ideal_norm_bounded(
+                    sflint::FmpzConstRef(bound)) ||
+            !cached.equal(fresh) || !fresh.equal(cached) ||
+            cached.rational_prime_block_count() !=
+                    fresh.rational_prime_block_count() ||
+            cache.decompositions.size() !=
+                    cache.skipped_smallest_residue_degree.size()) {
+            return false;
+        }
+        for (slong block = 0; block < cached.rational_prime_block_count();
+             ++block) {
+            sflint::Fmpz cached_prime;
+            sflint::Fmpz fresh_prime;
+            slong cached_length = 0;
+            slong fresh_length = 0;
+            bool cached_complete = false;
+            bool fresh_complete = false;
+            if (!cached.rational_prime_block_data(
+                        sflint::FmpzRef(cached_prime), cached_length,
+                        block) ||
+                !fresh.rational_prime_block_data(
+                        sflint::FmpzRef(fresh_prime), fresh_length, block) ||
+                !sflint::fmpz_equal(sflint::FmpzConstRef(cached_prime),
+                                    sflint::FmpzConstRef(fresh_prime)) ||
+                cached_length != fresh_length ||
+                !silex::detail::FactorBaseBlockAccess::
+                        rational_prime_block_is_complete(
+                                cached_complete, cached, block) ||
+                !silex::detail::FactorBaseBlockAccess::
+                        rational_prime_block_is_complete(
+                                fresh_complete, fresh, block) ||
+                cached_complete != fresh_complete) {
+                return false;
+            }
+        }
+        for (std::size_t i = 0; i < previous.size(); ++i) {
+            if (previous[i] > 0 &&
+                cache.skipped_smallest_residue_degree[i] == 0) {
+                filled_placeholder = true;
+            }
+        }
+        previous = cache.skipped_smallest_residue_degree;
+        skipped[step] = skipped_entry_count(cache);
+    }
+    return true;
+}
+
+// A cached norm-bounded build skips, without decomposing, a rational prime
+// whose residue degrees (read from the defining polynomial) put every prime
+// ideal above it over the bound, and decomposes it once a doubled bound
+// admits one; the base is the fresh build's at every bound.  Index
+// divisors and discriminant divisors are always decomposed.
+int test_norm_bounded_build_skips_primes_over_the_bound() {
+    // Q(2^(1/3)): 7 and 13 are inert (norms 343 and 2197); 2 and 3 are
+    // ramified.  Bounds 2, 4, ..., 4096.
+    {
+        silex::NumberField cubic = cubic_field();
+        silex::Order equation = silex::test::equation_order(cubic);
+        silex::Order maximal(cubic);
+        assert(maximal.maximal_order(equation));
+        std::size_t skipped[12] = {};
+        bool filled = false;
+        assert(doubling_builds_match_fresh(maximal, 12, skipped, filled));
+        assert(filled);
+        bool any_skipped = false;
+        for (const std::size_t count : skipped) {
+            any_skipped = any_skipped || count > 0;
+        }
+        assert(any_skipped);
+    }
+
+    // Q(sqrt(5)) from x^2 - 5: 2 divides the index of Z[sqrt(5)] and is
+    // inert (norm 4 > 2), so it is decomposed even at bound 2; 5 divides
+    // the discriminant.  3 and 7 are inert (norms 9 and 49): bound 4 skips
+    // 3, bound 8 skips 3 and 7, and bound 16 decomposes 3.
+    {
+        const slong coefficients[] = {-5, 0, 1};
+        silex::NumberField quadratic = monic_field(coefficients, 2);
+        silex::Order equation = silex::test::equation_order(quadratic);
+        silex::Order maximal(quadratic);
+        assert(maximal.maximal_order(equation));
+        assert(!equation.is_maximal());
+
+        silex::detail::PrimeDecompositionCache cache;
+        sflint::Fmpz bound;
+        assert(set_fmpz_si(bound, 2));
+        silex::FactorBase base(maximal);
+        assert(silex::detail::FactorBaseBlockAccess::
+                       build_prime_ideal_norm_bounded_cached(
+                               base, sflint::FmpzConstRef(bound), cache));
+        assert(base.length() == 0);
+        assert(cache.decompositions.size() == 1);
+        assert(cache.skipped_smallest_residue_degree[0] == 0);
+        assert(cache.decompositions[0].size() == 1);
+
+        std::size_t skipped[5] = {};
+        bool filled = false;
+        assert(doubling_builds_match_fresh(maximal, 5, skipped, filled));
+        assert(filled);
+        assert(skipped[0] == 0 && skipped[1] == 1 && skipped[2] == 2);
+    }
+
+    // Dedekind's cubic x^3 - x^2 - 2x - 8: 2 splits completely in the
+    // maximal order, so it divides the index of every Z[theta].
+    {
+        const slong coefficients[] = {-8, -2, -1, 1};
+        silex::NumberField cubic = monic_field(coefficients, 3);
+        silex::Order equation = silex::test::equation_order(cubic);
+        silex::Order maximal(cubic);
+        assert(maximal.maximal_order(equation));
+        assert(!equation.is_maximal());
+        std::size_t skipped[10] = {};
+        bool filled = false;
+        assert(doubling_builds_match_fresh(maximal, 10, skipped, filled));
+    }
+
+    return 0;
+}
+
 // equal() answers copies from a shared identity and everything else from the
 // element-wise comparison; both must give the same answer.
 int test_equal_copies_and_independent_builds() {
@@ -950,6 +1116,7 @@ int main() {
     assert(test_lll_relation_base_order() == 0);
     assert(test_lll_relation_base_from_norm_bounded() == 0);
     assert(test_norm_bounded_build_with_decomposition_cache() == 0);
+    assert(test_norm_bounded_build_skips_primes_over_the_bound() == 0);
     assert(test_equal_copies_and_independent_builds() == 0);
     assert(test_class_group_bound() == 0);
     assert(test_failure_preserves_output() == 0);

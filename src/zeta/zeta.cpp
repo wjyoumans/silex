@@ -42,18 +42,7 @@ constexpr slong kBfArrayLinearFactorMaxDegree = WORD(6);
 constexpr slong kValidationInitialWorkPrecision = WORD(64);
 constexpr slong kValidationReserveBits = WORD(20);
 
-struct BfResidueDegreeContext {
-    const fmpq_poly_struct* defining_polynomial = nullptr;
-    std::vector<flint::Fmpz> defining_coefficients;
-    slong defining_degree = -1;
-    flint::Fmpz order_discriminant;
-    flint::Fmpz equation_index;
-    const FactorBase* residue_degree_base = nullptr;
-    bool has_defining_polynomial_route = false;
-    bool has_order_discriminant = false;
-    bool check_equation_index = false;
-    bool has_complete_residue_degree_base = false;
-};
+using detail::BfResidueDegreeContext;
 
 struct BfSummandScratch {
     flint::Arb log_norm;
@@ -4153,6 +4142,29 @@ std::optional<ZetaBfAuditResult> zeta_class_regulator_product_bf_audit(
 }  // namespace silex
 
 namespace silex::detail {
+
+bool DefiningPolynomialResidueDegrees::init(const Order& order) noexcept {
+    ready_ = false;
+    BfResidueDegreeContext context;
+    if (!bf_init_residue_degree_context(context, order)) {
+        return false;
+    }
+    std::vector<slong> scratch(
+            static_cast<std::size_t>(context.defining_degree));
+    context_ = std::move(context);
+    degree_scratch_.swap(scratch);
+    ready_ = true;
+    return true;
+}
+
+bool DefiningPolynomialResidueDegrees::residue_degrees(
+        std::vector<slong>& out,
+        const Order& order,
+        ulong p) noexcept {
+    return ready_ && p >= 2 &&
+           bf_residue_degrees_from_defining_polynomial_ui(
+                   out, context_, order, degree_scratch_, p, nullptr);
+}
 
 bool grh_factor_base_bound_with_diagnostics(
         flint::FmpzRef out,

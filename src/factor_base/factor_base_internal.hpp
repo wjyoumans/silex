@@ -7,14 +7,27 @@
 #include <vector>
 
 #include "generation_different_route_internal.hpp"
+#include "../zeta/zeta_internal.hpp"
 
 namespace silex::detail {
 
 // Decompositions of the rational primes 2, 3, 5, ..., in that order, kept
 // across norm-bounded builds of one maximal order: entry k is
-// decompose_prime of the k-th rational prime.
+// decompose_prime of the k-th rational prime, or, when
+// skipped_smallest_residue_degree[k] > 0, an empty placeholder for a prime
+// that a build skipped without decomposing it.  A prime is skipped only
+// when residue_degrees (the defining-polynomial route, under its own gate)
+// gives its residue degrees and p^f exceeds the bound for the smallest of
+// them, f, so that no prime ideal above p has norm at most the bound.  The
+// placeholder keeps that f: a later build at a bound of at least p^f
+// decomposes p then and fills the entry.  `order` is a copy of the parent
+// order of the first build, for which residue_degrees is prepared; a later
+// build over an order with other data fails.
 struct PrimeDecompositionCache {
     std::vector<PrimeIdealList> decompositions;
+    std::vector<slong> skipped_smallest_residue_degree;
+    DefiningPolynomialResidueDegrees residue_degrees;
+    Order order;
 };
 
 class FactorBaseBlockAccess {
@@ -22,7 +35,8 @@ public:
     // Builds exactly the base base.build_prime_ideal_norm_bounded(bound)
     // builds, taking the decomposition of each rational prime from `cache`
     // when the cache already holds it and appending the decompositions it
-    // computes.  The cache must come from builds over base's parent order
+    // computes, or a placeholder for a prime it skips (see
+    // PrimeDecompositionCache).  The cache must come from builds over base's parent order
     // (a cached decomposition of another order fails the build).  On
     // failure base is unchanged; the cache keeps every decomposition it
     // holds and may have gained some.  `diagnostics` only feeds profile

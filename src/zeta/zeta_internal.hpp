@@ -2,6 +2,7 @@
 
 #include <silex/diagnostics.hpp>
 #include <silex/flint/arb_vec.hpp>
+#include <silex/flint/fmpz.hpp>
 #include <silex/zeta.hpp>
 
 #include <cstddef>
@@ -13,6 +14,53 @@ class FactorBase;
 }
 
 namespace silex::detail {
+
+// What the Belabas-Friedman evaluation knows about reading residue degrees
+// of a maximal order from its field's defining polynomial: the reduced
+// coefficients, the order discriminant, and, for an order other than the
+// equation order, its index over the equation order.
+struct BfResidueDegreeContext {
+    const fmpq_poly_struct* defining_polynomial = nullptr;
+    std::vector<flint::Fmpz> defining_coefficients;
+    slong defining_degree = -1;
+    flint::Fmpz order_discriminant;
+    flint::Fmpz equation_index;
+    const FactorBase* residue_degree_base = nullptr;
+    bool has_defining_polynomial_route = false;
+    bool has_order_discriminant = false;
+    bool check_equation_index = false;
+    bool has_complete_residue_degree_base = false;
+};
+
+// The residue degrees of the prime ideals of a maximal order above a
+// rational prime p, read from the distinct-degree factorisation of the
+// field's defining polynomial modulo p (Dedekind-Kummer), without
+// decomposing p.  It is the route the Belabas-Friedman evaluation takes
+// (bf_residue_degrees_from_defining_polynomial_ui in zeta.cpp), under the
+// same gate: the defining polynomial is monic integral, and p divides
+// neither the order discriminant nor the index of the equation order in
+// the order.  For every other prime the caller must decompose p.
+class DefiningPolynomialResidueDegrees {
+public:
+    // Prepares the route for the maximal order `order`.  Returns false,
+    // leaving every later query false, when the route is unavailable for
+    // it (not maximal, defining polynomial not monic integral, or the
+    // discriminant or index cannot be computed).
+    bool init(const Order& order) noexcept;
+    // Sets out to the residue degrees above p, one entry per prime ideal,
+    // and returns true when the route applies to p.  Returns false when
+    // init has not succeeded, the gate rejects p, or the computation
+    // fails; out is then unspecified.  `order` must be the order init was
+    // called with.
+    bool residue_degrees(std::vector<slong>& out,
+                         const Order& order,
+                         ulong p) noexcept;
+
+private:
+    BfResidueDegreeContext context_;
+    std::vector<slong> degree_scratch_;
+    bool ready_ = false;
+};
 
 struct ZetaBfResidueDegreeCacheEntry {
     ulong p = 0;

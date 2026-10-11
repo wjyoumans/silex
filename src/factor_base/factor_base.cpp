@@ -1027,6 +1027,53 @@ bool prime_ideal_norm_at_most_bound(const PrimeIdeal& prime,
     return fmpz_cmp(norm.raw(), bound.raw()) <= 0;
 }
 
+// Whether p^residue_degree <= bound, for residue_degree >= 1.
+bool rational_prime_power_at_most_bound(flint::FmpzConstRef rational_prime,
+                                        slong residue_degree,
+                                        flint::FmpzConstRef bound) noexcept {
+    if (residue_degree <= 0) {
+        return false;
+    }
+    flint::Fmpz norm;
+    fmpz_pow_ui(norm.raw(), rational_prime.raw(),
+                static_cast<ulong>(residue_degree));
+    return fmpz_cmp(norm.raw(), bound.raw()) <= 0;
+}
+
+// The smallest residue degree f of the prime ideals above the rational
+// prime p when the defining-polynomial route gives the residue degrees
+// without decomposing p and p^f exceeds `bound`, so that no prime ideal
+// above p has norm at most `bound`; 0 otherwise (p must then be
+// decomposed).  The route is asked only when p^degree exceeds `bound`,
+// since otherwise every prime ideal above p has norm at most `bound`.
+slong smallest_residue_degree_without_decomposition(
+        std::vector<slong>& residue_degrees,
+        detail::DefiningPolynomialResidueDegrees& route,
+        const Order& order,
+        flint::FmpzConstRef rational_prime,
+        flint::FmpzConstRef bound) noexcept {
+    if (!fmpz_abs_fits_ui(rational_prime.raw()) ||
+        rational_prime_power_at_most_bound(rational_prime, order.degree(),
+                                           bound) ||
+        !route.residue_degrees(residue_degrees, order,
+                               fmpz_get_ui(rational_prime.raw())) ||
+        residue_degrees.empty()) {
+        return 0;
+    }
+    slong smallest = 0;
+    for (const slong degree : residue_degrees) {
+        if (degree <= 0) {
+            return 0;
+        }
+        if (smallest == 0 || degree < smallest) {
+            smallest = degree;
+        }
+    }
+    return rational_prime_power_at_most_bound(rational_prime, smallest, bound)
+            ? 0
+            : smallest;
+}
+
 bool is_inert_prime_decomposition(const PrimeIdealList& decomposed,
                                   slong degree) noexcept {
     if (degree <= 0 || decomposed.size() != 1) {
@@ -1553,29 +1600,82 @@ bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
         return false;
     }
 
+    if (cache != nullptr) {
+        if (!cache->order.is_defined()) {
+            // The first build of this cache prepares the residue-degree
+            // route; when it is unavailable every prime is decomposed.
+            cache->order = parent;
+            static_cast<void>(cache->residue_degrees.init(cache->order));
+        } else if (!same_order_parent(&cache->order, &parent)) {
+            return false;
+        }
+        if (cache->skipped_smallest_residue_degree.size() !=
+            cache->decompositions.size()) {
+            return false;
+        }
+    }
+
     FactorBase candidate(parent);
     flint::Fmpz p;
     fmpz_set_ui(p.raw(), 2);
     PrimeIdealList local;
+    std::vector<slong> residue_degrees;
     std::size_t prime_position = 0;
     while (fmpz_cmp(p.raw(), bound.raw()) <= 0) {
         // Entry k of the cache is the decomposition of the k-th rational
         // prime, so a build at a larger bound reuses every decomposition an
         // earlier build of the same order computed and decomposes only the
-        // primes beyond it.
+        // primes beyond it.  A placeholder entry stands for a prime with no
+        // prime ideal of norm at most the bound of the build that reached
+        // it; it is decomposed only once a bound admits its smallest
+        // residue degree.
         const PrimeIdealList* decomposition = nullptr;
+        bool decompose = true;
         if (cache != nullptr &&
             prime_position < cache->decompositions.size()) {
-            SILEX_PROFILE_EVENT(
-                    diagnostics, DiagnosticsModule::class_group,
-                    "factor_base.norm_bounded.decomposition_cache_hit");
-            decomposition = &cache->decompositions[prime_position];
-            const PrimeIdeal* first = decomposition->at(0);
-            if (first == nullptr ||
-                !same_order_parent(first->parent(), &parent)) {
-                return false;
+            const slong skipped = cache->skipped_smallest_residue_degree
+                    [prime_position];
+            if (skipped > 0) {
+                if (!rational_prime_power_at_most_bound(
+                            flint::FmpzConstRef(p), skipped, bound)) {
+                    SILEX_PROFILE_EVENT(
+                            diagnostics, DiagnosticsModule::class_group,
+                            "factor_base.norm_bounded.skipped_prime_kept");
+                    ++prime_position;
+                    fmpz_nextprime(p.raw(), p.raw(), 1);
+                    continue;
+                }
+            } else {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "factor_base.norm_bounded.decomposition_cache_hit");
+                decomposition = &cache->decompositions[prime_position];
+                const PrimeIdeal* first = decomposition->at(0);
+                if (first == nullptr ||
+                    !same_order_parent(first->parent(), &parent)) {
+                    return false;
+                }
+                decompose = false;
             }
-        } else {
+        } else if (cache != nullptr) {
+            slong smallest = 0;
+            {
+                SILEX_PROFILE_SCOPE(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "factor_base.norm_bounded.residue_degrees");
+                smallest = smallest_residue_degree_without_decomposition(
+                        residue_degrees, cache->residue_degrees,
+                        cache->order, flint::FmpzConstRef(p), bound);
+            }
+            if (smallest > 0) {
+                cache->decompositions.emplace_back();
+                cache->skipped_smallest_residue_degree.push_back(smallest);
+                ++prime_position;
+                fmpz_nextprime(p.raw(), p.raw(), 1);
+                continue;
+            }
+        }
+        if (decompose) {
             SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                                 "factor_base.norm_bounded.decompose_prime");
             PrimeIdealList computed;
@@ -1583,8 +1683,15 @@ bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
                                  flint::FmpzConstRef(p))) {
                 return false;
             }
-            if (cache != nullptr) {
+            if (cache != nullptr &&
+                prime_position < cache->decompositions.size()) {
+                // Fill the placeholder of a prime an earlier build skipped.
+                cache->decompositions[prime_position].swap(computed);
+                cache->skipped_smallest_residue_degree[prime_position] = 0;
+                decomposition = &cache->decompositions[prime_position];
+            } else if (cache != nullptr) {
                 cache->decompositions.emplace_back(std::move(computed));
+                cache->skipped_smallest_residue_degree.push_back(0);
                 decomposition = &cache->decompositions.back();
             } else {
                 local.swap(computed);
