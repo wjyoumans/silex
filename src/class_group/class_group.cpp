@@ -1730,11 +1730,9 @@ bool compact_multiply_power_fmpz(FactoredElement& accumulator,
     }
 
     FactoredElement power(*accumulator.parent());
-    FactoredElement product(*accumulator.parent());
     if (flint::fmpz_fits_si(exponent)) {
         return power.pow_si(base, flint::fmpz_get_si(exponent)) &&
-               product.multiply(accumulator, power) &&
-               accumulator.set(product);
+               accumulator.multiply(accumulator, power);
     }
 
     // An exponent outside slong would have to be expanded.  A base x that
@@ -1760,8 +1758,7 @@ bool compact_multiply_power_fmpz(FactoredElement& accumulator,
     flint::fmpz_fdiv_r(flint::FmpzRef(reduced_exponent), exponent,
                        flint::FmpzConstRef(torsion_order));
     return power.pow_si(base, flint::fmpz_get_si(reduced_exponent)) &&
-           product.multiply(accumulator, power) &&
-           accumulator.set(product);
+           accumulator.multiply(accumulator, power);
 }
 
 bool multiply_element_power_fmpz(FactoredElement& accumulator,

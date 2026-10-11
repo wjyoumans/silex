@@ -1596,14 +1596,12 @@ bool transform_factored_units(std::vector<FactoredElement>& units,
             }
 
             FactoredElement power(field);
-            FactoredElement product(field);
             const FactoredElement& unit = units[static_cast<std::size_t>(j)];
             if (!power.pow_si(unit, flint::fmpz_get_si(entry))) {
                 overflowed = factored_power_overflows(unit, entry);
                 return false;
             }
-            if (!product.multiply(transformed.back(), power) ||
-                !transformed.back().set(product)) {
+            if (!transformed.back().multiply(transformed.back(), power)) {
                 return false;
             }
         }

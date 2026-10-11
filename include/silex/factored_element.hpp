@@ -10,6 +10,8 @@
 #include <silex/flint/arb_vec.hpp>
 #include <silex/number_field.hpp>
 
+#include <cstddef>
+#include <memory>
 #include <vector>
 
 namespace silex {
@@ -83,10 +85,18 @@ public:
             const noexcept;
 
 private:
+    struct FactorList;
+
     bool push_copy(const Element& factor, slong exponent) noexcept;
+    FactorSpan<Element> stored_factors() const noexcept;
+    FactorList* unshared_factors() noexcept;
+    void reserve_factors(std::size_t capacity) noexcept;
 
     NumberField parent_;
-    Factored<Element> value_;
+    // The factor list, shared copy-on-write between values copied from one
+    // another with set(); null is the empty product.  A shared list is never
+    // modified: every mutation first gives this value its own copy.
+    std::shared_ptr<FactorList> value_;
 
     friend class ResidueFieldElement;
 };

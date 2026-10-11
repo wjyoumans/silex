@@ -8,9 +8,11 @@
 #include <flint/nf_elem.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -30,6 +32,27 @@ bool negate_slong(slong& out, slong value) noexcept {
         return false;
     }
     out = -value;
+    return true;
+}
+
+// Copies `entries` into `out` in order, negating each exponent when
+// `negate` is true.  Fails, with `out` partly filled, when a factor cannot
+// be copied or an exponent cannot be negated.
+bool copy_entries(std::vector<FactorPower<Element>>& out,
+                  FactorSpan<Element> entries,
+                  bool negate) noexcept {
+    out.reserve(out.size() + entries.size());
+    for (const auto& entry : entries) {
+        slong exponent = entry.exponent;
+        if (negate && !negate_slong(exponent, entry.exponent)) {
+            return false;
+        }
+        Element factor;
+        if (!copy_factor(factor, entry.factor)) {
+            return false;
+        }
+        out.push_back(FactorPower<Element>{std::move(factor), exponent});
+    }
     return true;
 }
 
@@ -447,6 +470,12 @@ bool evaluate_entries(Element& out,
 
 }  // namespace
 
+// Stored exponents are never zero: push_copy drops a zero exponent and the
+// operations below push only nonzero ones.
+struct FactoredElement::FactorList {
+    std::vector<FactorPower<Element>> entries;
+};
+
 FactoredElement::FactoredElement(const NumberField& parent) noexcept {
     define(parent);
 }
@@ -472,8 +501,45 @@ void FactoredElement::swap(FactoredElement& other) noexcept {
 }
 
 void FactoredElement::clear() noexcept {
-    value_.clear();
+    value_.reset();
     parent_.clear();
+}
+
+FactorSpan<Element> FactoredElement::stored_factors() const noexcept {
+    return value_ == nullptr ? FactorSpan<Element>()
+                             : FactorSpan<Element>(value_->entries.data(),
+                                                   value_->entries.size());
+}
+
+FactoredElement::FactorList* FactoredElement::unshared_factors() noexcept {
+    if (value_ == nullptr) {
+        value_ = std::make_shared<FactorList>();
+        return value_.get();
+    }
+    if (value_.use_count() == 1) {
+        // A holder on another thread may have just dropped the list.  The
+        // acquire fence pairs with the release of its reference-count
+        // decrement, so its reads of the list happen before our writes.
+        std::atomic_thread_fence(std::memory_order_acquire);
+        return value_.get();
+    }
+
+    auto copy = std::make_shared<FactorList>();
+    if (!copy_entries(copy->entries, stored_factors(), false)) {
+        return nullptr;
+    }
+    value_ = std::move(copy);
+    return value_.get();
+}
+
+void FactoredElement::reserve_factors(std::size_t capacity) noexcept {
+    if (capacity == 0) {
+        return;
+    }
+    FactorList* list = unshared_factors();
+    if (list != nullptr) {
+        list->entries.reserve(capacity);
+    }
 }
 
 bool FactoredElement::define(const NumberField& parent) noexcept {
@@ -496,11 +562,16 @@ bool FactoredElement::push_copy(
         return true;
     }
 
+    // Copy first: `factor` may be one of this value's own factors.
     Element copy;
     if (!copy_factor(copy, factor)) {
         return false;
     }
-    value_.push(std::move(copy), exponent);
+    FactorList* list = unshared_factors();
+    if (list == nullptr) {
+        return false;
+    }
+    list->entries.push_back(FactorPower<Element>{std::move(copy), exponent});
     return true;
 }
 
@@ -522,15 +593,8 @@ bool FactoredElement::set(const FactoredElement& other) noexcept {
         return false;
     }
 
-    FactoredElement copy(parent_);
-    copy.value_.reserve(other.value_.factors().size());
-    for (const auto& entry : other.value_.factors()) {
-        if (!copy.push_copy(entry.factor, entry.exponent)) {
-            return false;
-        }
-    }
-
-    swap(copy);
+    // Share the factor list; a later mutation of either value copies it.
+    value_ = other.value_;
     return true;
 }
 
@@ -543,18 +607,18 @@ const NumberField* FactoredElement::parent() const noexcept {
 }
 
 slong FactoredElement::length() const noexcept {
-    return is_defined() ? static_cast<slong>(value_.factors().size()) : 0;
+    return is_defined() ? static_cast<slong>(stored_factors().size()) : 0;
 }
 
 FactorSpan<Element> FactoredElement::factors() const noexcept {
-    return is_defined() ? value_.factors() : FactorSpan<Element>();
+    return is_defined() ? stored_factors() : FactorSpan<Element>();
 }
 
 bool FactoredElement::one() noexcept {
     if (!is_defined()) {
         return false;
     }
-    value_.clear();
+    value_.reset();
     return true;
 }
 
@@ -578,8 +642,18 @@ bool FactoredElement::push(
 }
 
 void FactoredElement::normalize() noexcept {
-    if (is_defined()) {
-        value_.normalize();
+    if (!is_defined() || value_ == nullptr ||
+        std::none_of(value_->entries.begin(), value_->entries.end(),
+                     [](const FactorPower<Element>& entry) {
+                         return entry.exponent == 0;
+                     })) {
+        return;
+    }
+    FactorList* list = unshared_factors();
+    if (list != nullptr) {
+        std::erase_if(list->entries, [](const FactorPower<Element>& entry) {
+            return entry.exponent == 0;
+        });
     }
 }
 
@@ -592,15 +666,43 @@ bool FactoredElement::multiply(
         return false;
     }
 
+    // The factor list of the product is left's list followed by right's.
+    // When one of them is empty the product shares the other list; when
+    // the output is `left`, only right's factors are copied, then appended.
+    if (left.stored_factors().empty()) {
+        value_ = right.value_;
+        return true;
+    }
+    if (right.stored_factors().empty()) {
+        value_ = left.value_;
+        return true;
+    }
+    if (this == &left) {
+        std::vector<FactorPower<Element>> appended;
+        if (!copy_entries(appended, right.stored_factors(), false)) {
+            return false;
+        }
+        FactorList* list = unshared_factors();
+        if (list == nullptr) {
+            return false;
+        }
+        list->entries.reserve(list->entries.size() + appended.size());
+        for (auto& entry : appended) {
+            list->entries.push_back(std::move(entry));
+        }
+        normalize();
+        return true;
+    }
+
     FactoredElement result(parent_);
-    result.value_.reserve(left.value_.factors().size() +
-                          right.value_.factors().size());
-    for (const auto& entry : left.value_.factors()) {
+    result.reserve_factors(left.stored_factors().size() +
+                           right.stored_factors().size());
+    for (const auto& entry : left.stored_factors()) {
         if (!result.push_copy(entry.factor, entry.exponent)) {
             return false;
         }
     }
-    for (const auto& entry : right.value_.factors()) {
+    for (const auto& entry : right.stored_factors()) {
         if (!result.push_copy(entry.factor, entry.exponent)) {
             return false;
         }
@@ -619,15 +721,40 @@ bool FactoredElement::divide(
         return false;
     }
 
+    // The factor list of the quotient is left's list followed by right's
+    // with negated exponents.  When right is empty the quotient shares
+    // left's list; when the output is `left`, only right's factors are
+    // copied, then appended.
+    if (right.stored_factors().empty()) {
+        value_ = left.value_;
+        return true;
+    }
+    if (this == &left) {
+        std::vector<FactorPower<Element>> appended;
+        if (!copy_entries(appended, right.stored_factors(), true)) {
+            return false;
+        }
+        FactorList* list = unshared_factors();
+        if (list == nullptr) {
+            return false;
+        }
+        list->entries.reserve(list->entries.size() + appended.size());
+        for (auto& entry : appended) {
+            list->entries.push_back(std::move(entry));
+        }
+        normalize();
+        return true;
+    }
+
     FactoredElement result(parent_);
-    result.value_.reserve(left.value_.factors().size() +
-                          right.value_.factors().size());
-    for (const auto& entry : left.value_.factors()) {
+    result.reserve_factors(left.stored_factors().size() +
+                           right.stored_factors().size());
+    for (const auto& entry : left.stored_factors()) {
         if (!result.push_copy(entry.factor, entry.exponent)) {
             return false;
         }
     }
-    for (const auto& entry : right.value_.factors()) {
+    for (const auto& entry : right.stored_factors()) {
         slong negated = 0;
         if (!negate_slong(negated, entry.exponent) ||
             !result.push_copy(entry.factor, negated)) {
@@ -646,8 +773,8 @@ bool FactoredElement::invert(const FactoredElement& input) noexcept {
     }
 
     FactoredElement result(parent_);
-    result.value_.reserve(input.value_.factors().size());
-    for (const auto& entry : input.value_.factors()) {
+    result.reserve_factors(input.stored_factors().size());
+    for (const auto& entry : input.stored_factors()) {
         slong negated = 0;
         if (!negate_slong(negated, entry.exponent) ||
             !result.push_copy(entry.factor, negated)) {
@@ -668,8 +795,8 @@ bool FactoredElement::pow_si(
     }
 
     FactoredElement result(parent_);
-    result.value_.reserve(input.value_.factors().size());
-    for (const auto& entry : input.value_.factors()) {
+    result.reserve_factors(input.stored_factors().size());
+    for (const auto& entry : input.stored_factors()) {
         slong scaled = 0;
         if (!multiply_slong(scaled, entry.exponent, exponent)) {
             return false;
@@ -697,8 +824,8 @@ bool FactoredElement::root_si(
     }
 
     FactoredElement result(parent_);
-    result.value_.reserve(input.value_.factors().size());
-    for (const auto& entry : input.value_.factors()) {
+    result.reserve_factors(input.stored_factors().size());
+    for (const auto& entry : input.stored_factors()) {
         if (entry.exponent % exponent != 0) {
             return false;
         }
@@ -726,12 +853,12 @@ bool FactoredElement::is_square(
 
     FactoredElement structural(parent_);
     FactoredElement leftover(parent_);
-    structural.value_.reserve(value_.factors().size());
-    leftover.value_.reserve(value_.factors().size());
+    structural.reserve_factors(stored_factors().size());
+    leftover.reserve_factors(stored_factors().size());
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.square_split");
-        for (const auto& entry : value_.factors()) {
+        for (const auto& entry : stored_factors()) {
             const slong quotient = floor_half_slong(entry.exponent);
             if (quotient != 0 &&
                 !structural.push_copy(entry.factor, quotient)) {
@@ -889,12 +1016,12 @@ bool FactoredElement::is_power_si(
 
     FactoredElement structural(parent_);
     FactoredElement leftover(parent_);
-    structural.value_.reserve(value_.factors().size());
-    leftover.value_.reserve(value_.factors().size());
+    structural.reserve_factors(stored_factors().size());
+    leftover.reserve_factors(stored_factors().size());
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.reduced_split");
-        for (const auto& entry : value_.factors()) {
+        for (const auto& entry : stored_factors()) {
             slong quotient = 0;
             slong remainder = 0;
             floor_divrem_positive_slong(
@@ -982,7 +1109,7 @@ bool FactoredElement::evaluate(Element& out) const noexcept {
         return false;
     }
 
-    return evaluate_entries(out, parent_, value_.factors());
+    return evaluate_entries(out, parent_, stored_factors());
 }
 
 bool FactoredElement::logarithmic_embedding(
@@ -1012,7 +1139,7 @@ bool FactoredElement::logarithmic_embedding(
         return false;
     }
 
-    const auto entries = value_.factors();
+    const auto entries = stored_factors();
     flint_bitcnt_t max_exponent_bits = 0;
     for (const auto& entry : entries) {
         const flint_bitcnt_t bits = abs_slong_bits(entry.exponent);

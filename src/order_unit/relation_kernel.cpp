@@ -299,11 +299,9 @@ bool compact_multiply_power(FactoredElement& accumulator,
         return true;
     }
     FactoredElement power(*accumulator.parent());
-    FactoredElement product(*accumulator.parent());
     if (flint::fmpz_fits_si(exponent)) {
         return power.pow_si(base, flint::fmpz_get_si(exponent)) &&
-               product.multiply(accumulator, power) &&
-               accumulator.set(product);
+               accumulator.multiply(accumulator, power);
     }
 
     Element base_value(*accumulator.parent());
@@ -311,8 +309,7 @@ bool compact_multiply_power(FactoredElement& accumulator,
     return base.evaluate(base_value) &&
            powered_value.pow_fmpz(base_value, exponent) &&
            power.set_element(powered_value) &&
-           product.multiply(accumulator, power) &&
-           accumulator.set(product);
+           accumulator.multiply(accumulator, power);
 }
 
 bool compact_relation_product(FactoredElement& out,
