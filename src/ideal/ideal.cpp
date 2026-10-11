@@ -706,11 +706,12 @@ bool Ideal::contains(const OrderElement& element) const noexcept {
     if (!element.get_coordinates(flint::FmpzMatRef(row))) {
         return false;
     }
-    // Every construction route stores a full-rank HNF, which is upper
-    // triangular with a nonzero diagonal; membership is then decided by
-    // forward substitution against the stored matrix, with no lattice copy.
-    // Both routes decide membership in the Z-row span of `hnf_`, so the
-    // lattice test is kept for any other stored shape.
+    // Every construction route is expected to store a full-rank HNF, which
+    // is upper triangular with a nonzero diagonal; membership is then decided
+    // by forward substitution against the stored matrix, with no lattice
+    // copy. Both routes decide membership in the Z-row span of `hnf_`. The
+    // lattice test below is a defensive fallback for any other stored shape;
+    // it is not reachable through the API today and no test exercises it.
     if (detail::is_full_rank_upper_triangular(hnf_.raw())) {
         return detail::triangular_basis_contains(hnf_.raw(),
                                                  fmpz_mat_row(row.raw(), 0));
