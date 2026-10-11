@@ -28,9 +28,21 @@ struct CompactCoordinateBoundReport {
     slong attempts = 0;
     ulong bit_bound = 0;
     flint::Fmpz coordinate_bound;
+    // The reference expression: log2Mbound (Hadamard estimate) plus
+    // log2fubound, plus the basis normalization scale.
     flint::Arb log2_minkowski_bound;
     flint::Arb log2_unit_bound;
     flint::Arb log2_coordinate_bound;
+    // The quantity log2Mbound bounds, log2 of the max-row-sum norm of the
+    // inverse split real/imaginary embedding matrix, and the same total with
+    // it in place of log2_minkowski_bound.  Indeterminate when the inverse
+    // was not certified at `precision`.
+    flint::Arb log2_inverse_norm_bound;
+    flint::Arb log2_inverse_norm_coordinate_bound;
+    // Ceiling of log2_coordinate_bound; bit_bound is the smaller of it and
+    // the ceiling of log2_inverse_norm_coordinate_bound when that is stable.
+    ulong hadamard_bit_bound = 0;
+    bool inverse_norm_bound_used = false;
 };
 
 // The caller certifies that generators are the complete fundamental units for

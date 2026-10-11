@@ -17,6 +17,8 @@
 #include "order_unit/compact_reconstruction_bound_internal.hpp"
 #include "test_support.hpp"
 
+#include <flint/arb.h>
+#include <flint/arf.h>
 #include <flint/flint.h>
 #include <flint/fmpz.h>
 #include <flint/nmod_mat.h>
@@ -605,6 +607,138 @@ silex::NumberField monic_field(std::span<const slong> coefficients) noexcept {
     }
     return silex::test::field_by_polynomial(
             sflint::FmpqPolyConstRef(polynomial));
+}
+
+silex::Element element_from_coefficients(
+        const silex::NumberField& field,
+        std::span<const slong> coefficients) noexcept {
+    sflint::FmpqPoly polynomial;
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    silex::Element element(field);
+    assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    return element;
+}
+
+bool basis_is_power_basis(const silex::Order& order) noexcept {
+    sflint::FmpqMat basis(order.degree(), order.degree());
+    if (!order.get_basis(sflint::FmpqMatRef(basis))) {
+        return false;
+    }
+    for (slong row = 0; row < order.degree(); ++row) {
+        for (slong column = 0; column < order.degree(); ++column) {
+            if (!sflint::fmpq_equal_si(
+                        sflint::fmpq_mat_entry(sflint::FmpqMatConstRef(basis),
+                                               row, column),
+                        row == column ? 1 : 0)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// The operator-norm bound log2 ||S^-1||_oo against the reference's Hadamard
+// expression log2Mbound on power bases of maximal orders.  The expected
+// values are floating-point gp evaluations of both quantities on the same
+// basis (max row sum of |S^-1| for S the split real/imaginary embedding
+// matrix).  The published bound must cover the exact unit coordinates, be no
+// larger than the Hadamard bound, and still reconstruct the units.
+void check_inverse_norm_bound(std::span<const slong> polynomial,
+                              std::span<const std::span<const slong>> units,
+                              double expected_hadamard,
+                              double expected_inverse_norm,
+                              bool expect_fewer_bits) {
+    silex::NumberField field = monic_field(polynomial);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(basis_is_power_basis(maximal));
+
+    std::vector<silex::FactoredElement> inputs;
+    for (std::span<const slong> unit : units) {
+        inputs.emplace_back(field);
+        assert(inputs.back().push(element_from_coefficients(field, unit), 1));
+    }
+
+    std::vector<silex::Element> expected;
+    sflint::Fmpz exact_maximum;
+    exact_outputs_and_bound(expected, exact_maximum, maximal, inputs);
+
+    silex::EmbeddingContext embeddings(field);
+    sflint::Fmpz output;
+    silex::detail::CompactCoordinateBoundReport report;
+    assert(silex::detail::compact_unit_coordinate_bound(
+            report, sflint::FmpzRef(output), maximal, factored_span(inputs),
+            embeddings));
+    assert(report.status ==
+           silex::detail::CompactCoordinateBoundStatus::success);
+    assert(report.attempts == 1);
+
+    const double hadamard =
+            arf_get_d(arb_midref(report.log2_minkowski_bound.raw()),
+                      ARF_RND_NEAR);
+    const double inverse_norm =
+            arf_get_d(arb_midref(report.log2_inverse_norm_bound.raw()),
+                      ARF_RND_NEAR);
+    assert(hadamard > expected_hadamard - 1e-9 &&
+           hadamard < expected_hadamard + 1e-9);
+    assert(inverse_norm > expected_inverse_norm - 1e-9 &&
+           inverse_norm < expected_inverse_norm + 1e-9);
+    assert(arb_lt(report.log2_inverse_norm_bound.raw(),
+                  report.log2_minkowski_bound.raw()) != 0);
+    assert(arb_lt(report.log2_inverse_norm_coordinate_bound.raw(),
+                  report.log2_coordinate_bound.raw()) != 0);
+
+    assert(report.bit_bound <= report.hadamard_bit_bound);
+    assert(report.inverse_norm_bound_used == expect_fewer_bits);
+    if (expect_fewer_bits) {
+        assert(report.bit_bound < report.hadamard_bit_bound);
+    }
+    sflint::Fmpz expected_output;
+    sflint::fmpz_one(sflint::FmpzRef(expected_output));
+    fmpz_mul_2exp(expected_output.raw(), expected_output.raw(),
+                  report.bit_bound);
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(output),
+                              sflint::FmpzConstRef(expected_output)));
+    assert(sflint::fmpz_cmp(sflint::FmpzConstRef(output),
+                            sflint::FmpzConstRef(exact_maximum)) >= 0);
+
+    silex::detail::BoundedCompactReconstructionReport reconstruction_report;
+    std::vector<silex::Element> actual;
+    assert(silex::detail::bounded_compact_reconstruct(
+            reconstruction_report, actual, maximal, inputs,
+            sflint::FmpzConstRef(output)));
+    assert_equal_outputs(actual, expected);
+}
+
+int test_coordinate_bound_inverse_norm() {
+    // Q(zeta_17)^+: x is 2 cos(2 pi / 17); the units are conjugates of x
+    // (Chebyshev polynomials in x) and x + 1, x - 1, x + 2.  Totally real,
+    // so the operator norm is at most the Hadamard expression.
+    constexpr slong real_cyclotomic[] = {1, -4, -10, 10, 15, -6, -7, 1, 1};
+    constexpr slong u1[] = {0, 1};
+    constexpr slong u2[] = {-2, 0, 1};
+    constexpr slong u3[] = {0, -3, 0, 1};
+    constexpr slong u4[] = {2, 0, -4, 0, 1};
+    constexpr slong u5[] = {1, 1};
+    constexpr slong u6[] = {-1, 1};
+    constexpr slong u7[] = {2, 1};
+    const std::span<const slong> real_units[] = {u1, u2, u3, u4, u5, u6, u7};
+    check_inverse_norm_bound(real_cyclotomic, real_units,
+                             18.613715410627902, 3.1952538507995360, true);
+
+    // Discriminant -11119, signature (3, 1), with its fundamental units.
+    constexpr slong quintic[] = {1, -3, 1, 1, -2, 1};
+    constexpr slong v1[] = {2, -1, 0, 1, -1};
+    constexpr slong v2[] = {3, -1, -1, 2, -1};
+    constexpr slong v3[] = {-2, 2, 0, -2, 1};
+    const std::span<const slong> quintic_units[] = {v1, v2, v3};
+    check_inverse_norm_bound(quintic, quintic_units, 3.3837048782446365,
+                             0.87438113961560431, true);
+    return 0;
 }
 
 // Keys of the compact field-modulus cache: an entry is returned only for its
@@ -1513,6 +1647,7 @@ int main() {
     assert(test_coordinate_bound_rejects_nonmaximal_order() == 0);
     assert(test_coordinate_bound_supports_reordered_basis() == 0);
     assert(test_coordinate_bound_supports_index_three_maximal_basis() == 0);
+    assert(test_coordinate_bound_inverse_norm() == 0);
     assert(test_compact_field_modulus_cache_keys() == 0);
     assert(test_compact_field_modulus_cache_shared_across_calls() == 0);
     assert(test_compact_unit_power_root_reuses_high_precision_base_logs() == 0);

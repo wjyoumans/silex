@@ -365,16 +365,18 @@ bool validate_inputs(const Order& order, const UnitLogSource& generators,
     return true;
 }
 
-bool compute_log2_minkowski_bound(flint::Arb& out, const Order& order,
-                                  const Signature& sig,
-                                  flint::FmpzConstRef absolute_discriminant,
-                                  const OptionalOrderBasisTransform&
-                                          normalized_to_original,
-                                  bool basis_is_unchanged,
-                                  const flint::Arb& log_two,
-                                  slong precision) noexcept {
+// Rows of the weighted Minkowski embedding (the reference's T2 matrix G, one
+// row per basis element) of the basis that begins with 1.
+bool normalized_minkowski_rows(flint::ArbMat& rows, const Order& order,
+                               const OptionalOrderBasisTransform&
+                                       normalized_to_original,
+                               bool basis_is_unchanged,
+                               slong precision) noexcept {
     const slong degree = order.degree();
-    flint::ArbMat rows(degree, degree);
+    if (flint::arb_mat_nrows_value(rows) != degree ||
+        flint::arb_mat_ncols_value(rows) != degree) {
+        return false;
+    }
     if (basis_is_unchanged) {
         if (!order_minkowski_embedding_rows(flint::ArbMatRef(rows), order,
                                             precision, nullptr)) {
@@ -410,6 +412,15 @@ bool compute_log2_minkowski_bound(flint::Arb& out, const Order& order,
             }
         }
     }
+    return true;
+}
+
+bool compute_log2_minkowski_bound(flint::Arb& out, const flint::ArbMat& rows,
+                                  const Signature& sig,
+                                  flint::FmpzConstRef absolute_discriminant,
+                                  const flint::Arb& log_two,
+                                  slong precision) noexcept {
+    const slong degree = flint::arb_mat_nrows_value(rows);
     flint::Arb e;
     flint::Arb norm_squared;
     flint::Arb entry;
@@ -446,6 +457,61 @@ bool compute_log2_minkowski_bound(flint::Arb& out, const Order& order,
     flint::arb_mul_ui(term, log_two, static_cast<ulong>(sig.r2()), precision);
     flint::arb_sub(d, d, term, precision);
     flint::arb_sub(out, e, d, precision);
+    return flint::arb_is_finite(out);
+}
+
+// log2 of the quantity the reference's log2Mbound bounds (second reference
+// buch2.c:1201): the largest ratio |x|_oo / |y|_oo over the solutions x of
+// the split real/imaginary system S x = y (RgM_solve_realimag), where S has
+// the real parts of all r1 + r2 embeddings and the imaginary parts of the r2
+// complex ones, unweighted.  That ratio is at most the induced max-row-sum
+// norm ||S^-1||_oo, and log2Mbound is the Hadamard and Cramer estimate of
+// it; this evaluates the norm itself from a certified Arb inverse.
+//
+// `rows` is G^T: row j holds sqrt(w_k) times the embedding coordinate k of
+// basis element j, with w_k = 1 for the r1 real columns and w_k = 2 for the
+// interleaved real and imaginary columns of the complex places.  If c is
+// the coordinate row of an element with split embedding row y, then
+// c rows = y W^(1/2), so c = y W^(1/2) rows^-1 and
+//   |c_j| <= |y|_oo sum_k sqrt(w_k) |(rows^-1)_kj|,
+// a column sum of rows^-1 that equals the row sum of S^-1.  Every Arb
+// operation encloses its exact value, so the returned ball encloses the
+// exact norm and its upper end is an outward-rounded bound.
+bool compute_log2_inverse_norm_bound(flint::Arb& out,
+                                     const flint::ArbMat& rows,
+                                     const Signature& sig,
+                                     const flint::Arb& log_two,
+                                     slong precision) noexcept {
+    const slong degree = flint::arb_mat_nrows_value(rows);
+    flint::ArbMat inverse(degree, degree);
+    if (degree <= 0 || flint::arb_mat_ncols_value(rows) != degree ||
+        arb_mat_inv(inverse.raw(), rows.raw(), precision) == 0) {
+        return false;
+    }
+
+    flint::Arb sqrt_two;
+    flint::Arb column_sum;
+    flint::Arb entry;
+    flint::Arb maximum;
+    flint::arb_sqrt_ui(sqrt_two, 2, precision);
+    flint::arb_zero(maximum);
+    for (slong column = 0; column < degree; ++column) {
+        flint::arb_zero(column_sum);
+        for (slong k = 0; k < degree; ++k) {
+            flint::arb_set(entry, arb_mat_entry(inverse.raw(), k, column));
+            flint::arb_abs(entry, entry);
+            if (k >= sig.r1()) {
+                flint::arb_mul(entry, entry, sqrt_two, precision);
+            }
+            flint::arb_add(column_sum, column_sum, entry, precision);
+        }
+        flint::arb_max(maximum, maximum, column_sum, precision);
+    }
+    if (!flint::arb_is_finite(maximum) || !flint::arb_is_positive(maximum)) {
+        return false;
+    }
+    flint::arb_log(out, maximum, precision);
+    flint::arb_div(out, out, log_two, precision);
     return flint::arb_is_finite(out);
 }
 
@@ -489,11 +555,14 @@ bool compute_bound_interval(CompactCoordinateBoundReport& report,
                             slong precision) noexcept {
     flint::Arb log_two;
     flint::arb_log_ui(log_two, 2, precision);
+    const slong degree = order.degree();
+    flint::ArbMat rows(degree, degree);
     if (!flint::arb_is_finite(log_two) || !flint::arb_is_positive(log_two) ||
-        !compute_log2_minkowski_bound(report.log2_minkowski_bound, order, sig,
-                                      absolute_discriminant,
-                                      normalized_to_original,
-                                      basis_is_unchanged, log_two, precision) ||
+        !normalized_minkowski_rows(rows, order, normalized_to_original,
+                                   basis_is_unchanged, precision) ||
+        !compute_log2_minkowski_bound(report.log2_minkowski_bound, rows, sig,
+                                      absolute_discriminant, log_two,
+                                      precision) ||
         !compute_log2_unit_bound(report.log2_unit_bound, embeddings, generators,
                                  sig, log_two, precision)) {
         return false;
@@ -506,7 +575,28 @@ bool compute_bound_interval(CompactCoordinateBoundReport& report,
                           report.log2_coordinate_bound,
                           coordinate_scale_bits, precision);
     }
-    return flint::arb_is_finite(report.log2_coordinate_bound);
+    if (!flint::arb_is_finite(report.log2_coordinate_bound)) {
+        return false;
+    }
+
+    // An inverse that is not certified at this precision leaves the
+    // operator-norm bound indeterminate; the reference expression above
+    // still decides success and the precision ladder.
+    if (compute_log2_inverse_norm_bound(report.log2_inverse_norm_bound, rows,
+                                        sig, log_two, precision)) {
+        flint::arb_add(report.log2_inverse_norm_coordinate_bound,
+                       report.log2_inverse_norm_bound, report.log2_unit_bound,
+                       precision);
+        if (coordinate_scale_bits != 0) {
+            flint::arb_add_ui(report.log2_inverse_norm_coordinate_bound,
+                              report.log2_inverse_norm_coordinate_bound,
+                              coordinate_scale_bits, precision);
+        }
+    } else {
+        arb_indeterminate(report.log2_inverse_norm_bound.raw());
+        arb_indeterminate(report.log2_inverse_norm_coordinate_bound.raw());
+    }
+    return true;
 }
 
 bool stable_ceiling(flint::Fmpz& ceiling, const flint::Arb& value,
@@ -583,8 +673,31 @@ bool compact_unit_coordinate_bound_from_source(
                 return false;
             }
 
-            candidate.bit_bound =
+            candidate.hadamard_bit_bound =
                     flint::fmpz_get_ui(flint::FmpzConstRef(bit_bound));
+            candidate.bit_bound = candidate.hadamard_bit_bound;
+            // Publish the smaller stable ceiling, so the bound is never
+            // looser than the reference expression.  For r2 = 0, Cramer's
+            // rule, Cauchy-Schwarz and Hadamard's inequality give
+            // log2 ||S^-1||_oo <= log2Mbound exactly (the column of 1 has the
+            // smallest norm, sqrt(n) <= sqrt(T2(w)) for a nonzero integer w),
+            // so the minimum is the operator norm.  For r2 > 0 the reference
+            // subtracts r2 * ln 2 for log2 |det S| = log2 |D| / 2 - r2, so
+            // that argument does not cover it and the minimum is kept.
+            flint::Fmpz inverse_norm_bit_bound;
+            if (flint::arb_is_finite(
+                        candidate.log2_inverse_norm_coordinate_bound) &&
+                stable_ceiling(inverse_norm_bit_bound,
+                               candidate.log2_inverse_norm_coordinate_bound,
+                               precision) &&
+                flint::fmpz_sgn(
+                        flint::FmpzConstRef(inverse_norm_bit_bound)) >= 0 &&
+                flint::fmpz_cmp(flint::FmpzConstRef(inverse_norm_bit_bound),
+                                flint::FmpzConstRef(bit_bound)) < 0) {
+                candidate.bit_bound = flint::fmpz_get_ui(
+                        flint::FmpzConstRef(inverse_norm_bit_bound));
+                candidate.inverse_norm_bound_used = true;
+            }
             flint::fmpz_one(flint::FmpzRef(candidate.coordinate_bound));
             flint::fmpz_mul_2exp(
                     flint::FmpzRef(candidate.coordinate_bound),
