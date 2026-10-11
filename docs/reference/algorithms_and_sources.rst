@@ -1904,6 +1904,17 @@ branches decide the same question, since ``a = s^n * r``, so only the cost
 differs.
 Whether to port ``factor_coprime`` is a separate decision.
 
+The split of each exponent ``v`` into ``v = q*n + e`` also differs.  Hecke
+uses Julia's ``divrem`` (line 391), which truncates, so on the path with the
+conjugate-log comparison (``easy = false``) ``e`` has the sign of ``v`` and
+lies in ``(-n, n)``.  Silex floors (``compact_floor_divrem_positive`` in
+``src/class_group/class_group.cpp``, used by ``compact_split_power``), so
+``e`` lies in ``[0, n)``.  For a negative ``v`` that ``n`` does not divide,
+the two leftovers ``r`` differ, and so can the conjugate-log comparison that
+chooses between the branches.  The answer does not change, since both
+branches decide whether ``a = s^n * r`` is an ``n``-th power.  This is an
+existing deviation.
+
 The logarithmic embedding follows Hecke's ``conjugates_arb_log`` for
 ``FacElem`` (``src/NumFieldOrd/NfOrd/FacElem.jl``): equal bases are merged
 into one dictionary entry with summed exponents, each base is evaluated with
