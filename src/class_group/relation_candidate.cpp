@@ -8,13 +8,22 @@
 #include "relation_search_internal.hpp"
 #include "../relation/relation_internal.hpp"
 
+#include <silex/flint/acb_vec.hpp>
+#include <silex/flint/arb.hpp>
+#include <silex/flint/arb_mat.hpp>
 #include <silex/flint/nmod_poly_factor.hpp>
 
+#include <flint/acb.h>
+#include <flint/arb_fmpz_poly.h>
+#include <flint/arb_mat.h>
 #include <flint/fmpz_vec.h>
+#include <flint/mag.h>
 #include <flint/ulong_extras.h>
 
+#include <cmath>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace silex {
 namespace detail::relation_search {
@@ -47,6 +56,255 @@ constexpr slong kSplitPrimeSearchFactor = 4;
 // to the exact fmpz_poly_resultant.
 constexpr std::size_t kMaxSplitPrimes = 64;
 
+// Precisions of the root enclosures and of the Gram matrix and Cholesky
+// checks behind the T2 bound.  Numerical choices, not from a source: when
+// they are too low for a field, the Cholesky checks fail and the bound
+// stays at trace(G), which is still certified.
+constexpr slong kT2BoundRootPrecision = 32;
+constexpr slong kT2BoundPrecision = 64;
+// Power-iteration steps for the estimate of lambda_max(G) and the relative
+// margin 2^-7 added to it before the Cholesky check; the search stops once
+// the certified upper end is within a factor 1 + 2^-6 of the lower end, or
+// after kT2BoundBisectionSteps checks.  A factor 1 + 2^-6 in lambda costs at
+// most n / 2 * log2(1 + 2^-6) < n / 87 bits of the resultant bound.
+constexpr int kT2BoundPowerSteps = 32;
+constexpr slong kT2BoundMarginExponent = -7;
+constexpr slong kT2BoundStopExponent = -6;
+constexpr int kT2BoundBisectionSteps = 12;
+
+// Approximates lambda_max(G) 2^-scale_exponent by power iteration in double
+// precision on the midpoints of G 2^-scale_exponent (Golub and Van Loan,
+// Matrix Computations, Section 8.2.1: the Rayleigh quotient of the iterate
+// converges to the largest eigenvalue of a symmetric positive semidefinite
+// matrix).  Only an estimate: it picks the first lambda to certify.
+double t2_gram_power_estimate(const arb_mat_t gram,
+                              slong degree,
+                              slong scale_exponent) noexcept {
+    const auto n = static_cast<std::size_t>(degree);
+    std::vector<double> matrix(n * n);
+    flint::Arf scaled;
+    for (slong j = 0; j < degree; ++j) {
+        for (slong k = 0; k < degree; ++k) {
+            arf_mul_2exp_si(scaled.raw(),
+                            arb_midref(arb_mat_entry(gram, j, k)),
+                            -scale_exponent);
+            matrix[static_cast<std::size_t>(j) * n +
+                   static_cast<std::size_t>(k)] =
+                    arf_get_d(scaled.raw(), ARF_RND_NEAR);
+        }
+    }
+    // A fixed pseudo-random start, so the estimate is deterministic and the
+    // start is not orthogonal to the top eigenspace in structured cases
+    // (the all-ones vector is an eigenvector of Phi_p's G for eigenvalue 1).
+    std::vector<double> vector(n);
+    std::vector<double> image(n);
+    ulong state = 1;
+    for (std::size_t j = 0; j < n; ++j) {
+        state = state * UWORD(6364136223846793005) +
+                UWORD(1442695040888963407);
+        vector[j] = 0.5 + static_cast<double>(state >> 11) * 0x1p-53;
+    }
+    double estimate = 0.0;
+    for (int step = 0; step < kT2BoundPowerSteps; ++step) {
+        double vector_norm = 0.0;
+        double rayleigh = 0.0;
+        double image_norm = 0.0;
+        for (std::size_t j = 0; j < n; ++j) {
+            double sum = 0.0;
+            for (std::size_t k = 0; k < n; ++k) {
+                sum += matrix[j * n + k] * vector[k];
+            }
+            image[j] = sum;
+            vector_norm += vector[j] * vector[j];
+            rayleigh += vector[j] * sum;
+            image_norm += sum * sum;
+        }
+        if (!(vector_norm > 0.0) || !(image_norm > 0.0)) {
+            return 0.0;
+        }
+        estimate = rayleigh / vector_norm;
+        const double inverse = 1.0 / std::sqrt(image_norm);
+        for (std::size_t j = 0; j < n; ++j) {
+            vector[j] = image[j] * inverse;
+        }
+    }
+    return estimate;
+}
+
+// Returns whether lambda I - G is certainly positive definite, which gives
+// lambda_max(G) < lambda for the symmetric matrix G inside the balls.
+bool t2_gram_bound_certified(flint::ArbMat& shifted,
+                             flint::ArbMat& cholesky,
+                             const arb_mat_t gram,
+                             const arf_t lambda,
+                             slong degree) noexcept {
+    arb_mat_neg(shifted.raw(), gram);
+    for (slong j = 0; j < degree; ++j) {
+        arb_add_arf(arb_mat_entry(shifted.raw(), j, j),
+                    arb_mat_entry(shifted.raw(), j, j), lambda,
+                    kT2BoundPrecision);
+    }
+    return arb_mat_cho(cholesky.raw(), shifted.raw(), kT2BoundPrecision) != 0;
+}
+
+// Sets out to a certified upper bound for lambda_max(G) / n, where
+// G[j][k] = Re sum_i r_i^j conj(r_i)^k over the n complex roots r_i of the
+// squarefree f, so that T2(a) = a^T G a for the coefficient vector of a.
+// G = A^T A + B^T B with A = Re(r_i^j) and B = Im(r_i^j) is positive
+// semidefinite, so lambda_max(G) <= trace(G); each smaller lambda for which
+// FLINT arb_mat_cho certifies lambda I - G positive definite gives
+// lambda_max(G) < lambda.  The first lambda tried is the power-iteration
+// estimate plus a margin; a geometric bisection between the lower end (the
+// largest diagonal entry or the estimate) and the certified upper end
+// follows only while they are far apart.  Returns false when no finite
+// bound is found.
+bool certified_t2_ratio_bound(flint::Arf& out,
+                              const fmpz_poly_struct* field_polynomial,
+                              slong degree) noexcept {
+    const slong prec = kT2BoundPrecision;
+    if (degree <= 0 || fmpz_poly_is_squarefree(field_polynomial) == 0) {
+        return false;
+    }
+    flint::AcbVec roots(degree);
+    arb_fmpz_poly_complex_roots(roots.data(), field_polynomial, 0,
+                                kT2BoundRootPrecision);
+
+    flint::ArbMat real_powers(degree, degree);
+    flint::ArbMat imag_powers(degree, degree);
+    {
+        acb_t power;
+        acb_init(power);
+        for (slong i = 0; i < degree; ++i) {
+            acb_one(power);
+            for (slong j = 0; j < degree; ++j) {
+                arb_set(arb_mat_entry(real_powers.raw(), i, j),
+                        acb_realref(power));
+                arb_set(arb_mat_entry(imag_powers.raw(), i, j),
+                        acb_imagref(power));
+                acb_mul(power, power, roots.data() + i, prec);
+            }
+        }
+        acb_clear(power);
+    }
+    flint::ArbMat transpose(degree, degree);
+    flint::ArbMat gram(degree, degree);
+    flint::ArbMat term(degree, degree);
+    arb_mat_transpose(transpose.raw(), real_powers.raw());
+    arb_mat_mul(gram.raw(), transpose.raw(), real_powers.raw(), prec);
+    arb_mat_transpose(transpose.raw(), imag_powers.raw());
+    arb_mat_mul(term.raw(), transpose.raw(), imag_powers.raw(), prec);
+    arb_mat_add(gram.raw(), gram.raw(), term.raw(), prec);
+
+    flint::Arb trace;
+    flint::Arf high;
+    flint::Arf low;
+    flint::Arf scratch;
+    arb_mat_trace(trace.raw(), gram.raw(), prec);
+    arb_get_ubound_arf(high.raw(), trace.raw(), prec);
+    if (arf_is_finite(high.raw()) == 0 || arf_sgn(high.raw()) <= 0) {
+        return false;
+    }
+    arf_zero(low.raw());
+    for (slong j = 0; j < degree; ++j) {
+        arb_get_lbound_arf(scratch.raw(), arb_mat_entry(gram.raw(), j, j),
+                           prec);
+        if (arf_cmp(scratch.raw(), low.raw()) > 0) {
+            arf_set(low.raw(), scratch.raw());
+        }
+    }
+
+    flint::ArbMat shifted(degree, degree);
+    flint::ArbMat cholesky(degree, degree);
+    if (fmpz_fits_si(ARF_EXPREF(high.raw())) != 0) {
+        const slong scale_exponent = fmpz_get_si(ARF_EXPREF(high.raw()));
+        const double estimate =
+                t2_gram_power_estimate(gram.raw(), degree, scale_exponent);
+        if (estimate > 0.0 && estimate <= 1.0) {
+            flint::Arf candidate;
+            arf_set_d(scratch.raw(), estimate);
+            arf_mul_2exp_si(scratch.raw(), scratch.raw(), scale_exponent);
+            arf_mul_2exp_si(candidate.raw(), scratch.raw(),
+                            kT2BoundMarginExponent);
+            arf_add(candidate.raw(), candidate.raw(), scratch.raw(), prec,
+                    ARF_RND_UP);
+            if (arf_cmp(candidate.raw(), high.raw()) < 0) {
+                if (t2_gram_bound_certified(shifted, cholesky, gram.raw(),
+                                            candidate.raw(), degree)) {
+                    arf_set(high.raw(), candidate.raw());
+                    // The estimate only steers the search below.
+                    if (arf_cmp(scratch.raw(), low.raw()) > 0) {
+                        arf_set(low.raw(), scratch.raw());
+                    }
+                } else if (arf_cmp(candidate.raw(), low.raw()) > 0) {
+                    arf_set(low.raw(), candidate.raw());
+                }
+            }
+        }
+    }
+
+    if (arf_sgn(low.raw()) > 0 && arf_is_finite(low.raw()) != 0) {
+        flint::Arf middle;
+        for (int step = 0; step < kT2BoundBisectionSteps; ++step) {
+            arf_mul_2exp_si(scratch.raw(), low.raw(), kT2BoundStopExponent);
+            arf_add(scratch.raw(), scratch.raw(), low.raw(), prec,
+                    ARF_RND_UP);
+            if (arf_cmp(high.raw(), scratch.raw()) <= 0) {
+                break;
+            }
+            arf_mul(middle.raw(), low.raw(), high.raw(), prec, ARF_RND_NEAR);
+            arf_sqrt(middle.raw(), middle.raw(), prec, ARF_RND_NEAR);
+            if (t2_gram_bound_certified(shifted, cholesky, gram.raw(),
+                                        middle.raw(), degree)) {
+                arf_set(high.raw(), middle.raw());
+            } else {
+                arf_set(low.raw(), middle.raw());
+            }
+        }
+    }
+
+    arf_div_ui(out.raw(), high.raw(), static_cast<ulong>(degree), prec,
+               ARF_RND_UP);
+    return true;
+}
+
+// Sets out so that |Res(f, a)| < 2^out, from
+// |Res(f, a)|^2 <= (ratio ||a||_2^2)^n with ratio >= lambda_max(G) / n.
+// mag_t arithmetic rounds every step upward.  Returns false when the bound
+// does not fit a word.
+bool t2_resultant_half_bits(flint_bitcnt_t& out,
+                            const fmpz_t norm_squared,
+                            const arf_t ratio,
+                            slong degree) noexcept {
+    mag_t bound;
+    mag_t factor;
+    mag_init(bound);
+    mag_init(factor);
+    mag_set_fmpz(bound, norm_squared);
+    arf_get_mag(factor, ratio);
+    mag_mul(bound, bound, factor);
+    mag_pow_ui(bound, bound, static_cast<ulong>(degree));
+    bool ok = true;
+    if (mag_is_zero(bound) != 0) {
+        out = 0;
+    } else if (mag_is_finite(bound) == 0 ||
+               fmpz_fits_si(MAG_EXPREF(bound)) == 0) {
+        ok = false;
+    } else {
+        // bound < 2^exponent: a mag_t is m 2^(e - MAG_BITS) with
+        // m < 2^MAG_BITS; the loop only guards that representation.
+        slong exponent = fmpz_get_si(MAG_EXPREF(bound));
+        while (mag_cmp_2exp_si(bound, exponent) >= 0) {
+            ++exponent;
+        }
+        // |Res|^2 < 2^exponent, so |Res| < 2^ceil(exponent / 2).
+        out = exponent <= 0 ? 0
+                            : static_cast<flint_bitcnt_t>((exponent + 1) / 2);
+    }
+    mag_clear(bound);
+    mag_clear(factor);
+    return ok;
+}
+
 }  // namespace
 
 void SplitPrimeResultant::reset(
@@ -64,6 +322,8 @@ void SplitPrimeResultant::reset(
     field_norm_squared_bits = 0;
     last_tested_prime = kSplitPrimeSearchStart;
     tested_primes = 0;
+    last_prime_count = 0;
+    t2_bound_state = T2BoundState::not_computed;
     moduli.clear();
     root_powers.clear();
     residues.clear();
@@ -183,7 +443,22 @@ void SplitPrimeResultant::resultant(
                     field_norm_squared_bits +
             static_cast<flint_bitcnt_t>(degree) *
                     fmpz_bits(coordinate_norm_squared.raw());
-    const flint_bitcnt_t half_bits = (doubled_bits + 1) / 2;
+    flint_bitcnt_t half_bits = (doubled_bits + 1) / 2;
+    // The T2 bound, when smaller (see SplitPrimeResultant).
+    if (t2_bound_state == T2BoundState::not_computed) {
+        t2_bound_state = certified_t2_ratio_bound(t2_ratio_bound,
+                                                  field_polynomial.raw(),
+                                                  degree)
+                                 ? T2BoundState::available
+                                 : T2BoundState::unavailable;
+    }
+    flint_bitcnt_t t2_half_bits = 0;
+    if (t2_bound_state == T2BoundState::available &&
+        t2_resultant_half_bits(t2_half_bits, coordinate_norm_squared.raw(),
+                               t2_ratio_bound.raw(), degree) &&
+        t2_half_bits < half_bits) {
+        half_bits = t2_half_bits;
+    }
     // The symmetric residue is the integer once the modulus exceeds twice
     // the bound: fmpz_bits(modulus) >= half_bits + 2 gives
     // modulus >= 2^(half_bits + 1).
@@ -242,6 +517,7 @@ void SplitPrimeResultant::resultant(
         fmpz_mul_ui(modulus.raw(), modulus.raw(), mod.n);
         ++used;
     }
+    last_prime_count = static_cast<slong>(used);
     handled = true;
 }
 

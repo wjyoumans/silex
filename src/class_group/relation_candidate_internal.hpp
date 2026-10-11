@@ -1,6 +1,7 @@
 #pragma once
 
 #include "class_group_storage_internal.hpp"
+#include <silex/flint/arf.hpp>
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/nmod_poly.hpp>
@@ -29,17 +30,38 @@ struct OrderCoordinateElementConversion {
 // symmetric CRT once the product of the primes used exceeds twice the
 // Hadamard bound |Res(f, a)| <= ||f||_2^deg(a) ||a||_2^n, the bound FLINT's
 // _fmpz_poly_resultant_modular uses (FLINT src/fmpz_poly/resultant_modular.c,
-// citing Theorem 7 of doi:10.1016/j.laa.2009.08.012).  Split primes are searched lazily;
+// citing Theorem 7 of doi:10.1016/j.laa.2009.08.012).  When it is smaller,
+// the bound used is instead the T2 bound
+// |Res(f, a)|^2 = prod_i |a(r_i)|^2 <= (T2(a) / n)^n <= (lambda ||a||_2^2 / n)^n,
+// the inequality of arithmetic and geometric means on the n values
+// |a(r_i)|^2, with T2(a) = sum_i |a(r_i)|^2 the T2 form of Cohen, GTM 138
+// (used there for polynomial reduction), followed by the
+// Rayleigh-quotient bound x^T G x <= lambda_max(G) x^T x for the real
+// symmetric T2 Gram matrix G of the power basis (Horn and Johnson, Matrix
+// Analysis, Theorem 4.2.2), where lambda >= lambda_max(G) is certified once
+// per f: lambda I - G is certainly positive definite by FLINT arb_mat_cho
+// on ball enclosures of G built from arb_fmpz_poly_complex_roots, or else
+// lambda = trace(G), its upper end, since G is positive semidefinite.  The
+// bound is evaluated with mag_t upper-bound arithmetic, so every rounding
+// is outward.  Split primes are searched lazily;
 // when they do not cover a candidate's bound, the caller computes
 // fmpz_poly_resultant instead, so the value is always the exact resultant.
 struct SplitPrimeResultant {
+    enum class T2BoundState { not_computed, available, unavailable };
+
     flint::FmpzPoly field_polynomial;
     slong degree = 0;
     flint_bitcnt_t field_norm_squared_bits = 0;
     ulong last_tested_prime = 0;
     slong tested_primes = 0;
+    // Split primes used by the last handled call.
+    slong last_prime_count = 0;
     bool enabled = false;
     bool search_exhausted = false;
+    // Certified upper bound for lambda_max(G) / n, computed on the first
+    // call after a reset with a new f.
+    T2BoundState t2_bound_state = T2BoundState::not_computed;
+    flint::Arf t2_ratio_bound;
     std::vector<nmod_t> moduli;
     std::vector<ulong> root_powers;
     std::vector<ulong> residues;

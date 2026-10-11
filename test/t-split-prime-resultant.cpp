@@ -3,6 +3,7 @@
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_poly.hpp>
 
+#include <flint/arf.h>
 #include <flint/fmpz_poly.h>
 
 #include <cstddef>
@@ -277,6 +278,114 @@ int test_reset_keeps_split_primes_for_same_field() {
     return evaluator.enabled || !evaluator.moduli.empty() ? 1 : 0;
 }
 
+
+// Res(f, a) for constants and monomials c x^j has |Res| = |c|^n, where the
+// AM-GM inequality |N(a)|^2 <= (T2(a) / n)^n is an equality, so these
+// candidates sit within a fraction of a bit of the T2 bound.  Sweeping
+// |c| across 2^k - 1, 2^k and 2^k + 1 places |Res| on both sides of every
+// modulus size the bound can choose.
+int compare_tight_candidates(relation_search::SplitPrimeResultant& evaluator,
+                             const sflint::FmpzPoly& field) noexcept {
+    const slong degree = fmpz_poly_degree(field.raw());
+    sflint::FmpzPoly coordinate;
+    sflint::Fmpz c;
+    sflint::Fmpz expected;
+    sflint::Fmpz actual;
+    for (slong k = 1; k <= 40; ++k) {
+        for (const slong offset : {-1, 0, 1}) {
+            fmpz_one(c.raw());
+            fmpz_mul_2exp(c.raw(), c.raw(), static_cast<ulong>(k));
+            fmpz_add_si(c.raw(), c.raw(), offset);
+            for (const slong power : {static_cast<slong>(0), degree / 2,
+                                      degree - 1}) {
+                for (const int sign : {1, -1}) {
+                    fmpz_poly_zero(coordinate.raw());
+                    fmpz_poly_set_coeff_fmpz(coordinate.raw(), power,
+                                             c.raw());
+                    if (sign < 0) {
+                        fmpz_poly_neg(coordinate.raw(), coordinate.raw());
+                    }
+                    fmpz_poly_resultant(expected.raw(), field.raw(),
+                                        coordinate.raw());
+                    bool handled = false;
+                    evaluator.resultant(handled, actual.raw(),
+                                        coordinate.raw());
+                    if (handled &&
+                        !fmpz_equal(expected.raw(), actual.raw())) {
+                        std::fprintf(stderr,
+                                     "split-prime resultant mismatch on a "
+                                     "tight candidate: degree %ld, k %ld\n",
+                                     static_cast<long>(degree),
+                                     static_cast<long>(k));
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+int test_t2_bound_matches_resultant_on_tight_candidates() {
+    for (const slong m : {17, 41}) {
+        sflint::FmpzPoly field;
+        set_prime_cyclotomic(field, m);
+        relation_search::SplitPrimeResultant evaluator;
+        evaluator.reset(field.raw());
+        if (compare_tight_candidates(evaluator, field) != 0) {
+            return 1;
+        }
+    }
+    sflint::FmpzPoly field;
+    set_real_abelian_degree_17(field);
+    relation_search::SplitPrimeResultant evaluator;
+    evaluator.reset(field.raw());
+    return compare_tight_candidates(evaluator, field);
+}
+
+int test_t2_bound_for_prime_cyclotomic() {
+    // For Phi_41 in the power basis 1, ..., x^39,
+    // T2(a) = 41 ||a||^2 - (a(1))^2, so the largest eigenvalue of the T2
+    // Gram matrix is 41 and the certified ratio must lie in
+    // [41/40, 41/40 (1 + 1/16)].
+    sflint::FmpzPoly field;
+    set_prime_cyclotomic(field, 41);
+    relation_search::SplitPrimeResultant evaluator;
+    evaluator.reset(field.raw());
+
+    // Res(Phi_41, 1 + x) = Phi_41(-1) = 1.  The Hadamard bound
+    // 41^(1/2) 2^20 needs two split primes; the T2 bound
+    // (41/40 * 2)^20 < 2^21 needs one.
+    sflint::FmpzPoly coordinate;
+    sflint::Fmpz actual;
+    fmpz_poly_set_coeff_si(coordinate.raw(), 0, 1);
+    fmpz_poly_set_coeff_si(coordinate.raw(), 1, 1);
+    bool handled = false;
+    evaluator.resultant(handled, actual.raw(), coordinate.raw());
+    if (!handled || !fmpz_is_one(actual.raw()) ||
+        evaluator.last_prime_count != 1 ||
+        evaluator.t2_bound_state !=
+                relation_search::SplitPrimeResultant::T2BoundState::
+                        available) {
+        return 1;
+    }
+
+    arf_t lower;
+    arf_t upper;
+    arf_init(lower);
+    arf_init(upper);
+    arf_set_ui(lower, 41);
+    arf_div_ui(lower, lower, 40, 64, ARF_RND_DOWN);
+    arf_set_ui(upper, 41 * 17);
+    arf_div_ui(upper, upper, 40 * 16, 64, ARF_RND_UP);
+    const bool in_range =
+            arf_cmp(evaluator.t2_ratio_bound.raw(), lower) >= 0 &&
+            arf_cmp(evaluator.t2_ratio_bound.raw(), upper) <= 0;
+    arf_clear(lower);
+    arf_clear(upper);
+    return in_range ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
@@ -284,7 +393,10 @@ int main() {
                    test_real_abelian_matches_resultant() != 0 ||
                    test_constant_and_zero_polynomials() != 0 ||
                    test_disabled_and_exhausted_cases() != 0 ||
-                   test_reset_keeps_split_primes_for_same_field() != 0
+                   test_reset_keeps_split_primes_for_same_field() != 0 ||
+                   test_t2_bound_matches_resultant_on_tight_candidates() !=
+                           0 ||
+                   test_t2_bound_for_prime_cyclotomic() != 0
             ? 1
             : 0;
 }
