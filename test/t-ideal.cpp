@@ -2154,7 +2154,7 @@ int test_known_two_generator_hnf_matches_generic() {
 }
 
 // The generic branch of try_ideal_product_hnf takes the HNF of the rows
-// [mk H; H M_beta] modulo mh mk (fmpz_mat_hnf_modular_eldiv).  Compare it with
+// [mk H; H M_beta] (fmpz_mat_hnf).  Compare it with
 // the plain fmpz_mat_hnf of all n^2 basis products, over maximal orders with
 // trivial and nontrivial index, ideals with content, equal minima, squares and
 // word and multiword moduli.  Outside a maximal order the branch is refused.
