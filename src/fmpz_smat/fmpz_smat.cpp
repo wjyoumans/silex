@@ -19,7 +19,9 @@ SquareAbsDetRoute fmpz_mat_square_abs_det(flint::FmpzRef out,
         flint::FmpzMatConstRef matrix) noexcept {
     const fmpz_mat_struct* raw = matrix.raw();
     const slong n = ::fmpz_mat_nrows(raw);
-    bool upper_triangular = true;
+    // A non-square input goes to fmpz_mat_det, which rejects it, so the
+    // diagonal scan never reads past the last column.
+    bool upper_triangular = (n == ::fmpz_mat_ncols(raw));
     for (slong i = 1; i < n && upper_triangular; ++i) {
         for (slong j = 0; j < i; ++j) {
             if (!::fmpz_is_zero(fmpz_mat_entry(raw, i, j))) {

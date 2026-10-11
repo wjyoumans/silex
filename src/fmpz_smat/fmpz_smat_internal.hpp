@@ -9,7 +9,8 @@ enum class SquareAbsDetRoute { diagonal_product, determinant };
 
 // Sets out to |det(matrix)| for a square matrix. An upper triangular matrix
 // takes the product of its diagonal; any other square matrix falls back to
-// fmpz_mat_det. The returned route is for tests.
+// fmpz_mat_det. A non-square matrix is also passed to fmpz_mat_det, which
+// rejects it. The returned route is for tests.
 SquareAbsDetRoute fmpz_mat_square_abs_det(flint::FmpzRef out,
         flint::FmpzMatConstRef matrix) noexcept;
 
