@@ -609,6 +609,21 @@ if(SILEX_BUILD_TESTS)
     add_test(NAME silex-class-group COMMAND t-silex-class-group)
     list(APPEND SILEX_TEST_NAMES silex-class-group)
 
+    add_executable(t-silex-saturation-nonunit-small-bound
+        test/t-saturation-nonunit-small-bound.cpp)
+    target_link_libraries(t-silex-saturation-nonunit-small-bound
+        PRIVATE Silex::silex)
+    target_include_directories(t-silex-saturation-nonunit-small-bound PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-saturation-nonunit-small-bound)
+    add_test(NAME silex-saturation-nonunit-small-bound
+        COMMAND t-silex-saturation-nonunit-small-bound)
+    list(APPEND SILEX_TEST_NAMES silex-saturation-nonunit-small-bound)
+    # Reproduces a known defect (non-unit candidate with log bound <= 1);
+    # remove DISABLED once saturation_process_candidates_once is fixed.
+    set_tests_properties(silex-saturation-nonunit-small-bound
+        PROPERTIES DISABLED TRUE)
+
     add_executable(t-silex-ideal-minkowski-embedding
         test/t-ideal-minkowski-embedding.cpp)
     target_link_libraries(t-silex-ideal-minkowski-embedding
