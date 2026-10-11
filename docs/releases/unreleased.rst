@@ -201,14 +201,15 @@ Changed
   random sub-factor-base twists, ``maxtry_FACT`` and ``maxtry_HONEST`` in
   ``buch2.c``) instead of the uncapped scalar/lattice search.  A prime with
   no witness within the caps now ends in a factor-base restart or, without
-  one, fails closed with ``failure_reason``
+  one, doubles the caps at up to three further stages (to 4000 candidates
+  and 400 twists) and then fails closed with ``failure_reason``
   ``factor_base_honesty_unwitnessed`` (``failure_detail`` ``search``
   ``t2``) instead of searching until the caller's time limit.  Every
   witness passes the same exact check as before, and results and labels of
-  the benchmark corpus's 65 succeeding ``proven`` rows are unchanged.  Three
-  fields that ran past a 600 s limit, ``Q(zeta_31)^+`` and
-  ``Q(sqrt(-3), sqrt(-5), sqrt(-7))`` and ``Q(sqrt(5), sqrt(-7), sqrt(-11))``,
-  now finish ``proven``, with the class groups and regulators of PARI's
+  the benchmark corpus's 65 succeeding ``proven`` rows are unchanged.  Seven
+  benchmark rows now finish ``proven``, including three fields that ran past
+  a 600 s limit, ``Q(zeta_31)^+`` and
+  ``Q(sqrt(-3), sqrt(-5), sqrt(-7))`` and ``Q(sqrt(5), sqrt(-7), sqrt(-11))``, with the class groups and regulators of PARI's
   certified ``bnfinit``.
 
 - The class-relation saturation with units keeps a stack of ``ell``-th-power

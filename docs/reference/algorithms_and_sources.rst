@@ -1842,8 +1842,10 @@ factor base over the fixed size limit of ``2^14`` generators is refused
 before any matrix is allocated, and the transaction then reports
 ``factor_base_size_limit_exceeded``; any other computation failure reports
 ``class_unit_computation_failed``.  Every
-candidate at every stage passes the same exact witness check, and stage 0 is
-the previous search, so results that succeeded at stage 0 are unchanged.
+candidate at every stage passes the same exact witness check.  For the
+relation-search checkpoint, stage 0 is the capped T2 search, not the previous
+search; the unchanged results of the 65 succeeding ``proven`` benchmark rows
+were established by measurement, not by construction.
 
 Within one class/unit transaction, Silex keeps a passed honesty scan and
 reuses it, with the same receipt, for a later candidate whose factor base is
