@@ -1349,11 +1349,7 @@ in the local system together with ``ell``-th powers.  With proven units,
 ``ell``-th power with character zero, so the character row of ``beta_i``
 changes by a unimodular row operation modulo ``ell``, and the rank modulo
 ``ell`` is unchanged.  Silex therefore applies the reduction only after the
-units are proven, and refuses it otherwise.  On the proven presentation of
-``x^2 - x - 25000001`` the coefficients drop from 903 to 2492 bits to 2 to
-12 bits, and the ``ell = 2`` test now verifies.  The ``ell = 53`` test
-still stops at rank 1 of 2 within the auxiliary-prime bound, so that field
-still fails closed.
+units are proven, and refuses it otherwise.
 
 The order-unit saturation proofs build degree-one primes ``(q, theta - r)``
 from roots ``r`` of the defining polynomial ``f`` modulo ``q`` with an

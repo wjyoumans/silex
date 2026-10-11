@@ -5689,6 +5689,12 @@ int test_relation_saturation_beta_rows_size_reduced() {
         std::vector<silex::FactoredElement> reduced;
         assert(silex::detail::relation_saturation_beta_rows(
                 reduced, context, units, sflint::FmpzConstRef(ell)));
+        {
+            // Units that are not proven are refused.
+            std::vector<silex::FactoredElement> refused;
+            assert(!silex::detail::relation_saturation_beta_rows(
+                    refused, context, grh_units, sflint::FmpzConstRef(ell)));
+        }
         std::vector<slong> beta_indices;
         for (slong i = 0; i < context.invariant_count(); ++i) {
             assert(context.invariant(sflint::FmpzRef(value), i));
@@ -5707,6 +5713,11 @@ int test_relation_saturation_beta_rows_size_reduced() {
         sflint::FmpzMat coefficients(0, 0);
         assert(silex::detail::relation_saturation_beta_coefficients(
                 coefficients, context, units, sflint::FmpzConstRef(ell)));
+        {
+            sflint::FmpzMat refused(0, 0);
+            assert(!silex::detail::relation_saturation_beta_coefficients(
+                    refused, context, grh_units, sflint::FmpzConstRef(ell)));
+        }
         assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(coefficients)) ==
                beta_count);
         for (slong b = 0; b < beta_count; ++b) {
