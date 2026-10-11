@@ -953,10 +953,72 @@ int test_required_prime_norm_prefilter_word_path_matches_fmpz() {
             }
         }
     }
+    // Negative norms at the 2^FLINT_BITS bound: in x^2 - x - 4 the norm
+    // a0^2 + a0 a1 - 4 a1^2 is negative, with |N| just below 2^64 at
+    // (0, 2^31 - 1) and growing past it as a0 decreases toward -a1 / 2.
+    const FieldSetup negative = maximal_order_setup({-4, -1, 1});
+    std::vector<std::array<sflint::Fmpz, 2>> negative_extra;
+    {
+        sflint::Fmpz word_bound;
+        sflint::fmpz_one(sflint::FmpzRef(word_bound));
+        fmpz_mul_2exp(word_bound.raw(), word_bound.raw(), FLINT_BITS);
+        sflint::Fmpz bound_value;
+        sflint::fmpz_set_si(sflint::FmpzRef(bound_value), 50);
+        silex::FactorBase base(negative.maximal_order);
+        silex::PrimeIdeal required(negative.maximal_order);
+        silex::detail::RequiredPrimeNormPrefilter prefilter;
+        if (!base.build(sflint::FmpzConstRef(bound_value)) ||
+            !first_prime_above(required, negative.maximal_order, 53) ||
+            !silex::detail::required_prime_norm_prefilter_init(prefilter, base,
+                                                              required)) {
+            return 1;
+        }
+        sflint::FmpzMat coordinates(1, 2);
+        sflint::Fmpz norm;
+        const slong second = limit;
+        // 1 when the norm is negative with |N| < 2^64, 0 when |N| >= 2^64.
+        const auto below = [&](slong a0) -> int {
+            sflint::fmpz_set_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 0),
+                    a0);
+            sflint::fmpz_set_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 1),
+                    second);
+            if (!silex::detail::required_prime_norm_prefilter_norm(
+                        sflint::FmpzRef(norm), prefilter,
+                        sflint::FmpzMatConstRef(coordinates)) ||
+                fmpz_sgn(norm.raw()) >= 0) {
+                return -1;
+            }
+            return fmpz_cmpabs(norm.raw(), word_bound.raw()) < 0 ? 1 : 0;
+        };
+        slong lo = -(limit / 2), hi = 0;  // |N| >= 2^64 at lo, below at hi
+        if (below(lo) != 0 || below(hi) != 1) {
+            return 1;
+        }
+        while (hi - lo > 1) {
+            const slong mid = lo + (hi - lo) / 2;
+            const int b = below(mid);
+            if (b < 0) {
+                return 1;
+            }
+            (b == 1 ? hi : lo) = mid;
+        }
+        for (slong first : {lo - 1, lo, hi, hi + 1}) {
+            negative_extra.emplace_back();
+            sflint::fmpz_set_si(sflint::FmpzRef(negative_extra.back()[0]),
+                                first);
+            sflint::fmpz_set_si(sflint::FmpzRef(negative_extra.back()[1]),
+                                second);
+        }
+    }
     const FieldSetup row = maximal_order_setup({-25000000, -1, 1});
     const FieldSetup at_limit = maximal_order_setup({2147483647, 1, 1});
     if (check_norm_prefilter_word_path(imaginary, 50, 53, true,
                                        extra, imaginary_extra, word_rejected,
+                                       word_kept, fallbacks) != 0 ||
+        check_norm_prefilter_word_path(negative, 50, 53, true, extra,
+                                       negative_extra, word_rejected,
                                        word_kept, fallbacks) != 0 ||
         check_norm_prefilter_word_path(row, 50, 53, true, extra, no_extra,
                                        word_rejected, word_kept,
