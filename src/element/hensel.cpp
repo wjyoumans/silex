@@ -548,6 +548,11 @@ public:
 
     std::vector<Entry>& entries() noexcept { return entries_; }
 
+    void clear() noexcept {
+        entries_.clear();
+        next_replacement_ = 0;
+    }
+
     void insert(Entry entry) noexcept {
         if (entries_.size() < capacity_) {
             entries_.push_back(std::move(entry));
@@ -669,6 +674,134 @@ slong equation_order_c3(slong degree) noexcept {
     return floor_integer_root_slong(degree, exponent) + 1;
 }
 
+// Field part of pure_power_conjugate_bounds: the embedding roots of the
+// field at the working precision and the conjugates of f'(theta).  Neither
+// reads the radicand, yet every lifting-exponent computation used to isolate
+// the roots afresh (acb_poly_find_roots through a local EmbeddingContext).
+//
+// Key: the defining polynomial, backend, working precision and the
+// derivative polynomial whose conjugates are stored.  The roots are those of
+// EmbeddingContext::refine(precision) on a fresh context, which reads only
+// the defining polynomial, and the entry is used only at exactly the
+// precision it was computed at, so a hit never serves a lower-precision
+// enclosure and evaluates bit for bit as a fresh context would.  The entry's
+// context owns its own copy of the field handle, which keeps that field's
+// (small) data alive until the entry is replaced or the thread exits; an
+// element of another field object with the same polynomial is evaluated
+// through its polynomial.
+struct ConjugateBoundsFieldEntry {
+    flint::FmpqPoly polynomial;
+    flint::FmpqPoly derivative_polynomial;
+    NumberFieldBackendKind backend = NumberFieldBackendKind::generic;
+    slong precision = 0;
+    EmbeddingContext embeddings;
+    flint::AcbVec derivative_values{0};
+};
+
+constexpr std::size_t kConjugateBoundsFieldCacheCapacity = 8;
+
+BoundedEntryCache<ConjugateBoundsFieldEntry>&
+conjugate_bounds_field_cache() noexcept {
+    thread_local BoundedEntryCache<ConjugateBoundsFieldEntry> cache(
+            kConjugateBoundsFieldCacheCapacity);
+    return cache;
+}
+
+bool compute_conjugate_bounds_field_entry(
+        ConjugateBoundsFieldEntry& entry,
+        const NumberField& parent,
+        const flint::FmpqPoly& derivative_polynomial,
+        slong precision) noexcept {
+    const nf_struct* raw_field = parent.raw_flint_field();
+    if (raw_field == nullptr || !entry.embeddings.define(parent) ||
+        !entry.embeddings.refine(precision)) {
+        return false;
+    }
+
+    Element derivative(parent);
+    if (!derivative.is_defined() ||
+        !derivative.set_fmpq_poly(flint::FmpqPolyConstRef(
+                derivative_polynomial))) {
+        return false;
+    }
+
+    entry.derivative_values = flint::AcbVec(parent.degree());
+    if (!entry.embeddings.evaluate_all(
+                flint::AcbVecRef(entry.derivative_values), derivative,
+                precision)) {
+        return false;
+    }
+    fmpq_poly_set(entry.polynomial.raw(), raw_field->pol);
+    fmpq_poly_set(entry.derivative_polynomial.raw(),
+                  derivative_polynomial.raw());
+    entry.backend = parent.backend_kind();
+    entry.precision = precision;
+    return true;
+}
+
+// Conjugates of `input` and of f'(theta) at `precision`, from the field memo
+// above.  No reference into a cache is held across a call that could reach
+// a Hensel cache again: only EmbeddingContext and Element operations run
+// while the entry is in use.
+bool conjugate_bounds_values(flint::AcbVec& input_values,
+                             flint::AcbVec& derivative_values,
+                             Signature& sig,
+                             const Element& input,
+                             const flint::FmpqPoly& derivative_polynomial,
+                             slong precision) noexcept {
+    const NumberField* parent = input.parent();
+    const nf_struct* raw_field = parent->raw_flint_field();
+    if (raw_field == nullptr) {
+        return false;
+    }
+    const NumberFieldBackendKind backend = parent->backend_kind();
+    const auto evaluate_with = [&](ConjugateBoundsFieldEntry& entry) noexcept {
+        const NumberField* entry_parent = entry.embeddings.parent();
+        if (entry_parent == nullptr) {
+            return false;
+        }
+        sig = entry.embeddings.signature();
+        if (!derivative_values.set_from(
+                    flint::AcbVecConstRef(entry.derivative_values))) {
+            return false;
+        }
+        if (input.has_parent(*entry_parent)) {
+            return entry.embeddings.evaluate_all(
+                    flint::AcbVecRef(input_values), input, precision);
+        }
+        flint::FmpqPoly input_polynomial;
+        Element converted(*entry_parent);
+        return input.get_fmpq_poly(flint::FmpqPolyRef(input_polynomial)) &&
+               converted.is_defined() &&
+               converted.set_fmpq_poly(
+                       flint::FmpqPolyConstRef(input_polynomial)) &&
+               entry.embeddings.evaluate_all(flint::AcbVecRef(input_values),
+                                             converted, precision);
+    };
+
+    auto& cache = conjugate_bounds_field_cache();
+    for (ConjugateBoundsFieldEntry& entry : cache.entries()) {
+        if (entry.precision == precision && entry.backend == backend &&
+            fmpq_poly_equal(entry.polynomial.raw(), raw_field->pol) != 0 &&
+            fmpq_poly_equal(entry.derivative_polynomial.raw(),
+                            derivative_polynomial.raw()) != 0) {
+            ++hensel_data_cache_counters_tls.conjugate_bounds_field_hits;
+            return evaluate_with(entry);
+        }
+    }
+
+    ++hensel_data_cache_counters_tls.conjugate_bounds_field_misses;
+    ConjugateBoundsFieldEntry entry;
+    if (!compute_conjugate_bounds_field_entry(entry, *parent,
+                                              derivative_polynomial,
+                                              precision) ||
+        !evaluate_with(entry)) {
+        return false;
+    }
+    cache.insert(std::move(entry));
+    return true;
+}
+
 bool pure_power_conjugate_bounds(
         std::vector<flint::Arb>& bounds,
         const Element& input,
@@ -680,29 +813,15 @@ bool pure_power_conjugate_bounds(
         return false;
     }
 
-    EmbeddingContext embeddings(*parent);
-    if (!embeddings.refine(precision)) {
-        return false;
-    }
-
-    Element derivative(*parent);
-    if (!derivative.is_defined() ||
-        !derivative.set_fmpq_poly(flint::FmpqPolyConstRef(
-                derivative_polynomial))) {
-        return false;
-    }
-
     const slong degree = parent->degree();
     flint::AcbVec input_values(degree);
     flint::AcbVec derivative_values(degree);
-    if (!embeddings.evaluate_all(flint::AcbVecRef(input_values), input,
-                                 precision) ||
-        !embeddings.evaluate_all(flint::AcbVecRef(derivative_values),
-                                 derivative, precision)) {
+    Signature sig;
+    if (!conjugate_bounds_values(input_values, derivative_values, sig, input,
+                                 derivative_polynomial, precision)) {
         return false;
     }
 
-    const Signature sig = embeddings.signature();
     const slong r1 = sig.r1();
     const slong places = sig.r1() + sig.r2();
     bounds.clear();
@@ -852,6 +971,36 @@ bool friedrich_fieker_lifting_exponent(
     return out >= 2;
 }
 
+// Friedrich-Fieker lifting exponent of one radicand, memoized per thread.
+// The class-group saturation stage tests the same radicand many times (the
+// same square class reached through different relation combinations), and
+// each test recomputed the conjugate bounds and the exponent.
+//
+// Key: everything pure_power_lifting_exponent reads, compared for exact
+// equality: the defining polynomial and backend, the derivative polynomial,
+// the radicand's power-basis coordinates, the root exponent, the prime and
+// the residue degree (the working precision is the fixed constant below).
+// The computation is deterministic, so a hit returns exactly what
+// recomputation would.  Only successful computations are stored.
+struct LiftingExponentEntry {
+    flint::FmpqPoly polynomial;
+    flint::FmpqPoly derivative_polynomial;
+    flint::FmpqPoly element;
+    NumberFieldBackendKind backend = NumberFieldBackendKind::generic;
+    flint::Fmpz prime;
+    slong residue_degree = 0;
+    slong exponent = 0;
+    slong lift_exponent = 0;
+};
+
+constexpr std::size_t kLiftingExponentCacheCapacity = 64;
+
+BoundedEntryCache<LiftingExponentEntry>& lifting_exponent_cache() noexcept {
+    thread_local BoundedEntryCache<LiftingExponentEntry> cache(
+            kLiftingExponentCacheCapacity);
+    return cache;
+}
+
 bool pure_power_lifting_exponent(
         slong& out,
         const Element& input,
@@ -867,17 +1016,59 @@ bool pure_power_lifting_exponent(
         fmpz_fits_si(prime.raw()) == 0 || fmpz_sgn(prime.raw()) <= 0) {
         return false;
     }
+    const nf_struct* raw_field = parent->raw_flint_field();
+    flint::FmpqPoly element_polynomial;
+    if (raw_field == nullptr ||
+        !input.get_fmpq_poly(flint::FmpqPolyRef(element_polynomial))) {
+        return false;
+    }
+    const NumberFieldBackendKind backend = parent->backend_kind();
+    for (const LiftingExponentEntry& entry :
+         lifting_exponent_cache().entries()) {
+        if (entry.exponent == exponent &&
+            entry.residue_degree == residue_degree &&
+            entry.backend == backend &&
+            fmpz_equal(entry.prime.raw(), prime.raw()) != 0 &&
+            fmpq_poly_equal(entry.element.raw(), element_polynomial.raw()) !=
+                    0 &&
+            fmpq_poly_equal(entry.polynomial.raw(), raw_field->pol) != 0 &&
+            fmpq_poly_equal(entry.derivative_polynomial.raw(),
+                            derivative_polynomial.raw()) != 0) {
+            out = entry.lift_exponent;
+            ++hensel_data_cache_counters_tls.lifting_exponent_hits;
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.power_hensel_lifting_exponent.cache_hit");
+            return true;
+        }
+    }
 
+    ++hensel_data_cache_counters_tls.lifting_exponent_misses;
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                        "element.power_hensel_lifting_exponent.cache_miss");
     constexpr slong precision = 128;
     std::vector<flint::Arb> root_bounds;
     if (!pure_power_conjugate_bounds(
                 root_bounds, input, derivative_polynomial, exponent,
-                precision)) {
+                precision) ||
+        !friedrich_fieker_lifting_exponent(out, *parent, root_bounds, prime,
+                                           residue_degree, precision,
+                                           diagnostics)) {
         return false;
     }
-    return friedrich_fieker_lifting_exponent(out, *parent, root_bounds,
-                                             prime, residue_degree,
-                                             precision, diagnostics);
+
+    LiftingExponentEntry entry;
+    fmpq_poly_set(entry.polynomial.raw(), raw_field->pol);
+    fmpq_poly_set(entry.derivative_polynomial.raw(),
+                  derivative_polynomial.raw());
+    entry.element = std::move(element_polynomial);
+    entry.backend = backend;
+    fmpz_set(entry.prime.raw(), prime.raw());
+    entry.residue_degree = residue_degree;
+    entry.exponent = exponent;
+    entry.lift_exponent = out;
+    lifting_exponent_cache().insert(std::move(entry));
+    return true;
 }
 
 bool lifting_chain(std::vector<slong>& out,
@@ -2212,6 +2403,61 @@ bool pure_power_hensel_step(
     return true;
 }
 
+// 1 / f'(theta) in the field, memoized per thread: try_pure_power_root_at_
+// prime divides every reconstructed candidate by it and used to invert it
+// for each radicand.  Key: the defining polynomial and backend, the only
+// inputs of the inversion; the stored value is the inverse's power-basis
+// coordinates, which determine the element exactly.
+struct InverseDerivativeEntry {
+    flint::FmpqPoly polynomial;
+    NumberFieldBackendKind backend = NumberFieldBackendKind::generic;
+    flint::FmpqPoly inverse;
+};
+
+constexpr std::size_t kInverseDerivativeCacheCapacity = 8;
+
+BoundedEntryCache<InverseDerivativeEntry>& inverse_derivative_cache() noexcept {
+    thread_local BoundedEntryCache<InverseDerivativeEntry> cache(
+            kInverseDerivativeCacheCapacity);
+    return cache;
+}
+
+// Sets `out` (an element of `parent`) to 1 / f'(theta), where
+// `derivative_polynomial` is f' for the defining polynomial f of `parent`.
+bool inverse_field_derivative(Element& out,
+                              const NumberField& parent,
+                              const flint::FmpqPoly& derivative_polynomial)
+        noexcept {
+    const nf_struct* raw_field = parent.raw_flint_field();
+    if (raw_field == nullptr) {
+        return false;
+    }
+    const NumberFieldBackendKind backend = parent.backend_kind();
+    for (const InverseDerivativeEntry& entry :
+         inverse_derivative_cache().entries()) {
+        if (entry.backend == backend &&
+            fmpq_poly_equal(entry.polynomial.raw(), raw_field->pol) != 0) {
+            ++hensel_data_cache_counters_tls.inverse_derivative_hits;
+            return out.set_fmpq_poly(flint::FmpqPolyConstRef(entry.inverse));
+        }
+    }
+
+    ++hensel_data_cache_counters_tls.inverse_derivative_misses;
+    Element denominator(parent);
+    InverseDerivativeEntry entry;
+    if (!denominator.is_defined() ||
+        !denominator.set_fmpq_poly(
+                flint::FmpqPolyConstRef(derivative_polynomial)) ||
+        !out.invert(denominator) ||
+        !out.get_fmpq_poly(flint::FmpqPolyRef(entry.inverse))) {
+        return false;
+    }
+    fmpq_poly_set(entry.polynomial.raw(), raw_field->pol);
+    entry.backend = backend;
+    inverse_derivative_cache().insert(std::move(entry));
+    return true;
+}
+
 // Lifts a root of y^n = input, where input = power_input * d^n and
 // root_scale = 1/d (nullptr when power_input is used as is, i.e. d = 1), and
 // verifies the scaled candidate against power_input.  See
@@ -2255,7 +2501,6 @@ bool try_pure_power_root_at_prime(
     }
 
     flint::FmpqPoly derivative_polynomial;
-    Element denominator(*parent);
     Element inverse_denominator(*parent);
     flint::Fmpz exponent_fmpz;
     {
@@ -2263,10 +2508,9 @@ bool try_pure_power_root_at_prime(
                             "element.power_hensel_prime_denominator");
         fmpq_poly_derivative(derivative_polynomial.raw(), raw_field->pol);
         fmpz_set_si(exponent_fmpz.raw(), exponent);
-        if (!denominator.is_defined() || !inverse_denominator.is_defined() ||
-            !denominator.set_fmpq_poly(
-                    flint::FmpqPolyConstRef(derivative_polynomial)) ||
-            !inverse_denominator.invert(denominator) ||
+        if (!inverse_denominator.is_defined() ||
+            !inverse_field_derivative(inverse_denominator, *parent,
+                                      derivative_polynomial) ||
             (root_scale != nullptr &&
              !inverse_denominator.multiply(inverse_denominator,
                                            *root_scale))) {
@@ -2673,6 +2917,126 @@ bool pre_lift_residue_disproves(const flint::FmpqPoly& element_polynomial,
     return false;
 }
 
+// Radicand-independent part of one prime of pure_power_hensel_prime_search:
+// f mod p and its factorization.  Every search walks the same primes 5, 7,
+// 11, ... and used to reduce and factor f mod p again for each radicand.
+//
+// Key: the defining polynomial, backend and the prime, which are all that
+// the reduction and fmpz_mod_poly_factor read; the factorization is
+// deterministic, so the stored factors and their order are those a
+// recomputation returns.  `usable` records the two radicand-independent
+// reasons the search skips a prime (f mod p loses degree, or is not
+// squarefree).  Factors are stored as integer lifts in [0, p) and rebuilt in
+// the caller's modulus context.
+struct PrimeSearchSetupEntry {
+    flint::FmpqPoly polynomial;
+    NumberFieldBackendKind backend = NumberFieldBackendKind::generic;
+    flint::Fmpz prime;
+    bool usable = false;
+    flint::FmpzPoly field_mod_prime;
+    std::vector<flint::FmpzPoly> factors;
+};
+
+// A search rarely needs more than a few primes per field; the cap bounds
+// memory for the 256-attempt worst case and for many fields.
+constexpr std::size_t kPrimeSearchSetupCacheCapacity = 64;
+
+BoundedEntryCache<PrimeSearchSetupEntry>& prime_search_setup_cache() noexcept {
+    thread_local BoundedEntryCache<PrimeSearchSetupEntry> cache(
+            kPrimeSearchSetupCacheCapacity);
+    return cache;
+}
+
+// Fills `field_polynomial` with f mod p and `factors` with the factors of f
+// mod p in fmpz_mod_poly_factor order, and sets `usable` as above.  Returns
+// false only on an allocation failure.
+bool prime_search_setup(bool& usable,
+                        flint::FmpzModPoly& field_polynomial,
+                        std::vector<flint::FmpzModPoly>& factors,
+                        const nf_struct* raw_field,
+                        NumberFieldBackendKind backend,
+                        slong degree,
+                        const flint::Fmpz& prime,
+                        const flint::FmpzModCtx& ctx,
+                        const DiagnosticsContext* diagnostics) noexcept {
+    factors.clear();
+    const auto rebuild = [&](const PrimeSearchSetupEntry& entry) noexcept {
+        usable = entry.usable;
+        fmpz_mod_poly_set_fmpz_poly(field_polynomial.raw(),
+                                    entry.field_mod_prime.raw(), ctx.raw());
+        factors.reserve(entry.factors.size());
+        for (const flint::FmpzPoly& lifted : entry.factors) {
+            factors.emplace_back(ctx);
+            if (!factors.back().is_initialized()) {
+                return false;
+            }
+            fmpz_mod_poly_set_fmpz_poly(factors.back().raw(), lifted.raw(),
+                                        ctx.raw());
+        }
+        return true;
+    };
+
+    auto& cache = prime_search_setup_cache();
+    for (const PrimeSearchSetupEntry& entry : cache.entries()) {
+        if (entry.backend == backend &&
+            fmpz_equal(entry.prime.raw(), prime.raw()) != 0 &&
+            fmpq_poly_equal(entry.polynomial.raw(), raw_field->pol) != 0) {
+            ++hensel_data_cache_counters_tls.prime_setup_hits;
+            return rebuild(entry);
+        }
+    }
+
+    ++hensel_data_cache_counters_tls.prime_setup_misses;
+    PrimeSearchSetupEntry entry;
+    fmpq_poly_set(entry.polynomial.raw(), raw_field->pol);
+    entry.backend = backend;
+    fmpz_set(entry.prime.raw(), prime.raw());
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                            "element.power_hensel_prime_project");
+        if (!field_polynomial.is_initialized()) {
+            return false;
+        }
+        entry.usable =
+                fmpq_poly_reduce_modulus(field_polynomial, raw_field->pol,
+                                         ctx, prime.raw()) &&
+                fmpz_mod_poly_degree(field_polynomial.raw(), ctx.raw()) ==
+                        degree;
+    }
+    if (entry.usable) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                            "element.power_hensel_field_factor");
+        flint::FmpzModPolyFactor factorization(ctx);
+        fmpz_mod_poly_factor(factorization.raw(), field_polynomial.raw(),
+                             ctx.raw());
+        entry.usable =
+                fmpz_mod_poly_factorization_is_squarefree(factorization);
+        fmpz_mod_poly_get_fmpz_poly(entry.field_mod_prime.raw(),
+                                    field_polynomial.raw(), ctx.raw());
+        if (entry.usable) {
+            entry.factors.reserve(
+                    static_cast<std::size_t>(factorization.raw()->num));
+            for (slong i = 0; i < factorization.raw()->num; ++i) {
+                flint::FmpzModPoly factor(ctx);
+                if (!factor.is_initialized()) {
+                    return false;
+                }
+                fmpz_mod_poly_factor_get_poly(factor.raw(),
+                                              factorization.raw(), i,
+                                              ctx.raw());
+                entry.factors.emplace_back();
+                fmpz_mod_poly_get_fmpz_poly(entry.factors.back().raw(),
+                                            factor.raw(), ctx.raw());
+            }
+        }
+    }
+    if (!rebuild(entry)) {
+        return false;
+    }
+    cache.insert(std::move(entry));
+    return true;
+}
+
 // Prime search and Hensel lift of pure_power_hensel_root for the radicand
 // `radicand` = input * d^n, whose power-basis coordinates are
 // `element_polynomial`; root_scale = 1/d, or nullptr when radicand is input
@@ -2700,43 +3064,36 @@ bool pure_power_hensel_prime_search(
             return false;
         }
 
+        // The field part (f mod p, its degree and squarefree
+        // factorization) comes from the per-(field, prime) memo above; a
+        // prime is skipped for the same reasons as before, and an element
+        // that does not reduce mod p skips it too.
         flint::FmpzModPoly field_polynomial(ctx);
         flint::FmpzModPoly element(ctx);
+        bool usable = false;
+        std::vector<flint::FmpzModPoly> factors;
+        if (!field_polynomial.is_initialized() || !element.is_initialized()) {
+            continue;
+        }
+        if (!prime_search_setup(usable, field_polynomial, factors, raw_field,
+                                parent->backend_kind(), parent->degree(),
+                                prime, ctx, diagnostics)) {
+            return false;
+        }
+        if (!usable) {
+            continue;
+        }
         {
             SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                                 "element.power_hensel_prime_project");
-            if (!field_polynomial.is_initialized() ||
-                !element.is_initialized() ||
-                !fmpq_poly_reduce_modulus(field_polynomial, raw_field->pol,
-                                          ctx, prime.raw()) ||
-                !fmpq_poly_reduce_modulus(element,
+            if (!fmpq_poly_reduce_modulus(element,
                                           element_polynomial.raw(), ctx,
-                                          prime.raw()) ||
-                fmpz_mod_poly_degree(field_polynomial.raw(), ctx.raw()) !=
-                        parent->degree()) {
+                                          prime.raw())) {
                 continue;
             }
         }
 
-        flint::FmpzModPolyFactor factorization(ctx);
-        {
-            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                                "element.power_hensel_field_factor");
-            fmpz_mod_poly_factor(factorization.raw(), field_polynomial.raw(),
-                                 ctx.raw());
-            if (!fmpz_mod_poly_factorization_is_squarefree(factorization)) {
-                continue;
-            }
-        }
-
-        for (slong i = 0; i < factorization.raw()->num; ++i) {
-            flint::FmpzModPoly factor(ctx);
-            if (!factor.is_initialized()) {
-                return false;
-            }
-            fmpz_mod_poly_factor_get_poly(factor.raw(), factorization.raw(),
-                                          i, ctx.raw());
-
+        for (flint::FmpzModPoly& factor : factors) {
             std::vector<flint::FmpzPoly> inverse_roots;
             const ResiduePowerStatus status =
                     residue_field_power_inverse_roots(
@@ -3185,6 +3542,15 @@ namespace detail {
 
 HenselDataCacheCounters hensel_data_cache_counters() noexcept {
     return hensel_data_cache_counters_tls;
+}
+
+void clear_hensel_data_caches() noexcept {
+    norm_change_constants_cache().clear();
+    reconstruction_data_cache().clear();
+    conjugate_bounds_field_cache().clear();
+    lifting_exponent_cache().clear();
+    prime_search_setup_cache().clear();
+    inverse_derivative_cache().clear();
 }
 
 bool has_exact_order(const Element& z, ulong m) noexcept {

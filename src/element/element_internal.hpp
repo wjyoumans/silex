@@ -18,17 +18,31 @@ bool ensure_parent(Element& out, const NumberField& field) noexcept;
 // src/unit/roots_of_unity.cpp.
 bool has_exact_order(const Element& z, ulong m) noexcept;
 
-// Per-thread counts of the radicand-independent Hensel data memo in
-// src/element/hensel.cpp (norm-change constants of the Friedrich-Fieker
-// lifting exponent and the power-root reconstruction lattice).  Diagnostic
-// only: the memo never changes a computed value.
+// Per-thread counts of the Hensel data memo in src/element/hensel.cpp
+// (norm-change constants of the Friedrich-Fieker lifting exponent, the
+// power-root reconstruction lattice, the field embedding data of the
+// conjugate bounds, per-radicand lifting exponents, f mod p setups of the
+// prime search, and 1 / f'(theta)).  Diagnostic only: the memo never
+// changes a computed value.
 struct HenselDataCacheCounters {
     slong norm_change_constants_hits = 0;
     slong norm_change_constants_misses = 0;
     slong reconstruction_data_hits = 0;
     slong reconstruction_data_misses = 0;
+    slong conjugate_bounds_field_hits = 0;
+    slong conjugate_bounds_field_misses = 0;
+    slong lifting_exponent_hits = 0;
+    slong lifting_exponent_misses = 0;
+    slong prime_setup_hits = 0;
+    slong prime_setup_misses = 0;
+    slong inverse_derivative_hits = 0;
+    slong inverse_derivative_misses = 0;
 };
 HenselDataCacheCounters hensel_data_cache_counters() noexcept;
+
+// Empties every memo counted above on the calling thread, so a test can
+// compare a cold computation with a memoized one.  Diagnostic only.
+void clear_hensel_data_caches() noexcept;
 
 // Entry points into the private Hensel-lifting and root-reconstruction
 // machinery of `src/element/hensel.cpp`: exact square/power roots over Q

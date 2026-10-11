@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstdint>
 #include <initializer_list>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -779,10 +780,171 @@ void test_power_hensel_data_cache_reuse() noexcept {
     assert(second.reconstruction_data_misses ==
            first.reconstruction_data_misses);
     assert(second.reconstruction_data_hits > first.reconstruction_data_hits);
+    // The second pass reads the lifting exponents of its radicands from the
+    // per-radicand memo, which sits above the norm-change constants, so
+    // those constants are neither recomputed nor consulted again.
     assert(second.norm_change_constants_misses ==
            first.norm_change_constants_misses);
-    assert(second.norm_change_constants_hits >
-           first.norm_change_constants_hits);
+    assert(second.lifting_exponent_misses == first.lifting_exponent_misses);
+    assert(second.lifting_exponent_hits > first.lifting_exponent_hits);
+}
+
+// The field embedding data of the conjugate bounds, the per-radicand
+// lifting exponents, the f mod p setups of the prime search and 1 / f'(theta)
+// are memoized per thread in src/element/hensel.cpp.  A memoized call must
+// return the same answer and root as a cold one (every memo emptied first),
+// a field with a different defining polynomial must never be served another
+// field's entries, and a second field object with the same polynomial may
+// share them but must still get the same answers.
+struct HenselPowerAnswer {
+    bool supported = false;
+    bool is_power = false;
+    std::string root_coordinates;
+};
+
+// `shift` is added to the constant coordinate of every base.
+std::vector<HenselPowerAnswer> hensel_power_answers(const silex::NumberField& field,
+                                       bool cold,
+                                       slong shift = 0) noexcept {
+    const std::initializer_list<slong> bases[] = {
+            {1, 1},
+            {123456, -98765, 4321, 77},
+            {3, -2, 1},
+            {0, 5, 0, -1},
+    };
+    // Radicands b^n (a root exists) and 3 b^n (3 is no square or cube in
+    // either field below), for n = 2, 3.
+    std::vector<HenselPowerAnswer> answers;
+    for (slong n : {2, 3}) {
+        sflint::Fmpz exponent;
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+        for (const std::initializer_list<slong>& coefficients : bases) {
+            for (slong cofactor : {1, 3}) {
+                silex::Element base =
+                        element_from_coefficients(field, coefficients);
+                silex::Element offset(field);
+                assert(offset.set_si(shift));
+                assert(base.add(base, offset));
+                silex::Element value(field);
+                assert(value.pow_fmpz(base, sflint::FmpzConstRef(exponent)));
+                silex::Element scale(field);
+                assert(scale.set_si(cofactor));
+                assert(value.multiply(value, scale));
+                if (cold) {
+                    silex::detail::clear_hensel_data_caches();
+                }
+                HenselPowerAnswer answer;
+                silex::Element root(field);
+                answer.supported = silex::detail::pure_power_hensel_root(
+                        answer.is_power, root, value, n, nullptr);
+                if (answer.supported && answer.is_power) {
+                    silex::Element check(field);
+                    assert(check.pow_fmpz(root,
+                                          sflint::FmpzConstRef(exponent)));
+                    assert(check.equal(value));
+                    sflint::FmpqPoly coordinates;
+                    assert(root.get_fmpq_poly(
+                            sflint::FmpqPolyRef(coordinates)));
+                    char* text = fmpq_poly_get_str(coordinates.raw());
+                    answer.root_coordinates = text;
+                    flint_free(text);
+                }
+                answers.push_back(std::move(answer));
+            }
+        }
+    }
+    return answers;
+}
+
+bool same_hensel_power_answers(const std::vector<HenselPowerAnswer>& left,
+                        const std::vector<HenselPowerAnswer>& right) noexcept {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        if (left[i].supported != right[i].supported ||
+            left[i].is_power != right[i].is_power ||
+            left[i].root_coordinates != right[i].root_coordinates) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void test_power_hensel_field_caches_match_cold() noexcept {
+    // Q(sqrt 2, sqrt 3) and Q(sqrt 2, sqrt 5): residue degrees are at most 2,
+    // so square roots take the lifting path too.
+    const silex::NumberField field = field_from_coefficients({1, 0, -10, 0, 1});
+    const silex::NumberField other = field_from_coefficients({9, 0, -14, 0, 1});
+
+    const std::vector<HenselPowerAnswer> cold = hensel_power_answers(field, true);
+    const std::vector<HenselPowerAnswer> other_cold = hensel_power_answers(other, true);
+    std::size_t lifted_roots = 0;
+    for (const HenselPowerAnswer& answer : cold) {
+        lifted_roots += answer.supported && answer.is_power ? 1 : 0;
+    }
+    assert(lifted_roots >= 8);
+
+    silex::detail::clear_hensel_data_caches();
+    const std::vector<HenselPowerAnswer> warm_first = hensel_power_answers(field, false);
+    const silex::detail::HenselDataCacheCounters filled =
+            silex::detail::hensel_data_cache_counters();
+    const std::vector<HenselPowerAnswer> warm_second = hensel_power_answers(field, false);
+    const silex::detail::HenselDataCacheCounters reused =
+            silex::detail::hensel_data_cache_counters();
+    assert(same_hensel_power_answers(cold, warm_first));
+    assert(same_hensel_power_answers(cold, warm_second));
+    // The second pass over the same radicands recomputes nothing.
+    assert(reused.conjugate_bounds_field_misses ==
+           filled.conjugate_bounds_field_misses);
+    assert(reused.lifting_exponent_misses == filled.lifting_exponent_misses);
+    assert(reused.lifting_exponent_hits > filled.lifting_exponent_hits);
+    assert(reused.prime_setup_misses == filled.prime_setup_misses);
+    assert(reused.prime_setup_hits > filled.prime_setup_hits);
+    assert(reused.inverse_derivative_misses ==
+           filled.inverse_derivative_misses);
+    assert(reused.inverse_derivative_hits > filled.inverse_derivative_hits);
+
+    // Another field with the memo full of the first field's entries: every
+    // field-keyed memo misses first, and the answers are the cold ones.
+    const std::vector<HenselPowerAnswer> other_warm = hensel_power_answers(other, false);
+    const silex::detail::HenselDataCacheCounters switched =
+            silex::detail::hensel_data_cache_counters();
+    assert(same_hensel_power_answers(other_cold, other_warm));
+    assert(!same_hensel_power_answers(cold, other_cold));
+    assert(switched.conjugate_bounds_field_misses >
+           reused.conjugate_bounds_field_misses);
+    assert(switched.lifting_exponent_misses > reused.lifting_exponent_misses);
+    assert(switched.prime_setup_misses > reused.prime_setup_misses);
+    assert(switched.inverse_derivative_misses >
+           reused.inverse_derivative_misses);
+
+    // A second field object with the first polynomial, after the memo was
+    // filled through the original object: the per-field data is shared (new
+    // radicands of the other object are evaluated through their
+    // coordinates) and the answers are the cold ones.
+    const std::vector<HenselPowerAnswer> shifted_cold = hensel_power_answers(field, true, 1);
+    silex::detail::clear_hensel_data_caches();
+    const std::vector<HenselPowerAnswer> refilled = hensel_power_answers(field, false);
+    const silex::detail::HenselDataCacheCounters before_copy =
+            silex::detail::hensel_data_cache_counters();
+    const silex::NumberField same_polynomial =
+            field_from_coefficients({1, 0, -10, 0, 1});
+    assert(!same_polynomial.has_same_data(field));
+    const std::vector<HenselPowerAnswer> shared =
+            hensel_power_answers(same_polynomial, false, 1);
+    const silex::detail::HenselDataCacheCounters after_copy =
+            silex::detail::hensel_data_cache_counters();
+    assert(same_hensel_power_answers(cold, refilled));
+    assert(same_hensel_power_answers(shifted_cold, shared));
+    assert(!same_hensel_power_answers(cold, shifted_cold));
+    assert(after_copy.lifting_exponent_misses >
+           before_copy.lifting_exponent_misses);
+    assert(after_copy.conjugate_bounds_field_misses ==
+           before_copy.conjugate_bounds_field_misses);
+    assert(after_copy.conjugate_bounds_field_hits >
+           before_copy.conjugate_bounds_field_hits);
+    assert(after_copy.prime_setup_misses == before_copy.prime_setup_misses);
 }
 
 // Independent oracle for "no": each element below is not an n-th power in its
@@ -1174,6 +1336,7 @@ int main() {
     test_power_gp_nonpowers();
     test_power_degree_twenty_cyclotomic_residue_disproof();
     test_power_hensel_data_cache_reuse();
+    test_power_hensel_field_caches_match_cold();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 
