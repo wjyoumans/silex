@@ -18,6 +18,10 @@
 #include "class_group_storage_internal.hpp"
 #include "ideal_minkowski_embedding_internal.hpp"
 
+namespace silex {
+class EmbeddingContext;
+}  // namespace silex
+
 namespace silex::detail {
 
 struct RelationUnitCandidateBatchState;
@@ -221,6 +225,7 @@ bool compact_presentation_reduction(
         slong n,
         slong arb_precision,
         slong short_precision,
+        EmbeddingContext* shared_embeddings = nullptr,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
 bool compact_presentation_power_root(
         bool& is_power,
@@ -231,6 +236,7 @@ bool compact_presentation_power_root(
         slong n,
         slong arb_precision,
         slong short_precision,
+        EmbeddingContext* shared_embeddings = nullptr,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
 bool compact_unit_presentation_power_root(
         bool& is_power,
