@@ -1938,6 +1938,29 @@ int test_grh_generation_labels_sunit_groups() {
     assert(result.success);
     assert_published_labels(s_class, s_units, grh, grh, grh);
 
+    // Generation rests on GRH, so a valuation-solve rejection is only
+    // `unknown`, never the proven `not_sunit`.  With S = {P3} (degree 1,
+    // class not trivial here) the value 3 has valuation 1 at P3 outside the
+    // published lattice.
+    const std::vector<silex::PrimeIdeal> over_three =
+            prime_above_with_degree(fixture.order, 3, 1);
+    silex::SUnitComputeResult result3;
+    silex::SClassGroup s_class3;
+    silex::SUnitGroup s_units3;
+    assert(compute_at(result3, s_class3, s_units3, fixture.class_group,
+                      fixture.units, over_three, grh));
+    silex::Element three(fixture.field);
+    assert(three.set_si(3));
+    silex::SUnitCoordinates out;
+    out.defined = true;
+    silex::SUnitMembershipResult membership;
+    const bool returned = s_units3.preimage(membership, out, three,
+                                            fixture.embeddings, 16, 256);
+    assert(membership.stage == silex::SUnitMembershipStage::valuation_solve);
+    assert(!returned && !membership.success);
+    assert(membership.outcome == silex::SUnitMembershipOutcome::unknown);
+    assert(out.defined);
+
     assert(!compute_at(result, s_class, s_units, fixture.class_group,
                        fixture.units, selected, proven));
     assert(!result.success);

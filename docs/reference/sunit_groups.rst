@@ -99,9 +99,13 @@ archimedean places and ``-v_P(x) log N(P)`` at ``P`` in ``S``.  For nonempty
 
    R_S = R_K \, \frac{h}{h_S} \prod_{P \in S} \log N(P),
 
-where ``R_K`` is the ordinary regulator of the input unit group, ``h`` is the class number and
-``h_S`` is the published S-class number.  Equivalently, the S-class number
-formula ``h_S R_S = h R_K prod log N(P)`` holds.  Silex never forms ``h /
+where ``R_K`` is the ordinary regulator of the input unit group, ``h`` is the
+class number of the input presentation (under ``grh`` inputs it is conditional
+on GRH, and ``R_K`` may be a multiple of the true regulator if the input units
+do not generate the full unit group) and ``h_S`` is the published S-class
+number.  Equivalently, the S-class number formula
+``h_S R_S = h R_K prod log N(P)`` holds relative to the inputs, as an identity
+about the published group.  Silex never forms ``h /
 h_S`` from floating point: it is the exact index of the nonunit valuation
 lattice in ``Z^S``, the absolute determinant of the published valuation HNF
 (``nonunit_valuation_matrix``), which is the order of the subgroup of the
