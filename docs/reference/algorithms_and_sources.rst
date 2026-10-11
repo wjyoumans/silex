@@ -1319,7 +1319,8 @@ Where Hecke would enlarge the relations with ``saturate!`` and repeat, Silex
 fails closed: an ``ell`` whose local test does not reach full rank within the
 auxiliary-prime bound is recorded as ``unavailable`` and does not promote.
 A caller of ``try_prove_relation_saturation_with_units`` chooses that bound.
-Inside a ``proven`` paired class/unit transaction the bound is not fixed: as
+Inside a ``proven`` paired class/unit transaction, the saturation proof run at
+analytic index one has no fixed bound: as
 in ``primecertify``, which walks every prime ``q = 1 mod p`` up to
 ``ULONG_MAX`` until the matrix has full rank (2.17.3 ``buch3.c`` lines
 1086--1146), the test runs over the whole machine-word range of ``q``.  The
