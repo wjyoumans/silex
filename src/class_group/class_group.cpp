@@ -4416,6 +4416,42 @@ bool compact_use_residual_power_test(
     return true;
 }
 
+// Whether the residual branch of reference `is_power(::FacElem, n)` may be
+// taken with Silex's unit-only presentation reduction.  reference
+// (CompactRepresentation.jl:370-432) tests the residual with
+// `_ispower(anew, n)`, dropping `decom`, so `compact_presentation`
+// recomputes the residual's ideal factorization with `factor_coprime`
+// (lines 18-20).  Silex has no port of that and reduces the residual from
+// the unit ideal (compact_unit_presentation_reduction), whose invariant
+// (leftover * multiplier) = residual ideal holds only when the leftover is
+// a unit of `order`.  The input is a unit (callers check this), so an empty
+// `structural` means leftover = input; otherwise the leftover is evaluated
+// and tested exactly.  When it is not a unit, callers take reference's other
+// branch, `_ispower(a, n; decom)`, on the whole input: a =
+// structural^n * leftover, so the power question is the same.  A false
+// return is an evaluation failure.
+bool compact_residual_leftover_is_unit(
+        bool& is_unit,
+        const Order& order,
+        const FactoredElement& structural,
+        const FactoredElement& leftover) noexcept {
+    is_unit = false;
+    if (structural.length() == 0) {
+        is_unit = true;
+        return true;
+    }
+    const NumberField* field = order.parent();
+    if (field == nullptr) {
+        return false;
+    }
+    Element value(*field);
+    if (!value.is_defined() || !leftover.evaluate(value)) {
+        return false;
+    }
+    is_unit = detail::evaluated_is_order_unit(order, value);
+    return true;
+}
+
 bool compact_arb_radius_lt_2exp(const arb_struct* value,
                                       slong exponent,
                                       slong precision) noexcept {
@@ -7358,6 +7394,21 @@ bool compact_unit_presentation_power_root(
                 "unit_group.compact_unit_power_split_bound_failure");
         return false;
     }
+    if (use_residual) {
+        // The unit-only reduction of the residual needs a unit leftover;
+        // see compact_residual_leftover_is_unit.
+        bool leftover_is_unit = false;
+        if (!compact_residual_leftover_is_unit(leftover_is_unit, order,
+                                               structural, leftover)) {
+            return false;
+        }
+        if (!leftover_is_unit) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compact_unit_residual_not_unit");
+            use_residual = false;
+        }
+    }
 
     const FactoredElement& compact_input = use_residual ? leftover : element;
     SILEX_PROFILE_EVENT(
@@ -8478,16 +8529,18 @@ bool saturation_process_candidates_once(
             // presentation recomputes the residual's ideal factorization
             // (`factor_coprime`).  Silex's residual path is the unit-only
             // reduction (empty decomposition), which matches that only when
-            // the candidate is a unit (zero decomposition row).  A non-unit
-            // candidate therefore always takes reference's other branch,
+            // the leftover is a unit, so it needs a unit candidate (zero
+            // decomposition row).  A non-unit candidate therefore always
+            // takes reference's other branch,
             // `_ispower(a, n; decom=fac_a)`, with its decomposition row; the
             // power question is the same, since a = structural^n * leftover.
-            // The residual gate below also relies on the leftover being a
-            // unit: for a unit candidate the leftover is a unit only while
-            // `structural` carries no non-unit base with an exponent
-            // outside [0, n) (saturation relations are single elements
-            // with kernel coefficients lifted into [0, n), so leftover =
-            // element unless equal generators merge).
+            // For a unit candidate the leftover is a unit only when
+            // `structural` is, so the residual branch is also gated on an
+            // exact unit test of the leftover
+            // (compact_residual_leftover_is_unit).  Saturation relations are
+            // single elements with kernel coefficients lifted into [0, n), so
+            // `structural` is empty and the test free unless equal
+            // generators merge or a caller passes other coefficients.
             FactoredElement structural(*field);
             FactoredElement leftover(*field);
             if (!structural.is_defined() || !leftover.is_defined() ||
@@ -8522,6 +8575,20 @@ bool saturation_process_candidates_once(
                             "class_group.saturation_original_log_bound",
                             "class_group.saturation_residual_log_bound")) {
                     return false;
+                }
+                if (use_residual) {
+                    bool leftover_is_unit = false;
+                    if (!compact_residual_leftover_is_unit(
+                                leftover_is_unit, *order, structural,
+                                leftover)) {
+                        return false;
+                    }
+                    if (!leftover_is_unit) {
+                        SILEX_PROFILE_EVENT(
+                                diagnostics, DiagnosticsModule::class_group,
+                                "class_group.saturation_residual_not_unit");
+                        use_residual = false;
+                    }
                 }
                 SILEX_PROFILE_EVENT(
                         diagnostics, DiagnosticsModule::class_group,

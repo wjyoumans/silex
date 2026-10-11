@@ -781,6 +781,53 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     return 0;
 }
 
+// A unit whose formal leftover is not a unit: in Q(sqrt 2) with
+// eps = 1 + sqrt 2, gamma = eps^K sqrt 2 and delta = eps^e / 2 are not units,
+// but gamma^2 delta = eps^(2K + e) is.  The formal split leaves the small
+// non-unit delta, so the residual conjugate-log bound is below the square
+// root of the original one.
+int test_compact_unit_power_root_nonunit_small_leftover() {
+    const slong coefficients[] = {-2, 0, 1};
+    const silex::NumberField field = monic_field(coefficients);
+    const silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::Element sqrt2(field);
+    silex::Element eps(field);
+    assert(sqrt2.gen() && eps.add_si(sqrt2, 1));
+    sflint::Fmpz k;
+    fmpz_set_si(k.raw(), 20);
+    silex::Element eps_k(field);
+    silex::Element gamma(field);
+    silex::Element half_eps(field);
+    silex::Element half_eps_sq(field);
+    silex::Element eps_sq(field);
+    assert(eps_k.pow_fmpz(eps, sflint::FmpzConstRef(k)) &&
+           gamma.multiply(eps_k, sqrt2) &&
+           half_eps.scalar_div_si(eps, 2) &&
+           eps_sq.multiply(eps, eps) &&
+           half_eps_sq.scalar_div_si(eps_sq, 2));
+
+    constexpr slong precision = 128;
+    // eps^41 is not a square (eps is fundamental of norm -1).
+    silex::FactoredElement odd(field);
+    assert(odd.push(gamma, 2) && odd.push(half_eps, 1));
+    bool is_power = true;
+    silex::FactoredElement root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, root, order, odd, 2, precision, precision));
+    assert(!is_power);
+
+    // eps^42 = (eps^21)^2.
+    silex::FactoredElement even(field);
+    assert(even.push(gamma, 2) && even.push(half_eps_sq, 1));
+    is_power = false;
+    silex::FactoredElement even_root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, even_root, order, even, 2, precision, precision));
+    assert(is_power && compact_power_root_squares_to(even_root, even));
+    return 0;
+}
+
 // Log-cache events seen inside the residual log bound and inside the compact
 // presentation of a unit power test.  The presentation embeds the bases of
 // its input first and only later the multipliers it builds, so its leading
@@ -1132,5 +1179,6 @@ int main() {
     assert(test_compact_field_modulus_cache_keys() == 0);
     assert(test_compact_field_modulus_cache_shared_across_calls() == 0);
     assert(test_compact_unit_power_root_reuses_high_precision_base_logs() == 0);
+    assert(test_compact_unit_power_root_nonunit_small_leftover() == 0);
     return 0;
 }

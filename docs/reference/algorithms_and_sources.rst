@@ -1877,6 +1877,25 @@ are exact and canonical, so the expanded value does not depend on the
 multiplication order.  The reduced power and square tests expand only the
 leftover factors whose exponents are not multiples of the root degree.
 
+The compact power test of a factored unit or relation-saturation candidate
+follows Hecke's ``is_power(::FacElem, n)`` (Hecke.jl commit 44b5409,
+``src/NumField/NfAbs/CompactRepresentation.jl``, lines 370-432).  It removes
+the formal exponent quotient, writing the input as ``a = s^n * r``.  When the
+conjugate-log bound of ``r`` is at most the integer square root of that of
+``a``, Hecke tests ``r`` with ``_ispower(r, n)``; that call drops the ideal
+decomposition, so ``compact_presentation`` recomputes the factorization of
+``r`` with ``factor_coprime`` (lines 18-20).  Otherwise Hecke tests ``a`` with
+its decomposition.  Silex has no port of ``factor_coprime``: its test of
+``r`` reduces from the unit ideal, which is valid only when ``r`` is a unit.
+Silex therefore takes that branch only for a unit ``r``.  A saturation
+candidate with a nonzero factor-base row always takes the branch for ``a``
+with that row.  For a unit input, ``r`` is a unit when ``s`` is empty
+(``r = a``); otherwise ``r`` is expanded and checked to generate the unit
+ideal of the order.  When the check fails, Silex tests ``a``.  This is a
+recorded deviation.  Both branches decide the same question, since
+``a = s^n * r``, so only the cost differs.
+Whether to port ``factor_coprime`` is a separate decision.
+
 The logarithmic embedding follows Hecke's ``conjugates_arb_log`` for
 ``FacElem`` (``src/NumFieldOrd/NfOrd/FacElem.jl``): equal bases are merged
 into one dictionary entry with summed exponents, each base is evaluated with
