@@ -1278,7 +1278,9 @@ constexpr ulong kBfWordLinearFactorPrimeLimit = UWORD(1) << 30;
 
 struct BfWordModulus {
     ulong n = 0;
-    // floor((2^64 - 1) / n): the quotient estimate is at most one short.
+    // floor((2^64 - 1) / n): the quotient estimate is at most one short,
+    // since inverse >= (2^64 - n) / n gives value * inverse / 2^64 >
+    // value / n - 1 for value < 2^64.
     ulong inverse = 0;
 };
 

@@ -869,12 +869,6 @@ bool same_grh_default_product(
                        reference_audit.error_bound.raw()) != 0;
 }
 
-// The linear-factor counts stored in the residue-degree cache are the
-// number of degree-one primes above p (checked against decompose_prime),
-// a later Belabas-Friedman evaluation consumes them (a wrong count changes
-// the value) and gets the uncached value from them, and a grh ensure() after
-// ensure_index_one() on the shared cache gives the value and audit of a
-// fresh cache.
 // The batched linear factor counts of the BF prime loop agree with the
 // per-prime nmod path on every prime of [first, end), cover every prime
 // that path covers when the degree is at most 6 and p < 2^30, and skip the
@@ -990,6 +984,12 @@ bool check_linear_factor_batches() noexcept {
            check_linear_factor_batch(non_monic_setup, false);
 }
 
+// The linear-factor counts stored in the residue-degree cache are the
+// number of degree-one primes above p (checked against decompose_prime),
+// a later Belabas-Friedman evaluation consumes them (a wrong count changes
+// the value) and gets the uncached value from them, and a grh ensure() after
+// ensure_index_one() on the shared cache gives the value and audit of a
+// fresh cache.
 bool check_linear_factor_count_cache(const FieldSetup& setup) noexcept {
     const silex::Order& order = setup.maximal_order;
     sflint::Arb reference;
