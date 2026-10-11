@@ -1767,7 +1767,12 @@ the precomputed table of ``w_i w_j`` coordinates; the layout follows PARI 2.17.3
 ``buch2.c:can_factor`` and ``base4.c:Z_ppo``: dividing out the part of the
 norm supported on the product of the factor-base rational primes and the
 required prime's rational prime must leave a unit, and a nonzero norm with a
-larger cofactor cannot be a smooth witness.  The prefilter only rejects a
+larger cofactor cannot be a smooth witness.  In degree 2, when the table
+entries and coordinates are at most ``2^31 - 1`` in absolute value (on 64-bit
+words) and the norm is below ``2^64``, the same determinant and cofactor loop
+run exactly in machine words, using ``gcd(N, P) = gcd(N, P mod N)`` for the
+first step; any other input takes the multiprecision path, so the decision is
+the same.  The prefilter only rejects a
 candidate that the direct path rejects by that same cofactor test; every
 other candidate, every unsupported or unreadable case, and degree 5 and above
 continue through the direct path unchanged, so accepted witnesses, search
