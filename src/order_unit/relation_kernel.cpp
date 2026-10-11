@@ -2082,9 +2082,11 @@ bool dependent_relation_rank_zero(bool& recovered,
 // OrderUnitGroup::set_relation_kernel_units_bounded passes false) it first
 // accepts any exact m-th root of prod u_i^a_i * zeta^i, returned in `root`
 // and not compared with y (see relation_power_root; a Silex divergence from
-// reference `_add_dependent_unit!`, which always checks and adjoins y).  Only
-// when that search fails or finds no root does it check y modulo torsion,
-// and then `root` is not reset to y.
+// reference `_add_dependent_unit!`, which always checks and adjoins y).  When
+// that search cannot complete or finds no root, it checks y modulo torsion
+// and, if that verifies the relation, returns root = y.  So `root` is always
+// the element whose relation was verified; its value on entry is never
+// returned.
 bool verify_dependent_relation_candidate(bool& recovered,
                                          FactoredElement& root,
                                          flint::FmpzMat& rel,
@@ -2104,6 +2106,7 @@ bool verify_dependent_relation_candidate(bool& recovered,
     const slong denominator = flint::fmpz_get_si(last);
 
     bool is_relation = false;
+    bool root_is_verified_power_root = false;
     if (denominator >= 2 && require_y_root) {
         // reference Unit/UnitGrpCtx.jl `_add_dependent_unit!` decides the
         // candidate with `_check_relation_mod_torsion` (Unit/Relation.jl)
@@ -2131,6 +2134,7 @@ bool verify_dependent_relation_candidate(bool& recovered,
                 flint::FmpzMatConstRef(candidate), 0, require_y_root);
         if (power_root_ok && is_relation) {
             flint::fmpz_zero(flint::FmpzRef(torsion_exp));
+            root_is_verified_power_root = true;
         } else if (!check_relation_mod_torsion(
                            is_relation, flint::FmpzRef(torsion_exp), group,
                            y, flint::FmpzMatConstRef(candidate), 0,
@@ -2144,12 +2148,14 @@ bool verify_dependent_relation_candidate(bool& recovered,
         return false;
     }
     if (is_relation) {
-        // reference `_add_dependent_unit!` transforms `vcat(U.units, y)`.  The
-        // torsion check does not write `root` when it decides, and the
-        // power-root fallback sets `root = y` or fails, so set it to `y` here.
-        // Without require_y_root and with m >= 2, `root` is kept as is (see
-        // the comment above this function).
-        if ((denominator < 2 || require_y_root) && !root.set(y)) {
+        // reference `_add_dependent_unit!` transforms `vcat(U.units, y)`.
+        // The torsion check verifies the relation for y and does not write
+        // `root`, which may still hold a value from the caller or from a
+        // failed root search, so `root` is set to y here.  Only an exact
+        // m-th root found by relation_power_root without require_y_root is
+        // kept: its own relation is the one verified.  With require_y_root
+        // that search already returns root = y.
+        if (!root_is_verified_power_root && !root.set(y)) {
             return false;
         }
         flint::fmpz_mat_set(flint::FmpzMatRef(rel),
@@ -2257,10 +2263,11 @@ bool dependent_relation_denominator_step(bool& possible,
     // which three upward mag roundings enlarge by a factor below
     // 1 + 2^-27.  So k / m lies in E.  (FLINT src/arb/mul.c: arb_mul_si
     // calls arb_mul_arf, which rounds the midpoint with ARB_RND =
-    // ARF_RND_DOWN and adds arf_mag_add_ulp / arf_mag_fast_add_ulp to the
-    // radius when inexact; arb_mat_scalar_mul_si applies arb_mul_si
-    // entrywise, src/arb_mat/templates.c.  Read in FLINT 3.3.1, 3.4.0,
-    // 3.5.0 and the 3.6.0-dev tree; identical in all four.)
+    // ARF_RND_DOWN and, when inexact, sets the radius of an exact input
+    // ball to that ulp (arf_mag_set_ulp) or adds the ulp to the radius
+    // (arf_mag_fast_add_ulp / arf_mag_add_ulp); arb_mat_scalar_mul_si
+    // applies arb_mul_si entrywise, src/arb_mat/templates.c.  Read in FLINT
+    // 3.3.1, 3.4.0, 3.5.0 and the 3.6.0-dev tree; identical in all four.)
     // When E is narrower than 1 / bound^2 it holds at most one rational with
     // denominator <= bound (two differ by at least 1 / bound^2), and then
     // that rational is the simplest one in E (the one with least

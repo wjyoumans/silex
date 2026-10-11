@@ -1508,7 +1508,6 @@ bool OrderUnitGroup::set_relation_kernel_units_bounded(
 
     const NumberField* field = order.parent();
     FactoredElement y(*field);
-    FactoredElement root(*field);
     flint::FmpzMat rel(1, rank + 1);
     flint::Fmpz torsion_exp;
     OrderUnitGroup refined(order);
@@ -1521,6 +1520,9 @@ bool OrderUnitGroup::set_relation_kernel_units_bounded(
                 continue;
             }
 
+            // A fresh root per kernel generator: the element adjoined is the
+            // one verified for this y, never a value from an earlier one.
+            FactoredElement root(*field);
             bool recovered = false;
             if (!detail::dependent_relation_bounded_min_denominator(
                         recovered, root, rel, torsion_exp, current, y,

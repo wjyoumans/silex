@@ -8018,6 +8018,70 @@ int test_kernel_row_root_defers_undecidable_rows() {
     return 0;
 }
 
+// Without require_y_root (the bounded relation-kernel search), when the exact
+// m-th root search cannot complete and the torsion check verifies the
+// relation for y, the element returned and adjoined is y, as in reference
+// Unit/UnitGrpCtx.jl `_add_dependent_unit!` (`_transform(vcat(U.units, y),
+// m)`), and not whatever `root` held before.  Against <u_2^17, u_3, ...,
+// u_6> in Q(zeta_13), y = u_2 satisfies y^17 = g_1, but the root of the
+// expanded u_2^17 is not computed in degree 12.
+int test_dependent_relation_unbounded_root_failure_adjoins_y() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup group(order);
+    assert(set_cyclotomic13_u2_power17_group(group, order, field, embeddings));
+
+    // The premise: the compact 17th-root search of g_1 = u_2^17 fails, so
+    // the power-root search returns false and the torsion check decides.
+    silex::FactoredElement g1(field);
+    assert(group.free_generator(g1, 0));
+    silex::FactoredElement g1_root(field);
+    bool is_power = false;
+    assert(!g1.is_power_si(is_power, g1_root, 17,
+                           silex::FactoredRootStrategy::compact));
+
+    silex::Element u2(field);
+    assert(set_cyclotomic13_u2(u2));
+    silex::FactoredElement y(field);
+    assert(y.set_element(u2));
+
+    // A stale value in `root`, as left by an earlier kernel generator.
+    silex::FactoredElement root(field);
+    assert(group.free_generator(root, 1));
+
+    sflint::FmpzMat relation(1, 6);
+    sflint::Fmpz torsion_exp;
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 17));
+    bool recovered = false;
+    assert(silex::detail::dependent_relation_bounded_min_denominator(
+            recovered, root, relation, torsion_exp, group, y, embeddings,
+            sflint::FmpzConstRef(bound), 2, 128, 256, false, false));
+    assert(recovered);
+    const slong expected[] = {-1, 0, 0, 0, 0, 17};
+    assert(candidate_row_equals(relation, expected, 6));
+    silex::Element root_value(field);
+    assert(root.evaluate(root_value));
+    assert(root_value.equal(u2));
+
+    // Adjoining it gives <U, y>, the full unit group.
+    silex::OrderUnitGroup refined(order);
+    bool changed = false;
+    assert(silex::detail::adjoin_verified_dependent_relation(
+            changed, refined, group, root, sflint::FmpzMatConstRef(relation),
+            0, embeddings, 256));
+    assert(changed);
+    assert(refined.free_rank() == 5);
+    // GP: \p 110; K.reg (see test_prove_index_bound_cyclotomic13_undecided_root)
+    assert(regulator_contains(
+            refined,
+            "120.7840313626563127293175827399128565840801560246896328383867"
+            "406585225412356786592960914162040943733"));
+    return 0;
+}
+
 // A kernel row that is not an ell-th power, met when the scan has used every
 // prime q of its range, fails closed as `unavailable`: a rescan would return
 // the same kernel, so doubling `stable` would never end.  The test hook ends
@@ -10437,6 +10501,7 @@ int main() {
     test_prove_index_bound_cyclotomic13_undecided_root();
     test_kernel_row_root_three_way_result();
     test_kernel_row_root_defers_undecidable_rows();
+    test_dependent_relation_unbounded_root_failure_adjoins_y();
     test_prove_index_bound_non_power_range_exhausted();
     test_prove_index_bound_roots_power_after_deferred_rescan();
     test_prove_index_bound_range_exhausted_tests_rows_at_once();

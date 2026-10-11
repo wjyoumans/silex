@@ -652,13 +652,15 @@ The bounded relation-kernel refinement
 (``OrderUnitGroup::set_relation_kernel_units_bounded``) uses a different,
 Silex-specific rule that has no cited source.  For ``m >= 2`` it first looks
 for any exact ``m``-th root of ``prod u_i^{a_i} zeta^i``, where ``zeta``
-generates the torsion.  It adjoins that root without comparing it with ``y``.
-Only when that search does not find a root does it check ``y``.  The relation
-then certifies that the ``m``-th power of the adjoined root lies in the
-current group modulo torsion; it certifies nothing about ``y``.  When the
-candidate is a true relation for ``y``, any such root equals ``y`` up to
-torsion.  When the candidate is a wrong guess, the refined group may not
-contain ``y``.  Hecke's ``_add_dependent_unit!`` always decides
+generates the torsion.  It adjoins the first exact root found without
+comparing it with ``y``.  For that root the relation certifies that its
+``m``-th power lies in the current group modulo torsion; it certifies nothing
+about ``y``.  When the candidate is a true relation for ``y``, any such root
+equals ``y`` up to torsion.  When the candidate is a wrong guess, the refined
+group may not contain ``y``.  When that search does not find a root or cannot
+complete, Silex checks ``y`` with ``_check_relation_mod_torsion`` and, if the
+relation holds, adjoins ``y`` itself, as Hecke does.  The adjoined element is
+always the one whose relation was verified.  Hecke's ``_add_dependent_unit!`` always decides
 with ``_check_relation_mod_torsion`` on ``y`` (``UnitGrpCtx.jl`` line 97 in
 v0.38.6) and adjoins ``y`` itself through ``_transform(vcat(U.units, y), m)``
 (line 131).  The root is an exact field element, and it is adjoined only
