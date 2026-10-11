@@ -1378,8 +1378,8 @@ void test_prelift_disproof_field_setup_cache_matches_cold() noexcept {
             {-1}, {6}, {1, 1}, {3, 1}, {2, 1, 1}, {1, 0, 1}, {-5, 2, 1}};
     const silex::detail::HenselDataCacheCounters start =
             silex::detail::hensel_data_cache_counters();
-    std::size_t total_misses = start.residue_setup_misses;
-    std::size_t total_hits = start.residue_setup_hits;
+    slong total_misses = start.residue_setup_misses;
+    slong total_hits = start.residue_setup_hits;
     for (Case& test_case : cases) {
         for (const std::initializer_list<slong>& coefficients : bases) {
             silex::Element value = element_from_coefficients(
