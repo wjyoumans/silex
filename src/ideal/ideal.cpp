@@ -1196,7 +1196,8 @@ bool extract_two_generator(flint::FmpzMat& coordinates,
     // contract of FLINT fmpz_mat_hnf_modular_eldiv with D = a, whose result
     // is the unique HNF that fmpz_mat_hnf would return.
     const auto verifies = [&]() noexcept {
-        // a = 1: a O + beta O = O.  FLINT's word path would reduce modulo 1.
+        // Shortcut, not a correctness requirement: for a = 1, a O + beta O = O,
+        // so compare H with I directly.
         if (fmpz_is_one(minimum.raw())) return fmpz_mat_is_one(h.raw()) != 0;
         fmpz_mat_zero(rows.raw());
         for (slong i = 0; i < n; ++i) {
