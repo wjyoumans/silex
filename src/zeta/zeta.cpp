@@ -1973,9 +1973,17 @@ bool factor_base_bound_bdf_right_side(
     flint::arb_zero(flint::ArbRef(sum));
 
     for (ulong p = 2; p < cutoff; p = n_nextprime(p, 1)) {
-        if (!bf_prime_residue_degrees_ui(
+        bool degrees_found = false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.bdf_factor_base_bound.right_side."
+                    "residue_degrees");
+            degrees_found = bf_prime_residue_degrees_ui(
                     residue_degrees, residue_context, order, degree_scratch,
-                    p, diagnostics, &residue_degree_cache)) {
+                    p, diagnostics, &residue_degree_cache);
+        }
+        if (!degrees_found) {
             return false;
         }
         for (slong residue_degree : residue_degrees) {
@@ -2084,9 +2092,15 @@ detail::BdfSearchOutcome factor_base_bound_bdf_search_impl(
     flint::Fmpz discriminant;
     flint::Fmpz abs_discriminant;
     BfResidueDegreeContext residue_context;
-    if (!signature.compute(*field) ||
-        !order.discriminant(flint::FmpzRef(discriminant)) ||
-        !bf_init_residue_degree_context(residue_context, order)) {
+    bool setup_ready = false;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.bdf_factor_base_bound.setup");
+        setup_ready = signature.compute(*field) &&
+                      order.discriminant(flint::FmpzRef(discriminant)) &&
+                      bf_init_residue_degree_context(residue_context, order);
+    }
+    if (!setup_ready) {
         return BdfSearchOutcome::failed;
     }
     flint::fmpz_abs(flint::FmpzRef(abs_discriminant),
@@ -2138,6 +2152,9 @@ detail::BdfSearchOutcome factor_base_bound_bdf_search_impl(
     // Evaluates the right side at the integer cutoff t >= 2 (exact as a
     // double: t stays below 2^52 here).
     const auto evaluate = [&](ulong t) noexcept {
+        // One call per evaluation of the right side.
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.bdf_factor_base_bound.evaluate");
         ++evaluations;
         return factor_base_bound_bdf_right_side(
                 right_side, order, residue_context, residue_degrees,
@@ -2209,6 +2226,8 @@ detail::BdfSearchOutcome factor_base_bound_bdf_search(
         const flint::Fmpz* stop_bound,
         const DiagnosticsContext* diagnostics,
         slong* evaluations = nullptr) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.bdf_factor_base_bound");
     slong count = 0;
     const detail::BdfSearchOutcome outcome =
             factor_base_bound_bdf_search_impl(out, order, stop_bound,

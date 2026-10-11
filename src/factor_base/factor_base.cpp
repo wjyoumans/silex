@@ -1499,15 +1499,16 @@ bool FactorBase::build_prime_ideal_norm_bounded_impl(
         bool retain_one_split_prime) noexcept {
     return detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
             *this, bound, include_inert_primes, degree_limit,
-            retain_one_split_prime, nullptr);
+            retain_one_split_prime, nullptr, nullptr);
 }
 
 bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded_cached(
         FactorBase& base,
         flint::FmpzConstRef bound,
-        PrimeDecompositionCache& cache) noexcept {
+        PrimeDecompositionCache& cache,
+        const DiagnosticsContext* diagnostics) noexcept {
     return build_prime_ideal_norm_bounded(base, bound, true, 0, false,
-                                          &cache);
+                                          &cache, diagnostics);
 }
 
 bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
@@ -1516,7 +1517,10 @@ bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
         bool include_inert_primes,
         slong degree_limit,
         bool retain_one_split_prime,
-        PrimeDecompositionCache* cache) noexcept {
+        PrimeDecompositionCache* cache,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "factor_base.norm_bounded.build");
     const Order& parent = base.parent_;
     if (!base.is_defined() || fmpz_cmp_ui(bound.raw(), 2) < 0 ||
         !parent.is_maximal() || degree_limit < 0) {
@@ -1536,6 +1540,9 @@ bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
         const PrimeIdealList* decomposition = nullptr;
         if (cache != nullptr &&
             prime_position < cache->decompositions.size()) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "factor_base.norm_bounded.decomposition_cache_hit");
             decomposition = &cache->decompositions[prime_position];
             const PrimeIdeal* first = decomposition->at(0);
             if (first == nullptr ||
@@ -1543,6 +1550,8 @@ bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
                 return false;
             }
         } else {
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                                "factor_base.norm_bounded.decompose_prime");
             PrimeIdealList computed;
             if (!decompose_prime(computed, parent,
                                  flint::FmpzConstRef(p))) {

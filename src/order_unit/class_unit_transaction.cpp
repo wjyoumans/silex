@@ -4,6 +4,7 @@
 #include "../class_group/relation_factor_base_plan_internal.hpp"
 #include "../factor_base/factor_base_internal.hpp"
 
+#include <silex/diagnostics.hpp>
 #include <silex/signature.hpp>
 
 #include <chrono>
@@ -151,9 +152,17 @@ bool grh_factor_base_bound(
         flint::Fmpz* generation_bound,
         ClassGroupGenerationBasis* generation_basis,
         FactorBase* norm_bounded_base) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.grh_factor_base_bound");
     bool bach_selected = false;
-    if (!grh_factor_base_bound_with_diagnostics(
-                flint::FmpzRef(out), order, diagnostics, &bach_selected)) {
+    bool bound_computed = false;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.grh_factor_base_bound.bound");
+        bound_computed = grh_factor_base_bound_with_diagnostics(
+                flint::FmpzRef(out), order, diagnostics, &bach_selected);
+    }
+    if (!bound_computed) {
         return false;
     }
     if (generation_basis != nullptr) {
@@ -169,12 +178,16 @@ bool grh_factor_base_bound(
     // rational primes an earlier probe reached are reused, not recomputed.
     detail::PrimeDecompositionCache decompositions;
     for (;;) {
+        // One probe per doubling of the bound: the scope's call count is the
+        // number of probes.
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.grh_factor_base_bound.probe");
         FactorBase probe(order);
         if (!probe.is_defined() ||
             !detail::FactorBaseBlockAccess::
                     build_prime_ideal_norm_bounded_cached(
                             probe, flint::FmpzConstRef(out),
-                            decompositions)) {
+                            decompositions, diagnostics)) {
             return false;
         }
         for (slong i = 0; i < probe.length(); ++i) {

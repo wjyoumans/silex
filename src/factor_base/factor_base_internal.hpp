@@ -25,11 +25,13 @@ public:
     // computes.  The cache must come from builds over base's parent order
     // (a cached decomposition of another order fails the build).  On
     // failure base is unchanged; the cache keeps every decomposition it
-    // holds and may have gained some.
+    // holds and may have gained some.  `diagnostics` only feeds profile
+    // scopes; it does not change the build.
     static bool build_prime_ideal_norm_bounded_cached(
             FactorBase& base,
             flint::FmpzConstRef bound,
-            PrimeDecompositionCache& cache) noexcept;
+            PrimeDecompositionCache& cache,
+            const DiagnosticsContext* diagnostics = nullptr) noexcept;
     // The body of FactorBase::build_prime_ideal_norm_bounded_impl, with
     // the optional decomposition cache of the overload above.
     static bool build_prime_ideal_norm_bounded(
@@ -38,7 +40,8 @@ public:
             bool include_inert_primes,
             slong degree_limit,
             bool retain_one_split_prime,
-            PrimeDecompositionCache* cache) noexcept;
+            PrimeDecompositionCache* cache,
+            const DiagnosticsContext* diagnostics) noexcept;
     static bool rational_prime_block_is_complete(
             bool& complete,
             const FactorBase& base,
