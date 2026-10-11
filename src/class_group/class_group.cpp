@@ -5437,13 +5437,10 @@ bool ClassGroupCertificationAccess::
                 ClassGroupContext& context,
                 CertificationMode requested,
                 flint::FmpzConstRef discriminant,
-                flint::FmpzConstRef exact_order,
-                bool structure_certificate) noexcept {
-    const bool generation_verified =
-            context.factor_base_generation_status_ == ProofState::verified;
+                flint::FmpzConstRef exact_order) noexcept {
     if (requested != CertificationMode::proven ||
         !context.has_presentation() || !context.parent_.is_maximal() ||
-        (!generation_verified && !structure_certificate) ||
+        context.factor_base_generation_status_ != ProofState::verified ||
         flint::fmpz_sgn(discriminant) >= 0 ||
         flint::fmpz_sgn(exact_order) <= 0 ||
         !detail::order_supports_exact_quadratic_class_certificate(
@@ -5462,23 +5459,12 @@ bool ClassGroupCertificationAccess::
                 flint::FmpzRef(context_discriminant)) ||
         !flint::fmpz_equal(
                 flint::FmpzConstRef(context_discriminant), discriminant) ||
-        (generation_verified &&
-         (!context.factor_base_generation_bound(
-                  flint::FmpzRef(required_bound)) ||
-          !context.check_factor_base_generation_bound(
-                  flint::FmpzConstRef(required_bound)))) ||
+        !context.factor_base_generation_bound(
+                flint::FmpzRef(required_bound)) ||
+        !context.check_factor_base_generation_bound(
+                flint::FmpzConstRef(required_bound)) ||
         !context.order(flint::FmpzRef(class_order)) ||
         !flint::fmpz_equal(flint::FmpzConstRef(class_order), exact_order)) {
-        return false;
-    }
-
-    // No generation bound: the published generators themselves are checked
-    // to give the whole class group of order h.  Then the factor base
-    // generates it, and the argument below (relation index h_cand / h = 1)
-    // applies unchanged.
-    if (!generation_verified &&
-        !imaginary_quadratic_structure_certificate(
-                context, discriminant, exact_order, true)) {
         return false;
     }
 
