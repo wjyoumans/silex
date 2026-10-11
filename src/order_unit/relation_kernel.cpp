@@ -1197,9 +1197,9 @@ struct WordQuotientLogBabyStep {
 // `baby_step_giant_step` (line 43), whose baby-step table is shared by every
 // element of the prime.  Deviation (cost only): the walk here is linear in
 // ell, the order of the quotient generator, and baby-step giant-step is
-// already faster from ell of 7 bits on (measured on proven saturation
-// columns, where ell runs up to 16 bits and the walk was about a third of
-// the run), so baby-step giant-step is taken from 7 bits instead of 19.
+// cheaper from ell of 7 bits on (busy-machine probe data on proven
+// saturation rows, where ell ran up to 16 bits; not a controlled
+// measurement), so baby-step giant-step is taken from 7 bits instead of 19.
 // Both routes return the unique logarithm in [0, ell), so the values are
 // the same.
 constexpr flint_bitcnt_t kWordQuotientLogBabyGiantBits = 7;

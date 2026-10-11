@@ -1452,9 +1452,9 @@ degree-one primes, where its shared linear walk costs up to ``ell`` steps
 against Hecke's ``pp`` table entries.  As an intentional deviation from the
 19-bit cutoff (``Saturate.jl`` line 32), Silex takes the logarithms by
 baby-step giant-step once ``ell`` has 7 or more bits and keeps the walk only
-for smaller ``ell``: measured on proven unit saturation, where ``ell`` runs
-up to 16 bits, baby-step giant-step was faster per column from 7 bits on
-and about 17 to 33 times faster at 14 to 16 bits.  This is a cost choice
+for smaller ``ell``: on the measured proven unit saturation rows, where
+``ell`` ran up to 16 bits, baby-step giant-step was cheaper from 7 bits
+on (busy-machine probe data, not a controlled measurement).  This is a cost choice
 only: baby-step giant-step runs only when ``ell`` is prime and the quotient
 generator has order ``ell``, so both routes return the unique logarithm in
 ``[0, ell)`` and the columns are the same.
