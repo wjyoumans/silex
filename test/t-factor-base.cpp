@@ -514,6 +514,19 @@ int test_equal_copies_and_independent_builds() {
     assert(copy.equal(moved));
     assert(copy.set(base));
     assert(copy.equal(base));
+
+    // Changing the source after the copy ends the equality both ways.
+    {
+        silex::FactorBase source(order);
+        assert(source.build(sflint::FmpzConstRef(bound)));
+        silex::FactorBase source_copy;
+        assert(source_copy.set(source));
+        assert(source_copy.equal(source));
+        assert(source.build(sflint::FmpzConstRef(smaller_bound)));
+        assert(!source_copy.equal(source));
+        assert(!source.equal(source_copy));
+    }
+
     assert(copy.define(order));
     assert(copy.length() == 0);
     assert(!copy.equal(base));
