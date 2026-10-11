@@ -2427,6 +2427,60 @@ int test_contains_and_set_hnf_match_hnf_reference() {
     return members > 0 && nonmembers > 0 && accepted > 0 && rejected > 0 ? 0 : 1;
 }
 
+// Differential test of Ideal::contains(const Ideal&) against the
+// HNF-comparison rule: J is in I iff every row of J's HNF is in the lattice of
+// I's HNF.  The ideals are the product fixtures (maximal and equation orders,
+// degrees 2-8), their sums, products and doubles and the unit ideal, compared
+// in every ordered pair, so both inclusions and non-inclusions occur.
+int test_contains_ideal_matches_hnf_reference() {
+    slong included = 0;
+    slong excluded = 0;
+    for (slong degree : {2, 3, 4, 6, 8}) {
+        for (slong kind = 0; kind < 5; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            const slong n = order.degree();
+            silex::Ideal sum(order), product(order), two(order),
+                    double_left(order), double_sum(order), unit(order);
+            silex::OrderElement two_element(order);
+            assert(sum.add(left, right));
+            assert(product.multiply(left, right));
+            assert(two_element.set_si(2));
+            assert(two.set_principal(two_element));
+            assert(double_left.multiply(two, left));
+            assert(double_sum.multiply(two, sum));
+            assert(unit.one());
+            const silex::Ideal* ideals[] = {&left, &right, &sum, &product, &two,
+                                            &double_left, &double_sum, &unit};
+            for (const silex::Ideal* outer : ideals) {
+                sflint::FmpzMat outer_hnf(n, n);
+                assert(outer->get_hnf(sflint::FmpzMatRef(outer_hnf)));
+                // Stored HNFs take the triangular-solve route of contains.
+                assert(silex::detail::is_full_rank_upper_triangular(outer_hnf.raw()));
+                for (const silex::Ideal* inner : ideals) {
+                    sflint::FmpzMat inner_hnf(n, n);
+                    assert(inner->get_hnf(sflint::FmpzMatRef(inner_hnf)));
+                    bool expected = true;
+                    sflint::FmpzMat row(1, n);
+                    for (slong i = 0; expected && i < n; ++i) {
+                        for (slong j = 0; j < n; ++j) {
+                            fmpz_set(fmpz_mat_entry(row.raw(), 0, j),
+                                     fmpz_mat_entry(inner_hnf.raw(), i, j));
+                        }
+                        expected = reference_hnf_contains(outer_hnf, row);
+                    }
+                    if (outer->contains(*inner) != expected) {
+                        return 1;
+                    }
+                    ++(expected ? included : excluded);
+                }
+            }
+        }
+    }
+    return included > 0 && excluded > 0 ? 0 : 1;
+}
+
 // The triangular solve behind Ideal::contains, on bases no ideal stores:
 // square upper triangular matrices with negative or large diagonal entries
 // and unreduced entries above the diagonal, compared with the HNF-comparison
@@ -2580,6 +2634,7 @@ int main(int argc, char** argv) {
     assert(test_quadratic_principal_and_validation() == 0);
     assert(test_set_hnf_validation() == 0);
     assert(test_contains_and_set_hnf_match_hnf_reference() == 0);
+    assert(test_contains_ideal_matches_hnf_reference() == 0);
     assert(test_triangular_basis_contains_matches_hnf_reference() == 0);
     assert(test_integral_noninvertible_norm_trap() == 0);
     assert(test_fractional_inverse_quadratic() == 0);

@@ -3,6 +3,7 @@
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
 #include <flint/fmpz_mat.h>
+#include <flint/fmpz_vec.h>
 
 #include <silex/diagnostics.hpp>
 #include <silex/flint/fmpq_mat.hpp>
@@ -140,6 +141,16 @@ bool order_element_multiplication_matrix(
 void set_identity_row(flint::FmpzMatRef row, slong index) noexcept {
     fmpz_mat_zero(row.raw());
     fmpz_one(fmpz_mat_entry(row.raw(), 0, index));
+}
+
+// True when `hnf` is an n x n full-rank upper triangular matrix for the
+// ideal's degree n, the shape on which the forward substitution of
+// `detail::triangular_basis_contains` reads and writes only n entries of an
+// n-entry row.
+bool is_triangular_basis_of_degree(const flint::FmpzMat& hnf,
+                                   slong degree) noexcept {
+    return fmpz_mat_ncols(hnf.raw()) == degree &&
+           detail::is_full_rank_upper_triangular(hnf.raw());
 }
 
 bool hnf_lattice_contains(flint::FmpzMatConstRef hnf,
@@ -712,7 +723,7 @@ bool Ideal::contains(const OrderElement& element) const noexcept {
     // copy. Both routes decide membership in the Z-row span of `hnf_`. The
     // lattice test below is a defensive fallback for any other stored shape;
     // it is not reachable through the API today and no test exercises it.
-    if (detail::is_full_rank_upper_triangular(hnf_.raw())) {
+    if (is_triangular_basis_of_degree(hnf_, parent_.degree())) {
         return detail::triangular_basis_contains(hnf_.raw(),
                                                  fmpz_mat_row(row.raw(), 0));
     }
@@ -728,6 +739,26 @@ bool Ideal::contains(const Ideal& ideal) const noexcept {
     }
 
     const slong n = degree();
+    // As in contains(OrderElement): I is contained in this ideal iff each of
+    // the n rows of I's stored HNF lies in the Z-row span of `hnf_`, decided
+    // by forward substitution against `hnf_` with one reused residual row
+    // instead of a lattice copy.  The lattice test below decides the same
+    // span membership and is a defensive fallback for any other stored
+    // shape; it is not expected to be reachable through the API.
+    if (is_triangular_basis_of_degree(hnf_, n) &&
+        fmpz_mat_nrows(ideal.hnf_.raw()) >= n &&
+        fmpz_mat_ncols(ideal.hnf_.raw()) == n) {
+        flint::FmpzMat residual(1, n);
+        fmpz* row = fmpz_mat_row(residual.raw(), 0);
+        for (slong i = 0; i < n; ++i) {
+            _fmpz_vec_set(row, fmpz_mat_row(ideal.hnf_.raw(), i), n);
+            if (!detail::triangular_basis_contains(hnf_.raw(), row)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     lat::Lat lattice(n);
     if (!lattice.set_basis(flint::FmpzMatConstRef(hnf_))) {
         return false;
