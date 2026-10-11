@@ -93,8 +93,8 @@ private:
     void reserve_factors(std::size_t capacity) noexcept;
 
     NumberField parent_;
-    // The factor list, shared copy-on-write between values copied from one
-    // another with set(); null is the empty product.  A shared list is never
+    // The factor list, shared copy-on-write by set() and by products or
+    // quotients with an empty operand; null is the empty product.  A shared list is never
     // modified: every mutation first gives this value its own copy.
     std::shared_ptr<FactorList> value_;
 

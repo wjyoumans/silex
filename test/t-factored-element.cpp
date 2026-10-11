@@ -817,6 +817,16 @@ void check_copies_are_independent() noexcept {
         assert(has_factor_list(copy, source_factors, source_exponents));
         assert(has_factor_list(source, source_factors, source_exponents));
     }
+
+    // The same failure on an unshared list (the in-place path).
+    {
+        silex::FactoredElement own(field);
+        silex::FactoredElement huge(field);
+        assert(own.push(a, 2));
+        assert(huge.push(c, std::numeric_limits<slong>::min()));
+        assert(!own.divide(own, huge));
+        assert(has_factor_list(own, {&a}, {2}));
+    }
 }
 
 int main() {

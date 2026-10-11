@@ -522,6 +522,11 @@ Changed
   stays rigorous; published results are unchanged on the class/unit test
   corpus.
 
+- Copying a factored value (``FactoredElement::set``) and multiplying or
+  dividing a value into itself now share the factor storage and copy it only
+  when a shared value is modified, instead of deep-copying every factor.
+  Published results are unchanged.
+
 Fixed
 -----
 
