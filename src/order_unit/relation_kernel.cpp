@@ -475,6 +475,21 @@ bool relation_power_root_matches_y(bool& matches,
     return true;
 }
 
+// Exact power-root check of the relation row (-a_1, ..., -a_r, m), m >= 2:
+// for i = 0, ..., w - 1 (w the torsion order) it tests whether
+// prod u_i^a_i * zeta^i is an exact m-th power.  With require_y_root it
+// accepts such a root only when it equals y up to torsion, and then sets
+// root = y.  Without it, the first exact m-th root found is accepted and
+// returned in `root`, whether or not it is y up to torsion; the relation
+// then certifies root^m in <U> * mu, not y^m.  That mode differs from the
+// reference: v0.38.6 Unit/UnitGrpCtx.jl `_add_dependent_unit!`
+// always decides with `_check_relation_mod_torsion(U.units, y, rel, p)`
+// (line 97) and adjoins y itself, `_transform(vcat(U.units, y), m)`
+// (line 131).  The root is an exact field element and is adjoined only
+// after adjoinable_root_is_order_unit, so the result is still a subgroup of
+// the order's units.  When the row is a true relation for y, any such root
+// equals y up to torsion; when it is a wrong guess, the group may fail to
+// contain y.
 bool relation_power_root(bool& is_relation,
                          FactoredElement& root,
                          flint::Fmpz& candidate_exp,
@@ -2059,10 +2074,17 @@ bool dependent_relation_rank_zero(bool& recovered,
     return true;
 }
 
-// Exactly verifies the candidate row (-a_1, ..., -a_r, m), m >= 1, as a
-// relation y^m = prod u_i^a_i modulo torsion.  A candidate obtained from
-// rounded or reconstructed coordinates is only a guess; this check is what
-// makes a recovered relation usable.
+// Exactly verifies the candidate row (-a_1, ..., -a_r, m), m >= 1.  A
+// candidate obtained from rounded or reconstructed coordinates is only a
+// guess; this check is what makes a recovered relation usable.  For m = 1,
+// or with require_y_root, it verifies y^m = prod u_i^a_i modulo torsion and
+// returns root = y.  For m >= 2 without require_y_root (only
+// OrderUnitGroup::set_relation_kernel_units_bounded passes false) it first
+// accepts any exact m-th root of prod u_i^a_i * zeta^i, returned in `root`
+// and not compared with y (see relation_power_root; a Silex divergence from
+// reference `_add_dependent_unit!`, which always checks and adjoins y).  Only
+// when that search fails or finds no root does it check y modulo torsion,
+// and then `root` is not reset to y.
 bool verify_dependent_relation_candidate(bool& recovered,
                                          FactoredElement& root,
                                          flint::FmpzMat& rel,
@@ -2125,6 +2147,8 @@ bool verify_dependent_relation_candidate(bool& recovered,
         // reference `_add_dependent_unit!` transforms `vcat(U.units, y)`.  The
         // torsion check does not write `root` when it decides, and the
         // power-root fallback sets `root = y` or fails, so set it to `y` here.
+        // Without require_y_root and with m >= 2, `root` is kept as is (see
+        // the comment above this function).
         if ((denominator < 2 || require_y_root) && !root.set(y)) {
             return false;
         }
@@ -2231,7 +2255,12 @@ bool dependent_relation_denominator_step(bool& possible,
     // arb_mul_arf rounds the midpoint m x by less than one ulp
     // (<= m |x| 2^(1 - precision)) and adds that ulp to the radius m r,
     // which three upward mag roundings enlarge by a factor below
-    // 1 + 2^-27.  So k / m lies in E.
+    // 1 + 2^-27.  So k / m lies in E.  (FLINT src/arb/mul.c: arb_mul_si
+    // calls arb_mul_arf, which rounds the midpoint with ARB_RND =
+    // ARF_RND_DOWN and adds arf_mag_add_ulp / arf_mag_fast_add_ulp to the
+    // radius when inexact; arb_mat_scalar_mul_si applies arb_mul_si
+    // entrywise, src/arb_mat/templates.c.  Read in FLINT 3.3.1, 3.4.0,
+    // 3.5.0 and the 3.6.0-dev tree; identical in all four.)
     // When E is narrower than 1 / bound^2 it holds at most one rational with
     // denominator <= bound (two differ by at least 1 / bound^2), and then
     // that rational is the simplest one in E (the one with least

@@ -647,8 +647,24 @@ check.  When adjoining ``y``, Silex decides the candidate as Hecke does, with
 the certified log screen of ``Unit/Relation.jl:_check_relation_mod_torsion``
 and adjoins ``y`` itself.  When the screen is inconclusive, Hecke raises a
 precision error; Silex instead adds its own exact-expansion fallback to the
-check.  It extracts an ``m``-th root only when that check cannot complete.  An inconclusive attempt or a failed check doubles the
-precision.  Hecke's loop is unbounded; Silex stops at a fixed precision cap
+check.  It extracts an ``m``-th root only when that check cannot complete.
+The bounded relation-kernel refinement
+(``OrderUnitGroup::set_relation_kernel_units_bounded``) uses a different,
+Silex-specific rule that has no cited source.  For ``m >= 2`` it first looks
+for any exact ``m``-th root of ``prod u_i^{a_i} zeta^i``, where ``zeta``
+generates the torsion.  It adjoins that root without comparing it with ``y``.
+Only when that search does not find a root does it check ``y``.  The relation
+then certifies that the ``m``-th power of the adjoined root lies in the
+current group modulo torsion; it certifies nothing about ``y``.  When the
+candidate is a true relation for ``y``, any such root equals ``y`` up to
+torsion.  When the candidate is a wrong guess, the refined group may not
+contain ``y``.  Hecke's ``_add_dependent_unit!`` always decides
+with ``_check_relation_mod_torsion`` on ``y`` (``UnitGrpCtx.jl`` line 97 in
+v0.38.6) and adjoins ``y`` itself through ``_transform(vcat(U.units, y), m)``
+(line 131).  The root is an exact field element, and it is adjoined only
+after an exact check that it lies in the order.  The refined group is
+therefore still a subgroup of the order's units.  An inconclusive attempt or
+a failed check doubles the precision.  Hecke's loop is unbounded; Silex stops at a fixed precision cap
 and then leaves the group unchanged.  The loop terminates below the cap in
 the usual case: when the true coordinate is ``a/b`` with ``b`` at most the
 bound ``B`` and the ball radius is below ``1/(2B^2)``, the ball has diameter
