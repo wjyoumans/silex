@@ -213,6 +213,52 @@ void relation_saturation_candidate_filter_screen(
         flint::FmpzConstRef ell,
         flint::FmpzMatConstRef kernel,
         slong row) noexcept;
+// Integral Gram-Schmidt data of the rows b_0, ..., b_{m-1} of `basis`
+// (Cohen, GTM 138, Algorithm 2.6.7, step 2): `d` becomes 1 x (m + 1) with
+// d_0 = 1 and d_{j+1} = d_j |b*_j|^2, and `lambda` becomes m x m with
+// lambda(k, j) = d_{j+1} mu(k, j) for j < k (zero elsewhere).  Fails when
+// the rows are linearly dependent.
+bool integral_gram_schmidt(flint::FmpzMat& d,
+                           flint::FmpzMat& lambda,
+                           flint::FmpzMatConstRef basis) noexcept;
+
+// Size-reduces the 1 x n `row` against the rows of `basis`, whose integral
+// Gram-Schmidt data `d` and `lambda` come from integral_gram_schmidt: for
+// l = m-1, ..., 0 it applies Cohen's sub-algorithm RED (Algorithm 2.6.7),
+// subtracting round(mu(row, l)) b_l, so that afterwards every
+// |mu(row, l)| <= 1/2 (Babai's nearest-plane step).  Only integer
+// multiples of basis rows are subtracted, so `row` changes by a vector of
+// the lattice the basis spans.
+bool size_reduce_row_against_basis(flint::FmpzMatRef row,
+                                   flint::FmpzMatConstRef basis,
+                                   flint::FmpzMatConstRef d,
+                                   flint::FmpzMatConstRef lambda) noexcept;
+
+// The relation coefficients of the ell-local relation-saturation beta
+// rows: one row of `rows` per invariant index i with ell | d_i, in index
+// order, equal to the presentation's coefficient row of g_i^{d_i}
+// (invariant_generator_relation_matrix) size-reduced against the
+// LLL-reduced relation kernel, so the two differ by a relation-kernel
+// vector.  Requires `units` to be proven for the same order; see the
+// definition for the soundness condition.
+bool relation_saturation_beta_coefficients(flint::FmpzMat& rows,
+                                           const ClassGroupContext& context,
+                                           const OrderUnitGroup& units,
+                                           flint::FmpzConstRef ell) noexcept;
+
+// The beta rows of the ell-local relation-saturation test (2.17.3
+// src/basemath/buch3.c check_prime, cited in
+// docs/reference/algorithms_and_sources.rst): for each invariant index i with ell | d_i, a compact
+// witness beta_i with (beta_i) = g_i^{d_i}.  The relation coefficients of
+// each beta_i are size-reduced against the LLL-reduced relation kernel, so
+// beta_i differs from the presentation's witness
+// (invariant_generator_power_witness) by a relation-kernel unit.  Requires
+// `units` to be proven for the same order; see the definition.
+bool relation_saturation_beta_rows(std::vector<FactoredElement>& beta_rows,
+                                   const ClassGroupContext& context,
+                                   const OrderUnitGroup& units,
+                                   flint::FmpzConstRef ell) noexcept;
+
 bool saturate_class_unit_context(
         bool& success,
         SaturationCandidateProcessingResult& last_result,

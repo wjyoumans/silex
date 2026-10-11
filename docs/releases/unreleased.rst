@@ -512,6 +512,19 @@ Changed
 Fixed
 -----
 
+- The class-relation saturation proof with proven units size-reduces the
+  relation coefficients of each invariant-generator ``beta`` row against the
+  LLL-reduced relation kernel before forming its compact witness.  The
+  presentation's coefficients can be thousands of bits long.  The reduced
+  row differs from the original by a relation-kernel unit, so the ``ell``-th
+  power rank modulo ``ell`` is unchanged.  For ``x^2 - x - 25000001`` the
+  coefficients drop from up to 2492 bits to at most 12, and the ``ell = 2``
+  local proof now verifies.  The field still fails closed, because
+  ``ell = 53`` does not reach full rank within the auxiliary-prime bound.
+  Published class groups, units and labels are unchanged on the test
+  manifest.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The class-relation saturation candidate search no longer uses an auxiliary
   prime ``q`` that divides ``lc(F) * disc(F)`` when the defining polynomial is
   not monic with integer coefficients (``F`` is its integer numerator, which

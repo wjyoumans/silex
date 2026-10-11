@@ -5358,6 +5358,63 @@ public:
         return silex::push_relation_witnesses(
                 out, context.relations_, coefficients, coefficient_row);
     }
+
+    static bool invariant_generator_relation_matrix(
+            flint::FmpzMatRef out,
+            const ClassGroupContext& context) noexcept {
+        return context.has_presentation() &&
+               context.quotient_.invariant_generator_relation_matrix(out);
+    }
+
+    // LLL-reduced basis of the relation kernel of the published
+    // presentation, cached in the private storage until the presentation
+    // changes.  Returns the storage holding it, or nullptr on failure.
+    static const ClassGroupContextStorage* reduced_relation_kernel(
+            const ClassGroupContext& context) noexcept {
+        ClassGroupContextStorage* storage = context.private_storage_.get();
+        if (!context.has_presentation() || storage == nullptr) {
+            return nullptr;
+        }
+        if (!storage->reduced_relation_kernel_valid) {
+            flint::FmpzMat kernel(context.relation_kernel_unit_count(),
+                                  context.relation_count());
+            if (!context.quotient_.relation_kernel_matrix(
+                        flint::FmpzMatRef(kernel))) {
+                return nullptr;
+            }
+            if (flint::fmpz_mat_nrows(kernel) > 1) {
+                flint::FmpzLll lll;
+                ::fmpz_lll(kernel.raw(), nullptr, lll.raw());
+            }
+            storage->reduced_relation_kernel = std::move(kernel);
+            storage->reduced_relation_kernel_valid = true;
+        }
+        return storage;
+    }
+
+    // As reduced_relation_kernel, with the integral Gram-Schmidt data of
+    // that basis also built.
+    static const ClassGroupContextStorage* reduced_relation_kernel_gram(
+            const ClassGroupContext& context) noexcept {
+        if (reduced_relation_kernel(context) == nullptr) {
+            return nullptr;
+        }
+        ClassGroupContextStorage* storage = context.private_storage_.get();
+        if (!storage->reduced_relation_kernel_gram_valid) {
+            flint::FmpzMat d(0, 0);
+            flint::FmpzMat lambda(0, 0);
+            if (!integral_gram_schmidt(
+                        d, lambda,
+                        flint::FmpzMatConstRef(
+                                storage->reduced_relation_kernel))) {
+                return nullptr;
+            }
+            storage->reduced_relation_kernel_gram_d = std::move(d);
+            storage->reduced_relation_kernel_gram_lambda = std::move(lambda);
+            storage->reduced_relation_kernel_gram_valid = true;
+        }
+        return storage;
+    }
 };
 
 bool ClassGroupCertificationAccess::
@@ -9224,31 +9281,252 @@ bool append_factor_base_generation_record(
     return true;
 }
 
-bool relation_saturation_beta_rows(
-        std::vector<FactoredElement>& beta_rows,
-        const ClassGroupContext& context,
-        flint::FmpzConstRef ell) noexcept {
-    const Order* order = context.parent();
-    const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (!context.has_presentation() || field == nullptr ||
-        !flint::fmpz_is_prime(ell)) {
+namespace detail {
+
+namespace {
+
+void row_dot(flint::FmpzRef out,
+             flint::FmpzMatConstRef left,
+             slong left_row,
+             flint::FmpzMatConstRef right,
+             slong right_row) noexcept {
+    flint::fmpz_zero(out);
+    for (slong c = 0; c < flint::fmpz_mat_ncols(left); ++c) {
+        flint::fmpz_addmul(out, flint::fmpz_mat_entry(left, left_row, c),
+                           flint::fmpz_mat_entry(right, right_row, c));
+    }
+}
+
+}  // namespace
+
+bool integral_gram_schmidt(flint::FmpzMat& d,
+                           flint::FmpzMat& lambda,
+                           flint::FmpzMatConstRef basis) noexcept {
+    const slong m = flint::fmpz_mat_nrows(basis);
+    flint::FmpzMat d_out(1, m + 1);
+    flint::FmpzMat lambda_out(m, m);
+    flint::FmpzMatRef d_ref(d_out);
+    flint::FmpzMatRef lambda_ref(lambda_out);
+    const flint::FmpzMatConstRef d_const(d_out);
+    const flint::FmpzMatConstRef lambda_const(lambda_out);
+    flint::fmpz_one(flint::fmpz_mat_entry(d_ref, 0, 0));
+
+    // Cohen, GTM 138, Algorithm 2.6.7 step 2 (0-based): for j <= k,
+    // u = b_k . b_j, then u = (d_{i+1} u - lambda(k, i) lambda(j, i)) / d_i
+    // for i < j, each division exact; u is lambda(k, j) for j < k and
+    // d_{k+1} for j = k.
+    flint::Fmpz u;
+    flint::Fmpz t;
+    for (slong k = 0; k < m; ++k) {
+        for (slong j = 0; j <= k; ++j) {
+            row_dot(flint::FmpzRef(u), basis, k, basis, j);
+            for (slong i = 0; i < j; ++i) {
+                flint::fmpz_mul(flint::FmpzRef(t), flint::FmpzConstRef(u),
+                                flint::fmpz_mat_entry(d_const, 0, i + 1));
+                flint::fmpz_submul(
+                        flint::FmpzRef(t),
+                        flint::fmpz_mat_entry(lambda_const, k, i),
+                        flint::fmpz_mat_entry(lambda_const, j, i));
+                flint::fmpz_divexact(flint::FmpzRef(u),
+                                     flint::FmpzConstRef(t),
+                                     flint::fmpz_mat_entry(d_const, 0, i));
+            }
+            if (j < k) {
+                flint::fmpz_set(flint::fmpz_mat_entry(lambda_ref, k, j),
+                                flint::FmpzConstRef(u));
+            } else {
+                if (flint::fmpz_sgn(flint::FmpzConstRef(u)) <= 0) {
+                    return false;
+                }
+                flint::fmpz_set(flint::fmpz_mat_entry(d_ref, 0, k + 1),
+                                flint::FmpzConstRef(u));
+            }
+        }
+    }
+
+    d = std::move(d_out);
+    lambda = std::move(lambda_out);
+    return true;
+}
+
+bool size_reduce_row_against_basis(flint::FmpzMatRef row,
+                                   flint::FmpzMatConstRef basis,
+                                   flint::FmpzMatConstRef d,
+                                   flint::FmpzMatConstRef lambda) noexcept {
+    const slong m = flint::fmpz_mat_nrows(basis);
+    const slong n = flint::fmpz_mat_ncols(basis);
+    if (flint::fmpz_mat_nrows(row) != 1 || flint::fmpz_mat_ncols(row) != n ||
+        flint::fmpz_mat_nrows(d) != 1 || flint::fmpz_mat_ncols(d) != m + 1 ||
+        flint::fmpz_mat_nrows(lambda) != m ||
+        flint::fmpz_mat_ncols(lambda) != m) {
         return false;
     }
 
-    std::vector<FactoredElement> candidate;
-    candidate.reserve(static_cast<std::size_t>(context.invariant_count()));
+    // lambda(row, j) = d_{j+1} mu(row, j), by the recursion of
+    // integral_gram_schmidt with row in the place of b_k.
+    flint::FmpzMat row_lambda(1, m);
+    flint::FmpzMatRef row_lambda_ref(row_lambda);
+    const flint::FmpzMatConstRef row_lambda_const(row_lambda);
+    const flint::FmpzMatConstRef row_const(row.raw());
+    flint::Fmpz u;
+    flint::Fmpz t;
+    for (slong j = 0; j < m; ++j) {
+        row_dot(flint::FmpzRef(u), row_const, 0, basis, j);
+        for (slong i = 0; i < j; ++i) {
+            flint::fmpz_mul(flint::FmpzRef(t), flint::FmpzConstRef(u),
+                            flint::fmpz_mat_entry(d, 0, i + 1));
+            flint::fmpz_submul(flint::FmpzRef(t),
+                               flint::fmpz_mat_entry(row_lambda_const, 0, i),
+                               flint::fmpz_mat_entry(lambda, j, i));
+            flint::fmpz_divexact(flint::FmpzRef(u), flint::FmpzConstRef(t),
+                                 flint::fmpz_mat_entry(d, 0, i));
+        }
+        flint::fmpz_set(flint::fmpz_mat_entry(row_lambda_ref, 0, j),
+                        flint::FmpzConstRef(u));
+    }
+
+    // Sub-algorithm RED(row, l) of Cohen, Algorithm 2.6.7, for
+    // l = m-1, ..., 0: when 2 |lambda(row, l)| > d_{l+1}, subtract q b_l
+    // with q = floor((2 lambda(row, l) + d_{l+1}) / (2 d_{l+1})), the
+    // nearest integer to mu(row, l), and update lambda(row, i) for i <= l.
+    flint::Fmpz q;
+    flint::Fmpz twice_d;
+    for (slong l = m - 1; l >= 0; --l) {
+        const flint::FmpzConstRef d_l = flint::fmpz_mat_entry(d, 0, l + 1);
+        flint::fmpz_mul_2exp(flint::FmpzRef(t),
+                             flint::fmpz_mat_entry(row_lambda_const, 0, l),
+                             1);
+        if (flint::fmpz_cmpabs(flint::FmpzConstRef(t), d_l) <= 0) {
+            continue;
+        }
+        flint::fmpz_add(flint::FmpzRef(t), flint::FmpzConstRef(t), d_l);
+        flint::fmpz_mul_2exp(flint::FmpzRef(twice_d), d_l, 1);
+        flint::fmpz_fdiv_q(flint::FmpzRef(q), flint::FmpzConstRef(t),
+                           flint::FmpzConstRef(twice_d));
+        for (slong c = 0; c < n; ++c) {
+            flint::fmpz_submul(flint::fmpz_mat_entry(row, 0, c),
+                               flint::FmpzConstRef(q),
+                               flint::fmpz_mat_entry(basis, l, c));
+        }
+        flint::fmpz_submul(flint::fmpz_mat_entry(row_lambda_ref, 0, l),
+                           flint::FmpzConstRef(q), d_l);
+        for (slong i = 0; i < l; ++i) {
+            flint::fmpz_submul(flint::fmpz_mat_entry(row_lambda_ref, 0, i),
+                               flint::FmpzConstRef(q),
+                               flint::fmpz_mat_entry(lambda, l, i));
+        }
+    }
+    return true;
+}
+
+bool relation_saturation_beta_coefficients(
+        flint::FmpzMat& rows,
+        const ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        flint::FmpzConstRef ell) noexcept {
+    const Order* order = context.parent();
+    // Soundness condition for the size reduction below.  Changing the
+    // relation coefficients of beta_i by a relation-kernel vector multiplies
+    // beta_i by a unit u of the order and keeps the ideal identity
+    // (beta_i) = g_i^{d_i}; the reference source (2.17.3, cited in
+    // docs/reference/algorithms_and_sources.rst), src/basemath/buch3.c
+    // check_prime (lines 1159-1180), fixes its beta list (cycgen) only by
+    // that identity.  The ell-th-power character row of beta_i then
+    // changes by that of u.
+    // With proven units, u = zeta^a prod eps_j^{b_j} for the free-unit rows
+    // eps_j of the same dlog system, and zeta^a is either covered by the
+    // system's torsion row (ell | w) or an ell-th power with zero character
+    // (ell does not divide w).  So the change is a unimodular row operation
+    // modulo ell and the rank of the dlog matrix modulo ell is unchanged.
+    // The unit factor must lie in the group spanned by the rows actually in
+    // the system together with ell-th powers; proven units guarantee this,
+    // so this routine refuses units that are not proven.
+    if (!context.has_presentation() || order == nullptr ||
+        !flint::fmpz_is_prime(ell) || !units.is_set() ||
+        !same_order_parent(units.parent(), order) ||
+        units.certification_status() != CertificationMode::proven) {
+        return false;
+    }
+
+    const slong relation_count = context.relation_count();
+    std::vector<slong> indices;
     flint::Fmpz invariant;
     for (slong i = 0; i < context.invariant_count(); ++i) {
         if (!context.invariant(flint::FmpzRef(invariant), i)) {
             return false;
         }
-        if (!flint::fmpz_divisible(flint::FmpzConstRef(invariant), ell)) {
-            continue;
+        if (flint::fmpz_divisible(flint::FmpzConstRef(invariant), ell)) {
+            indices.push_back(i);
         }
+    }
 
+    flint::FmpzMat candidate(static_cast<slong>(indices.size()),
+                             relation_count);
+    if (indices.empty()) {
+        rows = std::move(candidate);
+        return true;
+    }
+    const ClassGroupContextStorage* kernel =
+            ClassGroupRelationAccess::reduced_relation_kernel_gram(context);
+    flint::FmpzMat coefficients(context.invariant_count(), relation_count);
+    if (kernel == nullptr ||
+        !ClassGroupRelationAccess::invariant_generator_relation_matrix(
+                flint::FmpzMatRef(coefficients), context)) {
+        return false;
+    }
+    flint::FmpzMat row(1, relation_count);
+    for (std::size_t b = 0; b < indices.size(); ++b) {
+        for (slong j = 0; j < relation_count; ++j) {
+            flint::fmpz_set(
+                    flint::fmpz_mat_entry(flint::FmpzMatRef(row), 0, j),
+                    flint::fmpz_mat_entry(
+                            flint::FmpzMatConstRef(coefficients), indices[b],
+                            j));
+        }
+        if (!size_reduce_row_against_basis(
+                    flint::FmpzMatRef(row),
+                    flint::FmpzMatConstRef(kernel->reduced_relation_kernel),
+                    flint::FmpzMatConstRef(
+                            kernel->reduced_relation_kernel_gram_d),
+                    flint::FmpzMatConstRef(
+                            kernel->reduced_relation_kernel_gram_lambda))) {
+            return false;
+        }
+        for (slong j = 0; j < relation_count; ++j) {
+            flint::fmpz_set(
+                    flint::fmpz_mat_entry(flint::FmpzMatRef(candidate),
+                                          static_cast<slong>(b), j),
+                    flint::fmpz_mat_entry(flint::FmpzMatConstRef(row), 0, j));
+        }
+    }
+
+    rows = std::move(candidate);
+    return true;
+}
+
+bool relation_saturation_beta_rows(
+        std::vector<FactoredElement>& beta_rows,
+        const ClassGroupContext& context,
+        const OrderUnitGroup& units,
+        flint::FmpzConstRef ell) noexcept {
+    const Order* order = context.parent();
+    const NumberField* field = order == nullptr ? nullptr : order->parent();
+    flint::FmpzMat rows(0, 0);
+    if (field == nullptr ||
+        !relation_saturation_beta_coefficients(rows, context, units, ell)) {
+        return false;
+    }
+
+    std::vector<FactoredElement> candidate;
+    candidate.reserve(static_cast<std::size_t>(
+            flint::fmpz_mat_nrows(flint::FmpzMatConstRef(rows))));
+    for (slong b = 0; b < flint::fmpz_mat_nrows(flint::FmpzMatConstRef(rows));
+         ++b) {
         candidate.emplace_back(*field);
         if (!candidate.back().is_defined() ||
-            !context.invariant_generator_power_witness(candidate.back(), i)) {
+            !ClassGroupRelationAccess::push_relation_witnesses(
+                    candidate.back(), context, flint::FmpzMatConstRef(rows),
+                    b)) {
             return false;
         }
     }
@@ -9256,6 +9534,8 @@ bool relation_saturation_beta_rows(
     beta_rows.swap(candidate);
     return true;
 }
+
+}  // namespace detail
 
 bool relation_saturation_torsion_needed(bool& out,
                                         const OrderUnitGroup& units,
@@ -11493,7 +11773,8 @@ bool ClassGroupContext::prove_relation_saturation_dlog_ell_(
 
     std::vector<FactoredElement> beta_rows;
     bool include_torsion = false;
-    if (!relation_saturation_beta_rows(beta_rows, *this, ell) ||
+    if (!detail::relation_saturation_beta_rows(beta_rows, *this, units,
+                                               ell) ||
         !relation_saturation_torsion_needed(include_torsion, units, ell)) {
         return false;
     }
@@ -13016,21 +13297,10 @@ bool ClassGroupContext::relation_kernel_unit(
     // applies lll! to the kernel before forming FacElem candidates.  The
     // reduced basis spans the same lattice, so the unit group generated by
     // all candidates is unchanged.
-    detail::ClassGroupContextStorage* storage = private_storage_.get();
+    const detail::ClassGroupContextStorage* storage =
+            detail::ClassGroupRelationAccess::reduced_relation_kernel(*this);
     if (storage == nullptr) {
         return false;
-    }
-    if (!storage->reduced_relation_kernel_valid) {
-        flint::FmpzMat kernel(relation_kernel_unit_count(), relation_count());
-        if (!quotient_.relation_kernel_matrix(flint::FmpzMatRef(kernel))) {
-            return false;
-        }
-        if (flint::fmpz_mat_nrows(kernel) > 1) {
-            flint::FmpzLll lll;
-            ::fmpz_lll(kernel.raw(), nullptr, lll.raw());
-        }
-        storage->reduced_relation_kernel = std::move(kernel);
-        storage->reduced_relation_kernel_valid = true;
     }
     return push_relation_witnesses(
             out, relations_,

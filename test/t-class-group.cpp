@@ -1,11 +1,13 @@
 #include <silex/class_group.hpp>
 #include <silex/embedding.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_lll.hpp>
 #include <silex/ideal_factorization.hpp>
 #include <silex/order_element.hpp>
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/relation.hpp>
+#include <silex/residue_field.hpp>
 #include <silex/zeta.hpp>
 
 #include "class_group/class_group_certification_internal.hpp"
@@ -24,6 +26,7 @@
 #include <cassert>
 #include <cstring>
 #include <initializer_list>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -5491,6 +5494,381 @@ int test_real_quadratic_conditional_hr_records_belabas_friedman() {
     return 0;
 }
 
+ulong relation_saturation_test_rank_mod(
+        const std::vector<std::vector<ulong>>& columns,
+        slong rows,
+        ulong ell) {
+    if (columns.empty()) {
+        return 0;
+    }
+    nmod_mat_t matrix;
+    nmod_mat_init(matrix, rows, static_cast<slong>(columns.size()), ell);
+    for (std::size_t c = 0; c < columns.size(); ++c) {
+        for (slong r = 0; r < rows; ++r) {
+            nmod_mat_set_entry(matrix, r, static_cast<slong>(c),
+                               columns[c][static_cast<std::size_t>(r)]);
+        }
+    }
+    const slong rank = nmod_mat_rank(matrix);
+    nmod_mat_clear(matrix);
+    return static_cast<ulong>(rank);
+}
+
+// The ell-th-power character of a nonzero residue image; fails on zero.
+bool relation_saturation_test_character(
+        ulong& out,
+        const silex::ResidueFieldElement& image,
+        sflint::FmpzConstRef ell) {
+    sflint::Fmpz log;
+    if (image.is_zero() ||
+        !image.quotient_log_mod_prime(sflint::FmpzRef(log), ell)) {
+        return false;
+    }
+    out = fmpz_get_ui(log.raw());
+    return true;
+}
+
+// Whether the last row k of the stack whose integral Gram-Schmidt data are
+// `d` and `lambda` is size-reduced against the rows before it:
+// |mu(k, j)| <= 1/2, that is 2 |lambda(k, j)| <= d_{j+1}, for all j < k.
+bool relation_saturation_test_size_reduced(const sflint::FmpzMat& d,
+                                           const sflint::FmpzMat& lambda,
+                                           slong k) {
+    for (slong j = 0; j < k; ++j) {
+        sflint::Fmpz twice;
+        fmpz_mul_2exp(twice.raw(),
+                      sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(lambda),
+                                             k, j)
+                              .raw(),
+                      1);
+        fmpz_abs(twice.raw(), twice.raw());
+        if (fmpz_cmp(twice.raw(),
+                     sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(d), 0,
+                                            j + 1)
+                             .raw()) > 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Integral Gram-Schmidt data and size reduction (Cohen, GTM 138,
+// Algorithm 2.6.7) on the basis b_0 = (3, 0), b_1 = (1, 3): d = (1, 9, 81),
+// lambda(1, 0) = 3, and (10, 7) reduces to (10, 7) - 2 b_1 - 3 b_0 =
+// (-1, 1), with mu = -1/3 and 1/3.
+int test_relation_saturation_size_reduce_row() {
+    sflint::FmpzMat basis(2, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(basis), 0, 0),
+                        3);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(basis), 1, 0),
+                        1);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(basis), 1, 1),
+                        3);
+    sflint::FmpzMat d(0, 0);
+    sflint::FmpzMat lambda(0, 0);
+    assert(silex::detail::integral_gram_schmidt(
+            d, lambda, sflint::FmpzMatConstRef(basis)));
+    assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(d)) == 1 &&
+           sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(d)) == 3);
+    const slong expected_d[3] = {1, 9, 81};
+    for (slong j = 0; j < 3; ++j) {
+        assert(sflint::fmpz_equal_si(
+                sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(d), 0, j),
+                expected_d[j]));
+    }
+    assert(sflint::fmpz_equal_si(
+            sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(lambda), 1, 0), 3));
+
+    sflint::FmpzMat row(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(row), 0, 0),
+                        10);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(row), 0, 1),
+                        7);
+    assert(silex::detail::size_reduce_row_against_basis(
+            sflint::FmpzMatRef(row), sflint::FmpzMatConstRef(basis),
+            sflint::FmpzMatConstRef(d), sflint::FmpzMatConstRef(lambda)));
+    assert(sflint::fmpz_equal_si(
+            sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(row), 0, 0), -1));
+    assert(sflint::fmpz_equal_si(
+            sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(row), 0, 1), 1));
+
+    // Dependent rows have no Gram-Schmidt data.
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(basis), 1, 0),
+                        6);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(basis), 1, 1),
+                        0);
+    assert(!silex::detail::integral_gram_schmidt(
+            d, lambda, sflint::FmpzMatConstRef(basis)));
+    return 0;
+}
+
+// The relation-saturation beta rows are size-reduced against the
+// LLL-reduced relation kernel.  Q(sqrt(100000005)), x^2 - x - 25000001:
+// h = 212 with invariants [106, 2], w = 2, unit rank 1, regulator
+// 18.19753721763815524762... (certified independently).  Each
+// reduced coefficient row differs from the presentation's row for
+// g_i^{d_i} by a relation-kernel vector and is size-reduced against the
+// reduced kernel; the raw rows of this presentation are not.  A reduced
+// beta_i therefore differs from the raw one by a unit, so at the same
+// auxiliary primes the raw and reduced ell-th-power characters give the
+// same rank modulo ell: for ell = 2 with the torsion row and for ell = 53
+// without it (-1 is a 53rd power).  The raw characters are the linear
+// combinations of the relation-generator characters.
+int test_relation_saturation_beta_rows_size_reduced() {
+    silex::NumberField field = shifted_quadratic_field(-1, -25000001);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), maximal_order));
+
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::ClassGroupContext context;
+    silex::OrderUnitGroup grh_units;
+    assert(grh_units.compute_with_class_group(
+            context, maximal_order, sflint::FmpzConstRef(factor_base_bound),
+            options, 128));
+    sflint::Fmpz value;
+    assert(context.order(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 212));
+
+    silex::OrderUnitGroup units(maximal_order);
+    silex::EmbeddingContext embeddings(field);
+    silex::ProofState unit_status = silex::ProofState::not_checked;
+    bool units_changed = false;
+    sflint::Fmpz unit_aux_bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(unit_aux_bound), 1000);
+    assert(units.prove_index_bound(unit_status, units_changed, grh_units, 1,
+                                   sflint::FmpzConstRef(unit_aux_bound), 2,
+                                   embeddings, 128));
+    assert(unit_status == silex::ProofState::verified);
+    assert(units.certification_status() == silex::CertificationMode::proven);
+    assert(units.free_rank() == 1);
+    silex::FactoredElement fundamental_unit(field);
+    assert(units.free_generator(fundamental_unit, 0));
+    silex::OrderElement torsion(maximal_order);
+    assert(units.torsion_generator(torsion));
+
+    silex::FiniteAbelianGroup presentation;
+    assert(context.presentation(presentation));
+    const slong relation_count = context.relation_count();
+    sflint::FmpzMat raw(context.invariant_count(), relation_count);
+    assert(presentation.invariant_generator_relation_matrix(
+            sflint::FmpzMatRef(raw)));
+    sflint::FmpzMat kernel(0, 0);
+    {
+        std::optional<sflint::FmpzMat> exact_kernel =
+                presentation.relation_kernel_matrix();
+        assert(exact_kernel.has_value());
+        kernel = std::move(*exact_kernel);
+    }
+    const slong kernel_rows =
+            sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(kernel));
+    assert(kernel_rows > 1);
+    {
+        sflint::FmpzLll lll;
+        ::fmpz_lll(kernel.raw(), nullptr, lll.raw());
+    }
+    bool raw_size_reduced = true;
+
+    std::vector<silex::Element> generators;
+    generators.reserve(static_cast<std::size_t>(relation_count));
+    for (slong j = 0; j < relation_count; ++j) {
+        generators.emplace_back(field);
+        assert(context.relation_generator(generators.back(), j));
+    }
+
+    for (const slong ell_value : {2, 53}) {
+        sflint::Fmpz ell;
+        sflint::fmpz_set_si(sflint::FmpzRef(ell), ell_value);
+        const ulong ell_ui = static_cast<ulong>(ell_value);
+
+        std::vector<silex::FactoredElement> reduced;
+        assert(silex::detail::relation_saturation_beta_rows(
+                reduced, context, units, sflint::FmpzConstRef(ell)));
+        std::vector<slong> beta_indices;
+        for (slong i = 0; i < context.invariant_count(); ++i) {
+            assert(context.invariant(sflint::FmpzRef(value), i));
+            if (sflint::fmpz_divisible(sflint::FmpzConstRef(value),
+                                       sflint::FmpzConstRef(ell))) {
+                beta_indices.push_back(i);
+            }
+        }
+        const slong beta_count = static_cast<slong>(beta_indices.size());
+        assert(beta_count > 0 && beta_count == static_cast<slong>(reduced.size()));
+
+        // Each reduced coefficient row differs from the raw row of
+        // g_i^{d_i} by a relation-kernel vector (the integer kernel is
+        // saturated, so membership in its rational span suffices) and is
+        // size-reduced against the LLL-reduced kernel: |mu(row, l)| <= 1/2.
+        sflint::FmpzMat coefficients(0, 0);
+        assert(silex::detail::relation_saturation_beta_coefficients(
+                coefficients, context, units, sflint::FmpzConstRef(ell)));
+        assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(coefficients)) ==
+               beta_count);
+        for (slong b = 0; b < beta_count; ++b) {
+            sflint::FmpzMat difference(kernel_rows + 1, relation_count);
+            sflint::FmpzMat raw_stack(kernel_rows + 1, relation_count);
+            sflint::FmpzMat reduced_stack(kernel_rows + 1, relation_count);
+            for (slong r = 0; r < kernel_rows; ++r) {
+                for (slong j = 0; j < relation_count; ++j) {
+                    const sflint::FmpzConstRef entry = sflint::fmpz_mat_entry(
+                            sflint::FmpzMatConstRef(kernel), r, j);
+                    for (sflint::FmpzMat* stack :
+                         {&difference, &raw_stack, &reduced_stack}) {
+                        sflint::fmpz_set(sflint::fmpz_mat_entry(
+                                                 sflint::FmpzMatRef(*stack),
+                                                 r, j),
+                                         entry);
+                    }
+                }
+            }
+            for (slong j = 0; j < relation_count; ++j) {
+                const sflint::FmpzConstRef raw_entry = sflint::fmpz_mat_entry(
+                        sflint::FmpzMatConstRef(raw),
+                        beta_indices[static_cast<std::size_t>(b)], j);
+                const sflint::FmpzConstRef reduced_entry =
+                        sflint::fmpz_mat_entry(
+                                sflint::FmpzMatConstRef(coefficients), b, j);
+                sflint::fmpz_set(sflint::fmpz_mat_entry(
+                                         sflint::FmpzMatRef(raw_stack),
+                                         kernel_rows, j),
+                                 raw_entry);
+                sflint::fmpz_set(sflint::fmpz_mat_entry(
+                                         sflint::FmpzMatRef(reduced_stack),
+                                         kernel_rows, j),
+                                 reduced_entry);
+                fmpz_sub(sflint::fmpz_mat_entry(
+                                 sflint::FmpzMatRef(difference),
+                                 kernel_rows, j)
+                                 .raw(),
+                         raw_entry.raw(), reduced_entry.raw());
+            }
+            assert(fmpz_mat_rank(difference.raw()) == kernel_rows);
+            sflint::FmpzMat d(0, 0);
+            sflint::FmpzMat lambda(0, 0);
+            assert(silex::detail::integral_gram_schmidt(
+                    d, lambda, sflint::FmpzMatConstRef(reduced_stack)));
+            assert(relation_saturation_test_size_reduced(d, lambda,
+                                                         kernel_rows));
+            assert(silex::detail::integral_gram_schmidt(
+                    d, lambda, sflint::FmpzMatConstRef(raw_stack)));
+            raw_size_reduced =
+                    raw_size_reduced &&
+                    relation_saturation_test_size_reduced(d, lambda,
+                                                          kernel_rows);
+        }
+        const bool include_torsion = ell_value == 2;
+        const slong rows = beta_count + 1 + (include_torsion ? 1 : 0);
+
+        std::vector<std::vector<ulong>> raw_columns;
+        std::vector<std::vector<ulong>> reduced_columns;
+        ulong rank = 0;
+        for (ulong q = 2; q <= 10000 && rank < static_cast<ulong>(rows);
+             q = n_nextprime(q, 1)) {
+            if ((q - 1) % ell_ui != 0) {
+                continue;
+            }
+            sflint::Fmpz rational_prime;
+            sflint::fmpz_set_ui(sflint::FmpzRef(rational_prime), q);
+            silex::PrimeIdealList above;
+            assert(silex::decompose_prime(
+                    above, maximal_order,
+                    sflint::FmpzConstRef(rational_prime)));
+            for (slong k = 0; k < above.size() &&
+                              rank < static_cast<ulong>(rows);
+                 ++k) {
+                const silex::PrimeIdeal* prime = above.at(k);
+                assert(prime != nullptr);
+                if (prime->residue_degree() != 1) {
+                    continue;
+                }
+                silex::ResidueField residue_field(*prime);
+                assert(residue_field.is_defined());
+                silex::ResidueFieldElement image(residue_field);
+
+                // Primes dividing a relation generator, a beta row or a unit
+                // give no character; skip them.
+                std::vector<ulong> relation_characters;
+                bool coprime = true;
+                for (const silex::Element& generator : generators) {
+                    ulong character = 0;
+                    coprime = image.set_element(generator) &&
+                              relation_saturation_test_character(
+                                      character, image,
+                                      sflint::FmpzConstRef(ell));
+                    if (!coprime) {
+                        break;
+                    }
+                    relation_characters.push_back(character);
+                }
+                std::vector<ulong> raw_column;
+                std::vector<ulong> reduced_column;
+                for (slong b = 0; coprime && b < beta_count; ++b) {
+                    sflint::Fmpz sum;
+                    for (slong j = 0; j < relation_count; ++j) {
+                        sflint::fmpz_addmul_ui(
+                                sflint::FmpzRef(sum),
+                                sflint::fmpz_mat_entry(
+                                        sflint::FmpzMatConstRef(raw),
+                                        beta_indices[static_cast<std::size_t>(
+                                                b)],
+                                        j),
+                                relation_characters[static_cast<std::size_t>(
+                                        j)]);
+                    }
+                    raw_column.push_back(fmpz_fdiv_ui(sum.raw(), ell_ui));
+                    ulong character = 0;
+                    coprime = image.set_factored_element(
+                                      reduced[static_cast<std::size_t>(b)]) &&
+                              relation_saturation_test_character(
+                                      character, image,
+                                      sflint::FmpzConstRef(ell));
+                    reduced_column.push_back(character);
+                }
+                ulong unit_character = 0;
+                coprime = coprime &&
+                          image.set_factored_element(fundamental_unit) &&
+                          relation_saturation_test_character(
+                                  unit_character, image,
+                                  sflint::FmpzConstRef(ell));
+                ulong torsion_character = 0;
+                coprime = coprime &&
+                          (!include_torsion ||
+                           (image.set_order_element(torsion) &&
+                            relation_saturation_test_character(
+                                    torsion_character, image,
+                                    sflint::FmpzConstRef(ell))));
+                if (!coprime) {
+                    continue;
+                }
+                raw_column.push_back(unit_character);
+                reduced_column.push_back(unit_character);
+                if (include_torsion) {
+                    raw_column.push_back(torsion_character);
+                    reduced_column.push_back(torsion_character);
+                }
+                raw_columns.push_back(std::move(raw_column));
+                reduced_columns.push_back(std::move(reduced_column));
+
+                rank = relation_saturation_test_rank_mod(reduced_columns,
+                                                         rows, ell_ui);
+                assert(rank == relation_saturation_test_rank_mod(
+                                       raw_columns, rows, ell_ui));
+            }
+        }
+        assert(rank == static_cast<ulong>(rows));
+        assert(raw_columns.size() > 1);
+    }
+    // The fixture exercises the reduction: some raw row is not size-reduced.
+    assert(!raw_size_reduced);
+
+    return 0;
+}
+
 int main() {
     test_certification_metadata_defaults_and_invalidation();
     test_factor_base_generation_metadata();
@@ -5547,6 +5925,8 @@ int main() {
     test_analytic_index_bound_keeps_complete_saturation_records();
     test_analytic_index_one_routes_clear_saturation_proof_records();
     test_low_bound_generation_check_does_not_promote();
+    test_relation_saturation_size_reduce_row();
+    test_relation_saturation_beta_rows_size_reduced();
     test_grh_request_takes_belabas_friedman_residue();
     test_exact_route_keeps_verified_ell_local_proof();
     test_compute_candidate_preserves_on_failure();
