@@ -506,7 +506,8 @@ public:
             flint::FmpzConstRef required_bound) noexcept;
     // Keep, in the attached class/unit transaction, a passed honesty scan of
     // `base` at these bounds, replacing any earlier one; no-op without a
-    // transaction.  Nothing is kept if the base cannot be copied.
+    // transaction.  Nothing is kept if the base cannot be copied.  Call only
+    // after a passed scan: the kept verdict is reused without a rescan.
     static void record_transaction_factor_base_honest(
             ClassGroupContext& context,
             const FactorBase& base,

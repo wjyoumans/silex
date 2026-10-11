@@ -1804,6 +1804,12 @@ before any matrix is allocated, and the transaction then reports
 candidate at every stage passes the same exact witness check, and stage 0 is
 the previous search, so results that succeeded at stage 0 are unchanged.
 
+Within one class/unit transaction, Silex keeps a passed honesty scan and
+reuses it, with the same receipt, for a later candidate whose factor base is
+equal (``FactorBase::equal``) and whose active and required bounds are equal;
+only passed scans are kept.  PARI's ``be_honest`` has no such reuse: it runs
+once per ``bnfinit`` pass.
+
 In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``
 object is the one place for structured failure detail; its keys depend on
 ``failure_reason``, and it is null for every reason other than

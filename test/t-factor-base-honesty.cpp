@@ -1901,6 +1901,33 @@ int test_transaction_reuses_passed_honesty_scan() {
             {sflint::FmpzConstRef(required), sflint::FmpzConstRef(required),
              driver::AnalyticFinishDecision::failed},
     };
+    // Same bounds, different base: keep the {P2, P3} base at active bound 2
+    // and the required bound, then a {P2} context at those same bounds must
+    // still scan (and fail), not reuse.
+    {
+        silex::ClassGroupContext keeper(setup.maximal_order);
+        if (!d21_checkpoint_context(keeper, setup, 3)) {
+            return 1;
+        }
+        silex::detail::ClassUnitTransactionAccess::set_run_context(
+                keeper, &transaction);
+        Access::record_transaction_factor_base_honest(
+                keeper, *keeper.factor_base(), sflint::FmpzConstRef(two),
+                sflint::FmpzConstRef(required));
+        silex::detail::ClassUnitTransactionAccess::set_run_context(keeper,
+                                                                   nullptr);
+        silex::ClassGroupContext narrow(setup.maximal_order);
+        if (!d21_checkpoint_context(narrow, setup, 2) ||
+            d21_checkpoint(narrow, setup, 2, transaction) !=
+                    driver::AnalyticFinishDecision::failed) {
+            return 1;
+        }
+    }
+    sflint::Fmpz passing_checked;
+    if (!passing.factor_base_generation_checked_bound(
+                sflint::FmpzRef(passing_checked))) {
+        return 1;
+    }
     for (const Probe& probe : probes) {
         silex::ClassGroupContext probed(setup.maximal_order);
         if (!d21_checkpoint_context(probed, setup, 2)) {
@@ -1919,6 +1946,18 @@ int test_transaction_reuses_passed_honesty_scan() {
              probed.factor_base_generation_checked_status() !=
                      silex::ProofState::verified)) {
             return 1;
+        }
+        if (decision == driver::AnalyticFinishDecision::finished) {
+            // The reused receipt matches a fresh scan's.
+            sflint::Fmpz checked;
+            if (!probed.factor_base_generation_checked_bound(
+                        sflint::FmpzRef(checked)) ||
+                !sflint::fmpz_equal(sflint::FmpzConstRef(checked),
+                                    sflint::FmpzConstRef(passing_checked)) ||
+                probed.factor_base_generation_status() !=
+                        passing.factor_base_generation_status()) {
+                return 1;
+            }
         }
     }
 
