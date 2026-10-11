@@ -131,8 +131,10 @@ struct ClassUnitTransactionReport {
     // Whether the most recent class-group candidate attempt ended because its
     // factor base had more generators than the relation modules allow
     // (kRelationModuleMaxColumns, relation_module_limits_internal.hpp).
-    // Cleared with factor_base_honesty_failure; read only to name a failed
-    // transaction's reason.
+    // Set when a base build refuses an oversized base, cleared when a later
+    // base build within the same attempt passes the limit, and cleared with
+    // factor_base_honesty_failure; read only to name a failed transaction's
+    // reason.
     bool factor_base_size_limit_exceeded = false;
 
     void reset() noexcept;

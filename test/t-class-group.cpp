@@ -5116,7 +5116,8 @@ int test_imaginary_quadratic_structure_certificate_rejects_subgroup() {
 // (2^14) is refused before their dense mod-p matrices are allocated, the
 // same way on every machine: the context keeps no base, and an attached
 // class/unit transaction names the reason factor_base_size_limit_exceeded
-// until the next attempt clears it.
+// until the next attempt clears it or a later base within the limit is
+// built.
 int test_factor_base_size_limit_fails_closed() {
     silex::NumberField field = degree_one_field();
     silex::Order order = silex::test::equation_order(field);
@@ -5154,6 +5155,17 @@ int test_factor_base_size_limit_fails_closed() {
                    "class_unit_computation_failed") == 0);
     assert(!context.set_factor_base(base));
     assert(audit.factor_base_size_limit_exceeded);
+    // A later base within the limit clears the flag, so a failure after it
+    // is not reported as the earlier size-limit refusal.
+    sflint::Fmpz small_bound;
+    assert(set_fmpz_si(small_bound, 100));
+    assert(context.build_factor_base(sflint::FmpzConstRef(small_bound)));
+    assert(context.has_factor_base());
+    assert(!audit.factor_base_size_limit_exceeded);
+    assert(std::strcmp(
+                   silex::detail::class_unit_computation_failure_reason(
+                           audit),
+                   "class_unit_computation_failed") == 0);
     silex::detail::ClassUnitTransactionAccess::set_run_context(context,
                                                                nullptr);
     return 0;

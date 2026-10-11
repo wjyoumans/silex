@@ -1048,6 +1048,11 @@ bool reset_relation_modules(
         }
         return false;
     }
+    // The flag names the reason only while the latest base of the attempt
+    // is the refused one; a base within the limit ends that.
+    if (run_context != nullptr) {
+        run_context->audit.factor_base_size_limit_exceeded = false;
+    }
     return reset_row_module(row_module, ncols) &&
            relation_module.reset(ncols, kRowModuleModRankPrime);
 }
