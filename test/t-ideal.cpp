@@ -2153,6 +2153,143 @@ int test_known_two_generator_hnf_matches_generic() {
     return 0;
 }
 
+// The generic branch of try_ideal_product_hnf takes the HNF of the rows
+// [mk H; H M_beta] modulo mh mk (fmpz_mat_hnf_modular_eldiv).  Compare it with
+// the plain fmpz_mat_hnf of all n^2 basis products, over maximal orders with
+// trivial and nontrivial index, ideals with content, equal minima, squares and
+// word and multiword moduli.  Outside a maximal order the branch is refused.
+void plain_product_hnf(sflint::FmpzMat& out, const silex::Ideal& left,
+                       const silex::Ideal& right) noexcept {
+    const silex::Order& order = *left.parent();
+    const slong n = order.degree();
+    sflint::FmpzMat h(n, n), k(n, n), row(1, n), rows(n * n, n), reduced(n * n, n);
+    assert(left.get_hnf(sflint::FmpzMatRef(h)));
+    assert(right.get_hnf(sflint::FmpzMatRef(k)));
+    silex::OrderElement a(order), b(order), ab(order);
+    for (slong i = 0; i < n; ++i) {
+        sflint::FmpzMatConstWindow hi(h, i, 0, i + 1, n);
+        fmpz_mat_set(row.raw(), hi.raw());
+        assert(a.set_coordinates(sflint::FmpzMatConstRef(row)));
+        for (slong j = 0; j < n; ++j) {
+            sflint::FmpzMatConstWindow kj(k, j, 0, j + 1, n);
+            fmpz_mat_set(row.raw(), kj.raw());
+            assert(b.set_coordinates(sflint::FmpzMatConstRef(row)));
+            assert(ab.multiply(a, b) && ab.get_coordinates(sflint::FmpzMatRef(row)));
+            for (slong c = 0; c < n; ++c) {
+                fmpz_set(fmpz_mat_entry(rows.raw(), i * n + j, c),
+                         fmpz_mat_entry(row.raw(), 0, c));
+            }
+        }
+    }
+    fmpz_mat_hnf(reduced.raw(), rows.raw());
+    sflint::FmpzMatConstWindow top(reduced, 0, 0, n, n);
+    fmpz_mat_set(out.raw(), top.raw());
+}
+
+int test_general_product_hnf_matches_plain_hnf() {
+    sflint::FmpqPoly polynomial;
+    slong generic = 0, multiword = 0;
+    // x^2 - 5 (index 2), x^3 - 10 (index 3), x^3 - 2, the fixture quartic,
+    // Phi_15 and x^6 + x + 1.
+    for (slong which = 0; which < 6; ++which) {
+        sflint::fmpq_poly_zero(polynomial);
+        if (which == 0) {
+            poly_x2_minus(polynomial, 5);
+        } else if (which == 1) {
+            poly_x3_minus(polynomial, 10);
+        } else if (which == 2) {
+            poly_x3_minus(polynomial, 2);
+        } else if (which == 3) {
+            silex::test::ideal_product::polynomial(polynomial, 4);
+        } else if (which == 4) {
+            for (slong e : {8, 7, 5, 4, 3, 1, 0}) {
+                sflint::fmpq_poly_set_coeff_si(polynomial, e,
+                        (e == 7 || e == 4 || e == 1) ? -1 : 1);
+            }
+        } else {
+            sflint::fmpq_poly_set_coeff_si(polynomial, 6, 1);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 1, 1);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+        }
+        silex::NumberField field = field_by_polynomial(polynomial);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order order(field);
+        assert(order.maximal_order(equation) && order.is_maximal());
+        const slong n = order.degree();
+
+        // Evaluation ideals (f(k), theta - k); the last point makes f(k)
+        // exceed one word, so mh mk takes FLINT's multiword path.
+        std::vector<silex::Ideal> ideals;
+        const slong large = (n == 2) ? (WORD(1) << 33) : (n == 3) ? WORD(3000000)
+                          : (n == 4) ? (WORD(1) << 17) : WORD(3000);
+        for (slong point : {2, 3, -2, 7, 11}) {
+            ideals.emplace_back(order);
+            assert(silex::test::ideal_product::evaluation_ideal(ideals.back(), polynomial, point));
+        }
+        ideals.emplace_back(order);
+        assert(silex::test::ideal_product::evaluation_ideal(ideals.back(), polynomial, large));
+        {
+            sflint::Fmpz minimum;
+            silex::OrderElement beta(order);
+            assert(silex::detail::ideal_two_generator(sflint::FmpzRef(minimum), beta,
+                                                      ideals.back()));
+            assert(!fmpz_abs_fits_ui(minimum.raw()));
+        }
+        // A product without metadata, and an ideal with content 6.
+        ideals.emplace_back(order);
+        assert(ideals.back().multiply(ideals[0], ideals[1]));
+        {
+            sflint::FmpzMat h(n, n);
+            assert(ideals[0].get_hnf(sflint::FmpzMatRef(h)));
+            fmpz_mat_scalar_mul_si(h.raw(), h.raw(), 6);
+            ideals.emplace_back(order);
+            assert(ideals.back().set_hnf(sflint::FmpzMatConstRef(h)));
+        }
+
+        sflint::FmpzMat expected(n, n), actual(n, n);
+        for (const silex::Ideal& left : ideals) {
+            for (const silex::Ideal& right : ideals) {
+                if (left.is_one() || right.is_one()) continue;
+                plain_product_hnf(expected, left, right);
+                silex::detail::TwoGeneratorSearchReport report;
+                fmpz_mat_zero(actual.raw());
+                if (!silex::detail::try_ideal_product_hnf(sflint::FmpzMatRef(actual), left, right,
+                                                          {}, &report)) continue;
+                if (report.verified) {
+                    ++generic;
+                    if (&left == &ideals[5] || &right == &ideals[5]) ++multiword;
+                }
+                if (!fmpz_mat_equal(actual.raw(), expected.raw())) {
+                    std::fprintf(stderr, "general product HNF mismatch: n=%ld\n", n);
+                    fmpz_mat_print_pretty(actual.raw());
+                    fmpz_mat_print_pretty(expected.raw());
+                    std::fflush(stdout);
+                }
+                assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+            }
+        }
+
+        // The equation order of x^3 - 10 is not maximal: the generic branch
+        // is refused and the output is unchanged.
+        if (which == 1) {
+            assert(!equation.is_maximal());
+            silex::Ideal a(equation), b(equation), product(equation);
+            assert(silex::test::ideal_product::evaluation_ideal(a, polynomial, 2));
+            assert(silex::test::ideal_product::evaluation_ideal(b, polynomial, 3));
+            sflint::FmpzMat out(3, 3), snapshot(3, 3);
+            fmpz_mat_one(out.raw());
+            fmpz_mat_set(snapshot.raw(), out.raw());
+            assert(!silex::detail::try_ideal_product_hnf(sflint::FmpzMatRef(out), a, b));
+            assert(fmpz_mat_equal(out.raw(), snapshot.raw()));
+            plain_product_hnf(expected, a, b);
+            assert(product.multiply(a, b) && product.get_hnf(sflint::FmpzMatRef(actual)));
+            assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+        }
+    }
+    assert(generic >= 100 && multiword > 0);
+    return 0;
+}
+
 int test_nonprincipal_product_and_associativity() {
     sflint::FmpqPoly f;
     poly_x2_minus(f, -5);
@@ -2645,6 +2782,7 @@ int main(int argc, char** argv) {
     assert(test_general_product_contents_and_fallback() == 0);
     assert(test_nonprincipal_product_and_associativity() == 0);
     assert(test_known_two_generator_hnf_matches_generic() == 0);
+    assert(test_general_product_hnf_matches_plain_hnf() == 0);
     for (slong degree : {2, 3, 4, 6, 8, 12}) {
         for (slong kind = 0; kind < 5; ++kind) {
             silex::Order order;

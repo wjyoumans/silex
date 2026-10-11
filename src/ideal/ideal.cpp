@@ -1331,15 +1331,30 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out, const Ideal& left,
             mh.swap(mk);
         }
         // Extract from k (the smaller minimum; right wins ties).
-        flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n), reduced(2 * n, n);
+        flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n);
         const bool found = extract_two_generator(row, matrix, order,
                 flint::FmpzMatConstRef(k), mk, options, report);
         if (output_report != nullptr) *output_report = report;
         if (!found) return false;
         two_generator_rows(rows, flint::FmpzMatConstRef(h),
                            flint::FmpzConstRef(mk), flint::FmpzMatConstRef(matrix));
-        fmpz_mat_hnf(reduced.raw(), rows.raw());
-        flint::FmpzMatConstWindow top(reduced, 0, 0, n, n);
+        // Source trace: reference `base4.c:idealHNF_mul_two` HNF-reduces the
+        // generators [alpha x | a x] with `ZM_hnfmodid(m, a * x[1,1])`, the
+        // scalar generator times the minimum of the other ideal, after
+        // `idealHNF_mul` has put the smaller-minimum ideal in two-element
+        // form.  Here the rows mk H and H M_beta span mk h + beta h =
+        // h (mk O + beta O) = h k, because extraction verified
+        // k = mk O + beta O.  As mh lies in h and mk in k, the product
+        // contains mh mk Z^n, so its rank is n and every elementary divisor
+        // divides D = mh mk.  That is the contract of FLINT
+        // `fmpz_mat_hnf_modular_eldiv` (Fieker-Hofmann 2014), and the HNF of
+        // a full-rank lattice is unique, so the result is the same matrix as
+        // the generic `fmpz_mat_hnf` of these rows.  D > 1: mh = 1 would put
+        // 1 in the primitive h, so h would be scalar and handled above.
+        fmpz_mul(mh.raw(), mh.raw(), mk.raw());
+        fmpz_mat_hnf_modular_eldiv(rows.raw(), mh.raw());
+        // The window is taken after the HNF, which may permute row storage.
+        flint::FmpzMatConstWindow top(rows, 0, 0, n, n);
         fmpz_mul(ch.raw(), ch.raw(), ck.raw());
         fmpz_mat_scalar_mul_fmpz(result.raw(), top.raw(), ch.raw());
     }
