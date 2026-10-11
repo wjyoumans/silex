@@ -668,6 +668,69 @@ static bool build_embedding_gram(flint::ArbMat& out,
     return true;
 }
 
+// Reduces the ideal basis from the first full-rank rounding at or above
+// min_rounding_scale and builds the Gram matrix of the reduced rows and its
+// Cholesky factor.  The reduced basis is the LLL transform times the ideal
+// HNF, so it spans the same lattice at every scale.
+static bool reduce_finite_enumeration_basis_from_scale(
+        flint::FmpzMat& basis,
+        flint::FmpzMat& transform,
+        slong& rounding_scale,
+        flint::ArbMat& embedding_rows,
+        flint::ArbMat& gram,
+        flint::ArbMat& cholesky,
+        const flint::FmpzMat& original_basis,
+        const flint::ArbMat& original_embedding_rows,
+        slong precision,
+        slong embedding_precision,
+        slong min_rounding_scale,
+        const DiagnosticsContext* diagnostics) noexcept {
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.finite_enumeration_setup.lll_reduce");
+        if (!finite_enumeration_basis_lll_reduce(
+                    basis, transform, rounding_scale, original_basis,
+                    original_embedding_rows, precision, min_rounding_scale,
+                    diagnostics)) {
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail, "T2 context LLL reduction failed");
+            return false;
+        }
+    }
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.finite_enumeration_setup.reduced_embedding_rows");
+        if (!detail::multiply_integer_arb_matrices(
+                    embedding_rows, flint::FmpzMatConstRef(transform),
+                    original_embedding_rows, embedding_precision)) {
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail,
+                      "T2 context reduced embedding rows failed");
+            return false;
+        }
+    }
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.finite_enumeration_setup.gram");
+        if (!build_embedding_gram(gram, embedding_rows, precision)) {
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail, "T2 context Gram build failed");
+            return false;
+        }
+    }
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.finite_enumeration_setup.cholesky");
+        if (flint::arb_mat_cho(cholesky, gram, precision) == 0) {
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail, "T2 context Cholesky failed");
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool build_finite_ideal_t2_enumeration_data_at_precision(
         FiniteIdealT2EnumerationData& out,
         const Ideal& ideal,
@@ -733,58 +796,30 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
     // precision with the same transform gives the same result.  In either case
     // the same lattice is reduced again from the next finer full-rank
     // rounding, as the reference ideal LLL redoes the reduction at a higher
-    // precision.  When no finer scale is left, a basis with quadratic-form
-    // data is kept as before.  The ideal lattice, and the bound rule applied
-    // to the result, do not change.
+    // precision.  When a finer attempt fails, or no finer scale is left, the
+    // first basis that had quadratic-form data is kept.  So a basis that a
+    // single reduction from the first scale accepted before is still the
+    // result when no finer basis is accepted.  The ideal lattice and the
+    // bound rule applied to the result do not change.
+    flint::FmpzMat fallback_basis(degree, degree);
+    std::vector<double> fallback_quadratic_form_data;
+    bool have_fallback = false;
     slong min_rounding_scale = kT2EnumerationInitialRoundingScale;
     for (;;) {
         slong rounding_scale = 0;
+        if (!reduce_finite_enumeration_basis_from_scale(
+                    basis, transform, rounding_scale, embedding_rows, gram,
+                    cholesky, original_basis, original_embedding_rows,
+                    precision, embedding_precision, min_rounding_scale,
+                    diagnostics)) {
+            if (!have_fallback) {
+                return false;
+            }
+            basis.swap(fallback_basis);
+            quadratic_form_data.swap(fallback_quadratic_form_data);
+            break;
+        }
         bool have_quadratic_form = false;
-        {
-            SILEX_PROFILE_SCOPE(
-                    diagnostics, DiagnosticsModule::class_group,
-                    "class_group.finite_enumeration_setup.lll_reduce");
-            if (!finite_enumeration_basis_lll_reduce(
-                        basis, transform, rounding_scale, original_basis,
-                        original_embedding_rows, precision,
-                        min_rounding_scale, diagnostics)) {
-                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                          LogLevel::detail,
-                          "T2 context LLL reduction failed");
-                return false;
-            }
-        }
-        {
-            SILEX_PROFILE_SCOPE(
-                    diagnostics, DiagnosticsModule::class_group,
-                    "class_group.finite_enumeration_setup.reduced_embedding_rows");
-            if (!detail::multiply_integer_arb_matrices(
-                        embedding_rows, flint::FmpzMatConstRef(transform),
-                        original_embedding_rows, embedding_precision)) {
-                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                          LogLevel::detail,
-                          "T2 context reduced embedding rows failed");
-                return false;
-            }
-        }
-        {
-            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
-                                "class_group.finite_enumeration_setup.gram");
-            if (!build_embedding_gram(gram, embedding_rows, precision)) {
-                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                          LogLevel::detail, "T2 context Gram build failed");
-                return false;
-            }
-        }
-        {
-            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
-                                "class_group.finite_enumeration_setup.cholesky");
-            if (flint::arb_mat_cho(cholesky, gram, precision) == 0) {
-                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                          LogLevel::detail, "T2 context Cholesky failed");
-                return false;
-            }
-        }
         {
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::class_group,
@@ -807,11 +842,18 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
                           "T2 context reduced basis outside LLL bounds");
             }
         }
+        if (have_quadratic_form && !have_fallback) {
+            fallback_basis.swap(basis);
+            fallback_quadratic_form_data.swap(quadratic_form_data);
+            have_fallback = true;
+        }
         if (rounding_scale > precision / 2) {
-            if (have_quadratic_form) {
-                break;
+            if (!have_fallback) {
+                return false;
             }
-            return false;
+            basis.swap(fallback_basis);
+            quadratic_form_data.swap(fallback_quadratic_form_data);
+            break;
         }
         min_rounding_scale = 2 * rounding_scale;
     }
