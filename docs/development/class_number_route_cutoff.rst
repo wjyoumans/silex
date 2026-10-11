@@ -20,32 +20,61 @@ is counted from the reduced forms, and from ``2^44`` on it comes from the class
 number formula with a rigorous ``L(1, chi_D)`` enclosure (see "Class groups
 and order units" in :doc:`../reference/algorithms_and_sources`).
 
-The first measurement, below, set the cutoff ``2^44``.  Its requirement was
-that the combined route be no slower than the reduced-form listing alone at
-any measured ``|D|`` from ``1e7`` to ``1e14``, with at least two
-discriminants per decade.  That measurement was on a busy machine, and the
-lattice route's index-one test then used a different ``hR`` below ``2^44``;
-the idle-machine measurement at the end of this page supersedes the cutoff.
+The 2^44 cutoff was set by a first measurement (a busy machine; the lattice
+route's index-one test then used a different ``hR`` below ``2^44``) and was
+re-measured with the faster listing of T-193 (below) before it was lowered to
+``2^34`` on an idle machine (last section).  The sections "Setup" and
+"Results" describe the re-measurement; it was taken with the cutoff at
+``2^44``, so its "lattice" columns are forced routes, not the shipped
+behavior.
+
+Coupling to the zeta cap
+------------------------
+
+The cutoff is coupled to the zeta cap ``quadratic_route_max_abs_discriminant_bits``
+(``src/zeta/zeta.cpp``, value 44).  On the lattice route the index-one test
+takes ``hR`` from the unconditional analytic evaluation (the AFE of
+``L(1, chi_D)``) when ``|D|`` is below the zeta cap, and from the
+Belabas-Friedman route at or above it.  In the re-measurement the AFE was
+reached by the index-2 presentation ``x^2 + n`` only, and cost 23 to 79 s
+where listing took 0.4 to 1.2 s.  Lowering the class-group cutoff below the
+zeta cap therefore exposes the AFE cost on the lattice route between the two;
+the two constants have to be considered together.  Lowering the zeta cap also
+removes the unconditional ``L(1, chi)`` route for ``proven`` requests between
+the new cap and ``2^44``, which is a scope decision.
 
 Setup
 -----
 
-Each field is ``x^2 + n`` with ``n`` squarefree and ``n = 3 mod 4``, so
-``D = -n``.  Each run is one ``silex-class-unit-instance --coeffs n,0,1
---mode grh`` process.  Wall time is the median over the listed runs.  Peak
-memory is the process's maximum resident set size; the process uses about
-21 MB before any class-group work.  Three separate Release trees were built
-with identical settings (GCC 16.2.1, FLINT 3.6.0, AMD Ryzen AI 9 HX PRO
-370): "main" lists forms at every ``|D|``, "lattice only" uses the lattice
-at every ``|D|``, and "combined" uses the cutoff.  The machine was busy with
-other work (load average 5 to 12 on 24 cores, ``machine-idle.sh`` reported
-BUSY at start and end), so these are busy-machine timings, not a controlled
-benchmark.  ``h`` and the class-group invariants agreed in all three trees
-in every row; at ``n = 10^14 + 319`` ``h = 15815072`` agrees with PARI/GP
-2.17 ``quadclassunit``.
+Each field is ``Q(sqrt(-n))`` with ``n`` squarefree and ``n = 3 mod 4``, so
+``D = -n``.  Each run is one ``silex-class-unit-instance --mode grh``
+process, whose wall time is the median over 7 runs (5 in the sweep below
+``1e12``), interleaved per repetition with the order rotating.  The source was
+main at 4e7433a (which includes T-193).  Because no option forces the route,
+three scratch Release builds differing in one or two constants were used:
+
+- "listing": the class-group cutoff set to 99, so forms are listed at every
+  ``|D|`` (equal to the shipped build below ``2^44``);
+- "lattice": the cutoff set to 0, so the lattice is used at every ``|D|``,
+  with the shipped ``hR`` choice (the AFE below the zeta cap, Belabas-Friedman
+  at or above it; equal to the shipped build above ``2^44``);
+- "lattice BF": the cutoff and the zeta cap both set to 0, so the lattice is
+  used with the Belabas-Friedman ``hR`` at every ``|D|``.
+
+Each field was run in four presentations: ``x^2 + x + (n+1)/4`` (equation
+order index 1, the maximal order, "lucky"), ``x^2 + n`` (index 2),
+``x^2 + x + (9n+1)/4`` (index 3) and ``x^2 + 9n`` (index 6).  The tables give
+the lucky (index 1) and the index-2 presentation.  ``h`` and the class-group
+invariants agreed in all trees and presentations for every field.  The
+machine was busy (``machine-idle.sh`` reported BUSY at the start and IDLE at
+the end, after all runs; load average 5 to 8 on 24 cores), so these are
+busy-machine timings, not a controlled benchmark.  Memory was not measured.
 
 Results
 -------
+
+Fields with ``|D|`` below ``2^44``, wall time in seconds (index 1 / index 2).
+The AFE cost appears only in the index-2 "lattice" column.
 
 .. list-table::
    :header-rows: 1
@@ -53,160 +82,119 @@ Results
    * - ``n``
      - bits of ``|D|``
      - ``h``
-     - runs
-     - main: s, MB
-     - lattice only: s, MB
-     - combined: s, MB
-   * - 10000003
-     - 24
-     - 706
-     - 3
-     - 0.011, 21
-     - 0.183, 21
-     - 0.011, 21
-   * - 30000003
-     - 25
-     - 1380
-     - 3
-     - 0.011, 21
-     - 0.214, 21
-     - 0.012, 21
-   * - 100000003
-     - 27
-     - 1702
-     - 3
-     - 0.016, 22
-     - 0.661, 21
-     - 0.017, 22
-   * - 300000003
-     - 29
-     - 3072
-     - 3
-     - 0.031, 23
-     - 0.823, 22
-     - 0.030, 23
-   * - 1000000003
-     - 30
-     - 3680
-     - 1
-     - 2.100, 25
-     - 2.085, 22
-     - 2.088, 25
-   * - 3000000003
-     - 32
-     - 9728
-     - 3
-     - 0.080, 28
-     - 2.232, 22
-     - 0.078, 28
-   * - 10000000003
-     - 34
-     - 10538
-     - 1
-     - 5.181, 32
-     - 5.203, 22
-     - 5.506, 32
-   * - 30000000003
-     - 35
-     - 33216
-     - 3
-     - 0.084, 40
-     - 5.701, 22
-     - 0.084, 40
-   * - 100000000003
-     - 37
-     - 31057
-     - 1
-     - 10.677, 55
-     - 10.696, 24
-     - 10.815, 55
-   * - 300000000007
-     - 39
-     - 173988
-     - 3
-     - 0.245, 82
-     - 16.946, 23
-     - 0.246, 82
+     - listing
+     - lattice
+     - lattice BF
    * - 1000000000003
      - 40
      - 124568
-     - 1
-     - 26.825, 125
-     - 27.516, 24
-     - 28.299, 126
+     - 0.60 / 0.43
+     - 0.51 / 22.9
+     - 0.50 / 0.36
    * - 3000000000003
      - 42
      - 412512
-     - 3
-     - 0.383, 207
-     - 34.430, 23
-     - 0.373, 207
+     - 0.39 / 0.33
+     - 0.21 / 27.7
+     - 0.21 / 0.14
    * - 10000000000003
      - 44
      - 497056
-     - 1
-     - 77.044, 355
-     - 78.642, 25
-     - 78.804, 355
+     - 1.03 / 1.16
+     - 0.74 / 64.6
+     - 0.72 / 0.88
    * - 15000000000007
      - 44
      - 1331780
-     - 1
-     - 91.277, 446
-     - 92.895, 24
-     - 86.812, 446
+     - 0.80 / 0.82
+     - 0.29 / 78.6
+     - 0.29 / 0.31
+   * - 17592186044415
+     - 44
+     - 3384192
+     - 0.99 / 1.03
+     - 0.12 / 52.3
+     - 0.12 / 0.17
+
+Fields with ``|D|`` at or above ``2^44``: the shipped lattice route (equal to
+"lattice") against listing.
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``n``
+     - bits of ``|D|``
+     - ``h``
+     - listing
+     - lattice
    * - 18000000000003
      - 45
      - 888096
-     - 3
-     - 0.854, 473
-     - 0.329, 24
-     - 0.321, 24
-   * - 20000000000003
-     - 45
-     - 1081476
-     - 3
-     - 0.932, 501
-     - 0.406, 24
-     - 0.396, 24
+     - 0.68 / 0.75
+     - 0.22 / 0.28
    * - 30000000000003
      - 45
      - 1290536
-     - 3
-     - 1.031, 607
-     - 0.378, 24
-     - 0.397, 23
-   * - 50000000000003
-     - 46
-     - 1469496
-     - 3
-     - 1.820, 774
-     - 1.017, 26
-     - 0.982, 26
+     - 0.93 / 0.94
+     - 0.32 / 0.34
    * - 100000000000003
      - 47
      - 1425472
-     - 3
-     - 2.384, 1071
-     - 1.345, 27
-     - 1.359, 27
+     - 1.64 / 2.12
+     - 0.72 / 1.18
    * - 100000000000319
      - 47
      - 15815072
-     - 3
-     - 3.211, 1396
-     - 0.118, 22
-     - 0.118, 22
+     - 2.94 / 2.87
+     - 0.18 / 0.12
 
-The combined route equals main below ``2^44`` and is faster above it.  The
-lattice-only route is slower than main at every measured ``|D| < 2^44`` and
-faster at every measured ``|D| >= 2^44``, so ``2^44`` is the cutoff.  The
-fields ``n = 10^k + 3`` (``k = 9`` to ``13``) and ``n = 15000000000007``
-take seconds to minutes in all three trees, by similar amounts in both
-routes; that cost does not come from listing forms and is not studied here.
-A second, interleaved run of main
-and combined at ``n = 10^10 + 3`` and ``n = 10^12 + 3`` (three runs each)
-gave medians of 5.07 s and 5.09 s, and 25.87 s and 25.92 s.
+At ``n = 10^14 + 319``, ``h = 15815072`` agrees with PARI/GP 2.17
+``quadclassunit``.  Below ``1e12``, listing against "lattice BF" (index 1 /
+index 2, seconds) shows a tie within the noise at ``1e8`` to ``1e10`` and a
+5 to 10% gain for the lattice at ``1e11``:
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``n``
+     - bits of ``|D|``
+     - ``h``
+     - listing
+     - lattice BF
+   * - 100000003
+     - 27
+     - 1702
+     - 0.019 / 0.022
+     - 0.019 / 0.025
+   * - 1000000003
+     - 30
+     - 3680
+     - 0.047 / 0.070
+     - 0.054 / 0.073
+   * - 10000000003
+     - 34
+     - 10538
+     - 0.079 / 0.111
+     - 0.073 / 0.108
+   * - 100000000003
+     - 37
+     - 31057
+     - 0.262 / 0.375
+     - 0.233 / 0.351
+
+Listing now takes 0.3 to 1.2 s for ``|D|`` from ``1e12`` to ``2^44`` in every
+presentation, and 0.7 to 2.9 s up to ``1e14``.  The earlier table had 27 to
+91 s there, which came from the listing before T-193.
+
+The lattice with the shipped ``hR`` choice is slower than listing below
+``2^44`` only on the presentations that reach the AFE, here the index-2
+presentation ``x^2 + n`` (23 to 79 s against 0.4 to 1.2 s); the index 1, 3 and
+6 presentations take the Belabas-Friedman route even there, and are as fast
+as or faster than listing from ``1e12``.  Why only index 2 reaches the AFE
+was not investigated.  The lattice with the Belabas-Friedman ``hR`` is at
+least as fast as listing at every presentation from ``1e12``, by 1.0 to 1.4x
+at ``1e12`` and ``1e13`` and up to 8x at ``2^44 - 1``.  At and above ``2^44``
+the lattice is faster than listing in every row, by 1.4 to 25x.
 
 Lowering the cutoff to 2^34
 ---------------------------
