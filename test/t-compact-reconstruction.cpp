@@ -1,3 +1,4 @@
+#include <silex/diagnostics.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/embedding.hpp>
 #include <silex/flint/fmpq.hpp>
@@ -24,6 +25,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <vector>
 
@@ -779,6 +781,62 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     return 0;
 }
 
+// Log-cache events seen inside the residual log bound and inside the compact
+// presentation of a unit power test.  The presentation embeds the bases of
+// its input first and only later the multipliers it builds, so its leading
+// hits (those before its first store) are base logs served by the cache.
+struct SharedLogCacheCounters {
+    slong residual_bound_depth = 0;
+    slong presentation_depth = 0;
+    slong residual_bound_hits = 0;
+    slong residual_bound_stores = 0;
+    slong presentation_leading_hits = 0;
+    slong presentation_stores = 0;
+};
+
+void shared_log_cache_callback(void* user,
+                               silex::DiagnosticsModule,
+                               silex::ProfileEvent event,
+                               const char*,
+                               const char* label) noexcept {
+    SharedLogCacheCounters* counters =
+            static_cast<SharedLogCacheCounters*>(user);
+    if (label == nullptr) {
+        return;
+    }
+    const bool residual_bound =
+            std::strcmp(label, "unit_group.compact_unit_residual_log_bound") ==
+            0;
+    const bool presentation =
+            std::strcmp(label,
+                        "unit_group.compact_unit_presentation_reduction") == 0;
+    if (event == silex::ProfileEvent::begin_scope ||
+        event == silex::ProfileEvent::end_scope) {
+        const slong step = event == silex::ProfileEvent::begin_scope ? 1 : -1;
+        if (residual_bound) {
+            counters->residual_bound_depth += step;
+        } else if (presentation) {
+            counters->presentation_depth += step;
+        }
+        return;
+    }
+    const bool hit =
+            std::strcmp(label, "element.logarithmic_embedding.cache_hit") == 0;
+    const bool store =
+            std::strcmp(label, "element.logarithmic_embedding.cache_store") ==
+            0;
+    if (counters->residual_bound_depth > 0) {
+        counters->residual_bound_hits += hit ? 1 : 0;
+        counters->residual_bound_stores += store ? 1 : 0;
+    }
+    if (counters->presentation_depth > 0) {
+        if (hit && counters->presentation_stores == 0) {
+            ++counters->presentation_leading_hits;
+        }
+        counters->presentation_stores += store ? 1 : 0;
+    }
+}
+
 // A unit power test whose bases have huge coefficients: one conjugate of
 // each base is tiny, so its logarithm cancels and the factored-log precision
 // ladder climbs far above the requested 64 bits.  The two log bounds and the
@@ -812,13 +870,38 @@ int test_compact_unit_power_root_reuses_high_precision_base_logs() {
     assert(square.push(large, 1) && square.push(small, 1) &&
            square.push(structural, 2));
 
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    SharedLogCacheCounters counters;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::element) |
+                    silex::diagnostics_module_bit(
+                            silex::DiagnosticsModule::unit_group),
+            shared_log_cache_callback, &counters);
+
     constexpr slong precision = 128;
     bool is_power = false;
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
-            is_power, root, order, square, 2, precision, precision, nullptr,
-            nullptr));
+            is_power, root, order, square, 2, precision, precision,
+            &diagnostics, nullptr));
     assert(is_power && compact_power_root_squares_to(root, square));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The residual bound takes both leftover base logs from the context the
+    // original bound filled and stores none.  The compact presentation shares
+    // that context, so its first embeddings, those of the bases of its input
+    // (at least the two leftover bases), are cache hits; with a context of
+    // its own the first embedding would miss and store.
+    assert(counters.residual_bound_depth == 0 &&
+           counters.presentation_depth == 0);
+    assert(counters.residual_bound_hits >= 2 &&
+           counters.residual_bound_stores == 0);
+    assert(counters.presentation_leading_hits >= 2);
+#else
+    assert(counters.residual_bound_hits == 0 &&
+           counters.presentation_leading_hits == 0);
+#endif
 
     // A unit that is not a square: (1 + x)^401 * (1 + x)^4.
     silex::FactoredElement non_square(field);
