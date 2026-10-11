@@ -149,6 +149,11 @@ enum class ClassGroupRelationSource {
     ClassGenerator = 6
 };
 
+// Some const member functions fill internal caches; relation_kernel_unit,
+// for one, computes and stores the LLL-reduced relation kernel on first use.
+// A const call is therefore not a read-only access: a ClassGroupContext must
+// not be used from several threads at once, even through const member
+// functions, without external synchronization.
 class ClassGroupContext {
 public:
     ClassGroupContext() noexcept;
@@ -452,6 +457,8 @@ public:
     bool invariant_generator_power_witness(FactoredElement& out,
                                            slong index) const noexcept;
     slong relation_kernel_unit_count() const noexcept;
+    // Fills the cached reduced relation kernel on first use (see the class
+    // comment on concurrent const calls).
     bool relation_kernel_unit(FactoredElement& out, slong index) const noexcept;
     bool compute_candidate(const Order& order,
                            flint::FmpzConstRef factor_base_bound,
