@@ -52,6 +52,11 @@ Added
   ``kor1_generation`` (the spelling of the detail log: no hypothesis on the
   different is needed), and is null for every other basis.  Additive; the
   format is unchanged.
+- ``silex-class-unit-instance`` raises its default ``max_candidates`` for
+  degree 3 and up from 5000 to ``max(5000, n^2 + 64)``, so degrees above 70
+  are no longer stopped before the small-LLL phase finishes its ``n^2``
+  candidates.  ``--max-candidates`` still overrides; smaller degrees are
+  unchanged.
 - ``silex-class-unit-instance`` reports ``failure_reason``
   ``factor_base_honesty_unwitnessed`` (``failure_stage`` ``total``) when a
   class/unit computation fails because the last candidate attempt stopped at

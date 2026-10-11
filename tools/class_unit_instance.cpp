@@ -859,7 +859,11 @@ bool configure_compute_options(silex::ClassGroupComputeOptions& out,
     }
 
     if (order.degree() >= 3) {
-        out.max_candidates = 5000;
+        // The small-LLL phase tries up to n^2 candidates, so the cap must
+        // exceed n^2 or high-degree rows fail before it finishes. The slack
+        // of 64 leaves room for the few candidates other phases consume.
+        const slong n = static_cast<slong>(order.degree());
+        out.max_candidates = std::max<slong>(5000, n * n + 64);
         out.max_relations = order.degree() >= 5 ? 1000 : 500;
     }
 
