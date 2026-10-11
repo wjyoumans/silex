@@ -8,6 +8,7 @@
 #include <flint/fmpz_mod_mat.h>
 #include <flint/fmpz_mod_poly.h>
 #include <flint/fmpz_mod_poly_factor.h>
+#include <flint/fmpz_poly.h>
 #include <flint/nf_elem.h>
 
 #include <silex/archimedean.hpp>
@@ -21,6 +22,7 @@
 #include <silex/flint/fmpz_mod_mat.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/flint/fmpz_vec.hpp>
 #include <silex/flint/nf_elem.hpp>
 #include <silex/ideal.hpp>
@@ -180,6 +182,46 @@ void squarefree_kernel(flint::FmpzModPoly& out,
         fmpz_mod_poly_mul(out.raw(), out.raw(),
                           factorization.raw()->poly + i, ctx.raw());
     }
+}
+
+// Dedekind's criterion for Z[theta] = Z[x]/(f), f monic integral: with
+// f = prod t_i^e_i mod p, g = prod t_i and h = f/g mod p (monic lifts), Z[theta]
+// is p-maximal iff gcd(F, g, h) = 1 mod p, where F = (f - g h)/p.  Cohen,
+// GTM 138, Thm 6.1.4 (2) and Alg 6.1.8 steps 4-6; the upstream anchor is
+// listed in docs/reference/algorithms_and_sources.rst.  The caller
+// guarantees that f is monic integral.
+bool monic_equation_order_is_p_maximal(const fmpq_poly_t polynomial,
+                                       const fmpz_t prime) noexcept {
+    flint::FmpzModCtx ctx(prime);
+    flint::FmpzModPoly reduced(ctx);
+    flint::FmpzModPoly radical(ctx);
+    flint::FmpzModPoly cofactor(ctx);
+    flint::FmpzModPoly remainder(ctx);
+    flint::FmpzModPoly quotient(ctx);
+    flint::FmpzModPoly gcd(ctx);
+    flint::FmpzModPolyFactor factorization(ctx);
+    flint::FmpzPoly f;
+    flint::FmpzPoly g;
+    flint::FmpzPoly h;
+    flint::FmpzPoly gh;
+
+    fmpq_poly_get_fmpz_mod_poly(reduced, polynomial, ctx);
+    fmpz_mod_poly_factor(factorization.raw(), reduced.raw(), ctx.raw());
+    squarefree_kernel(radical, factorization, ctx);
+    fmpz_mod_poly_divrem(cofactor.raw(), remainder.raw(), reduced.raw(),
+                         radical.raw(), ctx.raw());
+
+    fmpq_poly_get_numerator(f.raw(), polynomial);
+    fmpz_mod_poly_get_fmpz_poly(g.raw(), radical.raw(), ctx.raw());
+    fmpz_mod_poly_get_fmpz_poly(h.raw(), cofactor.raw(), ctx.raw());
+    fmpz_poly_mul(gh.raw(), g.raw(), h.raw());
+    fmpz_poly_sub(f.raw(), f.raw(), gh.raw());
+    fmpz_poly_scalar_divexact_fmpz(f.raw(), f.raw(), prime);
+    fmpz_mod_poly_set_fmpz_poly(quotient.raw(), f.raw(), ctx.raw());
+
+    fmpz_mod_poly_gcd(gcd.raw(), radical.raw(), cofactor.raw(), ctx.raw());
+    fmpz_mod_poly_gcd(gcd.raw(), gcd.raw(), quotient.raw(), ctx.raw());
+    return fmpz_mod_poly_degree(gcd.raw(), ctx.raw()) == 0;
 }
 
 bool element_set_mod_poly(Element& out,
@@ -1176,6 +1218,14 @@ bool Order::pmaximal_overorder(const Order& input,
         return true;
     }
 
+    // Dedekind's criterion settles p-maximality of Z[theta] without the
+    // multiplier ring; when it holds, the loop below would return the input.
+    const fmpq_poly_struct* polynomial = data_->parent_.raw_flint_field()->pol;
+    if (input.is_equation_order() && fmpq_poly_is_monic_integral(polynomial) &&
+        monic_equation_order_is_p_maximal(polynomial, prime.raw())) {
+        return candidate.set(input) && (swap(candidate), true);
+    }
+
     Order current(data_->parent_);
     Order next(data_->parent_);
     flint::Fmpz p_squared;
@@ -1259,8 +1309,23 @@ bool Order::maximal_order(const Order& input) noexcept {
     fmpz_abs(disc.raw(), disc.raw());
     fmpz_factor(factorization.raw(), disc.raw());
 
+    // For an equation-order input Z[theta] with f monic integral, current is
+    // Z[theta] enlarged only at the primes already processed, each by a power
+    // of that prime (Cohen, GTM 138, Thm 6.1.3: O c O' c p^-1 O).  So current
+    // is p-maximal whenever Z[theta] is, and pmaximal_overorder would then
+    // return it unchanged (Thm 6.1.3: O' = O exactly when O is p-maximal).
+    const fmpq_poly_struct* polynomial = data_->parent_.raw_flint_field()->pol;
+    const bool dedekind_applies = input.is_equation_order() &&
+                                  fmpq_poly_is_monic_integral(polynomial);
+
     for (slong i = 0; i < factorization.raw()->num; ++i) {
         if (factorization.raw()->exp[i] < 2) {
+            continue;
+        }
+
+        if (dedekind_applies &&
+            monic_equation_order_is_p_maximal(
+                    polynomial, factorization.raw()->p + i)) {
             continue;
         }
 

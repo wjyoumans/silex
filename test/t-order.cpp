@@ -665,6 +665,82 @@ int test_maximal_order_failure_preserves_output() {
     return 0;
 }
 
+int test_dedekind_criterion_equation_orders() {
+    // x^3 - 10 has discriminant -2700 = -2^2 3^3 5^2.  It is Eisenstein at 2
+    // and 5, so Z[theta] is 2- and 5-maximal.  At 3, x^3 - 10 = (x - 1)^3 and
+    // (f - (x - 1)^3)/3 = x^2 - x - 3 = x(x - 1) mod 3, so Dedekind's gcd is
+    // x - 1 and Z[theta] is not 3-maximal: since 10 = 1 mod 9,
+    // (1 + theta + theta^2)/3 is integral, [O_K : Z[theta]] = 3 and
+    // disc(O_K) = -300.
+    sflint::FmpqPoly polynomial;
+    poly_x3_minus(polynomial, 10);
+    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::Order equation = silex::test::equation_order(field);
+    assert(equation.is_equation_order());
+
+    sflint::FmpqPoly third_poly;
+    sflint::Fmpq third;
+    sflint::fmpq_set_si(third, 1, 3);
+    for (slong i = 0; i < 3; ++i) {
+        sflint::fmpq_poly_set_coeff_fmpq(third_poly, i, third);
+    }
+    silex::Element third_element(field);
+    assert(third_element.set_fmpq_poly(sflint::FmpqPolyConstRef(third_poly)));
+    assert(!equation.contains(third_element));
+
+    sflint::Fmpz p;
+    sflint::Fmpz idx;
+    sflint::Fmpz disc;
+    for (slong prime = 2; prime <= 5; prime += 3) {
+        sflint::fmpz_set_si(p, prime);
+        silex::Order pmax(field);
+        assert(pmax.pmaximal_overorder(equation, sflint::FmpzConstRef(p)));
+        assert(pmax.is_equation_order());
+        assert(!pmax.maximality_known());
+        assert(order_index(sflint::FmpzRef(idx), equation, pmax));
+        assert(sflint::fmpz_equal_si(idx, 1));
+    }
+
+    sflint::fmpz_set_si(p, 3);
+    silex::Order pmax3(field);
+    assert(pmax3.pmaximal_overorder(equation, sflint::FmpzConstRef(p)));
+    assert(!pmax3.is_equation_order());
+    assert(pmax3.contains(third_element));
+    assert(order_index(sflint::FmpzRef(idx), equation, pmax3));
+    assert(sflint::fmpz_equal_si(idx, 3));
+    assert(pmax3.discriminant(sflint::FmpzRef(disc)));
+    assert(sflint::fmpz_equal_si(disc, -300));
+
+    // The global route enlarges at 3 and keeps the enlarged order at 5.
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(maximal.contains(third_element));
+    assert(order_index(sflint::FmpzRef(idx), equation, maximal));
+    assert(sflint::fmpz_equal_si(idx, 3));
+    assert(order_index(sflint::FmpzRef(idx), pmax3, maximal));
+    assert(sflint::fmpz_equal_si(idx, 1));
+    assert(maximal.discriminant(sflint::FmpzRef(disc)));
+    assert(sflint::fmpz_equal_si(disc, -300));
+    assert(maximal.is_maximal());
+
+    // x^3 - 2 (discriminant -108 = -2^2 3^3) passes Dedekind at 2 and 3, so
+    // the maximal order is the input equation order itself.
+    poly_x3_minus(polynomial, 2);
+    silex::NumberField pure_cubic = field_by_polynomial(polynomial);
+    silex::Order pure_equation = silex::test::equation_order(pure_cubic);
+    silex::Order pure_maximal(pure_cubic);
+    assert(pure_maximal.maximal_order(pure_equation));
+    assert(pure_maximal.is_equation_order());
+    assert(pure_maximal.is_maximal());
+    sflint::fmpz_set_si(p, 3);
+    silex::Order pure_pmax(pure_cubic);
+    assert(pure_pmax.pmaximal_overorder(pure_equation,
+                                        sflint::FmpzConstRef(p)));
+    assert(pure_pmax.is_equation_order());
+
+    return 0;
+}
+
 silex::Order local_equation_order() {
     silex::NumberField field = quadratic_field(2);
     return silex::Order::equation_order(field);
@@ -1084,6 +1160,7 @@ int main() {
     assert(test_quadratic_maximal_orders() == 0);
     assert(test_polynomial_quadratic_and_generic_global_maximal_orders() == 0);
     assert(test_maximal_order_failure_preserves_output() == 0);
+    assert(test_dedekind_criterion_equation_orders() == 0);
     assert(test_order_keeps_parent_alive() == 0);
     assert(test_maximality_is_only_computed() == 0);
     assert(test_general_conductor_quadratic() == 0);
