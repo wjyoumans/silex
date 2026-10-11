@@ -70,5 +70,14 @@ bool quadratic_nth_suitable_ideal_bound(
 bool quadratic_working_bound_floor(slong& out,
                                    flint::FmpzConstRef discriminant) noexcept;
 
+// Test hook for the structure-certificate switch of
+// specialize_maximal_imaginary_quadratic_factor_base_plan: a positive
+// `columns` replaces kRelationModuleMaxColumns as the number of prime ideals
+// up to the generation bound past which a `proven` imaginary quadratic plan
+// keeps its compact base, so a test can take that route on a small field.
+// Zero restores the default.
+void set_quadratic_structure_certificate_column_limit_for_testing(
+        slong columns) noexcept;
+
 }  // namespace relation_search
 }  // namespace silex::detail

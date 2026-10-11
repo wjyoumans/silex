@@ -1229,8 +1229,10 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
 
     fmpz_smat::HnfContext staged_relation_module;
     staged_relation_module.set_diagnostics(active_diagnostics);
-    // Candidate form rows stay private.  Only the canonical HNF basis below
-    // is admitted after reconstructing an exact public element witness.
+    // Candidate form rows stay private until the checkpoint below admits
+    // either the canonical HNF basis or, on the structure-certificate route,
+    // the staged rows, each after reconstructing an exact public element
+    // witness.
     std::vector<flint::FmpzMat> staged_relation_rows;
     std::vector<ClassGroupRelationSource> staged_relation_sources;
     if (!staged_relation_module.reset(
@@ -1368,7 +1370,40 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                 }
             }
             bool published = false;
-            if (exact_relation_lattice) {
+            if (exact_relation_lattice && structure_certificate_route) {
+                // On the structure-certificate route the staged rows
+                // themselves are admitted, each with its exact witness.
+                // They span the same lattice as the HNF basis, so the
+                // presentation is the same.  The HNF rows of this compact
+                // base carry entries up to h, so their row ideals have
+                // norms of millions of bits and the witness reduction
+                // below stalls on them; the staged rows have small
+                // exponents.  The structure certificate and validation
+                // read only the presentation and the factor base, not the
+                // relation generators.
+                SILEX_PROFILE_SCOPE(
+                        active_diagnostics, DiagnosticsModule::class_group,
+                        "class_group.maximal_imaginary_quadratic_relations."
+                        "checkpoint.witness_staged");
+                for (std::size_t staged_index = 0;
+                     staged_index < staged_relation_rows.size();
+                     ++staged_index) {
+                    Element generator(*order.parent());
+                    const flint::FmpzMatConstRef row(
+                            staged_relation_rows[staged_index]);
+                    if (!generator.is_defined() ||
+                        !principal_generator_from_factor_base_row(
+                                generator, order, base_, form_primes, row,
+                                flint::FmpzConstRef(discriminant),
+                                active_diagnostics) ||
+                        !append_verified_relation(
+                                row, generator,
+                                staged_relation_sources[staged_index])) {
+                        return SpecializedRelationBackendStatus::failed;
+                    }
+                }
+                published = publish_presentation();
+            } else if (exact_relation_lattice) {
                 SILEX_PROFILE_SCOPE(
                         active_diagnostics, DiagnosticsModule::class_group,
                         "class_group.maximal_imaginary_quadratic_relations."

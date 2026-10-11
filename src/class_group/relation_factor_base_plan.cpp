@@ -11,6 +11,7 @@
 #include <flint/ulong_extras.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -967,6 +968,11 @@ bool next_relation_factor_base_bound(
 
 namespace {
 
+// Test-only override of the column limit of the structure-certificate
+// switch; zero means off.  Production code only reads it.  Relaxed atomic
+// so a reader on another thread never races with a test setting it.
+std::atomic<slong> g_quadratic_structure_certificate_column_limit_override{0};
+
 // Whether the norm-bounded factor base of the maximal order of discriminant
 // D < 0 up to `bound` has more prime ideals than kRelationModuleMaxColumns:
 // two of norm p for each split p <= bound, one for each ramified p <= bound,
@@ -981,6 +987,12 @@ bool quadratic_base_exceeds_relation_module_limit(
         return false;
     }
     const ulong limit = flint::fmpz_get_ui(bound);
+    const slong override_columns =
+            g_quadratic_structure_certificate_column_limit_override.load(
+                    std::memory_order_relaxed);
+    const slong max_columns = override_columns > 0
+            ? override_columns
+            : kRelationModuleMaxColumns;
     slong ideals = 0;
     flint::Fmpz rational_prime;
     for (ulong p = 2; p <= limit; p = n_nextprime(p, 1)) {
@@ -992,7 +1004,7 @@ bool quadratic_base_exceeds_relation_module_limit(
         } else if (symbol == 0 || p <= limit / p) {
             ideals += 1;
         }
-        if (ideals > kRelationModuleMaxColumns) {
+        if (ideals > max_columns) {
             out = true;
             break;
         }
@@ -1001,6 +1013,12 @@ bool quadratic_base_exceeds_relation_module_limit(
 }
 
 }  // namespace
+
+void set_quadratic_structure_certificate_column_limit_for_testing(
+        slong columns) noexcept {
+    g_quadratic_structure_certificate_column_limit_override.store(
+            columns > 0 ? columns : 0, std::memory_order_relaxed);
+}
 
 bool specialize_maximal_imaginary_quadratic_factor_base_plan(
         RelationFactorBasePlan& plan,

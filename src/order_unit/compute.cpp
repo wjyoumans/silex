@@ -4244,6 +4244,16 @@ bool OrderUnitGroup::compute_with_class_group(
                 return false;
             }
             auto ensure_factor_base_generation = [&]() noexcept {
+                // A `proven` imaginary quadratic base planned for the
+                // structure certificate has no generation bound to check:
+                // validation (rank_zero_quadratic_class_index_bound)
+                // accepts it only when the certificate passes.
+                if (requested_proven && rank == 0 &&
+                    detail::ClassGroupCertificationAccess::
+                            imaginary_quadratic_structure_certificate_planned(
+                                    candidate_class_group)) {
+                    return true;
+                }
                 flint::Fmpz required_bound;
                 if (candidate_class_group.factor_base_generation_bound(
                             flint::FmpzRef(required_bound)) &&
