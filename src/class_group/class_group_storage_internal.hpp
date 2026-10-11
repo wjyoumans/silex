@@ -544,6 +544,8 @@ public:
                           ->direct_partial_residue_blocks.size();
     }
 
+    // `norm` must be the exact field norm of `generator` and
+    // `integral_coordinates` its coordinates.
     static bool try_append_integral_generator_relation(
             ClassGroupContext& context,
             bool& partial_throttle_exit,

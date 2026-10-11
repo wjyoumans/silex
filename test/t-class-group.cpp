@@ -1752,6 +1752,9 @@ int test_direct_partial_row_exact_valuation_cubic() {
                 assert(sflint::fmpz_equal(
                         sflint::FmpzConstRef(large_prime),
                         sflint::FmpzConstRef(known_large_prime)));
+                assert(sflint::fmpz_equal(
+                        sflint::FmpzConstRef(large_prime),
+                        sflint::FmpzConstRef(leftover)));
                 assert(sflint::fmpz_mat_ncols(row) == base->length());
 
                 silex::Ideal principal(maximal_order);
