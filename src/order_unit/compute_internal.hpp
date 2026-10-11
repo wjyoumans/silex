@@ -587,20 +587,29 @@ enum class ValidationRecomputeCause {
 // The last bounded class-relation saturation pass of grh validation that
 // appended no relation and cleared no prime of h_cand, kept across the
 // iterations of the class/unit loop (compute_with_relation_class_group_).
-// While h_cand is exactly the recorded value and the candidate regulator is
-// within a certified factor two of the recorded one, the relation lattice
-// and the unit lattice are taken to be unchanged and the pass is not
-// repeated: saturate_candidate_class_relations_with_units replays its state
-// instead (ClassGroupCertificationAccess::
-// replay_unchanged_bounded_relation_saturation).  A pass with the same
-// lattices and the same ell set, auxiliary-prime bound and append limit
-// tests the same question.  This is a cost memo only: grh acceptance never
-// rests on this saturation, which only adds relations when it finds them.
+// While h_cand is exactly the recorded value, the factor base has the
+// recorded number of generators and the candidate regulator is within a
+// certified factor two of the recorded one, the pass is not repeated:
+// saturate_candidate_class_relations_with_units replays its state instead
+// (ClassGroupCertificationAccess::
+// replay_unchanged_bounded_relation_saturation).  The skip is a heuristic
+// over the same lattices and the same bounds (ell set, auxiliary-prime
+// bound, append limit): it assumes that the pass would again append
+// nothing, and that is empirical, not proven.  The pass power-tests kernel
+// rows over the actual relation rows and unit generators, so appended rows
+// that leave the lattices unchanged can change what it tests; and the
+// factor-two regulator test proves the unit lattices equal only when one
+// contains the other, which the units rebuilt in each iteration do not
+// guarantee.  Identical outputs were observed on every grh row of the
+// class/unit benchmark corpus.  This is a cost memo only: grh acceptance
+// never rests on this saturation, which only adds relations when it finds
+// them.
 struct RelationSaturationMemo {
     bool valid = false;
     flint::Fmpz class_order;
     flint::Arb regulator;
     flint::Fmpz aux_bound;
+    slong generator_count = 0;
     slong max_appends_per_ell = 0;
     slong attempt_limit = 0;
     // Number of passes skipped through the memo, for tests.

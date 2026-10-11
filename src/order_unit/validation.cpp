@@ -697,6 +697,7 @@ bool saturate_candidate_class_relations_with_units(
                               flint::FmpzConstRef(memo->class_order)) &&
             flint::fmpz_equal(flint::FmpzConstRef(aux_bound),
                               flint::FmpzConstRef(memo->aux_bound)) &&
+            class_group.generator_count() == memo->generator_count &&
             max_appends_per_ell == memo->max_appends_per_ell &&
             attempt_limit == memo->attempt_limit &&
             regulators_within_factor_two(regulator, memo->regulator) &&
@@ -741,6 +742,7 @@ bool saturate_candidate_class_relations_with_units(
         if (memo->valid) {
             flint::fmpz_set(flint::FmpzRef(memo->aux_bound),
                             flint::FmpzConstRef(aux_bound));
+            memo->generator_count = class_group.generator_count();
             memo->max_appends_per_ell = max_appends_per_ell;
             memo->attempt_limit = attempt_limit;
         }
