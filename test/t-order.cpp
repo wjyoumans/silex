@@ -738,6 +738,25 @@ int test_dedekind_criterion_equation_orders() {
                                         sflint::FmpzConstRef(p)));
     assert(pure_pmax.is_equation_order());
 
+    // Dedekind's x^3 - x^2 - 2x - 8 has discriminant -2012 = -2^2 * 503.
+    // Modulo 2 it is x^2 (x + 1) (mixed multiplicities), the criterion fails
+    // at 2, [O_K : Z[theta]] = 2 and disc(O_K) = -503.
+    sflint::FmpqPoly dedekind_poly;
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 0, -8);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 1, -2);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 2, -1);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 3, 1);
+    silex::NumberField dedekind_field = field_by_polynomial(dedekind_poly);
+    silex::Order dedekind_equation = silex::test::equation_order(dedekind_field);
+    silex::Order dedekind_maximal(dedekind_field);
+    assert(dedekind_maximal.maximal_order(dedekind_equation));
+    assert(!dedekind_maximal.is_equation_order());
+    assert(order_index(sflint::FmpzRef(idx), dedekind_equation,
+                       dedekind_maximal));
+    assert(sflint::fmpz_equal_si(idx, 2));
+    assert(dedekind_maximal.discriminant(sflint::FmpzRef(disc)));
+    assert(sflint::fmpz_equal_si(disc, -503));
+
     return 0;
 }
 

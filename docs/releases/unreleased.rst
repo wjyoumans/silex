@@ -527,6 +527,11 @@ Changed
   when a shared value is modified, instead of deep-copying every factor.
   Published results are unchanged.
 
+- ``Order::maximal_order`` and ``Order::pmaximal_overorder`` apply Dedekind's
+  criterion before Round 2 when the input is the equation order of a monic
+  integral defining polynomial, and return the input order at primes where it
+  is ``p``-maximal.  Results are unchanged.
+
 Fixed
 -----
 

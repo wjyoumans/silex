@@ -1309,11 +1309,12 @@ bool Order::maximal_order(const Order& input) noexcept {
     fmpz_abs(disc.raw(), disc.raw());
     fmpz_factor(factorization.raw(), disc.raw());
 
-    // For an equation-order input Z[theta] with f monic integral, current is
-    // Z[theta] enlarged only at the primes already processed, each by a power
-    // of that prime (Cohen, GTM 138, Thm 6.1.3: O c O' c p^-1 O).  So current
-    // is p-maximal whenever Z[theta] is, and pmaximal_overorder would then
-    // return it unchanged (Thm 6.1.3: O' = O exactly when O is p-maximal).
+    // For an equation-order input Z[theta] with f monic integral, current
+    // always contains Z[theta], so its index in O_K divides [O_K : Z[theta]].
+    // When Z[theta] is p-maximal that index is prime to p, so current is
+    // p-maximal and pmaximal_overorder would return it unchanged (Cohen,
+    // GTM 138, p. 306: the criterion holds for any order containing Z[theta]
+    // with index prime to p; Thm 6.1.3).
     const fmpq_poly_struct* polynomial = data_->parent_.raw_flint_field()->pol;
     const bool dedekind_applies = input.is_equation_order() &&
                                   fmpq_poly_is_monic_integral(polynomial);

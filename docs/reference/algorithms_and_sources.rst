@@ -162,13 +162,14 @@ orders.
 Before the Round 2 multiplier-ring loop, ``maximal_order`` and
 ``pmaximal_overorder`` apply Dedekind's criterion to an equation-order input
 ``Z[theta]`` whose defining polynomial ``f`` is monic integral (Cohen, GTM 138,
-Theorem 6.1.4 (2) and Algorithm 6.1.8 steps 4-6; PARI 2.17.3
+Theorem 6.1.4 (2) and Algorithm 6.1.8 steps 4-5, the ``m = 0`` case; PARI 2.17.3
 ``src/basemath/base2.c:ZX_Dedekind`` and ``maxord``, where a gcd of degree 0
 means ``p``-maximal).  When ``Z[theta]`` is ``p``-maximal the input order is
 kept as is, which is the order the multiplier ring would return (Cohen,
 Theorem 6.1.3).  In ``maximal_order`` the test is also valid after
-enlargements at other primes, because each enlargement at ``q`` has
-``q``-power index.  The criterion only replaces a computation that would
+enlargements at other primes: the running order contains ``Z[theta]``, and
+the criterion holds for any order containing ``Z[theta]`` with index prime to
+``p`` (Cohen, GTM 138, p. 306).  The criterion only replaces a computation that would
 return index 1; nonmaximal primes still go through the multiplier-ring loop.
 
 ``src/ideal`` implements integral and fractional canonical row-HNF ideal
