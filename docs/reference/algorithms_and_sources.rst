@@ -1386,7 +1386,12 @@ is squarefree modulo ``q``.  This is a sufficient condition for
 theorem applies (Cohen, *A Course in Computational Algebraic Number Theory*,
 GTM 138, Theorem 4.8.13).  It is not a necessary condition, and the
 constructor refuses every root that fails it, even when ``(q, theta - r)`` is
-still such a prime.  This is the same condition as the degree-one fast path of
+still such a prime.  For example, ``f = x^3 - 3x^2 + 2x - 8`` has
+discriminant ``-1724``, field discriminant ``-431`` and
+``[O_K : Z[theta]] = 2``.  Modulo 2, ``f = x^2 (x + 1)`` is not squarefree,
+yet ``r = 1`` is a simple root and 2 splits completely in ``O_K``, so
+``(2, theta - 1) O_K`` is a prime with ``e = f = 1`` that the constructor
+refuses.  This is the same condition as the degree-one fast path of
 ``decompose_prime``.
 
 The unconditional unit proof ``OrderUnitGroup::prove_index_bound`` bounds the

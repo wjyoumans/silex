@@ -353,7 +353,11 @@ int test_degree_one_prime_from_root_rejects_non_roots() {
 // On a maximal order with [O : Z[theta]] = 2, the root 1 of
 // f = x^3 - 3x^2 + 2x - 8 mod 2 does not give a Dedekind-Kummer prime
 // (2 divides the index; f = x^2 (x + 1) mod 2 is not squarefree), so the
-// internal constructor refuses it and leaves its output unchanged.
+// internal constructor refuses it and leaves its output unchanged.  The
+// squarefree condition is sufficient but not necessary: 1 is a simple root
+// mod 2 and (2, theta - 1)O is still a prime with e = f = 1, since 2 splits
+// completely in O and the ideal has norm 2 and valuation one at exactly one
+// of the three primes above 2.  The constructor refuses it all the same.
 int test_degree_one_prime_from_root_rejects_index_prime() {
     sflint::FmpqPoly polynomial;
     poly_cubic_disc1724(polynomial);
@@ -372,6 +376,41 @@ int test_degree_one_prime_from_root_rejects_index_prime() {
             prime, maximal, sflint::FmpzConstRef(p),
             sflint::FmpzConstRef(root)));
     assert(!prime.has_prime_data());
+
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 3);
+    for (slong i = 0; i < 3; ++i) {
+        assert(primes.at(i)->ramification_index() == 1);
+        assert(primes.at(i)->residue_degree() == 1);
+    }
+
+    silex::Element theta(field);
+    assert(theta.gen());
+    silex::OrderElement theta_minus_one(maximal);
+    silex::OrderElement one(maximal);
+    silex::OrderElement two(maximal);
+    assert(theta_minus_one.set_element(theta));
+    assert(one.set_si(1));
+    assert(theta_minus_one.subtract(theta_minus_one, one));
+    assert(two.set_si(2));
+    silex::Ideal two_ideal(maximal);
+    silex::Ideal theta_ideal(maximal);
+    silex::Ideal generated(maximal);
+    assert(two_ideal.set_principal(two));
+    assert(theta_ideal.set_principal(theta_minus_one));
+    assert(generated.add(two_ideal, theta_ideal));
+    sflint::Fmpz norm;
+    assert(generated.norm(sflint::FmpzRef(norm)));
+    assert(sflint::fmpz_equal_si(norm, 2));
+    slong valuation_one = 0;
+    for (slong i = 0; i < 3; ++i) {
+        slong value = -1;
+        assert(primes.at(i)->valuation(value, generated));
+        assert(value == 0 || value == 1);
+        valuation_one += value;
+    }
+    assert(valuation_one == 1);
     return 0;
 }
 
