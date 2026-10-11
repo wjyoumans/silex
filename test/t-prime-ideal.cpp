@@ -1512,64 +1512,108 @@ int test_valuation_power_containment_matches_definition() {
     return 0;
 }
 
-// Independent oracle for the power-containment valuation.  Each row is an
-// element a = sum c_i x^i of Q[x]/(f), given by its coefficients, and the
-// (p, e, f, v_P(a)) entries with v_P(a) > 0 over the primes P above
-// p in {2, 3, 5, 7, 11}; every other P above those p has v_P(a) = 0.  The
-// values are from an independent computer algebra system (gp 2.17.4):
-// idealval(nf, a, P) for nf = nfinit(f) and P over idealprimedec(nf, p),
-// recorded by hand.  Each p entry also satisfies
-// sum_P f_P v_P(a) = v_p(N(a)).  Primes with the same p, e and f are not
-// matched one to one across systems, so the (e, f, v) multisets are compared
-// per p.
+// Independent oracle for the power-containment valuation, pinned prime by
+// prime.  For each field f the table lists the primes P above p in
+// {2, 3, 5, 7, 11} as idealprimedec(nf, p) returns them for nf = nfinit(f),
+// each with its p, e, f and second generator g = P.gen[2] written as
+// (sum c_i x^i) / d, so that P = p O + g O.  Each row is an element
+// a = sum c_i x^i of Q[x]/(f) with its (prime index, v_P(a)) entries for
+// v_P(a) > 0 from idealval(nf, a, P); every other listed P has v_P(a) = 0.
+// The data are from an independent computer algebra system (gp 2.17.4),
+// recorded by hand.  Each p also satisfies sum_P f_P v_P(a) = v_p(N(a)).
+// Silex's primes above p are matched one to one to the listed primes by the
+// ideal equality P = p O + g O, so a valuation assigned to the wrong prime of
+// the same (p, e, f) fails.
+struct GpPrime {
+    slong p;
+    slong e;
+    slong f;
+    slong denominator;
+    std::vector<slong> generator;
+};
+
 struct GpValuationRow {
     std::vector<slong> element;
-    std::vector<std::array<slong, 4>> positive;
+    std::vector<std::array<slong, 2>> positive;
 };
+
+bool set_order_element_from_coefficients(silex::OrderElement& out,
+                                         const silex::NumberField& field,
+                                         const std::vector<slong>& numerators,
+                                         slong denominator) {
+    sflint::FmpqPoly polynomial;
+    for (std::size_t i = 0; i < numerators.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       numerators[i]);
+    }
+    fmpq_poly_scalar_div_si(polynomial.raw(), polynomial.raw(), denominator);
+    silex::Element value(field);
+    return value.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)) &&
+           out.set_element(value);
+}
 
 int test_valuation_power_containment_matches_gp() {
     struct Field {
         std::vector<slong> polynomial;
+        std::vector<GpPrime> primes;
         std::vector<GpValuationRow> rows;
     };
     const std::vector<Field> fields = {
             {{474, -4, 5, -2, 1},
              {
-                     {{0, 1}, {{2, 2, 1, 1}, {3, 1, 1, 1}}},
-                     {{-1, 1}, {{2, 2, 1, 1}, {3, 1, 1, 1}}},
-                     {{2, 1, 1}, {{2, 2, 1, 1}, {2, 2, 1, 1}}},
-                     {{3, 6},
-                      {{3, 1, 1, 1}, {3, 1, 1, 1}, {3, 1, 1, 1},
-                       {3, 1, 1, 4}}},
-                     {{9, 6, 1}, {{2, 2, 1, 2}, {3, 1, 1, 4}}},
-                     {{-25, 0, 5}, {{2, 2, 1, 2}, {5, 2, 2, 2}}},
-                     {{15, -1, 0, 1},
-                      {{3, 1, 1, 1}, {3, 1, 1, 1}, {3, 1, 1, 1},
-                       {3, 1, 1, 4}}},
-                     {{30, 20, 10},
-                      {{2, 2, 1, 2}, {2, 2, 1, 7}, {3, 1, 1, 1},
-                       {3, 1, 1, 2}, {5, 2, 2, 2}}},
-                     {{1, 0, 3, 0, 3, 0, 1}, {{2, 2, 1, 9}}},
-                     {{-7, 14},
-                      {{3, 1, 1, 1}, {3, 1, 1, 1}, {7, 1, 2, 1},
-                       {7, 1, 2, 1}}},
+                     {2, 2, 1, 1, {0, 1}},
+                     {2, 2, 1, 1, {1, 1}},
+                     {3, 1, 1, 87, {-9, -113, 45, -1}},
+                     {3, 1, 1, 1, {-1, 1}},
+                     {3, 1, 1, 1, {0, 1}},
+                     {3, 1, 1, 87, {183, 26, 42, 1}},
+                     {5, 2, 2, 1, {2, -1, 1}},
+                     {7, 1, 2, 87, {-39, -103, 108, -14}},
+                     {7, 1, 2, 1, {5, 2, 1}},
+                     {11, 1, 2, 1, {-3, -1, 1}},
+                     {11, 1, 2, 1, {7, -1, 1}},
+             },
+             {
+                     {{0, 1}, {{0, 1}, {4, 1}}},
+                     {{-1, 1}, {{1, 1}, {3, 1}}},
+                     {{2, 1, 1}, {{0, 1}, {1, 1}}},
+                     {{3, 6}, {{2, 1}, {3, 4}, {4, 1}, {5, 1}}},
+                     {{9, 6, 1}, {{1, 2}, {4, 4}}},
+                     {{-25, 0, 5}, {{1, 2}, {6, 2}}},
+                     {{15, -1, 0, 1}, {{2, 1}, {3, 1}, {4, 4}, {5, 1}}},
+                     {{30, 20, 10}, {{0, 2}, {1, 7}, {3, 2}, {4, 1}, {6, 2}}},
+                     {{1, 0, 3, 0, 3, 0, 1}, {{1, 9}}},
+                     {{-7, 14}, {{2, 1}, {5, 1}, {7, 1}, {8, 1}}},
              }},
             {{7, 0, 0, 0, 0, 0, 1},
              {
-                     {{0, 1}, {{7, 6, 1, 1}}},
-                     {{1, 1}, {{2, 1, 1, 1}, {2, 1, 1, 2}}},
-                     {{1, 3, 3, 1}, {{2, 1, 1, 3}, {2, 1, 1, 6}}},
-                     {{2, 4, 2},
-                      {{2, 1, 1, 3}, {2, 1, 1, 5}, {2, 1, 2, 1},
-                       {2, 1, 2, 1}}},
-                     {{3, 1, 1}, {{2, 1, 2, 1}, {2, 1, 2, 1}}},
-                     {{0, 49}, {{7, 6, 1, 13}}},
-                     {{0, 0, 0, 1}, {{7, 6, 1, 3}}},
-                     {{9, -3, 0, 0, 1}, {{11, 1, 1, 1}}},
-                     {{6, 0, 3}, {{3, 3, 2, 3}}},
-                     {{1, -2, 3, -2, 1}, {{2, 1, 2, 2}, {2, 1, 2, 4}}},
-                     {{33, 15}, {{2, 1, 1, 1}, {2, 1, 1, 2}, {3, 3, 2, 3}}},
-                     {{11, 0, 0, 0, 0, 1}, {{2, 1, 1, 1}, {2, 1, 1, 3}}},
+                     {2, 1, 1, 2, {1, 3, 3, 1, 1, 1}},
+                     {2, 1, 1, 2, {3, 1, 1, 1, 1, 1}},
+                     {2, 1, 2, 2, {-2, 3, 3, 0, 1, 1}},
+                     {2, 1, 2, 2, {2, 1, 1, 0, 1, 1}},
+                     {3, 3, 2, 1, {1, 0, 1}},
+                     {5, 1, 2, 1, {-2, -2, 1}},
+                     {5, 1, 2, 1, {-2, 0, 1}},
+                     {5, 1, 2, 1, {-2, 2, 1}},
+                     {7, 6, 1, 1, {0, 1}},
+                     {11, 1, 1, 1, {-4, 1}},
+                     {11, 1, 1, 1, {4, 1}},
+                     {11, 1, 2, 1, {5, -4, 1}},
+                     {11, 1, 2, 1, {5, 4, 1}},
+             },
+             {
+                     {{0, 1}, {{8, 1}}},
+                     {{1, 1}, {{0, 2}, {1, 1}}},
+                     {{1, 3, 3, 1}, {{0, 6}, {1, 3}}},
+                     {{2, 4, 2}, {{0, 5}, {1, 3}, {2, 1}, {3, 1}}},
+                     {{3, 1, 1}, {{2, 1}, {3, 1}}},
+                     {{0, 49}, {{8, 13}}},
+                     {{0, 0, 0, 1}, {{8, 3}}},
+                     {{9, -3, 0, 0, 1}, {{9, 1}}},
+                     {{6, 0, 3}, {{4, 3}}},
+                     {{1, -2, 3, -2, 1}, {{2, 4}, {3, 2}}},
+                     {{33, 15}, {{0, 1}, {1, 2}, {4, 3}}},
+                     {{11, 0, 0, 0, 0, 1}, {{0, 1}, {1, 3}}},
              }},
     };
     // Above every expected valuation, so the bounded search returns v_P(a).
@@ -1587,49 +1631,82 @@ int test_valuation_power_containment_matches_gp() {
         silex::Order maximal(field);
         assert(maximal.maximal_order(equation));
 
+        std::vector<silex::OrderElement> elements;
         for (const GpValuationRow& row : data.rows) {
-            sflint::FmpqPoly element_polynomial;
-            for (std::size_t i = 0; i < row.element.size(); ++i) {
-                sflint::fmpq_poly_set_coeff_si(element_polynomial,
-                                               static_cast<slong>(i),
-                                               row.element[i]);
-            }
-            silex::Element value(field);
-            assert(value.set_fmpq_poly(
-                    sflint::FmpqPolyConstRef(element_polynomial)));
             silex::OrderElement element(maximal);
-            assert(element.set_element(value));
+            assert(set_order_element_from_coefficients(element, field,
+                                                       row.element, 1));
+            elements.push_back(std::move(element));
+        }
 
-            for (slong rational_prime : {2, 3, 5, 7, 11}) {
-                std::vector<std::array<slong, 3>> expected;
-                for (const std::array<slong, 4>& entry : row.positive) {
-                    if (entry[0] == rational_prime) {
-                        expected.push_back({entry[1], entry[2], entry[3]});
+        for (slong rational_prime : {2, 3, 5, 7, 11}) {
+            sflint::Fmpz p;
+            assert(set_fmpz_si(p, rational_prime));
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(primes, maximal,
+                                          sflint::FmpzConstRef(p)));
+            silex::OrderElement p_element(maximal);
+            silex::Ideal p_ideal(maximal);
+            assert(p_element.set_si(rational_prime));
+            assert(p_ideal.set_principal(p_element));
+
+            // gp_index[i] is the table prime equal to Silex's prime i.
+            std::vector<slong> gp_index;
+            std::vector<bool> used(data.primes.size(), false);
+            for (slong index = 0; index < primes.size(); ++index) {
+                const silex::PrimeIdeal* prime = primes.at(index);
+                assert(prime != nullptr);
+                silex::Ideal prime_ideal(maximal);
+                assert(prime->get_ideal(prime_ideal));
+                slong match = -1;
+                for (std::size_t k = 0; k < data.primes.size(); ++k) {
+                    const GpPrime& gp_prime = data.primes[k];
+                    if (gp_prime.p != rational_prime) {
+                        continue;
+                    }
+                    silex::OrderElement generator(maximal);
+                    silex::Ideal generator_ideal(maximal);
+                    silex::Ideal candidate(maximal);
+                    assert(set_order_element_from_coefficients(
+                            generator, field, gp_prime.generator,
+                            gp_prime.denominator));
+                    assert(generator_ideal.set_principal(generator));
+                    assert(candidate.add(p_ideal, generator_ideal));
+                    if (candidate.equal(prime_ideal)) {
+                        assert(match < 0);
+                        match = static_cast<slong>(k);
                     }
                 }
-                sflint::Fmpz p;
-                assert(set_fmpz_si(p, rational_prime));
-                silex::PrimeIdealList primes;
-                assert(silex::decompose_prime(primes, maximal,
-                                              sflint::FmpzConstRef(p)));
-                std::vector<std::array<slong, 3>> actual;
+                assert(match >= 0 && !used[static_cast<std::size_t>(match)]);
+                used[static_cast<std::size_t>(match)] = true;
+                const GpPrime& matched = data.primes[static_cast<std::size_t>(match)];
+                assert(prime->ramification_index() == matched.e &&
+                       prime->residue_degree() == matched.f);
+                gp_index.push_back(match);
+            }
+            for (std::size_t k = 0; k < data.primes.size(); ++k) {
+                assert(used[k] == (data.primes[k].p == rational_prime));
+            }
+
+            for (std::size_t r = 0; r < data.rows.size(); ++r) {
                 for (slong index = 0; index < primes.size(); ++index) {
-                    const silex::PrimeIdeal* prime = primes.at(index);
-                    assert(prime != nullptr);
+                    slong expected = 0;
+                    for (const std::array<slong, 2>& entry :
+                         data.rows[r].positive) {
+                        if (entry[0] == gp_index[static_cast<std::size_t>(index)]) {
+                            expected = entry[1];
+                        }
+                    }
                     slong v = -1;
                     assert(silex::detail::PrimeIdealAccess::
                                    valuation_by_power_containment_for_testing(
-                                           v, *prime, element, bound));
-                    assert(v >= 0 && v < bound);
+                                           v, *primes.at(index), elements[r],
+                                           bound));
+                    assert(v == expected);
                     if (v > 0) {
-                        actual.push_back({prime->ramification_index(),
-                                          prime->residue_degree(), v});
                         ++checked_positive;
                     }
                 }
-                std::sort(expected.begin(), expected.end());
-                std::sort(actual.begin(), actual.end());
-                assert(actual == expected);
             }
         }
     }
