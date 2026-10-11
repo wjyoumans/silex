@@ -57,6 +57,11 @@ public:
     // leaving base unchanged, if base already holds `prime`.  For tests only.
     static bool append_prime_for_testing(FactorBase& base,
                                          const PrimeIdeal& prime) noexcept;
+    // Test hook: the maximal imaginary-quadratic builder that
+    // ClassGroupContext reaches in an oriented quadratic class-unit
+    // transaction.  For tests only.
+    static bool build_maximal_imaginary_quadratic_for_testing(
+            FactorBase& base, flint::FmpzConstRef bound) noexcept;
 };
 
 // Proven generation bound used by factor_base_class_group_bound for degree

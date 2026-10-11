@@ -851,6 +851,24 @@ int test_append_rejects_repeated_prime() {
     assert(copy.set(complete));
     assert(primes_are_distinct(copy));
 
+    // build(bound, diagnostics) and the maximal imaginary-quadratic route
+    // (built from set_first_degree_one_prime).
+    silex::FactorBase with_diagnostics(maximal);
+    assert(with_diagnostics.build(sflint::FmpzConstRef(bound), nullptr));
+    assert(primes_are_distinct(with_diagnostics));
+    for (slong radicand : {-5, -47}) {
+        silex::NumberField imag = quadratic_field(radicand);
+        silex::Order imag_equation = silex::test::equation_order(imag);
+        silex::Order imag_maximal(imag);
+        assert(imag_maximal.maximal_order(imag_equation));
+        silex::FactorBase imag_base(imag_maximal);
+        assert(FactorBaseBlockAccess::
+                       build_maximal_imaginary_quadratic_for_testing(
+                               imag_base, sflint::FmpzConstRef(bound)));
+        assert(imag_base.length() > 0);
+        assert(primes_are_distinct(imag_base));
+    }
+
     // 5 = P Q with f(P) = 1 and f(Q) = 2.  A second copy of the first prime
     // is refused and the other prime above 5 is still accepted.
     silex::PrimeIdealList five;

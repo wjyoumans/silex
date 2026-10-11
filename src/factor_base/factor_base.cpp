@@ -1041,7 +1041,8 @@ bool is_inert_prime_decomposition(const PrimeIdealList& decomposed,
 
 // Two primes of one order with the same rational prime are the same prime
 // ideal exactly when their integral ideals are equal; e and f are then equal
-// too.  Ideal::equal compares HNFs, which are canonical, so this does not
+// too, provided the order is maximal and the recorded e and f are correct
+// (a prime ideal of a maximal order has well-defined e and f).  Ideal::equal compares HNFs, which are canonical, so this does not
 // depend on the residue data a construction recorded (PrimeIdeal::equal also
 // compares the residue polynomial, its variable convention and whether one
 // was recorded at all).
@@ -1462,6 +1463,13 @@ bool detail::FactorBaseBlockAccess::append_prime_for_testing(
         FactorBase& base,
         const PrimeIdeal& prime) noexcept {
     return base.append_prime(prime);
+}
+
+bool detail::FactorBaseBlockAccess::
+        build_maximal_imaginary_quadratic_for_testing(
+                FactorBase& base, flint::FmpzConstRef bound) noexcept {
+    return base.build_maximal_imaginary_quadratic_relation_base(bound,
+                                                                nullptr);
 }
 
 bool detail::FactorBaseBlockAccess::order_lll_relation_base_by_norm(
