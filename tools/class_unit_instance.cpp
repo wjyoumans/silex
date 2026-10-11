@@ -252,6 +252,8 @@ const char* generation_basis_name(
         return "bach";
     case silex::ClassGroupGenerationBasis::zimmert_twin_class:
         return "zimmert_twin_class";
+    case silex::ClassGroupGenerationBasis::structure_certificate:
+        return "structure_certificate";
     }
     return "none";
 }

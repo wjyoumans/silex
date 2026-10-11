@@ -27,6 +27,26 @@ public:
             flint::FmpzConstRef exact_order,
             bool structure_certificate = false) noexcept;
 
+    // True when the context runs inside a `proven` class/unit transaction
+    // whose imaginary quadratic factor-base plan kept the compact base past
+    // the relation module size limit
+    // (RelationFactorBasePlan::imaginary_quadratic_structure_certificate):
+    // generation is then established by the structure certificate, not by
+    // a generation bound.
+    static bool imaginary_quadratic_structure_certificate_planned(
+            const ClassGroupContext& context) noexcept;
+
+    // Runs the structure certificate of ClassGroupGenerationBasis on the
+    // published presentation against the exact class number
+    // `exact_order`.  With `record`, a passing certificate is stored as the
+    // generation basis structure_certificate; without it nothing is
+    // written.  The caller publishes the class group label.
+    static bool imaginary_quadratic_structure_certificate(
+            ClassGroupContext& context,
+            flint::FmpzConstRef discriminant,
+            flint::FmpzConstRef exact_order,
+            bool record) noexcept;
+
     static bool record_factor_base_honesty_proof(
             ClassGroupContext& context,
             flint::FmpzConstRef required_bound) noexcept;

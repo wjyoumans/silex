@@ -1127,7 +1127,17 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
             flint::fmpz_cmp(
                     factor_base_bound,
                     flint::FmpzConstRef(required_generation_bound)) < 0;
-    if (compact_base_needs_honesty) {
+    // A `proven` transaction whose plan kept the compact base because the
+    // base up to the generation bound exceeds the relation module size
+    // limit: no honesty check, which would have to witness every prime
+    // ideal up to that bound.  Generation is established by the structure
+    // certificate instead, and a candidate that cannot pass it fails
+    // closed.
+    const bool structure_certificate_route =
+            compact_base_needs_honesty &&
+            detail::ClassGroupCertificationAccess::
+                    imaginary_quadratic_structure_certificate_planned(*this);
+    if (compact_base_needs_honesty && !structure_certificate_route) {
         SILEX_PROFILE_SCOPE(
                 active_diagnostics, DiagnosticsModule::class_group,
                 "class_group.maximal_imaginary_quadratic_relations."
@@ -1343,6 +1353,18 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                             flint::fmpz_equal(
                                     flint::FmpzConstRef(candidate_order),
                                     flint::FmpzConstRef(exact_class_order));
+                    // The relation lattice lies in the lattice of all
+                    // relations of the base, whose index is the order of the
+                    // subgroup the base generates.  An index below h proves
+                    // that the compact base does not generate the class
+                    // group, so the structure certificate cannot pass.
+                    if (structure_certificate_route &&
+                        exact_class_order_ready &&
+                        flint::fmpz_cmp(
+                                flint::FmpzConstRef(candidate_order),
+                                flint::FmpzConstRef(exact_class_order)) < 0) {
+                        return SpecializedRelationBackendStatus::failed;
+                    }
                 }
             }
             bool published = false;
@@ -1399,18 +1421,42 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                             "class_group."
                             "maximal_imaginary_quadratic_relations."
                             "checkpoint.generation");
-                    generation_verified = compact_base_needs_honesty
-                            ? detail::ClassGroupCertificationAccess::
-                                      record_factor_base_honesty_proof(
-                                              *this,
-                                              flint::FmpzConstRef(
-                                                      required_generation_bound))
-                            : check_factor_base_generation_bound(
-                                      flint::FmpzConstRef(
-                                              required_generation_bound));
+                    generation_verified =
+                            !structure_certificate_route &&
+                            (compact_base_needs_honesty
+                                     ? detail::ClassGroupCertificationAccess::
+                                               record_factor_base_honesty_proof(
+                                                       *this,
+                                                       flint::FmpzConstRef(
+                                                               required_generation_bound))
+                                     : check_factor_base_generation_bound(
+                                               flint::FmpzConstRef(
+                                                       required_generation_bound)));
                 }
                 bool exact_presentation = false;
-                if (generation_verified &&
+                if (structure_certificate_route) {
+                    SILEX_PROFILE_SCOPE(
+                            active_diagnostics,
+                            DiagnosticsModule::class_group,
+                            "class_group."
+                            "maximal_imaginary_quadratic_relations."
+                            "checkpoint.structure_certificate");
+                    // The relation index equals h here, so a failed
+                    // certificate proves that the compact base does not
+                    // generate the class group.  The transaction's
+                    // validation records the certificate when it publishes
+                    // the `proven` label.
+                    if (!detail::ClassGroupCertificationAccess::
+                                imaginary_quadratic_structure_certificate(
+                                        *this,
+                                        flint::FmpzConstRef(discriminant),
+                                        flint::FmpzConstRef(
+                                                exact_class_order),
+                                        false)) {
+                        return SpecializedRelationBackendStatus::failed;
+                    }
+                    exact_presentation = true;
+                } else if (generation_verified &&
                     options.requested_certification ==
                             CertificationMode::proven) {
                     SILEX_PROFILE_SCOPE(

@@ -12,6 +12,12 @@ struct RelationFactorBasePlan {
     ZetaBfResidueDegreeCache residue_degrees;
     Order order;
     bool valid = false;
+    // Set by specialize_maximal_imaginary_quadratic_factor_base_plan when
+    // the base up to the generation bound would exceed the relation module
+    // size limit: the working bound then stays compact, and the `proven`
+    // class group is certified by its structure certificate instead of the
+    // generation bound (ClassGroupGenerationBasis::structure_certificate).
+    bool imaginary_quadratic_structure_certificate = false;
 };
 
 ZetaBfResidueDegreeCache* relation_factor_base_plan_residue_degrees(

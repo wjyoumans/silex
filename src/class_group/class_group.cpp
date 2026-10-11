@@ -30,6 +30,8 @@
 #include "class_group_certification_internal.hpp"
 #include "factor_base_proof_targets_internal.hpp"
 #include "relation_saturation_internal.hpp"
+#include "relation_factor_base_plan_internal.hpp"
+#include "relation_module_limits_internal.hpp"
 #include "ideal_lattice_reduction_internal.hpp"
 #include "../ideal_factorization/ideal_factorization_internal.hpp"
 #include "../order_unit/class_unit_transaction_internal.hpp"
@@ -943,19 +945,8 @@ bool reset_row_module(fmpz_smat::HnfContext& module, slong ncols) noexcept {
     return module.reset(ncols, kRowModuleModRankPrime);
 }
 
-// Largest factor base, in generators, for which a class-group context
-// builds its relation modules: 2^14.  Each reset allocates three dense
-// ncols x ncols mod-p matrices (the row module's and the relation module's
-// fmpz_smat::ModRankContext and the relation module's checkpoint, FLINT
-// nmod_mat), 2 GiB each at this limit, and FLINT aborts the process when
-// such an allocation fails (flint_calloc).  A larger base fails closed
-// before allocating, with reason factor_base_size_limit_exceeded in a
-// class/unit transaction, so it fails the same way on every machine.  The
-// largest base of the test suite and the benchmark corpus has fewer than
-// 400 generators; the proven base of an imaginary quadratic field, up to
-// sqrt(|D| / 3), passes the limit between |D| = 4e11 and 5e11 (about 2.4e4
-// generators at |D| = 1e12).
-constexpr slong kRelationModuleMaxColumns = WORD(1) << 14;
+// The relation module size limit: relation_module_limits_internal.hpp.
+using detail::kRelationModuleMaxColumns;
 
 bool reset_relation_modules(
         fmpz_smat::HnfContext& row_module,
@@ -5103,9 +5094,17 @@ void QuadraticStructureCertificate::compose_(
 void QuadraticStructureCertificate::square_(
         flint::Qfb& out,
         const flint::Qfb& input) const noexcept {
+    // qfb_nudupl takes D and L as mutable arguments; pass copies, as the
+    // qfb_nucomp wrapper does.
     flint::Qfb squared;
-    ::qfb_nudupl(squared.raw(), input.raw(), discriminant_.raw(),
-                 fourth_root_.raw());
+    flint::Fmpz discriminant_copy;
+    flint::Fmpz fourth_root_copy;
+    flint::fmpz_set(flint::FmpzRef(discriminant_copy),
+                    flint::FmpzConstRef(discriminant_));
+    flint::fmpz_set(flint::FmpzRef(fourth_root_copy),
+                    flint::FmpzConstRef(fourth_root_));
+    ::qfb_nudupl(squared.raw(), input.raw(), discriminant_copy.raw(),
+                 fourth_root_copy.raw());
     flint::qfb_reduce(flint::QfbRef(out), flint::QfbConstRef(squared),
                       flint::FmpzConstRef(discriminant_));
 }
@@ -5401,6 +5400,39 @@ bool ClassGroupCertificationAccess::
 }
 
 bool ClassGroupCertificationAccess::
+        imaginary_quadratic_structure_certificate_planned(
+                const ClassGroupContext& context) noexcept {
+    const ClassUnitTransactionContext* const run_context =
+            context.class_unit_transaction_context_;
+    const RelationFactorBasePlan* const plan =
+            run_context != nullptr ? run_context->relation_factor_base_plan
+                                   : nullptr;
+    return plan != nullptr && plan->valid &&
+           plan->imaginary_quadratic_structure_certificate &&
+           plan->order.has_same_data(context.parent_);
+}
+
+bool ClassGroupCertificationAccess::imaginary_quadratic_structure_certificate(
+        ClassGroupContext& context,
+        flint::FmpzConstRef discriminant,
+        flint::FmpzConstRef exact_order,
+        bool record) noexcept {
+    QuadraticStructureCertificate certificate(
+            context, discriminant, exact_order);
+    if (!certificate.verify()) {
+        return false;
+    }
+    if (!record) {
+        return true;
+    }
+    if (!context.ensure_private_storage_()) {
+        return false;
+    }
+    context.private_storage_->generation_structure_certified = true;
+    return true;
+}
+
+bool ClassGroupCertificationAccess::
         try_certify_imaginary_quadratic_from_exact_order(
                 ClassGroupContext& context,
                 CertificationMode requested,
@@ -5440,17 +5472,14 @@ bool ClassGroupCertificationAccess::
         return false;
     }
 
-    if (!generation_verified) {
-        // No generation bound: the published generators themselves are
-        // checked to give the whole class group of order h.  Then the
-        // factor base generates it, and the argument below (relation index
-        // h_cand / h = 1) applies unchanged.
-        QuadraticStructureCertificate certificate(
-                context, discriminant, exact_order);
-        if (!certificate.verify() || !context.ensure_private_storage_()) {
-            return false;
-        }
-        context.private_storage_->generation_structure_certified = true;
+    // No generation bound: the published generators themselves are checked
+    // to give the whole class group of order h.  Then the factor base
+    // generates it, and the argument below (relation index h_cand / h = 1)
+    // applies unchanged.
+    if (!generation_verified &&
+        !imaginary_quadratic_structure_certificate(
+                context, discriminant, exact_order, true)) {
+        return false;
     }
 
     if (!publish_exact_class_order_proof(context, exact_order)) {
@@ -5804,9 +5833,16 @@ bool ClassGroupCertificationAccess::
         !units.is_set() ||
         units.free_rank() != 0 ||
         !same_order_parent(units.parent(), context.parent()) ||
-        !context.has_presentation() || !context.parent_.is_maximal() ||
-        (requested == CertificationMode::proven &&
-         context.factor_base_generation_status_ != ProofState::verified)) {
+        !context.has_presentation() || !context.parent_.is_maximal()) {
+        return false;
+    }
+    // A `proven` request without verified generation is accepted only on
+    // the planned structure-certificate route, at index one below.
+    const bool structure_certificate_route =
+            requested == CertificationMode::proven &&
+            context.factor_base_generation_status_ != ProofState::verified;
+    if (structure_certificate_route &&
+        !imaginary_quadratic_structure_certificate_planned(context)) {
         return false;
     }
 
@@ -5846,6 +5882,7 @@ bool ClassGroupCertificationAccess::
     flint::Fmpz exact_order;
     flint::Fmpz index;
     if ((requested == CertificationMode::proven &&
+         !structure_certificate_route &&
          (!context.factor_base_generation_bound(
                   flint::FmpzRef(required_bound)) ||
           !context.check_factor_base_generation_bound(
@@ -5861,7 +5898,9 @@ bool ClassGroupCertificationAccess::
     flint::fmpz_divexact(flint::FmpzRef(index),
                          flint::FmpzConstRef(candidate_order),
                          flint::FmpzConstRef(exact_order));
-    if (flint::fmpz_cmp_ui(flint::FmpzConstRef(index), 1) < 0) {
+    if (flint::fmpz_cmp_ui(flint::FmpzConstRef(index), 1) < 0 ||
+        (structure_certificate_route &&
+         !flint::fmpz_is_one(flint::FmpzConstRef(index)))) {
         return false;
     }
 
@@ -5877,6 +5916,14 @@ bool ClassGroupCertificationAccess::
         // try_certify_class_unit_with_units_); otherwise fail closed and
         // leave the other validation routes to the caller.
         if (!detail::order_unit_torsion_is_computed(units)) {
+            return false;
+        }
+        // Without verified generation, the structure certificate proves
+        // that the factor base generates the class group.
+        if (structure_certificate_route &&
+            !imaginary_quadratic_structure_certificate(
+                    context, flint::FmpzConstRef(discriminant),
+                    flint::FmpzConstRef(exact_order), true)) {
             return false;
         }
         // Index one against the exact class number: as in

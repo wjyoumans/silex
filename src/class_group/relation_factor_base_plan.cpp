@@ -1,4 +1,5 @@
 #include "relation_factor_base_plan_internal.hpp"
+#include "relation_module_limits_internal.hpp"
 
 #include <silex/factor_base.hpp>
 #include <silex/flint/fmpq.hpp>
@@ -6,6 +7,8 @@
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/ideal_factorization.hpp>
 #include <silex/signature.hpp>
+
+#include <flint/ulong_extras.h>
 
 #include <algorithm>
 #include <cmath>
@@ -962,6 +965,43 @@ bool next_relation_factor_base_bound(
     return next_relation_factor_base_bound_to_limit(out, current, limit);
 }
 
+namespace {
+
+// Whether the norm-bounded factor base of the maximal order of discriminant
+// D < 0 up to `bound` has more prime ideals than kRelationModuleMaxColumns:
+// two of norm p for each split p <= bound, one for each ramified p <= bound,
+// and one of norm p^2 for each inert p with p^2 <= bound.  Stops counting at
+// the limit.
+bool quadratic_base_exceeds_relation_module_limit(
+        bool& out,
+        flint::FmpzConstRef discriminant,
+        flint::FmpzConstRef bound) noexcept {
+    out = false;
+    if (!flint::fmpz_abs_fits_ui(bound) || flint::fmpz_sgn(bound) <= 0) {
+        return false;
+    }
+    const ulong limit = flint::fmpz_get_ui(bound);
+    slong ideals = 0;
+    flint::Fmpz rational_prime;
+    for (ulong p = 2; p <= limit; p = n_nextprime(p, 1)) {
+        flint::fmpz_set_ui(flint::FmpzRef(rational_prime), p);
+        const int symbol = flint::fmpz_kronecker(
+                discriminant, flint::FmpzConstRef(rational_prime));
+        if (symbol > 0) {
+            ideals += 2;
+        } else if (symbol == 0 || p <= limit / p) {
+            ideals += 1;
+        }
+        if (ideals > kRelationModuleMaxColumns) {
+            out = true;
+            break;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 bool specialize_maximal_imaginary_quadratic_factor_base_plan(
         RelationFactorBasePlan& plan,
         const Order& order,
@@ -1045,10 +1085,25 @@ bool specialize_maximal_imaginary_quadratic_factor_base_plan(
                     flint::FmpzRef(generation_bound), order)) {
             return false;
         }
+        plan.imaginary_quadratic_structure_certificate = false;
         if (flint::fmpz_cmp(
                     flint::FmpzConstRef(plan.working_bound),
                     flint::FmpzConstRef(generation_bound)) < 0) {
-            plan.working_bound.swap(generation_bound);
+            bool exceeds_limit = false;
+            if (!quadratic_base_exceeds_relation_module_limit(
+                        exceeds_limit, flint::FmpzConstRef(discriminant),
+                        flint::FmpzConstRef(generation_bound))) {
+                return false;
+            }
+            if (exceeds_limit) {
+                // The base up to the generation bound cannot be built, so
+                // keep the compact base and certify the class group by its
+                // structure (ClassGroupGenerationBasis::
+                // structure_certificate).
+                plan.imaginary_quadratic_structure_certificate = true;
+            } else {
+                plan.working_bound.swap(generation_bound);
+            }
         }
     }
     return true;

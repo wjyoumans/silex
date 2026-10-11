@@ -130,9 +130,9 @@ struct ClassUnitTransactionReport {
     const char* last_validation_outcome = nullptr;
     // Whether the most recent class-group candidate attempt ended because its
     // factor base had more generators than the relation modules allow
-    // (class_group.cpp, kRelationModuleMaxColumns).  Cleared with
-    // factor_base_honesty_failure; read only to name a failed transaction's
-    // reason.
+    // (kRelationModuleMaxColumns, relation_module_limits_internal.hpp).
+    // Cleared with factor_base_honesty_failure; read only to name a failed
+    // transaction's reason.
     bool factor_base_size_limit_exceeded = false;
 
     void reset() noexcept;
