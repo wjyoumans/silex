@@ -1079,6 +1079,24 @@ int test_index_divisor_monogenic_order_unchanged_unramified() {
              {1, 0, 4, 0, 1, 8, 0, 0, 17}});
 }
 
+// Pins the prime order the separating fixed element gives.  The maximal
+// order of Q[x]/(x^3 - 5x^2 - 2x - 3) (field discriminant -239) has 3 as an
+// index divisor with three unramified degree-one primes: nullity 3 <= p = 3
+// and p^nullity = 27 <= 4096, so find_separating_fixed_element splits it and
+// the prime order is the order of the factors of the minimal polynomial of
+// the first accepted candidate.  A change that skips the search or reorders
+// the primes changes the list below.  The expected HNFs were taken from the
+// current decomposition.  An independent computation of the splitting type
+// (three primes with e = f = 1) agrees, but it uses another basis and prime
+// order, so it cannot confirm the matrices themselves.
+int test_index_divisor_separating_element_order() {
+    return check_index_divisor_decomposition_hnfs(
+            {-3, -2, -5, 1}, 3, {1, 1, 1},
+            {{1, 0, 2, 0, 1, 0, 0, 0, 3},
+             {1, 2, 0, 0, 3, 0, 0, 0, 1},
+             {1, 0, 2, 0, 1, 1, 0, 0, 3}});
+}
+
 // 17^4 g(x/17) for g = y (y - 1) (y - 2)^2 + 17: 17 = P1 P2 P3^2.
 int test_index_divisor_monogenic_order_unchanged_ramified() {
     return check_index_divisor_decomposition_hnfs(
@@ -3307,6 +3325,7 @@ int main() {
     assert(test_index_divisor_cache_recursive_split() == 0);
     assert(test_index_divisor_cache_monogenic() == 0);
     assert(test_index_divisor_cache_inert_principal() == 0);
+    assert(test_index_divisor_separating_element_order() == 0);
     assert(test_recursive_split_matches_enumeration_unramified() == 0);
     assert(test_recursive_split_matches_enumeration_ramified() == 0);
     assert(test_valuation_degree_one() == 0);
