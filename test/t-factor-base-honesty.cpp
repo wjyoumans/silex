@@ -1786,6 +1786,153 @@ int test_later_attempt_clears_honesty_failure() {
             : 1;
 }
 
+// A Q(sqrt(-21)) context on the norm-at-most-`active` base (2 or 3) with
+// (2) = P2^2 and, for 3, (3) = P3^2 published.  P2, P3 and P2 P3 are all
+// nonprincipal (none of 2, 3, 6 is a norm x^2 + 21 y^2), so the {P2, P3}
+// base generates the class group Z/2 x Z/2 and its honesty scan passes,
+// while the {P2} base cannot witness P3 and its scan fails.
+bool d21_checkpoint_context(silex::ClassGroupContext& context,
+                            const FieldSetup& setup,
+                            ulong active) noexcept {
+    sflint::Fmpz active_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), active);
+    if (!context.is_defined() ||
+        !context.build_factor_base(sflint::FmpzConstRef(active_bound)) ||
+        context.factor_base() == nullptr) {
+        return false;
+    }
+    for (slong p = 2; p <= static_cast<slong>(active); ++p) {
+        silex::Relation relation(*context.factor_base());
+        silex::Element generator(setup.field);
+        if (!generator.set_si(p) || !relation.set_generator(generator) ||
+            !context.append_relation(relation)) {
+            return false;
+        }
+    }
+    return context.publish_presentation();
+}
+
+driver::AnalyticFinishDecision d21_checkpoint(
+        silex::ClassGroupContext& context,
+        const FieldSetup& setup,
+        ulong active,
+        silex::detail::ClassUnitTransactionContext& transaction) noexcept {
+    sflint::Fmpz active_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), active);
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               &transaction);
+    silex::detail::RelationSearchControlState route_state;
+    const driver::AnalyticFinishDecision decision = driver::apply_honesty_check(
+            context, route_state, true, setup.maximal_order, nullptr,
+            sflint::FmpzConstRef(active_bound), false, false, nullptr);
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               nullptr);
+    return decision;
+}
+
+// A passed honesty scan is kept in the class/unit transaction with its
+// factor base and bounds, and a later context of the same transaction takes
+// the verdict only for an equal base at the same active and required bounds.
+// A failed scan keeps nothing.  The reuse probe records a verdict for the
+// {P2} base, whose own scan fails: the checkpoint finishes only when the
+// record matches exactly, which shows that the scan was skipped then and run
+// otherwise.
+int test_transaction_reuses_passed_honesty_scan() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    FieldSetup setup = imaginary_quadratic_fixture(21);
+    silex::detail::ClassUnitTransactionReport audit;
+    audit.reset();
+    silex::detail::ClassUnitTransactionContext transaction{
+            audit, nullptr, {}, {}, false};
+
+    silex::ClassGroupContext failing(setup.maximal_order);
+    if (!d21_checkpoint_context(failing, setup, 2) ||
+        d21_checkpoint(failing, setup, 2, transaction) !=
+                driver::AnalyticFinishDecision::failed ||
+        transaction.factor_base_honesty.base.is_defined()) {
+        return 1;
+    }
+
+    silex::ClassGroupContext passing(setup.maximal_order);
+    sflint::Fmpz required;
+    if (!d21_checkpoint_context(passing, setup, 3) ||
+        !Access::recorded_generation_requirement(
+                sflint::FmpzRef(required), passing, setup.maximal_order) ||
+        sflint::fmpz_cmp_ui(sflint::FmpzConstRef(required), 3) <= 0 ||
+        d21_checkpoint(passing, setup, 3, transaction) !=
+                driver::AnalyticFinishDecision::finished ||
+        !transaction.factor_base_honesty.base.equal(*passing.factor_base()) ||
+        sflint::fmpz_cmp_ui(sflint::FmpzConstRef(
+                                    transaction.factor_base_honesty
+                                            .active_bound),
+                            3) != 0 ||
+        !sflint::fmpz_equal(
+                sflint::FmpzConstRef(
+                        transaction.factor_base_honesty.required_bound),
+                sflint::FmpzConstRef(required))) {
+        return 1;
+    }
+
+    // A later context with the {P2} base: the kept {P2, P3} verdict is for
+    // another base, so the scan runs and fails.
+    silex::ClassGroupContext other_base(setup.maximal_order);
+    if (!d21_checkpoint_context(other_base, setup, 2) ||
+        d21_checkpoint(other_base, setup, 2, transaction) !=
+                driver::AnalyticFinishDecision::failed) {
+        return 1;
+    }
+
+    sflint::Fmpz two;
+    sflint::Fmpz required_plus_one;
+    sflint::fmpz_set_ui(sflint::FmpzRef(two), 2);
+    sflint::fmpz_add_ui(sflint::FmpzRef(required_plus_one),
+                        sflint::FmpzConstRef(required), 1);
+    struct Probe {
+        sflint::FmpzConstRef active;
+        sflint::FmpzConstRef required;
+        driver::AnalyticFinishDecision expected;
+    };
+    const Probe probes[] = {
+            {sflint::FmpzConstRef(two), sflint::FmpzConstRef(required),
+             driver::AnalyticFinishDecision::finished},
+            {sflint::FmpzConstRef(two),
+             sflint::FmpzConstRef(required_plus_one),
+             driver::AnalyticFinishDecision::failed},
+            {sflint::FmpzConstRef(required), sflint::FmpzConstRef(required),
+             driver::AnalyticFinishDecision::failed},
+    };
+    for (const Probe& probe : probes) {
+        silex::ClassGroupContext probed(setup.maximal_order);
+        if (!d21_checkpoint_context(probed, setup, 2)) {
+            return 1;
+        }
+        silex::detail::ClassUnitTransactionAccess::set_run_context(
+                probed, &transaction);
+        Access::record_transaction_factor_base_honest(
+                probed, *probed.factor_base(), probe.active, probe.required);
+        silex::detail::ClassUnitTransactionAccess::set_run_context(probed,
+                                                                   nullptr);
+        const driver::AnalyticFinishDecision decision =
+                d21_checkpoint(probed, setup, 2, transaction);
+        if (decision != probe.expected ||
+            (decision == driver::AnalyticFinishDecision::finished &&
+             probed.factor_base_generation_checked_status() !=
+                     silex::ProofState::verified)) {
+            return 1;
+        }
+    }
+
+    // Without a transaction nothing is kept or reused.
+    silex::ClassGroupContext detached(setup.maximal_order);
+    return d21_checkpoint_context(detached, setup, 2) &&
+                   !Access::transaction_factor_base_honest(
+                           detached, *detached.factor_base(),
+                           sflint::FmpzConstRef(two),
+                           sflint::FmpzConstRef(required))
+            ? 0
+            : 1;
+}
+
 // The instance JSON's failure_detail value for a class/unit transaction
 // report.
 std::string failure_detail_json(
@@ -1907,6 +2054,7 @@ int main() {
                    test_terminal_honesty_failure_names_transaction_reason() !=
                            0 ||
                    test_later_attempt_clears_honesty_failure() != 0 ||
+                   test_transaction_reuses_passed_honesty_scan() != 0 ||
                    test_failure_detail_json() != 0
             ? 1
             : 0;

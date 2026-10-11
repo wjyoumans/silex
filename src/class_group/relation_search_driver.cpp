@@ -334,6 +334,28 @@ AnalyticFinishDecision apply_honesty_check(
     }
 
     const FactorBase* base = context.factor_base();
+    // A passed scan of an equal base at the same bounds earlier in this
+    // class/unit transaction (another candidate context, for instance after
+    // the rank-1 fast path failed validation) answers the same question:
+    // its verdict depends only on the order, the base's prime list and the
+    // required bound (TransactionFactorBaseHonesty).
+    if (base != nullptr &&
+        ClassGroupRelationSearchAccess::transaction_factor_base_honest(
+                context, *base, active_factor_base_bound,
+                flint::FmpzConstRef(required_bound))) {
+        if (!detail::ClassGroupCertificationAccess::
+                    record_factor_base_honesty_proof(
+                            context,
+                            flint::FmpzConstRef(required_bound))) {
+            return AnalyticFinishDecision::failed;
+        }
+        route_state.honesty_checked = true;
+        SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                  LogLevel::detail,
+                  "be_honest check passed earlier in this transaction for "
+                  "the same factor base and bounds");
+        return AnalyticFinishDecision::finished;
+    }
     const ulong random_seed = base == nullptr
             ? UWORD(0)
             : relation_search_phase_seed(context, base->length(),
@@ -362,6 +384,9 @@ AnalyticFinishDecision apply_honesty_check(
                             flint::FmpzConstRef(required_bound))) {
             return AnalyticFinishDecision::failed;
         }
+        ClassGroupRelationSearchAccess::record_transaction_factor_base_honest(
+                context, *base, active_factor_base_bound,
+                flint::FmpzConstRef(required_bound));
         route_state.honesty_checked = true;
         SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                   LogLevel::detail, "be_honest check passed");

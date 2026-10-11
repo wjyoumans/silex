@@ -496,6 +496,23 @@ public:
     static void clear_factor_base_honesty_failure(
             ClassGroupContext& context) noexcept;
 
+    // Whether the attached class/unit transaction keeps a passed honesty
+    // scan (TransactionFactorBaseHonesty) of a factor base equal to `base`
+    // at the same active and required bounds.  False without a transaction.
+    static bool transaction_factor_base_honest(
+            const ClassGroupContext& context,
+            const FactorBase& base,
+            flint::FmpzConstRef active_bound,
+            flint::FmpzConstRef required_bound) noexcept;
+    // Keep, in the attached class/unit transaction, a passed honesty scan of
+    // `base` at these bounds, replacing any earlier one; no-op without a
+    // transaction.  Nothing is kept if the base cannot be copied.
+    static void record_transaction_factor_base_honest(
+            ClassGroupContext& context,
+            const FactorBase& base,
+            flint::FmpzConstRef active_bound,
+            flint::FmpzConstRef required_bound) noexcept;
+
     // The class-group candidate computation and extension entry points the
     // class/unit transaction calls for each attempt.
     static bool compute_relation_candidate(

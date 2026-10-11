@@ -269,6 +269,45 @@ void ClassGroupRelationSearchAccess::clear_factor_base_honesty_failure(
     }
 }
 
+bool ClassGroupRelationSearchAccess::transaction_factor_base_honest(
+        const ClassGroupContext& context,
+        const FactorBase& base,
+        flint::FmpzConstRef active_bound,
+        flint::FmpzConstRef required_bound) noexcept {
+    const ClassUnitTransactionContext* const run_context =
+            context.class_unit_transaction_context_;
+    if (run_context == nullptr) {
+        return false;
+    }
+    const TransactionFactorBaseHonesty& kept =
+            run_context->factor_base_honesty;
+    return kept.base.is_defined() &&
+           flint::fmpz_equal(flint::FmpzConstRef(kept.active_bound),
+                             active_bound) &&
+           flint::fmpz_equal(flint::FmpzConstRef(kept.required_bound),
+                             required_bound) &&
+           kept.base.equal(base);
+}
+
+void ClassGroupRelationSearchAccess::record_transaction_factor_base_honest(
+        ClassGroupContext& context,
+        const FactorBase& base,
+        flint::FmpzConstRef active_bound,
+        flint::FmpzConstRef required_bound) noexcept {
+    ClassUnitTransactionContext* const run_context =
+            context.class_unit_transaction_context_;
+    if (run_context == nullptr) {
+        return;
+    }
+    TransactionFactorBaseHonesty& kept = run_context->factor_base_honesty;
+    if (!base.is_defined() || !kept.base.set(base)) {
+        kept.base.clear();
+        return;
+    }
+    flint::fmpz_set(flint::FmpzRef(kept.active_bound), active_bound);
+    flint::fmpz_set(flint::FmpzRef(kept.required_bound), required_bound);
+}
+
 const char* class_unit_computation_failure_reason(
         const ClassUnitTransactionReport& audit) noexcept {
     if (audit.factor_base_size_limit_exceeded) {

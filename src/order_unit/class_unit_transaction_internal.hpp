@@ -151,6 +151,25 @@ struct TransactionGenerationRequirement {
     GenerationDifferentRoute route = GenerationDifferentRoute::none;
 };
 
+// The most recent passed relation-search factor-base honesty scan (the
+// be_honest checkpoint, relation_search_driver.cpp:apply_honesty_check) of a
+// class/unit transaction: a copy of the factor base it scanned, the active
+// factor-base bound, and the required generation bound.  A later candidate
+// context of the same transaction whose installed base is equal to `base`
+// (FactorBase::equal: same order, same prime ideals in the same positions)
+// at the same two bounds takes the verdict instead of scanning again.  A
+// passed scan is a property of the order, that prime list and the required
+// bound alone: every witness it accepts is an exact check that a prime ideal
+// of norm at most the required bound lies in the subgroup the base generates
+// (factor_base_honesty.cpp), and the seed, sub-factor base and search caps
+// steer only which witnesses are found.  Failed scans are not kept.  Nothing
+// is kept while `base` is undefined.
+struct TransactionFactorBaseHonesty {
+    FactorBase base;
+    flint::Fmpz active_bound;
+    flint::Fmpz required_bound;
+};
+
 struct ClassUnitTransactionContext {
     ClassUnitTransactionReport& audit;
     RelationFactorBasePlan* relation_factor_base_plan = nullptr;
@@ -166,6 +185,7 @@ struct ClassUnitTransactionContext {
     // grh_norm_bounded_base_for); it is left empty once taken.
     FactorBase* grh_norm_bounded_base = nullptr;
     const flint::Fmpz* grh_norm_bounded_base_bound = nullptr;
+    TransactionFactorBaseHonesty factor_base_honesty{};
 };
 
 inline bool uses_class_unit_kernel(
