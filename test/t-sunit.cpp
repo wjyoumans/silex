@@ -1939,9 +1939,10 @@ int test_grh_generation_labels_sunit_groups() {
     assert_published_labels(s_class, s_units, grh, grh, grh);
 
     // Generation rests on GRH, so a valuation-solve rejection is only
-    // `unknown`, never the proven `not_sunit`.  With S = {P3} (degree 1,
-    // class not trivial here) the value 3 has valuation 1 at P3 outside the
-    // published lattice.
+    // `unknown`, never the proven `not_sunit`.  With S = {P3} the published
+    // valuation lattice is the proper sublattice 2Z of Z^S (the class of P3
+    // generates Cl = Z/2), so the value 3 with valuation 1 at P3 lies outside
+    // it.
     const std::vector<silex::PrimeIdeal> over_three =
             prime_above_with_degree(fixture.order, 3, 1);
     silex::SUnitComputeResult result3;
@@ -1949,6 +1950,16 @@ int test_grh_generation_labels_sunit_groups() {
     silex::SUnitGroup s_units3;
     assert(compute_at(result3, s_class3, s_units3, fixture.class_group,
                       fixture.units, over_three, grh));
+    assert(result3.success);
+    assert_published_labels(s_class3, s_units3, grh, grh, grh);
+    sflint::Fmpz s_class3_order;
+    assert(s_class3.order(sflint::FmpzRef(s_class3_order)));
+    assert(sflint::fmpz_equal_si(s_class3_order, 1));
+    sflint::FmpzMat lattice3(1, 1);
+    assert(s_units3.nonunit_valuation_matrix(sflint::FmpzMatRef(lattice3)));
+    assert(sflint::fmpz_equal_si(
+            sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(lattice3), 0, 0),
+            2));
     silex::Element three(fixture.field);
     assert(three.set_si(3));
     silex::SUnitCoordinates out;

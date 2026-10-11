@@ -105,7 +105,10 @@ on GRH, and ``R_K`` may be a multiple of the true regulator if the input units
 do not generate the full unit group) and ``h_S`` is the published S-class
 number.  Equivalently, the S-class number formula
 ``h_S R_S = h R_K prod log N(P)`` holds relative to the inputs, as an identity
-about the published group.  Silex never forms ``h /
+about the published group.  Under ``grh`` inputs ``R_S`` is the regulator of
+the published S-unit group, and the published valuation lattice may be a proper
+sublattice of the true one, so ``R_S`` may be an integer multiple of the true
+S-regulator.  Silex never forms ``h /
 h_S`` from floating point: it is the exact index of the nonunit valuation
 lattice in ``Z^S``, the absolute determinant of the published valuation HNF
 (``nonunit_valuation_matrix``), which is the order of the subgroup of the
