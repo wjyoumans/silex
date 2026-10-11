@@ -317,6 +317,13 @@ bool class_relation_witnessed_hnf_basis(
         WitnessedClassRelationHnfBasis& out,
         const ClassGroupContext& context) noexcept;
 
+// Marks covered[j] = 1 for every column j that is the leading (first nonzero)
+// column of some row of the module's HNF row basis, and 0 otherwise. One HNF
+// row extraction serves every factor base index of a pivot scan.
+bool hnf_row_pivot_column_flags(std::vector<char>& covered,
+                                fmpz_smat::HnfContext& module,
+                                slong ambient_dim) noexcept;
+
 // Whether `relation` is defined over a factor base equal to the context's.
 // Local saturation evaluates this once per residue-dlog kernel and fails every
 // nondivisible kernel row when it is false.

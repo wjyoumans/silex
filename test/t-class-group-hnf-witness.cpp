@@ -9,6 +9,7 @@
 #include "test_support.hpp"
 
 #include <cassert>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -681,6 +682,38 @@ int test_default_completion_populates_finish_workspace() {
     return 0;
 }
 
+int test_hnf_row_pivot_column_flags() {
+    std::vector<char> covered;
+    silex::fmpz_smat::HnfContext module;
+    assert(module.reset(4, 7));
+    assert(silex::detail::hnf_row_pivot_column_flags(covered, module, 4));
+    assert(covered == std::vector<char>({0, 0, 0, 0}));
+
+    // Rows (0, 2, 1, 0) and (0, 4, 0, 3) have HNF leading columns 1 and 2.
+    sflint::FmpzMat rows(2, 4);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(rows), 0, 1),
+                        2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(rows), 0, 2),
+                        1);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(rows), 1, 1),
+                        4);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(sflint::FmpzMatRef(rows), 1, 3),
+                        3);
+    bool independent = false;
+    assert(module.add_fmpz_mat_row(&independent,
+                                   sflint::FmpzMatConstRef(rows), 0));
+    assert(independent);
+    assert(module.add_fmpz_mat_row(&independent,
+                                   sflint::FmpzMatConstRef(rows), 1));
+    assert(independent);
+    assert(silex::detail::hnf_row_pivot_column_flags(covered, module, 4));
+    assert(covered == std::vector<char>({0, 1, 1, 0}));
+
+    // A mismatched ambient dimension cannot extract the HNF rows.
+    assert(!silex::detail::hnf_row_pivot_column_flags(covered, module, 3));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -694,5 +727,6 @@ int main() {
     assert(test_corrupted_known_row_rejected() == 0);
     assert(test_extra_prime_outside_factor_base_rejected() == 0);
     assert(test_unit_multiplied_generator_accepted() == 0);
+    assert(test_hnf_row_pivot_column_flags() == 0);
     return 0;
 }

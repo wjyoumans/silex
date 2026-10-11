@@ -9228,6 +9228,39 @@ bool ClassGroupContext::factor_base_prime_is_principal(
     return true;
 }
 
+namespace detail {
+
+bool hnf_row_pivot_column_flags(std::vector<char>& covered,
+                                fmpz_smat::HnfContext& module,
+                                slong ambient_dim) noexcept {
+    if (ambient_dim < 0) {
+        return false;
+    }
+    covered.assign(static_cast<std::size_t>(ambient_dim), 0);
+    const slong rank = module.rank();
+    if (rank <= 0) {
+        return true;
+    }
+
+    flint::FmpzMat hnf(rank, ambient_dim);
+    if (!module.get_hnf_rows(flint::FmpzMatRef(hnf))) {
+        return false;
+    }
+    for (slong i = 0; i < rank; ++i) {
+        for (slong j = 0; j < ambient_dim; ++j) {
+            if (!flint::fmpz_is_zero(
+                        flint::fmpz_mat_entry(
+                                flint::FmpzMatConstRef(hnf), i, j))) {
+                covered[static_cast<std::size_t>(j)] = 1;
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+}  // namespace detail
+
 bool ClassGroupContext::factor_base_prime_is_hnf_covered(
         bool& out,
         slong index) noexcept {
@@ -9238,32 +9271,12 @@ bool ClassGroupContext::factor_base_prime_is_hnf_covered(
         return false;
     }
 
-    bool is_covered = false;
-    const slong rank = row_module_.rank();
-    if (rank > 0) {
-        flint::FmpzMat hnf(rank, generator_count());
-        if (!row_module_.get_hnf_rows(flint::FmpzMatRef(hnf))) {
-            return false;
-        }
-
-        for (slong i = 0; i < rank; ++i) {
-            slong pivot_col = -1;
-            for (slong j = 0; j < generator_count(); ++j) {
-                if (!flint::fmpz_is_zero(
-                            flint::fmpz_mat_entry(
-                                    flint::FmpzMatConstRef(hnf), i, j))) {
-                    pivot_col = j;
-                    break;
-                }
-            }
-            if (pivot_col == index) {
-                is_covered = true;
-                break;
-            }
-        }
+    std::vector<char> covered;
+    if (!detail::hnf_row_pivot_column_flags(covered, row_module_,
+                                            generator_count())) {
+        return false;
     }
-
-    out = is_covered;
+    out = covered[static_cast<std::size_t>(index)] != 0;
     return true;
 }
 

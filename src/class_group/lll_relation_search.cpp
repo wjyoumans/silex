@@ -1052,12 +1052,15 @@ bool ClassGroupContext::pivot_info_(flint::FmpzRef h,
     const slong n = generator_count();
     flint::fmpz_zero(h);
     if (relation_rank() < n) {
+        if (!sync_row_module_checkpoint_()) {
+            return false;
+        }
+        std::vector<char> covered;
+        if (!detail::hnf_row_pivot_column_flags(covered, row_module_, n)) {
+            return false;
+        }
         for (slong index = 0; index < n; ++index) {
-            bool covered = false;
-            if (!factor_base_prime_is_hnf_covered(covered, index)) {
-                return false;
-            }
-            if (!covered) {
+            if (covered[static_cast<std::size_t>(index)] == 0) {
                 pivots.push_back(index);
             }
         }
