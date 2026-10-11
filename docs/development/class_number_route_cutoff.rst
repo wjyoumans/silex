@@ -31,17 +31,33 @@ behavior.
 Coupling to the zeta cap
 ------------------------
 
-The cutoff is coupled to the zeta cap ``quadratic_route_max_abs_discriminant_bits``
-(``src/zeta/zeta.cpp``, value 44).  On the lattice route the index-one test
-takes ``hR`` from the unconditional analytic evaluation (the AFE of
-``L(1, chi_D)``) when ``|D|`` is below the zeta cap, and from the
-Belabas-Friedman route at or above it.  In the re-measurement the AFE was
-reached by the index-2 presentation ``x^2 + n`` only, and cost 23 to 79 s
-where listing took 0.4 to 1.2 s.  Lowering the class-group cutoff below the
-zeta cap therefore exposes the AFE cost on the lattice route between the two;
-the two constants have to be considered together.  Lowering the zeta cap also
-removes the unconditional ``L(1, chi)`` route for ``proven`` requests between
-the new cap and ``2^44``, which is a scope decision.
+The shipped state is class-group cutoff ``2^34`` with zeta cap ``2^44``
+(``quadratic_route_max_abs_discriminant_bits`` in ``src/zeta/zeta.cpp``,
+value 44, line 905).  Whether the lattice route's index-one test can take
+``hR`` from the unconditional analytic evaluation (the AFE of ``L(1, chi_D)``)
+below the zeta cap is the question here.  The forced-route re-measurement below
+found that, with the cutoff at ``2^44`` and the zeta cap at 44 in scratch trees,
+only the index-2 presentation ``x^2 + n`` showed a slow lattice route, 23 to
+79 s where listing took 0.3 to 1.2 s; the AFE was inferred from the
+completeness basis field and the cause was not investigated.
+
+A later check on main (T-312, busy machine, ``taskset -c 0-3``, median of 3)
+did not reproduce this.  In ``class_group.cpp`` a ``grh`` request with
+``|D| >= 2^34`` leaves the exact class-number route (line 5421), and
+``try_certify_class_unit_with_bf_audit`` (lines 5144-5156) sets
+``hr_unconditional`` to ``(degree == 1)``, false for a quadratic field, so a
+``grh`` request on the lattice route gets no ``unconditional_analytic`` record
+and takes the Belabas-Friedman ``hR``.  The AFE (``quadratic_residue``,
+``zeta.cpp`` line 941, gated at line 932) is reached from the ``proven``
+class-unit path and the zeta residue path.  Index-1 and index-2 fields of
+about ``2^36``, ``2^40`` and ``2^43`` all ran in under 0.35 s with basis
+``belabas_friedman``, and T-242's idle sweep on ``x^2 + n`` agrees (1.9 s at
+bin 43.9).  So the shipped build does not pay the AFE cost in this range.
+Why the scratch trees of the re-measurement did take 23 to 79 s is unexplained;
+something in their ``hR`` selection may have differed from the shipped code,
+but this was not confirmed.  Lowering the zeta cap would still remove the
+unconditional ``L(1, chi)`` route for ``proven`` requests between the new cap
+and ``2^44``, which is a scope decision.
 
 Setup
 -----
@@ -54,7 +70,7 @@ main at 4e7433a (which includes T-193).  Because no option forces the route,
 three scratch Release builds differing in one or two constants were used:
 
 - "listing": the class-group cutoff set to 99, so forms are listed at every
-  ``|D|`` (equal to the shipped build below ``2^44``);
+  ``|D|`` (equal to the shipped build below ``2^44`` at 4e7433a);
 - "lattice": the cutoff set to 0, so the lattice is used at every ``|D|``,
   with the shipped ``hR`` choice (the AFE below the zeta cap, Belabas-Friedman
   at or above it; equal to the shipped build above ``2^44``);
@@ -188,13 +204,13 @@ presentation, and 0.7 to 2.9 s up to ``1e14``.  The earlier table had 27 to
 
 The lattice with the shipped ``hR`` choice is slower than listing below
 ``2^44`` only on the presentations that reach the AFE, here the index-2
-presentation ``x^2 + n`` (23 to 79 s against 0.4 to 1.2 s); the index 1, 3 and
+presentation ``x^2 + n`` (23 to 79 s against 0.3 to 1.2 s); the index 1, 3 and
 6 presentations take the Belabas-Friedman route even there, and are as fast
 as or faster than listing from ``1e12``.  Why only index 2 reaches the AFE
 was not investigated.  The lattice with the Belabas-Friedman ``hR`` is at
-least as fast as listing at every presentation from ``1e12``, by 1.0 to 1.4x
+least as fast as listing at every presentation from ``1e12``, by about 1.2 to 1.9x
 at ``1e12`` and ``1e13`` and up to 8x at ``2^44 - 1``.  At and above ``2^44``
-the lattice is faster than listing in every row, by 1.4 to 25x.
+the lattice is faster than listing in every row, by 1.5 to 25x.
 
 Lowering the cutoff to 2^34
 ---------------------------
