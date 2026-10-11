@@ -779,6 +779,59 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     return 0;
 }
 
+// A unit power test whose bases have huge coefficients: one conjugate of
+// each base is tiny, so its logarithm cancels and the factored-log precision
+// ladder climbs far above the requested 64 bits.  The two log bounds and the
+// compact presentation share one embedding context, so the later embeddings
+// take each base's log from the context's cache, stored at the top rung of
+// the first ladder.  The root must still square to the input.
+int test_compact_unit_power_root_reuses_high_precision_base_logs() {
+    const slong coefficients[] = {-2, 0, 1};
+    const silex::NumberField field = monic_field(coefficients);
+    const silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+
+    silex::Element x(field);
+    silex::Element one(field);
+    silex::Element unit(field);
+    assert(x.gen() && one.one() && unit.add(x, one));
+    const auto unit_power = [&](slong exponent) {
+        silex::Element out(field);
+        sflint::Fmpz e;
+        fmpz_set_si(e.raw(), exponent);
+        assert(out.pow_fmpz(unit, sflint::FmpzConstRef(e)));
+        return out;
+    };
+    const silex::Element large = unit_power(401);
+    const silex::Element small = unit_power(3);
+    const silex::Element structural = unit_power(150);
+
+    // (1 + x)^401 * (1 + x)^3 * ((1 + x)^150)^2 = ((1 + x)^352)^2, with the
+    // formal leftover (1 + x)^401 * (1 + x)^3.
+    silex::FactoredElement square(field);
+    assert(square.push(large, 1) && square.push(small, 1) &&
+           square.push(structural, 2));
+
+    constexpr slong precision = 128;
+    bool is_power = false;
+    silex::FactoredElement root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, root, order, square, 2, precision, precision, nullptr,
+            nullptr));
+    assert(is_power && compact_power_root_squares_to(root, square));
+
+    // A unit that is not a square: (1 + x)^401 * (1 + x)^4.
+    silex::FactoredElement non_square(field);
+    assert(non_square.push(large, 1) && non_square.push(unit_power(4), 1));
+    is_power = true;
+    silex::FactoredElement no_root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, no_root, order, non_square, 2, precision, precision,
+            nullptr, nullptr));
+    assert(!is_power);
+    return 0;
+}
+
 // Reference evaluation of the modular power products: one independent binary
 // powering per (output, base) and a running product, the evaluation that the
 // shared-table interleaved evaluation replaces.
@@ -995,5 +1048,6 @@ int main() {
     assert(test_coordinate_bound_supports_index_three_maximal_basis() == 0);
     assert(test_compact_field_modulus_cache_keys() == 0);
     assert(test_compact_field_modulus_cache_shared_across_calls() == 0);
+    assert(test_compact_unit_power_root_reuses_high_precision_base_logs() == 0);
     return 0;
 }

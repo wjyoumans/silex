@@ -509,6 +509,19 @@ Changed
   differs in its last bits; every new enclosure overlaps the previous one.
   Units, class groups and labels are unchanged on that corpus.
 
+- The compact power test of a unit or saturation candidate embeds each base
+  once.  It bounds the conjugate logarithms of the candidate and of its
+  formal residual, which have the same bases, and then reduces the chosen
+  one to a compact presentation, which embeds it again.  The three steps
+  previously used separate embedding contexts, so a base whose logarithm
+  needs a high working precision (a base with large coefficients and a tiny
+  conjugate) was evaluated up the whole precision ladder three times.  They
+  now share one context per candidate, and the later steps take each base's
+  logarithm from its cache, stored at the highest precision the first step
+  reached.  The cached values are the same Arb enclosures, so every bound
+  stays rigorous; published results are unchanged on the class/unit test
+  corpus.
+
 Fixed
 -----
 

@@ -4288,6 +4288,7 @@ bool compact_factored_log_abs_upper_bound(
         flint::Fmpz& out,
         const Order& order,
         const FactoredElement& element,
+        EmbeddingContext& embeddings,
         slong precision,
         const DiagnosticsContext* diagnostics,
         DiagnosticsModule module,
@@ -4307,8 +4308,9 @@ bool compact_factored_log_abs_upper_bound(
     }
     const slong places = sig.r1() + sig.r2();
     flint::ArbVec logs(places);
-    EmbeddingContext embeddings(*field);
-    if (!embeddings.is_defined() || !embeddings.refine(precision) ||
+    if (!embeddings.is_defined() || embeddings.parent() == nullptr ||
+        !embeddings.parent()->has_same_data(*field) ||
+        !embeddings.refine(precision) ||
         !element.logarithmic_embedding(
                 flint::ArbVecRef(logs), embeddings,
                 LogEmbeddingMode::product, precision, diagnostics)) {
@@ -4344,6 +4346,7 @@ bool compact_use_residual_power_test(
         const Order& order,
         const FactoredElement& element,
         const FactoredElement& leftover,
+        EmbeddingContext& embeddings,
         const DiagnosticsContext* diagnostics,
         DiagnosticsModule module = DiagnosticsModule::unit_group,
         const char* split_profile_label =
@@ -4360,11 +4363,13 @@ bool compact_use_residual_power_test(
     flint::Fmpz residual_bound;
     flint::Fmpz sqrt_original;
     if (!compact_factored_log_abs_upper_bound(
-                original_bound, order, element, kPowerSplitLogPrecision,
-                diagnostics, module, original_profile_label) ||
+                original_bound, order, element, embeddings,
+                kPowerSplitLogPrecision, diagnostics, module,
+                original_profile_label) ||
         !compact_factored_log_abs_upper_bound(
-                residual_bound, order, leftover, kPowerSplitLogPrecision,
-                diagnostics, module, residual_profile_label)) {
+                residual_bound, order, leftover, embeddings,
+                kPowerSplitLogPrecision, diagnostics, module,
+                residual_profile_label)) {
         return false;
     }
 
@@ -4594,6 +4599,7 @@ bool compact_infinite_reduction(
         slong n,
         slong arb_precision,
         slong short_precision,
+        EmbeddingContext* shared_embeddings,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.compact_infinite_reduction");
@@ -4616,7 +4622,19 @@ bool compact_infinite_reduction(
         return false;
     }
     const slong places = sig.r1() + sig.r2();
-    EmbeddingContext embeddings(*field);
+    // A caller that has already embedded the bases of `element` (the power
+    // test's log bounds) passes its context, so the per-element log cache
+    // serves those bases instead of re-evaluating them.
+    EmbeddingContext local_embeddings;
+    if (shared_embeddings == nullptr ? !local_embeddings.define(*field)
+                                     : (shared_embeddings->parent() == nullptr ||
+                                        !shared_embeddings->parent()
+                                                 ->has_same_data(*field))) {
+        return false;
+    }
+    EmbeddingContext& embeddings =
+            shared_embeddings != nullptr ? *shared_embeddings
+                                         : local_embeddings;
     flint::ArbVec logs(places);
     if (!compact_factored_logs(logs, element,
                                      accumulated_multiplier, embeddings,
@@ -6146,6 +6164,7 @@ bool compact_presentation_reduction(
         slong n,
         slong arb_precision,
         slong short_precision,
+        EmbeddingContext* shared_embeddings,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.compact_presentation_reduction");
@@ -6191,7 +6210,7 @@ bool compact_presentation_reduction(
     return compact_infinite_reduction(
             residual_ideal, multiplier, *order, element,
             accumulated_multiplier, decomposition, finite_bound, n,
-            arb_precision, short_precision, diagnostics);
+            arb_precision, short_precision, shared_embeddings, diagnostics);
 }
 
 bool compact_unit_presentation_reduction(
@@ -6202,6 +6221,7 @@ bool compact_unit_presentation_reduction(
         slong n,
         slong arb_precision,
         slong short_precision,
+        EmbeddingContext* shared_embeddings,
         const DiagnosticsContext* diagnostics,
         DiagnosticsModule module = DiagnosticsModule::unit_group,
         const char* profile_label =
@@ -6234,7 +6254,7 @@ bool compact_unit_presentation_reduction(
     return compact_infinite_reduction(
             residual_ideal, multiplier, order, element,
             accumulated_multiplier, decomposition, 0, n, arb_precision,
-            short_precision, diagnostics);
+            short_precision, shared_embeddings, diagnostics);
 }
 
 void compact_floor_divrem_positive(
@@ -7187,6 +7207,7 @@ bool compact_presentation_power_root(
         slong n,
         slong arb_precision,
         slong short_precision,
+        EmbeddingContext* shared_embeddings,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(
             diagnostics, DiagnosticsModule::class_group,
@@ -7209,7 +7230,8 @@ bool compact_presentation_power_root(
     if (!residual.is_defined() || !multiplier.is_defined() ||
         !compact_presentation_reduction(
                 residual, multiplier, context, decomposition_row, element, n,
-                arb_precision, short_precision, diagnostics)) {
+                arb_precision, short_precision, shared_embeddings,
+                diagnostics)) {
         return false;
     }
 
@@ -7265,9 +7287,15 @@ bool compact_unit_presentation_power_root(
         return true;
     }
 
+    // One embedding context per candidate: `element` and `leftover` have the
+    // same bases, and the compact presentation below embeds the chosen one
+    // again, so the context's per-element log cache evaluates each base once
+    // at the highest precision any of these embeddings needs.
+    EmbeddingContext candidate_embeddings(*field);
     bool use_residual = false;
     if (!compact_use_residual_power_test(
-                use_residual, order, element, leftover, diagnostics)) {
+                use_residual, order, element, leftover, candidate_embeddings,
+                diagnostics)) {
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::unit_group,
                 "unit_group.compact_unit_power_split_bound_failure");
@@ -7286,7 +7314,7 @@ bool compact_unit_presentation_power_root(
     if (!residual.is_defined() || !multiplier.is_defined() ||
         !compact_unit_presentation_reduction(
                 residual, multiplier, order, compact_input, n, arb_precision,
-                short_precision, diagnostics)) {
+                short_precision, &candidate_embeddings, diagnostics)) {
         return false;
     }
 
@@ -8409,10 +8437,15 @@ bool saturation_process_candidates_once(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.saturation_compact_power_test");
 
+                // One embedding context per candidate, shared by the two
+                // log bounds and the compact presentation, as in
+                // compact_unit_presentation_power_root.
+                EmbeddingContext candidate_embeddings(*field);
                 bool use_residual = false;
                 if (!compact_use_residual_power_test(
                             use_residual, *order, element, leftover,
-                            diagnostics, DiagnosticsModule::class_group,
+                            candidate_embeddings, diagnostics,
+                            DiagnosticsModule::class_group,
                             "class_group.saturation_power_split_bound",
                             "class_group.saturation_original_log_bound",
                             "class_group.saturation_residual_log_bound")) {
@@ -8432,8 +8465,8 @@ bool saturation_process_candidates_once(
                         !compact_root.is_defined() ||
                         !compact_unit_presentation_reduction(
                                 residual, multiplier, *order, leftover, n,
-                                precision, precision, diagnostics,
-                                DiagnosticsModule::class_group,
+                                precision, precision, &candidate_embeddings,
+                                diagnostics, DiagnosticsModule::class_group,
                                 "class_group.saturation_residual_presentation_reduction") ||
                         !compact_power_root_from_presentation(
                                 is_power, compact_root, *order, leftover,
@@ -8451,7 +8484,8 @@ bool saturation_process_candidates_once(
                 } else if (!compact_presentation_power_root(
                                    is_power, root, input_context,
                                    flint::FmpzMatConstRef(fac_row), element, n,
-                                   precision, precision, diagnostics)) {
+                                   precision, precision, &candidate_embeddings,
+                                   diagnostics)) {
                     return false;
                 }
             }
