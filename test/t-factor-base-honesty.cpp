@@ -2175,7 +2175,7 @@ driver::AnalyticFinishDecision d21_checkpoint(
     silex::detail::RelationSearchControlState route_state;
     const driver::AnalyticFinishDecision decision = driver::apply_honesty_check(
             context, route_state, true, setup.maximal_order, nullptr,
-            sflint::FmpzConstRef(active_bound), false, false, nullptr);
+            sflint::FmpzConstRef(active_bound), false, nullptr);
     silex::detail::ClassUnitTransactionAccess::set_run_context(context,
                                                                nullptr);
     return decision;
