@@ -1097,6 +1097,57 @@ void test_power_hensel_answer_memo() noexcept {
     assert(field_root.get_fmpq_poly(sflint::FmpqPolyRef(field_coordinates)));
     assert(copy_root.get_fmpq_poly(sflint::FmpqPolyRef(copy_coordinates)));
     assert(fmpq_poly_equal(field_coordinates.raw(), copy_coordinates.raw()) != 0);
+
+    // Eviction: the memo is bounded (64 entries).  Store the answer for the
+    // square of (1 + 2 theta), then many more distinct radicands; the first
+    // key must be evicted, so asking again misses and recomputes the same
+    // answer with the right parent.
+    silex::detail::clear_hensel_data_caches();
+    silex::Element first_base = element_from_coefficients(field, {1, 2});
+    silex::Element first_square(field);
+    assert(first_square.multiply(first_base, first_base));
+    silex::Element first_root(field);
+    is_power = false;
+    assert(silex::detail::pure_power_hensel_root(is_power, first_root,
+                                                 first_square, 2, nullptr));
+    assert(is_power);
+    silex::Element resident_root(field);
+    is_power = false;
+    const silex::detail::HenselDataCacheCounters before_resident =
+            silex::detail::hensel_data_cache_counters();
+    assert(silex::detail::pure_power_hensel_root(is_power, resident_root,
+                                                 first_square, 2, nullptr));
+    assert(silex::detail::hensel_data_cache_counters()
+                   .power_root_answer_hits ==
+           before_resident.power_root_answer_hits + 1);
+    for (slong k = 2; k < 2 + 80; ++k) {
+        silex::Element other_base = element_from_coefficients(field, {k, 1});
+        silex::Element other_square(field);
+        assert(other_square.multiply(other_base, other_base));
+        silex::Element other_root(field);
+        is_power = false;
+        assert(silex::detail::pure_power_hensel_root(is_power, other_root,
+                                                     other_square, 2, nullptr));
+        assert(is_power);
+    }
+    const silex::detail::HenselDataCacheCounters before_evicted =
+            silex::detail::hensel_data_cache_counters();
+    silex::Element evicted_root(field);
+    is_power = false;
+    assert(silex::detail::pure_power_hensel_root(is_power, evicted_root,
+                                                 first_square, 2, nullptr));
+    const silex::detail::HenselDataCacheCounters after_evicted =
+            silex::detail::hensel_data_cache_counters();
+    assert(is_power);
+    assert(after_evicted.power_root_answer_misses ==
+           before_evicted.power_root_answer_misses + 1);
+    assert(after_evicted.power_root_answer_hits ==
+           before_evicted.power_root_answer_hits);
+    assert(evicted_root.has_parent(field));
+    silex::Element evicted_check(field);
+    assert(evicted_check.multiply(evicted_root, evicted_root));
+    assert(evicted_check.equal(first_square));
+    assert(evicted_root.equal(resident_root));
 }
 
 // Independent oracle for "no": each element below is not an n-th power in its
