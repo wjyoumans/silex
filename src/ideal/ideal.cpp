@@ -746,7 +746,7 @@ bool Ideal::contains(const Ideal& ideal) const noexcept {
     // span membership and is a defensive fallback for any other stored
     // shape; it is not expected to be reachable through the API.
     if (is_triangular_basis_of_degree(hnf_, n) &&
-        fmpz_mat_nrows(ideal.hnf_.raw()) >= n &&
+        fmpz_mat_nrows(ideal.hnf_.raw()) == n &&
         fmpz_mat_ncols(ideal.hnf_.raw()) == n) {
         flint::FmpzMat residual(1, n);
         fmpz* row = fmpz_mat_row(residual.raw(), 0);
