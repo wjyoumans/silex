@@ -153,17 +153,24 @@ def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
         assert instance["failure_detail"] is None
 
 
-def assert_factor_base_size_limit(exe: Path, root: Path) -> None:
-    # x^2 + 1000000000039: the proven factor base would exceed the fixed
-    # limit of 2^14 generators, so it is refused before any matrix is
-    # allocated and the transaction names that reason.
+def assert_structure_certificate_route(exe: Path, root: Path) -> None:
+    # x^2 + 1000000000039: the proven base up to the generation bound would
+    # exceed the fixed limit of 2^14 generators, so the compact base is kept
+    # and the class group (order 1113261) is certified by the structure
+    # certificate; no generation bound is published.  (The refusal reason
+    # factor_base_size_limit_exceeded stays covered by t-class-group.)
     instance = run_json(
         [str(exe), "--coeffs=1000000000039,0,1", "--mode=proven"], root
     )
-    assert instance["success"] is False
-    assert instance["final_result_published"] is False
-    assert instance["failure_reason"] == "factor_base_size_limit_exceeded"
-    assert instance["failure_detail"] is None
+    assert instance["success"] is True
+    assert instance["final_result_published"] is True
+    class_group = instance["class_group"]
+    assert class_group["factor_base_generation_certification"] == "proven"
+    assert class_group["factor_base_generation_basis"] == (
+        "structure_certificate"
+    )
+    assert class_group["order"] == "1113261"
+    assert class_group["invariants"] == ["1113261"]
 
 
 def assert_grh_generation_below_minkowski(exe: Path, root: Path) -> None:
@@ -457,7 +464,7 @@ def main() -> int:
     assert_marked_phase_failures(args.exe, root)
     assert_fail_closed_inputs(args.exe, root)
     assert_computation_failure_cause(args.exe, root)
-    assert_factor_base_size_limit(args.exe, root)
+    assert_structure_certificate_route(args.exe, root)
     assert_grh_generation_below_minkowski(args.exe, root)
     assert_grh_minkowski_equality_boundary(args.exe, root)
     assert_proven_and_degree_one_provenance(args.exe, root)
