@@ -1264,13 +1264,14 @@ bool set_known_two_generator_ideal(
         return false;
     }
 
-    // Source trace: reference `Ideal.jl:assure_has_basis_matrix` builds a
-    // two-element ideal basis as
-    // `hnf_modular_eldiv!(representation_matrix(gen_two), gen_one)`, which is
-    // FLINT `fmpz_mat_hnf_modular_eldiv`, and reference `base4.c:idealhnf_two`
-    // computes the HNF of the same lattice (in PARI's column convention) as
-    // `ZM_hnfmodid` of the multiplication table of beta modulo the scalar
-    // generator.
+    // Source trace: reference `Ideal.jl` (lower-left convention, lines 422 and
+    // 444-455) builds a two-element ideal basis as
+    // `hnf_modular_eldiv!(representation_matrix(gen_two), gen_one, :lowerleft)`,
+    // which is FLINT `fmpz_mat_hnf_modular_eldiv`, and reference
+    // `base4.c:idealhnf_two` computes the HNF of the same lattice (in the
+    // reference's column convention) as `ZM_hnfmodid` of the multiplication
+    // table of beta modulo the scalar generator. Silex keeps FLINT's
+    // upper-right HNF convention.
     //
     // The rows a I and M_beta span a O + beta O, which contains a Z^n, so
     // every elementary divisor of the 2n x n row matrix divides a and its rank

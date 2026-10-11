@@ -2117,7 +2117,8 @@ int test_known_two_generator_hnf_matches_generic() {
 
     std::vector<sflint::Fmpz> scalars;
     for (ulong a : {1UL, 2UL, 3UL, 4UL, 5UL, 6UL, 7UL, 11UL, 12UL, 13UL, 30UL,
-                    97UL, 128UL, 4093UL * 4093UL}) {
+                    97UL, 128UL, 4093UL * 4093UL,
+                    18446744073709551557UL}) {  // 2^64 - 59, full-word nmod path
         scalars.emplace_back();
         fmpz_set_ui(scalars.back().raw(), a);
     }
