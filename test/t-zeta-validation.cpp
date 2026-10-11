@@ -931,9 +931,61 @@ bool check_linear_factor_count_cache(const FieldSetup& setup) noexcept {
             shared.value_bf_audit();
     sflint::Arb shared_value;
     sflint::arb_set(sflint::ArbRef(shared_value), shared.value());
-    return shared_audit != nullptr &&
-           same_grh_default_product(shared_value, *shared_audit, reference,
-                                    reference_audit);
+    if (shared_audit == nullptr ||
+        !same_grh_default_product(shared_value, *shared_audit, reference,
+                                  reference_audit)) {
+        return false;
+    }
+
+    // Every count of the cache from the grh run above, changed.  Seeding it
+    // into an AnalyticClassRegulatorCache is observable only through the
+    // value that a later grh ensure() computes from it.
+    silex::detail::ZetaBfResidueDegreeCache wrong = cache;
+    for (silex::detail::ZetaBfLinearFactorCountEntry& entry :
+         wrong.linear_factor_counts) {
+        entry.count = entry.count == 0 ? 1 : entry.count - 1;
+    }
+
+    // A grh ensure() reads the shared cache (a cache hit): seeded wrong
+    // counts change its value, so ensure() does not pass nullptr.
+    silex::detail::AnalyticClassRegulatorCache seeded;
+    if (wrong.entries.empty() ||
+        !seeded.seed_bf_residue_degree_cache(order, wrong, nullptr) ||
+        !seeded.ensure(order, 128, nullptr, nullptr, false, true) ||
+        ::arb_equal(seeded.value().raw(), reference.raw()) != 0) {
+        return false;
+    }
+
+    // The seed check rejects counts out of order, below 0 or above the
+    // degree, and a rejected seed leaves the cache as it was.
+    silex::detail::ZetaBfResidueDegreeCache unsorted = cache;
+    std::swap(unsorted.linear_factor_counts[0],
+              unsorted.linear_factor_counts[1]);
+    silex::detail::ZetaBfResidueDegreeCache negative = cache;
+    negative.linear_factor_counts[0].count = -1;
+    silex::detail::ZetaBfResidueDegreeCache too_large = cache;
+    too_large.linear_factor_counts[0].count = order.degree() + 1;
+    silex::detail::AnalyticClassRegulatorCache rejecting;
+    if (rejecting.seed_bf_residue_degree_cache(order, unsorted, nullptr) ||
+        rejecting.seed_bf_residue_degree_cache(order, negative, nullptr) ||
+        rejecting.seed_bf_residue_degree_cache(order, too_large, nullptr) ||
+        !rejecting.ensure(order, 128, nullptr, nullptr, false, true) ||
+        ::arb_equal(rejecting.value().raw(), reference.raw()) == 0) {
+        return false;
+    }
+
+    // Switching to a different order clears the counts: the wrong counts of
+    // `order` must not reach the value of another order.
+    const FieldSetup other = cubic_blocker();
+    sflint::Arb other_reference;
+    silex::detail::ZetaBfRouteAudit other_audit;
+    silex::detail::AnalyticClassRegulatorCache switched;
+    return call_grh_default_product(other_reference, other_audit,
+                                    other.maximal_order, nullptr) &&
+           switched.seed_bf_residue_degree_cache(order, wrong, nullptr) &&
+           switched.ensure(other.maximal_order, 128, nullptr, nullptr, false,
+                           true) &&
+           ::arb_equal(switched.value().raw(), other_reference.raw()) != 0;
 }
 }  // namespace
 
