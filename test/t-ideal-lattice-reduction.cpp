@@ -751,6 +751,96 @@ int test_large_power_basis_embeddings_round_at_first_precision() {
     return 0;
 }
 
+// Checks the T2 enumeration data of an ideal of a maximal order: the basis
+// spans the ideal lattice (same HNF), the product of the Gram-Schmidt pivots
+// on the quadratic-form diagonal is det(Gram) = |disc| N(I)^2, and the basis
+// meets the LLL bounds the reduction accepts:
+//   |b_1|^2 <= 2^floor((n + 1) / 2) (d^(1/n) + 1)  and
+//   prod_i |b_i|^2 <= 2^(n (n - 1) / 2) d.
+bool t2_enumeration_data_is_reduced_ideal_basis(
+        const silex::Ideal& ideal,
+        const silex::Order& order,
+        const silex::detail::relation_search::FiniteIdealT2EnumerationData&
+                data) noexcept {
+    const slong degree = order.degree();
+    if (degree <= 0 || sflint::fmpz_mat_nrows(data.basis) != degree ||
+        sflint::fmpz_mat_ncols(data.basis) != degree ||
+        data.quadratic_form_data.size() !=
+                static_cast<std::size_t>(degree * degree) ||
+        !std::isfinite(data.initial_bound_value) ||
+        data.initial_bound_value <= 0.0) {
+        return false;
+    }
+
+    sflint::FmpzMat ideal_hnf(degree, degree);
+    sflint::FmpzMat basis_hnf(degree, degree);
+    if (!ideal.get_hnf(sflint::FmpzMatRef(ideal_hnf))) {
+        return false;
+    }
+    ::fmpz_mat_hnf(basis_hnf.raw(), data.basis.raw());
+    ::fmpz_mat_hnf(ideal_hnf.raw(), ideal_hnf.raw());
+    if (!sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(basis_hnf),
+                                sflint::FmpzMatConstRef(ideal_hnf))) {
+        return false;
+    }
+
+    sflint::Fmpz discriminant;
+    sflint::Fmpz norm;
+    sflint::Fmpz determinant;
+    if (!order.discriminant(sflint::FmpzRef(discriminant)) ||
+        !ideal.norm(sflint::FmpzRef(norm))) {
+        return false;
+    }
+    sflint::fmpz_abs(sflint::FmpzRef(determinant),
+                     sflint::FmpzConstRef(discriminant));
+    sflint::fmpz_mul(sflint::FmpzRef(determinant),
+                     sflint::FmpzConstRef(determinant),
+                     sflint::FmpzConstRef(norm));
+    sflint::fmpz_mul(sflint::FmpzRef(determinant),
+                     sflint::FmpzConstRef(determinant),
+                     sflint::FmpzConstRef(norm));
+    const double log2_determinant =
+            std::log2(sflint::fmpz_get_d(sflint::FmpzConstRef(determinant)));
+    if (!std::isfinite(log2_determinant)) {
+        return false;
+    }
+
+    // Row i of the quadratic form holds the Gram-Schmidt pivot B_i on the
+    // diagonal and mu_{j,i} at column j > i, so
+    // |b_j|^2 = B_j + sum_{i<j} mu_{j,i}^2 B_i.
+    const auto entry = [&](slong row, slong column) {
+        return data.quadratic_form_data[static_cast<std::size_t>(
+                row * degree + column)];
+    };
+    double log2_pivot_product = 0.0;
+    double log2_norm_product = 0.0;
+    for (slong j = 0; j < degree; ++j) {
+        const double pivot = entry(j, j);
+        if (!std::isfinite(pivot) || pivot <= 0.0) {
+            return false;
+        }
+        log2_pivot_product += std::log2(pivot);
+        double squared_norm = pivot;
+        for (slong i = 0; i < j; ++i) {
+            squared_norm += entry(i, j) * entry(i, j) * entry(i, i);
+        }
+        log2_norm_product += std::log2(squared_norm);
+    }
+    constexpr double kLog2Tolerance = 1.0e-6;
+    if (std::fabs(log2_pivot_product - log2_determinant) > kLog2Tolerance) {
+        return false;
+    }
+
+    const double n = static_cast<double>(degree);
+    const double log2_first_bound =
+            static_cast<double>((degree + 1) / 2) +
+            std::log2(std::exp2(log2_determinant / n) + 1.0);
+    const double log2_product_bound =
+            (n * (n - 1.0)) / 2.0 + log2_determinant;
+    return std::log2(entry(0, 0)) <= log2_first_bound + kLog2Tolerance &&
+           log2_norm_product <= log2_product_bound + kLog2Tolerance;
+}
+
 // A degree-10 field given by a polynomial with coefficients near 2^18, so
 // the maximal-order basis
 // embeddings reach about 2^34 while the ideal lattices have short vectors
@@ -795,12 +885,55 @@ int test_skewed_basis_t2_enumeration_data_builds() {
         assert(silex::detail::relation_search::
                        build_finite_ideal_t2_enumeration_data_with_retry(
                                data, prime_ideal, nullptr, nullptr));
-        assert(sflint::fmpz_mat_nrows(data.basis) == degree);
-        assert(sflint::fmpz_mat_ncols(data.basis) == degree);
-        assert(data.quadratic_form_data.size() ==
-               static_cast<std::size_t>(degree * degree));
-        assert(std::isfinite(data.initial_bound_value));
-        assert(data.initial_bound_value > 0.0);
+        assert(t2_enumeration_data_is_reduced_ideal_basis(prime_ideal, order,
+                                                          data));
+    }
+    return 0;
+}
+
+// The totally real octic x^8 - 20x^6 + 95x^4 - 100x^2 + 25 (LMFDB
+// 8.8.82944000000.1).  For prime ideals above 5, 11 and 13 the basis reduced
+// from the first full-rank rounding has quadratic-form data but misses the
+// LLL bounds; the T2 enumeration data must then come from a basis that meets
+// them.
+int test_octic_t2_enumeration_data_meets_lll_bounds() {
+    constexpr std::array<slong, 9> coefficients = {25, 0, -100, 0, 95,
+                                                   0,  -20, 0,  1};
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    const silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation_order));
+    assert(order.is_maximal());
+    assert(order.degree() == 8);
+
+    constexpr std::array<ulong, 6> rational_primes = {2, 3, 5, 7, 11, 13};
+    for (const ulong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        sflint::fmpz_set_ui(sflint::FmpzRef(p), rational_prime);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            silex::Ideal prime_ideal(order);
+            assert(prime->get_ideal(prime_ideal));
+
+            silex::detail::relation_search::FiniteIdealT2EnumerationData data;
+            assert(silex::detail::relation_search::
+                           build_finite_ideal_t2_enumeration_data_with_retry(
+                                   data, prime_ideal, nullptr, nullptr));
+            assert(t2_enumeration_data_is_reduced_ideal_basis(prime_ideal,
+                                                              order, data));
+        }
     }
     return 0;
 }
@@ -815,5 +948,6 @@ int main() {
     assert(test_large_power_basis_embeddings_round_at_first_precision() ==
            0);
     assert(test_skewed_basis_t2_enumeration_data_builds() == 0);
+    assert(test_octic_t2_enumeration_data_meets_lll_bounds() == 0);
     return 0;
 }
