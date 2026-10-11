@@ -699,7 +699,128 @@ void check_warm_cache_and_second_pass() noexcept {
     }
 }
 
+// The factor list of `value` is exactly `expected`, in order: equal factors
+// and equal exponents, nothing merged or reordered.
+bool has_factor_list(const silex::FactoredElement& value,
+                     const std::vector<const silex::Element*>& factors,
+                     const std::vector<slong>& exponents) noexcept {
+    const auto entries = value.factors();
+    if (entries.size() != factors.size() ||
+        factors.size() != exponents.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        if (!entries[i].factor.equal(*factors[i]) ||
+            entries[i].exponent != exponents[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A copy made with set() may share factor storage with its source.  Every
+// mutation of one value, including in-place forms whose output aliases an
+// input, must leave the other value and the factors it exposes unchanged.
+void check_copies_are_independent() noexcept {
+    silex::NumberField field = quadratic_field(-5);
+    silex::Element a(field);
+    silex::Element b(field);
+    silex::Element c(field);
+    set_one_plus_theta(a);
+    assert(b.set_si(3));
+    assert(c.set_si(-7));
+
+    silex::FactoredElement source(field);
+    assert(source.push(a, 2));
+    assert(source.push(b, -1));
+    assert(source.push(a, 5));
+    const std::vector<const silex::Element*> source_factors{&a, &b, &a};
+    const std::vector<slong> source_exponents{2, -1, 5};
+
+    silex::FactoredElement extra(field);
+    assert(extra.push(c, 3));
+
+    // Mutating the copy leaves the source unchanged.
+    {
+        silex::FactoredElement copy(field);
+        assert(copy.set(source));
+        assert(has_factor_list(copy, source_factors, source_exponents));
+        const silex::Element* source_first = source.factor(0);
+        assert(copy.push(c, 4));
+        assert(copy.multiply(copy, extra));
+        assert(copy.divide(copy, extra));
+        assert(copy.pow_si(copy, 2));
+        assert(has_factor_list(source, source_factors, source_exponents));
+        assert(source.factor(0) == source_first);
+        assert(has_factor_list(copy, {&a, &b, &a, &c, &c, &c},
+                               {4, -2, 10, 8, 6, -6}));
+    }
+
+    // Mutating the source leaves the copy unchanged, also after the source
+    // is cleared.
+    {
+        silex::FactoredElement working(field);
+        silex::FactoredElement copy(field);
+        assert(working.set(source));
+        assert(copy.set(working));
+        const silex::Element* copy_first = copy.factor(0);
+        assert(working.multiply(working, working));
+        assert(has_factor_list(working, {&a, &b, &a, &a, &b, &a},
+                               {2, -1, 5, 2, -1, 5}));
+        assert(has_factor_list(copy, source_factors, source_exponents));
+        assert(copy.factor(0) == copy_first);
+        assert(working.push(*working.factor(1), 7));
+        assert(working.length() == 7);
+        working.clear();
+        assert(has_factor_list(copy, source_factors, source_exponents));
+        assert(copy.factor(0) == copy_first);
+    }
+
+    // A push of one of the value's own factors copies it before the list
+    // changes, whether or not the storage is shared.
+    {
+        silex::FactoredElement shared(field);
+        silex::FactoredElement copy(field);
+        assert(shared.set(source));
+        assert(copy.set(shared));
+        assert(shared.push(*shared.factor(2), -3));
+        assert(has_factor_list(shared, {&a, &b, &a, &a}, {2, -1, 5, -3}));
+        assert(has_factor_list(copy, source_factors, source_exponents));
+        assert(copy.push(*copy.factor(1), 1));
+        assert(has_factor_list(copy, {&a, &b, &a, &b}, {2, -1, 5, 1}));
+        assert(has_factor_list(source, source_factors, source_exponents));
+    }
+
+    // Products with an empty operand and set_element do not touch the other
+    // operand.
+    {
+        silex::FactoredElement empty(field);
+        silex::FactoredElement product(field);
+        assert(empty.one());
+        assert(product.multiply(empty, source));
+        assert(has_factor_list(product, source_factors, source_exponents));
+        assert(product.multiply(product, empty));
+        assert(product.push(c, 1));
+        assert(product.set_element(b));
+        assert(has_factor_list(product, {&b}, {1}));
+        assert(has_factor_list(source, source_factors, source_exponents));
+        assert(empty.length() == 0);
+    }
+
+    // A failed in-place product leaves the value unchanged.
+    {
+        silex::FactoredElement copy(field);
+        silex::FactoredElement huge(field);
+        assert(copy.set(source));
+        assert(huge.push(c, std::numeric_limits<slong>::min()));
+        assert(!copy.divide(copy, huge));
+        assert(has_factor_list(copy, source_factors, source_exponents));
+        assert(has_factor_list(source, source_factors, source_exponents));
+    }
+}
+
 int main() {
+    check_copies_are_independent();
     check_many_factor_evaluation();
     check_repeated_factor_logs();
     check_merged_equal_bases();
