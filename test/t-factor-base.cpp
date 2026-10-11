@@ -461,6 +461,98 @@ int test_lll_relation_base_from_norm_bounded() {
     return 0;
 }
 
+bool block_length_for_prime(slong& length,
+                            const silex::FactorBase& base,
+                            slong rational_prime) noexcept {
+    sflint::Fmpz p;
+    sflint::fmpz_set_si(sflint::FmpzRef(p), rational_prime);
+    slong block = -1;
+    slong start = 0;
+    if (!base.rational_prime_block_index_for_prime(
+                block, sflint::FmpzConstRef(p))) {
+        length = 0;
+        return true;
+    }
+    return base.rational_prime_block(sflint::FmpzRef(p), start, length,
+                                     block);
+}
+
+// A norm-bounded build that takes its decompositions from a cache filled by
+// earlier builds of the same order equals a fresh build at every bound,
+// including a bound below the cache's reach and a bound at which a cached
+// rational prime gains a prime ideal of larger norm (5 in Q(2^(1/3)): a
+// degree-one and a degree-two prime, norms 5 and 25).  A cache from another
+// order fails the build and leaves the base unchanged.
+int test_norm_bounded_build_with_decomposition_cache() {
+    silex::NumberField cubic = cubic_field();
+    silex::Order cubic_equation = silex::test::equation_order(cubic);
+    silex::Order cubic_maximal(cubic);
+    assert(cubic_maximal.maximal_order(cubic_equation));
+
+    silex::detail::PrimeDecompositionCache cache;
+    const slong bounds[] = {4, 8, 16, 32, 64, 12};
+    const std::size_t primes_up_to[] = {2, 4, 6, 11, 18, 18};
+    slong previous_five_length = -1;
+    for (std::size_t i = 0; i < sizeof(bounds) / sizeof(bounds[0]); ++i) {
+        sflint::Fmpz bound;
+        assert(set_fmpz_si(bound, bounds[i]));
+        silex::FactorBase cached(cubic_maximal);
+        silex::FactorBase fresh(cubic_maximal);
+        assert(silex::detail::FactorBaseBlockAccess::
+                       build_prime_ideal_norm_bounded_cached(
+                               cached, sflint::FmpzConstRef(bound), cache));
+        assert(fresh.build_prime_ideal_norm_bounded(
+                sflint::FmpzConstRef(bound)));
+        assert(cache.decompositions.size() == primes_up_to[i]);
+        assert(cached.equal(fresh));
+        assert(fresh.equal(cached));
+        assert(all_block_completeness_matches_decomposition(cached));
+        for (slong block = 0; block < cached.rational_prime_block_count();
+             ++block) {
+            bool cached_complete = false;
+            bool fresh_complete = false;
+            assert(silex::detail::FactorBaseBlockAccess::
+                           rational_prime_block_is_complete(
+                                   cached_complete, cached, block));
+            assert(silex::detail::FactorBaseBlockAccess::
+                           rational_prime_block_is_complete(
+                                   fresh_complete, fresh, block));
+            assert(cached_complete == fresh_complete);
+        }
+        slong five_length = 0;
+        assert(block_length_for_prime(five_length, cached, 5));
+        if (bounds[i] == 16) {
+            assert(five_length == 1);
+        }
+        if (bounds[i] == 32) {
+            assert(previous_five_length == 1 && five_length == 2);
+        }
+        previous_five_length = five_length;
+    }
+
+    silex::NumberField quadratic = quadratic_field(2);
+    silex::Order quadratic_order = silex::test::equation_order(quadratic);
+    assert(quadratic_order.is_maximal());
+    silex::detail::PrimeDecompositionCache other_cache;
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 16));
+    silex::FactorBase quadratic_base(quadratic_order);
+    assert(silex::detail::FactorBaseBlockAccess::
+                   build_prime_ideal_norm_bounded_cached(
+                           quadratic_base, sflint::FmpzConstRef(bound),
+                           other_cache));
+    silex::FactorBase kept(cubic_maximal);
+    assert(kept.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(bound)));
+    silex::FactorBase copy(cubic_maximal);
+    assert(copy.set(kept));
+    assert(!silex::detail::FactorBaseBlockAccess::
+                    build_prime_ideal_norm_bounded_cached(
+                            kept, sflint::FmpzConstRef(bound), other_cache));
+    assert(kept.equal(copy));
+
+    return 0;
+}
+
 // equal() answers copies from a shared identity and everything else from the
 // element-wise comparison; both must give the same answer.
 int test_equal_copies_and_independent_builds() {
@@ -695,6 +787,7 @@ int main() {
     assert(test_prime_ideal_norm_bounded_shape() == 0);
     assert(test_lll_relation_base_order() == 0);
     assert(test_lll_relation_base_from_norm_bounded() == 0);
+    assert(test_norm_bounded_build_with_decomposition_cache() == 0);
     assert(test_equal_copies_and_independent_builds() == 0);
     assert(test_class_group_bound() == 0);
     assert(test_failure_preserves_output() == 0);

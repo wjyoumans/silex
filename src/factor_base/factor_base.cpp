@@ -1497,24 +1497,71 @@ bool FactorBase::build_prime_ideal_norm_bounded_impl(
         bool include_inert_primes,
         slong degree_limit,
         bool retain_one_split_prime) noexcept {
-    if (!is_defined() || fmpz_cmp_ui(bound.raw(), 2) < 0 ||
-        !parent_.is_maximal() || degree_limit < 0) {
+    return detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
+            *this, bound, include_inert_primes, degree_limit,
+            retain_one_split_prime, nullptr);
+}
+
+bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded_cached(
+        FactorBase& base,
+        flint::FmpzConstRef bound,
+        PrimeDecompositionCache& cache) noexcept {
+    return build_prime_ideal_norm_bounded(base, bound, true, 0, false,
+                                          &cache);
+}
+
+bool detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
+        FactorBase& base,
+        flint::FmpzConstRef bound,
+        bool include_inert_primes,
+        slong degree_limit,
+        bool retain_one_split_prime,
+        PrimeDecompositionCache* cache) noexcept {
+    const Order& parent = base.parent_;
+    if (!base.is_defined() || fmpz_cmp_ui(bound.raw(), 2) < 0 ||
+        !parent.is_maximal() || degree_limit < 0) {
         return false;
     }
 
-    FactorBase candidate(parent_);
+    FactorBase candidate(parent);
     flint::Fmpz p;
     fmpz_set_ui(p.raw(), 2);
+    PrimeIdealList local;
+    std::size_t prime_position = 0;
     while (fmpz_cmp(p.raw(), bound.raw()) <= 0) {
-        PrimeIdealList decomposed;
-        if (!decompose_prime(decomposed, parent_,
-                             flint::FmpzConstRef(p))) {
-            return false;
+        // Entry k of the cache is the decomposition of the k-th rational
+        // prime, so a build at a larger bound reuses every decomposition an
+        // earlier build of the same order computed and decomposes only the
+        // primes beyond it.
+        const PrimeIdealList* decomposition = nullptr;
+        if (cache != nullptr &&
+            prime_position < cache->decompositions.size()) {
+            decomposition = &cache->decompositions[prime_position];
+            const PrimeIdeal* first = decomposition->at(0);
+            if (first == nullptr ||
+                !same_order_parent(first->parent(), &parent)) {
+                return false;
+            }
+        } else {
+            PrimeIdealList computed;
+            if (!decompose_prime(computed, parent,
+                                 flint::FmpzConstRef(p))) {
+                return false;
+            }
+            if (cache != nullptr) {
+                cache->decompositions.emplace_back(std::move(computed));
+                decomposition = &cache->decompositions.back();
+            } else {
+                local.swap(computed);
+                decomposition = &local;
+            }
         }
+        ++prime_position;
+        const PrimeIdealList& decomposed = *decomposition;
         // The source factor-base generator skips inert rational primes for the relation
         // factor base, even when p^degree is still below the tested bound.
         if (!include_inert_primes &&
-            is_inert_prime_decomposition(decomposed, parent_.degree())) {
+            is_inert_prime_decomposition(decomposed, parent.degree())) {
             fmpz_nextprime(p.raw(), p.raw(), 1);
             continue;
         }
@@ -1560,7 +1607,7 @@ bool FactorBase::build_prime_ideal_norm_bounded_impl(
         fmpz_nextprime(p.raw(), p.raw(), 1);
     }
 
-    swap(candidate);
+    base.swap(candidate);
     return true;
 }
 

@@ -2,13 +2,43 @@
 
 #include <silex/factor_base.hpp>
 #include <silex/flint/arb.hpp>
+#include <silex/prime_ideal.hpp>
+
+#include <vector>
 
 #include "generation_different_route_internal.hpp"
 
 namespace silex::detail {
 
+// Decompositions of the rational primes 2, 3, 5, ..., in that order, kept
+// across norm-bounded builds of one maximal order: entry k is
+// decompose_prime of the k-th rational prime.
+struct PrimeDecompositionCache {
+    std::vector<PrimeIdealList> decompositions;
+};
+
 class FactorBaseBlockAccess {
 public:
+    // Builds exactly the base base.build_prime_ideal_norm_bounded(bound)
+    // builds, taking the decomposition of each rational prime from `cache`
+    // when the cache already holds it and appending the decompositions it
+    // computes.  The cache must come from builds over base's parent order
+    // (a cached decomposition of another order fails the build).  On
+    // failure base is unchanged; the cache keeps every decomposition it
+    // holds and may have gained some.
+    static bool build_prime_ideal_norm_bounded_cached(
+            FactorBase& base,
+            flint::FmpzConstRef bound,
+            PrimeDecompositionCache& cache) noexcept;
+    // The body of FactorBase::build_prime_ideal_norm_bounded_impl, with
+    // the optional decomposition cache of the overload above.
+    static bool build_prime_ideal_norm_bounded(
+            FactorBase& base,
+            flint::FmpzConstRef bound,
+            bool include_inert_primes,
+            slong degree_limit,
+            bool retain_one_split_prime,
+            PrimeDecompositionCache* cache) noexcept;
     static bool rational_prime_block_is_complete(
             bool& complete,
             const FactorBase& base,

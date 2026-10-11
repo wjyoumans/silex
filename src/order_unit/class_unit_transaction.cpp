@@ -2,6 +2,7 @@
 
 #include "../class_group/relation_search_driver_internal.hpp"
 #include "../class_group/relation_factor_base_plan_internal.hpp"
+#include "../factor_base/factor_base_internal.hpp"
 
 #include <silex/signature.hpp>
 
@@ -163,10 +164,17 @@ bool grh_factor_base_bound(
         flint::fmpz_set(flint::FmpzRef(*generation_bound),
                         flint::FmpzConstRef(out));
     }
+    // Each doubling rebuilds the base from p = 2 in the same order as a
+    // fresh build_prime_ideal_norm_bounded(out); the decompositions of the
+    // rational primes an earlier probe reached are reused, not recomputed.
+    detail::PrimeDecompositionCache decompositions;
     for (;;) {
         FactorBase probe(order);
-        if (!probe.is_defined() || !probe.build_prime_ideal_norm_bounded(
-                                           flint::FmpzConstRef(out))) {
+        if (!probe.is_defined() ||
+            !detail::FactorBaseBlockAccess::
+                    build_prime_ideal_norm_bounded_cached(
+                            probe, flint::FmpzConstRef(out),
+                            decompositions)) {
             return false;
         }
         for (slong i = 0; i < probe.length(); ++i) {
