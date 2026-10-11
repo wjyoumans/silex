@@ -287,21 +287,51 @@ bool relation_exponents_are_zero(bool& is_zero,
     return true;
 }
 
+bool sparse_relation_rows_equal(const fmpz_smat::SparseRow& left,
+                                const fmpz_smat::SparseRow& right) noexcept {
+    // Both rows are in SparseRow's canonical form (strictly increasing
+    // columns, no stored zeros), so this is exact equality of the dense rows.
+    if (left.length() != right.length()) {
+        return false;
+    }
+    const auto left_columns = left.columns();
+    const auto right_columns = right.columns();
+    if (!std::equal(left_columns.begin(), left_columns.end(),
+                    right_columns.begin())) {
+        return false;
+    }
+    const flint::FmpzVecConstRef left_values = left.values();
+    const flint::FmpzVecConstRef right_values = right.values();
+    for (slong i = 0; i < left.length(); ++i) {
+        if (!fmpz_equal(left_values.data() + i, right_values.data() + i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// `stored_rows` is `relations`' own sparse row storage. The candidate row is
+// converted to sparse form once and compared against the stored sparse rows
+// in place, instead of extracting every stored row into a dense row per
+// candidate.
 bool relation_matrix_contains_row(bool& contains,
                                   const RelationMatrix& relations,
+                                  const fmpz_smat::SparseMat& stored_rows,
                                   flint::FmpzMatConstRef row) noexcept {
     contains = false;
     if (!relations.is_defined() || flint::fmpz_mat_nrows(row) != 1 ||
-        flint::fmpz_mat_ncols(row) != relations.ncols()) {
+        flint::fmpz_mat_ncols(row) != relations.ncols() ||
+        stored_rows.nrows() != relations.length() ||
+        stored_rows.ncols() != relations.ncols()) {
         return false;
     }
 
-    flint::FmpzMat stored(1, relations.ncols());
-    for (slong i = 0; i < relations.length(); ++i) {
-        if (!relations.row(flint::FmpzMatRef(stored), i)) {
-            return false;
-        }
-        if (flint::fmpz_mat_equal(flint::FmpzMatConstRef(stored), row)) {
+    fmpz_smat::SparseRow candidate;
+    if (!candidate.set_fmpz_mat_row(row, 0)) {
+        return false;
+    }
+    for (slong i = 0; i < stored_rows.nrows(); ++i) {
+        if (sparse_relation_rows_equal(stored_rows.row_ref(i), candidate)) {
             contains = true;
             return true;
         }
@@ -10305,6 +10335,7 @@ bool ClassGroupContext::append_relation_with_outcome_(
                             "class_group.append_relation_duplicate_check");
         bool duplicate = false;
         if (!relation_matrix_contains_row(duplicate, relations_,
+                                          relations_.rows_,
                                           flint::FmpzMatConstRef(row))) {
             return false;
         }

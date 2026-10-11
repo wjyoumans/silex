@@ -8,6 +8,7 @@
 
 #include <flint/fmpz_mat.h>
 
+#include <cstddef>
 #include <initializer_list>
 #include <type_traits>
 #include <utility>
@@ -334,6 +335,95 @@ int test_sparse_matrix_basic() {
     fmpz_mat_clear(dense);
     fmpz_clear(x);
     return 0;
+}
+
+bool sparse_rows_match(const silex::fmpz_smat::SparseRow& left,
+                       const silex::fmpz_smat::SparseRow& right) noexcept {
+    if (left.length() != right.length()) {
+        return false;
+    }
+    for (slong i = 0; i < left.length(); ++i) {
+        if (left.columns()[static_cast<std::size_t>(i)] !=
+                    right.columns()[static_cast<std::size_t>(i)] ||
+            fmpz_equal(left.values().data() + i, right.values().data() + i) ==
+                    0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Rows built from dense rows are canonical (increasing columns, no stored
+// zeros), so comparing their columns and values decides dense-row equality.
+// The class-group duplicate-relation check relies on this.
+int test_sparse_row_dense_equality_is_canonical() {
+    constexpr slong count = 7;
+    constexpr slong ncols = 5;
+    fmpz_mat_t dense;
+    fmpz_mat_init(dense, count, ncols);
+    fmpz_mat_zero(dense);
+    // Row 0 stays zero.
+    set_entry_si(dense, 1, 0, 1);
+    set_entry_si(dense, 2, 0, 1);  // differs from row 1 only in the last column
+    set_entry_si(dense, 2, 4, 1);
+    set_entry_si(dense, 3, 4, 1);  // differs from row 4 only in sign
+    set_entry_si(dense, 4, 4, -1);
+    set_entry_si(dense, 5, 1, 2);
+    set_entry_si(dense, 5, 2, -3);
+    set_entry_si(dense, 6, 1, 2);  // differs from row 5 in a multi-limb value
+    fmpz_one(fmpz_mat_entry(dense, 6, 2));
+    fmpz_mul_2exp(fmpz_mat_entry(dense, 6, 2),
+                  fmpz_mat_entry(dense, 6, 2), 100);
+    fmpz_neg(fmpz_mat_entry(dense, 6, 2), fmpz_mat_entry(dense, 6, 2));
+
+    silex::fmpz_smat::SparseMat stored(ncols);
+    for (slong i = 0; i < count; ++i) {
+        if (!stored.append_fmpz_mat_row(dense, i)) {
+            return 1;
+        }
+    }
+
+    fmpz_mat_t left;
+    fmpz_mat_t right;
+    fmpz_mat_window_init(left, dense, 0, 0, 1, ncols);
+    fmpz_mat_window_init(right, dense, 0, 0, 1, ncols);
+    int failed = 0;
+    silex::fmpz_smat::SparseRow candidate;
+    for (slong i = 0; i < count && failed == 0; ++i) {
+        if (!candidate.set_fmpz_mat_row(dense, i)) {
+            failed = 1;
+            break;
+        }
+        for (slong j = 0; j < count; ++j) {
+            fmpz_mat_window_clear(left);
+            fmpz_mat_window_clear(right);
+            fmpz_mat_window_init(left, dense, i, 0, i + 1, ncols);
+            fmpz_mat_window_init(right, dense, j, 0, j + 1, ncols);
+            const bool dense_equal = fmpz_mat_equal(left, right) != 0;
+            if (dense_equal != (i == j) ||
+                sparse_rows_match(stored.row_ref(j), candidate) !=
+                        dense_equal) {
+                failed = 1;
+                break;
+            }
+        }
+    }
+    fmpz_mat_window_clear(right);
+    fmpz_mat_window_clear(left);
+
+    // An equal dense row in another matrix gives the same sparse row.
+    fmpz_mat_t copy;
+    fmpz_mat_init(copy, 1, ncols);
+    fmpz_set(fmpz_mat_entry(copy, 0, 1), fmpz_mat_entry(dense, 6, 1));
+    fmpz_set(fmpz_mat_entry(copy, 0, 2), fmpz_mat_entry(dense, 6, 2));
+    if (failed == 0 && (!candidate.set_fmpz_mat_row(copy, 0) ||
+                        !sparse_rows_match(stored.row_ref(6), candidate) ||
+                        sparse_rows_match(stored.row_ref(5), candidate))) {
+        failed = 1;
+    }
+    fmpz_mat_clear(copy);
+    fmpz_mat_clear(dense);
+    return failed;
 }
 
 int test_sparse_matrix_kernels() {
@@ -1494,6 +1584,7 @@ int test_square_abs_det_routes() {
 
 int main() {
     return test_sparse_row_basic() != 0 || test_sparse_matrix_basic() != 0 ||
+                   test_sparse_row_dense_equality_is_canonical() != 0 ||
                    test_sparse_matrix_kernels() != 0 ||
                    test_sparse_matrix_nmod() != 0 || test_mod_rank_context() != 0 ||
                    test_mod_rank_context_row_is_independent() != 0 ||
