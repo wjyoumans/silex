@@ -5,6 +5,7 @@
 #include "test_support.hpp"
 #include "ideal_product_fixtures.hpp"
 #include "../src/ideal/hnf_membership_internal.hpp"
+#include "../src/ideal/ideal_access_internal.hpp"
 #include "../src/ideal/two_generator_internal.hpp"
 
 #include <cassert>
@@ -2842,6 +2843,131 @@ int test_contains_ideal_matches_hnf_reference() {
     return included > 0 && excluded > 0 ? 0 : 1;
 }
 
+// A basis of the row lattice of the n x n HNF `hnf` (n >= 2) that is not
+// upper triangular: the rows in reverse order, so row 0 has a zero first
+// entry, followed by random unimodular row additions.
+void reversed_scrambled_basis(sflint::FmpzMat& out,
+                              const sflint::FmpzMat& hnf,
+                              ContainsRng& rng) {
+    const slong n = fmpz_mat_nrows(hnf.raw());
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(out.raw(), i, j),
+                     fmpz_mat_entry(hnf.raw(), n - 1 - i, j));
+        }
+    }
+    sflint::Fmpz c;
+    for (slong step = 0; step < 2 * n; ++step) {
+        const slong target = rng.next(1, n - 1);
+        const slong source = rng.next(0, n - 1);
+        if (target == source) {
+            continue;
+        }
+        fmpz_set_si(c.raw(), rng.next(-2, 2));
+        for (slong j = 0; j < n; ++j) {
+            fmpz_addmul(fmpz_mat_entry(out.raw(), target, j),
+                        fmpz_mat_entry(out.raw(), source, j), c.raw());
+        }
+    }
+}
+
+// The defensive lattice fallbacks of both Ideal::contains overloads, which no
+// public construction route reaches: every route stores a full-rank upper
+// triangular HNF.  The noninstalled detail::IdealAccess hook stores a
+// non-triangular basis of a fixture ideal's lattice (rows reversed, so row 0
+// has a zero first entry, then scrambled by unimodular row additions), and
+// both overloads are compared with the HNF-comparison rule on that basis and
+// with the triangular route of the fixture ideal itself.
+int test_contains_lattice_fallback_matches_hnf_reference() {
+    ContainsRng rng{0xfa11bac4};
+    slong members = 0;
+    slong nonmembers = 0;
+    slong included = 0;
+    slong excluded = 0;
+    for (slong degree : {2, 3, 4, 6}) {
+        for (slong kind = 0; kind < 5; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            const slong n = order.degree();
+            silex::Ideal sum(order), product(order), unit(order);
+            assert(sum.add(left, right));
+            assert(product.multiply(left, right));
+            assert(unit.one());
+            const silex::Ideal* ideals[] = {&left, &right, &sum, &product, &unit};
+            for (const silex::Ideal* outer : ideals) {
+                sflint::FmpzMat hnf(n, n);
+                assert(outer->get_hnf(sflint::FmpzMatRef(hnf)));
+                sflint::FmpzMat basis(n, n);
+                reversed_scrambled_basis(basis, hnf, rng);
+                // The stored basis fails the triangular shape check, so both
+                // overloads take the lattice fallback.
+                assert(!silex::detail::is_full_rank_upper_triangular(basis.raw()));
+                silex::Ideal stored(order);
+                assert(silex::detail::IdealAccess::set_hnf_direct(
+                        stored, sflint::FmpzMatConstRef(basis)));
+
+                sflint::FmpzMat row(1, n);
+                sflint::Fmpz c;
+                silex::OrderElement element(order);
+                for (slong sample = 0; sample < 12; ++sample) {
+                    const slong shape = sample % 3;
+                    fmpz_mat_zero(row.raw());
+                    if (shape != 2) {
+                        for (slong i = 0; i < n; ++i) {
+                            fmpz_set_si(c.raw(), rng.next(-4, 4));
+                            for (slong j = 0; j < n; ++j) {
+                                fmpz_addmul(fmpz_mat_entry(row.raw(), 0, j),
+                                            fmpz_mat_entry(hnf.raw(), i, j),
+                                            c.raw());
+                            }
+                        }
+                    }
+                    if (shape == 1) {
+                        fmpz_add_si(fmpz_mat_entry(row.raw(), 0, rng.next(0, n - 1)),
+                                    fmpz_mat_entry(row.raw(), 0, rng.next(0, n - 1)),
+                                    rng.next(1, 3));
+                    } else if (shape == 2) {
+                        for (slong j = 0; j < n; ++j) {
+                            fmpz_set_si(fmpz_mat_entry(row.raw(), 0, j),
+                                        rng.next(-30, 30));
+                        }
+                    }
+                    assert(element.set_coordinates(sflint::FmpzMatConstRef(row)));
+                    const bool expected = reference_hnf_contains(basis, row);
+                    if (stored.contains(element) != expected ||
+                        outer->contains(element) != expected) {
+                        return 1;
+                    }
+                    ++(expected ? members : nonmembers);
+                }
+
+                for (const silex::Ideal* inner : ideals) {
+                    sflint::FmpzMat inner_hnf(n, n);
+                    assert(inner->get_hnf(sflint::FmpzMatRef(inner_hnf)));
+                    bool expected = true;
+                    for (slong i = 0; expected && i < n; ++i) {
+                        for (slong j = 0; j < n; ++j) {
+                            fmpz_set(fmpz_mat_entry(row.raw(), 0, j),
+                                     fmpz_mat_entry(inner_hnf.raw(), i, j));
+                        }
+                        expected = reference_hnf_contains(basis, row);
+                    }
+                    if (stored.contains(*inner) != expected ||
+                        outer->contains(*inner) != expected) {
+                        return 1;
+                    }
+                    ++(expected ? included : excluded);
+                }
+                if (!stored.contains(stored)) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return members > 0 && nonmembers > 0 && included > 0 && excluded > 0 ? 0 : 1;
+}
+
 // Failure returns of the public Ideal::contains overloads: an undefined ideal
 // or element, an ideal without an HNF, and an element or ideal of another
 // order (a different order of the same field, and an order of another field)
@@ -3067,6 +3193,7 @@ int main(int argc, char** argv) {
     assert(test_set_hnf_validation() == 0);
     assert(test_contains_and_set_hnf_match_hnf_reference() == 0);
     assert(test_contains_ideal_matches_hnf_reference() == 0);
+    assert(test_contains_lattice_fallback_matches_hnf_reference() == 0);
     assert(test_contains_failure_returns() == 0);
     assert(test_triangular_basis_contains_matches_hnf_reference() == 0);
     assert(test_integral_noninvertible_norm_trap() == 0);

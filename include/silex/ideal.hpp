@@ -17,6 +17,8 @@ class FractionalIdeal;
 
 namespace detail {
 
+class IdealAccess;
+
 bool set_known_two_generator_ideal(Ideal& out,
                                    flint::FmpzConstRef scalar_generator,
                                    const OrderElement& element_generator) noexcept;
@@ -85,6 +87,10 @@ private:
     bool set_known_ideal_rows(flint::FmpzMatConstRef rows) noexcept;
 
     friend class Order;
+    // Test-only access to set_hnf_direct, defined in the noninstalled
+    // src/ideal/ideal_access_internal.hpp.  Names in silex::detail are
+    // internal to Silex and its tests, not a supported entry point.
+    friend class detail::IdealAccess;
     friend bool detail::set_known_two_generator_ideal(
             Ideal& out,
             flint::FmpzConstRef scalar_generator,

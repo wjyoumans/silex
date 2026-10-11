@@ -722,7 +722,8 @@ bool Ideal::contains(const OrderElement& element) const noexcept {
     // by forward substitution against the stored matrix, with no lattice
     // copy. Both routes decide membership in the Z-row span of `hnf_`. The
     // lattice test below is a defensive fallback for any other stored shape;
-    // it is not reachable through the API today and no test exercises it.
+    // it is not reachable through the API today.  Tests reach it through the
+    // noninstalled detail::IdealAccess hook.
     if (is_triangular_basis_of_degree(hnf_, parent_.degree())) {
         return detail::triangular_basis_contains(hnf_.raw(),
                                                  fmpz_mat_row(row.raw(), 0));
@@ -744,7 +745,8 @@ bool Ideal::contains(const Ideal& ideal) const noexcept {
     // by forward substitution against `hnf_` with one reused residual row
     // instead of a lattice copy.  The lattice test below decides the same
     // span membership and is a defensive fallback for any other stored
-    // shape; it is not expected to be reachable through the API.
+    // shape; it is not expected to be reachable through the API.  Tests
+    // reach it through the noninstalled detail::IdealAccess hook.
     if (is_triangular_basis_of_degree(hnf_, n) &&
         fmpz_mat_nrows(ideal.hnf_.raw()) == n &&
         fmpz_mat_ncols(ideal.hnf_.raw()) == n) {
