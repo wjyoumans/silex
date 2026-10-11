@@ -2765,6 +2765,7 @@ bool unknown_small_index_saturation(
                       "small-index saturation source assertion failed");
             return false;
         }
+        const bool presentation_rebuilt = !class_group.has_presentation();
         if (!rebuild_saturated_presentation(class_group)) {
             return false;
         }
@@ -2795,6 +2796,13 @@ bool unknown_small_index_saturation(
             SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "small-index saturation index did not decrease");
+            // Reference Clgp.jl asserts idx != n_idx.  Silex keeps its
+            // earlier behaviour after a rebuilt presentation: the candidate
+            // goes to the caller's proven re-check, which decides.
+            if (presentation_rebuilt) {
+                validated = true;
+                return true;
+            }
             return false;
         }
         index_bound = next_index_bound;

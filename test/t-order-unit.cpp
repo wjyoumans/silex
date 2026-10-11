@@ -5592,8 +5592,14 @@ bool real_quadratic_two_units(silex::OrderUnitGroup& out,
 // is Z/2.  Saturation at 2 finds 3 + sqrt(2) and appends it as a class
 // relation, which clears the stored presentation.  The loop must validate
 // against the rebuilt presentation instead of reading "presentation
-// unavailable" as a result.
-int test_small_index_saturation_revalidates_appended_class_relation() {
+// unavailable" as a result.  With factor base generation recorded as checked
+// the real index bound drops to 1.  Without it the bound stays 2; the round
+// then hands the candidate to the caller's proven re-check, as Silex did
+// before the rebuild, instead of failing.
+bool small_index_saturation_appended_class_relation_case(
+        bool record_generation_check) {
+    using CertificationAccess =
+            silex::detail::ClassGroupCertificationAccess;
     silex::NumberField field = quadratic_field(2);
     silex::Order order;
     order = silex::test::equation_order(field);
@@ -5616,6 +5622,10 @@ int test_small_index_saturation_revalidates_appended_class_relation() {
         assert(context.append_relation(relation));
     }
     assert(context.publish_presentation());
+    if (record_generation_check) {
+        assert(CertificationAccess::record_factor_base_honesty_proof(
+                context, sflint::FmpzConstRef(bound)));
+    }
     sflint::Fmpz class_order;
     assert(context.order(sflint::FmpzRef(class_order)));
     assert(sflint::fmpz_equal_si(class_order, 2));
@@ -5640,12 +5650,22 @@ int test_small_index_saturation_revalidates_appended_class_relation() {
     assert(attempted);
     assert(context.relation_count() > relations_before);
     assert(context.has_presentation());
-    assert(summary.outcome == silex::detail::ValidateRefineOutcome::proven);
-    assert(sflint::fmpz_equal_si(summary.last_index_bound, 1));
-    assert(validated);
     assert(context.order(sflint::FmpzRef(class_order)));
     assert(sflint::fmpz_equal_si(class_order, 1));
+    assert(validated);
+    if (record_generation_check) {
+        assert(summary.outcome ==
+               silex::detail::ValidateRefineOutcome::proven);
+        assert(sflint::fmpz_equal_si(summary.last_index_bound, 1));
+    } else {
+        assert(sflint::fmpz_equal_si(summary.last_index_bound, 2));
+    }
+    return true;
+}
 
+int test_small_index_saturation_revalidates_appended_class_relation() {
+    assert(small_index_saturation_appended_class_relation_case(true));
+    assert(small_index_saturation_appended_class_relation_case(false));
     return 0;
 }
 
