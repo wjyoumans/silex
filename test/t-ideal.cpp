@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -2026,6 +2027,130 @@ int test_general_product_contents_and_fallback() {
     return 0;
 }
 
+// set_known_two_generator_ideal takes the HNF of a O + beta O modulo a
+// (fmpz_mat_hnf_modular_eldiv).  Compare it with the generic fmpz_mat_hnf of
+// the 2n x n rows a I and the coordinates of beta w_i, over prime, composite,
+// unit and multiword scalars, in orders with trivial and nontrivial index.
+void check_known_two_generator_hnf(silex::Order& order,
+                                   sflint::FmpzConstRef scalar,
+                                   const sflint::FmpzMat& coordinates) noexcept {
+    const slong n = order.degree();
+    silex::OrderElement beta(order), basis_element(order), product(order);
+    assert(beta.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+    sflint::FmpzMat rows(2 * n, n), reference(2 * n, n), unit(1, n), row(1, n);
+    for (slong i = 0; i < n; ++i) {
+        fmpz_set(fmpz_mat_entry(rows.raw(), i, i), scalar.raw());
+        fmpz_mat_zero(unit.raw());
+        fmpz_one(fmpz_mat_entry(unit.raw(), 0, i));
+        assert(basis_element.set_coordinates(sflint::FmpzMatConstRef(unit)));
+        assert(product.multiply(beta, basis_element));
+        assert(product.get_coordinates(sflint::FmpzMatRef(row)));
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(rows.raw(), n + i, j),
+                     fmpz_mat_entry(row.raw(), 0, j));
+        }
+    }
+    fmpz_mat_hnf(reference.raw(), rows.raw());
+    sflint::FmpzMat expected(n, n), actual(n, n);
+    sflint::FmpzMatConstWindow top(reference, 0, 0, n, n);
+    fmpz_mat_set(expected.raw(), top.raw());
+    for (slong i = n; i < 2 * n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            assert(fmpz_is_zero(fmpz_mat_entry(reference.raw(), i, j)));
+        }
+    }
+
+    silex::Ideal ideal(order);
+    assert(silex::detail::set_known_two_generator_ideal(ideal, scalar, beta));
+    assert(ideal.get_hnf(sflint::FmpzMatRef(actual)));
+    if (!fmpz_mat_equal(actual.raw(), expected.raw())) {
+        std::fprintf(stderr, "known two-generator HNF mismatch: n=%ld a=", n);
+        fmpz_fprint(stderr, scalar.raw());
+        std::fprintf(stderr, "\n");
+        fmpz_mat_print_pretty(actual.raw());
+        fmpz_mat_print_pretty(expected.raw());
+        std::fflush(stdout);
+    }
+    assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+}
+
+int test_known_two_generator_hnf_matches_generic() {
+    sflint::FmpqPoly polynomial;
+    std::vector<silex::Order> orders;
+
+    // Q(sqrt 5) with basis 1, (1 + theta) / 2.
+    poly_x2_minus(polynomial, 5);
+    {
+        silex::NumberField field = field_by_polynomial(polynomial);
+        silex::Order order(field);
+        sflint::FmpqMat basis(2, 2);
+        qmat_entry_si(basis, 0, 0, 1);
+        qmat_entry_frac_si(basis, 1, 0, 1, 2);
+        qmat_entry_frac_si(basis, 1, 1, 1, 2);
+        assert(order.set_basis(sflint::FmpqMatConstRef(basis)));
+        orders.push_back(std::move(order));
+    }
+    // x^3 - 2: the equation order.
+    poly_x3_minus(polynomial, 2);
+    orders.push_back(silex::test::equation_order(field_by_polynomial(polynomial)));
+    // x^3 - 10: 10 = 1 mod 9, so the maximal order has index 3 over Z[theta].
+    poly_x3_minus(polynomial, 10);
+    {
+        silex::Order equation =
+                silex::test::equation_order(field_by_polynomial(polynomial));
+        silex::Order order(*equation.parent());
+        assert(order.maximal_order(equation));
+        assert(!order.is_equation_order());
+        orders.push_back(std::move(order));
+    }
+    // Phi_15, degree 8, and x^6 + x + 1 (equation orders).
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong e : {8, 7, 5, 4, 3, 1, 0}) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, e, (e == 7 || e == 4 || e == 1) ? -1 : 1);
+    }
+    orders.push_back(silex::test::equation_order(field_by_polynomial(polynomial)));
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 6, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    orders.push_back(silex::test::equation_order(field_by_polynomial(polynomial)));
+
+    std::vector<sflint::Fmpz> scalars;
+    for (ulong a : {1UL, 2UL, 3UL, 4UL, 5UL, 6UL, 7UL, 11UL, 12UL, 13UL, 30UL,
+                    97UL, 128UL, 4093UL * 4093UL}) {
+        scalars.emplace_back();
+        fmpz_set_ui(scalars.back().raw(), a);
+    }
+    // Multiword scalars take FLINT's fmpz path: 2^64 + 13 and 6 (2^64 + 13).
+    scalars.emplace_back();
+    fmpz_one(scalars.back().raw());
+    fmpz_mul_2exp(scalars.back().raw(), scalars.back().raw(), 64);
+    fmpz_add_ui(scalars.back().raw(), scalars.back().raw(), 13);
+    scalars.emplace_back();
+    fmpz_mul_ui(scalars.back().raw(), scalars[scalars.size() - 2].raw(), 6);
+
+    ulong state = 0x2545f491UL;
+    for (silex::Order& order : orders) {
+        const slong n = order.degree();
+        for (const sflint::Fmpz& scalar : scalars) {
+            for (slong trial = 0; trial < 5; ++trial) {
+                sflint::FmpzMat coordinates(1, n);
+                for (slong j = 0; j < n; ++j) {
+                    state = state * 6364136223846793005UL + 1442695040888963407UL;
+                    slong value = static_cast<slong>((state >> 33) % 41) - 20;
+                    if (trial == 0) value = 0;                 // beta = 0
+                    if (trial == 1) value = (j == 0) ? 1 : 0;  // beta = 1
+                    if (trial == 4 && j == 0) value += 1000003;
+                    fmpz_set_si(fmpz_mat_entry(coordinates.raw(), 0, j), value);
+                }
+                check_known_two_generator_hnf(order, sflint::FmpzConstRef(scalar),
+                                              coordinates);
+            }
+        }
+    }
+    return 0;
+}
+
 int test_nonprincipal_product_and_associativity() {
     sflint::FmpqPoly f;
     poly_x2_minus(f, -5);
@@ -2304,6 +2429,7 @@ int main(int argc, char** argv) {
     assert(test_two_generator_search_contracts() == 0);
     assert(test_general_product_contents_and_fallback() == 0);
     assert(test_nonprincipal_product_and_associativity() == 0);
+    assert(test_known_two_generator_hnf_matches_generic() == 0);
     for (slong degree : {2, 3, 4, 6, 8, 12}) {
         for (slong kind = 0; kind < 5; ++kind) {
             silex::Order order;

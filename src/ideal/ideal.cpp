@@ -1265,9 +1265,19 @@ bool set_known_two_generator_ideal(
     }
 
     // Source trace: reference `Ideal.jl:assure_has_basis_matrix` builds a
-    // two-element ideal basis from `representation_matrix_mod(gen_two, m)`,
-    // and reference `base4.c:idealhnf_two` computes HNF from the multiplication
-    // table of beta together with the scalar generator.
+    // two-element ideal basis as
+    // `hnf_modular_eldiv!(representation_matrix(gen_two), gen_one)`, which is
+    // FLINT `fmpz_mat_hnf_modular_eldiv`, and reference `base4.c:idealhnf_two`
+    // computes the HNF of the same lattice (in PARI's column convention) as
+    // `ZM_hnfmodid` of the multiplication table of beta modulo the scalar
+    // generator.
+    //
+    // The rows a I and M_beta span a O + beta O, which contains a Z^n, so
+    // every elementary divisor of the 2n x n row matrix divides a and its rank
+    // is n.  That is the documented contract of `fmpz_mat_hnf_modular_eldiv`
+    // with D = a (FLINT `fmpz_mat/hnf_modular_eldiv.c`, Fieker-Hofmann 2014).
+    // The HNF of a full-rank lattice is unique, so the result is the same
+    // matrix as the generic `fmpz_mat_hnf` of these rows.
     const slong n = out.parent_.degree();
     flint::FmpzMat element_multiplication(n, n);
     flint::FmpzMat rows(2 * n, n);
@@ -1290,7 +1300,18 @@ bool set_known_two_generator_ideal(
     }
 
     Ideal candidate(out.parent_);
-    if (!candidate.set_known_ideal_rows(flint::FmpzMatConstRef(rows))) {
+    if (flint::fmpz_is_one(scalar_generator)) {
+        // a O + beta O = O.  FLINT's word path would reduce modulo 1.
+        fmpz_mat_zero(rows.raw());
+        for (slong i = 0; i < n; ++i) {
+            fmpz_one(fmpz_mat_entry(rows.raw(), i, i));
+        }
+    } else {
+        fmpz_mat_hnf_modular_eldiv(rows.raw(), scalar_generator.raw());
+    }
+    // The window is taken after the HNF, which may permute row storage.
+    flint::FmpzMatConstWindow top(rows, 0, 0, n, n);
+    if (!candidate.set_hnf_direct(top.const_ref())) {
         return false;
     }
 
