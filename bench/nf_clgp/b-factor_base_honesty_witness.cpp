@@ -44,34 +44,40 @@ enum class HonestyWorkload {
     quintic,
 };
 
-constexpr std::size_t kQuarticScalarCandidates = 570;
-constexpr std::size_t kQuarticEnumeratedCandidates = 102;
+constexpr std::size_t kQuarticScalarCandidates = 360;
+constexpr std::size_t kQuarticEnumeratedCandidates = 62;
 constexpr std::size_t kQuarticCandidateCount =
         kQuarticScalarCandidates + kQuarticEnumeratedCandidates;
-constexpr std::size_t kQuinticScalarCandidates = 3240;
-constexpr std::size_t kQuinticEnumeratedCandidates = 697;
+constexpr std::size_t kQuinticScalarCandidates = 1575;
+constexpr std::size_t kQuinticEnumeratedCandidates = 364;
 constexpr std::size_t kQuinticCandidateCount =
         kQuinticScalarCandidates + kQuinticEnumeratedCandidates;
 
+// Regenerated on the production bound (factor_base_class_group_bound, the
+// minimum of Zimmert's, Minkowski's and the former generation bound) in place
+// of the former generation bound n! ceil(sqrt|d|) 2^r2 / n^n that the fixtures
+// used before.  Method: with the count checks in build_witness_batch and
+// validate_batch bypassed, run the fixture builder, classify every candidate
+// with full_factorization_has_principal_witness (exhaustive IdealFactorization,
+// independent of the code under test), and record the candidate counts, the
+// searched-prime count, the match counts (all matches enumerated, none scalar)
+// and the bitmaps below.  Quartic: 360+62 candidates, 24 primes; quintic:
+// 1575+364 candidates, 105 primes (previously 570+102/38 and 3240+697/216).
 // Frozen output of exhaustive factorization over each deterministic fixture.
 // Bit i (least-significant bit first) is the expected classification of
 // candidate i.  Comparing every classification to these bitmaps prevents a
 // count-preserving permutation of true and false results from passing.
-constexpr std::array<std::uint64_t, 11> kQuarticExpectedPattern = {
+constexpr std::array<std::uint64_t, 7> kQuarticExpectedPattern = {
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0xfc00000000000000),
-        UINT64_C(0xc081fe1840c18101),
-        UINT64_C(0x00000000e010381f),
+        UINT64_C(0x60407f0000000000),
+        UINT64_C(0x000000207f861030),
 };
 
-constexpr std::array<std::uint64_t, 62> kQuinticExpectedPattern = {
+constexpr std::array<std::uint64_t, 31> kQuinticExpectedPattern = {
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
@@ -96,44 +102,13 @@ constexpr std::array<std::uint64_t, 62> kQuinticExpectedPattern = {
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x0000000000000000),
-        UINT64_C(0x3007e10000000000),
-        UINT64_C(0x38180200f00601c0),
-        UINT64_C(0x000f81807e040204),
-        UINT64_C(0x201c08101c000000),
-        UINT64_C(0x87c07f00c3e0381c),
-        UINT64_C(0x01ff00803e06020f),
-        UINT64_C(0xe000000000181f82),
-        UINT64_C(0x07fe01f003804080),
-        UINT64_C(0x00f000fffc087808),
-        UINT64_C(0x070000000000fffc),
-        UINT64_C(0xffe01fc00fc0f008),
-        UINT64_C(0x000000010381fff0),
+        UINT64_C(0x1803f08000000000),
+        UINT64_C(0x1c0c0100780300e0),
+        UINT64_C(0x0007c0c03f020102),
+        UINT64_C(0x100e04080e000000),
+        UINT64_C(0xc3e03f8061f01c0e),
+        UINT64_C(0x00ff80401f030107),
+        UINT64_C(0x0000000000040fc1),
 };
 
 static_assert(kQuarticExpectedPattern.size() ==
@@ -158,17 +133,17 @@ WitnessPatternContract witness_pattern_contract(
                 kQuarticExpectedPattern.size(),
                 kQuarticScalarCandidates,
                 kQuarticEnumeratedCandidates,
-                38,
+                24,
                 0,
-                38};
+                24};
     }
     return {kQuinticExpectedPattern.data(),
             kQuinticExpectedPattern.size(),
             kQuinticScalarCandidates,
             kQuinticEnumeratedCandidates,
-            216,
+            105,
             0,
-            216};
+            105};
 }
 
 bool expected_candidate_match(const WitnessPatternContract& contract,
@@ -524,15 +499,12 @@ bool build_witness_batch(WitnessBatch& batch,
     sflint::fmpz_set(
             sflint::FmpzRef(active_bound),
             sflint::FmpzConstRef(factor_base_plan.working_bound));
-    // The frozen candidate counts and expected patterns were built on the
-    // primes between the working bound and the generic proven generation
-    // bound n! ceil(sqrt|d|) 2^r2 / n^n.  factor_base_class_group_bound now
-    // returns the minimum of Zimmert's, Minkowski's and that former bound,
-    // which would drop primes from the batch, so the fixture keeps the former
-    // bound and the workload stays the same.
+    // The frozen candidate counts and expected patterns (see the comment on
+    // kQuarticExpectedPattern) were built on the primes between the working
+    // bound and the production bound factor_base_class_group_bound.
     if (!batch.base.build_relation_completion_base(
                 sflint::FmpzConstRef(active_bound)) ||
-        !silex::test::former_generation_bound(required_bound,
+        !silex::factor_base_class_group_bound(sflint::FmpzRef(required_bound),
                                               batch.field.maximal_order)) {
         return false;
     }
