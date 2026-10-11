@@ -16,7 +16,6 @@
 #include "residue_field/residue_field_internal.hpp"
 #include "test_support.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cassert>
 #include <utility>

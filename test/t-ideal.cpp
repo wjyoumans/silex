@@ -2436,7 +2436,7 @@ int test_contains_ideal_matches_hnf_reference() {
     slong included = 0;
     slong excluded = 0;
     for (slong degree : {2, 3, 4, 6, 8}) {
-        for (slong kind = 0; kind < 5; ++kind) {
+        for (slong kind = 0; kind < 6; ++kind) {
             silex::Order order;
             silex::Ideal left, right;
             assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
