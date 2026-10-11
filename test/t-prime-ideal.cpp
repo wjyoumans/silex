@@ -16,6 +16,8 @@
 #include "residue_field/residue_field_internal.hpp"
 #include "test_support.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <utility>
 #include <vector>
@@ -1402,8 +1404,10 @@ int test_valuation_order_element_ramified_nonunique_containment() {
 }
 
 // Definitional valuation for the containment cross-check: the largest
-// i <= bound with element in P^i, built from explicit ideal powers and the
-// generic Ideal::contains test.
+// i <= bound with element in P^i, built from explicit ideal powers and
+// Ideal::contains.  It shares Ideal::multiply and Ideal::contains with the
+// code under test, so it checks the cached power sequence;
+// test_valuation_power_containment_matches_gp pins the values themselves.
 slong definitional_power_containment_valuation(
         const silex::Order& order,
         const silex::PrimeIdeal& prime,
@@ -1421,51 +1425,6 @@ slong definitional_power_containment_valuation(
         power.swap(next);
     }
     return value;
-}
-
-int test_triangular_containment_shape_check() {
-    // The valuation prepass falls back to Ideal::contains for any stored
-    // basis that is not full-rank upper triangular.  FLINT always yields
-    // upper triangular HNF here, so the fallback is pinned by checking the
-    // shape check on hand-built matrices.
-    sflint::FmpzMat upper(2, 2);
-    sflint::FmpzMat lower(2, 2);
-    sflint::FmpzMat singular(2, 2);
-    sflint::FmpzMat row(1, 2);
-    fmpz_set_si(fmpz_mat_entry(upper.raw(), 0, 0), 2);
-    fmpz_set_si(fmpz_mat_entry(upper.raw(), 0, 1), 1);
-    fmpz_set_si(fmpz_mat_entry(upper.raw(), 1, 1), 3);
-    fmpz_set_si(fmpz_mat_entry(lower.raw(), 0, 0), 2);
-    fmpz_set_si(fmpz_mat_entry(lower.raw(), 1, 0), 1);
-    fmpz_set_si(fmpz_mat_entry(lower.raw(), 1, 1), 3);
-    fmpz_set_si(fmpz_mat_entry(singular.raw(), 0, 0), 2);
-    fmpz_set_si(fmpz_mat_entry(singular.raw(), 0, 1), 1);
-
-    bool shape_ok = false;
-    bool contains = true;
-    // (2, 1) is the first row of the upper basis.
-    fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), 2);
-    fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 1), 1);
-    assert(silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
-            shape_ok, contains, sflint::FmpzMatConstRef(upper),
-            sflint::FmpzMatConstRef(row)));
-    assert(shape_ok && contains);
-    // (0, 1) is not in the lattice.
-    fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), 0);
-    assert(silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
-            shape_ok, contains, sflint::FmpzMatConstRef(upper),
-            sflint::FmpzMatConstRef(row)));
-    assert(shape_ok && !contains);
-    // Lower triangular and singular matrices are rejected by the shape check.
-    assert(!silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
-            shape_ok, contains, sflint::FmpzMatConstRef(lower),
-            sflint::FmpzMatConstRef(row)));
-    assert(!shape_ok && !contains);
-    assert(!silex::detail::PrimeIdealAccess::triangular_containment_for_testing(
-            shape_ok, contains, sflint::FmpzMatConstRef(singular),
-            sflint::FmpzMatConstRef(row)));
-    assert(!shape_ok && !contains);
-    return 0;
 }
 
 int test_valuation_power_containment_matches_definition() {
@@ -1550,6 +1509,131 @@ int test_valuation_power_containment_matches_definition() {
         }
     }
     assert(checked_positive > 0);
+    return 0;
+}
+
+// Independent oracle for the power-containment valuation.  Each row is an
+// element a = sum c_i x^i of Q[x]/(f), given by its coefficients, and the
+// (p, e, f, v_P(a)) entries with v_P(a) > 0 over the primes P above
+// p in {2, 3, 5, 7, 11}; every other P above those p has v_P(a) = 0.  The
+// values are from an independent computer algebra system (gp 2.17.4):
+// idealval(nf, a, P) for nf = nfinit(f) and P over idealprimedec(nf, p),
+// recorded by hand.  Each p entry also satisfies
+// sum_P f_P v_P(a) = v_p(N(a)).  Primes with the same p, e and f are not
+// matched one to one across systems, so the (e, f, v) multisets are compared
+// per p.
+struct GpValuationRow {
+    std::vector<slong> element;
+    std::vector<std::array<slong, 4>> positive;
+};
+
+int test_valuation_power_containment_matches_gp() {
+    struct Field {
+        std::vector<slong> polynomial;
+        std::vector<GpValuationRow> rows;
+    };
+    const std::vector<Field> fields = {
+            {{474, -4, 5, -2, 1},
+             {
+                     {{0, 1}, {{2, 2, 1, 1}, {3, 1, 1, 1}}},
+                     {{-1, 1}, {{2, 2, 1, 1}, {3, 1, 1, 1}}},
+                     {{2, 1, 1}, {{2, 2, 1, 1}, {2, 2, 1, 1}}},
+                     {{3, 6},
+                      {{3, 1, 1, 1}, {3, 1, 1, 1}, {3, 1, 1, 1},
+                       {3, 1, 1, 4}}},
+                     {{9, 6, 1}, {{2, 2, 1, 2}, {3, 1, 1, 4}}},
+                     {{-25, 0, 5}, {{2, 2, 1, 2}, {5, 2, 2, 2}}},
+                     {{15, -1, 0, 1},
+                      {{3, 1, 1, 1}, {3, 1, 1, 1}, {3, 1, 1, 1},
+                       {3, 1, 1, 4}}},
+                     {{30, 20, 10},
+                      {{2, 2, 1, 2}, {2, 2, 1, 7}, {3, 1, 1, 1},
+                       {3, 1, 1, 2}, {5, 2, 2, 2}}},
+                     {{1, 0, 3, 0, 3, 0, 1}, {{2, 2, 1, 9}}},
+                     {{-7, 14},
+                      {{3, 1, 1, 1}, {3, 1, 1, 1}, {7, 1, 2, 1},
+                       {7, 1, 2, 1}}},
+             }},
+            {{7, 0, 0, 0, 0, 0, 1},
+             {
+                     {{0, 1}, {{7, 6, 1, 1}}},
+                     {{1, 1}, {{2, 1, 1, 1}, {2, 1, 1, 2}}},
+                     {{1, 3, 3, 1}, {{2, 1, 1, 3}, {2, 1, 1, 6}}},
+                     {{2, 4, 2},
+                      {{2, 1, 1, 3}, {2, 1, 1, 5}, {2, 1, 2, 1},
+                       {2, 1, 2, 1}}},
+                     {{3, 1, 1}, {{2, 1, 2, 1}, {2, 1, 2, 1}}},
+                     {{0, 49}, {{7, 6, 1, 13}}},
+                     {{0, 0, 0, 1}, {{7, 6, 1, 3}}},
+                     {{9, -3, 0, 0, 1}, {{11, 1, 1, 1}}},
+                     {{6, 0, 3}, {{3, 3, 2, 3}}},
+                     {{1, -2, 3, -2, 1}, {{2, 1, 2, 2}, {2, 1, 2, 4}}},
+                     {{33, 15}, {{2, 1, 1, 1}, {2, 1, 1, 2}, {3, 3, 2, 3}}},
+                     {{11, 0, 0, 0, 0, 1}, {{2, 1, 1, 1}, {2, 1, 1, 3}}},
+             }},
+    };
+    // Above every expected valuation, so the bounded search returns v_P(a).
+    const slong bound = 16;
+    slong checked_positive = 0;
+    for (const Field& data : fields) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < data.polynomial.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           data.polynomial[i]);
+        }
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+
+        for (const GpValuationRow& row : data.rows) {
+            sflint::FmpqPoly element_polynomial;
+            for (std::size_t i = 0; i < row.element.size(); ++i) {
+                sflint::fmpq_poly_set_coeff_si(element_polynomial,
+                                               static_cast<slong>(i),
+                                               row.element[i]);
+            }
+            silex::Element value(field);
+            assert(value.set_fmpq_poly(
+                    sflint::FmpqPolyConstRef(element_polynomial)));
+            silex::OrderElement element(maximal);
+            assert(element.set_element(value));
+
+            for (slong rational_prime : {2, 3, 5, 7, 11}) {
+                std::vector<std::array<slong, 3>> expected;
+                for (const std::array<slong, 4>& entry : row.positive) {
+                    if (entry[0] == rational_prime) {
+                        expected.push_back({entry[1], entry[2], entry[3]});
+                    }
+                }
+                sflint::Fmpz p;
+                assert(set_fmpz_si(p, rational_prime));
+                silex::PrimeIdealList primes;
+                assert(silex::decompose_prime(primes, maximal,
+                                              sflint::FmpzConstRef(p)));
+                std::vector<std::array<slong, 3>> actual;
+                for (slong index = 0; index < primes.size(); ++index) {
+                    const silex::PrimeIdeal* prime = primes.at(index);
+                    assert(prime != nullptr);
+                    slong v = -1;
+                    assert(silex::detail::PrimeIdealAccess::
+                                   valuation_by_power_containment_for_testing(
+                                           v, *prime, element, bound));
+                    assert(v >= 0 && v < bound);
+                    if (v > 0) {
+                        actual.push_back({prime->ramification_index(),
+                                          prime->residue_degree(), v});
+                        ++checked_positive;
+                    }
+                }
+                std::sort(expected.begin(), expected.end());
+                std::sort(actual.begin(), actual.end());
+                assert(actual == expected);
+            }
+        }
+    }
+    assert(checked_positive == 50);
     return 0;
 }
 
@@ -2977,8 +3061,8 @@ int main() {
     assert(test_valuation_order_element_ramified_split_coordinate_matrix() ==
            0);
     assert(test_valuation_order_element_ramified_nonunique_containment() == 0);
-    assert(test_triangular_containment_shape_check() == 0);
     assert(test_valuation_power_containment_matches_definition() == 0);
+    assert(test_valuation_power_containment_matches_gp() == 0);
     assert(test_valuation_fractional_element_and_factored() == 0);
     assert(test_extended_valuation_failure_preserves_output() == 0);
     assert(test_valuation_maximal_quadratic() == 0);

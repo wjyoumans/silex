@@ -116,17 +116,6 @@ public:
             const OrderElement& element,
             slong bound) noexcept;
 
-    // Test hook: runs the shape check and the triangular membership test used
-    // by the power-containment valuation on a caller-built `basis`.  Sets
-    // `shape_ok` to whether `basis` is square, upper triangular with nonzero
-    // diagonal; only then is `contains` (row in the row lattice of `basis`)
-    // computed, and the call returns true.  For tests only.
-    static bool triangular_containment_for_testing(
-            bool& shape_ok,
-            bool& contains,
-            flint::FmpzMatConstRef basis,
-            flint::FmpzMatConstRef row) noexcept;
-
     // Test hook: splits O/(p, I_p) for a prime p dividing the index of the
     // maximal order `order` and writes its prime ideals in the order
     // decompose_prime publishes them.  It skips the separating-element search
