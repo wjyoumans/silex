@@ -22,7 +22,8 @@ bool has_exact_order(const Element& z, ulong m) noexcept;
 // (norm-change constants of the Friedrich-Fieker lifting exponent, the
 // power-root reconstruction lattice, the field embedding data of the
 // conjugate bounds, per-radicand lifting exponents, f mod p setups of the
-// prime search, 1 / f'(theta), and whole pure_power_hensel_root answers).
+// prime search, the distinct-degree factorizations of f mod p of the residue
+// disproof, 1 / f'(theta), and whole pure_power_hensel_root answers).
 // Diagnostic only: the memo never changes a computed value.
 struct HenselDataCacheCounters {
     slong norm_change_constants_hits = 0;
@@ -35,6 +36,8 @@ struct HenselDataCacheCounters {
     slong lifting_exponent_misses = 0;
     slong prime_setup_hits = 0;
     slong prime_setup_misses = 0;
+    slong residue_setup_hits = 0;
+    slong residue_setup_misses = 0;
     slong inverse_derivative_hits = 0;
     slong inverse_derivative_misses = 0;
     slong power_root_answer_hits = 0;

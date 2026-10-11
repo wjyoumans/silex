@@ -2807,37 +2807,79 @@ bool residue_degree_can_disprove_power(ulong p, slong degree,
     return false;
 }
 
-// Residue test at one rational prime p (see above).  Sets `admissible` when
-// p satisfies conditions (1) and (2), and returns true only when some factor
-// of f mod p with a nonzero residue has a residue that is not an n-th power.
-bool residue_disproves_power_at_prime(bool& admissible,
-                                      const fmpq_poly_t field_polynomial,
-                                      const fmpq_poly_t element_polynomial,
-                                      slong degree,
-                                      const fmpz_t prime,
-                                      slong exponent) noexcept {
-    admissible = false;
-    if (exponent <= 1 || degree <= 0 || fmpz_sgn(prime) <= 0 ||
-        fmpz_abs_fits_ui(prime) == 0) {
-        return false;
-    }
-    const ulong p = fmpz_get_ui(prime);
+// Element-independent part of residue_disproves_power_at_prime at one prime:
+// the distinct-degree factorization of f mod p.  Every scan of
+// pure_power_residue_disproves walks the same primes 3, 5, 7, ... and used to
+// reduce and factor f mod p again for each element.
+//
+// Key: the defining polynomial f, the degree argument and the word prime p,
+// which are all that the reduction of f, the degree and squarefree tests and
+// nmod_poly_factor_distinct_deg read; the factorization is deterministic, so
+// the stored blocks and block degrees are those a recomputation returns.
+// `usable` records the element-independent reasons the test returns false
+// without admitting p (f is not p-integral, f mod p loses degree, or is not
+// squarefree).  The blocks are word polynomials modulo the same p as the
+// caller's element residues.
+struct ResidueFieldSetupEntry {
+    flint::FmpqPoly polynomial;
+    slong degree = 0;
+    ulong prime = 0;
+    bool usable = false;
+    flint::NmodPolyFactor blocks;
+    std::vector<slong> block_degrees;
+};
+
+// A degree >= 10 scan touches at most kHighDegreeDisproofPrimes admissible
+// primes plus the few inadmissible ones below them (41 primes for the
+// squares of Q(zeta_136)^+); the cap bounds memory for the 256-attempt worst
+// case and for many fields.
+constexpr std::size_t kResidueFieldSetupCacheCapacity = 128;
+
+BoundedEntryCache<ResidueFieldSetupEntry>& residue_field_setup_cache() noexcept {
+    thread_local BoundedEntryCache<ResidueFieldSetupEntry> cache(
+            kResidueFieldSetupCacheCapacity);
+    return cache;
+}
+
+// Fills `entry` for (field_polynomial, degree, p) as described above.
+void compute_residue_field_setup(ResidueFieldSetupEntry& entry,
+                                 const fmpq_poly_t field_polynomial,
+                                 slong degree,
+                                 ulong p) noexcept {
+    fmpq_poly_set(entry.polynomial.raw(), field_polynomial);
+    entry.degree = degree;
+    entry.prime = p;
     flint::NmodPoly field_mod(p);
+    entry.usable = fmpq_poly_reduce_nmod(field_mod, field_polynomial) &&
+                   nmod_poly_degree(field_mod.raw()) == degree &&
+                   nmod_poly_is_squarefree(field_mod.raw()) != 0;
+    if (!entry.usable) {
+        return;
+    }
+    nmod_poly_make_monic(field_mod.raw(), field_mod.raw());
+    entry.block_degrees.assign(static_cast<std::size_t>(degree) + 1, 0);
+    slong* block_degree_data = entry.block_degrees.data();
+    nmod_poly_factor_distinct_deg(entry.blocks.raw(), field_mod.raw(),
+                                  &block_degree_data);
+}
+
+// Residue test at one rational prime p (see above) with the factorization of
+// f mod p in `setup`.  Sets `admissible` when p satisfies conditions (1) and
+// (2), and returns true only when some factor of f mod p with a nonzero
+// residue has a residue that is not an n-th power.
+bool residue_disproves_power_with_setup(bool& admissible,
+                                        const ResidueFieldSetupEntry& setup,
+                                        const fmpq_poly_t element_polynomial,
+                                        slong exponent) noexcept {
+    admissible = false;
+    const ulong p = setup.prime;
     flint::NmodPoly element(p);
-    if (!fmpq_poly_reduce_nmod(field_mod, field_polynomial) ||
-        nmod_poly_degree(field_mod.raw()) != degree ||
-        nmod_poly_is_squarefree(field_mod.raw()) == 0 ||
-        !fmpq_poly_reduce_nmod(element, element_polynomial)) {
+    if (!setup.usable || !fmpq_poly_reduce_nmod(element, element_polynomial)) {
         return false;
     }
     admissible = true;
-    nmod_poly_make_monic(field_mod.raw(), field_mod.raw());
-
-    flint::NmodPolyFactor blocks;
-    std::vector<slong> block_degrees(static_cast<std::size_t>(degree) + 1, 0);
-    slong* block_degree_data = block_degrees.data();
-    nmod_poly_factor_distinct_deg(blocks.raw(), field_mod.raw(),
-                                  &block_degree_data);
+    const flint::NmodPolyFactor& blocks = setup.blocks;
+    const std::vector<slong>& block_degrees = setup.block_degrees;
 
     flint::NmodPoly common(p);
     flint::NmodPoly quotient(p);
@@ -2877,6 +2919,41 @@ bool residue_disproves_power_at_prime(bool& admissible,
         }
     }
     return false;
+}
+
+// Residue test at one rational prime p (see above).  Sets `admissible` when
+// p satisfies conditions (1) and (2), and returns true only when some factor
+// of f mod p with a nonzero residue has a residue that is not an n-th power.
+// The factorization of f mod p comes from the per-(field, prime) memo above;
+// a miss computes it, uses it, and stores it.
+bool residue_disproves_power_at_prime(bool& admissible,
+                                      const fmpq_poly_t field_polynomial,
+                                      const fmpq_poly_t element_polynomial,
+                                      slong degree,
+                                      const fmpz_t prime,
+                                      slong exponent) noexcept {
+    admissible = false;
+    if (exponent <= 1 || degree <= 0 || fmpz_sgn(prime) <= 0 ||
+        fmpz_abs_fits_ui(prime) == 0) {
+        return false;
+    }
+    const ulong p = fmpz_get_ui(prime);
+    auto& cache = residue_field_setup_cache();
+    for (const ResidueFieldSetupEntry& entry : cache.entries()) {
+        if (entry.prime == p && entry.degree == degree &&
+            fmpq_poly_equal(entry.polynomial.raw(), field_polynomial) != 0) {
+            ++hensel_data_cache_counters_tls.residue_setup_hits;
+            return residue_disproves_power_with_setup(
+                    admissible, entry, element_polynomial, exponent);
+        }
+    }
+    ++hensel_data_cache_counters_tls.residue_setup_misses;
+    ResidueFieldSetupEntry setup;
+    compute_residue_field_setup(setup, field_polynomial, degree, p);
+    const bool disproved = residue_disproves_power_with_setup(
+            admissible, setup, element_polynomial, exponent);
+    cache.insert(std::move(setup));
+    return disproved;
 }
 
 // True when a residue at a factor of the chosen prime or of one of the next
@@ -3746,6 +3823,7 @@ void clear_hensel_data_caches() noexcept {
     conjugate_bounds_field_cache().clear();
     lifting_exponent_cache().clear();
     prime_search_setup_cache().clear();
+    residue_field_setup_cache().clear();
     inverse_derivative_cache().clear();
     power_root_answer_cache().clear();
 }
@@ -4017,6 +4095,8 @@ bool pure_power_residue_disproves(bool& is_power,
                                                    exponent)) {
                 continue;
             }
+            // The factorization of f mod p comes from the per-(field,
+            // prime) memo of residue_disproves_power_at_prime.
             bool admissible = false;
             if (residue_disproves_power_at_prime(
                         admissible, raw_field->pol, element_polynomial.raw(),

@@ -1247,6 +1247,120 @@ void test_power_degree_twenty_cyclotomic_residue_disproof() noexcept {
     }
 }
 
+// The residue disproof of degree >= 10 memoizes the distinct-degree
+// factorization of f mod p per (field, prime) in src/element/hensel.cpp.  A
+// memoized decision must equal a cold one (every memo emptied first) for
+// non-powers and true powers alike, and a field must never be served another
+// field's factorizations.
+struct ResidueDisproofDecision {
+    bool decided = false;
+    bool is_power = true;
+};
+
+std::vector<ResidueDisproofDecision> residue_disproof_decisions(
+        const silex::NumberField& field, bool cold) noexcept {
+    const std::initializer_list<slong> bases[] = {
+            {1, 1},
+            {2, 1},
+            {0, 1},
+            {1, 0, 1},
+            {3, -1, 0, 2},
+            {-5, 2, 1, 0, 0, 7},
+    };
+    std::vector<ResidueDisproofDecision> decisions;
+    for (slong n : {2, 3, 5}) {
+        sflint::Fmpz exponent;
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+        for (const std::initializer_list<slong>& coefficients : bases) {
+            const silex::Element base =
+                    element_from_coefficients(field, coefficients);
+            silex::Element power(field);
+            assert(power.pow_fmpz(base, sflint::FmpzConstRef(exponent)));
+            silex::Element scaled(field);
+            assert(scaled.set_si(3));
+            assert(scaled.multiply(scaled, power));
+            const silex::Element* values[] = {&base, &power, &scaled};
+            for (const silex::Element* value : values) {
+                if (cold) {
+                    silex::detail::clear_hensel_data_caches();
+                }
+                ResidueDisproofDecision decision;
+                decision.decided = silex::detail::pure_power_residue_disproves(
+                        decision.is_power, *value, n, nullptr);
+                // A true power is never disproved.
+                assert(value != &power || !decision.decided);
+                decisions.push_back(decision);
+            }
+        }
+    }
+    return decisions;
+}
+
+bool same_residue_disproof_decisions(
+        const std::vector<ResidueDisproofDecision>& left,
+        const std::vector<ResidueDisproofDecision>& right) noexcept {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        if (left[i].decided != right[i].decided ||
+            left[i].is_power != right[i].is_power) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void test_power_residue_disproof_field_setup_cache_matches_cold() noexcept {
+    // Q(zeta_25) and Q(zeta_44), both of degree 20.
+    const silex::NumberField phi25 = field_from_coefficients(
+            {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+    const silex::NumberField phi44 = field_from_coefficients(
+            {1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0,
+             1});
+
+    const std::vector<ResidueDisproofDecision> cold =
+            residue_disproof_decisions(phi25, true);
+    const std::vector<ResidueDisproofDecision> other_cold =
+            residue_disproof_decisions(phi44, true);
+    std::size_t disproved = 0;
+    for (const ResidueDisproofDecision& decision : cold) {
+        disproved += decision.decided ? 1 : 0;
+    }
+    assert(disproved >= 12);
+
+    silex::detail::clear_hensel_data_caches();
+    const silex::detail::HenselDataCacheCounters emptied =
+            silex::detail::hensel_data_cache_counters();
+    const std::vector<ResidueDisproofDecision> warm_first =
+            residue_disproof_decisions(phi25, false);
+    const silex::detail::HenselDataCacheCounters filled =
+            silex::detail::hensel_data_cache_counters();
+    const std::vector<ResidueDisproofDecision> warm_second =
+            residue_disproof_decisions(phi25, false);
+    const silex::detail::HenselDataCacheCounters reused =
+            silex::detail::hensel_data_cache_counters();
+    assert(same_residue_disproof_decisions(cold, warm_first));
+    assert(same_residue_disproof_decisions(cold, warm_second));
+    // The first pass already reuses the primes of earlier elements, and the
+    // second pass factors nothing again.
+    assert(filled.residue_setup_hits - emptied.residue_setup_hits >
+           filled.residue_setup_misses - emptied.residue_setup_misses);
+    assert(reused.residue_setup_misses == filled.residue_setup_misses);
+    assert(reused.residue_setup_hits > filled.residue_setup_hits);
+
+    // Another field with the memo holding the first field's entries: it
+    // misses first, and its decisions are the cold ones.
+    const std::vector<ResidueDisproofDecision> other_warm =
+            residue_disproof_decisions(phi44, false);
+    const silex::detail::HenselDataCacheCounters switched =
+            silex::detail::hensel_data_cache_counters();
+    assert(same_residue_disproof_decisions(other_cold, other_warm));
+    assert(switched.residue_setup_misses > reused.residue_setup_misses);
+    assert(same_residue_disproof_decisions(
+            cold, residue_disproof_decisions(phi25, false)));
+}
+
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
     sflint::FmpqPoly polynomial;
     sflint::Fmpq coefficient;
@@ -1538,6 +1652,7 @@ int main() {
     test_power_prelift_named_cases_unknown_without_disproof();
     test_power_gp_nonpowers();
     test_power_degree_twenty_cyclotomic_residue_disproof();
+    test_power_residue_disproof_field_setup_cache_matches_cold();
     test_power_hensel_data_cache_reuse();
     test_power_hensel_field_caches_match_cold();
     test_power_hensel_answer_memo();
