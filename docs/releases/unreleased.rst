@@ -87,7 +87,10 @@ Added
   generation bound is published
   (``factor_base_generation_certification_bound`` returns false).  On this
   route the published relations are the staged relation rows with exact
-  witnesses.  Results on other routes are unchanged; the refusal reason
+  witnesses.  When the certificate fails, or the relation index is below
+  ``h``, the run fails closed with the generic reason
+  ``class_unit_computation_failed``, with no fallback.  Results on other
+  routes are unchanged; the refusal reason
   remains for other fields.  See
   :doc:`../reference/algorithms_and_sources`.
 

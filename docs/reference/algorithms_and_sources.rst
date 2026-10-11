@@ -999,8 +999,12 @@ and for every prime ``ell`` dividing ``h`` no nonzero
 principal.  The induced map from the direct sum of the ``Z/d_j`` to the
 class group is then injective between groups of order ``h``, hence bijective,
 so the ``g_j``, and with them the factor base, generate the class group.
-This is elementary finite abelian group theory with no upstream source; the
-class number is the exact one above.  A relation lattice of index ``h`` alone
+The ideal-to-form isomorphism is Cohen, *A Course in Computational
+Algebraic Number Theory*, GTM 138, Section 5.2.  The stopping rule, that
+classes generating a subgroup of order exactly ``h`` generate the class
+group, is Cohen, GTM 138, Algorithm 5.4.1 and its proof (pp. 240--242), and
+Mosunov and Jacobson, *Math. Comp.* 85 (2016), Section 5; the class number
+is the exact one above.  A relation lattice of index ``h`` alone
 would not suffice, because the factor base may fail to generate the class
 group (the ``Cl(-199)`` example of the route's design), which is why the
 ``ell``-step test is required.  The route publishes
@@ -1008,8 +1012,13 @@ group (the ``Cl(-199)`` example of the route's design), which is why the
 certification ``proven`` and no generation bound
 (``factor_base_generation_certification_bound`` is false).  For
 ``x^2 + 1000000000039`` a ``proven`` request now succeeds in under a second
-with ``h = 1113261`` (the factor base would have 23592 generators).  Fields
-above about ``|D| = 1e14`` still depend on the cost of ``h(D)`` above.
+with ``h = 1113261`` (the factor base would have 23592 generators).  The
+largest tested proven run on this route is at ``|D|`` of order ``1e12``;
+``h(D)`` alone takes about 100 s at ``|D| = 1e14`` and its cost grows like
+``sqrt(|D|)``; ``fmpz_fits_si`` limits ``D`` to ``|D| < 2^63``.  When the
+structure certificate fails, or the relation index is below ``h``, the run
+fails closed with the generic reason ``class_unit_computation_failed``, with
+no fallback.
 
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
@@ -1250,7 +1259,10 @@ component, through ``factor_base_generation_certification()``,
 ``class_unit_completeness_basis()``; ``silex-class-unit-instance`` prints the
 same values in its ``class_group`` object.  Generation is ``proven``, with
 basis ``minkowski_type`` or ``zimmert_twin_class`` and the proven generation
-requirement, when ``factor_base_generation_status()`` is ``verified``; it is ``grh`` when only
+requirement, when ``factor_base_generation_status()`` is ``verified``, or
+with basis ``structure_certificate`` and no generation bound on the
+imaginary quadratic structure certificate route above, where the status is
+not ``verified``; it is ``grh`` when only
 the GRH generation record above holds, with basis ``bdf`` or ``bach`` for the
 theorem that gave the GRH bound and that bound before the factor-base size
 doubling.  A ``grh`` generation basis ``bdf`` assumes the Riemann hypothesis
