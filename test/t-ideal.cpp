@@ -2481,6 +2481,75 @@ int test_contains_ideal_matches_hnf_reference() {
     return included > 0 && excluded > 0 ? 0 : 1;
 }
 
+// Failure returns of the public Ideal::contains overloads: an undefined ideal
+// or element, an ideal without an HNF, and an element or ideal of another
+// order (a different order of the same field, and an order of another field)
+// give false.  The probes are 0 and the unit ideal's own data, which a
+// successful test would accept, so each false is a failure return.
+int test_contains_failure_returns() {
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 5);
+    silex::NumberField field;
+    field = field_by_polynomial(polynomial);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+
+    // The maximal order Z[(1 + x) / 2] of the same field.
+    silex::Order maximal(field);
+    sflint::FmpqMat basis(2, 2);
+    qmat_entry_si(basis, 0, 0, 1);
+    qmat_entry_frac_si(basis, 1, 0, 1, 2);
+    qmat_entry_frac_si(basis, 1, 1, 1, 2);
+    assert(maximal.set_basis(sflint::FmpqMatConstRef(basis)));
+
+    sflint::FmpqPoly other_polynomial;
+    poly_x2_minus(other_polynomial, 3);
+    silex::NumberField other_field;
+    other_field = field_by_polynomial(other_polynomial);
+    silex::Order other_order;
+    other_order = silex::test::equation_order(other_field);
+
+    silex::Ideal unit(order);
+    assert(unit.one());
+    silex::OrderElement zero(order);
+    assert(zero.set_si(0));
+    assert(unit.contains(zero));
+    assert(unit.contains(unit));
+
+    silex::Ideal undefined;
+    assert(!undefined.is_defined());
+    assert(!undefined.contains(zero));
+
+    silex::Ideal without_hnf(order);
+    assert(without_hnf.is_defined() && !without_hnf.has_hnf());
+    assert(!without_hnf.contains(zero));
+
+    silex::OrderElement undefined_element;
+    assert(!undefined_element.is_defined());
+    assert(!unit.contains(undefined_element));
+
+    silex::OrderElement maximal_zero(maximal);
+    assert(maximal_zero.set_si(0));
+    assert(!unit.contains(maximal_zero));
+
+    silex::OrderElement other_zero(other_order);
+    assert(other_zero.set_si(0));
+    assert(!unit.contains(other_zero));
+
+    silex::Ideal maximal_unit(maximal);
+    silex::Ideal other_unit(other_order);
+    assert(maximal_unit.one() && other_unit.one());
+    assert(!unit.contains(undefined));
+    assert(!undefined.contains(unit));
+    assert(!unit.contains(without_hnf));
+    assert(!without_hnf.contains(unit));
+    assert(!unit.contains(maximal_unit));
+    assert(!maximal_unit.contains(unit));
+    assert(!unit.contains(other_unit));
+    assert(!other_unit.contains(unit));
+    return 0;
+}
+
 // The triangular solve behind Ideal::contains, on bases no ideal stores:
 // square upper triangular matrices with negative or large diagonal entries
 // and unreduced entries above the diagonal, compared with the HNF-comparison
@@ -2635,6 +2704,7 @@ int main(int argc, char** argv) {
     assert(test_set_hnf_validation() == 0);
     assert(test_contains_and_set_hnf_match_hnf_reference() == 0);
     assert(test_contains_ideal_matches_hnf_reference() == 0);
+    assert(test_contains_failure_returns() == 0);
     assert(test_triangular_basis_contains_matches_hnf_reference() == 0);
     assert(test_integral_noninvertible_norm_trap() == 0);
     assert(test_fractional_inverse_quadratic() == 0);
