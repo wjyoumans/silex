@@ -44,10 +44,22 @@ struct ZetaBfResidueDegreeCacheEntry {
 // way; they do not own one themselves.  A caller that needs to cache residue
 // degrees for more than one order must construct one
 // `ZetaBfResidueDegreeCache` per order.
+struct ZetaBfLinearFactorCountEntry {
+    ulong p = 0;
+    slong count = 0;
+};
+
+// The same per-order cache also holds, sorted by `p`, the number of linear
+// factors of the defining polynomial modulo `p` (the number of degree-one
+// primes above `p`) for the primes where the Belabas-Friedman sums need only
+// that count: the Theorem 7 cutoff scan and `bf_term` at every cutoff.  It
+// follows the same one-order rule as the residue degrees.
 struct ZetaBfResidueDegreeCache {
     std::vector<ZetaBfResidueDegreeCacheEntry> entries;
     std::vector<slong> residue_degrees;
     std::size_t lookup_hint = 0;
+    std::vector<ZetaBfLinearFactorCountEntry> linear_factor_counts;
+    std::size_t linear_factor_count_hint = 0;
 };
 
 // Audit data of the Belabas-Friedman evaluation behind a default-route

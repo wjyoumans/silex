@@ -202,10 +202,17 @@ public:
         value_unconditional_ = false;
         value_bf_audit_valid_ = false;
         value_accept_grh_residue_ = route_accepts_grh_residue;
+        // A grh request shares this order's cache with ensure_index_one,
+        // which fills it over the same primes, so the default-route
+        // Belabas-Friedman sum reuses its residue degrees and linear-factor
+        // counts instead of recomputing them; both are exact per prime, so
+        // the value is the same.
+        const bool use_residue_degree_cache =
+                cache_bf_residue_degrees || accept_grh_residue;
         valid_ = analytic_class_regulator_product_for_validation(
                          flint::ArbRef(value_), order, precision, diagnostics,
                          residue_degree_base,
-                         cache_bf_residue_degrees ? &bf_residue_degree_cache_
+                         use_residue_degree_cache ? &bf_residue_degree_cache_
                                                   : nullptr,
                          &value_unconditional_, &value_bf_audit_,
                          accept_grh_residue)
@@ -426,9 +433,19 @@ public:
                 }
             }
         }
+        previous_prime = 0;
+        for (const ZetaBfLinearFactorCountEntry& entry :
+             source.linear_factor_counts) {
+            if (entry.p <= previous_prime || entry.count < 0 ||
+                entry.count > order.degree()) {
+                return false;
+            }
+            previous_prime = entry.p;
+        }
         reset_for_order_if_needed_(order);
         bf_residue_degree_cache_ = source;
         bf_residue_degree_cache_.lookup_hint = 0;
+        bf_residue_degree_cache_.linear_factor_count_hint = 0;
         bf_valid_ = 0;
         validation_valid_ = 0;
         validation_active_ = false;
@@ -506,6 +523,8 @@ private:
         bf_residue_degree_cache_.entries.clear();
         bf_residue_degree_cache_.residue_degrees.clear();
         bf_residue_degree_cache_.lookup_hint = 0;
+        bf_residue_degree_cache_.linear_factor_counts.clear();
+        bf_residue_degree_cache_.linear_factor_count_hint = 0;
         bf_residue_degree_cache_order_ = order;
         bf_residue_degree_cache_has_order_ = true;
         bf_valid_ = 0;

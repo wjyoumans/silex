@@ -160,6 +160,72 @@ void bf_residue_degree_cache_store(
             it, bf_residue_degree_cache_entry(cache, p, residue_degrees));
 }
 
+bool bf_linear_factor_count_cache_lookup(
+        slong& out,
+        detail::ZetaBfResidueDegreeCache* cache,
+        ulong p,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (cache == nullptr || cache->linear_factor_counts.empty()) {
+        return false;
+    }
+
+    const std::vector<detail::ZetaBfLinearFactorCountEntry>& counts =
+            cache->linear_factor_counts;
+    std::size_t& hint = cache->linear_factor_count_hint;
+    std::size_t index = hint;
+    if (index >= counts.size() || counts[index].p != p) {
+        if (p > counts.back().p) {
+            return false;
+        }
+        auto it = std::lower_bound(
+                counts.begin(), counts.end(), p,
+                [](const detail::ZetaBfLinearFactorCountEntry& entry,
+                   ulong prime) {
+                    return entry.p < prime;
+                });
+        if (it == counts.end() || it->p != p) {
+            return false;
+        }
+        index = static_cast<std::size_t>(it - counts.begin());
+    }
+
+    SILEX_PROFILE_EVENT(
+            diagnostics, DiagnosticsModule::unit_group,
+            "unit_group.zeta_bf.term.prime_decomposition_type."
+            "linear_count_cache_hit");
+    out = counts[index].count;
+    hint = index + 1;
+    return true;
+}
+
+void bf_linear_factor_count_cache_store(
+        detail::ZetaBfResidueDegreeCache* cache,
+        ulong p,
+        slong count) noexcept {
+    if (cache == nullptr) {
+        return;
+    }
+    std::vector<detail::ZetaBfLinearFactorCountEntry>& counts =
+            cache->linear_factor_counts;
+    const detail::ZetaBfLinearFactorCountEntry entry{p, count};
+    if (counts.empty() || counts.back().p < p) {
+        counts.push_back(entry);
+        return;
+    }
+
+    auto it = std::lower_bound(
+            counts.begin(), counts.end(), p,
+            [](const detail::ZetaBfLinearFactorCountEntry& existing,
+               ulong prime) {
+                return existing.p < prime;
+            });
+    if (it != counts.end() && it->p == p) {
+        *it = entry;
+        return;
+    }
+    counts.insert(it, entry);
+}
+
 bool supported_order(const Order& order, slong precision) noexcept {
     return precision > 0 && order.has_basis() && order.is_maximal();
 }
@@ -1425,13 +1491,20 @@ bool bf_residue_degrees_from_defining_polynomial_ui(
             out, order, context, degree_scratch, p, diagnostics);
 }
 
+// The number of linear factors of the defining polynomial modulo `p`, when
+// the defining-polynomial route applies to `p`.  `cache`, when given, holds
+// the counts already computed for this order (ZetaBfResidueDegreeCache).
 bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
         slong& out,
         const BfResidueDegreeContext& context,
         ulong p,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        detail::ZetaBfResidueDegreeCache* cache) noexcept {
     if (!bf_residue_degree_context_uses_defining_polynomial(context, p)) {
         return false;
+    }
+    if (bf_linear_factor_count_cache_lookup(out, cache, p, diagnostics)) {
+        return true;
     }
 
     SILEX_PROFILE_SCOPE(
@@ -1447,7 +1520,11 @@ bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
             diagnostics, DiagnosticsModule::unit_group,
             "unit_group.zeta_bf.term.prime_decomposition_type.nmod."
             "cutoff_linear_factors");
-    return bf_linear_factor_count_from_squarefree_nmod(out, reduced, p);
+    if (!bf_linear_factor_count_from_squarefree_nmod(out, reduced, p)) {
+        return false;
+    }
+    bf_linear_factor_count_cache_store(cache, p, out);
+    return true;
 }
 
 bool bf_residue_degrees_from_complete_factor_base(
@@ -2342,7 +2419,8 @@ bool bf_add_prime_terms(flint::Arb& sum,
                 have_linear_factor_count =
                         bf_linear_residue_degree_count_from_defining_polynomial_ui(
                                 linear_factor_count, residue_context,
-                                rational_prime, diagnostics);
+                                rational_prime, diagnostics,
+                                residue_degree_cache);
             }
         }
         if (!have_complete_residue_degrees &&
@@ -2428,6 +2506,7 @@ bool bf_term(flint::Arb& out,
                         "unit_group.zeta_bf.term");
     if (residue_degree_cache != nullptr) {
         residue_degree_cache->lookup_hint = 0;
+        residue_degree_cache->linear_factor_count_hint = 0;
     }
     cutoff = bf_adjust_cutoff(cutoff);
     const ulong cutoff_div_9 = cutoff / 9;
@@ -3142,7 +3221,8 @@ bool bf_theorem7_add_prime(flint::Arb& prime_sum,
                 residue_degrees, residue_degree_cache, p, diagnostics);
         if (!have_complete_residue_degrees &&
             bf_linear_residue_degree_count_from_defining_polynomial_ui(
-                    linear_factor_count, residue_context, p, diagnostics)) {
+                    linear_factor_count, residue_context, p, diagnostics,
+                    residue_degree_cache)) {
             if (linear_factor_count < 0 ||
                 linear_factor_count > order.degree()) {
                 return false;
@@ -3228,6 +3308,7 @@ bool bf_select_theorem7_cutoff(ulong& cutoff_out,
     std::vector<std::pair<ulong, ulong>> pending;
     if (residue_degree_cache != nullptr) {
         residue_degree_cache->lookup_hint = 0;
+        residue_degree_cache->linear_factor_count_hint = 0;
     }
 
     flint::Arb prime_sum;

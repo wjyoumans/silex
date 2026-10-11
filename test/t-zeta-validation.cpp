@@ -843,6 +843,98 @@ bool check_grh_transaction_refines_to_default_audit(
            record->cutoff != coarse_cutoff;
 }
 
+// The grh default-route product (Belabas-Friedman residue at the default
+// maximum cutoff), with its audit.
+bool call_grh_default_product(
+        sflint::Arb& product,
+        silex::detail::ZetaBfRouteAudit& audit,
+        const silex::Order& order,
+        silex::detail::ZetaBfResidueDegreeCache* cache) noexcept {
+    bool unconditional = true;
+    return silex::detail::zeta_class_regulator_product_with_diagnostics(
+                   sflint::ArbRef(product), order, 128, nullptr, nullptr,
+                   cache, &unconditional, &audit, true) &&
+           !unconditional;
+}
+
+bool same_grh_default_product(
+        const sflint::Arb& product,
+        const silex::detail::ZetaBfRouteAudit& audit,
+        const sflint::Arb& reference,
+        const silex::detail::ZetaBfRouteAudit& reference_audit) noexcept {
+    return audit.cutoff == reference_audit.cutoff &&
+           audit.work_precision == reference_audit.work_precision &&
+           ::arb_equal(product.raw(), reference.raw()) != 0 &&
+           ::arb_equal(audit.error_bound.raw(),
+                       reference_audit.error_bound.raw()) != 0;
+}
+
+// The linear-factor counts stored in the residue-degree cache are the
+// number of degree-one primes above p (checked against decompose_prime),
+// a later Belabas-Friedman evaluation consumes them (a wrong count changes
+// the value) and gets the uncached value from them, and a grh ensure() after
+// ensure_index_one() on the shared cache gives the value and audit of a
+// fresh cache.
+bool check_linear_factor_count_cache(const FieldSetup& setup) noexcept {
+    const silex::Order& order = setup.maximal_order;
+    sflint::Arb reference;
+    silex::detail::ZetaBfRouteAudit reference_audit;
+    if (!call_grh_default_product(reference, reference_audit, order,
+                                  nullptr)) {
+        return false;
+    }
+
+    silex::detail::ZetaBfResidueDegreeCache cache;
+    for (int pass = 0; pass < 2; ++pass) {
+        sflint::Arb candidate;
+        silex::detail::ZetaBfRouteAudit candidate_audit;
+        if (!call_grh_default_product(candidate, candidate_audit, order,
+                                      &cache) ||
+            !same_grh_default_product(candidate, candidate_audit, reference,
+                                      reference_audit) ||
+            cache.linear_factor_counts.size() < 2) {
+            return false;
+        }
+    }
+
+    std::vector<slong> degrees;
+    const std::size_t count_size = cache.linear_factor_counts.size();
+    const std::size_t checked[] = {0, 1, count_size / 2, count_size - 1};
+    for (std::size_t index : checked) {
+        const silex::detail::ZetaBfLinearFactorCountEntry& entry =
+                cache.linear_factor_counts[index];
+        if (!decomposition_residue_degrees(degrees, order, entry.p) ||
+            entry.count != static_cast<slong>(std::count(
+                                   degrees.begin(), degrees.end(), 1))) {
+            return false;
+        }
+    }
+
+    silex::detail::ZetaBfResidueDegreeCache perturbed = cache;
+    silex::detail::ZetaBfLinearFactorCountEntry& last =
+            perturbed.linear_factor_counts.back();
+    last.count = last.count == 0 ? 1 : last.count - 1;
+    sflint::Arb perturbed_value;
+    silex::detail::ZetaBfRouteAudit perturbed_audit;
+    if (!call_grh_default_product(perturbed_value, perturbed_audit, order,
+                                  &perturbed) ||
+        ::arb_equal(perturbed_value.raw(), reference.raw()) != 0) {
+        return false;
+    }
+
+    silex::detail::AnalyticClassRegulatorCache shared;
+    if (!shared.ensure_index_one(order, 128) ||
+        !shared.ensure(order, 128, nullptr, nullptr, false, true)) {
+        return false;
+    }
+    const silex::detail::ZetaBfRouteAudit* shared_audit =
+            shared.value_bf_audit();
+    sflint::Arb shared_value;
+    sflint::arb_set(sflint::ArbRef(shared_value), shared.value());
+    return shared_audit != nullptr &&
+           same_grh_default_product(shared_value, *shared_audit, reference,
+                                    reference_audit);
+}
 }  // namespace
 
 int main() {
@@ -872,6 +964,8 @@ int main() {
                    !check_grh_transaction_records_index_one_audit(
                            setup_from_coefficients(x2_minus_210, 2)) ||
                    !check_grh_transaction_refines_to_default_audit(
+                           setup_from_coefficients(d12_coefficients, 12)) ||
+                   !check_linear_factor_count_cache(
                            setup_from_coefficients(d12_coefficients, 12))
             ? 1
             : 0;
