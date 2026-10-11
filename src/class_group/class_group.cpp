@@ -7185,6 +7185,12 @@ bool compact_evaluate_mod(
     }
 }
 
+// Writes `compact` = quotient^n * remainder, splitting each stored entry's
+// exponent v as v = q*n + e with e in [0, n).  reference
+// (CompactRepresentation.jl:383-394) splits the merged FacElem dictionary
+// with a truncating divrem and skips bases equal to one; this splits each
+// entry on its own with a floor.  The leftover can differ, not the power
+// answer (docs/reference/algorithms_and_sources.rst records both).
 bool compact_split_power(
         FactoredElement& quotient,
         FactoredElement& remainder,

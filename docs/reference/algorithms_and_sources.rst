@@ -1915,6 +1915,16 @@ chooses between the branches.  The answer does not change, since both
 branches decide whether ``a = s^n * r`` is an ``n``-th power.  This is an
 existing deviation.
 
+The split also applies to different entries.  Hecke iterates over the
+``FacElem`` dictionary (lines 383-389), whose equal bases are already merged
+into one entry with the summed exponent, and skips bases equal to one.
+``compact_split_power`` splits each stored entry of the factored element on
+its own, merging no equal bases and keeping bases equal to one.  For
+example, ``f^1 * f^1`` with ``n = 2`` leaves ``r = 1`` in Hecke and
+``r = f * f`` in Silex.  The leftover and its conjugate-log bound can
+therefore differ, and so can the branch chosen, but not the answer, for the
+same reason as above.  This is an existing deviation.
+
 The logarithmic embedding follows Hecke's ``conjugates_arb_log`` for
 ``FacElem`` (``src/NumFieldOrd/NfOrd/FacElem.jl``): equal bases are merged
 into one dictionary entry with summed exponents, each base is evaluated with
