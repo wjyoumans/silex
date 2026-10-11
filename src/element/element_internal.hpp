@@ -22,8 +22,8 @@ bool has_exact_order(const Element& z, ulong m) noexcept;
 // (norm-change constants of the Friedrich-Fieker lifting exponent, the
 // power-root reconstruction lattice, the field embedding data of the
 // conjugate bounds, per-radicand lifting exponents, f mod p setups of the
-// prime search, and 1 / f'(theta)).  Diagnostic only: the memo never
-// changes a computed value.
+// prime search, 1 / f'(theta), and whole pure_power_hensel_root answers).
+// Diagnostic only: the memo never changes a computed value.
 struct HenselDataCacheCounters {
     slong norm_change_constants_hits = 0;
     slong norm_change_constants_misses = 0;
@@ -37,12 +37,19 @@ struct HenselDataCacheCounters {
     slong prime_setup_misses = 0;
     slong inverse_derivative_hits = 0;
     slong inverse_derivative_misses = 0;
+    slong power_root_answer_hits = 0;
+    slong power_root_answer_misses = 0;
 };
 HenselDataCacheCounters hensel_data_cache_counters() noexcept;
 
 // Empties every memo counted above on the calling thread, so a test can
 // compare a cold computation with a memoized one.  Diagnostic only.
 void clear_hensel_data_caches() noexcept;
+
+// Empties only the whole-answer memo of pure_power_hensel_root on the calling
+// thread, so a test can reach the memos below it with repeated radicands.
+// Diagnostic only.
+void clear_power_root_answer_cache() noexcept;
 
 // Entry points into the private Hensel-lifting and root-reconstruction
 // machinery of `src/element/hensel.cpp`: exact square/power roots over Q

@@ -778,6 +778,9 @@ void test_power_hensel_data_cache_reuse() noexcept {
     assert(first.norm_change_constants_hits >
            before.norm_change_constants_hits);
 
+    // The whole-answer memo would serve the repeated radicands before any
+    // memo checked here is reached.
+    silex::detail::clear_power_root_answer_cache();
     run_pass(false);
     const silex::detail::HenselDataCacheCounters second =
             silex::detail::hensel_data_cache_counters();
@@ -894,6 +897,9 @@ void test_power_hensel_field_caches_match_cold() noexcept {
     const std::vector<HenselPowerAnswer> warm_first = hensel_power_answers(field, false);
     const silex::detail::HenselDataCacheCounters filled =
             silex::detail::hensel_data_cache_counters();
+    // Repeated radicands would be answered by the whole-answer memo (tested
+    // in test_power_hensel_answer_memo) before the memos checked here.
+    silex::detail::clear_power_root_answer_cache();
     const std::vector<HenselPowerAnswer> warm_second = hensel_power_answers(field, false);
     const silex::detail::HenselDataCacheCounters reused =
             silex::detail::hensel_data_cache_counters();
@@ -950,6 +956,147 @@ void test_power_hensel_field_caches_match_cold() noexcept {
     assert(after_copy.conjugate_bounds_field_hits >
            before_copy.conjugate_bounds_field_hits);
     assert(after_copy.prime_setup_misses == before_copy.prime_setup_misses);
+}
+
+// The whole pure_power_hensel_root answer is memoized per thread, keyed on
+// the field polynomial and backend, the radicand coordinates, the exponent
+// and the pre-lift mode.  A hit must give the cold answer and root, for "not
+// a power" as well as for a root; "unsupported" is never stored; a different
+// pre-lift mode must not be served; and a root served to a second field
+// object with the same polynomial must belong to that object.
+void test_power_hensel_answer_memo() noexcept {
+    // Q(sqrt 2, sqrt 5): 3 is neither a square nor a cube there.
+    const silex::NumberField field = field_from_coefficients({9, 0, -14, 0, 1});
+    const std::vector<HenselPowerAnswer> cold = hensel_power_answers(field, true);
+    std::size_t definite = 0;
+    std::size_t roots = 0;
+    std::size_t nonpowers = 0;
+    for (const HenselPowerAnswer& answer : cold) {
+        definite += answer.supported ? 1 : 0;
+        roots += answer.supported && answer.is_power ? 1 : 0;
+        nonpowers += answer.supported && !answer.is_power ? 1 : 0;
+    }
+    assert(roots >= 4);
+    assert(nonpowers >= 1);
+    const slong unsupported =
+            static_cast<slong>(cold.size()) - static_cast<slong>(definite);
+
+    silex::detail::clear_hensel_data_caches();
+    const silex::detail::HenselDataCacheCounters empty =
+            silex::detail::hensel_data_cache_counters();
+    const std::vector<HenselPowerAnswer> first = hensel_power_answers(field, false);
+    const silex::detail::HenselDataCacheCounters filled =
+            silex::detail::hensel_data_cache_counters();
+    const std::vector<HenselPowerAnswer> second = hensel_power_answers(field, false);
+    const silex::detail::HenselDataCacheCounters reused =
+            silex::detail::hensel_data_cache_counters();
+    assert(same_hensel_power_answers(cold, first));
+    assert(same_hensel_power_answers(cold, second));
+    // Every radicand is distinct, so the first pass only misses; the second
+    // is served for every definite answer and recomputes only the
+    // unsupported ones, without reaching the memos below.
+    assert(filled.power_root_answer_hits == empty.power_root_answer_hits);
+    assert(filled.power_root_answer_misses - empty.power_root_answer_misses ==
+           static_cast<slong>(cold.size()));
+    assert(reused.power_root_answer_hits - filled.power_root_answer_hits ==
+           static_cast<slong>(definite));
+    assert(reused.power_root_answer_misses -
+                   filled.power_root_answer_misses ==
+           unsupported);
+    if (unsupported == 0) {
+        assert(reused.prime_setup_hits == filled.prime_setup_hits);
+        assert(reused.prime_setup_misses == filled.prime_setup_misses);
+    }
+
+    // 3 (1 + theta)^2 is not a square here: a definite "no" from a residue
+    // disproof, then a memo hit.
+    const silex::Element one_plus_theta =
+            element_from_coefficients(field, {1, 1});
+    silex::Element three(field);
+    assert(three.set_si(3));
+    silex::Element nonsquare(field);
+    assert(nonsquare.multiply(one_plus_theta, one_plus_theta));
+    assert(nonsquare.multiply(nonsquare, three));
+    silex::detail::clear_hensel_data_caches();
+    bool is_power = true;
+    silex::Element root(field);
+    assert(silex::detail::pure_power_hensel_root(is_power, root, nonsquare, 2,
+                                                 nullptr));
+    assert(!is_power);
+    const silex::detail::HenselDataCacheCounters stored =
+            silex::detail::hensel_data_cache_counters();
+    is_power = true;
+    assert(silex::detail::pure_power_hensel_root(is_power, root, nonsquare, 2,
+                                                 nullptr));
+    assert(!is_power);
+    const silex::detail::HenselDataCacheCounters hit =
+            silex::detail::hensel_data_cache_counters();
+    assert(hit.power_root_answer_hits == stored.power_root_answer_hits + 1);
+    assert(hit.power_root_answer_misses == stored.power_root_answer_misses);
+
+    // The other pre-lift mode is a different key: it misses, and its answer
+    // is the cold one of that mode.
+    bool disabled_cold_is_power = false;
+    silex::detail::clear_hensel_data_caches();
+    const bool disabled_cold_supported = silex::detail::pure_power_hensel_root(
+            disabled_cold_is_power, root, nonsquare, 2, nullptr,
+            silex::detail::PreLiftResidueDisproof::disabled);
+    silex::detail::clear_hensel_data_caches();
+    assert(silex::detail::pure_power_hensel_root(is_power, root, nonsquare, 2,
+                                                 nullptr));
+    const silex::detail::HenselDataCacheCounters before_disabled =
+            silex::detail::hensel_data_cache_counters();
+    bool disabled_is_power = false;
+    const bool disabled_supported = silex::detail::pure_power_hensel_root(
+            disabled_is_power, root, nonsquare, 2, nullptr,
+            silex::detail::PreLiftResidueDisproof::disabled);
+    const silex::detail::HenselDataCacheCounters after_disabled =
+            silex::detail::hensel_data_cache_counters();
+    assert(disabled_supported == disabled_cold_supported);
+    assert(!disabled_supported || disabled_is_power == disabled_cold_is_power);
+    assert(after_disabled.power_root_answer_misses ==
+           before_disabled.power_root_answer_misses + 1);
+    assert(after_disabled.power_root_answer_hits ==
+           before_disabled.power_root_answer_hits);
+
+    // A root stored through `field` and served to a second field object with
+    // the same polynomial is an element of that second object.
+    silex::detail::clear_hensel_data_caches();
+    const silex::Element base = element_from_coefficients(field, {3, -2, 1});
+    silex::Element square(field);
+    assert(square.multiply(base, base));
+    silex::Element field_root(field);
+    assert(silex::detail::pure_power_hensel_root(is_power, field_root, square,
+                                                 2, nullptr));
+    assert(is_power);
+    const silex::NumberField same_polynomial =
+            field_from_coefficients({9, 0, -14, 0, 1});
+    assert(!same_polynomial.has_same_data(field));
+    const silex::Element copy_base =
+            element_from_coefficients(same_polynomial, {3, -2, 1});
+    silex::Element copy_square(same_polynomial);
+    assert(copy_square.multiply(copy_base, copy_base));
+    const silex::detail::HenselDataCacheCounters before_copy =
+            silex::detail::hensel_data_cache_counters();
+    silex::Element copy_root(same_polynomial);
+    is_power = false;
+    assert(silex::detail::pure_power_hensel_root(is_power, copy_root,
+                                                 copy_square, 2, nullptr));
+    const silex::detail::HenselDataCacheCounters after_copy =
+            silex::detail::hensel_data_cache_counters();
+    assert(is_power);
+    assert(after_copy.power_root_answer_hits ==
+           before_copy.power_root_answer_hits + 1);
+    assert(copy_root.has_parent(same_polynomial));
+    assert(!copy_root.has_parent(field));
+    silex::Element check(same_polynomial);
+    assert(check.multiply(copy_root, copy_root));
+    assert(check.equal(copy_square));
+    sflint::FmpqPoly field_coordinates;
+    sflint::FmpqPoly copy_coordinates;
+    assert(field_root.get_fmpq_poly(sflint::FmpqPolyRef(field_coordinates)));
+    assert(copy_root.get_fmpq_poly(sflint::FmpqPolyRef(copy_coordinates)));
+    assert(fmpq_poly_equal(field_coordinates.raw(), copy_coordinates.raw()) != 0);
 }
 
 // Independent oracle for "no": each element below is not an n-th power in its
@@ -1342,6 +1489,7 @@ int main() {
     test_power_degree_twenty_cyclotomic_residue_disproof();
     test_power_hensel_data_cache_reuse();
     test_power_hensel_field_caches_match_cold();
+    test_power_hensel_answer_memo();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 

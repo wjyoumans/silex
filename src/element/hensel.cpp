@@ -3132,6 +3132,202 @@ bool pure_power_hensel_prime_search(
     return false;
 }
 
+// Rescaling, prime search and lift of pure_power_hensel_root, after its
+// field checks; `element_polynomial` holds the power-basis coordinates of
+// `input` and is overwritten on the rescaled branch.
+bool pure_power_hensel_answer(
+        bool& is_power,
+        Element& root,
+        const Element& input,
+        flint::FmpqPoly& element_polynomial,
+        const NumberField* parent,
+        const nf_struct* raw_field,
+        slong exponent,
+        detail::PreLiftResidueDisproof pre_lift,
+        const DiagnosticsContext* diagnostics) noexcept {
+    // The lifted candidate is reconstructed as f'(theta) c in Z[theta], which
+    // holds for every integral c.  Following reference
+    // `src/NumField/NfAbs/Elem.jl:is_power(::AbsSimpleNumFieldElem, ::Int)`,
+    // a non-integral input a is replaced by a d^n, with d the denominator of
+    // a in the power basis, and a root y of y^n = a d^n gives the root y / d
+    // of a.  Since (y / d)^n = a exactly when y^n = a d^n, a residue disproof
+    // for a d^n disproves a.  Silex rescales only when a is not an algebraic
+    // integer, since otherwise every root is integral and already
+    // reconstructible.  The scaled radicand and scale exist only on the
+    // rescaled branch, so the integral path (the common case) searches the
+    // input itself with no extra Element construction, copy, or
+    // multiply-by-one (a null root_scale means "scale by 1").
+    if (fmpz_is_one(element_polynomial.raw()->den) == 0) {
+        Element scaled_radicand;
+        Element scale;
+        bool rescaled = false;
+        {
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                                "element.power_hensel_denominator");
+            flint::Fmpz leading;
+            if (!primitive_characteristic_leading_coefficient(leading,
+                                                              input)) {
+                return false;
+            }
+            if (fmpz_is_one(leading.raw()) == 0) {
+                // Silex pre-filter, not in the reference: it only returns
+                // unsupported, so it never changes a definite answer.  With
+                // lc(P) as in primitive_characteristic_leading_coefficient,
+                // lc(P_a) = lc(P_c)^n when c^n = a, because the finite-place
+                // terms d_v log max(1, |c|_v) scale by n.  A non-integral a
+                // has only non-integral roots, whose lc is at least 2.  So
+                // lc(P_a) must be an exact n-th power of an integer >= 2,
+                // which also bounds n by log_2 lc(P_a) and hence the size of
+                // d^n.
+                flint::Fmpz lc_root;
+                flint::Fmpz one;
+                fmpz_one(one.raw());
+                if (fmpz_cmp_ui(leading.raw(),
+                                static_cast<ulong>(1)) <= 0 ||
+                    static_cast<ulong>(exponent) >= fmpz_bits(leading.raw()) ||
+                    fmpz_root(lc_root.raw(), leading.raw(), exponent) == 0) {
+                    return false;
+                }
+
+                flint::Fmpq inverse_denominator;
+                fmpq_set_fmpz_frac(inverse_denominator.raw(), one.raw(),
+                                   element_polynomial.raw()->den);
+                flint::FmpqPoly inverse_scale;
+                fmpq_poly_set_coeff_fmpq(inverse_scale.raw(), 0,
+                                         inverse_denominator.raw());
+
+                flint::Fmpz scale_by;
+                fmpz_pow_ui(scale_by.raw(), element_polynomial.raw()->den,
+                            static_cast<ulong>(exponent));
+                fmpq_poly_scalar_mul_fmpz(element_polynomial.raw(),
+                                          element_polynomial.raw(),
+                                          scale_by.raw());
+                if (!scale.define(*parent) ||
+                    !scaled_radicand.define(*parent) ||
+                    !scale.set_fmpq_poly(
+                            flint::FmpqPolyConstRef(inverse_scale)) ||
+                    !scaled_radicand.set_fmpq_poly(
+                            flint::FmpqPolyConstRef(element_polynomial))) {
+                    return false;
+                }
+                rescaled = true;
+            }
+        }
+        if (rescaled) {
+            return pure_power_hensel_prime_search(
+                    is_power, root, scaled_radicand, input, &scale,
+                    element_polynomial, parent, raw_field, exponent,
+                    pre_lift, diagnostics);
+        }
+    }
+
+    return pure_power_hensel_prime_search(
+            is_power, root, input, input, nullptr, element_polynomial,
+            parent, raw_field, exponent, pre_lift, diagnostics);
+}
+
+// Memo of the whole pure_power_hensel_root answer.  The class-group
+// saturation stage asks is_square / is_power of the same few radicands
+// hundreds of times in one field, and the memos above still leave the residue
+// checks and the lift to be redone on every repeat.
+//
+// Exactness: the key holds every input pure_power_hensel_answer reads, each
+// compared for exact equality: the defining polynomial and backend of the
+// field (the degree follows from the polynomial), the power-basis coordinates
+// of the input (which determine it exactly), the exponent and the pre-lift
+// mode.  The computation is deterministic (the memos it reads return bit for
+// bit what recomputation would, and FLINT's factoring is repeatable, see
+// prime_search_setup), so a hit returns the answer and the root a fresh call
+// would return.  Only definite answers are stored: "not a power", which comes
+// only from an exact residue disproof, and a root, which was verified
+// exactly.  "Unsupported" is never stored, because some of its paths are
+// resource failures (a modular context or element that could not be built)
+// that a later call need not meet.  A stored root is kept as coordinates and
+// rebuilt in the caller's field, so it has the input's parent, as on a fresh
+// call.  Lifetime and thread safety are as for the caches above; no reference
+// into this cache is held across the computation.
+struct PowerRootAnswerEntry {
+    flint::FmpqPoly polynomial;
+    NumberFieldBackendKind backend = NumberFieldBackendKind::generic;
+    flint::FmpqPoly radicand;
+    slong exponent = 0;
+    detail::PreLiftResidueDisproof pre_lift =
+            detail::PreLiftResidueDisproof::enabled;
+    bool is_power = false;
+    flint::FmpqPoly root;
+};
+
+constexpr std::size_t kPowerRootAnswerCacheCapacity = 64;
+
+BoundedEntryCache<PowerRootAnswerEntry>& power_root_answer_cache() noexcept {
+    thread_local BoundedEntryCache<PowerRootAnswerEntry> cache(
+            kPowerRootAnswerCacheCapacity);
+    return cache;
+}
+
+// Publishes the stored answer for (field, radicand, exponent, pre_lift) and
+// returns true on a hit.  False means the caller must compute the answer: no
+// entry matches, or the stored root could not be rebuilt (then `root` is
+// untouched).
+bool find_power_root_answer(bool& is_power,
+                            Element& root,
+                            const NumberField& parent,
+                            const nf_struct* raw_field,
+                            const flint::FmpqPoly& radicand,
+                            slong exponent,
+                            detail::PreLiftResidueDisproof pre_lift,
+                            const DiagnosticsContext* diagnostics) noexcept {
+    const NumberFieldBackendKind backend = parent.backend_kind();
+    for (const PowerRootAnswerEntry& entry :
+         power_root_answer_cache().entries()) {
+        if (entry.exponent != exponent || entry.pre_lift != pre_lift ||
+            entry.backend != backend ||
+            fmpq_poly_equal(entry.polynomial.raw(), raw_field->pol) == 0 ||
+            fmpq_poly_equal(entry.radicand.raw(), radicand.raw()) == 0) {
+            continue;
+        }
+        if (entry.is_power) {
+            Element candidate(parent);
+            if (!candidate.is_defined() ||
+                !candidate.set_fmpq_poly(
+                        flint::FmpqPolyConstRef(entry.root))) {
+                break;
+            }
+            root.swap(candidate);
+        }
+        is_power = entry.is_power;
+        ++hensel_data_cache_counters_tls.power_root_answer_hits;
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                            "element.power_hensel_answer.cache_hit");
+        return true;
+    }
+    ++hensel_data_cache_counters_tls.power_root_answer_misses;
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                        "element.power_hensel_answer.cache_miss");
+    return false;
+}
+
+// Stores a definite answer of pure_power_hensel_answer; `entry` already
+// holds the radicand coordinates.
+void remember_power_root_answer(PowerRootAnswerEntry entry,
+                                bool is_power,
+                                const Element& root,
+                                const NumberField& parent,
+                                const nf_struct* raw_field,
+                                slong exponent,
+                                detail::PreLiftResidueDisproof pre_lift)
+        noexcept {
+    if (is_power && !root.get_fmpq_poly(flint::FmpqPolyRef(entry.root))) {
+        return;
+    }
+    fmpq_poly_set(entry.polynomial.raw(), raw_field->pol);
+    entry.backend = parent.backend_kind();
+    entry.exponent = exponent;
+    entry.pre_lift = pre_lift;
+    entry.is_power = is_power;
+    power_root_answer_cache().insert(std::move(entry));
+}
+
 // Root-of-unity search of reference `_torsion_units_gen`: a root in K of the
 // cyclotomic polynomial f = Phi_m, found as reference
 // `_roots_hensel(f, max_roots = 1, is_normal = true, root_bound = ones)`
@@ -3551,6 +3747,11 @@ void clear_hensel_data_caches() noexcept {
     lifting_exponent_cache().clear();
     prime_search_setup_cache().clear();
     inverse_derivative_cache().clear();
+    power_root_answer_cache().clear();
+}
+
+void clear_power_root_answer_cache() noexcept {
+    power_root_answer_cache().clear();
 }
 
 bool has_exact_order(const Element& z, ulong m) noexcept {
@@ -3713,85 +3914,22 @@ bool pure_power_hensel_root(bool& is_power,
         return false;
     }
 
-    // The lifted candidate is reconstructed as f'(theta) c in Z[theta], which
-    // holds for every integral c.  Following reference
-    // `src/NumField/NfAbs/Elem.jl:is_power(::AbsSimpleNumFieldElem, ::Int)`,
-    // a non-integral input a is replaced by a d^n, with d the denominator of
-    // a in the power basis, and a root y of y^n = a d^n gives the root y / d
-    // of a.  Since (y / d)^n = a exactly when y^n = a d^n, a residue disproof
-    // for a d^n disproves a.  Silex rescales only when a is not an algebraic
-    // integer, since otherwise every root is integral and already
-    // reconstructible.  The scaled radicand and scale exist only on the
-    // rescaled branch, so the integral path (the common case) searches the
-    // input itself with no extra Element construction, copy, or
-    // multiply-by-one (a null root_scale means "scale by 1").
-    if (fmpz_is_one(element_polynomial.raw()->den) == 0) {
-        Element scaled_radicand;
-        Element scale;
-        bool rescaled = false;
-        {
-            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                                "element.power_hensel_denominator");
-            flint::Fmpz leading;
-            if (!primitive_characteristic_leading_coefficient(leading,
-                                                              input)) {
-                return false;
-            }
-            if (fmpz_is_one(leading.raw()) == 0) {
-                // Silex pre-filter, not in the reference: it only returns
-                // unsupported, so it never changes a definite answer.  With
-                // lc(P) as in primitive_characteristic_leading_coefficient,
-                // lc(P_a) = lc(P_c)^n when c^n = a, because the finite-place
-                // terms d_v log max(1, |c|_v) scale by n.  A non-integral a
-                // has only non-integral roots, whose lc is at least 2.  So
-                // lc(P_a) must be an exact n-th power of an integer >= 2,
-                // which also bounds n by log_2 lc(P_a) and hence the size of
-                // d^n.
-                flint::Fmpz lc_root;
-                flint::Fmpz one;
-                fmpz_one(one.raw());
-                if (fmpz_cmp_ui(leading.raw(),
-                                static_cast<ulong>(1)) <= 0 ||
-                    static_cast<ulong>(exponent) >= fmpz_bits(leading.raw()) ||
-                    fmpz_root(lc_root.raw(), leading.raw(), exponent) == 0) {
-                    return false;
-                }
-
-                flint::Fmpq inverse_denominator;
-                fmpq_set_fmpz_frac(inverse_denominator.raw(), one.raw(),
-                                   element_polynomial.raw()->den);
-                flint::FmpqPoly inverse_scale;
-                fmpq_poly_set_coeff_fmpq(inverse_scale.raw(), 0,
-                                         inverse_denominator.raw());
-
-                flint::Fmpz scale_by;
-                fmpz_pow_ui(scale_by.raw(), element_polynomial.raw()->den,
-                            static_cast<ulong>(exponent));
-                fmpq_poly_scalar_mul_fmpz(element_polynomial.raw(),
-                                          element_polynomial.raw(),
-                                          scale_by.raw());
-                if (!scale.define(*parent) ||
-                    !scaled_radicand.define(*parent) ||
-                    !scale.set_fmpq_poly(
-                            flint::FmpqPolyConstRef(inverse_scale)) ||
-                    !scaled_radicand.set_fmpq_poly(
-                            flint::FmpqPolyConstRef(element_polynomial))) {
-                    return false;
-                }
-                rescaled = true;
-            }
-        }
-        if (rescaled) {
-            return pure_power_hensel_prime_search(
-                    is_power, root, scaled_radicand, input, &scale,
-                    element_polynomial, parent, raw_field, exponent,
-                    pre_lift, diagnostics);
-        }
+    // Whole-answer memo; see the comment above PowerRootAnswerEntry.
+    if (find_power_root_answer(is_power, root, *parent, raw_field,
+                               element_polynomial, exponent, pre_lift,
+                               diagnostics)) {
+        return true;
     }
-
-    return pure_power_hensel_prime_search(
-            is_power, root, input, input, nullptr, element_polynomial,
-            parent, raw_field, exponent, pre_lift, diagnostics);
+    PowerRootAnswerEntry entry;
+    fmpq_poly_set(entry.radicand.raw(), element_polynomial.raw());
+    if (!pure_power_hensel_answer(is_power, root, input, element_polynomial,
+                                  parent, raw_field, exponent, pre_lift,
+                                  diagnostics)) {
+        return false;
+    }
+    remember_power_root_answer(std::move(entry), is_power, root, *parent,
+                               raw_field, exponent, pre_lift);
+    return true;
 }
 
 bool pure_square_hensel_root(bool& is_square,
