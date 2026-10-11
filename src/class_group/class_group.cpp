@@ -8539,8 +8539,9 @@ bool saturation_process_candidates_once(
             // exact unit test of the leftover
             // (compact_residual_leftover_is_unit).  Saturation relations are
             // single elements with kernel coefficients lifted into [0, n), so
-            // `structural` is empty and the test free unless equal
-            // generators merge or a caller passes other coefficients.
+            // `structural` is empty and the test free unless the candidate
+            // coefficients lie outside [0, n) or relations carry their own
+            // exponents.
             FactoredElement structural(*field);
             FactoredElement leftover(*field);
             if (!structural.is_defined() || !leftover.is_defined() ||

@@ -21,6 +21,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -96,6 +97,21 @@ bool run(slong generator, bool expect_power) {
 // unit, with log bound 2 <= isqrt(37).  Before the residual branch was
 // gated on a unit leftover, the unit-only reduction of delta failed the
 // compact evaluation invariant and the call returned false.
+struct ResidualNotUnitCounter {
+    long events = 0;
+};
+
+void residual_not_unit_callback(void* user,
+                                silex::DiagnosticsModule,
+                                silex::ProfileEvent event,
+                                const char*,
+                                const char* label) noexcept {
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, "class_group.saturation_residual_not_unit") == 0) {
+        ++static_cast<ResidualNotUnitCounter*>(user)->events;
+    }
+}
+
 bool run_unit_candidate_nonunit_leftover() {
     silex::NumberField field = silex::test::quadratic_field(2);
     silex::Order order;
@@ -105,6 +121,14 @@ bool run_unit_candidate_nonunit_leftover() {
     sflint::fmpz_set_si(sflint::FmpzRef(bound), 2);
     silex::ClassGroupContext context(order);
     assert(context.is_defined());
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ResidualNotUnitCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            residual_not_unit_callback, &counter);
+    context.set_diagnostics(&diagnostics);
     assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
     const silex::FactorBase* base = context.factor_base();
     assert(base != nullptr);
@@ -160,6 +184,11 @@ bool run_unit_candidate_nonunit_leftover() {
                 result.saw_non_power ? 1 : 0,
                 static_cast<long>(result.compact_power_candidates));
     std::fflush(stdout);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The residual branch was considered and rejected for the non-unit
+    // leftover.
+    assert(counter.events == 1);
+#endif
     return ok && !result.saw_power && result.saw_non_power &&
            result.compact_power_candidates == 1 &&
            result.structural_power_candidates == 0 &&

@@ -786,6 +786,21 @@ int test_compact_field_modulus_cache_shared_across_calls() {
 // but gamma^2 delta = eps^(2K + e) is.  The formal split leaves the small
 // non-unit delta, so the residual conjugate-log bound is below the square
 // root of the original one.
+struct ResidualNotUnitCounter {
+    slong events = 0;
+};
+
+void residual_not_unit_callback(void* user,
+                                silex::DiagnosticsModule,
+                                silex::ProfileEvent event,
+                                const char*,
+                                const char* label) noexcept {
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, "unit_group.compact_unit_residual_not_unit") == 0) {
+        ++static_cast<ResidualNotUnitCounter*>(user)->events;
+    }
+}
+
 int test_compact_unit_power_root_nonunit_small_leftover() {
     const slong coefficients[] = {-2, 0, 1};
     const silex::NumberField field = monic_field(coefficients);
@@ -811,11 +826,24 @@ int test_compact_unit_power_root_nonunit_small_leftover() {
     // eps^41 is not a square (eps is fundamental of norm -1).
     silex::FactoredElement odd(field);
     assert(odd.push(gamma, 2) && odd.push(half_eps, 1));
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ResidualNotUnitCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            residual_not_unit_callback, &counter);
     bool is_power = true;
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
-            is_power, root, order, odd, 2, precision, precision));
+            is_power, root, order, odd, 2, precision, precision,
+            &diagnostics, nullptr));
     assert(!is_power);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The residual branch was considered and rejected for the non-unit
+    // leftover.
+    assert(counter.events == 1);
+#endif
 
     // eps^42 = (eps^21)^2.
     silex::FactoredElement even(field);
