@@ -2290,6 +2290,230 @@ int test_general_product_hnf_matches_plain_hnf() {
     return 0;
 }
 
+// extract_two_generator accepts a candidate beta only when the HNF of the
+// rows [a I; M_beta mod a] equals the ideal HNF (base4.c ok_elt).  Replay the
+// whole search here with the plain fmpz_mat_hnf of those rows and compare the
+// outcome, trial counts and returned element of ideal_two_generator, over
+// maximal orders with trivial and nontrivial index, minimum 1, scalar ideals,
+// ideals with content, and word and multiword minima.
+void reduced_multiplication_rows(sflint::FmpzMat& out, silex::Order& order,
+                                 const sflint::FmpzMat& coordinates,
+                                 const sflint::Fmpz& modulus) noexcept {
+    const slong n = order.degree();
+    silex::OrderElement beta(order), basis_element(order), product(order);
+    assert(beta.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+    sflint::FmpzMat unit(1, n), row(1, n);
+    for (slong i = 0; i < n; ++i) {
+        fmpz_mat_zero(unit.raw());
+        fmpz_one(fmpz_mat_entry(unit.raw(), 0, i));
+        assert(basis_element.set_coordinates(sflint::FmpzMatConstRef(unit)));
+        assert(product.multiply(beta, basis_element));
+        assert(product.get_coordinates(sflint::FmpzMatRef(row)));
+        for (slong j = 0; j < n; ++j) {
+            fmpz_mod(fmpz_mat_entry(out.raw(), i, j),
+                     fmpz_mat_entry(row.raw(), 0, j), modulus.raw());
+        }
+    }
+}
+
+bool plain_presentation_hnf_matches(const sflint::FmpzMat& h,
+                                    const sflint::Fmpz& minimum,
+                                    const sflint::FmpzMat& matrix) noexcept {
+    const slong n = fmpz_mat_nrows(h.raw());
+    sflint::FmpzMat rows(2 * n, n), reduced(2 * n, n);
+    for (slong i = 0; i < n; ++i) {
+        fmpz_set(fmpz_mat_entry(rows.raw(), i, i), minimum.raw());
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(rows.raw(), n + i, j),
+                     fmpz_mat_entry(matrix.raw(), i, j));
+        }
+    }
+    fmpz_mat_hnf(reduced.raw(), rows.raw());
+    sflint::FmpzMatConstWindow top(reduced, 0, 0, n, n);
+    return fmpz_mat_equal(top.raw(), h.raw()) != 0;
+}
+
+// Least positive integer in the ideal: the denominator of the coordinates of
+// 1 in the basis given by the rows of h.
+void plain_ideal_minimum(sflint::Fmpz& minimum, const sflint::FmpzMat& h,
+                         const sflint::FmpzMat& one) noexcept {
+    const slong n = fmpz_mat_nrows(h.raw());
+    sflint::FmpqMat basis(n, n), inverse(n, n), target(1, n), solution(1, n);
+    fmpq_mat_set_fmpz_mat(basis.raw(), h.raw());
+    assert(fmpq_mat_inv(inverse.raw(), basis.raw()));
+    fmpq_mat_set_fmpz_mat(target.raw(), one.raw());
+    fmpq_mat_mul(solution.raw(), target.raw(), inverse.raw());
+    fmpz_one(minimum.raw());
+    for (slong j = 0; j < n; ++j) {
+        fmpz_lcm(minimum.raw(), minimum.raw(),
+                 fmpq_denref(fmpq_mat_entry(solution.raw(), 0, j)));
+    }
+}
+
+struct PlainSearch {
+    bool found = false;
+    silex::detail::TwoGeneratorSearchReport report;
+};
+
+PlainSearch plain_two_generator_search(sflint::FmpzMat& found_row, silex::Order& order,
+                                       const sflint::FmpzMat& h,
+                                       const sflint::Fmpz& minimum,
+                                       const silex::detail::TwoGeneratorSearchOptions& options) noexcept {
+    const slong n = order.degree();
+    PlainSearch search;
+    sflint::FmpzMat row(1, n), matrix(n, n);
+    std::vector<sflint::FmpzMat> rows, matrices;
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(row.raw(), 0, j), fmpz_mat_entry(h.raw(), i, j));
+        }
+        reduced_multiplication_rows(matrix, order, row, minimum);
+        if (fmpz_mat_is_zero(matrix.raw())) continue;
+        if (options.basis_candidates) {
+            ++search.report.basis_trials;
+            if (plain_presentation_hnf_matches(h, minimum, matrix)) {
+                fmpz_mat_set(found_row.raw(), row.raw());
+                search.found = true;
+                return search;
+            }
+        }
+        rows.emplace_back(1, n);
+        matrices.emplace_back(n, n);
+        fmpz_mat_set(rows.back().raw(), row.raw());
+        fmpz_mat_set(matrices.back().raw(), matrix.raw());
+    }
+    if (rows.empty()) {
+        fmpz_mat_zero(matrix.raw());
+        search.found = plain_presentation_hnf_matches(h, minimum, matrix);
+        if (search.found) fmpz_mat_zero(found_row.raw());
+        return search;
+    }
+    flint_rand_t state;
+    flint_rand_init(state);
+    flint_rand_set_seed(state, 0x53494c45UL, 0x58UL);
+    sflint::Fmpz coefficient;
+    for (slong trial = 0; trial < options.random_trials && !search.found; ++trial) {
+        ++search.report.random_trials;
+        fmpz_mat_zero(row.raw());
+        for (std::size_t k = 0; k < rows.size(); ++k) {
+            fmpz_randm(coefficient.raw(), state, minimum.raw());
+            fmpz_mat_scalar_addmul_fmpz(row.raw(), rows[k].raw(), coefficient.raw());
+        }
+        fmpz_mat_scalar_mod_fmpz(row.raw(), row.raw(), minimum.raw());
+        reduced_multiplication_rows(matrix, order, row, minimum);
+        if (!fmpz_mat_is_zero(matrix.raw()) &&
+            plain_presentation_hnf_matches(h, minimum, matrix)) {
+            fmpz_mat_set(found_row.raw(), row.raw());
+            search.found = true;
+        }
+    }
+    flint_rand_clear(state);
+    return search;
+}
+
+int test_two_generator_search_matches_plain_hnf() {
+    sflint::FmpqPoly polynomial;
+    slong searches = 0, rejected = 0, multiword = 0, unit_minimum = 0;
+    for (slong which = 0; which < 6; ++which) {
+        sflint::fmpq_poly_zero(polynomial);
+        if (which == 0) {
+            poly_x2_minus(polynomial, 5);
+        } else if (which == 1) {
+            poly_x3_minus(polynomial, 10);
+        } else if (which == 2) {
+            poly_x3_minus(polynomial, 2);
+        } else if (which == 3) {
+            silex::test::ideal_product::polynomial(polynomial, 4);
+        } else if (which == 4) {
+            for (slong e : {8, 7, 5, 4, 3, 1, 0}) {
+                sflint::fmpq_poly_set_coeff_si(polynomial, e,
+                        (e == 7 || e == 4 || e == 1) ? -1 : 1);
+            }
+        } else {
+            sflint::fmpq_poly_set_coeff_si(polynomial, 6, 1);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 1, 1);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+        }
+        silex::NumberField field = field_by_polynomial(polynomial);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order order(field);
+        assert(order.maximal_order(equation) && order.is_maximal());
+        const slong n = order.degree();
+
+        std::vector<silex::Ideal> ideals;
+        const slong large = (n == 2) ? (WORD(1) << 33) : (n == 3) ? WORD(3000000)
+                          : (n == 4) ? (WORD(1) << 17) : WORD(3000);
+        for (slong point : {WORD(2), WORD(3), WORD(-2), WORD(7), WORD(11), large}) {
+            ideals.emplace_back(order);
+            assert(silex::test::ideal_product::evaluation_ideal(ideals.back(), polynomial, point));
+        }
+        ideals.emplace_back(order);
+        assert(ideals.back().multiply(ideals[0], ideals[1]));
+        ideals.emplace_back(order);
+        assert(ideals.back().multiply(ideals[0], ideals[0]));
+        // O (minimum 1), 6 O, (2^64 + 13) O, and 6 times an evaluation ideal.
+        sflint::Fmpz scale;
+        fmpz_one(scale.raw());
+        fmpz_mul_2exp(scale.raw(), scale.raw(), 64);
+        fmpz_add_ui(scale.raw(), scale.raw(), 13);
+        for (slong kind = 0; kind < 4; ++kind) {
+            sflint::FmpzMat h(n, n);
+            if (kind == 3) {
+                assert(ideals[0].get_hnf(sflint::FmpzMatRef(h)));
+            } else {
+                fmpz_mat_one(h.raw());
+            }
+            if (kind == 2) {
+                fmpz_mat_scalar_mul_fmpz(h.raw(), h.raw(), scale.raw());
+            } else if (kind != 0) {
+                fmpz_mat_scalar_mul_si(h.raw(), h.raw(), 6);
+            }
+            ideals.emplace_back(order);
+            assert(ideals.back().set_hnf(sflint::FmpzMatConstRef(h)));
+        }
+
+        sflint::FmpzMat one_row(1, n), h(n, n), expected_row(1, n), actual_row(1, n);
+        silex::OrderElement one(order);
+        assert(one.one() && one.get_coordinates(sflint::FmpzMatRef(one_row)));
+        for (const silex::Ideal& ideal : ideals) {
+            assert(ideal.get_hnf(sflint::FmpzMatRef(h)));
+            sflint::Fmpz minimum;
+            plain_ideal_minimum(minimum, h, one_row);
+            for (bool basis_candidates : {true, false}) {
+                silex::detail::TwoGeneratorSearchOptions options;
+                options.basis_candidates = basis_candidates;
+                const PlainSearch expected = plain_two_generator_search(
+                        expected_row, order, h, minimum, options);
+                silex::detail::TwoGeneratorSearchReport report;
+                sflint::Fmpz scalar;
+                silex::OrderElement beta(order);
+                const bool found = silex::detail::ideal_two_generator(
+                        sflint::FmpzRef(scalar), beta, ideal, options, &report);
+                ++searches;
+                const slong trials = report.basis_trials + report.random_trials;
+                rejected += trials - (found && trials > 0 ? 1 : 0);
+                if (!fmpz_abs_fits_ui(minimum.raw())) ++multiword;
+                if (fmpz_is_one(minimum.raw())) ++unit_minimum;
+                if (found != expected.found ||
+                    report.basis_trials != expected.report.basis_trials ||
+                    report.random_trials != expected.report.random_trials) {
+                    std::fprintf(stderr, "two-generator search mismatch: n=%ld\n", n);
+                    std::fflush(stderr);
+                }
+                assert(found == expected.found && report.verified == found);
+                assert(report.basis_trials == expected.report.basis_trials);
+                assert(report.random_trials == expected.report.random_trials);
+                if (!found) continue;
+                assert(fmpz_equal(scalar.raw(), minimum.raw()));
+                assert(beta.get_coordinates(sflint::FmpzMatRef(actual_row)));
+                assert(fmpz_mat_equal(actual_row.raw(), expected_row.raw()));
+            }
+        }
+    }
+    assert(searches >= 100 && rejected >= 40 && multiword >= 20 && unit_minimum >= 12);
+    return 0;
+}
+
 int test_nonprincipal_product_and_associativity() {
     sflint::FmpqPoly f;
     poly_x2_minus(f, -5);
@@ -2783,6 +3007,7 @@ int main(int argc, char** argv) {
     assert(test_nonprincipal_product_and_associativity() == 0);
     assert(test_known_two_generator_hnf_matches_generic() == 0);
     assert(test_general_product_hnf_matches_plain_hnf() == 0);
+    assert(test_two_generator_search_matches_plain_hnf() == 0);
     for (slong degree : {2, 3, 4, 6, 8, 12}) {
         for (slong kind = 0; kind < 5; ++kind) {
             silex::Order order;
