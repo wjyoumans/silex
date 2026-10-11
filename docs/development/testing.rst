@@ -36,6 +36,20 @@ source identified in :doc:`source_fidelity`.  Keep public API tests, internal
 algorithm tests, FLINT-wrapper ownership tests, adapter tests, diagnostics
 tests, and performance measurements conceptually separate.
 
+Some tests assert which internal route a computation took by reading
+profiling counters.  Those assertions sit in blocks guarded by
+``SILEX_ENABLE_PROFILING``, so the ``default``, ``werror``, and
+``asan-ubsan`` presets, which build with profiling off, check only the
+results.  A change to code those tests cover, or to the tests themselves,
+must also run the ``diagnostics`` preset, which enables profiling and debug
+checks:
+
+.. code-block:: console
+
+   cmake --preset diagnostics
+   cmake --build --preset diagnostics
+   ctest --preset diagnostics
+
 Documentation changes must run:
 
 .. code-block:: console

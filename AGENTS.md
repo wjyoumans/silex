@@ -120,6 +120,18 @@ cmake --build --preset asan-ubsan
 ctest --preset asan-ubsan
 ```
 
+When a change touches code whose tests assert routes through profiling
+counters (test blocks guarded by `SILEX_ENABLE_PROFILING`; list their files
+with `grep -l SILEX_ENABLE_PROFILING test/*.cpp`), or touches those tests,
+also run the diagnostics preset. The default, werror, and asan-ubsan presets
+build with profiling off, so they compile those route assertions out:
+
+```sh
+cmake --preset diagnostics
+cmake --build --preset diagnostics
+ctest --preset diagnostics
+```
+
 Before creating or moving a tag, Google Benchmark is required. Run the full
 Release build and semantic suite:
 
