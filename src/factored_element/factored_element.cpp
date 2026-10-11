@@ -139,6 +139,8 @@ bool arb_has_radius_at_most_2exp(const arb_struct* value,
            mag_cmp_2exp_si(arb_radref(value), exponent) <= 0;
 }
 
+// Ports `expand!` (reference Misc/acb_root_ctx.jl:278): the final
+// rounding that widens a ball to a requested radius bound.
 void expand_arb_to_radius(arb_struct* value, slong max_radius_2exp) noexcept {
     if (arb_rel_accuracy_bits(value) < 0 || arb_is_exact(value) != 0) {
         return;

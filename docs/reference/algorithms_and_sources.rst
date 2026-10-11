@@ -1811,6 +1811,15 @@ are exact and canonical, so the expanded value does not depend on the
 multiplication order.  The reduced power and square tests expand only the
 leftover factors whose exponents are not multiples of the root degree.
 
+The logarithmic embedding follows Hecke's ``conjugates_arb_log`` for
+``FacElem`` (``src/NumFieldOrd/NfOrd/FacElem.jl``): equal bases are merged
+into one dictionary entry with summed exponents, each base is evaluated with
+guard bits, and the sum is widened by Hecke's ``expand!``
+(``src/Misc/acb_root_ctx.jl``) as the final rounding.  The published radius
+of each logarithm is at most ``2^-precision``, but it is not monotone in the
+working precision, so it may be larger or smaller than before merging while
+remaining a rigorous enclosure.
+
 ``src/zeta`` follows the PARI analytic class-regulator and
 Belabas--Friedman-style bounds used by the class/unit proof consumers.  The
 Belabas--Friedman error bound assumes GRH; see "Class groups and order units"
