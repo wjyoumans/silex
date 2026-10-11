@@ -1,6 +1,7 @@
 #include <silex/prime_ideal.hpp>
 
 #include "prime_ideal_internal.hpp"
+#include "../ideal/ideal_access_internal.hpp"
 #include "../order/order_internal.hpp"
 
 #include <silex/diagnostics.hpp>
@@ -1926,7 +1927,22 @@ bool ideal_from_mod_rows(Ideal& out,
         return false;
     }
 
-    return out.set_hnf(hnf_lattice.basis_ref());
+    // The row span is an ideal by construction, so the release build skips
+    // set_hnf's ideal test (builds with assertions enabled still run it).
+    // Write A = O/pO, a commutative ring, in the coordinates of the order
+    // basis.  component_basis_from_idempotent gives each component's basis
+    // as an F_p-basis of the image of multiplication by its element e, that
+    // is of eA, an ideal of A because a(eb) = e(ab).  The kept components
+    // therefore span a sum of ideals of A, itself an ideal I of A.  The rows
+    // pO plus integer lifts of an F_p-basis of I span exactly the preimage
+    // of I under the ring map O -> O/pO, and the preimage of an ideal under
+    // a ring map is an ideal.  The argument holds for any e, idempotent or
+    // not; it needs only that `multiplication_table` is that of O mod p.
+    // Reference 2.17.3 `src/basemath/base2.c:primedec_aux` (2309, 2336-2343)
+    // likewise takes the F_p-image of [H | multiplication matrix] as an
+    // ideal of Z_K/p without testing it.
+    return detail::IdealAccess::set_known_ideal_hnf(out,
+                                                    hnf_lattice.basis_ref());
 }
 
 bool ideal_from_mod_kernel(Ideal& out,

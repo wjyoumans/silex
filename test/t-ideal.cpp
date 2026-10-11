@@ -2968,6 +2968,64 @@ int test_contains_lattice_fallback_matches_hnf_reference() {
     return members > 0 && nonmembers > 0 && included > 0 && excluded > 0 ? 0 : 1;
 }
 
+// The noninstalled detail::IdealAccess::set_known_ideal_hnf hook, which
+// library code uses for lattices that are ideals by construction, stores the
+// same normalized HNF as the checked Ideal::set_hnf for any full-rank basis
+// of an ideal's lattice, and fails like set_hnf, leaving the output
+// unchanged, on a singular or misshapen matrix.  It does not test that the
+// lattice is an ideal in release builds, so no non-ideal input is passed.
+int test_set_known_ideal_hnf_matches_set_hnf() {
+    ContainsRng rng{0x5e7c0de1};
+    for (slong degree : {2, 3, 4, 6}) {
+        for (slong kind = 0; kind < 5; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            const slong n = order.degree();
+            silex::Ideal product(order);
+            assert(product.multiply(left, right));
+            const silex::Ideal* ideals[] = {&left, &right, &product};
+            for (const silex::Ideal* source : ideals) {
+                sflint::FmpzMat hnf(n, n);
+                assert(source->get_hnf(sflint::FmpzMatRef(hnf)));
+                sflint::FmpzMat basis(n, n);
+                reversed_scrambled_basis(basis, hnf, rng);
+                for (const sflint::FmpzMat* input : {&hnf, &basis}) {
+                    silex::Ideal checked(order), known(order);
+                    assert(checked.set_hnf(sflint::FmpzMatConstRef(*input)));
+                    assert(silex::detail::IdealAccess::set_known_ideal_hnf(
+                            known, sflint::FmpzMatConstRef(*input)));
+                    sflint::FmpzMat want(n, n), got(n, n);
+                    assert(checked.get_hnf(sflint::FmpzMatRef(want)));
+                    assert(known.get_hnf(sflint::FmpzMatRef(got)));
+                    assert(fmpz_mat_equal(want.raw(), got.raw()) != 0);
+                    assert(fmpz_mat_equal(got.raw(), hnf.raw()) != 0);
+                    assert(known.equal(*source));
+                    sflint::Fmpz want_norm, got_norm;
+                    assert(checked.norm(sflint::FmpzRef(want_norm)));
+                    assert(known.norm(sflint::FmpzRef(got_norm)));
+                    assert(fmpz_equal(want_norm.raw(), got_norm.raw()) != 0);
+                }
+
+                silex::Ideal kept(order);
+                assert(kept.set(*source));
+                sflint::FmpzMat singular(n, n);
+                fmpz_mat_set(singular.raw(), hnf.raw());
+                for (slong j = 0; j < n; ++j) {
+                    fmpz_zero(fmpz_mat_entry(singular.raw(), n - 1, j));
+                }
+                assert(!silex::detail::IdealAccess::set_known_ideal_hnf(
+                        kept, sflint::FmpzMatConstRef(singular)));
+                sflint::FmpzMat wrong_shape(n - 1, n);
+                assert(!silex::detail::IdealAccess::set_known_ideal_hnf(
+                        kept, sflint::FmpzMatConstRef(wrong_shape)));
+                assert(kept.equal(*source));
+            }
+        }
+    }
+    return 0;
+}
+
 // Failure returns of the public Ideal::contains overloads: an undefined ideal
 // or element, an ideal without an HNF, and an element or ideal of another
 // order (a different order of the same field, and an order of another field)
@@ -3194,6 +3252,7 @@ int main(int argc, char** argv) {
     assert(test_contains_and_set_hnf_match_hnf_reference() == 0);
     assert(test_contains_ideal_matches_hnf_reference() == 0);
     assert(test_contains_lattice_fallback_matches_hnf_reference() == 0);
+    assert(test_set_known_ideal_hnf_matches_set_hnf() == 0);
     assert(test_contains_failure_returns() == 0);
     assert(test_triangular_basis_contains_matches_hnf_reference() == 0);
     assert(test_integral_noninvertible_norm_trap() == 0);

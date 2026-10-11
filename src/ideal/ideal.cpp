@@ -13,9 +13,11 @@
 #include <silex/lat.hpp>
 
 #include "hnf_membership_internal.hpp"
+#include "ideal_access_internal.hpp"
 #include "prime_inverse_internal.hpp"
 #include "two_generator_internal.hpp"
 
+#include <cassert>
 #include <utility>
 #include <vector>
 
@@ -1102,6 +1104,29 @@ bool Ideal::set_known_ideal_rows(flint::FmpzMatConstRef rows) noexcept {
 }
 
 namespace detail {
+
+bool IdealAccess::set_known_ideal_hnf(Ideal& ideal,
+                                      flint::FmpzMatConstRef hnf) noexcept {
+    if (!ideal.is_defined()) {
+        return false;
+    }
+
+    // As Ideal::set_hnf, minus the release-build hnf_is_ideal test: the caller
+    // vouches that the row span is an ideal.
+    const slong n = ideal.parent_.degree();
+    flint::FmpzMat normalized(n, n);
+    if (!normalize_full_rank_hnf(flint::FmpzMatRef(normalized), hnf)) {
+        return false;
+    }
+    assert(hnf_is_ideal(ideal.parent_, flint::FmpzMatConstRef(normalized)));
+
+    Ideal candidate(ideal.parent_);
+    if (!candidate.set_hnf_direct(flint::FmpzMatConstRef(normalized))) {
+        return false;
+    }
+    ideal.swap(candidate);
+    return true;
+}
 
 namespace {
 
