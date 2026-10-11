@@ -20,6 +20,7 @@
 #include "test_support.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -209,6 +210,107 @@ bool run_unit_candidate_nonunit_leftover() {
            result.structural_power_candidates == 0 &&
            result.appended_class_relations == 0;
 }
+
+// A unit candidate whose formal leftover has norm 1 but is not a unit, so
+// the norm prefilter at the saturation call site
+// (compact_residual_leftover_is_unit) passes it and the exact unit test
+// must reject it.  Factor bases need a maximal order, and there an integral
+// element of norm +-1 is a unit, so the leftover is not integral.  In
+// Q(sqrt 2) with eps = 1 + sqrt 2 and beta = (3 + sqrt 2) / (3 - sqrt 2)
+// (norm 1, row P - P' over 7 = P P'), relations beta, beta^-2 and eps
+// (zero row) and prime n = 3, the coefficients (4, 2, 3k + 1) give
+// eps^(3k + 1), with a zero row, split as (beta eps^k)^3 *
+// (beta * beta^-4 * eps): the leftover beta^-3 eps has norm -1 and row
+// -3 (P - P').  The candidate is not a cube (eps is fundamental).  The
+// residual bound selects the residual branch, and the candidate must take
+// the branch with the whole input.  A "norm +-1 implies unit" shortcut
+// would send the leftover to the unit-only reduction, whose invariant needs
+// a unit leftover.  (A cube candidate here would be a dependent unit, which
+// needs the unit-group state this test does not build.)
+bool run_norm_one_nonunit_leftover() {
+    silex::NumberField field = silex::test::quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 7);
+    silex::ClassGroupContext context(order);
+    assert(context.is_defined());
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+
+    silex::Element sqrt2(field);
+    silex::Element eps(field);
+    silex::Element numerator(field);
+    silex::Element denominator(field);
+    silex::Element beta(field);
+    silex::Element beta_inverse_square(field);
+    assert(sqrt2.gen() && eps.add_si(sqrt2, 1) &&
+           numerator.add_si(sqrt2, 3) && denominator.add_si(sqrt2, -3) &&
+           denominator.invert(denominator) &&
+           beta.multiply(numerator, denominator) &&
+           beta.scalar_div_si(beta, -1) &&
+           beta_inverse_square.multiply(beta, beta) &&
+           beta_inverse_square.invert(beta_inverse_square));
+    // sqrt 2, 3, 5, 3 + sqrt 2 and 3 - sqrt 2 generate the five
+    // factor-base primes, so the presentation can be published; their
+    // candidate coefficients are zero.
+    silex::Element three(field);
+    silex::Element five(field);
+    silex::Element conjugate(field);
+    assert(three.set_si(3) && five.set_si(5) &&
+           conjugate.scalar_div_si(sqrt2, -1) && conjugate.add_si(conjugate, 3));
+    for (const silex::Element* generator :
+         {&sqrt2, &three, &five, &numerator, &conjugate, &beta,
+          &beta_inverse_square, &eps}) {
+        silex::Relation relation(*base);
+        assert(relation.set_generator(*generator));
+        bool skipped = false;
+        assert(silex::detail::ClassGroupRelationSearchAccess::
+                       append_search_relation(skipped, context, relation));
+        assert(!skipped);
+    }
+    assert(context.publish_presentation());
+
+    // Coefficients follow the relation order of saturation_relation_data.
+    std::vector<silex::FactoredElement> relations;
+    sflint::FmpzMat rows(context.relation_count(), context.generator_count());
+    assert(silex::detail::saturation_relation_data(
+            relations, sflint::FmpzMatRef(rows), context));
+    assert(context.relation_count() == 8 && relations.size() == 8);
+    sflint::FmpzMat candidates(8, 1);
+    for (slong j = 0; j < 8; ++j) {
+        silex::Element value(field);
+        assert(relations[static_cast<std::size_t>(j)].evaluate(value));
+        slong coefficient = 3 * 20 + 1;
+        if (value.equal(beta)) {
+            coefficient = 4;
+        } else if (value.equal(beta_inverse_square)) {
+            coefficient = 2;
+        } else if (!value.equal(eps)) {
+            coefficient = 0;
+        }
+        sflint::fmpz_set_si(
+                sflint::FmpzRef(sflint::fmpz_mat_entry(candidates, j, 0)),
+                coefficient);
+    }
+
+    silex::detail::SaturationCandidateProcessingResult result;
+    const bool ok = silex::detail::saturation_process_candidates_once(
+            result, context, sflint::FmpzMatConstRef(candidates), 3, true,
+            nullptr, nullptr, nullptr, 128);
+    std::printf("unit candidate, norm-one non-unit leftover: ok=%d "
+                "saw_power=%d saw_non_power=%d compact=%ld structural=%ld\n",
+                ok ? 1 : 0,
+                result.saw_power ? 1 : 0, result.saw_non_power ? 1 : 0,
+                static_cast<long>(result.compact_power_candidates),
+                static_cast<long>(result.structural_power_candidates));
+    std::fflush(stdout);
+    return ok && !result.saw_power && result.saw_non_power &&
+           result.compact_power_candidates == 1 &&
+           result.structural_power_candidates == 0;
+}
 }  // namespace
 
 int main() {
@@ -224,5 +326,7 @@ int main() {
     assert(non_square);
     const bool unit_candidate = run_unit_candidate_nonunit_leftover();
     assert(unit_candidate);
+    const bool norm_one_leftover = run_norm_one_nonunit_leftover();
+    assert(norm_one_leftover);
     return 0;
 }

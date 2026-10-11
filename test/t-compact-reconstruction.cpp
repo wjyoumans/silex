@@ -974,6 +974,54 @@ int test_compact_unit_residual_leftover_norm_prefilter() {
     return 0;
 }
 
+// A leftover of norm +-1 that is not a unit of a non-maximal order.  In
+// Z[2 sqrt 2] (the equation order of x^2 - 8, theta = 2 sqrt 2), eps =
+// 1 + sqrt 2 has norm -1 but lies outside the order, while eps^2 =
+// 3 + theta is a unit of it.  With n = 3, eps^28 * (eps^2)^k splits as
+// (eps^9)^3 * eps * (eps^2)^k.  For k = 1 the leftover is eps^3 =
+// 7 + 5 sqrt 2, of norm -1 and outside the order, and eps^30 = (eps^10)^3;
+// for k = 0 the leftover is eps and eps^28 is not a cube.  The residual
+// bound selects the residual branch, the norm prefilter passes the
+// leftover, and the exact test must reject it, so the input takes the
+// original branch.  A "norm +-1 implies unit" shortcut would send the
+// leftover to the unit-only reduction, whose invariant needs a unit of the
+// order.
+int test_compact_unit_residual_leftover_norm_one_nonmaximal() {
+    const slong coefficients[] = {-8, 0, 1};
+    const silex::NumberField field = monic_field(coefficients);
+    const silex::Order order = silex::test::equation_order(field);
+    assert(!order.is_maximal());
+    silex::Element theta(field);
+    silex::Element eps(field);
+    silex::Element eps_sq(field);
+    assert(theta.gen() && eps.scalar_div_si(theta, 2) &&
+           eps.add_si(eps, 1) && eps_sq.multiply(eps, eps));
+    constexpr slong precision = 128;
+
+    silex::FactoredElement cube(field);
+    assert(cube.push(eps, 28) && cube.push(eps_sq, 1));
+    bool is_power = false;
+    silex::FactoredElement root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, root, order, cube, 3, precision, precision));
+    assert(is_power);
+    silex::Element root_value(field);
+    silex::Element root_cube(field);
+    silex::Element value(field);
+    assert(root.evaluate(root_value) &&
+           root_cube.multiply(root_value, root_value) &&
+           root_cube.multiply(root_cube, root_value) && cube.evaluate(value) &&
+           root_cube.equal(value));
+
+    silex::FactoredElement non_cube(field);
+    assert(non_cube.push(eps, 28));
+    is_power = true;
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, root, order, non_cube, 3, precision, precision));
+    assert(!is_power);
+    return 0;
+}
+
 // Log-cache events seen inside the residual log bound and inside the compact
 // presentation of a unit power test.  The presentation embeds the bases of
 // its input first and only later the multipliers it builds, so its leading
@@ -1327,5 +1375,6 @@ int main() {
     assert(test_compact_unit_power_root_reuses_high_precision_base_logs() == 0);
     assert(test_compact_unit_power_root_nonunit_small_leftover() == 0);
     assert(test_compact_unit_residual_leftover_norm_prefilter() == 0);
+    assert(test_compact_unit_residual_leftover_norm_one_nonmaximal() == 0);
     return 0;
 }
