@@ -773,6 +773,10 @@ void test_power_hensel_data_cache_reuse() noexcept {
                    first.norm_change_constants_misses >
            before.norm_change_constants_hits +
                    before.norm_change_constants_misses);
+    // Radicands new to a known field miss the lifting-exponent memo and are
+    // then served by the norm-change constants.
+    assert(first.norm_change_constants_hits >
+           before.norm_change_constants_hits);
 
     run_pass(false);
     const silex::detail::HenselDataCacheCounters second =
@@ -812,8 +816,9 @@ std::vector<HenselPowerAnswer> hensel_power_answers(const silex::NumberField& fi
             {3, -2, 1},
             {0, 5, 0, -1},
     };
-    // Radicands b^n (a root exists) and 3 b^n (3 is no square or cube in
-    // either field below), for n = 2, 3.
+    // Radicands b^n (a root exists) and 3 b^n (3 is no cube in either
+    // field below and no square in the second; in the first, Q(sqrt 2,
+    // sqrt 3), it is a square, so those answers are not fixed), for n = 2, 3.
     std::vector<HenselPowerAnswer> answers;
     for (slong n : {2, 3}) {
         sflint::Fmpz exponent;
