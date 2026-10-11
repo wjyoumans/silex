@@ -713,8 +713,12 @@ int test_fractional_factor_over_incomplete_block() {
     assert(order.maximal_order(equation));
     assert(order.is_maximal());
 
-    silex::PrimeIdeal p_prime(order);
-    silex::PrimeIdeal q_prime(order);
+    // The rows below compare against both primes, so they live in one array
+    // from the start and the names refer into it.
+    silex::PrimeIdeal primes[] = {silex::PrimeIdeal(order),
+                                  silex::PrimeIdeal(order)};
+    silex::PrimeIdeal& p_prime = primes[0];
+    silex::PrimeIdeal& q_prime = primes[1];
     assert(primes_above_with_degree(&p_prime, 1, order, 5, 1) == 1);
     assert(primes_above_with_degree(&q_prime, 1, order, 5, 2) == 1);
 
@@ -746,24 +750,22 @@ int test_fractional_factor_over_incomplete_block() {
     // P^2 Q^{-1} is smooth over the complete base and not over {P}.
     assert(set_prime_power(ideal, p_prime, 2));
     assert(multiply_prime_power(ideal, q_prime, -1));
-    const silex::PrimeIdeal mixed_primes[] = {std::move(p_prime),
-                                              std::move(q_prime)};
     const slong mixed_exponents[] = {2, -1};
     assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(full_row), ideal,
                                          full));
-    assert(row_is(full_row, full, mixed_primes, mixed_exponents, 2));
+    assert(row_is(full_row, full, primes, mixed_exponents, 2));
     fill_row(row, 7);
     assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
                                           partial));
     assert(row_is_filled(row, 7));
 
     // Q^{-1} and P / 7 are not smooth over {P}; the output is unchanged.
-    assert(set_prime_power(ideal, mixed_primes[1], -1));
+    assert(set_prime_power(ideal, q_prime, -1));
     assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
                                           partial));
     assert(row_is_filled(row, 7));
     assert(set_fractional_principal(ideal, 1, 7));
-    assert(multiply_prime_power(ideal, mixed_primes[0], 1));
+    assert(multiply_prime_power(ideal, p_prime, 1));
     assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
                                           partial));
     assert(!silex::ideal_factor_over_base(sflint::FmpzMatRef(full_row), ideal,
@@ -772,7 +774,7 @@ int test_fractional_factor_over_incomplete_block() {
 
     // 2 P^{-1} / 3 is smooth over both bases.
     assert(set_fractional_principal(ideal, 2, 3));
-    assert(multiply_prime_power(ideal, mixed_primes[0], -1));
+    assert(multiply_prime_power(ideal, p_prime, -1));
     assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(row), ideal,
                                          partial));
     silex::Ideal integral(order);
@@ -785,7 +787,7 @@ int test_fractional_factor_over_incomplete_block() {
         assert(prime != nullptr);
         slong expected = exponent_of_prime(two, *prime) -
                          exponent_of_prime(three, *prime);
-        if (prime->equal(mixed_primes[0])) {
+        if (prime->equal(p_prime)) {
             expected -= 1;
         }
         assert(sflint::fmpz_equal_si(sflint::fmpz_mat_entry(row, 0, i),
