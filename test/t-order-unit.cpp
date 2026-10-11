@@ -10672,6 +10672,82 @@ int test_rebasis_keeps_group_torsion() {
     return 0;
 }
 
+// Stored units past the reduction's factor-count cutoff (20000 factors) are
+// rebuilt as single field elements equal to the units the unpadded basis
+// reduces to.  The padding (u2 u2^-1)^10000 is a formal product equal to 1
+// that the factored form does not merge, so u2 is stored with 20001
+// factors.  The reduced basis {u2, u3} takes the identity-transform path,
+// the skewed basis {u2, u2^5 u3} the transform path.  The rebuild needs an
+// order known to be maximal; on Z[zeta_7] not marked maximal it fails, and
+// the reduction keeps the factored units (identity transform) or the merged
+// transformed products (skewed basis).
+int test_reduce_stored_units_rebuilds_large_factored_units() {
+    Cyclotomic7Units c;
+    silex::EmbeddingContext embeddings(c.field);
+    silex::Order maximal(c.field);
+    assert(maximal.maximal_order(c.order));
+    constexpr slong kPaddingPairs = 10000;
+    for (const bool known_maximal : {true, false}) {
+        const silex::Order& order = known_maximal ? maximal : c.order;
+        for (const slong e21 : {slong(0), slong(5)}) {
+            const std::vector<silex::FactoredElement> plain = c.basis(1, e21);
+            std::vector<silex::FactoredElement> padded = c.basis(1, e21);
+            for (slong k = 0; k < kPaddingPairs; ++k) {
+                assert(padded[0].push(c.u2, 1));
+                assert(padded[0].push(c.u2, -1));
+            }
+            assert(padded[0].length() == 2 * kPaddingPairs + 1);
+
+            silex::OrderUnitGroup plain_group(order);
+            silex::OrderUnitGroup padded_group(order);
+            assert(silex::detail::order_unit_group_set_units_internal(
+                    plain_group, order,
+                    silex::FactoredElementSpan(plain.data(), plain.size()),
+                    embeddings, 256, true));
+            assert(silex::detail::order_unit_group_set_units_internal(
+                    padded_group, order,
+                    silex::FactoredElementSpan(padded.data(), padded.size()),
+                    embeddings, 256, true));
+            bool plain_changed = false;
+            bool padded_changed = false;
+            assert(silex::detail::reduce_stored_relation_units(
+                    plain_changed, plain_group, embeddings, 256));
+            assert(silex::detail::reduce_stored_relation_units(
+                    padded_changed, padded_group, embeddings, 256));
+            assert(plain_changed == (e21 != 0));
+            assert(padded_changed == (known_maximal || e21 != 0));
+            assert(padded_group.free_rank() == 2);
+            assert(silex::detail::OrderUnitGroupAccess::wide_free_generators(
+                           padded_group) == nullptr);
+            slong padded_length = 0;
+            for (slong i = 0; i < 2; ++i) {
+                silex::FactoredElement expected(c.field);
+                silex::FactoredElement stored(c.field);
+                assert(plain_group.free_generator(expected, i));
+                assert(padded_group.free_generator(stored, i));
+                padded_length += stored.length();
+                silex::Element expected_value(c.field);
+                silex::Element stored_value(c.field);
+                assert(expected.evaluate(expected_value));
+                assert(stored.evaluate(stored_value));
+                assert(stored_value.equal(expected_value));
+            }
+            if (known_maximal) {
+                assert(padded_length == 2);
+            } else if (e21 == 0) {
+                assert(padded_length > 2 * kPaddingPairs);
+            }
+            const auto plain_regulator = plain_group.regulator();
+            const auto padded_regulator = padded_group.regulator();
+            assert(plain_regulator.has_value() &&
+                   padded_regulator.has_value());
+            assert(::arb_overlaps(plain_regulator->raw(),
+                                  padded_regulator->raw()) != 0);
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -10798,6 +10874,7 @@ int main() {
     test_group_wide_form_failure_move_clear();
     test_reduce_stored_units_keeps_wide_form();
     test_rebasis_keeps_group_torsion();
+    test_reduce_stored_units_rebuilds_large_factored_units();
     test_group_wide_free_generators();
     return 0;
 }

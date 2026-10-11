@@ -1703,13 +1703,18 @@ bool wide_units_to_factored(std::vector<FactoredElement>& out,
 // merged exponents fit in slong, `units` gets those products and has_wide is
 // false; otherwise `units` gets the rebuilt word-size units and `wide` the
 // wide form, with has_wide true.
+//
+// With rebuild_fitting, merged exponents that fit in slong are rebuilt too:
+// `units` gets the equal word-size units of rebuild_wide_unit_generators and
+// has_wide stays false, since nothing is wider than slong.  If that rebuild
+// fails, `units` gets the merged products as without rebuild_fitting.
 bool transform_factored_units_wide(std::vector<FactoredElement>& units,
                                    WideFactoredUnits& wide, bool& has_wide,
                                    const flint::FmpzMat& transform,
                                    const Order& order,
                                    EmbeddingContext& embeddings,
-                                   const DiagnosticsContext* diagnostics)
-        noexcept {
+                                   const DiagnosticsContext* diagnostics,
+                                   bool rebuild_fitting) noexcept {
     const NumberField* field = order.parent();
     WideFactoredUnits transformed;
     std::vector<FactoredElement> next;
@@ -1721,6 +1726,18 @@ bool transform_factored_units_wide(std::vector<FactoredElement>& units,
         return false;
     }
     if (!wide_factored_units_exceed_slong(transformed)) {
+        if (rebuild_fitting &&
+            rebuild_wide_unit_generators(next, order, transformed, embeddings,
+                                         diagnostics)) {
+            units.swap(next);
+            has_wide = false;
+            return true;
+        }
+        if (rebuild_fitting) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.reduce_stored_units.rebuild_size_failed");
+        }
         if (!wide_units_to_factored(next, transformed, *field)) {
             return false;
         }
@@ -1736,6 +1753,89 @@ bool transform_factored_units_wide(std::vector<FactoredElement>& units,
     wide.bases.swap(transformed.bases);
     wide.exponents.swap(transformed.exponents);
     has_wide = true;
+    return true;
+}
+
+// Silex cost cutoff, not a source rule: the total factor count of the
+// stored units above which reduce_stored_units_vector rebuilds them as single
+// field elements with exponent one.  Neither reference sets such a count:
+// reference `reduce` (Reduction.jl:88-112) keeps the transformed FacElem
+// units, and the second reference keeps units as an exponent matrix and
+// expands them by `vec_chinese_units` (buch2.c 1214-1240) when asked.
+// FactoredElement does not merge repeated bases, so each unit-basis transform
+// can multiply the factor count by up to the rank, and every later log
+// embedding and transform is linear in that count.  The rebuilt units are
+// equal to the factored ones, so the cutoff changes no unit, regulator or
+// group; it changes only how the stored generators are written.
+constexpr std::size_t kStoredUnitRebuildFactorCount = 20000;
+
+std::size_t factored_units_length(
+        std::span<const FactoredElement> units) noexcept {
+    std::size_t total = 0;
+    for (const FactoredElement& unit : units) {
+        const slong length = unit.length();
+        if (length > 0) {
+            total += static_cast<std::size_t>(length);
+        }
+    }
+    return total;
+}
+
+// The factor count transform_factored_units would produce: it concatenates
+// the factors of every unit j with a nonzero entry transform[i, j] in row i.
+std::size_t transformed_factored_units_length(
+        std::span<const FactoredElement> units,
+        const flint::FmpzMat& transform) noexcept {
+    const slong rank = static_cast<slong>(units.size());
+    std::size_t total = 0;
+    for (slong i = 0; i < rank; ++i) {
+        for (slong j = 0; j < rank; ++j) {
+            const slong length = units[static_cast<std::size_t>(j)].length();
+            if (length > 0 &&
+                !flint::fmpz_is_zero(flint::fmpz_mat_entry(transform, i, j))) {
+                total += static_cast<std::size_t>(length);
+            }
+        }
+    }
+    return total;
+}
+
+// Rebuilds `units` in place as the equal single field elements of
+// rebuild_wide_unit_generators when their factor count exceeds
+// kStoredUnitRebuildFactorCount.  `rebuilt` is false, and `units` unchanged,
+// below the cutoff or when the rebuild fails; the factored units stay valid.
+bool rebuild_large_stored_units(bool& rebuilt,
+                                std::vector<FactoredElement>& units,
+                                const Order& order,
+                                EmbeddingContext& embeddings,
+                                const DiagnosticsContext* diagnostics)
+        noexcept {
+    rebuilt = false;
+    if (factored_units_length(std::span<const FactoredElement>(
+                units.data(), units.size())) <=
+        kStoredUnitRebuildFactorCount) {
+        return true;
+    }
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.reduce_stored_units.rebuild_size");
+    const slong rank = static_cast<slong>(units.size());
+    flint::FmpzMat identity(rank, rank);
+    fmpz_mat_one(identity.raw());
+    WideFactoredUnits merged;
+    std::vector<FactoredElement> next;
+    if (!wide_factored_units_transform(
+                merged,
+                std::span<const FactoredElement>(units.data(), units.size()),
+                flint::FmpzMatConstRef(identity)) ||
+        !rebuild_wide_unit_generators(next, order, merged, embeddings,
+                                      diagnostics)) {
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::unit_group,
+                "unit_group.reduce_stored_units.rebuild_size_failed");
+        return true;
+    }
+    units.swap(next);
+    rebuilt = true;
     return true;
 }
 
@@ -1782,6 +1882,18 @@ bool reduce_stored_units_vector(bool& changed,
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::unit_group,
                     "unit_group.reduce_stored_units.transform_identity");
+            // The basis is already reduced, but units adjoined since the
+            // last reduction may have pushed the factor count past the
+            // cutoff.
+            bool rebuilt = false;
+            if (!rebuild_large_stored_units(rebuilt, units, order, embeddings,
+                                            diagnostics)) {
+                return false;
+            }
+            if (rebuilt) {
+                changed = true;
+                has_wide = false;
+            }
             return true;
         }
         SILEX_PROFILE_EVENT(
@@ -1794,18 +1906,29 @@ bool reduce_stored_units_vector(bool& changed,
             !row_norm_product_bits(after_bits, reduced)) {
             return false;
         }
+        // Past the cutoff the transform goes through the merged wide form
+        // and its rebuild instead of materializing the concatenated factor
+        // lists (see kStoredUnitRebuildFactorCount).
+        const bool rebuild_size =
+                transformed_factored_units_length(
+                        std::span<const FactoredElement>(units.data(),
+                                                         units.size()),
+                        transform) > kStoredUnitRebuildFactorCount;
         bool overflowed = false;
-        if (transform_factored_units(units, transform, overflowed)) {
+        if (!rebuild_size &&
+            transform_factored_units(units, transform, overflowed)) {
             has_wide = false;
-        } else if (!overflowed) {
+        } else if (!rebuild_size && !overflowed) {
             return false;
         } else {
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::unit_group,
-                    "unit_group.reduce_stored_units.transform_wide");
+                    rebuild_size
+                            ? "unit_group.reduce_stored_units.rebuild_size"
+                            : "unit_group.reduce_stored_units.transform_wide");
             if (!transform_factored_units_wide(units, wide, has_wide,
                                                transform, order, embeddings,
-                                               diagnostics)) {
+                                               diagnostics, rebuild_size)) {
                 return false;
             }
         }

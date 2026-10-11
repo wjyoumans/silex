@@ -211,14 +211,17 @@ bool transform_factored_units(std::vector<FactoredElement>& units,
 // has_wide is false.  Otherwise units gets equal word-size units rebuilt by
 // the bounded compact reconstruction (reference vec_chinese_units), wide gets
 // the transformed products, and has_wide is true.  `order` must be the
-// maximal order and the units a full-rank system of its units.
+// maximal order and the units a full-rank system of its units.  With
+// rebuild_fitting, merged products that fit in slong are rebuilt the same
+// way (has_wide false), falling back to the merged products if the rebuild
+// fails; reduce_stored_relation_units sets it past its factor-count cutoff.
 bool transform_factored_units_wide(std::vector<FactoredElement>& units,
                                    WideFactoredUnits& wide, bool& has_wide,
                                    const flint::FmpzMat& transform,
                                    const Order& order,
                                    EmbeddingContext& embeddings,
-                                   const DiagnosticsContext* diagnostics)
-        noexcept;
+                                   const DiagnosticsContext* diagnostics,
+                                   bool rebuild_fitting = false) noexcept;
 // True when the reduce-mod-units precision ladder should stop on the
 // coordinate matrix `rows`: some entry is a ball of radius at most 0.1 that
 // contains a half-integer, and every entry that defeats the approximate
