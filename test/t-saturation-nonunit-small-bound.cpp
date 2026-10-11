@@ -99,6 +99,8 @@ bool run(slong generator, bool expect_power) {
 // compact evaluation invariant and the call returned false.
 struct ResidualNotUnitCounter {
     long events = 0;
+    long norm_rejected = 0;
+    long unit_test = 0;
 };
 
 void residual_not_unit_callback(void* user,
@@ -109,6 +111,15 @@ void residual_not_unit_callback(void* user,
     if (event == silex::ProfileEvent::event && label != nullptr &&
         std::strcmp(label, "class_group.saturation_residual_not_unit") == 0) {
         ++static_cast<ResidualNotUnitCounter*>(user)->events;
+    }
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, "class_group.saturation_residual_norm_not_unit") ==
+                0) {
+        ++static_cast<ResidualNotUnitCounter*>(user)->norm_rejected;
+    }
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, "class_group.saturation_residual_unit_test") == 0) {
+        ++static_cast<ResidualNotUnitCounter*>(user)->unit_test;
     }
 }
 
@@ -188,6 +199,10 @@ bool run_unit_candidate_nonunit_leftover() {
     // The residual branch was considered and rejected for the non-unit
     // leftover.
     assert(counter.events == 1);
+    // The leftover has norm -4, so the norm prefilter rejects it and the
+    // unit test is not run.
+    assert(counter.norm_rejected == 1);
+    assert(counter.unit_test == 0);
 #endif
     return ok && !result.saw_power && result.saw_non_power &&
            result.compact_power_candidates == 1 &&

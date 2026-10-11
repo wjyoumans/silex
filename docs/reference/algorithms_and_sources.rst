@@ -1905,7 +1905,7 @@ differs.
 Whether to port ``factor_coprime`` is a separate decision.
 
 The split of each exponent ``v`` into ``v = q*n + e`` also differs.  Hecke
-uses Julia's ``divrem`` (line 391), which truncates, so on the path with the
+uses Julia's ``divrem`` (line 390), which truncates, so on the path with the
 conjugate-log comparison (``easy = false``) ``e`` has the sign of ``v`` and
 lies in ``(-n, n)``.  Silex floors (``compact_floor_divrem_positive`` in
 ``src/class_group/class_group.cpp``, used by ``compact_split_power``), so
