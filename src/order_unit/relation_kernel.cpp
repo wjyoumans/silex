@@ -1195,10 +1195,14 @@ struct WordQuotientLogBabyStep {
 // v0.38.6 revision) fills one table of all generator powers per prime when
 // `nbits(pp) < 19` (line 32) and otherwise takes each logarithm by
 // `baby_step_giant_step` (line 43), whose baby-step table is shared by every
-// element of the prime.  Its table holds pp entries, the order of the
-// l-primary part it works in; the table here holds ell entries, the order of
-// the quotient generator, so the same bit cutoff is applied to ell.
-constexpr flint_bitcnt_t kWordQuotientLogTableBits = 19;
+// element of the prime.  Deviation (cost only): the walk here is linear in
+// ell, the order of the quotient generator, and baby-step giant-step is
+// already faster from ell of 7 bits on (measured on proven saturation
+// columns, where ell runs up to 16 bits and the walk was about a third of
+// the run), so baby-step giant-step is taken from 7 bits instead of 19.
+// Both routes return the unique logarithm in [0, ell), so the values are
+// the same.
+constexpr flint_bitcnt_t kWordQuotientLogBabyGiantBits = 7;
 
 // Quotient logs of `pending` by baby-step giant-step with one baby-step
 // table, as reference `baby_step_giant_step`
@@ -1269,10 +1273,10 @@ void word_quotient_log_baby_giant(
 // (`quotient_log_mod_prime_apply_ui` in residue_field.cpp), which walks
 // zeta^0, zeta^1, ..., zeta^(ell - 1) for every element separately and
 // returns the first exponent i with zeta^i equal to the element raised to
-// (p - 1) / ell.  Below the reference cutoff (kWordQuotientLogTableBits) one
-// walk visits the same powers in the same order once and records, for each
-// element, the first such i; the walk stops early once every element is
-// matched.  At or above it, when ell is prime and zeta has order ell, the
+// (p - 1) / ell.  Below kWordQuotientLogBabyGiantBits one walk visits the
+// same powers in the same order once and records, for each element, the
+// first such i; the walk stops early once every element is matched.  At or
+// above it, when ell is prime and zeta has order ell, the
 // logarithms are taken by word_quotient_log_baby_giant instead; the
 // logarithm is then unique in [0, ell), so the values are the same.
 // `resolved[j]` is set for the entries written into row j of `out`; an
@@ -1335,7 +1339,7 @@ void word_quotient_log_shared_walk(
         return;
     }
 
-    if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogTableBits &&
+    if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogBabyGiantBits &&
         zeta != 1 && n_is_prime(ell_ui) != 0 &&
         n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1) {
         word_quotient_log_baby_giant(out, resolved, pending, zeta, p_ui,
@@ -1380,8 +1384,8 @@ bool residue_quotient_log_column(
     }
     // Every entry takes the quotient log of the same residue field and ell,
     // so one walk over the powers of the quotient generator, or one
-    // baby-step table at or above the reference cutoff, serves the whole
-    // column; entries left unresolved take ResidueFieldQuotientLog::apply as
+    // baby-step table from kWordQuotientLogBabyGiantBits on, serves the
+    // whole column; entries left unresolved take ResidueFieldQuotientLog::apply as
     // before.
     std::vector<bool> resolved(images.size(), false);
     word_quotient_log_shared_walk(out, resolved, images, residue_field,

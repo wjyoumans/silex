@@ -4570,11 +4570,12 @@ int test_residue_dlog_proof_matrix_matches_per_entry_quotient_log() {
     return checked >= 48 && torsion_columns > 0 ? 0 : 1;
 }
 
-// At or above the reference table cutoff (ell of 19 bits or more) a
-// degree-one column takes its quotient logs by baby-step giant-step with one
-// baby-step table; every entry must still equal the per-entry quotient log.
-// ell = 262139 (18 bits) stays on the shared walk, while 262147 and 1048583
-// (19 and 21 bits) take baby-step giant-step.  The cyclic cubic
+// From ell of 7 bits on a degree-one column takes its quotient logs by
+// baby-step giant-step with one baby-step table; every entry must still
+// equal the per-entry quotient log.  ell = 61 (6 bits) stays on the shared
+// walk, while 67 (7 bits), 262139 and 262147 (18 and 19 bits, either side of
+// the reference table cutoff) and 1048583 (21 bits) take baby-step
+// giant-step.  The cyclic cubic
 // x^3 - 3x + 1 splits completely at each q used, giving three degree-one
 // primes per q.
 int test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log() {
@@ -4595,7 +4596,7 @@ int test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log() {
     assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
                            embeddings, 64));
 
-    const slong ells[] = {262139, 262147, 1048583};
+    const slong ells[] = {61, 67, 262139, 262147, 1048583};
     slong checked = 0;
     for (const slong ell_si : ells) {
         sflint::Fmpz ell;
@@ -4671,8 +4672,8 @@ int test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log() {
             }
         }
     }
-    assert(checked == 18);
-    return checked == 18 ? 0 : 1;
+    assert(checked == 30);
+    return checked == 30 ? 0 : 1;
 }
 
 // On a degree-one prime with word-size p the shared walk (or baby-step
@@ -4682,8 +4683,8 @@ int test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log() {
 // residue_quotient_log_column with chosen images.  A column mixing resolved
 // entries with one zero entry must fail like the per-entry quotient log,
 // wherever the zero entry sits and on both routes (ell = 7 at q = 71 walks,
-// ell = 262147 at q = 1048589 takes baby-step giant-step); the same column
-// without it must equal the per-entry values.
+// ell = 67 at q = 269 and ell = 262147 at q = 1048589 take baby-step
+// giant-step); the same column without it must equal the per-entry values.
 int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
     silex::NumberField cubic = cubic_field(-3, 1);
     silex::Order order;
@@ -4698,7 +4699,7 @@ int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
                                       &theta_plus_two};
     const slong value_count = 3;
 
-    const slong cases[][2] = {{7, 71}, {262147, 1048589}};
+    const slong cases[][2] = {{7, 71}, {67, 269}, {262147, 1048589}};
     slong checked = 0;
     for (const auto& entry : cases) {
         sflint::Fmpz ell;
@@ -4773,8 +4774,8 @@ int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
             ++checked;
         }
     }
-    assert(checked == 6);
-    return checked == 6 ? 0 : 1;
+    assert(checked == 9);
+    return checked == 9 ? 0 : 1;
 }
 
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
