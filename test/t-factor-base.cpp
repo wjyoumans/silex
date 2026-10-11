@@ -461,6 +461,96 @@ int test_lll_relation_base_from_norm_bounded() {
     return 0;
 }
 
+// equal() answers copies from a shared identity and everything else from the
+// element-wise comparison; both must give the same answer.
+int test_equal_copies_and_independent_builds() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order = silex::test::equation_order(field);
+    assert(order.is_maximal());
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 7));
+    sflint::Fmpz smaller_bound;
+    assert(set_fmpz_si(smaller_bound, 5));
+
+    silex::FactorBase undefined;
+    assert(!undefined.equal(undefined));
+
+    silex::FactorBase base(order);
+    assert(base.build(sflint::FmpzConstRef(bound)));
+    assert(base.equal(base));
+    assert(!base.equal(undefined));
+    assert(!undefined.equal(base));
+
+    silex::FactorBase copy;
+    assert(copy.set(base));
+    assert(copy.equal(base));
+    assert(base.equal(copy));
+
+    // Built separately with the same contents: equal through the deep path.
+    silex::FactorBase independent(order);
+    assert(independent.build(sflint::FmpzConstRef(bound)));
+    assert(independent.equal(base));
+    assert(base.equal(independent));
+
+    // A copy of a copy, and copies moved or swapped, keep comparing equal.
+    silex::FactorBase second;
+    assert(second.set(copy));
+    assert(second.equal(base));
+    silex::FactorBase moved(std::move(second));
+    assert(moved.equal(base));
+    assert(!second.equal(base));
+    silex::FactorBase other(order);
+    assert(other.build(sflint::FmpzConstRef(smaller_bound)));
+    assert(!other.equal(base));
+    other.swap(moved);
+    assert(other.equal(base));
+    assert(!moved.equal(base));
+
+    // Changing either side of a copy ends the equality.
+    assert(copy.build(sflint::FmpzConstRef(smaller_bound)));
+    assert(!copy.equal(base));
+    assert(!base.equal(copy));
+    assert(copy.equal(moved));
+    assert(copy.set(base));
+    assert(copy.equal(base));
+    assert(copy.define(order));
+    assert(copy.length() == 0);
+    assert(!copy.equal(base));
+    silex::FactorBase empty(order);
+    assert(copy.equal(empty));
+    assert(copy.set(base));
+    copy.clear();
+    assert(!copy.equal(base));
+    assert(!copy.equal(copy));
+
+    // Reordering a copy in place changes its blocks and order.
+    silex::NumberField quartic = quartic_field();
+    silex::Order quartic_equation = silex::test::equation_order(quartic);
+    silex::Order quartic_maximal(quartic);
+    assert(quartic_maximal.maximal_order(quartic_equation));
+    sflint::Fmpz quartic_bound;
+    assert(set_fmpz_si(quartic_bound, 40));
+    silex::FactorBase built(quartic_maximal);
+    assert(built.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(quartic_bound)));
+    silex::FactorBase ordered;
+    assert(ordered.set(built));
+    assert(ordered.equal(built));
+    assert(silex::detail::FactorBaseBlockAccess::
+                   order_lll_relation_base_by_norm(ordered));
+    assert(!ordered.equal(built));
+    assert(!built.equal(ordered));
+    silex::FactorBase ordered_independent(quartic_maximal);
+    assert(ordered_independent.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(quartic_bound)));
+    assert(silex::detail::FactorBaseBlockAccess::
+                   order_lll_relation_base_by_norm(ordered_independent));
+    assert(ordered.equal(ordered_independent));
+
+    return 0;
+}
+
 int test_class_group_bound() {
     sflint::Fmpz bound;
 
@@ -592,6 +682,7 @@ int main() {
     assert(test_prime_ideal_norm_bounded_shape() == 0);
     assert(test_lll_relation_base_order() == 0);
     assert(test_lll_relation_base_from_norm_bounded() == 0);
+    assert(test_equal_copies_and_independent_builds() == 0);
     assert(test_class_group_bound() == 0);
     assert(test_failure_preserves_output() == 0);
     assert(test_keeps_parent_order_alive() == 0);

@@ -6,6 +6,7 @@
 #include <silex/order.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <cstdint>
 #include <vector>
 
 namespace silex {
@@ -102,6 +103,11 @@ private:
     std::vector<PrimeIdeal> primes_;
     std::vector<PrimeBlock> blocks_;
     bool complete_rational_prime_blocks_ = false;
+    // Content identity: nonzero once defined, replaced by a fresh value on
+    // every change to the parent, primes or blocks, and copied by set().
+    // Two bases with the same nonzero identity hold equal contents, so
+    // equal() can answer without the element-wise comparison.
+    std::uint64_t identity_ = 0;
 };
 
 bool factor_base_class_group_bound(flint::FmpzRef out,

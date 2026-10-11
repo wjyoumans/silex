@@ -15,10 +15,21 @@
 #include <flint/fmpz.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <utility>
 
 namespace silex {
 namespace {
+
+// Source of FactorBase content identities.  One counter for every base keeps
+// an identity from being reused by a later, different base; zero is never
+// issued.
+std::atomic<std::uint64_t> next_factor_base_identity{1};
+
+std::uint64_t fresh_factor_base_identity() noexcept {
+    return next_factor_base_identity.fetch_add(1, std::memory_order_relaxed);
+}
 
 void floor_sqrt_div_ui(flint::Fmpz& out,
                        flint::FmpzConstRef value,
@@ -1202,6 +1213,7 @@ void FactorBase::swap(FactorBase& other) noexcept {
     blocks_.swap(other.blocks_);
     std::swap(complete_rational_prime_blocks_,
               other.complete_rational_prime_blocks_);
+    std::swap(identity_, other.identity_);
 }
 
 void FactorBase::clear() noexcept {
@@ -1209,6 +1221,7 @@ void FactorBase::clear() noexcept {
     blocks_.clear();
     parent_.clear();
     complete_rational_prime_blocks_ = false;
+    identity_ = 0;
 }
 
 bool FactorBase::define(const Order& parent) noexcept {
@@ -1218,6 +1231,7 @@ bool FactorBase::define(const Order& parent) noexcept {
 
     clear();
     parent_ = parent;
+    identity_ = fresh_factor_base_identity();
     return true;
 }
 
@@ -1249,7 +1263,10 @@ bool FactorBase::set(const FactorBase& other) noexcept {
     copy.complete_rational_prime_blocks_ =
             other.complete_rational_prime_blocks_;
 
+    // The copy holds the same parent, primes and blocks as other, so it
+    // carries other's identity until either side changes.
     swap(copy);
+    identity_ = other.identity_;
     return true;
 }
 
@@ -1459,6 +1476,7 @@ bool detail::FactorBaseBlockAccess::order_lll_relation_base_by_norm(
                   return left.index < right.index;
               });
 
+    base.identity_ = fresh_factor_base_identity();
     std::vector<PrimeIdeal> sorted;
     sorted.reserve(base.primes_.size());
     for (const NormIndex& entry : order) {
@@ -1637,6 +1655,12 @@ bool FactorBase::rational_prime_block_index_for_prime(
 }
 
 bool FactorBase::equal(const FactorBase& other) const noexcept {
+    // A shared identity means one base is an unchanged copy of the other
+    // (or the same object), whose contents compare equal below.
+    if (identity_ != 0 && identity_ == other.identity_ && is_defined() &&
+        other.is_defined()) {
+        return true;
+    }
     if (!is_defined() || !other.is_defined() ||
         !same_order_parent(parent(), other.parent()) ||
         length() != other.length() ||
@@ -1704,6 +1728,7 @@ bool FactorBase::append_prime(const PrimeIdeal& prime) noexcept {
         return false;
     }
 
+    identity_ = fresh_factor_base_identity();
     const slong index = static_cast<slong>(primes_.size());
     primes_.emplace_back(std::move(copy));
     return add_block_index(flint::FmpzConstRef(rational_prime), index);
@@ -1720,6 +1745,7 @@ bool FactorBase::append_prime(PrimeIdeal&& prime) noexcept {
         return false;
     }
 
+    identity_ = fresh_factor_base_identity();
     const slong index = static_cast<slong>(primes_.size());
     primes_.emplace_back(std::move(prime));
     return add_block_index(flint::FmpzConstRef(rational_prime), index);
@@ -1769,6 +1795,7 @@ bool FactorBase::add_block_index(flint::FmpzConstRef rational_prime,
         return false;
     }
 
+    identity_ = fresh_factor_base_identity();
     bool found = false;
     const slong pos = block_position(rational_prime, found);
     if (found) {
@@ -1787,6 +1814,7 @@ bool FactorBase::add_block_index(flint::FmpzConstRef rational_prime,
 }
 
 bool FactorBase::rebuild_blocks() noexcept {
+    identity_ = fresh_factor_base_identity();
     std::vector<PrimeBlock> previous_blocks = std::move(blocks_);
     blocks_.clear();
     flint::Fmpz rational_prime;
