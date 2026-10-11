@@ -10,6 +10,7 @@
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/class_group_internal.hpp"
+#include "class_group/relation_factor_base_plan_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
@@ -4781,6 +4782,165 @@ int test_twin_class_generation_routes() {
     return 0;
 }
 
+// A `proven` imaginary quadratic request whose base up to the generation
+// bound would exceed the relation module limit keeps its compact base and
+// is certified by the structure certificate
+// (ClassGroupGenerationBasis::structure_certificate).  The limit is lowered
+// by the test hook so two small fields with non-cyclic class groups take
+// that route: D = -4027 (Z/3 x Z/3, one ell = 3 combination step over two
+// forms) and D = -420 (x^2 + 105, (Z/2)^3).  The class group equals the one
+// certified by the generation bound, and no generation bound is published.
+int test_imaginary_quadratic_structure_certificate_route() {
+    struct Row {
+        slong radicand;
+        slong discriminant;
+        std::vector<slong> invariants;
+    };
+    const Row rows[] = {
+            {-4027, -4027, {3, 3}},
+            {-105, -420, {2, 2, 2}},
+    };
+    for (const Row& row : rows) {
+        silex::NumberField field = quadratic_field(row.radicand);
+        silex::Order equation_order = silex::test::equation_order(field);
+        silex::Order maximal_order(field);
+        assert(maximal_order.maximal_order(equation_order));
+        sflint::Fmpz bound;
+        assert(silex::factor_base_class_group_bound(
+                sflint::FmpzRef(bound), maximal_order));
+        sflint::Fmpz discriminant;
+        assert(set_fmpz_si(discriminant, row.discriminant));
+        sflint::Fmpz class_number;
+        fmpz_one(class_number.raw());
+        for (slong invariant : row.invariants) {
+            fmpz_mul_si(class_number.raw(), class_number.raw(), invariant);
+        }
+
+        silex::ClassGroupComputeOptions options;
+        options.max_candidates = 5000;
+        options.max_relations = 500;
+        options.requested_certification = silex::CertificationMode::proven;
+
+        silex::ClassGroupContext reference;
+        silex::OrderUnitGroup reference_units;
+        assert(reference_units.compute_with_class_group(
+                reference, maximal_order, sflint::FmpzConstRef(bound),
+                options, 128));
+        assert(reference.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(reference.factor_base_generation_basis() !=
+               silex::ClassGroupGenerationBasis::structure_certificate);
+
+        silex::detail::relation_search::
+                set_quadratic_structure_certificate_column_limit_for_testing(
+                        1);
+        silex::ClassGroupContext forced;
+        silex::OrderUnitGroup forced_units;
+        const bool computed = forced_units.compute_with_class_group(
+                forced, maximal_order, sflint::FmpzConstRef(bound), options,
+                128);
+        silex::detail::relation_search::
+                set_quadratic_structure_certificate_column_limit_for_testing(
+                        0);
+        assert(computed);
+        assert(forced.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(forced_units.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(forced.factor_base_generation_certification() ==
+               silex::CertificationMode::proven);
+        assert(forced.factor_base_generation_basis() ==
+               silex::ClassGroupGenerationBasis::structure_certificate);
+        assert(forced.factor_base_generation_status() !=
+               silex::ProofState::verified);
+        sflint::Fmpz value;
+        assert(!forced.factor_base_generation_certification_bound(
+                sflint::FmpzRef(value)));
+        assert(forced.class_unit_completeness_certification() ==
+               silex::CertificationMode::proven);
+        assert(forced.class_unit_completeness_basis() ==
+               silex::ClassUnitCompletenessBasis::unconditional_certification);
+        assert(forced.relation_saturation_status() ==
+               silex::ProofState::verified);
+
+        assert(forced.invariant_count() ==
+               static_cast<slong>(row.invariants.size()));
+        assert(reference.invariant_count() == forced.invariant_count());
+        for (slong j = 0; j < forced.invariant_count(); ++j) {
+            assert(forced.invariant(sflint::FmpzRef(value), j));
+            assert(sflint::fmpz_equal_si(
+                    value, row.invariants[static_cast<std::size_t>(j)]));
+            assert(reference.invariant(sflint::FmpzRef(value), j));
+            assert(sflint::fmpz_equal_si(
+                    value, row.invariants[static_cast<std::size_t>(j)]));
+        }
+
+        // The certificate itself, without recording: it passes against
+        // the exact class number and fails against any other order.
+        assert(CertificationAccess::imaginary_quadratic_structure_certificate(
+                forced, sflint::FmpzConstRef(discriminant),
+                sflint::FmpzConstRef(class_number), false));
+        assert(CertificationAccess::imaginary_quadratic_structure_certificate(
+                reference, sflint::FmpzConstRef(discriminant),
+                sflint::FmpzConstRef(class_number), false));
+        sflint::Fmpz doubled;
+        fmpz_mul_ui(doubled.raw(), class_number.raw(), 2);
+        assert(!CertificationAccess::imaginary_quadratic_structure_certificate(
+                forced, sflint::FmpzConstRef(discriminant),
+                sflint::FmpzConstRef(doubled), false));
+    }
+    return 0;
+}
+
+// A relation lattice of index h does not prove that the factor base
+// generates the class group (the Cl(-199) example of the structure
+// certificate's design).  D = -4363 has class group Z/9; 2, 3, 5 and 7 are
+// inert and 11 = P Pbar splits with P of order 3: P^3 = (alpha),
+// alpha = (31 + sqrt(-4363)) / 2 of norm 11^3.  The base up to 11 is
+// {(2), (3), P, Pbar} (or its orientation), and the true relations (2),
+// (3), (11) and alpha^3 (P^9) have index 9 = h, so the presentation is Z/9
+// generated by P.  Its order is h and g^9 is principal, but g^3 = P^3 is
+// principal too, so the ell = 3 step rejects it.
+int test_imaginary_quadratic_structure_certificate_rejects_subgroup() {
+    silex::NumberField field = quadratic_field(-4363);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+
+    silex::ClassGroupContext context(maximal_order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 11));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+
+    silex::Element theta(field);
+    silex::Element shifted(field);
+    silex::Element alpha(field);
+    silex::Element alpha_cubed(field);
+    sflint::Fmpz three;
+    assert(set_fmpz_si(three, 3));
+    assert(theta.gen() && shifted.add_si(theta, 31) &&
+           alpha.scalar_div_si(shifted, 2) &&
+           alpha_cubed.pow_fmpz(alpha, sflint::FmpzConstRef(three)));
+    for (slong rational : {2, 3, 11}) {
+        silex::Element generator(field);
+        assert(generator.set_si(rational));
+        assert(context.try_append_generator_relation(generator));
+    }
+    assert(context.try_append_generator_relation(alpha_cubed));
+    assert(context.publish_presentation());
+
+    sflint::Fmpz value;
+    assert(context.order(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 9));
+    assert(context.invariant_count() == 1);
+    sflint::Fmpz discriminant;
+    assert(set_fmpz_si(discriminant, -4363));
+    assert(!CertificationAccess::imaginary_quadratic_structure_certificate(
+            context, sflint::FmpzConstRef(discriminant),
+            sflint::FmpzConstRef(value), false));
+    return 0;
+}
+
 // A factor base with more generators than the relation modules allow
 // (2^14) is refused before their dense mod-p matrices are allocated, the
 // same way on every machine: the context keeps no base, and an attached
@@ -5395,6 +5555,8 @@ int main() {
     test_transaction_keeps_generation_requirement();
     test_grh_generation_bound_bach_fallback();
     test_twin_class_generation_routes();
+    test_imaginary_quadratic_structure_certificate_route();
+    test_imaginary_quadratic_structure_certificate_rejects_subgroup();
     test_factor_base_size_limit_fails_closed();
     test_class_unit_index_routes_share_normalization();
     test_exact_quadratic_index_below_one_fails_closed();
