@@ -1361,6 +1361,65 @@ void test_power_residue_disproof_field_setup_cache_matches_cold() noexcept {
             cold, residue_disproof_decisions(phi25, false)));
 }
 
+// The same comparison on the degree < 10 pre-lift path, which also fills the
+// memo (primes after the chosen one, varying with the element).
+void test_prelift_disproof_field_setup_cache_matches_cold() noexcept {
+    struct Case {
+        silex::NumberField field;
+        slong exponent;
+    };
+    Case cases[] = {
+            {cubic_field(), 2},
+            {cubic_field(), 3},
+            {field_from_coefficients({1, 0, -10, 0, 1}), 2},
+            {field_from_coefficients({-3, 1, 0, 0, 0, 1}), 5},
+    };
+    const std::initializer_list<slong> bases[] = {
+            {-1}, {6}, {1, 1}, {3, 1}, {2, 1, 1}, {1, 0, 1}, {-5, 2, 1}};
+    const silex::detail::HenselDataCacheCounters start =
+            silex::detail::hensel_data_cache_counters();
+    std::size_t total_misses = start.residue_setup_misses;
+    std::size_t total_hits = start.residue_setup_hits;
+    for (Case& test_case : cases) {
+        for (const std::initializer_list<slong>& coefficients : bases) {
+            silex::Element value = element_from_coefficients(
+                    test_case.field, coefficients);
+            silex::Element root_cold(test_case.field);
+            silex::Element root_warm(test_case.field);
+            silex::detail::clear_hensel_data_caches();
+            const PowerAnswer cold = hensel_power_answer(
+                    value, test_case.exponent,
+                    silex::detail::PreLiftResidueDisproof::enabled,
+                    root_cold);
+            const silex::detail::HenselDataCacheCounters filled =
+                    silex::detail::hensel_data_cache_counters();
+            total_misses = filled.residue_setup_misses;
+            // Warm: memo left as the cold call filled it, then again.
+            for (int pass = 0; pass < 2; ++pass) {
+                // The whole-answer memo would otherwise hide the setup memo.
+                silex::detail::clear_power_root_answer_cache();
+                const PowerAnswer warm = hensel_power_answer(
+                        value, test_case.exponent,
+                        silex::detail::PreLiftResidueDisproof::enabled,
+                        root_warm);
+                assert(warm.known == cold.known);
+                assert(warm.is_power == cold.is_power);
+                const silex::detail::HenselDataCacheCounters now =
+                        silex::detail::hensel_data_cache_counters();
+                if (pass == 1) {
+                    total_hits = now.residue_setup_hits;
+                }
+                if (cold.known && cold.is_power) {
+                    assert(root_warm.equal(root_cold));
+                }
+            }
+        }
+    }
+    // The pre-lift path really used the memo, both missing and hitting.
+    assert(total_misses > start.residue_setup_misses);
+    assert(total_hits > start.residue_setup_hits);
+}
+
 void set_rational(silex::Element& element, slong numerator, ulong denominator) noexcept {
     sflint::FmpqPoly polynomial;
     sflint::Fmpq coefficient;
@@ -1653,6 +1712,7 @@ int main() {
     test_power_gp_nonpowers();
     test_power_degree_twenty_cyclotomic_residue_disproof();
     test_power_residue_disproof_field_setup_cache_matches_cold();
+    test_prelift_disproof_field_setup_cache_matches_cold();
     test_power_hensel_data_cache_reuse();
     test_power_hensel_field_caches_match_cold();
     test_power_hensel_answer_memo();

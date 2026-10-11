@@ -531,13 +531,16 @@ bool compute_equation_order_norm_change_constants(
 // returns bit for bit what recomputation would return.  Only successful
 // computations are stored; a failure is recomputed each time.
 //
-// Lifetime and thread safety: both caches are thread_local, so a thread only
+// Lifetime and thread safety: each cache is thread_local, so a thread only
 // ever sees entries it computed itself, no locking is needed, and entries are
 // released when the thread exits.  Each cache holds a bounded number of
 // entries (round-robin replacement once full), so memory stays bounded however
 // many fields a thread visits.  A lookup copies the entry out and an insertion
 // happens only after the computation has returned, so no reference into a
-// cache is held across a call that could reach the cache again.
+// cache is held across a call that could reach the cache again.  The one
+// exception is the residue field setup memo, which is evaluated through a
+// const reference; that evaluation makes FLINT calls only and never reaches
+// a cache.
 thread_local detail::HenselDataCacheCounters hensel_data_cache_counters_tls;
 
 template <class Entry>
@@ -2744,8 +2747,10 @@ constexpr slong kPreLiftDisproofExtraPrimes = 40;
 // degree 10 and higher examines (pure_power_residue_disproves).  Any value is
 // sound; exhausting it leaves the call unsupported.  A true power is never
 // disproved and always runs to the bound, at a distinct-degree factorisation
-// per prime (a fraction of a millisecond in degree 20), so the bound is the
-// same as kPreLiftDisproofExtraPrimes.  A residue can
+// per prime the first time a (field, prime) is seen (a fraction of a
+// millisecond in degree 20; later calls reuse the memoised factorisation while
+// its entry stays cached), so the bound is the same as
+// kPreLiftDisproofExtraPrimes.  A residue can
 // fail to be an n-th power only at a factor whose residue field order q has
 // gcd(n, q - 1) > 1, so a prime p with gcd(n, p^f - 1) = 1 for every
 // f <= N is skipped exactly, without factoring, and is not counted
@@ -2829,10 +2834,12 @@ struct ResidueFieldSetupEntry {
     std::vector<slong> block_degrees;
 };
 
-// A degree >= 10 scan touches at most kHighDegreeDisproofPrimes admissible
-// primes plus the few inadmissible ones below them (41 primes for the
-// squares of Q(zeta_136)^+); the cap bounds memory for the 256-attempt worst
-// case and for many fields.
+// Two callers fill this memo.  A degree >= 10 scan touches at most
+// kHighDegreeDisproofPrimes admissible primes plus the few inadmissible ones
+// below them (41 primes for the squares of Q(zeta_136)^+).  The degree < 10
+// pre-lift path (pre_lift_residue_disproves) tries the chosen prime plus up
+// to kPreLiftDisproofExtraPrimes admissible ones, within 256 attempts.  The
+// cap bounds memory for those worst cases and for many fields.
 constexpr std::size_t kResidueFieldSetupCacheCapacity = 128;
 
 BoundedEntryCache<ResidueFieldSetupEntry>& residue_field_setup_cache() noexcept {
