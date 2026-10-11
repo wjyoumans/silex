@@ -915,8 +915,12 @@ bool try_prove_candidate_pair_by_saturation(
     // class group from relation saturation at every p | h_cand.  The proven
     // unit group is built aside and replaces `units` only after the class
     // proof succeeds, so a failure leaves both objects unchanged.
+    // The class saturation proof scans auxiliary primes q = 1 mod ell with
+    // no fixed bound, as source buch3.c:primecertify does (see
+    // kComputeProofClassAuxMax).  The unit proof below keeps its bounded
+    // pre-scan and its own full scan.
     flint::Fmpz aux_bound;
-    flint::fmpz_set_si(flint::FmpzRef(aux_bound), kComputeProofAuxMax);
+    flint::fmpz_set_ui(flint::FmpzRef(aux_bound), kComputeProofClassAuxMax);
     if (units.certification_status() != CertificationMode::proven) {
         OrderUnitGroup proven(order);
         proven.set_diagnostics(units.diagnostics());

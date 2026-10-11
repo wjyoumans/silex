@@ -2896,6 +2896,80 @@ int test_quintic_disc11119_proven_prepass_route() {
     return 0;
 }
 
+// x^2 - x - 393757 (D = 1575029 = 1255^2 + 4), proven.  h = 89, Cl = Z/89,
+// regulator 7.1348914864758365698 (GP 2.17 bnfinit(x^2 - x - 393757, 1) and
+// bnfcertify = 1).  The class group is proven by relation saturation at
+// ell = 89, which needs degree-one primes over auxiliary primes
+// q = 1 mod 89.  The only such q below 1000 is 179, and it is inert
+// (kronecker(D, 179) = -1); the first split one is 2671.  The proof scans q
+// with no fixed bound, as source 2.17.3 buch3.c:primecertify does; a scan
+// that stopped at q = 1000 found no column and failed closed.
+int test_real_quadratic_proven_saturation_aux_prime_above_1000() {
+    const slong quadratic[] = {-393757, -1};
+    const char* name = "real quadratic D = 1575029 proven saturation at 89";
+    FieldSetup setup = setup_from_coefficients(quadratic, 2);
+
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_matrix_options(options, factor_base_bound,
+                                  setup.maximal_order,
+                                  silex::CertificationMode::proven)) {
+        std::cerr << name << ": options unavailable\n";
+        return 1;
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        std::cerr << name << ": class/unit computation failed\n";
+        return 1;
+    }
+    sflint::Fmpz class_order;
+    sflint::Fmpz invariant;
+    if (!class_group.order(sflint::FmpzRef(class_order)) ||
+        sflint::fmpz_cmp_ui(sflint::FmpzConstRef(class_order), 89) != 0 ||
+        class_group.invariant_count() != 1 ||
+        !class_group.invariant(sflint::FmpzRef(invariant), 0) ||
+        sflint::fmpz_cmp_ui(sflint::FmpzConstRef(invariant), 89) != 0 ||
+        !units.is_set() || units.free_rank() != 1 ||
+        class_group.certification_status() !=
+                silex::CertificationMode::proven ||
+        units.certification_status() != silex::CertificationMode::proven ||
+        class_group.relation_saturation_status() !=
+                silex::ProofState::verified) {
+        std::cerr << name << ": unexpected class/unit data\n";
+        return 1;
+    }
+    bool ell_verified = false;
+    for (slong i = 0; i < class_group.relation_saturation_record_count();
+         ++i) {
+        const std::optional<silex::ClassGroupRelationSaturationRecord>
+                record = class_group.relation_saturation_record(i);
+        if (record.has_value() &&
+            sflint::fmpz_cmp_ui(sflint::FmpzConstRef(record->ell), 89) == 0 &&
+            record->status == silex::ProofState::verified) {
+            ell_verified = true;
+        }
+    }
+    if (!ell_verified) {
+        std::cerr << name << ": no verified saturation record at 89\n";
+        return 1;
+    }
+    sflint::Arb regulator;
+    sflint::Arb expected_regulator;
+    // The decimal is truncated, so widen it to a 2^-60 ball.
+    if (!units.regulator(sflint::ArbRef(regulator)) ||
+        ::arb_set_str(expected_regulator.raw(), "7.1348914864758365698",
+                      128) != 0 ||
+        (::arb_add_error_2exp_si(expected_regulator.raw(), -60), false) ||
+        ::arb_overlaps(regulator.raw(), expected_regulator.raw()) == 0) {
+        std::cerr << name << ": regulator does not match GP\n";
+        return 1;
+    }
+    return 0;
+}
+
 int main() {
     int status = 0;
     status |= test_public_paired_certification_request_validation();
@@ -2916,5 +2990,6 @@ int main() {
     status |= test_grh_generation_below_minkowski_bound();
     status |= test_real_quadratic_h_gt_one_proven_saturation();
     status |= test_quintic_disc11119_proven_prepass_route();
+    status |= test_real_quadratic_proven_saturation_aux_prime_above_1000();
     return status;
 }

@@ -21,6 +21,23 @@ inline constexpr slong kComputeSatAuxMax = 31;
 // nonempty character kernel continues with the unbounded reference `saturate!`
 // scan, and every ell >= kComputeProofAuxMax uses that scan directly.
 inline constexpr slong kComputeProofAuxMax = 1000;
+// Upper end of the auxiliary primes q of the ell-local class-relation
+// saturation proof in the proven paired transaction
+// (prove_relation_saturation_dlog_ell_).  It is neither a proof limit nor a
+// fixed resource bound.  The source bnfcertify local check (2.17.3
+// src/basemath/buch3.c:primecertify, lines 1086-1146) walks every prime
+// q = 1 mod p from u_forprime_arith_init(&T, 1, ULONG_MAX, 1, p) until the
+// character matrix reaches full rank; the proof does the same over the whole
+// machine-word range of q, and checks every q it uses exactly as before.
+// The pair it proves passed the Belabas-Friedman index-one test, so under
+// GRH its relations are saturated and the scan ends at full rank, as
+// primecertify does on a bnfinit result.  Silex has no in-library time
+// limit: only the caller's time or memory limit on the request (for example
+// a process timeout) stops a longer scan, and a stopped request publishes
+// nothing, so no result is labelled proven.  A scan that reaches the end of
+// the range records the ell-local proof as unavailable and the request
+// fails closed.
+inline constexpr ulong kComputeProofClassAuxMax = UWORD_MAX;
 inline constexpr slong kComputeProofRetryAuxMax = 127;
 inline constexpr slong kComputeSatMaxPasses = 2;
 inline constexpr slong kComputeRevalidateMaxPasses = 1;
