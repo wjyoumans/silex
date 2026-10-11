@@ -11,6 +11,7 @@
 #include <silex/flint/fmpz_mod_mat.hpp>
 #include <silex/lat.hpp>
 
+#include "hnf_membership_internal.hpp"
 #include "prime_inverse_internal.hpp"
 #include "two_generator_internal.hpp"
 
@@ -18,6 +19,56 @@
 #include <vector>
 
 namespace silex {
+namespace detail {
+
+bool is_full_rank_upper_triangular(const fmpz_mat_t basis) noexcept {
+    const slong n = fmpz_mat_nrows(basis);
+    if (n <= 0 || fmpz_mat_ncols(basis) != n) {
+        return false;
+    }
+    for (slong i = 0; i < n; ++i) {
+        if (fmpz_is_zero(fmpz_mat_entry(basis, i, i)) != 0) {
+            return false;
+        }
+        for (slong j = 0; j < i; ++j) {
+            if (fmpz_is_zero(fmpz_mat_entry(basis, i, j)) == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// B is invertible, so v lies in the row lattice of B iff the unique rational
+// solution x of x B = v is integral.  Because B is upper triangular, column j
+// of x B = v reads v_j = sum_{i <= j} x_i B_ij, so x_0, x_1, ... are
+// determined one at a time by dividing the reduced v_j by B_jj; v is in the
+// lattice iff every such division is exact.  This is the coordinate test of
+// reference `NumFieldOrd/NfOrd/Ideal/Ideal.jl:containment_by_matrices` (x in I
+// iff coordinates(x) * basis_mat_inv(I) is integral), evaluated by forward
+// substitution instead of a stored inverse.
+bool triangular_basis_contains(const fmpz_mat_t basis, fmpz* vector) noexcept {
+    const slong n = fmpz_mat_ncols(basis);
+    flint::Fmpz quotient;
+    for (slong j = 0; j < n; ++j) {
+        if (fmpz_is_zero(vector + j) != 0) {
+            continue;
+        }
+        const fmpz* pivot = fmpz_mat_entry(basis, j, j);
+        if (fmpz_divisible(vector + j, pivot) == 0) {
+            return false;
+        }
+        fmpz_divexact(quotient.raw(), vector + j, pivot);
+        for (slong l = j; l < n; ++l) {
+            fmpz_submul(vector + l, quotient.raw(),
+                        fmpz_mat_entry(basis, j, l));
+        }
+    }
+    return true;
+}
+
+}  // namespace detail
+
 namespace {
 
 bool fmpz_mat_shape(flint::FmpzMatConstRef matrix,
@@ -652,8 +703,19 @@ bool Ideal::contains(const OrderElement& element) const noexcept {
     }
 
     flint::FmpzMat row(1, parent_.degree());
-    return element.get_coordinates(flint::FmpzMatRef(row)) &&
-           hnf_lattice_contains(flint::FmpzMatConstRef(hnf_),
+    if (!element.get_coordinates(flint::FmpzMatRef(row))) {
+        return false;
+    }
+    // Every construction route stores a full-rank HNF, which is upper
+    // triangular with a nonzero diagonal; membership is then decided by
+    // forward substitution against the stored matrix, with no lattice copy.
+    // Both routes decide membership in the Z-row span of `hnf_`, so the
+    // lattice test is kept for any other stored shape.
+    if (detail::is_full_rank_upper_triangular(hnf_.raw())) {
+        return detail::triangular_basis_contains(hnf_.raw(),
+                                                 fmpz_mat_row(row.raw(), 0));
+    }
+    return hnf_lattice_contains(flint::FmpzMatConstRef(hnf_),
                                 flint::FmpzMatConstRef(row));
 }
 

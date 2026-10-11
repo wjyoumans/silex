@@ -4,6 +4,7 @@
 
 #include "test_support.hpp"
 #include "ideal_product_fixtures.hpp"
+#include "../src/ideal/hnf_membership_internal.hpp"
 #include "../src/ideal/two_generator_internal.hpp"
 
 #include <cassert>
@@ -2317,6 +2318,9 @@ int test_contains_and_set_hnf_match_hnf_reference() {
             for (const silex::Ideal* ideal : {&left, &right, &sum, &product}) {
                 sflint::FmpzMat hnf(n, n);
                 assert(ideal->get_hnf(sflint::FmpzMatRef(hnf)));
+                // The stored HNF is full-rank upper triangular, so these
+                // samples take the triangular-solve route of contains.
+                assert(silex::detail::is_full_rank_upper_triangular(hnf.raw()));
 
                 sflint::FmpzMat row(1, n);
                 sflint::Fmpz c;
@@ -2423,6 +2427,93 @@ int test_contains_and_set_hnf_match_hnf_reference() {
     return members > 0 && nonmembers > 0 && accepted > 0 && rejected > 0 ? 0 : 1;
 }
 
+// The triangular solve behind Ideal::contains, on bases no ideal stores:
+// square upper triangular matrices with negative or large diagonal entries
+// and unreduced entries above the diagonal, compared with the HNF-comparison
+// rule.  Lower triangular, singular and non-square matrices fail the shape
+// check, so Ideal::contains keeps the lattice test for them.
+int test_triangular_basis_contains_matches_hnf_reference() {
+    sflint::FmpzMat lower(2, 2);
+    sflint::FmpzMat singular(2, 2);
+    sflint::FmpzMat wide(2, 3);
+    fmpz_set_si(fmpz_mat_entry(lower.raw(), 0, 0), 2);
+    fmpz_set_si(fmpz_mat_entry(lower.raw(), 1, 0), 1);
+    fmpz_set_si(fmpz_mat_entry(lower.raw(), 1, 1), 3);
+    fmpz_set_si(fmpz_mat_entry(singular.raw(), 0, 0), 2);
+    fmpz_set_si(fmpz_mat_entry(singular.raw(), 0, 1), 1);
+    fmpz_set_si(fmpz_mat_entry(wide.raw(), 0, 0), 1);
+    fmpz_set_si(fmpz_mat_entry(wide.raw(), 1, 1), 1);
+    assert(!silex::detail::is_full_rank_upper_triangular(lower.raw()));
+    assert(!silex::detail::is_full_rank_upper_triangular(singular.raw()));
+    assert(!silex::detail::is_full_rank_upper_triangular(wide.raw()));
+
+    ContainsRng rng{0x7a1a5017};
+    slong members = 0;
+    slong nonmembers = 0;
+    for (slong n : {1, 2, 3, 5, 8}) {
+        for (slong trial = 0; trial < 24; ++trial) {
+            sflint::FmpzMat basis(n, n);
+            for (slong i = 0; i < n; ++i) {
+                slong diagonal = 0;
+                while (diagonal == 0) {
+                    diagonal = rng.next(-6, 6);
+                }
+                fmpz_set_si(fmpz_mat_entry(basis.raw(), i, i), diagonal);
+                for (slong j = i + 1; j < n; ++j) {
+                    fmpz_set_si(fmpz_mat_entry(basis.raw(), i, j),
+                                rng.next(-40, 40));
+                }
+            }
+            if (trial % 6 == 5) {
+                fmpz_mul_2exp(fmpz_mat_entry(basis.raw(), 0, 0),
+                              fmpz_mat_entry(basis.raw(), 0, 0), 80);
+            }
+            assert(silex::detail::is_full_rank_upper_triangular(basis.raw()));
+
+            sflint::FmpzMat row(1, n);
+            sflint::FmpzMat residual(1, n);
+            sflint::Fmpz c;
+            for (slong sample = 0; sample < 8; ++sample) {
+                fmpz_mat_zero(row.raw());
+                if (sample % 2 == 0) {
+                    // An integer combination of the rows, perturbed in one
+                    // entry on every fourth sample.
+                    for (slong i = 0; i < n; ++i) {
+                        fmpz_set_si(c.raw(), rng.next(-5, 5));
+                        for (slong j = 0; j < n; ++j) {
+                            fmpz_addmul(fmpz_mat_entry(row.raw(), 0, j),
+                                        fmpz_mat_entry(basis.raw(), i, j),
+                                        c.raw());
+                        }
+                    }
+                    if (sample % 4 == 2) {
+                        fmpz_add_si(fmpz_mat_entry(row.raw(), 0,
+                                                   rng.next(0, n - 1)),
+                                    fmpz_mat_entry(row.raw(), 0,
+                                                   rng.next(0, n - 1)),
+                                    1);
+                    }
+                } else {
+                    for (slong j = 0; j < n; ++j) {
+                        fmpz_set_si(fmpz_mat_entry(row.raw(), 0, j),
+                                    rng.next(-60, 60));
+                    }
+                }
+                fmpz_mat_set(residual.raw(), row.raw());
+                const bool expected = reference_hnf_contains(basis, row);
+                if (silex::detail::triangular_basis_contains(
+                            basis.raw(), fmpz_mat_row(residual.raw(), 0)) !=
+                    expected) {
+                    return 1;
+                }
+                ++(expected ? members : nonmembers);
+            }
+        }
+    }
+    assert(members > 0 && nonmembers > 0);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--dump-product-fixtures")
         return dump_product_fixtures();
@@ -2489,6 +2580,7 @@ int main(int argc, char** argv) {
     assert(test_quadratic_principal_and_validation() == 0);
     assert(test_set_hnf_validation() == 0);
     assert(test_contains_and_set_hnf_match_hnf_reference() == 0);
+    assert(test_triangular_basis_contains_matches_hnf_reference() == 0);
     assert(test_integral_noninvertible_norm_trap() == 0);
     assert(test_fractional_inverse_quadratic() == 0);
     assert(test_fractional_inverse_nontrivial_order_basis() == 0);

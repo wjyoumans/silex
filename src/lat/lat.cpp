@@ -92,7 +92,7 @@ slong nonzero_rows(const fmpz_mat_t matrix) noexcept {
 // in place of comparing the HNFs of B and B + v; it has the same result, as
 // equal HNFs mean equal lattices.  A zero row followed by a nonzero row is
 // rejected, matching the `nonzero_rows` check in `Lat::hnf`.  The same
-// approach is `triangular_basis_contains_row` in prime_ideal.cpp, which is
+// approach is `detail::triangular_basis_contains` in ideal.cpp, which is
 // restricted to square full-rank triangular bases.
 bool echelon_basis_contains(const fmpz_mat_t basis,
                             const fmpz* vector) noexcept {
