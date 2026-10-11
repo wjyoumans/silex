@@ -867,6 +867,7 @@ struct ResidualLeftoverGateCounter {
     slong unit_tests = 0;
     slong not_unit = 0;
     slong residual_branch = 0;
+    slong original_branch = 0;
 };
 
 void residual_leftover_gate_callback(void* user,
@@ -896,6 +897,9 @@ void residual_leftover_gate_callback(void* user,
     } else if (std::strcmp(label,
                            "unit_group.compact_unit_residual_branch") == 0) {
         ++counter->residual_branch;
+    } else if (std::strcmp(label,
+                           "unit_group.compact_unit_original_branch") == 0) {
+        ++counter->original_branch;
     }
 }
 
@@ -997,14 +1001,29 @@ int test_compact_unit_residual_leftover_norm_one_nonmaximal() {
     assert(theta.gen() && eps.scalar_div_si(theta, 2) &&
            eps.add_si(eps, 1) && eps_sq.multiply(eps, eps));
     constexpr slong precision = 128;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ResidualLeftoverGateCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            residual_leftover_gate_callback, &counter);
 
     silex::FactoredElement cube(field);
     assert(cube.push(eps, 28) && cube.push(eps_sq, 1));
     bool is_power = false;
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
-            is_power, root, order, cube, 3, precision, precision));
+            is_power, root, order, cube, 3, precision, precision,
+            &diagnostics, nullptr));
     assert(is_power);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The norm prefilter passes the leftover, the exact test rejects it,
+    // and the input takes the original branch.
+    assert(counter.norm_rejected == 0 && counter.unit_tests == 1 &&
+           counter.not_unit == 1 && counter.residual_branch == 0 &&
+           counter.original_branch == 1);
+#endif
     silex::Element root_value(field);
     silex::Element root_cube(field);
     silex::Element value(field);
@@ -1013,12 +1032,19 @@ int test_compact_unit_residual_leftover_norm_one_nonmaximal() {
            root_cube.multiply(root_cube, root_value) && cube.evaluate(value) &&
            root_cube.equal(value));
 
+    counter = ResidualLeftoverGateCounter{};
     silex::FactoredElement non_cube(field);
     assert(non_cube.push(eps, 28));
     is_power = true;
     assert(silex::detail::compact_unit_presentation_power_root(
-            is_power, root, order, non_cube, 3, precision, precision));
+            is_power, root, order, non_cube, 3, precision, precision,
+            &diagnostics, nullptr));
     assert(!is_power);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.norm_rejected == 0 && counter.unit_tests == 1 &&
+           counter.not_unit == 1 && counter.residual_branch == 0 &&
+           counter.original_branch == 1);
+#endif
     return 0;
 }
 

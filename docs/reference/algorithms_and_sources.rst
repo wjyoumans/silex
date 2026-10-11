@@ -1922,8 +1922,13 @@ into one entry with the summed exponent, and skips bases equal to one.
 its own, merging no equal bases and keeping bases equal to one.  For
 example, ``f^1 * f^1`` with ``n = 2`` leaves ``r = 1`` in Hecke and
 ``r = f * f`` in Silex.  The leftover and its conjugate-log bound can
-therefore differ, and so can the branch chosen, but not the answer, for the
-same reason as above.  This is an existing deviation.
+therefore differ, and so can the branch chosen.  When both sides decide, the
+answer is the same, for the same reason as above.  Not merging has two
+further consequences, neither of which affects a label.  In the ``f * f``
+case Silex skips the structural-power shortcut that Hecke takes at once, so
+it can fail where ``Element::is_power`` is unsupported while Hecke returns.
+The root returned can also differ from Hecke's by an ``n``-th root of unity.
+This is an existing deviation.
 
 The logarithmic embedding follows Hecke's ``conjugates_arb_log`` for
 ``FacElem`` (``src/NumFieldOrd/NfOrd/FacElem.jl``): equal bases are merged

@@ -102,6 +102,8 @@ struct ResidualNotUnitCounter {
     long events = 0;
     long norm_rejected = 0;
     long unit_test = 0;
+    long residual_branch = 0;
+    long original_branch = 0;
 };
 
 void residual_not_unit_callback(void* user,
@@ -118,9 +120,20 @@ void residual_not_unit_callback(void* user,
                 0) {
         ++static_cast<ResidualNotUnitCounter*>(user)->norm_rejected;
     }
-    if (event == silex::ProfileEvent::event && label != nullptr &&
+    // The exact unit test is a profile scope; count its entries.
+    if (event == silex::ProfileEvent::begin_scope && label != nullptr &&
         std::strcmp(label, "class_group.saturation_residual_unit_test") == 0) {
         ++static_cast<ResidualNotUnitCounter*>(user)->unit_test;
+    }
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, "class_group.saturation_residual_power_branch") ==
+                0) {
+        ++static_cast<ResidualNotUnitCounter*>(user)->residual_branch;
+    }
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, "class_group.saturation_original_power_branch") ==
+                0) {
+        ++static_cast<ResidualNotUnitCounter*>(user)->original_branch;
     }
 }
 
@@ -211,7 +224,7 @@ bool run_unit_candidate_nonunit_leftover() {
            result.appended_class_relations == 0;
 }
 
-// A unit candidate whose formal leftover has norm 1 but is not a unit, so
+// A unit candidate whose formal leftover has norm -1 but is not a unit, so
 // the norm prefilter at the saturation call site
 // (compact_residual_leftover_is_unit) passes it and the exact unit test
 // must reject it.  Factor bases need a maximal order, and there an integral
@@ -236,6 +249,14 @@ bool run_norm_one_nonunit_leftover() {
     sflint::fmpz_set_si(sflint::FmpzRef(bound), 7);
     silex::ClassGroupContext context(order);
     assert(context.is_defined());
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ResidualNotUnitCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            residual_not_unit_callback, &counter);
+    context.set_diagnostics(&diagnostics);
     assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
     const silex::FactorBase* base = context.factor_base();
     assert(base != nullptr);
@@ -307,6 +328,15 @@ bool run_norm_one_nonunit_leftover() {
                 static_cast<long>(result.compact_power_candidates),
                 static_cast<long>(result.structural_power_candidates));
     std::fflush(stdout);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The norm prefilter passes the leftover, the exact unit test rejects
+    // it, and the candidate takes the original branch.
+    assert(counter.norm_rejected == 0);
+    assert(counter.unit_test == 1);
+    assert(counter.events == 1);
+    assert(counter.residual_branch == 0);
+    assert(counter.original_branch == 1);
+#endif
     return ok && !result.saw_power && result.saw_non_power &&
            result.compact_power_candidates == 1 &&
            result.structural_power_candidates == 0;
