@@ -2710,6 +2710,167 @@ int test_relation_kernel_units_index_bounded_quartic_power_root() {
     return 0;
 }
 
+namespace {
+
+// One grh validation saturation pass (inexact index bound 2) on `context`.
+bool grh_validation_saturation_pass(
+        bool& changed,
+        silex::ClassGroupContext& context,
+        const silex::OrderUnitGroup& units,
+        const silex::ClassGroupComputeOptions& options,
+        silex::detail::RelationSaturationMemo* memo) {
+    sflint::Fmpz index_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(index_bound), 2);
+    return silex::detail::saturate_candidate_class_relations_with_units(
+            changed, context, units, options,
+            sflint::FmpzConstRef(index_bound), false, memo);
+}
+
+void assert_same_saturation_state(const silex::ClassGroupContext& left,
+                                  const silex::ClassGroupContext& right) {
+    assert(left.relation_count() == right.relation_count());
+    sflint::Fmpz left_order;
+    sflint::Fmpz right_order;
+    assert(left.order(sflint::FmpzRef(left_order)));
+    assert(right.order(sflint::FmpzRef(right_order)));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(left_order),
+                              sflint::FmpzConstRef(right_order)));
+    assert(left.relation_saturation_status() ==
+           right.relation_saturation_status());
+    assert(left.unit_proof_status() == right.unit_proof_status());
+    assert(left.regulator_proof_status() == right.regulator_proof_status());
+    assert(left.relation_saturation_record_count() ==
+           right.relation_saturation_record_count());
+    for (slong i = 0; i < left.relation_saturation_record_count(); ++i) {
+        auto left_record = left.relation_saturation_record(i);
+        auto right_record = right.relation_saturation_record(i);
+        assert(left_record.has_value() && right_record.has_value());
+        assert(sflint::fmpz_equal(sflint::FmpzConstRef(left_record->ell),
+                                  sflint::FmpzConstRef(right_record->ell)));
+        assert(left_record->status == right_record->status);
+    }
+}
+
+}  // namespace
+
+// The grh validation memo (detail::RelationSaturationMemo): a bounded
+// saturation pass that found nothing is skipped while h_cand, the candidate
+// regulator, the auxiliary-prime bound and the append limit are unchanged,
+// and the skip leaves the state of a real pass that appends nothing.
+// Q(sqrt(10)) has h = 2, so with a candidate h_cand = 2 no pass at ell = 2
+// can append a relation.
+int test_grh_validation_saturation_memo_replays_unchanged_pass() {
+    silex::NumberField field = quadratic_field(10);
+    silex::Order equation_order;
+    silex::Order order(field);
+    equation_order = silex::test::equation_order(field);
+    assert(order.maximal_order(equation_order));
+
+    sflint::Fmpz factor_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_bound), order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(factor_bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(factor_bound), 2);
+    }
+    silex::ClassGroupCandidateOptions candidate_options;
+    candidate_options.max_candidates = 5000;
+    candidate_options.max_relations = 500;
+
+    // `real` runs every pass; `memoed` and `fresh` run through the memo.
+    // `fresh` stands for the class/unit loop's context after an iteration
+    // that appended relations without changing h_cand: the append reset its
+    // saturation records and status.
+    silex::ClassGroupContext real;
+    silex::ClassGroupContext memoed;
+    silex::ClassGroupContext fresh;
+    assert(real.compute_candidate(order, sflint::FmpzConstRef(factor_bound),
+                                  candidate_options));
+    assert(memoed.compute_candidate(order, sflint::FmpzConstRef(factor_bound),
+                                    candidate_options));
+    assert(fresh.compute_candidate(order, sflint::FmpzConstRef(factor_bound),
+                                   candidate_options));
+    sflint::Fmpz h_cand;
+    assert(real.order(sflint::FmpzRef(h_cand)));
+    assert(sflint::fmpz_equal_si(h_cand, 2));
+    assert_same_saturation_state(real, memoed);
+    assert_same_saturation_state(real, fresh);
+
+    silex::OrderUnitGroup units(order);
+    assert(units.compute(order));
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    options.max_relations = 500;
+    silex::detail::RelationSaturationMemo memo;
+
+    // First pass: both run it, find nothing, and the memo records it.
+    bool real_changed = true;
+    bool memo_changed = true;
+    assert(grh_validation_saturation_pass(real_changed, real, units, options,
+                                          nullptr));
+    assert(grh_validation_saturation_pass(memo_changed, memoed, units,
+                                          options, &memo));
+    assert(!real_changed && !memo_changed);
+    assert(memo.valid);
+    assert(memo.skips == 0);
+    assert(sflint::fmpz_equal_si(memo.class_order, 2));
+    assert(real.relation_saturation_status() ==
+           silex::ProofState::unavailable);
+    assert(real.relation_saturation_record_count() == 1);
+    auto record = real.relation_saturation_record(0);
+    assert(record.has_value());
+    assert(sflint::fmpz_equal_si(record->ell, 2));
+    assert(record->status == silex::ProofState::unavailable);
+    assert(units.certification_status() == silex::CertificationMode::proven);
+    assert(real.unit_proof_status() == silex::ProofState::verified);
+    assert_same_saturation_state(real, memoed);
+
+    // Same h_cand and units on a context with no saturation state: the memo
+    // skips the pass and writes the state the real pass wrote.
+    assert(fresh.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+    assert(fresh.relation_saturation_record_count() == 0);
+    assert(fresh.unit_proof_status() == silex::ProofState::not_checked);
+    memo_changed = true;
+    assert(grh_validation_saturation_pass(memo_changed, fresh, units, options,
+                                          &memo));
+    assert(!memo_changed);
+    assert(memo.skips == 1);
+    assert_same_saturation_state(real, fresh);
+
+    // A repeated pass on the context that recorded the memo is skipped too.
+    real_changed = true;
+    memo_changed = true;
+    assert(grh_validation_saturation_pass(real_changed, real, units, options,
+                                          nullptr));
+    assert(grh_validation_saturation_pass(memo_changed, memoed, units,
+                                          options, &memo));
+    assert(!real_changed && !memo_changed);
+    assert(memo.skips == 2);
+    assert_same_saturation_state(real, memoed);
+
+    // A different auxiliary-prime bound asks a different question: the pass
+    // runs and the memo is recorded again for the new bound.
+    options.relation_saturation_aux_prime_bound = 37;
+    assert(grh_validation_saturation_pass(memo_changed, memoed, units,
+                                          options, &memo));
+    assert(!memo_changed);
+    assert(memo.skips == 2);
+    assert(memo.valid);
+    assert(sflint::fmpz_equal_si(memo.aux_bound, 37));
+    assert_same_saturation_state(real, memoed);
+
+    // The exact imaginary-quadratic index route never uses the memo.
+    sflint::Fmpz exact_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(exact_bound), 2);
+    assert(silex::detail::saturate_candidate_class_relations_with_units(
+            memo_changed, memoed, units, options,
+            sflint::FmpzConstRef(exact_bound), true, &memo));
+    assert(memo.skips == 2);
+
+    return 0;
+}
+
 int test_relation_kernel_units_index_bounded_cubic_rank_target() {
     silex::NumberField field = cubic_field(-2, -5);
     silex::Order equation_order;
@@ -10414,6 +10575,7 @@ int test_rebasis_keeps_group_torsion() {
 }  // namespace
 
 int main() {
+    test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_unit_extraction_cache_clear();
     test_precision_doubling_cap_default_value();
     test_precision_doubling_cap_forced_failures();

@@ -623,13 +623,35 @@ bool factor_base_generation_checked_to_required_bound(
 
 }  // namespace
 
+namespace {
+
+// True when each of the two positive regulators is certified to be below
+// twice the other.  When one unit lattice contains the other, the quotient
+// of their regulators is the integer index, so the lattices are then equal.
+bool regulators_within_factor_two(const flint::Arb& left,
+                                  const flint::Arb& right) noexcept {
+    if (!flint::arb_is_finite(left) || !flint::arb_is_finite(right) ||
+        !flint::arb_is_positive(left) || !flint::arb_is_positive(right)) {
+        return false;
+    }
+    flint::Arb twice_left;
+    flint::Arb twice_right;
+    flint::arb_mul_2exp_si(twice_left, left, 1);
+    flint::arb_mul_2exp_si(twice_right, right, 1);
+    return flint::arb_lt(left, twice_right) &&
+           flint::arb_lt(right, twice_left);
+}
+
+}  // namespace
+
 bool saturate_candidate_class_relations_with_units(
         bool& changed,
         ClassGroupContext& class_group,
         const OrderUnitGroup& units,
         const ClassGroupComputeOptions& options,
         flint::FmpzConstRef index_bound,
-        bool index_bound_is_exact) noexcept {
+        bool index_bound_is_exact,
+        RelationSaturationMemo* memo) noexcept {
     const DiagnosticsContext* diagnostics =
             options.diagnostics != nullptr ? options.diagnostics
                                            : class_group.diagnostics();
@@ -662,6 +684,34 @@ bool saturate_candidate_class_relations_with_units(
             factor_base_generation_checked_to_required_bound(class_group);
     bool saturated = false;
     const slong remaining = options.max_relations - class_group.relation_count();
+    const slong max_appends_per_ell =
+            relation_saturation_max_appends_per_ell(options);
+    // The per-ell append limit of a pass that appends nothing.
+    const slong attempt_limit = min_slong(max_appends_per_ell, remaining);
+    if (memo != nullptr && !index_bound_is_exact && memo->valid) {
+        flint::Fmpz class_order;
+        flint::Arb regulator;
+        if (class_group.order(flint::FmpzRef(class_order)) &&
+            units.regulator(flint::ArbRef(regulator)) &&
+            flint::fmpz_equal(flint::FmpzConstRef(class_order),
+                              flint::FmpzConstRef(memo->class_order)) &&
+            flint::fmpz_equal(flint::FmpzConstRef(aux_bound),
+                              flint::FmpzConstRef(memo->aux_bound)) &&
+            max_appends_per_ell == memo->max_appends_per_ell &&
+            attempt_limit == memo->attempt_limit &&
+            regulators_within_factor_two(regulator, memo->regulator) &&
+            ClassGroupCertificationAccess::
+                    replay_unchanged_bounded_relation_saturation(
+                            class_group, units,
+                            flint::FmpzConstRef(class_order))) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.validation_class_relation_saturation."
+                    "memo_skip");
+            ++memo->skips;
+            return true;
+        }
+    }
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
     const bool log_saturation = log_enabled(
             diagnostics, DiagnosticsModule::unit_group, LogLevel::detail);
@@ -680,10 +730,20 @@ bool saturate_candidate_class_relations_with_units(
             : class_group.saturate_relations_bounded_with_units(
                       changed, saturated, units,
                       flint::FmpzConstRef(aux_bound),
-                      relation_saturation_max_appends_per_ell(options),
-                      remaining);
+                      max_appends_per_ell, remaining);
     if (!saturation_ok) {
         return false;
+    }
+    if (memo != nullptr && !index_bound_is_exact) {
+        memo->valid = !changed && !saturated &&
+                class_group.order(flint::FmpzRef(memo->class_order)) &&
+                units.regulator(flint::ArbRef(memo->regulator));
+        if (memo->valid) {
+            flint::fmpz_set(flint::FmpzRef(memo->aux_bound),
+                            flint::FmpzConstRef(aux_bound));
+            memo->max_appends_per_ell = max_appends_per_ell;
+            memo->attempt_limit = attempt_limit;
+        }
     }
 
 #if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
@@ -1415,7 +1475,8 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
         if (!saturate_candidate_class_relations_with_units(
                     class_changed, class_group, units, options,
                     flint::FmpzConstRef(index_bound),
-                    exact_quadratic_index)) {
+                    exact_quadratic_index,
+                    refresh_options.relation_saturation_memo)) {
             summary.outcome =
                     ValidateRefineOutcome::class_saturation_failed;
             return false;

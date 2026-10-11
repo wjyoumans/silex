@@ -584,6 +584,29 @@ enum class ValidationRecomputeCause {
     proven_refinement_retry,
 };
 
+// The last bounded class-relation saturation pass of grh validation that
+// appended no relation and cleared no prime of h_cand, kept across the
+// iterations of the class/unit loop (compute_with_relation_class_group_).
+// While h_cand is exactly the recorded value and the candidate regulator is
+// within a certified factor two of the recorded one, the relation lattice
+// and the unit lattice are taken to be unchanged and the pass is not
+// repeated: saturate_candidate_class_relations_with_units replays its state
+// instead (ClassGroupCertificationAccess::
+// replay_unchanged_bounded_relation_saturation).  A pass with the same
+// lattices and the same ell set, auxiliary-prime bound and append limit
+// tests the same question.  This is a cost memo only: grh acceptance never
+// rests on this saturation, which only adds relations when it finds them.
+struct RelationSaturationMemo {
+    bool valid = false;
+    flint::Fmpz class_order;
+    flint::Arb regulator;
+    flint::Fmpz aux_bound;
+    slong max_appends_per_ell = 0;
+    slong attempt_limit = 0;
+    // Number of passes skipped through the memo, for tests.
+    slong skips = 0;
+};
+
 struct ValidationUnitRefreshOptions {
     RelationUnitExtractionState* relation_unit_state = nullptr;
     slong* unit_add = nullptr;
@@ -595,6 +618,8 @@ struct ValidationUnitRefreshOptions {
     // True exactly for a grh request: lets the validation estimates count
     // the GRH factor-base generation record.
     bool accept_grh_generation = false;
+    // Set only by the grh class/unit loop; null runs every saturation pass.
+    RelationSaturationMemo* relation_saturation_memo = nullptr;
 };
 
 bool set_class_relation_units(bool& ready,
@@ -657,13 +682,16 @@ bool recompute_units_from_class_context(OrderUnitGroup& units,
 // `index_bound`, a bound on h_cand / h.  With `index_bound_is_exact` it is
 // the exact imaginary-quadratic index, which counts as unconditional only
 // when factor-base generation is verified up to the required bound.
+// A non-null `memo` lets the bounded pass (inexact `index_bound`) be
+// skipped and replayed as described at RelationSaturationMemo.
 bool saturate_candidate_class_relations_with_units(
         bool& changed,
         ClassGroupContext& class_group,
         const OrderUnitGroup& units,
         const ClassGroupComputeOptions& options,
         flint::FmpzConstRef index_bound,
-        bool index_bound_is_exact) noexcept;
+        bool index_bound_is_exact,
+        RelationSaturationMemo* memo = nullptr) noexcept;
 bool complete_requested_proven_relation_saturation(
         ClassGroupContext& class_group,
         OrderUnitGroup& units,

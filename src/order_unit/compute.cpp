@@ -3518,6 +3518,14 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     detail::ValidationUnitRefreshOptions refresh_options;
     refresh_options.accept_grh_generation =
             options.requested_certification == CertificationMode::grh;
+    // A grh request repeats the validation's bounded class-relation
+    // saturation once per loop iteration; while h_cand and the candidate
+    // regulator stay put, a pass that found nothing is not run again (see
+    // detail::RelationSaturationMemo).
+    detail::RelationSaturationMemo relation_saturation_memo;
+    if (options.requested_certification == CertificationMode::grh) {
+        refresh_options.relation_saturation_memo = &relation_saturation_memo;
+    }
     if (rank > 1 || (transaction && rank > 0)) {
         refresh_options.relation_unit_state = &relation_unit_state;
         refresh_options.unit_add = &unit_add;

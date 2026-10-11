@@ -6224,6 +6224,52 @@ bool ClassGroupCertificationAccess::
             max_appends_total);
 }
 
+bool ClassGroupCertificationAccess::
+        replay_unchanged_bounded_relation_saturation(
+                ClassGroupContext& context,
+                const OrderUnitGroup& units,
+                flint::FmpzConstRef expected_class_order) noexcept {
+    if (!context.has_factor_base() || !context.has_presentation() ||
+        !units.is_set() || !same_order_parent(units.parent(), &context.parent_) ||
+        !context.ensure_private_storage_()) {
+        return false;
+    }
+    // The same index the pass factors (saturate_relations_bounded_with_units).
+    flint::Fmpz index;
+    if (!context.sync_row_module_checkpoint_() ||
+        !context.row_module_.full_rank_index(flint::FmpzRef(index)) ||
+        !flint::fmpz_equal(flint::FmpzConstRef(index), expected_class_order) ||
+        flint::fmpz_cmp_ui(flint::FmpzConstRef(index), 1) <= 0) {
+        return false;
+    }
+
+    flint::FmpzFactor factorization;
+    flint::fmpz_factor(flint::FmpzFactorRef(factorization),
+                       flint::FmpzConstRef(index));
+    // The tail of saturate_relations_bounded_for_index_with_units_ when no
+    // ell is cleared: every ell is marked `unavailable`, so the status is
+    // `unavailable` whatever the bound's conditionality.
+    context.private_storage_->relation_saturation_records.clear();
+    for (slong i = 0;
+         i < flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
+         ++i) {
+        flint::Fmpz ell;
+        flint::fmpz_factor_get_fmpz(
+                flint::FmpzRef(ell),
+                flint::FmpzFactorConstRef(factorization), i);
+        if (!context.mark_relation_saturation_(flint::FmpzConstRef(ell),
+                                               ProofState::unavailable)) {
+            return false;
+        }
+    }
+    context.relation_saturation_status_ = ProofState::unavailable;
+    if (units.certification_status() == CertificationMode::proven) {
+        context.unit_proof_status_ = ProofState::verified;
+        context.regulator_proof_status_ = ProofState::verified;
+    }
+    return true;
+}
+
 bool compact_first_reduction(
         Ideal& reduced,
         FactoredElement& multiplier,

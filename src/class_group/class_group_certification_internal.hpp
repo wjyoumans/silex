@@ -116,6 +116,21 @@ public:
             slong max_appends_per_ell,
             slong max_appends_total) noexcept;
 
+    // Leaves `context` in the state saturate_relations_bounded_with_units
+    // leaves after a pass that appends no relation: the ell-records are
+    // replaced by one `unavailable` record per prime ell of h_cand,
+    // relation_saturation_status() becomes `unavailable`, and with proven
+    // `units` the unit and regulator proofs are recorded as that pass
+    // records them.  Nothing is searched.  For the grh validation memo
+    // (RelationSaturationMemo): the caller asserts that a pass on the same
+    // relation and unit lattices appended nothing.  Returns false, changing
+    // nothing, unless the current h_cand equals `expected_class_order` and
+    // exceeds one.
+    static bool replay_unchanged_bounded_relation_saturation(
+            ClassGroupContext& context,
+            const OrderUnitGroup& units,
+            flint::FmpzConstRef expected_class_order) noexcept;
+
     // The gates below trust caller-supplied proof data: an analytic
     // class-regulator product hR or a saturation index bound.  They are
     // internal so that only Silex routes that computed that data themselves
