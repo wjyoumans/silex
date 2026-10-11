@@ -499,6 +499,13 @@ struct PrimeReductionVisitContext {
     const PrimeIdeal* prime = nullptr;
     const Order* order = nullptr;
     flint::FmpzMat* basis = nullptr;
+    // Per-search scratch reused by every candidate: the 1 x n coordinate row
+    // and the order element. Each candidate overwrites both completely
+    // (coordinates_from_lattice_combination zeroes the row and
+    // OrderElement::set_coordinates replaces value and coordinates), so no
+    // state carries from one candidate to the next.
+    flint::FmpzMat* coordinates = nullptr;
+    OrderElement* order_element = nullptr;
     const DiagnosticsContext* diagnostics = nullptr;
     FactorBaseWitnessPredicate predicate = FactorBaseWitnessPredicate::selected;
     // Ready only for the direct predicate; see visit_prime_reduction_candidate.
@@ -529,11 +536,12 @@ int visit_prime_reduction_candidate(const fmpz_mat_t coefficients, void* user) {
             static_cast<PrimeReductionVisitContext*>(user);
     if (visit == nullptr || visit->base == nullptr ||
         visit->prime == nullptr || visit->order == nullptr ||
-        visit->basis == nullptr || visit->found || visit->failed) {
+        visit->basis == nullptr || visit->coordinates == nullptr ||
+        visit->order_element == nullptr || visit->found || visit->failed) {
         return 0;
     }
 
-    flint::FmpzMat coordinates(1, visit->order->degree());
+    flint::FmpzMat& coordinates = *visit->coordinates;
     coordinates_from_lattice_combination(
             coordinates, flint::FmpzMatConstRef(coefficients),
             flint::FmpzMatConstRef(*visit->basis));
@@ -561,7 +569,7 @@ int visit_prime_reduction_candidate(const fmpz_mat_t coefficients, void* user) {
         }
     }
 
-    OrderElement order_element(*visit->order);
+    OrderElement& order_element = *visit->order_element;
     if (!order_element.is_defined() ||
         !order_element.set_coordinates(flint::FmpzMatConstRef(coordinates))) {
         visit->failed = true;
@@ -648,11 +656,15 @@ bool factor_base_reduces_prime_by_ideal_lattice_search(
                        flint::FmpzConstRef(max_diag),
                        static_cast<ulong>(reduced.nrows()));
 
+    flint::FmpzMat coordinates(1, order->degree());
+    OrderElement order_element(*order);
     PrimeReductionVisitContext visit;
     visit.base = &base;
     visit.prime = &prime;
     visit.order = order;
     visit.basis = &basis;
+    visit.coordinates = &coordinates;
+    visit.order_element = &order_element;
     visit.diagnostics = diagnostics;
     visit.predicate = predicate;
     visit.norm_prefilter = &norm_prefilter;
