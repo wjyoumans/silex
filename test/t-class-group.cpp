@@ -4661,7 +4661,7 @@ int test_grh_generation_bound_bach_fallback() {
     // and bound; every other case yields nullptr (a fresh build).
     {
         silex::detail::ClassUnitTransactionReport takeover_audit;
-        silex::detail::ClassUnitTransactionContext takeover{takeover_audit};
+        silex::detail::ClassUnitTransactionContext takeover{takeover_audit, nullptr, {}, {}, false};
         sflint::Fmpz other_bound;
         sflint::fmpz_set_ui(sflint::FmpzRef(other_bound), 81);
         silex::Order other_order(quadratic);
