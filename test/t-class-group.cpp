@@ -2562,7 +2562,9 @@ int test_saturation_candidates_skip_bad_prime_of_nonmonic_polynomial() {
 // A defining polynomial with non-trivial content, f = q0 (x^2 - 21), has the
 // integer numerator f itself.  q0 divides its content, so f is zero modulo q0
 // and the root search would abort on it; the search must reject q0 and go on
-// to the next prime.
+// to the next prime q1.  21 is a nonresidue modulo q1 and a residue modulo the
+// prime q2 after it, so q1 has no degree-one prime and q2 has two: the search
+// from q0 must match the search from q1 and not the one from q2.
 int test_saturation_candidates_skip_content_prime_of_nonmonic_polynomial() {
     sflint::Fmpz q0;
     fmpz_one(q0.raw());
@@ -2598,12 +2600,41 @@ int test_saturation_candidates_skip_content_prime_of_nonmonic_polynomial() {
     std::vector<silex::FactoredElement> relations;
     relations.push_back(std::move(relation));
 
+    sflint::Fmpz q1;
+    sflint::Fmpz q2;
+    sflint::Fmpz twenty_one;
+    sflint::fmpz_nextprime(sflint::FmpzRef(q1), sflint::FmpzConstRef(q0));
+    sflint::fmpz_nextprime(sflint::FmpzRef(q2), sflint::FmpzConstRef(q1));
+    fmpz_set_si(twenty_one.raw(), 21);
+    assert(fmpz_jacobi(twenty_one.raw(), q1.raw()) == -1);
+    assert(fmpz_jacobi(twenty_one.raw(), q2.raw()) == 1);
+
     sflint::FmpzMat candidates(0, 0);
     slong auxiliary_prime_count = 0;
+    silex::detail::SaturationCandidateSearchResult search;
     assert(silex::detail::saturation_candidates_from_relations_from_prime(
             candidates, auxiliary_prime_count, relations, order, 2, 100.0,
-            sflint::FmpzConstRef(q0), 1));
+            sflint::FmpzConstRef(q0), 1, &search));
     assert(auxiliary_prime_count == 1);
+    assert(search.auxiliary_prime_count == 1);
+    assert(search.degree_one_prime_count == 0);
+
+    sflint::FmpzMat q1_candidates(0, 0);
+    slong q1_count = 0;
+    silex::detail::SaturationCandidateSearchResult q1_search;
+    assert(silex::detail::saturation_candidates_from_relations_from_prime(
+            q1_candidates, q1_count, relations, order, 2, 100.0,
+            sflint::FmpzConstRef(q1), 1, &q1_search));
+    assert(q1_count == 1 && q1_search.degree_one_prime_count == 0);
+    assert(sflint::fmpz_mat_equal(candidates, q1_candidates));
+
+    sflint::FmpzMat q2_candidates(0, 0);
+    slong q2_count = 0;
+    silex::detail::SaturationCandidateSearchResult q2_search;
+    assert(silex::detail::saturation_candidates_from_relations_from_prime(
+            q2_candidates, q2_count, relations, order, 2, 100.0,
+            sflint::FmpzConstRef(q2), 1, &q2_search));
+    assert(q2_count == 1 && q2_search.degree_one_prime_count == 2);
     return 0;
 }
 
