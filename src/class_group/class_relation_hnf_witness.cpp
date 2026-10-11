@@ -6,24 +6,6 @@ namespace silex::detail {
 
 namespace {
 
-bool multiply_element_power_fmpz(FactoredElement& accumulator,
-                                 const Element& base,
-                                 flint::FmpzConstRef exponent) noexcept {
-    if (flint::fmpz_is_zero(exponent)) {
-        return true;
-    }
-    if (flint::fmpz_fits_si(exponent)) {
-        return accumulator.push(base, flint::fmpz_get_si(exponent));
-    }
-
-    // The shared compact power keeps the exponent guard for exponents
-    // outside slong (see compact_multiply_power_fmpz in class_group.cpp).
-    FactoredElement factored_base(*accumulator.parent());
-    return factored_base.set_element(base) &&
-           multiply_factored_element_power_fmpz(accumulator, factored_base,
-                                                exponent);
-}
-
 slong fmpz_mat_trimmed_nonzero_rows(flint::FmpzMatConstRef matrix) noexcept {
     slong rows = flint::fmpz_mat_nrows(matrix);
     while (rows > 0 &&

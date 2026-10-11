@@ -228,10 +228,6 @@ bool compact_multiply_power_fmpz(FactoredElement& accumulator,
                                  const FactoredElement& base,
                                  flint::FmpzConstRef exponent) noexcept;
 
-bool multiply_element_power_fmpz(FactoredElement& accumulator,
-                                 const Element& base,
-                                 flint::FmpzConstRef exponent) noexcept;
-
 bool push_relation_witnesses(FactoredElement& out,
                              const RelationMatrix& relations,
                              flint::FmpzMatConstRef coefficients,
@@ -259,7 +255,8 @@ bool push_relation_witnesses(FactoredElement& out,
             continue;
         }
         if (!relations.generator(generator, i) ||
-            !multiply_element_power_fmpz(candidate, generator, exponent)) {
+            !detail::multiply_element_power_fmpz(candidate, generator,
+                                                 exponent)) {
             return false;
         }
     }
@@ -1847,21 +1844,6 @@ bool compact_multiply_power_fmpz(FactoredElement& accumulator,
            accumulator.multiply(accumulator, power);
 }
 
-bool multiply_element_power_fmpz(FactoredElement& accumulator,
-                                 const Element& base,
-                                 flint::FmpzConstRef exponent) noexcept {
-    if (flint::fmpz_is_zero(exponent)) {
-        return true;
-    }
-    if (flint::fmpz_fits_si(exponent)) {
-        return accumulator.push(base, flint::fmpz_get_si(exponent));
-    }
-
-    FactoredElement factored_base(*accumulator.parent());
-    return factored_base.set_element(base) &&
-           compact_multiply_power_fmpz(accumulator, factored_base, exponent);
-}
-
 bool fmpz_mat_row_is_zero(bool& out,
                           flint::FmpzMatConstRef row) noexcept {
     if (flint::fmpz_mat_nrows(row) != 1) {
@@ -3237,8 +3219,8 @@ bool saturation_relation_product_with_units(FactoredElement& product,
             continue;
         }
         if (!context.relation_generator(relation_generator, j) ||
-            !multiply_element_power_fmpz(product, relation_generator,
-                                         exponent)) {
+            !detail::multiply_element_power_fmpz(product, relation_generator,
+                                                 exponent)) {
             return false;
         }
     }
@@ -3294,8 +3276,8 @@ bool saturation_relation_product(FactoredElement& product,
             continue;
         }
         if (!context.relation_generator(relation_generator, j) ||
-            !multiply_element_power_fmpz(product, relation_generator,
-                                         exponent)) {
+            !detail::multiply_element_power_fmpz(product, relation_generator,
+                                                 exponent)) {
             return false;
         }
     }
@@ -5818,6 +5800,21 @@ bool multiply_factored_element_power_fmpz(
         const FactoredElement& base,
         flint::FmpzConstRef exponent) noexcept {
     return compact_multiply_power_fmpz(accumulator, base, exponent);
+}
+
+bool multiply_element_power_fmpz(FactoredElement& accumulator,
+                                 const Element& base,
+                                 flint::FmpzConstRef exponent) noexcept {
+    if (flint::fmpz_is_zero(exponent)) {
+        return true;
+    }
+    if (flint::fmpz_fits_si(exponent)) {
+        return accumulator.push(base, flint::fmpz_get_si(exponent));
+    }
+
+    FactoredElement factored_base(*accumulator.parent());
+    return factored_base.set_element(base) &&
+           compact_multiply_power_fmpz(accumulator, factored_base, exponent);
 }
 
 bool ClassGroupCertificationAccess::try_certify_class_unit_with_bf_audit(

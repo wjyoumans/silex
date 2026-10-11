@@ -144,6 +144,12 @@ bool multiply_factored_element_power_fmpz(
         FactoredElement& accumulator,
         const FactoredElement& base,
         flint::FmpzConstRef exponent) noexcept;
+// Multiplies accumulator by base^exponent. Exponents that fit in slong are
+// pushed as one factor; larger ones go through
+// multiply_factored_element_power_fmpz, which keeps its exponent guard.
+bool multiply_element_power_fmpz(FactoredElement& accumulator,
+                                 const Element& base,
+                                 flint::FmpzConstRef exponent) noexcept;
 
 bool class_group_ideal_relation_continuation_witness(
         ClassGroupIdealRelationWitnessResult& result,
