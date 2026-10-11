@@ -741,6 +741,245 @@ int test_required_prime_norm_prefilter_matches_direct() {
     return 0;
 }
 
+// The degree-2 word path of the norm prefilter against its fmpz path on one
+// quadratic field: the word path applies exactly when the table and the
+// coordinates are within the word limit and |N| < 2^FLINT_BITS, and then
+// decides as the fmpz path does. Extra rows are coordinate pairs to add to a
+// small grid.
+int check_norm_prefilter_word_path(
+        const FieldSetup& setup,
+        slong base_bound,
+        slong required_rational_prime,
+        bool expect_word_table,
+        const std::vector<std::array<sflint::Fmpz, 2>>& extra,
+        const std::vector<std::array<sflint::Fmpz, 2>>& field_extra,
+        slong& word_rejected,
+        slong& word_kept,
+        slong& fallbacks) {
+    const silex::Order& order = setup.maximal_order;
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), base_bound);
+    silex::FactorBase base(order);
+    silex::PrimeIdeal required(order);
+    silex::detail::RequiredPrimeNormPrefilter prefilter;
+    if (order.degree() != 2 || !order.is_maximal() ||
+        !base.build(sflint::FmpzConstRef(bound)) ||
+        !first_prime_above(required, order, required_rational_prime) ||
+        base.contains(required) ||
+        !silex::detail::required_prime_norm_prefilter_init(prefilter, base,
+                                                          required) ||
+        !prefilter.ready ||
+        prefilter.word_table_ready != expect_word_table) {
+        return 1;
+    }
+    sflint::Fmpz word_bound;  // 2^FLINT_BITS
+    sflint::fmpz_one(sflint::FmpzRef(word_bound));
+    fmpz_mul_2exp(word_bound.raw(), word_bound.raw(), FLINT_BITS);
+    sflint::Fmpz limit;
+    sflint::fmpz_set_si(sflint::FmpzRef(limit),
+                        silex::detail::required_prime_norm_prefilter_word_limit);
+
+    sflint::FmpzMat coordinates(1, 2);
+    sflint::Fmpz norm;
+    const auto check = [&](const fmpz* a0, const fmpz* a1) -> bool {
+        fmpz_set(fmpz_mat_entry(coordinates.raw(), 0, 0), a0);
+        fmpz_set(fmpz_mat_entry(coordinates.raw(), 0, 1), a1);
+        bool fmpz_rejected = true;
+        bool word_rejected_now = true;
+        bool combined_rejected = true;
+        if (!silex::detail::required_prime_norm_prefilter_norm(
+                    sflint::FmpzRef(norm), prefilter,
+                    sflint::FmpzMatConstRef(coordinates)) ||
+            !silex::detail::required_prime_norm_prefilter_rejects_fmpz(
+                    fmpz_rejected, prefilter,
+                    sflint::FmpzMatConstRef(coordinates)) ||
+            !silex::detail::required_prime_norm_prefilter_rejects(
+                    combined_rejected, prefilter,
+                    sflint::FmpzMatConstRef(coordinates)) ||
+            combined_rejected != fmpz_rejected) {
+            return false;
+        }
+        const bool expect_word =
+                expect_word_table && fmpz_cmpabs(a0, limit.raw()) <= 0 &&
+                fmpz_cmpabs(a1, limit.raw()) <= 0 &&
+                fmpz_cmpabs(norm.raw(), word_bound.raw()) < 0;
+        const bool applied = silex::detail::required_prime_norm_prefilter_rejects_word(
+                word_rejected_now, prefilter,
+                sflint::FmpzMatConstRef(coordinates));
+        if (applied != expect_word || (!applied && word_rejected_now) ||
+            (applied && word_rejected_now != fmpz_rejected)) {
+            return false;
+        }
+        if (!applied) {
+            ++fallbacks;
+        } else if (word_rejected_now) {
+            ++word_rejected;
+        } else {
+            ++word_kept;
+        }
+        return true;
+    };
+
+    sflint::Fmpz x, y;
+    for (slong i = -40; i <= 40; ++i) {
+        for (slong j = -40; j <= 40; ++j) {
+            sflint::fmpz_set_si(sflint::FmpzRef(x), i);
+            sflint::fmpz_set_si(sflint::FmpzRef(y), j);
+            if (!check(x.raw(), y.raw())) {
+                return 1;
+            }
+        }
+    }
+    for (const auto* rows : {&extra, &field_extra}) {
+    for (const auto& row : *rows) {
+        // Each pair also with signs flipped and coordinates swapped.
+        for (int sign = 0; sign < 4; ++sign) {
+            fmpz_set(x.raw(), row[0].raw());
+            fmpz_set(y.raw(), row[1].raw());
+            if ((sign & 1) != 0) {
+                fmpz_neg(x.raw(), x.raw());
+            }
+            if ((sign & 2) != 0) {
+                fmpz_neg(y.raw(), y.raw());
+            }
+            if (!check(x.raw(), y.raw()) || !check(y.raw(), x.raw())) {
+                return 1;
+            }
+        }
+    }
+    }
+    return 0;
+}
+
+int test_required_prime_norm_prefilter_word_path_matches_fmpz() {
+    const slong limit = silex::detail::required_prime_norm_prefilter_word_limit;
+    if (limit != (WORD(1) << (FLINT_BITS / 2 - 1)) - 1) {
+        return 1;
+    }
+    std::vector<std::array<sflint::Fmpz, 2>> extra;
+    const auto add = [&extra](const fmpz* a0, const fmpz* a1) {
+        extra.emplace_back();
+        fmpz_set(extra.back()[0].raw(), a0);
+        fmpz_set(extra.back()[1].raw(), a1);
+    };
+    const auto add_si = [&add](slong a0, slong a1) {
+        sflint::Fmpz x, y;
+        sflint::fmpz_set_si(sflint::FmpzRef(x), a0);
+        sflint::fmpz_set_si(sflint::FmpzRef(y), a1);
+        add(x.raw(), y.raw());
+    };
+    // Coordinates at and just past the limit, and far past it.
+    sflint::Fmpz past, big;
+    sflint::fmpz_set_si(sflint::FmpzRef(past), limit);
+    fmpz_add_ui(past.raw(), past.raw(), 1);
+    sflint::fmpz_one(sflint::FmpzRef(big));
+    fmpz_mul_2exp(big.raw(), big.raw(), 3 * FLINT_BITS);
+    for (slong small : {slong(0), slong(1), slong(3), slong(17)}) {
+        add_si(limit, small);
+        add_si(limit - 1, small);
+        sflint::Fmpz s;
+        sflint::fmpz_set_si(sflint::FmpzRef(s), small);
+        add(past.raw(), s.raw());
+        add(big.raw(), s.raw());
+    }
+    add_si(limit, limit);
+    add(past.raw(), past.raw());
+    // Smooth coordinates with norms near the word bound.
+    add_si(WORD(1) << 30, 0);
+    add_si(WORD(1162261467), 0);  // 3^19
+    add_si(WORD(1162261467), WORD(1) << 30);
+    add_si(WORD(30) * 30 * 30 * 30 * 30 * 30, 0);
+
+    slong word_rejected = 0, word_kept = 0, fallbacks = 0;
+    // Table entries within the limit: x^2 + 1009, the reported row
+    // x^2 - x - 25000000, and x^2 + x + (2^31 - 1), whose table holds
+    // -(2^31 - 1), exactly the limit on 64-bit words.
+    const FieldSetup imaginary = maximal_order_setup({1009, 0, 1});
+    std::vector<std::array<sflint::Fmpz, 2>> imaginary_extra;
+    const std::vector<std::array<sflint::Fmpz, 2>> no_extra;
+    {
+        // |N| at 2^FLINT_BITS - 1 or below and at 2^FLINT_BITS or above:
+        // for a fixed second coordinate the norm grows with the first.
+        sflint::Fmpz word_bound;
+        sflint::fmpz_one(sflint::FmpzRef(word_bound));
+        fmpz_mul_2exp(word_bound.raw(), word_bound.raw(), FLINT_BITS);
+        sflint::Fmpz bound_value;
+        sflint::fmpz_set_si(sflint::FmpzRef(bound_value), 50);
+        silex::FactorBase base(imaginary.maximal_order);
+        silex::PrimeIdeal required(imaginary.maximal_order);
+        silex::detail::RequiredPrimeNormPrefilter prefilter;
+        if (!base.build(sflint::FmpzConstRef(bound_value)) ||
+            !first_prime_above(required, imaginary.maximal_order, 53) ||
+            !silex::detail::required_prime_norm_prefilter_init(prefilter, base,
+                                                              required)) {
+            return 1;
+        }
+        sflint::FmpzMat coordinates(1, 2);
+        sflint::Fmpz norm;
+        const auto norm_below = [&](slong a0, slong a1) -> int {
+            sflint::fmpz_set_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 0),
+                    a0);
+            sflint::fmpz_set_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0, 1),
+                    a1);
+            if (!silex::detail::required_prime_norm_prefilter_norm(
+                        sflint::FmpzRef(norm), prefilter,
+                        sflint::FmpzMatConstRef(coordinates))) {
+                return -1;
+            }
+            return fmpz_cmpabs(norm.raw(), word_bound.raw()) < 0 ? 1 : 0;
+        };
+        for (slong second : {WORD(120000000), WORD(125000001)}) {
+            slong lo = 0, hi = limit;
+            if (norm_below(lo, second) != 1 || norm_below(hi, second) != 0) {
+                return 1;
+            }
+            while (hi - lo > 1) {
+                const slong mid = lo + (hi - lo) / 2;
+                const int below = norm_below(mid, second);
+                if (below < 0) {
+                    return 1;
+                }
+                (below == 1 ? lo : hi) = mid;
+            }
+            sflint::Fmpz x, y;
+            for (slong first : {lo - 1, lo, hi, hi + 1}) {
+                sflint::fmpz_set_si(sflint::FmpzRef(x), first);
+                sflint::fmpz_set_si(sflint::FmpzRef(y), second);
+                imaginary_extra.emplace_back();
+                fmpz_set(imaginary_extra.back()[0].raw(), x.raw());
+                fmpz_set(imaginary_extra.back()[1].raw(), y.raw());
+            }
+        }
+    }
+    const FieldSetup row = maximal_order_setup({-25000000, -1, 1});
+    const FieldSetup at_limit = maximal_order_setup({2147483647, 1, 1});
+    if (check_norm_prefilter_word_path(imaginary, 50, 53, true,
+                                       extra, imaginary_extra, word_rejected,
+                                       word_kept, fallbacks) != 0 ||
+        check_norm_prefilter_word_path(row, 50, 53, true, extra, no_extra,
+                                       word_rejected, word_kept,
+                                       fallbacks) != 0 ||
+        check_norm_prefilter_word_path(at_limit, 50, 53, true, extra, no_extra,
+                                       word_rejected, word_kept,
+                                       fallbacks) != 0) {
+        return 1;
+    }
+    // A table entry of 2^31, just past the limit: every candidate falls back.
+    const slong before = fallbacks;
+    const FieldSetup past_limit = maximal_order_setup({2147483648, 1, 1});
+    slong past_rejected = 0, past_kept = 0;
+    if (check_norm_prefilter_word_path(past_limit, 50, 53, false, extra,
+                                       no_extra,
+                                       past_rejected, past_kept,
+                                       fallbacks) != 0 ||
+        past_rejected != 0 || past_kept != 0 || fallbacks == before) {
+        return 1;
+    }
+    return word_rejected > 0 && word_kept > 0 && before > 0 ? 0 : 1;
+}
+
 int test_selected_witness_edge_cases() {
     namespace search = silex::detail::relation_search;
     using Mode = search::FactorBaseWitnessPredicate;
@@ -2079,6 +2318,8 @@ int main() {
                    test_required_prime_direct_rejects_nonsmooth_cofactor() !=
                            0 ||
                    test_required_prime_norm_prefilter_matches_direct() != 0 ||
+                   test_required_prime_norm_prefilter_word_path_matches_fmpz() !=
+                           0 ||
                    test_ideal_transforms_preserve_principal_witness() != 0 ||
                    test_truncated_decomposition_withholds_honesty() != 0 ||
                    test_generation_bound_checker_rejects_missing_truncated_target() !=

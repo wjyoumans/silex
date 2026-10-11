@@ -68,7 +68,17 @@ struct RequiredPrimeNormPrefilter {
     flint::Fmpz norm;
     flint::Fmpz cofactor;
     flint::Fmpz divisor;
+    // Degree 2 only: the multiplication table as words, set when every entry
+    // has absolute value at most required_prime_norm_prefilter_word_limit.
+    bool word_table_ready = false;
+    slong word_table[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 };
+
+// Largest absolute value of a coordinate or table entry the degree-2 word
+// path accepts: 2^31 - 1 on 64-bit words, so each multiplication-matrix entry
+// fits a signed word and the determinant fits two words.
+inline constexpr slong required_prime_norm_prefilter_word_limit =
+        (WORD(1) << (FLINT_BITS / 2 - 1)) - 1;
 
 bool required_prime_norm_prefilter_init(
         RequiredPrimeNormPrefilter& prefilter,
@@ -85,7 +95,24 @@ bool required_prime_norm_prefilter_norm(
 // Sets rejected exactly when the direct path would reject the element by its
 // norm cofactor: the norm is nonzero and not smooth over the primes of
 // smooth_product. A false rejection leaves the decision to the direct path.
+// Takes the word path below when it applies and the fmpz path otherwise.
 bool required_prime_norm_prefilter_rejects(
+        bool& rejected,
+        RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept;
+
+// The same decision in word arithmetic. Applies only to a ready degree-2
+// prefilter with word_table_ready, coordinates of absolute value at most
+// required_prime_norm_prefilter_word_limit, and |norm| below 2^FLINT_BITS;
+// returns false otherwise, with rejected false, and the caller takes the
+// fmpz path.
+bool required_prime_norm_prefilter_rejects_word(
+        bool& rejected,
+        const RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept;
+
+// The same decision with fmpz arithmetic, for every ready prefilter.
+bool required_prime_norm_prefilter_rejects_fmpz(
         bool& rejected,
         RequiredPrimeNormPrefilter& prefilter,
         flint::FmpzMatConstRef coordinates) noexcept;

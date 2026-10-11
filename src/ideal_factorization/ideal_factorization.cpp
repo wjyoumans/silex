@@ -11,6 +11,8 @@
 #include <flint/fmpz.h>
 #include <flint/fmpz_factor.h>
 #include <flint/fmpz_mat.h>
+#include <flint/longlong.h>
+#include <flint/ulong_extras.h>
 
 #include <limits>
 #include <utility>
@@ -1324,6 +1326,7 @@ bool required_prime_norm_prefilter_init(
         const PrimeIdeal& required_prime) noexcept {
     prefilter.ready = false;
     prefilter.degree = 0;
+    prefilter.word_table_ready = false;
     // The preconditions of order_element_factor_over_base_with_required_prime_direct
     // for an element of base.parent(); when one fails the direct path reports
     // an evaluation failure, which the prefilter leaves to it.
@@ -1392,6 +1395,16 @@ bool required_prime_norm_prefilter_init(
             }
         }
     }
+    if (n == 2) {
+        bool fits = true;
+        for (slong k = 0; k < 8 && fits; ++k) {
+            const fmpz* entry = fmpz_mat_entry(table.raw(), k / 2, k % 2);
+            fits = ::fmpz_bits(entry) <=
+                   static_cast<flint_bitcnt_t>(FLINT_BITS / 2 - 1);
+            prefilter.word_table[k] = fits ? ::fmpz_get_si(entry) : 0;
+        }
+        prefilter.word_table_ready = fits;
+    }
     prefilter.multiplication_table = std::move(table);
     prefilter.multiplication_matrix = flint::FmpzMat(n, n);
     prefilter.degree = n;
@@ -1432,6 +1445,79 @@ bool required_prime_norm_prefilter_norm(
 }
 
 bool required_prime_norm_prefilter_rejects(
+        bool& rejected,
+        RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    return required_prime_norm_prefilter_rejects_word(rejected, prefilter,
+                                                      coordinates) ||
+           required_prime_norm_prefilter_rejects_fmpz(rejected, prefilter,
+                                                      coordinates);
+}
+
+bool required_prime_norm_prefilter_rejects_word(
+        bool& rejected,
+        const RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    rejected = false;
+    const fmpz_mat_struct* a = coordinates.raw();
+    if (!prefilter.ready || prefilter.degree != 2 ||
+        !prefilter.word_table_ready || ::fmpz_mat_nrows(a) != 1 ||
+        ::fmpz_mat_ncols(a) != 2) {
+        return false;
+    }
+    // At most required_prime_norm_prefilter_word_limit = 2^(FLINT_BITS / 2
+    // - 1) - 1 in absolute value exactly when at most FLINT_BITS / 2 - 1 bits.
+    constexpr flint_bitcnt_t limit_bits = FLINT_BITS / 2 - 1;
+    const fmpz* a0_entry = fmpz_mat_entry(a, 0, 0);
+    const fmpz* a1_entry = fmpz_mat_entry(a, 0, 1);
+    if (::fmpz_bits(a0_entry) > limit_bits ||
+        ::fmpz_bits(a1_entry) > limit_bits) {
+        return false;
+    }
+    // The fmpz path below in words: the same multiplication matrix and
+    // 2 x 2 determinant, exact because every coordinate and table entry is at
+    // most 2^(FLINT_BITS / 2 - 1) - 1 in absolute value, so each entry
+    // a_0 t_0 + a_1 t_1 is below 2^(FLINT_BITS - 1) and each product of two
+    // entries below 2^(2 FLINT_BITS - 2) in absolute value.
+    const slong a0 = ::fmpz_get_si(a0_entry);
+    const slong a1 = ::fmpz_get_si(a1_entry);
+    const slong* t = prefilter.word_table;
+    // Entry (r, j) is sum_i a_i t[(i * 2 + j) * 2 + r].
+    const slong m00 = a0 * t[0] + a1 * t[4];
+    const slong m01 = a0 * t[2] + a1 * t[6];
+    const slong m10 = a0 * t[1] + a1 * t[5];
+    const slong m11 = a0 * t[3] + a1 * t[7];
+    ulong left_hi = 0, left_lo = 0, right_hi = 0, right_lo = 0;
+    smul_ppmm(left_hi, left_lo, m00, m11);
+    smul_ppmm(right_hi, right_lo, m01, m10);
+    ulong det_hi = 0, det_lo = 0;
+    sub_ddmmss(det_hi, det_lo, left_hi, left_lo, right_hi, right_lo);
+    if (static_cast<slong>(det_hi) < 0) {
+        // |det| < 2^(2 FLINT_BITS - 1), so negation does not overflow.
+        det_lo = -det_lo;
+        det_hi = ~det_hi + (det_lo == 0 ? 1 : 0);
+    }
+    if (det_hi != 0) {
+        return false;
+    }
+    if (det_lo == 0) {
+        return true;
+    }
+    // The Z_ppo loop of the fmpz path below on words; gcd(N, P) is
+    // gcd(N, P mod N).
+    ulong cofactor = det_lo;
+    ulong divisor =
+            n_gcd(cofactor, ::fmpz_fdiv_ui(prefilter.smooth_product.raw(),
+                                           cofactor));
+    while (divisor != 1) {
+        cofactor /= divisor;
+        divisor = n_gcd(cofactor, divisor);
+    }
+    rejected = cofactor != 1;
+    return true;
+}
+
+bool required_prime_norm_prefilter_rejects_fmpz(
         bool& rejected,
         RequiredPrimeNormPrefilter& prefilter,
         flint::FmpzMatConstRef coordinates) noexcept {
