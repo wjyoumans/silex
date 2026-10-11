@@ -856,6 +856,124 @@ int test_compact_unit_power_root_nonunit_small_leftover() {
     return 0;
 }
 
+// The residual-leftover unit gate rejects a leftover whose factored norm is
+// not +-1 without expanding it, and expands and tests every other leftover.
+// In Q(sqrt 2) with eps = 1 + sqrt 2 and gamma = eps^20 sqrt 2:
+// gamma^2 (eps / 2) = eps^41 leaves eps / 2 (norm -1/4), eps^41 leaves eps
+// (norm -1) and eps^41 * eps^3 = eps^44 leaves eps * eps^3 (norm 1), and the
+// residual bound selects the residual branch for all three.
+struct ResidualLeftoverGateCounter {
+    slong norm_rejected = 0;
+    slong unit_tests = 0;
+    slong not_unit = 0;
+    slong residual_branch = 0;
+};
+
+void residual_leftover_gate_callback(void* user,
+                                     silex::DiagnosticsModule,
+                                     silex::ProfileEvent event,
+                                     const char*,
+                                     const char* label) noexcept {
+    if (label == nullptr) {
+        return;
+    }
+    auto* counter = static_cast<ResidualLeftoverGateCounter*>(user);
+    if (event == silex::ProfileEvent::begin_scope &&
+        std::strcmp(label, "unit_group.compact_unit_residual_unit_test") ==
+                0) {
+        ++counter->unit_tests;
+    }
+    if (event != silex::ProfileEvent::event) {
+        return;
+    }
+    if (std::strcmp(label,
+                    "unit_group.compact_unit_residual_norm_not_unit") == 0) {
+        ++counter->norm_rejected;
+    } else if (std::strcmp(label,
+                           "unit_group.compact_unit_residual_not_unit") ==
+               0) {
+        ++counter->not_unit;
+    } else if (std::strcmp(label,
+                           "unit_group.compact_unit_residual_branch") == 0) {
+        ++counter->residual_branch;
+    }
+}
+
+int test_compact_unit_residual_leftover_norm_prefilter() {
+    const slong coefficients[] = {-2, 0, 1};
+    const silex::NumberField field = monic_field(coefficients);
+    const silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::Element sqrt2(field);
+    silex::Element eps(field);
+    assert(sqrt2.gen() && eps.add_si(sqrt2, 1));
+    sflint::Fmpz k;
+    fmpz_set_si(k.raw(), 20);
+    silex::Element eps_k(field);
+    silex::Element gamma(field);
+    silex::Element half_eps(field);
+    silex::Element eps_sq(field);
+    silex::Element eps_cube(field);
+    assert(eps_k.pow_fmpz(eps, sflint::FmpzConstRef(k)) &&
+           gamma.multiply(eps_k, sqrt2) &&
+           half_eps.scalar_div_si(eps, 2) &&
+           eps_sq.multiply(eps, eps) && eps_cube.multiply(eps_sq, eps));
+
+    constexpr slong precision = 128;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ResidualLeftoverGateCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            residual_leftover_gate_callback, &counter);
+
+    // Non-unit leftover eps / 2: rejected by its norm, never expanded.
+    silex::FactoredElement nonunit(field);
+    assert(nonunit.push(gamma, 2) && nonunit.push(half_eps, 1));
+    bool is_power = true;
+    silex::FactoredElement root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, root, order, nonunit, 2, precision, precision,
+            &diagnostics, nullptr));
+    assert(!is_power);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.norm_rejected == 1 && counter.unit_tests == 0 &&
+           counter.not_unit == 1 && counter.residual_branch == 0);
+#endif
+
+    // Unit leftover eps: passes the norm filter, is expanded and tested, and
+    // takes the residual branch; eps^41 is not a square.
+    counter = ResidualLeftoverGateCounter{};
+    silex::FactoredElement odd(field);
+    assert(odd.push(eps, 41));
+    is_power = true;
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, root, order, odd, 2, precision, precision,
+            &diagnostics, nullptr));
+    assert(!is_power);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.norm_rejected == 0 && counter.unit_tests == 1 &&
+           counter.not_unit == 0 && counter.residual_branch == 1);
+#endif
+
+    // Unit leftover eps * eps^3: the same route, and eps^44 = (eps^22)^2.
+    counter = ResidualLeftoverGateCounter{};
+    silex::FactoredElement even(field);
+    assert(even.push(eps, 41) && even.push(eps_cube, 1));
+    is_power = false;
+    silex::FactoredElement even_root(field);
+    assert(silex::detail::compact_unit_presentation_power_root(
+            is_power, even_root, order, even, 2, precision, precision,
+            &diagnostics, nullptr));
+    assert(is_power && compact_power_root_squares_to(even_root, even));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.norm_rejected == 0 && counter.unit_tests == 1 &&
+           counter.not_unit == 0 && counter.residual_branch == 1);
+#endif
+    return 0;
+}
+
 // Log-cache events seen inside the residual log bound and inside the compact
 // presentation of a unit power test.  The presentation embeds the bases of
 // its input first and only later the multipliers it builds, so its leading
@@ -1208,5 +1326,6 @@ int main() {
     assert(test_compact_field_modulus_cache_shared_across_calls() == 0);
     assert(test_compact_unit_power_root_reuses_high_precision_base_logs() == 0);
     assert(test_compact_unit_power_root_nonunit_small_leftover() == 0);
+    assert(test_compact_unit_residual_leftover_norm_prefilter() == 0);
     return 0;
 }

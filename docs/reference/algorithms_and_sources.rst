@@ -1895,10 +1895,13 @@ its decomposition.  Silex has no port of ``factor_coprime``: its test of
 Silex therefore takes that branch only for a unit ``r``.  A saturation
 candidate with a nonzero factor-base row always takes the branch for ``a``
 with that row.  For a unit input, ``r`` is a unit when ``s`` is empty
-(``r = a``); otherwise ``r`` is expanded and checked to generate the unit
-ideal of the order.  When the check fails, Silex tests ``a``.  This is a
-recorded deviation.  Both branches decide the same question, since
-``a = s^n * r``, so only the cost differs.
+(``r = a``).  Otherwise an ``r`` whose factored norm, the product of
+``N(f)^e`` over its factors, is not ``+-1`` is not a unit, since units have
+norm ``+-1``, and is rejected without being expanded; any other ``r`` is
+expanded and checked to generate the unit ideal of the order.  When the
+check fails, Silex tests ``a``.  This is a recorded deviation.  Both
+branches decide the same question, since ``a = s^n * r``, so only the cost
+differs.
 Whether to port ``factor_coprime`` is a separate decision.
 
 The logarithmic embedding follows Hecke's ``conjugates_arb_log`` for

@@ -4463,6 +4463,29 @@ bool compact_use_residual_power_test(
     return true;
 }
 
+// Whether a leftover with every factor nonzero has factored norm
+// prod N(f)^r different from +-1.  Units of any order have norm +-1 and the
+// norm is multiplicative, so such a leftover is not a unit, and the exact
+// test below would say so after expanding it.  Returns false (no decision)
+// when a factor norm is unavailable or zero, so that case keeps the
+// expanded test and its failure behaviour.
+bool compact_leftover_norm_is_not_pm1(const FactoredElement& leftover)
+        noexcept {
+    flint::Fmpq product;
+    flint::Fmpq factor_norm;
+    ::fmpq_one(product.raw());
+    for (const auto& entry : leftover.factors()) {
+        if (!entry.factor.norm(flint::FmpqRef(factor_norm)) ||
+            ::fmpq_is_zero(factor_norm.raw()) != 0) {
+            return false;
+        }
+        ::fmpq_pow_si(factor_norm.raw(), factor_norm.raw(), entry.exponent);
+        ::fmpq_mul(product.raw(), product.raw(), factor_norm.raw());
+    }
+    return ::fmpz_is_one(fmpq_denref(product.raw())) == 0 ||
+           ::fmpz_is_pm1(fmpq_numref(product.raw())) == 0;
+}
+
 // Whether the residual branch of reference `is_power(::FacElem, n)` may be
 // taken with Silex's unit-only presentation reduction.  reference
 // (CompactRepresentation.jl:370-432) tests the residual with
@@ -4472,7 +4495,9 @@ bool compact_use_residual_power_test(
 // the unit ideal (compact_unit_presentation_reduction), whose invariant
 // (leftover * multiplier) = residual ideal holds only when the leftover is
 // a unit of `order`.  The input is a unit (callers check this), so an empty
-// `structural` means leftover = input; otherwise the leftover is evaluated
+// `structural` means leftover = input; otherwise a leftover whose factored
+// norm is not +-1 is rejected without expansion
+// (compact_leftover_norm_is_not_pm1), and any other leftover is evaluated
 // and tested exactly.  When it is not a unit, callers take reference's other
 // branch, `_ispower(a, n; decom)`, on the whole input: a =
 // structural^n * leftover, so the power question is the same.  A false
@@ -4481,7 +4506,14 @@ bool compact_residual_leftover_is_unit(
         bool& is_unit,
         const Order& order,
         const FactoredElement& structural,
-        const FactoredElement& leftover) noexcept {
+        const FactoredElement& leftover,
+        const DiagnosticsContext* diagnostics,
+        DiagnosticsModule module,
+        const char* norm_rejected_label,
+        const char* expanded_test_label) noexcept {
+    (void)module;
+    (void)norm_rejected_label;
+    (void)expanded_test_label;
     is_unit = false;
     if (structural.length() == 0) {
         is_unit = true;
@@ -4492,6 +4524,16 @@ bool compact_residual_leftover_is_unit(
         return false;
     }
     Element value(*field);
+    // The prefilter runs only where `leftover.evaluate(value)` would accept
+    // `value`, and with every factor nonzero that expansion succeeds, so a
+    // rejection here is the same answer the expanded test gives.
+    if (leftover.is_defined() && value.is_defined() &&
+        value.has_parent(*leftover.parent()) &&
+        compact_leftover_norm_is_not_pm1(leftover)) {
+        SILEX_PROFILE_EVENT(diagnostics, module, norm_rejected_label);
+        return true;
+    }
+    SILEX_PROFILE_SCOPE(diagnostics, module, expanded_test_label);
     if (!value.is_defined() || !leftover.evaluate(value)) {
         return false;
     }
@@ -7445,8 +7487,11 @@ bool compact_unit_presentation_power_root(
         // The unit-only reduction of the residual needs a unit leftover;
         // see compact_residual_leftover_is_unit.
         bool leftover_is_unit = false;
-        if (!compact_residual_leftover_is_unit(leftover_is_unit, order,
-                                               structural, leftover)) {
+        if (!compact_residual_leftover_is_unit(
+                    leftover_is_unit, order, structural, leftover,
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.compact_unit_residual_norm_not_unit",
+                    "unit_group.compact_unit_residual_unit_test")) {
             return false;
         }
         if (!leftover_is_unit) {
@@ -8628,7 +8673,10 @@ bool saturation_process_candidates_once(
                     bool leftover_is_unit = false;
                     if (!compact_residual_leftover_is_unit(
                                 leftover_is_unit, *order, structural,
-                                leftover)) {
+                                leftover, diagnostics,
+                                DiagnosticsModule::class_group,
+                                "class_group.saturation_residual_norm_not_unit",
+                                "class_group.saturation_residual_unit_test")) {
                         return false;
                     }
                     if (!leftover_is_unit) {
