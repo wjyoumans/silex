@@ -38,6 +38,7 @@
 #include "../order_unit/relation_unit_internal.hpp"
 #include "../order_unit/order_unit_internal.hpp"
 #include "../order/order_internal.hpp"
+#include "../prime_ideal/prime_ideal_internal.hpp"
 #include "../relation/relation_internal.hpp"
 #include "../residue_field/residue_field_internal.hpp"
 #include "../zeta/zeta_internal.hpp"
@@ -797,7 +798,15 @@ DirectLargePrimeStatus direct_partial_relation_row(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.partial_relation_direct_large_prime_path_exact_valuation_no_residue_poly");
             }
-            if (!prime->valuation(valuation, integral_generator)) {
+            // `remaining_vp` is the exact p-adic valuation of |N(alpha)|:
+            // `norm_value` is the field norm of `integral_generator`
+            // (computed above or supplied by the caller under the same
+            // contract), and earlier blocks only divided out other rational
+            // primes.  Reuse it instead of recomputing the norm per hit,
+            // as relation.cpp's `factor_over_base_integral` exact block does.
+            if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+                        valuation, *prime, integral_generator,
+                        remaining_vp)) {
                 SILEX_PROFILE_EVENT(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.partial_relation_direct_large_prime_path_exact_valuation_order_element_unavailable");
@@ -4861,6 +4870,27 @@ bool compact_infinite_reduction(
 }
 
 }  // namespace
+
+namespace detail {
+
+bool direct_partial_relation_row_for_testing(
+        flint::FmpzMat& out_row,
+        flint::Fmpz& out_rational_large_prime,
+        const Element& generator,
+        const FactorBase& base,
+        flint::FmpzConstRef factor_base_bound,
+        const fmpq* known_norm,
+        const fmpz_mat_struct* known_integral_coordinates) noexcept {
+    flint::FmpzPoly residue_key;
+    std::vector<DirectPartialResidueBlockCacheEntry> residue_block_cache;
+    return direct_partial_relation_row(
+                   out_row, out_rational_large_prime, residue_key, generator,
+                   base, factor_base_bound, known_norm,
+                   known_integral_coordinates, nullptr, residue_block_cache,
+                   nullptr) == DirectLargePrimeStatus::found;
+}
+
+}  // namespace detail
 
 // The certification fields a CertificationTransaction_ restores.  The
 // factor-base fields factor_base_build_bound_, factor_base_generation_bound_,

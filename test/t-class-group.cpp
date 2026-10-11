@@ -1649,6 +1649,139 @@ int test_one_large_prime_match_cubic() {
     return 0;
 }
 
+// The exact-valuation branch of the direct large-prime partial-relation
+// row reuses the p-adic valuation of the element norm.  Its rows must match
+// the per-prime element valuations of the public PrimeIdeal::valuation
+// (which recomputes the norm), with the principal-ideal valuation as its
+// fallback, whether or not the norm and coordinates are supplied.
+int test_direct_partial_row_exact_valuation_cubic() {
+    silex::NumberField field = cubic_field(-6, -10);
+    silex::Order equation_order;
+    silex::Order maximal_order(field);
+    equation_order = silex::test::equation_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    assert(maximal_order.is_maximal());
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 30));
+    silex::ClassGroupContext context(maximal_order);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+
+    sflint::FmpzMat coordinates(1, maximal_order.degree());
+    silex::OrderElement order_element(maximal_order);
+    silex::Element element(field);
+    sflint::Fmpq norm;
+    sflint::FmpzMat row(0, 0);
+    sflint::FmpzMat known_row(0, 0);
+    sflint::Fmpz large_prime;
+    sflint::Fmpz known_large_prime;
+    sflint::Fmpz leftover;
+    sflint::Fmpz block_prime;
+    sflint::Fmpz large_prime_bound;
+    sflint::fmpz_mul(sflint::FmpzRef(large_prime_bound),
+                     sflint::FmpzConstRef(bound), sflint::FmpzConstRef(bound));
+    slong found = 0;
+    slong exact_entries = 0;
+    for (slong a = -8; a <= 8; ++a) {
+        for (slong b = -8; b <= 8; ++b) {
+            for (slong c = -8; c <= 8; ++c) {
+                if (a == 0 && b == 0 && c == 0) {
+                    continue;
+                }
+                sflint::fmpz_mat_zero(sflint::FmpzMatRef(coordinates));
+                sflint::fmpz_set_si(
+                        sflint::fmpz_mat_entry(coordinates, 0, 0), a);
+                sflint::fmpz_set_si(
+                        sflint::fmpz_mat_entry(coordinates, 0, 1), b);
+                sflint::fmpz_set_si(
+                        sflint::fmpz_mat_entry(coordinates, 0, 2), c);
+                assert(order_element.set_coordinates(
+                        sflint::FmpzMatConstRef(coordinates)));
+                assert(order_element.get_element(element));
+                const bool have_row = silex::detail::
+                        direct_partial_relation_row_for_testing(
+                                row, large_prime, element, *base,
+                                sflint::FmpzConstRef(bound));
+                assert(element.norm(sflint::FmpqRef(norm)));
+                const bool have_known_row = silex::detail::
+                        direct_partial_relation_row_for_testing(
+                                known_row, known_large_prime, element,
+                                *base, sflint::FmpzConstRef(bound),
+                                norm.raw(), coordinates.raw());
+                assert(have_row == have_known_row);
+
+                // The row exists exactly when the norm is a factor-base
+                // smooth part times one prime at most bound^2 (the
+                // single large prime of reference Rel_add.jl).
+                sflint::fmpz_abs(sflint::FmpzRef(leftover),
+                                 sflint::fmpq_num_ref(
+                                         sflint::FmpqConstRef(norm)));
+                for (slong block = 0;
+                     block < base->rational_prime_block_count(); ++block) {
+                    slong block_length = 0;
+                    assert(base->rational_prime_block_data(
+                            sflint::FmpzRef(block_prime), block_length,
+                            block));
+                    while (!sflint::fmpz_is_zero(
+                                   sflint::FmpzConstRef(leftover)) &&
+                           sflint::fmpz_divisible(
+                                   sflint::FmpzConstRef(leftover),
+                                   sflint::FmpzConstRef(block_prime))) {
+                        sflint::fmpz_divexact(
+                                sflint::FmpzRef(leftover),
+                                sflint::FmpzConstRef(leftover),
+                                sflint::FmpzConstRef(block_prime));
+                    }
+                }
+                const bool expect_row =
+                        sflint::fmpz_cmp(sflint::FmpzConstRef(leftover),
+                                         sflint::FmpzConstRef(
+                                                 large_prime_bound)) <= 0 &&
+                        sflint::fmpz_is_prime(
+                                sflint::FmpzConstRef(leftover));
+                assert(have_row == expect_row);
+                if (!have_row) {
+                    continue;
+                }
+                ++found;
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(row),
+                        sflint::FmpzMatConstRef(known_row)));
+                assert(sflint::fmpz_equal(
+                        sflint::FmpzConstRef(large_prime),
+                        sflint::FmpzConstRef(known_large_prime)));
+                assert(sflint::fmpz_mat_ncols(row) == base->length());
+
+                silex::Ideal principal(maximal_order);
+                bool have_principal = false;
+                for (slong i = 0; i < base->length(); ++i) {
+                    const silex::PrimeIdeal* prime = base->prime_at(i);
+                    assert(prime != nullptr);
+                    slong valuation = -1;
+                    if (!prime->valuation(valuation, order_element)) {
+                        if (!have_principal) {
+                            assert(principal.set_principal(order_element));
+                            have_principal = true;
+                        }
+                        assert(prime->valuation(valuation, principal));
+                    }
+                    assert(sflint::fmpz_equal_si(
+                            sflint::fmpz_mat_entry(row, 0, i), valuation));
+                    if (valuation >= 2) {
+                        // The residue-degree shortcut writes only 0 or 1.
+                        ++exact_entries;
+                    }
+                }
+            }
+        }
+    }
+    assert(found > 0);
+    assert(exact_entries > 0);
+    return 0;
+}
+
 int test_compute_candidate_post_finite_refinement_cubic() {
     silex::NumberField field = cubic_field(-4, -7);
     silex::Order equation_order;
@@ -5907,6 +6040,7 @@ int main() {
     test_try_certify_with_units_zeta_quadratic();
     test_compute_candidate_random_product_relation_cubic();
     test_one_large_prime_match_cubic();
+    test_direct_partial_row_exact_valuation_cubic();
     test_compute_candidate_post_finite_refinement_cubic();
     test_compute_candidate_relation_kernel_target_quadratic();
     test_compute_candidate_relation_kernel_target_shifted_quadratic();
