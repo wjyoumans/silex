@@ -592,6 +592,17 @@ Fixed
   ramified prime with one prime ideal is still checked.  See "Class groups
   and order units" in :doc:`../reference/algorithms_and_sources`.
 
+- A ``proven`` class/unit computation no longer fails closed when its
+  relation-saturation proof at a prime ``ell`` needs an auxiliary prime
+  ``q = 1 mod ell`` above 1000.  The proof now scans ``q`` with no fixed
+  bound until it reaches full rank, as PARI's ``bnfcertify`` does, and checks
+  every ``q`` it uses as before.  Only the caller's time or memory limit stops
+  a longer scan, and a stopped request publishes no result.  For example,
+  ``Q(sqrt(1575029))`` now succeeds with ``proven`` class group ``Z/89`` and
+  the regulator PARI reports; it needs ``q = 2671``.  Results that succeeded
+  before are unchanged.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - Class/unit computations no longer fail in relation search when the order's
   Minkowski embedding has large entries, as for the power bases of the real
   cyclotomic fields of conductor 37 and 41 (degree 18 and 20), which now

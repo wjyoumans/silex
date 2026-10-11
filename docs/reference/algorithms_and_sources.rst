@@ -1318,6 +1318,18 @@ which adds the torsion generator when ``ell`` divides the torsion order.
 Where Hecke would enlarge the relations with ``saturate!`` and repeat, Silex
 fails closed: an ``ell`` whose local test does not reach full rank within the
 auxiliary-prime bound is recorded as ``unavailable`` and does not promote.
+A caller of ``try_prove_relation_saturation_with_units`` chooses that bound.
+Inside a ``proven`` paired class/unit transaction the bound is not fixed: as
+in ``primecertify``, which walks every prime ``q = 1 mod p`` up to
+``ULONG_MAX`` until the matrix has full rank (2.17.3 ``buch3.c`` lines
+1086--1146), the test runs over the whole machine-word range of ``q``.  The
+pair it proves passed the Belabas--Friedman index-one test, so under GRH its
+relations are saturated and the scan stops at full rank.  Every auxiliary
+prime it uses is checked as before.  Silex has no time limit of its own: a
+request whose scan runs longer is stopped only by the caller's time or memory
+limit, and a stopped request publishes nothing, so no result is labelled
+``proven``.  For example, ``Q(sqrt(1575029))`` (``h = 89``) needs
+``q = 2671``: the only ``q = 1 mod 89`` below 1000 is 179, which is inert.
 Each certification entry point is transactional; a failed call restores all
 class-group certification metadata, including the unit and regulator proof
 statuses.  A successful ``try_prove_relation_saturation_with_units`` call
