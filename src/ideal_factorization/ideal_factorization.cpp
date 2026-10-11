@@ -432,8 +432,9 @@ bool order_element_factor_over_base_with_required_prime_direct(
         // element is now a completed non-match even where the full path
         // would have returned false on an internal error at a smaller prime
         // (block mismatch, failed valuation, exponent overflow), so the
-        // capped honesty witness search moves on to the next candidate
-        // instead of failing; any witness it finds later is still genuine.
+        // honesty witness searches take it as final instead of falling back
+        // to the full factorization.  It is no witness either way: its norm
+        // has a rational prime with no base or required prime ideal above it.
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
                             "ideal.required_prime_direct_cofactor");
         flint::Fmpz cofactor;

@@ -1657,27 +1657,32 @@ int test_ramified_target_is_never_omitted() {
         }
     }
 
-    bool honest = true;
-    silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
-    const bool check_succeeded =
-            silex::detail::relation_search::factor_base_honesty_check(
-                    honest, base, sflint::FmpzConstRef(active_bound),
-                    sflint::FmpzConstRef(required_bound), nullptr, UWORD(0),
-                    true, 128,
-                    silex::detail::relation_search::
-                            FactorBaseWitnessEscalation::none,
-                    nullptr, &audit);
-
-    // The first omitted target is the ramified norm-4 prime above 2.  With no
-    // witness schedule the strict check must fail there, independently of the
-    // order in which the decomposition producer returned the two primes.
-    return check_succeeded || honest || audit.rational_prime_checks != 1 ||
-                           audit.checks_at_or_below_active_bound != 1
-            ? 1
-            : 0;
+    // The only omitted target up to the required bound is the ramified
+    // norm-4 prime above 2.  Both witness searches must target it,
+    // independently of the order in which the decomposition producer
+    // returned the two primes, and witness it.
+    for (bool direct : {false, true}) {
+        bool honest = false;
+        silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
+        const bool check_succeeded =
+                silex::detail::relation_search::factor_base_honesty_check(
+                        honest, base, sflint::FmpzConstRef(active_bound),
+                        sflint::FmpzConstRef(required_bound), nullptr,
+                        UWORD(0), direct, 128,
+                        silex::detail::relation_search::
+                                FactorBaseWitnessEscalation::none,
+                        nullptr, &audit);
+        if (!check_succeeded || !honest || audit.witness_targets != 1 ||
+            audit.witnessed_targets != 1 || audit.unwitnessed.recorded ||
+            audit.rational_prime_checks != 2 ||
+            audit.checks_at_or_below_active_bound != 2) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
-int test_scan_detects_lower_interval_omissions_and_fails_closed() {
+int test_scan_detects_lower_interval_omissions() {
     FieldSetup setup = quintic_lower_interval_fixture();
     sflint::Fmpz active_bound;
     sflint::Fmpz required_bound;
@@ -1726,26 +1731,29 @@ int test_scan_detects_lower_interval_omissions_and_fails_closed() {
         return 1;
     }
 
-    bool honest = true;
-    silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
-    const bool check_succeeded =
-            silex::detail::relation_search::factor_base_honesty_check(
-                    honest, base, sflint::FmpzConstRef(active_bound),
-                    sflint::FmpzConstRef(required_bound), nullptr, UWORD(0),
-                    true, 128,
-                    silex::detail::relation_search::
-                            FactorBaseWitnessEscalation::none,
-                    nullptr, &audit);
-
-    // With no sub-factor-base witness state, the first omitted norm-9 ideal
-    // fails closed. The audit proves that the scan reached it through p=3.
-    if (check_succeeded || honest) {
-        return 1;
+    // The norm-9 ideals above 3 hold one proof target (the last unramified
+    // factor of (3) is discharged by the others).  Both witness searches
+    // must target it, so the scan reaches p=3 and goes on to the required
+    // bound, and witness it.
+    for (bool direct : {false, true}) {
+        bool honest = false;
+        silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
+        const bool check_succeeded =
+                silex::detail::relation_search::factor_base_honesty_check(
+                        honest, base, sflint::FmpzConstRef(active_bound),
+                        sflint::FmpzConstRef(required_bound), nullptr,
+                        UWORD(0), direct, 128,
+                        silex::detail::relation_search::
+                                FactorBaseWitnessEscalation::none,
+                        nullptr, &audit);
+        if (!check_succeeded || !honest || audit.witness_targets != 1 ||
+            audit.witnessed_targets != 1 || audit.unwitnessed.recorded ||
+            audit.rational_prime_checks != 4 ||
+            audit.checks_at_or_below_active_bound != 4) {
+            return 1;
+        }
     }
-    return audit.rational_prime_checks != 2 ||
-                   audit.checks_at_or_below_active_bound != 2
-            ? 1
-            : 0;
+    return 0;
 }
 
 FieldSetup imaginary_quadratic_fixture(slong d) noexcept {
@@ -2429,6 +2437,122 @@ int test_escalation_only_without_recovery() {
             : 1;
 }
 
+// Runs one honesty scan with the capped T2 search (direct) or the
+// scalar/lattice search, with no escalation.
+bool run_fallback_scan(bool& honest,
+                       search::FactorBaseHonestyScanAudit& audit,
+                       const silex::FactorBase& base,
+                       ulong active,
+                       ulong required,
+                       const silex::detail::SubfactorBaseSchedule* schedule,
+                       bool direct) noexcept {
+    sflint::Fmpz active_bound;
+    sflint::Fmpz required_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), active);
+    sflint::fmpz_set_ui(sflint::FmpzRef(required_bound), required);
+    honest = !honest;
+    return search::factor_base_honesty_check(
+            honest, base, sflint::FmpzConstRef(active_bound),
+            sflint::FmpzConstRef(required_bound), schedule, UWORD(42), direct,
+            128, search::FactorBaseWitnessEscalation::none, nullptr, &audit);
+}
+
+// The capped T2 witness search keeps the scalar/lattice search's outcomes
+// where the per-candidate test or the twist schedule cannot be used: a
+// direct-evaluation error falls back to the full factorization, and a null
+// schedule or a schedule entry outside the base means no further twists, so
+// the scan still completes with the same honesty verdict instead of failing.
+int test_direct_witness_search_keeps_lattice_fallbacks() {
+    using silex::detail::SubfactorBaseSchedule;
+    // Z[x]/(x^3 - x - 1) (discriminant -23) is the maximal order.  The hook
+    // marks it maximal for the base build and then withdraws that, so the
+    // direct test cannot evaluate any candidate while the equation-order
+    // prime decomposition stays available.  The T2 search must still
+    // complete the scan, through the full-factorization fallback, with the
+    // scalar/lattice search's verdict.
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_zero(polynomial);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+        const silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order order = silex::test::equation_order(field);
+        if (!order.is_equation_order()) {
+            return 1;
+        }
+        silex::detail::OrderAccess::set_maximality_unchecked(order, true);
+        sflint::Fmpz active;
+        sflint::fmpz_set_ui(active, 7);
+        silex::FactorBase base(order);
+        if (!base.build_relation_completion_base(sflint::FmpzConstRef(active)) ||
+            base.length() == 0) {
+            return 1;
+        }
+        SubfactorBaseSchedule schedule;
+        schedule.subfactor_base.push_back(0);
+        schedule.excluded_indices.assign(
+                static_cast<std::size_t>(base.length()), 0);
+        silex::detail::OrderAccess::set_maximality_unchecked(order, false);
+        bool lattice_honest = false;
+        bool direct_honest = false;
+        search::FactorBaseHonestyScanAudit lattice_audit;
+        search::FactorBaseHonestyScanAudit direct_audit;
+        if (!run_fallback_scan(lattice_honest, lattice_audit, base, 7, 30,
+                               &schedule, false) ||
+            !run_fallback_scan(direct_honest, direct_audit, base, 7, 30,
+                               &schedule, true) ||
+            direct_honest != lattice_honest ||
+            direct_audit.witness_targets == 0 ||
+            direct_audit.witness_targets != lattice_audit.witness_targets ||
+            direct_audit.witnessed_targets !=
+                    lattice_audit.witnessed_targets ||
+            direct_audit.rational_prime_checks !=
+                    lattice_audit.rational_prime_checks ||
+            direct_audit.unwitnessed.recorded !=
+                    lattice_audit.unwitnessed.recorded ||
+            !sflint::fmpz_equal(direct_audit.unwitnessed.p,
+                                lattice_audit.unwitnessed.p)) {
+            return 1;
+        }
+    }
+    // Q(sqrt(-5)) on the empty norm-at-most-1 base: the prime above 2 has no
+    // witness.  A null schedule, an excluded entry and an entry past the end
+    // of the base each end the search with no witness.
+    {
+        FieldSetup setup = imaginary_quadratic_fixture(5);
+        silex::FactorBase base(setup.maximal_order);
+        if (!base.is_defined() || base.length() != 0) {
+            return 1;
+        }
+        SubfactorBaseSchedule past_end;
+        past_end.subfactor_base.push_back(0);
+        past_end.excluded_indices.assign(1, 0);
+        SubfactorBaseSchedule excluded;
+        excluded.subfactor_base.push_back(0);
+        excluded.excluded_indices.assign(1, 1);
+        for (const SubfactorBaseSchedule* schedule :
+             {static_cast<const SubfactorBaseSchedule*>(nullptr),
+              static_cast<const SubfactorBaseSchedule*>(&past_end),
+              static_cast<const SubfactorBaseSchedule*>(&excluded)}) {
+            for (bool direct : {false, true}) {
+                bool honest = true;
+                search::FactorBaseHonestyScanAudit audit;
+                if (!run_fallback_scan(honest, audit, base, 1, 2, schedule,
+                                       direct) ||
+                    honest || audit.witness_targets != 1 ||
+                    audit.witnessed_targets != 0 ||
+                    !audit.unwitnessed.recorded ||
+                    audit.unwitnessed.direct_witness_search != direct) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -2450,7 +2574,7 @@ int main() {
                    test_generation_bound_checker_rejects_missing_truncated_target() !=
                            0 ||
                    test_ramified_target_is_never_omitted() != 0 ||
-                   test_scan_detects_lower_interval_omissions_and_fails_closed() !=
+                   test_scan_detects_lower_interval_omissions() !=
                            0 ||
                    test_escalated_witness_search_proves_large_class_group_base() !=
                            0 ||
@@ -2460,7 +2584,8 @@ int main() {
                            0 ||
                    test_later_attempt_clears_honesty_failure() != 0 ||
                    test_transaction_reuses_passed_honesty_scan() != 0 ||
-                   test_failure_detail_json() != 0
+                   test_failure_detail_json() != 0 ||
+                   test_direct_witness_search_keeps_lattice_fallbacks() != 0
             ? 1
             : 0;
 }

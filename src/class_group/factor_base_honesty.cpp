@@ -307,6 +307,7 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         const FactorBaseWitnessSearchEffort& effort,
         RequiredPrimeWitnessExhaustion& exhaustion,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
+        FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.honesty_enumerate_witness");
@@ -386,15 +387,13 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
             !order_element.set_element(original_element)) {
             return RequiredPrimeWitnessSearchResult::failed;
         }
-        bool matches = false;
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.honesty_factor_over_base_required_prime");
-        if (!detail::order_element_factor_over_base_with_required_prime(
-                    matches, order_element, base, required_prime,
-                    diagnostics)) {
-            return RequiredPrimeWitnessSearchResult::failed;
-        }
-        if (matches) {
+        // Classify the candidate as the scalar/lattice search does: a direct
+        // evaluation error falls back to the full factorization, and a
+        // failed classification is no witness, not a failed search.
+        if (factor_base_principal_witness(base, required_prime, order_element,
+                                          predicate, diagnostics)) {
             return RequiredPrimeWitnessSearchResult::found;
         }
     }
@@ -414,11 +413,11 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
         const FactorBaseWitnessSearchEffort& effort,
         RequiredPrimeWitnessExhaustion& exhaustion,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
+        FactorBaseWitnessPredicate predicate,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (field == nullptr || subfactor_base_schedule == nullptr ||
-        ideal_reduction_precision <= 0 ||
+    if (field == nullptr || ideal_reduction_precision <= 0 ||
         !same_order_parent(required_prime.parent(), order) ||
         base.contains(required_prime)) {
         return RequiredPrimeWitnessSearchResult::failed;
@@ -440,8 +439,9 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
 
     RequiredPrimeWitnessSearchResult result = enumerate_required_prime_witness(
             base, required_prime, current, back_multiplier, effort,
-            exhaustion, embedding_cache, diagnostics);
-    if (result != RequiredPrimeWitnessSearchResult::exhausted) {
+            exhaustion, embedding_cache, predicate, diagnostics);
+    if (result != RequiredPrimeWitnessSearchResult::exhausted ||
+        subfactor_base_schedule == nullptr) {
         return result;
     }
 
@@ -455,10 +455,12 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
         }
 
         for (slong index : subfactor_base_schedule->subfactor_base) {
+            // As in the scalar/lattice random search, a schedule entry
+            // outside the base ends the twists without a witness.
             if (subfactor_base_index_is_excluded(
                         *subfactor_base_schedule, index) ||
                 index >= base.length()) {
-                return RequiredPrimeWitnessSearchResult::failed;
+                return RequiredPrimeWitnessSearchResult::exhausted;
             }
             const slong exponent = static_cast<slong>(
                     next_relation_random_exponent(random_state));
@@ -485,7 +487,7 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
         }
         result = enumerate_required_prime_witness(
                 base, required_prime, current, back_multiplier, effort,
-                exhaustion, embedding_cache, diagnostics);
+                exhaustion, embedding_cache, predicate, diagnostics);
         if (result != RequiredPrimeWitnessSearchResult::exhausted) {
             return result;
         }
@@ -1007,7 +1009,7 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                 base, *prime, subfactor_base_schedule,
                                 random_state, ideal_reduction_precision,
                                 effort, exhaustion, embedding_cache,
-                                diagnostics);
+                                predicate, diagnostics);
                 if (result == RequiredPrimeWitnessSearchResult::failed) {
                     return false;
                 }

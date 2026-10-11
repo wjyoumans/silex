@@ -91,8 +91,11 @@ bool factor_base_honesty_reduce_large_ideal(
         slong precision,
         const DiagnosticsContext* diagnostics) noexcept;
 
-// The predicate selector affects only the legacy scalar/lattice search;
-// use_direct_required_prime_witness independently selects the T2 search.
+// use_direct_required_prime_witness selects the capped T2 search instead of
+// the scalar/lattice search.  Both classify each candidate with
+// factor_base_principal_witness under the given predicate, and both treat a
+// null subfactor_base_schedule, or a schedule entry outside the base, as no
+// further twists rather than as a failed scan.
 bool factor_base_honesty_check(
         bool& honest,
         const FactorBase& base,

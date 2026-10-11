@@ -1763,7 +1763,11 @@ of the required prime ideal by T2 norm and stops after ``maxtry_FACT`` =
 search has no candidate cap: in high degree it could run on one prime with
 no smooth element until the caller's time limit.  Every T2 candidate passes
 the same exact norm-accounting check, so a witness proves the same thing on
-either route.  The noninstalled
+either route.  The T2 route also keeps the scalar/lattice route's fallbacks:
+a candidate the direct test cannot evaluate is classified by the full ideal
+factorization, and a missing sub-factor-base schedule, or a schedule entry
+outside the factor base, ends the random twists without a witness rather
+than failing the scan.  The noninstalled
 reference selector and scan audit support differential tests without a
 public option or persistent cache.  Frozen quartic and quintic benchmark
 batches contain 672 and 3937 candidates respectively; each classification
