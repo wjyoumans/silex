@@ -1447,10 +1447,17 @@ characters, the quotient logarithms of the unit images, following Hecke
 ``Saturate.jl:mod_p`` (lines 6-46).  Hecke fills a table of all generator
 powers when ``nbits(pp) < 19`` (line 32) and otherwise takes each logarithm by
 ``baby_step_giant_step`` (``ResidueRingMultGrp.jl``, lines 716-738, line 43 of
-``mod_p``).  Silex works in the order-``ell`` quotient, where its linear walk
-costs ``ell`` steps against Hecke's ``pp`` table entries, so it applies the
-19-bit cutoff to ``ell`` instead of ``pp``; this is a cost adaptation only,
-since both routes return the unique logarithm in ``[0, ell)``.
+``mod_p``).  Silex works in the order-``ell`` quotient on word-size
+degree-one primes, where its shared linear walk costs up to ``ell`` steps
+against Hecke's ``pp`` table entries.  As an intentional deviation from the
+19-bit cutoff (``Saturate.jl`` line 32), Silex takes the logarithms by
+baby-step giant-step once ``ell`` has 7 or more bits and keeps the walk only
+for smaller ``ell``: measured on proven unit saturation, where ``ell`` runs
+up to 16 bits, baby-step giant-step was faster per column from 7 bits on
+and about 17 to 33 times faster at 14 to 16 bits.  This is a cost choice
+only: baby-step giant-step runs only when ``ell`` is prime and the quotient
+generator has order ``ell``, so both routes return the unique logarithm in
+``[0, ell)`` and the columns are the same.
 
 When ``ell`` divides the torsion order, the candidates include the torsion
 generator ``zeta``, as in Hecke v0.38.6
