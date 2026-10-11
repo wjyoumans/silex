@@ -1185,20 +1185,28 @@ bool extract_two_generator(flint::FmpzMat& coordinates,
     // modulo a, and accept only HNF([a I; M_beta]) == H. Unlike the source's
     // unbounded loop, exhaustion returns to the exact basis-product algorithm.
     const slong n = order.degree();
-    flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n), reduced(2 * n, n);
+    flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n);
     flint::FmpzMat table(n * n, n);
     if (!order.multiplication_table(flint::FmpzMatRef(table))) return false;
     std::vector<flint::FmpzMat> basis_rows;
     std::vector<flint::FmpzMat> basis_matrices;
+    // Source: base4.c ok_elt takes ZM_hnfmodid(M_beta, a), the HNF modulo the
+    // minimum a.  The rows a I and M_beta span a O + beta O, which contains
+    // a Z^n, so every elementary divisor divides a and the rank is n: the
+    // contract of FLINT fmpz_mat_hnf_modular_eldiv with D = a, whose result
+    // is the unique HNF that fmpz_mat_hnf would return.
     const auto verifies = [&]() noexcept {
+        // a = 1: a O + beta O = O.  FLINT's word path would reduce modulo 1.
+        if (fmpz_is_one(minimum.raw())) return fmpz_mat_is_one(h.raw()) != 0;
         fmpz_mat_zero(rows.raw());
         for (slong i = 0; i < n; ++i) {
             fmpz_set(fmpz_mat_entry(rows.raw(), i, i), minimum.raw());
             copy_row(flint::FmpzMatRef(rows), n + i,
                      flint::FmpzMatConstRef(matrix), i);
         }
-        fmpz_mat_hnf(reduced.raw(), rows.raw());
-        flint::FmpzMatConstWindow top(reduced, 0, 0, n, n);
+        fmpz_mat_hnf_modular_eldiv(rows.raw(), minimum.raw());
+        // The window is taken after the HNF, which may permute row storage.
+        flint::FmpzMatConstWindow top(rows, 0, 0, n, n);
         return fmpz_mat_equal(top.raw(), h.raw()) != 0;
     };
     const auto publish = [&]() noexcept {
