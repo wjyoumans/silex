@@ -5,6 +5,7 @@
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_vec.hpp>
 #include <silex/number_field.hpp>
 
 #include "test_support.hpp"
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -232,18 +234,50 @@ void check_definite_non_powers() noexcept {
 
 }  // namespace
 
-// The per-entry factored log pass: the factor log of every entry, in order,
-// at the bucketed precision of FactoredElement::logarithmic_embedding for the
-// working precision `work`, summed entry by entry with its own exponent, then
+// The merged factor list of `value`, as the reference's factored-element
+// dictionary holds it: equal factors (Element::equal) in order of first
+// occurrence, each with the exact fmpz sum of its entries' exponents, zero
+// sums dropped.
+void merge_factors(std::vector<const silex::Element*>& bases,
+                   sflint::FmpzVec& exponents,
+                   const silex::FactoredElement& value) noexcept {
+    const auto entries = value.factors();
+    sflint::FmpzVec sums(static_cast<slong>(entries.size()));
+    std::vector<const silex::Element*> distinct;
+    for (const auto& entry : entries) {
+        std::size_t d = 0;
+        while (d < distinct.size() && !distinct[d]->equal(entry.factor)) {
+            ++d;
+        }
+        if (d == distinct.size()) {
+            distinct.push_back(&entry.factor);
+        }
+        ::fmpz_add_si(sums.data() + d, sums.data() + d, entry.exponent);
+    }
+    bases.clear();
+    sflint::FmpzVec kept(static_cast<slong>(distinct.size()));
+    for (std::size_t d = 0; d < distinct.size(); ++d) {
+        if (::fmpz_is_zero(sums.data() + d) == 0) {
+            ::fmpz_set(kept.data() + bases.size(), sums.data() + d);
+            bases.push_back(distinct[d]);
+        }
+    }
+    exponents = std::move(kept);
+}
+
+// The merged factored log pass: the factor log of every merged base, in
+// order, at the bucketed precision of FactoredElement::logarithmic_embedding
+// for the working precision `work`, summed with its merged exponent, then
 // each coordinate rounded to the shortest form within 2^-precision.  Returns
 // false when a partial sum misses the target radius (the caller doubles).
-bool per_entry_factored_log_pass(sflint::ArbVec& out,
-                                 silex::EmbeddingContext& embeddings,
-                                 const silex::FactoredElement& value,
-                                 silex::LogEmbeddingMode mode,
-                                 slong precision,
-                                 slong places,
-                                 slong work) noexcept {
+bool merged_factored_log_pass(sflint::ArbVec& out,
+                              silex::EmbeddingContext& embeddings,
+                              const std::vector<const silex::Element*>& bases,
+                              const sflint::FmpzVec& exponents,
+                              silex::LogEmbeddingMode mode,
+                              slong precision,
+                              slong places,
+                              slong work) noexcept {
     slong factor_precision = 1;
     while (factor_precision <= work) {
         factor_precision *= 2;
@@ -251,26 +285,25 @@ bool per_entry_factored_log_pass(sflint::ArbVec& out,
 
     sflint::ArbVec row(places);
     _arb_vec_zero(out.data(), places);
-    bool first = true;
-    for (const auto& entry : value.factors()) {
+    for (std::size_t k = 0; k < bases.size(); ++k) {
         if (!silex::logarithmic_embedding(sflint::ArbVecRef(row), embeddings,
-                                          entry.factor, mode,
+                                          *bases[k], mode,
                                           factor_precision)) {
             return false;
         }
+        const fmpz* exponent = exponents.data() + k;
         for (slong j = 0; j < places; ++j) {
-            if (first) {
-                ::arb_mul_si(out.data() + j, row.data() + j, entry.exponent,
-                             factor_precision);
+            if (k == 0) {
+                ::arb_mul_fmpz(out.data() + j, row.data() + j, exponent,
+                               factor_precision);
             } else {
-                ::arb_addmul_si(out.data() + j, row.data() + j,
-                                entry.exponent, factor_precision);
+                ::arb_addmul_fmpz(out.data() + j, row.data() + j, exponent,
+                                  factor_precision);
             }
             if (!has_radius_at_most_2exp(out.data() + j, -precision)) {
                 return false;
             }
         }
-        first = false;
     }
     for (slong j = 0; j < places; ++j) {
         arb_struct* coordinate = out.data() + j;
@@ -294,37 +327,39 @@ bool per_entry_factored_log_pass(sflint::ArbVec& out,
     return true;
 }
 
-// The per-entry factored log with its own precision doubling: start at the
-// target plus exponent and factor-count guard bits and double the working
-// precision until every partial sum meets 2^-precision.  `first_pass_only`
-// stops after the first pass (false when that pass misses the target).
-bool per_entry_factored_log(sflint::ArbVec& out,
-                            silex::EmbeddingContext& embeddings,
-                            const silex::FactoredElement& value,
-                            silex::LogEmbeddingMode mode,
-                            slong precision,
-                            slong places,
-                            bool first_pass_only = false) noexcept {
-    const auto bits = [](ulong x) noexcept {
-        slong count = 0;
-        while (x != 0) {
-            ++count;
-            x >>= 1;
-        }
-        return count;
-    };
+// The merged factored log with its own precision doubling: start at the
+// target plus guard bits for the largest merged exponent and the number of
+// merged bases, and double the working precision until every partial sum
+// meets 2^-precision.  `first_pass_only` stops after the first pass (false
+// when that pass misses the target).
+bool merged_factored_log(sflint::ArbVec& out,
+                         silex::EmbeddingContext& embeddings,
+                         const silex::FactoredElement& value,
+                         silex::LogEmbeddingMode mode,
+                         slong precision,
+                         slong places,
+                         bool first_pass_only = false) noexcept {
+    std::vector<const silex::Element*> bases;
+    sflint::FmpzVec exponents(0);
+    merge_factors(bases, exponents, value);
+    if (bases.empty()) {
+        _arb_vec_zero(out.data(), places);
+        return true;
+    }
     slong exponent_bits = 0;
-    for (const auto& entry : value.factors()) {
-        const slong b = bits(entry.exponent < 0
-                                     ? -static_cast<ulong>(entry.exponent)
-                                     : static_cast<ulong>(entry.exponent));
+    for (std::size_t k = 0; k < bases.size(); ++k) {
+        const slong b = static_cast<slong>(
+                ::fmpz_bits(exponents.data() + k));
         exponent_bits = b > exponent_bits ? b : exponent_bits;
     }
-    slong work = precision + exponent_bits +
-                 bits(static_cast<ulong>(value.factors().size()));
+    slong count_bits = 0;
+    for (std::size_t n = bases.size(); n != 0; n >>= 1) {
+        ++count_bits;
+    }
+    slong work = precision + exponent_bits + count_bits;
     for (int attempt = 0; attempt < 12; ++attempt) {
-        if (per_entry_factored_log_pass(out, embeddings, value, mode,
-                                        precision, places, work)) {
+        if (merged_factored_log_pass(out, embeddings, bases, exponents, mode,
+                                     precision, places, work)) {
             return true;
         }
         if (first_pass_only) {
@@ -335,17 +370,32 @@ bool per_entry_factored_log(sflint::ArbVec& out,
     return false;
 }
 
+// The exact log embedding of `value`, enclosed far more tightly than any
+// result checked against it: the log of the evaluated element at high
+// precision.
+void exact_factored_log(sflint::ArbVec& out,
+                        const silex::NumberField& field,
+                        const silex::FactoredElement& value,
+                        silex::LogEmbeddingMode mode) noexcept {
+    silex::Element evaluated(field);
+    assert(value.evaluate(evaluated));
+    silex::EmbeddingContext embeddings(field);
+    assert(silex::logarithmic_embedding(sflint::ArbVecRef(out), embeddings,
+                                        evaluated, mode, 1200));
+}
 
 // A factored element that repeats equal factors (as separate copies, built
 // along different paths, interleaved with other factors) has the log
-// embedding of the per-entry sum, bit for bit: looking each distinct factor
-// up once per pass changes neither the terms nor their order.
+// embedding of its merged factor list, bit for bit, and that enclosure
+// contains the exact log embedding.
 void check_factored_log_of(const silex::NumberField& field,
                            const silex::FactoredElement& value,
                            slong places) noexcept {
     for (const silex::LogEmbeddingMode mode :
          {silex::LogEmbeddingMode::plain,
           silex::LogEmbeddingMode::product}) {
+        sflint::ArbVec exact(places);
+        exact_factored_log(exact, field, value, mode);
         for (const slong precision : {slong(30), slong(64), slong(200)}) {
             silex::EmbeddingContext embeddings(field);
             silex::EmbeddingContext reference_embeddings(field);
@@ -353,12 +403,14 @@ void check_factored_log_of(const silex::NumberField& field,
             sflint::ArbVec expected(places);
             assert(value.logarithmic_embedding(sflint::ArbVecRef(logs),
                                                embeddings, mode, precision));
-            assert(per_entry_factored_log(expected, reference_embeddings,
-                                          value, mode, precision, places));
+            assert(merged_factored_log(expected, reference_embeddings,
+                                       value, mode, precision, places));
             for (slong j = 0; j < places; ++j) {
                 assert(::arb_equal(logs.data() + j, expected.data() + j) !=
                        0);
                 assert(has_radius_at_most_2exp(logs.data() + j, -precision));
+                assert(::arb_contains(logs.data() + j, exact.data() + j) !=
+                       0);
             }
         }
     }
@@ -431,9 +483,131 @@ void check_repeated_factor_logs() noexcept {
     check_factored_log_of(cubic, long_value, 2);
 }
 
+// Equal bases are merged before the log sum, with exponents summed exactly.
+// Each case below has a result that only the merged sum gives: an entry-by-
+// entry sum of irrational logs is never an exact zero, and it rounds each
+// cancelled entry into the radius.
+void check_merged_equal_bases() noexcept {
+    silex::NumberField quadratic = quadratic_field(2);
+    silex::Element unit_like(quadratic);
+    silex::Element theta(quadratic);
+    silex::Element same_unit(quadratic);
+    silex::Element shifted(quadratic);
+    set_one_plus_theta(unit_like);
+    assert(theta.gen());
+    assert(same_unit.add_si(theta, 1));
+    assert(shifted.add_si(theta, 5));
+
+    // Exponents that cancel completely: the value is 1 and its log is 0
+    // exactly.
+    silex::FactoredElement cancelled(quadratic);
+    assert(cancelled.push(unit_like, 7));
+    assert(cancelled.push(shifted, 3));
+    assert(cancelled.push(same_unit, -4));
+    assert(cancelled.push(shifted, -3));
+    assert(cancelled.push(unit_like, -3));
+    // Exponents that cancel on one base and add on the other: the merged
+    // list is shifted^2 alone, so the log is that of a one-entry product.
+    silex::FactoredElement partial(quadratic);
+    assert(partial.push(unit_like, 9));
+    assert(partial.push(shifted, 3));
+    assert(partial.push(same_unit, -9));
+    assert(partial.push(shifted, -1));
+    silex::FactoredElement single(quadratic);
+    assert(single.push(shifted, 2));
+    for (const silex::LogEmbeddingMode mode :
+         {silex::LogEmbeddingMode::plain,
+          silex::LogEmbeddingMode::product}) {
+        for (const slong precision : {slong(30), slong(64), slong(200)}) {
+            silex::EmbeddingContext embeddings(quadratic);
+            sflint::ArbVec logs(2);
+            assert(cancelled.logarithmic_embedding(sflint::ArbVecRef(logs),
+                                                   embeddings, mode,
+                                                   precision));
+            for (slong j = 0; j < 2; ++j) {
+                assert(::arb_is_zero(logs.data() + j) != 0);
+                assert(::arb_is_exact(logs.data() + j) != 0);
+            }
+
+            sflint::ArbVec merged(2);
+            sflint::ArbVec alone(2);
+            silex::EmbeddingContext other_embeddings(quadratic);
+            assert(partial.logarithmic_embedding(sflint::ArbVecRef(merged),
+                                                 embeddings, mode,
+                                                 precision));
+            assert(single.logarithmic_embedding(sflint::ArbVecRef(alone),
+                                                other_embeddings, mode,
+                                                precision));
+            for (slong j = 0; j < 2; ++j) {
+                assert(::arb_equal(merged.data() + j, alone.data() + j) !=
+                       0);
+            }
+        }
+    }
+    check_factored_log_of(quadratic, cancelled, 2);
+    check_factored_log_of(quadratic, partial, 2);
+
+    // Exponents whose sum leaves slong: a^max * a^max * b has the merged
+    // exponent 2 * (2^63 - 1) on a.  The result must contain the exact log,
+    // (2^64 - 2) log|a| + log|b| at each place (a cubic field, with a real
+    // and a complex place).
+    silex::NumberField cubic = cubic_field();
+    silex::Element a(cubic);
+    silex::Element same_a(cubic);
+    silex::Element b(cubic);
+    silex::Element cubic_theta(cubic);
+    set_cubic_element(a, 1, 1, 0);
+    assert(cubic_theta.gen());
+    assert(same_a.add_si(cubic_theta, 1));
+    set_cubic_element(b, 3, -1, 1);
+    const slong max = std::numeric_limits<slong>::max();
+    silex::FactoredElement wide(cubic);
+    assert(wide.push(a, max));
+    assert(wide.push(b, 1));
+    assert(wide.push(same_a, max));
+    sflint::Fmpz wide_exponent;
+    sflint::fmpz_set_si(wide_exponent, max);
+    ::fmpz_mul_ui(wide_exponent.raw(), wide_exponent.raw(), 2);
+    for (const silex::LogEmbeddingMode mode :
+         {silex::LogEmbeddingMode::plain,
+          silex::LogEmbeddingMode::product}) {
+        silex::EmbeddingContext exact_embeddings(cubic);
+        sflint::ArbVec log_a(2);
+        sflint::ArbVec log_b(2);
+        assert(silex::logarithmic_embedding(sflint::ArbVecRef(log_a),
+                                            exact_embeddings, a, mode, 1200));
+        assert(silex::logarithmic_embedding(sflint::ArbVecRef(log_b),
+                                            exact_embeddings, b, mode, 1200));
+        sflint::ArbVec exact(2);
+        for (slong j = 0; j < 2; ++j) {
+            ::arb_mul_fmpz(exact.data() + j, log_a.data() + j,
+                           wide_exponent.raw(), 1200);
+            ::arb_add(exact.data() + j, exact.data() + j, log_b.data() + j,
+                      1200);
+        }
+        for (const slong precision : {slong(30), slong(64), slong(200)}) {
+            silex::EmbeddingContext embeddings(cubic);
+            silex::EmbeddingContext reference_embeddings(cubic);
+            sflint::ArbVec logs(2);
+            sflint::ArbVec expected(2);
+            assert(wide.logarithmic_embedding(sflint::ArbVecRef(logs),
+                                              embeddings, mode, precision));
+            assert(merged_factored_log(expected, reference_embeddings, wide,
+                                       mode, precision, 2));
+            for (slong j = 0; j < 2; ++j) {
+                assert(::arb_equal(logs.data() + j, expected.data() + j) !=
+                       0);
+                assert(has_radius_at_most_2exp(logs.data() + j, -precision));
+                assert(::arb_contains(logs.data() + j, exact.data() + j) !=
+                       0);
+            }
+        }
+    }
+}
+
 // A context whose cache already holds the factor logs at a higher precision
 // (stored by an earlier call), and a value whose first pass misses the target
-// so a second precision pass runs: both must equal the per-entry reference,
+// so a second precision pass runs: both must equal the merged reference,
 // which doubles on its own.
 void check_warm_cache_and_second_pass() noexcept {
     silex::NumberField cubic = cubic_field();
@@ -454,9 +628,9 @@ void check_warm_cache_and_second_pass() noexcept {
         sflint::ArbVec warmup(2);
         assert(warm_value.logarithmic_embedding(sflint::ArbVecRef(warmup),
                                                 embeddings, mode, 400));
-        // The reference context is warmed the same way, entry by entry.
+        // The reference context is warmed the same way.
         sflint::ArbVec reference_warmup(2);
-        assert(per_entry_factored_log(reference_warmup, reference_embeddings,
+        assert(merged_factored_log(reference_warmup, reference_embeddings,
                                       warm_value, mode, 400, 2));
         std::uint64_t version = 0;
         assert(silex::detail::embedding_log_cache_version(version,
@@ -465,7 +639,7 @@ void check_warm_cache_and_second_pass() noexcept {
         sflint::ArbVec expected(2);
         assert(warm_value.logarithmic_embedding(sflint::ArbVecRef(logs),
                                                 embeddings, mode, 30));
-        assert(per_entry_factored_log(expected, reference_embeddings,
+        assert(merged_factored_log(expected, reference_embeddings,
                                       warm_value, mode, 30, 2));
         for (slong j = 0; j < 2; ++j) {
             assert(::arb_equal(logs.data() + j, expected.data() + j) != 0);
@@ -512,11 +686,11 @@ void check_warm_cache_and_second_pass() noexcept {
         sflint::ArbVec logs(2);
         sflint::ArbVec expected(2);
         sflint::ArbVec first_pass(2);
-        assert(!per_entry_factored_log(first_pass, reference_embeddings, hard,
+        assert(!merged_factored_log(first_pass, reference_embeddings, hard,
                                        mode, 30, 2, true));
         assert(hard.logarithmic_embedding(sflint::ArbVecRef(logs), embeddings,
                                           mode, 30));
-        assert(per_entry_factored_log(expected, reference_embeddings, hard,
+        assert(merged_factored_log(expected, reference_embeddings, hard,
                                       mode, 30, 2));
         for (slong j = 0; j < 2; ++j) {
             assert(::arb_equal(logs.data() + j, expected.data() + j) != 0);
@@ -528,6 +702,7 @@ void check_warm_cache_and_second_pass() noexcept {
 int main() {
     check_many_factor_evaluation();
     check_repeated_factor_logs();
+    check_merged_equal_bases();
     check_warm_cache_and_second_pass();
     check_multi_factor_leftover_roots();
     check_definite_non_powers();

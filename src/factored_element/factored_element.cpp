@@ -1,7 +1,9 @@
 #include <silex/factored_element.hpp>
+#include <silex/flint/fmpz_vec.hpp>
 #include "../order_unit/precision_cap_internal.hpp"
 
 #include <flint/arb.h>
+#include <flint/fmpz.h>
 #include <flint/nf.h>
 #include <flint/nf_elem.h>
 
@@ -1027,13 +1029,17 @@ bool FactoredElement::logarithmic_embedding(
 
     // Unit candidates repeat a few distinct factors many times (a product of
     // relation units appends the factor lists of its operands and merges
-    // nothing), so each distinct factor's log is looked up once per pass and
-    // reused for its later entries.  The sum below still takes every entry
-    // in order with its own exponent, so the result is the one the per-entry
-    // loop computes: a repeated lookup in that loop is a cache hit returning
-    // the row its first lookup in the pass returned or stored at the same
-    // precision.  (Only when that store failed would the per-entry loop
-    // recompute the row instead.)
+    // nothing), so equal bases are merged first, as the reference's
+    // factored-element dictionary holds them (NfOrd/FacElem.jl:149-205 sums
+    // over that dictionary): each distinct factor, in order of first
+    // occurrence, carries the exact sum of its entries' exponents (an fmpz,
+    // so the sum cannot overflow), and the log sum takes one term per
+    // distinct factor with a nonzero merged exponent.  The guard bits come
+    // from the merged exponents and the number of terms, as the reference's
+    // conjugates_arb_log computes them from its dictionary.  Every term is an
+    // Arb ball operation, so the sum stays a rigorous enclosure; it is not
+    // bit-identical to an entry-by-entry sum (fewer roundings, a different
+    // working precision).
     std::vector<std::size_t> distinct_index;
     std::vector<std::size_t> distinct_first;
     if (!distinct_factor_indices(distinct_index, distinct_first, entries,
@@ -1046,16 +1052,40 @@ bool FactoredElement::logarithmic_embedding(
                 std::numeric_limits<slong>::max() / places)) {
         return false;
     }
-    flint::ArbVec rows(static_cast<slong>(distinct_count) * places);
-    std::vector<unsigned char> row_ready(distinct_count, 0);
+    flint::FmpzVec merged(static_cast<slong>(distinct_count));
+    for (std::size_t k = 0; k < entries.size(); ++k) {
+        ::fmpz_add_si(merged.data() + distinct_index[k],
+                      merged.data() + distinct_index[k],
+                      entries[k].exponent);
+    }
+    std::vector<std::size_t> terms;
+    flint_bitcnt_t merged_exponent_bits = 0;
+    for (std::size_t d = 0; d < distinct_count; ++d) {
+        const fmpz* exponent = merged.data() + d;
+        if (::fmpz_is_zero(exponent) != 0) {
+            continue;
+        }
+        terms.push_back(d);
+        const flint_bitcnt_t bits = ::fmpz_bits(exponent);
+        if (bits > merged_exponent_bits) {
+            merged_exponent_bits = bits;
+        }
+    }
+    if (terms.empty()) {
+        // The exponents of every base cancel: the value is 1, whose log is 0
+        // exactly (the reference replaces such a dictionary by one(K)^1).
+        _arb_vec_zero(sum.data(), places);
+        return out.set_from(flint::ArbVecConstRef(sum));
+    }
+    flint::ArbVec row(places);
 
     // Source trace: reference NfOrd/FacElem.jl:116-120 and :149-205 bucket factor
     // logs, add exponent and factor-count guard bits, and double working
     // precision until every partial sum meets the requested absolute error.
     slong work_precision = 0;
     if (!factored_log_work_precision(
-                work_precision, precision, max_exponent_bits,
-                size_bits(entries.size()))) {
+                work_precision, precision, merged_exponent_bits,
+                size_bits(terms.size()))) {
         return false;
     }
 
@@ -1069,38 +1099,31 @@ bool FactoredElement::logarithmic_embedding(
             return false;
         }
         _arb_vec_zero(sum.data(), places);
-        std::fill(row_ready.begin(), row_ready.end(),
-                  static_cast<unsigned char>(0));
         bool first = true;
         bool precision_too_low = false;
-        for (std::size_t k = 0; k < entries.size(); ++k) {
-            const auto& entry = entries[k];
-            const std::size_t d = distinct_index[k];
-            arb_ptr row = rows.data() + static_cast<slong>(d) * places;
-            if (row_ready[d] == 0) {
-                // Profile counts here and for the cache hits below are per
-                // distinct factor per pass, not per entry, so they are not
-                // comparable with profiles taken before this memoization.
+        for (const std::size_t d : terms) {
+            const auto& entry = entries[distinct_first[d]];
+            const fmpz* exponent = merged.data() + d;
+            {
                 SILEX_PROFILE_SCOPE(
                         diagnostics, DiagnosticsModule::element,
                         "element.factored.logarithmic_embedding_factor");
                 if (!silex::logarithmic_embedding(
-                            flint::ArbVecRef(row, places), embeddings,
+                            flint::ArbVecRef(row), embeddings,
                             entry.factor, mode, factor_precision,
                             diagnostics)) {
                     precision_too_low = true;
                     break;
                 }
-                row_ready[d] = 1;
             }
 
             for (slong j = 0; j < places; ++j) {
                 if (first) {
-                    arb_mul_si(sum.data() + j, row + j,
-                               entry.exponent, factor_precision);
+                    arb_mul_fmpz(sum.data() + j, row.data() + j, exponent,
+                                 factor_precision);
                 } else {
-                    arb_addmul_si(sum.data() + j, row + j,
-                                  entry.exponent, factor_precision);
+                    arb_addmul_fmpz(sum.data() + j, row.data() + j,
+                                    exponent, factor_precision);
                 }
                 if (!arb_has_radius_at_most_2exp(
                             sum.data() + j, target_radius_2exp)) {

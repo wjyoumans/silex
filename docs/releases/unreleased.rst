@@ -492,6 +492,23 @@ Changed
   and ``true`` answers and their roots are unchanged.  See "Element powers
   and roots" in :doc:`../reference/algorithms_and_sources`.
 
+- ``FactoredElement::logarithmic_embedding`` merges equal bases before
+  summing, as Hecke's ``conjugates_arb_log`` sums over a ``FacElem``
+  dictionary (``src/NumFieldOrd/NfOrd/FacElem.jl``, 149-205): each distinct
+  factor contributes one term with the exact sum of its exponents (exponents
+  that cancel contribute nothing), and the guard bits come from the merged
+  exponents and the number of terms.  The result is still a rigorous Arb
+  enclosure within the requested ``2^-precision``, but its bits differ from
+  the entry-by-entry sum.  Unit candidates built from products of relation
+  units repeat a few dozen bases thousands of times, so this shortens unit
+  computations on such fields (for example ``grh`` on the maximal real
+  subfield of ``Q(zeta_31)``).  The published regulator enclosure changes in
+  its last bits: on the class/unit benchmark corpus, 36 of 237 ``grh`` and
+  ``proven`` results report a different ``regulator_radius`` (between 0.71
+  and 1.11 times the previous value) and some a regulator midpoint that
+  differs in its last bits; every new enclosure overlaps the previous one.
+  Units, class groups and labels are unchanged on that corpus.
+
 Fixed
 -----
 
