@@ -5590,16 +5590,31 @@ bool real_quadratic_two_units(silex::OrderUnitGroup& out,
 // factor base over the primes up to 7 and the relations sqrt(2), 3, 5,
 // 11 + 6 sqrt(2) = (3 + sqrt(2))^2 and 3 - sqrt(2), the tentative class group
 // is Z/2.  Saturation at 2 finds 3 + sqrt(2) and appends it as a class
-// relation, which clears the stored presentation.  The loop must validate
-// against the rebuilt presentation instead of reading "presentation
-// unavailable" as a result.  With factor base generation recorded as checked
-// the real index bound drops to 1.  Without it the bound stays 2; the round
-// then hands the candidate to the caller's proven re-check, as Silex did
-// before the rebuild, instead of failing.
-bool small_index_saturation_appended_class_relation_case(
-        bool record_generation_check) {
+// relation, which clears the stored presentation.  Both saturation helpers
+// must validate against the rebuilt presentation instead of reading
+// "presentation unavailable" as a result.  With factor base generation
+// recorded as checked the real index bound drops to 1.  Without it the bound
+// stays 2.  An outcome the small-index loop cannot resolve after a rebuild
+// keeps Silex's behaviour from before the rebuild instead of failing the
+// compute: a round that rebuilt the presentation sets the candidate validated
+// (in the proven path the full proven re-check then decides), and a loop
+// entered after saturation at 2 rebuilt it returns without an attempt.
+enum class AppendedClassRelationCase {
+    small_index_generation_checked,
+    small_index_bound_two,
+    small_index_bound_three,
+    at_two_generation_checked,
+    at_two_then_small_index,
+};
+
+bool appended_class_relation_case(AppendedClassRelationCase which) {
     using CertificationAccess =
             silex::detail::ClassGroupCertificationAccess;
+    using silex::detail::ValidateRefineOutcome;
+    const bool record_generation_check =
+            which == AppendedClassRelationCase::
+                             small_index_generation_checked ||
+            which == AppendedClassRelationCase::at_two_generation_checked;
     silex::NumberField field = quadratic_field(2);
     silex::Order order;
     order = silex::test::equation_order(field);
@@ -5640,32 +5655,83 @@ bool small_index_saturation_appended_class_relation_case(
     silex::detail::RelationUnitExtractionState state;
     silex::detail::ValidateRefineSummary summary;
     silex::detail::AnalyticClassRegulatorCache analytic_cache;
-    ::fmpz_set_si(summary.last_index_bound.raw(), 2);
     const slong relations_before = context.relation_count();
     bool validated = false;
     bool attempted = false;
+    bool entered_after_rebuild = false;
+    if (which == AppendedClassRelationCase::at_two_generation_checked ||
+        which == AppendedClassRelationCase::at_two_then_small_index) {
+        bool rebuilt = false;
+        assert(silex::detail::unknown_saturation_at_two(
+                validated, rebuilt, state, summary, context, units,
+                embeddings, analytic_cache, order, 1, 128, nullptr, false));
+        assert(summary.outcome !=
+               ValidateRefineOutcome::local_rank_unavailable);
+        assert(state.saturation_at_two_done);
+        assert(rebuilt);
+        assert(context.relation_count() > relations_before);
+        assert(context.has_presentation());
+        assert(context.order(sflint::FmpzRef(class_order)));
+        assert(sflint::fmpz_equal_si(class_order, 1));
+        if (record_generation_check) {
+            assert(validated);
+            assert(summary.outcome == ValidateRefineOutcome::proven);
+            assert(sflint::fmpz_equal_si(summary.last_index_bound, 1));
+            return true;
+        }
+        assert(!validated);
+        assert(sflint::fmpz_equal_si(summary.last_index_bound, 2));
+        entered_after_rebuild = true;
+    } else {
+        const slong entry_bound =
+                which == AppendedClassRelationCase::small_index_bound_three
+                        ? 3
+                        : 2;
+        ::fmpz_set_si(summary.last_index_bound.raw(), entry_bound);
+    }
+
+    const slong relations_entering = context.relation_count();
     assert(silex::detail::unknown_small_index_saturation(
             validated, attempted, state, summary, context, units, embeddings,
-            analytic_cache, order, 1, 128, nullptr, false));
-    assert(attempted);
-    assert(context.relation_count() > relations_before);
+            analytic_cache, order, 1, 128, nullptr, false,
+            entered_after_rebuild));
+    assert(summary.outcome != ValidateRefineOutcome::local_rank_unavailable);
     assert(context.has_presentation());
     assert(context.order(sflint::FmpzRef(class_order)));
     assert(sflint::fmpz_equal_si(class_order, 1));
+    if (entered_after_rebuild) {
+        // Nothing saturates at 2 or 3 any more; Silex skipped this loop
+        // before the rebuild, so the caller continues.
+        assert(context.relation_count() == relations_entering);
+        assert(!validated);
+        assert(!attempted);
+        return true;
+    }
+    assert(attempted);
+    assert(context.relation_count() > relations_before);
     assert(validated);
     if (record_generation_check) {
-        assert(summary.outcome ==
-               silex::detail::ValidateRefineOutcome::proven);
+        assert(summary.outcome == ValidateRefineOutcome::proven);
         assert(sflint::fmpz_equal_si(summary.last_index_bound, 1));
     } else {
+        // Bound 2 either did not decrease (entered at 2) or decreased from 3
+        // with no saturation at 2 or 3 in the next round.
         assert(sflint::fmpz_equal_si(summary.last_index_bound, 2));
     }
     return true;
 }
 
 int test_small_index_saturation_revalidates_appended_class_relation() {
-    assert(small_index_saturation_appended_class_relation_case(true));
-    assert(small_index_saturation_appended_class_relation_case(false));
+    assert(appended_class_relation_case(
+            AppendedClassRelationCase::small_index_generation_checked));
+    assert(appended_class_relation_case(
+            AppendedClassRelationCase::small_index_bound_two));
+    assert(appended_class_relation_case(
+            AppendedClassRelationCase::small_index_bound_three));
+    assert(appended_class_relation_case(
+            AppendedClassRelationCase::at_two_generation_checked));
+    assert(appended_class_relation_case(
+            AppendedClassRelationCase::at_two_then_small_index));
     return 0;
 }
 

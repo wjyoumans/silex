@@ -2663,6 +2663,7 @@ bool rebuild_saturated_presentation(ClassGroupContext& class_group) noexcept {
 
 bool unknown_saturation_at_two(
         bool& validated,
+        bool& presentation_rebuilt,
         RelationUnitExtractionState& extraction_state,
         ValidateRefineSummary& summary,
         ClassGroupContext& class_group,
@@ -2677,6 +2678,7 @@ bool unknown_saturation_at_two(
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.saturation_at_two");
     validated = false;
+    presentation_rebuilt = false;
     if (extraction_state.saturation_at_two_done || precision <= 0 ||
         expected_rank < 0 || !units.is_set() ||
         units.free_rank() != expected_rank ||
@@ -2702,12 +2704,39 @@ bool unknown_saturation_at_two(
     }
 
     extraction_state.saturation_at_two_done = true;
+    presentation_rebuilt = !class_group.has_presentation();
     if (!rebuild_saturated_presentation(class_group)) {
         return false;
     }
     return unknown_candidate_validated(
             validated, extraction_state, summary, units, class_group, order,
             analytic_cache, expected_rank, precision, accept_grh_generation);
+}
+
+// Without the presentation rebuild, a round that appended class relations
+// read "presentation unavailable" (index bound 0) and set the candidate
+// validated, and a presentation cleared by saturation at 2 made this loop
+// return without an attempt.  After a rebuild, an outcome the loop cannot
+// resolve itself (no saturation found, index bound not decreasing) keeps that
+// earlier result instead of failing the compute; reference Clgp.jl asserts
+// there.  In compute_with_class_group's proven path a validated candidate
+// then goes through the full proven re-check, which decides; the unknown-mode
+// caller in compute_with_relation_class_group_ has no such re-check.
+bool small_index_saturation_unresolved_after_rebuild(
+        bool& validated,
+        bool& attempted,
+        bool entered_after_rebuilt_presentation,
+        bool presentation_rebuilt) noexcept {
+    if (entered_after_rebuilt_presentation) {
+        validated = false;
+        attempted = false;
+        return true;
+    }
+    if (presentation_rebuilt) {
+        validated = true;
+        return true;
+    }
+    return false;
 }
 
 bool unknown_small_index_saturation(
@@ -2723,7 +2752,8 @@ bool unknown_small_index_saturation(
         slong expected_rank,
         slong precision,
         const DiagnosticsContext* diagnostics,
-        bool accept_grh_generation) noexcept {
+        bool accept_grh_generation,
+        bool entered_after_rebuilt_presentation) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.small_index_saturation");
     validated = false;
@@ -2743,6 +2773,7 @@ bool unknown_small_index_saturation(
     slong index_bound = flint::fmpz_get_si(
             flint::FmpzConstRef(summary.last_index_bound));
     constexpr double kSmallIndexStable = 3.5;
+    bool presentation_rebuilt = false;
     while (index_bound > 1 && index_bound < 20) {
         attempted = true;
         bool saturated = false;
@@ -2763,9 +2794,13 @@ bool unknown_small_index_saturation(
             SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "small-index saturation source assertion failed");
-            return false;
+            return small_index_saturation_unresolved_after_rebuild(
+                    validated, attempted, entered_after_rebuilt_presentation,
+                    presentation_rebuilt);
         }
-        const bool presentation_rebuilt = !class_group.has_presentation();
+        if (!class_group.has_presentation()) {
+            presentation_rebuilt = true;
+        }
         if (!rebuild_saturated_presentation(class_group)) {
             return false;
         }
@@ -2783,7 +2818,9 @@ bool unknown_small_index_saturation(
         }
         if (!flint::fmpz_fits_si(
                     flint::FmpzConstRef(summary.last_index_bound))) {
-            return false;
+            return small_index_saturation_unresolved_after_rebuild(
+                    validated, attempted, entered_after_rebuilt_presentation,
+                    presentation_rebuilt);
         }
 
         const slong next_index_bound = flint::fmpz_get_si(
@@ -2796,14 +2833,10 @@ bool unknown_small_index_saturation(
             SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "small-index saturation index did not decrease");
-            // Reference Clgp.jl asserts idx != n_idx.  Silex keeps its
-            // earlier behaviour after a rebuilt presentation: the candidate
-            // goes to the caller's proven re-check, which decides.
-            if (presentation_rebuilt) {
-                validated = true;
-                return true;
-            }
-            return false;
+            // Reference Clgp.jl asserts idx != n_idx.
+            return small_index_saturation_unresolved_after_rebuild(
+                    validated, attempted, entered_after_rebuilt_presentation,
+                    presentation_rebuilt);
         }
         index_bound = next_index_bound;
     }
@@ -3617,13 +3650,15 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
             certified = true;
         }
 
+        bool saturation_at_two_rebuilt = false;
         if (!certified && candidate_units_ready && rank_complete &&
             options.requested_certification == CertificationMode::unknown) {
             if (unit_improved == 1 &&
                 !relation_unit_state.saturation_at_two_done) {
                 bool saturation_at_two_validated = false;
                 if (!detail::unknown_saturation_at_two(
-                            saturation_at_two_validated, relation_unit_state,
+                            saturation_at_two_validated,
+                            saturation_at_two_rebuilt, relation_unit_state,
                             validate_summary, candidate_class_group,
                             candidate_units, embeddings, analytic_cache,
                             order, rank, precision, active_diagnostics,
@@ -3646,7 +3681,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                         candidate_class_group, candidate_units, embeddings,
                         analytic_cache, order, rank, precision,
                         active_diagnostics,
-                        refresh_options.accept_grh_generation)) {
+                        refresh_options.accept_grh_generation,
+                        saturation_at_two_rebuilt)) {
                 return false;
             }
             if (saturation_validated) {
@@ -4386,13 +4422,15 @@ bool OrderUnitGroup::compute_with_class_group(
                     }
                 }
             }
+            bool saturation_at_two_rebuilt = false;
             if (!certified && candidate_units_ready && rank_complete &&
                 used_candidate_units && requested_proven) {
                 if (unit_improved == 1 &&
                     !relation_unit_state.saturation_at_two_done) {
                     bool saturation_at_two_validated = false;
                     if (!detail::unknown_saturation_at_two(
-                                saturation_at_two_validated, relation_unit_state,
+                                saturation_at_two_validated,
+                                saturation_at_two_rebuilt, relation_unit_state,
                                 validate_summary, candidate_class_group,
                                 candidate_units, embeddings, analytic_cache,
                                 order, rank, precision, active_diagnostics,
@@ -4414,7 +4452,8 @@ bool OrderUnitGroup::compute_with_class_group(
                             candidate_class_group, candidate_units, embeddings,
                             analytic_cache, order, rank, precision,
                             active_diagnostics,
-                            refresh_options.accept_grh_generation)) {
+                            refresh_options.accept_grh_generation,
+                            saturation_at_two_rebuilt)) {
                     return false;
                 }
                 if (saturation_validated) {
