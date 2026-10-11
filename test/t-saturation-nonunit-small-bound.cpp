@@ -1,19 +1,15 @@
-// Reproducer for a suspected defect in saturation_process_candidates_once:
-// a non-unit candidate whose conjugate-log bound is at most 1 makes
-// compact_use_residual_power_test choose the unit-only presentation
-// reduction (empty ideal decomposition), whose invariant check then fails
-// for a non-unit, so the call returns false instead of "square" or "not a
-// square".
+// Regression test for saturation_process_candidates_once on a non-unit
+// candidate whose residual conjugate-log bound is small.  The residual
+// (unit-only) presentation reduction assumes an empty ideal decomposition,
+// so it must be taken only for unit candidates; before the fix a non-unit
+// candidate with log bound at most 1 took it, failed the compact
+// evaluation invariant, and the call returned false instead of "power" or
+// "not a power".
 //
 // Fixture: Q(sqrt 2), factor base bound 2 (the prime P over 2, 2 = P^2),
-// one relation with generator 2 (row (2)), prime n = 2, candidate = that
-// relation.  The element 2 = (sqrt 2)^2 is a square, so a correct run
-// returns true with saw_power set.  The log bound of 2 is
-// ceil(log 2) = 1 and sqrt(1) = 1, so the residual branch is taken.
-//
-// The test is registered DISABLED while the defect stands; re-enable it by
-// removing the DISABLED property in CMakeLists.txt (search for
-// silex-saturation-nonunit-small-bound) once the library is fixed.
+// one relation with a given generator, prime n = 2, candidate = that
+// relation.  2 = (sqrt 2)^2 is a square; -2 is not (it is negative at both
+// real places).  Both have row (2) and log bound ceil(log 2) = 1.
 
 #include <silex/class_group.hpp>
 #include <silex/relation.hpp>
@@ -27,7 +23,7 @@
 namespace {
 namespace sflint = silex::flint;
 
-bool run(slong generator) {
+bool run(slong generator, bool expect_power) {
     silex::NumberField field = silex::test::quadratic_field(2);
     silex::Order order;
     order = silex::test::equation_order(field);
@@ -63,18 +59,21 @@ bool run(slong generator) {
                 static_cast<long>(result.compact_power_candidates),
                 static_cast<long>(result.structural_power_candidates));
     std::fflush(stdout);
-    // Correct behavior: the candidate is a square and is reported as one.
-    return ok && result.saw_power;
+    return ok && result.saw_power == expect_power &&
+           result.saw_non_power == !expect_power;
 }
 }  // namespace
 
 int main() {
-    // Control: 4 has log bound ceil(log 4) = 2 > sqrt(2), so the original
-    // (non-residual) branch is taken.
-    const bool control = run(4);
+    // Control: 4 has log bound ceil(log 4) = 2 > sqrt(2) and was handled
+    // before the fix.
+    const bool control = run(4, true);
     assert(control);
-    // Defect: 2 has log bound 1, so the residual branch is taken.
-    const bool defect = run(2);
-    assert(defect);
+    // 2 has log bound 1: a non-unit square.
+    const bool square = run(2, true);
+    assert(square);
+    // -2 has log bound 1: a non-unit non-square.
+    const bool non_square = run(-2, false);
+    assert(non_square);
     return 0;
 }

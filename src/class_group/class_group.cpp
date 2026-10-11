@@ -8444,7 +8444,14 @@ bool saturation_process_candidates_once(
             // reference's `is_power(::FacElem, n; decom=fac_a)` first removes the
             // formal exponent quotient.  If the residual factor is small
             // enough in the conjugate-log bound, reference tests the residual
-            // compact presentation without the ideal decomposition row.
+            // with `_ispower(anew, n)`, dropping `decom`, so its compact
+            // presentation recomputes the residual's ideal factorization
+            // (`factor_coprime`).  Silex's residual path is the unit-only
+            // reduction (empty decomposition), which matches that only when
+            // the candidate is a unit (zero decomposition row).  A non-unit
+            // candidate therefore always takes reference's other branch,
+            // `_ispower(a, n; decom=fac_a)`, with its decomposition row; the
+            // power question is the same, since a = structural^n * leftover.
             FactoredElement structural(*field);
             FactoredElement leftover(*field);
             if (!structural.is_defined() || !leftover.is_defined() ||
@@ -8469,7 +8476,8 @@ bool saturation_process_candidates_once(
                 // compact_unit_presentation_power_root.
                 EmbeddingContext candidate_embeddings(*field);
                 bool use_residual = false;
-                if (!compact_use_residual_power_test(
+                if (zero_row &&
+                    !compact_use_residual_power_test(
                             use_residual, *order, element, leftover,
                             candidate_embeddings, diagnostics,
                             DiagnosticsModule::class_group,
