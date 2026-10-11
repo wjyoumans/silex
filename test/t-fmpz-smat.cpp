@@ -4,8 +4,11 @@
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/nmod_mat.hpp>
 
+#include "fmpz_smat/fmpz_smat_internal.hpp"
+
 #include <flint/fmpz_mat.h>
 
+#include <initializer_list>
 #include <type_traits>
 #include <utility>
 
@@ -1439,6 +1442,54 @@ int test_native_cpp_raii_call_sites() {
     return 0;
 }
 
+int check_square_abs_det(std::initializer_list<slong> entries,
+                         slong n,
+                         silex::detail::SquareAbsDetRoute expected_route,
+                         slong expected) {
+    silex::flint::FmpzMat matrix(n, n);
+    slong k = 0;
+    for (slong value : entries) {
+        fmpz_set_si(fmpz_mat_entry(matrix.raw(), k / n, k % n), value);
+        ++k;
+    }
+    silex::flint::Fmpz out;
+    fmpz_set_si(out.raw(), -99);
+    const silex::detail::SquareAbsDetRoute route =
+            silex::detail::fmpz_mat_square_abs_det(out, matrix);
+    return route == expected_route && fmpz_is_si(out.raw(), expected) ? 0 : 1;
+}
+
+int test_square_abs_det_routes() {
+    using silex::detail::SquareAbsDetRoute;
+    // Upper triangular, with a negative diagonal entry: |(-2) * 3 * 5|.
+    if (check_square_abs_det({-2, 5, 7, 0, 3, 1, 0, 0, 5}, 3,
+                             SquareAbsDetRoute::diagonal_product, 30) != 0) {
+        return 1;
+    }
+    // Singular upper triangular.
+    if (check_square_abs_det({4, 1, 0, 0}, 2,
+                             SquareAbsDetRoute::diagonal_product, 0) != 0) {
+        return 1;
+    }
+    // Empty matrix: the empty product.
+    if (check_square_abs_det({}, 0, SquareAbsDetRoute::diagonal_product, 1) !=
+        0) {
+        return 1;
+    }
+    // Not upper triangular: det [[1, 2], [3, 4]] = -2.
+    if (check_square_abs_det({1, 2, 3, 4}, 2,
+                             SquareAbsDetRoute::determinant, 2) != 0) {
+        return 1;
+    }
+    // Lower triangular is not taken by the diagonal route; its only
+    // nonzero subdiagonal entry is the last one scanned.
+    if (check_square_abs_det({2, 0, 0, 0, 3, 0, 0, 7, -5}, 3,
+                             SquareAbsDetRoute::determinant, 30) != 0) {
+        return 1;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1451,7 +1502,8 @@ int main() {
                    test_hnf_context_index_before_transform() != 0 ||
                    test_hnf_context_incremental_refresh() != 0 ||
                    test_hnf_context_deferred_dependent_refresh() != 0 ||
-                   test_native_cpp_raii_call_sites() != 0
+                   test_native_cpp_raii_call_sites() != 0 ||
+                   test_square_abs_det_routes() != 0
                ? 1
                : 0;
 }

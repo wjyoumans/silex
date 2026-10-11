@@ -1,5 +1,7 @@
 #include <silex/fmpz_smat.hpp>
 
+#include "fmpz_smat_internal.hpp"
+
 #include <silex/diagnostics.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
@@ -10,6 +12,36 @@
 #include <flint/ulong_extras.h>
 
 #include <vector>
+
+namespace silex::detail {
+
+SquareAbsDetRoute fmpz_mat_square_abs_det(flint::FmpzRef out,
+        flint::FmpzMatConstRef matrix) noexcept {
+    const fmpz_mat_struct* raw = matrix.raw();
+    const slong n = ::fmpz_mat_nrows(raw);
+    bool upper_triangular = true;
+    for (slong i = 1; i < n && upper_triangular; ++i) {
+        for (slong j = 0; j < i; ++j) {
+            if (!::fmpz_is_zero(fmpz_mat_entry(raw, i, j))) {
+                upper_triangular = false;
+                break;
+            }
+        }
+    }
+    if (!upper_triangular) {
+        ::fmpz_mat_det(out.raw(), raw);
+        ::fmpz_abs(out.raw(), out.raw());
+        return SquareAbsDetRoute::determinant;
+    }
+    ::fmpz_one(out.raw());
+    for (slong i = 0; i < n; ++i) {
+        ::fmpz_mul(out.raw(), out.raw(), fmpz_mat_entry(raw, i, i));
+    }
+    ::fmpz_abs(out.raw(), out.raw());
+    return SquareAbsDetRoute::diagonal_product;
+}
+
+}  // namespace silex::detail
 
 namespace silex::fmpz_smat {
 namespace {
@@ -1467,9 +1499,7 @@ void HnfContext::invalidate_index() noexcept {
 void HnfContext::update_index_from_hnf() noexcept {
     invalidate_index();
     if (rank_ == ambient_dim_ && rank_ > 0) {
-        flint::Fmpz det;
-        fmpz_mat_det(det.raw(), hnf_.raw());
-        flint::fmpz_abs(index_, det);
+        detail::fmpz_mat_square_abs_det(index_, hnf_);
         index_valid_ = !flint::fmpz_is_zero(index_);
     }
 }

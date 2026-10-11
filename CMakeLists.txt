@@ -579,6 +579,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-fmpz-smat test/t-fmpz-smat.cpp)
     target_link_libraries(t-silex-fmpz-smat PRIVATE Silex::silex)
+    target_include_directories(t-silex-fmpz-smat PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-fmpz-smat)
     add_test(NAME silex-fmpz-smat COMMAND t-silex-fmpz-smat)
     list(APPEND SILEX_TEST_NAMES silex-fmpz-smat)
