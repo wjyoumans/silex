@@ -19,6 +19,7 @@
 #include <flint/arb_hypgeom.h>
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
+#include <flint/longlong.h>
 #include <flint/mag.h>
 #include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
@@ -1263,6 +1264,188 @@ bool bf_linear_factor_count_from_squarefree_nmod(
     return out >= 0 && out <= degree;
 }
 
+// Word-size kernel for the number of roots of a squarefree monic
+// polynomial f modulo a prime p, deg gcd(f, x^p - x), the same quantity
+// bf_linear_factor_count_from_squarefree_nmod computes through FLINT.  It
+// serves the batched counts of bf_fill_linear_factor_count_batch.  For
+// degree at most kBfWordLinearFactorMaxDegree and p below
+// kBfWordLinearFactorPrimeLimit, every sum of at most 2 deg - 1 products of
+// residues stays below 2^64, so each coefficient is reduced once per
+// squaring, by Barrett reduction (Brent and Zimmermann, Modern Computer
+// Arithmetic, 2010, Section 2.4.1).
+constexpr slong kBfWordLinearFactorMaxDegree = WORD(6);
+constexpr ulong kBfWordLinearFactorPrimeLimit = UWORD(1) << 30;
+
+struct BfWordModulus {
+    ulong n = 0;
+    // floor((2^64 - 1) / n): the quotient estimate is at most one short.
+    ulong inverse = 0;
+};
+
+BfWordModulus bf_word_modulus(ulong n) noexcept {
+    return BfWordModulus{n, UWORD_MAX / n};
+}
+
+ulong bf_word_reduce(ulong value, const BfWordModulus& modulus) noexcept {
+    ulong quotient = 0;
+    ulong low = 0;
+    umul_ppmm(quotient, low, value, modulus.inverse);
+    (void)low;
+    const ulong remainder = value - quotient * modulus.n;
+    return remainder >= modulus.n ? remainder - modulus.n : remainder;
+}
+
+ulong bf_word_mulmod(ulong a, ulong b, const BfWordModulus& modulus)
+        noexcept {
+    return bf_word_reduce(a * b, modulus);
+}
+
+// Degree of gcd(a, b) for polynomials of degree `a_degree` and `b_degree`
+// (b nonzero) with coefficients reduced modulo the prime, by the Euclidean
+// algorithm; both arrays are overwritten.
+template <slong Degree>
+slong bf_word_gcd_degree(std::array<ulong, Degree + 1>& a,
+                         slong a_degree,
+                         std::array<ulong, Degree + 1>& b,
+                         slong b_degree,
+                         const BfWordModulus& modulus) noexcept {
+    while (b_degree > 0) {
+        const ulong inverse = n_invmod(
+                b[static_cast<std::size_t>(b_degree)], modulus.n);
+        while (a_degree >= b_degree) {
+            const ulong quotient = bf_word_mulmod(
+                    a[static_cast<std::size_t>(a_degree)], inverse,
+                    modulus);
+            const slong shift = a_degree - b_degree;
+            for (slong i = 0; i < b_degree; ++i) {
+                ulong& coefficient = a[static_cast<std::size_t>(i + shift)];
+                const ulong product = bf_word_mulmod(
+                        quotient, b[static_cast<std::size_t>(i)], modulus);
+                coefficient = coefficient >= product
+                                      ? coefficient - product
+                                      : coefficient + modulus.n - product;
+            }
+            a[static_cast<std::size_t>(a_degree)] = 0;
+            --a_degree;
+            while (a_degree >= 0 &&
+                   a[static_cast<std::size_t>(a_degree)] == 0) {
+                --a_degree;
+            }
+        }
+        std::swap(a, b);
+        std::swap(a_degree, b_degree);
+    }
+    // A nonzero constant remainder means coprime inputs.
+    return b_degree == 0 ? 0 : a_degree;
+}
+
+// `f` holds the Degree + 1 coefficients of a monic polynomial reduced
+// modulo `modulus.n`, squarefree modulo it.  Returns the number of its
+// roots modulo the prime.
+template <slong Degree>
+slong bf_word_linear_factor_count(const ulong* f,
+                                  const BfWordModulus& modulus) noexcept {
+    static_assert(Degree >= 2 &&
+                  Degree <= kBfWordLinearFactorMaxDegree);
+    constexpr std::size_t kDegree = static_cast<std::size_t>(Degree);
+    const ulong n = modulus.n;
+
+    // reduction[k][j]: coefficient of x^j in x^(Degree + k) mod f.
+    std::array<std::array<ulong, kDegree>, kDegree - 1> reduction{};
+    for (std::size_t j = 0; j < kDegree; ++j) {
+        reduction[0][j] = f[j] == 0 ? 0 : n - f[j];
+    }
+    for (std::size_t k = 1; k + 1 < kDegree; ++k) {
+        const ulong top = reduction[k - 1][kDegree - 1];
+        reduction[k][0] = bf_word_mulmod(top, reduction[0][0], modulus);
+        for (std::size_t j = 1; j < kDegree; ++j) {
+            reduction[k][j] = bf_word_reduce(
+                    reduction[k - 1][j - 1] + top * reduction[0][j],
+                    modulus);
+        }
+    }
+
+    // x^p mod f by left-to-right binary powering from x.
+    std::array<ulong, kDegree> power{};
+    power[1] = 1;
+    for (slong bit = static_cast<slong>(FLINT_BIT_COUNT(n)) - 2; bit >= 0;
+         --bit) {
+        std::array<ulong, 2 * kDegree - 1> square{};
+        for (std::size_t i = 0; i < kDegree; ++i) {
+            for (std::size_t j = 0; j < kDegree; ++j) {
+                square[i + j] += power[i] * power[j];
+            }
+        }
+        for (std::size_t k = kDegree; k < 2 * kDegree - 1; ++k) {
+            square[k] = bf_word_reduce(square[k], modulus);
+        }
+        for (std::size_t j = 0; j < kDegree; ++j) {
+            ulong sum = square[j];
+            for (std::size_t k = kDegree; k < 2 * kDegree - 1; ++k) {
+                sum += square[k] * reduction[k - kDegree][j];
+            }
+            power[j] = bf_word_reduce(sum, modulus);
+        }
+        if (((n >> bit) & UWORD(1)) != 0) {
+            const ulong top = power[kDegree - 1];
+            for (std::size_t j = kDegree - 1; j >= 1; --j) {
+                power[j] = bf_word_reduce(
+                        power[j - 1] + top * reduction[0][j], modulus);
+            }
+            power[0] = bf_word_mulmod(top, reduction[0][0], modulus);
+        }
+    }
+
+    // gcd(f, x^p - x).
+    power[1] = power[1] == 0 ? n - 1 : power[1] - 1;
+    slong frobenius_degree = Degree - 1;
+    while (frobenius_degree >= 0 &&
+           power[static_cast<std::size_t>(frobenius_degree)] == 0) {
+        --frobenius_degree;
+    }
+    if (frobenius_degree < 0) {
+        return Degree;
+    }
+    std::array<ulong, kDegree + 1> a{};
+    std::array<ulong, kDegree + 1> b{};
+    for (std::size_t i = 0; i <= kDegree; ++i) {
+        a[i] = f[i];
+    }
+    for (std::size_t i = 0; i < kDegree; ++i) {
+        b[i] = power[i];
+    }
+    return bf_word_gcd_degree<Degree>(a, Degree, b, frobenius_degree,
+                                      modulus);
+}
+
+// The number of roots modulo the prime `p` of the monic polynomial with
+// reduced coefficients `f` of degree `degree`, squarefree modulo p, or -1
+// when the word kernel does not cover the degree or prime.
+slong bf_word_linear_factor_count_dispatch(const ulong* f,
+                                           slong degree,
+                                           ulong p) noexcept {
+    if (p < 2 || p >= kBfWordLinearFactorPrimeLimit) {
+        return -1;
+    }
+    const BfWordModulus modulus = bf_word_modulus(p);
+    switch (degree) {
+    case 1:
+        return 1;
+    case 2:
+        return bf_word_linear_factor_count<2>(f, modulus);
+    case 3:
+        return bf_word_linear_factor_count<3>(f, modulus);
+    case 4:
+        return bf_word_linear_factor_count<4>(f, modulus);
+    case 5:
+        return bf_word_linear_factor_count<5>(f, modulus);
+    case 6:
+        return bf_word_linear_factor_count<6>(f, modulus);
+    default:
+        return -1;
+    }
+}
+
 bool bf_residue_degrees_from_small_squarefree_nmod(
         std::vector<slong>& out,
         const flint::NmodPoly& reduced,
@@ -1491,19 +1674,55 @@ bool bf_residue_degrees_from_defining_polynomial_ui(
             out, order, context, degree_scratch, p, diagnostics);
 }
 
+// Linear factor counts of the defining polynomial for consecutive primes,
+// computed in one pass by bf_fill_linear_factor_count_batch before a BF
+// prime loop.  `primes` is increasing and holds only the primes the pass
+// counted.
+struct BfLinearFactorCountBatch {
+    std::vector<ulong> primes;
+    std::vector<slong> counts;
+    std::size_t hint = 0;
+};
+
+bool bf_linear_factor_count_batch_lookup(slong& out,
+                                         BfLinearFactorCountBatch* batch,
+                                         ulong p) noexcept {
+    if (batch == nullptr || batch->primes.empty()) {
+        return false;
+    }
+    std::size_t index = batch->hint;
+    if (index >= batch->primes.size() || batch->primes[index] != p) {
+        auto it = std::lower_bound(batch->primes.begin(),
+                                   batch->primes.end(), p);
+        if (it == batch->primes.end() || *it != p) {
+            return false;
+        }
+        index = static_cast<std::size_t>(it - batch->primes.begin());
+    }
+    out = batch->counts[index];
+    batch->hint = index + 1;
+    return true;
+}
+
 // The number of linear factors of the defining polynomial modulo `p`, when
 // the defining-polynomial route applies to `p`.  `cache`, when given, holds
-// the counts already computed for this order (ZetaBfResidueDegreeCache).
+// the counts already computed for this order (ZetaBfResidueDegreeCache);
+// `batch`, when given, the counts of a batched pass over the primes.
 bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
         slong& out,
         const BfResidueDegreeContext& context,
         ulong p,
         const DiagnosticsContext* diagnostics,
-        detail::ZetaBfResidueDegreeCache* cache) noexcept {
+        detail::ZetaBfResidueDegreeCache* cache,
+        BfLinearFactorCountBatch* batch = nullptr) noexcept {
     if (!bf_residue_degree_context_uses_defining_polynomial(context, p)) {
         return false;
     }
     if (bf_linear_factor_count_cache_lookup(out, cache, p, diagnostics)) {
+        return true;
+    }
+    if (bf_linear_factor_count_batch_lookup(out, batch, p)) {
+        bf_linear_factor_count_cache_store(cache, p, out);
         return true;
     }
 
@@ -1525,6 +1744,88 @@ bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
     }
     bf_linear_factor_count_cache_store(cache, p, out);
     return true;
+}
+
+// Whether `cache` already holds the residue degrees or the linear factor
+// count of `p`.
+bool bf_residue_degree_cache_covers(
+        const detail::ZetaBfResidueDegreeCache* cache, ulong p) noexcept {
+    if (cache == nullptr) {
+        return false;
+    }
+    const auto entry = std::lower_bound(
+            cache->entries.begin(), cache->entries.end(), p,
+            [](const detail::ZetaBfResidueDegreeCacheEntry& existing,
+               ulong prime) {
+                return existing.p < prime;
+            });
+    if (entry != cache->entries.end() && entry->p == p) {
+        return true;
+    }
+    const auto count = std::lower_bound(
+            cache->linear_factor_counts.begin(),
+            cache->linear_factor_counts.end(), p,
+            [](const detail::ZetaBfLinearFactorCountEntry& existing,
+               ulong prime) {
+                return existing.p < prime;
+            });
+    return count != cache->linear_factor_counts.end() && count->p == p;
+}
+
+// Counts, in one pass with the word kernel, the linear factors of the
+// defining polynomial modulo every prime in [first, end) that the
+// defining-polynomial route covers and `cache` does not, for
+// bf_linear_residue_degree_count_from_defining_polynomial_ui.  The count is
+// the per-prime quantity deg gcd(f, x^p - x); primes or degrees outside the
+// word kernel are left to the per-prime path.
+void bf_fill_linear_factor_count_batch(
+        BfLinearFactorCountBatch& out,
+        const BfResidueDegreeContext& context,
+        ulong first,
+        ulong end,
+        const detail::ZetaBfResidueDegreeCache* cache,
+        const DiagnosticsContext* diagnostics) noexcept {
+    out.primes.clear();
+    out.counts.clear();
+    out.hint = 0;
+    const slong degree = context.defining_degree;
+    if (!context.has_defining_polynomial_route ||
+        context.defining_polynomial == nullptr || degree < 1 ||
+        degree > kBfWordLinearFactorMaxDegree ||
+        context.defining_coefficients.size() !=
+                static_cast<std::size_t>(degree + 1) ||
+        first >= end) {
+        return;
+    }
+
+    SILEX_PROFILE_SCOPE(
+            diagnostics, DiagnosticsModule::unit_group,
+            "unit_group.zeta_bf.term.prime_decomposition_type."
+            "linear_factor_batch");
+    std::array<ulong, static_cast<std::size_t>(
+                              kBfWordLinearFactorMaxDegree + 1)>
+            reduced{};
+    for (ulong p = first <= 2 ? UWORD(2) : n_nextprime(first - 1, 1);
+         p < end && p < kBfWordLinearFactorPrimeLimit;
+         p = n_nextprime(p, 1)) {
+        if (!bf_residue_degree_context_uses_defining_polynomial(context, p) ||
+            bf_residue_degree_cache_covers(cache, p)) {
+            continue;
+        }
+        for (slong i = 0; i <= degree; ++i) {
+            reduced[static_cast<std::size_t>(i)] = fmpz_fdiv_ui(
+                    context.defining_coefficients[static_cast<std::size_t>(i)]
+                            .raw(),
+                    p);
+        }
+        const slong count =
+                bf_word_linear_factor_count_dispatch(reduced.data(), degree, p);
+        if (count < 0 || count > degree) {
+            continue;
+        }
+        out.primes.push_back(p);
+        out.counts.push_back(count);
+    }
 }
 
 bool bf_residue_degrees_from_complete_factor_base(
@@ -2398,7 +2699,9 @@ bool bf_add_prime_terms(flint::Arb& sum,
                         slong precision,
                         const DiagnosticsContext* diagnostics,
                         detail::ZetaBfResidueDegreeCache*
-                                residue_degree_cache = nullptr) noexcept {
+                                residue_degree_cache = nullptr,
+                        BfLinearFactorCountBatch* linear_factor_batch =
+                                nullptr) noexcept {
     slong linear_factor_count = -1;
     bool have_complete_residue_degrees = false;
     bool have_linear_factor_count = false;
@@ -2420,7 +2723,7 @@ bool bf_add_prime_terms(flint::Arb& sum,
                         bf_linear_residue_degree_count_from_defining_polynomial_ui(
                                 linear_factor_count, residue_context,
                                 rational_prime, diagnostics,
-                                residue_degree_cache);
+                                residue_degree_cache, linear_factor_batch);
             }
         }
         if (!have_complete_residue_degrees &&
@@ -2533,6 +2836,12 @@ bool bf_term(flint::Arb& out,
                                    residue_degree_base);
     std::vector<slong> degree_scratch(static_cast<std::size_t>(
             FLINT_MAX(order.degree(), WORD(1))));
+    // Only degree-one primes contribute for p^2 >= cutoff; their linear
+    // factor counts come from one batched pass.
+    BfLinearFactorCountBatch linear_factor_batch;
+    bf_fill_linear_factor_count_batch(
+            linear_factor_batch, residue_context, n_sqrt(cutoff - 1) + 1,
+            cutoff, residue_degree_cache, diagnostics);
 
     flint::arb_zero(sum);
     {
@@ -2561,7 +2870,8 @@ bool bf_term(flint::Arb& out,
                                     prime_term_scratch, p, cutoff, cutoff_div_9,
                                     sqrt_cutoff_log_cutoff,
                                     sqrt_cutoff9_log_cutoff9, precision,
-                                    diagnostics, residue_degree_cache)) {
+                                    diagnostics, residue_degree_cache,
+                                    &linear_factor_batch)) {
                 return false;
             }
         }
@@ -3981,6 +4291,43 @@ bool zeta_bf_audit_cutoff_available(const Order& order,
     const slong work_precision = FLINT_MAX(precision + 64, WORD(192));
     return bf_select_cutoff(cutoff, order, target, max_cutoff, true,
                             work_precision, nullptr);
+}
+
+bool zeta_bf_linear_factor_counts_for_test(std::vector<ulong>& primes,
+                                           std::vector<slong>& batch_counts,
+                                           std::vector<slong>& per_prime_counts,
+                                           const Order& order,
+                                           ulong first,
+                                           ulong end) noexcept {
+    primes.clear();
+    batch_counts.clear();
+    per_prime_counts.clear();
+    if (!order.has_basis() || !order.is_maximal()) {
+        return false;
+    }
+
+    BfResidueDegreeContext context;
+    bf_init_residue_degree_context(context, order);
+    BfLinearFactorCountBatch batch;
+    bf_fill_linear_factor_count_batch(batch, context, first, end, nullptr,
+                                      nullptr);
+    for (ulong p = first <= 2 ? UWORD(2) : n_nextprime(first - 1, 1);
+         p < end; p = n_nextprime(p, 1)) {
+        slong batch_count = -1;
+        if (!bf_residue_degree_context_uses_defining_polynomial(context, p) ||
+            !bf_linear_factor_count_batch_lookup(batch_count, &batch, p)) {
+            batch_count = -1;
+        }
+        slong per_prime_count = -1;
+        if (!bf_linear_residue_degree_count_from_defining_polynomial_ui(
+                    per_prime_count, context, p, nullptr, nullptr)) {
+            per_prime_count = -1;
+        }
+        primes.push_back(p);
+        batch_counts.push_back(batch_count);
+        per_prime_counts.push_back(per_prime_count);
+    }
+    return true;
 }
 
 bool class_regulator_product_estimate_with_diagnostics(

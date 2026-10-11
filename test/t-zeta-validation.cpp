@@ -875,6 +875,121 @@ bool same_grh_default_product(
 // the value) and gets the uncached value from them, and a grh ensure() after
 // ensure_index_one() on the shared cache gives the value and audit of a
 // fresh cache.
+// The batched linear factor counts of the BF prime loop agree with the
+// per-prime nmod path on every prime of [first, end), cover every prime
+// that path covers when the degree is at most 6 and p < 2^30, and skip the
+// primes it skips (index divisors, discriminant divisors, a non-monic
+// defining polynomial).
+bool check_linear_factor_batch_range(const silex::Order& order,
+                                     ulong first,
+                                     ulong end,
+                                     slong& covered) noexcept {
+    std::vector<ulong> primes;
+    std::vector<slong> batch_counts;
+    std::vector<slong> per_prime_counts;
+    if (!silex::detail::zeta_bf_linear_factor_counts_for_test(
+                primes, batch_counts, per_prime_counts, order, first, end) ||
+        primes.empty() || primes.size() != batch_counts.size() ||
+        primes.size() != per_prime_counts.size()) {
+        return false;
+    }
+    const bool word_degree = order.degree() <= 6;
+    for (std::size_t i = 0; i < primes.size(); ++i) {
+        const slong batch = batch_counts[i];
+        const slong per_prime = per_prime_counts[i];
+        if (batch >= 0) {
+            if (batch != per_prime) {
+                return false;
+            }
+            ++covered;
+            continue;
+        }
+        if (per_prime >= 0 && word_degree &&
+            primes[i] < (UWORD(1) << 30)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool check_linear_factor_batch(const FieldSetup& setup,
+                               bool expect_coverage) noexcept {
+    // Small primes, and primes on both sides of the word kernel's 2^30
+    // limit, where residues are largest.
+    slong small = 0;
+    slong large = 0;
+    const ulong limit = UWORD(1) << 30;
+    if (!check_linear_factor_batch_range(setup.maximal_order, 2, 20000,
+                                         small) ||
+        !check_linear_factor_batch_range(setup.maximal_order, limit - 3000,
+                                         limit + 3000, large)) {
+        return false;
+    }
+    return expect_coverage ? small > 2000 && large > 100
+                           : small == 0 && large == 0;
+}
+
+bool check_linear_factor_batches() noexcept {
+    // x^4 - 7 and x^4 - 2x^3 + 23x^2 - 22x + 16 (Q(sqrt(-5), sqrt(-23))).
+    const slong pure_x4[] = {-7, 0, 0, 0};
+    const slong multiquadratic[] = {16, -22, 23, -2};
+    const slong quadratic[] = {5, 0};
+    const slong quintic[] = {-1, -1, 0, 0, 0};
+    // The seventh cyclotomic polynomial.
+    const slong sextic[] = {1, 1, 1, 1, 1, 1};
+    // x^7 - 2: above the word kernel's degree, left to the per-prime path.
+    const slong septic[] = {-2, 0, 0, 0, 0, 0, 0};
+    // x^3 - x^2 - 2x - 8 (Dedekind): 2 divides the index of Z[x].
+    const slong dedekind[] = {-8, -2, -1};
+    const FieldSetup dedekind_setup = setup_from_coefficients(dedekind, 3);
+
+    std::vector<ulong> primes;
+    std::vector<slong> batch_counts;
+    std::vector<slong> per_prime_counts;
+    if (!silex::detail::zeta_bf_linear_factor_counts_for_test(
+                primes, batch_counts, per_prime_counts,
+                dedekind_setup.maximal_order, 2, 3) ||
+        primes.size() != 1 || batch_counts[0] != -1 ||
+        per_prime_counts[0] != -1) {
+        return false;
+    }
+
+    // 2x^2 - 3: not monic, so no defining-polynomial route.
+    sflint::FmpqPoly non_monic;
+    sflint::fmpq_poly_zero(non_monic);
+    sflint::fmpq_poly_set_coeff_si(non_monic, 2, 2);
+    sflint::fmpq_poly_set_coeff_si(non_monic, 0, -3);
+    FieldSetup non_monic_setup;
+    non_monic_setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(non_monic));
+    // Z[2 beta], beta a root, with basis 1, 2 beta.
+    sflint::FmpqMat alpha_basis(2, 2);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 0, 0), 1, 1);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 1, 1), 2, 1);
+    const silex::Order alpha_order = silex::Order::from_basis(
+            non_monic_setup.field, sflint::FmpqMatConstRef(alpha_basis));
+    non_monic_setup.maximal_order = silex::Order(non_monic_setup.field);
+    if (!alpha_order.is_defined() ||
+        !non_monic_setup.maximal_order.maximal_order(alpha_order)) {
+        return false;
+    }
+
+    return check_linear_factor_batch(setup_from_coefficients(pure_x4, 4),
+                                     true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(multiquadratic, 4), true) &&
+           check_linear_factor_batch(setup_from_coefficients(quadratic, 2),
+                                     true) &&
+           check_linear_factor_batch(setup_from_coefficients(quintic, 5),
+                                     true) &&
+           check_linear_factor_batch(setup_from_coefficients(sextic, 6),
+                                     true) &&
+           check_linear_factor_batch(setup_from_coefficients(septic, 7),
+                                     false) &&
+           check_linear_factor_batch(dedekind_setup, true) &&
+           check_linear_factor_batch(non_monic_setup, false);
+}
+
 bool check_linear_factor_count_cache(const FieldSetup& setup) noexcept {
     const silex::Order& order = setup.maximal_order;
     sflint::Arb reference;
@@ -1018,7 +1133,8 @@ int main() {
                    !check_grh_transaction_refines_to_default_audit(
                            setup_from_coefficients(d12_coefficients, 12)) ||
                    !check_linear_factor_count_cache(
-                           setup_from_coefficients(d12_coefficients, 12))
+                           setup_from_coefficients(d12_coefficients, 12)) ||
+                   !check_linear_factor_batches()
             ? 1
             : 0;
 }

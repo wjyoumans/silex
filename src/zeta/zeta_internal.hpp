@@ -118,6 +118,20 @@ BdfSearchOutcome grh_bdf_factor_base_bound_search(
         const DiagnosticsContext* diagnostics,
         slong* evaluations = nullptr) noexcept;
 
+// Test entry for the batched linear factor counts of the Belabas-Friedman
+// prime loop.  For each prime p in [first, end), in increasing order,
+// `primes` receives p, `batch_counts` the number of linear factors of the
+// defining polynomial of `order` modulo p from the batched word pass, and
+// `per_prime_counts` the same number from the per-prime nmod path; each is
+// -1 where that path does not apply to p.  Returns false when `order` is not
+// a maximal order with a basis.
+bool zeta_bf_linear_factor_counts_for_test(std::vector<ulong>& primes,
+                                           std::vector<slong>& batch_counts,
+                                           std::vector<slong>& per_prime_counts,
+                                           const Order& order,
+                                           ulong first,
+                                           ulong end) noexcept;
+
 // `unconditional`, when given, is set to true exactly when the product came
 // from an unconditional route: degree one, or the quadratic L(1, chi) route
 // (explicit quadratic backend, maximal order, |D| fitting a ulong).  It is
