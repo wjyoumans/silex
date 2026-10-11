@@ -587,6 +587,21 @@ Changed
   result instead of failing.  The skip never adds a proof label, and
   ``proven`` requests are unchanged.
 
+- Unit-basis reduction of the stored units no longer lets their factored
+  form grow without bound.  When a transform would give a factored unit more
+  than 20000 factors, or the stored units already exceed that size (as after
+  an adjoin), on an order known to be maximal the units are rebuilt as single
+  field elements by the existing wide path (``rebuild_wide_unit_generators``,
+  the port of PARI 2.17.3 ``buch2.c`` ``vec_chinese_units``, 1214-1240).  The
+  cutoff is a Silex cost limit, not a source constant.  If the rebuild fails
+  the factored units are kept.  Units, class groups, regulator values and
+  labels are unchanged.  The published ``unit_group.regulator_radius``
+  changes (still a valid enclosure; some radii shrink, some grow) because the
+  regulator is computed from the rebuilt generators: on the class/unit
+  benchmark corpus (degree at most 40, ``grh``) 10 fields differ in it, among
+  them ``cyclotomic_37_phi36`` and ``cyclotomic_64_phi32``.  No other published field differs; in ``proven`` mode
+  no compared field differs.
+
 Fixed
 -----
 
