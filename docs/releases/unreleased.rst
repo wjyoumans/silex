@@ -546,6 +546,18 @@ Changed
   searches for a separating element, which cannot exist.  Decompositions,
   prime order included, are unchanged.
 
+- The ``grh`` factor-base probe no longer decomposes a rational prime that has
+  no prime ideal of norm at most the probe bound.  It reads the residue
+  degrees of the prime from the defining polynomial modulo the prime, and when
+  ``p`` raised to the smallest residue degree exceeds the bound it keeps a
+  placeholder and decomposes the prime only if a later, larger bound admits
+  it.  Factor bases and outputs are unchanged (identical on the 13 ``grh``
+  rows compared).  On ``cyclotomic_real_163_deg81`` the probe went from 48.5 s
+  to 8.9 s (busy machine, one sample each, not a controlled measurement).
+  Behavior change: a skipped prime is never decomposed, so an internal error
+  that decomposing it would have raised no longer fails the build; the prime
+  contributes nothing to the factor base either way.
+
 Fixed
 -----
 
