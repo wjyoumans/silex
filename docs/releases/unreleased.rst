@@ -549,6 +549,14 @@ Changed
 Fixed
 -----
 
+- ``FactorBase::index`` and ``FactorBase::contains`` compare prime ideals as
+  ideals.  A prime equal to a base prime but recorded with other residue data
+  (another residue polynomial or variable convention, or none) was reported
+  absent; it is now found at the base prime's index.  Factor-base builds
+  refuse to list a prime ideal twice, which the block-completeness checks of
+  factorization over a base assume; no builder produced a repeat.
+  Test-suite outputs are unchanged.
+
 - The class-relation saturation proof with proven units size-reduces the
   relation coefficients of each invariant-generator ``beta`` row against the
   LLL-reduced relation kernel before forming its compact witness.  The

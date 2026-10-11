@@ -1,9 +1,11 @@
 #include <silex/factor_base.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/order.hpp>
 
 #include "factor_base/factor_base_internal.hpp"
+#include "prime_ideal/prime_ideal_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -751,6 +753,148 @@ int test_failure_preserves_output() {
     return 0;
 }
 
+// Each prime of `base` is found at its own index, so no prime ideal occurs
+// twice (index compares ideals, not their residue data).
+bool primes_are_distinct(const silex::FactorBase& base) noexcept {
+    for (slong i = 0; i < base.length(); ++i) {
+        const silex::PrimeIdeal* prime = base.prime_at(i);
+        if (prime == nullptr || base.index(*prime) != i) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Copies `prime`, a degree-one prime with residue polynomial x - r in the
+// alpha convention, into `out` with the residue polynomial x - r - p: the
+// same residue map onto F_p, so the same prime ideal, recorded with an
+// unreduced coefficient.  PrimeIdeal::equal tells the two apart.
+bool set_unreduced_residue_variant(silex::PrimeIdeal& out,
+                                   const silex::PrimeIdeal& prime) noexcept {
+    using silex::detail::PrimeIdealAccess;
+    sflint::FmpzPoly residue;
+    sflint::Fmpz p;
+    sflint::Fmpz constant;
+    if (prime.residue_degree() != 1 ||
+        PrimeIdealAccess::residue_uses_integral_generator(prime) ||
+        !prime.residue_polynomial(sflint::FmpzPolyRef(residue)) ||
+        !prime.rational_prime(sflint::FmpzRef(p)) || !out.set(prime)) {
+        return false;
+    }
+    fmpz_poly_get_coeff_fmpz(constant.raw(), residue.raw(), 0);
+    fmpz_add(constant.raw(), constant.raw(), p.raw());
+    fmpz_poly_set_coeff_fmpz(residue.raw(), 0, constant.raw());
+    return PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
+                   out, sflint::FmpzPolyConstRef(residue)) &&
+           !out.equal(prime);
+}
+
+// x^3 - 2: the base at 5 holds degree-one primes above 2, 3 and 5 with
+// residue data in the alpha convention.  A copy of each with a different
+// residue polynomial is the same prime and is found at the same index.
+int test_contains_ignores_residue_representation() {
+    silex::NumberField field = cubic_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::FactorBase base(maximal);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    assert(base.build(sflint::FmpzConstRef(bound)));
+
+    slong checked = 0;
+    for (slong i = 0; i < base.length(); ++i) {
+        const silex::PrimeIdeal* prime = base.prime_at(i);
+        assert(prime != nullptr);
+        silex::PrimeIdeal variant(maximal);
+        if (!set_unreduced_residue_variant(variant, *prime)) {
+            continue;
+        }
+        assert(base.contains(variant));
+        assert(base.index(variant) == i);
+        ++checked;
+    }
+    assert(checked >= 1);
+    return 0;
+}
+
+// Every builder lists distinct primes, and append_prime refuses to repeat
+// one, leaving the base unchanged.  A repeated prime would make a block
+// look complete (the sum of e f reaching the degree) while a prime above p
+// is missing.
+int test_append_rejects_repeated_prime() {
+    using silex::detail::FactorBaseBlockAccess;
+    silex::NumberField field = cubic_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 30));
+    silex::FactorBase complete(maximal);
+    silex::FactorBase norm_bounded(maximal);
+    silex::FactorBase relation(maximal);
+    silex::FactorBase lll(maximal);
+    assert(complete.build(sflint::FmpzConstRef(bound)));
+    assert(norm_bounded.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(relation.build_relation_completion_base(
+            sflint::FmpzConstRef(bound)));
+    assert(lll.build_lll_relation_base(sflint::FmpzConstRef(bound)));
+    assert(primes_are_distinct(complete));
+    assert(primes_are_distinct(norm_bounded));
+    assert(primes_are_distinct(relation));
+    assert(primes_are_distinct(lll));
+
+    silex::FactorBase copy;
+    assert(copy.set(complete));
+    assert(primes_are_distinct(copy));
+
+    // 5 = P Q with f(P) = 1 and f(Q) = 2.  A second copy of the first prime
+    // is refused and the other prime above 5 is still accepted.
+    silex::PrimeIdealList five;
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, 5));
+    assert(silex::decompose_prime(five, maximal, sflint::FmpzConstRef(p)));
+    assert(five.size() == 2);
+    silex::FactorBase pair(maximal);
+    assert(FactorBaseBlockAccess::append_prime_for_testing(pair,
+                                                           *five.at(0)));
+    assert(!FactorBaseBlockAccess::append_prime_for_testing(pair,
+                                                            *five.at(0)));
+    assert(pair.length() == 1 && pair.rational_prime_block_count() == 1);
+    assert(FactorBaseBlockAccess::append_prime_for_testing(pair,
+                                                           *five.at(1)));
+    assert(pair.length() == 2 && primes_are_distinct(pair));
+
+    // Repeats of every base prime, also with other residue data, are
+    // refused and the contents stay those of an independent build.
+    silex::FactorBase independent(maximal);
+    assert(independent.build(sflint::FmpzConstRef(bound)));
+    const slong length = complete.length();
+    slong variants = 0;
+    for (slong i = 0; i < length; ++i) {
+        const silex::PrimeIdeal* prime = complete.prime_at(i);
+        assert(prime != nullptr);
+        silex::PrimeIdeal repeat(maximal);
+        assert(repeat.set(*prime));
+        assert(!FactorBaseBlockAccess::append_prime_for_testing(complete,
+                                                                repeat));
+        silex::PrimeIdeal variant(maximal);
+        if (set_unreduced_residue_variant(variant, *prime)) {
+            assert(!FactorBaseBlockAccess::append_prime_for_testing(
+                    complete, variant));
+            ++variants;
+        }
+        assert(complete.length() == length);
+    }
+    assert(variants >= 1);
+    assert(complete.equal(independent));
+    assert(primes_are_distinct(complete));
+    return 0;
+}
+
 silex::FactorBase local_factor_base() {
     silex::NumberField field = degree_one_field();
     silex::Order order = silex::test::equation_order(field);
@@ -792,5 +936,7 @@ int main() {
     assert(test_class_group_bound() == 0);
     assert(test_failure_preserves_output() == 0);
     assert(test_keeps_parent_order_alive() == 0);
+    assert(test_contains_ignores_residue_representation() == 0);
+    assert(test_append_rejects_repeated_prime() == 0);
     return 0;
 }

@@ -73,6 +73,14 @@ public:
 // data, and read-only access to recorded residue-map state.
 class PrimeIdealAccess {
 public:
+    // The integral ideal of `prime`, without the copy get_ideal makes.  Its
+    // HNF determines the prime ideal: two primes of one order are the same
+    // prime exactly when these compare equal under Ideal::equal, whatever
+    // residue data each construction recorded.
+    static const Ideal& ideal(const PrimeIdeal& prime) noexcept {
+        return prime.ideal_;
+    }
+
     // The residue-polynomial convention recorded when `prime` was built.
     static bool residue_uses_integral_generator(
             const PrimeIdeal& prime) noexcept;

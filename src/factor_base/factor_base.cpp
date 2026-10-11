@@ -1039,6 +1039,18 @@ bool is_inert_prime_decomposition(const PrimeIdealList& decomposed,
            prime->residue_degree() == degree;
 }
 
+// Two primes of one order with the same rational prime are the same prime
+// ideal exactly when their integral ideals are equal; e and f are then equal
+// too.  Ideal::equal compares HNFs, which are canonical, so this does not
+// depend on the residue data a construction recorded (PrimeIdeal::equal also
+// compares the residue polynomial, its variable convention and whether one
+// was recorded at all).
+bool same_prime_ideal(const PrimeIdeal& left,
+                      const PrimeIdeal& right) noexcept {
+    return detail::PrimeIdealAccess::ideal(left).equal(
+            detail::PrimeIdealAccess::ideal(right));
+}
+
 bool generation_bound_inputs_valid(flint::FmpzConstRef abs_discriminant,
                                    slong real_places,
                                    slong complex_pairs) noexcept {
@@ -1446,6 +1458,12 @@ bool FactorBase::build_lll_relation_base_impl(
             *this);
 }
 
+bool detail::FactorBaseBlockAccess::append_prime_for_testing(
+        FactorBase& base,
+        const PrimeIdeal& prime) noexcept {
+    return base.append_prime(prime);
+}
+
 bool detail::FactorBaseBlockAccess::order_lll_relation_base_by_norm(
         FactorBase& base) noexcept {
     struct NormIndex {
@@ -1762,18 +1780,30 @@ slong FactorBase::index(const PrimeIdeal& prime) const noexcept {
         return -1;
     }
 
+    // Every prime in the block lies over rational_prime, so the ideal
+    // comparison decides equality.
     const PrimeBlock& prime_block = blocks_[static_cast<std::size_t>(block)];
     for (slong index : prime_block.indices) {
-        if (primes_[static_cast<std::size_t>(index)].equal(prime)) {
+        if (same_prime_ideal(primes_[static_cast<std::size_t>(index)],
+                             prime)) {
             return index;
         }
     }
     return -1;
 }
 
+// The base holds each prime ideal at most once, and append_prime fails
+// without changing the base when asked to repeat one.  The completeness
+// checks rely on this: a block is complete when the sum of e f over its
+// primes is the degree (ideal_factor_over_base), and the builders mark a
+// block complete when it retains every prime of the decomposition, which is
+// only sound for distinct primes.  The builders cannot repeat a prime: each
+// rational prime is decomposed once, decompose_prime lists the distinct
+// primes above it, and set() copies a base that already holds distinct
+// primes.
 bool FactorBase::append_prime(const PrimeIdeal& prime) noexcept {
     if (!is_defined() || !same_order_parent(prime.parent(), &parent_) ||
-        !prime.has_prime_data()) {
+        !prime.has_prime_data() || index(prime) >= 0) {
         return false;
     }
 
@@ -1792,7 +1822,7 @@ bool FactorBase::append_prime(const PrimeIdeal& prime) noexcept {
 
 bool FactorBase::append_prime(PrimeIdeal&& prime) noexcept {
     if (!is_defined() || !same_order_parent(prime.parent(), &parent_) ||
-        !prime.has_prime_data()) {
+        !prime.has_prime_data() || index(prime) >= 0) {
         return false;
     }
 

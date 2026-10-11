@@ -53,6 +53,10 @@ public:
     // build_lll_relation_base_impl(bound, true) builds.  Fails, possibly
     // leaving base unchanged, if a norm cannot be computed or a copy fails.
     static bool order_lll_relation_base_by_norm(FactorBase& base) noexcept;
+    // Test hook: FactorBase::append_prime, which the builders call.  Fails,
+    // leaving base unchanged, if base already holds `prime`.  For tests only.
+    static bool append_prime_for_testing(FactorBase& base,
+                                         const PrimeIdeal& prime) noexcept;
 };
 
 // Proven generation bound used by factor_base_class_group_bound for degree
