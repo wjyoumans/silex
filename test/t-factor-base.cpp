@@ -653,7 +653,17 @@ bool doubling_builds_match_fresh(const silex::Order& order,
 // whose residue degrees (read from the defining polynomial) put every prime
 // ideal above it over the bound, and decomposes it once a doubled bound
 // admits one; the base is the fresh build's at every bound.  Index
-// divisors and discriminant divisors are always decomposed.
+// divisors and discriminant divisors are always decomposed: the index-divisor
+// cases below check the defining-polynomial route's gate directly (it
+// rejects 2, accepts 3), since 2 has a linear factor modulo the polynomial
+// there and the build alone would decompose it with or without the gate.
+bool gate_rejects_index_divisor_two(const silex::Order& maximal) {
+    silex::detail::DefiningPolynomialResidueDegrees route;
+    std::vector<slong> out;
+    return route.init(maximal) && !route.residue_degrees(out, maximal, 2) &&
+           route.residue_degrees(out, maximal, 3);
+}
+
 int test_norm_bounded_build_skips_primes_over_the_bound() {
     // Q(2^(1/3)): 7 and 13 are inert (norms 343 and 2197); 2 and 3 are
     // ramified.  Bounds 2, 4, ..., 4096.
@@ -684,6 +694,7 @@ int test_norm_bounded_build_skips_primes_over_the_bound() {
         silex::Order maximal(quadratic);
         assert(maximal.maximal_order(equation));
         assert(!equation.is_maximal());
+        assert(gate_rejects_index_divisor_two(maximal));
 
         silex::detail::PrimeDecompositionCache cache;
         sflint::Fmpz bound;
@@ -713,6 +724,7 @@ int test_norm_bounded_build_skips_primes_over_the_bound() {
         silex::Order maximal(cubic);
         assert(maximal.maximal_order(equation));
         assert(!equation.is_maximal());
+        assert(gate_rejects_index_divisor_two(maximal));
         std::size_t skipped[10] = {};
         bool filled = false;
         assert(doubling_builds_match_fresh(maximal, 10, skipped, filled));
