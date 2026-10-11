@@ -66,7 +66,7 @@ def main() -> int:
     assert "source-neutral" in manifest["fixture_contract"]
     fields = manifest["fields"]
     assert isinstance(fields, list)
-    assert len(fields) == 32
+    assert len(fields) == 33
     assert len({row["id"] for row in fields}) == len(fields)
     assert all(row["expected_success"] is True for row in fields)
     assert all(row["mode"] in {"proven", "grh"} for row in fields)
@@ -74,7 +74,7 @@ def main() -> int:
     proven = [row for row in fields if row["status"] == "must_pass_fast"]
     grh = [row for row in fields if row["status"] == "grh_certification"]
     assert len(proven) == 18
-    assert len(grh) == 13
+    assert len(grh) == 14
     assert all(row["mode"] == "proven" for row in proven)
     assert all(row["mode"] == "grh" for row in grh)
     assert all(row["timeout_seconds"] == 20 for row in proven)
@@ -143,6 +143,8 @@ def main() -> int:
         (-10007, 0, 1),
         (-31333, 0, 1),
         (100003, 0, 1),
+        # Totally real sextic, LMFDB 6.6.46411625.1.
+        (-1, -16, 58, 17, -18, -1, 1),
     }
 
     campaign_only_keys = {

@@ -478,7 +478,7 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "must_pass_fast"
     ]
-    assert len(manifest["fields"]) == 32
+    assert len(manifest["fields"]) == 33
     assert len(proven_rows) == 18
     exact_rows = {
         "degree_one_proven",
@@ -598,7 +598,7 @@ def main() -> int:
         for row in manifest["fields"]
         if row.get("status") == "grh_certification"
     ]
-    assert len(grh_rows) == 13
+    assert len(grh_rows) == 14
     # The proven generation requirement of the rows of degree 3..20:
     # Zimmert's twin-class bound (Korollar 1), with no hypothesis on the
     # class of the different, wherever it is below the Minkowski-type
@@ -610,6 +610,7 @@ def main() -> int:
         "quartic_disc1412343_grh": 98,
         "quartic_disc1208000_grh": 91,
         "quintic_disc401370255_grh": 469,
+        "lmfdb_6_6_46411625_1_grh": 25,
     }
     grh_bounds: dict[str, tuple[int, int, int]] = {}
     for row in grh_rows:
@@ -752,6 +753,10 @@ def main() -> int:
     # its generation is proven.
     used, requirement, minkowski = grh_bounds["quartic_disc1208000_grh"]
     assert requirement <= used < minkowski
+    # The LMFDB 6.6.46411625.1 sextic's base (152) is far above its
+    # twin-class bound (25), so its generation is proven.
+    used, requirement, minkowski = grh_bounds["lmfdb_6_6_46411625_1_grh"]
+    assert requirement <= used
 
     # An actually GRH-conditional (`"grh"`-valued) analytic hR check is
     # exercised by a dedicated fixture row instead: `--zeta-bf-audit`

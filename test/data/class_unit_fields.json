@@ -378,6 +378,20 @@
       "source": "Rank-zero grh fixture: x^2 + 100003, disc -100003, GRH factor-base bound below the Minkowski-type bound"
     },
     {
+      "id": "lmfdb_6_6_46411625_1_grh",
+      "coefficients_low_to_high": [-1, -16, 58, 17, -18, -1, 1],
+      "mode": "grh",
+      "expected_class_order": 2,
+      "expected_class_invariants": [2],
+      "expected_unit_rank": 5,
+      "expected_signature": [6, 0],
+      "maximal_order_discriminant": "46411625",
+      "timeout_seconds": 10,
+      "expected_success": true,
+      "status": "grh_certification",
+      "source": "Totally real sextic regression fixture, LMFDB 6.6.46411625.1 (class group [2], regulator 46.0281827452, discriminant 46411625; class group and regulator reproduced by an independent bnfinit/bnfcertify computation on 2026-10-03): the grh factor-base bound (152) is above the Zimmert twin-class bound (25), so generation is proven and completeness is grh; covers the grh factor_base_bound failure on this field"
+    },
+    {
       "id": "cubic_disc23_analytic_grh",
       "coefficients_low_to_high": [-1, -1, 0, 1],
       "mode": "proven",
