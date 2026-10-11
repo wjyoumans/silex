@@ -1200,6 +1200,13 @@ int check_index_divisor_cache_matches_fresh(
                             cached, sflint::FmpzConstRef(p));
             assert(stored != nullptr);
             assert(static_cast<slong>(stored->size()) == unbounded.size());
+            // Order::set starts with nothing stored (the claim at
+            // OrderAccess::index_divisor_decomposition), although `cached`
+            // now holds a decomposition for p.
+            silex::Order copy(field);
+            assert(copy.set(cached));
+            assert(silex::detail::OrderAccess::index_divisor_decomposition(
+                           copy, sflint::FmpzConstRef(p)) == nullptr);
 
             silex::Order fresh(field);
             assert(fresh.maximal_order(equation));
@@ -1224,8 +1231,11 @@ int test_index_divisor_cache_more_primes_than_p() {
             {2, 3}, {1, 0, 2});
 }
 
-// Q(sqrt(-3), sqrt(-5), sqrt(-7)), p = 11: 11^4 > 4096, so the recursive
-// split decomposes p.
+// Q(sqrt(-3), sqrt(-5), sqrt(-7)), p = 11: 11^4 > 4096, so the bounded
+// enumeration does not apply; the recursive split decomposes p only if the
+// monogenic generator search also fails for this order.  No existing probe
+// observes that branch from this test (the profile scopes need a diagnostics
+// build), so the test does not assert it.
 int test_index_divisor_cache_recursive_split() {
     return check_index_divisor_cache_matches_fresh(
             {1201, 598, -524, -146, 69, 2, 4, -4, 1}, {11}, {1, 0, 2});
