@@ -75,6 +75,22 @@ Added
   route.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- A ``proven`` request for a maximal imaginary quadratic order whose base up
+  to the generation bound would exceed the factor-base size limit of 2^14
+  generators no longer fails with ``factor_base_size_limit_exceeded`` (for
+  example ``x^2 + 1000000000039``, ``h = 1113261``).  It keeps its compact
+  base and is certified by a structure certificate, checked in exact reduced
+  form arithmetic against the exact class number; the result is ``proven``
+  with ``ClassGroupContext::factor_base_generation_basis()`` equal to the new
+  value ``ClassGroupGenerationBasis::structure_certificate`` (printed as
+  ``structure_certificate`` by ``silex-class-unit-instance``), and no
+  generation bound is published
+  (``factor_base_generation_certification_bound`` returns false).  On this
+  route the published relations are the staged relation rows with exact
+  witnesses.  Results on other routes are unchanged; the refusal reason
+  remains for other fields.  See
+  :doc:`../reference/algorithms_and_sources`.
+
 Changed
 -------
 

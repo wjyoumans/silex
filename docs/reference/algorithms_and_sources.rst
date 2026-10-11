@@ -958,9 +958,9 @@ contains exactly one integer, which must be positive; the working precision
 is the bit length of ``|D|`` plus 32 bits, doubled once if the ball still
 holds more than one integer, after which the computation fails closed.  At
 ``|D| = 1e14 + 31`` a direct call of this function gives ``h = 14414435``,
-PARI's value, in about 100 s and 14 MB.  A full proven run does not reach
-this step at such sizes today: ``x^2 + n`` fields above about ``4e11`` fail
-first at the factor-base size limit (``factor_base_size_limit_exceeded``).
+PARI's value, in about 100 s and 14 MB.  A full proven run reaches
+this step at such sizes only through the structure certificate route
+described below.
 With generation verified up to the Minkowski-type bound and ``h_cand = h``,
 the computed relation lattice has index one in the full one, so it is
 saturated at every prime.  The route stores a verified relation-saturation
@@ -982,10 +982,34 @@ prints in ``failure_reason``.  The limit is a fixed Silex choice with no
 upstream source, so the same fields fail the same way on every machine.  The
 proven base of the exact imaginary-quadratic route reaches the Minkowski-type
 bound ``sqrt(|D| / 3)`` and passes the limit between ``|D| = 4e11`` and
-``5e11``: for ``x^2 + n`` with ``n = 10^12 + 39`` (``23592`` generators) and
-``n = 10^14 + 31`` (about ``2e5``) a ``proven`` request now fails with that
-reason in under 4 s.  Before, the first ran for more than 10 minutes with
-8 GB of memory and the second aborted.
+``5e11``.  There a ``proven`` request keeps the compact relation base and is
+certified by the structure certificate instead (next paragraphs); the
+refusal reason stays for every other route that needs a base over the limit.
+
+*Structure certificate (imaginary quadratic, ``proven``).*  When the base up
+to the generation bound would exceed the limit, the route computes the class
+group from the compact base (the staged relation rows with their exact
+witnesses are the published relations; no relation outside the stage is
+added) and then checks, in exact reduced binary quadratic form arithmetic,
+that the published invariant generators ``g_j`` (products of factor-base
+primes, with invariants ``d_j``) satisfy: the product of the ``d_j`` is the
+exact class number ``h`` described above; each ``g_j^(d_j)`` is principal;
+and for every prime ``ell`` dividing ``h`` no nonzero
+``F_ell``-combination of the ``g_j^(d_j / ell)`` with ``ell | d_j`` is
+principal.  The induced map from the direct sum of the ``Z/d_j`` to the
+class group is then injective between groups of order ``h``, hence bijective,
+so the ``g_j``, and with them the factor base, generate the class group.
+This is elementary finite abelian group theory with no upstream source; the
+class number is the exact one above.  A relation lattice of index ``h`` alone
+would not suffice, because the factor base may fail to generate the class
+group (the ``Cl(-199)`` example of the route's design), which is why the
+``ell``-step test is required.  The route publishes
+``factor_base_generation_basis() == structure_certificate`` with
+certification ``proven`` and no generation bound
+(``factor_base_generation_certification_bound`` is false).  For
+``x^2 + 1000000000039`` a ``proven`` request now succeeds in under a second
+with ``h = 1113261`` (the factor base would have 23592 generators).  Fields
+above about ``|D| = 1e14`` still depend on the cost of ``h(D)`` above.
 
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
