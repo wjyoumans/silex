@@ -41,9 +41,11 @@ struct OrderCoordinateElementConversion {
 // Analysis, Theorem 4.2.2), where lambda >= lambda_max(G) is certified once
 // per f: lambda I - G is certainly positive definite by FLINT arb_mat_cho
 // on ball enclosures of G built from arb_fmpz_poly_complex_roots, or else
-// lambda = trace(G), its upper end, since G is positive semidefinite.  The
-// bound is evaluated with mag_t upper-bound arithmetic, so every rounding
-// is outward.  Split primes are searched lazily;
+// lambda = trace(G), its upper end, since G is positive semidefinite.  It
+// is not computed when the exact power sums p_k of f show
+// lambda_max(G) >= max |p_(2j)| >= n ||f||_2^2, where it can never beat the
+// Hadamard bound.  The bound is evaluated with mag_t upper-bound
+// arithmetic, so every rounding is outward.  Split primes are searched lazily;
 // when they do not cover a candidate's bound, the caller computes
 // fmpz_poly_resultant instead, so the value is always the exact resultant.
 struct SplitPrimeResultant {

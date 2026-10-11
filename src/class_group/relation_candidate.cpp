@@ -165,6 +165,26 @@ bool certified_t2_ratio_bound(flint::Arf& out,
     if (degree <= 0 || fmpz_poly_is_squarefree(field_polynomial) == 0) {
         return false;
     }
+    // lambda_max(G) >= G[j][j] = sum_i |r_i|^(2j) >= |p_(2j)|, the exact
+    // power sums of the monic f.  When some |p_(2j)| >= n ||f||_2^2, then
+    // lambda / n >= ||f||_2^2 and the T2 bound is never below the
+    // Hadamard bound, so the roots are not computed.
+    {
+        flint::FmpzPoly power_sums;
+        flint::Fmpz field_norm_squared;
+        flint::Fmpz threshold;
+        fmpz_poly_power_sums(power_sums.raw(), field_polynomial,
+                             2 * degree - 1);
+        _fmpz_vec_dot(field_norm_squared.raw(), field_polynomial->coeffs,
+                      field_polynomial->coeffs, field_polynomial->length);
+        fmpz_mul_si(threshold.raw(), field_norm_squared.raw(), degree);
+        for (slong j = 0; 2 * j < power_sums.raw()->length; ++j) {
+            if (fmpz_cmpabs(power_sums.raw()->coeffs + 2 * j,
+                            threshold.raw()) >= 0) {
+                return false;
+            }
+        }
+    }
     flint::AcbVec roots(degree);
     arb_fmpz_poly_complex_roots(roots.data(), field_polynomial, 0,
                                 kT2BoundRootPrecision);
@@ -444,7 +464,12 @@ void SplitPrimeResultant::resultant(
             static_cast<flint_bitcnt_t>(degree) *
                     fmpz_bits(coordinate_norm_squared.raw());
     flint_bitcnt_t half_bits = (doubled_bits + 1) / 2;
-    // The T2 bound, when smaller (see SplitPrimeResultant).
+    // The T2 bound, when smaller (see SplitPrimeResultant).  It is set up
+    // only once a split prime exists, so fields without one never pay
+    // for it; the loop below needs that first prime anyway.
+    if (moduli.empty() && !add_next_split_prime()) {
+        return;
+    }
     if (t2_bound_state == T2BoundState::not_computed) {
         t2_bound_state = certified_t2_ratio_bound(t2_ratio_bound,
                                                   field_polynomial.raw(),

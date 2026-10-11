@@ -370,6 +370,31 @@ int test_t2_bound_for_prime_cyclotomic() {
         return 1;
     }
 
+    // The minimal polynomial of 2 cos(2 pi / 41) has power sums
+    // p_38 > 20 ||f||_2^2 (its roots lie near +-2), so the T2 bound cannot
+    // beat the Hadamard bound and is not computed; values stay exact.
+    {
+        constexpr slong real_coefficients[] = {
+                1,    -10,  -55, 165,  495,  -792, -1716,
+                1716, 3003, -2002, -3003, 1365, 1820, -560,
+                -680, 136,  153, -18,  -19,  1,    1};
+        sflint::FmpzPoly real_field;
+        slong i = 0;
+        for (const slong coefficient : real_coefficients) {
+            fmpz_poly_set_coeff_si(real_field.raw(), i, coefficient);
+            ++i;
+        }
+        relation_search::SplitPrimeResultant real_evaluator;
+        real_evaluator.reset(real_field.raw());
+        if (compare_with_resultant(real_evaluator, real_field, 11, 50, 12) !=
+                    50 ||
+            real_evaluator.t2_bound_state !=
+                    relation_search::SplitPrimeResultant::T2BoundState::
+                            unavailable) {
+            return 1;
+        }
+    }
+
     arf_t lower;
     arf_t upper;
     arf_init(lower);
