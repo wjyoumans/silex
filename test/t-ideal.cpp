@@ -3023,6 +3023,11 @@ int test_set_known_ideal_hnf_matches_set_hnf() {
             }
         }
     }
+    silex::Ideal undefined;
+    sflint::FmpzMat identity(2, 2);
+    fmpz_mat_one(identity.raw());
+    assert(!silex::detail::IdealAccess::set_known_ideal_hnf(
+            undefined, sflint::FmpzMatConstRef(identity)));
     return 0;
 }
 

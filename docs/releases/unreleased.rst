@@ -621,8 +621,8 @@ Changed
 
 - When ``decompose_prime`` splits ``O/pO`` for an unramified prime dividing
   the index, it no longer tests that each new prime ideal's lattice is an
-  ideal in builds with ``NDEBUG`` defined (Release, RelWithDebInfo).  The
-  lattice is ``pO`` plus sums of ideals ``eO/pO`` of ``O/pO``, so it is an
+  ideal in builds with ``NDEBUG`` defined (for example Release).  The
+  lattice is ``pO`` plus sums of ideals ``e(O/pO)`` of ``O/pO``, so it is an
   ideal by construction.  Builds with assertions enabled still assert the
   test.  Decompositions are unchanged.
 

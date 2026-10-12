@@ -1938,7 +1938,7 @@ bool ideal_from_mod_rows(Ideal& out,
     // of I under the ring map O -> O/pO, and the preimage of an ideal under
     // a ring map is an ideal.  The argument holds for any e, idempotent or
     // not; it needs only that `multiplication_table` is that of O mod p.
-    // Reference 2.17.3 `src/basemath/base2.c:primedec_aux` (2309, 2336-2343)
+    // Reference 2.17.3 `src/basemath/base2.c:primedec_aux` (2309-2310, 2336-2343)
     // likewise takes the F_p-image of [H | multiplication matrix] as an
     // ideal of Z_K/p without testing it.
     return detail::IdealAccess::set_known_ideal_hnf(out,
