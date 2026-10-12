@@ -70,6 +70,18 @@ public:
         ComputeTestSeams::continuation_appends_nothing_.store(
                 on, std::memory_order_relaxed);
     }
+
+    // Calls of word_quotient_log_resolve that took the shared walk and the
+    // baby-step giant-step route since the process started.  Read-only; a
+    // test compares the counts before and after a call.
+    static unsigned long word_quotient_log_walk_calls() noexcept {
+        return ComputeTestSeams::word_quotient_log_walk_calls_.load(
+                std::memory_order_relaxed);
+    }
+    static unsigned long word_quotient_log_baby_giant_calls() noexcept {
+        return ComputeTestSeams::word_quotient_log_baby_giant_calls_.load(
+                std::memory_order_relaxed);
+    }
 };
 
 }  // namespace silex::detail

@@ -5040,6 +5040,90 @@ int test_residue_quotient_log_column_mixes_resolved_and_apply_entries() {
     return checked == 9 ? 0 : 1;
 }
 
+// word_quotient_log_resolve takes the shared walk when ell has fewer than 7
+// bits (kWordQuotientLogBabyGiantBits) and baby-step giant-step from 7 bits
+// on.  The route counters of ComputeTestSeams, read through TestHookAccess,
+// show which one residue_quotient_log_column ran: ell = 3 and ell = 61 (6
+// bits, a prime just below the cutoff 64) walk; ell = 67
+// (7 bits, just above the cutoff 64) and ell = 127 (7 bits, the largest) use
+// baby-step giant-step.  Each case uses the first prime q = k ell + 1 that
+// splits completely in the cubic, so ell divides q - 1.
+int test_residue_quotient_log_column_route_follows_the_bit_cutoff() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_plus_two(cubic);
+    assert(theta.gen());
+    assert(theta_plus_two.add_si(theta, 2));
+    const silex::Element* values[] = {&theta, &theta_plus_two};
+
+    struct Case {
+        slong ell;
+        bool baby_giant;
+    };
+    const Case cases[] = {{3, false}, {61, false}, {67, true}, {127, true}};
+    for (const Case& entry : cases) {
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, entry.ell));
+        silex::PrimeIdealList primes;
+        for (ulong k = 1; k < 10000; ++k) {
+            const ulong q = k * static_cast<ulong>(entry.ell) + 1;
+            if (n_is_prime(q) == 0) {
+                continue;
+            }
+            sflint::Fmpz q_fmpz;
+            assert(set_fmpz_si(q_fmpz, static_cast<slong>(q)));
+            primes = silex::PrimeIdealList();
+            if (silex::decompose_prime(primes, order,
+                                       sflint::FmpzConstRef(q_fmpz), 1) &&
+                primes.size() == 3) {
+                break;
+            }
+            primes = silex::PrimeIdealList();
+        }
+        assert(primes.size() == 3);
+        if (primes.size() != 3) {
+            return 1;
+        }
+        const silex::PrimeIdeal* prime = primes.at(0);
+        assert(prime != nullptr);
+        if (prime == nullptr) {
+            return 1;
+        }
+        silex::ResidueField residue_field(*prime);
+        silex::ResidueFieldQuotientLog quotient_log(residue_field);
+        assert(residue_field.is_defined() && residue_field.degree() == 1);
+        assert(quotient_log.set_ell(sflint::FmpzConstRef(ell)));
+        std::vector<silex::ResidueFieldElement> images;
+        for (const silex::Element* value : values) {
+            images.emplace_back(residue_field);
+            assert(images.back().set_element(*value));
+        }
+        sflint::FmpzMat column(2, 1);
+
+        const unsigned long walk_before =
+                silex::detail::TestHookAccess::word_quotient_log_walk_calls();
+        const unsigned long bsgs_before = silex::detail::TestHookAccess::
+                word_quotient_log_baby_giant_calls();
+        const bool ok = silex::detail::residue_quotient_log_column(
+                column, images, residue_field, quotient_log,
+                sflint::FmpzConstRef(ell), nullptr);
+        const unsigned long walk_after =
+                silex::detail::TestHookAccess::word_quotient_log_walk_calls();
+        const unsigned long bsgs_after = silex::detail::TestHookAccess::
+                word_quotient_log_baby_giant_calls();
+        assert(ok);
+        assert(walk_after - walk_before == (entry.baby_giant ? 0u : 1u));
+        assert(bsgs_after - bsgs_before == (entry.baby_giant ? 1u : 0u));
+        if (!ok || walk_after - walk_before != (entry.baby_giant ? 0u : 1u) ||
+            bsgs_after - bsgs_before != (entry.baby_giant ? 1u : 0u)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
     silex::OrderUnitGroup group = real_quadratic_unit_group();
     const silex::Order* order = group.parent();
@@ -11572,6 +11656,7 @@ int main() {
     test_residue_dlog_proof_matrix_matches_per_entry_quotient_log();
     test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log();
     test_residue_quotient_log_column_mixes_resolved_and_apply_entries();
+    test_residue_quotient_log_column_route_follows_the_bit_cutoff();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();
     test_unit_proof_records();

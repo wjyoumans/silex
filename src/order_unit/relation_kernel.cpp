@@ -1305,10 +1305,12 @@ void word_quotient_log_resolve(
     if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogBabyGiantBits &&
         zeta != 1 && n_is_prime(ell_ui) != 0 &&
         n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1) {
+        ComputeTestSeams::count_word_quotient_log_baby_giant();
         word_quotient_log_baby_giant(out, resolved, pending, zeta, p_ui,
                                      ell_ui, diagnostics);
         return;
     }
+    ComputeTestSeams::count_word_quotient_log_walk();
 
     SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.residue_dlog_proof_matrix.shared_walk");

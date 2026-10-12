@@ -110,9 +110,25 @@ public:
         return continuation_appends_nothing_.exchange(
                 false, std::memory_order_relaxed);
     }
+    // word_quotient_log_resolve (relation_kernel.cpp): counts the calls that
+    // took each discrete-log route, so a test can observe the route choice
+    // (shared walk below kWordQuotientLogBabyGiantBits bits of ell, baby-step
+    // giant-step from there on).  One relaxed increment per call, which is
+    // once per residue_quotient_log_column; it never changes a result.
+    static void count_word_quotient_log_walk() noexcept {
+        word_quotient_log_walk_calls_.fetch_add(
+                1, std::memory_order_relaxed);
+    }
+    static void count_word_quotient_log_baby_giant() noexcept {
+        word_quotient_log_baby_giant_calls_.fetch_add(
+                1, std::memory_order_relaxed);
+    }
 
 private:
     friend class TestHookAccess;
+    inline static std::atomic<unsigned long> word_quotient_log_walk_calls_{0};
+    inline static std::atomic<unsigned long>
+            word_quotient_log_baby_giant_calls_{0};
     inline static std::atomic<bool> forget_validation_summary_{false};
     inline static std::atomic<bool> continuation_appends_nothing_{false};
 };
