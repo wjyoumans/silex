@@ -498,6 +498,43 @@ static bool ideal_lattice_t2_diagonal_checks_pass(
                            flint::FmpzConstRef(product_bound)) <= 0;
 }
 
+// Runs certified_fmpz_lll on `matrix` with `transform` set to the
+// identity of the row count.
+static lat::detail::CertifiedLllRoute ideal_lattice_certified_lll(
+        flint::FmpzMat& matrix,
+        flint::FmpzMat& transform,
+        const flint::FmpzLll& config) noexcept {
+    const slong rows = flint::fmpz_mat_nrows(matrix);
+    if (flint::fmpz_mat_nrows(transform) != rows ||
+        flint::fmpz_mat_ncols(transform) != rows) {
+        transform = flint::FmpzMat(rows, rows);
+    }
+    flint::fmpz_mat_one(flint::FmpzMatRef(transform));
+    return lat::detail::certified_fmpz_lll(matrix.raw(), transform.raw(),
+                                           flint::FmpzLllConstRef(config));
+}
+
+// The two-LLL route's fmpz_lll calls, through FLINT's certified first
+// phase (lat::detail::certified_fmpz_lll, the Lat::lll_reduce route,
+// docs/reference/algorithms_and_sources.rst), which skips FLINT's
+// multiprecision pre-check of the phase output.  The returned matrices are
+// fmpz_lll's on every route.
+lat::detail::CertifiedLllRoute ideal_lattice_pre_reduction_lll(
+        flint::FmpzMat& basis,
+        flint::FmpzMat& transform) noexcept {
+    // reference implementation NfOrd/LLL.jl:_lll first applies
+    // lll_with_transform(basis_matrix(A), LLLContext(0.5, 0.51)).
+    const flint::FmpzLll config(0.5, 0.51, Z_BASIS, APPROX);
+    return ideal_lattice_certified_lll(basis, transform, config);
+}
+
+lat::detail::CertifiedLllRoute ideal_lattice_gram_lll(
+        flint::FmpzMat& gram,
+        flint::FmpzMat& transform) noexcept {
+    const flint::FmpzLll config(0.99, 0.51, GRAM, APPROX);
+    return ideal_lattice_certified_lll(gram, transform, config);
+}
+
 static IdealLatticeReductionStatus
 ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                               flint::FmpzMat& transform,
@@ -550,13 +587,10 @@ weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                 "class_group.ideal_lattice_reduction.weighted.pre_lll");
         flint::fmpz_mat_set(flint::FmpzMatRef(pre_reduced_basis),
                             flint::FmpzMatConstRef(basis));
-        flint::fmpz_mat_one(flint::FmpzMatRef(pre_transform));
-
         // reference implementation NfOrd/LLL.jl:_lll first applies
         // lll_with_transform(basis_matrix(A), LLLContext(0.5, 0.51)).
-        flint::FmpzLll pre_config(0.5, 0.51, Z_BASIS, APPROX);
-        fmpz_lll(pre_reduced_basis.raw(), pre_transform.raw(),
-                 pre_config.raw());
+        (void)ideal_lattice_pre_reduction_lll(pre_reduced_basis,
+                                              pre_transform);
         flint::fmpz_mat_mul(flint::FmpzMatRef(pre_transform_check),
                             flint::FmpzMatConstRef(pre_transform),
                             flint::FmpzMatConstRef(basis));
@@ -632,9 +666,7 @@ weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                 "class_group.ideal_lattice_reduction.weighted.gram_lll");
         flint::fmpz_mat_set(flint::FmpzMatRef(reduced_gram),
                             flint::FmpzMatConstRef(original_gram));
-        flint::fmpz_mat_one(flint::FmpzMatRef(gram_transform));
-        flint::FmpzLll config(0.99, 0.51, GRAM, APPROX);
-        fmpz_lll(reduced_gram.raw(), gram_transform.raw(), config.raw());
+        (void)ideal_lattice_gram_lll(reduced_gram, gram_transform);
 
         if (!gram_transform_matches(flint::FmpzMatConstRef(reduced_gram),
                                     flint::FmpzMatConstRef(original_gram),
@@ -705,13 +737,9 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
     flint::FmpzMat pre_transform_check(degree, degree);
     flint::fmpz_mat_set(flint::FmpzMatRef(pre_reduced_basis),
                         flint::FmpzMatConstRef(basis));
-    flint::fmpz_mat_one(flint::FmpzMatRef(pre_transform));
-
     // reference implementation NfOrd/LLL.jl:_lll first applies
     // lll_with_transform(basis_matrix(A), LLLContext(0.5, 0.51)).
-    flint::FmpzLll pre_config(0.5, 0.51, Z_BASIS, APPROX);
-    fmpz_lll(pre_reduced_basis.raw(), pre_transform.raw(),
-             pre_config.raw());
+    (void)ideal_lattice_pre_reduction_lll(pre_reduced_basis, pre_transform);
     flint::fmpz_mat_mul(flint::FmpzMatRef(pre_transform_check),
                         flint::FmpzMatConstRef(pre_transform),
                         flint::FmpzMatConstRef(basis));
@@ -765,9 +793,7 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
     flint::fmpz_mat_set(flint::FmpzMatRef(reduced_gram),
                         flint::FmpzMatConstRef(original_gram));
     flint::FmpzMat gram_transform(degree, degree);
-    flint::fmpz_mat_one(flint::FmpzMatRef(gram_transform));
-    flint::FmpzLll config(0.99, 0.51, GRAM, APPROX);
-    fmpz_lll(reduced_gram.raw(), gram_transform.raw(), config.raw());
+    (void)ideal_lattice_gram_lll(reduced_gram, gram_transform);
 
     if (!gram_transform_matches(flint::FmpzMatConstRef(reduced_gram),
                                 flint::FmpzMatConstRef(original_gram),

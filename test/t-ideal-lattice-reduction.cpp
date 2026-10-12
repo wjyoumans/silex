@@ -1601,6 +1601,148 @@ int test_rounded_embedding_certified_lll_matches_fmpz_lll() {
     return 0;
 }
 
+// The two LLLs of the two-LLL route go through FLINT's certified first
+// phase (lat::detail::certified_fmpz_lll): the Z_BASIS pre-reduction
+// (delta 0.5) and the GRAM reduction (delta 0.99).  On the octic field of
+// row multiquadratic_m3_m5_m7 and the degree-one prime above 43 of the
+// rounded-embedding test, each takes the certified route on its real input
+// and returns fmpz_lll's matrix and transform; under every injected failure
+// it falls back to fmpz_lll with the same result.  The whole two-LLL
+// reduction, plain and weighted, is unchanged under injected failures,
+// which reach both sites.
+int test_two_lll_certified_lll_matches_fmpz_lll() {
+    namespace rs = silex::detail::relation_search;
+    constexpr std::array<slong, 9> m3_m5_m7 = {1201, 598, -524, -146, 69,
+                                              2,    4,   -4,   1};
+    FieldSetup setup = monic_field(m3_m5_m7.data(),
+                                   static_cast<slong>(m3_m5_m7.size()));
+    const silex::Order& order = setup.maximal_order;
+    const slong degree = order.degree();
+    silex::Ideal prime(order);
+    assert(degree_one_prime_ideal_above(prime, order, UWORD(43), 0));
+
+    using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
+    using silex::lat::detail::CertifiedLllRoute;
+    using SiteLll = CertifiedLllRoute (*)(sflint::FmpzMat&, sflint::FmpzMat&);
+    const auto check_site = [](SiteLll site, const sflint::FmpzMat& matrix,
+                               const sflint::FmpzLll& config) {
+        const slong rows = sflint::fmpz_mat_nrows(matrix);
+        const slong cols = sflint::fmpz_mat_ncols(matrix);
+        sflint::FmpzMat reference(rows, cols);
+        sflint::FmpzMat reference_transform(rows, rows);
+        sflint::fmpz_mat_set(sflint::FmpzMatRef(reference),
+                             sflint::FmpzMatConstRef(matrix));
+        sflint::fmpz_mat_one(sflint::FmpzMatRef(reference_transform));
+        ::fmpz_lll(reference.raw(), reference_transform.raw(), config.raw());
+        for (const auto failure : {CertifiedLllTestFailure::none,
+                                   CertifiedLllTestFailure::first_phase,
+                                   CertifiedLllTestFailure::certificate}) {
+            sflint::FmpzMat reduced(rows, cols);
+            sflint::FmpzMat transform(0, 0);
+            sflint::fmpz_mat_set(sflint::FmpzMatRef(reduced),
+                                 sflint::FmpzMatConstRef(matrix));
+            TestHookAccess::set_certified_lll_failure(failure);
+            const CertifiedLllRoute route = site(reduced, transform);
+            TestHookAccess::set_certified_lll_failure(
+                    CertifiedLllTestFailure::none);
+            const CertifiedLllRoute expected_route =
+                    failure == CertifiedLllTestFailure::none
+                            ? CertifiedLllRoute::certified
+                            : CertifiedLllRoute::fallback;
+            if (route != expected_route ||
+                !sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(reduced),
+                                        sflint::FmpzMatConstRef(reference)) ||
+                !sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(transform),
+                        sflint::FmpzMatConstRef(reference_transform))) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // The pre-reduction input is the ideal's HNF basis.
+    sflint::FmpzMat hnf(degree, degree);
+    assert(prime.get_hnf(sflint::FmpzMatRef(hnf)));
+    const sflint::FmpzLll pre_config(0.5, 0.51, Z_BASIS, APPROX);
+    assert(check_site(&rs::ideal_lattice_pre_reduction_lll, hnf, pre_config));
+
+    // A GRAM input of the same kind as the scaled T2 Gram matrix: the exact
+    // Gram matrix of the pre-reduced basis in the cached rounded embedding.
+    sflint::FmpzMat pre_reduced(degree, degree);
+    sflint::FmpzMat pre_transform(0, 0);
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(pre_reduced),
+                         sflint::FmpzMatConstRef(hnf));
+    assert(rs::ideal_lattice_pre_reduction_lll(pre_reduced, pre_transform) ==
+           CertifiedLllRoute::certified);
+    rs::IdealLatticeRoundedEmbeddingCache cache;
+    rs::IdealLatticeLllData rounded_data;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            rounded_data, prime, kReductionPrecision, cache));
+    assert(cache.has_rounded_rows);
+    sflint::FmpzMat embedded(degree, degree);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(embedded),
+                         sflint::FmpzMatConstRef(pre_reduced),
+                         sflint::FmpzMatConstRef(cache.rounded_rows));
+    sflint::FmpzMat gram(degree, degree);
+    ::fmpz_mat_gram(gram.raw(), embedded.raw());
+    const sflint::FmpzLll gram_config(0.99, 0.51, GRAM, APPROX);
+    assert(check_site(&rs::ideal_lattice_gram_lll, gram, gram_config));
+
+    // The whole two-LLL reduction, plain and weighted, under injected
+    // failures at both sites.
+    rs::IdealLatticeLllData expected;
+    assert(rs::build_ideal_lattice_lll_data(expected, prime,
+                                            kReductionPrecision));
+    sflint::FmpzMat weights(1, degree);
+    sflint::fmpz_mat_zero(sflint::FmpzMatRef(weights));
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(weights, 0, 0), 16);
+    sflint::FmpzMat weighted_basis(degree, degree);
+    sflint::FmpzMat weighted_transform(degree, degree);
+    sflint::FmpzMat weighted_gram(degree, degree);
+    sflint::Fmpz weighted_denominator;
+    assert(rs::build_weighted_ideal_lattice_reduction(
+            weighted_basis, weighted_transform, weighted_gram,
+            weighted_denominator, prime, sflint::FmpzMatConstRef(weights),
+            kReductionPrecision, nullptr, nullptr));
+    for (const auto failure : {CertifiedLllTestFailure::first_phase,
+                               CertifiedLllTestFailure::certificate}) {
+        const slong injected_before =
+                TestHookAccess::certified_lll_failures_injected();
+        TestHookAccess::set_certified_lll_failure(failure);
+        rs::IdealLatticeLllData actual;
+        const bool built = rs::build_ideal_lattice_lll_data(
+                actual, prime, kReductionPrecision);
+        sflint::FmpzMat basis(degree, degree);
+        sflint::FmpzMat transform(degree, degree);
+        sflint::FmpzMat scaled_gram(degree, degree);
+        sflint::Fmpz denominator;
+        const bool weighted_built = rs::build_weighted_ideal_lattice_reduction(
+                basis, transform, scaled_gram, denominator, prime,
+                sflint::FmpzMatConstRef(weights), kReductionPrecision,
+                nullptr, nullptr);
+        TestHookAccess::set_certified_lll_failure(
+                CertifiedLllTestFailure::none);
+        assert(built && same_lll_data(actual, expected));
+        assert(weighted_built &&
+               sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(basis),
+                                      sflint::FmpzMatConstRef(weighted_basis)) &&
+               sflint::fmpz_mat_equal(
+                       sflint::FmpzMatConstRef(transform),
+                       sflint::FmpzMatConstRef(weighted_transform)) &&
+               sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(scaled_gram),
+                                      sflint::FmpzMatConstRef(weighted_gram)) &&
+               sflint::fmpz_equal(sflint::FmpzConstRef(denominator),
+                                  sflint::FmpzConstRef(weighted_denominator)));
+        // Both LLLs of each reduction ran through the helper.
+        assert(TestHookAccess::certified_lll_failures_injected() -
+                       injected_before >=
+               4);
+    }
+    return 0;
+}
+
 int main() {
     assert(test_ideal_lattice_result_contracts() == 0);
     assert(test_rounded_embedding_lll_contracts() == 0);
@@ -1608,6 +1750,7 @@ int main() {
     assert(test_rounded_embedding_route_check_boundary() == 0);
     assert(test_rounded_embedding_route_check_once_per_context() == 0);
     assert(test_rounded_embedding_certified_lll_matches_fmpz_lll() == 0);
+    assert(test_two_lll_certified_lll_matches_fmpz_lll() == 0);
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);

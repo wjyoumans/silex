@@ -64,12 +64,28 @@ namespace silex::lat::detail {
 // inputs are restored and fmpz_lll runs from the start; (3) the double
 // phase is deterministic.  Only the direction "certificate true implies
 // FLINT accepts" is used.
+//
+// A GRAM context (the input is a Gram matrix) is reduced by fmpz_lll with
+// one wrapper call at every size (lll_with_removal_ulll.c), and FLINT's
+// check of the phase output is fmpz_lll_is_reduced's GRAM branch, which
+// strips no rows and ends in fmpz_mat_is_reduced_gram (is_reduced.c).  The
+// certificate is integer_gram_is_lll_reduced for small outputs: when it
+// holds, every Gram-Schmidt norm is positive, fmpz_mat_is_reduced_gram
+// computes the same exact mu and norms and accepts, so (1) to (3) carry
+// over.  For larger outputs it is FLINT's own check, the same call on the
+// same matrix as in fmpz_lll, so the decision is fmpz_lll's.  The transform
+// does not steer the GRAM phase: in _fmpz_lll_d (lll_d.c) U is read only
+// for its row count and in the update_b test, which needs more columns
+// than rows and so never holds for a square Gram matrix; every other use
+// writes the row operations into U (_fmpz_lll_check_babai in
+// lll_check_babai.c, fmpz_mat_move_row in lll_d.c).
 
 enum class CertifiedLllRoute {
     certified,   // The certified first phase is the result.
     fallback,    // The phase ran but was not certified; fmpz_lll ran.
-    ineligible,  // Fewer than two rows, entries above 250 bits, or a
-                 // non Z_BASIS / non APPROX context; fmpz_lll ran.
+    ineligible,  // Fewer than two rows, a non APPROX context, a Z_BASIS
+                 // input with entries above 250 bits, a non square GRAM
+                 // input, or a context that is neither; fmpz_lll ran.
 };
 
 // The certificate uses integer_basis_is_lll_reduced when the phase output
@@ -81,6 +97,27 @@ enum class CertifiedLllRoute {
 // about 16 bits for n up to 81, while above about 20 bits it falls behind
 // as n grows.
 inline constexpr slong certified_lll_integer_test_max_bits = 16;
+
+// For a GRAM context the certificate uses integer_gram_is_lll_reduced when
+// the phase output's row count times its entry bit size is at most this,
+// and FLINT's own check of the phase output (fmpz_lll_is_reduced at the
+// wrapper's precision 120) otherwise.  On the scaled T2 Gram matrices of
+// the class/unit corpus (busy machine), the integer test took at most 0.79
+// of the time of FLINT's check up to a product of about 2500 (degree 24),
+// about the same time near 3400 (degree 32), and 1.6 to 37 times as long
+// from degree 40 up.
+inline constexpr slong certified_lll_gram_integer_test_max_size = 3000;
+
+// Exact test of FLINT's fmpz_mat_is_reduced_gram(gram, delta, eta) for a
+// positive definite Gram matrix of at least two rows; false for fewer rows,
+// a non square matrix, or a matrix that is not positive definite (FLINT's
+// test may accept some of those, or divide by zero).  It reads only the
+// lower triangle and the diagonal.  Equality with FLINT holds for
+// eta^2 < delta, as below.  True implies fmpz_mat_is_reduced_gram for any
+// parameters.
+bool integer_gram_is_lll_reduced(flint::FmpzMatConstRef gram,
+                                 double delta,
+                                 double eta) noexcept;
 
 // Exact test of FLINT's fmpz_mat_is_reduced(basis, delta, eta) for a basis
 // of at least two rows; false for fewer rows.  Equality with FLINT holds
@@ -94,7 +131,12 @@ bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
 // The exact certificate: fmpz_mat_is_reduced(basis, delta, eta) of
 // `config`, decided by integer_basis_is_lll_reduced when the entries have
 // at most certified_lll_integer_test_max_bits bits.  False for fewer than
-// two rows.
+// two rows.  For a GRAM `config`: integer_gram_is_lll_reduced up to
+// certified_lll_gram_integer_test_max_size (unlike fmpz_mat_is_reduced_gram
+// it never divides by a zero Gram-Schmidt norm), and above it FLINT's own
+// fmpz_lll_is_reduced(basis, config, 120), the test fmpz_lll applies to
+// the phase output, which is not an exact test but makes the helper accept
+// exactly when fmpz_lll keeps the phase output.
 bool lll_certificate_holds(flint::FmpzMatConstRef basis,
                            flint::FmpzLllConstRef config) noexcept;
 

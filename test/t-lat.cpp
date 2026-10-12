@@ -851,12 +851,22 @@ int test_lll_certifier_boundaries() {
     silex::flint::FmpzLll config;
     fmpz_one(scale.raw());
     fmpz_mul_2exp(scale.raw(), scale.raw(), 60);
+    // The Gram matrix certificate on B B^T (entries of about 120 bits, so
+    // the integer test runs) against FLINT's exact fmpz_mat_is_reduced_gram.
+    silex::flint::FmpzMat gram(2, 2);
+    silex::flint::FmpzLll gram_config(0.99, 0.51, GRAM, APPROX);
     auto agrees = [&](bool expected) {
+        fmpz_mat_gram(gram.raw(), basis.raw());
         return silex::test::rational_lll_reduced(basis) == expected &&
                (fmpz_mat_is_reduced(basis.raw(), 0.99, 0.51) != 0) == expected &&
                silex::lat::detail::lll_certificate_holds(basis,
                        silex::flint::FmpzLllConstRef(config)) == expected &&
-               (fmpz_lll_is_reduced(basis.raw(), config.raw(), 120) != 0) == expected;
+               (fmpz_lll_is_reduced(basis.raw(), config.raw(), 120) != 0) == expected &&
+               (fmpz_mat_is_reduced_gram(gram.raw(), 0.99, 0.51) != 0) == expected &&
+               silex::lat::detail::integer_gram_is_lll_reduced(gram, 0.99,
+                       0.51) == expected &&
+               silex::lat::detail::lll_certificate_holds(gram,
+                       silex::flint::FmpzLllConstRef(gram_config)) == expected;
     };
     silex::test::exact_binary_parameter(parameter, 0.51);
     fmpz_mul(cutoff.raw(), fmpq_numref(parameter.raw()), scale.raw());
@@ -1826,6 +1836,175 @@ int test_certified_fmpz_lll_matches_fmpz_lll() {
            : 1;
 }
 
+// certified_fmpz_lll on GRAM input (the Gram matrices B B^T of random
+// full-rank bases of 4 to 200 bits, 2 to 34 rows) against plain fmpz_lll,
+// with a null and an identity transform and every injected failure.  The
+// matrix and transform must equal fmpz_lll's on every route.  The run must
+// certify phase outputs with the integer Gram test and, above
+// certified_lll_gram_integer_test_max_size, with FLINT's own check, and
+// must reach the fallback.  Every certified-or-not decision of the integer
+// Gram test is compared with fmpz_mat_is_reduced_gram and with
+// integer_basis_is_lll_reduced on B, and a single row, a non square matrix
+// and a GRAM EXACT context are ineligible.
+int test_certified_fmpz_lll_gram_matches_fmpz_lll() {
+    using namespace silex::lat::detail;
+    using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
+    using silex::flint::FmpzMat;
+    silex::flint::FmpzLll basis_config;
+    silex::flint::FmpzLll config(0.99, 0.51, GRAM, APPROX);
+    const silex::flint::FmpzLllConstRef config_ref(config);
+    flint_rand_t state;
+    flint_rand_init(state);
+    slong certified_integer = 0;
+    slong certified_flint = 0;
+    slong fallback = 0;
+    slong large_rejected = 0;
+    const flint_bitcnt_t bit_choices[] = {4, 20, 60, 120, 200};
+    for (slong iter = 0; iter < 260; ++iter) {
+        const bool large = iter % 20 == 0;
+        const slong rows = large ? 30 + static_cast<slong>(n_randint(state, 5))
+                                 : 2 + static_cast<slong>(n_randint(state, 11));
+        const slong cols = rows + static_cast<slong>(n_randint(state, 4));
+        const flint_bitcnt_t bits =
+                large ? 120 : bit_choices[n_randint(state, 5)];
+        FmpzMat basis(rows, cols);
+        do {
+            fmpz_mat_randtest(basis.raw(), state, bits);
+        } while (fmpz_mat_rank(basis.raw()) < rows);
+        if (large || n_randint(state, 2) == 0) {
+            fmpz_lll(basis.raw(), nullptr, basis_config.raw());
+            if (n_randint(state, 2) == 0) {
+                // Break the reduction so the phase has work to do.
+                for (slong j = 0; j < cols; ++j) {
+                    fmpz_addmul_ui(fmpz_mat_entry(basis.raw(), rows - 1, j),
+                            fmpz_mat_entry(basis.raw(), 0, j), 3);
+                }
+            }
+        }
+        FmpzMat input(rows, rows);
+        fmpz_mat_gram(input.raw(), basis.raw());
+
+        // The integer Gram test against FLINT's exact Gram test and the
+        // basis test, on the input and on the reduced input.
+        FmpzMat reduced_basis(rows, cols);
+        fmpz_mat_set(reduced_basis.raw(), basis.raw());
+        fmpz_lll(reduced_basis.raw(), nullptr, basis_config.raw());
+        for (const FmpzMat* pair : {&basis, &reduced_basis}) {
+            FmpzMat gram(rows, rows);
+            fmpz_mat_gram(gram.raw(), pair->raw());
+            const bool integer = integer_gram_is_lll_reduced(gram, 0.99, 0.51);
+            // The certificate on the Gram matrix: the integer test up to
+            // the cutoff, FLINT's own check above it; on these positive
+            // definite inputs both decide the exact predicate.
+            const bool certificate = lll_certificate_holds(gram, config_ref);
+            if (integer !=
+                        (fmpz_mat_is_reduced_gram(gram.raw(), 0.99, 0.51) != 0) ||
+                integer != integer_basis_is_lll_reduced(*pair, 0.99, 0.51) ||
+                certificate != integer ||
+                certificate !=
+                        (fmpz_lll_is_reduced(gram.raw(), config.raw(), 120) != 0) ||
+                (pair == &reduced_basis && !certificate)) {
+                flint_rand_clear(state);
+                return 1;
+            }
+            const slong gram_bits = fmpz_mat_max_bits(gram.raw());
+            if (large && pair == &basis &&
+                rows * (gram_bits < 0 ? -gram_bits : gram_bits) >
+                        certified_lll_gram_integer_test_max_size) {
+                // Above the cutoff, FLINT's check must also be seen to
+                // reject a matrix the phase has not reduced.
+                large_rejected += certificate ? 0 : 1;
+            }
+        }
+
+        const auto failure = static_cast<CertifiedLllTestFailure>(
+                n_randint(state, 3));
+        for (int form = 0; form < 2; ++form) {
+            fmpz_mat_struct* const no_transform = nullptr;
+            FmpzMat expected(rows, rows), expected_transform(rows, rows);
+            fmpz_mat_set(expected.raw(), input.raw());
+            fmpz_mat_one(expected_transform.raw());
+            fmpz_lll(expected.raw(),
+                     form == 0 ? no_transform : expected_transform.raw(),
+                     config.raw());
+
+            FmpzMat actual(rows, rows), actual_transform(rows, rows);
+            fmpz_mat_set(actual.raw(), input.raw());
+            fmpz_mat_one(actual_transform.raw());
+            TestHookAccess::set_certified_lll_failure(failure);
+            const CertifiedLllRoute route = certified_fmpz_lll(actual.raw(),
+                    form == 0 ? no_transform : actual_transform.raw(),
+                    config_ref);
+            TestHookAccess::set_certified_lll_failure(
+                    CertifiedLllTestFailure::none);
+            if (!fmpz_mat_equal(actual.raw(), expected.raw()) ||
+                (form != 0 && !fmpz_mat_equal(actual_transform.raw(),
+                                              expected_transform.raw())) ||
+                route == CertifiedLllRoute::ineligible ||
+                (failure != CertifiedLllTestFailure::none &&
+                 route != CertifiedLllRoute::fallback)) {
+                flint_rand_clear(state);
+                return 1;
+            }
+            if (route == CertifiedLllRoute::certified) {
+                const slong out_bits = fmpz_mat_max_bits(actual.raw());
+                (rows * (out_bits < 0 ? -out_bits : out_bits) <=
+                                 certified_lll_gram_integer_test_max_size
+                         ? certified_integer
+                         : certified_flint) += 1;
+            } else {
+                ++fallback;
+            }
+        }
+    }
+    flint_rand_clear(state);
+    if (certified_integer == 0 || certified_flint == 0 || fallback == 0 ||
+        large_rejected == 0) {
+        return 1;
+    }
+
+    // Ineligible inputs go to fmpz_lll unchanged.
+    const auto ineligible = [](FmpzMat& matrix,
+                               const silex::flint::FmpzLll& context) {
+        const slong rows = fmpz_mat_nrows(matrix.raw());
+        FmpzMat expected(rows, fmpz_mat_ncols(matrix.raw()));
+        FmpzMat expected_transform(rows, rows);
+        fmpz_mat_set(expected.raw(), matrix.raw());
+        fmpz_mat_one(expected_transform.raw());
+        fmpz_lll(expected.raw(), expected_transform.raw(), context.raw());
+        FmpzMat transform(rows, rows);
+        fmpz_mat_one(transform.raw());
+        return certified_fmpz_lll(matrix.raw(), transform.raw(),
+                       silex::flint::FmpzLllConstRef(context)) ==
+                       CertifiedLllRoute::ineligible &&
+               fmpz_mat_equal(matrix.raw(), expected.raw()) &&
+               fmpz_mat_equal(transform.raw(), expected_transform.raw());
+    };
+    FmpzMat single(1, 1);
+    fmpz_set_si(fmpz_mat_entry(single.raw(), 0, 0), 9);
+    FmpzMat gram(3, 3);
+    for (slong i = 0; i < 3; ++i) {
+        for (slong j = 0; j < 3; ++j) {
+            fmpz_set_si(fmpz_mat_entry(gram.raw(), i, j),
+                        i == j ? 10 + i : 3);
+        }
+    }
+    silex::flint::FmpzLll exact_config(0.99, 0.51, GRAM, EXACT);
+    if (!ineligible(single, config) || !ineligible(gram, exact_config)) {
+        return 1;
+    }
+    FmpzMat wide(2, 3);
+    fmpz_set_si(fmpz_mat_entry(wide.raw(), 0, 0), 5);
+    fmpz_set_si(fmpz_mat_entry(wide.raw(), 1, 1), 7);
+    FmpzMat wide_transform(2, 2);
+    return lll_first_phase_certified(wide.raw(), wide_transform.raw(),
+                                     config_ref) ==
+                           CertifiedLllRoute::ineligible
+                   ? 0
+                   : 1;
+}
+
 int main() {
     return test_init_set_swap_basis() != 0 || test_hnf_and_transform() != 0 ||
                    test_contains() != 0 ||
@@ -1836,6 +2015,7 @@ int main() {
                    test_lll_certifier_boundaries() != 0 ||
                    test_lll_certified_routes() != 0 ||
                    test_certified_fmpz_lll_matches_fmpz_lll() != 0 ||
+                   test_certified_fmpz_lll_gram_matches_fmpz_lll() != 0 ||
                    test_fplll_row_transform_boundary() != 0 ||
                    test_fplll_column_image_transform_boundary() != 0 ||
                    test_fplll_bounded_bkz_row_transform_boundary() != 0 ||

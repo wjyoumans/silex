@@ -49,6 +49,21 @@ bool build_ideal_lattice_lll_data(IdealLatticeLllData& out,
                                   const Ideal& ideal,
                                   slong precision) noexcept;
 
+// The two LLLs of the two-LLL route (ideal_lattice_gram_lll_reduce and its
+// weighted form), each through lat::detail::certified_fmpz_lll, whose
+// route they return.  Each replaces its first argument by the matrix
+// fmpz_lll returns for it and sets `transform` (resized to a square matrix
+// of the row count if needed) to fmpz_lll's transform from the identity.
+// ideal_lattice_pre_reduction_lll: the Z_BASIS pre-reduction of the ideal
+// basis, delta 0.5, eta 0.51.  ideal_lattice_gram_lll: the GRAM reduction
+// of the scaled T2 Gram matrix, delta 0.99, eta 0.51.
+lat::detail::CertifiedLllRoute ideal_lattice_pre_reduction_lll(
+        flint::FmpzMat& basis,
+        flint::FmpzMat& transform) noexcept;
+lat::detail::CertifiedLllRoute ideal_lattice_gram_lll(
+        flint::FmpzMat& gram,
+        flint::FmpzMat& transform) noexcept;
+
 // The integer LLL (delta 0.99, eta 0.51) of
 // build_ideal_lattice_rounded_embedding_lll_data: replaces `embedded` by the
 // matrix fmpz_lll returns for it and sets `transform` (resized to a square

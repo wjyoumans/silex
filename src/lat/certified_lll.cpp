@@ -12,6 +12,10 @@ namespace silex::lat::detail {
 
 namespace {
 
+// The precision fmpz_lll_wrapper_with_removal_knapsack passes to
+// fmpz_lll_is_reduced_with_removal (wrapper_with_removal_knapsack.c).
+constexpr flint_bitcnt_t kFlintWrapperCheckPrecision = 120;
+
 // Writes the finite positive double `value` exactly as
 // `mantissa * 2^-shift` with `shift >= 0`.
 bool double_as_dyadic(flint::Fmpz& mantissa,
@@ -37,11 +41,13 @@ bool double_as_dyadic(flint::Fmpz& mantissa,
 
 }  // namespace
 
-bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
-                                  double delta,
-                                  double eta) noexcept {
-    // Exact form of FLINT's `fmpz_mat_is_reduced(A, delta, eta)`
-    // (`gr_mat_is_row_lll_reduced_naive`): every Gram-Schmidt norm is
+bool integer_gram_is_lll_reduced(flint::FmpzMatConstRef gram_matrix,
+                                 double delta,
+                                 double eta) noexcept {
+    // Exact form of FLINT's `fmpz_mat_is_reduced_gram(A, delta, eta)` on a
+    // positive definite Gram matrix, and so of
+    // `fmpz_mat_is_reduced(B, delta, eta)` (`gr_mat_is_row_lll_reduced_naive`)
+    // on a basis B with Gram matrix A = B B^T: every Gram-Schmidt norm is
     // nonzero, |mu_ij| <= eta for j < i, and
     // (delta - mu_{i,i-1}^2) |b*_{i-1}|^2 <= |b*_i|^2, with `delta` and
     // `eta` read as the exact rationals of the doubles.  It uses the
@@ -51,10 +57,12 @@ bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
     // |b*_i|^2 = d_i / d_{i-1}.  Then |mu_ij| <= eta is
     // |lambda_ij| <= eta d_j, and the Lovasz test, multiplied by
     // d_{i-1} d_{i-2} > 0, is delta d_{i-1}^2 <= d_i d_{i-2} + lambda^2.
-    // Bases with fewer than two rows return false (callers fall back).
-    const slong rows = flint::fmpz_mat_nrows(basis);
-    const slong cols = flint::fmpz_mat_ncols(basis);
-    if (rows < 2) {
+    // Only the lower triangle and the diagonal are read, as in
+    // fmpz_mat_is_reduced_gram.  Each d_i is checked positive before it is
+    // divided by, so no input divides by zero.  Matrices with fewer than
+    // two rows, or not square, return false (callers fall back).
+    const slong rows = flint::fmpz_mat_nrows(gram_matrix);
+    if (rows < 2 || flint::fmpz_mat_ncols(gram_matrix) != rows) {
         return false;
     }
     flint::Fmpz eta_mantissa;
@@ -66,26 +74,18 @@ bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
         return false;
     }
 
-    const fmpz_mat_struct* b = basis.raw();
-    flint::FmpzMat gram(rows, rows);
+    const fmpz_mat_struct* gram = gram_matrix.raw();
     flint::FmpzMat lambda(rows, rows);
     // determinants(0, i) holds d_i; d_0 = 1.
     flint::FmpzMat determinants(1, rows + 1);
     ::fmpz_one(::fmpz_mat_entry(determinants.raw(), 0, 0));
-    for (slong i = 0; i < rows; ++i) {
-        for (slong j = 0; j <= i; ++j) {
-            ::_fmpz_vec_dot(::fmpz_mat_entry(gram.raw(), i, j),
-                            ::fmpz_mat_entry(b, i, 0),
-                            ::fmpz_mat_entry(b, j, 0), cols);
-        }
-    }
 
     flint::Fmpz u;
     flint::Fmpz left;
     flint::Fmpz right;
     for (slong k = 0; k < rows; ++k) {
         for (slong j = 0; j <= k; ++j) {
-            ::fmpz_set(u.raw(), ::fmpz_mat_entry(gram.raw(), k, j));
+            ::fmpz_set(u.raw(), ::fmpz_mat_entry(gram, k, j));
             for (slong i = 0; i < j; ++i) {
                 ::fmpz_mul(u.raw(), u.raw(),
                            ::fmpz_mat_entry(determinants.raw(), 0, i + 1));
@@ -130,10 +130,48 @@ bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
     return true;
 }
 
+bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
+                                  double delta,
+                                  double eta) noexcept {
+    // The Gram matrix B B^T of a basis is positive semidefinite, and
+    // positive definite exactly when integer_gram_is_lll_reduced can
+    // return true, so this decides fmpz_mat_is_reduced(B, delta, eta).
+    const slong rows = flint::fmpz_mat_nrows(basis);
+    const slong cols = flint::fmpz_mat_ncols(basis);
+    if (rows < 2) {
+        return false;
+    }
+    const fmpz_mat_struct* b = basis.raw();
+    flint::FmpzMat gram(rows, rows);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j <= i; ++j) {
+            ::_fmpz_vec_dot(::fmpz_mat_entry(gram.raw(), i, j),
+                            ::fmpz_mat_entry(b, i, 0),
+                            ::fmpz_mat_entry(b, j, 0), cols);
+        }
+    }
+    return integer_gram_is_lll_reduced(flint::FmpzMatConstRef(gram), delta,
+                                       eta);
+}
+
 bool lll_certificate_holds(flint::FmpzMatConstRef basis,
                            flint::FmpzLllConstRef config) noexcept {
     const fmpz_lll_struct* fl = config.raw();
     const slong bits = ::fmpz_mat_max_bits(basis.raw());
+    if (fl->rt == GRAM) {
+        const slong rows = flint::fmpz_mat_nrows(basis);
+        if (rows * (bits < 0 ? -bits : bits) <=
+            certified_lll_gram_integer_test_max_size) {
+            return integer_gram_is_lll_reduced(basis, fl->delta, fl->eta);
+        }
+        // FLINT's own acceptance test of the phase output
+        // (wrapper_with_removal_knapsack.c, through
+        // fmpz_lll_is_reduced_with_removal with gs_B NULL), so the helper
+        // accepts exactly when fmpz_lll does.
+        return rows >= 2 &&
+               ::fmpz_lll_is_reduced(basis.raw(), fl,
+                                     kFlintWrapperCheckPrecision) != 0;
+    }
     if ((bits < 0 ? -bits : bits) <= certified_lll_integer_test_max_bits) {
         return integer_basis_is_lll_reduced(basis, fl->delta, fl->eta);
     }
@@ -145,13 +183,19 @@ namespace {
 
 // FLINT's ULLL truncation threshold (lll_with_removal_ulll.c): fmpz_lll
 // reduces a Z_BASIS matrix whose entries have at most this many bits with
-// one call of its default wrapper (wrapper_with_removal_knapsack.c).
+// one call of its default wrapper (wrapper_with_removal_knapsack.c).  A
+// GRAM matrix is reduced with one wrapper call at every size.
 constexpr slong kFlintUlllTruncationBits = 250;
 
 bool first_phase_eligible(const fmpz_mat_struct* basis,
                           const fmpz_lll_struct* fl) noexcept {
-    if (fl->rt != Z_BASIS || fl->gt != APPROX ||
-        ::fmpz_mat_nrows(basis) < 2) {
+    if (fl->gt != APPROX || ::fmpz_mat_nrows(basis) < 2) {
+        return false;
+    }
+    if (fl->rt == GRAM) {
+        return ::fmpz_mat_ncols(basis) == ::fmpz_mat_nrows(basis);
+    }
+    if (fl->rt != Z_BASIS) {
         return false;
     }
     const slong bits = ::fmpz_mat_max_bits(basis);
