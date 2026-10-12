@@ -422,8 +422,9 @@ struct ClassGroupContextStorage {
     // relation-saturation beta size reduction
     // (relation_saturation_beta_coefficients) and never by
     // relation_kernel_unit.  It is a copy of reduced_relation_kernel when
-    // that is already built, and otherwise the output of FLINT's
-    // double-precision reduction pass without the final reducedness check
+    // that is already built, and otherwise FLINT's double-precision
+    // reduction pass certified LLL-reduced by fmpz_mat_is_reduced, or a copy
+    // of the fmpz_lll basis when that certificate is not obtained
     // (ClassGroupRelationAccess::saturation_relation_kernel).  Built on first
     // use and reset together with the reduced kernel.
     flint::FmpzMat saturation_relation_kernel{0, 0};

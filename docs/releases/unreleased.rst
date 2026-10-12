@@ -632,6 +632,19 @@ Changed
   differs in its last bits; every new enclosure overlaps the previous one.
   Units, class groups and labels are unchanged on that corpus.
 
+- The relation-kernel basis that the class-relation saturation proof
+  size-reduces its ``beta`` rows against no longer runs a full ``fmpz_lll``
+  when the basis for the unit candidates is not already built.  For a kernel
+  with at least two rows and entries of at most 250 bits, it takes FLINT's
+  double-precision first phase (``fmpz_lll_d_with_removal_knapsack``) and
+  accepts it only when ``fmpz_mat_is_reduced`` certifies it LLL-reduced with
+  the default parameters, as ``Lat::lll_reduce`` does; otherwise it falls
+  back to ``fmpz_lll``.  ``fmpz_lll``'s own certification of that phase
+  dominated the proof on a 71 x 94 kernel for ``x^2 - x - 25000000``.
+  Published results are unchanged on the ``proven`` corpus and the
+  class/unit test matrix.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The compact power test of a unit or saturation candidate embeds each base
   once.  It bounds the conjugate logarithms of the candidate and of its
   formal residual, which have the same bases, and then reduces the chosen
@@ -906,8 +919,9 @@ Fixed
   Test-suite outputs are unchanged.
 
 - The class-relation saturation proof with proven units size-reduces the
-  relation coefficients of each invariant-generator ``beta`` row against the
-  LLL-reduced relation kernel before forming its compact witness.  The
+  relation coefficients of each invariant-generator ``beta`` row against an
+  LLL-reduced basis of the relation kernel before forming its compact
+  witness.  The
   presentation's coefficients can exceed the reduced size by orders of
   magnitude: in
   ``t-silex-class-unit-matrix`` the largest raw coefficients are 414 bits

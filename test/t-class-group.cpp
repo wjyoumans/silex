@@ -5824,8 +5824,189 @@ int test_relation_saturation_size_reduce_row() {
     return 0;
 }
 
-// The relation-saturation beta rows are size-reduced against the
-// LLL-reduced relation kernel.  Q(sqrt(100000005)), x^2 - x - 25000001:
+// Replaces `kernel`, the presentation's exact relation-kernel basis, by the
+// basis relation_saturation_beta_coefficients size-reduces against, after
+// checking it: it spans the same lattice, is LLL-reduced with FLINT's
+// default parameters (fmpz_mat_is_reduced), and is cached.  For more than
+// one row and entries of at most 250 bits it comes from FLINT's
+// double-precision first phase when that phase is certified, so the
+// LLL-reduced basis read by relation_kernel_unit is left unbuilt;
+// `expect_first_phase` asserts that route.  Otherwise it is a copy of that
+// LLL-reduced basis, which is then built.
+void relation_saturation_test_kernel_basis(
+        sflint::FmpzMat& kernel,
+        const silex::ClassGroupContext& context,
+        bool expect_first_phase) {
+    const slong rows = sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(kernel));
+    const slong cols = sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(kernel));
+    const slong raw_bits = ::fmpz_mat_max_bits(kernel.raw());
+    const bool eligible = rows > 1 && raw_bits >= -250 && raw_bits <= 250;
+    sflint::FmpzMat basis(0, 0);
+    bool lll_basis_built = false;
+    assert(silex::detail::relation_saturation_kernel_basis(
+            basis, lll_basis_built, context));
+    assert(eligible || lll_basis_built);
+    assert(!expect_first_phase || (eligible && !lll_basis_built));
+    assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis)) == rows &&
+           sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(basis)) == cols);
+    sflint::FmpzLll lll;
+    assert(::fmpz_mat_is_reduced(basis.raw(), lll.raw()->delta,
+                                 lll.raw()->eta));
+    sflint::FmpzMat basis_hnf(rows, cols);
+    sflint::FmpzMat kernel_hnf(rows, cols);
+    ::fmpz_mat_hnf(basis_hnf.raw(), basis.raw());
+    ::fmpz_mat_hnf(kernel_hnf.raw(), kernel.raw());
+    assert(::fmpz_mat_equal(basis_hnf.raw(), kernel_hnf.raw()));
+    sflint::FmpzMat again(0, 0);
+    bool built_again = false;
+    assert(silex::detail::relation_saturation_kernel_basis(
+            again, built_again, context));
+    assert(::fmpz_mat_equal(again.raw(), basis.raw()));
+    assert(built_again == lll_basis_built);
+    kernel = std::move(basis);
+}
+
+// The saturation kernel basis from FLINT's certified first LLL phase.
+// Q(sqrt(100000001)), x^2 - x - 25000000, in GRH mode: the relation kernel
+// has more than one row and entries of at most 250 bits, so the basis the
+// beta rows are size-reduced against comes from
+// fmpz_lll_d_with_removal_knapsack certified by fmpz_mat_is_reduced,
+// without building the LLL-reduced basis of relation_kernel_unit.  With
+// proven units, each beta coefficient row differs from the presentation's
+// row by a kernel vector and is size-reduced against that basis.
+int test_relation_saturation_kernel_basis_first_phase() {
+    silex::NumberField field = shifted_quadratic_field(-1, -25000000);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), maximal_order));
+
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::ClassGroupContext context;
+    silex::OrderUnitGroup grh_units;
+    assert(grh_units.compute_with_class_group(
+            context, maximal_order, sflint::FmpzConstRef(factor_base_bound),
+            options, 128));
+
+    silex::FiniteAbelianGroup presentation;
+    assert(context.presentation(presentation));
+    const slong relation_count = context.relation_count();
+    sflint::FmpzMat kernel(0, 0);
+    {
+        std::optional<sflint::FmpzMat> exact_kernel =
+                presentation.relation_kernel_matrix();
+        assert(exact_kernel.has_value());
+        kernel = std::move(*exact_kernel);
+    }
+    const slong kernel_rows =
+            sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(kernel));
+    relation_saturation_test_kernel_basis(kernel, context, true);
+
+    silex::OrderUnitGroup units(maximal_order);
+    silex::EmbeddingContext embeddings(field);
+    silex::ProofState unit_status = silex::ProofState::not_checked;
+    bool units_changed = false;
+    sflint::Fmpz unit_aux_bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(unit_aux_bound), 1000);
+    assert(units.prove_index_bound(unit_status, units_changed, grh_units, 1,
+                                   sflint::FmpzConstRef(unit_aux_bound), 2,
+                                   embeddings, 128));
+    assert(unit_status == silex::ProofState::verified);
+    assert(units.certification_status() == silex::CertificationMode::proven);
+
+    sflint::FmpzMat raw(context.invariant_count(), relation_count);
+    assert(presentation.invariant_generator_relation_matrix(
+            sflint::FmpzMatRef(raw)));
+    sflint::Fmpz invariant;
+    slong checked_rows = 0;
+    for (slong i = 0; i < context.invariant_count(); ++i) {
+        assert(context.invariant(sflint::FmpzRef(invariant), i));
+        sflint::Fmpz ell;
+        sflint::fmpz_set_si(sflint::FmpzRef(ell), 2);
+        while (!sflint::fmpz_divisible(sflint::FmpzConstRef(invariant),
+                                       sflint::FmpzConstRef(ell))) {
+            fmpz_nextprime(ell.raw(), ell.raw(), 1);
+        }
+        sflint::FmpzMat coefficients(0, 0);
+        assert(silex::detail::relation_saturation_beta_coefficients(
+                coefficients, context, units, sflint::FmpzConstRef(ell)));
+        // Row b of `coefficients` is invariant index beta_indices[b].
+        std::vector<slong> beta_indices;
+        for (slong k = 0; k < context.invariant_count(); ++k) {
+            sflint::Fmpz value;
+            assert(context.invariant(sflint::FmpzRef(value), k));
+            if (sflint::fmpz_divisible(sflint::FmpzConstRef(value),
+                                       sflint::FmpzConstRef(ell))) {
+                beta_indices.push_back(k);
+            }
+        }
+        const slong beta_count = static_cast<slong>(beta_indices.size());
+        assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(coefficients)) ==
+               beta_count);
+        for (slong b = 0; b < beta_count; ++b) {
+            sflint::FmpzMat difference(kernel_rows + 1, relation_count);
+            sflint::FmpzMat reduced_stack(kernel_rows + 1, relation_count);
+            for (slong r = 0; r < kernel_rows; ++r) {
+                for (slong j = 0; j < relation_count; ++j) {
+                    fmpz_set(sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatRef(difference), r, j)
+                                     .raw(),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(kernel), r, j)
+                                     .raw());
+                    fmpz_set(sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatRef(reduced_stack), r, j)
+                                     .raw(),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(kernel), r, j)
+                                     .raw());
+                }
+            }
+            for (slong j = 0; j < relation_count; ++j) {
+                const sflint::FmpzConstRef reduced_entry =
+                        sflint::fmpz_mat_entry(
+                                sflint::FmpzMatConstRef(coefficients), b, j);
+                fmpz_set(sflint::fmpz_mat_entry(
+                                 sflint::FmpzMatRef(reduced_stack),
+                                 kernel_rows, j)
+                                 .raw(),
+                         reduced_entry.raw());
+                fmpz_sub(sflint::fmpz_mat_entry(
+                                 sflint::FmpzMatRef(difference),
+                                 kernel_rows, j)
+                                 .raw(),
+                         sflint::fmpz_mat_entry(
+                                 sflint::FmpzMatConstRef(raw),
+                                 beta_indices[static_cast<std::size_t>(b)], j)
+                                 .raw(),
+                         reduced_entry.raw());
+            }
+            assert(fmpz_mat_rank(difference.raw()) == kernel_rows);
+            sflint::FmpzMat d(0, 0);
+            sflint::FmpzMat lambda(0, 0);
+            assert(silex::detail::integral_gram_schmidt(
+                    d, lambda, sflint::FmpzMatConstRef(reduced_stack)));
+            assert(relation_saturation_test_size_reduced(d, lambda,
+                                                         kernel_rows));
+            ++checked_rows;
+        }
+    }
+    assert(checked_rows > 0);
+    // The size reduction left the LLL-reduced basis unbuilt.
+    sflint::FmpzMat basis(0, 0);
+    bool lll_basis_built = true;
+    assert(silex::detail::relation_saturation_kernel_basis(
+            basis, lll_basis_built, context));
+    assert(!lll_basis_built);
+    return 0;
+}
+
+// The relation-saturation beta rows are size-reduced against an
+// LLL-reduced relation-kernel basis.  Q(sqrt(100000005)), x^2 - x - 25000001:
 // h = 212 with invariants [106, 2], w = 2, unit rank 1, regulator
 // 18.19753721763815524762... (certified independently).  Each
 // reduced coefficient row differs from the presentation's row for
@@ -5890,10 +6071,8 @@ int test_relation_saturation_beta_rows_size_reduced() {
     const slong kernel_rows =
             sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(kernel));
     assert(kernel_rows > 1);
-    {
-        sflint::FmpzLll lll;
-        ::fmpz_lll(kernel.raw(), nullptr, lll.raw());
-    }
+    // Size reduction below is checked against the basis the beta rows use.
+    relation_saturation_test_kernel_basis(kernel, context, false);
     bool raw_size_reduced = true;
 
     std::vector<silex::Element> generators;
@@ -5931,7 +6110,7 @@ int test_relation_saturation_beta_rows_size_reduced() {
         // Each reduced coefficient row differs from the raw row of
         // g_i^{d_i} by a relation-kernel vector (the integer kernel is
         // saturated, so membership in its rational span suffices) and is
-        // size-reduced against the LLL-reduced kernel: |mu(row, l)| <= 1/2.
+        // size-reduced against that kernel basis: |mu(row, l)| <= 1/2.
         sflint::FmpzMat coefficients(0, 0);
         assert(silex::detail::relation_saturation_beta_coefficients(
                 coefficients, context, units, sflint::FmpzConstRef(ell)));
@@ -6161,6 +6340,7 @@ int main() {
     test_low_bound_generation_check_does_not_promote();
     test_relation_saturation_size_reduce_row();
     test_relation_saturation_beta_rows_size_reduced();
+    test_relation_saturation_kernel_basis_first_phase();
     test_grh_request_takes_belabas_friedman_residue();
     test_exact_route_keeps_verified_ell_local_proof();
     test_compute_candidate_preserves_on_failure();

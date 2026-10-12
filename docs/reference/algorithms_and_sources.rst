@@ -1657,9 +1657,18 @@ reduced in ``t-silex-class-unit-matrix``, the raw coefficients are at most
 414 bits (286 to 414 bits for the rows with 42 relations) and the reduced
 ones at most 12 bits (2 to 12 bits for those rows).  Larger presentations
 were not measured.
-Silex size-reduces ``c_i`` against the LLL-reduced basis of the relation
-kernel (the basis that also yields the unit candidates) before forming the
-witness: with the integral Gram--Schmidt data of that basis, it subtracts
+Silex size-reduces ``c_i`` against an LLL-reduced basis of the relation
+kernel before forming the witness.  If the basis that yields the unit
+candidates is already built, it is reused.  Otherwise, for a kernel with at
+least two rows and entries of at most 250 bits, the basis comes from the
+same route as ``Lat::lll_reduce`` above:
+``fmpz_lll_d_with_removal_knapsack``, accepted only when
+``fmpz_mat_is_reduced`` certifies it with FLINT's default parameters, and
+``fmpz_lll`` (whose result is also kept for the unit candidates) when the
+reducer fails, the certificate fails, or the kernel is outside that range.
+The reducer's row operations are unimodular, so the result is a basis of
+the kernel on every route.  With the integral Gram--Schmidt data of that
+basis, Silex subtracts
 ``round(mu)`` times each basis row, last row first, as in sub-algorithm RED
 of Cohen, *A Course in Computational Algebraic Number Theory*, GTM 138,
 Algorithm 2.6.7, so that every Gram--Schmidt coefficient of the result has

@@ -5730,23 +5730,21 @@ public:
     // reduction only, cached in the private storage until the presentation
     // changes.  Returns the storage holding it, or nullptr on failure.
     //
-    // The beta size reduction is sound for any basis of the kernel (see
-    // relation_saturation_beta_coefficients), so this basis need not be the
-    // LLL-reduced one that relation_kernel_unit publishes from.  If that
-    // basis is already built it is reused.  Otherwise, for fewer than two
-    // rows or entries above FLINT's 250-bit ULLL truncation threshold
-    // (FLINT 3.6.0 src/fmpz_lll/lll.c, lll_with_removal_ulll.c) the
-    // LLL-reduced basis is built and reused as before.  In between, fmpz_lll
-    // starts with fmpz_lll_wrapper_with_removal_knapsack, whose first phase
-    // is fmpz_lll_d_with_removal_knapsack followed by the reducedness check
-    // fmpz_lll_is_reduced (wrapper_with_removal_knapsack.c); this runs only
-    // the first phase.  Its row operations are unimodular, so the result is
-    // a basis of the kernel whatever its status, and it equals the fmpz_lll
-    // output whenever that check would pass.  On a failure status the
-    // LLL-reduced basis is built instead, as fmpz_lll's later phases would.
-    // The check is skipped because its precision fallback dominated the
-    // cost on a 71 x 94 kernel and reducedness only bounds the size of the
-    // reduced beta rows; it is not part of the proof.
+    // The basis is LLL-reduced (FLINT default parameters) in every case.  If
+    // the LLL-reduced basis that relation_kernel_unit publishes from is
+    // already built it is reused.  Otherwise, for at least two rows and
+    // entries of at most FLINT's 250-bit ULLL truncation threshold
+    // (lll_with_removal_ulll.c), the kernel is reduced by
+    // fmpz_lll_d_with_removal_knapsack, the first phase of fmpz_lll's
+    // default wrapper (wrapper_with_removal_knapsack.c), and accepted only
+    // when fmpz_mat_is_reduced certifies it with the same parameters, the
+    // Lat::lll_reduce route (docs/reference/algorithms_and_sources.rst).
+    // FLINT's own check after that phase, fmpz_lll_is_reduced, dominated
+    // the cost on a 71 x 94 kernel.  When the phase returns -1 or the
+    // certificate fails, or the kernel is outside that range, the
+    // LLL-reduced basis is built by fmpz_lll and copied.  The phase's row
+    // operations are unimodular, so either way the result is a basis of the
+    // kernel.
     static const ClassGroupContextStorage* saturation_relation_kernel(
             const ClassGroupContext& context) noexcept {
         ClassGroupContextStorage* storage = context.private_storage_.get();
@@ -5770,7 +5768,9 @@ public:
                 bits <= kFlintUlllTruncationBits) {
                 flint::FmpzLll lll;
                 if (::fmpz_lll_d_with_removal_knapsack(
-                            kernel.raw(), nullptr, nullptr, lll.raw()) != -1) {
+                            kernel.raw(), nullptr, nullptr, lll.raw()) != -1 &&
+                    ::fmpz_mat_is_reduced(kernel.raw(), lll.raw()->delta,
+                                          lll.raw()->eta)) {
                     storage->saturation_relation_kernel = std::move(kernel);
                     storage->saturation_relation_kernel_valid = true;
                     return storage;
