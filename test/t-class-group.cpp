@@ -19,6 +19,7 @@
 #include "ideal/ideal_access_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "order_unit/compute_internal.hpp"
+#include "relation/relation_internal.hpp"
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
 #include "zeta/zeta_internal.hpp"
@@ -2335,6 +2336,141 @@ int test_relation_saturation_bounded_append_with_units_degree_one() {
     assert(context.unit_proof_status() == silex::ProofState::verified);
     assert(context.regulator_proof_status() == silex::ProofState::verified);
 
+    return 0;
+}
+
+// Saturation installs the evaluated ell-th root beta with the divided row
+// (the kernel combination of the stored rows, divided by ell) instead of
+// re-factoring beta.  Re-factoring each saturation-appended generator with
+// Relation::set_generator is the oracle: its row must equal the stored row.
+//
+// A grh class/unit computation supplies the factor base, relations and
+// units.  Its relations are then replaced by their ell-th powers (generator
+// g^ell with row ell * row), so the relation index gains ell-power factors
+// and saturation with units at ell must append ell-th roots.  The fields
+// are x^2 - x - 25000000000002 (d = 10^14 + 9, ell = 2 and 3) and the
+// degree-4 field x^4 - 7 (ell = 2 and 3).
+int test_saturation_relations_match_refactored_generator() {
+    struct Row {
+        std::vector<slong> coefficients;
+        std::vector<slong> ells;
+    };
+    const std::vector<Row> rows = {
+            {{-25000000000002, -1, 1}, {2, 3}},
+            {{-7, 0, 0, 0, 1}, {2, 3}},
+    };
+
+    for (const Row& row : rows) {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_zero(polynomial);
+        for (std::size_t i = 0; i < row.coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           row.coefficients[i]);
+        }
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+
+        silex::ClassGroupComputeOptions options;
+        sflint::Fmpz bound;
+        assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                   maximal));
+        if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+            sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+        }
+        if (maximal.degree() >= 3) {
+            options.max_candidates = 5000;
+            options.max_relations = 500;
+        }
+        options.requested_certification = silex::CertificationMode::grh;
+
+        silex::ClassGroupContext computed;
+        silex::OrderUnitGroup units;
+        silex::detail::ClassUnitTransactionReport audit;
+        assert(silex::detail::compute_class_unit_transaction(
+                units, computed, maximal, sflint::FmpzConstRef(bound),
+                options, 128, audit));
+        const silex::FactorBase* base = computed.factor_base();
+        assert(base != nullptr);
+        const slong relation_count = computed.relation_count();
+        const slong generator_count = computed.generator_count();
+        sflint::FmpzMat computed_rows(relation_count, generator_count);
+        assert(computed.relations(sflint::FmpzMatRef(computed_rows)));
+
+        for (slong ell : row.ells) {
+            sflint::Fmpz ell_fmpz;
+            assert(set_fmpz_si(ell_fmpz, ell));
+
+            silex::ClassGroupContext context(maximal);
+            assert(context.set_factor_base(*base));
+            for (slong j = 0; j < relation_count; ++j) {
+                silex::Element generator(field);
+                silex::Element power(field);
+                assert(computed.relation_generator(generator, j));
+                assert(power.pow_fmpz(generator,
+                                      sflint::FmpzConstRef(ell_fmpz)));
+                sflint::FmpzMat power_row(1, generator_count);
+                for (slong i = 0; i < generator_count; ++i) {
+                    sflint::fmpz_mul(
+                            sflint::fmpz_mat_entry(power_row, 0, i),
+                            sflint::fmpz_mat_entry(
+                                    sflint::FmpzMatConstRef(computed_rows), j,
+                                    i),
+                            sflint::FmpzConstRef(ell_fmpz));
+                }
+                silex::Relation relation(*base);
+                assert(silex::detail::RelationAccess::
+                               set_relation_from_known_row(
+                                       relation, *base, power,
+                                       sflint::FmpzMatConstRef(power_row)));
+                assert(context.append_relation(relation));
+            }
+            assert(context.publish_presentation());
+
+            sflint::Fmpz aux_bound;
+            assert(set_fmpz_si(aux_bound, 200));
+            bool changed = false;
+            bool saturated = false;
+            assert(context.saturate_relations_bounded_with_units(
+                    changed, saturated, units,
+                    sflint::FmpzConstRef(aux_bound), 2, 2));
+            assert(changed);
+            const slong appended = context.relation_source_count(
+                    silex::ClassGroupRelationSource::Saturation);
+            assert(appended > 0);
+
+            const slong count = context.relation_count();
+            sflint::FmpzMat stored(count, generator_count);
+            assert(context.relations(sflint::FmpzMatRef(stored)));
+            slong checked = 0;
+            for (slong j = 0; j < count; ++j) {
+                silex::ClassGroupRelationSource source =
+                        silex::ClassGroupRelationSource::Unknown;
+                assert(context.relation_source(source, j));
+                if (source != silex::ClassGroupRelationSource::Saturation) {
+                    continue;
+                }
+                silex::Element generator(field);
+                assert(context.relation_generator(generator, j));
+                silex::Relation oracle(*base);
+                assert(oracle.set_generator(generator));
+                sflint::FmpzMat exponents(1, generator_count);
+                assert(oracle.exponents(sflint::FmpzMatRef(exponents)));
+                for (slong i = 0; i < generator_count; ++i) {
+                    assert(sflint::fmpz_equal(
+                            sflint::fmpz_mat_entry(
+                                    sflint::FmpzMatConstRef(exponents), 0,
+                                    i),
+                            sflint::fmpz_mat_entry(
+                                    sflint::FmpzMatConstRef(stored), j, i)));
+                }
+                ++checked;
+            }
+            assert(checked == appended);
+        }
+    }
     return 0;
 }
 
@@ -6960,6 +7096,7 @@ int main() {
     test_compute_candidate_relation_kernel_target_quintic();
     test_relation_saturation_proof_with_units_degree_one();
     test_relation_saturation_bounded_append_with_units_degree_one();
+    test_saturation_relations_match_refactored_generator();
     test_relation_saturation_candidate_filter_degree_one();
     test_relation_saturation_candidate_filter_count_gate();
     test_relation_saturation_round_settled_rows();

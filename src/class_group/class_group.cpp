@@ -3441,8 +3441,9 @@ bool saturation_relation_product(FactoredElement& product,
 
 // `relation_base_verified` is the caller's once-per-kernel result of
 // detail::saturation_kernel_relation_base_matches(relation, context); the
-// relation's factor base cannot change across rows because Relation::set
-// copies from a candidate built on the context base.
+// relation's factor base cannot change across rows because
+// RelationAccess::set_relation_from_known_row installs every row on the
+// context base.
 bool saturation_relation(Relation& relation,
                          bool& is_relation,
                          const ClassGroupContext& context,
@@ -3488,21 +3489,17 @@ bool saturation_relation(Relation& relation,
         return true;
     }
 
+    // The root is exact (root^ell equals the product in K), and the factor
+    // base lives on a maximal order, so valuations are additive and
+    // v_p(beta) equals the divided row for every base prime and is zero off
+    // the base.  The relation is therefore installed from the known row
+    // instead of re-factoring beta, as saturation_process_candidates_once
+    // does and as reference `Saturate.jl:saturate!` does
+    // (divexact(fac_a, n); class_group_add_relation(d, x, fac_a)).
     Element beta(*field);
-    Relation candidate(*base);
-    flint::FmpzMat exponents(1, base->length());
     if (!root.evaluate(beta) ||
-        !candidate.set_generator(beta, context.diagnostics()) ||
-        !candidate.exponents(flint::FmpzMatRef(exponents))) {
-        return false;
-    }
-    if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(exponents),
-                               flint::FmpzMatConstRef(divided))) {
-        is_relation = false;
-        return true;
-    }
-
-    if (!relation.set(candidate)) {
+        !detail::RelationAccess::set_relation_from_known_row(
+                relation, *base, beta, flint::FmpzMatConstRef(divided))) {
         return false;
     }
     is_relation = true;
@@ -3592,21 +3589,13 @@ bool saturation_relation_with_units(Relation& relation,
         return true;
     }
 
+    // As in saturation_relation: the root is exact and valuations are
+    // additive, and the unit and torsion generators have valuation zero, so
+    // v_p(beta) equals the divided row and beta is installed with it.
     Element beta(*field);
-    Relation candidate(*base);
-    flint::FmpzMat exponents(1, base->length());
     if (!root.evaluate(beta) ||
-        !candidate.set_generator(beta, context.diagnostics()) ||
-        !candidate.exponents(flint::FmpzMatRef(exponents))) {
-        return false;
-    }
-    if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(exponents),
-                               flint::FmpzMatConstRef(divided))) {
-        is_relation = false;
-        return true;
-    }
-
-    if (!relation.set(candidate)) {
+        !detail::RelationAccess::set_relation_from_known_row(
+                relation, *base, beta, flint::FmpzMatConstRef(divided))) {
         return false;
     }
     is_relation = true;

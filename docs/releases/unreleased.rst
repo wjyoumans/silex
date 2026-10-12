@@ -1124,6 +1124,18 @@ Changed
   ``grh`` mode the computation takes about 13% less time (release build on
   a busy machine, five runs each).
 
+- Class-relation saturation (with and without units) installs the evaluated
+  ``ell``-th root with the row it already knows, the kernel combination of
+  the stored rows divided by ``ell``, instead of factoring the root over the
+  factor base again.  The root is exact and valuations are additive, so the
+  row is the one factoring would give; the saturation pass of the class/unit
+  pipeline and the reference ``saturate!`` install their roots the same way.
+  One consequence: a resource or factoring failure in that re-factoring can no
+  longer fail the saturation pass.  Instance JSON is identical on the 184
+  ``grh`` corpus rows and the 70 ``proven`` benchmark rows.  ``grh`` CPU time
+  on ``real_quadratic_d100000000000009`` falls from about 0.27 s to 0.17 s
+  (release build, medians of 11 interleaved runs on a busy machine; the
+  controlled comparison is pending).
 - ``PrimeIdeal::valuation`` on an ``Ideal`` with a known principal generator
   ``a`` reuses the power of ``p`` in the ideal norm, which equals
   ``|N(a)|``, instead of computing ``N(a)`` again for every prime.  Class-group
