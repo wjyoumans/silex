@@ -8090,7 +8090,11 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
     // least primitive root is 3 and 3^6 = 18 mod 79, while the residue-field
     // route takes 2^6 = 64 mod 79; for ell = 5, q = 521 they are
     // 3^104 = 25 and 2^104 = 516.  Those columns differ by a unit factor.
-    const slong cases[][2] = {{2, 53}, {3, 79}, {5, 521}, {13, 79}};
+    // ell = 67 (7 bits) takes the baby-step giant-step branch of the word
+    // route (kWordQuotientLogBabyGiantBits); q = 10453 = 1 mod 13 * 67 has
+    // least primitive root 5, and 2^156 = (5^156)^57 mod 10453.
+    const slong cases[][2] = {{2, 53}, {3, 79}, {5, 521}, {13, 79},
+                              {67, 10453}};
     slong scaled_columns = 0;
     for (const silex::Order* order : orders) {
         silex::EmbeddingContext embeddings(field);
@@ -8213,6 +8217,245 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
     }
     // The scaled case is exercised, not only literal equality.
     assert(scaled_columns > 0);
+    return 0;
+}
+
+// Checks the stable proof scan's columns at q (stable_proof_prime_columns)
+// against saturation_proof_prime_column at each of the `prime_count` primes
+// of decompose_prime(order, q, 1), as
+// test_stable_proof_prime_columns_match_residue_field_route does, but
+// without computing the scale factor beforehand.  Where the direct root
+// evaluation succeeds, the scan's next column is that evaluation and equals
+// t times the residue-field column modulo ell, for one unit t per q (both
+// builders' quotient generators depend only on q).  Where it declines, the
+// scan falls back to the residue-field route at that prime; on the root
+// path q does not divide [O : Z[theta]], so that route reduces the same
+// theta-polynomials (residue_variable_numerator) and declines too, and the
+// scan, like the residue-field route alone, has no column there.  The proof
+// kernel after every column is the same for both.  Adds the direct columns
+// with t != 1 to `scaled` and the declined primes to `declined`.
+void check_stable_proof_prime_columns_at_q(slong& scaled,
+                                           slong& declined,
+                                           const silex::OrderUnitGroup& group,
+                                           const silex::Order& order,
+                                           sflint::FmpzConstRef q,
+                                           slong ell,
+                                           slong prime_count) {
+    sflint::Fmpz ell_value;
+    assert(set_fmpz_si(ell_value, ell));
+    const sflint::FmpzConstRef ell_ref(ell_value);
+    const ulong ell_ui = static_cast<ulong>(ell);
+    std::vector<sflint::FmpzMat> columns;
+    assert(silex::detail::stable_proof_prime_columns(columns, group, q,
+                                                     ell_ref));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order, q, 1));
+    assert(primes.size() == prime_count);
+
+    slong rows = 0;
+    assert(silex::detail::dlog_proof_rank(rows, group, ell_ref));
+    ulong factor = 0;
+    std::size_t next = 0;
+    sflint::FmpzMat scan_matrix(rows, 0);
+    sflint::FmpzMat field_matrix(rows, 0);
+    for (slong i = 0; i < prime_count; ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        assert(prime != nullptr);
+        sflint::Fmpz root;
+        assert(degree_one_residue_root(root, *prime));
+        sflint::FmpzMat direct(0, 0);
+        sflint::FmpzMat expected(0, 0);
+        if (!silex::detail::saturation_proof_prime_column_at_degree_one_root(
+                    direct, group, q, sflint::FmpzConstRef(root), ell_ref)) {
+            assert(!silex::detail::saturation_proof_prime_column(
+                    expected, group, *prime, ell_ref));
+            ++declined;
+            continue;
+        }
+        assert(silex::detail::saturation_proof_prime_column(expected, group,
+                                                            *prime, ell_ref));
+        assert(next < columns.size());
+        const sflint::FmpzMat& column = columns[next++];
+        assert(sflint::fmpz_mat_nrows(expected) == rows);
+        assert(sflint::fmpz_mat_nrows(column) == rows);
+        assert(sflint::fmpz_mat_ncols(column) == 1);
+        assert(fmpz_mat_equal(direct.raw(), column.raw()) != 0);
+        for (slong r = 0; r < rows; ++r) {
+            const ulong b = fmpz_fdiv_ui(fmpz_mat_entry(expected.raw(), r, 0),
+                                         ell_ui);
+            if (factor == 0 && b != 0) {
+                factor = (fmpz_fdiv_ui(fmpz_mat_entry(column.raw(), r, 0),
+                                       ell_ui) *
+                          n_invmod(b, ell_ui)) %
+                         ell_ui;
+                assert(factor != 0);
+            }
+            assert(fmpz_cmp_ui(fmpz_mat_entry(column.raw(), r, 0),
+                               (factor * b) % ell_ui) == 0);
+        }
+        if (fmpz_mat_equal(column.raw(), expected.raw()) == 0) {
+            ++scaled;
+        }
+
+        scan_matrix = append_proof_column_for_test(scan_matrix, column);
+        field_matrix = append_proof_column_for_test(field_matrix, expected);
+        sflint::FmpzMat scan_kernel(0, 0);
+        sflint::FmpzMat field_kernel(0, 0);
+        assert(silex::detail::dlog_kernel_from_matrix(scan_kernel, scan_matrix,
+                                                      ell_ref));
+        assert(silex::detail::dlog_kernel_from_matrix(field_kernel,
+                                                      field_matrix, ell_ref));
+        assert(fmpz_mat_equal(scan_kernel.raw(), field_kernel.raw()) != 0);
+    }
+    assert(next == columns.size());
+}
+
+// The stable proof scan's columns on the routes that
+// test_stable_proof_prime_columns_match_residue_field_route does not reach.
+// Each case has a direct column that is a nontrivial multiple of the
+// residue-field column, so the direct route, not the residue-field one,
+// built the columns that the check finds direct.
+// - The decompose_prime fallback: in Q(zeta_13) the first generator u_2 of
+//   <u_2, ..., u_6> is stored as the factors (u_2 (zeta - r))^1
+//   (zeta - r)^-1, which vanish at the root r of one prime over q = 79 and
+//   at no other root.  The direct evaluation declines at r only; the
+//   fallback finds the prime over r, whose residue-field column declines as
+//   well, so the scan has the columns of the other 11 primes, in order, as
+//   the residue-field route alone has.
+// - The fmpz route of saturation_proof_prime_column_at_degree_one_root, for
+//   q = 18446744073709555657 > 2^64, q = 1 mod 3 * 13.
+// - The maximal-order root route, for the maximal order Z[theta / 2] of
+//   theta^3 + 2 theta^2 - 8 theta - 8, which is not the equation order:
+//   theta = 2 alpha with alpha^3 + alpha^2 - 2 alpha - 1 = 0, so the field is
+//   Q(zeta_7)^+ and alpha, alpha^2 - 2 are units (conjugates 2 cos(2 pi / 7)
+//   and 2 cos(4 pi / 7)); ell = 7 and q = 43 = 1 mod 7 splits completely.
+int test_stable_proof_prime_columns_fallback_and_wide_routes() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order equation = silex::test::equation_order(field);
+    {
+        sflint::Fmpz q;
+        assert(set_fmpz_si(q, 79));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, equation,
+                                      sflint::FmpzConstRef(q), 1));
+        assert(primes.size() == 12);
+        sflint::Fmpz root;
+        assert(primes.at(4) != nullptr &&
+               degree_one_residue_root(root, *primes.at(4)));
+
+        sflint::FmpqPoly linear;
+        sflint::fmpq_poly_set_coeff_si(linear, 1, 1);
+        sflint::Fmpq constant;
+        sflint::fmpq_set_fmpz(constant, sflint::FmpzConstRef(root));
+        sflint::fmpq_neg(sflint::FmpqRef(constant),
+                         sflint::FmpqConstRef(constant));
+        sflint::fmpq_poly_set_coeff_fmpq(linear, 0, constant);
+        silex::Element vanishing(field);
+        silex::Element u2(field);
+        silex::Element u2_times_vanishing(field);
+        assert(vanishing.set_fmpq_poly(sflint::FmpqPolyConstRef(linear)));
+        assert(set_cyclotomic13_u2(u2));
+        assert(u2_times_vanishing.multiply(u2, vanishing));
+
+        std::vector<silex::FactoredElement> generators;
+        for (slong a = 2; a <= 6; ++a) {
+            generators.emplace_back(field);
+            if (a == 2) {
+                assert(generators.back().push(u2_times_vanishing, 1));
+                assert(generators.back().push(vanishing, -1));
+                continue;
+            }
+            sflint::FmpqPoly unit_poly;
+            for (slong i = 0; i < a; ++i) {
+                sflint::fmpq_poly_set_coeff_si(unit_poly, i, 1);
+            }
+            silex::Element unit(field);
+            assert(unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)));
+            assert(generators.back().set_element(unit));
+        }
+        silex::EmbeddingContext embeddings(field);
+        silex::OrderUnitGroup group(equation);
+        assert(group.set_units(equation,
+                               silex::FactoredElementSpan(generators.data(),
+                                                          generators.size()),
+                               embeddings, 256));
+        assert(group.free_rank() == 5);
+
+        slong scaled = 0;
+        slong declined = 0;
+        check_stable_proof_prime_columns_at_q(scaled, declined, group,
+                                              equation,
+                                              sflint::FmpzConstRef(q), 13, 12);
+        assert(declined == 1);
+        assert(scaled > 0);
+    }
+    {
+        sflint::Fmpz q;
+        assert(sflint::fmpz_set_str(sflint::FmpzRef(q),
+                                    "18446744073709555657"));
+        assert(!sflint::fmpz_abs_fits_ui(sflint::FmpzConstRef(q)));
+        silex::EmbeddingContext embeddings(field);
+        silex::OrderUnitGroup group(equation);
+        assert(set_cyclotomic13_u2_power17_group(group, equation, field,
+                                                 embeddings));
+        slong scaled = 0;
+        slong declined = 0;
+        check_stable_proof_prime_columns_at_q(scaled, declined, group,
+                                              equation,
+                                              sflint::FmpzConstRef(q), 3, 12);
+        assert(declined == 0);
+        assert(scaled > 0);
+    }
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 2, 2);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -8);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, -8);
+        silex::NumberField cubic = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order cubic_equation = silex::test::equation_order(cubic);
+        silex::Order maximal(cubic);
+        assert(maximal.maximal_order(cubic_equation));
+        assert(maximal.is_maximal() && !maximal.is_equation_order());
+
+        // alpha = theta / 2 and alpha^2 - 2 = theta^2 / 4 - 2.
+        sflint::FmpqPoly alpha_poly;
+        sflint::FmpqPoly conjugate_poly;
+        sflint::Fmpq coefficient;
+        sflint::fmpq_set_si(coefficient, 1, 2);
+        sflint::fmpq_poly_set_coeff_fmpq(alpha_poly, 1, coefficient);
+        sflint::fmpq_set_si(coefficient, 1, 4);
+        sflint::fmpq_poly_set_coeff_fmpq(conjugate_poly, 2, coefficient);
+        sflint::fmpq_poly_set_coeff_si(conjugate_poly, 0, -2);
+        silex::Element alpha(cubic);
+        silex::Element conjugate(cubic);
+        assert(alpha.set_fmpq_poly(sflint::FmpqPolyConstRef(alpha_poly)));
+        assert(conjugate.set_fmpq_poly(
+                sflint::FmpqPolyConstRef(conjugate_poly)));
+        std::vector<silex::FactoredElement> generators;
+        generators.emplace_back(cubic);
+        assert(generators.back().set_element(alpha));
+        generators.emplace_back(cubic);
+        assert(generators.back().set_element(conjugate));
+        silex::EmbeddingContext embeddings(cubic);
+        silex::OrderUnitGroup group(maximal);
+        assert(group.set_units(maximal,
+                               silex::FactoredElementSpan(generators.data(),
+                                                          generators.size()),
+                               embeddings, 256));
+        assert(group.free_rank() == 2);
+
+        sflint::Fmpz q;
+        assert(set_fmpz_si(q, 43));
+        slong scaled = 0;
+        slong declined = 0;
+        check_stable_proof_prime_columns_at_q(scaled, declined, group,
+                                              maximal,
+                                              sflint::FmpzConstRef(q), 7, 3);
+        assert(declined == 0);
+        assert(scaled > 0);
+    }
     return 0;
 }
 
@@ -11130,6 +11373,7 @@ int main() {
     test_prove_index_bound_quartic70640();
     test_prove_index_bound_cyclotomic13_undecided_root();
     test_stable_proof_prime_columns_match_residue_field_route();
+    test_stable_proof_prime_columns_fallback_and_wide_routes();
     test_kernel_row_root_three_way_result();
     test_kernel_row_root_defers_undecidable_rows();
     test_dependent_relation_unbounded_root_failure_adjoins_y();
