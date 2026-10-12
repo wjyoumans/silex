@@ -645,23 +645,9 @@ bool Ideal::is_one() const noexcept {
 }
 
 bool Ideal::set_hnf(flint::FmpzMatConstRef hnf) noexcept {
-    if (!is_defined()) {
-        return false;
-    }
-
-    const slong n = parent_.degree();
-    flint::FmpzMat normalized(n, n);
-    if (!normalize_full_rank_hnf(flint::FmpzMatRef(normalized), hnf) ||
-        !hnf_is_ideal(parent_, flint::FmpzMatConstRef(normalized))) {
-        return false;
-    }
-
-    Ideal candidate(parent_);
-    if (!candidate.set_hnf_direct(flint::FmpzMatConstRef(normalized))) {
-        return false;
-    }
-    swap(candidate);
-    return true;
+    return detail::IdealAccess::store_hnf(
+        *this, hnf, detail::IdealAccess::HnfInput::unnormalized,
+        detail::IdealAccess::IdealTest::always);
 }
 
 bool Ideal::get_hnf(flint::FmpzMatRef out) const noexcept {
@@ -1100,25 +1086,40 @@ bool Ideal::set_known_ideal_rows(flint::FmpzMatConstRef rows) noexcept {
         return false;
     }
 
-    return set_hnf_direct(hnf_lattice.basis_ref());
+    // The lattice HNF is already normalized; the caller vouches for closure.
+    return detail::IdealAccess::store_hnf(
+        *this, hnf_lattice.basis_ref(),
+        detail::IdealAccess::HnfInput::normalized,
+        detail::IdealAccess::IdealTest::assert_only);
 }
 
 namespace detail {
 
-bool IdealAccess::set_known_ideal_hnf(Ideal& ideal,
-                                      flint::FmpzMatConstRef hnf) noexcept {
+bool IdealAccess::store_hnf(Ideal& ideal, flint::FmpzMatConstRef hnf,
+                            HnfInput input, IdealTest test) noexcept {
     if (!ideal.is_defined()) {
         return false;
     }
 
-    // As Ideal::set_hnf, minus the release-build hnf_is_ideal test: the caller
-    // vouches that the row span is an ideal.
     const slong n = ideal.parent_.degree();
     flint::FmpzMat normalized(n, n);
-    if (!normalize_full_rank_hnf(flint::FmpzMatRef(normalized), hnf)) {
+    if (input == HnfInput::unnormalized) {
+        if (!normalize_full_rank_hnf(flint::FmpzMatRef(normalized), hnf)) {
+            return false;
+        }
+    } else if (!fmpz_mat_shape(hnf, n, n)) {
         return false;
+    } else {
+        fmpz_mat_set(normalized.raw(), hnf.raw());
     }
-    assert(hnf_is_ideal(ideal.parent_, flint::FmpzMatConstRef(normalized)));
+
+    if (test == IdealTest::always) {
+        if (!hnf_is_ideal(ideal.parent_, flint::FmpzMatConstRef(normalized))) {
+            return false;
+        }
+    } else {
+        assert(hnf_is_ideal(ideal.parent_, flint::FmpzMatConstRef(normalized)));
+    }
 
     Ideal candidate(ideal.parent_);
     if (!candidate.set_hnf_direct(flint::FmpzMatConstRef(normalized))) {
@@ -1126,6 +1127,14 @@ bool IdealAccess::set_known_ideal_hnf(Ideal& ideal,
     }
     ideal.swap(candidate);
     return true;
+}
+
+bool IdealAccess::set_known_ideal_hnf(Ideal& ideal,
+                                      flint::FmpzMatConstRef hnf) noexcept {
+    // As Ideal::set_hnf, minus the release-build hnf_is_ideal test: the caller
+    // vouches that the row span is an ideal.
+    return store_hnf(ideal, hnf, HnfInput::unnormalized,
+                     IdealTest::assert_only);
 }
 
 namespace {

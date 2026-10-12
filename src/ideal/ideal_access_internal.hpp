@@ -9,6 +9,18 @@ namespace silex::detail {
 // set_known_ideal_hnf is for library code.
 class IdealAccess {
 public:
+    enum class HnfInput { unnormalized, normalized };
+    enum class IdealTest { always, assert_only };
+
+    // The one routine behind Ideal::set_hnf, set_known_ideal_hnf and the
+    // private Ideal::set_known_ideal_rows.  `unnormalized` input is put in
+    // normalized HNF (failing if singular or misshapen); `normalized` input
+    // is only shape-checked and copied.  IdealTest::always rejects a lattice
+    // that is not an ideal; assert_only only asserts it (NDEBUG removes it).
+    // On failure `ideal` is unchanged.
+    static bool store_hnf(Ideal& ideal, flint::FmpzMatConstRef hnf,
+                          HnfInput input, IdealTest test) noexcept;
+
     // Stores the normalized HNF of the full-rank lattice spanned by the rows
     // of the n x n matrix `hnf`, as Ideal::set_hnf does, but without testing
     // that the lattice is an ideal of the parent order; builds with assertions

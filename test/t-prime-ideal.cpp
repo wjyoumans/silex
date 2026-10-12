@@ -355,9 +355,8 @@ int test_degree_one_prime_from_root_rejects_non_roots() {
 // (2 divides the index; f = x^2 (x + 1) mod 2 is not squarefree), so the
 // internal constructor refuses it and leaves its output unchanged.  The
 // squarefree condition is sufficient but not necessary: 1 is a simple root
-// mod 2 and (2, theta - 1)O is still a prime with e = f = 1, since 2 splits
-// completely in O and the ideal has norm 2 and valuation one at exactly one
-// of the three primes above 2.  The constructor refuses it all the same.
+// mod 2 (2 does not divide f'(1)) and that alone makes (2, theta - 1)O a
+// prime with e = f = 1.  The constructor refuses it all the same.
 int test_degree_one_prime_from_root_rejects_index_prime() {
     sflint::FmpqPoly polynomial;
     poly_cubic_disc1724(polynomial);
@@ -1356,6 +1355,15 @@ int check_recursive_split_matches_enumeration(
     assert(primes.size() == count);
     for (std::size_t i = 0; i < split.size(); ++i) {
         assert(split[i].equal(enumerated[i]));
+        // Independent closure check that survives optimized library builds:
+        // the checked set_hnf must accept the stored lattice unchanged.
+        {
+            sflint::FmpzMat stored(maximal.degree(), maximal.degree());
+            assert(split[i].get_hnf(sflint::FmpzMatRef(stored)));
+            silex::Ideal reloaded(maximal);
+            assert(reloaded.set_hnf(sflint::FmpzMatConstRef(stored)));
+            assert(reloaded.equal(split[i]));
+        }
         silex::Ideal ideal(maximal);
         assert(primes.at(static_cast<slong>(i))->get_ideal(ideal));
         assert(ideal.equal(split[i]));
