@@ -7,6 +7,7 @@
 #include "class_group_internal.hpp"
 #include "class_group_certification_internal.hpp"
 #include "factor_base_honesty_internal.hpp"
+#include "maximal_imaginary_quadratic_row_hnf_internal.hpp"
 #include "quadratic_form_reduction_internal.hpp"
 #include "../factor_base/factor_base_internal.hpp"
 #include "../relation/relation_internal.hpp"
@@ -34,6 +35,10 @@ struct QuadraticFormPrime {
     flint::Qfb form;
     Ideal conjugate_ideal;
     std::vector<flint::Qfb> powers;
+    // Root r of the minimal polynomial x^2 - t x + n of omega modulo p cached
+    // by the factor-base prime at oriented_factor_base_index, which is then
+    // p Z + (omega - r) Z; its conjugate is p Z + (omega - (t - r)) Z.
+    flint::Fmpz oriented_root;
     slong oriented_factor_base_index = -1;
     slong conjugate_factor_base_index = -1;
     slong factor_base_orientation = 1;
@@ -301,6 +306,242 @@ bool quadratic_factor_base_row_integral_den(
     return true;
 }
 
+// Lifts a simple root of f(x) = x^2 - t x + n modulo the prime p to the root
+// out of f modulo p^exponent with out = root (mod p), by the quadratic
+// (Newton) Hensel lift of the linear factor x - root (Cohen, GTM 138,
+// Theorem 3.5.3 and Algorithms 3.5.5-3.5.6): from f(s) = 0 (mod p^e) and
+// f'(s) = 2 s - t a unit modulo p, s - f(s) / f'(s) is a root modulo
+// p^(2e).  Returns false when f'(s) is not invertible.
+bool quadratic_root_hensel_lift(flint::Fmpz& out,
+                                flint::FmpzConstRef root,
+                                flint::FmpzConstRef prime,
+                                ulong exponent,
+                                flint::FmpzConstRef trace,
+                                flint::FmpzConstRef norm) noexcept {
+    ::fmpz_mod(out.raw(), root.raw(), prime.raw());
+    if (exponent <= 1) {
+        return exponent == 1;
+    }
+    std::vector<ulong> precisions;
+    for (ulong precision = exponent; precision > 1;
+         precision = precision / 2 + (precision & 1U)) {
+        precisions.push_back(precision);
+    }
+    flint::Fmpz modulus;
+    flint::Fmpz value;
+    flint::Fmpz derivative;
+    flint::Fmpz inverse;
+    for (auto precision = precisions.rbegin();
+         precision != precisions.rend(); ++precision) {
+        flint::fmpz_pow_ui(flint::FmpzRef(modulus), prime, *precision);
+        // value = s (s - t) + n, derivative = 2 s - t.
+        ::fmpz_sub(derivative.raw(), out.raw(), trace.raw());
+        ::fmpz_mul(value.raw(), out.raw(), derivative.raw());
+        ::fmpz_add(value.raw(), value.raw(), norm.raw());
+        ::fmpz_add(derivative.raw(), derivative.raw(), out.raw());
+        if (::fmpz_invmod(inverse.raw(), derivative.raw(),
+                          modulus.raw()) == 0) {
+            return false;
+        }
+        ::fmpz_mul(value.raw(), value.raw(), inverse.raw());
+        ::fmpz_sub(out.raw(), out.raw(), value.raw());
+        ::fmpz_mod(out.raw(), out.raw(), modulus.raw());
+    }
+    return true;
+}
+
+// Builds the HNF of the integral ideal p^(-v) times the row ideal that
+// quadratic_factor_base_row_integral_den builds as an Ideal, together with
+// its norm and the same denominator, directly in the order basis
+// (1, omega) of the maximal quadratic order (Cohen, GTM 138, Section 5.2).
+// For P = p Z + (omega - r) Z and its conjugate P' (Proposition 5.1.4),
+// P^a P'^b = p^min(a, b) Q with Q = P^(a - b) or P'^(b - a), and a ramified
+// P^k = p^floor(k / 2) P^(k mod 2).  The product of the Q over coprime norms
+// is the primitive ideal A Z + (omega - s) Z with s the CRT of the Hensel
+// lifts of the selected roots (Lemma 5.4.5 with d = 1 for coprime norms;
+// Lemma 5.5.1 for the factorization of a primitive ideal of norm A), so the
+// row ideal is m (A Z + (omega - s) Z) with norm m^2 A (Proposition 5.2.1).
+// Before the HNF is formed the result is checked: A divides
+// N(omega - s) = s^2 - t s + n, so the lattice is an ideal, and s is the
+// selected root modulo every prime p dividing A, so that ideal lies in the
+// selected prime above each p; with the norm A this identifies it with the
+// product.  Returns false when an exponent does not fit an slong or equals
+// LONG_MIN (as the Ideal route does) and when a check fails; the caller then
+// uses the Ideal route.
+bool quadratic_factor_base_row_hnf(
+        flint::FmpzMat& hnf,
+        flint::Fmpz& norm,
+        flint::Fmpz& denominator,
+        const FactorBase& base,
+        const std::vector<QuadraticFormPrime>& form_primes,
+        flint::FmpzMatConstRef row,
+        flint::FmpzConstRef omega_trace,
+        flint::FmpzConstRef omega_norm) noexcept {
+    if (flint::fmpz_mat_nrows(row) != 1 ||
+        flint::fmpz_mat_ncols(row) != base.length()) {
+        return false;
+    }
+
+    struct SelectedRoot {
+        ulong prime = 0;
+        ulong root = 0;
+    };
+    std::vector<SelectedRoot> selected_roots;
+    flint::Fmpz content;
+    flint::Fmpz modulus;
+    flint::Fmpz residue;
+    flint::Fmpz prime_power;
+    flint::Fmpz root;
+    flint::Fmpz lifted;
+    flint::Fmpz correction;
+    flint::fmpz_one(flint::FmpzRef(content));
+    flint::fmpz_one(flint::FmpzRef(modulus));
+    flint::fmpz_zero(flint::FmpzRef(residue));
+    flint::fmpz_one(flint::FmpzRef(denominator));
+
+    auto read_exponent = [&](slong& out, slong index) noexcept {
+        out = 0;
+        if (index < 0) {
+            return true;
+        }
+        const flint::FmpzConstRef entry =
+                flint::fmpz_mat_entry(row, 0, index);
+        if (flint::fmpz_is_zero(entry)) {
+            return true;
+        }
+        if (!flint::fmpz_fits_si(entry)) {
+            return false;
+        }
+        out = flint::fmpz_get_si(entry);
+        return out != std::numeric_limits<slong>::min();
+    };
+    auto absolute = [](slong value) noexcept {
+        return static_cast<ulong>(value < 0 ? -value : value);
+    };
+    auto multiply_power = [&](flint::Fmpz& target,
+                              flint::FmpzConstRef prime,
+                              ulong exponent) noexcept {
+        if (exponent == 0) {
+            return;
+        }
+        flint::fmpz_pow_ui(flint::FmpzRef(prime_power), prime, exponent);
+        ::fmpz_mul(target.raw(), target.raw(), prime_power.raw());
+    };
+
+    for (const QuadraticFormPrime& form_prime : form_primes) {
+        const flint::FmpzConstRef prime(form_prime.rational_prime);
+        slong oriented_exponent = 0;
+        slong conjugate_exponent = 0;
+        if (!read_exponent(oriented_exponent,
+                           form_prime.oriented_factor_base_index) ||
+            !read_exponent(conjugate_exponent,
+                           form_prime.ramified
+                                   ? -1
+                                   : form_prime.conjugate_factor_base_index)) {
+            return false;
+        }
+        if (oriented_exponent < 0) {
+            multiply_power(denominator, prime, absolute(oriented_exponent));
+        }
+        if (conjugate_exponent < 0) {
+            multiply_power(denominator, prime, absolute(conjugate_exponent));
+        }
+
+        ulong primitive_exponent = 0;
+        if (form_prime.ramified) {
+            const ulong exponent = absolute(oriented_exponent);
+            multiply_power(content, prime, exponent / 2);
+            primitive_exponent = exponent & 1U;
+            ::fmpz_mod(root.raw(), form_prime.oriented_root.raw(),
+                       prime.raw());
+        } else {
+            // a counts P = oriented, b counts its conjugate; a negative
+            // exponent of one is the other over p (P P' = (p)).
+            const ulong a = (oriented_exponent > 0
+                                     ? absolute(oriented_exponent)
+                                     : 0) +
+                    (conjugate_exponent < 0 ? absolute(conjugate_exponent)
+                                            : 0);
+            const ulong b = (oriented_exponent < 0
+                                     ? absolute(oriented_exponent)
+                                     : 0) +
+                    (conjugate_exponent > 0 ? absolute(conjugate_exponent)
+                                            : 0);
+            multiply_power(content, prime, a < b ? a : b);
+            primitive_exponent = a < b ? b - a : a - b;
+            if (a >= b) {
+                ::fmpz_mod(root.raw(), form_prime.oriented_root.raw(),
+                           prime.raw());
+            } else {
+                ::fmpz_sub(root.raw(), omega_trace.raw(),
+                           form_prime.oriented_root.raw());
+                ::fmpz_mod(root.raw(), root.raw(), prime.raw());
+            }
+        }
+        if (primitive_exponent == 0) {
+            continue;
+        }
+        if (!quadratic_root_hensel_lift(lifted, flint::FmpzConstRef(root),
+                                        prime, primitive_exponent,
+                                        omega_trace, omega_norm)) {
+            return false;
+        }
+        flint::fmpz_pow_ui(flint::FmpzRef(prime_power), prime,
+                           primitive_exponent);
+        // CRT: residue + modulus * ((lifted - residue) / modulus mod q).
+        ::fmpz_sub(correction.raw(), lifted.raw(), residue.raw());
+        ::fmpz_mod(correction.raw(), correction.raw(), prime_power.raw());
+        if (!::fmpz_is_one(modulus.raw())) {
+            ::fmpz_mod(lifted.raw(), modulus.raw(), prime_power.raw());
+            if (::fmpz_invmod(lifted.raw(), lifted.raw(),
+                              prime_power.raw()) == 0) {
+                return false;
+            }
+            ::fmpz_mul(correction.raw(), correction.raw(), lifted.raw());
+            ::fmpz_mod(correction.raw(), correction.raw(),
+                       prime_power.raw());
+        }
+        ::fmpz_addmul(residue.raw(), modulus.raw(), correction.raw());
+        ::fmpz_mul(modulus.raw(), modulus.raw(), prime_power.raw());
+        selected_roots.push_back(
+                {flint::fmpz_get_ui(prime), flint::fmpz_get_ui(
+                                                    flint::FmpzConstRef(root))});
+    }
+
+    // Check (i): modulus divides N(omega - residue) = s^2 - t s + n.
+    ::fmpz_sub(correction.raw(), residue.raw(), omega_trace.raw());
+    ::fmpz_mul(correction.raw(), correction.raw(), residue.raw());
+    ::fmpz_add(correction.raw(), correction.raw(), omega_norm.raw());
+    if (::fmpz_divisible(correction.raw(), modulus.raw()) == 0) {
+        return false;
+    }
+    // Check (ii): residue is the selected root modulo each prime of modulus.
+    for (const SelectedRoot& selected : selected_roots) {
+        if (::fmpz_fdiv_ui(residue.raw(), selected.prime) != selected.root) {
+            return false;
+        }
+    }
+
+    // HNF of the rows (A, 0) and (-s, 1) of the primitive part, times m.
+    flint::FmpzMat rows(2, 2);
+    ::fmpz_set(::fmpz_mat_entry(rows.raw(), 0, 0), modulus.raw());
+    ::fmpz_neg(::fmpz_mat_entry(rows.raw(), 1, 0), residue.raw());
+    ::fmpz_one(::fmpz_mat_entry(rows.raw(), 1, 1));
+    if (flint::fmpz_mat_nrows(flint::FmpzMatConstRef(hnf)) != 2 ||
+        flint::fmpz_mat_ncols(flint::FmpzMatConstRef(hnf)) != 2) {
+        return false;
+    }
+    ::fmpz_mat_hnf_xgcd(hnf.raw(), rows.raw());
+    ::fmpz_mat_scalar_mul_fmpz(hnf.raw(), hnf.raw(), content.raw());
+    ::fmpz_mul(norm.raw(), ::fmpz_mat_entry(hnf.raw(), 0, 0),
+               ::fmpz_mat_entry(hnf.raw(), 1, 1));
+    ::fmpz_abs(norm.raw(), norm.raw());
+    ::fmpz_mul(correction.raw(), content.raw(), content.raw());
+    ::fmpz_mul(correction.raw(), correction.raw(), modulus.raw());
+    return ::fmpz_mat_is_in_hnf(hnf.raw()) != 0 &&
+           ::fmpz_equal(norm.raw(), correction.raw()) != 0;
+}
+
 bool quadratic_integral_generator(Element& out,
                                   const NumberField& field,
                                   flint::FmpzConstRef radicand) noexcept {
@@ -515,6 +756,17 @@ bool identify_quadratic_form_primes(
              entry.conjugate_factor_base_index < 0)) {
             return false;
         }
+        const PrimeIdeal* oriented_prime =
+                base.prime_at(entry.oriented_factor_base_index);
+        const flint::Fmpz* oriented_root =
+                oriented_prime == nullptr
+                        ? nullptr
+                        : detail::linear_residue_root_ptr(*oriented_prime);
+        if (oriented_root == nullptr) {
+            return false;
+        }
+        flint::fmpz_set(flint::FmpzRef(entry.oriented_root),
+                        flint::FmpzConstRef(*oriented_root));
         out.emplace_back(std::move(entry));
     }
     return !out.empty();
@@ -753,7 +1005,6 @@ bool principal_generator_from_factor_base_row(
         return false;
     }
 
-    Ideal numerator(order);
     flint::Fmpz denominator;
     flint::Fmpz omega_trace;
     flint::Fmpz omega_norm;
@@ -769,34 +1020,60 @@ bool principal_generator_from_factor_base_row(
     flint::FmpzMat coordinates(1, 2);
     OrderElement integral_generator(order);
     Element generator(*order.parent());
-    if (!numerator.is_defined() || !integral_generator.is_defined() ||
+    if (!integral_generator.is_defined() ||
         !generator.is_defined()) {
         SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                   LogLevel::detail,
                   "quadratic witness allocation failed");
         return false;
     }
-    {
-        SILEX_PROFILE_SCOPE(
-                diagnostics, DiagnosticsModule::class_group,
-                "class_group.maximal_imaginary_quadratic_relations."
-                "witness.row_ideal");
-        if (!quadratic_factor_base_row_integral_den(
-                    numerator, denominator, base, form_primes, row,
-                    diagnostics)) {
-            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                      LogLevel::detail,
-                      "quadratic witness row ideal reconstruction failed");
-            return false;
-        }
-    }
     if (!quadratic_order_trace_and_norm(
-                omega_trace, omega_norm, discriminant) ||
-        !numerator.get_hnf(flint::FmpzMatRef(hnf))) {
+                omega_trace, omega_norm, discriminant)) {
         SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                   LogLevel::detail,
                   "quadratic witness norm-form setup failed");
         return false;
+    }
+    bool row_hnf_ready = false;
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.maximal_imaginary_quadratic_relations."
+                "witness.row_hnf");
+        row_hnf_ready = quadratic_factor_base_row_hnf(
+                hnf, numerator_norm, denominator, base, form_primes, row,
+                flint::FmpzConstRef(omega_trace),
+                flint::FmpzConstRef(omega_norm));
+    }
+    if (!row_hnf_ready) {
+        SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                  LogLevel::detail,
+                  "quadratic witness row HNF builder declined; using the "
+                  "ideal product");
+        Ideal numerator(order);
+        {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.maximal_imaginary_quadratic_relations."
+                    "witness.row_ideal");
+            if (!numerator.is_defined() ||
+                !quadratic_factor_base_row_integral_den(
+                        numerator, denominator, base, form_primes, row,
+                        diagnostics)) {
+                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                          LogLevel::detail,
+                          "quadratic witness row ideal reconstruction "
+                          "failed");
+                return false;
+            }
+        }
+        if (!numerator.get_hnf(flint::FmpzMatRef(hnf)) ||
+            !numerator.norm(flint::FmpzRef(numerator_norm))) {
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail,
+                      "quadratic witness norm-form setup failed");
+            return false;
+        }
     }
 
     const flint::FmpzConstRef x1 = flint::fmpz_mat_entry(
@@ -839,13 +1116,13 @@ bool principal_generator_from_factor_base_row(
                     flint::FmpzConstRef(product));
 
     Element integral_element(*order.parent());
-    // The coordinates prove membership in numerator.  Equal element and
-    // ideal norms then make (integral_element) a contained ideal of index one.
+    // The coordinates prove membership in the row ideal spanned by hnf.
+    // Equal element and ideal norms then make (integral_element) a contained
+    // ideal of index one.
     if (!integral_element.is_defined() ||
         !integral_generator.set_coordinates(
                 flint::FmpzMatConstRef(coordinates)) ||
         !integral_generator.get_element(integral_element) ||
-        !numerator.norm(flint::FmpzRef(numerator_norm)) ||
         !flint::fmpz_equal(flint::FmpzConstRef(shortest_value),
                            flint::FmpzConstRef(numerator_norm)) ||
         !element_scalar_div_fmpz(
@@ -1570,5 +1847,45 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
         current = (current + 1) % static_cast<slong>(form_primes.size());
     }
 }
+
+namespace detail {
+
+bool maximal_imaginary_quadratic_row_hnf(flint::FmpzMat& hnf,
+                                         flint::Fmpz& norm,
+                                         flint::Fmpz& denominator,
+                                         const Order& order,
+                                         const FactorBase& base,
+                                         flint::FmpzMatConstRef row,
+                                         QuadraticRowHnfRoute route) noexcept {
+    flint::Fmpz discriminant;
+    flint::Fmpz omega_trace;
+    flint::Fmpz omega_norm;
+    std::vector<QuadraticFormPrime> form_primes;
+    if (order.degree() != 2 || !order.is_maximal() ||
+        !order.discriminant(flint::FmpzRef(discriminant)) ||
+        !quadratic_order_trace_and_norm(
+                omega_trace, omega_norm,
+                flint::FmpzConstRef(discriminant)) ||
+        !identify_quadratic_form_primes(
+                form_primes, order, base,
+                flint::FmpzConstRef(discriminant), nullptr)) {
+        return false;
+    }
+    if (route == QuadraticRowHnfRoute::binary_form) {
+        return quadratic_factor_base_row_hnf(
+                hnf, norm, denominator, base, form_primes, row,
+                flint::FmpzConstRef(omega_trace),
+                flint::FmpzConstRef(omega_norm));
+    }
+    Ideal numerator(order);
+    return numerator.is_defined() &&
+           quadratic_factor_base_row_integral_den(
+                   numerator, denominator, base, form_primes, row,
+                   nullptr) &&
+           numerator.get_hnf(flint::FmpzMatRef(hnf)) &&
+           numerator.norm(flint::FmpzRef(norm));
+}
+
+}  // namespace detail
 
 }  // namespace silex

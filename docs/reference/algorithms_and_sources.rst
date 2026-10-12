@@ -1194,6 +1194,23 @@ structure certificate fails, or the relation index is below ``h``, the run
 fails closed with the generic reason ``class_unit_computation_failed``, with
 no fallback.
 
+The proven imaginary quadratic witness step needs, for each factor-base row,
+the Hermite normal form of the row's ideal in the order basis ``(1, omega)``
+of the maximal quadratic order.  Silex builds it directly instead of
+multiplying ideals, following Cohen (GTM 138): a prime above ``p`` is
+``p Z + (omega - r) Z`` with its conjugate (Prop. 5.1.4); the product of
+ideals of coprime norm is the primitive ideal ``A Z + (omega - s) Z`` (Lemma
+5.4.5 with ``d = 1`` and Lemma 5.5.1), and an ideal ``m`` times a primitive
+ideal of norm ``A`` has norm ``m^2 A`` (Prop. 5.2.1; Thm. 5.2.8 for the
+prime decomposition).  The root ``s`` is the Chinese remainder combination of
+the roots of the individual prime powers, each obtained from the stored root
+modulo ``p`` by the quadratic Hensel lift (Thm. 3.5.3, Alg. 3.5.5 and
+3.5.6).  Before the result is used the code checks that ``A`` divides
+``N(omega - s)`` and that ``s`` is the selected root modulo every ``p``
+dividing ``A``; with the norm ``A`` this identifies the lattice with the
+product.  If the builder declines or a check fails, the witness step uses the
+earlier ideal-arithmetic route, so the proven statement is unchanged.
+
 The reduction of the very large binary quadratic forms that the proven
 imaginary quadratic witness step produces (forms of more than 9000 bits)
 is a port of the recursive fast reduction of PARI 2.17.3

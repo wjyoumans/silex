@@ -670,6 +670,17 @@ if(SILEX_BUILD_TESTS)
         COMMAND t-silex-quadratic-form-reduction)
     list(APPEND SILEX_TEST_NAMES silex-quadratic-form-reduction)
 
+    add_executable(t-silex-quadratic-row-hnf
+        test/t-quadratic-row-hnf.cpp)
+    target_link_libraries(t-silex-quadratic-row-hnf
+        PRIVATE Silex::silex)
+    target_include_directories(t-silex-quadratic-row-hnf PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-quadratic-row-hnf)
+    add_test(NAME silex-quadratic-row-hnf
+        COMMAND t-silex-quadratic-row-hnf)
+    list(APPEND SILEX_TEST_NAMES silex-quadratic-row-hnf)
+
     add_executable(t-silex-ideal-lattice-reduction
         test/t-ideal-lattice-reduction.cpp)
     target_link_libraries(t-silex-ideal-lattice-reduction
