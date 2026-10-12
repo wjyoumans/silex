@@ -82,7 +82,7 @@ inline bool set_integral_ideal_known_hnf(FractionalIdeal& out,
     return IdealAccess::set_integral_known_hnf(out, numerator);
 }
 
-// Noninstalled integral-ideal products.  The first sets `out` to a O + beta O
+// Noninstalled integral-ideal products.  The first sets `out` to (a O + beta O)
 // times `ideal`; the second to `multiplier` times `ideal`, requiring an
 // integral result.  See the comment above the definitions in ideal.cpp.
 inline bool multiply_integral_ideal_by_two_generator(
