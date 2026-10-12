@@ -1,5 +1,6 @@
 #include <silex/diagnostics.hpp>
 #include <silex/element.hpp>
+#include <silex/factored.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/number_field.hpp>
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <iterator>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1642,6 +1644,166 @@ void test_power_residue_disproof_answer_cache_matches_cold() noexcept {
            other_warm.is_power == other_cold.is_power);
 }
 
+// detail::factored_power_residue_disproves runs the first admissible prime of
+// the degree >= 10 residue scan of pure_power_residue_disproves on the
+// residues of the factors of prod g_i^(e_i) without forming the product.  It
+// may only disprove where the scan of the evaluated product disproves.
+struct FactoredTerm {
+    std::initializer_list<slong> coefficients;
+    slong denominator;
+    slong exponent;
+};
+
+std::vector<silex::FactorPower<silex::Element>> factored_terms(
+        const silex::NumberField& field,
+        std::initializer_list<FactoredTerm> terms) noexcept {
+    std::vector<silex::FactorPower<silex::Element>> factors;
+    for (const FactoredTerm& term : terms) {
+        silex::Element factor = element_from_coefficients(field,
+                                                          term.coefficients);
+        if (term.denominator != 1) {
+            assert(factor.scalar_div_si(factor, term.denominator));
+        }
+        factors.push_back(
+                silex::FactorPower<silex::Element>{std::move(factor),
+                                                   term.exponent});
+    }
+    return factors;
+}
+
+ResidueDisproofDecision evaluated_residue_decision(
+        const silex::NumberField& field,
+        const std::vector<silex::FactorPower<silex::Element>>& factors,
+        slong exponent) noexcept {
+    silex::Element product(field);
+    assert(product.one());
+    for (const auto& entry : factors) {
+        sflint::Fmpz power;
+        sflint::fmpz_set_si(sflint::FmpzRef(power), entry.exponent);
+        silex::Element term(field);
+        assert(term.pow_fmpz(entry.factor, sflint::FmpzConstRef(power)));
+        assert(product.multiply(product, term));
+    }
+    ResidueDisproofDecision decision;
+    decision.decided = silex::detail::pure_power_residue_disproves(
+            decision.is_power, product, exponent, nullptr);
+    return decision;
+}
+
+ResidueDisproofDecision factored_residue_decision(
+        const silex::NumberField& field,
+        const std::vector<silex::FactorPower<silex::Element>>& factors,
+        slong exponent) noexcept {
+    ResidueDisproofDecision decision;
+    decision.decided = silex::detail::factored_power_residue_disproves(
+            decision.is_power, field,
+            std::span<const silex::FactorPower<silex::Element>>(factors),
+            exponent, nullptr);
+    return decision;
+}
+
+void test_factored_power_residue_disproof() noexcept {
+    // Q(zeta_25), degree 20.
+    const silex::NumberField phi25 = field_from_coefficients(
+            {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+
+    // (1 + zeta)^2 (1 + zeta)^2 = (1 + zeta)^3 (1 + zeta) and 8 (1 + zeta)
+    // are not cubes, since 1 + zeta is not a cube (test above): the screen
+    // disproves them from the factors.
+    for (const auto& factors :
+         {factored_terms(phi25, {{{1, 1}, 1, 2}, {{1, 1}, 1, 2}}),
+          factored_terms(phi25, {{{8}, 1, 1}, {{1, 1}, 1, 1}})}) {
+        bool is_power = true;
+        assert(silex::detail::factored_power_residue_disproves(
+                is_power, phi25,
+                std::span<const silex::FactorPower<silex::Element>>(factors),
+                3, nullptr));
+        assert(!is_power);
+        const ResidueDisproofDecision evaluated =
+                evaluated_residue_decision(phi25, factors, 3);
+        assert(evaluated.decided && !evaluated.is_power);
+    }
+
+    // True cubes are never disproved, so the screen leaves them to the
+    // caller: 2 * 4 = 2^3 (a rational cube, which Element::is_power then
+    // finds) and (1 + zeta) (1 + zeta)^2.
+    for (const auto& factors :
+         {factored_terms(phi25, {{{2}, 1, 1}, {{4}, 1, 1}}),
+          factored_terms(phi25, {{{1, 1}, 1, 1}, {{1, 1}, 1, 2}})}) {
+        bool is_power = true;
+        assert(!silex::detail::factored_power_residue_disproves(
+                is_power, phi25,
+                std::span<const silex::FactorPower<silex::Element>>(factors),
+                3, nullptr));
+        assert(is_power);
+    }
+
+    // ((1 + zeta) / 7) * 7 = 1 + zeta is disproved by the scan of the
+    // product, but at p = 7, the first usable prime (5 ramifies), a factor
+    // is not 7-integral, so the product's admissibility there is unknown
+    // from the factors and the screen gives up instead of skipping p.
+    {
+        const auto factors =
+                factored_terms(phi25, {{{1, 1}, 7, 1}, {{7}, 1, 1}});
+        assert(!factored_residue_decision(phi25, factors, 3).decided);
+        const ResidueDisproofDecision evaluated =
+                evaluated_residue_decision(phi25, factors, 3);
+        assert(evaluated.decided && !evaluated.is_power);
+    }
+
+    // Unsupported inputs decide nothing: degree below 10, a non-positive
+    // exponent of a factor, and an exponent below 2.
+    {
+        const silex::NumberField cubic = cubic_field();
+        const auto small = factored_terms(cubic, {{{1, 1}, 1, 1}});
+        assert(!factored_residue_decision(cubic, small, 3).decided);
+        const auto negative = factored_terms(phi25, {{{1, 1}, 1, -1}});
+        assert(!factored_residue_decision(phi25, negative, 3).decided);
+        const auto single = factored_terms(phi25, {{{1, 1}, 1, 1}});
+        assert(!factored_residue_decision(phi25, single, 1).decided);
+    }
+
+    // Differential: with or without denominators, the screen disproves only
+    // where the evaluated scan does, and it does decide some of these.
+    const std::initializer_list<slong> bases[] = {
+            {1, 1}, {2, 1}, {0, 1}, {1, 0, 1}, {3, -1, 0, 2},
+            {-5, 2, 1, 0, 0, 7}, {6}, {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}};
+    const slong denominators[] = {1, 2, 3, 11};
+    slong decided = 0;
+    for (slong n : {3, 5, 7}) {
+        for (std::size_t i = 0; i < std::size(bases); ++i) {
+            for (std::size_t j = 0; j < std::size(bases); ++j) {
+                for (slong denominator : denominators) {
+                    const slong first = 1 + static_cast<slong>(i) % (n - 1);
+                    const slong second = 1 + static_cast<slong>(j + 1) % (n - 1);
+                    std::vector<silex::FactorPower<silex::Element>> factors;
+                    silex::Element left = element_from_coefficients(
+                            phi25, bases[i]);
+                    silex::Element right = element_from_coefficients(
+                            phi25, bases[j]);
+                    if (denominator != 1) {
+                        assert(right.scalar_div_si(right, denominator));
+                    }
+                    factors.push_back(silex::FactorPower<silex::Element>{
+                            std::move(left), first});
+                    factors.push_back(silex::FactorPower<silex::Element>{
+                            std::move(right), second});
+                    const ResidueDisproofDecision screened =
+                            factored_residue_decision(phi25, factors, n);
+                    const ResidueDisproofDecision evaluated =
+                            evaluated_residue_decision(phi25, factors, n);
+                    if (screened.decided) {
+                        ++decided;
+                        assert(!screened.is_power);
+                        assert(evaluated.decided && !evaluated.is_power);
+                    }
+                }
+            }
+        }
+    }
+    assert(decided > 0);
+}
+
 // The same comparison on the degree < 10 pre-lift path, which also fills the
 // memo (primes after the chosen one, varying with the element).
 void test_prelift_disproof_field_setup_cache_matches_cold() noexcept {
@@ -1994,6 +2156,7 @@ int main() {
     test_power_degree_twenty_cyclotomic_residue_disproof();
     test_power_residue_disproof_field_setup_cache_matches_cold();
     test_power_residue_disproof_answer_cache_matches_cold();
+    test_factored_power_residue_disproof();
     test_prelift_disproof_field_setup_cache_matches_cold();
     test_power_hensel_data_cache_reuse();
     test_power_hensel_field_caches_match_cold();

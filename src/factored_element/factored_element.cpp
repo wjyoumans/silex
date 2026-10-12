@@ -1271,6 +1271,28 @@ bool FactoredElement::is_power_si(
         return true;
     }
 
+    // Residue screen on the factored leftover.  Here exponent >= 3, and in
+    // degree 10 and higher the only step of detail::element_is_power below
+    // that can answer "not a power" is pure_power_residue_disproves on the
+    // evaluated leftover (pure_power_hensel_root is not ported there and
+    // returns undecided; is_power_rational_constant answers "not a power"
+    // only in degree one).  factored_power_residue_disproves runs the first
+    // admissible prime of that scan on the factors' residues and disproves
+    // only where the scan would, so every answer is unchanged and only the
+    // product is saved.  When the screen decides nothing, the leftover is
+    // evaluated and tested as before, with the full scan.
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                            "factored.reduced_leftover_residue_screen");
+        bool screened_power = true;
+        if (detail::factored_power_residue_disproves(
+                    screened_power, parent_, leftover.stored_factors(),
+                    exponent, diagnostics)) {
+            is_power = false;
+            return true;
+        }
+    }
+
     Element leftover_value(parent_);
     Element leftover_root(parent_);
     flint::Fmpz exponent_fmpz;

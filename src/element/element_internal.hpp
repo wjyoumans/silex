@@ -1,11 +1,14 @@
 #pragma once
 
 #include <silex/element.hpp>
+#include <silex/factored.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpq.hpp>
 
 #include <flint/nf.h>
 #include <flint/nf_elem.h>
+
+#include <span>
 
 namespace silex::detail {
 
@@ -176,6 +179,22 @@ bool pure_power_residue_disproves(bool& is_power,
 bool pure_square_residue_disproves(bool& is_square,
                                    const Element& input,
                                    const DiagnosticsContext* diagnostics) noexcept;
+
+// pure_power_residue_disproves in degree 10 and higher for the product
+// prod factor^exponent of `factors` (nonzero elements of `parent`, positive
+// exponents), computed from the residues of the factors without forming the
+// product.  True (with `is_power` false) only where
+// pure_power_residue_disproves on the evaluated product would return true; a
+// false return decides nothing.  It examines only the first admissible prime
+// of that scan (a resource bound; see kFactoredScreenAdmissiblePrimes in
+// src/element/hensel.cpp), and abandons at the first prime where some factor
+// is not p-integral, since the product's admissibility there is unknown.
+bool factored_power_residue_disproves(
+        bool& is_power,
+        const NumberField& parent,
+        std::span<const FactorPower<Element>> factors,
+        slong exponent,
+        const DiagnosticsContext* diagnostics) noexcept;
 
 // A root in `field` of the cyclotomic polynomial Phi_m (m >= 3), that is, a
 // primitive m-th root of unity, found by Hensel lifting from a good prime as

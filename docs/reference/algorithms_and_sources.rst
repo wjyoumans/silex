@@ -2511,7 +2511,22 @@ each level are multiplied with a balanced product tree, as PARI's
 ``nffactorback``, rather than into one running accumulator.  Field products
 are exact and canonical, so the expanded value does not depend on the
 multiplication order.  The reduced power and square tests expand only the
-leftover factors whose exponents are not multiples of the root degree.
+leftover factors whose exponents are not multiples of the root degree.  In
+degree 10 and higher, the reduced power test for ``n >= 3`` first runs the
+first admissible prime of the residue disproof of degree 10 and higher
+(above) on the leftover ``r = prod g_i^(e_i)`` without expanding it.  It
+reduces each factor modulo ``p`` and multiplies the residues modulo
+``f mod p``.  This is valid because reduction from ``Z_(p)[x]`` is a ring
+homomorphism and ``f`` is monic integral.  The screen walks the same primes
+with the same admissibility as the scan of the expanded ``r``.  At a prime
+where some factor is not ``p``-integral, it stops without deciding, since
+the admissibility of ``r`` there is unknown.  It therefore answers ``false``
+only where the scan of the expanded leftover would.  There, no other step of
+``Element::is_power`` can answer "not a power", so every answer is
+unchanged.  When it decides nothing, the leftover is expanded and tested as
+before, with the full scan.  The one-prime limit is a resource bound only:
+each prime costs a pass over all factors, which a true power pays without
+benefit.
 
 The compact power test of a factored unit or relation-saturation candidate
 follows Hecke's ``is_power(::FacElem, n)`` (Hecke.jl commit 44b5409,

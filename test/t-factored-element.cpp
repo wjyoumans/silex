@@ -270,6 +270,88 @@ void check_reduced_root_factored_norm() noexcept {
     }
 }
 
+// In degree 10 and higher the reduced root first screens the factored
+// leftover by residues, and evaluates it only when the screen decides
+// nothing.  Its answers must equal those of Element::is_power on the
+// evaluated value: definite non-powers (also with a factor that is not
+// integral at the first usable prime, where the screen gives up), a rational
+// cube found after the screen, and a true cube that no step can find, which
+// stays unanswered.  Q(zeta_25) has degree 20; 1 + zeta is not a cube
+// (`nfroots` finds no root of x^3 - (1 + zeta)).
+void check_reduced_root_high_degree_screen() noexcept {
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 20; i += 5) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    const silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Element zeta(field);
+    silex::Element one_plus_zeta(field);
+    silex::Element one_plus_zeta_seventh(field);
+    silex::Element two(field);
+    silex::Element four(field);
+    silex::Element seven(field);
+    assert(zeta.gen());
+    assert(one_plus_zeta.set_si(1));
+    assert(one_plus_zeta.add(one_plus_zeta, zeta));
+    assert(one_plus_zeta_seventh.scalar_div_si(one_plus_zeta, 7));
+    assert(two.set_si(2));
+    assert(four.set_si(4));
+    assert(seven.set_si(7));
+
+    struct Entry {
+        const silex::Element* factor;
+        slong exponent;
+    };
+    struct Case {
+        std::vector<Entry> entries;
+        bool answered;
+        bool power;
+    };
+    const std::vector<Case> cases = {
+            {{{&one_plus_zeta, 2}, {&zeta, 3}, {&one_plus_zeta, 5}}, true,
+             false},
+            {{{&two, 3}, {&one_plus_zeta, 1}}, true, false},
+            {{{&one_plus_zeta_seventh, 1}, {&seven, 1}}, true, false},
+            {{{&two, 1}, {&four, 1}}, true, true},
+            {{{&one_plus_zeta, 1}, {&one_plus_zeta, 2}}, false, false},
+    };
+    for (const Case& test : cases) {
+        silex::FactoredElement input(field);
+        for (const Entry& entry : test.entries) {
+            assert(input.push(*entry.factor, entry.exponent));
+        }
+        silex::Element value(field);
+        assert(input.evaluate(value));
+
+        sflint::Fmpz exponent;
+        fmpz_set_si(exponent.raw(), 3);
+        bool plain_power = !test.power;
+        silex::Element plain_root(field);
+        const bool plain_answered = value.is_power(
+                plain_power, plain_root, sflint::FmpzConstRef(exponent));
+
+        bool is_power = !test.power;
+        silex::FactoredElement root(field);
+        const bool answered = input.is_power_si(
+                is_power, root, 3, silex::FactoredRootStrategy::reduced);
+        assert(answered == test.answered);
+        assert(answered == plain_answered);
+        if (!answered) {
+            continue;
+        }
+        assert(is_power == plain_power);
+        assert(is_power == test.power);
+        if (is_power) {
+            silex::FactoredElement check(field);
+            silex::Element check_value(field);
+            assert(check.pow_si(root, 3));
+            assert(check.evaluate(check_value));
+            assert(check_value.equal(value));
+        }
+    }
+}
+
 // Negative cases over Q, where the answer is definite: the leftover has
 // several factors and is not a power.
 void check_definite_non_powers() noexcept {
@@ -923,6 +1005,7 @@ int main() {
     check_multi_factor_leftover_roots();
     check_definite_non_powers();
     check_reduced_root_factored_norm();
+    check_reduced_root_high_degree_screen();
 
     silex::NumberField field = degree_one_field();
     silex::NumberField other_field = degree_one_field();

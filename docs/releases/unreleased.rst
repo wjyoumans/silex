@@ -224,6 +224,17 @@ Changed
   within a 300 s limit where it timed out before.  See "Class groups and
   order units" in :doc:`../reference/algorithms_and_sources`.
 
+- ``FactoredElement::is_power_si`` (the reduced test, ``n >= 3``) in degree
+  10 and higher first runs the residue disproof at the first admissible
+  prime on the factors of the leftover, before forming the leftover's
+  product.  The disproof answers
+  "not a power" only where the residue disproof on the expanded leftover
+  would.  Otherwise the leftover is expanded and tested as before, so every
+  answer is unchanged.  ``grh`` saturation on ``Q(zeta_52)`` (degree 24)
+  no longer expands most of its non-cube leftovers.  See "Factored elements and
+  analytic products" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The exact class number of an imaginary quadratic field with
   ``|D| >= 2^44`` (``proven`` class/unit computations) now first evaluates
   ``L(1, chi_D)`` to an absolute tolerance sized for the class number,
