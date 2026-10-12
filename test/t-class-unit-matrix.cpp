@@ -2972,8 +2972,9 @@ int test_real_quadratic_proven_saturation_aux_prime_above_1000() {
 
 // x^2 - x - 25000001 (D = 100000005), proven.  h = 212, Cl = Z/2 x Z/106
 // (invariants in increasing order), regulator 18.19753721763815524762
-// (GP 2.17.4 bnfinit(pol, 1), bnfcertify = 1).  Needs the unbounded
-// auxiliary-prime scan in the saturation proof.
+// (GP 2.17.4 bnfinit(pol, 1), bnfcertify = 1).  The saturation proof
+// leaves verified records at ell = 2 and ell = 53; the row fails on main
+// without T-252 and T-315 applied together (T-315 review).
 int test_real_quadratic_proven_d100000005() {
     const slong quadratic[] = {-25000001, -1};
     const char* name = "real quadratic D = 100000005 proven";
@@ -3013,6 +3014,25 @@ int test_real_quadratic_proven_d100000005() {
                 silex::ProofState::verified) {
         std::cerr << name << ": unexpected class/unit data\n";
         return 1;
+    }
+    for (const unsigned long ell : {2UL, 53UL}) {
+        bool ell_verified = false;
+        for (slong i = 0; i < class_group.relation_saturation_record_count();
+             ++i) {
+            const std::optional<silex::ClassGroupRelationSaturationRecord>
+                    record = class_group.relation_saturation_record(i);
+            if (record.has_value() &&
+                sflint::fmpz_cmp_ui(sflint::FmpzConstRef(record->ell), ell) ==
+                        0 &&
+                record->status == silex::ProofState::verified) {
+                ell_verified = true;
+            }
+        }
+        if (!ell_verified) {
+            std::cerr << name << ": no verified saturation record at " << ell
+                      << "\n";
+            return 1;
+        }
     }
     sflint::Arb regulator;
     sflint::Arb expected_regulator;
