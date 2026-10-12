@@ -785,10 +785,12 @@ Changed
   instead of about 8 s.  It now takes about 7.9 s (release build on a busy
   machine).  Where the check passes, the reduction and all results are
   unchanged; it costs one two-LLL reduction per order and class-group
-  context.  The check runs once per order in a class-group context, on the
+  context, or more when that reduction itself fails and the check repeats on
+  the next ideal.  The check runs once per order in a class-group context, on the
   first accepted ideal, and its result is shared by all relation slices of
   that context; each slice does not repeat it on its own first ideal.
-  Of the 185 ``grh`` corpus and fixture rows, three more take the two-LLL
+  Of the 172 ``grh`` corpus rows (the comparison did not cover the fixture
+  rows), three more take the two-LLL
   route for some orders: ``cyclotomic_real_37_deg18``,
   ``cyclotomic_real_41_deg20`` and ``multiquadratic_p5_m7_m11``.  Their class groups, regulator values and
   labels are unchanged, while ``relation_count``,
