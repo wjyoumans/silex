@@ -471,6 +471,7 @@ def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
     # as follows (class/unit detail log):
     # - 10 candidates: the candidate budget of the tentative search is
     #   spent before it has a presentation;
+    # - 1 relation: the relation cap stops the tentative search;
     # - 110 relations: the tentative presentation is found, and the first
     #   continuation slice is refused because the relation count has
     #   reached the cap.
@@ -478,6 +479,7 @@ def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
     # the cap and no cause.
     for flag, value, cap in (
         ("--max-candidates", "10", "max_candidates"),
+        ("--max-relations", "1", "max_relations"),
         ("--max-relations", "110", "max_relations"),
     ):
         instance = run_json(

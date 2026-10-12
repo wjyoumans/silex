@@ -86,7 +86,9 @@ Added
   relation search: the candidate cap (``--max-candidates``, option
   ``ClassGroupComputeOptions::max_candidates``) was spent, or the relation cap
   (``--max-relations``, option ``max_relations``) was reached, before the
-  search found the relations it needed.  Such runs previously reported
+  search found the relations it needed.  The tool's default caps for
+  degree 3 and higher count too, so a ``grh`` run that exhausts them with no
+  flag set also reports the new reason.  Such runs previously reported
   ``class_unit_computation_failed``.  Its ``failure_detail`` holds ``cap``,
   the option name of the cap that stopped the search (``max_candidates`` or
   ``max_relations``), preceded by the same ``cause`` key as for
