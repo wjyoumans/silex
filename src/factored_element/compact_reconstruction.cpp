@@ -6,12 +6,14 @@
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/nmod_mat.hpp>
 #include <silex/flint/nmod_poly.hpp>
+#include <silex/flint/nmod_poly_factor.hpp>
 #include <silex/order_element.hpp>
 
 #include <flint/fmpz_mat.h>
 #include <flint/nmod.h>
 #include <flint/nmod_mat.h>
 #include <flint/nmod_poly.h>
+#include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
 
 #include <algorithm>
@@ -454,7 +456,120 @@ bool publish_reconstructed_elements(std::vector<Element>& out,
     return true;
 }
 
+
+// Exponent rows of the factors after reduction modulo the exponent lambda of
+// the unit group of (Z/pZ)[x]/(modulus).  A row with an entry of magnitude
+// above lambda is copied into storage and reduced there; every other row
+// stays the caller's.  An entry e > 0 becomes ((e - 1) mod lambda) + 1, which
+// lies in [1, lambda] and gives the same power of every element of the ring:
+// in each field component F_q, a^q = a for every a, zero included (Lidl and
+// Niederreiter, Finite Fields, Lemma 2.3), and q - 1 divides lambda.  Plain
+// e mod lambda would turn a^lambda into a^0 = 1, which is wrong for a zero
+// divisor.  An entry e < 0 is reduced the same way only when the factor
+// carries an inverse, that is, when its base is a unit, whose order divides
+// lambda; the result is positive, so it uses the base's table.  The reduced
+// magnitude is at most lambda, below the original, so no exponent grows.
+void reduce_power_product_exponents(
+        std::vector<const std::vector<flint::Fmpz>*>& rows,
+        std::vector<std::vector<flint::Fmpz>>& storage,
+        std::span<const ModularPowerProductFactor> factors,
+        const flint::NmodPoly& modulus) noexcept {
+    rows.resize(factors.size());
+    for (std::size_t row = 0; row < factors.size(); ++row) {
+        rows[row] = factors[row].exponents;
+    }
+
+    // lambda >= p - 1, so nothing reduces unless some magnitude exceeds
+    // p - 1; only then is the modulus factored.
+    const ulong prime = modulus.raw()->mod.n;
+    const auto reducible = [](const flint::Fmpz& exponent,
+                              const ModularPowerProductFactor& factor) {
+        return fmpz_sgn(exponent.raw()) > 0 ||
+               (fmpz_sgn(exponent.raw()) < 0 && factor.inverse != nullptr);
+    };
+    flint::Fmpz floor;
+    fmpz_set_ui(floor.raw(), prime - 1);
+    bool large = false;
+    for (std::size_t row = 0; row < factors.size() && !large; ++row) {
+        for (const flint::Fmpz& exponent : *factors[row].exponents) {
+            if (reducible(exponent, factors[row]) &&
+                fmpz_cmpabs(exponent.raw(), floor.raw()) > 0) {
+                large = true;
+                break;
+            }
+        }
+    }
+    flint::Fmpz lambda;
+    if (!large || !modular_unit_group_exponent(lambda, modulus)) {
+        return;
+    }
+
+    storage.clear();
+    storage.reserve(factors.size());
+    for (std::size_t row = 0; row < factors.size(); ++row) {
+        const std::vector<flint::Fmpz>& exponents = *factors[row].exponents;
+        const bool reduces = std::any_of(
+                exponents.begin(), exponents.end(),
+                [&](const flint::Fmpz& exponent) {
+                    return reducible(exponent, factors[row]) &&
+                           fmpz_cmpabs(exponent.raw(), lambda.raw()) > 0;
+                });
+        if (!reduces) {
+            continue;
+        }
+        storage.emplace_back(exponents.size());
+        std::vector<flint::Fmpz>& reduced = storage.back();
+        for (std::size_t i = 0; i < exponents.size(); ++i) {
+            fmpz_set(reduced[i].raw(), exponents[i].raw());
+            if (reducible(exponents[i], factors[row]) &&
+                fmpz_cmpabs(exponents[i].raw(), lambda.raw()) > 0) {
+                fmpz_sub_ui(reduced[i].raw(), reduced[i].raw(), 1);
+                fmpz_fdiv_r(reduced[i].raw(), reduced[i].raw(), lambda.raw());
+                fmpz_add_ui(reduced[i].raw(), reduced[i].raw(), 1);
+            }
+        }
+        rows[row] = &reduced;
+    }
+}
+
 }  // namespace
+
+bool modular_unit_group_exponent(flint::Fmpz& out,
+                                 const flint::NmodPoly& modulus) noexcept {
+    const ulong prime = modulus.raw()->mod.n;
+    const slong degree = nmod_poly_degree(modulus.raw());
+    if (degree < 1 || nmod_poly_get_coeff_ui(modulus.raw(), degree) != 1 ||
+        n_is_prime(prime) == 0 || nmod_poly_is_squarefree(modulus.raw()) == 0) {
+        return false;
+    }
+
+    // Distinct-degree factorization: factor i is the product of the
+    // irreducible factors of degree degrees[i], so lambda is the least common
+    // multiple of p^degrees[i] - 1.
+    flint::NmodPolyFactor factorization;
+    std::vector<slong> degrees(static_cast<std::size_t>(degree) + 1);
+    slong* degree_data = degrees.data();
+    nmod_poly_factor_distinct_deg(factorization.raw(), modulus.raw(),
+                                  &degree_data);
+    flint::Fmpz term;
+    slong total_degree = 0;
+    fmpz_one(out.raw());
+    for (slong i = 0; i < factorization.raw()->num; ++i) {
+        const slong factor_degree = degrees[static_cast<std::size_t>(i)];
+        const slong product_degree =
+                nmod_poly_degree(factorization.raw()->p + i);
+        if (factor_degree <= 0 || product_degree <= 0 ||
+            product_degree % factor_degree != 0) {
+            return false;
+        }
+        total_degree += product_degree;
+        fmpz_set_ui(term.raw(), prime);
+        fmpz_pow_ui(term.raw(), term.raw(), static_cast<ulong>(factor_degree));
+        fmpz_sub_ui(term.raw(), term.raw(), 1);
+        fmpz_lcm(out.raw(), out.raw(), term.raw());
+    }
+    return total_degree == degree;
+}
 
 void modular_power_products(
         flint::NmodMat& power_residues,
@@ -463,6 +578,11 @@ void modular_power_products(
     const ulong prime = modulus.raw()->mod.n;
     const slong output_count = nmod_mat_nrows(power_residues.raw());
     const slong degree = nmod_mat_ncols(power_residues.raw());
+
+    std::vector<const std::vector<flint::Fmpz>*> exponent_rows;
+    std::vector<std::vector<flint::Fmpz>> reduced_exponents;
+    reduce_power_product_exponents(exponent_rows, reduced_exponents, factors,
+                                   modulus);
 
     // One table per base and exponent sign that occurs, built once and
     // shared by every output.
@@ -473,7 +593,7 @@ void modular_power_products(
         flint_bitcnt_t negative_bits = 0;
         flint_bitcnt_t positive_maximum = 0;
         flint_bitcnt_t negative_maximum = 0;
-        for (const flint::Fmpz& exponent : *factors[row].exponents) {
+        for (const flint::Fmpz& exponent : *exponent_rows[row]) {
             const flint_bitcnt_t bits = fmpz_bits(exponent.raw());
             if (fmpz_sgn(exponent.raw()) > 0) {
                 positive_bits += bits;
@@ -505,7 +625,7 @@ void modular_power_products(
         const std::size_t index = static_cast<std::size_t>(column);
         steps.clear();
         for (std::size_t row = 0; row < factors.size(); ++row) {
-            const flint::Fmpz& exponent = (*factors[row].exponents)[index];
+            const flint::Fmpz& exponent = (*exponent_rows[row])[index];
             if (fmpz_is_zero(exponent.raw()) != 0) {
                 continue;
             }

@@ -79,11 +79,26 @@ struct ModularPowerProductFactor {
 // sliding-window exponentiation (Moller, "Algorithms for multi-exponentiation",
 // SAC 2001, Section 3.1, the basic interleaving exponentiation method;
 // sliding windows as in Menezes, van Oorschot and Vanstone, Handbook of
-// Applied Cryptography, Algorithm 14.85 and Table 14.16).
+// Applied Cryptography, Algorithm 14.85 and Table 14.16).  Before
+// tabulating, an exponent whose magnitude exceeds the exponent lambda of the
+// unit group of the ring (modular_unit_group_exponent) is replaced by
+// ((e - 1) mod lambda) + 1, which gives the same power of every element when
+// e > 0 and of every unit when e < 0; when lambda is not available the
+// exponents are used as given.
 void modular_power_products(
         flint::NmodMat& power_residues,
         std::span<const ModularPowerProductFactor> factors,
         const flint::NmodPoly& modulus) noexcept;
+
+// Sets out to the exponent lambda of the unit group of (Z/pZ)[x]/(modulus)
+// and returns true when p = modulus.mod.n is prime and modulus is monic,
+// nonconstant and squarefree modulo p.  The ring is then the product of the
+// fields F_(p^d) over the irreducible factors of degree d, and lambda is the
+// least common multiple of the p^d - 1.  Every element a of the ring
+// satisfies a^(lambda + 1) = a, so a^e = a^(((e - 1) mod lambda) + 1) for
+// e > 0.  Returns false, leaving out unspecified, otherwise.
+bool modular_unit_group_exponent(flint::Fmpz& out,
+                                 const flint::NmodPoly& modulus) noexcept;
 
 struct WideFactoredUnits;
 

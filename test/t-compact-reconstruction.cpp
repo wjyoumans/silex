@@ -1787,10 +1787,155 @@ int test_modular_power_products_match_independent_powering() {
     return 0;
 }
 
+// Sets modulus to the product of the given monic factors modulo prime; each
+// factor is listed by its coefficients from low to high.
+void product_modulus(sflint::NmodPoly& modulus,
+                     const std::vector<std::vector<ulong>>& factors) {
+    const ulong prime = modulus.raw()->mod.n;
+    nmod_poly_one(modulus.raw());
+    sflint::NmodPoly factor(prime);
+    for (const auto& coefficients : factors) {
+        nmod_poly_zero(factor.raw());
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            nmod_poly_set_coeff_ui(factor.raw(), static_cast<slong>(i),
+                                   coefficients[i]);
+        }
+        nmod_poly_mul(modulus.raw(), modulus.raw(), factor.raw());
+    }
+}
+
+int test_modular_unit_group_exponent() {
+    sflint::Fmpz lambda;
+    sflint::Fmpz expected;
+
+    // 101 = 5 mod 8, so 2 is not a square and x^2 - 2 is irreducible:
+    // lambda = lcm(101 - 1, 101^2 - 1) = 10200.
+    sflint::NmodPoly split(UWORD(101));
+    product_modulus(split, {{100, 1}, {99, 1}, {99, 0, 1}});
+    assert(silex::detail::modular_unit_group_exponent(lambda, split));
+    assert(fmpz_equal_ui(lambda.raw(), 10200) != 0);
+
+    sflint::NmodPoly linear(UWORD(101));
+    product_modulus(linear, {{96, 1}});
+    assert(silex::detail::modular_unit_group_exponent(lambda, linear));
+    assert(fmpz_equal_ui(lambda.raw(), 100) != 0);
+
+    // The 41st cyclotomic polynomial modulo the first prime above 2^63, the
+    // prime of the wide unit rebuild: that prime has order 5 modulo 41, so
+    // the modulus is a product of 8 quintics and lambda = p^5 - 1.
+    const ulong big = n_nextprime(UWORD(1) << (FLINT_BITS - 1), 1);
+    sflint::NmodPoly cyclotomic(big);
+    for (slong i = 0; i <= 40; ++i) {
+        nmod_poly_set_coeff_ui(cyclotomic.raw(), i, 1);
+    }
+    assert(silex::detail::modular_unit_group_exponent(lambda, cyclotomic));
+    fmpz_set_ui(expected.raw(), big);
+    fmpz_pow_ui(expected.raw(), expected.raw(), 5);
+    fmpz_sub_ui(expected.raw(), expected.raw(), 1);
+    assert(fmpz_equal(lambda.raw(), expected.raw()) != 0);
+
+    // Preconditions: a repeated factor, a composite modulus, a modulus that
+    // is not monic, and a constant modulus have no exponent here.
+    sflint::NmodPoly repeated(UWORD(101));
+    product_modulus(repeated, {{100, 1}, {100, 1}, {99, 1}});
+    assert(!silex::detail::modular_unit_group_exponent(lambda, repeated));
+    sflint::NmodPoly composite(UWORD(91));
+    product_modulus(composite, {{90, 1}, {89, 1}});
+    assert(!silex::detail::modular_unit_group_exponent(lambda, composite));
+    sflint::NmodPoly not_monic(UWORD(101));
+    product_modulus(not_monic, {{100, 1}, {99, 2}});
+    assert(!silex::detail::modular_unit_group_exponent(lambda, not_monic));
+    sflint::NmodPoly constant(UWORD(101));
+    nmod_poly_one(constant.raw());
+    assert(!silex::detail::modular_unit_group_exponent(lambda, constant));
+    return 0;
+}
+
+// Exponents far above lambda, at multiples of lambda and next to them, on
+// bases that are zero divisors (where e mod lambda = 0 would wrongly give 1)
+// and on units with negative exponents, compared with independent powering
+// by the unreduced exponents.  Also a modulus with a repeated factor, where
+// no reduction applies, and wide random exponents on the cyclotomic modulus
+// of the wide unit rebuild.
+int test_modular_power_products_reduced_exponents() {
+    flint_rand_t state;
+    flint_rand_init(state);
+
+    sflint::NmodPoly modulus(UWORD(101));
+    product_modulus(modulus, {{100, 1}, {99, 1}, {99, 0, 1}});
+    sflint::Fmpz lambda;
+    assert(silex::detail::modular_unit_group_exponent(lambda, modulus));
+
+    for (int repeated = 0; repeated < 2; ++repeated) {
+        sflint::NmodPoly ring(UWORD(101));
+        if (repeated == 0) {
+            nmod_poly_set(ring.raw(), modulus.raw());
+        } else {
+            product_modulus(ring, {{100, 1}, {100, 1}, {99, 0, 1}});
+        }
+        PowerProductCase input;
+        for (int k = 0; k < 4; ++k) {
+            input.bases.emplace_back(UWORD(101));
+            input.inverses.emplace_back(UWORD(101));
+            input.has_inverse.push_back(false);
+        }
+        // x - 1 and (x - 1)(x - 2) vanish in some components, the zero base,
+        // and the unit x + 5 (which is not a root of either modulus).
+        product_modulus(input.bases[0], {{100, 1}});
+        product_modulus(input.bases[1], {{100, 1}, {99, 1}});
+        nmod_poly_zero(input.bases[2].raw());
+        product_modulus(input.bases[3], {{5, 1}});
+        assert(nmod_poly_invmod(input.inverses[3].raw(),
+                                input.bases[3].raw(), ring.raw()) != 0);
+        input.has_inverse[3] = true;
+
+        // Output columns: lambda, lambda + 1, 2 lambda, 2 lambda - 1,
+        // lambda * 2^70 + 3, and a random 300-bit exponent.
+        const std::size_t outputs = 6;
+        std::vector<sflint::Fmpz> column(outputs);
+        fmpz_set(column[0].raw(), lambda.raw());
+        fmpz_add_ui(column[1].raw(), lambda.raw(), 1);
+        fmpz_mul_ui(column[2].raw(), lambda.raw(), 2);
+        fmpz_sub_ui(column[3].raw(), column[2].raw(), 1);
+        fmpz_mul_2exp(column[4].raw(), lambda.raw(), 70);
+        fmpz_add_ui(column[4].raw(), column[4].raw(), 3);
+        fmpz_randbits(column[5].raw(), state, 300);
+        fmpz_abs(column[5].raw(), column[5].raw());
+        for (int k = 0; k < 4; ++k) {
+            input.exponents.emplace_back(outputs);
+            for (std::size_t i = 0; i < outputs; ++i) {
+                fmpz_set(input.exponents.back()[i].raw(), column[i].raw());
+            }
+        }
+        // The unit also takes the negatives: -lambda, -(lambda + 1), ...
+        for (std::size_t i = 0; i < outputs; i += 2) {
+            fmpz_neg(input.exponents[3][i].raw(), input.exponents[3][i].raw());
+        }
+        assert_power_products_match_reference(input, ring, outputs);
+    }
+
+    const ulong big = n_nextprime(UWORD(1) << (FLINT_BITS - 1), 1);
+    sflint::NmodPoly cyclotomic(big);
+    for (slong i = 0; i <= 40; ++i) {
+        nmod_poly_set_coeff_ui(cyclotomic.raw(), i, 1);
+    }
+    for (int sign_mode = 0; sign_mode < 2; ++sign_mode) {
+        PowerProductCase input;
+        random_power_product_case(input, state, cyclotomic, 4, 3, 2800,
+                                  sign_mode == 1);
+        assert_power_products_match_reference(input, cyclotomic, 3);
+    }
+
+    flint_rand_clear(state);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     assert(test_modular_power_products_match_independent_powering() == 0);
+    assert(test_modular_unit_group_exponent() == 0);
+    assert(test_modular_power_products_reduced_exponents() == 0);
     assert(test_shared_exponent_matrix_and_centered_crt() == 0);
     assert(test_denominator_prime_exclusion() == 0);
     assert(test_field_polynomial_denominator_prime_exclusion() == 0);
