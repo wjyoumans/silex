@@ -159,7 +159,8 @@ struct RelationSearchControlState {
     // field and that precision, so the context built for a precision is
     // kept for the next check at the same precision.  It is rebuilt when
     // the precision changes, so every check sees the roots a fresh context
-    // would compute.
+    // would compute.  It is cleared, with its log cache, when the check
+    // returns finished.
     EmbeddingContext analytic_finish_embeddings;
     slong analytic_finish_embedding_precision = 0;
 };

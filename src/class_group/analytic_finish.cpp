@@ -534,6 +534,15 @@ static EmbeddingContext* analytic_finish_embeddings(
     return &embeddings;
 }
 
+// Drops the kept embedding context and its log cache once the check has
+// finished, so the cache does not outlive the relation search.
+static AnalyticFinishDecision release_analytic_finish_embeddings(
+        RelationSearchControlState& route_state) noexcept {
+    route_state.analytic_finish_embeddings.clear();
+    route_state.analytic_finish_embedding_precision = 0;
+    return AnalyticFinishDecision::finished;
+}
+
 AnalyticFinishDecision apply_analytic_finish_check(
         ClassGroupContext& context,
         RelationSearchControlState& route_state,
@@ -552,7 +561,7 @@ AnalyticFinishDecision apply_analytic_finish_check(
     if (route_state.candidates_tried >= options.max_candidates ||
         route_state.accepted_relations >= options.max_relations ||
         !context.has_presentation() || order.parent() == nullptr) {
-        return AnalyticFinishDecision::finished;
+        return release_analytic_finish_embeddings(route_state);
     }
 
     for (;;) {
@@ -667,7 +676,7 @@ AnalyticFinishDecision apply_analytic_finish_check(
                                        flint::ArbConstRef(quotient),
                                        precision, check);
         if (check == AnalyticQuotientDecision::finished) {
-            return AnalyticFinishDecision::finished;
+            return release_analytic_finish_embeddings(route_state);
         }
         if (check == AnalyticQuotientDecision::relation_defect) {
             break;

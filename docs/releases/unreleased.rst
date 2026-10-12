@@ -699,6 +699,13 @@ Changed
   Belabas-Friedman check, so the run refines its validation and saturates
   the class group, and takes about 26 ms instead of 9 ms (release build on a
   busy machine).
+- The analytic finish check of class-group computations, which runs at each
+  relation checkpoint, keeps its embedding context between checks at the
+  same precision instead of rebuilding it, and the regulator product reuses
+  the unit-log matrix and pivot selection that the independent-unit check
+  just built from the same relations.  The kept context is released when
+  the check finishes.  This is a speed-up for computations that run the
+  check many times; outputs are unchanged.
 
 - ``roots_of_unity``, ``root_of_unity_order`` and ``root_of_unity_generator``
   remember their result per thread for the last few defining polynomials,
