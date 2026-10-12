@@ -6020,6 +6020,21 @@ bool ClassGroupCertificationAccess::record_grh_factor_base_generation(
     return true;
 }
 
+bool ClassGroupCertificationAccess::
+        factor_base_generation_checked_to_required_bound(
+                const ClassGroupContext& context) noexcept {
+    return context.factor_base_generation_status_ == ProofState::verified &&
+           context.factor_base_generation_checked_status_ ==
+                   ProofState::verified &&
+           !flint::fmpz_is_zero(flint::FmpzConstRef(
+                   context.factor_base_generation_bound_)) &&
+           flint::fmpz_cmp(
+                   flint::FmpzConstRef(
+                           context.factor_base_generation_checked_bound_),
+                   flint::FmpzConstRef(
+                           context.factor_base_generation_bound_)) >= 0;
+}
+
 bool ClassGroupCertificationAccess::grh_factor_base_generation_covered(
         const ClassGroupContext& context) noexcept {
     return context.has_factor_base() &&
@@ -9338,6 +9353,22 @@ bool ClassGroupContext::record_factor_base_honesty_proof_(
     return true;
 }
 
+// The preconditions of the ell-local relation-saturation proofs
+// (try_prove_relation_saturation_with_units and the internal index-bound
+// proof): a presentation, verified unit and regulator proofs, and a
+// verified generation check, which mark_factor_base_generation_check_
+// grants only on a base whose generation status is verified.  Unlike the
+// `proven` promotion gate, this deliberately does not require the check to
+// reach the recorded requirement
+// (ClassGroupCertificationAccess::
+// factor_base_generation_checked_to_required_bound): the saturation step
+// does not use generation.  With L_found <= L_true <= Z^S (the found
+// relations, every relation on the factor base, and all exponent vectors),
+// the ell-local proof shows that ell does not divide the index of the found
+// relations and units among all of them, a statement about the relations on
+// this base whether or not it generates the class group; generation is what
+// makes [Z^S : L_true] = h.  A `proven` label still needs generation checked
+// to the requirement, which try_promote_proven_certification_ requires.
 bool ClassGroupContext::relation_saturation_proof_prereqs_verified_()
         const noexcept {
     return quotient_.is_defined() &&
@@ -12198,14 +12229,8 @@ bool ClassGroupContext::try_promote_proven_certification_() noexcept {
     // public check_factor_base_generation_bound accepts any bound, and a
     // check below the required bound does not show that the factor base
     // generates the class group.
-    const bool factor_base_verified =
-            factor_base_generation_status_ == ProofState::verified &&
-            factor_base_generation_checked_status_ == ProofState::verified &&
-            !flint::fmpz_is_zero(
-                    flint::FmpzConstRef(factor_base_generation_bound_)) &&
-            flint::fmpz_cmp(
-                    flint::FmpzConstRef(factor_base_generation_checked_bound_),
-                    flint::FmpzConstRef(factor_base_generation_bound_)) >= 0;
+    const bool factor_base_verified = detail::ClassGroupCertificationAccess::
+            factor_base_generation_checked_to_required_bound(*this);
     // A Belabas-Friedman analytic check assumes GRH and never promotes to
     // `proven`; the saturation route is unconditional.
     const bool unconditional_analytic_check =

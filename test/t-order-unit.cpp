@@ -5997,6 +5997,64 @@ int test_small_index_saturation_revalidates_appended_class_relation() {
     return 0;
 }
 
+// Class/unit validation reads the candidate hR over the analytic hR as an
+// integer index, and so recognizes index one, only once factor-base
+// generation is checked up to the recorded requirement.  Q(sqrt(-26))
+// (h = 6) has requirement floor(sqrt(104 / 3)) = 5.  The public check
+// accepts any bound up to the build bound, so a check at 2 marks the
+// generation check verified without showing that the base generates the
+// class group; validation must then not report index one.  The same
+// candidate checked at 5 does.
+int test_validation_index_one_requires_generation_to_required_bound() {
+    silex::NumberField field = quadratic_field(-26);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    assert(order.is_maximal());
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup units(order);
+    assert(units.set_units(order, silex::FactoredElementSpan(), embeddings,
+                           128));
+    assert(units.free_rank() == 0);
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    silex::ClassGroupCandidateOptions options;
+    options.max_candidates = 256;
+    options.max_relations = 48;
+    for (const slong checked : {2, 5}) {
+        silex::ClassGroupContext class_group;
+        assert(class_group.compute_candidate(
+                order, sflint::FmpzConstRef(bound), options));
+        sflint::Fmpz class_order;
+        assert(class_group.order(sflint::FmpzRef(class_order)));
+        assert(sflint::fmpz_equal_si(class_order, 6));
+        sflint::Fmpz required;
+        assert(class_group.factor_base_generation_bound(
+                sflint::FmpzRef(required)));
+        assert(sflint::fmpz_equal_si(required, 5));
+        sflint::Fmpz checked_bound;
+        assert(set_fmpz_si(checked_bound, checked));
+        assert(class_group.check_factor_base_generation_bound(
+                sflint::FmpzConstRef(checked_bound)));
+        sflint::Fmpz recorded_check;
+        assert(class_group.factor_base_generation_checked_bound(
+                sflint::FmpzRef(recorded_check)));
+        assert(sflint::fmpz_equal_si(recorded_check, checked));
+
+        silex::detail::AnalyticClassRegulatorCache analytic_cache;
+        sflint::Fmpz index_bound;
+        sflint::Arb expected_regulator;
+        const bool estimated = silex::detail::class_unit_validation_estimate(
+                index_bound, expected_regulator, units, class_group,
+                analytic_cache, order, 128, false);
+        const bool index_one =
+                estimated &&
+                sflint::fmpz_is_one(sflint::FmpzConstRef(index_bound));
+        assert(index_one == (checked >= 5));
+    }
+    return 0;
+}
+
 int test_class_unit_regulator_certification() {
     using CertificationAccess =
             silex::detail::ClassGroupCertificationAccess;
@@ -10788,6 +10846,7 @@ int main() {
     test_relation_kernel_units_index_bounded_saturated();
     test_relation_kernel_units_rank_zero_delegates();
     test_small_index_saturation_revalidates_appended_class_relation();
+    test_validation_index_one_requires_generation_to_required_bound();
     test_relation_kernel_unit_failures_preserve_output();
     test_saturate_row_real_quadratic_square();
     test_saturate_row_no_root_and_divisible_copy();

@@ -296,13 +296,16 @@ AnalyticFinishDecision apply_honesty_check(
                 active_factor_base_bound)) {
         return AnalyticFinishDecision::failed;
     }
+    // A route that already passed this checkpoint finishes only while
+    // generation is still checked up to the recorded requirement; a check
+    // below it (the public check accepts any bound) proves nothing.
     if (route_state.honesty_checked) {
-        return context.factor_base_generation_status() ==
-                               ProofState::verified &&
-                       context.factor_base_generation_checked_status() ==
-                               ProofState::verified
-                ? AnalyticFinishDecision::finished
-                : AnalyticFinishDecision::failed;
+        const bool generation_checked =
+                detail::ClassGroupCertificationAccess::
+                        factor_base_generation_checked_to_required_bound(
+                                context);
+        return generation_checked ? AnalyticFinishDecision::finished
+                                  : AnalyticFinishDecision::failed;
     }
 
     // The requirement record_factor_base_generation_ recorded for the

@@ -226,10 +226,9 @@ bool validation_index_bound_from_product(
 #endif
 
     const bool unconditional_generation =
-            class_group.factor_base_generation_status() ==
-                    ProofState::verified &&
-            class_group.factor_base_generation_checked_status() ==
-                    ProofState::verified;
+            ClassGroupCertificationAccess::
+                    factor_base_generation_checked_to_required_bound(
+                            class_group);
     const bool integer_index_prerequisites =
             unconditional_generation ||
             (accept_grh_generation &&
@@ -601,30 +600,6 @@ slong initial_relation_kernel_target(slong rank,
 
 namespace {
 
-// True when factor-base generation is verified up to the required
-// Minkowski-type bound: the base was built to that bound and the
-// generation check covers it.  This is the generation test
-// try_promote_proven_certification_ applies before publishing `proven`.
-bool factor_base_generation_checked_to_required_bound(
-        const ClassGroupContext& class_group) noexcept {
-    flint::Fmpz required_bound;
-    flint::Fmpz checked_bound;
-    return class_group.factor_base_generation_status() ==
-                   ProofState::verified &&
-           class_group.factor_base_generation_checked_status() ==
-                   ProofState::verified &&
-           class_group.factor_base_generation_bound(
-                   flint::FmpzRef(required_bound)) &&
-           class_group.factor_base_generation_checked_bound(
-                   flint::FmpzRef(checked_bound)) &&
-           flint::fmpz_cmp(flint::FmpzConstRef(checked_bound),
-                           flint::FmpzConstRef(required_bound)) >= 0;
-}
-
-}  // namespace
-
-namespace {
-
 // True when each of the two positive regulators is certified to be below
 // twice the other.  When one unit lattice contains the other, the quotient
 // of their regulators is the integer index, so the lattices are then equal.
@@ -681,7 +656,9 @@ bool saturate_candidate_class_relations_with_units(
     // unconditional bound; the analytic index bound only decides whether to
     // run it.
     const bool exact_index_bound_unconditional =
-            factor_base_generation_checked_to_required_bound(class_group);
+            ClassGroupCertificationAccess::
+                    factor_base_generation_checked_to_required_bound(
+                            class_group);
     bool saturated = false;
     const slong remaining = options.max_relations - class_group.relation_count();
     const slong max_appends_per_ell =

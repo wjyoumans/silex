@@ -2227,6 +2227,59 @@ driver::AnalyticFinishDecision d21_checkpoint(
 // {P2} base, whose own scan fails: the checkpoint finishes only when the
 // record matches exactly, which shows that the scan was skipped then and run
 // otherwise.
+// Once a route has passed the honesty checkpoint
+// (RelationSearchControlState::honesty_checked), a later call finishes only
+// while factor-base generation stays checked up to the recorded
+// requirement.  Q(sqrt(-26)) has requirement floor(sqrt(104 / 3)) = 5.  The
+// public check accepts any bound up to the build bound, so a check at 2
+// marks the generation check verified without showing that the base
+// generates the class group: the checkpoint must then fail.  The same
+// candidate checked at 5 finishes.
+int test_passed_honesty_checkpoint_requires_required_bound() {
+    FieldSetup setup = imaginary_quadratic_fixture(26);
+    if (!setup.maximal_order.is_maximal()) {
+        return 1;
+    }
+    sflint::Fmpz bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(bound), 5);
+    for (const ulong checked : {UWORD(2), UWORD(5)}) {
+        silex::ClassGroupContext context;
+        sflint::Fmpz active_bound;
+        sflint::Fmpz required;
+        sflint::Fmpz checked_bound;
+        sflint::Fmpz recorded_check;
+        sflint::fmpz_set_ui(sflint::FmpzRef(checked_bound), checked);
+        if (!context.compute_candidate(setup.maximal_order,
+                                       sflint::FmpzConstRef(bound)) ||
+            !context.factor_base_build_bound(
+                    sflint::FmpzRef(active_bound)) ||
+            !context.factor_base_generation_bound(sflint::FmpzRef(required)) ||
+            sflint::fmpz_cmp_ui(sflint::FmpzConstRef(required), 5) != 0 ||
+            !context.check_factor_base_generation_bound(
+                    sflint::FmpzConstRef(checked_bound)) ||
+            !context.factor_base_generation_checked_bound(
+                    sflint::FmpzRef(recorded_check)) ||
+            sflint::fmpz_cmp_ui(sflint::FmpzConstRef(recorded_check),
+                                checked) != 0) {
+            return 1;
+        }
+        silex::detail::RelationSearchControlState route_state;
+        route_state.honesty_checked = true;
+        const driver::AnalyticFinishDecision decision =
+                driver::apply_honesty_check(
+                        context, route_state, true, setup.maximal_order,
+                        nullptr, sflint::FmpzConstRef(active_bound), false,
+                        nullptr);
+        const driver::AnalyticFinishDecision expected = checked >= 5
+                ? driver::AnalyticFinishDecision::finished
+                : driver::AnalyticFinishDecision::failed;
+        if (decision != expected) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int test_transaction_reuses_passed_honesty_scan() {
     using Access = silex::detail::ClassGroupRelationSearchAccess;
     FieldSetup setup = imaginary_quadratic_fixture(21);
@@ -2932,6 +2985,8 @@ int main() {
                            0 ||
                    test_later_attempt_clears_honesty_failure() != 0 ||
                    test_transaction_reuses_passed_honesty_scan() != 0 ||
+                   test_passed_honesty_checkpoint_requires_required_bound() !=
+                           0 ||
                    test_failure_detail_json() != 0 ||
                    test_budget_failure_reason_and_detail_json() != 0 ||
                    test_direct_witness_search_keeps_lattice_fallbacks() != 0

@@ -63,6 +63,21 @@ public:
             flint::FmpzConstRef grh_bound,
             ClassGroupGenerationBasis basis) noexcept;
 
+    // True when unconditional factor-base generation is checked up to the
+    // recorded requirement (factor_base_generation_bound(), the
+    // Minkowski-type or twin-class bound): generation is verified and the
+    // generation check is verified at a bound at least that requirement.
+    // The public check_factor_base_generation_bound accepts any bound up to
+    // the build bound, and a check below the requirement does not show
+    // that the factor base generates the class group.  This is the
+    // generation test of the `proven` promotion gate, of class/unit
+    // validation's integer-index reading, and of a relation-search route
+    // that has already passed its honesty checkpoint.  The ell-local
+    // relation-saturation proofs use a weaker condition on purpose (see
+    // relation_saturation_proof_prereqs_verified_).
+    static bool factor_base_generation_checked_to_required_bound(
+            const ClassGroupContext& context) noexcept;
+
     // True when the factor base carries the GRH generation record above.
     // Only a grh class/unit request writes it; readers that need
     // unconditional generation use factor_base_generation_status().
@@ -274,7 +289,11 @@ private:
     // It checks none of its preconditions; the caller must ensure that
     //   - the context has a presentation;
     //   - `units` is set and proven on the same parent order;
-    //   - factor-base generation is checked up to the required bound;
+    //   - the generation check is verified
+    //     (relation_saturation_proof_prereqs_verified_).  The saturation
+    //     step does not use generation, so the check need not reach the
+    //     required bound; publishing `proven` requires that, through
+    //     try_promote_proven_certification_;
     //   - the unit and regulator proof states are verified, or the caller
     //     sets them to verified in the same transaction;
     //   - the caller holds a CertificationTransaction_ and returns on false,
