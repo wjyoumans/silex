@@ -6115,8 +6115,9 @@ void relation_saturation_test_kernel_basis(
 // Q(sqrt(100000001)), x^2 - x - 25000000, in GRH mode: the relation kernel
 // has more than one row and entries of at most 250 bits, so the basis the
 // beta rows are size-reduced against comes from
-// fmpz_lll_d_with_removal_knapsack certified by fmpz_mat_is_reduced,
-// without building the LLL-reduced basis of relation_kernel_unit.  With
+// fmpz_lll_d_with_removal_knapsack certified by the exact certificate
+// (lat::detail::lll_certificate_holds), without building the LLL-reduced
+// basis of relation_kernel_unit.  With
 // proven units, each beta coefficient row differs from the presentation's
 // row by a kernel vector and is size-reduced against that basis.
 int test_relation_saturation_kernel_basis_first_phase() {

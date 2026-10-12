@@ -125,7 +125,8 @@ Changed
   class-group computation share one certified first LLL phase.  Its exact
   reducedness certificate is an integer Gram-Schmidt test when the reduced
   entries have at most 16 bits and ``fmpz_mat_is_reduced`` otherwise; both
-  decide the same predicate, and the integer test measured faster at those
+  decide the same predicate for FLINT's parameter range ``eta^2 < delta`` (all
+  callers use 0.99 and 0.51), and the integer test measured faster at those
   sizes.  ``Lat::lll_reduce``, the rounded-embedding LLL and the saturation
   kernel previously always used ``fmpz_mat_is_reduced``.  Every route still
   returns the basis and transform ``fmpz_lll`` returns, so every published
