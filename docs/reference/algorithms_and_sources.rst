@@ -858,10 +858,22 @@ contains 0, where more precision would have let the rounding succeed.
 ``reduce_mod_units`` computes ``round_approx``, sets ``exact = false``, doubles
 the precision and takes an unconditional ``continue``, so the approximate
 coefficients are never applied (checked against the v0.38.6 source,
-``Map.jl`` lines 640-658).  Silex applies the approximate coefficients and
-retries at the same precision, ending only when an exact rounding succeeds, a
-half-integer tie stops it, or the cap is reached.  Both give a valid unit
-basis, but the published basis can differ from Hecke's.  Silex keeps this
+``Map.jl`` lines 638-658).  Silex applies the approximate coefficients and
+retries at the same precision.  The loop ends when an exact rounding succeeds,
+when the coefficients are all zero (whether from exact or approximate
+rounding), or, through the branch where the approximate rounding fails, when a
+half-integer tie stops it or the cap is reached; only that failing branch
+changes the precision.  The all-zero exit is where Silex can be less reduced
+than Hecke: an approximate rounding of a ball such as 0.5 +- 0.45 gives zero,
+where Hecke would double the precision and might round exactly to a nonzero
+value.  The function also reduces class-group relation generators and unit
+candidates before the torsion test, so the argument is not about a unit basis
+only: each output is its input times an exact product of the current unit
+generators (exact ``FactoredElement`` arithmetic), so it generates the same
+principal ideal and, with the current units, the same group.  Correctness does
+not depend on which integer coefficients are applied; only which
+representatives are kept differs, so the published generators and basis can
+differ from Hecke's.  Silex keeps this
 behavior on purpose.
 
 The approximate rounding itself ports Hecke v0.38.6

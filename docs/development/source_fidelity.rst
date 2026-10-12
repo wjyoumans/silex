@@ -66,12 +66,22 @@ Recorded intentional deviations
 -------------------------------
 
 Unit reduction applies approximate coefficients.  Hecke v0.38.6
-``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units`` (lines 640-658) computes
+``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units`` (lines 638-658) computes
 ``round_approx`` when exact rounding raises ``InexactError``, then doubles the
 precision and takes an unconditional ``continue``, so the approximate
 coefficients are never applied.  Silex applies them and retries at the same
 precision (``reduction_coordinates`` and ``reduce_relation_units_modulo`` in
-``src/order_unit/compute.cpp``).  Any result is a valid unit basis, but the
-published basis can differ from Hecke's.  The user decided to keep this
-behavior and document it; outputs do not change.  See
+``src/order_unit/compute.cpp``).  The function also reduces class-group
+relation generators and unit candidates before the torsion test, so the
+argument is not about a unit basis only: each output is its input times an
+exact product of the current unit generators (exact ``FactoredElement``
+arithmetic), so it generates the same principal ideal and, with the current
+units, the same group.  Correctness does not depend on which integer
+coefficients are applied; only which representatives are kept differs, so the
+published generators and basis can differ from Hecke's.  The behavior is kept
+so that published outputs stay stable; the user decided to keep it and
+document it; outputs do not change.  An approximate rounding that gives all
+zeros ends the loop at the current precision, where Hecke would double the
+precision and might round exactly to a nonzero value; there the output can be
+less reduced than Hecke's.  See
 :doc:`../reference/algorithms_and_sources`.

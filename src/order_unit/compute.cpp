@@ -1201,8 +1201,13 @@ bool reduction_coordinates(flint::FmpzMat& out,
     // round_approx, doubles the precision and takes an unconditional
     // continue, so the approximate coefficients are never applied.  Silex
     // returns them (exact = false) and the caller applies them and retries
-    // at the same precision.  Any result is a valid unit basis; the
-    // published basis can differ from the reference's.  Kept by decision
+    // at the same precision.  Callers also reduce relation generators and
+    // unit candidates, so the argument is not about a unit basis only: each
+    // output is its input times an exact product of the current unit
+    // generators, hence the same principal ideal and, with the current units,
+    // the same group.  Correctness does not depend on which coefficients are
+    // applied; the published generators can differ from the reference's.
+    // Kept by decision so published outputs stay stable
     // (docs/development/source_fidelity.rst).
     if (!exact_rounding) {
         for (slong i = 0; i < len; ++i) {
@@ -2298,7 +2303,8 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
             // Intentional deviation: approximate coefficients are applied
             // and the loop retries at the same precision; the reference
             // discards them and doubles the precision (see
-            // reduction_coordinates).
+            // reduction_coordinates).  All-zero coefficients return above at
+            // the current precision, where the reference would double it.
             continue;
         }
         // A coordinate that is a narrow ball around a half-integer cannot be
