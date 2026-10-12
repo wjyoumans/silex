@@ -1082,10 +1082,12 @@ unchanged.  The port deviates from PARI in one place: for a form with
 gives determinant ``-1`` and the reduced form of the wrong class; Silex
 conjugates the matrix by ``diag(1, -1)`` instead, so the determinant stays
 ``1``.  If a step of the fast path meets the condition where PARI raises
-its internal error, or the basecase reduction of a step fails, the
+its internal error, the basecase reduction of a step fails, or the input
+form does not take the reduced minimum at the computed vector, the
 reduction falls back to the full basecase reduction.  Reduced forms, and so
 class-relation rows, norms and labels, are those of the basecase; the
-generator of a relation can differ from it by sign above the switch.
+generator of a relation can differ from it by sign above the switch (by a
+unit when ``D = -3`` or ``-4``).
 
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly

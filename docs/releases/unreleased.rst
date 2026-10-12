@@ -611,11 +611,13 @@ Changed
   comparison is pending).  Relation rows, norms, labels and instance JSON
   are unchanged on the test corpus.  Above the switch the reduced form is
   the same, but ``Relation::generator`` can differ in sign (171 of the 394
-  witnesses at ``x^2 + 100000007``); below it nothing changes.  The port
+  witnesses at ``x^2 + 100000007``), or by a unit when ``D = -3`` or
+  ``-4``; below it nothing changes.  The port
   does not copy PARI's treatment of forms with ``b < 0``, which yields a
   transformation of determinant ``-1``.  If a step of the fast path fails,
-  the reduction falls back to the earlier basecase reduction, so published
-  results and failures are as before.
+  or the input form does not take the reduced minimum at the computed
+  vector, the reduction falls back to the earlier basecase reduction, so
+  published results and failures are as before.
 
 Fixed
 -----

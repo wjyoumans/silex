@@ -56,7 +56,10 @@ bool quadratic_form_reduce_basecase(flint::Fmpz& reduced_a,
 // `quadratic_form_fast_reduction_limit` are first brought close to reduced by
 // `positive_quadratic_form_partial_reduce`, as the reference implementation
 // `Qfb.c:qfbred_imag_av` and `qfbredsl2_imag` do; the reduced form is the
-// same, and (u1, v1) can be the negative of the basecase vector.
+// same, and (u1, v1) can differ from the basecase vector by sign (by a unit
+// when D = -3 or -4).  The basecase reduction of (a, b, c) is used instead
+// when a fast-path step fails or (a, b, c) does not take the value
+// reduced_a at (u1, v1).
 bool quadratic_form_reduce(flint::Fmpz& reduced_a,
                            flint::Fmpz& reduced_b,
                            flint::Fmpz& reduced_c,

@@ -518,6 +518,19 @@ bool quadratic_form_reduce(flint::Fmpz& reduced_a,
               w2.raw());
     fmpz_fmma(v1.raw(), transform.m21.raw(), w1.raw(), transform.m22.raw(),
               w2.raw());
+    // The caller publishes (u1, v1) as a generator of norm reduced_a, so the
+    // fast path's transform is checked directly: unless the input form takes
+    // the value reduced_a at (u1, v1), the basecase reduction is used.
+    flint::Fmpz value;
+    flint::Fmpz partial;
+    fmpz_fmma(partial.raw(), a.raw(), u1.raw(), b.raw(), v1.raw());
+    fmpz_mul(value.raw(), u1.raw(), partial.raw());
+    fmpz_mul(partial.raw(), v1.raw(), v1.raw());
+    fmpz_addmul(value.raw(), c.raw(), partial.raw());
+    if (!fmpz_equal(value.raw(), reduced_a.raw())) {
+        return quadratic_form_reduce_basecase(reduced_a, reduced_b, reduced_c,
+                                              u1, v1, a, b, c);
+    }
     return true;
 }
 
