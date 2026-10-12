@@ -1728,7 +1728,15 @@ saturation loop in ``src/order_unit/compute.cpp``.  Silex first scans the
 primes ``q <= aux_bound`` (the caller's bound; 1000 in class/unit
 validation) and continues with the Hecke scan when that pre-scan selects no usable prime,
 when it leaves a nonempty kernel without adjoining a root, or when
-``ell >= aux_bound``.  A kernel row whose ``ell``-th root Silex cannot
+``ell >= aux_bound``.  The pre-scan, its root attempts and the bound are a
+Silex addition; ``saturate!`` has no pre-scan and tests candidates only after
+its own scan.  In ``prove_index_bound``, when the pre-scan leaves a nonempty
+kernel that it has not certified, Silex first runs the first scan of the Hecke
+loop (``stable = 3.5``) on the same group, before testing any pre-scan row for
+a root.  If that kernel is empty, ``ell`` is verified with that scan's local
+primes: the group is then ``ell``-saturated, so no pre-scan row has a root to
+adjoin, and the path below would end in the same scan.  Otherwise the
+pre-scan rows are tested and the Hecke loop runs as before.  A kernel row whose ``ell``-th root Silex cannot
 decide (the compact root and the factored root both leave it undecided, for
 example because ``Element::is_power`` decides in degree 10 and higher only
 by residue disproof, never by a root) is treated like a row

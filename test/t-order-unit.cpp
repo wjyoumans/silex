@@ -8857,6 +8857,127 @@ int test_prove_index_bound_non_power_range_exhausted() {
     return 0;
 }
 
+// Counts, in prove_local_saturated, the outcomes of the stable selection
+// run before the pre-scan's kernel-row root attempts, and the root passes
+// (saturate_local_with_kernel scopes) that follow it.
+struct PrescanStableFirstEvents {
+    slong verified = 0;
+    slong not_verified = 0;
+    slong root_passes = 0;
+};
+
+void prescan_stable_first_callback(void* user,
+                                   silex::DiagnosticsModule,
+                                   silex::ProfileEvent event,
+                                   const char*,
+                                   const char* label) noexcept {
+    PrescanStableFirstEvents* events =
+            static_cast<PrescanStableFirstEvents*>(user);
+    if (label == nullptr) {
+        return;
+    }
+    if (event == silex::ProfileEvent::begin_scope &&
+        std::strcmp(label, "unit_group.saturate_local_with_kernel") == 0) {
+        ++events->root_passes;
+    } else if (event == silex::ProfileEvent::event &&
+               std::strcmp(label,
+                           "unit_group.proof_prescan_stable_first_verified") ==
+                       0) {
+        ++events->verified;
+    } else if (event == silex::ProfileEvent::event &&
+               std::strcmp(label, "unit_group.proof_prescan_stable_first_"
+                                  "not_verified") == 0) {
+        ++events->not_verified;
+    }
+}
+
+// The pre-scan of a prove_index_bound pass that leaves a nonempty kernel
+// first runs the selection that opens the reference stable scan, and
+// publishes its result when that kernel is empty, without testing any
+// pre-scan row for a root.  Otherwise it tests the pre-scan rows and then
+// runs the stable scan, as before.  In Q(sqrt 22), eps = 197 + 42 sqrt(22)
+// (GP: K = bnfinit(x^2 - 22, 1); K.fu, up to sign) is a cube at both primes
+// above q = 7 and at neither prime above q = 13.  With aux_bound = 10 the ell = 3 pre-scan sees only q = 7, so
+// eps stays in its kernel; the stable scan continues to q = 13.  With the q
+// range ended at 10 it cannot.
+int test_prove_index_bound_prescan_stable_first() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -22);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup start(order);
+    {
+        sflint::FmpqPoly unit_poly;
+        sflint::fmpq_poly_set_coeff_si(unit_poly, 0, 197);
+        sflint::fmpq_poly_set_coeff_si(unit_poly, 1, 42);
+        silex::Element unit(field);
+        silex::FactoredElement generator(field);
+        assert(unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)));
+        assert(generator.set_element(unit));
+        assert(start.set_units(order,
+                               silex::FactoredElementSpan(&generator, 1),
+                               embeddings, 256));
+        assert(start.free_rank() == 1);
+    }
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 10));
+
+    for (const bool limit_range : {false, true}) {
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        PrescanStableFirstEvents events;
+        silex::diagnostics_set_profiling(
+                diagnostics, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::unit_group),
+                prescan_stable_first_callback, &events);
+        const StableProofScanLimitsForTesting limits(0, limit_range ? 10 : 0);
+        silex::OrderUnitGroup proved(order);
+        proved.set_diagnostics(&diagnostics);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(proved.prove_index_bound(status, changed, start, 1,
+                                        sflint::FmpzConstRef(aux_bound), 2,
+                                        embeddings, 256));
+        assert(!changed);
+        // The records are those of the path without the early selection
+        // (checked against it): ell = 2, then ell = 3.
+        assert(proved.unit_proof_record_count() == 2);
+        assert(check_unit_proof_record(proved, 0, 2,
+                                       silex::ProofState::verified, 10, 3,
+                                       false));
+        if (!limit_range) {
+            // The stable selection empties the kernel at the first prime
+            // above q = 13, after both primes above q = 7, where eps is a
+            // cube: ell = 3 is verified and eps is never tested for a root.
+            assert(status == silex::ProofState::verified);
+            assert(proved.certification_status() ==
+                   silex::CertificationMode::proven);
+            assert(check_unit_proof_record(proved, 1, 3,
+                                           silex::ProofState::verified, 10, 3,
+                                           false));
+        } else {
+            // The range ends before q = 13: the selection keeps eps, the
+            // pre-scan tests it (not a cube), and the stable fallback fails
+            // closed after the two primes above q = 7.
+            assert(status == silex::ProofState::unavailable);
+            assert(check_unit_proof_record(proved, 1, 3,
+                                           silex::ProofState::unavailable, 10,
+                                           2, false));
+        }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(events.verified == (limit_range ? 0 : 1));
+        assert(events.not_verified == (limit_range ? 1 : 0));
+        assert(events.root_passes == (limit_range ? 1 : 0));
+#endif
+    }
+    return 0;
+}
+
 // A deferred row that is a true power is rooted after the rescan (decision
 // for deferred root attempts).  In Q(zeta_13), the group of
 // set_cyclotomic13_minus_unit_power_group with ell = 17 and one powered
@@ -11484,6 +11605,7 @@ int main() {
     test_kernel_row_root_defers_undecidable_rows();
     test_dependent_relation_unbounded_root_failure_adjoins_y();
     test_prove_index_bound_non_power_range_exhausted();
+    test_prove_index_bound_prescan_stable_first();
     test_prove_index_bound_roots_power_after_deferred_rescan();
     test_prove_index_bound_range_exhausted_tests_rows_at_once();
     test_prove_index_bound_undecided_root_not_saturated();

@@ -148,6 +148,19 @@ Changed
   route for word-size ``q``.  Published results are unchanged on the 70
   ``proven`` corpus rows.
 
+- In ``OrderUnitGroup::prove_index_bound`` (the ``proven`` unit proof),
+  when the scan of the auxiliary primes ``q <= aux_bound`` at a prime ``ell``
+  leaves a nonempty kernel that it has not certified, the first scan of the
+  unbounded stable auxiliary-prime loop now runs before the ``ell``-th-root
+  attempts on that kernel's rows.  If that scan's kernel is empty, ``ell`` is
+  verified at once with the record the loop would have published, since no
+  row can then have a root in the order; otherwise the root attempts and the
+  loop run as before.  This skips root attempts that cannot succeed (on
+  ``random_d9_h2_s8`` all 30 such primes ``ell``, on ``pure_x12_plus_7`` all
+  15).  Published results, including the proof records' ``aux_prime_bound``
+  and ``local_primes``, are unchanged on the 70 ``proven`` corpus rows.  See
+  "Class groups and order units" in :doc:`../reference/algorithms_and_sources`.
+
 - ``quadratic_fundamental_unit`` and the ``proven`` unit route now use the
   continued-fraction fundamental unit for every monic integral ``x^2+bx+c``
   with positive nonsquare discriminant, normalised as the existing quadratic

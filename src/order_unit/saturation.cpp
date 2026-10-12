@@ -2778,8 +2778,9 @@ bool OrderUnitGroup::prove_local_saturated_(
     bool has_prime_records = false;
     bool has_saturation_kernel = false;
 
+    // reference `saturate!` starts the stable scan at stable = 3.5.
+    constexpr double kInitialStable = 3.5;
     auto run_stable_fallback = [&]() noexcept -> bool {
-        constexpr double kInitialStable = 3.5;
         double stable_threshold = kInitialStable;
         bool stable_changed = false;
         bool rescanned = false;
@@ -2856,6 +2857,39 @@ bool OrderUnitGroup::prove_local_saturated_(
     if (flint::fmpz_mat_nrows(kernel) == 0) {
         return publish(working, ProofState::verified, local_prime_count,
                        false);
+    }
+
+    if (!certified && use_stable_proof_fallback) {
+        // The pre-scan left a nonempty character kernel.  Before any root
+        // attempt on its rows, run the selection that opens the first step
+        // of `run_stable_fallback` (the reference `saturate!` scan, which
+        // has no pre-scan and tests roots only after its own scan) on the
+        // same `working` and threshold.  It reads only `working`, `ell` and
+        // the threshold: not `pass_result` and not the field-modulus cache.
+        // If its kernel is empty, that step returns `verified` without
+        // testing a root, and the group is ell-saturated in O^x, so no
+        // pre-scan row has an ell-th root in O that could be adjoined: the
+        // path below would end in that same step from the same `working`.
+        // Publish its result now.  Otherwise (a nonempty kernel, or a
+        // failed scan) nothing was published or changed: continue with the
+        // pre-scan root attempts and `run_stable_fallback` as before.
+        slong stable_local_primes = 0;
+        bool stable_certified = false;
+        bool stable_range_exhausted = false;
+        flint::FmpzMat stable_kernel(0, working.free_rank());
+        if (select_stable_proof_primes(stable_local_primes, stable_certified,
+                                       stable_range_exhausted, stable_kernel,
+                                       working, ell, kInitialStable) &&
+            flint::fmpz_mat_nrows(stable_kernel) == 0) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics_, DiagnosticsModule::unit_group,
+                    "unit_group.proof_prescan_stable_first_verified");
+            return publish(working, ProofState::verified, stable_local_primes,
+                           false);
+        }
+        SILEX_PROFILE_EVENT(
+                diagnostics_, DiagnosticsModule::unit_group,
+                "unit_group.proof_prescan_stable_first_not_verified");
     }
 
     const PrimeIdeal* first_prime = has_prime_records ? primes.at(0) : nullptr;
