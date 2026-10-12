@@ -12,19 +12,6 @@ namespace silex::detail {
 
 namespace {
 
-slong trimmed_nonzero_rows(flint::FmpzMatConstRef matrix) noexcept {
-    slong rows = flint::fmpz_mat_nrows(matrix);
-    while (rows > 0 && ::fmpz_mat_is_zero_row(matrix.raw(), rows - 1) != 0) {
-        --rows;
-    }
-    for (slong i = 0; i < rows; ++i) {
-        if (::fmpz_mat_is_zero_row(matrix.raw(), i) != 0) {
-            return -1;
-        }
-    }
-    return rows;
-}
-
 bool hnf_finish_workspace_unit_log_matrix(
         flint::ArbMat& out,
         HnfFinishWorkspace& workspace,
@@ -170,24 +157,20 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
                 out, *workspace, class_group, embeddings, precision);
     }
 
+    // The witness extraction (exact_hnf_relation_units) composes the units
+    // from the rows of the same function, so the logs below are those of
+    // the witnessed units.
     const slong relation_count = class_group.relation_count();
-    const slong generator_count = class_group.generator_count();
-    flint::FmpzMat stored(relation_count, generator_count);
-    if (!class_group.relations(flint::FmpzMatRef(stored))) {
-        return false;
-    }
-
-    flint::FmpzMat hnf(relation_count, generator_count);
-    flint::FmpzMat transform(relation_count, relation_count);
-    ::fmpz_mat_hnf_transform(hnf.raw(), transform.raw(), stored.raw());
-
-    const slong rank = trimmed_nonzero_rows(flint::FmpzMatConstRef(hnf));
-    if (rank < 0 || rank != class_group.relation_rank()) {
+    flint::FmpzMat kernel(0, 0);
+    if (!hnf_unit_witness_coefficients(kernel, class_group) ||
+        flint::fmpz_mat_ncols(kernel) != relation_count ||
+        flint::fmpz_mat_nrows(kernel) !=
+                relation_count - class_group.relation_rank()) {
         return false;
     }
 
     slong places = 0;
-    const slong unit_columns = relation_count - rank;
+    const slong unit_columns = flint::fmpz_mat_nrows(kernel);
     if (!compact_places(places, embeddings) ||
         flint::arb_mat_nrows_value(out) != unit_columns ||
         flint::arb_mat_ncols_value(out) != places) {
@@ -219,15 +202,14 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
     }
 
     // reference relation_completion_parameters carries HNF column operations in C and checks
-    // Ar = real_i(A) for the zero/HNF-unit columns.  With FLINT's
-    // row-oriented hnf = transform * relation_rows, the zero HNF rows are
-    // the corresponding retained-relation dependencies.
+    // Ar = real_i(A) for the zero/HNF-unit columns.  The kernel rows are
+    // retained-relation dependencies: the zero rows of FLINT's row-oriented
+    // hnf = transform * relation_rows, or a checked LLL basis of the same
+    // left kernel (relation_kernel_basis).
     for (slong dep = 0; dep < unit_columns; ++dep) {
-        const slong transform_row = rank + dep;
         for (slong relation = 0; relation < relation_count; ++relation) {
             const auto exponent = flint::fmpz_mat_entry(
-                    flint::FmpzMatConstRef(transform), transform_row,
-                    relation);
+                    flint::FmpzMatConstRef(kernel), dep, relation);
             if (flint::fmpz_is_zero(exponent)) {
                 continue;
             }

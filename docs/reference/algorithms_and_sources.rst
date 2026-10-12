@@ -613,6 +613,24 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+The ``proven`` analytic finish needs a small basis of the integer kernel
+of the relation matrix ``A`` (the unit exponent rows).  Silex reduces the
+rows of ``[c*A | I]`` with ``fmpz_lll`` for a power-of-two scale ``c`` of
+``2^40``, and takes the identity parts of the rows whose ``A`` part is zero
+as the kernel basis.  This follows the orthogonal-lattice construction of
+J. Chen, D. Stehle, and G. Villard, "Computing an LLL-reduced basis of the
+orthogonal lattice" (arXiv:1805.03418), Proposition 4.1, adapted from
+Nguyen and Stern (1997), whose sufficient scale is
+``K > 2^((n-1)/2) * lambda_{n-k}``.  Silex does not rely on the scale
+being large enough: the number of candidate rows must equal ``n`` minus
+the rank, and every row is checked exactly against ``v*A = 0``.  When
+either check fails, the helper uses the rows of the HNF transform that
+belong to the zero rows of the HNF, which are an exact kernel basis.  As
+in the reducer paragraph above, the basis claim relies on FLINT's guarantee
+that ``fmpz_lll`` applies only unimodular row operations; Silex adds no
+determinant check, and keeps FLINT's final reducedness check.  Published
+outputs do not depend on which route is taken.
+
 Continued-fraction fundamental unit of a real quadratic field
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

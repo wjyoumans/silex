@@ -120,6 +120,14 @@ Added
 Changed
 -------
 
+- The ``proven`` analytic finish now obtains a small kernel basis for
+  the unit exponent rows by LLL reduction of ``[c*A | I]`` with exact
+  checks and a fallback to the HNF-transform rows, instead of using the
+  HNF transform rows directly.  Published outputs are unchanged.  On a
+  busy machine, ``real_quadratic_d1000000000009`` now finishes ``proven``
+  within a 300 s limit where it timed out before.  See "Class groups and
+  order units" in :doc:`../reference/algorithms_and_sources`.
+
 - The exact class number of an imaginary quadratic field with
   ``|D| >= 2^44`` (``proven`` class/unit computations) now first evaluates
   ``L(1, chi_D)`` to an absolute tolerance sized for the class number,

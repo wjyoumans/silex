@@ -878,6 +878,263 @@ int test_hnf_row_pivot_column_flags() {
     return 0;
 }
 
+// Integer relation matrix with rank 2 and a 2-dimensional left kernel.
+sflint::FmpzMat kernel_test_relations() noexcept {
+    sflint::FmpzMat relations(4, 2);
+    const slong entries[4][2] = {{2, 0}, {0, 3}, {4, 6}, {6, 9}};
+    for (slong i = 0; i < 4; ++i) {
+        for (slong j = 0; j < 2; ++j) {
+            sflint::fmpz_set_si(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(relations), i,
+                                           j),
+                    entries[i][j]);
+        }
+    }
+    return relations;
+}
+
+sflint::FmpzMat transform_kernel_rows(sflint::FmpzMatConstRef transform,
+                                      slong rank) noexcept {
+    const slong n = sflint::fmpz_mat_nrows(transform);
+    sflint::FmpzMat rows(n - rank, n);
+    for (slong i = rank; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            sflint::fmpz_set(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(rows), i - rank,
+                                           j),
+                    sflint::fmpz_mat_entry(transform, i, j));
+        }
+    }
+    return rows;
+}
+
+bool same_row_lattice(sflint::FmpzMatConstRef left,
+                      sflint::FmpzMatConstRef right) noexcept {
+    sflint::FmpzMat left_hnf(sflint::fmpz_mat_nrows(left),
+                             sflint::fmpz_mat_ncols(left));
+    sflint::FmpzMat right_hnf(sflint::fmpz_mat_nrows(right),
+                              sflint::fmpz_mat_ncols(right));
+    ::fmpz_mat_hnf(left_hnf.raw(), left.raw());
+    ::fmpz_mat_hnf(right_hnf.raw(), right.raw());
+    return sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(left_hnf),
+                                  sflint::FmpzMatConstRef(right_hnf));
+}
+
+bool zero_relation_part(sflint::FmpzMatConstRef extension, slong row,
+                        slong generators) noexcept {
+    for (slong j = 0; j < generators; ++j) {
+        if (!sflint::fmpz_is_zero(sflint::fmpz_mat_entry(extension, row, j))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The LLL kernel basis is accepted only after its two exact checks; a
+// candidate failing either check, or a missing or misshapen candidate, gives
+// the HNF transform rows.
+int test_relation_kernel_basis_checks_and_fallback() {
+    using silex::detail::RelationKernelBasisRoute;
+    const sflint::FmpzMat relations = kernel_test_relations();
+    const slong n = 4;
+    const slong g = 2;
+    const slong rank = 2;
+    sflint::FmpzMat hnf(n, g);
+    sflint::FmpzMat transform(n, n);
+    ::fmpz_mat_hnf_transform(hnf.raw(), transform.raw(), relations.raw());
+    const sflint::FmpzMat fallback =
+            transform_kernel_rows(sflint::FmpzMatConstRef(transform), rank);
+
+    // Accepted LLL route: n - rank rows in the left kernel, spanning the
+    // same lattice as the HNF transform rows.
+    sflint::FmpzMat basis(0, 0);
+    RelationKernelBasisRoute route = RelationKernelBasisRoute::hnf_transform;
+    assert(silex::detail::relation_kernel_basis(
+            basis, &route, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(transform), rank));
+    assert(route == RelationKernelBasisRoute::lll_extended);
+    assert(sflint::fmpz_mat_nrows(basis) == n - rank);
+    assert(sflint::fmpz_mat_ncols(basis) == n);
+    sflint::FmpzMat product(n - rank, g);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(product),
+                         sflint::FmpzMatConstRef(basis),
+                         sflint::FmpzMatConstRef(relations));
+    assert(::fmpz_mat_is_zero(product.raw()) != 0);
+    assert(same_row_lattice(sflint::FmpzMatConstRef(basis),
+                            sflint::FmpzMatConstRef(fallback)));
+
+    sflint::FmpzMat extension(0, 0);
+    assert(silex::detail::lll_relation_kernel_extension(
+            extension, sflint::FmpzMatConstRef(relations)));
+    sflint::FmpzMat checked(0, 0);
+    assert(silex::detail::checked_relation_kernel_rows(
+            checked, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(extension), rank));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(checked),
+                                  sflint::FmpzMatConstRef(basis)));
+
+    const auto assert_fallback = [&](const sflint::FmpzMat* candidate) {
+        sflint::FmpzMat out(0, 0);
+        RelationKernelBasisRoute taken =
+                RelationKernelBasisRoute::lll_extended;
+        assert(silex::detail::relation_kernel_basis_from_extension(
+                out, &taken, sflint::FmpzMatConstRef(relations),
+                sflint::FmpzMatConstRef(transform), rank, candidate));
+        assert(taken == RelationKernelBasisRoute::hnf_transform);
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(out),
+                                      sflint::FmpzMatConstRef(fallback)));
+    };
+
+    // Count check: an extra row with a zero relation part gives n - rank + 1
+    // candidate rows.
+    sflint::FmpzMat extra_row(n, g + n);
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(extra_row),
+                         sflint::FmpzMatConstRef(extension));
+    slong nonkernel = -1;
+    for (slong i = 0; i < n && nonkernel < 0; ++i) {
+        if (!zero_relation_part(sflint::FmpzMatConstRef(extension), i, g)) {
+            nonkernel = i;
+        }
+    }
+    assert(nonkernel >= 0);
+    for (slong j = 0; j < g; ++j) {
+        sflint::fmpz_zero(sflint::fmpz_mat_entry(
+                sflint::FmpzMatRef(extra_row), nonkernel, j));
+    }
+    assert(!silex::detail::checked_relation_kernel_rows(
+            checked, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(extra_row), rank));
+    assert_fallback(&extra_row);
+
+    // Product check: a row whose relation part is zero but whose
+    // coefficients are not in the kernel.
+    sflint::FmpzMat outside_kernel(n, g + n);
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(outside_kernel),
+                         sflint::FmpzMatConstRef(extension));
+    slong kernel_row = -1;
+    for (slong i = 0; i < n && kernel_row < 0; ++i) {
+        if (zero_relation_part(sflint::FmpzMatConstRef(extension), i, g)) {
+            kernel_row = i;
+        }
+    }
+    assert(kernel_row >= 0);
+    ::fmpz_add_ui(fmpz_mat_entry(outside_kernel.raw(), kernel_row, g),
+                  fmpz_mat_entry(outside_kernel.raw(), kernel_row, g), 1);
+    assert(!silex::detail::checked_relation_kernel_rows(
+            checked, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(outside_kernel), rank));
+    assert_fallback(&outside_kernel);
+
+    // Missing count: the rank of a different matrix.
+    assert(!silex::detail::checked_relation_kernel_rows(
+            checked, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(extension), rank - 1));
+
+    // Misshapen or absent candidates.
+    const sflint::FmpzMat misshapen(n, g + n - 1);
+    assert_fallback(&misshapen);
+    assert_fallback(nullptr);
+
+    // Inconsistent transform shape or rank is a failure, not a fallback.
+    sflint::FmpzMat out(0, 0);
+    const sflint::FmpzMat short_transform(n - 1, n);
+    assert(!silex::detail::relation_kernel_basis(
+            out, nullptr, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(short_transform), rank));
+    assert(!silex::detail::relation_kernel_basis(
+            out, nullptr, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(transform), n + 1));
+    return 0;
+}
+
+// The HNF finish unit logs are the logs of the units composed from the
+// witness coefficient rows, row by row.
+int test_unit_logs_share_witness_rows() {
+    silex::NumberField field = cubic_discriminant_81_field();
+    const silex::Order equation_order =
+            silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), maximal_order));
+    if (sflint::fmpz_cmp_ui(
+                sflint::FmpzConstRef(factor_base_bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(factor_base_bound), 2);
+    }
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 500;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            class_group, maximal_order,
+            sflint::FmpzConstRef(factor_base_bound), options, 128));
+    assert(units.free_rank() == 2);
+
+    const slong relation_count = class_group.relation_count();
+    const slong rank = class_group.relation_rank();
+    sflint::FmpzMat coefficients(0, 0);
+    assert(silex::detail::hnf_unit_witness_coefficients(coefficients,
+                                                        class_group));
+    assert(sflint::fmpz_mat_nrows(coefficients) == relation_count - rank);
+    assert(relation_count - rank > 0);
+
+    // The witness rows are the shared kernel basis of the stored relations.
+    sflint::FmpzMat stored(relation_count, class_group.generator_count());
+    assert(class_group.relations(sflint::FmpzMatRef(stored)));
+    sflint::FmpzMat hnf(relation_count, class_group.generator_count());
+    sflint::FmpzMat transform(relation_count, relation_count);
+    ::fmpz_mat_hnf_transform(hnf.raw(), transform.raw(), stored.raw());
+    sflint::FmpzMat shared(0, 0);
+    silex::detail::RelationKernelBasisRoute route =
+            silex::detail::RelationKernelBasisRoute::hnf_transform;
+    assert(silex::detail::relation_kernel_basis(
+            shared, &route, sflint::FmpzMatConstRef(stored),
+            sflint::FmpzMatConstRef(transform), rank));
+    assert(route == silex::detail::RelationKernelBasisRoute::lll_extended);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(shared),
+                                  sflint::FmpzMatConstRef(coefficients)));
+
+    const slong precision = 160;
+    silex::EmbeddingContext embeddings(field);
+    assert(embeddings.refine(precision));
+    const slong places = 3;
+    sflint::ArbMat logs(relation_count - rank, places);
+    assert(silex::detail::hnf_unit_log_matrix(logs, class_group, embeddings,
+                                              nullptr, precision));
+
+    sflint::ArbVec row(places);
+    silex::Element generator(field);
+    for (slong unit = 0; unit < relation_count - rank; ++unit) {
+        sflint::ArbVec expected(places);
+        for (slong relation = 0; relation < relation_count; ++relation) {
+            const auto exponent = sflint::fmpz_mat_entry(
+                    sflint::FmpzMatConstRef(coefficients), unit, relation);
+            if (sflint::fmpz_is_zero(exponent)) {
+                continue;
+            }
+            assert(class_group.relation_generator(generator, relation));
+            assert(silex::logarithmic_embedding(
+                    sflint::ArbVecRef(row), embeddings, generator,
+                    silex::LogEmbeddingMode::product, precision));
+            for (slong place = 0; place < places; ++place) {
+                ::arb_addmul_fmpz(expected.data() + place, row.data() + place,
+                                  exponent.raw(), precision);
+            }
+        }
+        for (slong place = 0; place < places; ++place) {
+            assert(::arb_overlaps(expected.data() + place,
+                                  arb_mat_entry(logs.raw(), unit, place)) !=
+                   0);
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -894,5 +1151,7 @@ int main() {
     assert(test_hnf_row_pivot_column_flags() == 0);
     assert(test_preprobe_handoff_matches_rebuilt_product() == 0);
     assert(test_analytic_finish_embedding_reuse() == 0);
+    assert(test_relation_kernel_basis_checks_and_fallback() == 0);
+    assert(test_unit_logs_share_witness_rows() == 0);
     return 0;
 }

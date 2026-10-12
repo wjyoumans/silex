@@ -350,6 +350,52 @@ bool hnf_finish_workspace_witness_coefficients(
         flint::FmpzMat& out,
         HnfFinishWorkspace& workspace,
         const ClassGroupContext& context) noexcept;
+// Kernel basis of the relation-dependency (unit) rows: a basis of the left
+// kernel {v : v * relations == 0} of the n x g relation matrix.  The LLL route
+// reduces [c * relations | I_n] and takes the identity part of the reduced
+// rows whose relation part is zero; it is accepted only when exactly
+// n - rank such rows exist and every one satisfies v * relations == 0
+// (checked by an exact product).  Otherwise the rows rank..n-1 of the HNF
+// transform are used, as before the LLL route existed.  See "Class groups
+// and order units" in docs/reference/algorithms_and_sources.rst.
+enum class RelationKernelBasisRoute : unsigned char {
+    lll_extended,
+    hnf_transform,
+};
+
+// Binary exponent of the scale c applied to the relation columns.  It does
+// not affect correctness: a too-small c only makes the exact checks fail,
+// and the HNF transform rows are then used.  The value is not derived from
+// the sufficient bound on c in the cited source.
+inline constexpr ulong relation_kernel_lll_scale_bits = 40;
+
+// out = the fmpz_lll-reduced n x (g + n) matrix [c * relations | I_n].
+bool lll_relation_kernel_extension(flint::FmpzMat& out,
+                                   flint::FmpzMatConstRef relations) noexcept;
+// Applies the two exact checks to a reduced extension and, when both hold,
+// sets out to the (n - rank) x n kernel rows in their reduced order.
+bool checked_relation_kernel_rows(flint::FmpzMat& out,
+                                  flint::FmpzMatConstRef relations,
+                                  flint::FmpzMatConstRef reduced_extension,
+                                  slong rank) noexcept;
+// The shared selection: the checked rows of `reduced_extension` when it is
+// non-null and passes, the HNF transform rows otherwise.  Fails only on
+// inconsistent shapes or rank.
+bool relation_kernel_basis_from_extension(
+        flint::FmpzMat& out,
+        RelationKernelBasisRoute* route,
+        flint::FmpzMatConstRef relations,
+        flint::FmpzMatConstRef hnf_transform,
+        slong rank,
+        const flint::FmpzMat* reduced_extension) noexcept;
+bool relation_kernel_basis(flint::FmpzMat& out,
+                           RelationKernelBasisRoute* route,
+                           flint::FmpzMatConstRef relations,
+                           flint::FmpzMatConstRef hnf_transform,
+                           slong rank) noexcept;
+// The unit-row coefficients of the HNF analytic finish: relation_kernel_basis
+// of the context's stored relations.  hnf_unit_log_matrix takes its rows from
+// this function, so the unit logs and the unit witnesses use the same rows.
 bool hnf_unit_witness_coefficients(flint::FmpzMat& out,
                                         const ClassGroupContext& context)
         noexcept;

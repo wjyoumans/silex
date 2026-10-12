@@ -2,6 +2,10 @@
 
 #include <utility>
 
+#include <flint/fmpz_lll.h>
+
+#include <silex/flint/fmpz_lll.hpp>
+
 namespace silex::detail {
 
 namespace {
@@ -149,6 +153,142 @@ bool verify_stored_relation_generator(
 
 }  // namespace
 
+bool lll_relation_kernel_extension(flint::FmpzMat& out,
+                                   flint::FmpzMatConstRef relations) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    const slong g = flint::fmpz_mat_ncols(relations);
+    if (n <= 0 || g < 0) {
+        return false;
+    }
+
+    flint::FmpzMat extension(n, g + n);
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < g; ++j) {
+            flint::fmpz_mul_2exp(
+                    flint::fmpz_mat_entry(flint::FmpzMatRef(extension), i, j),
+                    flint::fmpz_mat_entry(relations, i, j),
+                    relation_kernel_lll_scale_bits);
+        }
+        flint::fmpz_one(flint::fmpz_mat_entry(flint::FmpzMatRef(extension), i,
+                                              g + i));
+    }
+    // The input rows are independent (identity part), and fmpz_lll applies
+    // only unimodular row operations.
+    flint::FmpzLll lll;
+    ::fmpz_lll(extension.raw(), nullptr, lll.raw());
+    out = std::move(extension);
+    return true;
+}
+
+bool checked_relation_kernel_rows(flint::FmpzMat& out,
+                                  flint::FmpzMatConstRef relations,
+                                  flint::FmpzMatConstRef reduced_extension,
+                                  slong rank) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    const slong g = flint::fmpz_mat_ncols(relations);
+    if (rank < 0 || rank > n ||
+        flint::fmpz_mat_nrows(reduced_extension) != n ||
+        flint::fmpz_mat_ncols(reduced_extension) != g + n) {
+        return false;
+    }
+
+    // Each reduced row is (c * v * relations | v) with v a row of the
+    // unimodular transform, so any n - rank of its v with v * relations == 0
+    // are a basis of the left kernel, whose rank is n - rank.
+    const slong kernel_rows = n - rank;
+    flint::FmpzMat rows(kernel_rows, n);
+    slong found = 0;
+    for (slong i = 0; i < n; ++i) {
+        bool zero_relation_part = true;
+        for (slong j = 0; j < g && zero_relation_part; ++j) {
+            zero_relation_part = flint::fmpz_is_zero(
+                    flint::fmpz_mat_entry(reduced_extension, i, j));
+        }
+        if (!zero_relation_part) {
+            continue;
+        }
+        // Check 1: the row count is exactly n - rank.
+        if (found == kernel_rows) {
+            return false;
+        }
+        for (slong j = 0; j < n; ++j) {
+            flint::fmpz_set(
+                    flint::fmpz_mat_entry(flint::FmpzMatRef(rows), found, j),
+                    flint::fmpz_mat_entry(reduced_extension, i, g + j));
+        }
+        ++found;
+    }
+    if (found != kernel_rows) {
+        return false;
+    }
+
+    // Check 2: every row satisfies v * relations == 0 exactly.
+    if (kernel_rows > 0 && g > 0) {
+        flint::FmpzMat product(kernel_rows, g);
+        flint::fmpz_mat_mul(flint::FmpzMatRef(product),
+                            flint::FmpzMatConstRef(rows), relations);
+        if (::fmpz_mat_is_zero(product.raw()) == 0) {
+            return false;
+        }
+    }
+    out = std::move(rows);
+    return true;
+}
+
+bool relation_kernel_basis_from_extension(
+        flint::FmpzMat& out,
+        RelationKernelBasisRoute* route,
+        flint::FmpzMatConstRef relations,
+        flint::FmpzMatConstRef hnf_transform,
+        slong rank,
+        const flint::FmpzMat* reduced_extension) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    if (rank < 0 || rank > n || flint::fmpz_mat_nrows(hnf_transform) != n ||
+        flint::fmpz_mat_ncols(hnf_transform) != n) {
+        return false;
+    }
+
+    flint::FmpzMat checked(0, 0);
+    if (reduced_extension != nullptr &&
+        checked_relation_kernel_rows(checked, relations,
+                                     flint::FmpzMatConstRef(*reduced_extension),
+                                     rank)) {
+        out = std::move(checked);
+        if (route != nullptr) {
+            *route = RelationKernelBasisRoute::lll_extended;
+        }
+        return true;
+    }
+
+    flint::FmpzMat coefficients(n - rank, n);
+    for (slong row = rank; row < n; ++row) {
+        if (!fmpz_mat_copy_row(flint::FmpzMatRef(coefficients), row - rank,
+                               hnf_transform, row)) {
+            return false;
+        }
+    }
+    out = std::move(coefficients);
+    if (route != nullptr) {
+        *route = RelationKernelBasisRoute::hnf_transform;
+    }
+    return true;
+}
+
+bool relation_kernel_basis(flint::FmpzMat& out,
+                           RelationKernelBasisRoute* route,
+                           flint::FmpzMatConstRef relations,
+                           flint::FmpzMatConstRef hnf_transform,
+                           slong rank) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    flint::FmpzMat extension(0, 0);
+    const bool have_extension =
+            rank >= 0 && rank < n &&
+            lll_relation_kernel_extension(extension, relations);
+    return relation_kernel_basis_from_extension(
+            out, route, relations, hnf_transform, rank,
+            have_extension ? &extension : nullptr);
+}
+
 bool hnf_unit_witness_coefficients(
         flint::FmpzMat& out,
         const ClassGroupContext& context) noexcept {
@@ -158,18 +298,12 @@ bool hnf_unit_witness_coefficients(
         return false;
     }
 
-    const slong relation_count = context.relation_count();
-    const slong rank = hnf_data.rank;
-    flint::FmpzMat coefficients(relation_count - rank, relation_count);
-    for (slong row = rank; row < relation_count; ++row) {
-        for (slong col = 0; col < relation_count; ++col) {
-            flint::fmpz_set(
-                    flint::fmpz_mat_entry(
-                            flint::FmpzMatRef(coefficients), row - rank, col),
-                    flint::fmpz_mat_entry(
-                            flint::FmpzMatConstRef(hnf_data.transform), row,
-                            col));
-        }
+    flint::FmpzMat coefficients(0, 0);
+    if (!relation_kernel_basis(coefficients, nullptr,
+                               flint::FmpzMatConstRef(hnf_data.stored),
+                               flint::FmpzMatConstRef(hnf_data.transform),
+                               hnf_data.rank)) {
+        return false;
     }
     out = std::move(coefficients);
     return true;
