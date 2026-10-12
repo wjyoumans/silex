@@ -1476,8 +1476,9 @@ bool IdealAccess::set_known_two_generator(
 // near FractionalIdeal::set_integral_den).  "Known" means that they skip the
 // hnf_is_ideal closure test of Ideal::set_hnf, not that they store a claim
 // the caller makes.  For every input that passes their checks they store
-// only the HNF of a lattice that is an ideal by construction, and no norm
-// and no principal generator:
+// only the HNF of a lattice that is an ideal by construction.  The first
+// three also store no norm and no principal generator; the fourth does not
+// make that claim (see its bullet):
 //   - set_known_two_generator_ideal(a, beta): rows a I_n and M_beta span
 //     a Z^n + beta O = a O + beta O, an ideal for every a > 0 and beta in O,
 //     and every elementary divisor divides a, so the modular-HNF contract
@@ -1486,8 +1487,9 @@ bool IdealAccess::set_known_two_generator(
 //     H M_beta span a I + beta I = I (a O + beta O), an ideal whenever I is.
 //   - multiply_integral_ideal_by_element(I, x): the rows are x times the
 //     basis of I, so x I, kept only when it is integral and in HNF.
-//   - set_integral_ideal_known_hnf(I): I / 1, a copy of the Ideal I with the
-//     data I already holds.
+//   - set_integral_ideal_known_hnf(I): I / 1, a copy of the Ideal I, which
+//     carries over whatever cached data (norm, principal generator) I
+//     already holds.
 // The inputs are Ideal, OrderElement and Element objects whose own
 // invariants hold on every installed route (an Ideal with an HNF stores an
 // ideal; the only unchecked store is the noninstalled test hook
