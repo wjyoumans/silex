@@ -120,6 +120,14 @@ Added
 Changed
 -------
 
+- The one-large-prime step of relation factoring builds only the prime
+  ideals above the large rational prime that can contain the element, found
+  by a Dedekind--Kummer divisibility test, instead of every prime above it,
+  when the prime does not divide the index of the equation order.  The
+  primes it builds are those built before, in the same order, so published
+  outputs are unchanged.  See "Local algebra and relations" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` analytic finish now obtains a small kernel basis for
   the unit exponent rows by LLL reduction of ``[c*A | I]`` with exact
   checks and a fallback to the HNF-transform rows, instead of using the

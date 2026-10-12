@@ -593,6 +593,19 @@ the integral generator ``omega`` of PARI ``quadgen``/``quadpoly``, whose
 generator in use is chosen by one shared predicate when a prime is built and
 stored in the prime, so it cannot drift from the stored residue polynomial.
 
+The one-large-prime step of relation factoring takes valuations of an element
+``alpha`` of the maximal order at the primes above each rational prime ``p``
+of its norm that the factor base does not account for.  When
+``decompose_prime`` would build those primes by Dedekind--Kummer (``p`` prime
+to ``[O : Z[theta]]``, off the quadratic integral-generator route), it builds
+only the ``P_i = (p, g_i(theta))`` with ``g_i`` dividing the reduction of
+``A`` modulo ``p``, where ``alpha = A(theta)/d`` with ``d`` prime to ``p``.
+``P_i`` meets ``Z[theta]`` in ``p Z[theta] + g_i(theta) Z[theta]`` (Cohen,
+GTM 138, Theorem 4.8.13 and its proof), so ``alpha`` lies in ``P_i`` exactly
+when ``g_i`` divides ``A`` modulo ``p``; the primes left out have valuation 0
+and were skipped before.  The primes that are built, and their order, are
+those of ``decompose_prime``.
+
 Class groups and order units
 ----------------------------
 
