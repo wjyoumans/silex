@@ -746,8 +746,6 @@ bool row_is_filled(const sflint::FmpzMat& row, slong value) noexcept {
     return true;
 }
 
-// Q(2^(1/3)): 5 = P Q with f(P) = 1 and f(Q) = 2.  The norm-bounded base at
-// 5 keeps P and drops Q, so its block above 5 is incomplete.
 // The cubic x^3 - 2 (maximal order Z[theta]), base bound 5: a - theta has
 // norm a^3 - 2.  At a = 5 (3 * 41) and a = 9 (727, which splits completely)
 // the one large prime is the degree-one prime (p, theta - a), found among
@@ -818,6 +816,8 @@ int test_order_element_factor_one_large_prime_cubic() {
     return 0;
 }
 
+// Q(2^(1/3)): 5 = P Q with f(P) = 1 and f(Q) = 2.  The norm-bounded base at
+// 5 keeps P and drops Q, so its block above 5 is incomplete.
 int test_required_prime_through_lacking_conjugate() {
     // x^3 - 2: 5 = R1 R2 with f(R1) = 1, f(R2) = 2, and 31 = P1 P2 P3.
     const slong coefficients[] = {-2, 0, 0, 1};

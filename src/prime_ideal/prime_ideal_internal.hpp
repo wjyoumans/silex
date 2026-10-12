@@ -165,7 +165,8 @@ public:
     // p Z[theta] + g_i(theta) Z[theta] (Cohen, GTM 138, Theorem 4.8.13 and
     // its proof).  Only those P_i are built; every omitted P_i has valuation
     // 0 at `element`.  On every other route the result is the whole
-    // decomposition.  Returns false when decompose_prime would.
+    // decomposition.  Returns false on failure; on the Dedekind-Kummer route
+    // only the primes it builds can fail.
     static bool decompose_prime_containing(
             std::vector<PrimeIdeal>& out,
             const OrderElement& element,
