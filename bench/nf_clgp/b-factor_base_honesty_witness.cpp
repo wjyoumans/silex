@@ -45,24 +45,31 @@ enum class HonestyWorkload {
 };
 
 constexpr std::size_t kQuarticScalarCandidates = 360;
-constexpr std::size_t kQuarticEnumeratedCandidates = 62;
+constexpr std::size_t kQuarticEnumeratedCandidates = 58;
 constexpr std::size_t kQuarticCandidateCount =
         kQuarticScalarCandidates + kQuarticEnumeratedCandidates;
 constexpr std::size_t kQuinticScalarCandidates = 1575;
-constexpr std::size_t kQuinticEnumeratedCandidates = 364;
+constexpr std::size_t kQuinticEnumeratedCandidates = 350;
 constexpr std::size_t kQuinticCandidateCount =
         kQuinticScalarCandidates + kQuinticEnumeratedCandidates;
 
-// Regenerated on the production bound (factor_base_class_group_bound, the
-// minimum of Zimmert's, Minkowski's and the former generation bound) in place
-// of the former generation bound n! ceil(sqrt|d|) 2^r2 / n^n that the fixtures
-// used before.  Method: with the count checks in build_witness_batch and
-// validate_batch bypassed, run the fixture builder, classify every candidate
-// with full_factorization_has_principal_witness (exhaustive IdealFactorization,
+// Regenerated for the lacking-conjugate witness rule: a witness may also
+// carry the one prime ideal above a rational prime q (other than the
+// required prime's) that the base lacks, when it has e = 1 and the base holds
+// every other prime ideal above q.  The production bound is
+// factor_base_class_group_bound (the minimum of Zimmert's, Minkowski's and
+// the former generation bound).  Method: with the count checks in
+// build_witness_batch and validate_batch bypassed, run the fixture builder,
+// classify every candidate with full_factorization_has_principal_witness
+// (exhaustive IdealFactorization plus a full decomposition of each q,
 // independent of the code under test), and record the candidate counts, the
-// searched-prime count, the match counts (all matches enumerated, none scalar)
-// and the bitmaps below.  Quartic: 360+62 candidates, 24 primes; quintic:
-// 1575+364 candidates, 105 primes (previously 570+102/38 and 3240+697/216).
+// searched-prime count, the match counts (all matches enumerated, none
+// scalar) and the bitmaps below.  Quartic: 360+58 candidates, 24 primes;
+// quintic: 1575+350 candidates, 105 primes.  Under the former rule the
+// enumerations were 62 and 364 candidates long: four required primes (79 in
+// the quartic field; 37, 113 and 547 in the quintic) now find a witness
+// through a lacking prime of residue degree 2 or 3 above 5 or 11 at an
+// earlier candidate, so their enumeration stops sooner.
 // Frozen output of exhaustive factorization over each deterministic fixture.
 // Bit i (least-significant bit first) is the expected classification of
 // candidate i.  Comparing every classification to these bitmaps prevents a
@@ -74,7 +81,7 @@ constexpr std::array<std::uint64_t, 7> kQuarticExpectedPattern = {
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
         UINT64_C(0x60407f0000000000),
-        UINT64_C(0x000000207f861030),
+        UINT64_C(0x0000000207fe1030),
 };
 
 constexpr std::array<std::uint64_t, 31> kQuinticExpectedPattern = {
@@ -102,13 +109,13 @@ constexpr std::array<std::uint64_t, 31> kQuinticExpectedPattern = {
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
         UINT64_C(0x0000000000000000),
-        UINT64_C(0x1803f08000000000),
-        UINT64_C(0x1c0c0100780300e0),
-        UINT64_C(0x0007c0c03f020102),
-        UINT64_C(0x100e04080e000000),
-        UINT64_C(0xc3e03f8061f01c0e),
-        UINT64_C(0x00ff80401f030107),
-        UINT64_C(0x0000000000040fc1),
+        UINT64_C(0x01803f8000000000),
+        UINT64_C(0x0810e0600803f00e),
+        UINT64_C(0x0000003e0601f810),
+        UINT64_C(0xe070807020407000),
+        UINT64_C(0x083e1f01fc030f80),
+        UINT64_C(0x3f0403fe0100f818),
+        UINT64_C(0x0000000000000010),
 };
 
 static_assert(kQuarticExpectedPattern.size() ==
@@ -544,6 +551,44 @@ bool build_witness_batch(WitnessBatch& batch,
                    contract.enumerated_candidate_count;
 }
 
+// The witness rule's one exception to "every other factor is in the base"
+// (the lacking-conjugate rule): the single prime ideal above a rational prime
+// q other than the required prime's that the base lacks, when it has e = 1
+// and the base holds every other prime ideal above q (at least one).  Checked
+// here from the complete decomposition of q, independently of the library
+// helper.
+bool lacking_prime_is_admissible(const silex::PrimeIdeal& factor,
+                                 const silex::FactorBase& base,
+                                 const silex::PrimeIdeal& required_prime) noexcept {
+    sflint::Fmpz q;
+    sflint::Fmpz p;
+    if (!factor.rational_prime(sflint::FmpzRef(q)) ||
+        !required_prime.rational_prime(sflint::FmpzRef(p)) ||
+        sflint::fmpz_equal(sflint::FmpzConstRef(q), sflint::FmpzConstRef(p)) ||
+        factor.ramification_index() != 1) {
+        return false;
+    }
+    silex::PrimeIdealList primes;
+    if (!silex::decompose_prime(primes, *base.parent(),
+                                sflint::FmpzConstRef(q))) {
+        return false;
+    }
+    slong inside = 0;
+    slong outside = 0;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        if (prime == nullptr) {
+            return false;
+        }
+        if (base.contains(*prime)) {
+            ++inside;
+        } else {
+            ++outside;
+        }
+    }
+    return inside >= 1 && outside == 1;
+}
+
 bool full_factorization_has_principal_witness(
         bool& matches,
         const silex::FactorBase& base,
@@ -572,7 +617,9 @@ bool full_factorization_has_principal_witness(
         }
         if (factor.equal(candidate.required_prime)) {
             required_exponent += exponent;
-        } else if (!base.contains(factor)) {
+        } else if (!base.contains(factor) &&
+                   !lacking_prime_is_admissible(factor, base,
+                                                candidate.required_prime)) {
             return true;
         }
     }
