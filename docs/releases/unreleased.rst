@@ -217,6 +217,16 @@ Changed
   merged factors, the log embeddings and every published result are
   unchanged.
 
+- In fields of degree 10 and higher, the residue test that can prove an
+  element is not a square or an ``n``-th power keeps its answer per defining
+  polynomial, element and exponent, so asking it again does not scan the
+  primes again.  Class-group saturation asks it of the same few elements many
+  times; on ``Q(zeta_19)`` one of them is a true square that no residue can
+  disprove, so every repeat used to scan all 40 primes.  The test reads
+  nothing else, so its answers are unchanged: such a square is still reported
+  as undecided, and published results are unchanged on the ``grh`` and
+  ``proven`` corpus rows that finish within 120 seconds.
+
 - The Belabas-Friedman ``hR`` estimate counts the roots of the defining
   polynomial modulo the large cutoff primes with its word-size kernel for
   defining polynomials of degree up to 16, instead of up to 6.  Degrees 7 to
