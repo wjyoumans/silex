@@ -133,8 +133,8 @@ Changed
   ``fmpz_mat_rank`` and computes the transform only when the LLL kernel
   basis fails its exact checks.  The kernel basis and every published
   output are unchanged on the tested ``proven`` corpus rows.  On a busy
-  machine, the 17 analytic finish checks of ``Q(sqrt(10000000005))``
-  (``proven``) took 1.6 to 3.1 s instead of 71 to 143 s over three runs
+  machine, the 17 analytic finish checks of the field defined by
+  ``x^2 - 10000000005`` (``proven``) took 1.6 to 3.1 s instead of 71 to 143 s over three runs
   each.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
