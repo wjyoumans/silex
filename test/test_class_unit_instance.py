@@ -148,7 +148,8 @@ def assert_fail_closed_inputs(exe: Path, root: Path) -> None:
         assert instance["maximal_order_defined"] is False
         assert instance["failure_reason"] == "input_or_options_unavailable"
         # failure_detail is null for every reason other than
-        # factor_base_honesty_unwitnessed and class_unit_computation_failed.
+        # factor_base_honesty_unwitnessed, class_unit_computation_failed and
+        # relation_search_budget_exhausted.
         assert "failure_detail" in instance
         assert instance["failure_detail"] is None
 
@@ -454,6 +455,42 @@ def assert_computation_failure_cause(exe: Path, root: Path) -> None:
     assert unrecorded["failure_detail"] is None
 
 
+def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
+    # x^3 - 4x + 1 in grh mode: with the harness caps the run succeeds, and
+    # the success fields carry no failure reason or detail.
+    coeffs = "1,-4,0,1"
+    success = run_json([str(exe), "--coeffs", coeffs, "--mode", "grh"], root)
+    assert success["success"] is True
+    assert success["certification_status"] == "grh"
+    assert success["class_group"]["order"] == "1"
+    assert success["failure_reason"] is None
+    assert success["failure_detail"] is None
+    # A cap that stops the grh relation search fails the run with
+    # relation_search_budget_exhausted, and failure_detail names the cap.
+    # The caps are chosen to make the run fail; with them the search stops
+    # as follows (class/unit detail log):
+    # - 10 candidates: the candidate budget of the tentative search is
+    #   spent before it has a presentation;
+    # - 110 relations: the tentative presentation is found, and the first
+    #   continuation slice is refused because the relation count has
+    #   reached the cap.
+    # Neither run reaches a unit-group validation, so the detail holds only
+    # the cap and no cause.
+    for flag, value, cap in (
+        ("--max-candidates", "10", "max_candidates"),
+        ("--max-relations", "110", "max_relations"),
+    ):
+        instance = run_json(
+            [str(exe), "--coeffs", coeffs, "--mode", "grh", flag, value],
+            root,
+        )
+        assert instance["success"] is False
+        assert instance["final_result_published"] is False
+        assert instance["failure_stage"] == "total"
+        assert instance["failure_reason"] == "relation_search_budget_exhausted"
+        assert instance["failure_detail"] == {"cap": cap}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
@@ -464,6 +501,7 @@ def main() -> int:
     assert_marked_phase_failures(args.exe, root)
     assert_fail_closed_inputs(args.exe, root)
     assert_computation_failure_cause(args.exe, root)
+    assert_relation_search_budget_exhausted(args.exe, root)
     assert_structure_certificate_route(args.exe, root)
     assert_grh_generation_below_minkowski(args.exe, root)
     assert_grh_minkowski_equality_boundary(args.exe, root)

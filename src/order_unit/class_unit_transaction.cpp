@@ -326,8 +326,11 @@ const char* class_unit_computation_failure_reason(
     if (audit.factor_base_size_limit_exceeded) {
         return "factor_base_size_limit_exceeded";
     }
-    return audit.factor_base_honesty_failure.recorded
-            ? "factor_base_honesty_unwitnessed"
+    if (audit.factor_base_honesty_failure.recorded) {
+        return "factor_base_honesty_unwitnessed";
+    }
+    return audit.relation_search_budget_cap != RelationSearchBudgetCap::none
+            ? "relation_search_budget_exhausted"
             : "class_unit_computation_failed";
 }
 
@@ -345,6 +348,7 @@ void ClassUnitTransactionReport::reset() noexcept {
     factor_base_honesty_failure = FactorBaseHonestyFailure{};
     last_validation_outcome = nullptr;
     factor_base_size_limit_exceeded = false;
+    relation_search_budget_cap = RelationSearchBudgetCap::none;
 }
 
 void ClassUnitTransactionReport::record_timing(ClassUnitStage stage,

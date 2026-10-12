@@ -7,6 +7,7 @@
 #include <silex/order_unit.hpp>
 
 #include "../class_group/factor_base_honesty_failure_internal.hpp"
+#include "../class_group/relation_search_budget_internal.hpp"
 #include "../factor_base/generation_different_route_internal.hpp"
 
 namespace silex::detail {
@@ -136,6 +137,14 @@ struct ClassUnitTransactionReport {
     // factor_base_honesty_failure; read only to name a failed transaction's
     // reason.
     bool factor_base_size_limit_exceeded = false;
+    // The search cap (candidate or relation budget) that stopped the grh
+    // LLL relation search and so ended the class/unit computation: set only
+    // where the computation fails because of it (the tentative candidate,
+    // a refused continuation slice, or a continuation slice that added no
+    // relation), none otherwise; read only to name a failed transaction's
+    // reason and detail.
+    RelationSearchBudgetCap relation_search_budget_cap =
+            RelationSearchBudgetCap::none;
 
     void reset() noexcept;
     void record_timing(ClassUnitStage stage, double elapsed_ms) noexcept;
@@ -227,7 +236,9 @@ const char* class_unit_stage_name(ClassUnitStage stage) noexcept;
 // factor_base_size_limit_exceeded when the last candidate attempt ended
 // because its factor base exceeded the relation module size limit,
 // factor_base_honesty_unwitnessed when it ended at an unwitnessed required
-// prime with no factor-base restart left, otherwise
+// prime with no factor-base restart left,
+// relation_search_budget_exhausted when a candidate or relation cap
+// stopped the relation search (relation_search_budget_cap), otherwise
 // class_unit_computation_failed.
 const char* class_unit_computation_failure_reason(
         const ClassUnitTransactionReport& audit) noexcept;

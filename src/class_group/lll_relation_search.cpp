@@ -1113,6 +1113,7 @@ bool ClassGroupContext::run_lll_relation_route_(
         return false;
     }
     detail::ClassGroupContextStorage& route_storage = *private_storage_;
+    route_storage.lll_route_budget_cap = detail::RelationSearchBudgetCap::none;
     struct GeneratorRelationPolicyGuard {
         ClassGroupContext& context;
         ClassGroupContext::DependentRelationPolicy previous;
@@ -1475,6 +1476,20 @@ bool ClassGroupContext::run_lll_relation_route_(
         }
     }
 
+    // Record the cap that stopped a slice short of its goal: the search
+    // loops above, the small-LLL phase and the pivot collectors all stop on
+    // these two tests (route_budget_exhausted).  A partial-relation
+    // throttle stop is not a budget, and the caps are unlimited by default.
+    if (search_ok && !goal_reached && !partial_throttle_exit) {
+        if (candidates_tried >= options.max_candidates) {
+            route_storage.lll_route_budget_cap =
+                    detail::RelationSearchBudgetCap::max_candidates;
+        } else if (accepted_relations >= options.max_relations) {
+            route_storage.lll_route_budget_cap =
+                    detail::RelationSearchBudgetCap::max_relations;
+        }
+    }
+
     SILEX_LOG(active_diagnostics, DiagnosticsModule::class_group,
               LogLevel::detail,
               goal_reached
@@ -1498,6 +1513,10 @@ bool ClassGroupContext::compute_tentative_candidate_(
             options.diagnostics != nullptr ? options.diagnostics : diagnostics_;
     SILEX_PROFILE_SCOPE(active_diagnostics, DiagnosticsModule::class_group,
                         "class_group.compute_tentative_candidate");
+    if (private_storage_ != nullptr) {
+        private_storage_->lll_route_budget_cap =
+                detail::RelationSearchBudgetCap::none;
+    }
     if (!detail::order_has_parented_basis(order) || !order.is_maximal() ||
         options.coordinate_search_radius < 1 ||
         options.ideal_search_radius < 0 ||
@@ -1562,6 +1581,15 @@ bool ClassGroupContext::compute_tentative_candidate_(
     if (!candidate.run_lll_relation_route_(
                 order, factor_base_bound, local_options, true, true) ||
         !candidate.has_presentation()) {
+        // Keep the cap that stopped the discarded candidate's search, if
+        // any, so that the caller can name it.
+        if (candidate.private_storage_ != nullptr &&
+            candidate.private_storage_->lll_route_budget_cap !=
+                    detail::RelationSearchBudgetCap::none &&
+            ensure_private_storage_()) {
+            private_storage_->lll_route_budget_cap =
+                    candidate.private_storage_->lll_route_budget_cap;
+        }
         return false;
     }
 
@@ -1578,6 +1606,10 @@ bool ClassGroupContext::extend_tentative_relations_(
             options.diagnostics != nullptr ? options.diagnostics : diagnostics_;
     SILEX_PROFILE_SCOPE(active_diagnostics, DiagnosticsModule::class_group,
                         "class_group.extend_tentative_relations");
+    if (private_storage_ != nullptr) {
+        private_storage_->lll_route_budget_cap =
+                detail::RelationSearchBudgetCap::none;
+    }
     if (!detail::order_has_parented_basis(order) || !order.is_maximal() ||
         !same_order_parent(parent(), &order) || !has_factor_base() ||
         !has_presentation() || options.coordinate_search_radius < 1 ||
@@ -1585,11 +1617,19 @@ bool ClassGroupContext::extend_tentative_relations_(
         options.target_relation_kernel_units < 0 ||
         options.post_finite_refinement_phase_budget < 0 ||
         options.max_candidates < 0 || options.max_relations < 0 ||
-        relation_count() >= options.max_relations ||
         (options.relation_saturation_aux_prime_bound != 0 &&
          options.relation_saturation_aux_prime_bound < 2) ||
         options.relation_saturation_max_appends_per_ell < 0 ||
         !detail::valid_certification_request(options.requested_certification)) {
+        return false;
+    }
+    // The relation cap counts every relation of the context, so once it is
+    // reached no slice may run.
+    if (relation_count() >= options.max_relations) {
+        if (ensure_private_storage_()) {
+            private_storage_->lll_route_budget_cap =
+                    detail::RelationSearchBudgetCap::max_relations;
+        }
         return false;
     }
 

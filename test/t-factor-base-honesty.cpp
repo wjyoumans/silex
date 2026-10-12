@@ -2464,6 +2464,65 @@ int test_failure_detail_json() {
             : 1;
 }
 
+// A candidate or relation cap that stopped the relation search names the
+// reason relation_search_budget_exhausted, and failure_detail names the cap
+// by its option name, after the generic failure's cause when a validation
+// ran.  Without a cap the reason stays generic; the size
+// limit and an unwitnessed prime keep their own reasons.
+int test_budget_failure_reason_and_detail_json() {
+    using silex::detail::RelationSearchBudgetCap;
+    silex::detail::ClassUnitTransactionReport report;
+    const auto reason = [&report]() {
+        report.failure_stage = silex::detail::ClassUnitStage::total;
+        report.failure_reason =
+                silex::detail::class_unit_computation_failure_reason(report);
+        return std::string(report.failure_reason);
+    };
+    const bool generic = reason() == "class_unit_computation_failed" &&
+                         failure_detail_json(report) == "null";
+
+    report.relation_search_budget_cap = RelationSearchBudgetCap::max_candidates;
+    const bool candidates =
+            reason() == "relation_search_budget_exhausted" &&
+            failure_detail_json(report) ==
+                    "{\n"
+                    "    \"cap\": \"max_candidates\"\n"
+                    "  }";
+    report.relation_search_budget_cap = RelationSearchBudgetCap::max_relations;
+    const bool relations =
+            reason() == "relation_search_budget_exhausted" &&
+            failure_detail_json(report) ==
+                    "{\n"
+                    "    \"cap\": \"max_relations\"\n"
+                    "  }";
+    // The cap adds to the generic failure's cause; it does not replace it.
+    report.last_validation_outcome = "index_one_publication_failed";
+    const bool cause_kept =
+            reason() == "relation_search_budget_exhausted" &&
+            failure_detail_json(report) ==
+                    "{\n"
+                    "    \"cause\": \"last unit-group validation outcome: "
+                    "index_one_publication_failed\",\n"
+                    "    \"cap\": \"max_relations\"\n"
+                    "  }";
+
+    report.factor_base_honesty_failure.recorded = true;
+    const bool honesty_first = reason() == "factor_base_honesty_unwitnessed";
+    report.factor_base_size_limit_exceeded = true;
+    const bool size_limit_first =
+            reason() == "factor_base_size_limit_exceeded" &&
+            failure_detail_json(report) == "null";
+
+    report.reset();
+    const bool cleared = report.relation_search_budget_cap ==
+                                 RelationSearchBudgetCap::none &&
+                         reason() == "class_unit_computation_failed";
+    return generic && candidates && relations && cause_kept &&
+                           honesty_first && size_limit_first && cleared
+            ? 0
+            : 1;
+}
+
 // Escalation runs only where an unwitnessed prime is final: a caller with a
 // factor-base restart or a fallback route keeps the stage-0 caps of the
 // reference be_honest.
@@ -2874,6 +2933,7 @@ int main() {
                    test_later_attempt_clears_honesty_failure() != 0 ||
                    test_transaction_reuses_passed_honesty_scan() != 0 ||
                    test_failure_detail_json() != 0 ||
+                   test_budget_failure_reason_and_detail_json() != 0 ||
                    test_direct_witness_search_keeps_lattice_fallbacks() != 0
             ? 1
             : 0;

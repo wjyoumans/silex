@@ -80,6 +80,21 @@ Added
   ``random_tries``, ``factor_attempts`` and ``element_steps`` on the T2
   route.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
+- ``silex-class-unit-instance`` reports the new ``failure_reason``
+  ``relation_search_budget_exhausted`` (``failure_stage`` ``total``) when a
+  ``grh`` class/unit computation fails because a search cap stopped its LLL
+  relation search: the candidate cap (``--max-candidates``, option
+  ``ClassGroupComputeOptions::max_candidates``) was spent, or the relation cap
+  (``--max-relations``, option ``max_relations``) was reached, before the
+  search found the relations it needed.  Such runs previously reported
+  ``class_unit_computation_failed``.  Its ``failure_detail`` holds ``cap``,
+  the option name of the cap that stopped the search (``max_candidates`` or
+  ``max_relations``), preceded by the same ``cause`` key as for
+  ``class_unit_computation_failed`` when a unit-group validation ran.  Only
+  failing ``grh`` runs change; ``proven`` runs stopped by a cap still report
+  ``class_unit_computation_failed``, and successful runs, results and labels
+  are unchanged.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
 
 - A ``proven`` request for a maximal imaginary quadratic order whose base up
   to the generation bound would exceed the factor-base size limit of 2^14

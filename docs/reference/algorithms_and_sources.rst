@@ -1895,8 +1895,22 @@ with reason ``factor_base_honesty_unwitnessed`` instead of
 ``failure_reason``; the failure itself and every label are unchanged.  A
 factor base over the fixed size limit of ``2^14`` generators is refused
 before any matrix is allocated, and the transaction then reports
-``factor_base_size_limit_exceeded``; any other computation failure reports
-``class_unit_computation_failed``.  Every
+``factor_base_size_limit_exceeded``.  A ``grh`` computation that fails
+because a search cap stopped its LLL relation search reports
+``relation_search_budget_exhausted``: the tentative search spent its
+candidate cap (``ClassGroupComputeOptions::max_candidates``, counted per call
+of the relation route) or reached the relation cap (``max_relations``,
+counted over all relations of the candidate) before it had a presentation,
+the relation cap refused a continuation slice, or a continuation slice spent
+its candidate cap without adding a relation.  Both caps are unlimited by
+default; ``silex-class-unit-instance`` sets them.  The caps and these stops
+are Silex's own bounds: Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group`` and
+``src/NumFieldOrd/NfOrd/Clgp/Main_LLL.jl:class_group_new_relations_via_lll``
+keep searching at these points, and PARI 2.17.3
+``src/basemath/buch2.c:Buchall_param`` enlarges its factor base instead of
+failing.  Only the reason is new; the failure itself is unchanged.  Any other
+computation failure reports ``class_unit_computation_failed``.  Every
 candidate at every stage passes the same exact witness check.  For the
 relation-search checkpoint, stage 0 is the capped T2 search, not the previous
 search; the unchanged results of the 65 succeeding ``proven`` benchmark rows
@@ -1911,12 +1925,16 @@ once per ``bnfinit`` pass.
 In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``
 object is the one place for structured failure detail; its keys depend on
 ``failure_reason``, and it is null for every reason other than
-``factor_base_honesty_unwitnessed`` and ``class_unit_computation_failed``.
-For ``class_unit_computation_failed`` it is an object with one key,
+``factor_base_honesty_unwitnessed``, ``class_unit_computation_failed`` and
+``relation_search_budget_exhausted``.  For ``class_unit_computation_failed``
+it is an object with one key,
 ``cause``, free text naming the last unit-group validation outcome the
 computation reached (for example ``index_one_publication_failed``); it is
 null when the computation failed before validation ran.  For
-``factor_base_honesty_unwitnessed`` it gives the
+``relation_search_budget_exhausted`` it is an object with the key ``cap``,
+the option name of the cap that stopped the search (``max_candidates`` or
+``max_relations``), preceded by the same ``cause`` key when a validation
+ran.  For ``factor_base_honesty_unwitnessed`` it gives the
 unwitnessed prime as ``p``, a decimal string such as ``"3"`` like every big
 integer in this JSON, and ``residue_degree``, the route as ``search``
 (``lattice`` or ``t2``), the last stage searched and the last stage allowed

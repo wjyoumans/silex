@@ -14,8 +14,11 @@ namespace silex_tools {
 // depend on `failure_reason`, or null when that reason carries no detail.
 // class_unit_computation_failed carries `cause`, free text naming the last
 // unit-group validation outcome reached (the detail is null when no
-// validation ran).  Otherwise only factor_base_honesty_unwitnessed carries
-// detail: the unwitnessed
+// validation ran).  relation_search_budget_exhausted carries `cap`, the
+// option name of the search cap that stopped the relation search
+// ("max_candidates" or "max_relations"), after the same `cause` when a
+// validation ran.  Otherwise only
+// factor_base_honesty_unwitnessed carries detail: the unwitnessed
 // required prime (`p`, a decimal string like every big integer in this
 // JSON, and `residue_degree`), its witness search route (`search`,
 // "lattice" or "t2"), the stage of its last search against the last stage
@@ -36,6 +39,23 @@ inline void write_class_unit_failure_detail_json(
         // names and fixed prose, so no JSON escaping is needed.
         out << "{\n    \"cause\": \"last unit-group validation outcome: "
             << report.last_validation_outcome << "\"\n  }";
+        return;
+    }
+    const char* const cap = silex::detail::relation_search_budget_cap_name(
+            report.relation_search_budget_cap);
+    if (report.failure_reason != nullptr &&
+        std::strcmp(report.failure_reason,
+                    "relation_search_budget_exhausted") == 0 &&
+        cap != nullptr) {
+        // The cap adds to the generic failure's `cause`, which stays when a
+        // validation ran.  Static names and fixed prose; no JSON escaping is
+        // needed.
+        out << "{\n";
+        if (report.last_validation_outcome != nullptr) {
+            out << "    \"cause\": \"last unit-group validation outcome: "
+                << report.last_validation_outcome << "\",\n";
+        }
+        out << "    \"cap\": \"" << cap << "\"\n  }";
         return;
     }
     if (report.failure_reason == nullptr ||

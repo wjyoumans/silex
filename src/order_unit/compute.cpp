@@ -3567,6 +3567,20 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     candidate_class_group.class_unit_transaction_context_ =
             class_group.class_unit_transaction_context_;
     candidate_class_group.set_diagnostics(active_diagnostics);
+    // Called only where the computation fails: names the candidate or
+    // relation cap, if one stopped the latest relation-search slice, in the
+    // transaction report (relation_search_budget_internal.hpp).
+    auto record_relation_search_budget_cap =
+            [&candidate_class_group]() noexcept {
+        detail::ClassUnitTransactionContext* const run_context =
+                candidate_class_group.class_unit_transaction_context_;
+        if (run_context != nullptr &&
+            candidate_class_group.private_storage_ != nullptr) {
+            run_context->audit.relation_search_budget_cap =
+                    candidate_class_group.private_storage_
+                            ->lll_route_budget_cap;
+        }
+    };
     bool tentative_ok = false;
     {
         SILEX_PROFILE_SCOPE(
@@ -3576,6 +3590,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                 order, factor_base_bound, local_options);
     }
     if (!tentative_ok) {
+        record_relation_search_budget_cap();
         return false;
     }
     if (options.requested_certification == CertificationMode::grh &&
@@ -3916,6 +3931,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                       LogLevel::detail,
                       "class/unit continuation did not add a relation "
                       "slice");
+            record_relation_search_budget_cap();
             return false;
         }
         if (candidate_class_group.relation_count() <= relation_count_before) {
@@ -3923,6 +3939,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                       LogLevel::detail,
                       "class/unit continuation made no relation "
                       "progress");
+            record_relation_search_budget_cap();
             return false;
         }
         flint::Fmpz class_order_after;

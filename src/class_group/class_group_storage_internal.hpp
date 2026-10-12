@@ -9,6 +9,7 @@
 #include <silex/residue_field.hpp>
 
 #include "relation_completion_scheduler_internal.hpp"
+#include "relation_search_budget_internal.hpp"
 #include "../factor_base/generation_different_route_internal.hpp"
 
 #include <cstdint>
@@ -298,6 +299,13 @@ struct ClassGroupContextStorage {
     bool partial_relations_configured = false;
 
     RandomIdealSearchState random_ideal_search_state;
+    // The cap that ended the latest LLL relation-route slice of this context
+    // short of its goal (none when no cap did, or when the slice failed for
+    // another reason).  Written by run_lll_relation_route_ and the
+    // tentative-candidate and extension calls around it; read only to name
+    // the failure of a class/unit transaction.
+    RelationSearchBudgetCap lll_route_budget_cap =
+            RelationSearchBudgetCap::none;
     ReducedIdealLatticeCache native_post_finite_reduced_lattices;
     std::optional<RelationFinishState> finish_state;
     HnfFinishWorkspace hnf_finish_workspace;
