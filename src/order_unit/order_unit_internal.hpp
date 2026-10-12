@@ -309,6 +309,22 @@ bool class_regulator_index_is_one_from_candidate_product(
         flint::ArbConstRef analytic_class_regulator_product,
         slong precision,
         const DiagnosticsContext* diagnostics) noexcept;
+// The decision rule of compact_independent, applied to a ball that encloses
+// the Gram determinant det(L L^T) of the log rows L of the generators (places
+// columns, degree the field degree), at one working precision.  The rule is
+// the reference `_isindependent`: dependent when the ball lies below the lower
+// bound (1/r)^r ((21/128) log(n) / n^2)^(2r), r = places - 1, or is exactly
+// zero; independent when the ball is positive; otherwise undecided (decided
+// false), and the caller doubles the precision.  Fails when degree <= 1 or
+// precision <= 0.  Any enclosure of the true determinant gives a sound
+// decision, however it was computed.
+bool compact_independence_from_gram_determinant(
+        bool& decided,
+        bool& independent,
+        const flint::Arb& determinant,
+        slong places,
+        slong degree,
+        slong precision) noexcept;
 bool compact_independent(bool& independent,
                          EmbeddingContext& embeddings,
                          FactoredElementSpan generators,

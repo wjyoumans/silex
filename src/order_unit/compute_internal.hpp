@@ -3,9 +3,12 @@
 #include <silex/class_group.hpp>
 #include <silex/diagnostics.hpp>
 #include <silex/flint/arb.hpp>
+#include <silex/flint/arb_mat.hpp>
+#include <silex/flint/arb_vec.hpp>
 #include <silex/order_unit.hpp>
 
 #include <atomic>
+#include <vector>
 
 #include "relation_unit_internal.hpp"
 #include "../zeta/zeta_internal.hpp"
@@ -721,6 +724,53 @@ bool add_dependent_unit(bool& changed,
                         RelationUnitExtractionState& extraction_state,
                         slong precision,
                         DependentUnitIndexFallback* fallback) noexcept;
+
+// The partial unit basis of the relation-unit search before it reaches full
+// rank: the reference `add_unit!` over `_isindependent` (see "Class groups
+// and order units" in docs/reference/algorithms_and_sources.rst).  A
+// candidate is kept when compact_independent's rule shows it independent of
+// the units already kept.  add_independent_unit first tries that rule on an
+// incremental enclosure of the Gram determinant, with compact_independent's
+// precision doubling and cap, and hands the candidate to
+// compact_independent, unchanged, whenever the incremental test does not
+// decide; see the soundness note in compute.cpp.
+struct IncrementalUnitContext {
+    const NumberField* field = nullptr;
+    slong target_rank = 0;
+    std::vector<FactoredElement> units;
+    bool full_rank = false;
+
+    // Cost memo of the incremental test at one working precision, never a
+    // decision by itself.  rows[i] encloses the product-mode log embedding
+    // of units[i].  When gram_units equals the number of kept units,
+    // gram_inverse and gram_determinant enclose the inverse and the
+    // determinant of the Gram matrix of those rows.
+    struct LogState {
+        slong precision = 0;
+        std::vector<flint::ArbVec> rows;
+        flint::ArbMat gram_inverse{0, 0};
+        flint::Arb gram_determinant;
+        slong gram_units = -1;
+    };
+    // One state per working precision the doubling loop has reached.
+    std::vector<LogState> log_states;
+
+    // For tests: candidates the incremental test decided, and candidates
+    // passed to compact_independent.
+    slong incremental_decisions = 0;
+    slong fallback_decisions = 0;
+
+    bool define(const NumberField& parent, slong rank) noexcept;
+    // Appends `candidate` to `units` when it is independent of them and
+    // sets `changed`.  An undecided or failed independence test leaves
+    // `units` unchanged and returns true, as before.  Fails only on an
+    // undefined context or a candidate from another field.
+    bool add_independent_unit(bool& changed,
+                              const FactoredElement& candidate,
+                              EmbeddingContext& embeddings,
+                              slong precision,
+                              const DiagnosticsContext* diagnostics) noexcept;
+};
 
 bool recompute_units_from_class_context(OrderUnitGroup& units,
                                         const Order& order,

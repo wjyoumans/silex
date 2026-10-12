@@ -962,6 +962,14 @@ Changed
   ``ell = 2``, the computation takes about 28% less time (release build on
   a busy machine, eleven interleaved runs each).
 
+- Unit extraction for ``grh`` class/unit computations tests each candidate
+  unit for independence incrementally, from the Gram matrix and inverse of the
+  units already kept (Schur complement identity), instead of rebuilding the
+  whole logarithmic Gram determinant per candidate.  The decisions are the same
+  enclosure-based decisions as before, so results and failure behavior are
+  unchanged.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 Fixed
 -----
 

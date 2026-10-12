@@ -165,7 +165,22 @@ bool compact_independence_from_log_matrix(bool& decided,
     arb_mat_transpose(transpose.raw(), logs.raw());
     arb_mat_mul(gram.raw(), logs.raw(), transpose.raw(), precision);
     arb_mat_det(determinant.raw(), gram.raw(), precision);
+    return compact_independence_from_gram_determinant(
+            decided, independent, determinant, places, degree, precision);
+}
 
+bool compact_independence_from_gram_determinant(
+        bool& decided,
+        bool& independent,
+        const flint::Arb& determinant,
+        slong places,
+        slong degree,
+        slong precision) noexcept {
+    decided = false;
+    independent = false;
+    if (degree <= 1 || precision <= 0) {
+        return false;
+    }
     if (!flint::arb_is_finite(determinant)) {
         return true;
     }

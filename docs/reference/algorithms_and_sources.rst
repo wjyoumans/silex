@@ -817,6 +817,22 @@ below ``1/B^2``, while every other fraction ``p/q`` with ``q <= b`` lies at
 distance at least ``1/(qb) >= 1/B^2`` from ``a/b``, so the simplest rational
 in the ball is ``a/b``.
 
+Extracting independent units for a ``grh`` class/unit computation decides, for
+each candidate unit, whether its logarithmic row is independent of the rows
+already kept.  Hecke ``src/NumFieldOrd/NfOrd/Unit/Independent.jl:_isindependent``
+tests the Gram determinant of the kept rows plus the candidate against a lower
+bound.  Silex keeps the Gram matrix ``G`` of the kept rows and its inverse and
+evaluates that determinant incrementally.  With ``L`` the kept rows, ``v`` the
+candidate row, ``g = L v`` and ``c = v . v``, the Schur complement identity
+(Horn and Johnson, *Matrix Analysis*, 0.8.5) gives
+``det [[G, g], [g^T, c]] = det(G) (c - g^T G^{-1} g)``.  Every factor is a ball
+enclosure, so the result contains the true determinant, and the decision rule
+(dependent below the lower bound or exactly zero, independent when positive) is
+the one applied to the full determinant.  If the matrix inverse cannot be
+proved, or the ball is undecided, the precision is doubled up to the same cap
+as before, and the full Gram determinant is used when the test stays
+undecided, so decisions and failure behavior are unchanged.
+
 Hecke's ``B`` is the a priori bound ``R_G / R_low``, with ``R_G`` the
 regulator of ``G`` and ``R_low`` the unconditional lower regulator bound,
 and it may have any size.  Silex's search takes a word-size ``B``, so when

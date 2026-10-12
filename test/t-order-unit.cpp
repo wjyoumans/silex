@@ -645,6 +645,149 @@ int test_precision_doubling_cap_forced_failures() {
     return 0;
 }
 
+// IncrementalUnitContext::add_independent_unit keeps the units that
+// compact_independent's rule shows independent, deciding from an
+// incremental enclosure of the Gram determinant.  In the real cyclotomic
+// quartic x^4 - x^3 - 4x^2 + 4x + 1 (Q(zeta_15)^+, unit rank 3) theta,
+// theta - 1 and theta + 2 are units (norms f(0), f(1), f(-2), all 1).  Each
+// add must agree with compact_independent on the same span, the dependent
+// candidates theta^2 and theta (theta - 1)^3 must be rejected, and no
+// candidate may fall back.  From 16 bits the dependent candidates need the
+// doubling, which the incremental test runs itself, so it holds more than
+// one precision state.
+int test_incremental_unit_context_matches_compact_independent() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, -4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Element theta(field);
+    silex::Element theta_minus_one(field);
+    silex::Element theta_plus_two(field);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    assert(theta_plus_two.add_si(theta, 2));
+
+    std::vector<silex::FactoredElement> candidates;
+    std::vector<char> dependent;
+    auto add_candidate = [&](const silex::Element& first, slong first_exp,
+                             const silex::Element* second, slong second_exp,
+                             bool is_dependent) {
+        candidates.emplace_back(field);
+        assert(candidates.back().push(first, first_exp));
+        if (second != nullptr) {
+            assert(candidates.back().push(*second, second_exp));
+        }
+        dependent.push_back(is_dependent ? 1 : 0);
+    };
+    add_candidate(theta, 1, nullptr, 0, false);
+    add_candidate(theta, 2, nullptr, 0, true);
+    add_candidate(theta_minus_one, 1, nullptr, 0, false);
+    add_candidate(theta, 1, &theta_minus_one, 3, true);
+    add_candidate(theta_plus_two, 1, nullptr, 0, false);
+
+    for (const slong precision : {WORD(16), WORD(128)}) {
+        silex::detail::IncrementalUnitContext context;
+        assert(context.define(field, 3));
+        silex::EmbeddingContext embeddings(field);
+        slong calls = 0;
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            std::vector<silex::FactoredElement> trial;
+            for (const silex::FactoredElement& unit : context.units) {
+                trial.emplace_back(field);
+                assert(trial.back().set(unit));
+            }
+            trial.emplace_back(field);
+            assert(trial.back().set(candidates[i]));
+            bool expected = false;
+            assert(silex::detail::compact_independent(
+                    expected, embeddings,
+                    silex::FactoredElementSpan(trial.data(), trial.size()),
+                    precision));
+            assert(expected == (dependent[i] == 0));
+
+            bool changed = false;
+            assert(context.add_independent_unit(changed, candidates[i],
+                                                embeddings, precision,
+                                                nullptr));
+            ++calls;
+            assert(changed == expected);
+            assert(context.units.size() == (changed ? trial.size()
+                                                    : trial.size() - 1));
+        }
+        assert(context.full_rank);
+        assert(context.incremental_decisions == calls);
+        assert(context.fallback_decisions == 0);
+        if (precision == 16) {
+            assert(context.log_states.size() > 1);
+        }
+
+        // A full-rank context takes no more candidates.
+        bool changed = true;
+        assert(!context.add_independent_unit(changed, candidates[0],
+                                             embeddings, precision, nullptr));
+        assert(!changed);
+    }
+    return 0;
+}
+
+// The fallback of add_independent_unit.  With the precision-doubling cap
+// forced to one bit, neither the incremental test nor compact_independent
+// decides the unit 1 + sqrt(2) at one bit: the candidate falls back to
+// compact_independent, which stops at the cap (one cap event, from
+// compact_independent only) and fails, so the candidate is not kept, as
+// before the incremental test.  With the default cap the incremental test
+// doubles the precision itself and keeps it.
+int test_incremental_unit_context_cap_fallback() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Element epsilon(field);
+    assert(set_quadratic_coeffs(epsilon, 1, 1, 1, 1));
+    silex::FactoredElement candidate(field);
+    assert(candidate.set_element(epsilon));
+    silex::EmbeddingContext embeddings(field);
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "unit_group.precision_doubling_cap";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+
+    silex::detail::IncrementalUnitContext context;
+    assert(context.define(field, 1));
+    {
+        PrecisionCapOverride cap(1);
+        bool changed = true;
+        assert(context.add_independent_unit(changed, candidate, embeddings, 1,
+                                            &diagnostics));
+        assert(!changed);
+        assert(context.units.empty());
+        assert(!context.full_rank);
+        assert(context.incremental_decisions == 0);
+        assert(context.fallback_decisions == 1);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(counter.count == 1);
+#endif
+    }
+
+    bool changed = false;
+    assert(context.add_independent_unit(changed, candidate, embeddings, 1,
+                                        nullptr));
+    assert(changed);
+    assert(context.full_rank);
+    assert(context.units.size() == 1);
+    assert(context.incremental_decisions == 1);
+    assert(context.fallback_decisions == 1);
+    assert(context.log_states.size() > 1);
+    return 0;
+}
+
 // An exact half-integer coordinate stops the reduce-mod-units precision
 // ladder.  In the cyclic cubic x^3 - 3x + 1 the units theta^2 and theta - 1
 // generate a rank-two group in which theta^3 has coordinates exactly
@@ -11760,6 +11903,8 @@ int main() {
     test_unit_extraction_cache_clear();
     test_precision_doubling_cap_default_value();
     test_precision_doubling_cap_forced_failures();
+    test_incremental_unit_context_matches_compact_independent();
+    test_incremental_unit_context_cap_fallback();
     test_reduce_mod_units_half_integer_tie();
     test_apply_unit_reduction_factor_list();
     test_reduce_mod_units_half_integer_tie_stop_rule();

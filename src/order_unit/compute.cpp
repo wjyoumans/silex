@@ -14,6 +14,7 @@
 #include "../lat/flatter_backend_internal.hpp"
 #include "../lat/fplll_backend_internal.hpp"
 
+#include <flint/arb_mat.h>
 #include <flint/fmpq_mat.h>
 #include <flint/fmpq_poly.h>
 
@@ -31,6 +32,7 @@
 #include <limits>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace silex {
@@ -42,57 +44,307 @@ struct RelationUnitCandidateSortKey {
     std::size_t original_index = 0;
 };
 
-struct IncrementalUnitContext {
-    const NumberField* field = nullptr;
-    slong target_rank = 0;
-    std::vector<FactoredElement> units;
-    bool full_rank = false;
+namespace {
 
-    bool define(const NumberField& parent, slong rank) noexcept {
-        if (rank <= 0) {
+// Encloses the product-mode log embedding of `unit` at `precision`, the row
+// compact_log_matrix computes for it.  Like compact_log_matrix it passes no
+// diagnostics context.
+bool incremental_log_row(flint::ArbVec& out,
+                         const FactoredElement& unit,
+                         EmbeddingContext& embeddings,
+                         slong places,
+                         slong precision) noexcept {
+    flint::ArbVec row(places);
+    if (!unit.logarithmic_embedding(flint::ArbVecRef(row), embeddings,
+                                    LogEmbeddingMode::product, precision)) {
+        return false;
+    }
+    out = std::move(row);
+    return true;
+}
+
+void incremental_row_dot(flint::Arb& out,
+                         const flint::ArbVec& left,
+                         const flint::ArbVec& right,
+                         slong precision) noexcept {
+    ::arb_dot(out.raw(), nullptr, 0, left.data(), 1, right.data(), 1,
+              left.length(), precision);
+}
+
+using IncrementalLogState = IncrementalUnitContext::LogState;
+
+// The memo of `context` at `precision`, created empty on first use.
+std::size_t incremental_log_state(IncrementalUnitContext& context,
+                                  slong precision) noexcept {
+    for (std::size_t i = 0; i < context.log_states.size(); ++i) {
+        if (context.log_states[i].precision == precision) {
+            return i;
+        }
+    }
+    context.log_states.emplace_back();
+    context.log_states.back().precision = precision;
+    return context.log_states.size() - 1;
+}
+
+// Brings `state` to the first `kept` units of `context`: their log rows,
+// and enclosures of the inverse and the determinant of their Gram matrix.
+// False when a row or a certified inverse is not available at this
+// precision.
+bool incremental_prepare(IncrementalLogState& state,
+                         const IncrementalUnitContext& context,
+                         slong kept,
+                         EmbeddingContext& embeddings,
+                         slong places) noexcept {
+    const slong precision = state.precision;
+    while (static_cast<slong>(state.rows.size()) < kept) {
+        flint::ArbVec row(0);
+        if (!incremental_log_row(row, context.units[state.rows.size()],
+                                 embeddings, places, precision)) {
             return false;
         }
-        field = &parent;
-        target_rank = rank;
-        units.clear();
-        units.reserve(static_cast<std::size_t>(rank));
-        full_rank = false;
+        state.rows.push_back(std::move(row));
+    }
+    if (state.gram_units == kept) {
         return true;
     }
 
-    bool add_independent_unit(bool& changed,
-                              const FactoredElement& candidate,
+    state.gram_units = -1;
+    flint::ArbMat gram(kept, kept);
+    flint::ArbMat inverse(kept, kept);
+    flint::Arb determinant;
+    flint::Arb entry;
+    for (slong i = 0; i < kept; ++i) {
+        for (slong j = 0; j <= i; ++j) {
+            incremental_row_dot(entry,
+                                state.rows[static_cast<std::size_t>(i)],
+                                state.rows[static_cast<std::size_t>(j)],
+                                precision);
+            arb_set(arb_mat_entry(gram.raw(), i, j), entry.raw());
+            arb_set(arb_mat_entry(gram.raw(), j, i), entry.raw());
+        }
+    }
+    if (kept == 0) {
+        arb_one(determinant.raw());
+    } else {
+        if (arb_mat_inv(inverse.raw(), gram.raw(), precision) == 0) {
+            return false;
+        }
+        arb_mat_det(determinant.raw(), gram.raw(), precision);
+        if (!flint::arb_is_positive(determinant)) {
+            return false;
+        }
+    }
+    state.gram_inverse.swap(inverse);
+    state.gram_determinant.swap(determinant);
+    state.gram_units = kept;
+    return true;
+}
+
+// The incremental test at the precision of `state` for the last entry of
+// context.units against the ones before it.  Returns true only when it
+// decides, with the answer in `independent`; `row` receives the
+// candidate's log row when one was computed.
+bool incremental_independence_at(bool& independent,
+                                 flint::ArbVec& row,
+                                 IncrementalLogState& state,
+                                 const IncrementalUnitContext& context,
+                                 EmbeddingContext& embeddings,
+                                 slong places,
+                                 slong degree) noexcept {
+    independent = false;
+    const slong precision = state.precision;
+    const slong kept = static_cast<slong>(context.units.size()) - 1;
+    if (!incremental_prepare(state, context, kept, embeddings, places) ||
+        !incremental_log_row(row, context.units.back(), embeddings, places,
+                             precision)) {
+        return false;
+    }
+
+    flint::ArbVec projection(kept);
+    flint::ArbVec inverse_projection(kept);
+    flint::Arb norm;
+    flint::Arb complement;
+    flint::Arb determinant;
+    incremental_row_dot(norm, row, row, precision);
+    for (slong i = 0; i < kept; ++i) {
+        ::arb_dot(projection.data() + i, nullptr, 0,
+                  state.rows[static_cast<std::size_t>(i)].data(), 1,
+                  row.data(), 1, places, precision);
+    }
+    for (slong i = 0; i < kept; ++i) {
+        ::arb_dot(inverse_projection.data() + i, nullptr, 0,
+                  arb_mat_entry(state.gram_inverse.raw(), i, 0), 1,
+                  projection.data(), 1, kept, precision);
+    }
+    // complement = norm - projection . inverse_projection
+    ::arb_dot(complement.raw(), norm.raw(), 1, projection.data(), 1,
+              inverse_projection.data(), 1, kept, precision);
+    arb_mul(determinant.raw(), state.gram_determinant.raw(),
+            complement.raw(), precision);
+
+    bool decided = false;
+    return compact_independence_from_gram_determinant(
+                   decided, independent, determinant, places, degree,
+                   precision) &&
+           decided;
+}
+
+// The incremental independence test for the last entry of context.units
+// against the ones before it, with compact_independent's precision doubling
+// and cap (precision_doubling_cap, precision_doubling_allowed); the cap
+// diagnostics are left to compact_independent.  Returns true only when it
+// decides, with the answer in `independent`, the decision precision in
+// `decided_precision`, and the candidate's log row at that precision in
+// `row`.
+//
+// Soundness under rounding.  Let L be the true k x places matrix of log
+// rows of the kept units, v the true row of the candidate, G = L L^T,
+// g = L v and c = v.v.  If G is invertible, the Schur complement
+// determinant identity (Horn and Johnson, Matrix Analysis, 2nd ed., 0.8.5)
+// gives
+//     det [[G, g], [g^T, c]] = det(G) (c - g^T G^{-1} g),
+// and the left side is the Gram determinant det(M M^T), M = [L; v], that
+// compact_independent tests.  At each working precision every factor is
+// computed in ball arithmetic from enclosures: the rows from
+// logarithmic_embedding (the call compact_log_matrix makes), the Gram
+// entries, g and c from arb_dot, G^{-1} from arb_mat_inv, and det(G) from
+// arb_mat_det.  arb_mat_inv returns zero unless it proves the ball matrix,
+// and so the true G, invertible, and otherwise encloses the true inverse;
+// the test is then skipped at that precision.  Ball operations are
+// inclusion monotone, so the computed ball contains the true Gram
+// determinant of the k + 1 rows whatever the rounding, and no step uses a
+// midpoint as if it were exact.  compact_independence_from_gram_determinant
+// applies compact_independent's rule and lower bound to that ball, and the
+// rule is sound for any enclosure of the true determinant: below the lower
+// bound or exactly zero means dependent, positive means independent.  So a
+// decision here is the true answer, which is also the answer
+// compact_independent gives whenever it decides.  When this test does not
+// decide before the cap (or a row, inverse or bound is unavailable), the
+// caller runs compact_independent itself, unchanged.
+bool incremental_independence(bool& independent,
+                              slong& decided_precision,
+                              flint::ArbVec& row,
+                              IncrementalUnitContext& context,
                               EmbeddingContext& embeddings,
-                              slong precision,
-                              const DiagnosticsContext* diagnostics) noexcept {
-        changed = false;
-        if (field == nullptr || target_rank <= 0 || full_rank ||
-            precision <= 0 || candidate.parent() == nullptr ||
-            !candidate.parent()->has_same_data(*field)) {
+                              slong precision) noexcept {
+    independent = false;
+    decided_precision = 0;
+    const slong kept = static_cast<slong>(context.units.size()) - 1;
+    slong places = 0;
+    const slong degree = context.field->degree();
+    if (kept < 0 || precision <= 0 || !compact_places(places, embeddings) ||
+        kept + 1 >= places || degree <= 1) {
+        return false;
+    }
+
+    slong work_precision = precision;
+    const slong cap = precision_doubling_cap(precision);
+    for (;;) {
+        const std::size_t index =
+                incremental_log_state(context, work_precision);
+        if (incremental_independence_at(independent, row,
+                                        context.log_states[index], context,
+                                        embeddings, places, degree)) {
+            decided_precision = work_precision;
+            return true;
+        }
+        if (!precision_doubling_allowed(work_precision, cap, nullptr,
+                                        "incremental independence stopped "
+                                        "at the precision cap")) {
             return false;
         }
+        work_precision *= 2;
+    }
+}
 
-        units.emplace_back(*field);
-        if (!units.back().is_defined() || !units.back().set(candidate)) {
-            units.pop_back();
-            return false;
-        }
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+// True unless compact_independent decides the other way.
+bool incremental_independence_agrees(bool independent,
+                                     EmbeddingContext& embeddings,
+                                     FactoredElementSpan units,
+                                     slong precision) noexcept {
+    bool direct = false;
+    return !compact_independent(direct, embeddings, units, precision) ||
+           direct == independent;
+}
+#endif
 
-        bool independent = false;
+}  // namespace
+
+bool IncrementalUnitContext::define(const NumberField& parent,
+                                    slong rank) noexcept {
+    if (rank <= 0) {
+        return false;
+    }
+    field = &parent;
+    target_rank = rank;
+    units.clear();
+    units.reserve(static_cast<std::size_t>(rank));
+    full_rank = false;
+    log_states.clear();
+    incremental_decisions = 0;
+    fallback_decisions = 0;
+    return true;
+}
+
+bool IncrementalUnitContext::add_independent_unit(
+        bool& changed,
+        const FactoredElement& candidate,
+        EmbeddingContext& embeddings,
+        slong precision,
+        const DiagnosticsContext* diagnostics) noexcept {
+    changed = false;
+    if (field == nullptr || target_rank <= 0 || full_rank ||
+        precision <= 0 || candidate.parent() == nullptr ||
+        !candidate.parent()->has_same_data(*field)) {
+        return false;
+    }
+
+    units.emplace_back(*field);
+    if (!units.back().is_defined() || !units.back().set(candidate)) {
+        units.pop_back();
+        return false;
+    }
+
+    bool independent = false;
+    slong decided_precision = 0;
+    flint::ArbVec row(0);
+    if (incremental_independence(independent, decided_precision, row, *this,
+                                 embeddings, precision)) {
+        ++incremental_decisions;
+        SILEX_DEBUG_CHECK(
+                diagnostics, DiagnosticsModule::unit_group,
+                DebugLevel::expensive,
+                "incremental independence agrees with compact_independent",
+                incremental_independence_agrees(
+                        independent, embeddings,
+                        FactoredElementSpan(units.data(), units.size()),
+                        precision));
+    } else {
+        ++fallback_decisions;
         if (!compact_independent(independent, embeddings,
                                  FactoredElementSpan(units.data(),
                                                      units.size()),
-                                 precision, diagnostics) ||
-            !independent) {
-            units.pop_back();
-            return true;
+                                 precision, diagnostics)) {
+            independent = false;
         }
-
-        changed = true;
-        full_rank = static_cast<slong>(units.size()) == target_rank;
+    }
+    if (!independent) {
+        units.pop_back();
         return true;
     }
-};
+
+    changed = true;
+    full_rank = static_cast<slong>(units.size()) == target_rank;
+    if (decided_precision > 0) {
+        IncrementalLogState& state = log_states[incremental_log_state(
+                *this, decided_precision)];
+        if (state.rows.size() + 1 == units.size()) {
+            state.rows.push_back(std::move(row));
+        }
+    }
+    return true;
+}
 
 slong order_unit_candidate_used_count(
         const RelationUnitCandidateBatchState& state) noexcept {
