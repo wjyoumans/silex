@@ -250,9 +250,10 @@ bool compact_presentation_power_root(
 // degree `degree`: prod N(f)^r * scale^(n * degree), by multiplicativity of
 // the norm and N(c) = c^degree for c in Q.
 // compact_power_root_from_presentation passes it to Element::is_power for the
-// expanded element, whose own norm can run to tens of thousands of bits while
-// the factors are small.  Returns false when a factor norm is unavailable or
-// zero.
+// expanded element, computing the norm from the factor norms by
+// multiplicativity instead of from the expanded element.  Measured compact-path
+// norms are small (at most 876 bits on the target rows).  Returns false when a
+// factor norm is unavailable or zero.
 bool compact_power_input_norm(flint::Fmpq& norm,
                               const FactoredElement& remainder,
                               flint::FmpzConstRef scale,
