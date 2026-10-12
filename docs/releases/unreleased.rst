@@ -751,6 +751,17 @@ Changed
   2.55 s) (release build, medians of nine paired runs on a busy machine; the
   controlled comparison is pending).
 
+- The exact HNF context ``fmpz_smat::HnfContext``, which the class-group
+  relation search uses, folds newly added rows into the HNF it already holds
+  when that HNF has less than full rank, instead of recomputing the HNF of
+  all rows with ``fmpz_mat_hnf``.  The row HNF is unique, so the
+  lattice, rank, index and every dependent-row decision are unchanged:
+  instance JSON is identical on the 65 ``proven`` and the 183 completed
+  ``grh`` benchmark rows.  ``grh`` CPU time on ``Q(zeta_64)`` falls by about 4%
+  (1.43 s to 1.37 s) and on ``Q(zeta_41)`` by about 2% (4.98 s to 4.88 s)
+  (release build, medians of nine paired runs on a busy machine; the
+  controlled comparison is pending).
+
 Fixed
 -----
 
