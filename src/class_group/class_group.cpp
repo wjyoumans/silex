@@ -5726,26 +5726,92 @@ public:
         return storage;
     }
 
-    // As reduced_relation_kernel, with the integral Gram-Schmidt data of
-    // that basis also built.
-    static const ClassGroupContextStorage* reduced_relation_kernel_gram(
+    // A basis of the relation kernel for the relation-saturation beta size
+    // reduction only, cached in the private storage until the presentation
+    // changes.  Returns the storage holding it, or nullptr on failure.
+    //
+    // The beta size reduction is sound for any basis of the kernel (see
+    // relation_saturation_beta_coefficients), so this basis need not be the
+    // LLL-reduced one that relation_kernel_unit publishes from.  If that
+    // basis is already built it is reused.  Otherwise, for fewer than two
+    // rows or entries above FLINT's 250-bit ULLL truncation threshold
+    // (FLINT 3.6.0 src/fmpz_lll/lll.c, lll_with_removal_ulll.c) the
+    // LLL-reduced basis is built and reused as before.  In between, fmpz_lll
+    // starts with fmpz_lll_wrapper_with_removal_knapsack, whose first phase
+    // is fmpz_lll_d_with_removal_knapsack followed by the reducedness check
+    // fmpz_lll_is_reduced (wrapper_with_removal_knapsack.c); this runs only
+    // the first phase.  Its row operations are unimodular, so the result is
+    // a basis of the kernel whatever its status, and it equals the fmpz_lll
+    // output whenever that check would pass.  On a failure status the
+    // LLL-reduced basis is built instead, as fmpz_lll's later phases would.
+    // The check is skipped because its precision fallback dominated the
+    // cost on a 71 x 94 kernel and reducedness only bounds the size of the
+    // reduced beta rows; it is not part of the proof.
+    static const ClassGroupContextStorage* saturation_relation_kernel(
             const ClassGroupContext& context) noexcept {
+        ClassGroupContextStorage* storage = context.private_storage_.get();
+        if (!context.has_presentation() || storage == nullptr) {
+            return nullptr;
+        }
+        if (storage->saturation_relation_kernel_valid) {
+            return storage;
+        }
+        if (!storage->reduced_relation_kernel_valid) {
+            flint::FmpzMat kernel(context.relation_kernel_unit_count(),
+                                  context.relation_count());
+            if (!context.quotient_.relation_kernel_matrix(
+                        flint::FmpzMatRef(kernel))) {
+                return nullptr;
+            }
+            constexpr slong kFlintUlllTruncationBits = 250;
+            const slong bits = ::fmpz_mat_max_bits(kernel.raw());
+            if (flint::fmpz_mat_nrows(kernel) > 1 &&
+                bits >= -kFlintUlllTruncationBits &&
+                bits <= kFlintUlllTruncationBits) {
+                flint::FmpzLll lll;
+                if (::fmpz_lll_d_with_removal_knapsack(
+                            kernel.raw(), nullptr, nullptr, lll.raw()) != -1) {
+                    storage->saturation_relation_kernel = std::move(kernel);
+                    storage->saturation_relation_kernel_valid = true;
+                    return storage;
+                }
+            }
+        }
         if (reduced_relation_kernel(context) == nullptr) {
             return nullptr;
         }
+        flint::FmpzMat copy(
+                flint::fmpz_mat_nrows(storage->reduced_relation_kernel),
+                flint::fmpz_mat_ncols(storage->reduced_relation_kernel));
+        flint::fmpz_mat_set(
+                flint::FmpzMatRef(copy),
+                flint::FmpzMatConstRef(storage->reduced_relation_kernel));
+        storage->saturation_relation_kernel = std::move(copy);
+        storage->saturation_relation_kernel_valid = true;
+        return storage;
+    }
+
+    // As saturation_relation_kernel, with the integral Gram-Schmidt data of
+    // that basis also built.
+    static const ClassGroupContextStorage* saturation_relation_kernel_gram(
+            const ClassGroupContext& context) noexcept {
+        if (saturation_relation_kernel(context) == nullptr) {
+            return nullptr;
+        }
         ClassGroupContextStorage* storage = context.private_storage_.get();
-        if (!storage->reduced_relation_kernel_gram_valid) {
+        if (!storage->saturation_relation_kernel_gram_valid) {
             flint::FmpzMat d(0, 0);
             flint::FmpzMat lambda(0, 0);
             if (!integral_gram_schmidt(
                         d, lambda,
                         flint::FmpzMatConstRef(
-                                storage->reduced_relation_kernel))) {
+                                storage->saturation_relation_kernel))) {
                 return nullptr;
             }
-            storage->reduced_relation_kernel_gram_d = std::move(d);
-            storage->reduced_relation_kernel_gram_lambda = std::move(lambda);
-            storage->reduced_relation_kernel_gram_valid = true;
+            storage->saturation_relation_kernel_gram_d = std::move(d);
+            storage->saturation_relation_kernel_gram_lambda =
+                    std::move(lambda);
+            storage->saturation_relation_kernel_gram_valid = true;
         }
         return storage;
     }
@@ -9993,6 +10059,24 @@ bool size_reduce_row_against_basis(flint::FmpzMatRef row,
     return true;
 }
 
+bool relation_saturation_kernel_basis(
+        flint::FmpzMat& out,
+        bool& lll_basis_built,
+        const ClassGroupContext& context) noexcept {
+    const ClassGroupContextStorage* storage =
+            ClassGroupRelationAccess::saturation_relation_kernel(context);
+    if (storage == nullptr) {
+        return false;
+    }
+    const flint::FmpzMatConstRef basis(storage->saturation_relation_kernel);
+    flint::FmpzMat copy(flint::fmpz_mat_nrows(basis),
+                        flint::fmpz_mat_ncols(basis));
+    flint::fmpz_mat_set(flint::FmpzMatRef(copy), basis);
+    out = std::move(copy);
+    lll_basis_built = storage->reduced_relation_kernel_valid;
+    return true;
+}
+
 bool relation_saturation_beta_coefficients(
         flint::FmpzMat& rows,
         const ClassGroupContext& context,
@@ -10041,7 +10125,7 @@ bool relation_saturation_beta_coefficients(
         return true;
     }
     const ClassGroupContextStorage* kernel =
-            ClassGroupRelationAccess::reduced_relation_kernel_gram(context);
+            ClassGroupRelationAccess::saturation_relation_kernel_gram(context);
     flint::FmpzMat coefficients(context.invariant_count(), relation_count);
     if (kernel == nullptr ||
         !ClassGroupRelationAccess::invariant_generator_relation_matrix(
@@ -10059,11 +10143,12 @@ bool relation_saturation_beta_coefficients(
         }
         if (!size_reduce_row_against_basis(
                     flint::FmpzMatRef(row),
-                    flint::FmpzMatConstRef(kernel->reduced_relation_kernel),
                     flint::FmpzMatConstRef(
-                            kernel->reduced_relation_kernel_gram_d),
+                            kernel->saturation_relation_kernel),
                     flint::FmpzMatConstRef(
-                            kernel->reduced_relation_kernel_gram_lambda))) {
+                            kernel->saturation_relation_kernel_gram_d),
+                    flint::FmpzMatConstRef(
+                            kernel->saturation_relation_kernel_gram_lambda))) {
             return false;
         }
         for (slong j = 0; j < relation_count; ++j) {

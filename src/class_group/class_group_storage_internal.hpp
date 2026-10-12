@@ -418,22 +418,34 @@ struct ClassGroupContextStorage {
     // the presentation resets the flag.
     flint::FmpzMat reduced_relation_kernel{0, 0};
     bool reduced_relation_kernel_valid = false;
-    // Integral Gram-Schmidt data of reduced_relation_kernel (Cohen, GTM 138,
-    // Algorithm 2.6.7): a 1 x (m + 1) row d with d_0 = 1 and
+    // A basis of the same relation kernel, read only by the
+    // relation-saturation beta size reduction
+    // (relation_saturation_beta_coefficients) and never by
+    // relation_kernel_unit.  It is a copy of reduced_relation_kernel when
+    // that is already built, and otherwise the output of FLINT's
+    // double-precision reduction pass without the final reducedness check
+    // (ClassGroupRelationAccess::saturation_relation_kernel).  Built on first
+    // use and reset together with the reduced kernel.
+    flint::FmpzMat saturation_relation_kernel{0, 0};
+    bool saturation_relation_kernel_valid = false;
+    // Integral Gram-Schmidt data of saturation_relation_kernel (Cohen,
+    // GTM 138, Algorithm 2.6.7): a 1 x (m + 1) row d with d_0 = 1 and
     // d_{j+1} = d_j |b*_j|^2, and an m x m matrix lambda with
     // lambda(k, j) = d_{j+1} mu(k, j) for j < k.  Read by the
     // relation-saturation beta size reduction; built on first use and reset
-    // together with the reduced kernel.
-    flint::FmpzMat reduced_relation_kernel_gram_d{0, 0};
-    flint::FmpzMat reduced_relation_kernel_gram_lambda{0, 0};
-    bool reduced_relation_kernel_gram_valid = false;
+    // together with the kernel bases.
+    flint::FmpzMat saturation_relation_kernel_gram_d{0, 0};
+    flint::FmpzMat saturation_relation_kernel_gram_lambda{0, 0};
+    bool saturation_relation_kernel_gram_valid = false;
 
     void invalidate_reduced_relation_kernel() noexcept {
         reduced_relation_kernel = flint::FmpzMat(0, 0);
         reduced_relation_kernel_valid = false;
-        reduced_relation_kernel_gram_d = flint::FmpzMat(0, 0);
-        reduced_relation_kernel_gram_lambda = flint::FmpzMat(0, 0);
-        reduced_relation_kernel_gram_valid = false;
+        saturation_relation_kernel = flint::FmpzMat(0, 0);
+        saturation_relation_kernel_valid = false;
+        saturation_relation_kernel_gram_d = flint::FmpzMat(0, 0);
+        saturation_relation_kernel_gram_lambda = flint::FmpzMat(0, 0);
+        saturation_relation_kernel_gram_valid = false;
     }
 
     void clear() noexcept {

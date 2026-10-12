@@ -234,12 +234,22 @@ bool size_reduce_row_against_basis(flint::FmpzMatRef row,
                                    flint::FmpzMatConstRef d,
                                    flint::FmpzMatConstRef lambda) noexcept;
 
+// For tests and audits: a copy of the relation-kernel basis that
+// relation_saturation_beta_coefficients size-reduces against, building it
+// if needed, and whether the LLL-reduced kernel basis that
+// relation_kernel_unit reads is built at return.
+bool relation_saturation_kernel_basis(flint::FmpzMat& out,
+                                      bool& lll_basis_built,
+                                      const ClassGroupContext& context) noexcept;
+
 // The relation coefficients of the ell-local relation-saturation beta
 // rows: one row of `rows` per invariant index i with ell | d_i, in index
 // order, equal to the presentation's coefficient row of g_i^{d_i}
-// (invariant_generator_relation_matrix) size-reduced against the
-// LLL-reduced relation kernel, so the two differ by a relation-kernel
-// vector.  Requires `units` to be proven for the same order; see the
+// (invariant_generator_relation_matrix) size-reduced against a reduced
+// basis of the relation kernel kept for this purpose (the LLL-reduced basis
+// or FLINT's uncertified first reduction phase of it; see
+// ClassGroupRelationAccess::saturation_relation_kernel), so the two differ
+// by a relation-kernel vector.  Requires `units` to be proven for the same order; see the
 // definition for the soundness condition.
 bool relation_saturation_beta_coefficients(flint::FmpzMat& rows,
                                            const ClassGroupContext& context,
@@ -250,7 +260,7 @@ bool relation_saturation_beta_coefficients(flint::FmpzMat& rows,
 // src/basemath/buch3.c check_prime, cited in
 // docs/reference/algorithms_and_sources.rst): for each invariant index i with ell | d_i, a compact
 // witness beta_i with (beta_i) = g_i^{d_i}.  The relation coefficients of
-// each beta_i are size-reduced against the LLL-reduced relation kernel, so
+// each beta_i are size-reduced against a reduced relation-kernel basis, so
 // beta_i differs from the presentation's witness
 // (invariant_generator_power_witness) by a relation-kernel unit.  Requires
 // `units` to be proven for the same order; see the definition.
