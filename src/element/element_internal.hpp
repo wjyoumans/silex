@@ -23,7 +23,8 @@ bool has_exact_order(const Element& z, ulong m) noexcept;
 // power-root reconstruction lattice, the field embedding data of the
 // conjugate bounds, per-radicand lifting exponents, f mod p setups of the
 // prime search, the distinct-degree factorizations of f mod p of the residue
-// disproof, 1 / f'(theta), and whole pure_power_hensel_root answers).
+// disproof, 1 / f'(theta), whole pure_power_hensel_root answers, and whole
+// answers of the degree >= 10 residue disproof scan).
 // Diagnostic only: the memo never changes a computed value.
 struct HenselDataCacheCounters {
     slong norm_change_constants_hits = 0;
@@ -42,6 +43,8 @@ struct HenselDataCacheCounters {
     slong inverse_derivative_misses = 0;
     slong power_root_answer_hits = 0;
     slong power_root_answer_misses = 0;
+    slong residue_disproof_answer_hits = 0;
+    slong residue_disproof_answer_misses = 0;
 };
 HenselDataCacheCounters hensel_data_cache_counters() noexcept;
 
@@ -53,6 +56,12 @@ void clear_hensel_data_caches() noexcept;
 // thread, so a test can reach the memos below it with repeated radicands.
 // Diagnostic only.
 void clear_power_root_answer_cache() noexcept;
+
+// Empties only the whole-answer memo of the degree >= 10 residue disproof
+// scan of pure_power_residue_disproves on the calling thread, so a test can
+// reach the residue field setup memo below it with repeated inputs.
+// Diagnostic only.
+void clear_residue_disproof_answer_cache() noexcept;
 
 // Entry points into the private Hensel-lifting and root-reconstruction
 // machinery of `src/element/hensel.cpp`: exact square/power roots over Q

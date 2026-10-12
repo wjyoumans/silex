@@ -15,6 +15,7 @@
 #include <cassert>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1529,6 +1530,8 @@ void test_power_residue_disproof_field_setup_cache_matches_cold() noexcept {
             residue_disproof_decisions(phi25, false);
     const silex::detail::HenselDataCacheCounters filled =
             silex::detail::hensel_data_cache_counters();
+    // The whole-scan answer memo would otherwise hide the setup memo.
+    silex::detail::clear_residue_disproof_answer_cache();
     const std::vector<ResidueDisproofDecision> warm_second =
             residue_disproof_decisions(phi25, false);
     const silex::detail::HenselDataCacheCounters reused =
@@ -1552,6 +1555,91 @@ void test_power_residue_disproof_field_setup_cache_matches_cold() noexcept {
     assert(switched.residue_setup_misses > reused.residue_setup_misses);
     assert(same_residue_disproof_decisions(
             cold, residue_disproof_decisions(phi25, false)));
+}
+
+// The degree >= 10 residue disproof also memoizes its whole answer per
+// (field, radicand, exponent).  A repeat must return the cold decision without
+// scanning again, both for a disproved non-power and for a true power that the
+// scan can never disprove (theta = (theta^10)^2 in Q(zeta_19)), and another
+// field must miss even for the same radicand coordinates.
+void test_power_residue_disproof_answer_cache_matches_cold() noexcept {
+    // Q(zeta_19), degree 18, and Q(zeta_25), degree 20.
+    const silex::NumberField phi19 = field_from_coefficients(
+            {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1});
+    const silex::NumberField phi25 = field_from_coefficients(
+            {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+    struct Case {
+        std::initializer_list<slong> coefficients;
+        slong exponent;
+    };
+    const Case cases[] = {
+            {{0, 1}, 2}, {{3}, 2}, {{1, 1}, 2}, {{2, 1}, 3}, {{0, 1}, 3}};
+    auto decide = [&](const silex::NumberField& field,
+                      const Case& test_case) noexcept {
+        const silex::Element value =
+                element_from_coefficients(field, test_case.coefficients);
+        ResidueDisproofDecision decision;
+        decision.decided = silex::detail::pure_power_residue_disproves(
+                decision.is_power, value, test_case.exponent, nullptr);
+        return decision;
+    };
+
+    std::vector<ResidueDisproofDecision> cold;
+    for (const Case& test_case : cases) {
+        silex::detail::clear_hensel_data_caches();
+        cold.push_back(decide(phi19, test_case));
+    }
+    // theta is a square, so no residue disproves it; 3 is not.
+    assert(!cold[0].decided);
+    assert(cold[1].decided && !cold[1].is_power);
+
+    silex::detail::clear_hensel_data_caches();
+    const silex::detail::HenselDataCacheCounters emptied =
+            silex::detail::hensel_data_cache_counters();
+    std::vector<ResidueDisproofDecision> warm_first;
+    for (const Case& test_case : cases) {
+        warm_first.push_back(decide(phi19, test_case));
+    }
+    const silex::detail::HenselDataCacheCounters filled =
+            silex::detail::hensel_data_cache_counters();
+    std::vector<ResidueDisproofDecision> warm_second;
+    for (const Case& test_case : cases) {
+        warm_second.push_back(decide(phi19, test_case));
+    }
+    const silex::detail::HenselDataCacheCounters reused =
+            silex::detail::hensel_data_cache_counters();
+    assert(same_residue_disproof_decisions(cold, warm_first));
+    assert(same_residue_disproof_decisions(cold, warm_second));
+    const slong case_count = static_cast<slong>(std::size(cases));
+    assert(filled.residue_disproof_answer_misses -
+                   emptied.residue_disproof_answer_misses ==
+           case_count);
+    assert(filled.residue_disproof_answer_hits ==
+           emptied.residue_disproof_answer_hits);
+    // The repeats are answered from the memo: no residue field is consulted.
+    assert(reused.residue_disproof_answer_hits -
+                   filled.residue_disproof_answer_hits ==
+           case_count);
+    assert(reused.residue_disproof_answer_misses ==
+           filled.residue_disproof_answer_misses);
+    assert(reused.residue_setup_hits == filled.residue_setup_hits);
+    assert(reused.residue_setup_misses == filled.residue_setup_misses);
+
+    // Same radicand coordinates in another field: a miss, and its own cold
+    // decision.
+    silex::detail::clear_hensel_data_caches();
+    const ResidueDisproofDecision other_cold = decide(phi25, cases[0]);
+    silex::detail::clear_hensel_data_caches();
+    (void)decide(phi19, cases[0]);
+    const silex::detail::HenselDataCacheCounters before_other =
+            silex::detail::hensel_data_cache_counters();
+    const ResidueDisproofDecision other_warm = decide(phi25, cases[0]);
+    const silex::detail::HenselDataCacheCounters after_other =
+            silex::detail::hensel_data_cache_counters();
+    assert(after_other.residue_disproof_answer_misses ==
+           before_other.residue_disproof_answer_misses + 1);
+    assert(other_warm.decided == other_cold.decided &&
+           other_warm.is_power == other_cold.is_power);
 }
 
 // The same comparison on the degree < 10 pre-lift path, which also fills the
@@ -1905,6 +1993,7 @@ int main() {
     test_power_gp_nonpowers();
     test_power_degree_twenty_cyclotomic_residue_disproof();
     test_power_residue_disproof_field_setup_cache_matches_cold();
+    test_power_residue_disproof_answer_cache_matches_cold();
     test_prelift_disproof_field_setup_cache_matches_cold();
     test_power_hensel_data_cache_reuse();
     test_power_hensel_field_caches_match_cold();

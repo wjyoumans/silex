@@ -3062,6 +3062,116 @@ bool pre_lift_residue_disproves(const flint::FmpqPoly& element_polynomial,
     return false;
 }
 
+// Residue scan of pure_power_residue_disproves in degree 10 and higher (see
+// the comment there): true when a residue at a factor of one of the first
+// kHighDegreeDisproofPrimes admissible odd primes, within 256 attempts,
+// disproves that `element_polynomial` is an n-th power.
+bool high_degree_residue_scan_disproves(
+        const fmpq_poly_t field_polynomial,
+        const fmpq_poly_t element_polynomial,
+        slong degree,
+        slong exponent) noexcept {
+    flint::Fmpz prime;
+    fmpz_set_ui(prime.raw(), 3);
+    // This bound only limits an optional disproof search.  Exhaustion leaves
+    // the caller in the existing unsupported/fail-closed state.
+    constexpr slong max_prime_attempts = 256;
+    slong admissible_primes = 0;
+    for (slong attempt = 0; attempt < max_prime_attempts &&
+                            admissible_primes < kHighDegreeDisproofPrimes;
+         ++attempt) {
+        fmpz_nextprime(prime.raw(), prime.raw(), 1);
+        // Exact skip (see residue_degree_can_disprove_power): no residue
+        // above this prime can disprove the input, so it is not factored and
+        // does not count towards the bound.
+        if (fmpz_abs_fits_ui(prime.raw()) == 0 ||
+            !residue_degree_can_disprove_power(fmpz_get_ui(prime.raw()),
+                                               degree, exponent)) {
+            continue;
+        }
+        // The factorization of f mod p comes from the per-(field, prime)
+        // memo of residue_disproves_power_at_prime.
+        bool admissible = false;
+        if (residue_disproves_power_at_prime(admissible, field_polynomial,
+                                             element_polynomial, degree,
+                                             prime.raw(), exponent)) {
+            return true;
+        }
+        if (admissible) {
+            ++admissible_primes;
+        }
+    }
+    return false;
+}
+
+// Memo of the whole answer of high_degree_residue_scan_disproves.  The grh
+// class saturation stage asks is_square of the same few leftovers many times
+// in one field: on Q(zeta_19) each of 18 failed saturation passes asks it of
+// theta, a true square (theta = (theta^10)^2) that no residue can disprove,
+// so every call runs the scan to its bound of 40 admissible primes, and the
+// disproved leftovers recur as well (10 distinct among 101 calls).
+//
+// Exactness: the key holds every input the scan reads, each compared for
+// exact equality: the defining polynomial f (the degree follows from it), the
+// power-basis coordinates of the input and the exponent.  The scan has no
+// other input and no resource-failure exit: the primes come from
+// fmpz_nextprime, the admissibility tests and the factorizations are
+// deterministic (the residue field setup memo returns what recomputation
+// would), so a hit returns what a fresh scan would.  Both outcomes are
+// stored, since "no disproving residue within the bound" is as repeatable as
+// a disproof; the caller still reports the former as unsupported.  Lifetime
+// and thread safety are as for the caches above; the scan holds no reference
+// into this cache.
+struct ResidueDisproofAnswerEntry {
+    flint::FmpqPoly polynomial;
+    flint::FmpqPoly radicand;
+    slong exponent = 0;
+    bool disproved = false;
+};
+
+constexpr std::size_t kResidueDisproofAnswerCacheCapacity = 64;
+
+BoundedEntryCache<ResidueDisproofAnswerEntry>&
+residue_disproof_answer_cache() noexcept {
+    thread_local BoundedEntryCache<ResidueDisproofAnswerEntry> cache(
+            kResidueDisproofAnswerCacheCapacity);
+    return cache;
+}
+
+// high_degree_residue_scan_disproves through the memo above.
+bool high_degree_residue_disproves(const fmpq_poly_t field_polynomial,
+                                   const flint::FmpqPoly& element_polynomial,
+                                   slong degree,
+                                   slong exponent,
+                                   const DiagnosticsContext* diagnostics)
+        noexcept {
+    for (const ResidueDisproofAnswerEntry& entry :
+         residue_disproof_answer_cache().entries()) {
+        if (entry.exponent == exponent &&
+            fmpq_poly_equal(entry.radicand.raw(),
+                            element_polynomial.raw()) != 0 &&
+            fmpq_poly_equal(entry.polynomial.raw(), field_polynomial) != 0) {
+            ++hensel_data_cache_counters_tls.residue_disproof_answer_hits;
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.power_residue_disproof.cache_hit");
+            return entry.disproved;
+        }
+    }
+    ++hensel_data_cache_counters_tls.residue_disproof_answer_misses;
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                        "element.power_residue_disproof.cache_miss");
+    ResidueDisproofAnswerEntry entry;
+    entry.disproved = high_degree_residue_scan_disproves(
+            field_polynomial, element_polynomial.raw(), degree, exponent);
+    fmpq_poly_set(entry.polynomial.raw(), field_polynomial);
+    fmpq_poly_set(entry.radicand.raw(), element_polynomial.raw());
+    entry.exponent = exponent;
+    const bool disproved = entry.disproved;
+    residue_disproof_answer_cache().insert(std::move(entry));
+    return disproved;
+}
+
 // Radicand-independent part of one prime of pure_power_hensel_prime_search:
 // f mod p and its factorization.  Every search walks the same primes 5, 7,
 // 11, ... and used to reduce and factor f mod p again for each radicand.
@@ -3899,10 +4009,15 @@ void clear_hensel_data_caches() noexcept {
     residue_field_setup_cache().clear();
     inverse_derivative_cache().clear();
     power_root_answer_cache().clear();
+    residue_disproof_answer_cache().clear();
 }
 
 void clear_power_root_answer_cache() noexcept {
     power_root_answer_cache().clear();
+}
+
+void clear_residue_disproof_answer_cache() noexcept {
+    residue_disproof_answer_cache().clear();
 }
 
 bool has_exact_order(const Element& z, ulong m) noexcept {
@@ -4157,35 +4272,16 @@ bool pure_power_residue_disproves(bool& is_power,
         if (!fmpq_poly_is_monic_integral(raw_field->pol)) {
             return false;
         }
-        slong admissible_primes = 0;
-        for (slong attempt = 0; attempt < max_prime_attempts &&
-                                admissible_primes < kHighDegreeDisproofPrimes;
-             ++attempt) {
-            fmpz_nextprime(prime.raw(), prime.raw(), 1);
-            // Exact skip (see residue_degree_can_disprove_power): no residue
-            // above this prime can disprove the input, so it is not
-            // factored and does not count towards the bound.
-            if (fmpz_abs_fits_ui(prime.raw()) == 0 ||
-                !residue_degree_can_disprove_power(fmpz_get_ui(prime.raw()),
-                                                   parent->degree(),
-                                                   exponent)) {
-                continue;
-            }
-            // The factorization of f mod p comes from the per-(field,
-            // prime) memo of residue_disproves_power_at_prime.
-            bool admissible = false;
-            if (residue_disproves_power_at_prime(
-                        admissible, raw_field->pol, element_polynomial.raw(),
-                        parent->degree(), prime.raw(), exponent)) {
-                SILEX_PROFILE_EVENT(
-                        diagnostics, DiagnosticsModule::element,
-                        "element.power_residue_disproof.high_degree_nonpower");
-                is_power = false;
-                return true;
-            }
-            if (admissible) {
-                ++admissible_primes;
-            }
+        // The whole scan answer comes from the per-(field, radicand,
+        // exponent) memo of high_degree_residue_disproves.
+        if (high_degree_residue_disproves(raw_field->pol, element_polynomial,
+                                          parent->degree(), exponent,
+                                          diagnostics)) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.power_residue_disproof.high_degree_nonpower");
+            is_power = false;
+            return true;
         }
         return false;
     }
