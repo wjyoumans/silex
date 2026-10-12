@@ -21,6 +21,7 @@
 #include <silex/number_field.hpp>
 #include <silex/order.hpp>
 #include <silex/order_element.hpp>
+#include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/relation.hpp>
 
@@ -2220,13 +2221,6 @@ driver::AnalyticFinishDecision d21_checkpoint(
     return decision;
 }
 
-// A passed honesty scan is kept in the class/unit transaction with its
-// factor base and bounds, and a later context of the same transaction takes
-// the verdict only for an equal base at the same active and required bounds.
-// A failed scan keeps nothing.  The reuse probe records a verdict for the
-// {P2} base, whose own scan fails: the checkpoint finishes only when the
-// record matches exactly, which shows that the scan was skipped then and run
-// otherwise.
 // Once a route has passed the honesty checkpoint
 // (RelationSearchControlState::honesty_checked), a later call finishes only
 // while factor-base generation stays checked up to the recorded
@@ -2280,6 +2274,61 @@ int test_passed_honesty_checkpoint_requires_required_bound() {
     return 0;
 }
 
+// Relation saturation proofs do not use factor-base generation: after the
+// public check at 2 on Q(sqrt(-26)) (requirement 5, h = 6) the ell = 3 and
+// ell = 2 proofs still verify, but the class group is not labelled proven,
+// because no route publishes `proven` from the saturation status alone.
+int test_saturation_proof_without_bounded_generation_is_not_proven() {
+    FieldSetup setup = imaginary_quadratic_fixture(26);
+    if (!setup.maximal_order.is_maximal()) {
+        return 1;
+    }
+    silex::OrderUnitGroup units;
+    if (!units.compute(setup.maximal_order)) {
+        return 1;
+    }
+    sflint::Fmpz bound;
+    sflint::Fmpz checked_bound;
+    sflint::Fmpz aux_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(bound), 5);
+    sflint::fmpz_set_ui(sflint::FmpzRef(checked_bound), 2);
+    sflint::fmpz_set_ui(sflint::FmpzRef(aux_bound), 200);
+    silex::ClassGroupContext context;
+    if (!context.compute_candidate(setup.maximal_order,
+                                   sflint::FmpzConstRef(bound)) ||
+        !context.check_factor_base_generation_bound(
+                sflint::FmpzConstRef(checked_bound)) ||
+        !context.try_certify_with_units(
+                units, silex::CertificationMode::unknown, 80)) {
+        return 1;
+    }
+    for (const ulong ell_value : {UWORD(3), UWORD(2)}) {
+        sflint::Fmpz ell;
+        sflint::fmpz_set_ui(sflint::FmpzRef(ell), ell_value);
+        if (!context.try_prove_relation_saturation_with_units(
+                    units, sflint::FmpzConstRef(ell),
+                    sflint::FmpzConstRef(aux_bound))) {
+            return 1;
+        }
+    }
+    if (context.relation_saturation_status() != silex::ProofState::verified ||
+        context.relation_saturation_record_count() != 2) {
+        return 1;
+    }
+    // Pinned: the saturation proofs alone do not publish `proven`.
+    if (context.certification_status() == silex::CertificationMode::proven) {
+        return 1;
+    }
+    return 0;
+}
+
+// A passed honesty scan is kept in the class/unit transaction with its
+// factor base and bounds, and a later context of the same transaction takes
+// the verdict only for an equal base at the same active and required bounds.
+// A failed scan keeps nothing.  The reuse probe records a verdict for the
+// {P2} base, whose own scan fails: the checkpoint finishes only when the
+// record matches exactly, which shows that the scan was skipped then and run
+// otherwise.
 int test_transaction_reuses_passed_honesty_scan() {
     using Access = silex::detail::ClassGroupRelationSearchAccess;
     FieldSetup setup = imaginary_quadratic_fixture(21);
@@ -2986,6 +3035,8 @@ int main() {
                    test_later_attempt_clears_honesty_failure() != 0 ||
                    test_transaction_reuses_passed_honesty_scan() != 0 ||
                    test_passed_honesty_checkpoint_requires_required_bound() !=
+                           0 ||
+                   test_saturation_proof_without_bounded_generation_is_not_proven() !=
                            0 ||
                    test_failure_detail_json() != 0 ||
                    test_budget_failure_reason_and_detail_json() != 0 ||
