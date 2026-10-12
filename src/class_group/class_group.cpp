@@ -83,6 +83,69 @@ namespace {
 // class/unit request has its own, lower cutoff, defined below.
 constexpr ulong imaginary_quadratic_listing_max_abs_discriminant_bits = 44;
 
+// Accuracy of the first step of the analytic class number ladder below:
+// the log2 tolerance of the first L(1, chi_D) sum and the accumulation
+// precision, sized so that the radius of the ball for h(D) is about 1/16
+// (rule A2).  h = sqrt(q) L(1, chi_D) / pi needs rad L <= pi / (16 sqrt(q));
+// the tolerance divides that by N / 16 + 2 for the per-term errors of the N
+// terms of the sums (each about tol / 32 under FLINT's per-term precision)
+// and their two tails, and by 4 as a margin, where N is the truncation index
+// estimated as in `quadratic_afe_sum` (src/zeta/zeta.cpp) from the
+// tolerance, iterated from N = sqrt(60 q / pi).  The sums are accumulated at
+// -log2 tol + log2 sqrt(q) + 8 bits, at least 32.  These are cost parameters
+// only: the enclosure is rigorous at any tolerance, and h(D) is taken only
+// when the ball holds one integer.
+struct ImaginaryQuadraticClassNumberAccuracy {
+    slong log2_tolerance = 0;
+    slong precision = 0;
+};
+
+ImaginaryQuadraticClassNumberAccuracy
+imaginary_quadratic_class_number_accuracy(ulong q) noexcept {
+    const double pi = 3.1415926535897932385;
+    const double ln2 = 0.69314718055994530942;
+    const double qd = static_cast<double>(q);
+    const double log2_l_radius = std::log2(pi / (16.0 * std::sqrt(qd)));
+    double terms = std::sqrt(60.0 * qd / pi);
+    double log2_tolerance = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        log2_tolerance =
+                log2_l_radius - std::log2(terms / 16.0 + 2.0) - 2.0;
+        const double z_end = FLINT_MAX(
+                1.0, (1.0 - log2_tolerance) * ln2 + std::log1p(qd / pi));
+        terms = std::sqrt(qd * z_end / pi) + 2.0;
+    }
+    ImaginaryQuadraticClassNumberAccuracy accuracy;
+    accuracy.log2_tolerance = static_cast<slong>(std::floor(log2_tolerance));
+    accuracy.precision = FLINT_MAX(
+            static_cast<slong>(std::floor(-log2_tolerance +
+                                          0.5 * std::log2(qd) + 8.0)),
+            32);
+    return accuracy;
+}
+
+// h = sqrt(q) L / pi at `precision` from a positive ball L for L(1, chi_D),
+// D < -4 (w / (2 pi) = 1 / pi); true, with h in `out`, when that ball holds
+// exactly one integer and it is positive.  `out` is untouched otherwise.
+bool imaginary_quadratic_class_number_from_l1(flint::FmpzRef out,
+                                              const flint::Arb& l_value,
+                                              ulong q,
+                                              slong precision) noexcept {
+    flint::Arb class_number;
+    flint::Arb t;
+    flint::arb_sqrt_ui(t, q, precision);
+    flint::arb_mul(class_number, l_value, t, precision);
+    flint::arb_const_pi(t, precision);
+    flint::arb_div(class_number, class_number, t, precision);
+    flint::Fmpz unique;
+    if (::arb_get_unique_fmpz(unique.raw(), class_number.raw()) != 0 &&
+        flint::fmpz_sgn(flint::FmpzConstRef(unique)) > 0) {
+        flint::fmpz_set(out, flint::FmpzConstRef(unique));
+        return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 namespace detail {
@@ -94,14 +157,23 @@ namespace detail {
 // detail::quadratic_dirichlet_l1 (FLINT acb_dirichlet_l_fmpq_afe, see
 // src/zeta/zeta.cpp).  The ball for h is computed in arb arithmetic from
 // that enclosure, so it contains the integer h(D); h(D) is returned only
-// when the ball contains exactly one integer.  The working precision is the
-// bit length of |D| plus 32, which exceeds the bit length of h(D) < |D|, and
-// is doubled once if the ball still holds more than one integer; otherwise
-// the call fails closed.  The time grows like sqrt(|D| prec) and the memory
-// is constant.
+// when the ball contains exactly one integer.  The steps are tried in turn:
+// first L(1, chi_D) to the absolute tolerance sized for h above
+// (quadratic_dirichlet_l1_with_tolerance), then FLINT's precision mapping at
+// the bit length of |D| plus 32, which exceeds the bit length of
+// h(D) < |D|, then at twice that.  Any failure of the first step moves on
+// to the second, so the ladder succeeds wherever the last two steps alone
+// do, with the same h(D); after the first step, a failed or non-positive
+// L(1, chi_D) enclosure fails closed, and so does a ball still holding more
+// than one integer after the third step.  The time grows like
+// sqrt(|D| prec) and the memory is constant.
 bool imaginary_quadratic_class_number_analytic(
         flint::FmpzRef out,
-        flint::FmpzConstRef discriminant) noexcept {
+        flint::FmpzConstRef discriminant,
+        ImaginaryQuadraticClassNumberAudit* audit) noexcept {
+    if (audit != nullptr) {
+        audit->step = -1;
+    }
     if (::fmpz_cmp_si(discriminant.raw(), -4) >= 0 ||
         !flint::fmpz_fits_si(discriminant)) {
         return false;
@@ -109,27 +181,43 @@ bool imaginary_quadratic_class_number_analytic(
     flint::Fmpz abs_discriminant;
     flint::fmpz_abs(flint::FmpzRef(abs_discriminant), discriminant);
     const ulong q = flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
+
+    ImaginaryQuadraticClassNumberAccuracy accuracy =
+            imaginary_quadratic_class_number_accuracy(q);
+    if (audit != nullptr && audit->override_first_log2_tolerance) {
+        accuracy.log2_tolerance = audit->first_log2_tolerance;
+    }
+    {
+        flint::Arb l_value;
+        if (quadratic_dirichlet_l1_with_tolerance(
+                    flint::ArbRef(l_value), discriminant,
+                    accuracy.log2_tolerance, accuracy.precision) &&
+            flint::arb_is_positive(l_value) &&
+            imaginary_quadratic_class_number_from_l1(out, l_value, q,
+                                                     accuracy.precision)) {
+            if (audit != nullptr) {
+                audit->step = 0;
+            }
+            return true;
+        }
+    }
+
     const slong first_precision =
             static_cast<slong>(::fmpz_bits(abs_discriminant.raw())) + 32;
+    int step = 1;
     for (slong precision = first_precision;
-         precision <= 2 * first_precision; precision *= 2) {
+         precision <= 2 * first_precision; precision *= 2, ++step) {
         flint::Arb l_value;
         if (!quadratic_dirichlet_l1(flint::ArbRef(l_value), discriminant,
                                     precision) ||
             !flint::arb_is_positive(l_value)) {
             return false;
         }
-        // w / (2 pi) = 1 / pi for D < -4.
-        flint::Arb class_number;
-        flint::Arb t;
-        flint::arb_sqrt_ui(t, q, precision);
-        flint::arb_mul(class_number, l_value, t, precision);
-        flint::arb_const_pi(t, precision);
-        flint::arb_div(class_number, class_number, t, precision);
-        flint::Fmpz unique;
-        if (::arb_get_unique_fmpz(unique.raw(), class_number.raw()) != 0 &&
-            flint::fmpz_sgn(flint::FmpzConstRef(unique)) > 0) {
-            flint::fmpz_set(out, flint::FmpzConstRef(unique));
+        if (imaginary_quadratic_class_number_from_l1(out, l_value, q,
+                                                     precision)) {
+            if (audit != nullptr) {
+                audit->step = step;
+            }
             return true;
         }
     }

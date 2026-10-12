@@ -69,13 +69,28 @@ bool imaginary_quadratic_class_number(
         flint::FmpzRef out,
         flint::FmpzConstRef discriminant) noexcept;
 
+// Test controls and record of the steps of
+// `imaginary_quadratic_class_number_analytic`.
+struct ImaginaryQuadraticClassNumberAudit {
+    // When true, the first step uses `first_log2_tolerance` (at most zero)
+    // in place of the tolerance sized for h(D), so a test can make that step
+    // fail to isolate h(D).
+    bool override_first_log2_tolerance = false;
+    slong first_log2_tolerance = 0;
+    // The step that gave h(D): 0 for the tolerance sized for h(D), 1 and 2
+    // for FLINT's precision mapping at the bit length of |D| plus 32 and at
+    // twice that; -1 when none did.
+    int step = -1;
+};
+
 // h(D) for a fundamental discriminant D < -4 with |D| < 2^63 from
 // h(D) = sqrt|D| L(1, chi_D) / pi, returned only when the ball enclosing it
 // contains exactly one integer; false otherwise.  D is not checked to be
-// fundamental.
+// fundamental.  `audit`, when given, is used and updated as described above.
 bool imaginary_quadratic_class_number_analytic(
         flint::FmpzRef out,
-        flint::FmpzConstRef discriminant) noexcept;
+        flint::FmpzConstRef discriminant,
+        ImaginaryQuadraticClassNumberAudit* audit = nullptr) noexcept;
 
 struct WitnessedClassRelationHnfBasis {
     flint::FmpzMat rows{0, 0};

@@ -305,6 +305,23 @@ bool quadratic_dirichlet_l1(flint::ArbRef out,
                             slong precision,
                             QuadraticAfeStepAudit* audit = nullptr) noexcept;
 
+// L(1, chi_D) as `quadratic_dirichlet_l1`, with the same two sums, tail
+// bound and per-term working precisions, but sized by an absolute tolerance
+// instead of FLINT's mapping from a target precision: the first sum is
+// truncated at tolerance 2^log2_tolerance and the second at FLINT's multiple
+// of it (about 2^log2_tolerance sqrt(|D| / pi)), and both sums and their
+// combination are accumulated at `precision`.  The result is a rigorous
+// enclosure for any such tolerance and precision; only its radius depends on
+// them.  Returns false when D is outside the range of
+// `quadratic_dirichlet_l1`, `precision` is not positive, `log2_tolerance` is
+// positive, or the enclosure is not finite.
+bool quadratic_dirichlet_l1_with_tolerance(
+        flint::ArbRef out,
+        flint::FmpzConstRef discriminant,
+        slong log2_tolerance,
+        slong precision,
+        QuadraticAfeStepAudit* audit = nullptr) noexcept;
+
 struct QuadraticAfeGammaStepCount {
     ulong blocks = 0;
     ulong stepped_values = 0;

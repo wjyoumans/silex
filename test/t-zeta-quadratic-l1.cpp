@@ -401,13 +401,119 @@ bool negative_fundamental_discriminant(ulong n) noexcept {
     return (m % 4 == 1 || m % 4 == 2) && n_is_squarefree(m) != 0;
 }
 
+// h(D) from imaginary_quadratic_class_number_analytic, which must take it
+// from the first step, the L(1, chi_D) tolerance sized for h(D).
 ulong analytic_class_number(slong d) {
     sflint::Fmpz discriminant;
     sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
     sflint::Fmpz h;
+    silex::detail::ImaginaryQuadraticClassNumberAudit audit;
     assert(silex::detail::imaginary_quadratic_class_number_analytic(
-            sflint::FmpzRef(h), sflint::FmpzConstRef(discriminant)));
+            sflint::FmpzRef(h), sflint::FmpzConstRef(discriminant), &audit));
+    assert(audit.step == 0);
     return sflint::fmpz_get_ui(sflint::FmpzConstRef(h));
+}
+
+// The L(1, chi_D) enclosure sized by an absolute tolerance overlaps the
+// enclosure of FLINT's precision mapping, for both parities, and narrows as
+// the tolerance does.  Invalid input fails closed and leaves `out`
+// untouched.
+void check_l1_with_tolerance() {
+    for (const slong d : {5L, 13L, -7L, -23L, 1009L, -1019L, -100003L,
+                          100049L}) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+        sflint::Arb reference;
+        assert(silex::detail::quadratic_dirichlet_l1(
+                sflint::ArbRef(reference),
+                sflint::FmpzConstRef(discriminant), 128));
+        for (const slong log2_tolerance : {-20L, -40L}) {
+            sflint::Arb value;
+            assert(silex::detail::quadratic_dirichlet_l1_with_tolerance(
+                    sflint::ArbRef(value), sflint::FmpzConstRef(discriminant),
+                    log2_tolerance, -log2_tolerance + 24));
+            assert(::arb_overlaps(value.raw(), reference.raw()) != 0);
+            assert(radius_lt_2exp_si(value, log2_tolerance + 16));
+        }
+    }
+
+    // A positive tolerance, a non-positive precision, |D| < 3, and |D|
+    // beyond a ulong.
+    struct FailCase {
+        slong d;
+        slong log2_tolerance;
+        slong precision;
+    };
+    for (const FailCase c : {FailCase{-23, 1, 64}, FailCase{-23, -20, 0},
+                             FailCase{-23, -20, -5}, FailCase{-1, -20, 64},
+                             FailCase{0, -20, 64}}) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), c.d);
+        sflint::Arb out;
+        ::arb_set_si(out.raw(), 7);
+        assert(!silex::detail::quadratic_dirichlet_l1_with_tolerance(
+                sflint::ArbRef(out), sflint::FmpzConstRef(discriminant),
+                c.log2_tolerance, c.precision));
+        assert(::arb_equal_si(out.raw(), 7) != 0);
+    }
+    sflint::Fmpz big;
+    sflint::fmpz_set_ui(sflint::FmpzRef(big), 1);
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(big), sflint::FmpzConstRef(big), 64);
+    sflint::fmpz_add_ui(sflint::FmpzRef(big), sflint::FmpzConstRef(big), 3);
+    sflint::fmpz_neg(sflint::FmpzRef(big), sflint::FmpzConstRef(big));
+    sflint::Arb out;
+    ::arb_set_si(out.raw(), 7);
+    assert(!silex::detail::quadratic_dirichlet_l1_with_tolerance(
+            sflint::ArbRef(out), sflint::FmpzConstRef(big), -20, 64));
+    assert(::arb_equal_si(out.raw(), 7) != 0);
+}
+
+// The analytic class number ladder falls back to FLINT's precision mapping
+// at the bit length of |D| plus 32 when the first step fails to isolate
+// h(D), and gives the same h(D).  The first tolerance is forced to 2^0, which
+// leaves an L(1, chi_D) ball containing zero, and to 2^-6, which leaves a
+// positive ball for L(1, chi_D) whose ball for h(D) holds several integers.
+void check_analytic_class_number_ladder() {
+    struct LadderCase {
+        slong d;
+        ulong class_number;
+    };
+    for (const LadderCase c : {LadderCase{-1000003, 105},
+                               LadderCase{-10000019, 1275}}) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), c.d);
+        const ulong q = static_cast<ulong>(-c.d);
+
+        sflint::Arb wide;
+        assert(silex::detail::quadratic_dirichlet_l1_with_tolerance(
+                sflint::ArbRef(wide), sflint::FmpzConstRef(discriminant), 0,
+                64));
+        assert(!sflint::arb_is_positive(wide));
+        sflint::Arb coarse;
+        assert(silex::detail::quadratic_dirichlet_l1_with_tolerance(
+                sflint::ArbRef(coarse), sflint::FmpzConstRef(discriminant),
+                -6, 64));
+        assert(sflint::arb_is_positive(coarse));
+        sflint::Arb h;
+        sflint::Arb t;
+        sflint::arb_sqrt_ui(t, q, 64);
+        sflint::arb_mul(h, coarse, t, 64);
+        sflint::arb_const_pi(t, 64);
+        sflint::arb_div(h, h, t, 64);
+        assert(!radius_lt_2exp_si(h, 0));
+
+        for (const slong forced : {0L, -6L}) {
+            silex::detail::ImaginaryQuadraticClassNumberAudit audit;
+            audit.override_first_log2_tolerance = true;
+            audit.first_log2_tolerance = forced;
+            sflint::Fmpz got;
+            assert(silex::detail::imaginary_quadratic_class_number_analytic(
+                    sflint::FmpzRef(got), sflint::FmpzConstRef(discriminant),
+                    &audit));
+            assert(audit.step == 1);
+            assert(::fmpz_equal_ui(got.raw(), c.class_number) != 0);
+        }
+    }
 }
 
 // h(D) from Dirichlet's class number formula with the L(1, chi_D)
@@ -614,7 +720,9 @@ int main() {
     check_large_imaginary_discriminant_at(imaginary_l1, -10000000019, 39809,
                                           128);
     check_public_class_unit_with_zeta();
+    check_l1_with_tolerance();
     check_analytic_class_number();
+    check_analytic_class_number_ladder();
 
     // |D| about 1e11 runs Taylor stepping of the incomplete gamma values over
     // most of both sums, including Gamma(0, z) = E_1(z), which only real D

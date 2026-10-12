@@ -888,43 +888,49 @@ void quadratic_afe_sum(flint::Arb& res,
     }
 }
 
-// FLINT `acb_dirichlet_l_fmpq_afe` at s = 1 for chi_D, with W(chi_D) = 1.
-bool quadratic_l1_afe(flint::Arb& out,
-                      flint::FmpzConstRef discriminant,
-                      ulong q,
-                      slong precision,
-                      detail::QuadraticAfeStepAudit* audit = nullptr)
-        noexcept {
-    if (q < 3 || precision <= 0) {
-        return false;
-    }
-    const int parity = flint::fmpz_sgn(discriminant) < 0 ? 1 : 0;
-    const slong origprec = precision;
-    const slong prec = static_cast<slong>(
-            static_cast<double>(precision) * 1.001 +
-            2 * static_cast<double>(FLINT_BIT_COUNT(q)));
+// Magnitudes (log2) of FLINT's two AFE sums at s = 1, as in
+// `acb_dirichlet_l_fmpq_afe`: m1 and m2 + m2pre estimate the first and the
+// scaled second sum, mmax is the larger of the two.
+struct QuadraticAfeMagnitudes {
+    double m1 = 0.0;
+    double m2 = 0.0;
+    double m2pre = 0.0;
+    double mmax = 0.0;
+};
 
+QuadraticAfeMagnitudes quadratic_afe_magnitudes(ulong q, int parity) noexcept {
     const double pi_q = 3.1415926535897932385 / static_cast<double>(q);
     const double inv_log2 = 1.4426950408889634074;
-    const double m1 = quadratic_afe_log_gamma_upper_approx(
-                              0.5 * (1.0 + parity), pi_q) * inv_log2;
-    const double m2 = quadratic_afe_log_gamma_upper_approx(
-                              0.5 * parity, pi_q) * inv_log2;
-    const double m2pre = 0.5 * std::log(pi_q) * inv_log2;
-    const double mmax = FLINT_MAX(m1, m2 + m2pre);
+    QuadraticAfeMagnitudes m;
+    m.m1 = quadratic_afe_log_gamma_upper_approx(0.5 * (1.0 + parity), pi_q) *
+           inv_log2;
+    m.m2 = quadratic_afe_log_gamma_upper_approx(0.5 * parity, pi_q) *
+           inv_log2;
+    m.m2pre = 0.5 * std::log(pi_q) * inv_log2;
+    m.mmax = FLINT_MAX(m.m1, m.m2 + m.m2pre);
+    return m;
+}
 
+// The two sums of FLINT `acb_dirichlet_l_fmpq_afe` at s = 1 with W(chi_D) = 1,
+// and their combination: the first sum to the absolute tolerance
+// tol1 = 2^log2_tol1 accumulated at prec1, the second to FLINT's
+// tol2 = tol1 2^(-m2pre) (about tol1 sqrt(q / pi)) accumulated at prec2,
+// combined at `prec`.  Not rounded.
+void quadratic_l1_afe_sums(flint::Arb& out,
+                           flint::FmpzConstRef discriminant,
+                           ulong q,
+                           int parity,
+                           const QuadraticAfeMagnitudes& m,
+                           slong log2_tol1,
+                           slong prec1,
+                           slong prec2,
+                           slong prec,
+                           detail::QuadraticAfeStepAudit* audit) noexcept {
     MagValue tol1;
     MagValue tol2;
     mag_one(tol1.raw());
-    mag_mul_2exp_si(tol1.raw(), tol1.raw(),
-                    static_cast<slong>(mmax - static_cast<double>(prec)));
-    mag_mul_2exp_si(tol2.raw(), tol1.raw(), static_cast<slong>(-m2pre));
-
-    slong prec1 = static_cast<slong>(static_cast<double>(prec) - (mmax - m1));
-    prec1 = FLINT_MAX(prec1, 32);
-    slong prec2 = static_cast<slong>(static_cast<double>(prec) -
-                                     (mmax - (m2 + m2pre)));
-    prec2 = FLINT_MAX(prec2, 32);
+    mag_mul_2exp_si(tol1.raw(), tol1.raw(), log2_tol1);
+    mag_mul_2exp_si(tol2.raw(), tol1.raw(), static_cast<slong>(-m.m2pre));
 
     flint::Arb s1;
     flint::Arb s2;
@@ -944,7 +950,60 @@ bool quadratic_l1_afe(flint::Arb& out,
         ::arb_const_sqrt_pi(t.raw(), prec);
         ::arb_div(out.raw(), out.raw(), t.raw(), prec);
     }
+}
+
+// FLINT `acb_dirichlet_l_fmpq_afe` at s = 1 for chi_D, with W(chi_D) = 1.
+bool quadratic_l1_afe(flint::Arb& out,
+                      flint::FmpzConstRef discriminant,
+                      ulong q,
+                      slong precision,
+                      detail::QuadraticAfeStepAudit* audit = nullptr)
+        noexcept {
+    if (q < 3 || precision <= 0) {
+        return false;
+    }
+    const int parity = flint::fmpz_sgn(discriminant) < 0 ? 1 : 0;
+    const slong origprec = precision;
+    const slong prec = static_cast<slong>(
+            static_cast<double>(precision) * 1.001 +
+            2 * static_cast<double>(FLINT_BIT_COUNT(q)));
+
+    const QuadraticAfeMagnitudes m = quadratic_afe_magnitudes(q, parity);
+    const slong log2_tol1 =
+            static_cast<slong>(m.mmax - static_cast<double>(prec));
+
+    slong prec1 =
+            static_cast<slong>(static_cast<double>(prec) - (m.mmax - m.m1));
+    prec1 = FLINT_MAX(prec1, 32);
+    slong prec2 = static_cast<slong>(static_cast<double>(prec) -
+                                     (m.mmax - (m.m2 + m.m2pre)));
+    prec2 = FLINT_MAX(prec2, 32);
+
+    quadratic_l1_afe_sums(out, discriminant, q, parity, m, log2_tol1, prec1,
+                          prec2, prec, audit);
     ::arb_set_round(out.raw(), out.raw(), origprec);
+    return ::arb_is_finite(out.raw()) != 0;
+}
+
+// Silex deviation from FLINT's precision mapping (see
+// `quadratic_dirichlet_l1_with_tolerance`): the same two sums, tail bound and
+// per-term working precisions, but the first sum's tolerance 2^log2_tol1 is
+// given directly, and both sums and their combination are accumulated at
+// `precision`.
+bool quadratic_l1_afe_with_tolerance(flint::Arb& out,
+                                     flint::FmpzConstRef discriminant,
+                                     ulong q,
+                                     slong log2_tol1,
+                                     slong precision,
+                                     detail::QuadraticAfeStepAudit* audit)
+        noexcept {
+    if (q < 3 || precision <= 0 || log2_tol1 > 0) {
+        return false;
+    }
+    const int parity = flint::fmpz_sgn(discriminant) < 0 ? 1 : 0;
+    const QuadraticAfeMagnitudes m = quadratic_afe_magnitudes(q, parity);
+    quadratic_l1_afe_sums(out, discriminant, q, parity, m, log2_tol1,
+                          precision, precision, precision, audit);
     return ::arb_is_finite(out.raw()) != 0;
 }
 
@@ -4397,6 +4456,28 @@ bool quadratic_dirichlet_l1(flint::ArbRef out,
             flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
     flint::Arb value;
     if (!quadratic_l1_afe(value, discriminant, q, precision, audit)) {
+        return false;
+    }
+    flint::arb_set(out, flint::ArbConstRef(value));
+    return true;
+}
+
+bool quadratic_dirichlet_l1_with_tolerance(flint::ArbRef out,
+                                           flint::FmpzConstRef discriminant,
+                                           slong log2_tolerance,
+                                           slong precision,
+                                           QuadraticAfeStepAudit* audit)
+        noexcept {
+    flint::Fmpz abs_discriminant;
+    flint::fmpz_abs(flint::FmpzRef(abs_discriminant), discriminant);
+    if (!flint::fmpz_abs_fits_ui(flint::FmpzConstRef(abs_discriminant))) {
+        return false;
+    }
+    const ulong q =
+            flint::fmpz_get_ui(flint::FmpzConstRef(abs_discriminant));
+    flint::Arb value;
+    if (!quadratic_l1_afe_with_tolerance(value, discriminant, q,
+                                         log2_tolerance, precision, audit)) {
         return false;
     }
     flint::arb_set(out, flint::ArbConstRef(value));
