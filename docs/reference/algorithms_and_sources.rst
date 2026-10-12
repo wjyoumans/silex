@@ -1894,13 +1894,32 @@ least two rows and entries of at most 250 bits, the basis comes from the
 certified first LLL phase described with ``Lat::lll_reduce`` above:
 ``fmpz_lll_d_with_removal_knapsack``, accepted only when the exact
 certificate holds with FLINT's default parameters, and ``fmpz_lll`` (whose
-result is also kept for the unit candidates) when the reducer fails, the
-certificate fails, or the kernel is outside that range.
-The reducer's row operations are unimodular, so the result is a basis of
-the kernel on every route.  With FLINT's default routing a certified first phase
+result is also kept for the unit candidates) when the reducer fails or the
+certificate fails.  For a kernel with at least two rows and entries of more
+than 250 bits, where ``fmpz_lll`` of
+the kernel itself took most of a 90 s ``proven`` run of
+``real_quadratic_d1000000000009`` (38 rows of up to 151685 bits, busy
+machine), the basis comes from the
+small kernel basis of the ``proven`` analytic finish above: the reduction
+of ``[c*A | I]`` for the presentation's relation matrix ``A``, with the
+same two exact checks, accepted only when ``fmpz_mat_is_reduced`` certifies
+the kernel rows with FLINT's default parameters; ``fmpz_lll`` is used when
+the reducer fails or a check or the certificate fails.  A kernel with one
+row takes ``fmpz_lll``.  The reducer's row operations are unimodular, and
+the checked rows of ``[c*A | I]`` are a kernel basis, so the result is a
+basis of the kernel on every route.  With FLINT's default routing a certified first phase
 is exactly the basis ``fmpz_lll`` returns for that kernel (``fmpz_lll`` keeps
-it when ``fmpz_lll_is_reduced`` holds), so the basis does not depend on the
-route.  With the integral Gram--Schmidt data of that
+it when ``fmpz_lll_is_reduced`` holds), so for kernels of at most 250 bits
+the basis does not depend on the route.  The ``[c*A | I]`` route returns an
+LLL-reduced basis of the same lattice that need not equal that one, so the
+reduced ``c_i`` below can differ by a kernel vector from those of the
+``fmpz_lll`` basis.  As shown below, this does not change the rank modulo
+``ell`` at any set of auxiliary primes.  Whether an auxiliary prime is
+usable also depends on which relation generators occur in ``beta_i`` (a
+generator that vanishes at the prime makes Silex skip it), so the number of
+primes the proof uses is not shown to be route-independent; on
+``real_quadratic_d1000000000009`` the proof records were identical to those
+of the ``fmpz_lll`` route.  With the integral Gram--Schmidt data of that
 basis, Silex subtracts
 ``round(mu)`` times each basis row, last row first, as in sub-algorithm RED
 of Cohen, *A Course in Computational Algebraic Number Theory*, GTM 138,

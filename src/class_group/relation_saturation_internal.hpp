@@ -268,6 +268,47 @@ bool relation_saturation_kernel_gram(flint::FmpzMat& d,
                                      flint::FmpzMat& lambda,
                                      const ClassGroupContext& context) noexcept;
 
+class TestHookAccess;
+
+// A failure that only detail::TestHookAccess (test/test_hook_access.hpp)
+// can inject into the extension route of the relation-saturation kernel
+// basis (ClassGroupRelationAccess::saturation_relation_kernel); the
+// certified first phase has CertifiedLllTestSeams
+// (lat/certified_lll_internal.hpp).  The route's output is zeroed after the
+// reduction runs, so the fallback is exercised after the reduction has
+// changed the matrix.  first_phase: the reduced extension is zeroed, so its
+// kernel-row count check fails.  certificate: fmpz_mat_is_reduced runs on
+// the zeroed basis, which it does not certify.
+enum class SaturationKernelTestFailure { none, first_phase, certificate };
+
+// Read by saturation_relation_kernel each time it builds a basis.  Off by
+// default and never set by production code.  Relaxed atomics so a reader
+// never races with a test setting them.
+class SaturationKernelTestSeams {
+public:
+    static SaturationKernelTestFailure failure() noexcept {
+        return failure_.load(std::memory_order_relaxed);
+    }
+    // When set, a kernel of more than one row takes the extension route
+    // even when its entries are within the first phase's range, so tests
+    // reach that route on small kernels.
+    static bool force_extension_route() noexcept {
+        return force_extension_route_.load(std::memory_order_relaxed);
+    }
+    // Counts each extension-route run that an injected
+    // failure replaced.
+    static void note_injected() noexcept {
+        injected_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<SaturationKernelTestFailure> failure_{
+            SaturationKernelTestFailure::none};
+    inline static std::atomic<bool> force_extension_route_{false};
+    inline static std::atomic<slong> injected_{0};
+};
+
 // The relation coefficients of the ell-local relation-saturation beta
 // rows: one row of `rows` per invariant index i with ell | d_i, in index
 // order, equal to the presentation's coefficient row of g_i^{d_i}

@@ -105,6 +105,34 @@ public:
                 std::memory_order_relaxed);
     }
 
+    // Sets the failure injected into every later extension-route run of the
+    // relation-saturation kernel basis
+    // (SaturationKernelTestSeams) until it is set back to none.  The
+    // fallback then builds the basis from fmpz_lll, which every other route
+    // can also take, so no invariant is skipped; it only forces the
+    // fallback where the route would be certified.
+    static void set_saturation_kernel_failure(
+            SaturationKernelTestFailure failure) noexcept {
+        SaturationKernelTestSeams::failure_.store(failure,
+                                                  std::memory_order_relaxed);
+    }
+
+    // Sends every later saturation kernel basis of more than one row
+    // through the extension route (SaturationKernelTestSeams) until it is
+    // set back to false.  That route is certified like the first phase and
+    // falls back to fmpz_lll in the same way, so no invariant is skipped.
+    static void set_saturation_kernel_force_extension(bool force) noexcept {
+        SaturationKernelTestSeams::force_extension_route_.store(
+                force, std::memory_order_relaxed);
+    }
+
+    // The number of extension-route runs an injected failure
+    // has replaced since the process started.
+    static slong saturation_kernel_failures_injected() noexcept {
+        return SaturationKernelTestSeams::injected_.load(
+                std::memory_order_relaxed);
+    }
+
     // Arms (or disarms) one use: the next
     // compact_unit_presentation_power_root call returns
     // CompactPowerRootResult::error after its argument checks, as an

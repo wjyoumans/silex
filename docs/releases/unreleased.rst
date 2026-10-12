@@ -256,6 +256,18 @@ Changed
   analytic products" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The ``proven`` relation-saturation proof now takes the relation-kernel
+  basis that its ``beta`` rows are size-reduced against from the same
+  ``[c*A | I]`` reduction, with the same exact checks and an
+  ``fmpz_mat_is_reduced`` certificate, when the kernel has entries above
+  250 bits, instead of running ``fmpz_lll`` on that kernel.  The
+  ``fmpz_lll`` basis remains the fallback.  On a busy machine,
+  ``real_quadratic_d1000000000009`` ``proven`` takes about 14 s instead of
+  about 90 s, with identical published outputs and saturation proof
+  records; the proven corpus rows, whose kernels are smaller, take the
+  route they took before.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The exact class number of an imaginary quadratic field with
   ``|D| >= 2^44`` (``proven`` class/unit computations) now first evaluates
   ``L(1, chi_D)`` to an absolute tolerance sized for the class number,

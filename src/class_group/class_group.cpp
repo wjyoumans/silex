@@ -5718,6 +5718,62 @@ public:
         return storage;
     }
 
+    // The kernel route of saturation_relation_kernel for kernels outside the
+    // first phase's range: the shared small-kernel helper reduces
+    // [c * relations | I_n] for the presentation's n x g relation matrix by
+    // fmpz_lll and keeps the identity parts of the rows whose relation part
+    // is zero, accepted only when exactly kernel_rows such rows exist and
+    // each satisfies v * relations == 0 (checked_relation_kernel_rows,
+    // class_group_internal.hpp).  The rows are then accepted only when
+    // fmpz_mat_is_reduced certifies them with FLINT's default parameters,
+    // as for the first phase.  Sets out and returns true on that success
+    // only; the caller then falls back to the fmpz_lll basis.
+    static bool extension_saturation_kernel(flint::FmpzMat& out,
+                                            const ClassGroupContext& context,
+                                            slong kernel_rows) noexcept {
+        const slong n = context.quotient_.relation_count();
+        const slong g = context.quotient_.generator_count();
+        if (kernel_rows <= 1 || kernel_rows > n) {
+            return false;
+        }
+        flint::FmpzMat relations(n, g);
+        if (!context.quotient_.relations(flint::FmpzMatRef(relations))) {
+            return false;
+        }
+        flint::FmpzMat extension(0, 0);
+        if (!lll_relation_kernel_extension(
+                    extension, flint::FmpzMatConstRef(relations))) {
+            return false;
+        }
+        const SaturationKernelTestFailure failure =
+                SaturationKernelTestSeams::failure();
+        if (failure == SaturationKernelTestFailure::first_phase) {
+            // Test-only failure injection: the zeroed extension has n rows
+            // with a zero relation part, so the row-count check fails.
+            flint::fmpz_mat_zero(flint::FmpzMatRef(extension));
+            SaturationKernelTestSeams::note_injected();
+        }
+        flint::FmpzMat rows(0, 0);
+        if (!checked_relation_kernel_rows(
+                    rows, flint::FmpzMatConstRef(relations),
+                    flint::FmpzMatConstRef(extension), n - kernel_rows)) {
+            return false;
+        }
+        if (failure == SaturationKernelTestFailure::certificate) {
+            // Test-only failure injection: fmpz_mat_is_reduced does not
+            // certify the zeroed rows.
+            flint::fmpz_mat_zero(flint::FmpzMatRef(rows));
+            SaturationKernelTestSeams::note_injected();
+        }
+        flint::FmpzLll lll;
+        if (!::fmpz_mat_is_reduced(rows.raw(), lll.raw()->delta,
+                                   lll.raw()->eta)) {
+            return false;
+        }
+        out = std::move(rows);
+        return true;
+    }
+
     // A basis of the relation kernel for the relation-saturation beta size
     // reduction only, cached in the private storage until the presentation
     // changes.  Returns the storage holding it, or nullptr on failure.
@@ -5730,11 +5786,19 @@ public:
     // docs/reference/algorithms_and_sources.rst), which is eligible for at
     // least two rows and entries of at most 250 bits.  FLINT's own check
     // after that phase, fmpz_lll_is_reduced, dominated the cost on a
-    // 71 x 94 kernel.  When the phase is not certified or not eligible, the
+    // 71 x 94 kernel.  For at least two rows with larger entries, where
+    // fmpz_lll of the kernel itself can take minutes, the basis comes from
+    // extension_saturation_kernel (the shared small-kernel helper of the
+    // proven analytic finish), certified by fmpz_mat_is_reduced.  When the
+    // phase is not certified or not eligible, or the extension route fails
+    // a check or its certificate, or the kernel has one row, the
     // LLL-reduced basis is built by fmpz_lll and copied.  A certified phase
-    // is the basis fmpz_lll returns, so the basis does not depend on the
-    // route.  Tests force the fallback through CertifiedLllTestSeams
-    // (lat/certified_lll_internal.hpp).
+    // is the basis fmpz_lll returns; the extension route's checked rows are
+    // a kernel basis (see checked_relation_kernel_rows), so every route
+    // returns a basis of the kernel.  Tests force the first-phase fallback
+    // through CertifiedLllTestSeams (lat/certified_lll_internal.hpp), and
+    // reach the extension route on small kernels and force its fallbacks
+    // through SaturationKernelTestSeams.
     static const ClassGroupContextStorage* saturation_relation_kernel(
             const ClassGroupContext& context) noexcept {
         ClassGroupContextStorage* storage = context.private_storage_.get();
@@ -5751,14 +5815,32 @@ public:
                         flint::FmpzMatRef(kernel))) {
                 return nullptr;
             }
-            flint::FmpzLll lll;
-            if (lat::detail::lll_first_phase_certified(
-                        kernel.raw(), nullptr,
-                        flint::FmpzLllConstRef(lll)) ==
-                lat::detail::CertifiedLllRoute::certified) {
-                storage->saturation_relation_kernel = std::move(kernel);
-                storage->saturation_relation_kernel_valid = true;
-                return storage;
+            constexpr slong kFlintUlllTruncationBits = 250;
+            const slong bits = ::fmpz_mat_max_bits(kernel.raw());
+            const bool in_first_phase_range =
+                    bits >= -kFlintUlllTruncationBits &&
+                    bits <= kFlintUlllTruncationBits;
+            if (flint::fmpz_mat_nrows(kernel) > 1 &&
+                (!in_first_phase_range ||
+                 SaturationKernelTestSeams::force_extension_route())) {
+                flint::FmpzMat basis(0, 0);
+                if (extension_saturation_kernel(basis, context,
+                                                flint::fmpz_mat_nrows(
+                                                        kernel))) {
+                    storage->saturation_relation_kernel = std::move(basis);
+                    storage->saturation_relation_kernel_valid = true;
+                    return storage;
+                }
+            } else {
+                flint::FmpzLll lll;
+                if (lat::detail::lll_first_phase_certified(
+                            kernel.raw(), nullptr,
+                            flint::FmpzLllConstRef(lll)) ==
+                    lat::detail::CertifiedLllRoute::certified) {
+                    storage->saturation_relation_kernel = std::move(kernel);
+                    storage->saturation_relation_kernel_valid = true;
+                    return storage;
+                }
             }
         }
         if (reduced_relation_kernel(context) == nullptr) {
