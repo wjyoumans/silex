@@ -1836,6 +1836,36 @@ int test_certified_fmpz_lll_matches_fmpz_lll() {
            : 1;
 }
 
+// integer_gram_is_lll_reduced returns false on a singular or an indefinite
+// symmetric matrix, so it certifies only positive definite Gram matrices.
+// [[0, 0], [0, 1]] (d_1 = 0) and, with delta = 0.25 < eta^2 (outside
+// FLINT's range), [[4, 2], [2, 1]] (d_2 = 0) satisfy the size and Lovasz
+// inequalities and are rejected only by the positivity test of the leading
+// minors.
+int test_integer_gram_rejects_non_positive_definite() {
+    using silex::flint::FmpzMat;
+    struct Case {
+        slong entries[4];
+        double delta;
+    };
+    const Case cases[] = {
+            {{1, 0, 0, 0}, 0.99},  {{1, 0, 0, -1}, 0.99},
+            {{0, 0, 0, 1}, 0.99},  {{-1, 0, 0, 1}, 0.99},
+            {{4, 2, 2, 1}, 0.99},  {{4, 2, 2, 1}, 0.25},
+            {{4, 2, 2, 0}, 0.25},
+    };
+    for (const Case& c : cases) {
+        FmpzMat gram(2, 2);
+        for (slong k = 0; k < 4; ++k) {
+            fmpz_set_si(fmpz_mat_entry(gram.raw(), k / 2, k % 2), c.entries[k]);
+        }
+        if (silex::lat::detail::integer_gram_is_lll_reduced(gram, c.delta,
+                                                            0.51)) {
+            return 1;
+        }
+    }
+    return 0;
+}
 // certified_fmpz_lll on GRAM input (the Gram matrices B B^T of random
 // full-rank bases of 4 to 200 bits, 2 to 34 rows) against plain fmpz_lll,
 // with a null and an identity transform and every injected failure.  The
@@ -2015,6 +2045,7 @@ int main() {
                    test_lll_certifier_boundaries() != 0 ||
                    test_lll_certified_routes() != 0 ||
                    test_certified_fmpz_lll_matches_fmpz_lll() != 0 ||
+                   test_integer_gram_rejects_non_positive_definite() != 0 ||
                    test_certified_fmpz_lll_gram_matches_fmpz_lll() != 0 ||
                    test_fplll_row_transform_boundary() != 0 ||
                    test_fplll_column_image_transform_boundary() != 0 ||
