@@ -1,3 +1,4 @@
+#include <silex/diagnostics.hpp>
 #include <silex/element.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
@@ -958,6 +959,198 @@ void test_power_hensel_field_caches_match_cold() noexcept {
     assert(after_copy.prime_setup_misses == before_copy.prime_setup_misses);
 }
 
+// A PowerInputNormSource that supplies a fixed norm (or declines when it has
+// none) and counts its calls.
+struct FixedInputNorm {
+    const sflint::Fmpq* value = nullptr;
+    slong* calls = nullptr;
+};
+
+bool fixed_input_norm(sflint::Fmpq& norm, const void* context) noexcept {
+    const auto* data = static_cast<const FixedInputNorm*>(context);
+    ++*data->calls;
+    if (data->value == nullptr) {
+        return false;
+    }
+    ::fmpq_set(norm.raw(), data->value->raw());
+    return true;
+}
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+void count_debug_failure(void* user,
+                         silex::DiagnosticsModule,
+                         silex::DebugLevel,
+                         const char*,
+                         const char*,
+                         int,
+                         const char*,
+                         const char*) noexcept {
+    ++*static_cast<slong*>(user);
+}
+#endif
+
+// detail::element_is_power from a cold whole-answer memo, so the lift and
+// its verification run on every call.
+PowerAnswer element_power_answer(
+        const silex::Element& value,
+        slong n,
+        const silex::detail::PowerInputNormSource* source,
+        silex::Element& root,
+        const silex::DiagnosticsContext* diagnostics) noexcept {
+    silex::detail::clear_power_root_answer_cache();
+    sflint::Fmpz exponent;
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+    PowerAnswer answer;
+    bool flag = false;
+    answer.known = silex::detail::element_is_power(
+            flag, root, value, sflint::FmpzConstRef(exponent), source,
+            diagnostics);
+    answer.is_power = answer.known && flag;
+    return answer;
+}
+
+// A caller-supplied N(input) (detail::PowerInputNormSource) replaces only
+// input.norm() in the verification's norm check.  The exact norm gives the
+// answer of the plain query, and so does a source that declines.  The source
+// runs at most once per query, and exactly once when a lifted root is
+// verified.  A wrong-signed norm is the failure the factored callers could
+// make; it must never give a wrong definite answer.  Every root below is
+// found by the lift, so a wrong-signed norm turns each of them into an
+// undecided result, which shows that the verification reads the supplied
+// norm; debug checks report the mismatch.
+void test_power_input_norm_source() noexcept {
+    struct Case {
+        silex::Element input;
+        slong n = 0;
+        bool power = false;
+    };
+    const silex::NumberField gaussian = imaginary_quadratic_field();
+    const silex::NumberField cubic = field_from_coefficients({-1, -1, 0, 1});
+    const silex::NumberField pure_cubic =
+            field_from_coefficients({-2, 0, 0, 1});
+    const silex::NumberField zeta_eight =
+            field_from_coefficients({1, 0, 0, 0, 1});
+    const silex::NumberField quintic =
+            field_from_coefficients({-1, -1, 0, 0, 0, 1});
+
+    const auto power_of = [](const silex::Element& base, slong n) {
+        sflint::Fmpz exponent;
+        sflint::fmpz_set_si(sflint::FmpzRef(exponent), n);
+        silex::Element power(*base.parent());
+        assert(power.pow_fmpz(base, sflint::FmpzConstRef(exponent)));
+        return power;
+    };
+    const auto times = [](const silex::Element& left,
+                          const silex::Element& right) {
+        silex::Element product(*left.parent());
+        assert(product.multiply(left, right));
+        return product;
+    };
+
+    std::vector<Case> cases;
+    // Non-integral root of norm 5/9 (rescaled branch) and of norm 1.
+    cases.push_back({power_of(element_from_fraction(gaussian, {1, 2}, 3), 3),
+                     3, true});
+    cases.push_back({power_of(element_from_fraction(gaussian, {3, 4}, 5), 5),
+                     5, true});
+    // Odd degree: c and -c have norms of opposite sign.
+    for (slong sign : {1, -1}) {
+        const silex::Element base =
+                element_from_coefficients(cubic, {2 * sign, -sign, 0});
+        cases.push_back({power_of(base, 3), 3, true});
+        cases.push_back({power_of(base, 5), 5, true});
+    }
+    const silex::Element pure_base =
+            element_from_coefficients(pure_cubic, {1, 1, 1});
+    cases.push_back({power_of(pure_base, 5), 5, true});
+    cases.push_back(
+            {power_of(element_from_coefficients(zeta_eight, {1, 2, 0, -1}), 3),
+             3, true});
+    cases.push_back(
+            {power_of(element_from_coefficients(quintic, {3, 0, -1}), 7), 7,
+             true});
+    // Not cubes: a cube times 1 + theta, and 2 + theta itself.
+    cases.push_back({times(power_of(pure_base, 3),
+                           element_from_coefficients(pure_cubic, {1, 1})),
+                     3, false});
+    cases.push_back(
+            {element_from_coefficients(cubic, {2, 1}), 3, false});
+
+    for (const Case& test_case : cases) {
+        const silex::Element& input = test_case.input;
+        const silex::NumberField& field = *input.parent();
+        silex::Element plain_root(field);
+        const PowerAnswer plain =
+                element_power_answer(input, test_case.n, nullptr, plain_root,
+                                     nullptr);
+        assert(!test_case.power || (plain.known && plain.is_power));
+
+        sflint::Fmpq norm;
+        sflint::Fmpq negated;
+        assert(input.norm(sflint::FmpqRef(norm)));
+        assert(::fmpq_is_zero(norm.raw()) == 0);
+        ::fmpq_neg(negated.raw(), norm.raw());
+        assert(silex::detail::power_input_norm_matches(input, norm));
+        assert(!silex::detail::power_input_norm_matches(input, negated));
+
+        slong calls = 0;
+        FixedInputNorm data{&norm, &calls};
+        const silex::detail::PowerInputNormSource source{&fixed_input_norm,
+                                                         &data};
+        for (const sflint::Fmpq* value :
+             {static_cast<const sflint::Fmpq*>(&norm),
+              static_cast<const sflint::Fmpq*>(nullptr)}) {
+            data.value = value;
+            calls = 0;
+            silex::Element root(field);
+            const PowerAnswer answer =
+                    element_power_answer(input, test_case.n, &source, root,
+                                         nullptr);
+            assert(answer.known == plain.known);
+            assert(answer.is_power == plain.is_power);
+            assert(!answer.is_power || root.equal(plain_root));
+            assert(calls <= 1);
+            assert(!test_case.power || calls == 1);
+        }
+
+        data.value = &negated;
+        calls = 0;
+        silex::Element root(field);
+        const PowerAnswer wrong =
+                element_power_answer(input, test_case.n, &source, root,
+                                     nullptr);
+        assert(calls <= 1);
+        assert(!wrong.known ||
+               (plain.known && wrong.is_power == plain.is_power));
+        assert(!wrong.is_power || root.equal(plain_root));
+        if (test_case.power) {
+            assert(!wrong.known);
+        }
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        slong failures = 0;
+        silex::diagnostics_set_debug_checks(
+                diagnostics, silex::DebugLevel::expensive,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::element),
+                count_debug_failure, &failures);
+        for (const sflint::Fmpq* value :
+             {static_cast<const sflint::Fmpq*>(&norm),
+              static_cast<const sflint::Fmpq*>(&negated)}) {
+            data.value = value;
+            calls = 0;
+            failures = 0;
+            silex::Element checked_root(field);
+            (void)element_power_answer(input, test_case.n, &source,
+                                       checked_root, &diagnostics);
+            assert(failures == (value == &negated ? calls : 0));
+        }
+#endif
+    }
+}
+
 // The whole pure_power_hensel_root answer is memoized per thread, keyed on
 // the field polynomial and backend, the radicand coordinates, the exponent
 // and the pre-lift mode.  A hit must give the cold answer and root, for "not
@@ -1716,6 +1909,7 @@ int main() {
     test_power_hensel_data_cache_reuse();
     test_power_hensel_field_caches_match_cold();
     test_power_hensel_answer_memo();
+    test_power_input_norm_source();
     silex::NumberField field = quadratic_field();
     silex::NumberField same_model = quadratic_field();
 

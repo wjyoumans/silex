@@ -1984,6 +1984,61 @@ bool reconstruct_power_root_candidate(
     return true;
 }
 
+// N(input) for the exact verification within one pure_power_hensel_root
+// call, computed at most once and only when a lifted candidate reaches the
+// norm check: from the caller's detail::PowerInputNormSource when it supplies
+// one and it succeeds, otherwise as input.norm().  The source must give
+// exactly N(input), so the norm check decides as it would with input.norm();
+// debug checks at DebugLevel::expensive compare the two.
+class PowerInputNorm {
+public:
+    PowerInputNorm(const Element& input,
+                   const detail::PowerInputNormSource* source,
+                   const DiagnosticsContext* diagnostics) noexcept
+        : input_(input), source_(source), diagnostics_(diagnostics) {}
+
+    PowerInputNorm(const PowerInputNorm&) = delete;
+    PowerInputNorm& operator=(const PowerInputNorm&) = delete;
+
+    // N(input), or null when it cannot be computed.
+    const flint::Fmpq* get() noexcept {
+        if (state_ == State::unknown) {
+            state_ = State::unavailable;
+            bool known = false;
+            if (source_ != nullptr && source_->compute != nullptr) {
+                known = source_->compute(value_, source_->context);
+                SILEX_DEBUG_CHECK(
+                        diagnostics_, DiagnosticsModule::element,
+                        DebugLevel::expensive,
+                        "power root input norm from the caller equals "
+                        "the input norm",
+                        !known || detail::power_input_norm_matches(input_,
+                                                                   value_));
+            }
+            if (!known) {
+                known = input_.norm(flint::FmpqRef(value_));
+            }
+            if (known) {
+                state_ = State::known;
+            }
+        }
+        return state_ == State::known ? &value_ : nullptr;
+    }
+
+private:
+    enum class State {
+        unknown,
+        known,
+        unavailable
+    };
+
+    const Element& input_;
+    const detail::PowerInputNormSource* source_;
+    const DiagnosticsContext* diagnostics_;
+    flint::Fmpq value_;
+    State state_ = State::unknown;
+};
+
 // Necessary condition for candidate^n == input from multiplicativity of the
 // norm: N(candidate)^n == N(input).  It only rejects candidates, so a
 // rejection leaves the caller in its unsupported state.  When
@@ -1995,20 +2050,22 @@ bool reconstruct_power_root_candidate(
 // +-1 case, which the norm cannot bound.
 bool norm_admits_power_root(bool& unit_norm,
                             const Element& candidate,
-                            const Element& input,
+                            PowerInputNorm& input_norm_source,
                             flint::FmpzConstRef exponent) noexcept {
     unit_norm = false;
     flint::Fmpq candidate_norm;
-    flint::Fmpq input_norm;
-    if (!candidate.norm(flint::FmpqRef(candidate_norm)) ||
-        !input.norm(flint::FmpqRef(input_norm))) {
+    if (!candidate.norm(flint::FmpqRef(candidate_norm))) {
+        return false;
+    }
+    const flint::Fmpq* input_norm = input_norm_source.get();
+    if (input_norm == nullptr) {
         return false;
     }
 
     const fmpz* candidate_num = fmpq_numref(candidate_norm.raw());
     const fmpz* candidate_den = fmpq_denref(candidate_norm.raw());
-    const fmpz* input_num = fmpq_numref(input_norm.raw());
-    const fmpz* input_den = fmpq_denref(input_norm.raw());
+    const fmpz* input_num = fmpq_numref(input_norm->raw());
+    const fmpz* input_den = fmpq_denref(input_norm->raw());
     if (fmpz_is_zero(candidate_num) != 0) {
         return fmpz_is_zero(input_num) != 0;
     }
@@ -2175,8 +2232,10 @@ bool height_admits_power_root(const Element& candidate,
     return arb_gt(candidate_log.raw(), input_log.raw()) == 0;
 }
 
+// `input_norm` supplies N(input); see PowerInputNorm.
 bool verify_power_root(const Element& candidate,
                              const Element& input,
+                             PowerInputNorm& input_norm,
                              flint::FmpzConstRef exponent,
                              const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
@@ -2188,7 +2247,8 @@ bool verify_power_root(const Element& candidate,
     }
 
     bool unit_norm = false;
-    if (!norm_admits_power_root(unit_norm, candidate, input, exponent)) {
+    if (!norm_admits_power_root(unit_norm, candidate, input_norm,
+                                exponent)) {
         SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
                             "element.power_hensel_verify.norm_reject");
         return false;
@@ -2463,12 +2523,13 @@ bool inverse_field_derivative(Element& out,
 
 // Lifts a root of y^n = input, where input = power_input * d^n and
 // root_scale = 1/d (nullptr when power_input is used as is, i.e. d = 1), and
-// verifies the scaled candidate against power_input.  See
-// pure_power_hensel_root.
+// verifies the scaled candidate against power_input, whose norm
+// power_input_norm supplies.  See pure_power_hensel_root.
 bool try_pure_power_root_at_prime(
         Element& root,
         const Element& input,
         const Element& power_input,
+        PowerInputNorm& power_input_norm,
         const Element* root_scale,
         const flint::FmpqPoly& element_polynomial,
         const nf_struct* raw_field,
@@ -2667,7 +2728,7 @@ bool try_pure_power_root_at_prime(
             }
             if (stabilized || final_lift) {
                 if (verify_power_root(
-                            candidate, power_input,
+                            candidate, power_input, power_input_norm,
                             flint::FmpzConstRef(exponent_fmpz),
                             diagnostics)) {
                     root.swap(candidate);
@@ -3125,12 +3186,13 @@ bool prime_search_setup(bool& usable,
 // `radicand` = input * d^n, whose power-basis coordinates are
 // `element_polynomial`; root_scale = 1/d, or nullptr when radicand is input
 // itself (d = 1).  A lifted root is published only after exact verification
-// against input.
+// against input; input_norm supplies N(input) (not N(radicand)).
 bool pure_power_hensel_prime_search(
         bool& is_power,
         Element& root,
         const Element& radicand,
         const Element& input,
+        PowerInputNorm& input_norm,
         const Element* root_scale,
         const flint::FmpqPoly& element_polynomial,
         const NumberField* parent,
@@ -3201,7 +3263,7 @@ bool pure_power_hensel_prime_search(
                     return true;
                 }
                 if (try_pure_power_root_at_prime(
-                            root, radicand, input, root_scale,
+                            root, radicand, input, input_norm, root_scale,
                             element_polynomial, raw_field, prime,
                             field_polynomial, factor, ctx,
                             std::move(inverse_roots), exponent, diagnostics)) {
@@ -3218,11 +3280,14 @@ bool pure_power_hensel_prime_search(
 
 // Rescaling, prime search and lift of pure_power_hensel_root, after its
 // field checks; `element_polynomial` holds the power-basis coordinates of
-// `input` and is overwritten on the rescaled branch.
+// `input` and is overwritten on the rescaled branch.  The exact verification
+// compares against input itself on both branches (the scale is folded into
+// the candidate), so `input_norm` is the source of N(input), not N(a d^n).
 bool pure_power_hensel_answer(
         bool& is_power,
         Element& root,
         const Element& input,
+        PowerInputNorm& input_norm,
         flint::FmpqPoly& element_polynomial,
         const NumberField* parent,
         const nf_struct* raw_field,
@@ -3299,14 +3364,15 @@ bool pure_power_hensel_answer(
         }
         if (rescaled) {
             return pure_power_hensel_prime_search(
-                    is_power, root, scaled_radicand, input, &scale,
-                    element_polynomial, parent, raw_field, exponent,
+                    is_power, root, scaled_radicand, input, input_norm,
+                    &scale, element_polynomial, parent, raw_field, exponent,
                     pre_lift, diagnostics);
         }
     }
 
     return pure_power_hensel_prime_search(
-            is_power, root, input, input, nullptr, element_polynomial,
+            is_power, root, input, input, input_norm, nullptr,
+            element_polynomial,
             parent, raw_field, exponent, pre_lift, diagnostics);
 }
 
@@ -3971,7 +4037,9 @@ bool pure_power_hensel_root(bool& is_power,
                                   const Element& input,
                                   slong exponent,
                                   const DiagnosticsContext* diagnostics,
-                                  PreLiftResidueDisproof pre_lift) noexcept {
+                                  PreLiftResidueDisproof pre_lift,
+                                  const PowerInputNormSource* input_norm_source)
+        noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.power_hensel_root");
     // Private port of reference `_roots_hensel(y^n - a, ispure=true,
@@ -4007,9 +4075,10 @@ bool pure_power_hensel_root(bool& is_power,
     }
     PowerRootAnswerEntry entry;
     fmpq_poly_set(entry.radicand.raw(), element_polynomial.raw());
-    if (!pure_power_hensel_answer(is_power, root, input, element_polynomial,
-                                  parent, raw_field, exponent, pre_lift,
-                                  diagnostics)) {
+    PowerInputNorm input_norm(input, input_norm_source, diagnostics);
+    if (!pure_power_hensel_answer(is_power, root, input, input_norm,
+                                  element_polynomial, parent, raw_field,
+                                  exponent, pre_lift, diagnostics)) {
         return false;
     }
     remember_power_root_answer(std::move(entry), is_power, root, *parent,

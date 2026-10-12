@@ -102,17 +102,51 @@ enum class PreLiftResidueDisproof {
     disabled
 };
 
+// A caller-supplied way to compute N(input) for the exact verification of
+// pure_power_hensel_root, for callers that can do so more cheaply than
+// input.norm(), for example from a factored form of input whose factors are
+// small.  `compute(norm, context)` writes exactly N(input) to `norm` and
+// returns true, or returns false to fall back to input.norm().  It is called
+// at most once per pure_power_hensel_root call, and only when a lifted
+// candidate reaches the norm check.  A wrong norm can only turn a found root
+// into an undecided result, never give a wrong definite answer, because a
+// root is published only after exact powering; debug checks at
+// DebugLevel::expensive compare it with input.norm().
+struct PowerInputNormSource {
+    bool (*compute)(flint::Fmpq& norm, const void* context) noexcept = nullptr;
+    const void* context = nullptr;
+};
+
 // Hensel-lifted `exponent`-th (respectively square) root of `input` in a
 // monic integral field of degree < 10, verified exactly before publication.
 // A definite "not a power" comes only from an exact residue disproof.
+// `input_norm_source`, when not null, supplies N(input) to the verification;
+// it is not part of the whole-answer memo key, since it does not change the
+// answer.
 bool pure_power_hensel_root(
         bool& is_power,
         Element& root,
         const Element& input,
         slong exponent,
         const DiagnosticsContext* diagnostics,
-        PreLiftResidueDisproof pre_lift =
-                PreLiftResidueDisproof::enabled) noexcept;
+        PreLiftResidueDisproof pre_lift = PreLiftResidueDisproof::enabled,
+        const PowerInputNormSource* input_norm_source = nullptr) noexcept;
+
+// Element::is_power(is_power, root, exponent, diagnostics) for `input`, with
+// an optional source of N(input) passed to pure_power_hensel_root.
+// Element::is_power is this with a null `input_norm_source`.
+bool element_is_power(bool& is_power,
+                      Element& root,
+                      const Element& input,
+                      flint::FmpzConstRef exponent,
+                      const PowerInputNormSource* input_norm_source,
+                      const DiagnosticsContext* diagnostics) noexcept;
+
+// Whether input.norm() succeeds and equals `input_norm`: the debug
+// cross-check of a norm supplied by a PowerInputNormSource.
+bool power_input_norm_matches(const Element& input,
+                              const flint::Fmpq& input_norm) noexcept;
+
 bool pure_square_hensel_root(bool& is_square,
                              Element& root,
                              const Element& input,

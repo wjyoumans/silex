@@ -706,6 +706,123 @@ bool compact_power_root_squares_to(const silex::FactoredElement& root,
            input.evaluate(value) && square.equal(value);
 }
 
+silex::Element element_from_si(const silex::NumberField& field,
+                               std::span<const slong> coefficients,
+                               slong denominator) {
+    sflint::FmpqPoly polynomial;
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    ::fmpq_poly_scalar_div_si(polynomial.raw(), polynomial.raw(), denominator);
+    silex::Element element(field);
+    assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    return element;
+}
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+void count_debug_failure(void* user,
+                         silex::DiagnosticsModule,
+                         silex::DebugLevel,
+                         const char*,
+                         const char*,
+                         int,
+                         const char*,
+                         const char*) noexcept {
+    ++*static_cast<slong*>(user);
+}
+#endif
+
+// detail::compact_power_input_norm, the N(input) that
+// compact_power_root_from_presentation passes to Element::is_power, equals
+// the norm of the expanded input remainder_value * scale^n: bases of either
+// norm sign, a non-integral base, negative exponents, scales other than one
+// and the empty product.  Then unit compact power roots in the cubic field,
+// one of norm -1, are found exactly with the debug cross-check of that norm
+// against the expanded input's norm (diagnostics builds) silent.
+int test_compact_power_input_norm() {
+    const slong coefficients[] = {-1, -1, 0, 1};
+    const silex::NumberField field = monic_field(coefficients);
+    const slong a_coefficients[] = {2, -1};
+    const slong b_coefficients[] = {1, 1};
+    const slong c_coefficients[] = {5, 0, -1};
+    const slong d_coefficients[] = {-2, 1};
+    const silex::Element a = element_from_si(field, a_coefficients, 1);
+    const silex::Element b = element_from_si(field, b_coefficients, 3);
+    const silex::Element c = element_from_si(field, c_coefficients, 1);
+    const silex::Element d = element_from_si(field, d_coefficients, 1);
+
+    silex::FactoredElement product(field);
+    assert(product.push(a, 2) && product.push(b, -1) && product.push(c, 4) &&
+           product.push(d, 1));
+    silex::FactoredElement empty(field);
+    assert(empty.one());
+    for (const silex::FactoredElement* remainder : {&product, &empty}) {
+        silex::Element value(field);
+        assert(remainder->evaluate(value));
+        for (slong n : {3, 5}) {
+            for (slong scale_si : {1, 2, -3}) {
+                sflint::Fmpz scale;
+                sflint::Fmpz scale_power;
+                fmpz_set_si(scale.raw(), scale_si);
+                fmpz_pow_ui(scale_power.raw(), scale.raw(),
+                            static_cast<ulong>(n));
+                silex::Element scale_element(field);
+                silex::Element input(field);
+                sflint::Fmpq expected;
+                sflint::Fmpq norm;
+                assert(scale_element.set_fmpz(
+                               sflint::FmpzConstRef(scale_power)) &&
+                       input.multiply(value, scale_element) &&
+                       input.norm(sflint::FmpqRef(expected)));
+                assert(silex::detail::compact_power_input_norm(
+                        norm, *remainder, sflint::FmpzConstRef(scale), n,
+                        field.degree()));
+                assert(fmpq_equal(norm.raw(), expected.raw()) != 0);
+            }
+        }
+    }
+
+    const silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::Element theta(field);
+    silex::Element minus_theta(field);
+    silex::Element theta_squared(field);
+    assert(theta.gen() && minus_theta.negate(theta) &&
+           theta_squared.multiply(theta, theta));
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    slong failures = 0;
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    silex::diagnostics_set_debug_checks(
+            diagnostics, silex::DebugLevel::expensive,
+            silex::diagnostics_all_modules, count_debug_failure, &failures);
+#endif
+    constexpr slong precision = 128;
+    // theta * (theta^2)^2 = theta^5 and (-theta) * (theta^2)^2 = (-theta)^5,
+    // of norms 1 and -1.
+    for (const silex::Element* unit : {&theta, &minus_theta}) {
+        silex::FactoredElement element(field);
+        assert(element.push(*unit, 1) && element.push(theta_squared, 2));
+        bool is_power = false;
+        silex::FactoredElement root(field);
+        assert(silex::detail::compact_unit_presentation_power_root(
+                is_power, root, order, element, 5, precision, precision,
+                &diagnostics, nullptr));
+        assert(is_power);
+        silex::Element root_value(field);
+        silex::Element power(field);
+        silex::Element value(field);
+        sflint::Fmpz five;
+        fmpz_set_si(five.raw(), 5);
+        assert(root.evaluate(root_value) &&
+               power.pow_fmpz(root_value, sflint::FmpzConstRef(five)) &&
+               element.evaluate(value) && power.equal(value));
+    }
+    assert(failures == 0);
+    return 0;
+}
+
 // One field-modulus cache shared by several compact power-root calls: the
 // first call fills it, a repeated call adds no entry, and every call gives
 // the result of an uncached call.
@@ -1402,5 +1519,6 @@ int main() {
     assert(test_compact_unit_power_root_nonunit_small_leftover() == 0);
     assert(test_compact_unit_residual_leftover_norm_prefilter() == 0);
     assert(test_compact_unit_residual_leftover_norm_one_nonmaximal() == 0);
+    assert(test_compact_power_input_norm() == 0);
     return 0;
 }

@@ -33,6 +33,7 @@
 #include "relation_factor_base_plan_internal.hpp"
 #include "relation_module_limits_internal.hpp"
 #include "ideal_lattice_reduction_internal.hpp"
+#include "../element/element_internal.hpp"
 #include "../ideal_factorization/ideal_factorization_internal.hpp"
 #include "../order_unit/class_unit_transaction_internal.hpp"
 #include "../order_unit/relation_unit_internal.hpp"
@@ -7284,6 +7285,67 @@ bool compact_split_power(
     return true;
 }
 
+bool compact_power_input_norm(flint::Fmpq& norm,
+                              const FactoredElement& remainder,
+                              flint::FmpzConstRef scale,
+                              slong n,
+                              slong degree) noexcept {
+    if (!remainder.is_defined() || n <= 0 || degree <= 0) {
+        return false;
+    }
+    flint::Fmpq factor_norm;
+    ::fmpq_one(norm.raw());
+    for (const auto& entry : remainder.factors()) {
+        if (!entry.factor.norm(flint::FmpqRef(factor_norm)) ||
+            ::fmpq_is_zero(factor_norm.raw()) != 0) {
+            return false;
+        }
+        ::fmpq_pow_si(factor_norm.raw(), factor_norm.raw(), entry.exponent);
+        ::fmpq_mul(norm.raw(), norm.raw(), factor_norm.raw());
+    }
+    flint::Fmpz scale_norm;
+    ::fmpz_pow_ui(scale_norm.raw(), scale.raw(),
+                  static_cast<ulong>(n) * static_cast<ulong>(degree));
+    ::fmpq_mul_fmpz(norm.raw(), norm.raw(), scale_norm.raw());
+    return true;
+}
+
+namespace {
+
+// detail::PowerInputNormSource context for the Element::is_power call of
+// compact_power_root_from_presentation: N(input) through
+// detail::compact_power_input_norm, cross-checked against input.norm() by
+// debug checks at DebugLevel::expensive.
+struct CompactPowerInputNorm {
+    const FactoredElement* remainder = nullptr;
+    const flint::Fmpz* scale = nullptr;
+    slong n = 0;
+    slong degree = 0;
+    const Element* input = nullptr;
+    const DiagnosticsContext* diagnostics = nullptr;
+};
+
+bool compact_power_input_norm_source(flint::Fmpq& norm,
+                                     const void* context) noexcept {
+    const auto* data = static_cast<const CompactPowerInputNorm*>(context);
+    if (data == nullptr || data->remainder == nullptr ||
+        data->scale == nullptr ||
+        !detail::compact_power_input_norm(
+                norm, *data->remainder, flint::FmpzConstRef(*data->scale),
+                data->n, data->degree)) {
+        return false;
+    }
+    SILEX_DEBUG_CHECK(
+            data->diagnostics, DiagnosticsModule::class_group,
+            DebugLevel::expensive,
+            "compact power-root input norm equals its factored norm",
+            data->input == nullptr ||
+                    detail::power_input_norm_matches(*data->input, norm));
+    return true;
+}
+
+}  // namespace
+
 bool compact_power_root_from_presentation(
         bool& is_power,
         FactoredElement& root,
@@ -7406,8 +7468,20 @@ bool compact_power_root_from_presentation(
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.compact_power_root_element_is_power");
-        if (!scaled_remainder.is_power(remainder_is_power, remainder_root,
-                                       flint::FmpzConstRef(exponent))) {
+        // scaled_remainder = remainder_value * adjusted_denominator^n.
+        CompactPowerInputNorm input_norm;
+        input_norm.remainder = &remainder;
+        input_norm.scale = &adjusted_denominator;
+        input_norm.n = n;
+        input_norm.degree = field->degree();
+        input_norm.input = &scaled_remainder;
+        input_norm.diagnostics = diagnostics;
+        const detail::PowerInputNormSource norm_source{
+                &compact_power_input_norm_source, &input_norm};
+        if (!detail::element_is_power(remainder_is_power, remainder_root,
+                                      scaled_remainder,
+                                      flint::FmpzConstRef(exponent),
+                                      &norm_source, nullptr)) {
             // Element::is_power left the reduced remainder undecided; the
             // compact presentation itself succeeded.
             SILEX_PROFILE_EVENT(

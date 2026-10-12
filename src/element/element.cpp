@@ -415,15 +415,29 @@ bool Element::is_power(bool& is_power,
                        Element& root,
                        flint::FmpzConstRef exponent,
                        const DiagnosticsContext* diagnostics) const noexcept {
+    return detail::element_is_power(is_power, root, *this, exponent, nullptr,
+                                    diagnostics);
+}
+
+namespace detail {
+
+bool element_is_power(bool& is_power,
+                      Element& root,
+                      const Element& input,
+                      flint::FmpzConstRef exponent,
+                      const PowerInputNormSource* input_norm_source,
+                      const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.is_power");
-    if (!has_same_parent(root) || fmpz_cmp_ui(exponent.raw(), 1) < 0) {
+    const NumberField* parent = input.parent();
+    if (parent == nullptr || !input.has_same_parent(root) ||
+        fmpz_cmp_ui(exponent.raw(), 1) < 0) {
         return false;
     }
 
     if (fmpz_is_one(exponent.raw()) != 0) {
-        Element candidate(parent_);
-        if (!candidate.set(*this)) {
+        Element candidate(*parent);
+        if (!candidate.set(input)) {
             return false;
         }
         is_power = true;
@@ -431,29 +445,31 @@ bool Element::is_power(bool& is_power,
         return true;
     }
 
-    Element candidate(parent_);
+    Element candidate(*parent);
     bool flag = false;
-    if (detail::is_power_rational_constant(flag, candidate, *this, exponent)) {
+    if (detail::is_power_rational_constant(flag, candidate, input, exponent)) {
         if (flag) {
             is_power = true;
             root.swap(candidate);
             return true;
         }
-        if (parent_.degree() == 1) {
+        if (parent->degree() == 1) {
             is_power = false;
             return true;
         }
     }
 
     if (fmpz_equal_ui(exponent.raw(), 2) != 0) {
-        return is_square(is_power, root, diagnostics);
+        return input.is_square(is_power, root, diagnostics);
     }
 
     if (fmpz_fits_si(exponent.raw()) != 0) {
         const slong exponent_si = fmpz_get_si(exponent.raw());
         if (exponent_si > 1) {
             if (detail::pure_power_hensel_root(
-                        flag, candidate, *this, exponent_si, diagnostics)) {
+                        flag, candidate, input, exponent_si, diagnostics,
+                        PreLiftResidueDisproof::enabled,
+                        input_norm_source)) {
                 is_power = flag;
                 if (flag) {
                     root.swap(candidate);
@@ -461,7 +477,7 @@ bool Element::is_power(bool& is_power,
                 return true;
             }
             if (detail::pure_power_residue_disproves(
-                        flag, *this, exponent_si, diagnostics)) {
+                        flag, input, exponent_si, diagnostics)) {
                 is_power = flag;
                 return true;
             }
@@ -470,6 +486,15 @@ bool Element::is_power(bool& is_power,
 
     return false;
 }
+
+bool power_input_norm_matches(const Element& input,
+                              const flint::Fmpq& input_norm) noexcept {
+    flint::Fmpq norm;
+    return input.norm(flint::FmpqRef(norm)) &&
+           fmpq_equal(norm.raw(), input_norm.raw()) != 0;
+}
+
+}  // namespace detail
 
 bool Element::trace(flint::FmpqRef out) const noexcept {
     if (!is_defined()) {

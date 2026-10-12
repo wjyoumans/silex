@@ -5,6 +5,7 @@
 #include <silex/factored_element.hpp>
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arb_mat.hpp>
+#include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
@@ -244,6 +245,19 @@ bool compact_presentation_power_root(
         slong short_precision,
         EmbeddingContext* shared_embeddings = nullptr,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
+// N(remainder_value * scale^n), where remainder_value = prod f^r is the
+// evaluation of `remainder` and scale is a rational integer, in a field of
+// degree `degree`: prod N(f)^r * scale^(n * degree), by multiplicativity of
+// the norm and N(c) = c^degree for c in Q.
+// compact_power_root_from_presentation passes it to Element::is_power for the
+// expanded element, whose own norm can run to tens of thousands of bits while
+// the factors are small.  Returns false when a factor norm is unavailable or
+// zero.
+bool compact_power_input_norm(flint::Fmpq& norm,
+                              const FactoredElement& remainder,
+                              flint::FmpzConstRef scale,
+                              slong n,
+                              slong degree) noexcept;
 bool compact_unit_presentation_power_root(
         bool& is_power,
         FactoredElement& root,
