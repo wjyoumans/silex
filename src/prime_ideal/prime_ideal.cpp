@@ -1809,6 +1809,9 @@ bool components_from_recursive_split(
 // none, fall back to the bounded idempotent enumeration or to the recursive
 // split.  The `*_only` modes skip the separating element; they exist so tests
 // can compare the enumeration and the recursive split on one algebra.
+// When `separator_absent` is given, it is set to whether the separating
+// element search ran and found nothing; `recursive_only` then gives what
+// `recursive` would, without repeating that deterministic search.
 enum class FixedSplit : unsigned char {
     bounded,
     recursive,
@@ -1824,17 +1827,24 @@ bool components_from_fixed_subspace(
         const flint::FmpzMat& multiplication_table,
         flint::FmpzConstRef p,
         const flint::FmpzModCtx& ctx,
-        FixedSplit split) noexcept {
+        FixedSplit split,
+        bool* separator_absent = nullptr) noexcept {
     const slong n = one.length();
     flint::FmpzVec separator(n);
     flint::FmpzModPoly minpoly(ctx);
     flint::FmpzModPolyFactor factorization(ctx);
     const bool direct = split == FixedSplit::enumeration_only ||
                         split == FixedSplit::recursive_only;
+    if (separator_absent != nullptr) {
+        *separator_absent = false;
+    }
     if (direct ||
         !find_separating_fixed_element(separator, factorization, minpoly,
                                        kernel, nullity, multiplication_table,
                                        p, ctx)) {
+        if (!direct && separator_absent != nullptr) {
+            *separator_absent = true;
+        }
         // The bounded enumerations stop when p^nullity exceeds 4096; the
         // recursive split has no such bound.
         if (split == FixedSplit::bounded ||
@@ -2260,11 +2270,27 @@ bool ramification_index_from_containment(slong& out,
     return true;
 }
 
-bool unramified_maximal_index_divisor_prime_data(
-        std::vector<IndexPrimeData>& out,
-        const Order& order,
-        flint::FmpzConstRef p,
-        FixedSplit split) noexcept {
+// The quotient O/pO of an unramified index-divisor prime, as the bounded and
+// recursive passes of unramified_maximal_index_divisor_prime_data share it:
+// the multiplication table, the coordinates of 1 modulo p, and the kernel of
+// x -> x^p - x with its dimension (the number of primes above p).
+struct UnramifiedFixedKernel {
+    UnramifiedFixedKernel(flint::FmpzConstRef p, slong n) noexcept
+        : ctx(p.raw()),
+          multiplication_table(n * n, n),
+          one_mod(n),
+          kernel(n, n, ctx) {
+    }
+
+    flint::FmpzModCtx ctx;
+    flint::FmpzMat multiplication_table;
+    flint::FmpzVec one_mod;
+    flint::FmpzModMat kernel;
+    slong nullity = 0;
+};
+
+bool unramified_index_divisor_prime_applies(const Order& order,
+                                            flint::FmpzConstRef p) noexcept {
     // Source trace: reference `Prime.jl:prime_dec_gen` forms `O / pradical(O,p)`,
     // `Polygons.jl:_decomposition` splits that finite algebra, and for
     // p not dividing the maximal-order discriminant sets every e to 1.  In
@@ -2274,31 +2300,42 @@ bool unramified_maximal_index_divisor_prime_data(
     }
 
     flint::Fmpz discriminant;
-    if (!order.discriminant(flint::FmpzRef(discriminant)) ||
-        fmpz_divisible(discriminant.raw(), p.raw()) != 0) {
-        return false;
-    }
+    return order.discriminant(flint::FmpzRef(discriminant)) &&
+           fmpz_divisible(discriminant.raw(), p.raw()) == 0;
+}
 
-    const slong n = order.degree();
-    flint::FmpzModCtx ctx(p.raw());
-    flint::FmpzMat multiplication_table(n * n, n);
-    flint::FmpzVec one(n);
-    flint::FmpzVec one_mod(n);
-    if (!build_multiplication_table(multiplication_table, order) ||
+// Fills `out`, built for p and order.degree(), for a prime that passes
+// unramified_index_divisor_prime_applies.
+bool unramified_fixed_kernel(UnramifiedFixedKernel& out,
+                             const Order& order,
+                             flint::FmpzConstRef p) noexcept {
+    flint::FmpzVec one(order.degree());
+    if (!build_multiplication_table(out.multiplication_table, order) ||
         !order_one_coords(one, order)) {
         return false;
     }
-    fmpz_vec_set_mod(one_mod, one, ctx);
+    fmpz_vec_set_mod(out.one_mod, one, out.ctx);
 
-    flint::FmpzModMat fixed_kernel(n, n, ctx);
-    slong nullity = 0;
-    if (!fixed_frobenius_kernel(fixed_kernel, nullity,
-                                multiplication_table, one_mod, p, ctx) ||
-        nullity <= 0) {
-        return false;
+    out.nullity = 0;
+    return fixed_frobenius_kernel(out.kernel, out.nullity,
+                                  out.multiplication_table, out.one_mod, p,
+                                  out.ctx) &&
+           out.nullity > 0;
+}
+
+// The primes above p from the quotient in `fixed`.  `separator_absent` is
+// passed to components_from_fixed_subspace.
+bool unramified_prime_data_from_kernel(std::vector<IndexPrimeData>& out,
+                                       const Order& order,
+                                       flint::FmpzConstRef p,
+                                       const UnramifiedFixedKernel& fixed,
+                                       FixedSplit split,
+                                       bool* separator_absent) noexcept {
+    if (separator_absent != nullptr) {
+        *separator_absent = false;
     }
-
-    if (nullity == 1) {
+    const slong n = order.degree();
+    if (fixed.nullity == 1) {
         std::vector<IndexPrimeData> data;
         data.emplace_back(order);
         IndexPrimeData& prime = data.back();
@@ -2315,9 +2352,10 @@ bool unramified_maximal_index_divisor_prime_data(
     }
 
     std::vector<FiniteAlgebraComponent> components;
-    if (!components_from_fixed_subspace(components, fixed_kernel, nullity,
-                                        one_mod, multiplication_table, p,
-                                        ctx, split)) {
+    if (!components_from_fixed_subspace(components, fixed.kernel,
+                                        fixed.nullity, fixed.one_mod,
+                                        fixed.multiplication_table, p,
+                                        fixed.ctx, split, separator_absent)) {
         return false;
     }
 
@@ -2337,6 +2375,20 @@ bool unramified_maximal_index_divisor_prime_data(
 
     out.swap(data);
     return true;
+}
+
+bool unramified_maximal_index_divisor_prime_data(
+        std::vector<IndexPrimeData>& out,
+        const Order& order,
+        flint::FmpzConstRef p,
+        FixedSplit split) noexcept {
+    if (!unramified_index_divisor_prime_applies(order, p)) {
+        return false;
+    }
+    UnramifiedFixedKernel fixed(p, order.degree());
+    return unramified_fixed_kernel(fixed, order, p) &&
+           unramified_prime_data_from_kernel(out, order, p, fixed, split,
+                                             nullptr);
 }
 
 bool ramified_maximal_index_divisor_prime_data(
@@ -4597,5 +4649,141 @@ bool decompose_prime(PrimeIdealList& out,
     out.swap(candidates);
     return true;
 }
+
+namespace detail {
+
+namespace {
+
+bool residue_degrees_from_decompose_prime(std::vector<slong>& out,
+                                          const Order& order,
+                                          flint::FmpzConstRef p) noexcept {
+    PrimeIdealList primes;
+    if (!decompose_prime(primes, order, p)) {
+        return false;
+    }
+    std::vector<slong> degrees;
+    degrees.reserve(static_cast<std::size_t>(primes.size()));
+    for (slong i = 0; i < primes.size(); ++i) {
+        const PrimeIdeal* prime = primes.at(i);
+        if (prime == nullptr) {
+            return false;
+        }
+        degrees.push_back(prime->residue_degree());
+    }
+    out.swap(degrees);
+    return true;
+}
+
+// Stores `primes` as decompose_prime's store_and_publish_index_primes does
+// and writes their residue degrees, failing exactly where its
+// publish_index_primes would (PrimeIdeal::set_data_no_residue needs an HNF,
+// e > 0 and f > 0).
+bool store_index_primes_and_get_degrees(
+        std::vector<slong>& out,
+        const Order& order,
+        flint::FmpzConstRef p,
+        const std::vector<IndexPrimeData>& primes) noexcept {
+    std::vector<IndexDivisorPrimeRecord> records;
+    if (index_prime_records(records, primes)) {
+        OrderAccess::store_index_divisor_decomposition(order, p,
+                                                       std::move(records));
+    }
+    std::vector<slong> degrees;
+    degrees.reserve(primes.size());
+    for (const IndexPrimeData& prime : primes) {
+        if (!prime.ideal.has_hnf() || prime.ramification_index <= 0 ||
+            prime.residue_degree <= 0) {
+            return false;
+        }
+        degrees.push_back(prime.residue_degree);
+    }
+    out.swap(degrees);
+    return true;
+}
+
+}  // namespace
+
+bool decompose_prime_residue_degrees(std::vector<slong>& out,
+                                     const Order& order,
+                                     flint::FmpzConstRef p) noexcept {
+    // Only the index-divisor branch of decompose_prime (maximal,
+    // non-equation order, p dividing the index) is handled here; every other
+    // case is delegated whole.  The test below is no weaker than the branch
+    // conditions decompose_prime checks, with max_residue_degree = 0, before
+    // it reaches that branch.
+    if (!order.has_basis() || order.parent() == nullptr ||
+        fmpz_is_prime(p.raw()) == 0 ||
+        !fmpq_poly_is_monic_integral(order.parent()->raw_flint_field()->pol) ||
+        order.degree() <= 1 ||
+        residue_polynomial_uses_quadratic_integral_generator(order) ||
+        order.is_equation_order() || !order.is_maximal() ||
+        maximal_order_has_nonindex_defining_polynomial_prime(order, p)) {
+        return residue_degrees_from_decompose_prime(out, order, p);
+    }
+
+    // Cache hit: decompose_prime rebuilds each stored ideal and publishes it
+    // with its stored e and f, unfiltered under bound 0, so the stored
+    // degrees in stored order are what it publishes.  (If a rebuild fails it
+    // recomputes the same deterministic decomposition.)  A record it would
+    // refuse to publish is left to it.
+    if (const std::vector<IndexDivisorPrimeRecord>* cached =
+                OrderAccess::index_divisor_decomposition(order, p);
+        cached != nullptr) {
+        std::vector<slong> degrees;
+        degrees.reserve(cached->size());
+        for (const IndexDivisorPrimeRecord& record : *cached) {
+            if (record.ramification_index <= 0 || record.residue_degree <= 0) {
+                return residue_degrees_from_decompose_prime(out, order, p);
+            }
+            degrees.push_back(record.residue_degree);
+        }
+        out.swap(degrees);
+        return true;
+    }
+
+    // Cache miss.  decompose_prime tries the bounded unramified and ramified
+    // splits, then the monogenic generator search, then the recursive
+    // splits, and stores the first decomposition found.  For a prime not
+    // dividing the discriminant only the unramified splits can succeed, and
+    // both passes begin with the same deterministic quotient O/pO and
+    // separating-element search; this runs them once and so stores and
+    // publishes the same decomposition.  Ramified primes, and orders where
+    // the monogenic search succeeds, are delegated.
+    if (!unramified_index_divisor_prime_applies(order, p)) {
+        return residue_degrees_from_decompose_prime(out, order, p);
+    }
+    UnramifiedFixedKernel fixed(p, order.degree());
+    if (!unramified_fixed_kernel(fixed, order, p)) {
+        return residue_degrees_from_decompose_prime(out, order, p);
+    }
+    std::vector<IndexPrimeData> index_primes;
+    bool separator_absent = false;
+    if (unramified_prime_data_from_kernel(index_primes, order, p, fixed,
+                                          FixedSplit::bounded,
+                                          &separator_absent)) {
+        return store_index_primes_and_get_degrees(out, order, p,
+                                                  index_primes);
+    }
+
+    Element beta(*order.parent());
+    flint::FmpzPoly chi;
+    if (!beta.is_defined()) {
+        return false;
+    }
+    if (find_monogenic_generator(chi, beta, order)) {
+        return residue_degrees_from_decompose_prime(out, order, p);
+    }
+    if (unramified_prime_data_from_kernel(
+                index_primes, order, p, fixed,
+                separator_absent ? FixedSplit::recursive_only
+                                 : FixedSplit::recursive,
+                nullptr)) {
+        return store_index_primes_and_get_degrees(out, order, p,
+                                                  index_primes);
+    }
+    return false;
+}
+
+}  // namespace detail
 
 }  // namespace silex

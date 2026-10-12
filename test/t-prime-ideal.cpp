@@ -1320,6 +1320,141 @@ int test_index_divisor_cache_inert_principal() {
                                                    {1, 0, 3});
 }
 
+bool same_index_divisor_records(
+        const std::vector<silex::detail::IndexDivisorPrimeRecord>& left,
+        const std::vector<silex::detail::IndexDivisorPrimeRecord>& right) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        const silex::detail::IndexDivisorPrimeRecord& a = left[i];
+        const silex::detail::IndexDivisorPrimeRecord& b = right[i];
+        if (a.ramification_index != b.ramification_index ||
+            a.residue_degree != b.residue_degree ||
+            a.has_principal_generator != b.has_principal_generator ||
+            fmpz_mat_equal(a.hnf.raw(), b.hnf.raw()) == 0 ||
+            (a.has_principal_generator &&
+             fmpz_mat_equal(a.principal_generator.raw(),
+                            b.principal_generator.raw()) == 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<slong> published_residue_degrees(
+        const silex::PrimeIdealList& primes) {
+    std::vector<slong> degrees;
+    for (slong i = 0; i < primes.size(); ++i) {
+        degrees.push_back(primes.at(i)->residue_degree());
+    }
+    return degrees;
+}
+
+// detail::decompose_prime_residue_degrees must give the residue degrees
+// decompose_prime publishes, in its order, on a cache miss, on a hit after
+// its own miss, and on a hit after decompose_prime filled the cache.  Its
+// miss must store the records decompose_prime stores on a fresh order, so a
+// later decompose_prime on that order publishes the same primes.  Primes in
+// `index_primes` must be cached index divisors; the others may take any
+// branch.
+int check_residue_degrees_match_decompose_prime(
+        const std::vector<slong>& low_to_high,
+        const std::vector<slong>& rational_primes,
+        const std::vector<slong>& index_primes) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+
+    silex::NumberField field;
+    silex::Order equation;
+    equation = order_by_polynomial(field, polynomial);
+
+    for (const slong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, rational_prime));
+        const sflint::FmpzConstRef p_ref(p);
+
+        silex::Order reference(field);
+        assert(reference.maximal_order(equation));
+        silex::PrimeIdealList expected_primes;
+        assert(silex::decompose_prime(expected_primes, reference, p_ref));
+        const std::vector<slong> expected =
+                published_residue_degrees(expected_primes);
+        const std::vector<silex::detail::IndexDivisorPrimeRecord>*
+                reference_records =
+                        silex::detail::OrderAccess::index_divisor_decomposition(
+                                reference, p_ref);
+        bool is_index_prime = false;
+        for (const slong index_prime : index_primes) {
+            is_index_prime = is_index_prime || index_prime == rational_prime;
+        }
+        assert(!is_index_prime || reference_records != nullptr);
+
+        // Miss, then hit, on one order.
+        silex::Order order(field);
+        assert(order.maximal_order(equation));
+        assert(silex::detail::OrderAccess::index_divisor_decomposition(
+                       order, p_ref) == nullptr);
+        std::vector<slong> degrees;
+        assert(silex::detail::decompose_prime_residue_degrees(degrees, order,
+                                                              p_ref));
+        assert(degrees == expected);
+        const std::vector<silex::detail::IndexDivisorPrimeRecord>* stored =
+                silex::detail::OrderAccess::index_divisor_decomposition(
+                        order, p_ref);
+        assert((stored == nullptr) == (reference_records == nullptr));
+        if (stored != nullptr) {
+            assert(same_index_divisor_records(*stored, *reference_records));
+        }
+        degrees.clear();
+        assert(silex::detail::decompose_prime_residue_degrees(degrees, order,
+                                                              p_ref));
+        assert(degrees == expected);
+        silex::PrimeIdealList after;
+        assert(silex::decompose_prime(after, order, p_ref));
+        assert(same_decomposition(after, order, expected_primes, reference));
+
+        // Hit after decompose_prime filled the cache.
+        degrees.clear();
+        assert(silex::detail::decompose_prime_residue_degrees(degrees,
+                                                              reference,
+                                                              p_ref));
+        assert(degrees == expected);
+    }
+    return 0;
+}
+
+// The index divisors 43, 67 and 1319 of the field of
+// cyclotomic_real_q10_c11_deg10 split into ten primes of degree one, past the
+// bounded enumeration, as do the discriminant divisors 2, 5 and 11, which
+// decompose_prime handles outside its index-divisor branch.
+int test_residue_degrees_cyclotomic_real_q10_c11() {
+    return check_residue_degrees_match_decompose_prime(
+            {238831, -228566, -128567, 146666, -15113, -13352, 2746, 334,
+             -97, -2, 1},
+            {43, 67, 1319, 2, 5, 11}, {43, 67, 1319});
+}
+
+// Bounded enumeration (2 and 3 in Q(sqrt(-23), sqrt(-31), sqrt(-47))), the
+// recursive split or the monogenic branch (11 in Q(sqrt(-3), sqrt(-5),
+// sqrt(-7))), the monogenic branch with an unramified and a ramified 17, and
+// an inert index divisor with a principal generator.
+int test_residue_degrees_index_divisor_routes() {
+    assert(check_residue_degrees_match_decompose_prime(
+                   {38188288, 1822160, -1462612, -62792, 24143, 602, -220, -2,
+                    1},
+                   {2, 3}, {2, 3}) == 0);
+    assert(check_residue_degrees_match_decompose_prime(
+                   {1201, 598, -524, -146, 69, 2, 4, -4, 1}, {11}, {11}) ==
+           0);
+    assert(check_residue_degrees_match_decompose_prime({54043, 3179, -102, 1},
+                                                       {17}, {17}) == 0);
+    assert(check_residue_degrees_match_decompose_prime(
+                   {1419857, -19652, 2312, -85, 1}, {17}, {17}) == 0);
+    return check_residue_degrees_match_decompose_prime({8, 4, 0, 1}, {2},
+                                                       {2});
+}
+
 // Splits O/(p, I_p) through the bounded idempotent enumeration and through
 // the recursive split (both without the separating element) and checks that
 // they give the same prime ideals in the same order, which is also the order
@@ -3478,6 +3613,8 @@ int main() {
     assert(test_index_divisor_cache_recursive_split() == 0);
     assert(test_index_divisor_cache_monogenic() == 0);
     assert(test_index_divisor_cache_inert_principal() == 0);
+    assert(test_residue_degrees_cyclotomic_real_q10_c11() == 0);
+    assert(test_residue_degrees_index_divisor_routes() == 0);
     assert(test_index_divisor_separating_element_order() == 0);
     assert(test_recursive_split_matches_enumeration_unramified() == 0);
     assert(test_recursive_split_matches_enumeration_ramified() == 0);

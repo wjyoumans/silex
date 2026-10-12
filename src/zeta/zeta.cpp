@@ -1,6 +1,7 @@
 #include <silex/zeta.hpp>
 
 #include "zeta_internal.hpp"
+#include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <flint/flint.h>
 
@@ -1961,22 +1962,21 @@ bool bf_prime_residue_degrees_ui(std::vector<slong>& out,
                     diagnostics, DiagnosticsModule::unit_group,
                     "unit_group.zeta_bf.term.prime_decomposition_type."
                     "prime_ideal");
-            PrimeIdealList primes;
-            if (!decompose_prime(primes, order,
-                                 flint::FmpzConstRef(p_value))) {
+            // Only the decomposition type is needed: the degrees of
+            // decompose_prime, read for index divisors from the order's
+            // cached decomposition without rebuilding its ideals.
+            std::vector<slong> degrees;
+            if (!detail::decompose_prime_residue_degrees(
+                        degrees, order, flint::FmpzConstRef(p_value))) {
                 return false;
             }
-
-            out.clear();
-            out.reserve(static_cast<std::size_t>(primes.size()));
-            for (slong i = 0; i < primes.size(); ++i) {
-                const PrimeIdeal* prime = primes.at(i);
-                if (prime == nullptr || prime->residue_degree() <= 0) {
+            for (const slong degree : degrees) {
+                if (degree <= 0) {
                     out.clear();
                     return false;
                 }
-                out.push_back(prime->residue_degree());
             }
+            out.swap(degrees);
             found = true;
         }
     }

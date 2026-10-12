@@ -69,6 +69,20 @@ public:
             const DiagnosticsContext* diagnostics) noexcept;
 };
 
+// Residue degrees of the primes above p in `order`, in the order
+// decompose_prime(primes, order, p) publishes them, with the same success.
+// For an index divisor of a maximal non-equation order it reads them from the
+// order's index-divisor decomposition cache (OrderAccess::
+// index_divisor_decomposition) without rebuilding the stored ideals, and on a
+// miss for an unramified p stores the decomposition decompose_prime would
+// store, computing the quotient O/pO once for the bounded and recursive
+// splits.  Every other case calls decompose_prime.  Leaves `out` unchanged on
+// failure.  For callers that need only the decomposition type, such as the
+// Bach-Friedman Euler factors in zeta.cpp.
+bool decompose_prime_residue_degrees(std::vector<slong>& out,
+                                     const Order& order,
+                                     flint::FmpzConstRef p) noexcept;
+
 // Noninstalled prime-ideal hooks: constructors that take caller-supplied
 // data, and read-only access to recorded residue-map state.
 class PrimeIdealAccess {
