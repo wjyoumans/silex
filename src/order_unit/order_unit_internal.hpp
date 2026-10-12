@@ -19,6 +19,7 @@ namespace detail {
 
 struct CompactFieldModulusCache;
 struct HnfFinishWorkspace;
+struct HnfUnitPivotProbe;
 struct CompactRelationUnitGroupStorage;
 
 class CompactRelationUnitGroup {
@@ -746,7 +747,8 @@ hnf_class_regulator_product_and_unit_matrix(
         flint::FmpzMat* unit_matrix_out,
         flint::Arb* regulator_out,
         HnfFinishWorkspace* workspace,
-        slong precision) noexcept;
+        slong precision,
+        const HnfUnitPivotProbe* probe = nullptr) noexcept;
 bool factored_units_from_relation_coefficients(
         std::vector<FactoredElement>& out,
         const ClassGroupContext& class_group,
@@ -781,13 +783,38 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
                               EmbeddingContext& embeddings,
                               HnfFinishWorkspace* workspace,
                               slong precision) noexcept;
+// The HNF unit-log matrix and regulator pivot selection that one
+// hnf_independent_unit_count call derived.  When the class group, the
+// embeddings and the precision are unchanged, hnf_class_regulator_product
+// takes them instead of rebuilding the matrix and repeating the pivot
+// elimination: both are deterministic in those inputs, so the product
+// sees the same matrix and the same selected columns.
+struct HnfUnitPivotProbe {
+    flint::ArbMat unit_logs{0, 0};
+    std::vector<slong> selected;
+    slong precision = 0;
+    slong relation_count = -1;
+    slong relation_rank = -1;
+    bool valid = false;
+
+    void clear() noexcept {
+        unit_logs = flint::ArbMat(0, 0);
+        selected.clear();
+        precision = 0;
+        relation_count = -1;
+        relation_rank = -1;
+        valid = false;
+    }
+};
+
 RegulatorPivotOutcome hnf_independent_unit_count(
         slong& out,
         const Order& order,
         const ClassGroupContext& class_group,
         EmbeddingContext& embeddings,
         HnfFinishWorkspace* workspace,
-        slong precision) noexcept;
+        slong precision,
+        HnfUnitPivotProbe* probe_out = nullptr) noexcept;
 bool set_hnf_units(OrderUnitGroup& out,
                         const Order& order,
                         const ClassGroupContext& class_group,
@@ -811,7 +838,8 @@ RegulatorPivotOutcome hnf_class_regulator_product(
         EmbeddingContext& embeddings,
         flint::ArbConstRef analytic_hR,
         HnfFinishWorkspace* workspace,
-        slong precision) noexcept;
+        slong precision,
+        const HnfUnitPivotProbe* probe = nullptr) noexcept;
 
 namespace relation_search {
 

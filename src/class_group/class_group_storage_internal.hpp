@@ -2,6 +2,7 @@
 
 #include <silex/class_group.hpp>
 #include <silex/element.hpp>
+#include <silex/embedding.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
@@ -153,6 +154,14 @@ struct RelationSearchControlState {
     flint::Arb analytic_finish_product;
     flint::Fmpz analytic_finish_torsion_order;
     Element analytic_finish_torsion_generator;
+    // The analytic finish check runs once per relation checkpoint, always
+    // at analytic_finish_precision.  Its embedding roots depend only on the
+    // field and that precision, so the context built for a precision is
+    // kept for the next check at the same precision.  It is rebuilt when
+    // the precision changes, so every check sees the roots a fresh context
+    // would compute.
+    EmbeddingContext analytic_finish_embeddings;
+    slong analytic_finish_embedding_precision = 0;
 };
 
 struct RelationFinishState {

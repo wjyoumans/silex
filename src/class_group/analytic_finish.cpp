@@ -507,6 +507,33 @@ static bool analytic_finish_product(flint::ArbRef out,
     return true;
 }
 
+// Returns the finish check's embedding context refined to `precision`.
+// A context kept from an earlier check is reused only while it holds roots
+// computed at exactly this precision for this field; otherwise a new one is
+// built and refined, as each check did before.
+static EmbeddingContext* analytic_finish_embeddings(
+        RelationSearchControlState& route_state,
+        const NumberField& field,
+        slong precision) noexcept {
+    EmbeddingContext& embeddings = route_state.analytic_finish_embeddings;
+    if (route_state.analytic_finish_embedding_precision == precision &&
+        embeddings.is_defined() && embeddings.is_set() &&
+        embeddings.precision() == precision &&
+        embeddings.parent() != nullptr &&
+        embeddings.parent()->has_same_data(field)) {
+        return &embeddings;
+    }
+
+    route_state.analytic_finish_embedding_precision = 0;
+    embeddings = EmbeddingContext(field);
+    if (!embeddings.is_defined() || !embeddings.refine(precision)) {
+        embeddings.clear();
+        return nullptr;
+    }
+    route_state.analytic_finish_embedding_precision = precision;
+    return &embeddings;
+}
+
 AnalyticFinishDecision apply_analytic_finish_check(
         ClassGroupContext& context,
         RelationSearchControlState& route_state,
@@ -530,17 +557,19 @@ AnalyticFinishDecision apply_analytic_finish_check(
 
     for (;;) {
         const slong precision = route_state.analytic_finish_precision;
-        EmbeddingContext embeddings(*order.parent());
         flint::Arb analytic_hR;
         flint::Arb candidate_hR;
         flint::Arb quotient;
 
-        if (!embeddings.is_defined() || !embeddings.refine(precision)) {
+        EmbeddingContext* const embeddings_ptr = analytic_finish_embeddings(
+                route_state, *order.parent(), precision);
+        if (embeddings_ptr == nullptr) {
             SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                       LogLevel::detail,
                       "analytic finish embedding setup failed");
             return AnalyticFinishDecision::failed;
         }
+        EmbeddingContext& embeddings = *embeddings_ptr;
 
         slong unit_target_rank = -1;
         slong independent_units = -1;
@@ -550,10 +579,14 @@ AnalyticFinishDecision apply_analytic_finish_check(
                       "analytic finish unit-rank setup failed");
             return AnalyticFinishDecision::failed;
         }
+        // The probe keeps the pre-probe's unit-log matrix and pivot
+        // selection for the regulator product below, which would otherwise
+        // rebuild both from the same relations at the same precision.
+        detail::HnfUnitPivotProbe unit_probe;
         const RegulatorPivotOutcome preprobe_outcome =
                 detail::hnf_independent_unit_count(
                         independent_units, order, context, embeddings,
-                        finish_workspace, precision);
+                        finish_workspace, precision, &unit_probe);
         const RegulatorPivotFinishAction preprobe_action =
                 route_regulator_pivot_outcome(
                         route_state, goal_reached,
@@ -599,7 +632,7 @@ AnalyticFinishDecision apply_analytic_finish_check(
                                   flint::ArbRef(candidate_hR),
                                   product_independent_units, order, context,
                                   embeddings, flint::ArbConstRef(analytic_hR),
-                                  finish_workspace, precision)
+                                  finish_workspace, precision, &unit_probe)
                         : RegulatorPivotOutcome::precision_inconclusive;
         const RegulatorPivotFinishAction product_action =
                 route_regulator_pivot_outcome(

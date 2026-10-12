@@ -1,10 +1,13 @@
 #include <silex/class_group.hpp>
+#include <silex/embedding.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/order_unit.hpp>
 #include <silex/relation.hpp>
+#include <silex/zeta.hpp>
 
 #include "class_group/class_group_internal.hpp"
+#include "order_unit/order_unit_internal.hpp"
 #include "relation/relation_internal.hpp"
 #include "test_support.hpp"
 
@@ -682,6 +685,83 @@ int test_default_completion_populates_finish_workspace() {
     return 0;
 }
 
+// The analytic finish check hands the independent-unit pre-probe's
+// unit-log matrix and pivot selection to the regulator product.  The
+// product must return exactly what it returns when it rebuilds both, and
+// must ignore a probe taken at another precision.
+int test_preprobe_handoff_matches_rebuilt_product() {
+    silex::NumberField field = cubic_discriminant_81_field();
+    const silex::Order equation_order =
+            silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), maximal_order));
+    if (sflint::fmpz_cmp_ui(
+                sflint::FmpzConstRef(factor_base_bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(factor_base_bound), 2);
+    }
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 500;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            class_group, maximal_order,
+            sflint::FmpzConstRef(factor_base_bound), options, 128));
+    assert(units.free_rank() == 2);
+
+    using silex::detail::RegulatorPivotOutcome;
+    auto* workspace =
+            silex::detail::class_group_finish_workspace(class_group);
+    assert(workspace != nullptr);
+    const slong precision = 160;
+    silex::EmbeddingContext embeddings(field);
+    assert(embeddings.refine(precision));
+    sflint::Arb analytic_hR;
+    assert(silex::zeta_class_regulator_product(
+            sflint::ArbRef(analytic_hR), maximal_order, precision));
+
+    slong independent = -1;
+    silex::detail::HnfUnitPivotProbe probe;
+    assert(silex::detail::hnf_independent_unit_count(
+                   independent, maximal_order, class_group, embeddings,
+                   workspace, precision, &probe) ==
+           RegulatorPivotOutcome::success);
+    assert(independent == 2);
+    assert(probe.valid && probe.precision == precision);
+    assert(static_cast<slong>(probe.selected.size()) == independent);
+    assert(probe.relation_count == class_group.relation_count());
+
+    for (const slong product_precision : {precision, 2 * precision}) {
+        sflint::Arb rebuilt;
+        sflint::Arb handed;
+        slong rebuilt_count = -1;
+        slong handed_count = -1;
+        const RegulatorPivotOutcome rebuilt_outcome =
+                silex::detail::hnf_class_regulator_product(
+                        sflint::ArbRef(rebuilt), rebuilt_count,
+                        maximal_order, class_group, embeddings,
+                        sflint::ArbConstRef(analytic_hR), workspace,
+                        product_precision);
+        const RegulatorPivotOutcome handed_outcome =
+                silex::detail::hnf_class_regulator_product(
+                        sflint::ArbRef(handed), handed_count,
+                        maximal_order, class_group, embeddings,
+                        sflint::ArbConstRef(analytic_hR), workspace,
+                        product_precision, &probe);
+        assert(rebuilt_outcome == RegulatorPivotOutcome::success);
+        assert(handed_outcome == rebuilt_outcome);
+        assert(rebuilt_count == 2 && handed_count == rebuilt_count);
+        assert(::arb_equal(rebuilt.raw(), handed.raw()) != 0);
+    }
+    return 0;
+}
+
 int test_hnf_row_pivot_column_flags() {
     std::vector<char> covered;
     silex::fmpz_smat::HnfContext module;
@@ -728,5 +808,6 @@ int main() {
     assert(test_extra_prime_outside_factor_base_rejected() == 0);
     assert(test_unit_multiplied_generator_accepted() == 0);
     assert(test_hnf_row_pivot_column_flags() == 0);
+    assert(test_preprobe_handoff_matches_rebuilt_product() == 0);
     return 0;
 }

@@ -3202,8 +3202,12 @@ RegulatorPivotOutcome hnf_independent_unit_count(
         const ClassGroupContext& class_group,
         EmbeddingContext& embeddings,
         HnfFinishWorkspace* workspace,
-        slong precision) noexcept {
+        slong precision,
+        HnfUnitPivotProbe* probe_out) noexcept {
     out = 0;
+    if (probe_out != nullptr) {
+        probe_out->clear();
+    }
     if (!validate_relation_kernel_inputs(order, class_group, embeddings,
                                          precision)) {
         return RegulatorPivotOutcome::invalid;
@@ -3242,6 +3246,14 @@ RegulatorPivotOutcome hnf_independent_unit_count(
     }
 
     out = static_cast<slong>(selected.size());
+    if (probe_out != nullptr) {
+        probe_out->unit_logs = std::move(unit_logs);
+        probe_out->selected = std::move(selected);
+        probe_out->precision = precision;
+        probe_out->relation_count = class_group.relation_count();
+        probe_out->relation_rank = class_group.relation_rank();
+        probe_out->valid = true;
+    }
     return RegulatorPivotOutcome::success;
 }
 

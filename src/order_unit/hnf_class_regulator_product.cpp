@@ -152,7 +152,8 @@ hnf_class_regulator_product_and_unit_matrix(
         flint::FmpzMat* unit_matrix_out,
         flint::Arb* regulator_out,
         HnfFinishWorkspace* workspace,
-        slong precision) noexcept {
+        slong precision,
+        const HnfUnitPivotProbe* probe) noexcept {
     if (independent_count_out != nullptr) {
         *independent_count_out = 0;
     }
@@ -179,30 +180,49 @@ hnf_class_regulator_product_and_unit_matrix(
         return RegulatorPivotOutcome::invalid;
     }
 
-    flint::ArbMat unit_logs(
-            class_group.relation_count() - class_group.relation_rank(),
-            places);
-    std::vector<slong> selected;
-    if (!hnf_unit_log_matrix(unit_logs, class_group, embeddings,
-                                  workspace, precision)) {
-        SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
-                  LogLevel::detail,
-                  "certify_regulator_multiple failed: HNF unit log matrix");
-        // This legacy bool conflates structural, exact, and numeric failures.
-        // The five-path pivot correction cannot safely relabel that opaque
-        // upstream result as certified precision ambiguity: only the Arb
-        // selector below owns the adjudicated tri-state distinction.
-        return RegulatorPivotOutcome::invalid;
+    const slong unit_log_rows =
+            class_group.relation_count() - class_group.relation_rank();
+    // A probe from hnf_independent_unit_count on this class group and
+    // precision already holds the matrix and the pivot selection that the
+    // two calls below would rebuild from the same inputs.
+    const bool reuse_probe =
+            probe != nullptr && probe->valid &&
+            probe->precision == precision &&
+            probe->relation_count == class_group.relation_count() &&
+            probe->relation_rank == class_group.relation_rank() &&
+            flint::arb_mat_nrows_value(probe->unit_logs) == unit_log_rows &&
+            flint::arb_mat_ncols_value(probe->unit_logs) == places &&
+            static_cast<slong>(probe->selected.size()) <= rank;
+    flint::ArbMat built_unit_logs(reuse_probe ? 0 : unit_log_rows,
+                                  reuse_probe ? 0 : places);
+    std::vector<slong> built_selected;
+    if (!reuse_probe) {
+        if (!hnf_unit_log_matrix(built_unit_logs, class_group, embeddings,
+                                      workspace, precision)) {
+            SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
+                      LogLevel::detail,
+                      "certify_regulator_multiple failed: HNF unit log matrix");
+            // This legacy bool conflates structural, exact, and numeric
+            // failures.  The five-path pivot correction cannot safely
+            // relabel that opaque upstream result as certified precision
+            // ambiguity: only the Arb selector below owns the adjudicated
+            // tri-state distinction.
+            return RegulatorPivotOutcome::invalid;
+        }
+        const RegulatorPivotOutcome pivot_outcome =
+                regulator_pivot_unit_indices(built_selected, built_unit_logs,
+                                             sig, rank, places, precision);
+        if (pivot_outcome != RegulatorPivotOutcome::success) {
+            SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
+                      LogLevel::detail,
+                      "certify_regulator_multiple failed: pivot elimination");
+            return pivot_outcome;
+        }
     }
-    const RegulatorPivotOutcome pivot_outcome =
-            regulator_pivot_unit_indices(
-                    selected, unit_logs, sig, rank, places, precision);
-    if (pivot_outcome != RegulatorPivotOutcome::success) {
-        SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
-                  LogLevel::detail,
-                  "certify_regulator_multiple failed: pivot elimination");
-        return pivot_outcome;
-    }
+    const flint::ArbMat& unit_logs =
+            reuse_probe ? probe->unit_logs : built_unit_logs;
+    const std::vector<slong>& selected =
+            reuse_probe ? probe->selected : built_selected;
     const slong independent_count = static_cast<slong>(selected.size());
     if (static_cast<slong>(selected.size()) != rank) {
         SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
@@ -316,7 +336,8 @@ RegulatorPivotOutcome hnf_class_regulator_product(
         EmbeddingContext& embeddings,
         flint::ArbConstRef analytic_hR,
         HnfFinishWorkspace* workspace,
-        slong precision) noexcept {
+        slong precision,
+        const HnfUnitPivotProbe* probe) noexcept {
     independent_count = 0;
     slong rank = -1;
     if (order.parent() == nullptr ||
@@ -343,7 +364,7 @@ RegulatorPivotOutcome hnf_class_regulator_product(
     }
     return hnf_class_regulator_product_and_unit_matrix(
             out, &independent_count, order, class_group, embeddings,
-            analytic_hR, nullptr, nullptr, workspace, precision);
+            analytic_hR, nullptr, nullptr, workspace, precision, probe);
 }
 
 }  // namespace silex::detail
