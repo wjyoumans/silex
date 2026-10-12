@@ -14,4 +14,14 @@ enum class SquareAbsDetRoute { diagonal_product, determinant };
 SquareAbsDetRoute fmpz_mat_square_abs_det(flint::FmpzRef out,
         flint::FmpzMatConstRef matrix) noexcept;
 
+// Folds rows [hnf_rows, nrows) of `matrix` into the canonical row HNF held in
+// its first hnf_rows rows, in place.  The first hnf_rows rows must be a
+// canonical row HNF with no zero rows (as fmpz_mat_hnf returns them).  On
+// success the first `rank` rows are the canonical row HNF of all rows (the
+// fmpz_mat_hnf normalization) and the remaining rows are zero.  Returns
+// false, with `matrix` unchanged, when hnf_rows is out of range or the first
+// hnf_rows rows do not have positive pivots in strictly increasing columns.
+bool fmpz_mat_hnf_add_rows(slong& rank, flint::FmpzMatRef matrix,
+                           slong hnf_rows) noexcept;
+
 }  // namespace silex::detail

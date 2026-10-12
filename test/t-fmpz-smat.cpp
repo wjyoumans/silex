@@ -1413,6 +1413,289 @@ int test_hnf_context_deferred_dependent_refresh() {
     return 0;
 }
 
+// Deterministic generator for the randomized HNF row-insertion checks.
+ulong next_random(ulong& state) noexcept {
+    state = state * 6364136223846793005UL + 1442695040888963407UL;
+    return state >> 33;
+}
+
+// Sets `row` of `matrix` to zero, then to a sparse row shaped like a
+// class-group relation: a few nonzero entries of at most max_abs in absolute
+// value at random columns from first_column on.
+void fill_relation_like_row(silex::flint::FmpzMat& matrix,
+                            slong row,
+                            slong first_column,
+                            slong max_abs,
+                            ulong& state) noexcept {
+    const slong cols = silex::flint::fmpz_mat_ncols(matrix);
+    for (slong j = 0; j < cols; ++j) {
+        ::fmpz_zero(::fmpz_mat_entry(matrix.raw(), row, j));
+    }
+    const slong span = cols - first_column;
+    if (span <= 0) {
+        return;
+    }
+    const slong terms = 1 + static_cast<slong>(next_random(state) % 6);
+    for (slong t = 0; t < terms; ++t) {
+        const slong col = first_column +
+                          static_cast<slong>(next_random(state) %
+                                             static_cast<ulong>(span));
+        const slong value =
+                static_cast<slong>(next_random(state) %
+                                   static_cast<ulong>(2 * max_abs + 1)) -
+                max_abs;
+        ::fmpz_set_si(::fmpz_mat_entry(matrix.raw(), row, col), value);
+    }
+}
+
+// Sets `row` of `matrix` to left_coeff * row `left` + right_coeff * row
+// `right`: a row dependent on earlier rows, in their lattice.
+void set_combination_row(silex::flint::FmpzMat& matrix,
+                         slong row,
+                         slong left,
+                         slong left_coeff,
+                         slong right,
+                         slong right_coeff) noexcept {
+    const slong cols = silex::flint::fmpz_mat_ncols(matrix);
+    for (slong j = 0; j < cols; ++j) {
+        fmpz* entry = ::fmpz_mat_entry(matrix.raw(), row, j);
+        ::fmpz_mul_si(entry, ::fmpz_mat_entry(matrix.raw(), left, j),
+                      left_coeff);
+        ::fmpz_addmul_si(entry, ::fmpz_mat_entry(matrix.raw(), right, j),
+                         right_coeff);
+    }
+}
+
+// Stacks the trimmed fmpz_mat_hnf of rows [0, old_rows) of `rows` over rows
+// [old_rows, nrows), folds the new rows in with fmpz_mat_hnf_add_rows, and
+// compares the result with fmpz_mat_hnf of all rows: the same nonzero rows,
+// then zero rows.
+bool hnf_add_rows_matches_full_hnf(silex::flint::FmpzMatConstRef rows,
+                                   slong old_rows) noexcept {
+    const slong nrows = silex::flint::fmpz_mat_nrows(rows);
+    const slong ncols = silex::flint::fmpz_mat_ncols(rows);
+    silex::flint::FmpzMatConstWindow old_window(rows, 0, 0, old_rows, ncols);
+    silex::flint::FmpzMat old_hnf(old_rows, ncols);
+    ::fmpz_mat_hnf(old_hnf.raw(), old_window.raw());
+    const slong old_rank =
+            trimmed_nonzero_rows(silex::flint::FmpzMatConstRef(old_hnf));
+
+    const slong stacked_rows = old_rank + nrows - old_rows;
+    silex::flint::FmpzMat stacked(stacked_rows, ncols);
+    for (slong i = 0; i < old_rank; ++i) {
+        for (slong j = 0; j < ncols; ++j) {
+            ::fmpz_set(::fmpz_mat_entry(stacked.raw(), i, j),
+                       ::fmpz_mat_entry(old_hnf.raw(), i, j));
+        }
+    }
+    for (slong i = old_rows; i < nrows; ++i) {
+        for (slong j = 0; j < ncols; ++j) {
+            ::fmpz_set(::fmpz_mat_entry(stacked.raw(), old_rank + i - old_rows,
+                                        j),
+                       ::fmpz_mat_entry(rows.raw(), i, j));
+        }
+    }
+
+    silex::flint::FmpzMat expected(nrows, ncols);
+    ::fmpz_mat_hnf(expected.raw(), rows.raw());
+    const slong expected_rank =
+            trimmed_nonzero_rows(silex::flint::FmpzMatConstRef(expected));
+
+    slong rank = -1;
+    if (!silex::detail::fmpz_mat_hnf_add_rows(
+                rank, silex::flint::FmpzMatRef(stacked), old_rank) ||
+        rank != expected_rank ||
+        rank != ::fmpz_mat_rank(rows.raw())) {
+        return false;
+    }
+    for (slong i = 0; i < stacked_rows; ++i) {
+        for (slong j = 0; j < ncols; ++j) {
+            const fmpz* got = ::fmpz_mat_entry(stacked.raw(), i, j);
+            const bool equal =
+                    i < rank ? ::fmpz_equal(got, ::fmpz_mat_entry(
+                                                         expected.raw(), i,
+                                                         j)) != 0
+                             : ::fmpz_is_zero(got) != 0;
+            if (!equal) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+int test_hnf_add_rows_random_small() {
+    ulong state = 20261012UL;
+    for (slong trial = 0; trial < 400; ++trial) {
+        const slong cols = 1 + static_cast<slong>(next_random(state) % 8);
+        const slong old_rows = static_cast<slong>(next_random(state) % 9);
+        const slong new_rows = static_cast<slong>(next_random(state) % 5);
+        const slong rows = old_rows + new_rows;
+        const slong max_abs = 1 + static_cast<slong>(next_random(state) % 40);
+        silex::flint::FmpzMat matrix(rows, cols);
+        for (slong i = 0; i < rows; ++i) {
+            // Shifted supports make later rows insert pivots in front of
+            // earlier ones; some rows are dependent or zero.
+            const slong kind = static_cast<slong>(next_random(state) % 6);
+            if (kind == 0 && i >= 2) {
+                set_combination_row(matrix, i, i - 1, 3, i - 2, -2);
+            } else if (kind == 1 && i >= 1) {
+                set_combination_row(matrix, i, i - 1, 5, i - 1, 0);
+            } else if (kind == 2) {
+                fill_relation_like_row(matrix, i, cols, max_abs, state);
+            } else {
+                const slong first = static_cast<slong>(
+                        next_random(state) % static_cast<ulong>(cols));
+                fill_relation_like_row(matrix, i, first, max_abs, state);
+            }
+        }
+        if (!hnf_add_rows_matches_full_hnf(
+                    silex::flint::FmpzMatConstRef(matrix), old_rows)) {
+            return 1;
+        }
+    }
+
+    // Malformed retained rows are rejected and left unchanged.
+    silex::flint::FmpzMat bad(2, 2);
+    set_entry_si(bad, 0, 0, -1);
+    set_entry_si(bad, 1, 1, 1);
+    silex::flint::FmpzMat bad_copy(2, 2);
+    silex::flint::fmpz_mat_set(silex::flint::FmpzMatRef(bad_copy),
+                               silex::flint::FmpzMatConstRef(bad));
+    slong rank = -1;
+    if (silex::detail::fmpz_mat_hnf_add_rows(
+                rank, silex::flint::FmpzMatRef(bad), 1) ||
+        silex::detail::fmpz_mat_hnf_add_rows(
+                rank, silex::flint::FmpzMatRef(bad), 3) ||
+        !silex::flint::fmpz_mat_equal(
+                silex::flint::FmpzMatConstRef(bad),
+                silex::flint::FmpzMatConstRef(bad_copy))) {
+        return 1;
+    }
+    return 0;
+}
+
+// Relation-module shape: 161 columns, retained HNFs of rank up to 160 (the
+// last column is never used, so the lattice stays rank deficient), and a few
+// new rows with entries of at most 5 bits, including dependent rows.
+int test_hnf_add_rows_relation_shape() {
+    constexpr slong cols = 161;
+    constexpr slong rows = 182;
+    ulong state = 442UL;
+    silex::flint::FmpzMat matrix(rows, cols);
+    for (slong i = 0; i < rows; ++i) {
+        if (i % 9 == 8) {
+            // Dependent rows in the lattice of earlier rows.
+            set_combination_row(matrix, i, i - 1, 2, i - 4, -1);
+        } else {
+            fill_relation_like_row(matrix, i, 0, 15, state);
+            // Drop the last column, then give the row an entry of its own
+            // column, mostly 1 as for relation rows, so the rank grows with
+            // the row count.
+            ::fmpz_zero(::fmpz_mat_entry(matrix.raw(), i, cols - 1));
+            const slong own = (i * 37) % (cols - 1);
+            const ulong pick = next_random(state) % 8;
+            ::fmpz_set_si(::fmpz_mat_entry(matrix.raw(), i, own),
+                          pick < 5 ? 1 : static_cast<slong>(pick) - 3);
+        }
+    }
+    // Row 100 becomes row 30 + row 31 and rows 30 and 31 are then tripled,
+    // so row 100 is rationally dependent but refines the lattice.
+    set_combination_row(matrix, 100, 30, 1, 31, 1);
+    for (slong j = 0; j < cols; ++j) {
+        ::fmpz_mul_si(::fmpz_mat_entry(matrix.raw(), 30, j),
+                      ::fmpz_mat_entry(matrix.raw(), 30, j), 3);
+        ::fmpz_mul_si(::fmpz_mat_entry(matrix.raw(), 31, j),
+                      ::fmpz_mat_entry(matrix.raw(), 31, j), 3);
+    }
+
+    for (const slong old_rows : {slong{80}, slong{99}, slong{176},
+                                 slong{178}}) {
+        for (const slong new_rows : {slong{1}, slong{3}}) {
+            silex::flint::FmpzMatConstWindow window(
+                    matrix, 0, 0, old_rows + new_rows, cols);
+            if (!hnf_add_rows_matches_full_hnf(window.const_ref(),
+                                               old_rows)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// The context refreshes the retained HNF incrementally after a few accepted
+// or deferred rows; every refreshed HNF must be the canonical HNF of all rows
+// added so far, through partial rank, refining dependent rows and full rank.
+int test_hnf_context_refresh_adds_rows_to_retained_hnf() {
+    constexpr slong cols = 40;
+    constexpr slong rows = 72;
+    ulong state = 447UL;
+    silex::flint::FmpzMat matrix(rows, cols);
+    for (slong i = 0; i < rows; ++i) {
+        // Supports widen leftwards, so new pivots land in front of old ones.
+        const slong first = cols - 1 - (i * cols) / rows;
+        if (i % 7 == 6) {
+            set_combination_row(matrix, i, i - 1, 3, i - 3, -2);
+        } else if (i % 11 == 10) {
+            // Half of the doubled row i - 2: refines the lattice.
+            for (slong j = 0; j < cols; ++j) {
+                ::fmpz_divexact_ui(::fmpz_mat_entry(matrix.raw(), i, j),
+                                   ::fmpz_mat_entry(matrix.raw(), i - 2, j),
+                                   2);
+            }
+        } else {
+            fill_relation_like_row(matrix, i, first, 15, state);
+        }
+        if (i % 11 == 8) {
+            for (slong j = 0; j < cols; ++j) {
+                ::fmpz_mul_2exp(::fmpz_mat_entry(matrix.raw(), i, j),
+                                ::fmpz_mat_entry(matrix.raw(), i, j), 1);
+            }
+        }
+    }
+
+    bool independent = false;
+    bool reduces_to_zero = false;
+    for (const ulong prime : {ulong{0}, ulong{3}, ulong{65537}}) {
+        for (const bool defer : {false, true}) {
+            silex::fmpz_smat::HnfContext context;
+            if (!context.reset(cols, prime)) {
+                return 1;
+            }
+            for (slong i = 0; i < rows; ++i) {
+                const bool ok =
+                        defer ? context.add_fmpz_mat_row_defer_dependent(
+                                        &independent,
+                                        silex::flint::FmpzMatConstRef(matrix),
+                                        i)
+                              : context.add_fmpz_mat_row(
+                                        &independent,
+                                        silex::flint::FmpzMatConstRef(matrix),
+                                        i);
+                if (!ok) {
+                    return 1;
+                }
+                // Refresh after most rows, as the relation search does, and
+                // let a few rows accumulate before some refreshes.
+                if (i % 5 != 4 &&
+                    !context.fmpz_mat_row_reduces_to_zero(
+                            reduces_to_zero,
+                            silex::flint::FmpzMatConstRef(matrix), i)) {
+                    return 1;
+                }
+                if (!reduces_to_zero && i % 5 != 4) {
+                    return 1;
+                }
+                if ((i % 6 == 5 || i == rows - 1) &&
+                    !hnf_context_matches_prefix(context, matrix, i + 1)) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 int test_native_cpp_raii_call_sites() {
     static_assert(!std::is_copy_constructible_v<silex::fmpz_smat::SparseRow>);
     static_assert(!std::is_copy_assignable_v<silex::fmpz_smat::SparseRow>);
@@ -1583,6 +1866,7 @@ int test_square_abs_det_routes() {
 }  // namespace
 
 int main() {
+
     return test_sparse_row_basic() != 0 || test_sparse_matrix_basic() != 0 ||
                    test_sparse_row_dense_equality_is_canonical() != 0 ||
                    test_sparse_matrix_kernels() != 0 ||
@@ -1593,6 +1877,9 @@ int main() {
                    test_hnf_context_index_before_transform() != 0 ||
                    test_hnf_context_incremental_refresh() != 0 ||
                    test_hnf_context_deferred_dependent_refresh() != 0 ||
+                   test_hnf_add_rows_random_small() != 0 ||
+                   test_hnf_add_rows_relation_shape() != 0 ||
+                   test_hnf_context_refresh_adds_rows_to_retained_hnf() != 0 ||
                    test_native_cpp_raii_call_sites() != 0 ||
                    test_square_abs_det_routes() != 0
                ? 1

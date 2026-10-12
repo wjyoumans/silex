@@ -97,11 +97,13 @@ the incomplete gamma values in closed form; the source comment and the public
 algorithm/source map record the deviations.
 
 The row-addition step of the relation-module checkpoint HNF, `hnf_add_rows` in
-`src/class_group/class_relation_module_context.cpp`, follows the `add_rows`
-step of the Pernet-Stein algorithm in FLINT 3.6.0
-`src/fmpz_mat/hnf_pernet_stein.c`. The adaptation keeps FLINT's extended-gcd
-row update and adds a divisible-entry shortcut, a pivot-index walk, and skipped
-reductions; the source comment records the deviations.
+`src/class_group/class_relation_module_context.cpp`, and the same step in the
+incremental HNF context refresh, `fmpz_mat_hnf_add_rows` in
+`src/fmpz_smat/fmpz_smat.cpp`, follow the `add_rows` step of the Pernet-Stein
+algorithm in FLINT 3.6.0 `src/fmpz_mat/hnf_pernet_stein.c`. The adaptation
+keeps FLINT's extended-gcd row update and adds a divisible-entry shortcut, a
+pivot-index walk, and skipped reductions; the source comments record the
+deviations.
 
 Copyright (C) 2021 Fredrik Johansson (`l_fmpq_afe.c`).
 

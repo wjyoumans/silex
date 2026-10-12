@@ -45,7 +45,16 @@ Sparse matrices and lattices
 dense/modular conversion, transpose, multiplication, one-shot and persistent
 modular rank, and incremental exact HNF/index contexts.  These operations use
 FLINT ``fmpz``, ``fmpz_mat``, and ``nmod_mat`` contracts; sparse rows are
-strictly column-sorted and never store zero values.
+strictly column-sorted and never store zero values.  When ``HnfContext``
+refreshes a retained HNF of less than full rank without a transformation, it
+folds the new rows into that HNF with the row-addition step of the
+Pernet--Stein HNF algorithm as FLINT 3.6.0 implements it
+(``src/fmpz_mat/hnf_pernet_stein.c``, ``add_rows``; C. Pernet and W. Stein,
+"Fast computation of Hermite normal forms of random integer matrices",
+*J. Number Theory* 130 (2010), 1675--1683), as the relation-module
+checkpoint already does; other refreshes call ``fmpz_mat_hnf`` or
+``fmpz_mat_hnf_transform``.  The canonical row HNF is unique, so the result
+is the one ``fmpz_mat_hnf`` returns for all rows.
 
 ``src/lat`` implements exact row lattices, HNF and transformation matrices,
 containment, sum, intersection, index, saturation, LLL reduction, and bounded
