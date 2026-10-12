@@ -3,6 +3,7 @@
 #include "order_unit_internal.hpp"
 
 #include "../class_group/class_group_internal.hpp"
+#include "../element/element_internal.hpp"
 #include "../order/order_internal.hpp"
 #include "../residue_field/residue_field_internal.hpp"
 
@@ -976,9 +977,8 @@ namespace {
 // pure_power_residue_disproves can only prove that the input is not a
 // power.  So for exponent >= 3 and degree >= 10, Element::is_power finds a
 // root only of a rational constant (is_power_rational_constant).  The bound
-// must follow the pure_power_hensel_root guard; a test pins it.
-constexpr slong kElementPowerRouteDegreeLimit = 10;
-
+// must follow the pure_power_hensel_root guard; it uses the constant
+// kElementPowerRouteDegreeLimit that guard uses (element_internal.hpp).
 bool element_power_test_roots_non_rational(const NumberField& field,
                                            slong exponent) noexcept {
     return exponent <= 2 || field.degree() < kElementPowerRouteDegreeLimit;

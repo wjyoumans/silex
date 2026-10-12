@@ -9,6 +9,12 @@
 
 namespace silex::detail {
 
+// Degree from which Element::is_power (exponent >= 3) no longer runs
+// pure_power_hensel_root, which is ported only for degree < this value.
+// hensel.cpp's guards and the order-unit relation kernel's
+// element_power_test_roots_non_rational share it.
+inline constexpr slong kElementPowerRouteDegreeLimit = 10;
+
 bool ensure_parent(Element& out, const NumberField& field) noexcept;
 
 // True when z has exact multiplicative order m, that is, when z is a root of

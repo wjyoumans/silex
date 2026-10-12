@@ -47,10 +47,12 @@ struct CompactCoordinateBoundReport {
     bool inverse_norm_bound_used = false;
 };
 
-// The caller certifies that generators are the complete fundamental units for
-// order and evaluate to elements of order. This private producer only ports
-// reference's coordinate-bound calculation; it does not verify those two facts by
-// expanding the compact elements.
+// The caller certifies that generators are units of order (of the maximal
+// order) and evaluate to elements of order.  They need not be the complete
+// fundamental units: the bound needs only that each generator lies in order,
+// so it also applies to a finite-index subgroup in the middle of extraction.
+// This private producer only ports reference's coordinate-bound calculation;
+// it does not verify those facts by expanding the compact elements.
 bool compact_unit_coordinate_bound(
         CompactCoordinateBoundReport& report, flint::FmpzRef out,
         const Order& order, FactoredElementSpan generators,

@@ -4163,7 +4163,7 @@ bool pure_power_hensel_root(bool& is_power,
     // unsupported.
     const NumberField* parent = input.parent();
     if (parent == nullptr || parent->degree() <= 1 ||
-        parent->degree() >= 10 || exponent <= 1) {
+        parent->degree() >= kElementPowerRouteDegreeLimit || exponent <= 1) {
         return false;
     }
 
@@ -4251,7 +4251,7 @@ bool pure_power_residue_disproves(bool& is_power,
     // the caller in the existing unsupported/fail-closed state.
     constexpr slong max_prime_attempts = 256;
 
-    if (parent->degree() >= 10) {
+    if (parent->degree() >= kElementPowerRouteDegreeLimit) {
         // Degree 10 and higher, where pure_power_hensel_root is not ported.
         // reference v0.38.6 `_roots_hensel` (Hensel.jl lines 159-161)
         // returns no roots as soon as y^n - a has no root modulo a prime

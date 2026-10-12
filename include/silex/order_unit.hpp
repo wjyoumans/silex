@@ -413,7 +413,9 @@ private:
     // Set only when the stored generators came from a unit-basis transform
     // whose exponents do not fit in slong: the stored wide form, one row per
     // free generator.  free_generators_ then holds the equal word-size units
-    // rebuilt from it, which free_generator returns.
+    // rebuilt from it, which free_generator returns.  Read only by tests
+    // (detail::wide_free_generators); it does not persist: any later
+    // set_units replaces the generators and drops it.
     std::unique_ptr<detail::WideFactoredUnits, detail::WideFactoredUnitsDelete>
             wide_free_generators_;
     slong free_generator_count_ = 0;
