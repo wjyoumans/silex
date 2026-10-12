@@ -1002,6 +1002,68 @@ static bool ideal_lattice_fill_rounded_embedding_cache(
     return false;
 }
 
+// FLINT's ULLL truncation threshold (lll_with_removal_ulll.c): fmpz_lll
+// reduces a matrix whose entries have at most this many bits directly with
+// its default wrapper (wrapper_with_removal_knapsack.c).
+constexpr slong kFlintUlllTruncationBits = 250;
+
+// The integer LLL of the rounded-embedding route, with fmpz_lll's result.
+// For at least two rows and entries of at most 250 bits, fmpz_lll runs
+// fmpz_lll_d_with_removal_knapsack and keeps its output when
+// fmpz_lll_is_reduced holds, which FLINT documents as always conclusive and
+// equal to fmpz_mat_is_reduced.  Silex runs that first phase and certifies
+// it with fmpz_mat_is_reduced directly, the Lat::lll_reduce route
+// (docs/reference/algorithms_and_sources.rst), which skips FLINT's
+// inconclusive multiprecision pre-check that dominated the cost of this
+// LLL.  When the phase returns -1 or the certificate fails, the input is
+// restored and fmpz_lll runs from the start, so the result and the
+// transform are fmpz_lll's on every route.
+IdealLatticeOneLllRoute ideal_lattice_rounded_embedding_integer_lll(
+        flint::FmpzMat& embedded,
+        flint::FmpzMat& transform,
+        IdealLatticeOneLllTestFailure failure) noexcept {
+    const slong rows = flint::fmpz_mat_nrows(embedded);
+    const slong cols = flint::fmpz_mat_ncols(embedded);
+    if (flint::fmpz_mat_nrows(transform) != rows ||
+        flint::fmpz_mat_ncols(transform) != rows) {
+        transform = flint::FmpzMat(rows, rows);
+    }
+    flint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
+    flint::fmpz_mat_one(flint::FmpzMatRef(transform));
+    bool eligible = rows > 1;
+    if (eligible) {
+        const slong bits = ::fmpz_mat_max_bits(embedded.raw());
+        eligible = bits >= -kFlintUlllTruncationBits &&
+                   bits <= kFlintUlllTruncationBits;
+    }
+    if (eligible) {
+        flint::FmpzMat input(rows, cols);
+        flint::fmpz_mat_set(flint::FmpzMatRef(input),
+                            flint::FmpzMatConstRef(embedded));
+        int status = ::fmpz_lll_d_with_removal_knapsack(
+                embedded.raw(), transform.raw(), nullptr, config.raw());
+        if (failure != IdealLatticeOneLllTestFailure::none) {
+            // Test-only: exercise the restoration after the phase has
+            // changed the matrix.
+            flint::fmpz_mat_zero(flint::FmpzMatRef(embedded));
+            if (failure == IdealLatticeOneLllTestFailure::reducer) {
+                status = -1;
+            }
+        }
+        if (status != -1 &&
+            ::fmpz_mat_is_reduced(embedded.raw(), config.raw()->delta,
+                                  config.raw()->eta)) {
+            return IdealLatticeOneLllRoute::certified;
+        }
+        flint::fmpz_mat_set(flint::FmpzMatRef(embedded),
+                            flint::FmpzMatConstRef(input));
+        flint::fmpz_mat_one(flint::FmpzMatRef(transform));
+    }
+    ::fmpz_lll(embedded.raw(), transform.raw(), config.raw());
+    return eligible ? IdealLatticeOneLllRoute::fallback
+                    : IdealLatticeOneLllRoute::ineligible;
+}
+
 // The reference 2.17.3 buch2.c:2461-2462 (Fincke_Pohst_ideal):
 //   u = ZM_lll(ZM_mul(G0, I), 0.99, LLL_IM); ideal = ZM_mul(I, u);
 // one integer LLL of the ideal basis in the rounded embedding.  The
@@ -1042,9 +1104,7 @@ static IdealLatticeReductionStatus ideal_lattice_rounded_embedding_lll_reduce(
         flint::fmpz_mat_mul(flint::FmpzMatRef(embedded),
                             flint::FmpzMatConstRef(basis),
                             flint::FmpzMatConstRef(cache.rounded_rows));
-        flint::fmpz_mat_one(flint::FmpzMatRef(transform));
-        flint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
-        fmpz_lll(embedded.raw(), transform.raw(), config.raw());
+        ideal_lattice_rounded_embedding_integer_lll(embedded, transform);
         flint::fmpz_mat_mul(flint::FmpzMatRef(reduced_basis),
                             flint::FmpzMatConstRef(transform),
                             flint::FmpzMatConstRef(basis));

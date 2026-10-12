@@ -47,6 +47,24 @@ bool build_ideal_lattice_lll_data(IdealLatticeLllData& out,
                                   const Ideal& ideal,
                                   slong precision) noexcept;
 
+enum class IdealLatticeOneLllRoute { certified, fallback, ineligible };
+enum class IdealLatticeOneLllTestFailure { none, reducer, certificate };
+
+// The integer LLL (delta 0.99, eta 0.51) of
+// build_ideal_lattice_rounded_embedding_lll_data: replaces `embedded` by the
+// matrix fmpz_lll returns for it and sets `transform` (resized to a square
+// matrix of the row count if needed) to fmpz_lll's transform from the
+// identity.  certified: FLINT's first phase, certified by
+// fmpz_mat_is_reduced; fallback: the phase failed and fmpz_lll ran;
+// ineligible: fewer than two rows or entries above 250 bits, fmpz_lll ran.
+// Failure injection is test-only: it zeroes the phase output, and
+// `reducer` also reads the phase status as -1.
+IdealLatticeOneLllRoute ideal_lattice_rounded_embedding_integer_lll(
+        flint::FmpzMat& embedded,
+        flint::FmpzMat& transform,
+        IdealLatticeOneLllTestFailure failure =
+                IdealLatticeOneLllTestFailure::none) noexcept;
+
 // One integer LLL per ideal on the ideal basis times the cached rounded
 // order embedding (reference buch2.c:Fincke_Pohst_ideal), with the same output contract
 // as build_ideal_lattice_lll_data.  Falls back to build_ideal_lattice_lll_data

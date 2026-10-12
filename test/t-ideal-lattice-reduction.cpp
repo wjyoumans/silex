@@ -1468,12 +1468,112 @@ int test_octic_t2_enumeration_data_meets_lll_bounds() {
 
 }  // namespace
 
+// The integer LLL of the rounded-embedding route certifies FLINT's first
+// phase with fmpz_mat_is_reduced instead of letting fmpz_lll run its own
+// check; the result must be fmpz_lll's on every route.  On the octic field
+// of row multiquadratic_m3_m5_m7 the one-LLL basis of a degree-one prime
+// above 43 is certified on the first phase and then fails the T2 diagonal
+// checks, so the ideal is reduced by the two-LLL route, as when the whole
+// fmpz_lll ran.
+int test_rounded_embedding_certified_lll_matches_fmpz_lll() {
+    namespace rs = silex::detail::relation_search;
+    constexpr std::array<slong, 9> m3_m5_m7 = {1201, 598, -524, -146, 69,
+                                              2,    4,   -4,   1};
+    FieldSetup setup = monic_field(m3_m5_m7.data(),
+                                   static_cast<slong>(m3_m5_m7.size()));
+    const silex::Order& order = setup.maximal_order;
+    const slong degree = order.degree();
+    assert(degree == 8);
+    silex::Ideal prime(order);
+    assert(degree_one_prime_ideal_above(prime, order, UWORD(43), 0));
+
+    rs::IdealLatticeRoundedEmbeddingCache cache;
+    rs::IdealLatticeLllData data;
+    rs::IdealLatticeLllData expected;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            data, prime, kReductionPrecision, cache));
+    // The order data was formed and the one-LLL basis was rejected: an
+    // accepted one would have run the route check.
+    assert(cache.has_rounded_rows && !cache.route_checked &&
+           !cache.use_two_lll_route);
+    assert(rs::build_ideal_lattice_lll_data(expected, prime,
+                                            kReductionPrecision));
+    assert(rounded_embedding_data_has_contract(data, prime));
+    assert(same_lll_data(data, expected));
+
+    // On the rejected ideal's embedded basis H R, every route returns
+    // fmpz_lll's matrix and transform.
+    sflint::FmpzMat hnf(degree, degree);
+    assert(prime.get_hnf(sflint::FmpzMatRef(hnf)));
+    sflint::FmpzMat input(degree, degree);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(input),
+                         sflint::FmpzMatConstRef(hnf),
+                         sflint::FmpzMatConstRef(cache.rounded_rows));
+    const auto check_routes = [](const sflint::FmpzMat& matrix,
+                                 rs::IdealLatticeOneLllRoute route) {
+        const slong rows = sflint::fmpz_mat_nrows(matrix);
+        const slong cols = sflint::fmpz_mat_ncols(matrix);
+        sflint::FmpzMat reference(rows, cols);
+        sflint::FmpzMat reference_transform(rows, rows);
+        sflint::fmpz_mat_set(sflint::FmpzMatRef(reference),
+                             sflint::FmpzMatConstRef(matrix));
+        sflint::fmpz_mat_one(sflint::FmpzMatRef(reference_transform));
+        sflint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
+        ::fmpz_lll(reference.raw(), reference_transform.raw(), config.raw());
+        for (const auto failure :
+             {rs::IdealLatticeOneLllTestFailure::none,
+              rs::IdealLatticeOneLllTestFailure::reducer,
+              rs::IdealLatticeOneLllTestFailure::certificate}) {
+            sflint::FmpzMat reduced(rows, cols);
+            sflint::FmpzMat transform(0, 0);
+            sflint::fmpz_mat_set(sflint::FmpzMatRef(reduced),
+                                 sflint::FmpzMatConstRef(matrix));
+            const rs::IdealLatticeOneLllRoute expected_route =
+                    route != rs::IdealLatticeOneLllRoute::certified
+                            ? route
+                    : failure == rs::IdealLatticeOneLllTestFailure::none
+                            ? rs::IdealLatticeOneLllRoute::certified
+                            : rs::IdealLatticeOneLllRoute::fallback;
+            if (rs::ideal_lattice_rounded_embedding_integer_lll(
+                        reduced, transform, failure) != expected_route ||
+                !sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(reduced),
+                                        sflint::FmpzMatConstRef(reference)) ||
+                !sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(transform),
+                        sflint::FmpzMatConstRef(reference_transform))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    assert(check_routes(input, rs::IdealLatticeOneLllRoute::certified));
+
+    // The one-LLL basis the route rejected is the fmpz_lll one, and it is
+    // not the two-LLL basis the route returned.
+    sflint::FmpzMat one_lll_basis(0, 0);
+    assert(one_lll_basis_from_cache(one_lll_basis, prime, cache));
+    assert(!sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(one_lll_basis),
+                                   sflint::FmpzMatConstRef(data.basis)));
+
+    // Entries above FLINT's 250-bit ULLL threshold, and a single row, go
+    // to fmpz_lll directly.
+    sflint::FmpzMat wide(degree, degree);
+    ::fmpz_mat_scalar_mul_2exp(wide.raw(), input.raw(), 260);
+    assert(check_routes(wide, rs::IdealLatticeOneLllRoute::ineligible));
+    sflint::FmpzMat single(1, 3);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(single, 0, 0), 6);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(single, 0, 2), -4);
+    assert(check_routes(single, rs::IdealLatticeOneLllRoute::ineligible));
+    return 0;
+}
+
 int main() {
     assert(test_ideal_lattice_result_contracts() == 0);
     assert(test_rounded_embedding_lll_contracts() == 0);
     assert(test_rounded_embedding_route_check_for_badly_rounded_order() == 0);
     assert(test_rounded_embedding_route_check_boundary() == 0);
     assert(test_rounded_embedding_route_check_once_per_context() == 0);
+    assert(test_rounded_embedding_certified_lll_matches_fmpz_lll() == 0);
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);
