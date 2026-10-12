@@ -604,6 +604,54 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+Continued-fraction fundamental unit of a real quadratic field
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``quadratic_fundamental_unit`` in ``src/unit/unit.cpp`` computes the
+fundamental unit of the maximal order of a real quadratic field by the
+classical continued-fraction period theorem, following the PARI 2.17.3
+``quadunit`` reference (``quad.c``).  It accepts the explicit quadratic
+backend and any field with a monic integral defining polynomial
+``x^2 + b*x + c`` of positive nonsquare discriminant.  The basis is
+unconditional: no GRH or heuristic hypothesis enters.
+
+Presentation map.  With ``D = b^2 - 4*c = f^2*d`` and ``d`` squarefree, a root
+``theta`` satisfies ``(2*theta + b)^2 = D``, so
+``sqrt(d) = (2*theta + b)/f`` is the square root of ``d`` in the field that is
+positive at the real embedding sending ``theta`` to the larger root
+(``monic_integral_quadratic_radicand_map``, ``src/unit/unit.cpp:72-83``).  The
+continued-fraction core runs on ``d``, so the unit does not depend on the
+presentation.  Its coefficients are rewritten through this map: the ``theta``
+coefficient is ``2*B/f`` and the constant is ``A + B*b/f``, where the unit is
+``A + B*sqrt(d)`` (``set_quadratic_coefficients``,
+``src/unit/unit.cpp:37-70``).  The ``x^2 - d`` presentation with ``d``
+squarefree is the case ``b = 0``, ``f = 2``.  Here ``f`` is not the conductor
+of ``Z[theta]``, which is ``f/2`` when ``d = 2, 3 (mod 4)``.  For a
+nonmaximal ``Z[theta]`` the unit is generally not in ``Z[theta]``; only the
+maximal order is claimed.
+
+Runtime checks.  Silex checks exactly two things, and neither is a
+certificate that the unit is fundamental.
+
+* The order is maximal: ``OrderUnitGroup::compute`` returns failure unless
+  ``order.is_maximal()`` (``src/order_unit/compute.cpp:3496``); the equation
+  order of a nonmaximal ``Z[theta]`` is rejected.
+* The unit has norm ``+1`` or ``-1``, tested exactly in integers
+  (``src/unit/unit.cpp:482-487``).
+
+That the unit is fundamental rests on the period theorem and the reference
+``quadunit``, the same basis the ``x^2 - d`` route already had.
+
+Certification label.  On success of ``quadratic_fundamental_unit`` the caller
+sets ``CertificationMode::proven``
+(``src/order_unit/compute.cpp:3507-3513``) with no unit proof record
+(``unit_proof_record_count`` is 0).  This does not contradict the sentence
+above that Silex never upgrades certification without the corresponding proof
+record: nothing is upgraded, because the label is ``proven`` from the start by
+the unconditional theorem rather than by a record, and no candidate or ``grh``
+result is promoted.  The class group is certified separately and is not
+affected by this route.
+
 The ideal-lattice LLL step of relation search follows Hecke 0.39.19
 ``src/NumFieldOrd/NfOrd/LLL.jl:_lll``, which rounds the scaled Minkowski Gram
 matrix from ``NfOrd.jl:minkowski_gram_mat_scaled``.  Hecke computes that
