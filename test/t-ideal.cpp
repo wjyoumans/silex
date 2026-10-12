@@ -3031,6 +3031,105 @@ int test_set_known_ideal_hnf_matches_set_hnf() {
     return 0;
 }
 
+// A fractional ideal is built from a matrix only through the checked
+// Ideal::set_hnf followed by FractionalIdeal::set_integral_den, which takes an
+// Ideal and so does not repeat the ideal test.  On the product fixtures:
+// set_hnf rejects every non-ideal HNF (decided by reference_set_hnf_accepts)
+// and leaves the ideal unchanged, so set_integral_den still sees the earlier
+// ideal; set_integral_den on gI with denominator d stores the checked
+// set_hnf of gI/c over d/c, c = gcd(content(gI), d); and on maximal orders
+// invert gives an inverse whose inverse is the input.
+int test_fractional_from_validated_numerator() {
+    ContainsRng rng{0x7a11d4e1};
+    slong rejected = 0;
+    slong reduced = 0;
+    for (slong degree : {2, 3, 4, 6}) {
+        for (slong kind = 0; kind < 6; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            const slong n = order.degree();
+            silex::Ideal product(order);
+            assert(product.multiply(left, right));
+            const silex::Ideal* ideals[] = {&left, &right, &product};
+            for (const silex::Ideal* source : ideals) {
+                sflint::FmpzMat hnf(n, n);
+                assert(source->get_hnf(sflint::FmpzMatRef(hnf)));
+
+                for (slong trial = 0; trial < 8; ++trial) {
+                    sflint::FmpzMat candidate(n, n);
+                    fmpz_mat_set(candidate.raw(), hnf.raw());
+                    const slong i = rng.next(0, n - 1);
+                    const slong j = rng.next(0, n - 1);
+                    fmpz_add_ui(fmpz_mat_entry(candidate.raw(), i, j),
+                                fmpz_mat_entry(candidate.raw(), i, j),
+                                static_cast<ulong>(rng.next(1, 3)));
+                    sflint::FmpzMat normalized(n, n);
+                    if (reference_set_hnf_accepts(order, candidate, normalized)) {
+                        continue;
+                    }
+                    silex::Ideal kept(order);
+                    assert(kept.set(*source));
+                    assert(!kept.set_hnf(sflint::FmpzMatConstRef(candidate)));
+                    assert(kept.equal(*source));
+                    silex::FractionalIdeal from_kept(order), from_source(order);
+                    assert(from_kept.set_integral(kept));
+                    assert(from_source.set_integral(*source));
+                    assert(from_kept.equal(from_source));
+                    ++rejected;
+                }
+
+                for (slong g : {1, 6}) {
+                    sflint::FmpzMat scaled(n, n);
+                    fmpz_mat_scalar_mul_si(scaled.raw(), hnf.raw(), g);
+                    silex::Ideal numerator(order);
+                    assert(numerator.set_hnf(sflint::FmpzMatConstRef(scaled)));
+                    for (slong d : {1, 4, 9}) {
+                        sflint::Fmpz den, content;
+                        fmpz_set_si(den.raw(), d);
+                        fmpz_mat_content(content.raw(), scaled.raw());
+                        fmpz_gcd(content.raw(), content.raw(), den.raw());
+                        sflint::FmpzMat divided(n, n);
+                        fmpz_mat_scalar_divexact_fmpz(divided.raw(), scaled.raw(),
+                                                      content.raw());
+                        sflint::Fmpz want_den;
+                        fmpz_divexact(want_den.raw(), den.raw(), content.raw());
+                        silex::Ideal want(order);
+                        assert(want.set_hnf(sflint::FmpzMatConstRef(divided)));
+                        if (!fmpz_is_one(content.raw())) {
+                            ++reduced;
+                        }
+
+                        silex::FractionalIdeal frac(order);
+                        assert(frac.set_integral_den(numerator,
+                                                     sflint::FmpzConstRef(den)));
+                        silex::Ideal got(order);
+                        sflint::Fmpz got_den;
+                        assert(frac.get_integral_den(got, sflint::FmpzRef(got_den)));
+                        sflint::FmpzMat want_hnf(n, n), got_hnf(n, n);
+                        assert(want.get_hnf(sflint::FmpzMatRef(want_hnf)));
+                        assert(got.get_hnf(sflint::FmpzMatRef(got_hnf)));
+                        assert(fmpz_mat_equal(want_hnf.raw(), got_hnf.raw()) != 0);
+                        assert(fmpz_equal(want_den.raw(), got_den.raw()) != 0);
+
+                        if (kind != 5) {
+                            silex::FractionalIdeal inverse(order), back(order);
+                            silex::FractionalIdeal unit(order), one(order);
+                            assert(inverse.invert(frac));
+                            assert(back.invert(inverse));
+                            assert(back.equal(frac));
+                            assert(unit.multiply(frac, inverse));
+                            assert(one.one());
+                            assert(unit.equal(one));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return rejected > 0 && reduced > 0 ? 0 : 1;
+}
+
 // Failure returns of the public Ideal::contains overloads: an undefined ideal
 // or element, an ideal without an HNF, and an element or ideal of another
 // order (a different order of the same field, and an order of another field)
@@ -3258,6 +3357,7 @@ int main(int argc, char** argv) {
     assert(test_contains_ideal_matches_hnf_reference() == 0);
     assert(test_contains_lattice_fallback_matches_hnf_reference() == 0);
     assert(test_set_known_ideal_hnf_matches_set_hnf() == 0);
+    assert(test_fractional_from_validated_numerator() == 0);
     assert(test_contains_failure_returns() == 0);
     assert(test_triangular_basis_contains_matches_hnf_reference() == 0);
     assert(test_integral_noninvertible_norm_trap() == 0);

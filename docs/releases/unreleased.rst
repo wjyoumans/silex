@@ -686,6 +686,16 @@ Changed
   ideal by construction.  Builds with assertions enabled still assert the
   test.  Decompositions are unchanged.
 
+- ``FractionalIdeal::set_integral_den`` and ``set_integral``, the
+  maximal-order ``FractionalIdeal::invert`` and the scaling step of
+  fractional ``add`` and ``intersect`` no longer test that a lattice is an
+  ideal in builds with ``NDEBUG`` defined (for example Release) when the
+  lattice is an ideal by construction: an ``Ideal`` argument divided by its
+  common content with the denominator, a positive integer multiple of an
+  ``Ideal``, or the colon ``(O : I)`` scaled into ``O``.  ``Ideal::set_hnf``
+  still rejects a matrix whose lattice is not an ideal, and builds with
+  assertions enabled still assert the test.  Results are unchanged.
+
 - The LLL relation search reduces each ideal once, with integer LLL on the
   ideal basis mapped through a rounded embedding of the order that is
   computed once per order, as PARI 2.17.3 ``Fincke_Pohst_ideal``

@@ -288,7 +288,11 @@ bool scale_integral_ideal(Ideal& out,
         return false;
     }
     fmpz_mat_scalar_mul_fmpz(hnf.raw(), hnf.raw(), scalar.raw());
-    return out.set_hnf(flint::FmpzMatConstRef(hnf));
+    // `input` is an Ideal, so its lattice I is an ideal, and sI is closed
+    // under the order: w(sx) = s(wx) lies in sI for x in I and w in O.  The
+    // hnf_is_ideal product test of set_hnf is therefore skipped.
+    return detail::IdealAccess::set_known_ideal_hnf(
+            out, flint::FmpzMatConstRef(hnf));
 }
 
 bool normalize_lattice_num_den(flint::FmpzMat& numerator,
@@ -508,9 +512,16 @@ bool colon_one_integral_hnf_inverse(FractionalIdeal& out,
     flint::Fmpz denominator_value;
     Ideal numerator(*order);
     FractionalIdeal candidate(*order);
+    // The dual lattice is {x : <x, c> in Z for every constraint row c}, that
+    // is {x : x b_i in O for every basis element b_i of the denominator},
+    // the colon (O : I).  It is closed under the order because O is a ring
+    // (w x b_i lies in wO, inside O, for w in O), so numerator_hnf, which
+    // spans denominator_value * (O : I) inside O, is an ideal, and the
+    // hnf_is_ideal product test of set_hnf is skipped.
     if (!rational_mat_to_lattice(numerator_hnf, denominator_value,
                                  flint::FmpqMatConstRef(dual)) ||
-        !numerator.set_hnf(flint::FmpzMatConstRef(numerator_hnf)) ||
+        !detail::IdealAccess::set_known_ideal_hnf(
+                numerator, flint::FmpzMatConstRef(numerator_hnf)) ||
         !candidate.set_integral_den(numerator,
                                     flint::FmpzConstRef(denominator_value))) {
         return false;
@@ -1979,7 +1990,15 @@ bool FractionalIdeal::set_integral_den(const Ideal& numerator,
                              flint::FmpzConstRef(g));
     }
 
-    if (!candidate.numerator_.set_hnf(flint::FmpzMatConstRef(hnf))) {
+    // `numerator` is an Ideal holding an HNF, so its lattice I is an ideal:
+    // Ideal::set_hnf tests closure, the other routes that store an HNF build
+    // an ideal by construction, and only the test hook
+    // IdealAccess::set_hnf_direct stores an unchecked matrix.  Dividing the
+    // content g out keeps an ideal: I = gJ as lattices, and for x in J and w
+    // in O, g(wx) = w(gx) lies in I, so wx lies in J.  The hnf_is_ideal
+    // product test of set_hnf is therefore skipped.
+    if (!detail::IdealAccess::set_known_ideal_hnf(
+                candidate.numerator_, flint::FmpzMatConstRef(hnf))) {
         return false;
     }
 
