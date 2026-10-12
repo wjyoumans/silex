@@ -2760,6 +2760,30 @@ int test_witness_through_lacking_conjugate() {
         // P13' lacking as well: the second lacking ideal lies above the
         // required prime's own rational prime 13, refused.
         check_lacking_prime_witness(base, p13[0], alpha, false, false, 65);
+        // 3 is inert, so (3 beta) = P13 * (3) with (3) the only ideal above
+        // 3 and outside the base: refused, as in buch2.c:can_factor.
+        found = false;
+        for (slong a = -4; a <= 4 && !found; ++a) {
+            for (slong b = 1; b <= 4 && !found; ++b) {
+                if (a * a + b * b != 13) continue;
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(
+                        sflint::FmpzMatRef(coordinates), 0, 0), 3 * a);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(
+                        sflint::FmpzMatRef(coordinates), 0, 1), 3 * b);
+                assert(alpha.set_coordinates(
+                        sflint::FmpzMatConstRef(coordinates)));
+                silex::Ideal principal(order);
+                slong v13 = -1;
+                assert(principal.set_principal(alpha));
+                assert(p13[0].valuation(v13, principal));
+                found = v13 == 1;
+            }
+        }
+        assert(found);
+        const auto p3 = primes_above(order, 3);
+        assert(p3.size() == 1 && p3[0].ramification_index() == 1 &&
+               p3[0].residue_degree() == 2);
+        check_lacking_prime_witness(base, p13[0], alpha, false, false);
     }
     // x^3 - x - 1 (discriminant -23, class number 1): 23 = P^2 Q and
     // 5 = R1 R2 with f(R1) = 1, f(R2) = 2.  Required R1, scalar 5 * 23.
