@@ -23,6 +23,10 @@ struct IdealLatticeLllData {
 // the build_ideal_lattice_lll_data schedule reaches from the starting
 // precision `order_gram_requested_precision` (0 while no Gram is cached).
 // The cache is keyed on the order's data and is filled on first use.
+// `route_checked` records that the first one-LLL basis accepted for the
+// order was compared with the two-LLL basis of the same ideal, and
+// `use_two_lll_route` that the comparison failed, so every further ideal of
+// the order is reduced by build_ideal_lattice_lll_data.
 struct IdealLatticeRoundedEmbeddingCache {
     Order order;
     bool has_order = false;
@@ -31,6 +35,8 @@ struct IdealLatticeRoundedEmbeddingCache {
     slong order_gram_requested_precision = 0;
     slong order_gram_precision = 0;
     flint::FmpzMat order_gram{0, 0};
+    bool route_checked = false;
+    bool use_two_lll_route = false;
 };
 
 bool copy_ideal_basis_row_coordinates(flint::FmpzMat& out,
@@ -44,7 +50,9 @@ bool build_ideal_lattice_lll_data(IdealLatticeLllData& out,
 // One integer LLL per ideal on the ideal basis times the cached rounded
 // order embedding (reference buch2.c:Fincke_Pohst_ideal), with the same output contract
 // as build_ideal_lattice_lll_data.  Falls back to build_ideal_lattice_lll_data
-// when the result fails that route's T2 reduction-quality checks.
+// when the result fails that route's T2 reduction-quality checks, and for
+// every ideal of an order whose first accepted one-LLL basis has a T2
+// diagonal product above 2^degree times that of the two-LLL basis.
 bool build_ideal_lattice_rounded_embedding_lll_data(
         IdealLatticeLllData& out,
         const Ideal& ideal,

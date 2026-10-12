@@ -83,6 +83,59 @@ FieldSetup cubic_x3_plus_x_plus_200() noexcept {
     return setup;
 }
 
+// The real subfield of Q(zeta_136), degree 32, by the minimal polynomial of
+// 2 cos(2 pi / 136) (benchmark row cyclotomic_real_136_deg32).  Its power
+// basis embeddings span about 2^0 to 2^31.
+FieldSetup real_cyclotomic_136() noexcept {
+    constexpr std::array<slong, 33> coefficients = {
+            1,       0, -144,    0, 3396,    0, -31248, 0, 149106,
+            0, -425128, 0,  786798,  0, -995824, 0, 891311, 0,
+            -575832, 0, 271214, 0, -93128, 0, 23051, 0, -4004, 0,
+            463,     0, -32,    0, 1};
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+
+    FieldSetup setup;
+    setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    assert(setup.maximal_order.maximal_order(equation_order));
+    assert(setup.maximal_order.is_maximal());
+    return setup;
+}
+
+// The degree-one unramified prime ideal above p with the given index among
+// those in decompose_prime order.
+bool degree_one_prime_ideal_above(silex::Ideal& out,
+                                  const silex::Order& order, ulong p,
+                                  slong index = 0) noexcept {
+    sflint::Fmpz prime_number;
+    sflint::fmpz_set_ui(sflint::FmpzRef(prime_number), p);
+    silex::PrimeIdealList primes;
+    if (!silex::decompose_prime(primes, order,
+                                sflint::FmpzConstRef(prime_number))) {
+        return false;
+    }
+
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        if (prime != nullptr && prime->ramification_index() == 1 &&
+            prime->residue_degree() == 1) {
+            if (index == 0) {
+                return prime->get_ideal(out);
+            }
+            --index;
+        }
+    }
+    return false;
+}
+
 bool degree_one_prime_ideal_above_five(silex::Ideal& out,
                                        const silex::Order& order) noexcept {
     sflint::Fmpz five;
@@ -476,6 +529,8 @@ int test_rounded_embedding_lll_contracts() {
     assert(sflint::fmpz_mat_rank(sflint::FmpzMatConstRef(cache.rounded_rows)) ==
            degree);
     assert(cache.order_gram_precision >= kReductionPrecision);
+    // The first basis passed the route check against the two-LLL basis.
+    assert(cache.route_checked && !cache.use_two_lll_route);
     // The basis is the one-LLL route's.
     sflint::FmpzMat one_lll_basis(0, 0);
     assert(one_lll_basis_from_cache(one_lll_basis, prime_ideal, cache));
@@ -569,6 +624,63 @@ int test_rounded_embedding_lll_contracts() {
             sflint::fmpz_mat_entry(
                     sflint::FmpzMatConstRef(prime_data.basis), 0, 0),
             11));
+    return 0;
+}
+
+// On the real subfield of Q(zeta_136) the order rows rounded at the first
+// full-rank scale steer the LLL to a basis that passes the T2 bounds but is
+// far longer than the two-LLL basis: its T2 diagonal product exceeds the
+// two-LLL one by far more than the factor 2^32 the route check allows.  The route check sends the order to the two-LLL
+// route, for the checked ideal and every later one, and a cache for another
+// order starts unchecked.
+int test_rounded_embedding_route_check_for_badly_rounded_order() {
+    namespace rs = silex::detail::relation_search;
+    FieldSetup setup = real_cyclotomic_136();
+    const silex::Order& order = setup.maximal_order;
+    assert(order.degree() == 32);
+
+    silex::Ideal first_prime(order);
+    silex::Ideal second_prime(order);
+    assert(first_prime.is_defined() && second_prime.is_defined());
+    assert(degree_one_prime_ideal_above(first_prime, order, UWORD(137), 0));
+    assert(degree_one_prime_ideal_above(second_prime, order, UWORD(137), 1));
+
+    rs::IdealLatticeRoundedEmbeddingCache cache;
+    rs::IdealLatticeLllData first_data;
+    rs::IdealLatticeLllData first_expected;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            first_data, first_prime, kReductionPrecision, cache));
+    assert(cache.has_rounded_rows && cache.route_checked &&
+           cache.use_two_lll_route);
+    assert(rs::build_ideal_lattice_lll_data(first_expected, first_prime,
+                                            kReductionPrecision));
+    assert(rounded_embedding_data_has_contract(first_data, first_prime));
+    assert(same_lll_data(first_data, first_expected));
+    sflint::FmpzMat one_lll_basis(0, 0);
+    assert(one_lll_basis_from_cache(one_lll_basis, first_prime, cache));
+    assert(!sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(one_lll_basis),
+                                   sflint::FmpzMatConstRef(first_data.basis)));
+
+    rs::IdealLatticeLllData second_data;
+    rs::IdealLatticeLllData second_expected;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            second_data, second_prime, kReductionPrecision, cache));
+    assert(rs::build_ideal_lattice_lll_data(second_expected, second_prime,
+                                            kReductionPrecision));
+    assert(rounded_embedding_data_has_contract(second_data, second_prime));
+    assert(same_lll_data(second_data, second_expected));
+
+    FieldSetup cubic = cubic_x3_minus_2();
+    silex::Ideal cubic_prime(cubic.maximal_order);
+    assert(degree_one_prime_ideal_above_five(cubic_prime,
+                                             cubic.maximal_order));
+    rs::IdealLatticeLllData cubic_data;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            cubic_data, cubic_prime, kReductionPrecision, cache));
+    assert(cache.route_checked && !cache.use_two_lll_route);
+    assert(one_lll_basis_from_cache(one_lll_basis, cubic_prime, cache));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(one_lll_basis),
+                                  sflint::FmpzMatConstRef(cubic_data.basis)));
     return 0;
 }
 
@@ -1189,6 +1301,7 @@ int test_octic_t2_enumeration_data_meets_lll_bounds() {
 int main() {
     assert(test_ideal_lattice_result_contracts() == 0);
     assert(test_rounded_embedding_lll_contracts() == 0);
+    assert(test_rounded_embedding_route_check_for_badly_rounded_order() == 0);
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);

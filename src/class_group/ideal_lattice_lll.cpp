@@ -942,6 +942,8 @@ static bool ideal_lattice_fill_rounded_embedding_cache(
         cache.order_gram_requested_precision = 0;
         cache.order_gram_precision = 0;
         cache.order_gram = flint::FmpzMat(0, 0);
+        cache.route_checked = false;
+        cache.use_two_lll_route = false;
     }
     if (cache.has_rounded_rows &&
         cache.order_gram_requested_precision == precision) {
@@ -1090,6 +1092,60 @@ static IdealLatticeReductionStatus ideal_lattice_rounded_embedding_lll_reduce(
     return IdealLatticeReductionStatus::success;
 }
 
+// Silex quality gate, not reference behavior.  The reference rounds the
+// embeddings of a T2-reduced integral basis; Silex rounds those of its
+// order basis, which may be badly conditioned (for example a power basis
+// whose rows span many binary orders of magnitude).  Rounding at the first
+// full-rank scale then loses the short vectors, and the one-LLL basis,
+// though it passes the T2 diagonal bounds, is much longer than the two-LLL
+// basis, so the relation search finds few relations per ideal.  Both are
+// 0.99-LLL bases of the same lattice, so with a faithful rounding their T2
+// diagonal products agree up to rounding effects.  Returns true when the
+// one-LLL product (denominator 2^one_denominator_bits) is at most
+// 2^degree times the two-LLL product, i.e. at most a factor 2 per T2
+// diagonal entry on average.
+static bool ideal_lattice_rounded_embedding_basis_matches_two_lll(
+        flint::FmpzMatConstRef one_lll_gram,
+        slong one_denominator_bits,
+        const IdealLatticeLllData& two_lll) noexcept {
+    const slong degree = flint::fmpz_mat_nrows(one_lll_gram);
+    if (degree <= 0 || one_denominator_bits < 0 ||
+        flint::fmpz_mat_nrows(two_lll.scaled_gram) != degree ||
+        flint::fmpz_sgn(flint::FmpzConstRef(two_lll.gram_denominator)) <= 0) {
+        return false;
+    }
+    const flint::FmpzConstRef two_denominator(two_lll.gram_denominator);
+    const flint_bitcnt_t two_denominator_bits =
+            ::fmpz_val2(two_denominator.raw());
+    if (::fmpz_bits(two_denominator.raw()) != two_denominator_bits + 1 ||
+        one_denominator_bits >
+                std::numeric_limits<slong>::max() / (degree + 1) ||
+        static_cast<ulong>(two_denominator_bits) >
+                static_cast<ulong>(std::numeric_limits<slong>::max() /
+                                   (degree + 1))) {
+        return false;
+    }
+
+    flint::Fmpz one_product;
+    flint::Fmpz two_product;
+    if (!fmpz_mat_diagonal_product(one_product, one_lll_gram) ||
+        !fmpz_mat_diagonal_product(
+                two_product,
+                flint::FmpzMatConstRef(two_lll.scaled_gram))) {
+        return false;
+    }
+    // one_product / 2^(degree d1) <= 2^degree two_product / 2^(degree d2).
+    flint::fmpz_mul_2exp(
+            flint::FmpzRef(one_product), flint::FmpzConstRef(one_product),
+            static_cast<ulong>(degree) * two_denominator_bits);
+    flint::fmpz_mul_2exp(
+            flint::FmpzRef(two_product), flint::FmpzConstRef(two_product),
+            static_cast<ulong>(degree) *
+                    static_cast<ulong>(one_denominator_bits + 1));
+    return flint::fmpz_cmp(flint::FmpzConstRef(one_product),
+                           flint::FmpzConstRef(two_product)) <= 0;
+}
+
 bool build_ideal_lattice_rounded_embedding_lll_data(
         IdealLatticeLllData& out,
         const Ideal& ideal,
@@ -1115,6 +1171,15 @@ bool build_ideal_lattice_rounded_embedding_lll_data(
         return false;
     }
 
+    if (cache.use_two_lll_route && cache.has_order &&
+        cache.order.has_same_data(*order)) {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.ideal_lattice_reduction.rounded_embedding."
+                "two_lll_order");
+        return build_ideal_lattice_lll_data(out, ideal, precision);
+    }
+
     if (ideal_lattice_fill_rounded_embedding_cache(cache, *order,
                                                    active_precision,
                                                    diagnostics)) {
@@ -1123,6 +1188,30 @@ bool build_ideal_lattice_rounded_embedding_lll_data(
         if (ideal_lattice_rounded_embedding_lll_reduce(
                     basis, scaled_gram, original_basis, ideal, *order, cache,
                     diagnostics) == IdealLatticeReductionStatus::success) {
+            if (!cache.route_checked) {
+                // The first accepted one-LLL basis of the order is compared
+                // with the two-LLL basis of the same ideal; when that fails,
+                // this and every later ideal of the order take the two-LLL
+                // route.  When the two-LLL route fails, the check waits for
+                // the next ideal.
+                SILEX_PROFILE_SCOPE(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.ideal_lattice_reduction."
+                        "rounded_embedding.route_check");
+                IdealLatticeLllData two_lll_data;
+                if (build_ideal_lattice_lll_data(two_lll_data, ideal,
+                                                 precision)) {
+                    cache.route_checked = true;
+                    if (!ideal_lattice_rounded_embedding_basis_matches_two_lll(
+                                flint::FmpzMatConstRef(scaled_gram),
+                                cache.order_gram_precision / 2,
+                                two_lll_data)) {
+                        cache.use_two_lll_route = true;
+                        out = std::move(two_lll_data);
+                        return true;
+                    }
+                }
+            }
             flint::Fmpz gram_denominator;
             flint::fmpz_one(flint::FmpzRef(gram_denominator));
             flint::fmpz_mul_2exp(

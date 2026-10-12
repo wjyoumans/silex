@@ -738,6 +738,15 @@ the Hecke route's checks, on ``|b_1|^2`` and on the product of the
 ``|b_i|^2``.  It skips the ``LLL.jl:_lll`` check on the size of the Gram
 transform, as this route has no Gram transform.  When a check fails, or the
 order data cannot be formed, the ideal is reduced by the Hecke route above.
+Because Silex's order basis is not reduced, its rounded rows can be too
+coarse to steer the LLL: on a badly conditioned basis the reduced basis
+passes the two diagonal bounds yet is far longer than the Hecke route's.
+Silex therefore adds a check that is not in either source: for the first
+ideal whose one-LLL basis is accepted in an order, it also reduces the ideal
+by the Hecke route, and when the product of the one-LLL basis's T2 diagonal
+entries exceeds ``2^n`` times the Hecke route's (``n`` the degree, so on
+average a factor 2 per entry), that ideal and every later ideal of the order
+are reduced by the Hecke route.
 
 The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
 rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:

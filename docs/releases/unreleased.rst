@@ -754,6 +754,32 @@ Changed
   the check finishes.  This is a speed-up for computations that run the
   check many times; outputs are unchanged.
 
+- The one-LLL reduction of the LLL relation search now checks, for the first
+  ideal it reduces in each order, that the reduced basis is about as short
+  in T2 as the basis of the earlier two-LLL route: the product of its T2
+  diagonal entries may exceed the two-LLL product by at most ``2^n`` for
+  degree ``n``.  When the check fails, that ideal and every later ideal of
+  the order use the two-LLL route.  Silex rounds the embeddings of its order
+  basis, which, unlike PARI's T2-reduced integral basis, can be badly
+  conditioned; on the power basis of the real subfield of ``Q(zeta_136)``
+  (``cyclotomic_real_136_deg32``) the rounded embedding steered the LLL to
+  bases that found almost no relations, so ``grh`` ran for more than 1200 s
+  instead of about 8 s.  It now takes about 7.9 s (release build on a busy
+  machine).  Where the check passes, the reduction and all results are
+  unchanged; it costs one two-LLL reduction per order and relation route.
+  Of the 185 ``grh`` corpus and fixture rows, four more take the two-LLL
+  route for some orders: ``cyclotomic_real_31_deg15``,
+  ``cyclotomic_real_37_deg18``, ``cyclotomic_real_41_deg20`` and
+  ``multiquadratic_p5_m7_m11``.  Their class groups, regulator values and
+  labels are unchanged, while ``relation_count``,
+  ``relation_kernel_unit_count``, ``relation_sources``,
+  ``skipped_dependent_relation_count``, ``unit_group.regulator_radius``
+  (still a valid enclosure) and the chosen fundamental units can differ.
+  ``cyclotomic_real_41_deg20`` falls from about 1.00 s to 0.44 s and
+  ``multiquadratic_p5_m7_m11`` from 0.12 s to 0.05 s, while
+  ``cyclotomic_real_31_deg15`` rises from 0.37 s to 0.67 s.  ``proven`` runs
+  are unchanged on the same rows.
+
 - ``roots_of_unity``, ``root_of_unity_order`` and ``root_of_unity_generator``
   remember their result per thread for the last few defining polynomials,
   so repeated queries on the same field, such as those made during a
