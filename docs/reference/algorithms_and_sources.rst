@@ -1066,12 +1066,32 @@ unit, as before.  The degrees ``d_i`` come from FLINT's
 ``nmod_poly_factor_distinct_deg``.  When ``f`` is not squarefree modulo
 ``p``, the exponents are used as given.  The residues are the same elements
 of ``R`` either way, so no reconstructed unit changes.  The reduction saves
-work only when an exponent exceeds ``lambda``.  No row of the Silex Bench
-class/unit corpus has
-such an exponent: at the first prime above ``2^63``, the 41st cyclotomic
-polynomial splits into 8 quintics, so ``lambda = p^5 - 1`` has 316 bits,
-while the wide unit exponents of ``cyclotomic_41_phi40`` have at most 136
-bits.
+work only when an exponent exceeds ``lambda``.
+
+At the first prime above ``2^63`` the 41st cyclotomic polynomial splits into
+8 quintics, so ``lambda = p^5 - 1`` has 316 bits and the wide unit exponents
+of ``cyclotomic_41_phi40`` (at most 136 bits) are not reduced.  Silex
+therefore chooses the CRT primes differently from PARI's
+``init_modular_big`` sequence when some exponent has more than ``FLINT_BITS``
+bits: for each prime the CRT needs, it scans at most ``4 * degree``
+candidates (a Silex limit, not a sourced constant) and takes the first prime
+``p`` with ``x^p = x`` modulo ``f``.  Such a prime has ``f`` split into
+distinct linear factors when ``f`` is squarefree modulo ``p``, so
+``lambda = p - 1`` (Lidl and Niederreiter, Theorem 1.61 and Lemma 2.3); by
+the Chebotarev density theorem a positive proportion of primes splits a
+Galois polynomial.  If the scan finds no such prime, the next prime of the
+PARI sequence is used and the preference stops.  The skipped primes are
+counted in the internal report field ``nonsplit_prime_skips``.  For a split
+prime the unit group exponent is at most 64 bits, so for each row whose
+exponents are large, a negative exponent is also made positive (``e`` plus a
+multiple of ``lambda``) when the sliding-window cost model finds that cheaper;
+a small negative exponent is otherwise kept, since the positive form would
+need about 63 bits.  Rows with no exponent above ``FLINT_BITS`` bits use the
+PARI primes and no scan.  The residues are the same elements of ``R``, so no
+reconstructed unit changes.  For ``cyclotomic_41_phi40`` 11 primes are
+skipped, ``lambda`` has 64 bits, and the exponent bits fall from 373k to
+179k; for the degree-32 real subfield of the 136th cyclotomic field, 40
+primes are skipped and the exponent bits fall from 159k to 150k.
 
 Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb

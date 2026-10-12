@@ -128,6 +128,15 @@ Changed
   corpus rows.  See "Number fields, orders, and ideals" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The compact-representation reconstruction of ``grh`` units, when an
+  exponent has more than 64 bits, prefers CRT primes at which the defining
+  polynomial splits into linear factors and reduces the exponents of the
+  modular power products modulo the unit group exponent ``p - 1``, making
+  negative exponents positive where that is cheaper.  The primes differ from
+  PARI's ``init_modular_big`` sequence only for such rows; every reconstructed
+  unit and published output is unchanged.  See
+  :doc:`../reference/algorithms_and_sources`.
+
 - ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
   and the unit-candidate and relation-saturation kernel bases of the
   class-group computation share one certified first LLL phase.  Its exact
