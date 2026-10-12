@@ -203,6 +203,73 @@ void check_multi_factor_leftover_roots() noexcept {
     assert(square_answered && !is_power);
 }
 
+// The reduced root verifies the expanded leftover against a norm computed
+// from its factors, prod N(f)^r.  With non-integral factors, factors of
+// negative norm, and repeated factors, its answers must equal those of
+// Element::is_power on the evaluated value.
+void check_reduced_root_factored_norm() noexcept {
+    silex::NumberField field = cubic_field();
+    silex::Element a(field);
+    silex::Element b(field);
+    silex::Element c(field);
+    silex::Element half(field);
+    set_cubic_element(a, -3, 1, 0);  // theta - 3, norm -25
+    set_rational(half, 1, 2);
+    assert(a.multiply(a, half));     // (theta - 3) / 2
+    set_cubic_element(b, 1, 1, 1);
+    set_cubic_element(c, 5, -2, 1);
+
+    struct Entry {
+        const silex::Element* factor;
+        slong exponent;
+    };
+    struct Case {
+        std::vector<Entry> entries;
+        slong n;
+        bool power;
+    };
+    const std::vector<Case> cases = {
+            {{{&a, 1}, {&b, 3}, {&a, 2}}, 3, true},
+            {{{&a, 2}, {&c, 3}, {&a, 3}, {&c, 2}}, 5, true},
+            {{{&a, 4}, {&b, 1}, {&c, -3}, {&b, 2}, {&a, -1}}, 3, true},
+            {{{&a, 1}, {&c, 2}}, 3, false},
+            {{{&a, 3}, {&b, 1}, {&c, 4}}, 5, false},
+    };
+    for (const Case& test : cases) {
+        silex::FactoredElement input(field);
+        for (const Entry& entry : test.entries) {
+            assert(input.push(*entry.factor, entry.exponent));
+        }
+        silex::Element value(field);
+        assert(input.evaluate(value));
+
+        sflint::Fmpz exponent;
+        fmpz_set_si(exponent.raw(), test.n);
+        bool plain_power = !test.power;
+        silex::Element plain_root(field);
+        const bool plain_answered = value.is_power(
+                plain_power, plain_root, sflint::FmpzConstRef(exponent));
+
+        bool is_power = !test.power;
+        silex::FactoredElement root(field);
+        const bool answered = input.is_power_si(
+                is_power, root, test.n, silex::FactoredRootStrategy::reduced);
+        assert(answered == plain_answered);
+        if (!answered) {
+            continue;
+        }
+        assert(is_power == plain_power);
+        assert(is_power == test.power);
+        if (is_power) {
+            silex::FactoredElement check(field);
+            silex::Element check_value(field);
+            assert(check.pow_si(root, test.n));
+            assert(check.evaluate(check_value));
+            assert(check_value.equal(value));
+        }
+    }
+}
+
 // Negative cases over Q, where the answer is definite: the leftover has
 // several factors and is not a power.
 void check_definite_non_powers() noexcept {
@@ -837,6 +904,7 @@ int main() {
     check_warm_cache_and_second_pass();
     check_multi_factor_leftover_roots();
     check_definite_non_powers();
+    check_reduced_root_factored_norm();
 
     silex::NumberField field = degree_one_field();
     silex::NumberField other_field = degree_one_field();

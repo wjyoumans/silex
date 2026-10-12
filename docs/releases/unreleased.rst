@@ -719,6 +719,14 @@ Changed
   pending).  Instance JSON is unchanged on the ``grh`` corpus and the 65
   ``proven`` benchmark rows.
 
+- The factored-element root tests and the compact power roots of the
+  class-group and unit computation verify a Hensel-lifted root against a norm
+  computed from the small factors of the input, as the product of the factor
+  norms to their exponents, instead of the norm of the expanded input, which
+  on ``proven`` runs of degree 6 to 9 can have tens of thousands of bits.
+  The value is the same norm, so every answer, root and failure is
+  unchanged; only the time spent rejecting candidate roots falls.
+
 Fixed
 -----
 

@@ -1,8 +1,11 @@
 #include <silex/factored_element.hpp>
+#include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpz_vec.hpp>
+#include "../element/element_internal.hpp"
 #include "../order_unit/precision_cap_internal.hpp"
 
 #include <flint/arb.h>
+#include <flint/fmpq.h>
 #include <flint/fmpz.h>
 #include <flint/nf.h>
 #include <flint/nf_elem.h>
@@ -466,6 +469,31 @@ bool evaluate_entries(Element& out,
     }
 
     return multiply_product_tree(out, parent, terms);
+}
+
+// detail::PowerInputNormSource for the reduced root of
+// FactoredElement::is_power_si: N(prod f^r) over the leftover factors as
+// prod N(f)^r, by multiplicativity of the norm.  The expanded leftover's own
+// norm can run to tens of thousands of bits while the factors are small.
+// Declines (falls back to input.norm()) when a factor norm is unavailable
+// or zero.
+bool reduced_leftover_norm_source(flint::Fmpq& norm,
+                                  const void* context) noexcept {
+    const auto* leftover = static_cast<const FactoredElement*>(context);
+    if (leftover == nullptr || !leftover->is_defined()) {
+        return false;
+    }
+    flint::Fmpq factor_norm;
+    ::fmpq_one(norm.raw());
+    for (const auto& entry : leftover->factors()) {
+        if (!entry.factor.norm(flint::FmpqRef(factor_norm)) ||
+            ::fmpq_is_zero(factor_norm.raw()) != 0) {
+            return false;
+        }
+        ::fmpq_pow_si(factor_norm.raw(), factor_norm.raw(), entry.exponent);
+        ::fmpq_mul(norm.raw(), norm.raw(), factor_norm.raw());
+    }
+    return true;
 }
 
 }  // namespace
@@ -1059,9 +1087,13 @@ bool FactoredElement::is_power_si(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.reduced_leftover_is_power");
-        if (!leftover_value.is_power(factor_is_power, leftover_root,
-                                     flint::FmpzConstRef(exponent_fmpz),
-                                     diagnostics)) {
+        // leftover_value = prod f^r; its norm comes from the factors.
+        const detail::PowerInputNormSource norm_source{
+                &reduced_leftover_norm_source, &leftover};
+        if (!detail::element_is_power(factor_is_power, leftover_root,
+                                      leftover_value,
+                                      flint::FmpzConstRef(exponent_fmpz),
+                                      &norm_source, diagnostics)) {
             return false;
         }
     }
