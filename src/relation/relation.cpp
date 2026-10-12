@@ -2,6 +2,7 @@
 
 #include "relation_internal.hpp"
 #include "../ideal/ideal_access_internal.hpp"
+#include "../order/order_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/abelian_group.hpp>
@@ -292,6 +293,28 @@ bool coordinate_polynomial_vanishes_at_linear_root_mod_prime(
     return true;
 }
 
+// Whether `polynomial` vanishes at `root` modulo p.
+bool polynomial_vanishes_at_linear_root_mod_prime(
+        bool& out,
+        LinearResidueEvaluationScratch& scratch,
+        const fmpz_poly_struct* polynomial,
+        flint::FmpzConstRef root,
+        flint::FmpzConstRef p) noexcept {
+    out = false;
+    if (polynomial == nullptr) {
+        return false;
+    }
+    fmpz_zero(scratch.value.raw());
+    for (slong i = fmpz_poly_length(polynomial); i-- > 0;) {
+        fmpz_mul(scratch.value.raw(), scratch.value.raw(), root.raw());
+        fmpz_add(scratch.value.raw(), scratch.value.raw(),
+                 polynomial->coeffs + i);
+        fmpz_mod(scratch.value.raw(), scratch.value.raw(), p.raw());
+    }
+    out = fmpz_is_zero(scratch.value.raw()) != 0;
+    return true;
+}
+
 bool set_element_from_fmpz_poly(Element& out,
                                 const flint::FmpzPoly& polynomial) noexcept {
     flint::FmpqPoly rational_polynomial;
@@ -401,18 +424,36 @@ bool factor_integral_data_over_base_by_residue_screen(
                 "relation.factor_over_base_integral.error_invalid_input",
                 false);
     }
-    // Current factor-base residue polynomials are in defining-generator
-    // coordinates.  Non-equation maximal orders stay on the exact fallback.
+    // Factor-base residue polynomials exist only for maximal orders.
     if (!parent->is_maximal()) {
         SILEX_RELATION_PROFILE_RETURN(
                 diagnostics,
                 "relation.factor_over_base_integral.fallback_nonmaximal_order",
                 true);
     }
-    if (!parent->is_equation_order()) {
+    // On the equation order Z[theta] the integral coordinates are the
+    // theta-polynomial coefficients.  On a non-equation maximal order O they
+    // are not, so a prime whose residue polynomial is in theta is screened
+    // through the theta-polynomial numerator(theta) / denominator of the
+    // element instead.  Source trace: reference `base2.c:modprinit`, the
+    // `p \nmid index` branch (Cohen, GTM 138, Theorem 4.8.13): for p not
+    // dividing [O : Z[theta]] and P = (p, g(theta)), O/P = F_p[x]/(g) with
+    // theta -> x, and the denominator is prime to p.  The element lies in P
+    // exactly when g divides the numerator modulo p.  Primes over p dividing
+    // the index carry no residue polynomial, or are not screened here; their
+    // elements take the exact fallback.  A prime recorded with the integral
+    // generator omega of a maximal quadratic order (basis [1, omega]) keeps
+    // the coordinate polynomial, which is its omega-polynomial.  The index
+    // is the order's cached [O : Z[theta]]; it exists only when the defining
+    // polynomial is monic integral and O contains Z[theta].
+    const bool theta_residues = !parent->is_equation_order();
+    flint::Fmpz equation_order_index;
+    if (theta_residues &&
+        !detail::OrderAccess::equation_order_index(
+                flint::FmpzRef(equation_order_index), *parent)) {
         SILEX_RELATION_PROFILE_RETURN(
                 diagnostics,
-                "relation.factor_over_base_integral.fallback_non_equation_order",
+                "relation.factor_over_base_integral.fallback_no_equation_order_index",
                 true);
     }
 
@@ -443,7 +484,37 @@ bool factor_integral_data_over_base_by_residue_screen(
     flint::FmpzMat coordinates(1, parent->degree());
     const fmpz_mat_struct* coordinate_rows = known_integral_coordinates;
     flint::FmpzPoly input_polynomial_storage;
-    const fmpz_poly_struct* input_polynomial = known_integral_polynomial;
+    // A caller-supplied polynomial holds the coordinates as polynomial
+    // coefficients, which is the theta-polynomial only on the equation order.
+    const fmpz_poly_struct* input_polynomial =
+            theta_residues ? nullptr : known_integral_polynomial;
+    flint::FmpzPoly theta_numerator;
+    flint::Fmpz theta_denominator;
+    bool theta_numerator_ready = false;
+    auto ensure_theta_numerator = [&]() noexcept -> bool {
+        if (theta_numerator_ready) {
+            return true;
+        }
+        flint::FmpqPoly polynomial;
+        if (known_integral_coordinates == nullptr && alpha != nullptr) {
+            if (!alpha->get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
+                return false;
+            }
+        } else {
+            Element element(*parent->parent());
+            if (!element.is_defined() ||
+                !set_element_from_integral_coordinates(
+                        element, *parent,
+                        flint::FmpzMatConstRef(coordinate_rows)) ||
+                !element.get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
+                return false;
+            }
+        }
+        fmpq_poly_get_numerator(theta_numerator.raw(), polynomial.raw());
+        fmpz_set(theta_denominator.raw(), fmpq_poly_denref(polynomial.raw()));
+        theta_numerator_ready = true;
+        return true;
+    };
     flint::FmpzPoly reduced;
     std::vector<NormPrimeBlockFactor> norm_block_factors;
     bool use_factored_norm_blocks = false;
@@ -561,12 +632,16 @@ bool factor_integral_data_over_base_by_residue_screen(
         }
 
         const slong block_vp = remaining_vp;
+        const bool p_divides_index =
+                theta_residues &&
+                fmpz_divisible(equation_order_index.raw(), p.raw()) != 0;
         hits.clear();
         {
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::relation,
                     "relation.factor_over_base_integral_residue_scan");
             ResidueReductionBlockScratch reduction_scratch;
+            ResidueReductionBlockScratch theta_reduction_scratch;
             for (slong offset = 0; offset < length; ++offset) {
                 slong index = -1;
                 if (!base.rational_prime_block_index(index, block_index,
@@ -596,15 +671,42 @@ bool factor_integral_data_over_base_by_residue_screen(
                         fmpz_poly_degree(residue_polynomial->raw()) == 1
                                 ? "relation.factor_over_base_integral.residue_linear"
                                 : "relation.factor_over_base_integral.residue_generic");
+                const bool residue_in_theta =
+                        theta_residues &&
+                        !detail::PrimeIdealAccess::
+                                residue_uses_integral_generator(*prime);
+                if (residue_in_theta) {
+                    if (p_divides_index) {
+                        SILEX_RELATION_PROFILE_RETURN(
+                                diagnostics,
+                                "relation.factor_over_base_integral.fallback_index_prime",
+                                true);
+                    }
+                    if (!ensure_theta_numerator() ||
+                        fmpz_divisible(theta_denominator.raw(),
+                                       p.raw()) != 0) {
+                        SILEX_RELATION_PROFILE_RETURN(
+                                diagnostics,
+                                "relation.factor_over_base_integral.fallback_theta_polynomial",
+                                true);
+                    }
+                }
                 const flint::Fmpz* linear_root =
                         detail::linear_residue_root_ptr(*prime);
                 if (linear_root != nullptr) {
                     bool residue_zero = false;
-                    if (!coordinate_polynomial_vanishes_at_linear_root_mod_prime(
-                                residue_zero, linear_scratch,
-                                flint::FmpzMatConstRef(coordinate_rows),
-                                flint::FmpzConstRef(*linear_root),
-                                flint::FmpzConstRef(p))) {
+                    const bool evaluated = residue_in_theta
+                            ? polynomial_vanishes_at_linear_root_mod_prime(
+                                      residue_zero, linear_scratch,
+                                      theta_numerator.raw(),
+                                      flint::FmpzConstRef(*linear_root),
+                                      flint::FmpzConstRef(p))
+                            : coordinate_polynomial_vanishes_at_linear_root_mod_prime(
+                                      residue_zero, linear_scratch,
+                                      flint::FmpzMatConstRef(coordinate_rows),
+                                      flint::FmpzConstRef(*linear_root),
+                                      flint::FmpzConstRef(p));
+                    if (!evaluated) {
                         SILEX_RELATION_PROFILE_RETURN(
                                 diagnostics,
                                 "relation.factor_over_base_integral.fallback_linear_residue_evaluation",
@@ -617,7 +719,11 @@ bool factor_integral_data_over_base_by_residue_screen(
                     continue;
                 }
                 if (!reduce_polynomial_mod_residue_with_block_scratch(
-                            reduced, reduction_scratch, input_polynomial,
+                            reduced,
+                            residue_in_theta ? theta_reduction_scratch
+                                             : reduction_scratch,
+                            residue_in_theta ? theta_numerator.raw()
+                                             : input_polynomial,
                             *residue_polynomial, flint::FmpzConstRef(p))) {
                     SILEX_RELATION_PROFILE_RETURN(
                             diagnostics,

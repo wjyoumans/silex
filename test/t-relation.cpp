@@ -1,13 +1,21 @@
 #include <silex/abelian_group.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/ideal.hpp>
+#include <silex/ideal_factorization.hpp>
 #include <silex/order_element.hpp>
 #include <silex/relation.hpp>
 
 #include "relation/relation_internal.hpp"
 #include "test_support.hpp"
 
+#include <flint/fmpq.h>
+#include <flint/fmpq_poly.h>
+#include <flint/fmpz.h>
+#include <flint/fmpz_mat.h>
+
 #include <cassert>
 #include <utility>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -683,6 +691,245 @@ int test_generic_cubic_relation() {
     return 0;
 }
 
+silex::NumberField field_from_coefficients(const slong* coefficients,
+                                           slong length) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i < length; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+struct ScreenFallbackCounts {
+    slong screened_smooth = 0;
+    slong screened_nonunit = 0;
+    slong screened_nonsmooth = 0;
+    slong screened_non_theta_integral = 0;
+    slong fallback_index_smooth = 0;
+};
+
+// Every element with order coordinates in [-range, range]^n is factored
+// three ways: through the integral-coordinate screen (with its handled flag),
+// through Relation::set_generator and the coordinate entry point, and by the
+// exact principal-ideal factorization the screen falls back to.  All rows
+// must agree.  `index_prime` divides [O : Z[theta]].
+void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
+                                         const silex::Order& order,
+                                         slong bound_value,
+                                         slong range,
+                                         slong index_prime) noexcept {
+    assert(order.is_maximal());
+    assert(!order.is_equation_order());
+    silex::NumberField field(*order.parent());
+    const slong n = order.degree();
+
+    silex::FactorBase base(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, bound_value));
+    assert(base.build(sflint::FmpzConstRef(bound)));
+
+    sflint::FmpzMat coordinates(1, n);
+    sflint::FmpzMat expected(1, base.length());
+    sflint::FmpzMat actual(1, base.length());
+    sflint::Fmpq norm;
+    sflint::FmpqPoly theta_polynomial;
+    silex::Element alpha(field);
+    std::vector<slong> digits(static_cast<std::size_t>(n), -range);
+    for (;;) {
+        bool nonzero = false;
+        for (slong j = 0; j < n; ++j) {
+            sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, j),
+                                digits[static_cast<std::size_t>(j)]);
+            nonzero = nonzero || digits[static_cast<std::size_t>(j)] != 0;
+        }
+        if (nonzero) {
+            silex::OrderElement integral_alpha(order);
+            silex::Ideal principal(order);
+            assert(integral_alpha.set_coordinates(
+                    sflint::FmpzMatConstRef(coordinates)));
+            assert(integral_alpha.get_element(alpha));
+            assert(alpha.norm(sflint::FmpqRef(norm)));
+            assert(principal.set_principal(integral_alpha));
+            const bool expected_smooth = silex::ideal_factor_over_base(
+                    sflint::FmpzMatRef(expected), principal, base);
+
+            silex::Relation screened(base);
+            bool handled = false;
+            bool smooth = false;
+            assert(RelationAccess::
+                           factor_relation_row_from_integral_coordinates_and_norm(
+                                   screened, handled, smooth,
+                                   sflint::FmpzMatConstRef(coordinates),
+                                   sflint::FmpqConstRef(norm)));
+            if (handled) {
+                assert(smooth == expected_smooth);
+                if (smooth) {
+                    assert(sflint::fmpz_mat_equal(
+                            RelationAccess::pending_relation_exponents_ref(
+                                    screened),
+                            sflint::FmpzMatConstRef(expected)));
+                    ++counts.screened_smooth;
+                    if (::fmpz_mat_is_zero(expected.raw()) == 0) {
+                        ++counts.screened_nonunit;
+                    }
+                    assert(alpha.get_fmpq_poly(
+                            sflint::FmpqPolyRef(theta_polynomial)));
+                    if (::fmpz_is_one(fmpq_poly_denref(
+                                theta_polynomial.raw())) == 0) {
+                        ++counts.screened_non_theta_integral;
+                    }
+                } else {
+                    ++counts.screened_nonsmooth;
+                }
+            } else if (expected_smooth &&
+                       ::fmpz_fdiv_ui(fmpq_numref(norm.raw()),
+                                      static_cast<ulong>(index_prime)) ==
+                               0) {
+                ++counts.fallback_index_smooth;
+            }
+
+            silex::Relation coordinate_relation(base);
+            assert(RelationAccess::set_relation_from_integral_coordinates_and_norm(
+                           coordinate_relation,
+                           sflint::FmpzMatConstRef(coordinates),
+                           sflint::FmpqConstRef(norm), nullptr) ==
+                   expected_smooth);
+            silex::Relation generator_relation(base);
+            assert(generator_relation.set_generator(alpha) ==
+                   expected_smooth);
+            if (expected_smooth) {
+                assert(coordinate_relation.exponents(
+                        sflint::FmpzMatRef(actual)));
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(actual),
+                        sflint::FmpzMatConstRef(expected)));
+                assert(generator_relation.exponents(
+                        sflint::FmpzMatRef(actual)));
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(actual),
+                        sflint::FmpzMatConstRef(expected)));
+            }
+        }
+
+        slong j = 0;
+        while (j < n && digits[static_cast<std::size_t>(j)] == range) {
+            digits[static_cast<std::size_t>(j)] = -range;
+            ++j;
+        }
+        if (j == n) {
+            break;
+        }
+        ++digits[static_cast<std::size_t>(j)];
+    }
+}
+
+// The element (c0 + c1 theta + c2 theta^2) / 3 of `order` is decided by the
+// integral-coordinate screen, and its row equals the principal-ideal row.
+void check_cubic_element_screened(const silex::Order& order,
+                                  const silex::FactorBase& base,
+                                  slong c0,
+                                  slong c1,
+                                  slong c2) noexcept {
+    silex::NumberField field(*order.parent());
+    sflint::FmpqPoly polynomial;
+    sflint::Fmpq coefficient;
+    const slong coefficients[] = {c0, c1, c2};
+    for (slong i = 0; i < 3; ++i) {
+        sflint::fmpq_set_si(coefficient, coefficients[i], 3);
+        sflint::fmpq_poly_set_coeff_fmpq(polynomial, i, coefficient);
+    }
+    silex::Element alpha(field);
+    assert(alpha.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    silex::OrderElement integral_alpha(order);
+    assert(integral_alpha.set_element(alpha));
+    sflint::FmpzMat coordinates(1, 3);
+    assert(integral_alpha.get_coordinates(sflint::FmpzMatRef(coordinates)));
+    sflint::Fmpq norm;
+    assert(alpha.norm(sflint::FmpqRef(norm)));
+
+    silex::Ideal principal(order);
+    assert(principal.set_principal(integral_alpha));
+    sflint::FmpzMat expected(1, base.length());
+    assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(expected),
+                                         principal, base));
+    assert(::fmpz_mat_is_zero(expected.raw()) == 0);
+
+    silex::Relation screened(base);
+    bool handled = false;
+    bool smooth = false;
+    assert(RelationAccess::factor_relation_row_from_integral_coordinates_and_norm(
+            screened, handled, smooth, sflint::FmpzMatConstRef(coordinates),
+            sflint::FmpqConstRef(norm)));
+    assert(handled);
+    assert(smooth);
+    assert(sflint::fmpz_mat_equal(
+            RelationAccess::pending_relation_exponents_ref(screened),
+            sflint::FmpzMatConstRef(expected)));
+}
+
+// On a non-equation maximal order the residue screen reads theta-residue
+// primes through the element's theta-polynomial (Kummer-Dedekind for p not
+// dividing [O : Z[theta]]); elements whose norm meets an index prime fall
+// back to the exact principal-ideal factorization.  Rows match that
+// factorization either way, including elements outside Z[theta] and
+// elements in index primes.
+int test_non_equation_maximal_screen_matches_ideal_fallback() {
+    {
+        // Dedekind's cubic x^3 - x^2 - 2x - 8: [O : Z[theta]] = 2, and 2 is
+        // a common index divisor (it splits completely in O).
+        const slong coefficients[] = {-8, -2, -1, 1};
+        silex::NumberField field = field_from_coefficients(coefficients, 4);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        ScreenFallbackCounts counts;
+        check_screen_matches_ideal_fallback(counts, maximal, 30, 3, 2);
+        assert(counts.screened_nonunit > 0);
+        assert(counts.screened_nonsmooth > 0);
+        assert(counts.fallback_index_smooth > 0);
+        // Z[theta] contains 2O and 1, and O/2O = F_2^3, so every element of
+        // odd norm (a unit modulo all three primes over 2) is 1 modulo 2O,
+        // hence in Z[theta].  Elements outside Z[theta] all fall back here.
+        assert(counts.screened_non_theta_integral == 0);
+    }
+    {
+        // x^3 - 19: [O : Z[theta]] = 3 (19 = 1 mod 9).
+        const slong coefficients[] = {-19, 0, 0, 1};
+        silex::NumberField field = field_from_coefficients(coefficients, 4);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        ScreenFallbackCounts counts;
+        check_screen_matches_ideal_fallback(counts, maximal, 40, 3, 3);
+        assert(counts.screened_nonunit > 0);
+        assert(counts.screened_non_theta_integral > 0);
+        assert(counts.fallback_index_smooth > 0);
+
+        // Outside Z[theta], with norms prime to the index 3 (gp idealfactor):
+        // (1 + 4 theta + theta^2) / 3 has norm 50 = N(P_2) N(P_25), and
+        // (4 + theta + theta^2) / 3 has norm 8 = N(P_2)^3.
+        silex::FactorBase base(maximal);
+        sflint::Fmpz bound;
+        assert(set_fmpz_si(bound, 40));
+        assert(base.build(sflint::FmpzConstRef(bound)));
+        check_cubic_element_screened(maximal, base, 1, 4, 1);
+        check_cubic_element_screened(maximal, base, 4, 1, 1);
+    }
+    {
+        // Q(sqrt(5)) with basis [1, omega]: residue polynomials are in omega.
+        silex::NumberField field = quadratic_field(5);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        ScreenFallbackCounts counts;
+        check_screen_matches_ideal_fallback(counts, maximal, 30, 6, 2);
+        assert(counts.screened_nonunit > 0);
+    }
+    return 0;
+}
+
 int test_relation_matrix() {
     silex::NumberField field = degree_one_field();
     silex::Order order = silex::test::equation_order(field);
@@ -958,6 +1205,7 @@ int main() {
     assert(test_nonintegral_relation_incomplete_denominator_block() == 0);
     assert(test_half_integral_quadratic_relation_fallback() == 0);
     assert(test_generic_cubic_relation() == 0);
+    assert(test_non_equation_maximal_screen_matches_ideal_fallback() == 0);
     assert(test_relation_matrix() == 0);
     assert(test_relation_matrix_to_abelian_group() == 0);
     assert(test_cross_parent_copy_swap() == 0);
