@@ -123,8 +123,7 @@ Changed
 - The ``proven`` imaginary quadratic witness step builds each factor-base
   row's ideal Hermite normal form by Hensel lifting the prime roots and
   combining them with the Chinese remainder theorem, instead of multiplying
-  ideals.  Published results are unchanged; the cost on large rows such as
-  ``x^2+100000007`` decreases.
+  ideals.  Published results are unchanged.
 
 - ``quadratic_fundamental_unit`` and the ``proven`` unit route now use the
   continued-fraction fundamental unit for every monic integral ``x^2+bx+c``

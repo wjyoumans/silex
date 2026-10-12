@@ -39,6 +39,11 @@ struct QuadraticFormPrime {
     // by the factor-base prime at oriented_factor_base_index, which is then
     // p Z + (omega - r) Z; its conjugate is p Z + (omega - (t - r)) Z.
     flint::Fmpz oriented_root;
+    // True when identify_quadratic_form_primes has checked that the prime at
+    // oriented_factor_base_index is p Z + (omega - r) Z and, when present,
+    // the prime at conjugate_factor_base_index is p Z + (omega - (t - r)) Z.
+    // quadratic_factor_base_row_hnf declines a row that needs r otherwise.
+    bool roots_match_columns = false;
     slong oriented_factor_base_index = -1;
     slong conjugate_factor_base_index = -1;
     slong factor_base_orientation = 1;
@@ -365,9 +370,12 @@ bool quadratic_root_hensel_lift(flint::Fmpz& out,
 // N(omega - s) = s^2 - t s + n, so the lattice is an ideal, and s is the
 // selected root modulo every prime p dividing A, so that ideal lies in the
 // selected prime above each p; with the norm A this identifies it with the
-// product.  Returns false when an exponent does not fit an slong or equals
-// LONG_MIN (as the Ideal route does) and when a check fails; the caller then
-// uses the Ideal route.
+// product.  The selected prime is the factor-base prime of the row's column
+// only because identify_quadratic_form_primes checked, once per prime, that
+// the column's prime is p Z + (omega - r) Z (roots_match_columns).  Returns
+// false when an exponent does not fit an slong or equals LONG_MIN (as the
+// Ideal route does), when the row needs the root of a prime that failed that
+// check, and when a check fails; the caller then uses the Ideal route.
 bool quadratic_factor_base_row_hnf(
         flint::FmpzMat& hnf,
         flint::Fmpz& norm,
@@ -480,6 +488,9 @@ bool quadratic_factor_base_row_hnf(
         }
         if (primitive_exponent == 0) {
             continue;
+        }
+        if (!form_prime.roots_match_columns) {
+            return false;
         }
         if (!quadratic_root_hensel_lift(lifted, flint::FmpzConstRef(root),
                                         prime, primitive_exponent,
@@ -635,6 +646,36 @@ bool quadratic_form_prime_orientation_matches(
     return true;
 }
 
+// True when the factor-base prime at `index` is p Z + (omega - root) Z:
+// its HNF in the order basis (1, omega) equals the HNF of the rows (p, 0)
+// and (-root, 1), formed as quadratic_factor_base_row_hnf forms it.  This
+// checks the prime itself rather than the convention under which its cached
+// root was recorded.  False also when the prime or its HNF is unavailable.
+bool quadratic_prime_column_has_root(const Order& order,
+                                     const FactorBase& base,
+                                     slong index,
+                                     flint::FmpzConstRef rational_prime,
+                                     flint::FmpzConstRef root) noexcept {
+    const PrimeIdeal* prime = base.prime_at(index);
+    Ideal column(order);
+    flint::FmpzMat column_hnf(2, 2);
+    if (prime == nullptr || !column.is_defined() ||
+        !prime->get_ideal(column) ||
+        !column.get_hnf(flint::FmpzMatRef(column_hnf))) {
+        return false;
+    }
+    flint::FmpzMat rows(2, 2);
+    flint::FmpzMat expected(2, 2);
+    ::fmpz_set(::fmpz_mat_entry(rows.raw(), 0, 0), rational_prime.raw());
+    ::fmpz_mod(::fmpz_mat_entry(rows.raw(), 1, 0), root.raw(),
+               rational_prime.raw());
+    ::fmpz_neg(::fmpz_mat_entry(rows.raw(), 1, 0),
+               ::fmpz_mat_entry(rows.raw(), 1, 0));
+    ::fmpz_one(::fmpz_mat_entry(rows.raw(), 1, 1));
+    ::fmpz_mat_hnf_xgcd(expected.raw(), rows.raw());
+    return ::fmpz_mat_equal(expected.raw(), column_hnf.raw()) != 0;
+}
+
 bool identify_quadratic_form_primes(
         std::vector<QuadraticFormPrime>& out,
         const Order& order,
@@ -648,12 +689,18 @@ bool identify_quadratic_form_primes(
     }
 
     flint::Fmpz radicand;
+    flint::Fmpz omega_trace;
+    flint::Fmpz omega_norm;
     Element omega(*order.parent());
     if (!order.parent()->quadratic_radicand(flint::FmpzRef(radicand)) ||
         !quadratic_integral_generator(
                 omega, *order.parent(), flint::FmpzConstRef(radicand))) {
         return false;
     }
+    // Only the root check below uses the trace t; without it every prime is
+    // left unchecked and the row HNF builder declines.
+    const bool omega_trace_ready = quadratic_order_trace_and_norm(
+            omega_trace, omega_norm, discriminant);
 
     out.reserve(static_cast<std::size_t>(base.rational_prime_block_count()));
     for (slong block = 0; block < base.rational_prime_block_count(); ++block) {
@@ -767,6 +814,23 @@ bool identify_quadratic_form_primes(
         }
         flint::fmpz_set(flint::FmpzRef(entry.oriented_root),
                         flint::FmpzConstRef(*oriented_root));
+        {
+            flint::Fmpz conjugate_root;
+            ::fmpz_sub(conjugate_root.raw(), omega_trace.raw(),
+                       entry.oriented_root.raw());
+            entry.roots_match_columns =
+                    omega_trace_ready &&
+                    quadratic_prime_column_has_root(
+                            order, base, entry.oriented_factor_base_index,
+                            flint::FmpzConstRef(entry.rational_prime),
+                            flint::FmpzConstRef(entry.oriented_root)) &&
+                    (entry.ramified ||
+                     entry.conjugate_factor_base_index < 0 ||
+                     quadratic_prime_column_has_root(
+                             order, base, entry.conjugate_factor_base_index,
+                             flint::FmpzConstRef(entry.rational_prime),
+                             flint::FmpzConstRef(conjugate_root)));
+        }
         out.emplace_back(std::move(entry));
     }
     return !out.empty();
@@ -997,7 +1061,8 @@ bool principal_generator_from_factor_base_row(
         const std::vector<QuadraticFormPrime>& form_primes,
         flint::FmpzMatConstRef row,
         flint::FmpzConstRef discriminant,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        bool use_row_hnf_builder = true) noexcept {
     SILEX_PROFILE_SCOPE(
             diagnostics, DiagnosticsModule::class_group,
             "class_group.maximal_imaginary_quadratic_relations.witness");
@@ -1034,8 +1099,10 @@ bool principal_generator_from_factor_base_row(
                   "quadratic witness norm-form setup failed");
         return false;
     }
+    // use_row_hnf_builder is false only through the test hook
+    // maximal_imaginary_quadratic_row_generator_for_testing.
     bool row_hnf_ready = false;
-    {
+    if (use_row_hnf_builder) {
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.maximal_imaginary_quadratic_relations."
@@ -1071,7 +1138,8 @@ bool principal_generator_from_factor_base_row(
             !numerator.norm(flint::FmpzRef(numerator_norm))) {
             SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                       LogLevel::detail,
-                      "quadratic witness norm-form setup failed");
+                      "quadratic witness row ideal HNF or norm extraction "
+                      "failed");
             return false;
         }
     }
@@ -1884,6 +1952,25 @@ bool maximal_imaginary_quadratic_row_hnf(flint::FmpzMat& hnf,
                    nullptr) &&
            numerator.get_hnf(flint::FmpzMatRef(hnf)) &&
            numerator.norm(flint::FmpzRef(norm));
+}
+
+bool maximal_imaginary_quadratic_row_generator_for_testing(
+        Element& out,
+        const Order& order,
+        const FactorBase& base,
+        flint::FmpzMatConstRef row,
+        bool use_row_hnf_builder) noexcept {
+    flint::Fmpz discriminant;
+    std::vector<QuadraticFormPrime> form_primes;
+    return order.degree() == 2 && order.is_maximal() &&
+           order.discriminant(flint::FmpzRef(discriminant)) &&
+           identify_quadratic_form_primes(
+                   form_primes, order, base,
+                   flint::FmpzConstRef(discriminant), nullptr) &&
+           principal_generator_from_factor_base_row(
+                   out, order, base, form_primes, row,
+                   flint::FmpzConstRef(discriminant), nullptr,
+                   use_row_hnf_builder);
 }
 
 }  // namespace detail

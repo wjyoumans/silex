@@ -1,5 +1,6 @@
 #pragma once
 
+#include <silex/element.hpp>
 #include <silex/factor_base.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
@@ -30,5 +31,18 @@ bool maximal_imaginary_quadratic_row_hnf(flint::FmpzMat& hnf,
                                          const FactorBase& base,
                                          flint::FmpzMatConstRef row,
                                          QuadraticRowHnfRoute route) noexcept;
+
+// Test hook: the proven witness generator of the row ideal, as the relation
+// backend computes it for a principal row (out generates
+// prod P_i^(row_i)).  With use_row_hnf_builder false the binary-form builder
+// is skipped, as when it declines, so the row HNF comes from the Ideal route
+// (the fallback).  Returns false when the factor base is not accepted or the
+// witness step fails.  For tests only.
+bool maximal_imaginary_quadratic_row_generator_for_testing(
+        Element& out,
+        const Order& order,
+        const FactorBase& base,
+        flint::FmpzMatConstRef row,
+        bool use_row_hnf_builder) noexcept;
 
 }  // namespace silex::detail

@@ -4,7 +4,9 @@
 
 #include "class_group/maximal_imaginary_quadratic_row_hnf_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
+#include "prime_ideal/prime_ideal_internal.hpp"
 
+#include <silex/element.hpp>
 #include <silex/factor_base.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
@@ -15,6 +17,7 @@
 
 #include <flint/fmpz.h>
 #include <flint/fmpz_mat.h>
+#include <flint/fmpz_poly.h>
 
 #include <cstdio>
 #include <limits>
@@ -103,13 +106,16 @@ bool routes_agree(const Fixture& fixture, const sflint::FmpzMat& row,
 
 // Counts the split blocks of length one whose factor-base prime is the
 // conjugate of the prime form's ideal p Z + ((-b + sqrt(D)) / 2) Z, that is
-// whose cached omega root differs from the prime form's shift.
-slong reversed_single_prime_blocks(const Fixture& fixture) noexcept {
+// whose cached omega root differs from the prime form's shift (reversed),
+// and those whose root equals it (oriented).  False if a count fails.
+bool single_prime_block_orientations(slong& reversed, slong& oriented,
+                                     const Fixture& fixture) noexcept {
+    reversed = 0;
+    oriented = 0;
     sflint::Fmpz discriminant;
     if (!fixture.order.discriminant(sflint::FmpzRef(discriminant))) {
-        return -1;
+        return false;
     }
-    slong reversed = 0;
     for (slong block = 0; block < fixture.base.rational_prime_block_count();
          ++block) {
         sflint::Fmpz p;
@@ -117,7 +123,7 @@ slong reversed_single_prime_blocks(const Fixture& fixture) noexcept {
         slong length = 0;
         if (!fixture.base.rational_prime_block(sflint::FmpzRef(p), start,
                                                length, block)) {
-            return -1;
+            return false;
         }
         if (length != 1 || fmpz_divisible(discriminant.raw(), p.raw())) {
             continue;
@@ -127,7 +133,7 @@ slong reversed_single_prime_blocks(const Fixture& fixture) noexcept {
                 prime == nullptr ? nullptr
                                  : detail::linear_residue_root_ptr(*prime);
         if (root == nullptr) {
-            return -1;
+            return false;
         }
         sflint::Qfb form;
         sflint::qfb_prime_form(sflint::QfbRef(form),
@@ -140,11 +146,13 @@ slong reversed_single_prime_blocks(const Fixture& fixture) noexcept {
         }
         fmpz_fdiv_q_2exp(shift.raw(), shift.raw(), 1);
         fmpz_mod(shift.raw(), shift.raw(), p.raw());
-        if (!fmpz_equal(shift.raw(), root->raw())) {
+        if (fmpz_equal(shift.raw(), root->raw())) {
+            ++oriented;
+        } else {
             ++reversed;
         }
     }
-    return reversed;
+    return true;
 }
 
 void random_rows(const Fixture& fixture, ulong seed, slong count,
@@ -262,6 +270,145 @@ void check_both_conjugates(slong radicand, slong bound,
     check(pairs > 1, "complete base has no split pair", index_base);
 }
 
+// The proven witness generator of row with the row HNF builder (if
+// builder) or with the builder skipped so the Ideal route (the fallback)
+// builds the row HNF.
+bool row_generator(silex::Element& out, const Fixture& fixture,
+                   const sflint::FmpzMat& row, bool builder) noexcept {
+    return detail::maximal_imaginary_quadratic_row_generator_for_testing(
+            out, fixture.order, fixture.base, sflint::FmpzMatConstRef(row),
+            builder);
+}
+
+// Principal rows (every exponent a multiple of an exponent of the class
+// group, class_exponent) give the same witness generator through the
+// builder and through the fallback.
+void check_fallback_generator(slong radicand, slong bound, bool incomplete,
+                              slong class_exponent, ulong seed,
+                              slong index_base) noexcept {
+    Fixture fixture;
+    if (!make_fixture(fixture, radicand, bound, incomplete)) {
+        check(false, "generator fixture construction failed", index_base);
+        return;
+    }
+    const slong length = fixture.base.length();
+    ulong state = seed;
+    for (slong trial = 0; trial < length + 20; ++trial) {
+        sflint::FmpzMat row(1, length);
+        if (trial < length) {
+            fmpz_set_si(fmpz_mat_entry(row.raw(), 0, trial),
+                        (trial % 2 == 0 ? 1 : -1) * class_exponent);
+        } else {
+            for (slong j = 0; j < length; ++j) {
+                if (next_random(state) % 4 != 0) {
+                    continue;
+                }
+                const slong multiple =
+                        static_cast<slong>(next_random(state) % 5) - 2;
+                fmpz_set_si(fmpz_mat_entry(row.raw(), 0, j),
+                            multiple * class_exponent);
+            }
+        }
+        silex::Element built(*fixture.order.parent());
+        silex::Element fallback(*fixture.order.parent());
+        const bool built_ok = row_generator(built, fixture, row, true);
+        const bool fallback_ok = row_generator(fallback, fixture, row, false);
+        check(built_ok, "builder witness generator failed",
+              index_base + trial);
+        check(fallback_ok, "fallback witness generator failed",
+              index_base + trial);
+        if (built_ok && fallback_ok) {
+            check(built.equal(fallback), "fallback generator differs",
+                  index_base + trial);
+        }
+    }
+}
+
+// D = -15, p = 17: the prime P = 17 Z + (omega - 12) Z has theta = 2 omega -
+// 1 = 6 mod P, and 6 is the omega root of its conjugate.  A copy of P whose
+// residue data is recorded in the theta convention therefore caches the
+// conjugate's root.  The builder must not use that root: it declines, and
+// the witness step's fallback gives the generator of P^2 (h(-15) = 2).
+void check_root_orientation_guard(slong index_base) noexcept {
+    sflint::Fmpz value;
+    sflint::fmpz_set_si(sflint::FmpzRef(value), -15);
+    const silex::NumberField field =
+            silex::NumberField::quadratic(sflint::FmpzConstRef(value));
+    sflint::fmpz_one(sflint::FmpzRef(value));
+    const silex::Order order = silex::Order::quadratic_order(
+            field, sflint::FmpzConstRef(value));
+    sflint::fmpz_set_si(sflint::FmpzRef(value), 17);
+    silex::PrimeIdealList primes;
+    if (!order.is_defined() || !order.is_maximal() ||
+        !silex::decompose_prime(primes, order, sflint::FmpzConstRef(value)) ||
+        primes.size() != 2) {
+        check(false, "decomposition of 17 failed", index_base);
+        return;
+    }
+    const silex::PrimeIdeal* chosen = nullptr;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const sflint::Fmpz* root =
+                detail::linear_residue_root_ptr(*primes.at(i));
+        if (root != nullptr && fmpz_equal_si(root->raw(), 12)) {
+            chosen = primes.at(i);
+        }
+    }
+    silex::PrimeIdeal relabelled(order);
+    sflint::FmpzPoly theta_residue;
+    fmpz_poly_set_coeff_si(theta_residue.raw(), 0, -6);
+    fmpz_poly_set_coeff_si(theta_residue.raw(), 1, 1);
+    if (chosen == nullptr || !relabelled.set(*chosen) ||
+        !detail::PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
+                relabelled, sflint::FmpzPolyConstRef(theta_residue))) {
+        check(false, "relabelled prime construction failed", index_base);
+        return;
+    }
+    const sflint::Fmpz* relabelled_root =
+            detail::linear_residue_root_ptr(relabelled);
+    check(relabelled_root != nullptr &&
+                  fmpz_equal_si(relabelled_root->raw(), 6),
+          "relabelled prime does not cache the conjugate root", index_base);
+
+    Fixture clean{field, order, silex::FactorBase(order)};
+    Fixture relabelled_base{field, order, silex::FactorBase(order)};
+    if (!detail::FactorBaseBlockAccess::append_prime_for_testing(clean.base,
+                                                                 *chosen) ||
+        !detail::FactorBaseBlockAccess::append_prime_for_testing(
+                relabelled_base.base, relabelled)) {
+        check(false, "single-prime base construction failed", index_base);
+        return;
+    }
+
+    sflint::FmpzMat row(1, 1);
+    sflint::FmpzMat hnf(2, 2);
+    sflint::Fmpz norm;
+    sflint::Fmpz denominator;
+    fmpz_one(fmpz_mat_entry(row.raw(), 0, 0));
+    // The clean base agrees on both routes; the relabelled base's builder
+    // declines rather than returning the conjugate's HNF.
+    routes_agree(clean, row, index_base + 1);
+    check(!detail::maximal_imaginary_quadratic_row_hnf(
+                  hnf, norm, denominator, relabelled_base.order,
+                  relabelled_base.base, sflint::FmpzMatConstRef(row),
+                  detail::QuadraticRowHnfRoute::binary_form),
+          "builder used a root that is not the column's prime",
+          index_base + 2);
+
+    fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), 2);
+    silex::Element expected(*clean.order.parent());
+    silex::Element relabelled_generator(*relabelled_base.order.parent());
+    const bool expected_ok = row_generator(expected, clean, row, true);
+    const bool relabelled_ok =
+            row_generator(relabelled_generator, relabelled_base, row, true);
+    check(expected_ok, "clean witness generator failed", index_base + 3);
+    check(relabelled_ok, "relabelled witness generator failed",
+          index_base + 3);
+    if (expected_ok && relabelled_ok) {
+        check(expected.equal(relabelled_generator),
+              "relabelled witness generator differs", index_base + 3);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -271,11 +418,13 @@ int main() {
         Fixture fixture;
         check(make_fixture(fixture, -100000007, 300, true),
               "fixture construction failed", 0);
-        const slong reversed = reversed_single_prime_blocks(fixture);
+        slong reversed = 0;
+        slong oriented = 0;
+        check(single_prime_block_orientations(reversed, oriented, fixture),
+              "orientation count failed", 0);
         // Both orientations of a single split prime must be exercised.
         check(reversed > 0, "no reversed single-prime block", 0);
-        check(reversed < fixture.base.rational_prime_block_count() - 1,
-              "no form-oriented single-prime block", 0);
+        check(oriented > 0, "no form-oriented single-prime block", 0);
     }
     check_fixture(-100000007, 300, true, UWORD(0x7101), 1000);
     check_fixture(-100000007, 120, false, UWORD(0x7102), 2000);
@@ -291,9 +440,21 @@ int main() {
     // D = -2 * 3 * 5 * 7 * 11 * 13 * 19 * 1009 (radicand 2 mod 4).
     check_fixture(-2 * 3 * 5 * 7 * 11 * 13 * 19 * 1009, 200, true,
                   UWORD(0x7109), 9000);
+    // D = -1155 = -3 * 5 * 7 * 11 (odd D, odd ramified primes: the double
+    // root is 1/2 mod p).
+    check_fixture(-1155, 250, true, UWORD(0x710a), 13000);
+    check_fixture(-1155, 150, false, UWORD(0x710b), 14000);
+    check_both_conjugates(-1155, 150, 15000);
     check_both_conjugates(-100000007, 120, 10000);
     check_both_conjugates(-23, 200, 11000);
     check_both_conjugates(-30030, 150, 12000);
+    // The witness generator through the fallback equals the one through the
+    // builder: h(-15) = 2, h(-23) = h(-31) = 3, and Cl(-420) = (Z/2)^3.
+    check_fallback_generator(-15, 150, false, 2, UWORD(0x710c), 16000);
+    check_fallback_generator(-23, 150, true, 3, UWORD(0x710d), 17000);
+    check_fallback_generator(-31, 150, false, 3, UWORD(0x710e), 18000);
+    check_fallback_generator(-105, 150, false, 2, UWORD(0x710f), 19000);
+    check_root_orientation_guard(20000);
 
     if (failures != 0) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
