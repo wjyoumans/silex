@@ -1,3 +1,4 @@
+#include <silex/archimedean.hpp>
 #include <silex/class_group.hpp>
 #include <silex/embedding.hpp>
 #include <silex/factored_element.hpp>
@@ -7,11 +8,13 @@
 #include <silex/zeta.hpp>
 
 #include "class_group/class_group_internal.hpp"
+#include "class_group/relation_search_driver_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "relation/relation_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <vector>
 
 namespace {
@@ -762,6 +765,87 @@ int test_preprobe_handoff_matches_rebuilt_product() {
     return 0;
 }
 
+// The analytic finish check keeps its embedding context between checks at
+// one precision, rebuilds it when the precision changes, and releases it
+// when the check returns finished.
+int test_analytic_finish_embedding_reuse() {
+    silex::NumberField field = cubic_discriminant_81_field();
+    const silex::Order equation_order =
+            silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+
+    namespace rs = silex::detail::relation_search;
+    rs::RelationSearchControlState route_state;
+    const slong precision = route_state.analytic_finish_precision;
+    silex::Element theta(field);
+    assert(theta.gen());
+    sflint::ArbVec logs(3);
+
+    silex::EmbeddingContext* first =
+            rs::analytic_finish_embeddings_for_testing(route_state, field,
+                                                       precision);
+    assert(first != nullptr && first->precision() == precision);
+    assert(silex::logarithmic_embedding(
+            sflint::ArbVecRef(logs), *first, theta,
+            silex::LogEmbeddingMode::product, precision));
+    std::uint64_t version = 0;
+    assert(silex::detail::embedding_log_cache_version(version, *first));
+
+    // Same precision: the context and its log cache are kept.
+    silex::EmbeddingContext* again =
+            rs::analytic_finish_embeddings_for_testing(route_state, field,
+                                                       precision);
+    assert(again == first && again->precision() == precision);
+    std::uint64_t kept_version = 0;
+    assert(silex::detail::embedding_log_cache_version(kept_version, *again));
+    assert(kept_version == version);
+
+    // Doubled precision: a fresh context, with no log cache yet.
+    silex::EmbeddingContext* doubled =
+            rs::analytic_finish_embeddings_for_testing(route_state, field,
+                                                       2 * precision);
+    assert(doubled != nullptr && doubled->precision() == 2 * precision);
+    std::uint64_t rebuilt_version = 0;
+    assert(!silex::detail::embedding_log_cache_version(rebuilt_version,
+                                                       *doubled));
+
+    // A finished check releases the kept context.
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), maximal_order));
+    if (sflint::fmpz_cmp_ui(
+                sflint::FmpzConstRef(factor_base_bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(factor_base_bound), 2);
+    }
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 500;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            class_group, maximal_order,
+            sflint::FmpzConstRef(factor_base_bound), options, 128));
+
+    rs::RelationSearchControlState check_state;
+    assert(rs::analytic_finish_embeddings_for_testing(
+                   check_state, field, check_state.analytic_finish_precision)
+           != nullptr);
+    assert(check_state.analytic_finish_embeddings.is_defined());
+    bool goal_reached = true;
+    const silex::detail::ClassGroupRelationOptions relation_options;
+    assert(rs::apply_analytic_finish_check(
+                   class_group, check_state, goal_reached, maximal_order,
+                   relation_options, false, false,
+                   silex::detail::class_group_finish_workspace(class_group),
+                   nullptr) == rs::AnalyticFinishDecision::finished);
+    assert(!check_state.analytic_finish_embeddings.is_defined());
+    assert(check_state.analytic_finish_embedding_precision == 0);
+    return 0;
+}
+
 int test_hnf_row_pivot_column_flags() {
     std::vector<char> covered;
     silex::fmpz_smat::HnfContext module;
@@ -809,5 +893,6 @@ int main() {
     assert(test_unit_multiplied_generator_accepted() == 0);
     assert(test_hnf_row_pivot_column_flags() == 0);
     assert(test_preprobe_handoff_matches_rebuilt_product() == 0);
+    assert(test_analytic_finish_embedding_reuse() == 0);
     return 0;
 }

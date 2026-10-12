@@ -44,6 +44,14 @@ AnalyticFinishDecision apply_analytic_finish_check(
         HnfFinishWorkspace* finish_workspace,
         const DiagnosticsContext* diagnostics) noexcept;
 
+// Testing seam for the embedding context kept between analytic finish
+// checks: returns it refined to `precision`, reused or rebuilt as the check
+// itself would.
+EmbeddingContext* analytic_finish_embeddings_for_testing(
+        RelationSearchControlState& route_state,
+        const NumberField& field,
+        slong precision) noexcept;
+
 AnalyticFinishDecision apply_honesty_check(
         ClassGroupContext& context,
         RelationSearchControlState& route_state,
