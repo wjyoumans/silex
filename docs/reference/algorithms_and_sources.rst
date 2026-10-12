@@ -857,6 +857,34 @@ with Arb balls and raises the precision until the ceiling of the bound is
 stable, and the CRT runs until the modulus exceeds twice that bound, so the
 centred coordinates are exact.
 
+PARI's comment on ``log2Mbound`` (``buch2.c``:1201) states the quantity it
+bounds: :math:`\log_2(|x|_\infty / |y|_\infty)` for the solution ``x`` of
+``RgM_solve_realimag(M, y)``, that is :math:`\log_2 \|S^{-1}\|_\infty` (the
+largest absolute row sum) for the matrix ``S`` of real parts of the
+:math:`r_1 + r_2` embeddings and imaginary parts of the :math:`r_2` complex
+ones.  ``log2Mbound`` itself is a Hadamard and Cramer estimate of that norm
+on PARI's T2-LLL-reduced integral basis.  Silex evaluates the formula on its
+own order basis (with 1 moved first), often a power basis, where the
+estimate also carries the basis's orthogonality defect.  As a Silex
+evaluation choice, not PARI's literal expression, Silex evaluates
+:math:`\|S^{-1}\|_\infty` itself from a certified Arb inverse of the same
+weighted embedding matrix (the upper end of the ball is an outward-rounded
+bound) and publishes that bound whenever it is certified: the inverse
+succeeds at the working precision and the ceiling of the total is stable.
+Only when it is not certified does Silex publish the bound from PARI's
+expression.  The PARI expression alone still decides success, the precision
+ladder and failure.  For totally real fields the norm never exceeds
+``log2Mbound`` (Cramer's rule, Cauchy-Schwarz and Hadamard's inequality,
+with the basis element 1 of smallest T2 norm).  For :math:`r_2 > 0`, PARI
+subtracts :math:`r_2 \ln 2` for
+:math:`\log_2 |\det S| = \log_2 |D| / 2 - r_2`, so that argument does not cover the comparison, and on some fields
+with complex places the published bound may be larger than PARI's
+expression, so the CRT may use more primes; no such field has been seen on
+the test corpus.  For the totally real degree-32 subfield of the 136th
+cyclotomic field the Minkowski term falls from 442.6 to 18.9 bits, so the
+wide-unit bound falls from 454 to 30 bits and the CRT uses 1 prime instead
+of 8.
+
 Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb
 coordinates of each unit against the generators' log matrix and divide by

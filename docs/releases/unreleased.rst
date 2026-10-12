@@ -177,6 +177,23 @@ Changed
   class group invariants ``[2, 2, 3953768]``.  See
   :doc:`../reference/algorithms_and_sources`.
 
+- When a unit group keeps units with exponents beyond ``slong`` and rebuilds
+  them by bounded CRT reconstruction, and when compact unit generators are
+  expanded to reduce relation units modulo the unit group, the CRT
+  coordinate bound now evaluates the quantity PARI's ``log2Mbound``
+  estimates, the norm of the inverse embedding matrix, with a certified Arb
+  inverse, and uses it whenever it is certified.  PARI's expression is used
+  only when the inverse cannot be certified at the working precision; it
+  still decides success, the precision ladder and failure.  For totally real
+  fields the new bound is never larger than before.  On some fields with
+  complex places it may be larger, so the reconstruction may use more CRT
+  primes; no such field has been seen on the test corpus.  For the ``grh``
+  computation on the totally real degree-32 subfield of the 136th
+  cyclotomic field the bound falls from 454 to 30 bits and the
+  reconstruction uses 1 CRT prime instead of 8.  Published results are
+  unchanged on the test corpus.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The relation-production prepass drops its outstanding relation surplus
   after each small-norm pass, as PARI's ``Buchall_param`` does
   (``cache.end = cache.last``), so a later request asks only for the missing
