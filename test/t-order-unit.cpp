@@ -2177,6 +2177,86 @@ int test_reduced_regulator_reconstruction_correction() {
     return 0;
 }
 
+// The best-denominator search stores convergents and semiconvergents without
+// a gcd; the stored fmpq must still be canonical (reduced, positive
+// denominator) and equal the canonical form of the same fraction.
+int test_best_denominator_convergents_are_canonical() {
+    auto best = [](const sflint::Fmpq& value,
+                   const sflint::Fmpz& max_denominator) noexcept {
+        sflint::Fmpq out;
+        const bool ok = silex::detail::fmpq_best_denominator_bounded_for_testing(
+                out, sflint::FmpqConstRef(value),
+                sflint::FmpzConstRef(max_denominator));
+        assert(ok);
+        assert(::fmpq_is_canonical(out.raw()) != 0);
+        assert(sflint::fmpz_sgn(sflint::fmpq_den_ref(out)) > 0);
+        assert(sflint::fmpz_cmp(sflint::fmpq_den_ref(out),
+                                sflint::FmpzConstRef(max_denominator)) <= 0);
+        sflint::Fmpq canonical;
+        sflint::fmpq_set_fmpz_frac(canonical, sflint::fmpq_num_ref(out),
+                                   sflint::fmpq_den_ref(out));
+        assert(sflint::fmpq_equal(out, canonical));
+        return out;
+    };
+    auto expect = [&best](slong num, ulong den, slong max_den,
+                          slong expected_num, ulong expected_den) noexcept {
+        sflint::Fmpq value;
+        ::fmpq_set_si(value.raw(), num, den);
+        sflint::Fmpz bound;
+        sflint::fmpz_set_si(sflint::FmpzRef(bound), max_den);
+        const sflint::Fmpq out = best(value, bound);
+        sflint::Fmpq expected;
+        ::fmpq_set_si(expected.raw(), expected_num, expected_den);
+        assert(sflint::fmpq_equal(out, expected));
+    };
+
+    // Convergents of 314159265358979/10^14 = [3; 7, 15, 1, 292, ...].
+    expect(314159265358979, 100000000000000UL, 7, 22, 7);
+    expect(314159265358979, 100000000000000UL, 113, 355, 113);
+    expect(-314159265358979, 100000000000000UL, 113, -355, 113);
+    // Semiconvergents: 16/15 = [1; 15] and -16/15 = [-2; 1, 14].
+    expect(16, 15, 10, 11, 10);
+    expect(-16, 15, 10, -11, 10);
+    // Integers and zero stop at the first convergent a_0 / 1.
+    expect(0, 1, 5, 0, 1);
+    expect(-7, 1, 5, -7, 1);
+
+    // Many-term expansions with large entries: F_{n+1}/F_n has all partial
+    // quotients 1, and the 2-adic bounds stop at every depth, including
+    // values with negative a_0.
+    sflint::Fmpz fib_num;
+    sflint::Fmpz fib_den;
+    ::fmpz_fib_ui(fib_num.raw(), 601);
+    ::fmpz_fib_ui(fib_den.raw(), 600);
+    sflint::Fmpq golden;
+    sflint::fmpq_set_fmpz_frac(golden, sflint::FmpzConstRef(fib_num),
+                               sflint::FmpzConstRef(fib_den));
+    sflint::Fmpq negative_golden;
+    sflint::fmpq_neg(negative_golden, golden);
+    sflint::Fmpq mixed;
+    sflint::Fmpz three_power;
+    ::fmpz_ui_pow_ui(three_power.raw(), 3, 300);
+    ::fmpz_sub_ui(three_power.raw(), three_power.raw(), 1);
+    sflint::Fmpz two_power;
+    ::fmpz_one(two_power.raw());
+    ::fmpz_mul_2exp(two_power.raw(), two_power.raw(), 470);
+    ::fmpz_add_ui(two_power.raw(), two_power.raw(), 3);
+    sflint::fmpq_set_fmpz_frac(mixed, sflint::FmpzConstRef(three_power),
+                               sflint::FmpzConstRef(two_power));
+    sflint::Fmpq negative_mixed;
+    sflint::fmpq_neg(negative_mixed, mixed);
+    for (ulong bits = 0; bits <= 480; bits += 7) {
+        sflint::Fmpz bound;
+        ::fmpz_one(bound.raw());
+        ::fmpz_mul_2exp(bound.raw(), bound.raw(), bits);
+        static_cast<void>(best(golden, bound));
+        static_cast<void>(best(negative_golden, bound));
+        static_cast<void>(best(mixed, bound));
+        static_cast<void>(best(negative_mixed, bound));
+    }
+    return 0;
+}
+
 int test_hnf_regulator_multiple_certification_correction() {
     constexpr slong precision = 256;
 
@@ -11938,6 +12018,7 @@ int main() {
     test_compute_with_class_group_failures_preserve_output();
     test_relation_kernel_rescale_log_matrix_word_rounding();
     test_reduced_regulator_reconstruction_correction();
+    test_best_denominator_convergents_are_canonical();
     test_hnf_regulator_multiple_certification_correction();
     test_regulator_pivot_exponent_policy();
     test_regulator_pivot_arb_ambiguity_and_invalidity();

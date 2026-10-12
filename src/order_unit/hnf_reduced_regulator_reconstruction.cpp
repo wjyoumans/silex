@@ -40,6 +40,35 @@ bool fmpq_abs_error_less(flint::FmpqConstRef left,
     return fmpq_cmp(left_error.raw(), right_error.raw()) < 0;
 }
 
+// Stores p/q in `out` without the gcd that fmpq_set_fmpz_frac performs.
+// Callers pass only continued-fraction convergents or semiconvergents, which
+// already have the canonical fmpq form (gcd(p, q) = 1 and q > 0); see the
+// argument in fmpq_set_best_denominator_bounded.
+void fmpq_set_coprime_fraction(flint::Fmpq& out,
+                               flint::FmpzConstRef p,
+                               flint::FmpzConstRef q) noexcept {
+    ::fmpz_set(fmpq_numref(out.raw()), p.raw());
+    ::fmpz_set(fmpq_denref(out.raw()), q.raw());
+}
+
+// Convergents p_i/q_i of value = [a_0; a_1, ..., a_{len-1}] from
+// fmpq_get_cfrac (a_0 = floor(value) of any sign, a_i >= 1 for i >= 1) follow
+//   p_i = a_i p_{i-1} + p_{i-2},  q_i = a_i q_{i-1} + q_{i-2},
+// from p_{-2} = 0, p_{-1} = 1, q_{-2} = 1, q_{-1} = 0. They are stored
+// directly as canonical fmpq values, skipping the gcd that dominated the
+// proven finish at high precision. Canonical form holds because:
+// - Sign: q_0 = 1 and, for i >= 1, q_i = a_i q_{i-1} + q_{i-2} with a_i >= 1,
+//   q_{i-1} >= 1 and q_{i-2} >= 0, so q_i >= 1. A semiconvergent
+//   (t p_{k-1} + p_{k-2}) / (t q_{k-1} + q_{k-2}) is formed only for k >= 1
+//   with t >= 1, so its denominator is >= q_{k-1} >= 1.
+// - Coprimality: p_{i-1} q_{i-2} - p_{i-2} q_{i-1} = (-1)^i holds for
+//   i = 0 (1 * 1 - 0 * 0 = 1) and is preserved by the recurrence, since
+//   p_i q_{i-1} - p_{i-1} q_i = -(p_{i-1} q_{i-2} - p_{i-2} q_{i-1}). For the
+//   semiconvergent, (t p_{k-1} + p_{k-2}) q_{k-1} - p_{k-1} (t q_{k-1} +
+//   q_{k-2}) = p_{k-2} q_{k-1} - p_{k-1} q_{k-2} = +-1. An integer
+//   combination equal to +-1 forces gcd(numerator, denominator) = 1.
+// This is the standard determinant identity of continued fractions (Hardy
+// and Wright, An Introduction to the Theory of Numbers, Chapter X).
 bool fmpq_set_best_denominator_bounded(
         flint::Fmpq& out,
         flint::FmpqConstRef value,
@@ -92,7 +121,7 @@ bool fmpq_set_best_denominator_bounded(
                     fmpz_add(semi_q.raw(), semi_q.raw(), q_prev2.raw());
 
                     flint::Fmpq semi;
-                    flint::fmpq_set_fmpz_frac(
+                    fmpq_set_coprime_fraction(
                             semi, flint::FmpzConstRef(semi_p),
                             flint::FmpzConstRef(semi_q));
                     if (!have ||
@@ -117,7 +146,7 @@ bool fmpq_set_best_denominator_bounded(
 
         if (flint::fmpz_cmp(flint::FmpzConstRef(q),
                             max_denominator) <= 0) {
-            flint::fmpq_set_fmpz_frac(
+            fmpq_set_coprime_fraction(
                     out, flint::FmpzConstRef(p), flint::FmpzConstRef(q));
             have = true;
             p_prev2.swap(p_prev1);
@@ -319,6 +348,13 @@ bool rational_approximation_error_bits_ok(
 }
 
 }  // namespace
+
+bool fmpq_best_denominator_bounded_for_testing(
+        flint::Fmpq& out,
+        flint::FmpqConstRef value,
+        flint::FmpzConstRef max_denominator) noexcept {
+    return fmpq_set_best_denominator_bounded(out, value, max_denominator);
+}
 
 bool reduced_regulator_from_coordinates(
         flint::ArbRef out,

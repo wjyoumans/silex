@@ -5,6 +5,7 @@
 
 #include <silex/class_group.hpp>
 #include <silex/flint/arb_mat.hpp>
+#include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/order_unit.hpp>
 
@@ -758,6 +759,10 @@ bool relation_coefficients_log_matrix(
         const flint::FmpzMat& coefficients,
         slong precision,
         const DiagnosticsContext* diagnostics) noexcept;
+bool fmpq_best_denominator_bounded_for_testing(
+        flint::Fmpq& out,
+        flint::FmpqConstRef value,
+        flint::FmpzConstRef max_denominator) noexcept;
 bool reduced_regulator_from_coordinates(
         flint::ArbRef out,
         const flint::ArbMat& coordinates,

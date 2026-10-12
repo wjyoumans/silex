@@ -148,6 +148,14 @@ Changed
   route for word-size ``q``.  Published results are unchanged on the 70
   ``proven`` corpus rows.
 
+- The rational reconstruction of the reduced regulator in the ``proven``
+  analytic finish stores each continued-fraction convergent of a unit
+  coordinate as it is, instead of reducing it with a gcd.  Convergents and
+  semiconvergents are already in lowest terms with a positive denominator, so
+  the reconstructed rationals, the regulator and every published output are
+  unchanged.  At high working precision (up to 40960 bits) that gcd was most
+  of the finish time on large real quadratic fields.
+
 - The word-size route of that column evaluation reads each unit factor's
   stored numerator polynomial and denominator in place, reducing them modulo
   ``q`` without copying the factor to a rational polynomial or inverting
