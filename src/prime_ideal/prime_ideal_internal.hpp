@@ -138,6 +138,40 @@ public:
             flint::FmpzConstRef p,
             bool recursive_split) noexcept;
 
+    // Builds into `out` (defined over `order`) the prime ideal
+    // (p, g(theta)) of the irreducible factor `factor` of the defining
+    // polynomial modulo p with multiplicity `ramification_index`, as
+    // decompose_prime builds it on its Dedekind-Kummer routes: ideal, residue
+    // polynomial g and centered Kummer generator.  Shared by those routes and
+    // decompose_prime_containing so both build the same prime.
+    static bool set_defining_polynomial_factor_prime(
+            PrimeIdeal& out,
+            const Order& order,
+            flint::FmpzConstRef p,
+            const fmpz_mod_poly_struct* factor,
+            slong ramification_index,
+            const flint::FmpzModCtx& ctx,
+            const DiagnosticsContext* diagnostics) noexcept;
+
+    // The prime ideals above the rational prime p that can contain the
+    // nonzero element `element` of a maximal order, in the order
+    // decompose_prime(.., p, 0) lists them and built as it builds them.
+    // When decompose_prime would take a Dedekind-Kummer route (p does not
+    // divide [O : Z[theta]], and the order is not on the quadratic
+    // integral-generator route), the primes above p are P_i = (p, g_i(theta))
+    // for the monic irreducible factors g_i of f modulo p.  Writing
+    // element = A(theta) / d with d coprime to p, element lies in P_i exactly
+    // when g_i divides A modulo p, because P_i meets Z[theta] in
+    // p Z[theta] + g_i(theta) Z[theta] (Cohen, GTM 138, Theorem 4.8.13 and
+    // its proof).  Only those P_i are built; every omitted P_i has valuation
+    // 0 at `element`.  On every other route the result is the whole
+    // decomposition.  Returns false when decompose_prime would.
+    static bool decompose_prime_containing(
+            std::vector<PrimeIdeal>& out,
+            const OrderElement& element,
+            flint::FmpzConstRef p,
+            const DiagnosticsContext* diagnostics) noexcept;
+
     // `norm_vp` must be the exact p-adic valuation of the absolute norm of
     // `element`; the result is wrong otherwise.
     static bool prime_ideal_valuation_with_norm_vp(

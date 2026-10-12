@@ -1455,6 +1455,150 @@ int test_residue_degrees_index_divisor_routes() {
                                                        {2});
 }
 
+// The same prime, built the same way: ideal HNF, e, f, residue polynomial
+// and Kummer generator.
+bool same_prime_data(const silex::PrimeIdeal& a,
+                     const silex::PrimeIdeal& b,
+                     const silex::Order& order) {
+    const slong n = order.degree();
+    sflint::FmpzMat hnf_a(n, n);
+    sflint::FmpzMat hnf_b(n, n);
+    sflint::FmpzMat kummer_a(1, n);
+    sflint::FmpzMat kummer_b(1, n);
+    sflint::FmpzPoly residue_a;
+    sflint::FmpzPoly residue_b;
+    const bool has_kummer_a =
+            a.kummer_generator_coordinates(sflint::FmpzMatRef(kummer_a));
+    const bool has_kummer_b =
+            b.kummer_generator_coordinates(sflint::FmpzMatRef(kummer_b));
+    const bool has_residue_a =
+            a.residue_polynomial(sflint::FmpzPolyRef(residue_a));
+    const bool has_residue_b =
+            b.residue_polynomial(sflint::FmpzPolyRef(residue_b));
+    return a.ramification_index() == b.ramification_index() &&
+           a.residue_degree() == b.residue_degree() &&
+           PrimeIdealAccess::ideal(a).get_hnf(sflint::FmpzMatRef(hnf_a)) &&
+           PrimeIdealAccess::ideal(b).get_hnf(sflint::FmpzMatRef(hnf_b)) &&
+           fmpz_mat_equal(hnf_a.raw(), hnf_b.raw()) != 0 &&
+           has_kummer_a == has_kummer_b &&
+           (!has_kummer_a ||
+            fmpz_mat_equal(kummer_a.raw(), kummer_b.raw()) != 0) &&
+           has_residue_a == has_residue_b &&
+           (!has_residue_a ||
+            fmpz_poly_equal(residue_a.raw(), residue_b.raw()) != 0);
+}
+
+// decompose_prime_containing on `element`: on a Dedekind-Kummer route
+// (`filtered`) exactly the primes of decompose_prime(.., p, 0) that contain
+// the element, in that order and built identically; otherwise all of them.
+void check_decompose_prime_containing(const silex::Order& order,
+                                      const silex::PrimeIdealList& all,
+                                      const silex::OrderElement& element,
+                                      sflint::FmpzConstRef p,
+                                      bool filtered) {
+    std::vector<silex::PrimeIdeal> containing;
+    assert(PrimeIdealAccess::decompose_prime_containing(containing, element,
+                                                        p, nullptr));
+    std::size_t next = 0;
+    for (slong i = 0; i < all.size(); ++i) {
+        const silex::PrimeIdeal& prime = *all.at(i);
+        slong valuation = -1;
+        assert(prime.valuation(valuation, element));
+        if (filtered && valuation == 0) {
+            continue;
+        }
+        assert(next < containing.size());
+        assert(same_prime_data(containing[next], prime, order));
+        ++next;
+    }
+    assert(next == containing.size());
+}
+
+// Elements of the maximal order of the field of `low_to_high`: small
+// coordinate vectors, p, 1, and each prime's Kummer generator, which lies
+// in that prime.  `index_primes` divide [O : Z[theta]] and keep the whole
+// decomposition.
+int check_decompose_prime_containing_routes(
+        const std::vector<slong>& low_to_high,
+        bool maximal_is_equation_order,
+        const std::vector<slong>& rational_primes,
+        const std::vector<slong>& index_primes) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+    silex::NumberField field;
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+    assert(order.is_equation_order() == maximal_is_equation_order);
+    const slong n = order.degree();
+
+    for (const slong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, rational_prime));
+        const sflint::FmpzConstRef p_ref(p);
+        bool filtered = true;
+        for (const slong index_prime : index_primes) {
+            filtered = filtered && index_prime != rational_prime;
+        }
+        silex::PrimeIdealList all;
+        assert(silex::decompose_prime(all, order, p_ref));
+        assert(all.size() > 0);
+
+        std::vector<silex::OrderElement> elements;
+        sflint::FmpzMat coordinates(1, n);
+        for (slong k = 0; k < 2 * n + 2; ++k) {
+            for (slong j = 0; j < n; ++j) {
+                fmpz_set_si(fmpz_mat_entry(coordinates.raw(), 0, j),
+                            ((k + 1) * (j + 3) * (j + k + 1)) % 7 - 3);
+            }
+            if (fmpz_mat_is_zero(coordinates.raw()) != 0) {
+                continue;
+            }
+            elements.emplace_back(order);
+            assert(elements.back().set_coordinates(
+                    sflint::FmpzMatConstRef(coordinates)));
+        }
+        elements.emplace_back(order);
+        assert(elements.back().set_si(rational_prime));
+        elements.emplace_back(order);
+        assert(elements.back().set_si(1));
+        for (slong i = 0; i < all.size(); ++i) {
+            if (all.at(i)->kummer_generator_coordinates(
+                        sflint::FmpzMatRef(coordinates)) &&
+                fmpz_mat_is_zero(coordinates.raw()) == 0) {
+                elements.emplace_back(order);
+                assert(elements.back().set_coordinates(
+                        sflint::FmpzMatConstRef(coordinates)));
+            }
+        }
+        for (const silex::OrderElement& element : elements) {
+            check_decompose_prime_containing(order, all, element, p_ref,
+                                             filtered);
+        }
+
+    }
+    return 0;
+}
+
+// The non-equation maximal order of cyclotomic_real_q10_c11_deg10 at
+// non-index primes (split, inert-like and ramified) and at the index divisor
+// 43; x^3 - 2, whose maximal order is its equation order; the quadratic
+// integral-generator route of Q(sqrt(5)).
+int test_decompose_prime_containing() {
+    assert(check_decompose_prime_containing_routes(
+                   {238831, -228566, -128567, 146666, -15113, -13352, 2746,
+                    334, -97, -2, 1},
+                   false, {2, 3, 5, 11, 23, 43, 89, 101}, {43}) == 0);
+    assert(check_decompose_prime_containing_routes({-2, 0, 0, 1}, true,
+                                                   {2, 3, 5, 31}, {}) == 0);
+    assert(check_decompose_prime_containing_routes({-5, 0, 1}, false,
+                                                   {2, 5, 11, 19}, {2, 5, 11,
+                                                                    19}) ==
+           0);
+    return 0;
+}
+
 // Splits O/(p, I_p) through the bounded idempotent enumeration and through
 // the recursive split (both without the separating element) and checks that
 // they give the same prime ideals in the same order, which is also the order
@@ -3788,6 +3932,7 @@ int main() {
     assert(test_index_divisor_cache_inert_principal() == 0);
     assert(test_residue_degrees_cyclotomic_real_q10_c11() == 0);
     assert(test_residue_degrees_index_divisor_routes() == 0);
+    assert(test_decompose_prime_containing() == 0);
     assert(test_index_divisor_separating_element_order() == 0);
     assert(test_recursive_split_matches_enumeration_unramified() == 0);
     assert(test_recursive_split_matches_enumeration_ramified() == 0);

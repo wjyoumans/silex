@@ -1312,17 +1312,17 @@ bool order_element_factor_over_base_with_one_large_prime(
             continue;
         }
 
-        PrimeIdealList decomposed;
-        if (!decompose_prime(decomposed, *order,
-                             flint::FmpzConstRef(rational_prime), 0,
-                             diagnostics)) {
+        // Only the primes above the rational prime that can contain the
+        // element are built: every other one has valuation 0, which the
+        // loop below skips.
+        std::vector<PrimeIdeal> decomposed;
+        if (!detail::PrimeIdealAccess::decompose_prime_containing(
+                    decomposed, element, flint::FmpzConstRef(rational_prime),
+                    diagnostics)) {
             return false;
         }
-        for (slong j = 0; j < decomposed.size(); ++j) {
-            const PrimeIdeal* prime = decomposed.at(j);
-            if (prime == nullptr) {
-                return false;
-            }
+        for (const PrimeIdeal& candidate : decomposed) {
+            const PrimeIdeal* prime = &candidate;
             if (base.contains(*prime)) {
                 continue;
             }

@@ -748,6 +748,76 @@ bool row_is_filled(const sflint::FmpzMat& row, slong value) noexcept {
 
 // Q(2^(1/3)): 5 = P Q with f(P) = 1 and f(Q) = 2.  The norm-bounded base at
 // 5 keeps P and drops Q, so its block above 5 is incomplete.
+// The cubic x^3 - 2 (maximal order Z[theta]), base bound 5: a - theta has
+// norm a^3 - 2.  At a = 5 (3 * 41) and a = 9 (727, which splits completely)
+// the one large prime is the degree-one prime (p, theta - a), found among
+// the primes above p that can contain the element.  At a = 7 (11 * 31) and
+// for 31 (three primes of norm 31) there are two large primes.
+int test_order_element_factor_one_large_prime_cubic() {
+    const slong coefficients[] = {-2, 0, 0, 1};
+    silex::NumberField field = field_from_coefficients(coefficients, 4);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    silex::FactorBase base(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    assert(base.build(sflint::FmpzConstRef(bound)));
+
+    silex::OrderElement element(order);
+    silex::Element ambient(field);
+    sflint::FmpqPoly polynomial;
+    sflint::Fmpq norm;
+    sflint::FmpzMat row(1, base.length());
+    silex::PrimeIdeal large_prime(order);
+    silex::detail::OneLargePrimeFactorStatus status =
+            silex::detail::OneLargePrimeFactorStatus::no_candidate;
+    auto set_a_minus_theta = [&](slong a) {
+        sflint::fmpq_poly_zero(polynomial);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, a);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+        assert(ambient.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+        assert(element.set_element(ambient));
+        assert(ambient.norm(sflint::FmpqRef(norm)));
+    };
+
+    const slong found_values[] = {5, 9};
+    for (slong a : found_values) {
+        set_a_minus_theta(a);
+        assert(silex::detail::
+                       order_element_factor_over_base_with_one_large_prime(
+                               status, sflint::FmpzMatRef(row), large_prime,
+                               element, sflint::FmpqConstRef(norm), base));
+        assert(status == silex::detail::OneLargePrimeFactorStatus::found);
+        assert(!base.contains(large_prime));
+        assert(large_prime.residue_degree() == 1);
+
+        silex::Ideal principal(order);
+        silex::IdealFactorization full(order);
+        assert(principal.set_principal(element));
+        assert(full.factor(principal));
+        assert(row_matches_factorization(row, base, full));
+        assert(exponent_of_prime(full, large_prime) == 1);
+    }
+
+    set_a_minus_theta(7);
+    assert(silex::detail::order_element_factor_over_base_with_one_large_prime(
+            status, sflint::FmpzMatRef(row), large_prime, element,
+            sflint::FmpqConstRef(norm), base));
+    assert(status == silex::detail::OneLargePrimeFactorStatus::no_candidate);
+
+    assert(element.set_si(31));
+    assert(element.get_element(ambient));
+    assert(ambient.norm(sflint::FmpqRef(norm)));
+    assert(silex::detail::order_element_factor_over_base_with_one_large_prime(
+            status, sflint::FmpzMatRef(row), large_prime, element,
+            sflint::FmpqConstRef(norm), base));
+    assert(status == silex::detail::OneLargePrimeFactorStatus::no_candidate);
+    return 0;
+}
+
 int test_required_prime_through_lacking_conjugate() {
     // x^3 - 2: 5 = R1 R2 with f(R1) = 1, f(R2) = 2, and 31 = P1 P2 P3.
     const slong coefficients[] = {-2, 0, 0, 1};
@@ -984,6 +1054,7 @@ int main() {
     assert(test_factor_over_base_with_required_prime() == 0);
     assert(test_required_prime_through_lacking_conjugate() == 0);
     assert(test_order_element_factor_over_base_with_one_large_prime() == 0);
+    assert(test_order_element_factor_one_large_prime_cubic() == 0);
     assert(test_factor_over_base_parent_failure_preserves_outputs() == 0);
     assert(test_fractional_factor_over_base_degree_one() == 0);
     assert(test_fractional_factor_over_base_quadratic() == 0);

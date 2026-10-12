@@ -4100,6 +4100,151 @@ bool PrimeIdealAccess::set_degree_one_prime_ideal_from_root(
            out.set_kummer_generator(flint::FmpzMatConstRef(kummer_generator));
 }
 
+bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
+        PrimeIdeal& out,
+        const Order& order,
+        flint::FmpzConstRef p,
+        const fmpz_mod_poly_struct* factor,
+        slong ramification_index,
+        const flint::FmpzModCtx& ctx,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const slong residue_degree = fmpz_mod_poly_degree(factor, ctx.raw());
+    if (order.parent() == nullptr) {
+        return false;
+    }
+    Element generator_element(*order.parent());
+    OrderElement generator(order);
+    Ideal candidate_ideal(order);
+    flint::FmpzMat kummer_generator(1, order.degree());
+    flint::FmpzPoly residue_polynomial;
+
+    if (!generator_element.is_defined() || !generator.is_defined() ||
+        !candidate_ideal.is_defined()) {
+        return false;
+    }
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
+                            "prime_ideal.decompose_prime.factor_to_generator");
+        if (!element_set_mod_poly(generator_element, factor, ctx) ||
+            !generator.set_element(generator_element) ||
+            !generator.get_coordinates(flint::FmpzMatRef(kummer_generator))) {
+            return false;
+        }
+    }
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
+                            "prime_ideal.decompose_prime.two_generator_ideal");
+        if (!set_known_two_generator_ideal(candidate_ideal, p, generator)) {
+            return false;
+        }
+    }
+    fmpz_mat_center_row_mod_prime(kummer_generator, 0, p);
+
+    fmpz_mod_poly_get_fmpz_poly(residue_polynomial, factor, ctx);
+    return out.set_data(p, ramification_index, residue_degree, candidate_ideal,
+                        flint::FmpzPolyConstRef(residue_polynomial), false) &&
+           out.set_kummer_generator(flint::FmpzMatConstRef(kummer_generator));
+}
+
+bool PrimeIdealAccess::decompose_prime_containing(
+        std::vector<PrimeIdeal>& out,
+        const OrderElement& element,
+        flint::FmpzConstRef p,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
+                        "prime_ideal.decompose_prime_containing");
+    const Order* order = element.parent();
+    if (order == nullptr || order->parent() == nullptr) {
+        return false;
+    }
+    const nf_struct* raw_field = order->parent()->raw_flint_field();
+
+    // The routes of decompose_prime(.., p, 0) that factor the defining
+    // polynomial f modulo p and build (p, g_i(theta)) for each factor g_i:
+    // a maximal order of degree at least 2, off the quadratic
+    // integral-generator route, that is the equation order or has p prime to
+    // its index.  Each other route gives the whole decomposition.
+    const bool dedekind_kummer_route =
+            order->has_basis() && order->degree() > 1 &&
+            fmpz_is_prime(p.raw()) != 0 && raw_field != nullptr &&
+            fmpq_poly_is_monic_integral(raw_field->pol) &&
+            !residue_polynomial_uses_quadratic_integral_generator(*order) &&
+            order->is_maximal() &&
+            (order->is_equation_order() ||
+             maximal_order_has_nonindex_defining_polynomial_prime(*order, p));
+
+    flint::FmpqPoly value;
+    if (dedekind_kummer_route) {
+        Element ambient(*order->parent());
+        if (!ambient.is_defined() || !element.get_element(ambient) ||
+            !ambient.get_fmpq_poly(flint::FmpqPolyRef(value))) {
+            return false;
+        }
+    }
+    // element = A(theta) / d.  p does not divide d when p is prime to the
+    // index, since [O : Z[theta]] element lies in Z[theta]; the test keeps
+    // the whole decomposition should that ever fail.
+    if (!dedekind_kummer_route ||
+        fmpz_divisible(fmpq_poly_denref(value.raw()), p.raw()) != 0) {
+        PrimeIdealList primes;
+        if (!decompose_prime(primes, *order, p, 0, diagnostics)) {
+            return false;
+        }
+        std::vector<PrimeIdeal> all;
+        all.reserve(static_cast<std::size_t>(primes.size()));
+        for (slong i = 0; i < primes.size(); ++i) {
+            PrimeIdeal* prime = primes.at(i);
+            if (prime == nullptr) {
+                return false;
+            }
+            all.push_back(std::move(*prime));
+        }
+        out.swap(all);
+        return true;
+    }
+
+    flint::FmpzModCtx ctx(p.raw());
+    flint::FmpzModPoly reduced_field_polynomial(ctx);
+    flint::FmpzModPoly reduced_value(ctx);
+    flint::FmpzModPoly remainder(ctx);
+    flint::FmpzModPolyFactor factorization(ctx);
+    fmpq_poly_get_fmpz_mod_poly(reduced_field_polynomial, raw_field->pol, ctx);
+    const fmpz* numerator = fmpq_poly_numref(value.raw());
+    for (slong i = 0; i < fmpq_poly_length(value.raw()); ++i) {
+        fmpz_mod_poly_set_coeff_fmpz(reduced_value.raw(), i, numerator + i,
+                                     ctx.raw());
+    }
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::prime_ideal,
+                "prime_ideal.decompose_prime_containing.factor_field_polynomial");
+        fmpz_mod_poly_factor(factorization.raw(),
+                             reduced_field_polynomial.raw(), ctx.raw());
+    }
+    const slong factor_count = factorization.raw()->num;
+    if (factor_count <= 0) {
+        return false;
+    }
+
+    std::vector<PrimeIdeal> containing;
+    for (slong i = 0; i < factor_count; ++i) {
+        const fmpz_mod_poly_struct* factor = factorization.raw()->poly + i;
+        fmpz_mod_poly_rem(remainder.raw(), reduced_value.raw(), factor,
+                          ctx.raw());
+        if (fmpz_mod_poly_is_zero(remainder.raw(), ctx.raw()) == 0) {
+            continue;
+        }
+        containing.emplace_back(*order);
+        if (!set_defining_polynomial_factor_prime(
+                    containing.back(), *order, p, factor,
+                    factorization.raw()->exp[i], ctx, diagnostics)) {
+            return false;
+        }
+    }
+    out.swap(containing);
+    return true;
+}
+
 }  // namespace detail
 
 PrimeIdealList::PrimeIdealList(const Order& parent, slong length) noexcept {
@@ -4346,50 +4491,12 @@ bool decompose_prime(PrimeIdealList& out,
         if (!residue_degree_allowed(residue_degree, max_residue_degree)) {
             return true;
         }
-
-        Element generator_element(*order.parent());
-        OrderElement generator(order);
-        Ideal candidate_ideal(order);
-        flint::FmpzMat kummer_generator(1, order.degree());
-        flint::FmpzPoly residue_polynomial;
-
-        if (!generator_element.is_defined() || !generator.is_defined() ||
-            !candidate_ideal.is_defined()) {
-            return false;
-        }
-        {
-            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
-                                "prime_ideal.decompose_prime.factor_to_generator");
-            if (!element_set_mod_poly(
-                        generator_element,
-                        factorization.raw()->poly + factor_index,
-                        ctx) ||
-                !generator.set_element(generator_element) ||
-                !generator.get_coordinates(
-                        flint::FmpzMatRef(kummer_generator))) {
-                return false;
-            }
-        }
-        {
-            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
-                                "prime_ideal.decompose_prime.two_generator_ideal");
-            if (!detail::set_known_two_generator_ideal(
-                        candidate_ideal, p, generator)) {
-                return false;
-            }
-        }
-        fmpz_mat_center_row_mod_prime(kummer_generator, 0, p);
-
-        fmpz_mod_poly_get_fmpz_poly(residue_polynomial,
-                                    factorization.raw()->poly + factor_index,
-                                    ctx);
         return candidates.append(order) &&
-               candidates.back()->set_data(
-                       p, factorization.raw()->exp[factor_index],
-                       residue_degree, candidate_ideal,
-                       flint::FmpzPolyConstRef(residue_polynomial), false) &&
-               candidates.back()->set_kummer_generator(
-                       flint::FmpzMatConstRef(kummer_generator));
+               detail::PrimeIdealAccess::set_defining_polynomial_factor_prime(
+                       *candidates.back(), order, p,
+                       factorization.raw()->poly + factor_index,
+                       factorization.raw()->exp[factor_index], ctx,
+                       diagnostics);
     };
 
     if (max_residue_degree == 1 &&
