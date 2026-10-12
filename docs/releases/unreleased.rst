@@ -216,6 +216,17 @@ Changed
   each.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The relation search residue screen now also runs on maximal orders
+  that are not the equation order, for primes that do not divide the
+  equation-order index: it tests the theta-numerator of an element modulo
+  the prime ideal's polynomial instead of falling back to a principal-ideal
+  factorization.  Published results are unchanged: 185 corpus rows in
+  ``grh`` and 185 in ``proven`` mode gave identical published output before
+  and after (``grh``: 184 finished, 1 timeout on both; ``proven``: 167
+  finished, 18 timeouts on both), and the screen agreed with the
+  principal-ideal fallback on every decision checked.  See "Class groups and
+  order units" in :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` analytic finish now obtains a small kernel basis for
   the unit exponent rows by LLL reduction of ``[c*A | I]`` with exact
   checks and a fallback to the HNF-transform rows, instead of using the

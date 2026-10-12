@@ -675,6 +675,27 @@ when ``g_i`` divides ``A`` modulo ``p``; the primes left out have valuation 0
 and were skipped before.  The primes that are built, and their order, are
 those of ``decompose_prime``.
 
+A relation generator ``alpha`` in a maximal order is first factored by a
+residue screen.  For each rational prime ``p`` dividing ``N(alpha)``, it
+tests ``alpha`` against the residue polynomial of every factor-base prime
+over ``p``.  If the residue degrees of the primes containing ``alpha`` add up
+to ``v_p(N(alpha))``, each of those primes has valuation one.  Otherwise
+their exact valuations are computed, and the row is published only when
+those valuations account for all of ``v_p(N(alpha))``, so a published row is
+the exact valuation vector of ``(alpha)``.  Any other case goes to the exact
+factorization of the principal ideal.  On the equation order the integral
+coordinates are the ``alpha``-polynomial coefficients.  On a maximal order
+that is not the equation order, the screen tests a prime over ``p`` not
+dividing ``[O : Z[alpha]]`` on the ``alpha``-polynomial numerator of the
+element, by the ``modprinit`` branch above (Cohen, GTM 138, Theorem 4.8.13).
+That numerator's denominator divides the order basis denominator, so it is
+prime to ``p``.  The index is the order's cached ``[O : Z[alpha]]``, which
+needs a monic integral defining polynomial.  An element whose norm is
+divisible by an index divisor goes to the principal-ideal factorization.  The
+exception is a prime stored in the quadratic generator ``omega``, which is
+tested on the element's ``[1, omega]`` coordinates, its ``omega``-polynomial,
+for every ``p``, since the order is ``Z[omega]``.
+
 Class groups and order units
 ----------------------------
 
