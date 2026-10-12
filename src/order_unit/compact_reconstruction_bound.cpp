@@ -580,8 +580,9 @@ bool compute_bound_interval(CompactCoordinateBoundReport& report,
     }
 
     // An inverse that is not certified at this precision leaves the
-    // operator-norm bound indeterminate; the reference expression above
-    // still decides success and the precision ladder.
+    // operator-norm bound indeterminate, and the caller then publishes the
+    // reference expression; that expression alone decides success and the
+    // precision ladder.
     if (compute_log2_inverse_norm_bound(report.log2_inverse_norm_bound, rows,
                                         sig, log_two, precision)) {
         flint::arb_add(report.log2_inverse_norm_coordinate_bound,
@@ -676,14 +677,20 @@ bool compact_unit_coordinate_bound_from_source(
             candidate.hadamard_bit_bound =
                     flint::fmpz_get_ui(flint::FmpzConstRef(bit_bound));
             candidate.bit_bound = candidate.hadamard_bit_bound;
-            // Publish the smaller stable ceiling, so the bound is never
-            // looser than the reference expression.  For r2 = 0, Cramer's
-            // rule, Cauchy-Schwarz and Hadamard's inequality give
-            // log2 ||S^-1||_oo <= log2Mbound exactly (the column of 1 has the
-            // smallest norm, sqrt(n) <= sqrt(T2(w)) for a nonzero integer w),
-            // so the minimum is the operator norm.  For r2 > 0 the reference
-            // subtracts r2 * ln 2 for log2 |det S| = log2 |D| / 2 - r2, so
-            // that argument does not cover it and the minimum is kept.
+            // Publish the operator-norm bound whenever it is certified: the
+            // Arb inverse succeeded at this precision and its total has a
+            // stable, nonnegative ceiling that fits a word.  It bounds the
+            // coordinates directly, for every signature.  Only otherwise
+            // publish the reference expression.  The operator norm is not
+            // capped by the reference expression: for r2 = 0 it never
+            // exceeds it (Cramer's rule, Cauchy-Schwarz and Hadamard's
+            // inequality, with the column of 1 of smallest norm,
+            // sqrt(n) <= sqrt(T2(w)) for a nonzero integer w), but for
+            // r2 > 0 the reference subtracts r2 * ln 2 for
+            // log2 |det S| = log2 |D| / 2 - r2 and that argument does not
+            // cover it, so there the operator norm may be the larger.  The
+            // reference expression alone still decides success, the
+            // precision ladder and failure.
             flint::Fmpz inverse_norm_bit_bound;
             if (flint::arb_is_finite(
                         candidate.log2_inverse_norm_coordinate_bound) &&
@@ -692,8 +699,8 @@ bool compact_unit_coordinate_bound_from_source(
                                precision) &&
                 flint::fmpz_sgn(
                         flint::FmpzConstRef(inverse_norm_bit_bound)) >= 0 &&
-                flint::fmpz_cmp(flint::FmpzConstRef(inverse_norm_bit_bound),
-                                flint::FmpzConstRef(bit_bound)) < 0) {
+                flint::fmpz_abs_fits_ui(
+                        flint::FmpzConstRef(inverse_norm_bit_bound))) {
                 candidate.bit_bound = flint::fmpz_get_ui(
                         flint::FmpzConstRef(inverse_norm_bit_bound));
                 candidate.inverse_norm_bound_used = true;

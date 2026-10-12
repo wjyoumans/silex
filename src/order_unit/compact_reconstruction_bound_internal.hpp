@@ -39,8 +39,10 @@ struct CompactCoordinateBoundReport {
     // was not certified at `precision`.
     flint::Arb log2_inverse_norm_bound;
     flint::Arb log2_inverse_norm_coordinate_bound;
-    // Ceiling of log2_coordinate_bound; bit_bound is the smaller of it and
-    // the ceiling of log2_inverse_norm_coordinate_bound when that is stable.
+    // Ceiling of log2_coordinate_bound.  bit_bound is the ceiling of
+    // log2_inverse_norm_coordinate_bound when the inverse was certified and
+    // that ceiling is stable (inverse_norm_bound_used), and this ceiling
+    // otherwise.
     ulong hadamard_bit_bound = 0;
     bool inverse_norm_bound_used = false;
 };
