@@ -489,7 +489,9 @@ bool kernel_rows_torsion_column(bool& has_torsion_column,
 // other roots of q are kept, and the function returns true.  The scan
 // itself walks the same columns one at a time (saturation.cpp,
 // visit_stable_proof_prime_columns) and stops building them at the column
-// that ends it; this function builds them all.
+// that ends it; this function builds them all.  It has no library caller and
+// serves only tests, as a seam that pins the column order; production code
+// must use the lazy walk, not this eager form.
 bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
                                 const OrderUnitGroup& group,
                                 flint::FmpzConstRef q,
