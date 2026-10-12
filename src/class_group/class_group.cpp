@@ -14,6 +14,7 @@
 #include <silex/flint/fmpz_mod_mat.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
+#include <silex/flint/nmod_poly.hpp>
 #include <silex/flint/qfb.hpp>
 #include <silex/ideal_factorization.hpp>
 #include <silex/lat.hpp>
@@ -545,13 +546,34 @@ bool direct_partial_polynomial_is_zero_mod_residue(
     return true;
 }
 
+// Word-size twin of `direct_partial_polynomial_is_zero_mod_residue`: the
+// same divisibility test over Z/pZ, with single-limb arithmetic for a
+// rational prime that fits in a word.
+bool direct_partial_polynomial_is_zero_mod_residue_word(
+        bool& out,
+        flint::NmodPolyConstRef input,
+        flint::NmodPolyConstRef modulus,
+        flint::NmodPolyRef remainder) noexcept {
+    out = false;
+    if (input.raw() == nullptr || modulus.raw() == nullptr ||
+        remainder.raw() == nullptr ||
+        ::nmod_poly_is_zero(modulus.raw()) != 0) {
+        return false;
+    }
+
+    ::nmod_poly_rem(remainder.raw(), input.raw(), modulus.raw());
+    out = ::nmod_poly_is_zero(remainder.raw()) != 0;
+    return true;
+}
+
 detail::DirectPartialResidueBlockCacheEntry*
 direct_partial_residue_block_cache(
         std::vector<detail::DirectPartialResidueBlockCacheEntry>& cache,
         const FactorBase& base,
         slong block_index,
         flint::FmpzConstRef rational_prime,
-        slong length) noexcept {
+        slong length,
+        bool allow_word_size) noexcept {
     // reference FactorBaseSingleP owns one finite-ring polynomial context and its
     // residue factors for every rational-prime block in the factor base.
     for (auto& entry : cache) {
@@ -566,13 +588,18 @@ direct_partial_residue_block_cache(
         return nullptr;
     }
 
-    cache.emplace_back(block_index, rational_prime);
+    cache.emplace_back(block_index, rational_prime, allow_word_size);
     auto& entry = cache.back();
     if (entry.context.raw() == nullptr) {
         cache.pop_back();
         return nullptr;
     }
-    entry.residue_polynomials.reserve(static_cast<std::size_t>(length));
+    if (entry.word_size) {
+        entry.word_residue_polynomials.reserve(
+                static_cast<std::size_t>(length));
+    } else {
+        entry.residue_polynomials.reserve(static_cast<std::size_t>(length));
+    }
     entry.prime_indices.reserve(static_cast<std::size_t>(length));
     entry.residue_degrees.reserve(static_cast<std::size_t>(length));
     for (slong offset = 0; offset < length; ++offset) {
@@ -589,19 +616,32 @@ direct_partial_residue_block_cache(
             cache.pop_back();
             return nullptr;
         }
-        entry.residue_polynomials.emplace_back(entry.context);
-        if (!entry.residue_polynomials.back().is_initialized()) {
-            cache.pop_back();
-            return nullptr;
-        }
-        ::fmpz_mod_poly_set_fmpz_poly(
-                entry.residue_polynomials.back().raw(),
-                residue_polynomial.raw(), entry.context.raw());
-        if (::fmpz_mod_poly_is_zero(
+        if (entry.word_size) {
+            entry.word_residue_polynomials.emplace_back(
+                    ::fmpz_get_ui(entry.rational_prime.raw()));
+            ::fmpz_poly_get_nmod_poly(
+                    entry.word_residue_polynomials.back().raw(),
+                    residue_polynomial.raw());
+            if (::nmod_poly_is_zero(
+                        entry.word_residue_polynomials.back().raw()) != 0) {
+                cache.pop_back();
+                return nullptr;
+            }
+        } else {
+            entry.residue_polynomials.emplace_back(entry.context);
+            if (!entry.residue_polynomials.back().is_initialized()) {
+                cache.pop_back();
+                return nullptr;
+            }
+            ::fmpz_mod_poly_set_fmpz_poly(
                     entry.residue_polynomials.back().raw(),
-                    entry.context.raw()) != 0) {
-            cache.pop_back();
-            return nullptr;
+                    residue_polynomial.raw(), entry.context.raw());
+            if (::fmpz_mod_poly_is_zero(
+                        entry.residue_polynomials.back().raw(),
+                        entry.context.raw()) != 0) {
+                cache.pop_back();
+                return nullptr;
+            }
         }
         entry.prime_indices.push_back(index);
         entry.residue_degrees.push_back(prime->residue_degree());
@@ -621,7 +661,8 @@ DirectLargePrimeStatus direct_partial_relation_row(
         const fmpz_poly_struct* known_integral_polynomial,
         std::vector<detail::DirectPartialResidueBlockCacheEntry>&
                 residue_block_cache,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        bool word_size_residues = true) noexcept {
     // reference Rel_add.jl stores partial relations by the leftover rational
     // prime and `special_prime_ideal`, then subtracts the two `_factor!`
     // rows on a match.  This is the maximal-equation-order integral-element
@@ -757,12 +798,12 @@ DirectLargePrimeStatus direct_partial_relation_row(
                     "class_group.direct_partial_relation_row.residue_block_cache");
             residue_block = direct_partial_residue_block_cache(
                     residue_block_cache, base, block_index,
-                    flint::FmpzConstRef(p), length);
+                    flint::FmpzConstRef(p), length, word_size_residues);
         }
         if (residue_block == nullptr ||
             !residue_block->input.is_initialized() ||
             !residue_block->remainder.is_initialized() ||
-            residue_block->residue_polynomials.size() !=
+            residue_block->residue_count() !=
                     static_cast<std::size_t>(length) ||
             residue_block->prime_indices.size() !=
                     static_cast<std::size_t>(length) ||
@@ -775,9 +816,14 @@ DirectLargePrimeStatus direct_partial_relation_row(
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::class_group,
                     "class_group.direct_partial_relation_row.block_input_reduce");
-            ::fmpz_mod_poly_set_fmpz_poly(residue_block->input.raw(),
-                                          input_polynomial,
-                                          residue_block->context.raw());
+            if (residue_block->word_size) {
+                ::fmpz_poly_get_nmod_poly(residue_block->word_input.raw(),
+                                          input_polynomial);
+            } else {
+                ::fmpz_mod_poly_set_fmpz_poly(residue_block->input.raw(),
+                                              input_polynomial,
+                                              residue_block->context.raw());
+            }
         }
 
         hits.clear();
@@ -787,16 +833,33 @@ DirectLargePrimeStatus direct_partial_relation_row(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.direct_partial_relation_row.residue_reduction");
         for (std::size_t offset = 0;
-             offset < residue_block->residue_polynomials.size(); ++offset) {
+             offset < residue_block->residue_count(); ++offset) {
             bool residue_zero = false;
-            if (!direct_partial_polynomial_is_zero_mod_residue(
-                        residue_zero,
-                        flint::FmpzModPolyConstRef(residue_block->input),
-                        flint::FmpzModPolyConstRef(
-                                residue_block->residue_polynomials[offset]),
-                        flint::FmpzModPolyRef(residue_block->remainder),
-                        flint::FmpzModCtxConstRef(
-                                residue_block->context))) {
+            const bool residue_ok =
+                    residue_block->word_size
+                            ? direct_partial_polynomial_is_zero_mod_residue_word(
+                                      residue_zero,
+                                      flint::NmodPolyConstRef(
+                                              residue_block->word_input),
+                                      flint::NmodPolyConstRef(
+                                              residue_block
+                                                      ->word_residue_polynomials
+                                                              [offset]),
+                                      flint::NmodPolyRef(
+                                              residue_block->word_remainder))
+                            : direct_partial_polynomial_is_zero_mod_residue(
+                                      residue_zero,
+                                      flint::FmpzModPolyConstRef(
+                                              residue_block->input),
+                                      flint::FmpzModPolyConstRef(
+                                              residue_block
+                                                      ->residue_polynomials
+                                                              [offset]),
+                                      flint::FmpzModPolyRef(
+                                              residue_block->remainder),
+                                      flint::FmpzModCtxConstRef(
+                                              residue_block->context));
+            if (!residue_ok) {
                 SILEX_PROFILE_EVENT(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.partial_relation_direct_large_prime_unsupported_residue_reduction");
@@ -859,13 +922,6 @@ DirectLargePrimeStatus direct_partial_relation_row(
             if (prime == nullptr) {
                 return unsupported(
                         "class_group.partial_relation_direct_large_prime_unsupported_exact_valuation");
-            }
-            flint::FmpzPoly prime_residue_polynomial;
-            if (!prime->residue_polynomial(
-                        flint::FmpzPolyRef(prime_residue_polynomial))) {
-                SILEX_PROFILE_EVENT(
-                        diagnostics, DiagnosticsModule::class_group,
-                        "class_group.partial_relation_direct_large_prime_path_exact_valuation_no_residue_poly");
             }
             // `remaining_vp` is the exact p-adic valuation of |N(alpha)|:
             // `norm_value` is the field norm of `integral_generator`
@@ -5023,14 +5079,16 @@ bool direct_partial_relation_row_for_testing(
         const FactorBase& base,
         flint::FmpzConstRef factor_base_bound,
         const fmpq* known_norm,
-        const fmpz_mat_struct* known_integral_coordinates) noexcept {
+        const fmpz_mat_struct* known_integral_coordinates,
+        bool word_size_residues) noexcept {
     flint::FmpzPoly residue_key;
     std::vector<DirectPartialResidueBlockCacheEntry> residue_block_cache;
     return direct_partial_relation_row(
                    out_row, out_rational_large_prime, residue_key, generator,
                    base, factor_base_bound, known_norm,
                    known_integral_coordinates, nullptr, residue_block_cache,
-                   nullptr) == DirectLargePrimeStatus::found;
+                   nullptr, word_size_residues) ==
+           DirectLargePrimeStatus::found;
 }
 
 }  // namespace detail

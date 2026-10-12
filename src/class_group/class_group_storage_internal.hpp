@@ -6,6 +6,7 @@
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
+#include <silex/flint/nmod_poly.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_field.hpp>
 
@@ -39,13 +40,36 @@ struct PartialRelationEntry {
 struct DirectPartialResidueBlockCacheEntry {
     DirectPartialResidueBlockCacheEntry(
             slong block_index,
-            flint::FmpzConstRef rational_prime) noexcept
+            flint::FmpzConstRef rational_prime,
+            bool allow_word_size = true) noexcept
         : context(rational_prime.raw()),
           input(context),
           remainder(context),
+          word_size(allow_word_size &&
+                    rational_prime_is_word_size(rational_prime)),
+          word_input(word_modulus(word_size, rational_prime)),
+          word_remainder(word_modulus(word_size, rational_prime)),
           block_index(block_index) {
         flint::fmpz_set(flint::FmpzRef(this->rational_prime),
                         rational_prime);
+    }
+
+    static bool rational_prime_is_word_size(
+            flint::FmpzConstRef rational_prime) noexcept {
+        return ::fmpz_sgn(rational_prime.raw()) > 0 &&
+               ::fmpz_abs_fits_ui(rational_prime.raw()) != 0;
+    }
+
+    static ulong word_modulus(bool word_size,
+                              flint::FmpzConstRef rational_prime) noexcept {
+        return word_size ? ::fmpz_get_ui(rational_prime.raw()) : 2;
+    }
+
+    // Residue polynomials stored for this block: the word-size (nmod)
+    // copies when `word_size` is set, otherwise the `fmpz_mod` copies.
+    std::size_t residue_count() const noexcept {
+        return word_size ? word_residue_polynomials.size()
+                         : residue_polynomials.size();
     }
 
     flint::Fmpz rational_prime;
@@ -53,6 +77,15 @@ struct DirectPartialResidueBlockCacheEntry {
     flint::FmpzModPoly input;
     flint::FmpzModPoly remainder;
     std::vector<flint::FmpzModPoly> residue_polynomials;
+    // Same residue test over Z/pZ with single-limb arithmetic when the
+    // rational prime fits in a word; the `fmpz_mod` members are unused
+    // then.  reference FacBase_Idl.jl likewise builds the word-size
+    // `FactorBaseSingleP` when `fits(Int, p)` and the big-integer one
+    // otherwise.
+    bool word_size = false;
+    flint::NmodPoly word_input;
+    flint::NmodPoly word_remainder;
+    std::vector<flint::NmodPoly> word_residue_polynomials;
     std::vector<slong> prime_indices;
     std::vector<slong> residue_degrees;
     slong block_index = -1;
@@ -64,7 +97,9 @@ struct DirectPartialResidueBlockCacheEntry {
 // and writes the factor-base row and leftover rational prime when that
 // branch finds a single large prime; returns false otherwise.  When given,
 // `known_norm` must be the exact field norm of `generator` and
-// `known_integral_coordinates` its maximal-order coordinates.  For tests only.
+// `known_integral_coordinates` its maximal-order coordinates.  With
+// `word_size_residues` false the residue test uses the multi-limb
+// `fmpz_mod` path even for word-size rational primes.  For tests only.
 bool direct_partial_relation_row_for_testing(
         flint::FmpzMat& out_row,
         flint::Fmpz& out_rational_large_prime,
@@ -72,7 +107,8 @@ bool direct_partial_relation_row_for_testing(
         const FactorBase& base,
         flint::FmpzConstRef factor_base_bound,
         const fmpq* known_norm = nullptr,
-        const fmpz_mat_struct* known_integral_coordinates = nullptr) noexcept;
+        const fmpz_mat_struct* known_integral_coordinates = nullptr,
+        bool word_size_residues = true) noexcept;
 
 struct FactorBaseGenerationRecord {
     flint::Fmpz p;

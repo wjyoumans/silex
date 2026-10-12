@@ -727,6 +727,16 @@ Changed
   The value is the same norm, so every answer, root and failure is
   unchanged; only the time spent rejecting candidate roots falls.
 
+- The large-prime partial relations of the class-group relation search test
+  which factor-base primes divide an element with word-size arithmetic
+  modulo the rational prime when it fits in a machine word, instead of
+  multi-precision modular polynomials.  The test is the same, so outputs are
+  unchanged: instance JSON is identical on the ``grh`` corpus and the 65
+  ``proven`` benchmark rows.  ``grh`` CPU time on ``Q(zeta_41)`` falls by
+  about 4% (7.73 s to 7.40 s) and on ``Q(zeta_37)`` by about 3% (2.63 s to
+  2.55 s) (release build, medians of nine paired runs on a busy machine; the
+  controlled comparison is pending).
+
 Fixed
 -----
 

@@ -1653,7 +1653,8 @@ int test_one_large_prime_match_cubic() {
 // row reuses the p-adic valuation of the element norm.  Its rows must match
 // the per-prime element valuations of the public PrimeIdeal::valuation
 // (which recomputes the norm), with the principal-ideal valuation as its
-// fallback, whether or not the norm and coordinates are supplied.
+// fallback, whether or not the norm and coordinates are supplied, and
+// whether the residue test runs word-size (nmod) or multi-limb (fmpz_mod).
 int test_direct_partial_row_exact_valuation_cubic() {
     silex::NumberField field = cubic_field(-6, -10);
     silex::Order equation_order;
@@ -1675,8 +1676,10 @@ int test_direct_partial_row_exact_valuation_cubic() {
     sflint::Fmpq norm;
     sflint::FmpzMat row(0, 0);
     sflint::FmpzMat known_row(0, 0);
+    sflint::FmpzMat multi_limb_row(0, 0);
     sflint::Fmpz large_prime;
     sflint::Fmpz known_large_prime;
+    sflint::Fmpz multi_limb_large_prime;
     sflint::Fmpz leftover;
     sflint::Fmpz block_prime;
     sflint::Fmpz large_prime_bound;
@@ -1711,6 +1714,12 @@ int test_direct_partial_row_exact_valuation_cubic() {
                                 *base, sflint::FmpzConstRef(bound),
                                 norm.raw(), coordinates.raw());
                 assert(have_row == have_known_row);
+                const bool have_multi_limb_row = silex::detail::
+                        direct_partial_relation_row_for_testing(
+                                multi_limb_row, multi_limb_large_prime,
+                                element, *base, sflint::FmpzConstRef(bound),
+                                nullptr, nullptr, false);
+                assert(have_row == have_multi_limb_row);
 
                 // The row exists exactly when the norm is a factor-base
                 // smooth part times one prime at most bound^2 (the
@@ -1752,6 +1761,12 @@ int test_direct_partial_row_exact_valuation_cubic() {
                 assert(sflint::fmpz_equal(
                         sflint::FmpzConstRef(large_prime),
                         sflint::FmpzConstRef(known_large_prime)));
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(row),
+                        sflint::FmpzMatConstRef(multi_limb_row)));
+                assert(sflint::fmpz_equal(
+                        sflint::FmpzConstRef(large_prime),
+                        sflint::FmpzConstRef(multi_limb_large_prime)));
                 assert(sflint::fmpz_equal(
                         sflint::FmpzConstRef(large_prime),
                         sflint::FmpzConstRef(leftover)));
