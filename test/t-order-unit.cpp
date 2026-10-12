@@ -9807,6 +9807,63 @@ int test_prove_index_bound_prescan_stable_first() {
     return 0;
 }
 
+// On the stable scan a kernel row whose free part is divisible by ell but
+// whose torsion exponent is not is a candidate like any other (the reference
+// `saturate!` forms prod R[j]^e[j] * zeta^e[end]); it is not skipped.  When
+// its root test says non-power the step is `wasted_non_power` (double
+// `stable`, rescan), not `unavailable`.  Q(sqrt 66) has the fundamental unit
+// eps = 65 + 8 sqrt66 (GP: K = bnfinit(x^2 - 66, 1); K.fu, up to sign).  At
+// ell = 2 the stable kernel has width 2 (eps and the torsion generator -1).
+// The split primes q = 17, 29, ... of the scan are all 1 mod 4, so -1 is a
+// square at every prime scanned first, while eps is not a square at the
+// first of them.  The scan then stops at its stability threshold with the
+// single kernel row (0, 1): the torsion generator -1, which is not a square
+// in the real field.  The group is eps^3, which is not a square and has
+// index bound 6 (so prove_index_bound runs the stable route at ell = 2 with
+// aux_bound = 2).  A scan that skips the row sees no candidate and ends the
+// proof for ell = 2 `unavailable`; the correct scan doubles `stable`, meets a
+// q = 3 mod 4 and verifies.  prove_index_bound reports success either way,
+// so the test reads the proof state and the ell = 2 record.
+int test_stable_scan_twisted_row_is_non_power_not_unavailable() {
+    silex::NumberField field = quadratic_field(66);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup group(order);
+    {
+        sflint::FmpqPoly unit_poly;
+        sflint::fmpq_poly_set_coeff_si(unit_poly, 0, 65);
+        sflint::fmpq_poly_set_coeff_si(unit_poly, 1, 8);
+        silex::Element unit(field);
+        silex::Element square(field);
+        silex::Element cube(field);
+        silex::FactoredElement generator(field);
+        assert(unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)));
+        assert(square.multiply(unit, unit));
+        assert(cube.multiply(square, unit));
+        assert(generator.set_element(cube));
+        assert(group.set_units(order,
+                               silex::FactoredElementSpan(&generator, 1),
+                               embeddings, 256));
+    }
+    assert(group.free_rank() == 1);
+
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 2));
+    silex::OrderUnitGroup proved(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = false;
+    assert(proved.prove_index_bound(status, changed, group, 1,
+                                    sflint::FmpzConstRef(aux_bound), 2,
+                                    embeddings, 256));
+    assert(status == silex::ProofState::verified);
+    assert(has_unit_proof_record(proved, 2, silex::ProofState::verified,
+                                 false));
+    return 0;
+}
+
 // A deferred row that is a true power is rooted after the rescan (decision
 // for deferred root attempts).  In Q(zeta_13), the group of
 // set_cyclotomic13_minus_unit_power_group with ell = 17 and one powered
@@ -12443,6 +12500,7 @@ int main() {
     test_dependent_relation_unbounded_root_failure_adjoins_y();
     test_prove_index_bound_non_power_range_exhausted();
     test_prove_index_bound_prescan_stable_first();
+    test_stable_scan_twisted_row_is_non_power_not_unavailable();
     test_prove_index_bound_roots_power_after_deferred_rescan();
     test_prove_index_bound_range_exhausted_tests_rows_at_once();
     test_prove_index_bound_undecided_root_not_saturated();
