@@ -60,6 +60,15 @@ bool build_ideal_lattice_rounded_embedding_lll_data(
         IdealLatticeRoundedEmbeddingCache& cache,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
 
+// The route check of build_ideal_lattice_rounded_embedding_lll_data, exposed
+// for tests: true when the T2 diagonal product of `one_lll_gram` (denominator
+// 2^one_denominator_bits) is at most 2^degree times that of `two_lll`.  False
+// on malformed inputs, which sends the order to the two-LLL route.
+bool ideal_lattice_rounded_embedding_basis_matches_two_lll(
+        flint::FmpzMatConstRef one_lll_gram,
+        slong one_denominator_bits,
+        const IdealLatticeLllData& two_lll) noexcept;
+
 bool ideal_lattice_weight_vector_shape_is_valid(flint::FmpzMatConstRef weights,
                                                 slong degree) noexcept;
 

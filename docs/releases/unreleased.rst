@@ -755,7 +755,8 @@ Changed
   check many times; outputs are unchanged.
 
 - The one-LLL reduction of the LLL relation search now checks, for the first
-  ideal it reduces in each order, that the reduced basis is about as short
+  ideal in each order whose one-LLL basis is accepted and whose two-LLL
+  reduction also succeeds, that the reduced basis is about as short
   in T2 as the basis of the earlier two-LLL route: the product of its T2
   diagonal entries may exceed the two-LLL product by at most ``2^n`` for
   degree ``n``.  When the check fails, that ideal and every later ideal of

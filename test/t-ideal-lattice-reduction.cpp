@@ -684,6 +684,38 @@ int test_rounded_embedding_route_check_for_badly_rounded_order() {
     return 0;
 }
 
+// The route check compares P1 / 2^(n d1) with 2^n P2 / 2^(n d2), evaluated as
+// P1 2^(n d2) <= P2 2^(n (d1 + 1)).  With n = 2, d1 = 3 and d2 = 1 the
+// threshold is P1 <= 64 P2.  A dropped "+ 1" would put it at 16 P2, and
+// swapped d1 and d2 at P2 / 4.
+int test_rounded_embedding_route_check_boundary() {
+    namespace rs = silex::detail::relation_search;
+    const auto diagonal = [](ulong a, ulong b) {
+        sflint::FmpzMat gram(2, 2);
+        sflint::fmpz_mat_zero(sflint::FmpzMatRef(gram));
+        sflint::fmpz_set_ui(sflint::fmpz_mat_entry(gram, 0, 0), a);
+        sflint::fmpz_set_ui(sflint::fmpz_mat_entry(gram, 1, 1), b);
+        return gram;
+    };
+    rs::IdealLatticeLllData two_lll;
+    two_lll.scaled_gram = diagonal(1, 1);
+    sflint::fmpz_set_ui(sflint::FmpzRef(two_lll.gram_denominator), UWORD(2));
+    const auto matches = [&](ulong a, ulong b) {
+        sflint::FmpzMat one = diagonal(a, b);
+        return rs::ideal_lattice_rounded_embedding_basis_matches_two_lll(
+                sflint::FmpzMatConstRef(one), 3, two_lll);
+    };
+    assert(matches(8, 8));    // ratio exactly 2^n
+    assert(matches(64, 1));
+    assert(!matches(65, 1));  // just above 2^n
+    assert(!matches(9, 8));
+
+    // Malformed input: a denominator that is not a power of two.
+    sflint::fmpz_set_ui(sflint::FmpzRef(two_lll.gram_denominator), UWORD(3));
+    assert(!matches(1, 1));
+    return 0;
+}
+
 int test_reduction_identities_and_mutation() {
     FieldSetup setup = cubic_x3_minus_2();
     const silex::Order& order = setup.maximal_order;
@@ -1302,6 +1334,7 @@ int main() {
     assert(test_ideal_lattice_result_contracts() == 0);
     assert(test_rounded_embedding_lll_contracts() == 0);
     assert(test_rounded_embedding_route_check_for_badly_rounded_order() == 0);
+    assert(test_rounded_embedding_route_check_boundary() == 0);
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);

@@ -1099,12 +1099,15 @@ static IdealLatticeReductionStatus ideal_lattice_rounded_embedding_lll_reduce(
 // full-rank scale then loses the short vectors, and the one-LLL basis,
 // though it passes the T2 diagonal bounds, is much longer than the two-LLL
 // basis, so the relation search finds few relations per ideal.  Both are
-// 0.99-LLL bases of the same lattice, so with a faithful rounding their T2
-// diagonal products agree up to rounding effects.  Returns true when the
+// 0.99-LLL bases of the same lattice, but LLL does not bound the ratio of
+// their T2 diagonal products by 2^n: the factor 2^degree is an empirical
+// Silex tolerance with no theoretical backing.  Returns true when the
 // one-LLL product (denominator 2^one_denominator_bits) is at most
 // 2^degree times the two-LLL product, i.e. at most a factor 2 per T2
-// diagonal entry on average.
-static bool ideal_lattice_rounded_embedding_basis_matches_two_lll(
+// diagonal entry on average.  Returns false on malformed inputs (a
+// non-power-of-two denominator, an overflow guard, or a failed diagonal
+// product); the caller then uses the two-LLL route, which is always valid.
+bool ideal_lattice_rounded_embedding_basis_matches_two_lll(
         flint::FmpzMatConstRef one_lll_gram,
         slong one_denominator_bits,
         const IdealLatticeLllData& two_lll) noexcept {
