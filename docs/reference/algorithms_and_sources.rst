@@ -609,19 +609,37 @@ Continued-fraction fundamental unit of a real quadratic field
 
 ``quadratic_fundamental_unit`` in ``src/unit/unit.cpp`` computes the
 fundamental unit of the maximal order of a real quadratic field by the
-classical continued-fraction period theorem, following the PARI 2.17.3
-``quadunit`` reference (``quad.c``).  It accepts the explicit quadratic
-backend and any field with a monic integral defining polynomial
+classical continued-fraction period theorem.  It accepts the explicit
+quadratic backend and any field with a monic integral defining polynomial
 ``x^2 + b*x + c`` of positive nonsquare discriminant.  The basis is
 unconditional: no GRH or heuristic hypothesis enters.
+
+Source.  The core follows PARI 2.17.3 ``src/basemath/quad.c``.  It is the
+sequential convergent recurrence of ``quadunit_uv_basecase`` (lines 280-316):
+the ``sqrtremi`` start with its parity correction, the even-period and
+odd-period exits, ``u = (a + D*b)/q`` and ``v = (c - a - b)/q``, the
+``u -= v`` adjustment for odd discriminant, and the final halving.
+``quadunit_uv`` (lines 428-475) is the same algorithm with a product tree of
+the partial-quotient matrices; PARI's ``quadunit`` (lines 476-518) calls it
+for discriminants of at least ``2000000`` and the basecase below that.  The
+nonmaximal-conductor branch of ``quadunit`` (lines 492-516), which raises the
+maximal-order unit to the index from ``quadunitindex``, is not ported: Silex
+rejects nonmaximal orders instead (see Runtime checks).
 
 Presentation map.  With ``D = b^2 - 4*c = f^2*d`` and ``d`` squarefree, a root
 ``theta`` satisfies ``(2*theta + b)^2 = D``, so
 ``sqrt(d) = (2*theta + b)/f`` is the square root of ``d`` in the field that is
 positive at the real embedding sending ``theta`` to the larger root
-(``monic_integral_quadratic_radicand_map``, ``src/unit/unit.cpp:72-83``).  The
-continued-fraction core runs on ``d``, so the unit does not depend on the
-presentation.  Its coefficients are rewritten through this map: the ``theta``
+(``monic_integral_quadratic_radicand_map``, ``src/unit/unit.cpp:72-146``,
+which factors ``D`` to split off ``f``).  For the explicit quadratic backend
+the generator is ``sqrt(d)`` itself and the map is ``b = 0``, ``f = 2``
+(``fundamental_unit_radicand_map``, ``src/unit/unit.cpp:148-163``); it relies
+on the backend radicand being squarefree, which
+``is_valid_quadratic_radicand`` (``src/number_field/number_field.cpp:66-69``)
+enforces whenever that backend is set.  The squarefree ``d`` matters: on a
+non-squarefree radicand the core would in general return a unit that is not
+fundamental for the maximal order.  The continued-fraction core runs on
+``d``, so the unit does not depend on the presentation.  Its coefficients are rewritten through this map: the ``theta``
 coefficient is ``2*B/f`` and the constant is ``A + B*b/f``, where the unit is
 ``A + B*sqrt(d)`` (``set_quadratic_coefficients``,
 ``src/unit/unit.cpp:37-70``).  The ``x^2 - d`` presentation with ``d``
@@ -630,14 +648,24 @@ of ``Z[theta]``, which is ``f/2`` when ``d = 2, 3 (mod 4)``.  For a
 nonmaximal ``Z[theta]`` the unit is generally not in ``Z[theta]``; only the
 maximal order is claimed.
 
-Runtime checks.  Silex checks exactly two things, and neither is a
-certificate that the unit is fundamental.
+Runtime checks.  Together these establish that the result is a non-torsion
+unit of the maximal order; none of them certifies that it is fundamental.
 
 * The order is maximal: ``OrderUnitGroup::compute`` returns failure unless
   ``order.is_maximal()`` (``src/order_unit/compute.cpp:3496``); the equation
   order of a nonmaximal ``Z[theta]`` is rejected.
-* The unit has norm ``+1`` or ``-1``, tested exactly in integers
+* The divisions in the coefficient reconstruction are checked to be exact
+  (``src/unit/unit.cpp:431-459``).
+* The unit has norm ``+1`` or ``-1``, tested exactly in integers as a norm
+  numerator of ``+-4`` for odd discriminant and ``+-1`` otherwise
   (``src/unit/unit.cpp:482-487``).
+* The unit is then published through ``set_units``
+  (``src/order_unit/compute.cpp:3509``), whose validating path
+  (``src/order_unit/order_unit.cpp:1174-1319``) computes the torsion exactly
+  (``rank_zero_torsion``, line 1230), checks that the generator is a unit of
+  the order (``evaluated_is_order_unit``, line 530), and checks log
+  independence, so the generator is not torsion (``compact_independent``,
+  line 1286).
 
 That the unit is fundamental rests on the period theorem and the reference
 ``quadunit``, the same basis the ``x^2 - d`` route already had.
@@ -649,8 +677,17 @@ sets ``CertificationMode::proven``
 above that Silex never upgrades certification without the corresponding proof
 record: nothing is upgraded, because the label is ``proven`` from the start by
 the unconditional theorem rather than by a record, and no candidate or ``grh``
-result is promoted.  The class group is certified separately and is not
-affected by this route.
+result is promoted.
+
+The class group depends on this route.  For degree-2, rank-1 orders the
+paired class and unit computations take this unit directly
+(``src/order_unit/compute.cpp:3699``, ``:4161``, ``:4410``).  Validation then
+treats a ``proven`` quadratic unit as the full unit group and attributes any
+remaining ``h*R`` index to missing class relations
+(``independently_proven_quadratic_unit``,
+``src/order_unit/validation.cpp:1478-1491``).  A class number certified there
+from ``h*R`` uses this unit's ``proven`` label and its regulator, so a proven
+class group of a real quadratic field also rests on the period theorem.
 
 The ideal-lattice LLL step of relation search follows Hecke 0.39.19
 ``src/NumFieldOrd/NfOrd/LLL.jl:_lll``, which rounds the scaled Minkowski Gram
