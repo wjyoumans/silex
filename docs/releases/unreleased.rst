@@ -103,6 +103,20 @@ Added
 Changed
 -------
 
+- The ``proven`` factor-base honesty check accepts a principal witness that
+  also carries a prime ideal ``Q`` outside the factor base, when ``Q`` lies
+  above a rational prime ``q`` other than the required prime's, ``Q`` is
+  unramified, and every other prime ideal above ``q`` is in the factor base.
+  The relation ``qO_K = Q_1^e_1 ... Q_g^e_g`` puts the class of ``Q`` in the
+  subgroup of the factor base, the step the proof-target selection already
+  uses (PARI 2.17.3 ``buch2.c:be_honest`` and ``bnftestprimes``).  Results
+  that passed before are unchanged; a computation that failed with
+  ``factor_base_honesty_unwitnessed`` or timed out searching for a witness
+  may now succeed.  For example, the ``proven`` computation for the imaginary
+  quadratic field of discriminant ``-100000000000319`` now finishes, with
+  class group invariants ``[2, 2, 3953768]``.  See
+  :doc:`../reference/algorithms_and_sources`.
+
 - The relation-production prepass drops its outstanding relation surplus
   after each small-norm pass, as PARI's ``Buchall_param`` does
   (``cache.end = cache.last``), so a later request asks only for the missing
