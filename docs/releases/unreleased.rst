@@ -157,6 +157,15 @@ Changed
   columns are unchanged.  Published results are unchanged on the 155
   ``proven`` corpus rows that finish within 60 seconds.
 
+- The Belabas-Friedman ``hR`` estimate counts the roots of the defining
+  polynomial modulo the large cutoff primes with its word-size kernel for
+  defining polynomials of degree up to 16, instead of up to 6.  Degrees 7 to
+  16 previously took the per-prime FLINT route.  The kernel covers primes
+  below ``2^30`` up to degree 8 and below ``2^29`` for degrees 9 to 16,
+  where its lazily reduced sums stay below ``2^64``; other primes keep the
+  per-prime route.  The counts are the same, so the Belabas-Friedman
+  values and published results are unchanged on the 184 grh corpus rows.
+
 - In ``OrderUnitGroup::prove_index_bound`` (the ``proven`` unit proof),
   when the scan of the auxiliary primes ``q <= aux_bound`` at a prime ``ell``
   leaves a nonempty kernel that it has not certified, the first scan of the
