@@ -202,6 +202,7 @@ add_library(silex
     src/class_group/ideal_t2_enumeration.cpp
     src/class_group/relation_production.cpp
     src/class_group/maximal_imaginary_quadratic_relation_backend.cpp
+    src/class_group/quadratic_form_reduction.cpp
     src/class_group/native_relation_search.cpp
     src/class_group/relation_admission_cache.cpp
     src/class_group/relation_completion_scheduler.cpp
@@ -657,6 +658,17 @@ if(SILEX_BUILD_TESTS)
         COMMAND t-silex-finite-quadratic-form-enumeration)
     list(APPEND SILEX_TEST_NAMES
         silex-finite-quadratic-form-enumeration)
+
+    add_executable(t-silex-quadratic-form-reduction
+        test/t-quadratic-form-reduction.cpp)
+    target_link_libraries(t-silex-quadratic-form-reduction
+        PRIVATE Silex::silex)
+    target_include_directories(t-silex-quadratic-form-reduction PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-quadratic-form-reduction)
+    add_test(NAME silex-quadratic-form-reduction
+        COMMAND t-silex-quadratic-form-reduction)
+    list(APPEND SILEX_TEST_NAMES silex-quadratic-form-reduction)
 
     add_executable(t-silex-ideal-lattice-reduction
         test/t-ideal-lattice-reduction.cpp)

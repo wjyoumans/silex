@@ -7,6 +7,7 @@
 #include "class_group_internal.hpp"
 #include "class_group_certification_internal.hpp"
 #include "factor_base_honesty_internal.hpp"
+#include "quadratic_form_reduction_internal.hpp"
 #include "../factor_base/factor_base_internal.hpp"
 #include "../relation/relation_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
@@ -138,134 +139,6 @@ bool quadratic_order_trace_and_norm(flint::Fmpz& omega_trace,
     flint::fmpz_neg(flint::FmpzRef(omega_norm), discriminant);
     flint::fmpz_fdiv_q_2exp(flint::FmpzRef(omega_norm),
                             flint::FmpzConstRef(omega_norm), 2);
-    return true;
-}
-
-void quadratic_form_reduce_basis_step(flint::Fmpz& b,
-                                      flint::Fmpz& c,
-                                      const flint::Fmpz& a,
-                                      const flint::Fmpz& u1,
-                                      flint::Fmpz& u2) noexcept {
-    flint::Fmpz quotient;
-    flint::Fmpz remainder;
-    flint::Fmpz twice_a;
-    flint::Fmpz half_sum;
-    flint::Fmpz change;
-    flint::fmpz_mul_2exp(flint::FmpzRef(twice_a),
-                         flint::FmpzConstRef(a), 1);
-    flint::fmpz_tdiv_qr(
-            flint::FmpzRef(quotient), flint::FmpzRef(remainder),
-            flint::FmpzConstRef(b), flint::FmpzConstRef(twice_a));
-    const int remainder_comparison = flint::fmpz_cmpabs(
-            flint::FmpzConstRef(remainder), flint::FmpzConstRef(a));
-    if (flint::fmpz_sgn(flint::FmpzConstRef(b)) >= 0) {
-        if (remainder_comparison > 0) {
-            flint::fmpz_add_ui(flint::FmpzRef(quotient),
-                               flint::FmpzConstRef(quotient), 1);
-            flint::fmpz_sub(flint::FmpzRef(remainder),
-                            flint::FmpzConstRef(remainder),
-                            flint::FmpzConstRef(twice_a));
-        }
-    } else if (remainder_comparison >= 0) {
-        flint::fmpz_sub_ui(flint::FmpzRef(quotient),
-                           flint::FmpzConstRef(quotient), 1);
-        flint::fmpz_add(flint::FmpzRef(remainder),
-                        flint::FmpzConstRef(remainder),
-                        flint::FmpzConstRef(twice_a));
-    }
-    flint::fmpz_add(flint::FmpzRef(half_sum), flint::FmpzConstRef(b),
-                    flint::FmpzConstRef(remainder));
-    flint::fmpz_fdiv_q_2exp(flint::FmpzRef(half_sum),
-                            flint::FmpzConstRef(half_sum), 1);
-    flint::fmpz_mul(flint::FmpzRef(change),
-                    flint::FmpzConstRef(quotient),
-                    flint::FmpzConstRef(half_sum));
-    flint::fmpz_sub(flint::FmpzRef(c), flint::FmpzConstRef(c),
-                    flint::FmpzConstRef(change));
-    flint::fmpz_set(flint::FmpzRef(b), flint::FmpzConstRef(remainder));
-    flint::fmpz_mul(flint::FmpzRef(change),
-                    flint::FmpzConstRef(quotient),
-                    flint::FmpzConstRef(u1));
-    flint::fmpz_sub(flint::FmpzRef(u2), flint::FmpzConstRef(u2),
-                    flint::FmpzConstRef(change));
-}
-
-bool quadratic_form_shortest_vector(flint::Fmpz& u1,
-                                    flint::Fmpz& v1,
-                                    flint::Fmpz& shortest_value,
-                                    flint::FmpzConstRef input_a,
-                                    flint::FmpzConstRef input_b,
-                                    flint::FmpzConstRef input_c) noexcept {
-    if (flint::fmpz_sgn(input_a) <= 0 || flint::fmpz_sgn(input_c) <= 0) {
-        return false;
-    }
-
-    // Source: reference implementation `Qfb.c:qfbredsl2_imag_basecase`.  The first
-    // column of its returned SL(2,Z) transform is a shortest vector for the
-    // positive definite input form.
-    flint::Fmpz a;
-    flint::Fmpz b;
-    flint::Fmpz c;
-    flint::Fmpz u2;
-    flint::fmpz_set(flint::FmpzRef(a), input_a);
-    flint::fmpz_set(flint::FmpzRef(b), input_b);
-    flint::fmpz_set(flint::FmpzRef(c), input_c);
-    flint::fmpz_one(flint::FmpzRef(u1));
-    flint::fmpz_zero(flint::FmpzRef(u2));
-
-    int comparison = flint::fmpz_cmpabs(
-            flint::FmpzConstRef(a), flint::FmpzConstRef(b));
-    if (comparison < 0) {
-        quadratic_form_reduce_basis_step(b, c, a, u1, u2);
-    } else if (comparison == 0 && flint::fmpz_sgn(flint::FmpzConstRef(b)) < 0) {
-        flint::fmpz_neg(flint::FmpzRef(b), flint::FmpzConstRef(b));
-        flint::fmpz_one(flint::FmpzRef(u2));
-    }
-
-    for (;;) {
-        comparison = flint::fmpz_cmpabs(
-                flint::FmpzConstRef(a), flint::FmpzConstRef(c));
-        if (comparison <= 0) {
-            break;
-        }
-        a.swap(c);
-        flint::fmpz_neg(flint::FmpzRef(b), flint::FmpzConstRef(b));
-        flint::Fmpz old_u1;
-        flint::fmpz_set(flint::FmpzRef(old_u1), flint::FmpzConstRef(u1));
-        flint::fmpz_set(flint::FmpzRef(u1), flint::FmpzConstRef(u2));
-        flint::fmpz_neg(flint::FmpzRef(u2), flint::FmpzConstRef(old_u1));
-        quadratic_form_reduce_basis_step(b, c, a, u1, u2);
-    }
-    if (comparison == 0 && flint::fmpz_sgn(flint::FmpzConstRef(b)) < 0) {
-        flint::fmpz_neg(flint::FmpzRef(b), flint::FmpzConstRef(b));
-        flint::Fmpz old_u1;
-        flint::fmpz_set(flint::FmpzRef(old_u1), flint::FmpzConstRef(u1));
-        flint::fmpz_set(flint::FmpzRef(u1), flint::FmpzConstRef(u2));
-        flint::fmpz_neg(flint::FmpzRef(u2), flint::FmpzConstRef(old_u1));
-    }
-
-    flint::Fmpz z;
-    flint::Fmpz numerator;
-    flint::Fmpz product;
-    flint::fmpz_sub(flint::FmpzRef(z), flint::FmpzConstRef(b), input_b);
-    if (flint::fmpz_fdiv_ui(flint::FmpzConstRef(z), 2) != 0) {
-        return false;
-    }
-    flint::fmpz_fdiv_q_2exp(flint::FmpzRef(z), flint::FmpzConstRef(z), 1);
-    flint::fmpz_mul(flint::FmpzRef(numerator), flint::FmpzConstRef(z),
-                    flint::FmpzConstRef(u1));
-    flint::fmpz_mul(flint::FmpzRef(product), flint::FmpzConstRef(a),
-                    flint::FmpzConstRef(u2));
-    flint::fmpz_sub(flint::FmpzRef(numerator),
-                    flint::FmpzConstRef(numerator),
-                    flint::FmpzConstRef(product));
-    if (!flint::fmpz_divisible(flint::FmpzConstRef(numerator), input_c)) {
-        return false;
-    }
-    flint::fmpz_divexact(flint::FmpzRef(v1),
-                         flint::FmpzConstRef(numerator), input_c);
-    flint::fmpz_set(flint::FmpzRef(shortest_value),
-                    flint::FmpzConstRef(a));
     return true;
 }
 
@@ -944,7 +817,7 @@ bool principal_generator_from_factor_base_row(
     quadratic_norm_form_value(
             form_c, x2, y2, flint::FmpzConstRef(omega_trace),
             flint::FmpzConstRef(omega_norm));
-    if (!quadratic_form_shortest_vector(
+    if (!detail::quadratic_form_shortest_vector(
                 u1, v1, shortest_value, flint::FmpzConstRef(form_a),
                 flint::FmpzConstRef(form_b),
                 flint::FmpzConstRef(form_c))) {
