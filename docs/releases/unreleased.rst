@@ -641,7 +641,9 @@ Changed
   the default parameters, as ``Lat::lll_reduce`` does; otherwise it falls
   back to ``fmpz_lll``.  ``fmpz_lll``'s own certification of that phase
   dominated the proof on a 71 x 94 kernel for ``x^2 - x - 25000000``.
-  Published results are unchanged on the ``proven`` corpus and the
+  With FLINT's default routing a certified first phase is exactly what
+  ``fmpz_lll`` returns, so the basis, and with it every published result,
+  is unchanged; this was also checked on the ``proven`` corpus and the
   class/unit test matrix.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 

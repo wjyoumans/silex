@@ -1667,7 +1667,10 @@ same route as ``Lat::lll_reduce`` above:
 ``fmpz_lll`` (whose result is also kept for the unit candidates) when the
 reducer fails, the certificate fails, or the kernel is outside that range.
 The reducer's row operations are unimodular, so the result is a basis of
-the kernel on every route.  With the integral Gram--Schmidt data of that
+the kernel on every route.  With FLINT's default routing a certified first phase
+is exactly the basis ``fmpz_lll`` returns for that kernel (``fmpz_lll`` keeps
+it when ``fmpz_lll_is_reduced`` holds), so the basis does not depend on the
+route.  With the integral Gram--Schmidt data of that
 basis, Silex subtracts
 ``round(mu)`` times each basis row, last row first, as in sub-algorithm RED
 of Cohen, *A Course in Computational Algebraic Number Theory*, GTM 138,

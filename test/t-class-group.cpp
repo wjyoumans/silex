@@ -5852,6 +5852,14 @@ void relation_saturation_test_kernel_basis(
     sflint::FmpzLll lll;
     assert(::fmpz_mat_is_reduced(basis.raw(), lll.raw()->delta,
                                  lll.raw()->eta));
+    if (expect_first_phase) {
+        // With FLINT's default routing a certified first phase is exactly
+        // what fmpz_lll returns, so the basis equals it entry for entry.
+        sflint::FmpzMat reference(rows, cols);
+        ::fmpz_mat_set(reference.raw(), kernel.raw());
+        ::fmpz_lll(reference.raw(), nullptr, lll.raw());
+        assert(::fmpz_mat_equal(reference.raw(), basis.raw()));
+    }
     sflint::FmpzMat basis_hnf(rows, cols);
     sflint::FmpzMat kernel_hnf(rows, cols);
     ::fmpz_mat_hnf(basis_hnf.raw(), basis.raw());
