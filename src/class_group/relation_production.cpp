@@ -170,6 +170,11 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                             active_diagnostics,
                             DiagnosticsModule::class_group,
                             "class_group.contract_prepass_store_live_state");
+                    // The stored state is read only for its torsion data,
+                    // so the kept analytic finish embeddings and their log
+                    // cache are released rather than stored.
+                    route_state.analytic_finish_embeddings.clear();
+                    route_state.analytic_finish_embedding_precision = 0;
                     detail::RelationFinishState next_state;
                     next_state.cache = cache;
                     next_state.subfactor_base_schedule =

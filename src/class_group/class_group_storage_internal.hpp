@@ -160,7 +160,8 @@ struct RelationSearchControlState {
     // kept for the next check at the same precision.  It is rebuilt when
     // the precision changes, so every check sees the roots a fresh context
     // would compute.  It is cleared, with its log cache, when the check
-    // returns finished.
+    // returns finished and before the route state is stored as the live
+    // finish state.
     EmbeddingContext analytic_finish_embeddings;
     slong analytic_finish_embedding_precision = 0;
 };
