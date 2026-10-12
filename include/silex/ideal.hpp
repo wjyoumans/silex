@@ -19,18 +19,6 @@ namespace detail {
 
 class IdealAccess;
 
-bool multiply_integral_ideal_by_two_generator(
-        Ideal& out,
-        const Ideal& ideal,
-        flint::FmpzConstRef scalar_generator,
-        const OrderElement& element_generator,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
-bool multiply_integral_ideal_by_element(
-        Ideal& out,
-        const Ideal& ideal,
-        const Element& multiplier,
-        const DiagnosticsContext* diagnostics = nullptr) noexcept;
-
 }  // namespace detail
 
 class Ideal {
@@ -86,17 +74,6 @@ private:
     // the noninstalled src/ideal/ideal_access_internal.hpp.  Names in silex::detail are
     // internal to Silex and its tests, not a supported entry point.
     friend class detail::IdealAccess;
-    friend bool detail::multiply_integral_ideal_by_two_generator(
-            Ideal& out,
-            const Ideal& ideal,
-            flint::FmpzConstRef scalar_generator,
-            const OrderElement& element_generator,
-            const DiagnosticsContext* diagnostics) noexcept;
-    friend bool detail::multiply_integral_ideal_by_element(
-            Ideal& out,
-            const Ideal& ideal,
-            const Element& multiplier,
-            const DiagnosticsContext* diagnostics) noexcept;
 
     Order parent_;
     flint::FmpzMat hnf_{0, 0};

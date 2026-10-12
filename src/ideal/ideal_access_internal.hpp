@@ -41,6 +41,17 @@ public:
     static bool set_integral_known_hnf(FractionalIdeal& out,
                                        const Ideal& numerator) noexcept;
 
+    // Implementations of detail::multiply_integral_ideal_by_two_generator
+    // and detail::multiply_integral_ideal_by_element, defined in ideal.cpp.
+    static bool multiply_two_generator(
+            Ideal& out, const Ideal& ideal,
+            flint::FmpzConstRef scalar_generator,
+            const OrderElement& element_generator,
+            const DiagnosticsContext* diagnostics) noexcept;
+    static bool multiply_by_element(
+            Ideal& out, const Ideal& ideal, const Element& multiplier,
+            const DiagnosticsContext* diagnostics) noexcept;
+
     // Stores `hnf` as the ideal's basis matrix without normalizing it or
     // checking that its row span is an ideal; only the n x n shape is
     // checked.  Every public construction route stores a full-rank upper
@@ -69,6 +80,28 @@ inline bool set_known_two_generator_ideal(
 inline bool set_integral_ideal_known_hnf(FractionalIdeal& out,
                                          const Ideal& numerator) noexcept {
     return IdealAccess::set_integral_known_hnf(out, numerator);
+}
+
+// Noninstalled integral-ideal products.  The first sets `out` to a O + beta O
+// times `ideal`; the second to `multiplier` times `ideal`, requiring an
+// integral result.  See the comment above the definitions in ideal.cpp.
+inline bool multiply_integral_ideal_by_two_generator(
+        Ideal& out,
+        const Ideal& ideal,
+        flint::FmpzConstRef scalar_generator,
+        const OrderElement& element_generator,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept {
+    return IdealAccess::multiply_two_generator(
+            out, ideal, scalar_generator, element_generator, diagnostics);
+}
+
+inline bool multiply_integral_ideal_by_element(
+        Ideal& out,
+        const Ideal& ideal,
+        const Element& multiplier,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept {
+    return IdealAccess::multiply_by_element(out, ideal, multiplier,
+                                            diagnostics);
 }
 
 }  // namespace silex::detail

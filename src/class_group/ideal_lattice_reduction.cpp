@@ -5,6 +5,7 @@
 #include <silex/ideal.hpp>
 #include <silex/order_element.hpp>
 
+#include "../ideal/ideal_access_internal.hpp"
 #include "ideal_lattice_reduction_internal.hpp"
 #include "ideal_lattice_lll_internal.hpp"
 

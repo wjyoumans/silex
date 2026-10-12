@@ -3,6 +3,7 @@
 #include "class_group/factor_base_proof_targets_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
+#include "ideal/ideal_access_internal.hpp"
 #include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "order/order_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"

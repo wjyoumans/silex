@@ -1507,7 +1507,7 @@ bool IdealAccess::set_known_two_generator(
 // PrimeIdeal data) rely on their own source-traced claims about the
 // generators, not on these routines.  The class-group test
 // test_detail_ideal_shortcuts_reach_labelled_dlog_as_true_ideals pins this.
-bool multiply_integral_ideal_by_two_generator(
+bool IdealAccess::multiply_two_generator(
         Ideal& out,
         const Ideal& ideal,
         flint::FmpzConstRef scalar_generator,
@@ -1549,7 +1549,7 @@ bool multiply_integral_ideal_by_two_generator(
     return true;
 }
 
-bool multiply_integral_ideal_by_element(
+bool IdealAccess::multiply_by_element(
         Ideal& out,
         const Ideal& ideal,
         const Element& multiplier,

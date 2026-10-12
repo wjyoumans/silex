@@ -3,6 +3,8 @@
 #include <silex/ideal.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include "../ideal/ideal_access_internal.hpp"
+
 #include "class_group_internal.hpp"
 #include "relation_candidate_internal.hpp"
 #include "relation_search_internal.hpp"
