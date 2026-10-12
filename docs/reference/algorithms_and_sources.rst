@@ -115,7 +115,8 @@ directly.  The certificate decides the predicate of ``fmpz_mat_is_reduced``
 (every Gram--Schmidt norm nonzero, ``|mu_ij| <= eta`` and
 ``(delta - mu_{i,i-1}^2) |b*_{i-1}|^2 <= |b*_i|^2``, with ``delta`` and ``eta``
 read as the exact rationals of the doubles).  It equals that predicate for
-FLINT's parameter range ``eta^2 < delta``; all callers use 0.99 and 0.51.
+FLINT's parameter range ``eta^2 < delta``; all callers use
+``eta = 0.51`` with ``delta = 0.99`` or ``delta = 0.5``.
 When the reducer's output has
 entries of at most 16 bits it is decided in integers with the integral
 Gram--Schmidt recurrence of Cohen, *A Course in Computational Algebraic
