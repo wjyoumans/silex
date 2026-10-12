@@ -1319,14 +1319,48 @@ bool bf_linear_factor_count_from_squarefree_nmod(
 // Word-size kernel for the number of roots of a squarefree monic
 // polynomial f modulo a prime p, deg gcd(f, x^p - x), the same quantity
 // bf_linear_factor_count_from_squarefree_nmod computes through FLINT.  It
-// serves the batched counts of bf_fill_linear_factor_count_batch.  For
-// degree at most kBfWordLinearFactorMaxDegree and p below
-// kBfWordLinearFactorPrimeLimit, every sum of at most 2 deg - 1 products of
-// residues stays below 2^64, so each coefficient is reduced once per
-// squaring, by Barrett reduction (Brent and Zimmermann, Modern Computer
-// Arithmetic, 2010, Section 2.4.1).
-constexpr slong kBfWordLinearFactorMaxDegree = WORD(6);
-constexpr ulong kBfWordLinearFactorPrimeLimit = UWORD(1) << 30;
+// serves the batched counts of bf_fill_linear_factor_count_batch for degree
+// d at most kBfWordLinearFactorMaxDegree and p below
+// bf_word_linear_factor_prime_limit(d).  Coefficients are reduced lazily,
+// once per squaring, by Barrett reduction (Brent and Zimmermann, Modern
+// Computer Arithmetic, 2010, Section 2.4.1).
+//
+// Word-size overflow.  Every stored residue is at most M = p - 1.  The
+// unreduced sums the kernel forms are:
+//   - square[s] = sum of power[i] power[j] over i + j = s, 0 <= i, j < d:
+//     at most min(s + 1, 2d - 1 - s) <= d products, each at most M^2;
+//   - for j < d, square[j] + sum over d <= k <= 2d - 2 of
+//     reduce(square[k]) reduction[k - d][j]: at most (j + 1) + (d - 1)
+//     <= 2d - 1 products, each at most M^2 (j = d - 1 attains 2d - 1);
+//   - a + top reduction[0][j] in the reduction table and the
+//     multiplication by x: at most M + M^2 <= 2 M^2 (M >= 1);
+//   - single products in bf_word_mulmod and the Euclidean steps: M^2.
+// So every intermediate value is at most (2d - 1) M^2 once d >= 2, and the
+// kernel is exact when (2d - 1) M^2 <= 2^64 - 1, which bf_word_reduce then
+// reduces correctly (its quotient estimate holds for every 64-bit value).
+// p < L gives M <= L - 2, and the limits below satisfy the condition with
+// M = L - 1: L = 2^30 for d <= 8 (2d - 1 <= 15 < 16 = 2^64 / 2^60), and
+// L = 2^29 for 9 <= d <= 16 (2d - 1 <= 31 < 64 = 2^64 / 2^58).  The bound
+// is checked at compile time for every instantiated degree
+// (bf_word_linear_factor_sums_fit).  At d = 9 the old limit 2^30 would
+// fail: 17 (2^30 - 2)^2 > 2^64.  Primes at or above the limit, and higher
+// degrees, are left to the per-prime FLINT path.
+constexpr slong kBfWordLinearFactorMaxDegree = WORD(16);
+
+constexpr ulong bf_word_linear_factor_prime_limit(slong degree) noexcept {
+    return degree <= WORD(8) ? UWORD(1) << 30 : UWORD(1) << 29;
+}
+
+// Whether (2 degree - 1) (L - 1)^2 <= 2^64 - 1 for the prime limit L of
+// `degree`, the overflow condition above, with M bounded by L - 1.
+constexpr bool bf_word_linear_factor_sums_fit(slong degree) noexcept {
+    const ulong residue = bf_word_linear_factor_prime_limit(degree) - 1;
+    return degree >= 2 && residue <= UWORD(0xffffffff) &&
+           residue * residue <=
+                   UWORD_MAX / static_cast<ulong>(2 * degree - 1);
+}
+
+static_assert(FLINT_BITS == 64);
 
 struct BfWordModulus {
     ulong n = 0;
@@ -1400,7 +1434,8 @@ template <slong Degree>
 slong bf_word_linear_factor_count(const ulong* f,
                                   const BfWordModulus& modulus) noexcept {
     static_assert(Degree >= 2 &&
-                  Degree <= kBfWordLinearFactorMaxDegree);
+                  Degree <= kBfWordLinearFactorMaxDegree &&
+                  bf_word_linear_factor_sums_fit(Degree));
     constexpr std::size_t kDegree = static_cast<std::size_t>(Degree);
     const ulong n = modulus.n;
 
@@ -1478,7 +1513,7 @@ slong bf_word_linear_factor_count(const ulong* f,
 slong bf_word_linear_factor_count_dispatch(const ulong* f,
                                            slong degree,
                                            ulong p) noexcept {
-    if (p < 2 || p >= kBfWordLinearFactorPrimeLimit) {
+    if (p < 2 || p >= bf_word_linear_factor_prime_limit(degree)) {
         return -1;
     }
     const BfWordModulus modulus = bf_word_modulus(p);
@@ -1495,6 +1530,26 @@ slong bf_word_linear_factor_count_dispatch(const ulong* f,
         return bf_word_linear_factor_count<5>(f, modulus);
     case 6:
         return bf_word_linear_factor_count<6>(f, modulus);
+    case 7:
+        return bf_word_linear_factor_count<7>(f, modulus);
+    case 8:
+        return bf_word_linear_factor_count<8>(f, modulus);
+    case 9:
+        return bf_word_linear_factor_count<9>(f, modulus);
+    case 10:
+        return bf_word_linear_factor_count<10>(f, modulus);
+    case 11:
+        return bf_word_linear_factor_count<11>(f, modulus);
+    case 12:
+        return bf_word_linear_factor_count<12>(f, modulus);
+    case 13:
+        return bf_word_linear_factor_count<13>(f, modulus);
+    case 14:
+        return bf_word_linear_factor_count<14>(f, modulus);
+    case 15:
+        return bf_word_linear_factor_count<15>(f, modulus);
+    case 16:
+        return bf_word_linear_factor_count<16>(f, modulus);
     default:
         return -1;
     }
@@ -1860,7 +1915,7 @@ void bf_fill_linear_factor_count_batch(
                               kBfWordLinearFactorMaxDegree + 1)>
             reduced{};
     for (ulong p = first <= 2 ? UWORD(2) : n_nextprime(first - 1, 1);
-         p < end && p < kBfWordLinearFactorPrimeLimit;
+         p < end && p < bf_word_linear_factor_prime_limit(degree);
          p = n_nextprime(p, 1)) {
         if (!bf_residue_degree_context_uses_defining_polynomial(context, p) ||
             bf_residue_degree_cache_covers(cache, p)) {

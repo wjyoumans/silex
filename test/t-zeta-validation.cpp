@@ -869,11 +869,24 @@ bool same_grh_default_product(
                        reference_audit.error_bound.raw()) != 0;
 }
 
+// The word kernel's prime limit for a defining polynomial of `degree`:
+// 2^30 up to degree 8 and 2^29 for degrees 9 to 16, where the lazy
+// reductions of the kernel stay below 2^64 (src/zeta/zeta.cpp,
+// bf_word_linear_factor_prime_limit); 0 above degree 16, which the word
+// kernel does not cover.
+ulong word_linear_factor_prime_limit(slong degree) noexcept {
+    if (degree > 16) {
+        return 0;
+    }
+    return degree <= 8 ? UWORD(1) << 30 : UWORD(1) << 29;
+}
+
 // The batched linear factor counts of the BF prime loop agree with the
 // per-prime nmod path on every prime of [first, end), cover every prime
-// that path covers when the degree is at most 6 and p < 2^30, and skip the
-// primes it skips (index divisors, discriminant divisors, a non-monic
-// defining polynomial).
+// that path covers below the word kernel's prime limit for the degree, cover
+// none at or above it, and skip the primes the per-prime path skips (index
+// divisors, discriminant divisors, a non-monic defining polynomial).
+// `covered` counts the batched primes.
 bool check_linear_factor_batch_range(const silex::Order& order,
                                      ulong first,
                                      ulong end,
@@ -887,19 +900,18 @@ bool check_linear_factor_batch_range(const silex::Order& order,
         primes.size() != per_prime_counts.size()) {
         return false;
     }
-    const bool word_degree = order.degree() <= 6;
+    const ulong limit = word_linear_factor_prime_limit(order.degree());
     for (std::size_t i = 0; i < primes.size(); ++i) {
         const slong batch = batch_counts[i];
         const slong per_prime = per_prime_counts[i];
         if (batch >= 0) {
-            if (batch != per_prime) {
+            if (batch != per_prime || primes[i] >= limit) {
                 return false;
             }
             ++covered;
             continue;
         }
-        if (per_prime >= 0 && word_degree &&
-            primes[i] < (UWORD(1) << 30)) {
+        if (per_prime >= 0 && primes[i] < limit) {
             return false;
         }
     }
@@ -908,15 +920,29 @@ bool check_linear_factor_batch_range(const silex::Order& order,
 
 bool check_linear_factor_batch(const FieldSetup& setup,
                                bool expect_coverage) noexcept {
-    // Small primes, and primes on both sides of the word kernel's 2^30
-    // limit, where residues are largest.
+    // Small primes, and primes on both sides of the word kernel's prime
+    // limit for the degree, where residues are largest and the lazy sums
+    // come closest to 2^64.  Above degree 8 the limit is 2^29, and the
+    // primes just below 2^30, where the degree 8 limit applies, must be
+    // left to the per-prime path.  Above degree 16 no prime is batched; the
+    // 2^29 range checks that.
+    const slong degree = setup.maximal_order.degree();
+    const ulong word_limit = word_linear_factor_prime_limit(degree);
+    const ulong limit = word_limit == 0 ? UWORD(1) << 29 : word_limit;
     slong small = 0;
     slong large = 0;
-    const ulong limit = UWORD(1) << 30;
+    slong above = 0;
     if (!check_linear_factor_batch_range(setup.maximal_order, 2, 20000,
                                          small) ||
         !check_linear_factor_batch_range(setup.maximal_order, limit - 3000,
                                          limit + 3000, large)) {
+        return false;
+    }
+    if (degree > 8 &&
+        (!check_linear_factor_batch_range(setup.maximal_order,
+                                          (UWORD(1) << 30) - 3000,
+                                          UWORD(1) << 30, above) ||
+         above != 0)) {
         return false;
     }
     return expect_coverage ? small > 2000 && large > 100
@@ -931,8 +957,19 @@ bool check_linear_factor_batches() noexcept {
     const slong quintic[] = {-1, -1, 0, 0, 0};
     // The seventh cyclotomic polynomial.
     const slong sextic[] = {1, 1, 1, 1, 1, 1};
-    // x^7 - 2: above the word kernel's degree, left to the per-prime path.
+    // x^7 - 2, x^8 + 1 and x^9 - 2: on both sides of the degree where the
+    // word kernel's prime limit drops from 2^30 to 2^29.
     const slong septic[] = {-2, 0, 0, 0, 0, 0, 0};
+    const slong octic[] = {1, 0, 0, 0, 0, 0, 0, 0};
+    const slong nonic[] = {-2, 0, 0, 0, 0, 0, 0, 0, 0};
+    // The 11th, 17th and 19th cyclotomic polynomials (degrees 10, 16 and
+    // 18): degree 16 is the word kernel's largest; degree 18 is left to the
+    // per-prime path.
+    const slong cyclotomic_11[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    const slong cyclotomic_17[] = {1, 1, 1, 1, 1, 1, 1, 1,
+                                   1, 1, 1, 1, 1, 1, 1, 1};
+    const slong cyclotomic_19[] = {1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                   1, 1, 1, 1, 1, 1, 1, 1, 1};
     // x^3 - x^2 - 2x - 8 (Dedekind): 2 divides the index of Z[x].
     const slong dedekind[] = {-8, -2, -1};
     const FieldSetup dedekind_setup = setup_from_coefficients(dedekind, 3);
@@ -979,7 +1016,17 @@ bool check_linear_factor_batches() noexcept {
            check_linear_factor_batch(setup_from_coefficients(sextic, 6),
                                      true) &&
            check_linear_factor_batch(setup_from_coefficients(septic, 7),
-                                     false) &&
+                                     true) &&
+           check_linear_factor_batch(setup_from_coefficients(octic, 8),
+                                     true) &&
+           check_linear_factor_batch(setup_from_coefficients(nonic, 9),
+                                     true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(cyclotomic_11, 10), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(cyclotomic_17, 16), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(cyclotomic_19, 18), false) &&
            check_linear_factor_batch(dedekind_setup, true) &&
            check_linear_factor_batch(non_monic_setup, false);
 }
