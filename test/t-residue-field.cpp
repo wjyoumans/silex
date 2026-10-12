@@ -1284,6 +1284,18 @@ int test_copy_keeps_validated_field() {
     assert(copy.set(rejected));
     assert(!copy.is_defined());
 
+    // A moved-from field is undefined, so copying it clears the target.
+    silex::ResidueField live;
+    assert(live.set_prime(*primes11.at(0)));
+    silex::ResidueField moved_to(std::move(live));
+    assert(moved_to.is_defined());
+    assert(!live.is_defined());
+    silex::ResidueField target;
+    assert(target.set_prime(*primes.at(0)));
+    assert(target.is_defined());
+    assert(target.set(live));
+    assert(!target.is_defined());
+
     return 0;
 }
 

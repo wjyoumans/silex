@@ -828,7 +828,7 @@ Changed
   a presentation several times during relation collection no longer invert
   that matrix each time (four inversions fewer on ``grh`` runs of
   ``Q(zeta_64)`` and ``Q(zeta_41)``).  Outputs are unchanged: instance JSON
-  is identical on the ``grh`` corpus and the 65 ``proven`` benchmark rows.
+  is identical on the ``grh`` corpus and the 70 ``proven`` benchmark rows.
   One failure point moves: the right transform from FLINT's Smith form is
   unimodular, but if its inverse were not integral, ``set_relation_matrix``
   would now succeed and the first ``invariant_generator_matrix`` or
@@ -845,9 +845,9 @@ Changed
   ``ResidueFieldQuotientLog::apply`` no longer repeat those checks per
   call.  ``set_prime`` and the ``PrimeIdeal`` constructor still validate
   their input, and results are unchanged on the ``grh`` class/unit corpus
-  and the 65 ``proven`` benchmark rows.  On ``cyclotomic_19_phi18`` in
+  and the 70 ``proven`` benchmark rows.  On ``cyclotomic_19_phi18`` in
   ``grh`` mode the computation takes about 13% less time (release build on
-  a busy machine, three runs each).
+  a busy machine, five runs each).
 
 Fixed
 -----
