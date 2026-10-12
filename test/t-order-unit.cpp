@@ -9812,11 +9812,12 @@ int test_prove_index_bound_prescan_stable_first() {
 // `saturate!` forms prod R[j]^e[j] * zeta^e[end]); it is not skipped.  When
 // its root test says non-power the step is `wasted_non_power` (double
 // `stable`, rescan), not `unavailable`.  Q(sqrt 66) has the fundamental unit
-// eps = 65 + 8 sqrt66 (GP: K = bnfinit(x^2 - 66, 1); K.fu, up to sign).  At
+// eps = 65 + 8 sqrt66 (GP: K = bnfinit(x^2 - 66, 1); K.fu = 8 sqrt66 - 65,
+// so eps = -(K.fu)^(-1): the same unit up to sign and inverse).  At
 // ell = 2 the stable kernel has width 2 (eps and the torsion generator -1).
-// The split primes q = 17, 29, ... of the scan are all 1 mod 4, so -1 is a
-// square at every prime scanned first, while eps is not a square at the
-// first of them.  The scan then stops at its stability threshold with the
+// The split primes q = 5, 13, 17, ... of the scan are all 1 mod 4 until 19,
+// so -1 is a square at each of them, while eps is not a square at the
+// first of them (q = 5).  The scan then stops at its stability threshold with the
 // single kernel row (0, 1): the torsion generator -1, which is not a square
 // in the real field.  The group is eps^3, which is not a square and has
 // index bound 6 (so prove_index_bound runs the stable route at ell = 2 with
