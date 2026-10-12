@@ -214,7 +214,7 @@ bool transform_factored_units(std::vector<FactoredElement>& units,
 // maximal order and the units a full-rank system of its units.  With
 // rebuild_fitting, merged products that fit in slong are rebuilt the same
 // way (has_wide false), falling back to the merged products if the rebuild
-// fails; reduce_stored_relation_units sets it past its factor-count cutoff.
+// fails; reduce_stored_units_vector sets it past its factor-count cutoff.
 bool transform_factored_units_wide(std::vector<FactoredElement>& units,
                                    WideFactoredUnits& wide, bool& has_wide,
                                    const flint::FmpzMat& transform,

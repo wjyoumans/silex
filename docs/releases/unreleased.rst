@@ -588,8 +588,8 @@ Changed
   ``proven`` requests are unchanged.
 
 - Unit-basis reduction of the stored units no longer lets their factored
-  form grow without bound.  When a transform would give a factored unit more
-  than 20000 factors, or the stored units already exceed that size (as after
+  form grow without bound.  When a transform would give the stored units more
+  than 20000 factors in total, or they already exceed that total (as after
   an adjoin), on an order known to be maximal the units are rebuilt as single
   field elements by the existing wide path (``rebuild_wide_unit_generators``,
   the port of PARI 2.17.3 ``buch2.c`` ``vec_chinese_units``, 1214-1240).  The

@@ -1765,8 +1765,9 @@ bool transform_factored_units_wide(std::vector<FactoredElement>& units,
 // FactoredElement does not merge repeated bases, so each unit-basis transform
 // can multiply the factor count by up to the rank, and every later log
 // embedding and transform is linear in that count.  The rebuilt units are
-// equal to the factored ones, so the cutoff changes no unit, regulator or
-// group; it changes only how the stored generators are written.
+// equal to the factored ones, so the cutoff changes no unit, group or
+// regulator value; it changes how the stored generators are written, and so
+// the regulator enclosure computed from them, whose radius may change.
 constexpr std::size_t kStoredUnitRebuildFactorCount = 20000;
 
 std::size_t factored_units_length(
@@ -1804,7 +1805,7 @@ std::size_t transformed_factored_units_length(
 // rebuild_wide_unit_generators when their factor count exceeds
 // kStoredUnitRebuildFactorCount.  `rebuilt` is false, and `units` unchanged,
 // below the cutoff or when the rebuild fails; the factored units stay valid.
-bool rebuild_large_stored_units(bool& rebuilt,
+void rebuild_large_stored_units(bool& rebuilt,
                                 std::vector<FactoredElement>& units,
                                 const Order& order,
                                 EmbeddingContext& embeddings,
@@ -1814,7 +1815,7 @@ bool rebuild_large_stored_units(bool& rebuilt,
     if (factored_units_length(std::span<const FactoredElement>(
                 units.data(), units.size())) <=
         kStoredUnitRebuildFactorCount) {
-        return true;
+        return;
     }
     SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.reduce_stored_units.rebuild_size");
@@ -1832,11 +1833,10 @@ bool rebuild_large_stored_units(bool& rebuilt,
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::unit_group,
                 "unit_group.reduce_stored_units.rebuild_size_failed");
-        return true;
+        return;
     }
     units.swap(next);
     rebuilt = true;
-    return true;
 }
 
 bool reduce_stored_units_vector(bool& changed,
@@ -1886,10 +1886,8 @@ bool reduce_stored_units_vector(bool& changed,
             // last reduction may have pushed the factor count past the
             // cutoff.
             bool rebuilt = false;
-            if (!rebuild_large_stored_units(rebuilt, units, order, embeddings,
-                                            diagnostics)) {
-                return false;
-            }
+            rebuild_large_stored_units(rebuilt, units, order, embeddings,
+                                       diagnostics);
             if (rebuilt) {
                 changed = true;
                 has_wide = false;
