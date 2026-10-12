@@ -41,10 +41,11 @@ public:
     // failure base is unchanged; the cache keeps every decomposition it
     // holds and may have gained some.  The order check runs before the
     // prime loop: a cache that already names another order fails even when
-    // no cached decomposition would be read.  The first build over an empty
-    // cache stores the parent order in it before anything can fail, so a
-    // failed first build still binds the cache to that order.  Use one cache
-    // per order (the class-unit transaction does).  `diagnostics` only feeds profile
+    // no cached decomposition would be read.  Once the base, bound and
+    // parent-order checks pass, the first build over an empty cache stores
+    // the parent order before any prime is decomposed, so a later failure
+    // still leaves the cache bound to that order.  Use one cache per order
+    // (the class-unit transaction does).  `diagnostics` only feeds profile
     // scopes; it does not change the build.
     static bool build_prime_ideal_norm_bounded_cached(
             FactorBase& base,

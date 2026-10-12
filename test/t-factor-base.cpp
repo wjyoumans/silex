@@ -578,6 +578,20 @@ int test_norm_bounded_build_with_decomposition_cache() {
         assert(first.order.is_defined());
     }
 
+    // A failed first build still binds the cache: decompositions without
+    // matching skipped entries fail the size check after the order is stored.
+    {
+        silex::detail::PrimeDecompositionCache inconsistent;
+        inconsistent.decompositions.emplace_back();
+        silex::FactorBase target(cubic_maximal);
+        assert(!inconsistent.order.is_defined());
+        assert(!silex::detail::FactorBaseBlockAccess::
+                        build_prime_ideal_norm_bounded_cached(
+                                target, sflint::FmpzConstRef(bound),
+                                inconsistent));
+        assert(inconsistent.order.is_defined());
+    }
+
     // The reused LLL probe base: norm-ordering the norm-bounded base is
     // exactly build_lll_relation_base_impl(bound, true).
     {
