@@ -183,6 +183,13 @@ Changed
   unchanged.  At high working precision (up to 40960 bits) that gcd was most
   of the finish time on large real quadratic fields.
 
+- Unit extraction's memo of factored logarithmic embeddings finds each stored
+  factor through a hash of its coefficients and a hash table, instead of
+  copying the factor to a rational polynomial and comparing against every
+  stored factor.  Every hash match is still confirmed by element equality, so
+  the memo returns the same values and published results are unchanged on
+  the 184 ``grh`` corpus rows that finish within 120 seconds.
+
 - The Belabas-Friedman ``hR`` estimate counts the roots of the defining
   polynomial modulo the large cutoff primes with its word-size kernel for
   defining polynomials of degree up to 16, instead of up to 6.  Degrees 7 to
