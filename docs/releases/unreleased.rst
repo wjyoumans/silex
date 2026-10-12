@@ -128,6 +128,16 @@ Changed
   outputs are unchanged.  See "Local algebra and relations" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The ``proven`` analytic finish no longer computes the HNF transform of
+  the relation matrix at every check.  It checks the relation rank with
+  ``fmpz_mat_rank`` and computes the transform only when the LLL kernel
+  basis fails its exact checks.  The kernel basis and every published
+  output are unchanged on the tested ``proven`` corpus rows.  On a busy
+  machine, the 17 analytic finish checks of ``Q(sqrt(10000000005))``
+  (``proven``) took 1.6 to 3.1 s instead of 71 to 143 s over three runs
+  each.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` analytic finish now obtains a small kernel basis for
   the unit exponent rows by LLL reduction of ``[c*A | I]`` with exact
   checks and a fallback to the HNF-transform rows, instead of using the
