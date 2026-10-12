@@ -617,6 +617,64 @@ int test_append_rejects_wrong_factor_base() {
     return 0;
 }
 
+// Under the keep_nonduplicate policy (the LLL relation route's) an exact
+// repeat of a stored row is skipped and counted, while a row that differs
+// only in sign is not a duplicate and is kept.
+int test_keep_nonduplicate_skips_exact_repeat_only() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    silex::NumberField field = degree_one_field();
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 3));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(context.generator_count() == 2);
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Relation relation(*base);
+    silex::Element alpha(field);
+    bool skipped = true;
+
+    // (1, 0) from -2: kept.
+    assert(alpha.set_si(-2));
+    assert(relation.set_generator(alpha));
+    assert(Access::append_keep_nonduplicate_relation(skipped, context,
+                                                     relation));
+    assert(!skipped);
+    assert(context.relation_count() == 1);
+    assert(context.skipped_dependent_relation_count() == 0);
+
+    // The same relation again: skipped once.
+    assert(Access::append_keep_nonduplicate_relation(skipped, context,
+                                                     relation));
+    assert(skipped);
+    assert(context.relation_count() == 1);
+    assert(context.skipped_dependent_relation_count() == 1);
+
+    // (-1, 0) from -1/2 differs only in sign: kept, though dependent.
+    assert(alpha.set_si_over_si(-1, 2));
+    assert(relation.set_generator(alpha));
+    sflint::FmpzMat row(1, 2);
+    assert(relation.exponents(sflint::FmpzMatRef(row)));
+    assert(mat_entry_is_si(row, 0, 0, -1));
+    assert(mat_entry_is_si(row, 0, 1, 0));
+    skipped = true;
+    assert(Access::append_keep_nonduplicate_relation(skipped, context,
+                                                     relation));
+    assert(!skipped);
+    assert(context.relation_count() == 2);
+    assert(context.skipped_dependent_relation_count() == 1);
+
+    // Repeating the sign-flipped row is skipped in turn.
+    assert(Access::append_keep_nonduplicate_relation(skipped, context,
+                                                     relation));
+    assert(skipped);
+    assert(context.relation_count() == 2);
+    assert(context.skipped_dependent_relation_count() == 2);
+    return 0;
+}
+
 int test_set_relation_matrix_preserves_on_failure() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -6695,6 +6753,7 @@ int main() {
     test_goal_publication_waits_for_kernel_target();
     test_relation_sources_reset_with_factor_base();
     test_append_tracks_rank_and_skips_nonrefining_dependent_rows();
+    test_keep_nonduplicate_skips_exact_repeat_only();
     test_append_keeps_index_refining_dependent_rows();
     test_factor_base_prime_search_masks();
     test_compute_candidate_coordinate_search();

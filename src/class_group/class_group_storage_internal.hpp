@@ -539,6 +539,27 @@ public:
         return true;
     }
 
+    // Append `relation` as a supplied relation under the keep_nonduplicate
+    // policy: an exact repeat of a stored row is skipped (counted as a
+    // skipped dependent relation, `skipped` set), any other row is kept even
+    // when it is dependent.  White-box hook for the duplicate-row tests.
+    static bool append_keep_nonduplicate_relation(
+            bool& skipped,
+            ClassGroupContext& context,
+            const Relation& relation) noexcept {
+        ClassGroupContext::RelationAppendOutcome outcome =
+                ClassGroupContext::RelationAppendOutcome::none;
+        if (!context.append_relation_with_outcome_(
+                    outcome, relation, ClassGroupRelationSource::Supplied,
+                    ClassGroupContext::DependentRelationPolicy::
+                            keep_nonduplicate)) {
+            return false;
+        }
+        skipped = outcome ==
+                ClassGroupContext::RelationAppendOutcome::skipped_dependent;
+        return true;
+    }
+
     static bool defer_native_goal_publication(
             const ClassGroupContext& context) noexcept;
 

@@ -5476,6 +5476,107 @@ int test_residue_quotient_log_column_route_follows_the_bit_cutoff() {
     return 0;
 }
 
+// The baby-step giant-step route also needs ell prime and zeta^ell = 1, so
+// a 7-bit ell that fails either test still takes the shared walk.  The
+// quotient log is set for the prime 67 (zeta of order 67) on a prime q with
+// 67 * 71 * 2 | q - 1, and the column is then asked for: ell = 67 (control:
+// baby-step giant-step), ell = 134 (7 bits, not prime, zeta^134 = 1, so only
+// primality rules out baby-step giant-step) and ell = 71 (7 bits, prime,
+// zeta^71 != 1, so only the order test does).  The ell passed differs from
+// the quotient log's own for the last two, so the walk need not find a match;
+// the entry then comes from ResidueFieldQuotientLog::apply, which always
+// uses its own ell, and must equal the control's.  The zeta == 1 guard has no
+// input that reaches it, because set_ell only accepts a quotient generator
+// that is not 1.
+int test_residue_quotient_log_column_walk_fallbacks_at_seven_bits() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_plus_two(cubic);
+    assert(theta.gen());
+    assert(theta_plus_two.add_si(theta, 2));
+    const silex::Element* values[] = {&theta, &theta_plus_two};
+
+    silex::PrimeIdealList primes;
+    for (ulong k = 1; k < 100000; ++k) {
+        const ulong q = k * 2 * 67 * 71 + 1;
+        if (n_is_prime(q) == 0) {
+            continue;
+        }
+        sflint::Fmpz q_fmpz;
+        assert(set_fmpz_si(q_fmpz, static_cast<slong>(q)));
+        primes = silex::PrimeIdealList();
+        if (silex::decompose_prime(primes, order, sflint::FmpzConstRef(q_fmpz),
+                                   1) &&
+            primes.size() == 3) {
+            break;
+        }
+        primes = silex::PrimeIdealList();
+    }
+    assert(primes.size() == 3);
+    if (primes.size() != 3) {
+        return 1;
+    }
+    const silex::PrimeIdeal* prime = primes.at(0);
+    assert(prime != nullptr);
+    if (prime == nullptr) {
+        return 1;
+    }
+    silex::ResidueField residue_field(*prime);
+    silex::ResidueFieldQuotientLog quotient_log(residue_field);
+    sflint::Fmpz own_ell;
+    assert(set_fmpz_si(own_ell, 67));
+    assert(residue_field.is_defined() && residue_field.degree() == 1);
+    assert(quotient_log.set_ell(sflint::FmpzConstRef(own_ell)));
+    std::vector<silex::ResidueFieldElement> images;
+    for (const silex::Element* value : values) {
+        images.emplace_back(residue_field);
+        assert(images.back().set_element(*value));
+    }
+
+    sflint::FmpzMat expected(2, 1);
+    for (slong j = 0; j < 2; ++j) {
+        assert(quotient_log.apply(
+                sflint::fmpz_mat_entry(sflint::FmpzMatRef(expected), j, 0),
+                images[static_cast<std::size_t>(j)]));
+    }
+
+    struct Case {
+        slong ell;
+        bool baby_giant;
+    };
+    const Case cases[] = {{67, true}, {134, false}, {71, false}};
+    for (const Case& entry : cases) {
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, entry.ell));
+        sflint::FmpzMat column(2, 1);
+        const unsigned long walk_before =
+                silex::detail::TestHookAccess::word_quotient_log_walk_calls();
+        const unsigned long bsgs_before = silex::detail::TestHookAccess::
+                word_quotient_log_baby_giant_calls();
+        const bool ok = silex::detail::residue_quotient_log_column(
+                column, images, residue_field, quotient_log,
+                sflint::FmpzConstRef(ell), nullptr);
+        const unsigned long walk_after =
+                silex::detail::TestHookAccess::word_quotient_log_walk_calls();
+        const unsigned long bsgs_after = silex::detail::TestHookAccess::
+                word_quotient_log_baby_giant_calls();
+        assert(ok);
+        assert(walk_after - walk_before == (entry.baby_giant ? 0u : 1u));
+        assert(bsgs_after - bsgs_before == (entry.baby_giant ? 1u : 0u));
+        if (!ok || walk_after - walk_before != (entry.baby_giant ? 0u : 1u) ||
+            bsgs_after - bsgs_before != (entry.baby_giant ? 1u : 0u)) {
+            return 1;
+        }
+        if (entry.baby_giant) {
+            assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(column),
+                                          sflint::FmpzMatConstRef(expected)));
+        }
+    }
+    return 0;
+}
+
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
     silex::OrderUnitGroup group = real_quadratic_unit_group();
     const silex::Order* order = group.parent();
@@ -12173,6 +12274,7 @@ int main() {
     test_residue_dlog_proof_matrix_baby_giant_matches_per_entry_quotient_log();
     test_residue_quotient_log_column_mixes_resolved_and_apply_entries();
     test_residue_quotient_log_column_route_follows_the_bit_cutoff();
+    test_residue_quotient_log_column_walk_fallbacks_at_seven_bits();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();
     test_unit_proof_records();
