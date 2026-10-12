@@ -654,7 +654,9 @@ int test_precision_doubling_cap_forced_failures() {
 // candidates theta^2 and theta (theta - 1)^3 must be rejected, and no
 // candidate may fall back.  From 16 bits the dependent candidates need the
 // doubling, which the incremental test runs itself, so it holds more than
-// one precision state.
+// one precision state.  At one bit the Gram inverse of the kept rows cannot
+// be proved, and the test must reach the doubling-only path (rows memoised,
+// no Gram state) and still decide.
 int test_incremental_unit_context_matches_compact_independent() {
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
@@ -690,7 +692,7 @@ int test_incremental_unit_context_matches_compact_independent() {
     add_candidate(theta, 1, &theta_minus_one, 3, true);
     add_candidate(theta_plus_two, 1, nullptr, 0, false);
 
-    for (const slong precision : {WORD(16), WORD(128)}) {
+    for (const slong precision : {WORD(1), WORD(16), WORD(128)}) {
         silex::detail::IncrementalUnitContext context;
         assert(context.define(field, 3));
         silex::EmbeddingContext embeddings(field);
@@ -724,6 +726,19 @@ int test_incremental_unit_context_matches_compact_independent() {
         assert(context.fallback_decisions == 0);
         if (precision == 16) {
             assert(context.log_states.size() > 1);
+        }
+        if (precision == 1) {
+            // At one bit the Gram matrix of the kept rows cannot be
+            // inverted (arb_mat_inv fails or det(G) is not positive), so
+            // incremental_prepare fails after computing the rows and the
+            // test only doubles the precision: the state at the starting
+            // precision holds rows but no Gram inverse.
+            assert(context.log_states.size() > 1);
+            const silex::detail::IncrementalUnitContext::LogState& first =
+                    context.log_states.front();
+            assert(first.precision == precision);
+            assert(!first.rows.empty());
+            assert(first.gram_units == -1);
         }
 
         // A full-rank context takes no more candidates.

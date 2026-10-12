@@ -817,22 +817,6 @@ below ``1/B^2``, while every other fraction ``p/q`` with ``q <= b`` lies at
 distance at least ``1/(qb) >= 1/B^2`` from ``a/b``, so the simplest rational
 in the ball is ``a/b``.
 
-Extracting independent units for a ``grh`` class/unit computation decides, for
-each candidate unit, whether its logarithmic row is independent of the rows
-already kept.  Hecke ``src/NumFieldOrd/NfOrd/Unit/Independent.jl:_isindependent``
-tests the Gram determinant of the kept rows plus the candidate against a lower
-bound.  Silex keeps the Gram matrix ``G`` of the kept rows and its inverse and
-evaluates that determinant incrementally.  With ``L`` the kept rows, ``v`` the
-candidate row, ``g = L v`` and ``c = v . v``, the Schur complement identity
-(Horn and Johnson, *Matrix Analysis*, 0.8.5) gives
-``det [[G, g], [g^T, c]] = det(G) (c - g^T G^{-1} g)``.  Every factor is a ball
-enclosure, so the result contains the true determinant, and the decision rule
-(dependent below the lower bound or exactly zero, independent when positive) is
-the one applied to the full determinant.  If the matrix inverse cannot be
-proved, or the ball is undecided, the precision is doubled up to the same cap
-as before, and the full Gram determinant is used when the test stays
-undecided, so decisions and failure behavior are unchanged.
-
 Hecke's ``B`` is the a priori bound ``R_G / R_low``, with ``R_G`` the
 regulator of ``G`` and ``R_low`` the unconditional lower regulator bound,
 and it may have any size.  Silex's search takes a word-size ``B``, so when
@@ -851,6 +835,30 @@ is recomputed for the current group after each adjoined unit.  It is a
 Silex choice, not Hecke's; candidate relations are still verified exactly,
 so a bound that is too small only misses relations.  ``proven`` requests and
 the other callers keep the a priori bound.
+
+Extracting independent units for a ``grh`` class/unit computation decides, for
+each candidate unit, whether its logarithmic row is independent of the rows
+already kept.  Hecke ``src/NumFieldOrd/NfOrd/Unit/Independent.jl:_isindependent``
+tests the Gram determinant of the kept rows plus the candidate against a lower
+bound.  Silex keeps the rows, the inverse of their Gram matrix ``G`` and ``det G``
+(rebuilding ``G`` from the rows when the kept count changes) and evaluates
+that determinant incrementally.  With ``L`` the kept rows, ``v`` the
+candidate row, ``g = L v`` and ``c = v . v``, the Schur complement identity
+(Horn and Johnson, *Matrix Analysis*, 0.8.5) gives
+``det [[G, g], [g^T, c]] = det(G) (c - g^T G^{-1} g)``.  Every factor is a ball
+enclosure, so the result contains the true determinant, and the decision rule
+(dependent below the lower bound or exactly zero, independent when positive) is
+the one applied to the full determinant.  If the matrix inverse cannot be
+proved, or the ball is undecided, the precision is doubled up to the same cap
+as before, and the full Gram determinant is used when the test stays
+undecided.  Whenever the full test decides, the incremental test gives the
+same decision.  Two cases differ, both sound.  A candidate that the full test
+dropped at the precision cap may now be decided, since the incremental ball
+can decide at the same level, and no cap event is then emitted.  And when the
+logarithmic embedding failed at some precision ``p``, the full test dropped the
+candidate without doubling, whereas the incremental loop retries at ``2p``,
+where the embedding's own cap is larger, and may decide.  Both cases need
+about ``2^20`` bits of precision.
 
 The unit-basis transform that follows a reduction applies the integer matrix
 to the stored factored units.  Hecke keeps factored elements as ``FacElem``

@@ -965,9 +965,10 @@ Changed
 - Unit extraction for ``grh`` class/unit computations tests each candidate
   unit for independence incrementally, from the Gram matrix and inverse of the
   units already kept (Schur complement identity), instead of rebuilding the
-  whole logarithmic Gram determinant per candidate.  The decisions are the same
-  enclosure-based decisions as before, so results and failure behavior are
-  unchanged.  See "Class groups and order units" in
+  whole logarithmic Gram determinant per candidate.  Wherever the previous test
+  decided, the decision is the same.  A candidate it dropped at the precision
+  cap, or after a failed logarithmic embedding, may now be decided at higher
+  precision (both need about ``2^20`` bits).  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 Fixed

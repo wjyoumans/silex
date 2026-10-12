@@ -733,7 +733,10 @@ bool add_dependent_unit(bool& changed,
 // incremental enclosure of the Gram determinant, with compact_independent's
 // precision doubling and cap, and hands the candidate to
 // compact_independent, unchanged, whenever the incremental test does not
-// decide; see the soundness note in compute.cpp.
+// decide; see the soundness note in compute.cpp.  Wherever
+// compact_independent decides, the decision is the same.  A candidate it
+// dropped at the cap, or after a failed logarithmic embedding, may now be
+// decided at higher precision (both need about 2^20 bits).
 struct IncrementalUnitContext {
     const NumberField* field = nullptr;
     slong target_rank = 0;
@@ -763,8 +766,9 @@ struct IncrementalUnitContext {
     bool define(const NumberField& parent, slong rank) noexcept;
     // Appends `candidate` to `units` when it is independent of them and
     // sets `changed`.  An undecided or failed independence test leaves
-    // `units` unchanged and returns true, as before.  Fails only on an
-    // undefined context or a candidate from another field.
+    // `units` unchanged and returns true, as before.  Returns false on an
+    // undefined context, a full-rank context, a non-positive precision, a
+    // candidate from another field, or when copying the candidate fails.
     bool add_independent_unit(bool& changed,
                               const FactoredElement& candidate,
                               EmbeddingContext& embeddings,
