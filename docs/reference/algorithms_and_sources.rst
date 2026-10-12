@@ -1773,9 +1773,15 @@ where ``zeta`` is the stored element of order ``ell``.  At residue degree
 ``0 <= j < f``, so ``N(x) = x^((q - 1)/(p - 1))`` and
 ``N(x)^((p - 1)/ell) = x^((q - 1)/ell)``; the ``ell``-th roots of unity lie
 in ``F_p``, so ``zeta`` is a constant and the degree-one walk applies.  For
-``x = a(theta)`` with monic irreducible modulus ``m``, ``N(x) = Res(m, a)``
-(Cohen, GTM 138, Proposition 4.3.4, whose proof holds over any field), taken
-with FLINT ``fmpz_mod_poly_resultant``.  This is a cost choice only: it
+``x = a(theta)`` with monic irreducible modulus ``m``, ``N(x) = Res(m, a)``,
+taken with FLINT ``fmpz_mod_poly_resultant``.  The route follows PARI 2.17.4
+``src/basemath/FpX.c``: ``FpXQ_issquare`` (lines 2490-2497) reduces the
+``ell = 2`` test to a Kronecker symbol of ``FpXQ_norm(x, T, p)``, with the
+comment ``Ng = g^((q-1)/(p-1))``, and ``FpXQ_norm`` (lines 2770-2778) is
+``FpX_resultant(T, x, p)`` divided by ``lc(T)^deg x``.  Cohen, GTM 138,
+Proposition 4.3.4 gives the resultant formula for the norm (stated over
+``Z``; its proof uses only the conjugates of ``a(theta)`` and so carries
+over to ``F_p``).  This is a cost choice only: it
 replaces a power in ``F_q`` by a resultant and a power in ``F_p``, and
 returns the same logarithm.  Other ``ell`` keep the power in ``F_q``.
 

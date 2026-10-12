@@ -1037,8 +1037,9 @@ bool ResidueFieldQuotientLog::apply(
     // unity of F_q all lie in F_p^* (cyclic of order divisible by ell), so
     // zeta's reduced representative is a constant.  For the monic
     // irreducible modulus m with roots theta^(p^i) and x = a(theta),
-    // N(x) = prod_i a(theta^(p^i)) = Res(m, a) (Cohen, GTM 138,
-    // Proposition 4.3.4, with d = 1; the proof holds over any field).
+    // N(x) = prod_i a(theta^(p^i)) = Res(m, a).  Sources are listed in
+    // docs/reference/algorithms_and_sources.rst: the finite-field norm route
+    // of the upstream system is primary, Cohen GTM 138 Prop. 4.3.4 secondary.
     // This replaces the powmod in F_q by one resultant over F_p and a
     // powmod in F_p, and then reuses the degree-one walk.
     if (parent_.degree() > 1 &&
