@@ -356,8 +356,9 @@ bool hnf_finish_workspace_witness_coefficients(
 // rows whose relation part is zero; it is accepted only when exactly
 // n - rank such rows exist and every one satisfies v * relations == 0
 // (checked by an exact product).  Otherwise the rows rank..n-1 of the HNF
-// transform are used, as before the LLL route existed.  See "Class groups
-// and order units" in docs/reference/algorithms_and_sources.rst.
+// transform are used, as before the LLL route existed; the transform is
+// computed only then.  See "Class groups and order units" in
+// docs/reference/algorithms_and_sources.rst.
 enum class RelationKernelBasisRoute : unsigned char {
     lll_extended,
     hnf_transform,
@@ -380,25 +381,32 @@ bool checked_relation_kernel_rows(flint::FmpzMat& out,
                                   flint::FmpzMatConstRef relations,
                                   flint::FmpzMatConstRef reduced_extension,
                                   slong rank) noexcept;
+// The fallback: rows rank..n-1 of the FLINT HNF transform of `relations`
+// (the rows that map to the zero rows of the HNF).  It computes the
+// transform, and fails when the HNF does not have exactly `rank` nonzero
+// rows.  For rank == n it returns the 0 x n basis without a transform.
+bool hnf_transform_kernel_rows(flint::FmpzMat& out,
+                               flint::FmpzMatConstRef relations,
+                               slong rank) noexcept;
 // The shared selection: the checked rows of `reduced_extension` when it is
-// non-null and passes, the HNF transform rows otherwise.  Fails only on
+// non-null and passes, hnf_transform_kernel_rows otherwise.  Fails only on
 // inconsistent shapes or rank.  Precondition: `rank` is the exact rank of
 // `relations`.
 bool relation_kernel_basis_from_extension(
         flint::FmpzMat& out,
         RelationKernelBasisRoute* route,
         flint::FmpzMatConstRef relations,
-        flint::FmpzMatConstRef hnf_transform,
         slong rank,
         const flint::FmpzMat* reduced_extension) noexcept;
 bool relation_kernel_basis(flint::FmpzMat& out,
                            RelationKernelBasisRoute* route,
                            flint::FmpzMatConstRef relations,
-                           flint::FmpzMatConstRef hnf_transform,
                            slong rank) noexcept;
 // The unit-row coefficients of the HNF analytic finish: relation_kernel_basis
-// of the context's stored relations.  hnf_unit_log_matrix takes its rows from
-// this function, so the unit logs and the unit witnesses use the same rows.
+// of the context's stored relations, after checking that fmpz_mat_rank of
+// those relations is the context's relation rank.  hnf_unit_log_matrix takes
+// its rows from this function, so the unit logs and the unit witnesses use
+// the same rows.
 bool hnf_unit_witness_coefficients(flint::FmpzMat& out,
                                         const ClassGroupContext& context)
         noexcept;

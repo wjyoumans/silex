@@ -950,8 +950,7 @@ int test_relation_kernel_basis_checks_and_fallback() {
     sflint::FmpzMat basis(0, 0);
     RelationKernelBasisRoute route = RelationKernelBasisRoute::hnf_transform;
     assert(silex::detail::relation_kernel_basis(
-            basis, &route, sflint::FmpzMatConstRef(relations),
-            sflint::FmpzMatConstRef(transform), rank));
+            basis, &route, sflint::FmpzMatConstRef(relations), rank));
     assert(route == RelationKernelBasisRoute::lll_extended);
     assert(sflint::fmpz_mat_nrows(basis) == n - rank);
     assert(sflint::fmpz_mat_ncols(basis) == n);
@@ -978,8 +977,8 @@ int test_relation_kernel_basis_checks_and_fallback() {
         RelationKernelBasisRoute taken =
                 RelationKernelBasisRoute::lll_extended;
         assert(silex::detail::relation_kernel_basis_from_extension(
-                out, &taken, sflint::FmpzMatConstRef(relations),
-                sflint::FmpzMatConstRef(transform), rank, candidate));
+                out, &taken, sflint::FmpzMatConstRef(relations), rank,
+                candidate));
         assert(taken == RelationKernelBasisRoute::hnf_transform);
         assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(out),
                                       sflint::FmpzMatConstRef(fallback)));
@@ -1039,18 +1038,14 @@ int test_relation_kernel_basis_checks_and_fallback() {
     {
         sflint::FmpzMat full(2, 2);
         ::fmpz_mat_one(full.raw());
-        sflint::FmpzMat full_hnf(2, 2);
-        sflint::FmpzMat full_transform(2, 2);
-        ::fmpz_mat_hnf_transform(full_hnf.raw(), full_transform.raw(),
-                                 full.raw());
         sflint::FmpzMat empty(5, 5);
         RelationKernelBasisRoute empty_route =
                 RelationKernelBasisRoute::lll_extended;
         assert(silex::detail::relation_kernel_basis(
-                empty, &empty_route, sflint::FmpzMatConstRef(full),
-                sflint::FmpzMatConstRef(full_transform), 2));
+                empty, &empty_route, sflint::FmpzMatConstRef(full), 2));
         assert(empty_route == RelationKernelBasisRoute::hnf_transform);
         assert(sflint::fmpz_mat_nrows(empty) == 0);
+        assert(sflint::fmpz_mat_ncols(empty) == 2);
     }
 
     // Misshapen or absent candidates.
@@ -1058,15 +1053,25 @@ int test_relation_kernel_basis_checks_and_fallback() {
     assert_fallback(&misshapen);
     assert_fallback(nullptr);
 
-    // Inconsistent transform shape or rank is a failure, not a fallback.
+    // The fallback computes the transform itself: its rows are those of
+    // the HNF transform above.
+    sflint::FmpzMat transform_rows(0, 0);
+    assert(silex::detail::hnf_transform_kernel_rows(
+            transform_rows, sflint::FmpzMatConstRef(relations), rank));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(transform_rows),
+                                  sflint::FmpzMatConstRef(fallback)));
+
+    // An inconsistent rank is a failure, not a fallback: out of range, or
+    // (on the fallback) not the number of nonzero HNF rows.
     sflint::FmpzMat out(0, 0);
-    const sflint::FmpzMat short_transform(n - 1, n);
     assert(!silex::detail::relation_kernel_basis(
-            out, nullptr, sflint::FmpzMatConstRef(relations),
-            sflint::FmpzMatConstRef(short_transform), rank));
-    assert(!silex::detail::relation_kernel_basis(
-            out, nullptr, sflint::FmpzMatConstRef(relations),
-            sflint::FmpzMatConstRef(transform), n + 1));
+            out, nullptr, sflint::FmpzMatConstRef(relations), n + 1));
+    assert(!silex::detail::relation_kernel_basis_from_extension(
+            out, nullptr, sflint::FmpzMatConstRef(relations), rank - 1,
+            nullptr));
+    assert(!silex::detail::relation_kernel_basis_from_extension(
+            out, nullptr, sflint::FmpzMatConstRef(relations), rank + 1,
+            nullptr));
     return 0;
 }
 
@@ -1109,15 +1114,12 @@ int test_unit_logs_share_witness_rows() {
     // The witness rows are the shared kernel basis of the stored relations.
     sflint::FmpzMat stored(relation_count, class_group.generator_count());
     assert(class_group.relations(sflint::FmpzMatRef(stored)));
-    sflint::FmpzMat hnf(relation_count, class_group.generator_count());
-    sflint::FmpzMat transform(relation_count, relation_count);
-    ::fmpz_mat_hnf_transform(hnf.raw(), transform.raw(), stored.raw());
+    assert(::fmpz_mat_rank(stored.raw()) == rank);
     sflint::FmpzMat shared(0, 0);
     silex::detail::RelationKernelBasisRoute route =
             silex::detail::RelationKernelBasisRoute::hnf_transform;
     assert(silex::detail::relation_kernel_basis(
-            shared, &route, sflint::FmpzMatConstRef(stored),
-            sflint::FmpzMatConstRef(transform), rank));
+            shared, &route, sflint::FmpzMatConstRef(stored), rank));
     assert(route == silex::detail::RelationKernelBasisRoute::lll_extended);
     assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(shared),
                                   sflint::FmpzMatConstRef(coefficients)));

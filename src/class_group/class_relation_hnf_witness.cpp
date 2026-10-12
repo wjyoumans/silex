@@ -47,9 +47,10 @@ struct ClassRelationHnfTransform {
     slong rank = 0;
 };
 
-bool build_class_relation_hnf_transform(
-        ClassRelationHnfTransform& out,
-        const ClassGroupContext& context) noexcept {
+// The context's stored relation matrix (relation_count x generator_count),
+// under the preconditions shared by the HNF basis and the unit-row kernel.
+bool context_relation_matrix(flint::FmpzMat& out,
+                             const ClassGroupContext& context) noexcept {
     const Order* order = context.parent();
     if (!context.has_factor_base() || order == nullptr ||
         order->parent() == nullptr ||
@@ -59,13 +60,25 @@ bool build_class_relation_hnf_transform(
         return false;
     }
 
-    const slong relation_count = context.relation_count();
-    const slong generator_count = context.generator_count();
-    flint::FmpzMat stored(relation_count, generator_count);
+    flint::FmpzMat stored(context.relation_count(),
+                          context.generator_count());
     if (!context.relations(flint::FmpzMatRef(stored))) {
         return false;
     }
+    out = std::move(stored);
+    return true;
+}
 
+bool build_class_relation_hnf_transform(
+        ClassRelationHnfTransform& out,
+        const ClassGroupContext& context) noexcept {
+    flint::FmpzMat stored(0, 0);
+    if (!context_relation_matrix(stored, context)) {
+        return false;
+    }
+
+    const slong relation_count = context.relation_count();
+    const slong generator_count = context.generator_count();
     ClassRelationHnfTransform candidate;
     candidate.stored = std::move(stored);
     candidate.hnf = flint::FmpzMat(relation_count, generator_count);
@@ -235,16 +248,44 @@ bool checked_relation_kernel_rows(flint::FmpzMat& out,
     return true;
 }
 
+bool hnf_transform_kernel_rows(flint::FmpzMat& out,
+                               flint::FmpzMatConstRef relations,
+                               slong rank) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    const slong g = flint::fmpz_mat_ncols(relations);
+    if (rank < 0 || rank > n || rank > g) {
+        return false;
+    }
+
+    flint::FmpzMat coefficients(n - rank, n);
+    if (rank < n) {
+        flint::FmpzMat hnf(n, g);
+        flint::FmpzMat transform(n, n);
+        ::fmpz_mat_hnf_transform(hnf.raw(), transform.raw(), relations.raw());
+        if (fmpz_mat_trimmed_nonzero_rows(flint::FmpzMatConstRef(hnf)) !=
+            rank) {
+            return false;
+        }
+        for (slong row = rank; row < n; ++row) {
+            if (!fmpz_mat_copy_row(flint::FmpzMatRef(coefficients),
+                                   row - rank,
+                                   flint::FmpzMatConstRef(transform), row)) {
+                return false;
+            }
+        }
+    }
+    out = std::move(coefficients);
+    return true;
+}
+
 bool relation_kernel_basis_from_extension(
         flint::FmpzMat& out,
         RelationKernelBasisRoute* route,
         flint::FmpzMatConstRef relations,
-        flint::FmpzMatConstRef hnf_transform,
         slong rank,
         const flint::FmpzMat* reduced_extension) noexcept {
     const slong n = flint::fmpz_mat_nrows(relations);
-    if (rank < 0 || rank > n || flint::fmpz_mat_nrows(hnf_transform) != n ||
-        flint::fmpz_mat_ncols(hnf_transform) != n) {
+    if (rank < 0 || rank > n) {
         return false;
     }
 
@@ -260,12 +301,11 @@ bool relation_kernel_basis_from_extension(
         return true;
     }
 
-    flint::FmpzMat coefficients(n - rank, n);
-    for (slong row = rank; row < n; ++row) {
-        if (!fmpz_mat_copy_row(flint::FmpzMatRef(coefficients), row - rank,
-                               hnf_transform, row)) {
-            return false;
-        }
+    // Fallback: the transform is built only here, when the LLL rows are
+    // absent or fail a check.
+    flint::FmpzMat coefficients(0, 0);
+    if (!hnf_transform_kernel_rows(coefficients, relations, rank)) {
+        return false;
     }
     out = std::move(coefficients);
     if (route != nullptr) {
@@ -277,7 +317,6 @@ bool relation_kernel_basis_from_extension(
 bool relation_kernel_basis(flint::FmpzMat& out,
                            RelationKernelBasisRoute* route,
                            flint::FmpzMatConstRef relations,
-                           flint::FmpzMatConstRef hnf_transform,
                            slong rank) noexcept {
     const slong n = flint::fmpz_mat_nrows(relations);
     flint::FmpzMat extension(0, 0);
@@ -285,7 +324,7 @@ bool relation_kernel_basis(flint::FmpzMat& out,
             rank >= 0 && rank < n &&
             lll_relation_kernel_extension(extension, relations);
     return relation_kernel_basis_from_extension(
-            out, route, relations, hnf_transform, rank,
+            out, route, relations, rank,
             have_extension ? &extension : nullptr);
 }
 
@@ -293,16 +332,23 @@ bool hnf_unit_witness_coefficients(
         flint::FmpzMat& out,
         const ClassGroupContext& context) noexcept {
     out = flint::FmpzMat(0, 0);
-    ClassRelationHnfTransform hnf_data;
-    if (!build_class_relation_hnf_transform(hnf_data, context)) {
+    flint::FmpzMat stored(0, 0);
+    if (!context_relation_matrix(stored, context)) {
+        return false;
+    }
+
+    // The rank check: the exact rank of the stored relations must be the
+    // context's relation rank.  fmpz_mat_rank is the number of nonzero rows
+    // of the HNF that the fallback builds, so this is the check that the
+    // HNF transform made before, without the transform.
+    const slong rank = context.relation_rank();
+    if (::fmpz_mat_rank(stored.raw()) != rank) {
         return false;
     }
 
     flint::FmpzMat coefficients(0, 0);
     if (!relation_kernel_basis(coefficients, nullptr,
-                               flint::FmpzMatConstRef(hnf_data.stored),
-                               flint::FmpzMatConstRef(hnf_data.transform),
-                               hnf_data.rank)) {
+                               flint::FmpzMatConstRef(stored), rank)) {
         return false;
     }
     out = std::move(coefficients);
