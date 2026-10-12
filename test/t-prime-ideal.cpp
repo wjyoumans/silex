@@ -3117,6 +3117,109 @@ int test_degree_one_root_follows_recorded_convention() {
     return 0;
 }
 
+// The word route factored_value_at_degree_one_root_nmod reads each factor's
+// stored form num(x) / den in place and inverts once at the end.  It must
+// fail exactly where the fmpz route factored_value_at_degree_one_root does
+// (a factor vanishing at the root, or a coefficient denominator divisible by
+// p) and otherwise give the same residue, on the linear, quadratic and
+// generic FLINT representations, for positive, negative and zero exponents.
+// The roots range over all of F_p: both routes only evaluate polynomials.
+int test_factored_value_nmod_matches_fmpz_route() {
+    std::vector<silex::NumberField> fields;
+    {
+        sflint::FmpqPoly linear;
+        sflint::fmpq_poly_set_coeff_si(linear, 1, 1);
+        sflint::fmpq_poly_set_coeff_si(linear, 0, -4);
+        fields.push_back(silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(linear)));
+    }
+    fields.push_back(silex::test::quadratic_field(-7));
+    {
+        sflint::FmpqPoly cubic;
+        poly_x3_minus(cubic, 2);
+        fields.push_back(silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(cubic)));
+    }
+
+    // Factor coefficients (numerator, denominator), low to high, padded to
+    // the field degree by dropping higher terms.
+    const std::array<std::array<std::array<slong, 2>, 3>, 5> factor_data = {{
+            {{{7, 6}, {-5, 6}, {3, 6}}},
+            {{{1, 1}, {1, 1}, {0, 1}}},
+            {{{2, 5}, {1, 3}, {-1, 7}}},
+            {{{-9, 4}, {0, 1}, {11, 10}}},
+            {{{1, 15}, {0, 1}, {0, 1}}},
+    }};
+    const std::array<std::array<slong, 3>, 5> exponent_data = {{
+            {1, 0, 0},
+            {-2, 3, 0},
+            {1, -1, 2},
+            {0, 5, -3},
+            {-1, -1, 4},
+    }};
+
+    slong checked = 0;
+    slong failures = 0;
+    for (const silex::NumberField& field : fields) {
+        const slong degree = field.degree();
+        std::vector<silex::Element> factors;
+        for (const auto& data : factor_data) {
+            sflint::FmpqPoly polynomial;
+            for (slong i = 0; i < degree && i < 3; ++i) {
+                sflint::Fmpq coefficient;
+                fmpq_set_si(coefficient.raw(), data[i][0],
+                            static_cast<ulong>(data[i][1]));
+                ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), i,
+                                           coefficient.raw());
+            }
+            silex::Element element(field);
+            assert(element.set_fmpq_poly(
+                    sflint::FmpqPolyConstRef(polynomial)));
+            factors.push_back(std::move(element));
+        }
+
+        for (const ulong p : {2UL, 3UL, 5UL, 7UL, 11UL, 13UL}) {
+            sflint::Fmpz p_fmpz;
+            sflint::fmpz_set_ui(sflint::FmpzRef(p_fmpz), p);
+            for (ulong root = 0; root < p; ++root) {
+                sflint::Fmpz root_fmpz;
+                sflint::fmpz_set_ui(sflint::FmpzRef(root_fmpz), root);
+                for (const auto& exponents : exponent_data) {
+                    for (std::size_t shift = 0; shift < factors.size();
+                         ++shift) {
+                        silex::FactoredElement element(field);
+                        for (std::size_t k = 0; k < exponents.size(); ++k) {
+                            assert(element.push(
+                                    factors[(shift + k) % factors.size()],
+                                    exponents[k]));
+                        }
+                        sflint::Fmpz expected;
+                        const bool expected_ok =
+                                silex::detail::factored_value_at_degree_one_root(
+                                        expected, element,
+                                        sflint::FmpzConstRef(p_fmpz),
+                                        sflint::FmpzConstRef(root_fmpz));
+                        ulong value = 0;
+                        const bool ok = silex::detail::
+                                factored_value_at_degree_one_root_nmod(
+                                        value, element, p, root);
+                        assert(ok == expected_ok);
+                        if (ok) {
+                            assert(fmpz_cmp_ui(expected.raw(), value) == 0);
+                        } else {
+                            ++failures;
+                        }
+                        ++checked;
+                    }
+                }
+            }
+        }
+    }
+    // Both outcomes are exercised.
+    assert(failures > 0 && failures < checked);
+    return 0;
+}
+
 // Reverse misuse direction: an alpha-convention prime keeps that convention
 // after its order is marked maximal, for reduce() and valuation (which
 // needs the maximal marking, so it is checked afterwards).  For d = 3
@@ -3645,6 +3748,7 @@ int main() {
     assert(test_residue_convention_fixed_at_decomposition() == 0);
     assert(test_kummer_generator_reduces_to_zero_and_residues_span() == 0);
     assert(test_degree_one_root_follows_recorded_convention() == 0);
+    assert(test_factored_value_nmod_matches_fmpz_route() == 0);
     assert(test_alpha_convention_kept_after_marking_maximal() == 0);
     assert(test_prime_ideal_inverse_matches_invert() == 0);
     assert(test_prime_ideal_inverse_declines_outside_contract() == 0);

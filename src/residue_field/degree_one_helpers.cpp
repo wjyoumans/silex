@@ -3,9 +3,12 @@
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <limits>
+#include <utility>
 
 #include <flint/fmpq_poly.h>
 #include <flint/fmpz_factor.h>
+#include <flint/nf.h>
+#include <flint/nf_elem.h>
 #include <flint/nmod.h>
 #include <flint/nmod_poly.h>
 #include <flint/ulong_extras.h>
@@ -88,6 +91,69 @@ bool pow_mod_abs_slong_ui(ulong& out,
     }
     out = n_powmod2_ui_preinv(base, static_cast<ulong>(exponent), modulus,
                               modulus_inverse);
+    return true;
+}
+
+// The stored form of `value` in `field` is the integer polynomial num(x) over
+// the positive integer den that nf_elem_get_fmpq_poly copies out: one
+// coefficient for NF_LINEAR, two for NF_QUADRATIC, and the fmpq_poly
+// otherwise.  Sets `numerator` = num(root) mod p and `denominator` = den mod
+// p, reading the coefficients in place.  `root` must be reduced mod p.
+// Horner's rule on the reduced coefficients gives the residue that
+// nmod_poly_evaluate_nmod gives on their reduction.
+void stored_form_value_mod_p(ulong& numerator,
+                             ulong& denominator,
+                             const nf_elem_struct* value,
+                             const nf_struct* field,
+                             ulong root,
+                             nmod_t mod) noexcept {
+    const fmpz* coefficients = nullptr;
+    const fmpz* stored_denominator = nullptr;
+    slong length = 0;
+    if ((field->flag & NF_LINEAR) != 0) {
+        coefficients = LNF_ELEM_NUMREF(value);
+        stored_denominator = LNF_ELEM_DENREF(value);
+        length = 1;
+    } else if ((field->flag & NF_QUADRATIC) != 0) {
+        coefficients = QNF_ELEM_NUMREF(value);
+        stored_denominator = QNF_ELEM_DENREF(value);
+        length = 2;
+    } else {
+        coefficients = NF_ELEM_NUMREF(value);
+        stored_denominator = NF_ELEM_DENREF(value);
+        length = NF_ELEM(value)->length;
+    }
+
+    ulong accumulator = 0;
+    for (slong i = length - 1; i >= 0; --i) {
+        accumulator = nmod_add(nmod_mul(accumulator, root, mod),
+                               ::fmpz_get_nmod(coefficients + i, mod), mod);
+    }
+    numerator = accumulator;
+    denominator = ::fmpz_get_nmod(stored_denominator, mod);
+}
+
+// The factor's value at `root` from its canonical fmpq_poly, inverting each
+// coefficient's own denominator: fails exactly when one of them is divisible
+// by p.  On success `numerator` is the value and `denominator` is 1.  This is
+// the route factored_value_at_degree_one_root_nmod takes when the stored
+// common denominator is divisible by p, so its failures stay those of the
+// per-coefficient evaluation (and of evaluate_fmpq_poly_at_degree_one_prime).
+bool fmpq_poly_value_at_root_nmod(ulong& numerator,
+                                  ulong& denominator,
+                                  const Element& factor,
+                                  ulong p,
+                                  ulong root,
+                                  nmod_t mod) noexcept {
+    flint::FmpqPoly polynomial;
+    NmodPoly reduced(p);
+    if (!factor.get_fmpq_poly(flint::FmpqPolyRef(polynomial)) ||
+        !fmpq_poly_get_nmod_poly(reduced, flint::FmpqPolyConstRef(polynomial),
+                                 p, mod)) {
+        return false;
+    }
+    numerator = nmod_poly_evaluate_nmod(reduced.raw(), root);
+    denominator = 1;
     return true;
 }
 
@@ -337,40 +403,69 @@ bool factored_value_at_degree_one_root_nmod(ulong& out,
     if (!element.is_defined() || p < 2) {
         return false;
     }
+    const NumberField* parent = element.parent();
+    const nf_struct* field =
+            parent == nullptr ? nullptr : parent->raw_flint_field();
+    if (field == nullptr) {
+        return false;
+    }
 
     nmod_t mod;
     nmod_init(&mod, p);
     const ulong p_inverse = n_preinvert_limb(p);
-    ulong product = 1 % p;
+    const ulong reduced_root = root % p;
+    // The product is kept as numerator / denominator, so one inversion at
+    // the end replaces one per factor.
+    ulong numerator_product = 1;
+    ulong denominator_product = 1;
 
     for (const auto& entry : element.factors()) {
         if (entry.exponent == 0) {
             continue;
         }
 
-        flint::FmpqPoly polynomial;
-        NmodPoly reduced(p);
-        if (!entry.factor.get_fmpq_poly(flint::FmpqPolyRef(polynomial)) ||
-            !fmpq_poly_get_nmod_poly(
-                    reduced, flint::FmpqPolyConstRef(polynomial), p, mod)) {
+        // base = numerator / denominator is the factor's value at the root.
+        ulong numerator = 0;
+        ulong denominator = 0;
+        stored_form_value_mod_p(numerator, denominator,
+                                entry.factor.raw_flint_element(), field,
+                                reduced_root, mod);
+        if (denominator == 0 &&
+            !fmpq_poly_value_at_root_nmod(numerator, denominator,
+                                          entry.factor, p, reduced_root,
+                                          mod)) {
+            return false;
+        }
+        if (numerator == 0) {
             return false;
         }
 
-        ulong base = nmod_poly_evaluate_nmod(reduced.raw(), root);
-        if (base == 0) {
+        ulong numerator_power = 1;
+        ulong denominator_power = 1;
+        if (!pow_mod_abs_slong_ui(numerator_power, numerator, entry.exponent,
+                                  p, p_inverse) ||
+            !pow_mod_abs_slong_ui(denominator_power, denominator,
+                                  entry.exponent, p, p_inverse)) {
             return false;
         }
         if (entry.exponent < 0) {
-            base = n_invmod(base, p);
+            std::swap(numerator_power, denominator_power);
         }
-
-        ulong power = 1;
-        if (!pow_mod_abs_slong_ui(power, base, entry.exponent, p, p_inverse)) {
-            return false;
-        }
-        product = nmod_mul(product, power, mod);
+        numerator_product = nmod_mul(numerator_product, numerator_power, mod);
+        denominator_product =
+                nmod_mul(denominator_product, denominator_power, mod);
     }
 
+    // For prime p every power above is a unit, so the inverse exists; a
+    // composite p (outside the contract) whose denominator is not a unit
+    // fails here instead of in n_invmod.
+    ulong denominator_inverse = 0;
+    if (denominator_product == 0 ||
+        n_gcdinv(&denominator_inverse, denominator_product, p) != 1) {
+        return false;
+    }
+    const ulong product =
+            nmod_mul(numerator_product, denominator_inverse, mod);
     out = product;
     return product != 0;
 }

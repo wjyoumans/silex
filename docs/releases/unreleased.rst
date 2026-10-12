@@ -148,6 +148,15 @@ Changed
   route for word-size ``q``.  Published results are unchanged on the 70
   ``proven`` corpus rows.
 
+- The word-size route of that column evaluation reads each unit factor's
+  stored numerator polynomial and denominator in place, reducing them modulo
+  ``q`` without copying the factor to a rational polynomial or inverting
+  each coefficient's denominator, and inverts one accumulated denominator per
+  unit.  A factor whose denominator is divisible by ``q`` takes the previous
+  per-coefficient route, so the route fails where it failed before and the
+  columns are unchanged.  Published results are unchanged on the 155
+  ``proven`` corpus rows that finish within 60 seconds.
+
 - In ``OrderUnitGroup::prove_index_bound`` (the ``proven`` unit proof),
   when the scan of the auxiliary primes ``q <= aux_bound`` at a prime ``ell``
   leaves a nonempty kernel that it has not certified, the first scan of the

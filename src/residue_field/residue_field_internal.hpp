@@ -35,6 +35,12 @@ bool factored_value_at_degree_one_root(flint::Fmpz& out,
                                        const FactoredElement& element,
                                        flint::FmpzConstRef p,
                                        flint::FmpzConstRef root) noexcept;
+// factored_value_at_degree_one_root in word arithmetic for a prime p below
+// the word size: fails exactly where it does and otherwise gives the same
+// residue.  Each factor is evaluated from its stored form num(x) / den in
+// place (no polynomial copy), and the per-coefficient route of
+// evaluate_fmpq_poly_at_degree_one_prime is taken only for a factor whose
+// stored denominator is divisible by p.
 bool factored_value_at_degree_one_root_nmod(ulong& out,
                                            const FactoredElement& element,
                                            ulong p,
