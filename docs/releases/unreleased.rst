@@ -132,6 +132,13 @@ Changed
   returns the basis and transform ``fmpz_lll`` returns, so every published
   result is unchanged.  See ``Lat::lll_reduce`` in
   :doc:`../reference/algorithms_and_sources`.
+- The two integer LLL calls of the grh two-LLL ideal-lattice route (the
+  ``Z_BASIS`` pre-reduction and the ``GRAM`` reduction) take the same
+  certified first LLL phase.  The ``GRAM`` certificate is the integer
+  Gram-Schmidt test up to rows times bits of 3000 and FLINT's
+  ``fmpz_lll_is_reduced`` above that; a failed certificate restores the input
+  and calls ``fmpz_lll``, so every published result is unchanged.  See
+  :doc:`../reference/algorithms_and_sources`.
 
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when

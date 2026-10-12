@@ -142,6 +142,28 @@ its fast phases unless certification is explicitly disabled; Silex does not
 disable it.  Tests force both rejection routes after scratch mutation at
 every call site and require exact agreement with ``fmpz_lll``.
 
+The same helper serves the two-LLL ideal-lattice route (grh class group,
+``ideal_lattice_lll.cpp``).  Its two pre-reduction ``Z_BASIS`` sites use
+parameters (0.5, 0.51) with ``eta^2 < delta`` and the certificate above.  Its
+two ``GRAM`` sites are eligible when the context is ``APPROX`` and the matrix
+is square with at least two rows, with no bit bound (FLINT's
+``lll_with_removal_ulll.c`` makes one wrapper call for ``GRAM`` at every
+size).  The GRAM certificate is the integer test above (Cohen, GTM 138,
+Algorithm 2.6.7, step 2, applied to the Gram matrix) while rows times maximal
+entry bits is at most 3000, and FLINT's own ``fmpz_lll_is_reduced(B, fl,
+120)`` above that, the very call FLINT's wrapper makes on the same matrix.
+``fmpz_mat_is_reduced_gram`` is not used: it divides by zero on a zero
+Gram--Schmidt norm, whereas a passing integer test excludes zero norms, so
+the exact quantities agree and FLINT's check accepts too.  The cutoff is
+measured: on corpus site matrices the integer test took at most 0.79 of
+FLINT's check up to about 2500, was even near 3400 (degree 32) and was far
+slower at degree 81.  The transformation argument does not steer the
+``GRAM`` d-pass: at the pinned revision ``lll_d.c`` reads it only for its row
+count (452-456) and in the ``update_b`` test (458), which needs more columns
+than rows and never holds for a square Gram matrix; all other uses write row
+operations into it.  The original matrix and transformation are restored
+before any ``fmpz_lll`` fallback.
+
 Number fields, orders, and ideals
 ---------------------------------
 
@@ -830,6 +852,9 @@ restores the input and calls ``fmpz_lll``.  The FLINT files and functions
 named here are those of the revision pinned in that paragraph (b574c48).
 The matrix and transform are those ``fmpz_lll`` returns, for the three
 reasons given there.  Only the certificate is cheaper.
+The two-LLL grh route uses the same helper at its ``Z_BASIS`` and ``GRAM``
+integer LLL sites, with the ``GRAM`` certificate and size cutoff described
+there.
 
 The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
 rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:
