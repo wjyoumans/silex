@@ -1581,6 +1581,123 @@ int check_decompose_prime_containing_routes(
     return 0;
 }
 
+// The route decompose_prime takes, from the classifier that
+// decompose_prime, decompose_prime_containing and
+// decompose_prime_residue_degrees share, pinned to the routes each took
+// before they shared it.
+silex::detail::DecomposePrimeRoute route_at(const silex::Order& order,
+                                            slong rational_prime,
+                                            slong max_residue_degree) {
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, rational_prime));
+    return PrimeIdealAccess::decompose_prime_route_for_testing(
+            order, sflint::FmpzConstRef(p), max_residue_degree);
+}
+
+// decompose_prime_containing's use of the classifier, on the maximal order
+// `order`: for the element 1 it builds no prime exactly on the
+// Dedekind-Kummer routes, and the whole decomposition otherwise.
+void check_containing_route(const silex::Order& order, slong rational_prime) {
+    using Route = silex::detail::DecomposePrimeRoute;
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, rational_prime));
+    const sflint::FmpzConstRef p_ref(p);
+    silex::OrderElement one(order);
+    assert(one.set_si(1));
+    std::vector<silex::PrimeIdeal> containing;
+    assert(PrimeIdealAccess::decompose_prime_containing(containing, one, p_ref,
+                                                        nullptr));
+    const Route route = route_at(order, rational_prime, 0);
+    if (route == Route::nonindex_factor || route == Route::equation_factor) {
+        assert(containing.empty());
+    } else {
+        silex::PrimeIdealList all;
+        assert(silex::decompose_prime(all, order, p_ref));
+        assert(static_cast<slong>(containing.size()) == all.size());
+        assert(!containing.empty());
+    }
+}
+
+int test_decompose_prime_route() {
+    using Route = silex::detail::DecomposePrimeRoute;
+
+    // Q: the degree-one order.
+    sflint::FmpqPoly linear;
+    poly_x(linear);
+    silex::NumberField rationals;
+    const silex::Order integers = order_by_polynomial(rationals, linear);
+    assert(route_at(integers, 7, 0) == Route::degree_one);
+    assert(route_at(integers, 7, 1) == Route::degree_one);
+    assert(route_at(integers, 8, 0) == Route::refused);
+    assert(route_at(integers, 7, -1) == Route::refused);
+
+    // Q(sqrt(5)): the maximal order Z[(1 + sqrt(5)) / 2] takes the quadratic
+    // integral-generator route for every bound; its equation order Z[sqrt(5)]
+    // is not maximal and factors x^2 - 5.
+    sflint::FmpqPoly quadratic;
+    poly_from_coefficients(quadratic, {-5, 0, 1});
+    silex::NumberField quadratic_field;
+    const silex::Order quadratic_equation =
+            order_by_polynomial(quadratic_field, quadratic);
+    silex::Order quadratic_maximal(quadratic_field);
+    assert(quadratic_maximal.maximal_order(quadratic_equation));
+    assert(!quadratic_maximal.is_equation_order());
+    for (const slong q : {2, 5, 11, 19}) {
+        assert(route_at(quadratic_maximal, q, 0) ==
+               Route::quadratic_integral_generator);
+        assert(route_at(quadratic_maximal, q, 1) ==
+               Route::quadratic_integral_generator);
+        check_containing_route(quadratic_maximal, q);
+    }
+    assert(route_at(quadratic_maximal, 9, 0) == Route::refused);
+    assert(route_at(quadratic_equation, 11, 0) == Route::equation_factor);
+    assert(route_at(quadratic_equation, 11, 1) == Route::squarefree_roots);
+    // 2 divides disc(x^2 - 5) = 20: no roots shortcut.
+    assert(route_at(quadratic_equation, 2, 1) == Route::equation_factor);
+
+    // x^3 - 2: the maximal order is the equation order.
+    sflint::FmpqPoly cubic;
+    poly_from_coefficients(cubic, {-2, 0, 0, 1});
+    silex::NumberField cubic_field;
+    const silex::Order cubic_equation =
+            order_by_polynomial(cubic_field, cubic);
+    silex::Order cubic_maximal(cubic_field);
+    assert(cubic_maximal.maximal_order(cubic_equation));
+    assert(cubic_maximal.is_equation_order());
+    for (const slong q : {2, 3, 5, 31}) {
+        assert(route_at(cubic_maximal, q, 0) == Route::equation_factor);
+        check_containing_route(cubic_maximal, q);
+    }
+    assert(route_at(cubic_maximal, 31, 1) == Route::squarefree_roots);
+    assert(route_at(cubic_maximal, 5, 1) == Route::squarefree_roots);
+    // 2 and 3 divide disc(x^3 - 2) = -108.
+    assert(route_at(cubic_maximal, 2, 1) == Route::equation_factor);
+    assert(route_at(cubic_maximal, 3, 1) == Route::equation_factor);
+    assert(route_at(cubic_maximal, 31, 2) == Route::equation_factor);
+
+    // cyclotomic_real_q10_c11_deg10: a non-equation maximal order with
+    // index divisor 43.
+    sflint::FmpqPoly decic;
+    poly_from_coefficients(decic, {238831, -228566, -128567, 146666, -15113,
+                                   -13352, 2746, 334, -97, -2, 1});
+    silex::NumberField decic_field;
+    const silex::Order decic_equation =
+            order_by_polynomial(decic_field, decic);
+    silex::Order decic_maximal(decic_field);
+    assert(decic_maximal.maximal_order(decic_equation));
+    assert(!decic_maximal.is_equation_order());
+    for (const slong q : {2, 3, 5, 11, 23, 89, 101}) {
+        assert(route_at(decic_maximal, q, 0) == Route::nonindex_factor);
+        check_containing_route(decic_maximal, q);
+    }
+    assert(route_at(decic_maximal, 43, 0) == Route::index_divisor);
+    check_containing_route(decic_maximal, 43);
+    assert(route_at(decic_maximal, 43, 1) == Route::index_divisor);
+    assert(route_at(decic_maximal, 101, 2) == Route::nonindex_factor);
+    assert(route_at(decic_equation, 43, 0) == Route::equation_factor);
+    return 0;
+}
+
 // The non-equation maximal order of cyclotomic_real_q10_c11_deg10 at
 // non-index primes (split, inert-like and ramified) and at the index divisor
 // 43; x^3 - 2, whose maximal order is its equation order; the quadratic
@@ -3932,6 +4049,7 @@ int main() {
     assert(test_index_divisor_cache_inert_principal() == 0);
     assert(test_residue_degrees_cyclotomic_real_q10_c11() == 0);
     assert(test_residue_degrees_index_divisor_routes() == 0);
+    assert(test_decompose_prime_route() == 0);
     assert(test_decompose_prime_containing() == 0);
     assert(test_index_divisor_separating_element_order() == 0);
     assert(test_recursive_split_matches_enumeration_unramified() == 0);

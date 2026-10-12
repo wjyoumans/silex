@@ -69,6 +69,32 @@ public:
             const DiagnosticsContext* diagnostics) noexcept;
 };
 
+// The route decompose_prime(primes, order, p, max_residue_degree) takes.
+// One classifier in prime_ideal.cpp chooses it, and decompose_prime,
+// PrimeIdealAccess::decompose_prime_containing and
+// decompose_prime_residue_degrees all route by it.
+enum class DecomposePrimeRoute {
+    // Returns false without decomposing: no basis or field, a negative
+    // bound, p not prime, a defining polynomial that is not monic integral,
+    // or a non-equation order not known to be maximal.
+    refused,
+    // A degree-one order: (p) itself.
+    degree_one,
+    // A maximal quadratic-backend order with basis [1, omega]: the factors
+    // of the minimal polynomial of omega modulo p.
+    quadratic_integral_generator,
+    // max_residue_degree == 1, an equation or maximal order, and the
+    // defining polynomial f squarefree modulo p: the roots of f modulo p.
+    squarefree_roots,
+    // A maximal non-equation order with p prime to [O : Z[theta]]: the
+    // factors of f modulo p (Dedekind-Kummer).
+    nonindex_factor,
+    // A maximal non-equation order with p dividing [O : Z[theta]].
+    index_divisor,
+    // The equation order: the factors of f modulo p (Dedekind-Kummer).
+    equation_factor,
+};
+
 // Residue degrees of the primes above p in `order`, in the order
 // decompose_prime(primes, order, p) publishes them, with the same success.
 // For an index divisor of a maximal non-equation order it reads them from the
@@ -137,6 +163,13 @@ public:
             const Order& order,
             flint::FmpzConstRef p,
             bool recursive_split) noexcept;
+
+    // Test hook: the route decompose_prime(.., order, p, max_residue_degree)
+    // takes, from the classifier decompose_prime uses.  For tests only.
+    static DecomposePrimeRoute decompose_prime_route_for_testing(
+            const Order& order,
+            flint::FmpzConstRef p,
+            slong max_residue_degree) noexcept;
 
     // Builds into `out` (defined over `order`) the prime ideal
     // (p, g(theta)) of the irreducible factor `factor` of the defining

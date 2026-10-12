@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <new>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -4146,6 +4147,82 @@ bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
            out.set_kummer_generator(flint::FmpzMatConstRef(kummer_generator));
 }
 
+namespace {
+
+// The route classifier of decompose_prime(.., order, p, max_residue_degree)
+// (see DecomposePrimeRoute).  It applies decompose_prime's route tests in
+// the order decompose_prime applies them, and decompose_prime_containing
+// and decompose_prime_residue_degrees route by it too, so the three cannot
+// drift apart.  `defining_polynomial_squarefree()` must report whether the
+// defining polynomial is squarefree modulo p.  It is called at most once,
+// only when max_residue_degree == 1 for an equation or maximal order of
+// degree at least 2 off the quadratic route, with p prime.  On the
+// quadratic route `quadratic_radicand` receives the field's radicand.
+template <typename SquarefreeTest>
+DecomposePrimeRoute decompose_prime_route(
+        const Order& order,
+        flint::FmpzConstRef p,
+        slong max_residue_degree,
+        flint::Fmpz& quadratic_radicand,
+        SquarefreeTest&& defining_polynomial_squarefree) noexcept {
+    if (!order.has_basis() || order.parent() == nullptr ||
+        max_residue_degree < 0 ||
+        fmpz_is_prime(p.raw()) == 0 ||
+        !fmpq_poly_is_monic_integral(order.parent()->raw_flint_field()->pol)) {
+        return DecomposePrimeRoute::refused;
+    }
+    if (order.degree() == 1) {
+        return DecomposePrimeRoute::degree_one;
+    }
+    if (residue_polynomial_uses_quadratic_integral_generator(order) &&
+        order.parent()->quadratic_radicand(
+                flint::FmpzRef(quadratic_radicand))) {
+        return DecomposePrimeRoute::quadratic_integral_generator;
+    }
+    if (max_residue_degree == 1 &&
+        (order.is_equation_order() || order.is_maximal()) &&
+        defining_polynomial_squarefree()) {
+        return DecomposePrimeRoute::squarefree_roots;
+    }
+    if (!order.is_equation_order()) {
+        if (!order.is_maximal()) {
+            return DecomposePrimeRoute::refused;
+        }
+        return maximal_order_has_nonindex_defining_polynomial_prime(order, p)
+                       ? DecomposePrimeRoute::nonindex_factor
+                       : DecomposePrimeRoute::index_divisor;
+    }
+    return DecomposePrimeRoute::equation_factor;
+}
+
+// The route of decompose_prime(.., order, p, 0), which never takes the
+// squarefree-roots route.
+DecomposePrimeRoute decompose_prime_route(const Order& order,
+                                          flint::FmpzConstRef p) noexcept {
+    flint::Fmpz quadratic_radicand;
+    return decompose_prime_route(order, p, 0, quadratic_radicand,
+                                 []() noexcept { return false; });
+}
+
+}  // namespace
+
+DecomposePrimeRoute PrimeIdealAccess::decompose_prime_route_for_testing(
+        const Order& order,
+        flint::FmpzConstRef p,
+        slong max_residue_degree) noexcept {
+    flint::Fmpz quadratic_radicand;
+    return decompose_prime_route(
+            order, p, max_residue_degree, quadratic_radicand,
+            [&]() noexcept {
+                flint::FmpzModCtx ctx(p.raw());
+                flint::FmpzModPoly reduced(ctx);
+                fmpq_poly_get_fmpz_mod_poly(
+                        reduced, order.parent()->raw_flint_field()->pol, ctx);
+                return fmpz_mod_poly_is_squarefree(reduced.raw(),
+                                                   ctx.raw()) != 0;
+            });
+}
+
 bool PrimeIdealAccess::decompose_prime_containing(
         std::vector<PrimeIdeal>& out,
         const OrderElement& element,
@@ -4160,18 +4237,16 @@ bool PrimeIdealAccess::decompose_prime_containing(
     const nf_struct* raw_field = order->parent()->raw_flint_field();
 
     // The routes of decompose_prime(.., p, 0) that factor the defining
-    // polynomial f modulo p and build (p, g_i(theta)) for each factor g_i:
-    // a maximal order of degree at least 2, off the quadratic
-    // integral-generator route, that is the equation order or has p prime to
-    // its index.  Each other route gives the whole decomposition.
-    const bool dedekind_kummer_route =
-            order->has_basis() && order->degree() > 1 &&
-            fmpz_is_prime(p.raw()) != 0 && raw_field != nullptr &&
-            fmpq_poly_is_monic_integral(raw_field->pol) &&
-            !residue_polynomial_uses_quadratic_integral_generator(*order) &&
-            order->is_maximal() &&
-            (order->is_equation_order() ||
-             maximal_order_has_nonindex_defining_polynomial_prime(*order, p));
+    // polynomial f modulo p and build (p, g_i(theta)) for each factor g_i,
+    // for a maximal order.  Each other route gives the whole decomposition.
+    bool dedekind_kummer_route = false;
+    if (raw_field != nullptr) {
+        const DecomposePrimeRoute route = decompose_prime_route(*order, p);
+        dedekind_kummer_route =
+                order->is_maximal() &&
+                (route == DecomposePrimeRoute::nonindex_factor ||
+                 route == DecomposePrimeRoute::equation_factor);
+    }
 
     flint::FmpqPoly value;
     if (dedekind_kummer_route) {
@@ -4389,17 +4464,38 @@ bool decompose_prime(PrimeIdealList& out,
                      const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
                         "prime_ideal.decompose_prime");
-    if (!order.has_basis() || order.parent() == nullptr ||
-        max_residue_degree < 0 ||
-        fmpz_is_prime(p.raw()) == 0 ||
-        !fmpq_poly_is_monic_integral(order.parent()->raw_flint_field()->pol)) {
+    // The context modulo p and the defining polynomial f reduced modulo p
+    // are built when first needed: by the classifier's squarefree test, or
+    // below where each route needs them.
+    std::optional<flint::FmpzModCtx> ctx_storage;
+    std::optional<flint::FmpzModPoly> reduced_storage;
+    auto reduce_defining_polynomial = [&]() noexcept {
+        if (!ctx_storage.has_value()) {
+            ctx_storage.emplace(p.raw());
+        }
+        if (!reduced_storage.has_value()) {
+            reduced_storage.emplace(*ctx_storage);
+            fmpq_poly_get_fmpz_mod_poly(
+                    *reduced_storage, order.parent()->raw_flint_field()->pol,
+                    *ctx_storage);
+        }
+    };
+    flint::Fmpz quadratic_radicand;
+    const detail::DecomposePrimeRoute route = detail::decompose_prime_route(
+            order, p, max_residue_degree, quadratic_radicand,
+            [&]() noexcept {
+                reduce_defining_polynomial();
+                return fmpz_mod_poly_is_squarefree(reduced_storage->raw(),
+                                                   ctx_storage->raw()) != 0;
+            });
+    if (route == detail::DecomposePrimeRoute::refused) {
         return false;
     }
 
     PrimeIdealList candidates;
     candidates.defined_ = true;
 
-    if (order.degree() == 1) {
+    if (route == detail::DecomposePrimeRoute::degree_one) {
         Ideal p_ideal(order);
         OrderElement p_element(order);
         flint::FmpzPoly residue_polynomial;
@@ -4425,12 +4521,12 @@ bool decompose_prime(PrimeIdealList& out,
         return true;
     }
 
-    flint::FmpzModCtx ctx(p.raw());
+    if (!ctx_storage.has_value()) {
+        ctx_storage.emplace(p.raw());
+    }
+    flint::FmpzModCtx& ctx = *ctx_storage;
 
-    flint::Fmpz quadratic_radicand;
-    if (detail::residue_polynomial_uses_quadratic_integral_generator(order) &&
-        order.parent()->quadratic_radicand(
-                flint::FmpzRef(quadratic_radicand))) {
+    if (route == detail::DecomposePrimeRoute::quadratic_integral_generator) {
         // reference `quadgen`/`quadpoly` use the integral generator omega and its
         // minimal polynomial.  Factoring in that generator keeps the stored
         // residue polynomial aligned with this order's natural basis.
@@ -4479,9 +4575,8 @@ bool decompose_prime(PrimeIdealList& out,
         return true;
     }
 
-    flint::FmpzModPoly reduced_field_polynomial(ctx);
-    fmpq_poly_get_fmpz_mod_poly(reduced_field_polynomial,
-                                order.parent()->raw_flint_field()->pol, ctx);
+    reduce_defining_polynomial();
+    flint::FmpzModPoly& reduced_field_polynomial = *reduced_storage;
     auto append_defining_polynomial_factor =
             [&](const flint::FmpzModPolyFactor& factorization,
                 slong factor_index) noexcept -> bool {
@@ -4499,10 +4594,7 @@ bool decompose_prime(PrimeIdealList& out,
                        diagnostics);
     };
 
-    if (max_residue_degree == 1 &&
-        (order.is_equation_order() || order.is_maximal()) &&
-        fmpz_mod_poly_is_squarefree(reduced_field_polynomial.raw(),
-                                    ctx.raw()) != 0) {
+    if (route == detail::DecomposePrimeRoute::squarefree_roots) {
         flint::FmpzModPolyFactor roots(ctx);
         fmpz_mod_poly_roots(roots.raw(), reduced_field_polynomial.raw(), 0,
                             ctx.raw());
@@ -4552,12 +4644,8 @@ bool decompose_prime(PrimeIdealList& out,
         return true;
     }
 
-    if (!order.is_equation_order()) {
-        if (!order.is_maximal()) {
-            return false;
-        }
-
-        if (maximal_order_has_nonindex_defining_polynomial_prime(order, p)) {
+    if (route != detail::DecomposePrimeRoute::equation_factor) {
+        if (route == detail::DecomposePrimeRoute::nonindex_factor) {
             flint::FmpzModPoly reduced(ctx);
             flint::FmpzModPolyFactor factorization(ctx);
 
@@ -4813,18 +4901,12 @@ bool store_index_primes_and_get_degrees(
 bool decompose_prime_residue_degrees(std::vector<slong>& out,
                                      const Order& order,
                                      flint::FmpzConstRef p) noexcept {
-    // Only the index-divisor branch of decompose_prime (maximal,
-    // non-equation order, p dividing the index) is handled here; every other
-    // case is delegated whole.  The test below is no weaker than the branch
-    // conditions decompose_prime checks, with max_residue_degree = 0, before
-    // it reaches that branch.
-    if (!order.has_basis() || order.parent() == nullptr ||
-        fmpz_is_prime(p.raw()) == 0 ||
-        !fmpq_poly_is_monic_integral(order.parent()->raw_flint_field()->pol) ||
-        order.degree() <= 1 ||
-        residue_polynomial_uses_quadratic_integral_generator(order) ||
-        order.is_equation_order() || !order.is_maximal() ||
-        maximal_order_has_nonindex_defining_polynomial_prime(order, p)) {
+    // Only the index-divisor route of decompose_prime (maximal,
+    // non-equation order, p dividing the index) is handled here, chosen by
+    // the classifier decompose_prime routes by; every other case is
+    // delegated whole.
+    if (decompose_prime_route(order, p) !=
+        DecomposePrimeRoute::index_divisor) {
         return residue_degrees_from_decompose_prime(out, order, p);
     }
 
