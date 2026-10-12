@@ -2482,6 +2482,88 @@ void BM_class_unit_0_1_0_imag_quadratic_3116399_proven(
             kImagQuadratic3116399ClassUnit);
 }
 
+// Times only the witness requests on the large class group (order 2528):
+// every invariant_generator_power_witness and every relation_kernel_unit, on
+// a fresh context per iteration (the class/unit computation runs with the
+// timer paused).  This is the row that reaches the extra n x n Smith form
+// and S/V check in the invariant-generator witness path for large n.  The
+// field has unit rank 0, so the relation-kernel unit count is 0 and only the
+// four invariant-generator witnesses are timed.
+void BM_class_witness_requests_imag_quadratic_3116399_proven(
+        benchmark::State& state) {
+    silex::bench_contract::initialize(state);
+    initialize_exact_class_unit_counters(state, kImagQuadratic3116399ClassUnit);
+    FieldOrderSetup setup;
+    sflint::Fmpz d;
+    sflint::fmpz_set_si(sflint::FmpzRef(d), -3116399);
+    if (!setup.define_quadratic(sflint::FmpzConstRef(d))) {
+        silex::bench_contract::fail(
+                state, "quadratic field/order setup failed",
+                silex::bench_contract::FailureReason::setup);
+        return;
+    }
+    sflint::Fmpz factor_base_bound;
+    silex::ClassGroupComputeOptions options;
+    if (!configure_class_unit_0_1_0_options(
+                options, factor_base_bound, setup.maximal_order, false, false,
+                false, false, silex::CertificationMode::proven, 20000)) {
+        silex::bench_contract::fail(
+                state, "class/unit benchmark options unavailable",
+                silex::bench_contract::FailureReason::setup);
+        return;
+    }
+    bool failed = false;
+    slong witnesses = 0;
+    slong kernel_units = 0;
+    for (auto _ : state) {
+        state.PauseTiming();
+        silex::ClassGroupContext class_group;
+        silex::OrderUnitGroup units;
+        const bool ok = units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128);
+        state.ResumeTiming();
+        if (!ok) {
+            failed = true;
+            silex::bench_contract::fail(
+                    state, "class/unit compute failed",
+                    silex::bench_contract::FailureReason::operation);
+            break;
+        }
+        witnesses = 0;
+        kernel_units = class_group.relation_kernel_unit_count();
+        const slong invariants = class_group.invariant_count();
+        for (slong i = 0; i < invariants && !failed; ++i) {
+            silex::FactoredElement w(*setup.maximal_order.parent());
+            if (!class_group.invariant_generator_power_witness(w, i)) {
+                failed = true;
+            }
+            ++witnesses;
+            benchmark::DoNotOptimize(w);
+        }
+        for (slong i = 0; i < kernel_units && !failed; ++i) {
+            silex::FactoredElement w(*setup.maximal_order.parent());
+            if (!class_group.relation_kernel_unit(w, i)) {
+                failed = true;
+            }
+            ++witnesses;
+            benchmark::DoNotOptimize(w);
+        }
+        if (failed) {
+            silex::bench_contract::fail(
+                    state, "witness request failed",
+                    silex::bench_contract::FailureReason::operation);
+            break;
+        }
+    }
+    state.counters["witnesses_requested"] = static_cast<double>(witnesses);
+    state.counters["kernel_units"] = static_cast<double>(kernel_units);
+    benchmark::ClobberMemory();
+    if (!failed) {
+        silex::bench_contract::succeed(state);
+    }
+}
+
 void BM_class_unit_0_1_0_real_quadratic_40001_proven(
         benchmark::State& state) {
     BM_class_unit_0_1_0_from_quadratic(
@@ -2859,6 +2941,7 @@ BENCHMARK(BM_class_unit_0_1_0_degree_one_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_3116399_proven);
+BENCHMARK(BM_class_witness_requests_imag_quadratic_3116399_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_40001_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_100003_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_disc23_proven);
