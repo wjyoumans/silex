@@ -198,6 +198,15 @@ Changed
   the memo returns the same values and published results are unchanged on
   the 184 ``grh`` corpus rows that finish within 120 seconds.
 
+- Each factor stored in a ``FactoredElement`` keeps the hash of its
+  coefficients and an origin shared by the copies the factored operations
+  make of it.  The factored logarithmic embedding and unit extraction's log
+  memo reuse the stored hash instead of hashing every factor again, and two
+  factors of the same origin are known to be equal without comparing their
+  coefficients.  Equal factors pushed separately are still compared, so the
+  merged factors, the log embeddings and every published result are
+  unchanged.
+
 - The Belabas-Friedman ``hR`` estimate counts the roots of the defining
   polynomial modulo the large cutoff primes with its word-size kernel for
   defining polynomials of degree up to 16, instead of up to 6.  Degrees 7 to
