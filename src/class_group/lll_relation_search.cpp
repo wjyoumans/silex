@@ -1170,9 +1170,11 @@ bool ClassGroupContext::run_lll_relation_route_(
         }
     }
 
-    // Per-order rounded embedding and order Gram shared by every per-ideal
-    // reduction of this route.
-    IdealLatticeRoundedEmbeddingCache lll_cache;
+    // Per-order rounded embedding, order Gram and route-check result, kept
+    // in the context so every per-ideal reduction of this and later route
+    // slices of the context shares them.
+    IdealLatticeRoundedEmbeddingCache& lll_cache =
+            route_storage.lll_rounded_embedding_cache;
     slong candidates_tried = 0;
     slong accepted_relations = relation_count();
     bool goal_reached = !extension_only && has_presentation() &&

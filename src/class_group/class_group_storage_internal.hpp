@@ -10,6 +10,7 @@
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_field.hpp>
 
+#include "ideal_lattice_lll_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 #include "relation_search_budget_internal.hpp"
 #include "../factor_base/generation_different_route_internal.hpp"
@@ -354,6 +355,12 @@ struct ClassGroupContextStorage {
     RelationSearchBudgetCap lll_route_budget_cap =
             RelationSearchBudgetCap::none;
     ReducedIdealLatticeCache native_post_finite_reduced_lattices;
+    // Per-order data of the rounded-embedding ideal reduction (rounded order
+    // rows, order T2 Gram, and the result of its route check), shared by
+    // every run_lll_relation_route_ call of this context, so that the route
+    // check runs once per order and not once per relation-route slice.
+    relation_search::IdealLatticeRoundedEmbeddingCache
+            lll_rounded_embedding_cache;
     std::optional<RelationFinishState> finish_state;
     HnfFinishWorkspace hnf_finish_workspace;
     slong analytic_finish_precision = 0;
@@ -450,6 +457,8 @@ struct ClassGroupContextStorage {
         random_ideal_search_state.random_state = UWORD(0);
         random_ideal_search_state.defined = false;
         native_post_finite_reduced_lattices.clear();
+        lll_rounded_embedding_cache =
+                relation_search::IdealLatticeRoundedEmbeddingCache();
         finish_state.reset();
         hnf_finish_workspace.clear();
         analytic_finish_precision = 0;
@@ -650,6 +659,13 @@ public:
                 ? nullptr
                 : &context.private_storage_
                            ->native_post_finite_reduced_lattices;
+    }
+
+    static const relation_search::IdealLatticeRoundedEmbeddingCache*
+    lll_rounded_embedding_cache(const ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? nullptr
+                : &context.private_storage_->lll_rounded_embedding_cache;
     }
 };
 

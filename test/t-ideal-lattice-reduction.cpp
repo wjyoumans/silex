@@ -1,9 +1,13 @@
+#include "class_group/class_group_storage_internal.hpp"
 #include "class_group/ideal_lattice_reduction_internal.hpp"
 #include "class_group/ideal_lattice_lll_internal.hpp"
 #include "class_group/ideal_t2_enumeration_internal.hpp"
 #include "test_support.hpp"
 
+#include <silex/class_group.hpp>
+#include <silex/diagnostics.hpp>
 #include <silex/element.hpp>
+#include <silex/factor_base.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
@@ -12,6 +16,7 @@
 #include <silex/number_field.hpp>
 #include <silex/order.hpp>
 #include <silex/order_element.hpp>
+#include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 
 #include <algorithm>
@@ -19,6 +24,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 
 namespace {
@@ -97,6 +103,26 @@ FieldSetup real_cyclotomic_136() noexcept {
     for (std::size_t i = 0; i < coefficients.size(); ++i) {
         sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
                                        coefficients[i]);
+    }
+
+    FieldSetup setup;
+    setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    assert(setup.maximal_order.maximal_order(equation_order));
+    assert(setup.maximal_order.is_maximal());
+    return setup;
+}
+
+// The field of the monic polynomial with low-to-high coefficients
+// `coefficients` (the leading 1 included), with its maximal order.
+FieldSetup monic_field(const slong* coefficients, slong count) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i < count; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
     }
 
     FieldSetup setup;
@@ -681,6 +707,118 @@ int test_rounded_embedding_route_check_for_badly_rounded_order() {
     assert(one_lll_basis_from_cache(one_lll_basis, cubic_prime, cache));
     assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(one_lll_basis),
                                   sflint::FmpzMatConstRef(cubic_data.basis)));
+    return 0;
+}
+
+// Counts the route checks of the rounded-embedding reduction and the ideals
+// reduced by the two-LLL route of a switched order.
+struct RouteCheckCounter {
+    long checks = 0;
+    long two_lll_order = 0;
+};
+
+void route_check_callback(void* user,
+                          silex::DiagnosticsModule,
+                          silex::ProfileEvent event,
+                          const char*,
+                          const char* label) noexcept {
+    if (event != silex::ProfileEvent::begin_scope || label == nullptr) {
+        return;
+    }
+    RouteCheckCounter& counter = *static_cast<RouteCheckCounter*>(user);
+    if (std::strcmp(label,
+                    "class_group.ideal_lattice_reduction.rounded_embedding."
+                    "route_check") == 0) {
+        ++counter.checks;
+    } else if (std::strcmp(label,
+                           "class_group.ideal_lattice_reduction."
+                           "rounded_embedding.two_lll_order") == 0) {
+        ++counter.two_lll_order;
+    }
+}
+
+// Runs the grh class/unit transaction on the maximal order of `setup` with
+// the options of the class/unit benchmark tool, and copies the route-check
+// state its class-group context kept.
+void run_grh_route_check(bool& route_checked,
+                         bool& use_two_lll_route,
+                         RouteCheckCounter& counter,
+                         const FieldSetup& setup) noexcept {
+    const silex::Order& order = setup.maximal_order;
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), order));
+    silex::ClassGroupComputeOptions options;
+    const slong n = order.degree();
+    options.max_candidates = std::max<slong>(5000, n * n + 64);
+    options.max_relations = 1000;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::grh;
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            route_check_callback, &counter);
+    options.diagnostics = &diagnostics;
+
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            class_group, order, sflint::FmpzConstRef(factor_base_bound),
+            options, 128));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    const silex::detail::relation_search::IdealLatticeRoundedEmbeddingCache*
+            cache = silex::detail::ClassGroupRelationSearchAccess::
+                    lll_rounded_embedding_cache(class_group);
+    assert(cache != nullptr && cache->has_order &&
+           cache->order.has_same_data(order));
+    route_checked = cache->route_checked;
+    use_two_lll_route = cache->use_two_lll_route;
+}
+
+// The route check runs once per order in a class-group context: the result
+// for the first accepted ideal of the order is kept in the context and used
+// by every later relation-route slice.  On the real subfield of Q(zeta_31)
+// (benchmark row cyclotomic_real_31_deg15) the first ideal, the unit ideal
+// of the first slice, passes the check (one-LLL T2 diagonal product about
+// 2^13.3 times the two-LLL one, under 2^15), so no ideal of the computation
+// takes the two-LLL route.  When each slice ran its own check, the first
+// pivot ideals of four of the seven extension slices failed it (2^15.2 to
+// 2^20.9), so those slices switched route and the relation set changed.  On the octic field of row
+// multiquadratic_p5_m7_m11 the unit ideal fails the check (about 2^23.4
+// against 2^8), and the order keeps the two-LLL route.
+int test_rounded_embedding_route_check_once_per_context() {
+    constexpr std::array<slong, 16> real_31 = {
+            -1, -8, 28, 84, -126, -252, 210, 330,
+            -165, -220, 66, 78, -13, -14, 1, 1};
+    bool route_checked = false;
+    bool use_two_lll_route = true;
+    RouteCheckCounter counter;
+    run_grh_route_check(route_checked, use_two_lll_route, counter,
+                        monic_field(real_31.data(),
+                                    static_cast<slong>(real_31.size())));
+    assert(route_checked && !use_two_lll_route);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.checks == 1);
+    assert(counter.two_lll_order == 0);
+#endif
+
+    constexpr std::array<slong, 9> p5_m7_m11 = {
+            144, -300, 259, -196, 162, -48, 24, -2, 1};
+    route_checked = false;
+    use_two_lll_route = false;
+    counter = RouteCheckCounter{};
+    run_grh_route_check(route_checked, use_two_lll_route, counter,
+                        monic_field(p5_m7_m11.data(),
+                                    static_cast<slong>(p5_m7_m11.size())));
+    assert(route_checked && use_two_lll_route);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.checks == 1);
+    assert(counter.two_lll_order > 0);
+#endif
     return 0;
 }
 
@@ -1335,6 +1473,7 @@ int main() {
     assert(test_rounded_embedding_lll_contracts() == 0);
     assert(test_rounded_embedding_route_check_for_badly_rounded_order() == 0);
     assert(test_rounded_embedding_route_check_boundary() == 0);
+    assert(test_rounded_embedding_route_check_once_per_context() == 0);
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);
