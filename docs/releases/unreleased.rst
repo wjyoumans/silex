@@ -678,6 +678,18 @@ Changed
   searches for a separating element, which cannot exist.  Decompositions,
   prime order included, are unchanged.
 
+- The Bach-Friedman Euler factors of a ``grh`` class/unit computation read
+  the residue degrees of a prime dividing the index from the decomposition
+  the maximal order keeps, instead of rebuilding its prime ideals.  When the
+  decomposition is not yet kept, the quotient ``O/pO`` of an unramified
+  prime is built once for the bounded and the recursive split, and the
+  decomposition kept is the one ``decompose_prime`` would keep.
+  ``decompose_prime`` and published results are unchanged (identical on the
+  ``grh`` corpus and the ``proven`` matrix compared).  On
+  ``cyclotomic_real_q10_c11_deg10`` (``grh``) the class/unit CPU time went
+  from a median of 354 ms to 331 ms over 11 interleaved runs (Release build
+  on a busy machine, not a controlled measurement).
+
 - The ``grh`` factor-base probe no longer decomposes a rational prime that has
   no prime ideal of norm at most the probe bound.  It reads the residue
   degrees of the prime from the defining polynomial modulo the prime, and when
