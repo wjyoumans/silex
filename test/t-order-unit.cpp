@@ -525,6 +525,47 @@ int test_precision_doubling_cap_default_value() {
     return 0;
 }
 
+// publish_presentation passes the context's Smith form cache: a second
+// publish of the same relations, whose HNF basis is unchanged, takes the
+// Smith form from the cache and emits the smith_form_reused event.
+int test_publish_presentation_reuses_smith_form() {
+    silex::NumberField field = degree_one_field();
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::ClassGroupContext context(order);
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "class_group.publish_presentation.smith_form_reused";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            torsion_event_callback, &counter);
+    context.set_diagnostics(&diagnostics);
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 2));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Relation relation(*base);
+    silex::Element alpha(field);
+    assert(alpha.set_si(4));
+    assert(relation.set_generator(alpha));
+    assert(context.append_relation(relation));
+
+    assert(context.publish_presentation());
+    assert(counter.count == 0);
+    assert(context.publish_presentation());
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count == 1);
+#endif
+    context.set_diagnostics(nullptr);
+    return 0;
+}
+
 int test_precision_doubling_cap_forced_failures() {
     silex::NumberField field = quadratic_field(2);
     silex::Element epsilon(field);
@@ -12403,6 +12444,7 @@ int main() {
     test_unit_extraction_cache_clear();
     test_precision_doubling_cap_default_value();
     test_precision_doubling_cap_forced_failures();
+    test_publish_presentation_reuses_smith_form();
     test_incremental_unit_context_matches_compact_independent();
     test_incremental_unit_context_cap_fallback();
     test_reduce_mod_units_half_integer_tie();
