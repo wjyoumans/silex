@@ -48,6 +48,7 @@ void reset_report(BoundedCompactReconstructionReport& report) noexcept {
     report.order_basis_prime_rejections = 0;
     report.denominator_prime_rejections = 0;
     report.noninvertible_prime_rejections = 0;
+    report.nonsplit_prime_skips = 0;
     report.modulus_bits = 0;
     report.last_prime = 0;
     fmpz_one(report.centered_crt_modulus.raw());
@@ -269,23 +270,33 @@ struct WindowStep {
 // interleaved evaluation and vary with w by less than w per exponent (Moller
 // gives b - max w_i up to b - 1), so they are left out of the choice.  The
 // width changes only the cost, never the product.
-ulong sliding_window_width(flint_bitcnt_t total_bits,
-                           flint_bitcnt_t maximum_bits) noexcept {
+struct SlidingWindowChoice {
+    ulong width = 1;
+    // Modeled multiplications of the table and the windows at that width.
+    double cost = 0.0;
+};
+
+SlidingWindowChoice choose_sliding_window(flint_bitcnt_t total_bits,
+                                          flint_bitcnt_t maximum_bits) noexcept {
     constexpr ulong maximum_width = 16;
     const double bits = static_cast<double>(total_bits);
-    ulong best_width = 1;
-    double best_cost = bits / 2.0;
+    SlidingWindowChoice best{1, bits / 2.0};
     for (ulong width = 2;
          width <= maximum_width && width <= static_cast<ulong>(maximum_bits);
          ++width) {
         const double cost = static_cast<double>(UWORD(1) << (width - 1)) +
                             bits / static_cast<double>(width + 1);
-        if (cost < best_cost) {
-            best_cost = cost;
-            best_width = width;
+        if (cost < best.cost) {
+            best.cost = cost;
+            best.width = width;
         }
     }
-    return best_width;
+    return best;
+}
+
+ulong sliding_window_width(flint_bitcnt_t total_bits,
+                           flint_bitcnt_t maximum_bits) noexcept {
+    return choose_sliding_window(total_bits, maximum_bits).width;
 }
 
 void build_odd_power_table(OddPowerTable& table, const flint::NmodPoly& base,
@@ -457,18 +468,103 @@ bool publish_reconstructed_elements(std::vector<Element>& out,
 }
 
 
+// For p = modulus.mod.n prime, true exactly when the monic modulus f of
+// positive degree is a product of distinct linear factors over F_p: since
+// x^p - x is the product of x - a over the elements a of F_p (Lidl and
+// Niederreiter, Finite Fields, Lemma 2.4), f divides x^p - x, which is
+// x^p = x modulo f, exactly when f is such a product.  This is the
+// degree-one step of distinct-degree factorization; one modular
+// exponentiation of x decides it.
+bool splits_into_distinct_linear_factors(const flint::NmodPoly& modulus)
+        noexcept {
+    const ulong prime = modulus.raw()->mod.n;
+    const slong degree = nmod_poly_degree(modulus.raw());
+    if (degree < 1 || nmod_poly_get_coeff_ui(modulus.raw(), degree) != 1) {
+        return false;
+    }
+    flint::NmodPoly inverse(prime);
+    nmod_poly_reverse(inverse.raw(), modulus.raw(), degree + 1);
+    nmod_poly_inv_series(inverse.raw(), inverse.raw(), degree + 1);
+    flint::NmodPoly power(prime);
+    nmod_poly_powmod_x_ui_preinv(power.raw(), prime, modulus.raw(),
+                                 inverse.raw());
+    flint::NmodPoly x(prime);
+    flint::NmodPoly x_reduced(prime);
+    nmod_poly_set_coeff_ui(x.raw(), 1, 1);
+    nmod_poly_rem(x_reduced.raw(), x.raw(), modulus.raw());
+    return nmod_poly_equal(power.raw(), x_reduced.raw()) != 0;
+}
+
+// Bit counts of the exponents of one factor row, by sign.
+struct ExponentRowBits {
+    flint_bitcnt_t positive_bits = 0;
+    flint_bitcnt_t positive_maximum = 0;
+    flint_bitcnt_t negative_bits = 0;
+    flint_bitcnt_t negative_maximum = 0;
+
+    void add(const flint::Fmpz& exponent) noexcept {
+        const flint_bitcnt_t bits = fmpz_bits(exponent.raw());
+        if (fmpz_sgn(exponent.raw()) > 0) {
+            positive_bits += bits;
+            positive_maximum = std::max(positive_maximum, bits);
+        } else if (fmpz_sgn(exponent.raw()) < 0) {
+            negative_bits += bits;
+            negative_maximum = std::max(negative_maximum, bits);
+        }
+    }
+
+    // The window model of sliding_window_width summed over the tables the
+    // row needs: one for the base when some exponent is positive and one for
+    // its inverse when some exponent is negative.
+    double modeled_cost() const noexcept {
+        double cost = 0.0;
+        if (positive_bits != 0) {
+            cost += choose_sliding_window(positive_bits, positive_maximum).cost;
+        }
+        if (negative_bits != 0) {
+            cost += choose_sliding_window(negative_bits, negative_maximum).cost;
+        }
+        return cost;
+    }
+};
+
+// out = ((exponent - 1) mod lambda) + 1, which lies in [1, lambda].
+void reduce_exponent(flint::Fmpz& out, const flint::Fmpz& exponent,
+                     const flint::Fmpz& lambda) noexcept {
+    fmpz_sub_ui(out.raw(), exponent.raw(), 1);
+    fmpz_fdiv_r(out.raw(), out.raw(), lambda.raw());
+    fmpz_add_ui(out.raw(), out.raw(), 1);
+}
+
 // Exponent rows of the factors after reduction modulo the exponent lambda of
-// the unit group of (Z/pZ)[x]/(modulus).  A row with an entry of magnitude
-// above lambda is copied into storage and reduced there; every other row
-// stays the caller's.  An entry e > 0 becomes ((e - 1) mod lambda) + 1, which
-// lies in [1, lambda] and gives the same power of every element of the ring:
-// in each field component F_q, a^q = a for every a, zero included (Lidl and
-// Niederreiter, Finite Fields, Lemma 2.3), and q - 1 divides lambda.  Plain
-// e mod lambda would turn a^lambda into a^0 = 1, which is wrong for a zero
-// divisor.  An entry e < 0 is reduced the same way only when the factor
-// carries an inverse, that is, when its base is a unit, whose order divides
-// lambda; the result is positive, so it uses the base's table.  The reduced
-// magnitude is at most lambda, below the original, so no exponent grows.
+// the unit group of R = (Z/pZ)[x]/(modulus).  A row that changes is copied
+// into storage and reduced there; every other row stays the caller's.
+//
+// Soundness.  modular_unit_group_exponent returns lambda only when p is prime
+// and the modulus is monic, nonconstant and squarefree modulo p (a product of
+// distinct linear factors, its lambda = p - 1 case, is squarefree).  Then R is
+// the product of the fields F_q = F_p[x]/(f_i) over the irreducible factors
+// f_i of the modulus (Chinese remainder theorem; Lidl and Niederreiter,
+// Finite Fields, Theorem 1.61), and lambda = lcm(q - 1).
+//  (a) e > 0, any base: in each F_q, a^q = a for every a, zero included
+//      (Lidl and Niederreiter, Lemma 2.3), and q - 1 divides lambda, so
+//      a^(lambda + 1) = a in R and a^e = a^(((e - 1) mod lambda) + 1).
+//      Plain e mod lambda would turn a^lambda into a^0 = 1, which is wrong
+//      for a zero divisor.
+//  (b) e < 0, only when the factor carries an inverse (the caller's
+//      contract; build_prime_residues rejects the prime when a base with a
+//      negative exponent is not invertible modulo it), so the base a is a
+//      unit of R.  Its order divides lambda, so a^e = a^(e + k lambda) for
+//      every integer k, and ((e - 1) mod lambda) + 1 is such an exponent.
+//      The result is positive, so the entry then uses the base's table.
+// Which of the equal forms is used changes only the cost, never the residue.
+// Every entry of magnitude above lambda is reduced, positive by (a) or (b),
+// so no exponent grows.  For a factor with an inverse, every entry of the
+// row is also made positive by (b) when the window model of
+// sliding_window_width charges less for one table of the reduced positive
+// exponents than for a base table and an inverse table; squarings are left
+// out of that comparison as they are of the width choice, and after the
+// reduction no entry exceeds lambda in either form.
 void reduce_power_product_exponents(
         std::vector<const std::vector<flint::Fmpz>*>& rows,
         std::vector<std::vector<flint::Fmpz>>& storage,
@@ -480,7 +576,7 @@ void reduce_power_product_exponents(
     }
 
     // lambda >= p - 1, so nothing reduces unless some magnitude exceeds
-    // p - 1; only then is the modulus factored.
+    // p - 1; only then is lambda computed.
     const ulong prime = modulus.raw()->mod.n;
     const auto reducible = [](const flint::Fmpz& exponent,
                               const ModularPowerProductFactor& factor) {
@@ -506,29 +602,53 @@ void reduce_power_product_exponents(
 
     storage.clear();
     storage.reserve(factors.size());
+    std::vector<flint::Fmpz> reduced;
     for (std::size_t row = 0; row < factors.size(); ++row) {
-        const std::vector<flint::Fmpz>& exponents = *factors[row].exponents;
-        const bool reduces = std::any_of(
-                exponents.begin(), exponents.end(),
-                [&](const flint::Fmpz& exponent) {
-                    return reducible(exponent, factors[row]) &&
-                           fmpz_cmpabs(exponent.raw(), lambda.raw()) > 0;
-                });
-        if (!reduces) {
+        const ModularPowerProductFactor& factor = factors[row];
+        const std::vector<flint::Fmpz>& exponents = *factor.exponents;
+        // reduced[i] = ((e - 1) mod lambda) + 1 for every nonzero entry e
+        // that may be reduced; zero and the other entries stay as given.
+        reduced.resize(exponents.size());
+        ExponentRowBits large_only;
+        ExponentRowBits all_positive;
+        bool large_entry = false;
+        bool small_negative = false;
+        for (std::size_t i = 0; i < exponents.size(); ++i) {
+            const flint::Fmpz& exponent = exponents[i];
+            if (fmpz_is_zero(exponent.raw()) != 0 ||
+                !reducible(exponent, factor)) {
+                fmpz_set(reduced[i].raw(), exponent.raw());
+                large_only.add(exponent);
+                all_positive.add(exponent);
+                continue;
+            }
+            reduce_exponent(reduced[i], exponent, lambda);
+            all_positive.add(reduced[i]);
+            if (fmpz_cmpabs(exponent.raw(), lambda.raw()) > 0) {
+                large_entry = true;
+                large_only.add(reduced[i]);
+            } else {
+                small_negative =
+                        small_negative || fmpz_sgn(exponent.raw()) < 0;
+                large_only.add(exponent);
+            }
+        }
+        const bool make_positive =
+                small_negative &&
+                all_positive.modeled_cost() < large_only.modeled_cost();
+        if (!large_entry && !make_positive) {
             continue;
         }
         storage.emplace_back(exponents.size());
-        std::vector<flint::Fmpz>& reduced = storage.back();
+        std::vector<flint::Fmpz>& kept = storage.back();
         for (std::size_t i = 0; i < exponents.size(); ++i) {
-            fmpz_set(reduced[i].raw(), exponents[i].raw());
-            if (reducible(exponents[i], factors[row]) &&
-                fmpz_cmpabs(exponents[i].raw(), lambda.raw()) > 0) {
-                fmpz_sub_ui(reduced[i].raw(), reduced[i].raw(), 1);
-                fmpz_fdiv_r(reduced[i].raw(), reduced[i].raw(), lambda.raw());
-                fmpz_add_ui(reduced[i].raw(), reduced[i].raw(), 1);
-            }
+            const bool use_reduced =
+                    make_positive ||
+                    fmpz_cmpabs(exponents[i].raw(), lambda.raw()) > 0;
+            fmpz_set(kept[i].raw(),
+                     use_reduced ? reduced[i].raw() : exponents[i].raw());
         }
-        rows[row] = &reduced;
+        rows[row] = &kept;
     }
 }
 
@@ -539,7 +659,17 @@ bool modular_unit_group_exponent(flint::Fmpz& out,
     const ulong prime = modulus.raw()->mod.n;
     const slong degree = nmod_poly_degree(modulus.raw());
     if (degree < 1 || nmod_poly_get_coeff_ui(modulus.raw(), degree) != 1 ||
-        n_is_prime(prime) == 0 || nmod_poly_is_squarefree(modulus.raw()) == 0) {
+        n_is_prime(prime) == 0) {
+        return false;
+    }
+    // A modulus with distinct linear factors only: R = F_p^degree, every
+    // factor degree is 1, and the distinct-degree factorization below would
+    // give the same lambda = p - 1.
+    if (splits_into_distinct_linear_factors(modulus)) {
+        fmpz_set_ui(out.raw(), prime - 1);
+        return true;
+    }
+    if (nmod_poly_is_squarefree(modulus.raw()) == 0) {
         return false;
     }
 
@@ -700,6 +830,17 @@ const char* bounded_compact_reconstruction_status_name(
 
 namespace {
 
+// The defining polynomial reduced modulo prime keeps its degree, is monic and
+// splits into distinct linear factors there.
+bool defining_polynomial_splits(const flint::FmpqPoly& defining_polynomial,
+                                slong degree, ulong prime) noexcept {
+    flint::NmodPoly modulus(prime);
+    return reduce_power_polynomial(modulus, defining_polynomial, degree,
+                                   prime) &&
+           nmod_poly_degree(modulus.raw()) == degree &&
+           splits_into_distinct_linear_factors(modulus);
+}
+
 bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
                           std::vector<Element>& out, const Order& order,
                           std::vector<PreparedFactor>& factors,
@@ -732,6 +873,31 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
     fmpz_one(modulus.raw());
     flint::FmpzMat reconstructed(static_cast<slong>(output_count), degree);
 
+    // Split-prime preference.  When some exponent has more than FLINT_BITS
+    // bits, it exceeds p - 1 for every word-size prime p, and at a prime
+    // where the reduced defining polynomial splits into distinct linear
+    // factors the unit group exponent of the residue ring is p - 1, so
+    // modular_power_products reduces every exponent below p and may drop the
+    // inverse tables.  Every prime gives the same reconstruction, so the
+    // choice changes only the cost.  Up to split_prime_scan_limit candidates
+    // are tested for each prime the CRT needs: by the Chebotarev density
+    // theorem the completely split primes have density 1 / [L : Q] for the
+    // Galois closure L of the field, which is 1 / degree for a Galois field,
+    // so the limit of 4 * degree candidates finds one with probability
+    // 1 - (1 - 1 / degree)^(4 degree) > 1 - e^-4 there.  When the limit is
+    // reached, that candidate is tried as before and the preference ends.
+    bool prefer_split_primes = false;
+    for (const PreparedFactor& factor : factors) {
+        for (const flint::Fmpz& exponent : factor.exponents) {
+            if (fmpz_bits(exponent.raw()) > FLINT_BITS) {
+                prefer_split_primes = true;
+            }
+        }
+    }
+    const std::size_t split_prime_scan_limit =
+            4 * static_cast<std::size_t>(degree);
+    std::size_t split_prime_scan = 0;
+
     ulong prime_cursor = options.prime_search_start;
     while (fmpz_cmp(modulus.raw(), twice_bound.raw()) <= 0 ||
            report.primes_used == 0) {
@@ -741,6 +907,17 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
         }
         const ulong prime = n_nextprime(prime_cursor, 1);
         prime_cursor = prime;
+        if (prefer_split_primes) {
+            if (defining_polynomial_splits(defining_polynomial, degree,
+                                           prime)) {
+                split_prime_scan = 0;
+            } else if (++split_prime_scan < split_prime_scan_limit) {
+                ++report.nonsplit_prime_skips;
+                continue;
+            } else {
+                prefer_split_primes = false;
+            }
+        }
         report.last_prime = prime;
         ++report.prime_trials;
 

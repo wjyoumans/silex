@@ -14,6 +14,7 @@
 
 #include "class_group/class_group_internal.hpp"
 #include "factored_element/compact_reconstruction_internal.hpp"
+#include "factored_element/wide_factored_internal.hpp"
 #include "order_unit/compact_reconstruction_bound_internal.hpp"
 #include "test_support.hpp"
 
@@ -21,6 +22,7 @@
 #include <flint/arf.h>
 #include <flint/flint.h>
 #include <flint/fmpz.h>
+#include <flint/fmpz_mat.h>
 #include <flint/nmod_mat.h>
 #include <flint/nmod_poly.h>
 #include <flint/ulong_extras.h>
@@ -165,6 +167,7 @@ int test_shared_exponent_matrix_and_centered_crt() {
     assert(report.factor_rows == 2);
     assert(report.primes_used >= 2);
     assert(report.prime_trials == report.primes_used);
+    assert(report.nonsplit_prime_skips == 0);
     assert(report.denominator_prime_rejections == 0);
     assert(report.noninvertible_prime_rejections == 0);
     assert_exact_crt_crossing(report, sflint::FmpzConstRef(bound));
@@ -462,7 +465,8 @@ int test_coordinate_bound_rank_zero() {
     sflint::fmpz_set_si(sflint::FmpzRef(bound), 99);
     silex::detail::CompactCoordinateBoundReport report;
     assert(silex::detail::compact_unit_coordinate_bound(
-            report, sflint::FmpzRef(bound), order, {}, embeddings));
+            report, sflint::FmpzRef(bound), order,
+            silex::FactoredElementSpan{}, embeddings));
     assert(report.status ==
            silex::detail::CompactCoordinateBoundStatus::success);
     assert(report.bit_bound == 0);
@@ -1930,12 +1934,279 @@ int test_modular_power_products_reduced_exponents() {
     return 0;
 }
 
+// The first prime above 2^63 that is 1 modulo m.
+ulong first_large_prime_one_mod(ulong m) {
+    ulong prime = n_nextprime(UWORD(1) << (FLINT_BITS - 1), 1);
+    while (prime % m != 1) {
+        prime = n_nextprime(prime, 1);
+    }
+    return prime;
+}
+
+// The 41st cyclotomic polynomial modulo prime.
+void cyclotomic_41_modulus(sflint::NmodPoly& modulus) {
+    nmod_poly_zero(modulus.raw());
+    for (slong i = 0; i <= 40; ++i) {
+        nmod_poly_set_coeff_ui(modulus.raw(), i, 1);
+    }
+}
+
+// A modulus with distinct linear factors only has lambda = p - 1.  Its
+// exponents are reduced below p, a unit's negative exponents included, and
+// negative exponents just below lambda in magnitude are made positive, so a
+// factor whose every negative exponent is either above lambda in magnitude
+// or close to it does not use its inverse: the products stay right when
+// that inverse is replaced by a value that is not an inverse.
+int test_modular_power_products_split_modulus() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    sflint::Fmpz lambda;
+
+    // (x - 1)(x - 2)(x - 5)(x - 7) modulo 101: lambda = 100.
+    sflint::NmodPoly split(UWORD(101));
+    product_modulus(split, {{100, 1}, {99, 1}, {96, 1}, {94, 1}});
+    assert(silex::detail::modular_unit_group_exponent(lambda, split));
+    assert(fmpz_equal_ui(lambda.raw(), 100) != 0);
+
+    // Phi_41 modulo a prime p = 1 mod 41 splits into linear factors.
+    const ulong big = first_large_prime_one_mod(41);
+    sflint::NmodPoly cyclotomic(big);
+    cyclotomic_41_modulus(cyclotomic);
+    assert(silex::detail::modular_unit_group_exponent(lambda, cyclotomic));
+    assert(fmpz_equal_ui(lambda.raw(), big - 1) != 0);
+
+    for (int which = 0; which < 2; ++which) {
+        const sflint::NmodPoly& modulus = which == 0 ? split : cyclotomic;
+        const ulong prime = modulus.raw()->mod.n;
+        assert(silex::detail::modular_unit_group_exponent(lambda, modulus));
+        PowerProductCase input;
+        // Bases: the zero divisor x - 1 (for the split modulus), then units.
+        random_power_product_case(input, state, modulus, 4, 7, 4, true);
+        if (which == 0) {
+            product_modulus(input.bases[0], {{100, 1}});
+        }
+        // Columns: +-1, -3, -(lambda - 2), lambda * 2^70 + 3, its
+        // negative, and +-(lambda + 1).
+        for (std::size_t k = 0; k < input.bases.size(); ++k) {
+            std::vector<sflint::Fmpz>& row = input.exponents[k];
+            const bool unit = k != 0 || which == 1;
+            fmpz_set_si(row[0].raw(), unit ? -1 : 1);
+            fmpz_set_si(row[1].raw(), unit ? -3 : 3);
+            fmpz_sub_ui(row[2].raw(), lambda.raw(), 2);
+            fmpz_mul_2exp(row[3].raw(), lambda.raw(), 70);
+            fmpz_add_ui(row[3].raw(), row[3].raw(), 3);
+            fmpz_set(row[4].raw(), row[3].raw());
+            fmpz_add_ui(row[5].raw(), lambda.raw(), 1);
+            fmpz_set(row[6].raw(), row[5].raw());
+            if (unit) {
+                fmpz_neg(row[2].raw(), row[2].raw());
+                fmpz_neg(row[4].raw(), row[4].raw());
+                fmpz_neg(row[6].raw(), row[6].raw());
+            }
+            input.has_inverse[k] = unit;
+            if (unit) {
+                assert(nmod_poly_invmod(input.inverses[k].raw(),
+                                        input.bases[k].raw(),
+                                        modulus.raw()) != 0);
+            }
+        }
+        assert_power_products_match_reference(input, modulus, 7);
+
+        // The last factor: negative exponents only of magnitude above or
+        // just below lambda, every one made positive.  Its inverse is
+        // replaced by the base itself, which is not its inverse.
+        const std::size_t last = input.bases.size() - 1;
+        std::vector<sflint::Fmpz>& row = input.exponents[last];
+        for (std::size_t i = 0; i < row.size(); ++i) {
+            fmpz_sub_ui(row[i].raw(), lambda.raw(), i + 1);
+            if (i % 2 == 0) {
+                fmpz_mul_2exp(row[i].raw(), row[i].raw(), 40 * i);
+            }
+            fmpz_neg(row[i].raw(), row[i].raw());
+        }
+        std::vector<silex::detail::ModularPowerProductFactor> factors;
+        for (std::size_t k = 0; k < input.bases.size(); ++k) {
+            factors.push_back(
+                    {&input.bases[k],
+                     input.has_inverse[k] ? &input.inverses[k] : nullptr,
+                     &input.exponents[k]});
+        }
+        sflint::NmodMat expected(7, nmod_poly_degree(modulus.raw()), prime);
+        sflint::NmodMat actual(7, nmod_poly_degree(modulus.raw()), prime);
+        reference_power_products(expected, factors, modulus);
+        sflint::NmodPoly not_inverse(prime);
+        nmod_poly_set(not_inverse.raw(), input.bases[last].raw());
+        nmod_poly_add_ui(not_inverse.raw(), not_inverse.raw(), 1);
+        factors[last].inverse = &not_inverse;
+        silex::detail::modular_power_products(actual, factors, modulus);
+        assert(nmod_mat_equal(expected.raw(), actual.raw()) != 0);
+    }
+
+    // Wide random exponents of both signs on the split cyclotomic modulus.
+    for (int sign_mode = 0; sign_mode < 2; ++sign_mode) {
+        PowerProductCase input;
+        random_power_product_case(input, state, cyclotomic, 5, 4, 140,
+                                  sign_mode == 1);
+        assert_power_products_match_reference(input, cyclotomic, 4);
+    }
+
+    flint_rand_clear(state);
+    return 0;
+}
+
+// Without lambda (a repeated factor) the exponents are used as given, so a
+// negative exponent does use the inverse: replacing it by a value that is
+// not an inverse changes the product.
+int test_modular_power_products_fallback_uses_inverse() {
+    sflint::NmodPoly repeated(UWORD(101));
+    product_modulus(repeated, {{100, 1}, {100, 1}, {99, 1}});
+    sflint::Fmpz lambda;
+    assert(!silex::detail::modular_unit_group_exponent(lambda, repeated));
+
+    PowerProductCase input;
+    input.bases.emplace_back(UWORD(101));
+    input.inverses.emplace_back(UWORD(101));
+    input.exponents.emplace_back(2);
+    input.has_inverse.push_back(true);
+    product_modulus(input.bases[0], {{5, 1}});
+    assert(nmod_poly_invmod(input.inverses[0].raw(), input.bases[0].raw(),
+                            repeated.raw()) != 0);
+    // -(2^80 + 1) exceeds p - 1 = 100 in magnitude, and -3 is small.
+    fmpz_one(input.exponents[0][0].raw());
+    fmpz_mul_2exp(input.exponents[0][0].raw(), input.exponents[0][0].raw(),
+                  80);
+    fmpz_add_ui(input.exponents[0][0].raw(), input.exponents[0][0].raw(), 1);
+    fmpz_neg(input.exponents[0][0].raw(), input.exponents[0][0].raw());
+    fmpz_set_si(input.exponents[0][1].raw(), -3);
+    assert_power_products_match_reference(input, repeated, 2);
+
+    std::vector<silex::detail::ModularPowerProductFactor> factors{
+            {&input.bases[0], &input.inverses[0], &input.exponents[0]}};
+    sflint::NmodMat expected(2, 3, UWORD(101));
+    sflint::NmodMat actual(2, 3, UWORD(101));
+    reference_power_products(expected, factors, repeated);
+    sflint::NmodPoly not_inverse(UWORD(101));
+    nmod_poly_set(not_inverse.raw(), input.bases[0].raw());
+    factors[0].inverse = &not_inverse;
+    silex::detail::modular_power_products(actual, factors, repeated);
+    for (slong column = 0; column < 2; ++column) {
+        bool same = true;
+        for (slong i = 0; i < 3; ++i) {
+            same = same && nmod_mat_entry(expected.raw(), column, i) ==
+                                   nmod_mat_entry(actual.raw(), column, i);
+        }
+        assert(!same);
+    }
+    return 0;
+}
+
+// Wide units of Q(zeta_5), whose defining polynomial Phi_5 splits into
+// linear factors modulo p exactly when p = 1 mod 5: with an exponent above
+// the word size, the reconstruction passes over the primes that are not
+// 1 mod 5, and after 4 * degree - 1 such primes in a row it takes the next
+// prime as before.  The units are the same either way.
+int test_wide_reconstruction_prefers_split_primes() {
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 4; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    // u = 1 + zeta is a unit (its norm is Phi_5(-1) = 1).  Bases u and u^2,
+    // outputs u^(2^71 + 1) (u^2)^(-2^70) = u and
+    // u^(-2^72 - 1) (u^2)^(2^71) = u^-1.
+    silex::Element zeta(field);
+    silex::Element unit(field);
+    assert(zeta.gen());
+    assert(unit.add_si(zeta, 1));
+    silex::detail::WideFactoredUnits wide;
+    wide.bases.emplace_back(field);
+    wide.bases.emplace_back(field);
+    assert(wide.bases[0].add_si(zeta, 1));
+    assert(wide.bases[1].multiply(unit, unit));
+    wide.exponents = sflint::FmpzMat(2, 2);
+    fmpz* e00 = fmpz_mat_entry(wide.exponents.raw(), 0, 0);
+    fmpz* e01 = fmpz_mat_entry(wide.exponents.raw(), 0, 1);
+    fmpz* e10 = fmpz_mat_entry(wide.exponents.raw(), 1, 0);
+    fmpz* e11 = fmpz_mat_entry(wide.exponents.raw(), 1, 1);
+    fmpz_one_2exp(e00, 71);
+    fmpz_add_ui(e00, e00, 1);
+    fmpz_one_2exp(e01, 70);
+    fmpz_neg(e01, e01);
+    fmpz_one_2exp(e10, 72);
+    fmpz_add_ui(e10, e10, 1);
+    fmpz_neg(e10, e10);
+    fmpz_one_2exp(e11, 71);
+
+    std::vector<silex::FactoredElement> plain;
+    plain.emplace_back(field);
+    plain.emplace_back(field);
+    assert(plain[0].push(unit, 1));
+    assert(plain[1].push(unit, -1));
+    std::vector<silex::Element> expected;
+    sflint::Fmpz bound;
+    exact_outputs_and_bound(expected, bound, maximal, plain);
+
+    // A start whose next prime is not 1 mod 5, and a start followed by
+    // 4 * 4 = 16 primes in a row that are not 1 mod 5.
+    ulong single_start = UWORD(1) << (FLINT_BITS - 1);
+    while (n_nextprime(single_start, 1) % 5 == 1) {
+        single_start = n_nextprime(single_start, 1);
+    }
+    ulong run_start = UWORD(1) << (FLINT_BITS - 1);
+    ulong run_last = 0;
+    for (bool found = false; !found;) {
+        ulong prime = run_start;
+        found = true;
+        for (int i = 0; i < 16; ++i) {
+            prime = n_nextprime(prime, 1);
+            if (prime % 5 == 1) {
+                run_start = prime;
+                found = false;
+                break;
+            }
+        }
+        run_last = prime;
+    }
+
+    for (int run = 0; run < 2; ++run) {
+        silex::detail::BoundedCompactReconstructionOptions options;
+        options.prime_search_start = run == 0 ? single_start : run_start;
+        silex::detail::BoundedCompactReconstructionReport report;
+        std::vector<silex::Element> actual;
+        assert(silex::detail::bounded_compact_reconstruct(
+                report, actual, maximal, wide, sflint::FmpzConstRef(bound),
+                options));
+        assert(report.status ==
+               silex::detail::BoundedCompactReconstructionStatus::success);
+        assert(report.primes_used == 1 && report.prime_trials == 1);
+        assert_exact_crt_crossing(report, sflint::FmpzConstRef(bound));
+        assert_equal_outputs(actual, expected);
+        if (run == 0) {
+            assert(report.nonsplit_prime_skips >= 1);
+            assert(report.last_prime % 5 == 1);
+        } else {
+            assert(report.nonsplit_prime_skips == 15);
+            assert(report.last_prime == run_last);
+            assert(report.last_prime % 5 != 1);
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     assert(test_modular_power_products_match_independent_powering() == 0);
     assert(test_modular_unit_group_exponent() == 0);
     assert(test_modular_power_products_reduced_exponents() == 0);
+    assert(test_modular_power_products_split_modulus() == 0);
+    assert(test_modular_power_products_fallback_uses_inverse() == 0);
+    assert(test_wide_reconstruction_prefers_split_primes() == 0);
     assert(test_shared_exponent_matrix_and_centered_crt() == 0);
     assert(test_denominator_prime_exclusion() == 0);
     assert(test_field_polynomial_denominator_prime_exclusion() == 0);

@@ -40,6 +40,9 @@ struct BoundedCompactReconstructionReport {
     std::size_t order_basis_prime_rejections = 0;
     std::size_t denominator_prime_rejections = 0;
     std::size_t noninvertible_prime_rejections = 0;
+    // Candidates passed over by the split-prime preference of a batch with
+    // an exponent above the word size; they are not counted in prime_trials.
+    std::size_t nonsplit_prime_skips = 0;
     flint_bitcnt_t modulus_bits = 0;
     ulong last_prime = 0;
 };
@@ -54,7 +57,13 @@ const char* bounded_compact_reconstruction_status_name(
 // and that the absolute value of every resulting order-basis coordinate is at
 // most certified_coordinate_bound. The reconstruction is exact once the
 // centered CRT modulus is strictly greater than twice that bound. This
-// internal checkpoint deliberately does not produce the bound.
+// internal checkpoint deliberately does not produce the bound.  The CRT
+// primes are taken in increasing order from options.prime_search_start, as
+// in reference init_modular_big, except that a batch with an exponent of
+// more than FLINT_BITS bits passes over a bounded number of primes at which
+// the reduced defining polynomial does not split into distinct linear
+// factors (counted in nonsplit_prime_skips).  Any set of usable primes whose
+// product exceeds twice the bound gives the same result.
 bool bounded_compact_reconstruct(
         BoundedCompactReconstructionReport& report, std::vector<Element>& out,
         const Order& order, std::span<const FactoredElement> inputs,
@@ -80,11 +89,14 @@ struct ModularPowerProductFactor {
 // SAC 2001, Section 3.1, the basic interleaving exponentiation method;
 // sliding windows as in Menezes, van Oorschot and Vanstone, Handbook of
 // Applied Cryptography, Algorithm 14.85 and Table 14.16).  Before
-// tabulating, an exponent whose magnitude exceeds the exponent lambda of the
-// unit group of the ring (modular_unit_group_exponent) is replaced by
-// ((e - 1) mod lambda) + 1, which gives the same power of every element when
-// e > 0 and of every unit when e < 0; when lambda is not available the
-// exponents are used as given.
+// tabulating, when some exponent exceeds p - 1 in magnitude and the exponent
+// lambda of the unit group of the ring is available
+// (modular_unit_group_exponent), an exponent whose magnitude exceeds lambda
+// is replaced by ((e - 1) mod lambda) + 1, which gives the same power of
+// every element when e > 0 and of every unit when e < 0.  For a factor with
+// an inverse, every exponent is replaced that way, so all are positive and
+// the inverse is not tabulated, when the window cost model charges less for
+// that; otherwise the exponents are used as given.
 void modular_power_products(
         flint::NmodMat& power_residues,
         std::span<const ModularPowerProductFactor> factors,
@@ -94,7 +106,9 @@ void modular_power_products(
 // and returns true when p = modulus.mod.n is prime and modulus is monic,
 // nonconstant and squarefree modulo p.  The ring is then the product of the
 // fields F_(p^d) over the irreducible factors of degree d, and lambda is the
-// least common multiple of the p^d - 1.  Every element a of the ring
+// least common multiple of the p^d - 1; when the modulus is a product of
+// distinct linear factors (x^p = x modulo it), lambda = p - 1 without a
+// factorization.  Every element a of the ring
 // satisfies a^(lambda + 1) = a, so a^e = a^(((e - 1) mod lambda) + 1) for
 // e > 0.  Returns false, leaving out unspecified, otherwise.
 bool modular_unit_group_exponent(flint::Fmpz& out,
