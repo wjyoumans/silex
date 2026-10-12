@@ -227,6 +227,17 @@ Changed
   as undecided, and published results are unchanged on the ``grh`` and
   ``proven`` corpus rows that finish within 120 seconds.
 
+- Unit extraction from class-group relations reduces its kernel basis
+  without FLINT's high-precision reducedness certificate.  ``fmpz_lll``
+  first runs a double-precision pass and then certifies the result with an
+  ``mpfr`` check before returning it; on these small kernels that check cost
+  far more than the reduction.  Silex now runs the same first pass and
+  accepts its output when an exact integer Gram-Schmidt test shows it meets
+  FLINT's reducedness definition, and otherwise calls ``fmpz_lll`` as
+  before.  The returned basis is the one ``fmpz_lll`` returns, so units and
+  every published result are unchanged on the ``grh`` and ``proven`` corpus
+  rows that finish within 120 seconds.
+
 - The Belabas-Friedman ``hR`` estimate counts the roots of the defining
   polynomial modulo the large cutoff primes with its word-size kernel for
   defining polynomials of degree up to 16, instead of up to 6.  Degrees 7 to
