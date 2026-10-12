@@ -506,7 +506,7 @@ std::uint64_t factored_log_memo_fingerprint(
     return hash;
 }
 
-bool factored_log_memo_matches(const FactoredLogMemo& memo,
+bool factored_log_memo_matches(FactoredLogMemo& memo,
                                const FactoredLogMemoEntry& entry,
                                const FactoredElement& value) noexcept {
     const auto entries = value.factors();
@@ -520,11 +520,14 @@ bool factored_log_memo_matches(const FactoredLogMemo& memo,
         }
         // A stored factor copied from a factor of the same origin is equal
         // to it; otherwise compare (Element::equal also requires the same
-        // parent field).
+        // parent field), or reuse the comparison of the same two origins.
         const std::size_t stored = entry.factor_indices[i];
-        if (memo.factor_origins[stored] !=
-                    FactoredElementAccess::factor_origin(value, i) &&
-            !entries[i].factor.equal(memo.factors[stored])) {
+        const std::uint64_t origin =
+                FactoredElementAccess::factor_origin(value, i);
+        if (memo.factor_origins[stored] != origin &&
+            !memo.origin_pairs.equal(entries[i].factor, origin,
+                                     memo.factors[stored],
+                                     memo.factor_origins[stored])) {
             return false;
         }
     }
@@ -693,8 +696,9 @@ bool memoized_factored_log_embedding(
         }
     }
 
-    if (!value.logarithmic_embedding(out, embeddings, mode, precision,
-                                     diagnostics)) {
+    if (!FactoredElementAccess::logarithmic_embedding(
+                value, out, embeddings, mode, precision, diagnostics,
+                &memo->origin_pairs)) {
         return false;
     }
 

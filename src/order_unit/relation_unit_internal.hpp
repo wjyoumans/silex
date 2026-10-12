@@ -13,6 +13,8 @@
 #include <silex/flint/fmpz.hpp>
 #include <silex/order_unit.hpp>
 
+#include "../factored_element/factor_screen_hash_internal.hpp"
+
 namespace silex::detail {
 
 inline constexpr slong kUnitCandidateSortPrecision = 32;
@@ -119,6 +121,11 @@ struct FactoredLogMemo {
     // factor's hash; kept at most half full.
     std::vector<std::size_t> factor_table;
     std::vector<FactoredLogMemoEntry> entries;
+    // Element::equal results between factors of different origins: a
+    // candidate against a stored entry's factors, and the candidate's own
+    // factors when a miss merges them.  The same few pairs of origins recur
+    // across the candidates of one extraction.
+    FactorOriginPairCache origin_pairs;
     slong hits = 0;
     slong stores = 0;
 };

@@ -309,12 +309,14 @@ std::uint64_t cached_factor_hash(const FactorTag& tag,
 // entry whose factor is distinct factor d.  `hashes` and `origins` hold the
 // screen hash and origin of each entry.  Factors are compared with
 // Element::equal, the comparison the embedding log cache uses; an equal
-// origin confirms equality without the comparison.
+// origin confirms equality without the comparison, and `pairs`, when not
+// null, answers a pair of origins it has compared before.
 bool distinct_factor_indices(std::vector<std::size_t>& index,
                              std::vector<std::size_t>& first,
                              FactorSpan<Element> entries,
                              const std::vector<std::uint64_t>& hashes,
-                             const std::vector<std::uint64_t>& origins)
+                             const std::vector<std::uint64_t>& origins,
+                             detail::FactorOriginPairCache* pairs)
         noexcept {
     const std::size_t count = entries.size();
     std::size_t buckets = 1;
@@ -342,7 +344,10 @@ bool distinct_factor_indices(std::vector<std::size_t>& index,
             const std::size_t j = first[distinct];
             if (hashes[j] == hash &&
                 (origins[j] == origins[i] ||
-                 entries[j].factor.equal(entries[i].factor))) {
+                 (pairs != nullptr
+                          ? pairs->equal(entries[j].factor, origins[j],
+                                         entries[i].factor, origins[i])
+                          : entries[j].factor.equal(entries[i].factor)))) {
                 index[i] = distinct;
                 break;
             }
@@ -693,6 +698,75 @@ std::uint64_t FactoredElementAccess::factor_origin(
         const FactoredElement& value,
         std::size_t index) noexcept {
     return value.value_->tags[index].origin;
+}
+
+bool FactorOriginPairCache::equal(const Element& left,
+                                  std::uint64_t left_origin,
+                                  const Element& right,
+                                  std::uint64_t right_origin) noexcept {
+    if (left_origin == 0 || right_origin == 0) {
+        return left.equal(right);
+    }
+    if (left_origin == right_origin) {
+        return true;
+    }
+    const std::uint64_t low =
+            left_origin < right_origin ? left_origin : right_origin;
+    const std::uint64_t high =
+            left_origin < right_origin ? right_origin : left_origin;
+    // Spreads the pair over the table; any mix is correct, since a probe
+    // compares the stored pair itself.
+    const auto slot_of = [](std::uint64_t a, std::uint64_t b) noexcept {
+        std::uint64_t mixed = a * UINT64_C(0x9e3779b97f4a7c15) ^
+                              b * UINT64_C(0xc2b2ae3d27d4eb4f);
+        mixed ^= mixed >> 29;
+        return static_cast<std::size_t>(mixed);
+    };
+    if (!slots_.empty()) {
+        const std::size_t mask = slots_.size() - 1;
+        for (std::size_t slot = slot_of(low, high) & mask;;
+             slot = (slot + 1) & mask) {
+            const Slot& held = slots_[slot];
+            if (held.low == 0) {
+                break;
+            }
+            if (held.low == low && held.high == high) {
+                ++hits_;
+                return held.equal;
+            }
+        }
+    }
+
+    const bool result = left.equal(right);
+    // Keep the table at most half full; when it cannot grow, the answer is
+    // simply not kept.
+    if (2 * (count_ + 1) > slots_.size()) {
+        const std::size_t grown = slots_.empty() ? 64 : 2 * slots_.size();
+        if (grown <= slots_.size() ||
+            grown > std::numeric_limits<std::size_t>::max() / 4) {
+            return result;
+        }
+        std::vector<Slot> old = std::move(slots_);
+        slots_.assign(grown, Slot{});
+        for (const Slot& held : old) {
+            if (held.low == 0) {
+                continue;
+            }
+            std::size_t slot = slot_of(held.low, held.high) & (grown - 1);
+            while (slots_[slot].low != 0) {
+                slot = (slot + 1) & (grown - 1);
+            }
+            slots_[slot] = held;
+        }
+    }
+    const std::size_t mask = slots_.size() - 1;
+    std::size_t slot = slot_of(low, high) & mask;
+    while (slots_[slot].low != 0) {
+        slot = (slot + 1) & mask;
+    }
+    slots_[slot] = Slot{low, high, result};
+    ++count_;
+    return result;
 }
 
 }  // namespace detail
@@ -1269,16 +1343,20 @@ bool FactoredElement::evaluate(Element& out) const noexcept {
     return evaluate_entries(out, parent_, stored_factors());
 }
 
-bool FactoredElement::logarithmic_embedding(
+namespace detail {
+
+bool FactoredElementAccess::logarithmic_embedding(
+        const FactoredElement& value,
         flint::ArbVecRef out,
         EmbeddingContext& embeddings,
         LogEmbeddingMode mode,
         slong precision,
-        const DiagnosticsContext* diagnostics) const noexcept {
+        const DiagnosticsContext* diagnostics,
+        FactorOriginPairCache* pairs) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.factored.logarithmic_embedding");
-    if (!is_defined() || embeddings.parent() == nullptr ||
-        !embeddings.parent()->has_same_data(parent_) ||
+    if (!value.is_defined() || embeddings.parent() == nullptr ||
+        !embeddings.parent()->has_same_data(value.parent_) ||
         precision <= 0 ||
         (mode != LogEmbeddingMode::plain &&
          mode != LogEmbeddingMode::product)) {
@@ -1288,7 +1366,7 @@ bool FactoredElement::logarithmic_embedding(
     Signature sig;
     if (embeddings.is_set()) {
         sig = embeddings.signature();
-    } else if (!signature(sig, parent_)) {
+    } else if (!signature(sig, value.parent_)) {
         return false;
     }
     const slong places = sig.r1() + sig.r2();
@@ -1296,7 +1374,7 @@ bool FactoredElement::logarithmic_embedding(
         return false;
     }
 
-    const auto entries = stored_factors();
+    const auto entries = value.stored_factors();
     flint_bitcnt_t max_exponent_bits = 0;
     for (const auto& entry : entries) {
         const flint_bitcnt_t bits = abs_slong_bits(entry.exponent);
@@ -1329,14 +1407,14 @@ bool FactoredElement::logarithmic_embedding(
     std::vector<std::uint64_t> hashes(entries.size());
     std::vector<std::uint64_t> origins(entries.size());
     for (std::size_t k = 0; k < entries.size(); ++k) {
-        const FactorTag& tag = value_->tags[k];
+        const FactorTag& tag = value.value_->tags[k];
         hashes[k] = cached_factor_hash(tag, entries[k].factor);
         origins[k] = tag.origin;
     }
     std::vector<std::size_t> distinct_index;
     std::vector<std::size_t> distinct_first;
     if (!distinct_factor_indices(distinct_index, distinct_first, entries,
-                                 hashes, origins)) {
+                                 hashes, origins, pairs)) {
         return false;
     }
     const std::size_t distinct_count = distinct_first.size();
@@ -1446,6 +1524,18 @@ bool FactoredElement::logarithmic_embedding(
         }
         work_precision *= 2;
     }
+}
+
+}  // namespace detail
+
+bool FactoredElement::logarithmic_embedding(
+        flint::ArbVecRef out,
+        EmbeddingContext& embeddings,
+        LogEmbeddingMode mode,
+        slong precision,
+        const DiagnosticsContext* diagnostics) const noexcept {
+    return detail::FactoredElementAccess::logarithmic_embedding(
+            *this, out, embeddings, mode, precision, diagnostics, nullptr);
 }
 
 CompactElement::CompactElement(const NumberField& parent) noexcept {

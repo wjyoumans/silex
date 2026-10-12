@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace silex::detail {
 
@@ -20,6 +21,55 @@ namespace silex::detail {
 // memo.
 std::uint64_t factor_screen_hash(const Element& factor,
                                  const nf_struct* field) noexcept;
+
+// Element::equal between stored factors of different origins (see
+// FactoredElementAccess), remembered by the unordered pair of origins so a
+// repeated comparison of the same pair is not made again.
+//
+// The cached result never goes stale.  An origin is minted once per process
+// by an atomic counter and never reused (fresh_factor_origin in
+// factored_element.cpp), only a copy of the same stored factor carries it
+// (push_factor and the factor-list copies), and stored factors are never
+// modified; so every factor with a given origin has the same coefficients
+// and the same parent field, and Element::equal, which depends only on
+// those, gives one answer for a pair of origins.  A true and a false answer
+// are both kept.  A factor with origin 0 (stored from a bare Element, as in
+// the relation-unit log memo) is compared every time and nothing is kept.
+//
+// The owner bounds the cache's lifetime; it holds one entry per pair it has
+// compared, so it grows with the comparisons made, never past them.  Not
+// thread-safe: one owner uses it at a time.
+class FactorOriginPairCache {
+public:
+    // left.equal(right), for factors whose origins are left_origin and
+    // right_origin.  Equal nonzero origins give true without a comparison.
+    bool equal(const Element& left,
+               std::uint64_t left_origin,
+               const Element& right,
+               std::uint64_t right_origin) noexcept;
+
+    // Number of origin pairs held, and number of calls answered from them.
+    std::size_t size() const noexcept {
+        return count_;
+    }
+    std::size_t hits() const noexcept {
+        return hits_;
+    }
+
+private:
+    // An empty slot has low == 0; a held pair has 0 < low <= high.
+    struct Slot {
+        std::uint64_t low = 0;
+        std::uint64_t high = 0;
+        bool equal = false;
+    };
+
+    // Open addressing with linear probing over a power-of-two number of
+    // slots, kept at most half full.
+    std::vector<Slot> slots_;
+    std::size_t count_ = 0;
+    std::size_t hits_ = 0;
+};
 
 // Internal access to the per-factor tags a FactoredElement keeps beside its
 // factor list.  Each stored factor carries an origin and its screen hash.
@@ -50,6 +100,19 @@ public:
                             const FactoredElement& source,
                             std::size_t index,
                             slong exponent) noexcept;
+
+    // value.logarithmic_embedding(out, embeddings, mode, precision,
+    // diagnostics), with the same result and failures; the comparisons
+    // that merge equal factors of different origins go through `pairs`
+    // when it is not null.
+    static bool logarithmic_embedding(
+            const FactoredElement& value,
+            flint::ArbVecRef out,
+            EmbeddingContext& embeddings,
+            LogEmbeddingMode mode,
+            slong precision,
+            const DiagnosticsContext* diagnostics,
+            FactorOriginPairCache* pairs) noexcept;
 
 private:
     friend class silex::FactoredElement;

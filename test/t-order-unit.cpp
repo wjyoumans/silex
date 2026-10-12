@@ -1195,6 +1195,152 @@ int test_factored_log_memo_matches_direct_call() {
     return 0;
 }
 
+// The origin-pair cache answers a repeated comparison of the same two
+// origins (in either order) from the first answer, false as well as true,
+// and keeps nothing for an origin of 0.  Through the factored log memo it
+// serves both the memo's candidate match and the merge of a candidate's
+// equal factors, and the results stay those of a direct call.
+int test_factored_log_memo_origin_pair_cache() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    using silex::detail::FactoredElementAccess;
+
+    // Two independent pushes of theta get different origins.
+    silex::FactoredElement first(cubic);
+    silex::FactoredElement second(cubic);
+    silex::FactoredElement third(cubic);
+    assert(first.push(theta, 1));
+    assert(second.push(theta, 1));
+    assert(third.push(theta_minus_one, 1));
+    const std::uint64_t a = FactoredElementAccess::factor_origin(first, 0);
+    const std::uint64_t b = FactoredElementAccess::factor_origin(second, 0);
+    const std::uint64_t c = FactoredElementAccess::factor_origin(third, 0);
+    assert(a != 0 && b != 0 && c != 0 && a != b && a != c && b != c);
+    const silex::Element& fa = first.factors()[0].factor;
+    const silex::Element& fb = second.factors()[0].factor;
+    const silex::Element& fc = third.factors()[0].factor;
+
+    silex::detail::FactorOriginPairCache pairs;
+    assert(pairs.equal(fa, a, fb, b));
+    assert(pairs.size() == 1 && pairs.hits() == 0);
+    assert(pairs.equal(fb, b, fa, a));
+    assert(pairs.size() == 1 && pairs.hits() == 1);
+    // A false answer is kept as false.
+    assert(!pairs.equal(fa, a, fc, c));
+    assert(pairs.size() == 2 && pairs.hits() == 1);
+    assert(!pairs.equal(fc, c, fa, a));
+    assert(pairs.size() == 2 && pairs.hits() == 2);
+    // An equal origin needs no comparison and no entry; origin 0 is
+    // compared each time and not kept.
+    assert(pairs.equal(fa, a, fa, a));
+    assert(pairs.equal(theta, 0, fa, a));
+    assert(!pairs.equal(theta, 0, fc, c));
+    assert(pairs.size() == 2 && pairs.hits() == 2);
+    // Many pairs: the table grows and keeps every answer.
+    std::vector<silex::FactoredElement> many;
+    for (int i = 0; i < 100; ++i) {
+        many.emplace_back(cubic);
+        assert(many.back().push(i % 2 == 0 ? theta : theta_minus_one, 1));
+    }
+    for (int round = 0; round < 2; ++round) {
+        for (int i = 0; i < 100; ++i) {
+            const std::uint64_t origin =
+                    FactoredElementAccess::factor_origin(many[i], 0);
+            assert(pairs.equal(fa, a, many[i].factors()[0].factor, origin) ==
+                   (i % 2 == 0));
+        }
+    }
+    assert(pairs.size() == 102 && pairs.hits() == 102);
+
+    // A candidate holding theta twice, pushed separately: merging its
+    // factors compares the two origins once, then reuses the answer.
+    silex::FactoredElement repeated(cubic);
+    assert(repeated.push(theta, 2));
+    assert(repeated.push(theta_minus_one, -1));
+    assert(repeated.push(theta, 1));
+    silex::EmbeddingContext embeddings(cubic);
+    const slong places = 3;
+    const slong precision = 64;
+    const auto mode = silex::LogEmbeddingMode::product;
+    sflint::ArbVec direct(places);
+    sflint::ArbVec cached(places);
+    assert(repeated.logarithmic_embedding(sflint::ArbVecRef(direct),
+                                          embeddings, mode, precision));
+    silex::detail::FactorOriginPairCache merge_pairs;
+    for (int round = 0; round < 2; ++round) {
+        assert(FactoredElementAccess::logarithmic_embedding(
+                repeated, sflint::ArbVecRef(cached), embeddings, mode,
+                precision, nullptr, &merge_pairs));
+        assert(arb_vecs_identical(cached, direct));
+        assert(merge_pairs.size() == 1);
+        assert(merge_pairs.hits() == static_cast<std::size_t>(round));
+    }
+
+    // The memo's candidate match: `twin` has the factors of `value` built
+    // again (equal, other origins); `other` has the same exponents and
+    // different factors.
+    silex::FactoredElement value(cubic);
+    assert(value.push(theta, 2));
+    assert(value.push(theta_minus_one, -1));
+    silex::FactoredElement twin(cubic);
+    assert(twin.push(theta, 2));
+    assert(twin.push(theta_minus_one, -1));
+    silex::FactoredElement other(cubic);
+    assert(other.push(theta_minus_one, 2));
+    assert(other.push(theta, -1));
+
+    silex::detail::FactoredLogMemo memo;
+    sflint::ArbVec memoized(places);
+    // The embedding cache exists (above), so the first call stores.
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, value, embeddings, mode,
+            precision));
+    assert(memo.stores == 1 && memo.hits == 0);
+    assert(memo.origin_pairs.size() == 0);
+    // `twin` matches the stored entry after two comparisons, kept as true;
+    // the second time both are answered from the cache.
+    for (int round = 0; round < 2; ++round) {
+        assert(silex::detail::memoized_factored_log_embedding(
+                sflint::ArbVecRef(memoized), &memo, twin, embeddings, mode,
+                precision));
+        assert(memo.stores == 1 && memo.hits == 1 + round);
+        assert(memo.origin_pairs.size() == 2);
+        assert(memo.origin_pairs.hits() ==
+               static_cast<std::size_t>(2 * round));
+    }
+    assert(twin.logarithmic_embedding(sflint::ArbVecRef(direct), embeddings,
+                                      mode, precision));
+    assert(arb_vecs_identical(memoized, direct));
+    // `other` fails to match `value`'s entry at its first factor, kept as
+    // false, and is stored as its own entry (whose factors are the stored
+    // copies from `value`, so of `value`'s origins).
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, other, embeddings, mode,
+            precision));
+    assert(memo.stores == 2 && memo.hits == 2);
+    assert(memo.origin_pairs.size() == 3 && memo.origin_pairs.hits() == 2);
+    // The second time the failed match is answered from the cache, and
+    // matching its own entry compares two new (equal) pairs.
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, other, embeddings, mode,
+            precision));
+    assert(memo.stores == 2 && memo.hits == 3);
+    assert(memo.origin_pairs.size() == 5 && memo.origin_pairs.hits() == 3);
+    // The third time all three comparisons are answered from the cache.
+    assert(silex::detail::memoized_factored_log_embedding(
+            sflint::ArbVecRef(memoized), &memo, other, embeddings, mode,
+            precision));
+    assert(memo.stores == 2 && memo.hits == 4);
+    assert(memo.origin_pairs.size() == 5 && memo.origin_pairs.hits() == 6);
+    assert(other.logarithmic_embedding(sflint::ArbVecRef(direct), embeddings,
+                                       mode, precision));
+    assert(arb_vecs_identical(memoized, direct));
+    return 0;
+}
+
 // A factor log that fails at the starting precision and is stored only at
 // a doubled precision changes what a fresh call computes: the fresh call
 // then hits the doubled-precision entry and finishes at the starting
@@ -12451,6 +12597,7 @@ int main() {
     test_apply_unit_reduction_factor_list();
     test_reduce_mod_units_half_integer_tie_stop_rule();
     test_factored_log_memo_matches_direct_call();
+    test_factored_log_memo_origin_pair_cache();
     test_factored_log_memo_after_failed_factor_log();
     test_factored_log_memo_factor_lookup();
     test_factored_element_factor_tags();
