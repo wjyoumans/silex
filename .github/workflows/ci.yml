@@ -56,6 +56,8 @@ jobs:
           pacman -Syu --noconfirm
           benchmark cmake gcc git flint make ninja pkgconf python
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Trust checkout for repository audits
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Configure diagnostics
         run: cmake --preset diagnostics
       - name: Build diagnostics
