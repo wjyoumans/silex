@@ -9419,13 +9419,18 @@ void reduce_unit_candidate_kernel(
     // NULL, fl)`.  For a Z_BASIS input of at most 250 bits that makes one
     // `fmpz_lll_wrapper_with_removal_knapsack(B, U, NULL, fl)` call, which
     // returns the `fmpz_lll_d_with_removal_knapsack` result when that pass
-    // succeeds and `fmpz_lll_is_reduced` accepts it; `fmpz_lll_is_reduced`
-    // is documented to be conclusive, equal to `fmpz_mat_is_reduced`.  Run
-    // that first pass on a copy and accept it only when the exact test
-    // agrees; otherwise run `fmpz_lll` on the original rows.  Either way the
-    // result is the basis `fmpz_lll` returns.  The transform argument is a
-    // zero matrix in both calls, as before; it does not steer the APPROX
-    // Z_BASIS reduction.
+    // succeeds and `fmpz_lll_is_reduced` accepts it.  Only one direction is
+    // used: if the exact test below is true then every Gram-Schmidt norm is
+    // nonzero, so FLINT's zero-row stripping for Z_BASIS is the identity and
+    // `fmpz_mat_is_reduced` holds, hence FLINT's chain accepts the pass.
+    // Run that first pass on a copy and accept it only when the exact test
+    // is true; otherwise (including inputs FLINT would accept after
+    // stripping zero rows) call `fmpz_lll` on the original rows.  Either way
+    // the result is the basis `fmpz_lll` returns.  `fmpz_mat_is_reduced` is
+    // not called instead because it measured about 10 times slower here
+    // (29.3 ms against 2.8 ms for the hand-written test on the 28 T-524
+    // kernels, busy machine).  The transform argument is a zero matrix in
+    // both calls, as before; it does not steer the APPROX Z_BASIS reduction.
     flint::FmpzMat transform(count, count);
     const slong bits = ::fmpz_mat_max_bits(rows.raw());
     if (lll.raw()->rt == Z_BASIS && lll.raw()->gt == APPROX &&

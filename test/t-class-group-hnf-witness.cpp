@@ -15,6 +15,7 @@
 #include "relation/relation_internal.hpp"
 #include "test_support.hpp"
 
+#include <cstdlib>
 #include <cassert>
 #include <cstdint>
 #include <vector>
@@ -1208,10 +1209,83 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
                item.reduced);
     }
 
+    // Equality cases of `<=` with dyadic parameters (exact in a double):
+    // mu = 1/2 = eta, and a Lovasz ratio with equality, both against
+    // fmpz_mat_is_reduced.  A `<` for `<=` slip fails the first and third.
+    {
+        struct DyadicCase {
+            slong rows;
+            slong cols;
+            std::vector<slong> entries;
+            double delta;
+            double eta;
+            bool reduced;
+        };
+        const DyadicCase dyadic[] = {
+                // mu_{1,0} = 1/2 = eta; Lovasz holds strictly.
+                {2, 2, {2, 0, 1, 2}, 0.75, 0.5, true},
+                // mu = 1/2 > eta = 1/4.
+                {2, 2, {2, 0, 1, 2}, 0.75, 0.25, false},
+                // Lovasz equality: mu = 1/2, |b*_1|^2 = 1 and
+                // (1/2 - 1/4) * 4 = 1.
+                {2, 2, {2, 0, 1, 1}, 0.5, 0.5, true},
+                // The same basis with delta just above 1/2 fails Lovasz.
+                {2, 2, {2, 0, 1, 1}, 0.5078125, 0.5, false},
+        };
+        for (const DyadicCase& item : dyadic) {
+            const sflint::FmpzMat basis =
+                    integer_rows(item.rows, item.cols, item.entries);
+            const bool flint_says =
+                    ::fmpz_mat_is_reduced(basis.raw(), item.delta,
+                                          item.eta) != 0;
+            assert(flint_says == item.reduced);
+            assert(silex::detail::integer_basis_is_lll_reduced(
+                           sflint::FmpzMatConstRef(basis), item.delta,
+                           item.eta) == item.reduced);
+        }
+    }
+
+    // The 250-bit guard in reduce_unit_candidate_kernel.  This basis has 254
+    // bits; the bare first pass is accepted by the exact test but differs
+    // from the basis fmpz_lll returns, so skipping the guard (taking the
+    // fast path above 250 bits) returns a different basis.
+    {
+        sflint::FmpzMat basis(2, 2);
+        ::fmpz_set_si(::fmpz_mat_entry(basis.raw(), 0, 0), 1);
+        assert(::fmpz_set_str(
+                       ::fmpz_mat_entry(basis.raw(), 0, 1),
+                       "-374144419153988888124815421131069254946284848021503",
+                       10) == 0);
+        ::fmpz_set_si(::fmpz_mat_entry(basis.raw(), 1, 0), -1073741823);
+        assert(::fmpz_set_str(
+                       ::fmpz_mat_entry(basis.raw(), 1, 1),
+                       "-28948022201489262187290378635446524851005985908420609"
+                       "365455395862898437783552",
+                       10) == 0);
+        assert(std::labs(static_cast<long>(
+                       ::fmpz_mat_max_bits(basis.raw()))) > 250);
+        sflint::FmpzMat pass_basis(2, 2);
+        ::fmpz_mat_set(pass_basis.raw(), basis.raw());
+        sflint::FmpzMat pass_transform(2, 2);
+        assert(::fmpz_lll_d_with_removal_knapsack(
+                       pass_basis.raw(), pass_transform.raw(), nullptr,
+                       lll.raw()) != -1);
+        assert(silex::detail::integer_basis_is_lll_reduced(
+                sflint::FmpzMatConstRef(pass_basis), delta, eta));
+        sflint::FmpzMat expected(2, 2);
+        ::fmpz_mat_set(expected.raw(), basis.raw());
+        sflint::FmpzMat expected_transform(2, 2);
+        fmpz_lll(expected.raw(), expected_transform.raw(), lll.raw());
+        assert(::fmpz_mat_equal(pass_basis.raw(), expected.raw()) == 0);
+        silex::detail::reduce_unit_candidate_kernel(basis, nullptr);
+        assert(::fmpz_mat_equal(basis.raw(), expected.raw()) != 0);
+    }
+
     flint_rand_t state;
     flint_rand_init(state);
     slong reduced_seen = 0;
     slong fallback_seen = 0;
+    slong fast_path_seen = 0;
     for (slong iter = 0; iter < 3000; ++iter) {
         const slong rows = 2 + static_cast<slong>(n_randint(state, 9));
         const slong cols = rows + static_cast<slong>(n_randint(state, 8));
@@ -1249,6 +1323,26 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
         ::fmpz_mat_set(actual.raw(), input.raw());
         silex::detail::reduce_unit_candidate_kernel(actual, nullptr);
         assert(::fmpz_mat_equal(actual.raw(), expected.raw()) != 0);
+
+        // The bare first pass, as reduce_unit_candidate_kernel runs it.  For
+        // at most 250 bits an accepted pass is the fast path.  Above 250
+        // bits fmpz_lll takes another route (see the fixed case below).
+        {
+            sflint::FmpzMat pass_basis(rows, cols);
+            ::fmpz_mat_set(pass_basis.raw(), input.raw());
+            sflint::FmpzMat pass_transform(rows, rows);
+            const int pass = ::fmpz_lll_d_with_removal_knapsack(
+                    pass_basis.raw(), pass_transform.raw(), nullptr,
+                    lll.raw());
+            if (pass != -1 &&
+                silex::detail::integer_basis_is_lll_reduced(
+                        sflint::FmpzMatConstRef(pass_basis), delta, eta)) {
+                const slong input_bits = ::fmpz_mat_max_bits(input.raw());
+                if ((input_bits < 0 ? -input_bits : input_bits) <= 250) {
+                    ++fast_path_seen;
+                }
+            }
+        }
         if (!silex::detail::integer_basis_is_lll_reduced(
                     sflint::FmpzMatConstRef(expected), delta, eta)) {
             ++fallback_seen;
@@ -1257,6 +1351,7 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
     flint_rand_clear(state);
     assert(reduced_seen > 0);
     assert(fallback_seen > 0);
+    assert(fast_path_seen > 0);
     return 0;
 }
 

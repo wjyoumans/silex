@@ -327,7 +327,10 @@ inline bool prime_to_fractional_ideal(FractionalIdeal& out,
 }
 
 // Exact test of FLINT's `fmpz_mat_is_reduced(basis, delta, eta)` for a
-// basis of at least two rows; false for fewer rows.
+// basis of at least two rows; false for fewer rows.  Equality with FLINT
+// holds for FLINT's parameter range eta^2 < delta; if delta <= eta^2 FLINT
+// can accept a zero last Gram-Schmidt vector, which this test always
+// rejects.
 bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
                                   double delta,
                                   double eta) noexcept;
