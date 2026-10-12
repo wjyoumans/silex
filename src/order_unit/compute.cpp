@@ -17,12 +17,10 @@
 
 #include <flint/arb_mat.h>
 #include <flint/fmpq_mat.h>
-#include <flint/fmpq_poly.h>
 
 #include <silex/class_group.hpp>
 #include <silex/flint/arf.hpp>
 #include <silex/flint/fmpq_mat.hpp>
-#include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_lll.hpp>
 #include <silex/signature.hpp>
 #include <silex/unit.hpp>

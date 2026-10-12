@@ -122,7 +122,9 @@ struct FactoredLogMemo {
 
 // Sets `index` to the position of `element` in memo.factors, appending a
 // copy when no stored factor equals it (Element::equal, which also requires
-// the same parent).  Fails on an undefined element.
+// the same parent).  Fails when `element` is undefined or has no parent,
+// when copying it fails, or when growing the hash table would overflow; on
+// failure memo.factors and memo.factor_hashes are not modified.
 bool factored_log_memo_factor_index(std::size_t& index,
                                     FactoredLogMemo& memo,
                                     const Element& element) noexcept;
