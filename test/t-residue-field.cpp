@@ -1185,12 +1185,115 @@ int test_set_factored_element_matches_factorwise_product() {
 
 }  // namespace
 
+// ResidueField::set copies a validated field: the copy keeps the prime,
+// characteristic, cardinality and modulus, outlives the source, and serves as
+// a parent for elements equal to the source's. Undefined sources clear the
+// target, and set_prime still rejects an unsupported prime afterwards.
+int test_copy_keeps_validated_field() {
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 5);
+
+    silex::NumberField field;
+    silex::Order order;
+    order = order_by_polynomial(field, polynomial);
+
+    sflint::Fmpz p;
+    fmpz_set_si(p, 3);
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 1);
+    fmpz_set_si(p, 11);
+    silex::PrimeIdealList primes11;
+    assert(silex::decompose_prime(primes11, order, sflint::FmpzConstRef(p)));
+    assert(primes11.size() == 2);
+
+    silex::ResidueField source;
+    assert(source.set_prime(*primes.at(0)));
+    assert(source.set(source));
+    assert(source.degree() == 2);
+
+    silex::ResidueField copy;
+    assert(copy.set_prime(*primes11.at(0)));
+    assert(copy.degree() == 1);
+    assert(copy.set(source));
+    assert(copy.is_defined());
+    assert(copy.equal(source));
+    assert(source.equal(copy));
+    assert(copy.degree() == 2);
+    assert(copy.prime() != nullptr);
+    assert(copy.prime()->equal(*primes.at(0)));
+    assert(copy.parent_order() != nullptr);
+
+    sflint::Fmpz value;
+    sflint::Fmpz expected;
+    assert(source.characteristic(sflint::FmpzRef(expected)));
+    assert(copy.characteristic(sflint::FmpzRef(value)));
+    assert(fmpz_equal(value.raw(), expected.raw()) != 0);
+    assert(copy.cardinality(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 9));
+    sflint::FmpzPoly source_modulus;
+    sflint::FmpzPoly copy_modulus;
+    assert(source.modulus(sflint::FmpzPolyRef(source_modulus)));
+    assert(copy.modulus(sflint::FmpzPolyRef(copy_modulus)));
+    assert(fmpz_poly_equal(source_modulus.raw(), copy_modulus.raw()) != 0);
+
+    silex::ResidueFieldElement from_source(source);
+    silex::ResidueFieldElement from_copy(copy);
+    sflint::FmpzPoly input;
+    zpoly_set_coeff_si(input, 0, 2);
+    zpoly_set_coeff_si(input, 1, 1);
+    assert(from_source.set_polynomial(sflint::FmpzPolyConstRef(input)));
+    assert(from_copy.set_polynomial(sflint::FmpzPolyConstRef(input)));
+    assert(from_copy.equal(from_source));
+    assert(from_source.multiply(from_source, from_source));
+    assert(from_copy.multiply(from_copy, from_copy));
+    assert(from_copy.equal(from_source));
+
+    source.clear();
+    assert(!source.is_defined());
+    assert(copy.is_defined());
+    assert(copy.cardinality(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 9));
+    silex::ResidueFieldElement inverse(copy);
+    silex::ResidueFieldElement product(copy);
+    assert(inverse.invert(from_copy));
+    assert(product.multiply(inverse, from_copy));
+    sflint::FmpzPoly output;
+    assert(product.get_polynomial(sflint::FmpzPolyRef(output)));
+    assert(fmpz_poly_is_const_si(output, 1));
+
+    silex::ResidueField undefined;
+    assert(copy.set(undefined));
+    assert(!copy.is_defined());
+
+    sflint::FmpqPoly unsupported_polynomial;
+    poly_x2_minus(unsupported_polynomial, 12);
+    silex::NumberField unsupported_field;
+    silex::Order unsupported_order;
+    unsupported_order = order_by_polynomial(unsupported_field,
+                                            unsupported_polynomial);
+    silex::Order maximal_order(unsupported_field);
+    assert(maximal_order.maximal_order(unsupported_order));
+    fmpz_set_si(p, 2);
+    silex::PrimeIdealList explicit_primes;
+    assert(silex::decompose_prime(explicit_primes, maximal_order,
+                                  sflint::FmpzConstRef(p)));
+    silex::ResidueField rejected;
+    assert(!rejected.set_prime(*explicit_primes.at(0)));
+    assert(!rejected.is_defined());
+    assert(copy.set(rejected));
+    assert(!copy.is_defined());
+
+    return 0;
+}
+
 int main() {
     assert(test_degree_one() == 0);
     assert(test_field_element_keeps_parent_alive() == 0);
     assert(test_quotient_log_keeps_parent_alive() == 0);
     assert(test_quadratic() == 0);
     assert(test_failure_preserves_output() == 0);
+    assert(test_copy_keeps_validated_field() == 0);
     assert(test_multiplicative_degree_one() == 0);
     assert(test_multiplicative_quadratic() == 0);
     assert(test_quotient_logs_mod_three() == 0);

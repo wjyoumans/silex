@@ -178,7 +178,23 @@ bool ResidueField::set(const ResidueField& other) noexcept {
         clear();
         return true;
     }
-    return set_prime(other.prime_);
+
+    // A defined field passed set_prime's checks (prime characteristic, monic
+    // irreducible modulus of positive degree) and is only replaced as a whole,
+    // so copy its validated state instead of re-running the primality and
+    // irreducibility tests.
+    ResidueField next{flint::FmpzConstRef(other.p_)};
+    next.prime_ = PrimeIdeal(*other.prime_.parent());
+    if (!next.prime_.is_defined() || !next.prime_.set(other.prime_)) {
+        return false;
+    }
+
+    fmpz_set(next.p_.raw(), other.p_.raw());
+    fmpz_mod_poly_set(next.modulus_.raw(), other.modulus_.raw(),
+                      next.ctx_.raw());
+    next.defined_ = true;
+    swap(next);
+    return true;
 }
 
 bool ResidueField::set_prime(const PrimeIdeal& prime) noexcept {
