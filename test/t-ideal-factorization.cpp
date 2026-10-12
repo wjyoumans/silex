@@ -146,6 +146,47 @@ bool row_matches_factorization(const sflint::FmpzMat& row,
     return true;
 }
 
+// Reference for the one non-base factor a required-prime witness may carry:
+// a positive power of the only prime ideal above its rational prime q that
+// the base lacks, with e = 1, when the base holds another ideal above q and
+// q is not the required prime's rational prime.  The relation
+// qO_K = Q_1^e_1 ... Q_g^e_g then puts that class in the subgroup of the base
+// ideals above q.
+bool lacking_prime_is_admissible(const silex::PrimeIdeal& factor,
+                                 slong exponent,
+                                 const silex::FactorBase& base,
+                                 const silex::PrimeIdeal& required_prime)
+        noexcept {
+    sflint::Fmpz q;
+    sflint::Fmpz required_p;
+    if (exponent <= 0 || factor.ramification_index() != 1 ||
+        !factor.rational_prime(sflint::FmpzRef(q)) ||
+        !required_prime.rational_prime(sflint::FmpzRef(required_p)) ||
+        sflint::fmpz_equal(sflint::FmpzConstRef(q),
+                           sflint::FmpzConstRef(required_p))) {
+        return false;
+    }
+    silex::PrimeIdealList primes;
+    if (!silex::decompose_prime(primes, *factor.parent(),
+                                sflint::FmpzConstRef(q))) {
+        return false;
+    }
+    slong in_base = 0;
+    slong outside = 0;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        if (prime == nullptr) {
+            return false;
+        }
+        if (base.contains(*prime)) {
+            ++in_base;
+        } else {
+            ++outside;
+        }
+    }
+    return in_base > 0 && outside == 1;
+}
+
 bool full_factorization_has_required_prime(
         const silex::Ideal& ideal,
         const silex::FactorBase& base,
@@ -172,7 +213,9 @@ bool full_factorization_has_required_prime(
         }
         if (factor.equal(required_prime)) {
             required_exponent += exponent;
-        } else if (!base.contains(factor)) {
+        } else if (!base.contains(factor) &&
+                   !lacking_prime_is_admissible(factor, exponent, base,
+                                                required_prime)) {
             return false;
         }
     }
@@ -705,6 +748,50 @@ bool row_is_filled(const sflint::FmpzMat& row, slong value) noexcept {
 
 // Q(2^(1/3)): 5 = P Q with f(P) = 1 and f(Q) = 2.  The norm-bounded base at
 // 5 keeps P and drops Q, so its block above 5 is incomplete.
+int test_required_prime_through_lacking_conjugate() {
+    // x^3 - 2: 5 = R1 R2 with f(R1) = 1, f(R2) = 2, and 31 = P1 P2 P3.
+    const slong coefficients[] = {-2, 0, 0, 1};
+    silex::NumberField field = field_from_coefficients(coefficients, 4);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    silex::PrimeIdeal r1(order);
+    silex::PrimeIdeal r2(order);
+    silex::PrimeIdeal p31[] = {silex::PrimeIdeal(order),
+                               silex::PrimeIdeal(order),
+                               silex::PrimeIdeal(order)};
+    assert(primes_above_with_degree(&r1, 1, order, 5, 1) == 1);
+    assert(primes_above_with_degree(&r2, 1, order, 5, 2) == 1);
+    assert(primes_above_with_degree(p31, 3, order, 31, 1) == 3);
+
+    // The norm-bounded base holds R1 and lacks R2.
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    silex::FactorBase partial(order);
+    assert(partial.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(partial.contains(r1) && !partial.contains(r2));
+    assert(!partial.contains(p31[0]) && !partial.contains(p31[1]));
+
+    silex::Ideal required_ideal(order);
+    silex::Ideal r2_ideal(order);
+    silex::Ideal other_ideal(order);
+    silex::Ideal product(order);
+    assert(p31[0].get_ideal(required_ideal));
+    assert(r2.get_ideal(r2_ideal));
+    assert(p31[1].get_ideal(other_ideal));
+
+    // P1 R2: R2 is the only ideal above 5 outside the base, with e = 1.
+    assert(product.multiply(required_ideal, r2_ideal));
+    assert(required_prime_result_matches(product, partial, p31[0], true));
+    // P1 P2: P2 lies above the required prime's own rational prime.
+    assert(product.multiply(required_ideal, other_ideal));
+    assert(required_prime_result_matches(product, partial, p31[0], false));
+    return 0;
+}
+
 int test_fractional_factor_over_incomplete_block() {
     const slong coefficients[] = {-2, 0, 0, 1};
     silex::NumberField field = field_from_coefficients(coefficients, 4);
@@ -895,6 +982,7 @@ int main() {
     assert(test_factor_over_base_degree_one() == 0);
     assert(test_factor_over_base_quadratic() == 0);
     assert(test_factor_over_base_with_required_prime() == 0);
+    assert(test_required_prime_through_lacking_conjugate() == 0);
     assert(test_order_element_factor_over_base_with_one_large_prime() == 0);
     assert(test_factor_over_base_parent_failure_preserves_outputs() == 0);
     assert(test_fractional_factor_over_base_degree_one() == 0);
