@@ -1169,7 +1169,7 @@ step deviates from FLINT's mapping of a target precision ``p`` to the
 tolerance ``2^(mmax - p')`` with ``p' = 1.001 p + 2 bits(q)`` (FLINT 3.6.0
 ``src/acb_dirichlet/l_fmpq_afe.c``, ``acb_dirichlet_l_fmpq_afe``), which the
 last two steps keep.  At ``|D| = 1e14 + 319`` that mapping targets
-``2^-173``, while the first step needs about ``2^-49``; the estimated
+``2^-174``, while the first step needs about ``2^-49``; the estimated
 truncation index falls from about ``6.9e7`` to about ``4.6e7``, and each term
 is evaluated at about one limb of precision instead of three.  The sources
 consulted select no such tolerance: PARI 2.17.4 ``classno2``
