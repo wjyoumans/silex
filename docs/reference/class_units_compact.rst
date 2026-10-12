@@ -103,11 +103,12 @@ accessor returns ``false`` when the quotient has an upper endpoint below
 one, since no positive integer then lies in the enclosure, instead of
 reporting an index.
 
-The installed headers still declare a few low-level ideal construction
-shortcuts in ``silex::detail`` (``set_known_two_generator_ideal``,
-``multiply_integral_ideal_by_two_generator``,
-``multiply_integral_ideal_by_element``, and ``set_integral_ideal_known_hnf``)
-that accept caller-supplied generators or HNF data without re-deriving them.
+The installed headers still declare two low-level ideal construction
+shortcuts in ``silex::detail`` (``multiply_integral_ideal_by_two_generator``
+and ``multiply_integral_ideal_by_element``), and the noninstalled library
+sources provide two more (``set_known_two_generator_ideal`` and
+``set_integral_ideal_known_hnf``).  All four accept caller-supplied
+generators or HNF data without re-deriving them.
 They set no certification label and are not proof gates; they are not part of
 the supported API.
 

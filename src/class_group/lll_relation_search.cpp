@@ -8,6 +8,7 @@
 #include "lll_relation_search_internal.hpp"
 #include "relation_candidate_internal.hpp"
 #include "relation_search_internal.hpp"
+#include "../ideal/ideal_access_internal.hpp"
 #include "../ideal/prime_inverse_internal.hpp"
 #include "../order/order_internal.hpp"
 #include "../order_unit/class_unit_transaction_internal.hpp"

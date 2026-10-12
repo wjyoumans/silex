@@ -1403,7 +1403,7 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out, const Ideal& left,
     return true;
 }
 
-bool set_known_two_generator_ideal(
+bool IdealAccess::set_known_two_generator(
         Ideal& out,
         flint::FmpzConstRef scalar_generator,
         const OrderElement& element_generator) noexcept {
@@ -1755,8 +1755,8 @@ bool prime_ideal_inverse_num_den(Ideal& numerator,
     if (!generator.is_defined() || !candidate.is_defined() ||
         !generator.set_coordinates(
                 flint::FmpzMatConstRef(generator_coordinates)) ||
-        !set_known_two_generator_ideal(candidate, flint::FmpzConstRef(p),
-                                       generator) ||
+        !IdealAccess::set_known_two_generator(candidate, flint::FmpzConstRef(p),
+                                              generator) ||
         !candidate.get_hnf(flint::FmpzMatRef(candidate_hnf))) {
         return false;
     }
@@ -2014,8 +2014,8 @@ bool FractionalIdeal::set_integral_den(const Ideal& numerator,
 
 namespace detail {
 
-bool set_integral_ideal_known_hnf(FractionalIdeal& out,
-                                  const Ideal& numerator) noexcept {
+bool IdealAccess::set_integral_known_hnf(FractionalIdeal& out,
+                                         const Ideal& numerator) noexcept {
     if (!out.is_defined() || numerator.parent() == nullptr ||
         !numerator.parent()->has_same_data(out.parent_) ||
         !numerator.has_hnf()) {

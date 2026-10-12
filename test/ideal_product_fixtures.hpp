@@ -3,6 +3,7 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/ideal.hpp>
 #include <silex/lat.hpp>
+#include "../src/ideal/ideal_access_internal.hpp"
 
 namespace silex::test::ideal_product {
 

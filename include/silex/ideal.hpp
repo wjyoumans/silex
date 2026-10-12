@@ -19,9 +19,6 @@ namespace detail {
 
 class IdealAccess;
 
-bool set_known_two_generator_ideal(Ideal& out,
-                                   flint::FmpzConstRef scalar_generator,
-                                   const OrderElement& element_generator) noexcept;
 bool multiply_integral_ideal_by_two_generator(
         Ideal& out,
         const Ideal& ideal,
@@ -33,8 +30,6 @@ bool multiply_integral_ideal_by_element(
         const Ideal& ideal,
         const Element& multiplier,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
-bool set_integral_ideal_known_hnf(FractionalIdeal& out,
-                                  const Ideal& numerator) noexcept;
 
 }  // namespace detail
 
@@ -91,10 +86,6 @@ private:
     // the noninstalled src/ideal/ideal_access_internal.hpp.  Names in silex::detail are
     // internal to Silex and its tests, not a supported entry point.
     friend class detail::IdealAccess;
-    friend bool detail::set_known_two_generator_ideal(
-            Ideal& out,
-            flint::FmpzConstRef scalar_generator,
-            const OrderElement& element_generator) noexcept;
     friend bool detail::multiply_integral_ideal_by_two_generator(
             Ideal& out,
             const Ideal& ideal,
@@ -161,9 +152,8 @@ public:
     bool invert(const FractionalIdeal& input) noexcept;
 
 private:
-    friend bool detail::set_integral_ideal_known_hnf(
-            FractionalIdeal& out,
-            const Ideal& numerator) noexcept;
+    // Access for the noninstalled detail::IdealAccess (see Ideal).
+    friend class detail::IdealAccess;
 
     Order parent_;
     Ideal numerator_;

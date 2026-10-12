@@ -18,6 +18,7 @@
 #include <silex/sunit.hpp>
 
 #include "class_unit_failure_detail.hpp"
+#include "ideal/ideal_access_internal.hpp"
 #include "class_group/class_group_certification_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 

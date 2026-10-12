@@ -3,6 +3,7 @@
 #include "../benchmark_contract.hpp"
 #include "../../test/ideal_product_fixtures.hpp"
 #include "../../src/ideal/two_generator_internal.hpp"
+#include "../../src/ideal/ideal_access_internal.hpp"
 
 namespace {
 namespace contract = silex::bench_contract;

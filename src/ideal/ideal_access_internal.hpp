@@ -33,6 +33,14 @@ public:
                                     flint::FmpzMatConstRef hnf) noexcept;
 
 
+    // Implementations of detail::set_known_two_generator_ideal and
+    // detail::set_integral_ideal_known_hnf, defined in ideal.cpp.
+    static bool set_known_two_generator(
+            Ideal& out, flint::FmpzConstRef scalar_generator,
+            const OrderElement& element_generator) noexcept;
+    static bool set_integral_known_hnf(FractionalIdeal& out,
+                                       const Ideal& numerator) noexcept;
+
     // Stores `hnf` as the ideal's basis matrix without normalizing it or
     // checking that its row span is an ideal; only the n x n shape is
     // checked.  Every public construction route stores a full-rank upper
@@ -44,5 +52,23 @@ public:
         return ideal.set_hnf_direct(hnf);
     }
 };
+
+// Trust helpers, noninstalled.  set_known_two_generator_ideal stores the HNF
+// of a O + beta O for a positive scalar a and an element beta of the same
+// order, trusting that the lattice is an ideal.  set_integral_ideal_known_hnf
+// sets `out` to the integral fractional ideal with the given numerator.
+// Both return false, leaving `out` unchanged, on undefined or mismatched
+// input.
+inline bool set_known_two_generator_ideal(
+        Ideal& out, flint::FmpzConstRef scalar_generator,
+        const OrderElement& element_generator) noexcept {
+    return IdealAccess::set_known_two_generator(out, scalar_generator,
+                                                element_generator);
+}
+
+inline bool set_integral_ideal_known_hnf(FractionalIdeal& out,
+                                         const Ideal& numerator) noexcept {
+    return IdealAccess::set_integral_known_hnf(out, numerator);
+}
 
 }  // namespace silex::detail

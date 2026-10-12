@@ -25,6 +25,7 @@
 #include <silex/unit.hpp>
 #include <silex/zeta.hpp>
 
+#include "../ideal/ideal_access_internal.hpp"
 #include "../abelian_group/abelian_group_internal.hpp"
 #include "../factor_base/factor_base_internal.hpp"
 #include "class_group_internal.hpp"

@@ -4,6 +4,7 @@
 #include <silex/flint/qfb.hpp>
 #include <silex/signature.hpp>
 
+#include "../ideal/ideal_access_internal.hpp"
 #include "class_group_internal.hpp"
 #include "class_group_certification_internal.hpp"
 #include "factor_base_honesty_internal.hpp"
