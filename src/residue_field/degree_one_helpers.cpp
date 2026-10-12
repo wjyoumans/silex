@@ -430,6 +430,9 @@ bool factored_value_at_degree_one_root_nmod(ulong& out,
         stored_form_value_mod_p(numerator, denominator,
                                 entry.factor.raw_flint_element(), field,
                                 reduced_root, mod);
+        // The fallback below succeeds only for a non-canonical stored form
+        // (p divides den but no reduced coefficient denominator); canonical
+        // FLINT elements fail on both routes.
         if (denominator == 0 &&
             !fmpq_poly_value_at_root_nmod(numerator, denominator,
                                           entry.factor, p, reduced_root,

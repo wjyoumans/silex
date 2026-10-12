@@ -3220,6 +3220,76 @@ int test_factored_value_nmod_matches_fmpz_route() {
     return 0;
 }
 
+// Same comparison at a prime just below 2^64 and for factors whose numerator
+// coefficients (positive and negative) and denominator exceed a word.
+int test_factored_value_nmod_matches_fmpz_route_large() {
+    const char* const prime_text = "18446744073709551557";
+    const char* const numerators[3][3] = {
+            {"123456789012345678901234567890", "-98765432109876543210987654321",
+             "55555555555555555555555555"},
+            {"-340282366920938463463374607431768211457", "7",
+             "-170141183460469231731687303715884105727"},
+            {"18446744073709551557", "1", "-3"},
+    };
+    const char* const denominators[3] = {"1000000000000000000000007",
+                                         "36893488147419103232",
+                                         "99999999999999999999"};
+    sflint::FmpqPoly cubic;
+    poly_x3_minus(cubic, 2);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(cubic));
+    std::vector<silex::Element> factors;
+    for (int f = 0; f < 3; ++f) {
+        sflint::FmpqPoly polynomial;
+        for (slong i = 0; i < 3; ++i) {
+            sflint::Fmpq coefficient;
+            fmpz_set_str(fmpq_numref(coefficient.raw()), numerators[f][i],
+                         10);
+            fmpz_set_str(fmpq_denref(coefficient.raw()), denominators[f],
+                         10);
+            fmpq_canonicalise(coefficient.raw());
+            ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), i,
+                                       coefficient.raw());
+        }
+        silex::Element element(field);
+        assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+        factors.push_back(std::move(element));
+    }
+
+    sflint::Fmpz p_fmpz;
+    fmpz_set_str(p_fmpz.raw(), prime_text, 10);
+    const ulong p = fmpz_get_ui(p_fmpz.raw());
+    const ulong roots[] = {0UL, 1UL, 2UL, 123456789UL, p / 2, p - 2, p - 1};
+    const slong exponent_data[3][3] = {{1, 1, 1}, {2, -1, 3}, {-3, 2, -1}};
+    slong checked = 0;
+    for (const ulong root : roots) {
+        sflint::Fmpz root_fmpz;
+        sflint::fmpz_set_ui(sflint::FmpzRef(root_fmpz), root);
+        for (const auto& exponents : exponent_data) {
+            silex::FactoredElement element(field);
+            for (std::size_t k = 0; k < 3; ++k) {
+                assert(element.push(factors[k], exponents[k]));
+            }
+            sflint::Fmpz expected;
+            const bool expected_ok =
+                    silex::detail::factored_value_at_degree_one_root(
+                            expected, element, sflint::FmpzConstRef(p_fmpz),
+                            sflint::FmpzConstRef(root_fmpz));
+            ulong value = 0;
+            const bool ok = silex::detail::
+                    factored_value_at_degree_one_root_nmod(value, element, p,
+                                                           root);
+            assert(ok == expected_ok);
+            if (ok) {
+                assert(fmpz_cmp_ui(expected.raw(), value) == 0);
+            }
+            ++checked;
+        }
+    }
+    assert(checked == 21);
+    return 0;
+}
+
 // Reverse misuse direction: an alpha-convention prime keeps that convention
 // after its order is marked maximal, for reduce() and valuation (which
 // needs the maximal marking, so it is checked afterwards).  For d = 3
@@ -3749,6 +3819,7 @@ int main() {
     assert(test_kummer_generator_reduces_to_zero_and_residues_span() == 0);
     assert(test_degree_one_root_follows_recorded_convention() == 0);
     assert(test_factored_value_nmod_matches_fmpz_route() == 0);
+    assert(test_factored_value_nmod_matches_fmpz_route_large() == 0);
     assert(test_alpha_convention_kept_after_marking_maximal() == 0);
     assert(test_prime_ideal_inverse_matches_invert() == 0);
     assert(test_prime_ideal_inverse_declines_outside_contract() == 0);
