@@ -985,19 +985,19 @@ bool factor_base_honest_for_rational_prime(bool& honest,
     }
 
     PrimeIdealList primes;
+    // An inert p decomposes as the single prime pO_K (e = 1, f = 2),
+    // for which select_factor_base_proof_targets selects nothing, so
+    // the decomposition is not needed (see
+    // factor_base_honesty_quadratic_discriminant).
+    if (quadratic_discriminant != nullptr &&
+        flint::fmpz_kronecker(
+                flint::FmpzConstRef(*quadratic_discriminant), p) < 0) {
+        honest = true;
+        return true;
+    }
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.honesty_decompose_prime");
-        // An inert p decomposes as the single prime pO_K (e = 1, f = 2),
-        // for which select_factor_base_proof_targets selects nothing, so
-        // the decomposition is not needed (see
-        // factor_base_honesty_quadratic_discriminant).
-        if (quadratic_discriminant != nullptr &&
-            flint::fmpz_kronecker(
-                    flint::FmpzConstRef(*quadratic_discriminant), p) < 0) {
-            honest = true;
-            return true;
-        }
         if (!decompose_prime(primes, *order, p)) {
             return false;
         }

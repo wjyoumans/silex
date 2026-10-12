@@ -98,7 +98,7 @@ bool factor_base_honesty_reduce_large_ideal(
 // every rational prime p with Kronecker symbol (D/p) = -1 without building
 // its decomposition.  For a quadratic field of discriminant D, p is inert
 // exactly when the Kronecker symbol (D/p) is -1, p = 2 included (Cohen,
-// GTM 138, Section 5.1, decomposition of primes in quadratic fields).  Then
+// GTM 138, Proposition 5.1.4(2); Corollary 4.8.12).  Then
 // pO_K is the only prime above p (e = 1, f = 2), and
 // select_factor_base_proof_targets returns no target for it at any bound,
 // so the per-prime check is honest without a witness search; the reference

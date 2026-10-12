@@ -1934,6 +1934,12 @@ factor base, is not accepted, as in ``buch2.c:can_factor``.  A completed
 negative classification is final; unsupported or failed direct evaluation
 falls back to the existing full ideal factorization predicate.
 
+On the maximal order of a quadratic field the scan classifies each
+rational prime ``p`` by the Kronecker symbol ``(D/p)`` of the field
+discriminant and skips an inert ``p`` (symbol ``-1``), whose only prime ideal
+``pO_K`` is never a proof target (Cohen, GTM 138, Proposition 5.1.4;
+PARI 2.17.3 ``buch1.c:nthidealquad``).
+
 This routing change preserves Silex's scalar/lattice candidate search,
 random draws, bounds, proof-target selection, and certification labels.
 It does not select the separate T2 witness search.  The relation-search

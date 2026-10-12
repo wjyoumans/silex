@@ -265,9 +265,7 @@ Changed
   target (its only prime ideal is ``pO_K``), so results are unchanged.  Split
   and ramified primes are decomposed as before.  Published outputs, labels
   and counters are identical on the 65 ``proven`` and the 183 completed
-  ``grh`` benchmark rows.  On a busy machine ``proven`` for
-  ``real_quadratic_d100000005`` and ``imaginary_quadratic_d100000031``
-  takes about 3% less time.
+  ``grh`` benchmark rows.
 
 - The class-relation saturation with units keeps a stack of ``ell``-th-power
   residue characters of the relation generators and units at degree-one
