@@ -700,6 +700,18 @@ Changed
   the class group, and takes about 26 ms instead of 9 ms (release build on a
   busy machine).
 
+- ``roots_of_unity``, ``root_of_unity_order`` and ``root_of_unity_generator``
+  remember their result per thread for the last few defining polynomials,
+  so repeated queries on the same field, such as those made during a
+  class-group and unit computation, no longer repeat the good-prime search
+  for ``w``.  Results and failures are unchanged: an entry is keyed by the
+  defining polynomial and backend, the computation reads nothing else, and
+  failures are not stored.  ``grh`` on ``Q(zeta_45)`` falls from about 0.70 s
+  to 0.61 s and on ``Q(zeta_72)`` from about 1.23 s to 1.16 s (release
+  build, three runs each on a busy machine; the controlled comparison is
+  pending).  Instance JSON is unchanged on the ``grh`` corpus and the 65
+  ``proven`` benchmark rows.
+
 Fixed
 -----
 
