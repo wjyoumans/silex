@@ -120,12 +120,24 @@ Added
 Changed
 -------
 
+- ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
+  and the unit-candidate and relation-saturation kernel bases of the
+  class-group computation share one certified first LLL phase.  Its exact
+  reducedness certificate is an integer Gram-Schmidt test when the reduced
+  entries have at most 16 bits and ``fmpz_mat_is_reduced`` otherwise; both
+  decide the same predicate, and the integer test measured faster at those
+  sizes.  ``Lat::lll_reduce``, the rounded-embedding LLL and the saturation
+  kernel previously always used ``fmpz_mat_is_reduced``.  Every route still
+  returns the basis and transform ``fmpz_lll`` returns, so every published
+  result is unchanged.  See ``Lat::lll_reduce`` in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The rounded-embedding LLL of the LLL relation search no longer pays
   FLINT's multiprecision reducedness pre-check on every call.  For at least
   two rows and entries of at most 250 bits it runs FLINT's double-precision
   first phase (``fmpz_lll_d_with_removal_knapsack``) and accepts it only when
-  ``fmpz_mat_is_reduced`` certifies it LLL-reduced, as ``Lat::lll_reduce``
-  does; otherwise it restores the input and calls ``fmpz_lll``.  The reduced
+  an exact certificate shows it LLL-reduced, as ``Lat::lll_reduce`` does;
+  otherwise it restores the input and calls ``fmpz_lll``.  The reduced
   basis and transform are those ``fmpz_lll`` returns, so every ideal's basis
   and every published result is unchanged.  See "Class groups and order
   units" in :doc:`../reference/algorithms_and_sources`.
@@ -758,8 +770,8 @@ Changed
   when the basis for the unit candidates is not already built.  For a kernel
   with at least two rows and entries of at most 250 bits, it takes FLINT's
   double-precision first phase (``fmpz_lll_d_with_removal_knapsack``) and
-  accepts it only when ``fmpz_mat_is_reduced`` certifies it LLL-reduced with
-  the default parameters, as ``Lat::lll_reduce`` does; otherwise it falls
+  accepts it only when an exact certificate shows it LLL-reduced with the
+  default parameters, as ``Lat::lll_reduce`` does; otherwise it falls
   back to ``fmpz_lll``.  ``fmpz_lll``'s own certification of that phase
   dominated the proof on a 71 x 94 kernel for ``x^2 - x - 25000000``.
   With FLINT's default routing a certified first phase is exactly what

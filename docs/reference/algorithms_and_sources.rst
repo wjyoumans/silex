@@ -97,21 +97,48 @@ rigorous ball arithmetic with rational fallback; this is distinct from the
 
 ``Lat::lll_reduce`` first normalizes to full-row-rank HNF.  For 2--14 rows,
 at most 14 columns, and coefficients of at most 250 bits in absolute value,
-it tries ``fmpz_lll_d_with_removal_knapsack`` with no removal bound and accepts
-only after ``fmpz_mat_is_reduced`` certifies the result with the unchanged
-default parameters.  The reducer's status is not a reducedness certificate
-or a rank.  A failed reduction or certificate restores the original HNF
-before calling the original ``fmpz_lll`` path; ineligible inputs use that path
-directly.  The existing zero-initialized transformation argument is retained.
-This is Silex-specific routing, not FLINT's default checker order.  The source
-anchors are FLINT ``src/fmpz_lll/wrapper_with_removal_knapsack.c`` (first phase
-and mandatory certification) and ``lll_with_removal_ulll.c`` (the 250-bit
-truncation boundary), inspected at revision
-``b574c48f46ca505d6d48dd843c0fe95e1199ecdc``.  PARI 2.17.3
+it takes the certified first LLL phase described next; larger inputs call
+``fmpz_lll`` directly.  The existing zero-initialized transformation argument
+is retained.
+
+The certified first LLL phase is one internal helper shared by
+``Lat::lll_reduce``, the unit-candidate kernel and the relation-saturation
+kernel basis of the class-group computation, and the rounded-embedding
+integer LLL (below).  For a ``Z_BASIS``, ``APPROX`` context, at least two rows
+and coefficients of at most 250 bits it runs
+``fmpz_lll_d_with_removal_knapsack`` with no removal bound and accepts the
+result only when an exact reducedness certificate holds with the unchanged
+parameters.  The reducer's status is not a reducedness certificate or a rank.
+A failed reduction or certificate restores the original matrix and
+transformation before calling ``fmpz_lll``; ineligible inputs call it
+directly.  The certificate decides the predicate of ``fmpz_mat_is_reduced``
+(every Gram--Schmidt norm nonzero, ``|mu_ij| <= eta`` and
+``(delta - mu_{i,i-1}^2) |b*_{i-1}|^2 <= |b*_i|^2``, with ``delta`` and ``eta``
+read as the exact rationals of the doubles).  When the reducer's output has
+entries of at most 16 bits it is decided in integers with the integral
+Gram--Schmidt recurrence of Cohen, *A Course in Computational Algebraic
+Number Theory*, GTM 138, Algorithm 2.6.7, step 2; otherwise by
+``fmpz_mat_is_reduced`` itself.  The cutoff only chooses the cheaper exact
+test: on a busy machine the integer test was faster on every matrix the
+class/unit rows produced (at most 14 bits after the reducer) and on dense
+reduced matrices up to about 16 bits with 81 rows, and slower above about 20
+bits as the row count grows.  The result is the matrix and transformation
+``fmpz_lll`` returns, for three reasons: a passing certificate excludes zero
+Gram--Schmidt vectors, so FLINT's own check (``fmpz_mat_is_reduced`` after
+stripping initial zero rows) accepts the same output; a failed certificate
+reruns ``fmpz_lll`` from the restored input; and the double phase is
+deterministic.  Only "certificate true implies FLINT accepts" is used.  This
+is Silex-specific routing, not FLINT's default checker order.  The source
+anchors are FLINT ``src/fmpz_lll/lll.c`` (``fmpz_lll`` is
+``fmpz_lll_with_removal_ulll`` with a 250-bit truncation),
+``wrapper_with_removal_knapsack.c`` (first phase and mandatory
+certification), ``lll_with_removal_ulll.c`` (the 250-bit truncation
+boundary) and ``is_reduced.c``, inspected at revision
+``b574c48f46ca505d6d48dd843c0fe95e1199ecdc`` (FLINT 3.6.0).  PARI 2.17.3
 ``src/basemath/lll.c:ZM_lll_norms`` likewise retains provable reduction after
 its fast phases unless certification is explicitly disabled; Silex does not
-disable it.  Tests force both rejection routes after scratch mutation and
-require exact agreement with the original path.
+disable it.  Tests force both rejection routes after scratch mutation at
+every call site and require exact agreement with ``fmpz_lll``.
 
 Number fields, orders, and ideals
 ---------------------------------
@@ -793,18 +820,14 @@ fails, the one-LLL basis is used and the check waits for the next ideal;
 when the comparison inputs are malformed, the order is switched to the
 Hecke route.
 
-The one integer LLL of this route takes the same certified first-phase
-route as ``Lat::lll_reduce`` (above): for at least two rows and entries of
-at most 250 bits it runs ``fmpz_lll_d_with_removal_knapsack`` and accepts the
-result only when ``fmpz_mat_is_reduced`` certifies it, and otherwise
+The one integer LLL of this route takes the certified first LLL phase
+described with ``Lat::lll_reduce`` (above): for at least two rows and
+entries of at most 250 bits it runs ``fmpz_lll_d_with_removal_knapsack`` and
+accepts the result only when the exact certificate holds, and otherwise
 restores the input and calls ``fmpz_lll``.  The FLINT files and functions
-named here are those of the revision pinned in the ``Lat::lll_reduce``
-paragraph above (b574c48).  The matrix and transform are those ``fmpz_lll``
-returns, for three reasons: a passing ``fmpz_mat_is_reduced`` excludes zero
-Gram-Schmidt vectors, so FLINT's own check (``fmpz_mat_is_reduced`` after
-stripping initial zero rows) accepts the same output; a failed certificate
-reruns ``fmpz_lll`` from the restored input; and the double phase is
-deterministic.  Only the certificate is cheaper.
+named here are those of the revision pinned in that paragraph (b574c48).
+The matrix and transform are those ``fmpz_lll`` returns, for the three
+reasons given there.  Only the certificate is cheaper.
 
 The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
 rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:
@@ -1742,11 +1765,11 @@ Silex size-reduces ``c_i`` against an LLL-reduced basis of the relation
 kernel before forming the witness.  If the basis that yields the unit
 candidates is already built, it is reused.  Otherwise, for a kernel with at
 least two rows and entries of at most 250 bits, the basis comes from the
-same route as ``Lat::lll_reduce`` above:
-``fmpz_lll_d_with_removal_knapsack``, accepted only when
-``fmpz_mat_is_reduced`` certifies it with FLINT's default parameters, and
-``fmpz_lll`` (whose result is also kept for the unit candidates) when the
-reducer fails, the certificate fails, or the kernel is outside that range.
+certified first LLL phase described with ``Lat::lll_reduce`` above:
+``fmpz_lll_d_with_removal_knapsack``, accepted only when the exact
+certificate holds with FLINT's default parameters, and ``fmpz_lll`` (whose
+result is also kept for the unit candidates) when the reducer fails, the
+certificate fails, or the kernel is outside that range.
 The reducer's row operations are unimodular, so the result is a basis of
 the kernel on every route.  With FLINT's default routing a certified first phase
 is exactly the basis ``fmpz_lll`` returns for that kernel (``fmpz_lll`` keeps
