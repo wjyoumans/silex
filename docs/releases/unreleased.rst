@@ -248,10 +248,9 @@ Changed
   estimates, the norm of the inverse embedding matrix, with a certified Arb
   inverse, and uses it whenever it is certified.  PARI's expression is used
   only when the inverse cannot be certified at the working precision; it
-  still decides success, the precision ladder and failure.  For totally real
-  fields the new bound is never larger than before.  On some fields with
-  complex places it may be larger, so the reconstruction may use more CRT
-  primes; no such field has been seen on the test corpus.  For the ``grh``
+  still decides success, the precision ladder and failure.  On every
+  signature the new bound is never larger than before, so the
+  reconstruction never uses more CRT primes.  For the ``grh``
   computation on the totally real degree-32 subfield of the 136th
   cyclotomic field the bound falls from 454 to 30 bits and the
   reconstruction uses 1 CRT prime instead of 8.  Published results are

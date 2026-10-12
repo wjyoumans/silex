@@ -681,16 +681,17 @@ bool compact_unit_coordinate_bound_from_source(
             // Arb inverse succeeded at this precision and its total has a
             // stable, nonnegative ceiling that fits a word.  It bounds the
             // coordinates directly, for every signature.  Only otherwise
-            // publish the reference expression.  The operator norm is not
-            // capped by the reference expression: for r2 = 0 it never
-            // exceeds it (Cramer's rule, Cauchy-Schwarz and Hadamard's
-            // inequality, with the column of 1 of smallest norm,
-            // sqrt(n) <= sqrt(T2(w)) for a nonzero integer w), but for
-            // r2 > 0 the reference subtracts r2 * ln 2 for
-            // log2 |det S| = log2 |D| / 2 - r2 and that argument does not
-            // cover it, so there the operator norm may be the larger.  The
-            // reference expression alone still decides success, the
-            // precision ladder and failure.
+            // publish the reference expression.  For every signature the
+            // operator-norm total is at most the reference expression, so
+            // bit_bound <= hadamard_bit_bound.  The proof inverts the
+            // weighted matrix G (|det G| = sqrt|D|, weights summing to
+            // n + 2 r2): Cramer's rule, Cauchy-Schwarz, and Hadamard's
+            // inequality with the leading basis element 1 of smallest T2
+            // norm sqrt(n).  The weighted determinant pays for the
+            // reference expression's r2 * ln 2; the margin is at least
+            // r2 * ln 2 - (1/2) log2(1 + 2 r2 / n) >= 0, and it is attained
+            // on imaginary quadratic fields.  The reference expression
+            // alone still decides success, the precision ladder and failure.
             flint::Fmpz inverse_norm_bit_bound;
             if (flint::arb_is_finite(
                         candidate.log2_inverse_norm_coordinate_bound) &&

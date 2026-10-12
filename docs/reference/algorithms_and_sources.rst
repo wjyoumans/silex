@@ -923,14 +923,16 @@ bound) and publishes that bound whenever it is certified: the inverse
 succeeds at the working precision and the ceiling of the total is stable.
 Only when it is not certified does Silex publish the bound from PARI's
 expression.  The PARI expression alone still decides success, the precision
-ladder and failure.  For totally real fields the norm never exceeds
-``log2Mbound`` (Cramer's rule, Cauchy-Schwarz and Hadamard's inequality,
-with the basis element 1 of smallest T2 norm).  For :math:`r_2 > 0`, PARI
-subtracts :math:`r_2 \ln 2` for
-:math:`\log_2 |\det S| = \log_2 |D| / 2 - r_2`, so that argument does not cover the comparison, and on some fields
-with complex places the published bound may be larger than PARI's
-expression, so the CRT may use more primes; no such field has been seen on
-the test corpus.  For the totally real degree-32 subfield of the 136th
+ladder and failure.  The norm never exceeds
+``log2Mbound`` on any signature, so the published bit bound never exceeds
+the bound from PARI's expression (Cramer's rule, Cauchy-Schwarz and
+Hadamard's inequality, with the basis element 1 of smallest T2 norm).  For
+:math:`r_2 > 0` the proof inverts the weighted matrix, whose determinant is
+:math:`\sqrt{|D|}` and whose weights sum to :math:`n + 2 r_2`; this pays for
+PARI's :math:`r_2 \ln 2`, with margin at least
+:math:`r_2 \ln 2 - \tfrac12 \log_2 (1 + 2 r_2 / n)`, attained on imaginary
+quadratic fields.  The CRT therefore never uses more primes than before.
+For the totally real degree-32 subfield of the 136th
 cyclotomic field the Minkowski term falls from 442.6 to 18.9 bits, so the
 wide-unit bound falls from 454 to 30 bits and the CRT uses 1 prime instead
 of 8.

@@ -659,6 +659,7 @@ void check_bound_output(const silex::detail::CompactCoordinateBoundReport&
     assert(report.status ==
            silex::detail::CompactCoordinateBoundStatus::success);
     if (report.inverse_norm_bound_used) {
+        assert(report.bit_bound <= report.hadamard_bit_bound);
         assert(report.bit_bound ==
                upper_ceiling(report.log2_inverse_norm_coordinate_bound,
                              report.precision));
