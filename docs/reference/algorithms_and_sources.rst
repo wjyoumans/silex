@@ -1665,7 +1665,7 @@ accepted against an unconditional ``hR`` (``unconditional_analytic``, which no
 public transaction reaches now that a ``grh`` request takes the
 Belabas--Friedman value) or the exact imaginary-quadratic
 class number
-(``exact_class_number``; a ``grh`` request with ``|D| < 2^34``), and for a ``proven`` class group or
+(``exact_class_number``; reported only by a ``grh`` request on an imaginary quadratic field with ``|D| < 2^34``), and for a ``proven`` class group or
 the exact
 degree-one route (``unconditional_certification``).
 ``certification_status()`` stays the requested label: a ``grh`` result whose

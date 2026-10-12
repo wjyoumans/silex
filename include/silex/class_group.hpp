@@ -104,9 +104,12 @@ enum class ClassGroupGenerationBasis {
 // - unconditional_analytic: analytic index one against an unconditional hR
 //   (the quadratic L(1, chi) route).
 // - exact_class_number: the candidate class number equals the exact
-//   imaginary-quadratic class number (`grh` imaginary-quadratic pairs with
-//   |D| < 2^34; above that the pair is accepted by the analytic index-one
-//   test).
+//   imaginary-quadratic class number.  Only `grh` requests on imaginary
+//   quadratic fields with |D| < 2^34 report it (the exact class number is
+//   counted from reduced forms below that cutoff); at |D| >= 2^34 the pair is
+//   accepted by the analytic index-one test and reports belabas_friedman.
+//   No other route reports it.  The value is kept for those fields and for
+//   API stability.
 // - unconditional_certification: the class group and units were certified
 //   `proven` (saturation or an unconditional analytic check, see
 //   relation_saturation_status() and analytic_class_regulator_certification()),
