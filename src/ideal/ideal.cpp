@@ -1470,6 +1470,41 @@ bool IdealAccess::set_known_two_generator(
     return true;
 }
 
+// Trust boundary of the four silex::detail ideal shortcuts
+// (set_known_two_generator_ideal above, this routine,
+// multiply_integral_ideal_by_element below, and set_integral_ideal_known_hnf
+// near FractionalIdeal::set_integral_den).  "Known" means that they skip the
+// hnf_is_ideal closure test of Ideal::set_hnf, not that they store a claim
+// the caller makes.  For every input that passes their checks they store
+// only the HNF of a lattice that is an ideal by construction, and no norm
+// and no principal generator:
+//   - set_known_two_generator_ideal(a, beta): rows a I_n and M_beta span
+//     a Z^n + beta O = a O + beta O, an ideal for every a > 0 and beta in O,
+//     and every elementary divisor divides a, so the modular-HNF contract
+//     holds whatever beta is.
+//   - multiply_integral_ideal_by_two_generator(I, a, beta): rows a H and
+//     H M_beta span a I + beta I = I (a O + beta O), an ideal whenever I is.
+//   - multiply_integral_ideal_by_element(I, x): the rows are x times the
+//     basis of I, so x I, kept only when it is integral and in HNF.
+//   - set_integral_ideal_known_hnf(I): I / 1, a copy of the Ideal I with the
+//     data I already holds.
+// The inputs are Ideal, OrderElement and Element objects whose own
+// invariants hold on every installed route (an Ideal with an HNF stores an
+// ideal; the only unchecked store is the noninstalled test hook
+// IdealAccess::set_hnf_direct).  So a "false" generator, one that does not
+// generate the ideal the caller intends, gives a true description of the
+// ideal it does generate, the same ideal Ideal::set_hnf, Ideal::add of
+// principal ideals, or Ideal::multiply would produce.  None of the four
+// reads or writes a ClassGroupContext, OrderUnitGroup or PrimeIdeal, or any
+// certification state: they are friends of Ideal and FractionalIdeal only.
+// Their results can reach labelled computations, for example
+// ClassGroupContext::ideal_class_coordinates on a proven group, but only as
+// ideals the installed API can also build, so no caller-supplied claim
+// reaches a proven or grh label through them.  Library callers that attach
+// meaning to a result (a prime power or a prime decomposition from
+// PrimeIdeal data) rely on their own source-traced claims about the
+// generators, not on these routines.  The class-group test
+// test_detail_ideal_shortcuts_reach_labelled_dlog_as_true_ideals pins this.
 bool multiply_integral_ideal_by_two_generator(
         Ideal& out,
         const Ideal& ideal,

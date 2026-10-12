@@ -16,6 +16,7 @@
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
+#include "ideal/ideal_access_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "order_unit/compute_internal.hpp"
 #include "test_hook_access.hpp"
@@ -1364,6 +1365,138 @@ int test_compute_candidate_proven_quadratic() {
     assert(proven_real.order(sflint::FmpzRef(order_out)));
     assert(sflint::fmpz_is_one(order_out));
 
+    return 0;
+}
+
+// The silex::detail ideal shortcuts take caller-supplied generators, but
+// they store only the HNF of the ideal those generators determine (see the
+// comment above detail::multiply_integral_ideal_by_two_generator in
+// src/ideal/ideal.cpp).  A "false" generator, here a pair a caller might take
+// for a prime above 2, yields a true ideal that is equal to the public-API
+// ideal with the same generators, so a proven class group's discrete
+// logarithm sees the same ideal on both routes and the shortcuts leave the
+// group's labels unchanged.
+int test_detail_ideal_shortcuts_reach_labelled_dlog_as_true_ideals() {
+    silex::NumberField field = quadratic_field(-5);
+    silex::Order equation;
+    silex::Order order(field);
+    equation = silex::test::equation_order(field);
+    assert(order.maximal_order(equation));
+
+    sflint::Fmpz bound;
+    assert(class_group_bound_at_least_two(bound, order));
+    silex::ClassGroupCandidateOptions options;
+    options.max_candidates = 128;
+    options.max_relations = 16;
+    silex::ClassGroupContext context;
+    assert(context.compute_candidate(order, sflint::FmpzConstRef(bound),
+                                     options));
+    assert(context.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(bound)));
+    assert(context.try_certify_quadratic(silex::CertificationMode::proven));
+    assert_proven_class_group_certification(context);
+    sflint::Fmpz class_order;
+    assert(context.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
+
+    silex::Element theta(field);
+    silex::OrderElement theta_order(order);
+    silex::OrderElement one(order);
+    silex::OrderElement theta_plus_one(order);
+    silex::OrderElement two_element(order);
+    assert(theta.gen());
+    assert(theta_order.set_element(theta));
+    assert(one.set_si(1));
+    assert(two_element.set_si(2));
+    assert(theta_plus_one.add(theta_order, one));
+    sflint::Fmpz two;
+    sflint::fmpz_set_ui(two, 2);
+
+    // Public route for a O + beta O: the sum of the two principal ideals.
+    auto public_two_generator = [&](silex::Ideal& out,
+                                    const silex::OrderElement& beta) {
+        silex::Ideal scalar_ideal(order);
+        silex::Ideal element_ideal(order);
+        return scalar_ideal.set_principal(two_element) &&
+               element_ideal.set_principal(beta) &&
+               out.add(scalar_ideal, element_ideal);
+    };
+    auto class_coordinate = [&](const silex::Ideal& ideal, slong expected) {
+        silex::FractionalIdeal fractional(order);
+        silex::FractionalIdeal shortcut_fractional(order);
+        sflint::FmpzMat coords(1, 1);
+        sflint::FmpzMat shortcut_coords(1, 1);
+        return fractional.set_integral(ideal) &&
+               silex::detail::set_integral_ideal_known_hnf(
+                       shortcut_fractional, ideal) &&
+               shortcut_fractional.equal(fractional) &&
+               context.ideal_class_coordinates(sflint::FmpzMatRef(coords),
+                                               fractional) &&
+               context.ideal_class_coordinates(
+                       sflint::FmpzMatRef(shortcut_coords),
+                       shortcut_fractional) &&
+               mat_entry_is_si(coords, 0, 0, expected) &&
+               mat_entry_is_si(shortcut_coords, 0, 0, expected);
+    };
+
+    // (2, 1 + theta) is the nonprincipal prime above 2.
+    silex::Ideal prime_two(order);
+    silex::Ideal public_prime_two(order);
+    assert(silex::detail::set_known_two_generator_ideal(
+            prime_two, sflint::FmpzConstRef(two), theta_plus_one));
+    assert(public_two_generator(public_prime_two, theta_plus_one));
+    assert(prime_two.equal(public_prime_two));
+    assert(prime_two.known_principal_generator() == nullptr);
+    assert(class_coordinate(prime_two, 1));
+
+    // (2, theta) contains 2 and theta^2 = -5, so it is the unit ideal, not a
+    // prime above 2; the shortcut stores O and the class is trivial.
+    silex::Ideal false_prime(order);
+    silex::Ideal public_false_prime(order);
+    assert(silex::detail::set_known_two_generator_ideal(
+            false_prime, sflint::FmpzConstRef(two), theta_order));
+    assert(public_two_generator(public_false_prime, theta_order));
+    assert(false_prime.equal(public_false_prime));
+    assert(false_prime.is_one());
+    assert(class_coordinate(false_prime, 0));
+
+    // P2 (2, 1 + theta) = P2^2 = (2), and P2 (2, theta) = P2.
+    silex::Ideal square(order);
+    silex::Ideal public_square(order);
+    assert(silex::detail::multiply_integral_ideal_by_two_generator(
+            square, prime_two, sflint::FmpzConstRef(two), theta_plus_one));
+    assert(public_square.multiply(public_prime_two, public_prime_two));
+    assert(square.equal(public_square));
+    assert(class_coordinate(square, 0));
+    silex::Ideal times_unit_ideal(order);
+    assert(silex::detail::multiply_integral_ideal_by_two_generator(
+            times_unit_ideal, prime_two, sflint::FmpzConstRef(two),
+            theta_order));
+    assert(times_unit_ideal.equal(public_prime_two));
+    assert(class_coordinate(times_unit_ideal, 1));
+
+    // 2 P2 is in the class of P2; (1/2) P2 is not integral, so the element
+    // shortcut refuses it and leaves its output unchanged.
+    silex::Element two_field(field);
+    silex::Element half(field);
+    assert(two_field.set_si(2));
+    assert(half.set_si_over_si(1, 2));
+    silex::Ideal doubled(order);
+    silex::Ideal public_doubled(order);
+    silex::Ideal principal_two(order);
+    assert(silex::detail::multiply_integral_ideal_by_element(
+            doubled, prime_two, two_field));
+    assert(principal_two.set_principal(two_element));
+    assert(public_doubled.multiply(principal_two, public_prime_two));
+    assert(doubled.equal(public_doubled));
+    assert(class_coordinate(doubled, 1));
+    assert(!silex::detail::multiply_integral_ideal_by_element(
+            doubled, prime_two, half));
+    assert(doubled.equal(public_doubled));
+
+    assert_proven_class_group_certification(context);
+    assert(context.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
     return 0;
 }
 
@@ -6569,6 +6702,7 @@ int main() {
     test_compute_candidate_ideal_lattice_search();
     test_compute_candidate_small_quadratic_policy();
     test_compute_candidate_proven_quadratic();
+    test_detail_ideal_shortcuts_reach_labelled_dlog_as_true_ideals();
     test_certify_real_quadratic_clears_saturation_records();
     test_default_maximal_quadratic_proven_policy();
     test_nonmaximal_quadratic_candidate_rejection_preserves_output();
