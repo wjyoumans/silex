@@ -524,9 +524,10 @@ void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,
 // true, `root` holds an exactly verified l-th root of the row product.
 // `undecided`: neither the compact presentation nor the factored fallback
 // could decide whether the row product is an l-th power.  `error`: invalid
-// arguments, an unusable kernel width, or a failure building the row product
-// or copying the root; callers fail closed at once instead of treating the
-// row as undecided.  `deferred`: only with
+// arguments, an unusable kernel width, a failure building the row product or
+// copying the root, or an error (not an undecided result) from
+// compact_unit_presentation_power_root; callers fail closed at once instead
+// of treating the row as undecided.  `deferred`: only with
 // KernelRowRootMode::defer_undecidable, the row was not tested (see below);
 // callers treat it like `undecided`.
 enum class KernelRowRootResult : unsigned char {

@@ -7772,7 +7772,7 @@ bool compact_presentation_power_root(
             diagnostics);
 }
 
-bool compact_unit_presentation_power_root(
+CompactPowerRootResult compact_unit_presentation_power_root(
         bool& is_power,
         FactoredElement& root,
         const Order& order,
@@ -7791,18 +7791,23 @@ bool compact_unit_presentation_power_root(
         !root.parent()->has_same_data(*field) || element.parent() == nullptr ||
         !element.parent()->has_same_data(*field) || n <= 1 ||
         arb_precision <= 0 || short_precision <= 0) {
-        return false;
+        return CompactPowerRootResult::error;
+    }
+    if (CompactPowerRootTestSeams::take_unit_power_root_error()) {
+        return CompactPowerRootResult::error;
     }
 
     FactoredElement structural(*field);
     FactoredElement leftover(*field);
+    if (!structural.is_defined() || !leftover.is_defined()) {
+        return CompactPowerRootResult::error;
+    }
     {
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::unit_group,
                 "unit_group.compact_unit_formal_split");
-        if (!structural.is_defined() || !leftover.is_defined() ||
-            !compact_split_power(structural, leftover, element, n)) {
-            return false;
+        if (!compact_split_power(structural, leftover, element, n)) {
+            return CompactPowerRootResult::undecided;
         }
     }
 
@@ -7816,7 +7821,7 @@ bool compact_unit_presentation_power_root(
                 diagnostics, DiagnosticsModule::unit_group,
                 "unit_group.compact_unit_structural_power");
         root.swap(structural);
-        return true;
+        return CompactPowerRootResult::decided;
     }
 
     // One embedding context per candidate: `element` and `leftover` have the
@@ -7831,7 +7836,7 @@ bool compact_unit_presentation_power_root(
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::unit_group,
                 "unit_group.compact_unit_power_split_bound_failure");
-        return false;
+        return CompactPowerRootResult::undecided;
     }
     if (use_residual) {
         // The unit-only reduction of the residual needs a unit leftover;
@@ -7842,7 +7847,7 @@ bool compact_unit_presentation_power_root(
                     diagnostics, DiagnosticsModule::unit_group,
                     "unit_group.compact_unit_residual_norm_not_unit",
                     "unit_group.compact_unit_residual_unit_test")) {
-            return false;
+            return CompactPowerRootResult::undecided;
         }
         if (!leftover_is_unit) {
             SILEX_PROFILE_EVENT(
@@ -7861,37 +7866,41 @@ bool compact_unit_presentation_power_root(
 
     Ideal residual(order);
     FactoredElement multiplier(*field);
+    FactoredElement compact_root(*field);
     if (!residual.is_defined() || !multiplier.is_defined() ||
-        !compact_unit_presentation_reduction(
+        !compact_root.is_defined()) {
+        return CompactPowerRootResult::error;
+    }
+    if (!compact_unit_presentation_reduction(
                 residual, multiplier, order, compact_input, n, arb_precision,
                 short_precision, &candidate_embeddings, diagnostics)) {
-        return false;
+        return CompactPowerRootResult::undecided;
     }
 
-    FactoredElement compact_root(*field);
-    if (!compact_root.is_defined() ||
-        !compact_power_root_from_presentation(
+    if (!compact_power_root_from_presentation(
                 is_power, compact_root, order, compact_input, residual,
                 multiplier, n, diagnostics, field_modulus_cache)) {
-        return false;
+        return CompactPowerRootResult::undecided;
     }
     if (!is_power) {
-        return true;
+        return CompactPowerRootResult::decided;
     }
 
     if (!use_residual) {
         root.swap(compact_root);
-        return true;
+        return CompactPowerRootResult::decided;
     }
 
     FactoredElement candidate(*field);
-    if (!candidate.is_defined() ||
-        !candidate.multiply(structural, compact_root)) {
-        return false;
+    if (!candidate.is_defined()) {
+        return CompactPowerRootResult::error;
+    }
+    if (!candidate.multiply(structural, compact_root)) {
+        return CompactPowerRootResult::undecided;
     }
 
     root.swap(candidate);
-    return true;
+    return CompactPowerRootResult::decided;
 }
 
 ulong unit_candidate_random_next(ulong& state) noexcept {

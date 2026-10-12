@@ -9669,6 +9669,103 @@ int test_kernel_row_root_three_way_result() {
     return 0;
 }
 
+// compact_unit_presentation_power_root tells an error apart from an
+// undecided result, and kernel_row_root fails at once on its error instead
+// of trying the factored fallback and reporting the row undecided.
+int test_compact_unit_power_root_three_way_result() {
+    using silex::detail::CompactPowerRootResult;
+    using silex::detail::KernelRowRootResult;
+    constexpr slong precision = 256;
+    {
+        silex::NumberField field = quadratic118_field();
+        silex::Order order = silex::test::verified_maximal_order(
+                silex::test::equation_order(field));
+        silex::EmbeddingContext embeddings(field);
+        silex::OrderUnitGroup group(order);
+        assert(set_quadratic118_fundamental_unit_group(group, order, field,
+                                                       embeddings));
+        silex::FactoredElement eps(field);
+        assert(group.free_generator(eps, 0));
+        silex::FactoredElement eps_cubed(field);
+        assert(eps_cubed.pow_si(eps, 3));
+
+        // eps is fundamental, so not a cube: decided, not a power.
+        silex::FactoredElement root(field);
+        bool is_power = true;
+        assert(silex::detail::compact_unit_presentation_power_root(
+                       is_power, root, order, eps, 3, precision,
+                       precision) == CompactPowerRootResult::decided);
+        assert(!is_power);
+        // eps^3: decided, with the root eps.
+        is_power = false;
+        assert(silex::detail::compact_unit_presentation_power_root(
+                       is_power, root, order, eps_cubed, 3, precision,
+                       precision) == CompactPowerRootResult::decided);
+        assert(is_power);
+        silex::Element root_value(field);
+        silex::Element eps_value(field);
+        assert(root.evaluate(root_value) && eps.evaluate(eps_value) &&
+               root_value.equal(eps_value));
+
+        // Errors: n <= 1, a nonpositive precision, a root from another field.
+        assert(silex::detail::compact_unit_presentation_power_root(
+                       is_power, root, order, eps_cubed, 1, precision,
+                       precision) == CompactPowerRootResult::error);
+        assert(silex::detail::compact_unit_presentation_power_root(
+                       is_power, root, order, eps_cubed, 3, 0, precision) ==
+               CompactPowerRootResult::error);
+        silex::NumberField other_field = cyclotomic13_field();
+        silex::FactoredElement other_root(other_field);
+        assert(silex::detail::compact_unit_presentation_power_root(
+                       is_power, other_root, order, eps_cubed, 3, precision,
+                       precision) == CompactPowerRootResult::error);
+
+        // An injected internal error on valid arguments.  The seam fires
+        // once: the next call decides again.
+        silex::detail::TestHookAccess::set_compact_unit_power_root_error(true);
+        assert(silex::detail::compact_unit_presentation_power_root(
+                       is_power, root, order, eps_cubed, 3, precision,
+                       precision) == CompactPowerRootResult::error);
+        assert(silex::detail::compact_unit_presentation_power_root(
+                       is_power, root, order, eps_cubed, 3, precision,
+                       precision) == CompactPowerRootResult::decided);
+
+        // kernel_row_root reports the injected error as an error, although
+        // the factored fallback would decide this row (eps is not a cube).
+        sflint::Fmpz ell;
+        assert(set_fmpz_si(ell, 3));
+        sflint::FmpzMat rows(1, 1);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 0, 0), 1);
+        silex::detail::TestHookAccess::set_compact_unit_power_root_error(true);
+        assert(silex::detail::kernel_row_root(
+                       is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                       sflint::FmpzConstRef(ell)) ==
+               KernelRowRootResult::error);
+        assert(silex::detail::kernel_row_root(
+                       is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                       sflint::FmpzConstRef(ell)) ==
+               KernelRowRootResult::decided);
+        assert(!is_power);
+    }
+
+    // The expanded u_2^17 in Q(zeta_13) is a 17th power whose root Silex
+    // cannot compute in degree 12: undecided, not an error.
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup group(order);
+    assert(set_cyclotomic13_u2_power17_group(group, order, field, embeddings));
+    silex::FactoredElement g1(field);
+    assert(group.free_generator(g1, 0));
+    silex::FactoredElement root(field);
+    bool is_power = false;
+    assert(silex::detail::compact_unit_presentation_power_root(
+                   is_power, root, order, g1, 17, precision, precision) ==
+           CompactPowerRootResult::undecided);
+    return 0;
+}
+
 // KernelRowRootMode::defer_undecidable skips the root attempt only where
 // Element::is_power cannot find the root of a non-rational l-th power
 // (l >= 3, degree >= 10) and the row product is not a formal l-th power.
@@ -12686,6 +12783,7 @@ int main() {
     test_stable_proof_prime_columns_fallback_and_wide_routes();
     test_stable_proof_scan_stops_building_columns_at_full_rank();
     test_kernel_row_root_three_way_result();
+    test_compact_unit_power_root_three_way_result();
     test_kernel_row_root_defers_undecidable_rows();
     test_dependent_relation_unbounded_root_failure_adjoins_y();
     test_prove_index_bound_non_power_range_exhausted();

@@ -19,6 +19,7 @@
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include "class_group/class_group_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
 #include "lat/certified_lll_internal.hpp"
 #include "order_unit/compute_internal.hpp"
@@ -102,6 +103,17 @@ public:
     static slong certified_lll_failures_injected() noexcept {
         return CertifiedLllTestSeams::injected_.load(
                 std::memory_order_relaxed);
+    }
+
+    // Arms (or disarms) one use: the next
+    // compact_unit_presentation_power_root call returns
+    // CompactPowerRootResult::error after its argument checks, as an
+    // internal error would.  No valid call reaches that error, so this
+    // skips no invariant a run keeps; it only lets a test reach the
+    // callers' error handling.
+    static void set_compact_unit_power_root_error(bool on) noexcept {
+        CompactPowerRootTestSeams::unit_power_root_error_.store(
+                on, std::memory_order_relaxed);
     }
 };
 

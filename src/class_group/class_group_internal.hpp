@@ -13,6 +13,7 @@
 #include <silex/ideal.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <vector>
 
@@ -274,7 +275,45 @@ bool compact_power_input_norm(flint::Fmpq& norm,
                               flint::FmpzConstRef scale,
                               slong n,
                               slong degree) noexcept;
-bool compact_unit_presentation_power_root(
+// Outcome of compact_unit_presentation_power_root.  `decided`: `is_power` is
+// set and, when it is true, `root` holds an exactly verified n-th root of
+// `element`.  `undecided`: the compact presentation could not decide, for
+// example because its reduction or the Element::is_power call on the reduced
+// remainder gave no answer; callers try their fallback, as before.  `error`:
+// invalid arguments (a parent mismatch, n <= 1, a nonpositive precision) or
+// a working element whose parent copy is undefined; the same arguments
+// cannot do better on a fallback or a rescan, so callers fail closed at
+// once.  A failure inside the compact helpers stays `undecided`, as before:
+// their bool results do not separate an internal error from an inconclusive
+// computation.
+enum class CompactPowerRootResult : unsigned char {
+    error,
+    undecided,
+    decided,
+};
+
+class TestHookAccess;
+
+// Switch that only detail::TestHookAccess (test/test_hook_access.hpp) can
+// set.  Off by default and never set by production code; a relaxed atomic
+// load per compact_unit_presentation_power_root call.
+class CompactPowerRootTestSeams {
+public:
+    // compact_unit_presentation_power_root: true once per arming, when the
+    // call should return CompactPowerRootResult::error after its argument
+    // checks, as an internal error would.  Reading consumes the arming.
+    static bool take_unit_power_root_error() noexcept {
+        return unit_power_root_error_.load(std::memory_order_relaxed) &&
+               unit_power_root_error_.exchange(
+                       false, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<bool> unit_power_root_error_{false};
+};
+
+CompactPowerRootResult compact_unit_presentation_power_root(
         bool& is_power,
         FactoredElement& root,
         const Order& order,

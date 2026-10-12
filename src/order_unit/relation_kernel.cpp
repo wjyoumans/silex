@@ -574,14 +574,21 @@ bool relation_power_root(bool& is_relation,
                 }
             }
 
-            const bool compact_available =
-                    use_full_presentation &&
-                    detail::compact_unit_presentation_power_root(
-                            is_power, root, *order, candidate, exponent_si,
-                            kUnitCompactArbPrecision,
-                            kUnitCompactShortPrecision,
-                            group.diagnostics(), &field_modulus_cache);
-            if ((!use_full_presentation || !compact_available) &&
+            const detail::CompactPowerRootResult compact_result =
+                    use_full_presentation
+                            ? detail::compact_unit_presentation_power_root(
+                                      is_power, root, *order, candidate,
+                                      exponent_si, kUnitCompactArbPrecision,
+                                      kUnitCompactShortPrecision,
+                                      group.diagnostics(),
+                                      &field_modulus_cache)
+                            : detail::CompactPowerRootResult::undecided;
+            // An error is not an undecided root: the factored fallback below
+            // gets the same arguments, so fail as its failure would.
+            if (compact_result == detail::CompactPowerRootResult::error) {
+                return false;
+            }
+            if (compact_result != detail::CompactPowerRootResult::decided &&
                 !candidate.is_power_si(
                         is_power, root, exponent_si,
                         FactoredRootStrategy::compact,
@@ -1049,11 +1056,20 @@ KernelRowRootResult kernel_row_root(
     }
     SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.kernel_row_root_compact_attempt");
-    if (!detail::compact_unit_presentation_power_root(
-                is_power, candidate, *order, product, exponent,
-                kUnitCompactArbPrecision,
-                kUnitCompactShortPrecision, group.diagnostics(),
-                field_modulus_cache)) {
+    const detail::CompactPowerRootResult compact_result =
+            detail::compact_unit_presentation_power_root(
+                    is_power, candidate, *order, product, exponent,
+                    kUnitCompactArbPrecision, kUnitCompactShortPrecision,
+                    group.diagnostics(), field_modulus_cache);
+    if (compact_result == detail::CompactPowerRootResult::error) {
+        // Invalid arguments or a failed working-element setup, not an
+        // undecided root: the factored fallback and a rescan would get the
+        // same arguments, so fail closed at once.
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.kernel_row_root_compact_error");
+        return KernelRowRootResult::error;
+    }
+    if (compact_result == detail::CompactPowerRootResult::undecided) {
         SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.kernel_row_root_compact_unavailable");
         if (!product.is_power_si(is_power, candidate, exponent,

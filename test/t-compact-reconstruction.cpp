@@ -1085,7 +1085,8 @@ int test_compact_power_input_norm() {
         silex::FactoredElement root(field);
         assert(silex::detail::compact_unit_presentation_power_root(
                 is_power, root, order, element, 5, precision, precision,
-                &diagnostics, nullptr));
+                &diagnostics, nullptr) ==
+               silex::detail::CompactPowerRootResult::decided);
         assert(is_power);
         silex::Element root_value(field);
         silex::Element power(field);
@@ -1135,7 +1136,8 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, root, order, square, 2, precision, precision, nullptr,
-            &cache));
+            &cache) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power && compact_power_root_squares_to(root, square));
     const std::size_t filled = cache.entries.size();
     assert(filled > 0 && cache.field.has_same_data(field));
@@ -1149,7 +1151,8 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     is_power = false;
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, second_root, order, square, 2, precision, precision,
-            nullptr, &cache));
+            nullptr, &cache) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power && compact_power_root_squares_to(second_root, square));
     assert(cache.entries.size() == filled);
 
@@ -1157,7 +1160,8 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     is_power = false;
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, uncached_root, order, square, 2, precision, precision,
-            nullptr, nullptr));
+            nullptr, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power);
     silex::Element cached_value(field);
     silex::Element uncached_value(field);
@@ -1169,7 +1173,8 @@ int test_compact_field_modulus_cache_shared_across_calls() {
     is_power = false;
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, other_root, order, other_square, 2, precision,
-            precision, nullptr, &cache));
+            precision, nullptr, &cache) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power && compact_power_root_squares_to(other_root, other_square));
     assert(cache.entries.size() >= filled);
     return 0;
@@ -1231,7 +1236,8 @@ int test_compact_unit_power_root_nonunit_small_leftover() {
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, root, order, odd, 2, precision, precision,
-            &diagnostics, nullptr));
+            &diagnostics, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(!is_power);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     // The residual branch was considered and rejected for the non-unit
@@ -1245,7 +1251,8 @@ int test_compact_unit_power_root_nonunit_small_leftover() {
     is_power = false;
     silex::FactoredElement even_root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
-            is_power, even_root, order, even, 2, precision, precision));
+            is_power, even_root, order, even, 2, precision, precision) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power && compact_power_root_squares_to(even_root, even));
     return 0;
 }
@@ -1333,7 +1340,8 @@ int test_compact_unit_residual_leftover_norm_prefilter() {
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, root, order, nonunit, 2, precision, precision,
-            &diagnostics, nullptr));
+            &diagnostics, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(!is_power);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(counter.norm_rejected == 1 && counter.unit_tests == 0 &&
@@ -1348,7 +1356,8 @@ int test_compact_unit_residual_leftover_norm_prefilter() {
     is_power = true;
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, root, order, odd, 2, precision, precision,
-            &diagnostics, nullptr));
+            &diagnostics, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(!is_power);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(counter.norm_rejected == 0 && counter.unit_tests == 1 &&
@@ -1363,7 +1372,8 @@ int test_compact_unit_residual_leftover_norm_prefilter() {
     silex::FactoredElement even_root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, even_root, order, even, 2, precision, precision,
-            &diagnostics, nullptr));
+            &diagnostics, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power && compact_power_root_squares_to(even_root, even));
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(counter.norm_rejected == 0 && counter.unit_tests == 1 &&
@@ -1409,7 +1419,8 @@ int test_compact_unit_residual_leftover_norm_one_nonmaximal() {
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, root, order, cube, 3, precision, precision,
-            &diagnostics, nullptr));
+            &diagnostics, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     // The norm prefilter passes the leftover, the exact test rejects it,
@@ -1432,7 +1443,8 @@ int test_compact_unit_residual_leftover_norm_one_nonmaximal() {
     is_power = true;
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, root, order, non_cube, 3, precision, precision,
-            &diagnostics, nullptr));
+            &diagnostics, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(!is_power);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(counter.norm_rejected == 0 && counter.unit_tests == 1 &&
@@ -1546,7 +1558,8 @@ int test_compact_unit_power_root_reuses_high_precision_base_logs() {
     silex::FactoredElement root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, root, order, square, 2, precision, precision,
-            &diagnostics, nullptr));
+            &diagnostics, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(is_power && compact_power_root_squares_to(root, square));
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     // The residual bound takes both leftover base logs from the context the
@@ -1571,7 +1584,8 @@ int test_compact_unit_power_root_reuses_high_precision_base_logs() {
     silex::FactoredElement no_root(field);
     assert(silex::detail::compact_unit_presentation_power_root(
             is_power, no_root, order, non_square, 2, precision, precision,
-            nullptr, nullptr));
+            nullptr, nullptr) ==
+           silex::detail::CompactPowerRootResult::decided);
     assert(!is_power);
     return 0;
 }
