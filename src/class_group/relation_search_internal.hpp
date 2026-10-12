@@ -13,6 +13,7 @@ struct OrderMinkowskiEmbeddingCache;
 namespace silex::detail::relation_search {
 
 struct NormPrefilter;
+struct IdealLatticeRoundedEmbeddingCache;
 
 bool publish_and_check_compute_goal(
         ClassGroupContext& context,
@@ -70,7 +71,8 @@ bool collect_order_small_lll_relations(
         bool& goal_reached,
         bool& partial_throttle_exit,
         ClassGroupRelationSource source = ClassGroupRelationSource::Search,
-        slong max_good_relations = WORD(-1)) noexcept;
+        slong max_good_relations = WORD(-1),
+        IdealLatticeRoundedEmbeddingCache* lll_cache = nullptr) noexcept;
 
 bool collect_private_direct_t2_relations_den(
         ClassGroupContext& context,

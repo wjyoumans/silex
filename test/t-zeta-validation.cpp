@@ -800,12 +800,12 @@ bool check_grh_transaction_records_index_one_audit(
 }
 
 // When the coarse value does not show index one, the transaction discards
-// it and records the audit of the default route.  The degree-12 field
-// x^12 - x^11 - x^9 + ... + 1 has a coarse cutoff of 2547 but candidate
-// index bound above one at the first test.
+// it and records the audit of the default route.  The cubic field
+// x^3 + x + 200 has a coarse cutoff of 882 but candidate index bound above
+// one at the first test.
 bool check_grh_transaction_refines_to_default_audit(
         const FieldSetup& setup) noexcept {
-    constexpr ulong coarse_cutoff = 2547;
+    constexpr ulong coarse_cutoff = 882;
     silex::detail::AnalyticClassRegulatorCache cache;
     if (!cache.ensure_index_one(setup.maximal_order, 128)) {
         return false;
@@ -1111,6 +1111,7 @@ int main() {
     const slong simplest_cubic_a6[] = {-1, -9, -6};
     const slong d12_coefficients[] = {1, 0, -2, 0, 2, 1, 1, 1, 2, -1, 0, -1};
     const slong x2_minus_210[] = {-210, 0};
+    const slong x3_plus_x_plus_200[] = {200, 1, 0};
 
     return !check_failed_call_preserves_outputs(quadratic.maximal_order,
                                                 20000) ||
@@ -1131,7 +1132,7 @@ int main() {
                    !check_grh_transaction_records_index_one_audit(
                            setup_from_coefficients(x2_minus_210, 2)) ||
                    !check_grh_transaction_refines_to_default_audit(
-                           setup_from_coefficients(d12_coefficients, 12)) ||
+                           setup_from_coefficients(x3_plus_x_plus_200, 3)) ||
                    !check_linear_factor_count_cache(
                            setup_from_coefficients(d12_coefficients, 12)) ||
                    !check_linear_factor_batches()

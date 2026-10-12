@@ -199,7 +199,8 @@ bool collect_order_small_lll_relations(
         bool& goal_reached,
         bool& partial_throttle_exit,
         ClassGroupRelationSource source,
-        slong max_good_relations) noexcept {
+        slong max_good_relations,
+        IdealLatticeRoundedEmbeddingCache* lll_cache) noexcept {
     const DiagnosticsContext* diagnostics = context.diagnostics();
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.small_lll.collect_order");
@@ -214,8 +215,11 @@ bool collect_order_small_lll_relations(
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.small_lll.build_t2_context");
-        if (!build_ideal_lattice_lll_data(
-                    t2_context, order_ideal, kSmallLllInitialPrecision)) {
+        IdealLatticeRoundedEmbeddingCache local_lll_cache;
+        if (!build_ideal_lattice_rounded_embedding_lll_data(
+                    t2_context, order_ideal, kSmallLllInitialPrecision,
+                    lll_cache != nullptr ? *lll_cache : local_lll_cache,
+                    diagnostics)) {
             return false;
         }
     }
@@ -962,7 +966,8 @@ bool collect_pivot_lll_ideal(
         slong& candidates_tried,
         slong& accepted_relations,
         bool& goal_reached,
-        bool& partial_throttle_exit) noexcept {
+        bool& partial_throttle_exit,
+        IdealLatticeRoundedEmbeddingCache* lll_cache = nullptr) noexcept {
     const DiagnosticsContext* diagnostics = context.diagnostics();
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.pivot_lll_ideal");
@@ -1026,7 +1031,8 @@ bool collect_pivot_lll_ideal(
                     target_relation_kernel_units, options,
                     candidates_tried, accepted_relations, goal_reached,
                     partial_throttle_exit,
-                    ClassGroupRelationSource::RandomProduct, max_good)) {
+                    ClassGroupRelationSource::RandomProduct, max_good,
+                    lll_cache)) {
             return false;
         }
     }
@@ -1164,6 +1170,9 @@ bool ClassGroupContext::run_lll_relation_route_(
         }
     }
 
+    // Per-order rounded embedding and order Gram shared by every per-ideal
+    // reduction of this route.
+    IdealLatticeRoundedEmbeddingCache lll_cache;
     slong candidates_tried = 0;
     slong accepted_relations = relation_count();
     bool goal_reached = !extension_only && has_presentation() &&
@@ -1180,7 +1189,8 @@ bool ClassGroupContext::run_lll_relation_route_(
                 *this, order, order_ideal, &norm_prefilter,
                 source_loop_target_units, options,
                 candidates_tried, accepted_relations, goal_reached,
-                partial_throttle_exit);
+                partial_throttle_exit, ClassGroupRelationSource::Search,
+                WORD(-1), &lll_cache);
     }
     if (search_ok && (extension_only || !goal_reached) &&
         !partial_throttle_exit) {
@@ -1344,7 +1354,8 @@ bool ClassGroupContext::run_lll_relation_route_(
                               random_env, &norm_prefilter,
                               source_loop_target_units, options,
                               candidates_tried, accepted_relations,
-                              goal_reached, partial_throttle_exit)) {
+                              goal_reached, partial_throttle_exit,
+                              &lll_cache)) {
                         search_ok = false;
                         break;
                       }

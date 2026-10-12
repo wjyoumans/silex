@@ -16,6 +16,23 @@ struct IdealLatticeLllData {
     flint::Fmpz gram_denominator;
 };
 
+// Per-order data for the reference-style per-ideal reduction of
+// build_ideal_lattice_rounded_embedding_lll_data: the integer-rounded
+// Minkowski embedding rows of the order basis (reference nf_get_roundG) and
+// the scaled order T2 Gram numerator at `order_gram_precision`, the precision
+// the build_ideal_lattice_lll_data schedule reaches from the starting
+// precision `order_gram_requested_precision` (0 while no Gram is cached).
+// The cache is keyed on the order's data and is filled on first use.
+struct IdealLatticeRoundedEmbeddingCache {
+    Order order;
+    bool has_order = false;
+    bool has_rounded_rows = false;
+    flint::FmpzMat rounded_rows{0, 0};
+    slong order_gram_requested_precision = 0;
+    slong order_gram_precision = 0;
+    flint::FmpzMat order_gram{0, 0};
+};
+
 bool copy_ideal_basis_row_coordinates(flint::FmpzMat& out,
                                       flint::FmpzMatConstRef basis,
                                       slong row) noexcept;
@@ -23,6 +40,17 @@ bool copy_ideal_basis_row_coordinates(flint::FmpzMat& out,
 bool build_ideal_lattice_lll_data(IdealLatticeLllData& out,
                                   const Ideal& ideal,
                                   slong precision) noexcept;
+
+// One integer LLL per ideal on the ideal basis times the cached rounded
+// order embedding (reference buch2.c:Fincke_Pohst_ideal), with the same output contract
+// as build_ideal_lattice_lll_data.  Falls back to build_ideal_lattice_lll_data
+// when the result fails that route's T2 reduction-quality checks.
+bool build_ideal_lattice_rounded_embedding_lll_data(
+        IdealLatticeLllData& out,
+        const Ideal& ideal,
+        slong precision,
+        IdealLatticeRoundedEmbeddingCache& cache,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept;
 
 bool ideal_lattice_weight_vector_shape_is_valid(flint::FmpzMatConstRef weights,
                                                 slong degree) noexcept;

@@ -373,6 +373,13 @@ static bool fmpz_mat_diagonal_product(flint::Fmpz& out,
     return true;
 }
 
+static bool ideal_lattice_t2_diagonal_checks_pass(
+        flint::FmpzMatConstRef reduced_gram,
+        const Ideal& ideal,
+        const Order& order,
+        slong denominator_bits,
+        slong positive_weight_sum) noexcept;
+
 static bool ideal_lattice_low_precision_checks_pass(
         flint::FmpzMatConstRef reduced_gram,
         flint::FmpzMatConstRef gram_transform,
@@ -396,6 +403,26 @@ static bool ideal_lattice_low_precision_checks_pass(
             fmpz_mat_max_abs_bits(gram_transform);
     if (transform_bits >
         static_cast<flint_bitcnt_t>(denominator_bits / 2)) {
+        return false;
+    }
+
+    return ideal_lattice_t2_diagonal_checks_pass(
+            reduced_gram, ideal, order, denominator_bits,
+            positive_weight_sum);
+}
+
+// The T2 diagonal part of ideal_lattice_low_precision_checks_pass, shared
+// with the rounded-embedding route, which has no Gram transform.
+static bool ideal_lattice_t2_diagonal_checks_pass(
+        flint::FmpzMatConstRef reduced_gram,
+        const Ideal& ideal,
+        const Order& order,
+        slong denominator_bits,
+        slong positive_weight_sum) noexcept {
+    const slong degree = order.degree();
+    if (degree <= 0 || denominator_bits < 0 || positive_weight_sum < 0 ||
+        flint::fmpz_mat_nrows(reduced_gram) != degree ||
+        flint::fmpz_mat_ncols(reduced_gram) != degree) {
         return false;
     }
 
@@ -848,6 +875,273 @@ bool build_ideal_lattice_lll_data(
     }
 
     return false;
+}
+
+// The reference nf_get_roundG (2.17.3) is the matrix stored by
+// base1.c:1851, RM_round_maxrank(G) (base4.c:2631-2640): round 2^e G for
+// e = 4, 8, 16, ... until the rounded matrix has full rank.  Silex rounds
+// the midpoints of the order's Minkowski rows (rows indexed by the order
+// basis, the transpose of the reference G), so the rounded rows R satisfy B R ~ 2^e B E for
+// an ideal basis B in order coordinates.  Any integer matrix is a valid LLL
+// input here; R only steers the reduction, and the caller checks the
+// result exactly.
+static bool ideal_lattice_round_embedding_rows_full_rank(
+        flint::FmpzMat& out,
+        const flint::ArbMat& embedding_rows,
+        slong max_scale) noexcept {
+    const slong rows = flint::arb_mat_nrows_value(embedding_rows);
+    const slong cols = flint::arb_mat_ncols_value(embedding_rows);
+    if (rows <= 0 || rows != cols || max_scale < 4) {
+        return false;
+    }
+
+    flint::FmpzMat rounded(rows, cols);
+    flint::Arf midpoint;
+    for (slong scale = 4; scale <= max_scale; scale *= 2) {
+        for (slong i = 0; i < rows; ++i) {
+            for (slong j = 0; j < cols; ++j) {
+                flint::arf_set(
+                        midpoint,
+                        arb_midref(flint::arb_mat_entry_ref(embedding_rows, i,
+                                                            j)
+                                           .raw()));
+                if (!flint::arf_is_finite(midpoint)) {
+                    return false;
+                }
+                ::arf_mul_2exp_si(midpoint.raw(), midpoint.raw(), scale);
+                flint::arf_get_fmpz(flint::fmpz_mat_entry(rounded, i, j),
+                                    midpoint, ARF_RND_NEAR);
+            }
+        }
+        if (flint::fmpz_mat_rank(flint::FmpzMatConstRef(rounded)) == rows) {
+            out = std::move(rounded);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Fills the per-order cache: the order T2 Gram numerator follows the same
+// precision schedule as the order Gram of ideal_lattice_gram_lll_reduce, so
+// at a given starting precision both routes use the same order Gram.  The
+// rounded rows come from the first embedding whose Gram rounds.
+static bool ideal_lattice_fill_rounded_embedding_cache(
+        IdealLatticeRoundedEmbeddingCache& cache,
+        const Order& order,
+        slong precision,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const slong degree = order.degree();
+    if (degree <= 0 || precision <= 0) {
+        return false;
+    }
+    if (!cache.has_order || !cache.order.has_same_data(order)) {
+        cache.order = order;
+        cache.has_order = true;
+        cache.has_rounded_rows = false;
+        cache.rounded_rows = flint::FmpzMat(0, 0);
+        cache.order_gram_requested_precision = 0;
+        cache.order_gram_precision = 0;
+        cache.order_gram = flint::FmpzMat(0, 0);
+    }
+    if (cache.has_rounded_rows &&
+        cache.order_gram_requested_precision == precision) {
+        return true;
+    }
+
+    SILEX_PROFILE_SCOPE(
+            diagnostics, DiagnosticsModule::class_group,
+            "class_group.ideal_lattice_reduction.rounded_embedding.fill_cache");
+    flint::FmpzMat order_basis(degree, degree);
+    flint::fmpz_mat_one(flint::FmpzMatRef(order_basis));
+    IdealLatticePrecisionSchedule schedule(precision);
+    while (schedule.active_precision() <= kIdealLatticeLllMaxPrecision) {
+        const slong active_precision = schedule.active_precision();
+        flint::ArbMat order_embedding_rows(degree, degree);
+        flint::FmpzMat order_gram(degree, degree);
+        IdealLatticeReductionStatus status =
+                IdealLatticeReductionStatus::retry_precision;
+        slong embedding_shortfall_bits = 0;
+        if (detail::build_ideal_minkowski_embedding_rows(
+                    order_embedding_rows,
+                    flint::FmpzMatConstRef(order_basis), order,
+                    schedule.embedding_precision())) {
+            if (ideal_lattice_scaled_minkowski_gram_numerator(
+                        order_gram, order_embedding_rows, active_precision,
+                        active_precision)) {
+                status = IdealLatticeReductionStatus::success;
+            } else {
+                status = ideal_lattice_rounding_retry_status(
+                        embedding_shortfall_bits, order_embedding_rows,
+                        active_precision, active_precision);
+            }
+        }
+        if (status != IdealLatticeReductionStatus::success) {
+            if (!schedule.advance(status, embedding_shortfall_bits)) {
+                return false;
+            }
+            continue;
+        }
+
+        if (!cache.has_rounded_rows) {
+            flint::FmpzMat rounded_rows(0, 0);
+            if (!ideal_lattice_round_embedding_rows_full_rank(
+                        rounded_rows, order_embedding_rows,
+                        schedule.embedding_precision())) {
+                return false;
+            }
+            cache.rounded_rows = std::move(rounded_rows);
+            cache.has_rounded_rows = true;
+        }
+        cache.order_gram = std::move(order_gram);
+        cache.order_gram_precision = active_precision;
+        cache.order_gram_requested_precision = precision;
+        return true;
+    }
+    return false;
+}
+
+// The reference 2.17.3 buch2.c:2461-2462 (Fincke_Pohst_ideal):
+//   u = ZM_lll(ZM_mul(G0, I), 0.99, LLL_IM); ideal = ZM_mul(I, u);
+// one integer LLL of the ideal basis in the rounded embedding.  The
+// reduced basis is checked exactly against the LLL output, and its scaled
+// T2 Gram is formed exactly from the cached order Gram as in
+// ideal_lattice_gram_lll_reduce.  Returns retry_precision when the T2
+// diagonal checks reject the result.
+static IdealLatticeReductionStatus ideal_lattice_rounded_embedding_lll_reduce(
+        flint::FmpzMat& reduced_basis,
+        flint::FmpzMat& reduced_gram,
+        const flint::FmpzMat& basis,
+        const Ideal& ideal,
+        const Order& order,
+        const IdealLatticeRoundedEmbeddingCache& cache,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const slong degree = flint::fmpz_mat_nrows(basis);
+    if (degree <= 0 || degree != flint::fmpz_mat_ncols(basis) ||
+        order.degree() != degree || !cache.has_rounded_rows ||
+        cache.order_gram_precision <= 0 ||
+        flint::fmpz_mat_nrows(cache.rounded_rows) != degree ||
+        flint::fmpz_mat_ncols(cache.rounded_rows) != degree ||
+        flint::fmpz_mat_nrows(cache.order_gram) != degree ||
+        flint::fmpz_mat_ncols(cache.order_gram) != degree ||
+        flint::fmpz_mat_nrows(reduced_basis) != degree ||
+        flint::fmpz_mat_ncols(reduced_basis) != degree ||
+        flint::fmpz_mat_nrows(reduced_gram) != degree ||
+        flint::fmpz_mat_ncols(reduced_gram) != degree) {
+        return IdealLatticeReductionStatus::failed;
+    }
+
+    flint::FmpzMat embedded(degree, degree);
+    flint::FmpzMat transform(degree, degree);
+    flint::FmpzMat check(degree, degree);
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.ideal_lattice_reduction.rounded_embedding.lll");
+        flint::fmpz_mat_mul(flint::FmpzMatRef(embedded),
+                            flint::FmpzMatConstRef(basis),
+                            flint::FmpzMatConstRef(cache.rounded_rows));
+        flint::fmpz_mat_one(flint::FmpzMatRef(transform));
+        flint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
+        fmpz_lll(embedded.raw(), transform.raw(), config.raw());
+        flint::fmpz_mat_mul(flint::FmpzMatRef(reduced_basis),
+                            flint::FmpzMatConstRef(transform),
+                            flint::FmpzMatConstRef(basis));
+        flint::fmpz_mat_mul(flint::FmpzMatRef(check),
+                            flint::FmpzMatConstRef(reduced_basis),
+                            flint::FmpzMatConstRef(cache.rounded_rows));
+        if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(check),
+                                   flint::FmpzMatConstRef(embedded))) {
+            return IdealLatticeReductionStatus::failed;
+        }
+    }
+
+    const slong lll_denominator_bits = cache.order_gram_precision / 2;
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.ideal_lattice_reduction.rounded_embedding.gram");
+        flint::FmpzMat reduced_basis_transpose(degree, degree);
+        flint::fmpz_mat_transpose(flint::FmpzMatRef(reduced_basis_transpose),
+                                  flint::FmpzMatConstRef(reduced_basis));
+        flint::fmpz_mat_mul(flint::FmpzMatRef(check),
+                            flint::FmpzMatConstRef(cache.order_gram),
+                            flint::FmpzMatConstRef(reduced_basis_transpose));
+        flint::fmpz_mat_mul(flint::FmpzMatRef(reduced_gram),
+                            flint::FmpzMatConstRef(reduced_basis),
+                            flint::FmpzMatConstRef(check));
+        flint::fmpz_mat_scalar_tdiv_q_2exp(
+                flint::FmpzMatRef(reduced_gram),
+                flint::FmpzMatConstRef(reduced_gram),
+                static_cast<ulong>(lll_denominator_bits));
+        for (slong i = 0; i < degree; ++i) {
+            flint::FmpzRef diagonal =
+                    flint::fmpz_mat_entry(reduced_gram, i, i);
+            flint::fmpz_add_ui(diagonal,
+                               flint::FmpzConstRef(diagonal.raw()),
+                               static_cast<ulong>(degree));
+        }
+    }
+
+    if (!ideal_lattice_t2_diagonal_checks_pass(
+                flint::FmpzMatConstRef(reduced_gram), ideal, order,
+                lll_denominator_bits, 0)) {
+        return IdealLatticeReductionStatus::retry_precision;
+    }
+    return IdealLatticeReductionStatus::success;
+}
+
+bool build_ideal_lattice_rounded_embedding_lll_data(
+        IdealLatticeLllData& out,
+        const Ideal& ideal,
+        slong precision,
+        IdealLatticeRoundedEmbeddingCache& cache,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const Order* order = ideal.parent();
+    if (order == nullptr || !ideal.has_hnf() || precision <= 0) {
+        return false;
+    }
+
+    const slong degree = order->degree();
+    if (degree <= 0 || degree > kIdealLatticeLllMaxPrecision / 4) {
+        return false;
+    }
+    const slong active_precision = std::max(precision, 4 * degree);
+    if (active_precision > kIdealLatticeLllMaxPrecision) {
+        return false;
+    }
+
+    flint::FmpzMat original_basis(degree, degree);
+    if (!ideal.get_hnf(flint::FmpzMatRef(original_basis))) {
+        return false;
+    }
+
+    if (ideal_lattice_fill_rounded_embedding_cache(cache, *order,
+                                                   active_precision,
+                                                   diagnostics)) {
+        flint::FmpzMat basis(degree, degree);
+        flint::FmpzMat scaled_gram(degree, degree);
+        if (ideal_lattice_rounded_embedding_lll_reduce(
+                    basis, scaled_gram, original_basis, ideal, *order, cache,
+                    diagnostics) == IdealLatticeReductionStatus::success) {
+            flint::Fmpz gram_denominator;
+            flint::fmpz_one(flint::FmpzRef(gram_denominator));
+            flint::fmpz_mul_2exp(
+                    flint::FmpzRef(gram_denominator),
+                    flint::FmpzConstRef(gram_denominator),
+                    static_cast<ulong>(cache.order_gram_precision / 2));
+            out.basis = std::move(basis);
+            out.scaled_gram = std::move(scaled_gram);
+            out.gram_denominator = std::move(gram_denominator);
+            return true;
+        }
+    }
+
+    // The T2 checks rejected the one-LLL basis, or the order data could not
+    // be formed: use the two-LLL route with its own precision schedule.
+    SILEX_PROFILE_SCOPE(
+            diagnostics, DiagnosticsModule::class_group,
+            "class_group.ideal_lattice_reduction.rounded_embedding.fallback");
+    return build_ideal_lattice_lll_data(out, ideal, precision);
 }
 
 bool build_weighted_ideal_lattice_reduction(

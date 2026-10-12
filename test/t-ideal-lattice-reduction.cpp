@@ -7,6 +7,7 @@
 #include <silex/factored_element.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_lll.hpp>
 #include <silex/ideal.hpp>
 #include <silex/number_field.hpp>
 #include <silex/order.hpp>
@@ -35,6 +36,41 @@ FieldSetup cubic_x3_minus_2() noexcept {
     sflint::fmpq_poly_zero(polynomial);
     sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
     sflint::fmpq_poly_set_coeff_si(polynomial, 0, -2);
+
+    FieldSetup setup;
+    setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    assert(setup.maximal_order.maximal_order(equation_order));
+    assert(setup.maximal_order.is_maximal());
+    return setup;
+}
+
+FieldSetup quadratic_x2_minus_6() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -6);
+
+    FieldSetup setup;
+    setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    assert(setup.maximal_order.maximal_order(equation_order));
+    assert(setup.maximal_order.is_maximal());
+    return setup;
+}
+
+FieldSetup cubic_x3_plus_x_plus_200() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 200);
 
     FieldSetup setup;
     setup.field = silex::test::field_by_polynomial(
@@ -323,6 +359,216 @@ int test_ideal_lattice_result_contracts() {
     assert(finite_data.quadratic_form_data[0] == 37.0);
     assert(finite_data.quadratic_form_data[1] == 41.0);
     assert(finite_data.initial_bound_value == 43.0);
+    return 0;
+}
+
+bool same_lattice_as_ideal(sflint::FmpzMatConstRef basis,
+                           const silex::Ideal& ideal) noexcept {
+    const slong degree = sflint::fmpz_mat_nrows(basis);
+    if (degree <= 0 || sflint::fmpz_mat_ncols(basis) != degree) {
+        return false;
+    }
+    sflint::FmpzMat ideal_hnf(degree, degree);
+    sflint::FmpzMat basis_hnf(degree, degree);
+    sflint::FmpzMat expected_hnf(degree, degree);
+    if (!ideal.get_hnf(sflint::FmpzMatRef(ideal_hnf))) {
+        return false;
+    }
+    ::fmpz_mat_hnf(basis_hnf.raw(), basis.raw());
+    ::fmpz_mat_hnf(expected_hnf.raw(), ideal_hnf.raw());
+    return sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(basis_hnf),
+                                  sflint::FmpzMatConstRef(expected_hnf));
+}
+
+bool rounded_embedding_data_has_contract(
+        const silex::detail::relation_search::IdealLatticeLllData& data,
+        const silex::Ideal& ideal) noexcept {
+    const slong degree = sflint::fmpz_mat_nrows(data.basis);
+    if (degree <= 0 || sflint::fmpz_mat_ncols(data.basis) != degree ||
+        sflint::fmpz_mat_nrows(data.scaled_gram) != degree ||
+        sflint::fmpz_mat_ncols(data.scaled_gram) != degree ||
+        sflint::fmpz_sgn(sflint::FmpzConstRef(data.gram_denominator)) <= 0 ||
+        !same_lattice_as_ideal(sflint::FmpzMatConstRef(data.basis), ideal)) {
+        return false;
+    }
+    for (slong i = 0; i < degree; ++i) {
+        if (sflint::fmpz_sgn(sflint::fmpz_mat_entry(
+                    sflint::FmpzMatConstRef(data.scaled_gram), i, i)) <= 0) {
+            return false;
+        }
+        for (slong j = 0; j < degree; ++j) {
+            if (!sflint::fmpz_equal(
+                        sflint::fmpz_mat_entry(
+                                sflint::FmpzMatConstRef(data.scaled_gram), i,
+                                j),
+                        sflint::fmpz_mat_entry(
+                                sflint::FmpzMatConstRef(data.scaled_gram), j,
+                                i))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// The basis of the one-LLL route computed directly from the cached rounded
+// rows R: U H with U the LLL transform of H R (delta 0.99) for the ideal's
+// HNF basis H.
+bool one_lll_basis_from_cache(
+        sflint::FmpzMat& out,
+        const silex::Ideal& ideal,
+        const silex::detail::relation_search::IdealLatticeRoundedEmbeddingCache&
+                cache) noexcept {
+    const slong degree = sflint::fmpz_mat_nrows(cache.rounded_rows);
+    if (degree <= 0) {
+        return false;
+    }
+    sflint::FmpzMat hnf(degree, degree);
+    if (!ideal.get_hnf(sflint::FmpzMatRef(hnf))) {
+        return false;
+    }
+    sflint::FmpzMat embedded(degree, degree);
+    sflint::FmpzMat transform(degree, degree);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(embedded),
+                         sflint::FmpzMatConstRef(hnf),
+                         sflint::FmpzMatConstRef(cache.rounded_rows));
+    sflint::fmpz_mat_one(sflint::FmpzMatRef(transform));
+    sflint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
+    ::fmpz_lll(embedded.raw(), transform.raw(), config.raw());
+    out = sflint::FmpzMat(degree, degree);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(out),
+                         sflint::FmpzMatConstRef(transform),
+                         sflint::FmpzMatConstRef(hnf));
+    return true;
+}
+
+bool same_lll_data(
+        const silex::detail::relation_search::IdealLatticeLllData& left,
+        const silex::detail::relation_search::IdealLatticeLllData&
+                right) noexcept {
+    return sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(left.basis),
+                                  sflint::FmpzMatConstRef(right.basis)) &&
+           sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(left.scaled_gram),
+                                  sflint::FmpzMatConstRef(right.scaled_gram)) &&
+           sflint::fmpz_equal(sflint::FmpzConstRef(left.gram_denominator),
+                              sflint::FmpzConstRef(right.gram_denominator));
+}
+
+int test_rounded_embedding_lll_contracts() {
+    namespace rs = silex::detail::relation_search;
+    FieldSetup setup = cubic_x3_minus_2();
+    const silex::Order& order = setup.maximal_order;
+    const slong degree = order.degree();
+
+    silex::Ideal prime_ideal(order);
+    silex::Ideal large_ideal(order);
+    assert(prime_ideal.is_defined() && large_ideal.is_defined());
+    assert(degree_one_prime_ideal_above_five(prime_ideal, order));
+    assert(build_large_ideal(large_ideal, prime_ideal, order, setup.field));
+
+    rs::IdealLatticeRoundedEmbeddingCache cache;
+    rs::IdealLatticeLllData prime_data;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            prime_data, prime_ideal, kReductionPrecision, cache));
+    assert(rounded_embedding_data_has_contract(prime_data, prime_ideal));
+    assert(cache.has_order && cache.has_rounded_rows);
+    assert(sflint::fmpz_mat_nrows(cache.rounded_rows) == degree);
+    assert(sflint::fmpz_mat_rank(sflint::FmpzMatConstRef(cache.rounded_rows)) ==
+           degree);
+    assert(cache.order_gram_precision >= kReductionPrecision);
+    // The basis is the one-LLL route's.
+    sflint::FmpzMat one_lll_basis(0, 0);
+    assert(one_lll_basis_from_cache(one_lll_basis, prime_ideal, cache));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(one_lll_basis),
+                                  sflint::FmpzMatConstRef(prime_data.basis)));
+
+    // The cached per-order rows are reused unchanged for another ideal.
+    sflint::FmpzMat cached_rows(degree, degree);
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(cached_rows),
+                         sflint::FmpzMatConstRef(cache.rounded_rows));
+    rs::IdealLatticeLllData large_data;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            large_data, large_ideal, kReductionPrecision, cache));
+    assert(rounded_embedding_data_has_contract(large_data, large_ideal));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(cached_rows),
+                                  sflint::FmpzMatConstRef(cache.rounded_rows)));
+
+    // On x^3 + x + 200 the one-LLL basis of P^4, P above 5 of degree one,
+    // differs from the two-LLL route's, so this shows the one-LLL result
+    // was accepted.
+    {
+        FieldSetup skew = cubic_x3_plus_x_plus_200();
+        silex::Ideal skew_prime(skew.maximal_order);
+        silex::Ideal skew_square(skew.maximal_order);
+        silex::Ideal skew_fourth(skew.maximal_order);
+        assert(degree_one_prime_ideal_above_five(skew_prime,
+                                                 skew.maximal_order));
+        assert(skew_square.multiply(skew_prime, skew_prime));
+        assert(skew_fourth.multiply(skew_square, skew_square));
+        rs::IdealLatticeRoundedEmbeddingCache skew_cache;
+        rs::IdealLatticeLllData skew_data;
+        assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+                skew_data, skew_fourth, kReductionPrecision, skew_cache));
+        assert(rounded_embedding_data_has_contract(skew_data, skew_fourth));
+        assert(one_lll_basis_from_cache(one_lll_basis, skew_fourth,
+                                        skew_cache));
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(one_lll_basis),
+                sflint::FmpzMatConstRef(skew_data.basis)));
+    }
+
+    // A cache filled for another order is rebuilt for the new order.
+    FieldSetup quadratic = quadratic_x2_minus_6();
+    silex::Ideal quadratic_prime(quadratic.maximal_order);
+    assert(quadratic_prime.is_defined());
+    assert(degree_one_prime_ideal_above_five(quadratic_prime,
+                                             quadratic.maximal_order));
+    rs::IdealLatticeLllData quadratic_data;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            quadratic_data, quadratic_prime, kReductionPrecision, cache));
+    assert(rounded_embedding_data_has_contract(quadratic_data,
+                                               quadratic_prime));
+    assert(sflint::fmpz_mat_nrows(cache.rounded_rows) == 2);
+
+    // Rounded rows that steer the LLL badly: with R = [[1, 0, 0], [M, 1, 0],
+    // [0, 0, 1]] and M = 2^200, every basis that is short in the embedding
+    // B R has a vector with first coordinate near -M times its second, far
+    // above the T2 bounds.  The checks reject it and the result is the
+    // two-LLL route's.
+    rs::IdealLatticeRoundedEmbeddingCache steered_cache;
+    rs::IdealLatticeLllData steered_data;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            steered_data, large_ideal, kReductionPrecision, steered_cache));
+    sflint::fmpz_mat_one(sflint::FmpzMatRef(steered_cache.rounded_rows));
+    sflint::fmpz_one(sflint::fmpz_mat_entry(steered_cache.rounded_rows, 1, 0));
+    sflint::fmpz_mul_2exp(
+            sflint::fmpz_mat_entry(steered_cache.rounded_rows, 1, 0),
+            sflint::fmpz_mat_entry(
+                    sflint::FmpzMatConstRef(steered_cache.rounded_rows), 1, 0),
+            200);
+    rs::IdealLatticeLllData fallback_data;
+    assert(rs::build_ideal_lattice_rounded_embedding_lll_data(
+            steered_data, large_ideal, kReductionPrecision, steered_cache));
+    assert(rs::build_ideal_lattice_lll_data(fallback_data, large_ideal,
+                                            kReductionPrecision));
+    assert(rounded_embedding_data_has_contract(steered_data, large_ideal));
+    assert(same_lll_data(steered_data, fallback_data));
+
+    // Deterministic failures leave the output untouched.
+    prime_data.basis = sflint::FmpzMat(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(prime_data.basis, 0, 0), 11);
+    assert(!rs::build_ideal_lattice_rounded_embedding_lll_data(
+            prime_data, prime_ideal, 0, cache));
+    silex::Ideal no_hnf_ideal(order);
+    assert(no_hnf_ideal.is_defined() && !no_hnf_ideal.has_hnf());
+    assert(!rs::build_ideal_lattice_rounded_embedding_lll_data(
+            prime_data, no_hnf_ideal, kReductionPrecision, cache));
+    assert(sflint::fmpz_mat_nrows(prime_data.basis) == 1);
+    assert(sflint::fmpz_mat_ncols(prime_data.basis) == 2);
+    assert(sflint::fmpz_equal_si(
+            sflint::fmpz_mat_entry(
+                    sflint::FmpzMatConstRef(prime_data.basis), 0, 0),
+            11));
     return 0;
 }
 
@@ -942,6 +1188,7 @@ int test_octic_t2_enumeration_data_meets_lll_bounds() {
 
 int main() {
     assert(test_ideal_lattice_result_contracts() == 0);
+    assert(test_rounded_embedding_lll_contracts() == 0);
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);
