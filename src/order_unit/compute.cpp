@@ -10,6 +10,7 @@
 #include "../class_group/class_group_internal.hpp"
 #include "../class_group/relation_saturation_internal.hpp"
 #include "../factored_element/compact_reconstruction_internal.hpp"
+#include "../factored_element/factor_screen_hash_internal.hpp"
 #include "../factored_element/wide_factored_internal.hpp"
 #include "../lat/flatter_backend_internal.hpp"
 #include "../lat/fplll_backend_internal.hpp"
@@ -526,49 +527,74 @@ bool factored_log_memo_matches(const FactoredLogMemo& memo,
     return true;
 }
 
-// Screening hash of a factor's coefficients; equal elements hash equally.
-std::uint64_t factored_log_memo_factor_hash(flint::FmpqPoly& scratch,
-                                            const Element& element) noexcept {
-    constexpr ulong modulus = (UWORD(1) << 61) - UWORD(1);
-    std::uint64_t hash = UINT64_C(14695981039346656037);
-    if (!element.get_fmpq_poly(flint::FmpqPolyRef(scratch))) {
-        return hash;
+namespace {
+
+constexpr std::size_t kFactoredLogMemoEmptySlot =
+        std::numeric_limits<std::size_t>::max();
+
+// Places factor `index` in the first empty slot probed from its hash.
+void factored_log_memo_table_insert(FactoredLogMemo& memo,
+                                    std::size_t index) noexcept {
+    const std::size_t mask = memo.factor_table.size() - 1;
+    std::size_t slot =
+            static_cast<std::size_t>(memo.factor_hashes[index]) & mask;
+    while (memo.factor_table[slot] != kFactoredLogMemoEmptySlot) {
+        slot = (slot + 1) & mask;
     }
-    const slong length = fmpq_poly_length(scratch.raw());
-    hash ^= static_cast<std::uint64_t>(length);
-    hash *= UINT64_C(1099511628211);
-    hash ^= ::fmpz_fdiv_ui(fmpq_poly_denref(scratch.raw()), modulus);
-    hash *= UINT64_C(1099511628211);
-    for (slong i = 0; i < length; ++i) {
-        hash ^= ::fmpz_fdiv_ui(fmpq_poly_numref(scratch.raw()) + i, modulus);
-        hash *= UINT64_C(1099511628211);
-    }
-    return hash;
+    memo.factor_table[slot] = index;
 }
+
+}  // namespace
 
 bool factored_log_memo_factor_index(std::size_t& index,
                                     FactoredLogMemo& memo,
-                                    flint::FmpqPoly& scratch,
                                     const Element& element) noexcept {
     const NumberField* field = element.parent();
     if (!element.is_defined() || field == nullptr) {
         return false;
     }
+    if (memo.factor_table.empty()) {
+        memo.factor_table.assign(16, kFactoredLogMemoEmptySlot);
+    }
     const std::uint64_t hash =
-            factored_log_memo_factor_hash(scratch, element);
-    for (std::size_t i = 0; i < memo.factors.size(); ++i) {
-        if (memo.factor_hashes[i] == hash && memo.factors[i].equal(element)) {
-            index = i;
+            factor_screen_hash(element, field->raw_flint_field());
+    const std::size_t mask = memo.factor_table.size() - 1;
+    std::size_t slot = static_cast<std::size_t>(hash) & mask;
+    for (;;) {
+        const std::size_t stored = memo.factor_table[slot];
+        if (stored == kFactoredLogMemoEmptySlot) {
+            break;
+        }
+        if (memo.factor_hashes[stored] == hash &&
+            memo.factors[stored].equal(element)) {
+            index = stored;
             return true;
         }
+        slot = (slot + 1) & mask;
     }
     Element copy(*field);
     if (!copy.is_defined() || !copy.set(element)) {
         return false;
     }
+    // Grow to keep the table at most half full.
+    const bool grow =
+            2 * (memo.factors.size() + 1) > memo.factor_table.size();
+    if (grow && memo.factor_table.size() >
+                        std::numeric_limits<std::size_t>::max() / 4) {
+        return false;
+    }
     memo.factors.push_back(std::move(copy));
     memo.factor_hashes.push_back(hash);
     index = memo.factors.size() - 1;
+    if (grow) {
+        memo.factor_table.assign(2 * memo.factor_table.size(),
+                                 kFactoredLogMemoEmptySlot);
+        for (std::size_t i = 0; i < memo.factors.size(); ++i) {
+            factored_log_memo_table_insert(memo, i);
+        }
+    } else {
+        memo.factor_table[slot] = index;
+    }
     return true;
 }
 
@@ -582,11 +608,9 @@ bool factored_log_memo_add_entry(FactoredLogMemoEntry*& out,
     entry.fingerprint = fingerprint;
     entry.factor_indices.reserve(entries.size());
     entry.exponents.reserve(entries.size());
-    flint::FmpqPoly scratch;
     for (const auto& factor : entries) {
         std::size_t index = 0;
-        if (!factored_log_memo_factor_index(index, memo, scratch,
-                                            factor.factor)) {
+        if (!factored_log_memo_factor_index(index, memo, factor.factor)) {
             return false;
         }
         entry.factor_indices.push_back(index);

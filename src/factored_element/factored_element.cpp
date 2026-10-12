@@ -2,6 +2,7 @@
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpz_vec.hpp>
 #include "../element/element_internal.hpp"
+#include "factor_screen_hash_internal.hpp"
 #include "../order_unit/precision_cap_internal.hpp"
 
 #include <flint/arb.h>
@@ -227,10 +228,10 @@ void profile_factored_log_shape(const DiagnosticsContext* diagnostics,
     }
 }
 
-// Screening hash of a factor's stored coefficients.  It only routes the
-// search in distinct_factor_indices, where every match is confirmed with
-// Element::equal, so two equal factors that hash apart are merely looked up
-// separately.
+}  // namespace
+
+namespace detail {
+
 std::uint64_t factor_screen_hash(const Element& factor,
                                  const nf_struct* field) noexcept {
     std::uint64_t hash = UINT64_C(14695981039346656037);
@@ -259,6 +260,10 @@ std::uint64_t factor_screen_hash(const Element& factor,
     return hash;
 }
 
+}  // namespace detail
+
+namespace {
+
 // Maps each entry to the index of its factor among the distinct factors of
 // `entries`, numbered in order of first occurrence; `first[d]` is the first
 // entry whose factor is distinct factor d.  Factors are compared with
@@ -283,7 +288,7 @@ bool distinct_factor_indices(std::vector<std::size_t>& index,
     const nf_struct* field = parent.raw_flint_field();
     for (std::size_t i = 0; i < count; ++i) {
         const std::uint64_t hash =
-                factor_screen_hash(entries[i].factor, field);
+                detail::factor_screen_hash(entries[i].factor, field);
         std::size_t slot = static_cast<std::size_t>(hash) & (buckets - 1);
         for (;;) {
             const std::size_t distinct = table[slot];

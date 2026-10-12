@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -108,11 +109,23 @@ struct FactoredLogMemoEntry {
 // context (none: no factor is recomputed) are unchanged.
 struct FactoredLogMemo {
     std::vector<Element> factors;
+    // factor_screen_hash of each factor.
     std::vector<std::uint64_t> factor_hashes;
+    // Open-addressing table over `factors`: a power-of-two number of slots,
+    // each a factor index or empty (SIZE_MAX), probed linearly from the
+    // factor's hash; kept at most half full.
+    std::vector<std::size_t> factor_table;
     std::vector<FactoredLogMemoEntry> entries;
     slong hits = 0;
     slong stores = 0;
 };
+
+// Sets `index` to the position of `element` in memo.factors, appending a
+// copy when no stored factor equals it (Element::equal, which also requires
+// the same parent).  Fails on an undefined element.
+bool factored_log_memo_factor_index(std::size_t& index,
+                                    FactoredLogMemo& memo,
+                                    const Element& element) noexcept;
 
 // FactoredElement::logarithmic_embedding through `memo` (a direct call when
 // `memo` is null).  Same arguments, result, and failure as the direct call.

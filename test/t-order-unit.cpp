@@ -16,6 +16,7 @@
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/class_group_internal.hpp"
+#include "factored_element/factor_screen_hash_internal.hpp"
 #include "factored_element/wide_factored_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/relation_unit_internal.hpp"
@@ -1198,6 +1199,119 @@ int test_factored_log_memo_after_failed_factor_log() {
     assert(value.logarithmic_embedding(sflint::ArbVecRef(direct), embeddings,
                                        mode, precision));
     assert(arb_vecs_identical(memoized, direct));
+    return 0;
+}
+
+// The factored log memo finds each distinct factor through its screen hash
+// and a bucket table.  Distinct factors with equal hashes stay distinct, an
+// equal factor is found again at the end of a long probe chain, and growing
+// the table keeps every factor at its first index.
+int test_factored_log_memo_factor_lookup() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    const nf_struct* field = cubic.raw_flint_field();
+    silex::Element theta(cubic);
+    assert(theta.gen());
+    // The screen hash reduces each coefficient mod p = 4294967291, so
+    // theta + 1 + j p all hash alike.
+    const slong p = 4294967291;
+    const slong chain = 40;
+    std::vector<silex::Element> colliding;
+    for (slong j = 0; j < chain; ++j) {
+        silex::Element factor(cubic);
+        assert(factor.add_si(theta, 1 + j * p));
+        colliding.push_back(std::move(factor));
+    }
+    const std::uint64_t hash =
+            silex::detail::factor_screen_hash(colliding[0], field);
+    for (const silex::Element& factor : colliding) {
+        assert(silex::detail::factor_screen_hash(factor, field) == hash);
+    }
+    assert(!colliding[0].equal(colliding[1]));
+
+    silex::detail::FactoredLogMemo memo;
+    std::size_t index = 0;
+    assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                         colliding[0]));
+    assert(index == 0);
+    assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                         colliding[1]));
+    assert(index == 1);
+    assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                         colliding[0]));
+    assert(index == 0);
+    assert(memo.factors.size() == 2);
+
+    // Interleave the rest of the chain with factors of other hashes, past
+    // several table growths.
+    silex::Element square(cubic);
+    assert(square.multiply(theta, theta));
+    std::vector<silex::Element> others;
+    for (slong j = 2; j < chain; ++j) {
+        assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                             colliding[j]));
+        assert(index == memo.factors.size() - 1);
+        silex::Element other(cubic);
+        assert(other.add_si(square, j));
+        assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                             other));
+        assert(index == memo.factors.size() - 1);
+        others.push_back(std::move(other));
+    }
+    const std::size_t stored = memo.factors.size();
+    assert(stored == 2 + 2 * static_cast<std::size_t>(chain - 2));
+    assert(2 * stored <= memo.factor_table.size());
+
+    // Equal copies are found again at their first index.
+    for (slong j = 0; j < chain; ++j) {
+        silex::Element copy(cubic);
+        assert(copy.set(colliding[j]));
+        assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                             copy));
+        assert(index == (j < 2 ? static_cast<std::size_t>(j)
+                               : static_cast<std::size_t>(2 * j - 2)));
+        assert(memo.factors[index].equal(colliding[j]));
+    }
+    for (std::size_t k = 0; k < others.size(); ++k) {
+        assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                             others[k]));
+        assert(index == 2 * k + 3);
+        assert(memo.factors[index].equal(others[k]));
+    }
+    assert(memo.factors.size() == stored);
+
+    // Through the memoized embedding: two candidates with the same
+    // exponents whose factors collide pairwise are kept apart, and each
+    // memoized result is the direct one.
+    silex::FactoredElement value(cubic);
+    assert(value.push(colliding[0], 1));
+    assert(value.push(colliding[1], -1));
+    silex::FactoredElement swapped(cubic);
+    assert(swapped.push(colliding[1], 1));
+    assert(swapped.push(colliding[0], -1));
+
+    silex::EmbeddingContext embeddings(cubic);
+    const slong places = 3;
+    const slong precision = 64;
+    const auto mode = silex::LogEmbeddingMode::product;
+    sflint::ArbVec theta_logs(places);
+    assert(silex::logarithmic_embedding(sflint::ArbVecRef(theta_logs),
+                                        embeddings, theta, mode, 4096));
+    silex::detail::FactoredLogMemo log_memo;
+    sflint::ArbVec memoized(places);
+    sflint::ArbVec direct(places);
+    for (const silex::FactoredElement* candidate : {&value, &swapped}) {
+        for (int round = 0; round < 2; ++round) {
+            assert(silex::detail::memoized_factored_log_embedding(
+                    sflint::ArbVecRef(memoized), &log_memo, *candidate,
+                    embeddings, mode, precision));
+            assert(candidate->logarithmic_embedding(
+                    sflint::ArbVecRef(direct), embeddings, mode, precision));
+            assert(arb_vecs_identical(memoized, direct));
+        }
+    }
+    assert(log_memo.factors.size() == 2);
+    assert(log_memo.entries.size() == 2);
+    assert(log_memo.stores == 2 && log_memo.hits == 2);
     return 0;
 }
 
@@ -12005,6 +12119,7 @@ int main() {
     test_reduce_mod_units_half_integer_tie_stop_rule();
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_after_failed_factor_log();
+    test_factored_log_memo_factor_lookup();
     test_round_arb_approx_width_check();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();
