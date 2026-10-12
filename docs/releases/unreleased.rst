@@ -784,19 +784,23 @@ Changed
   bases that found almost no relations, so ``grh`` ran for more than 1200 s
   instead of about 8 s.  It now takes about 7.9 s (release build on a busy
   machine).  Where the check passes, the reduction and all results are
-  unchanged; it costs one two-LLL reduction per order and relation route.
-  Of the 185 ``grh`` corpus and fixture rows, four more take the two-LLL
-  route for some orders: ``cyclotomic_real_31_deg15``,
-  ``cyclotomic_real_37_deg18``, ``cyclotomic_real_41_deg20`` and
-  ``multiquadratic_p5_m7_m11``.  Their class groups, regulator values and
+  unchanged; it costs one two-LLL reduction per order and class-group
+  context.  The check runs once per order in a class-group context, on the
+  first accepted ideal, and its result is shared by all relation slices of
+  that context; each slice does not repeat it on its own first ideal.
+  Of the 185 ``grh`` corpus and fixture rows, three more take the two-LLL
+  route for some orders: ``cyclotomic_real_37_deg18``,
+  ``cyclotomic_real_41_deg20`` and ``multiquadratic_p5_m7_m11``.  Their class groups, regulator values and
   labels are unchanged, while ``relation_count``,
   ``relation_kernel_unit_count``, ``relation_sources``,
   ``skipped_dependent_relation_count``, ``unit_group.regulator_radius``
   (still a valid enclosure) and the chosen fundamental units can differ.
   ``cyclotomic_real_41_deg20`` falls from about 1.00 s to 0.44 s and
-  ``multiquadratic_p5_m7_m11`` from 0.12 s to 0.05 s, while
-  ``cyclotomic_real_31_deg15`` rises from 0.37 s to 0.67 s.  ``proven`` runs
-  are unchanged on the same rows.
+  ``multiquadratic_p5_m7_m11`` from 0.12 s to 0.05 s.  ``proven`` runs are unchanged on the same rows.  Because the check runs
+  once per context, ``cyclotomic_real_31_deg15`` (whose first ideal passes
+  the check, while a later slice's first ideal failed it narrowly) keeps the
+  one-LLL route and returns to the outputs and time it had before this
+  check.
 
 - ``roots_of_unity``, ``root_of_unity_order`` and ``root_of_unity_generator``
   remember their result per thread for the last few defining polynomials,

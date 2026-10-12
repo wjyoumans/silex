@@ -742,7 +742,8 @@ Because Silex's order basis is not reduced, its rounded rows can be too
 coarse to steer the LLL: on a badly conditioned basis the reduced basis
 passes the two diagonal bounds yet is far longer than the Hecke route's.
 Silex therefore adds a check that is not in either source: for the first
-ideal whose one-LLL basis is accepted in an order, it also reduces the ideal
+ideal whose one-LLL basis is accepted in an order (once per order in a
+class-group context, not once per relation slice), it also reduces the ideal
 by the Hecke route, and when the product of the one-LLL basis's T2 diagonal
 entries exceeds ``2^n`` times the Hecke route's (``n`` the degree, so on
 average a factor 2 per entry), that ideal and every later ideal of the order
