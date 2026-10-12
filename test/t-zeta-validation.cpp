@@ -970,6 +970,12 @@ bool check_linear_factor_batches() noexcept {
                                    1, 1, 1, 1, 1, 1, 1, 1};
     const slong cyclotomic_19[] = {1, 1, 1, 1, 1, 1, 1, 1, 1,
                                    1, 1, 1, 1, 1, 1, 1, 1, 1};
+    // The 13th cyclotomic polynomial (degree 12, inside the word kernel's
+    // 11-15 range) and x^17 - 2 (degree 17, one above the kernel's largest
+    // degree, so no prime is batched).
+    const slong cyclotomic_13[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    const slong degree_17[] = {-2, 0, 0, 0, 0, 0, 0, 0, 0,
+                               0,  0, 0, 0, 0, 0, 0, 0};
     // x^3 - x^2 - 2x - 8 (Dedekind): 2 divides the index of Z[x].
     const slong dedekind[] = {-8, -2, -1};
     const FieldSetup dedekind_setup = setup_from_coefficients(dedekind, 3);
@@ -1025,6 +1031,10 @@ bool check_linear_factor_batches() noexcept {
                    setup_from_coefficients(cyclotomic_11, 10), true) &&
            check_linear_factor_batch(
                    setup_from_coefficients(cyclotomic_17, 16), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(cyclotomic_13, 12), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(degree_17, 17), false) &&
            check_linear_factor_batch(
                    setup_from_coefficients(cyclotomic_19, 18), false) &&
            check_linear_factor_batch(dedekind_setup, true) &&
