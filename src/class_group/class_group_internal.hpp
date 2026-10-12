@@ -374,13 +374,16 @@ bool lll_relation_kernel_extension(flint::FmpzMat& out,
                                    flint::FmpzMatConstRef relations) noexcept;
 // Applies the two exact checks to a reduced extension and, when both hold,
 // sets out to the (n - rank) x n kernel rows in their reduced order.
+// Precondition: `rank` is the exact rank of `relations`; the claim that the
+// rows are a basis of the full left kernel lattice depends on it.
 bool checked_relation_kernel_rows(flint::FmpzMat& out,
                                   flint::FmpzMatConstRef relations,
                                   flint::FmpzMatConstRef reduced_extension,
                                   slong rank) noexcept;
 // The shared selection: the checked rows of `reduced_extension` when it is
 // non-null and passes, the HNF transform rows otherwise.  Fails only on
-// inconsistent shapes or rank.
+// inconsistent shapes or rank.  Precondition: `rank` is the exact rank of
+// `relations`.
 bool relation_kernel_basis_from_extension(
         flint::FmpzMat& out,
         RelationKernelBasisRoute* route,

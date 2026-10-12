@@ -621,15 +621,22 @@ as the kernel basis.  This follows the orthogonal-lattice construction of
 J. Chen, D. Stehle, and G. Villard, "Computing an LLL-reduced basis of the
 orthogonal lattice" (arXiv:1805.03418), Proposition 4.1, adapted from
 Nguyen and Stern (1997), whose sufficient scale is
-``K > 2^((n-1)/2) * lambda_{n-k}``.  Silex does not rely on the scale
-being large enough: the number of candidate rows must equal ``n`` minus
+``K > 2^((n-1)/2) * lambda_{n-k}``, where ``k`` is the rank of the matrix.
+The proposition assumes a matrix of full column rank, which the relation
+matrix generally is not, so Silex does not rely on it.  Silex does not rely
+on the scale being large enough: the number of candidate rows must equal ``n`` minus
 the rank, and every row is checked exactly against ``v*A = 0``.  When
 either check fails, the helper uses the rows of the HNF transform that
 belong to the zero rows of the HNF, which are an exact kernel basis.  As
-in the reducer paragraph above, the basis claim relies on FLINT's guarantee
+in the reducer paragraph below, the basis claim relies on FLINT's guarantee
 that ``fmpz_lll`` applies only unimodular row operations; Silex adds no
-determinant check, and keeps FLINT's final reducedness check.  Published
-outputs do not depend on which route is taken.
+determinant check, and keeps FLINT's final reducedness check.  The rank
+passed in must be the exact rank of ``A``; the full-lattice claim depends on
+it.  The two routes return different bases of the same kernel lattice.  The
+class group, the regulator, and the unit lattice do not depend on the
+route; later LLL reductions start from the basis they receive, so the
+specific unit generators are not shown to be route-independent.  On the
+tested proven corpus rows the published outputs were identical.
 
 Continued-fraction fundamental unit of a real quadratic field
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1030,6 +1030,29 @@ int test_relation_kernel_basis_checks_and_fallback() {
             checked, sflint::FmpzMatConstRef(relations),
             sflint::FmpzMatConstRef(extension), rank - 1));
 
+    // Too large a rank: the zero-block has n - rank rows too few.
+    assert(!silex::detail::checked_relation_kernel_rows(
+            checked, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(extension), rank + 1));
+
+    // Empty kernel (rank == n): no LLL, a 0-row basis by the transform route.
+    {
+        sflint::FmpzMat full(2, 2);
+        ::fmpz_mat_one(full.raw());
+        sflint::FmpzMat full_hnf(2, 2);
+        sflint::FmpzMat full_transform(2, 2);
+        ::fmpz_mat_hnf_transform(full_hnf.raw(), full_transform.raw(),
+                                 full.raw());
+        sflint::FmpzMat empty(5, 5);
+        RelationKernelBasisRoute empty_route =
+                RelationKernelBasisRoute::lll_extended;
+        assert(silex::detail::relation_kernel_basis(
+                empty, &empty_route, sflint::FmpzMatConstRef(full),
+                sflint::FmpzMatConstRef(full_transform), 2));
+        assert(empty_route == RelationKernelBasisRoute::hnf_transform);
+        assert(sflint::fmpz_mat_nrows(empty) == 0);
+    }
+
     // Misshapen or absent candidates.
     const sflint::FmpzMat misshapen(n, g + n - 1);
     assert_fallback(&misshapen);
