@@ -120,6 +120,17 @@ Added
 Changed
 -------
 
+- The exact class number of an imaginary quadratic field with
+  ``|D| >= 2^44`` (``proven`` class/unit computations) now first evaluates
+  ``L(1, chi_D)`` to an absolute tolerance sized for the class number,
+  instead of FLINT's precision mapping at the bit length of ``|D|`` plus 32
+  bits.  The enclosure is still rigorous and the class number is still taken
+  only when its ball holds exactly one positive integer.  When that first
+  step does not isolate it, the previous precisions are tried as before, so
+  the class number and every published output are unchanged and no field
+  fails that succeeded before.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` imaginary quadratic witness step builds each factor-base
   row's ideal Hermite normal form by Hensel lifting the prime roots and
   combining them with the Chinese remainder theorem, instead of multiplying

@@ -1137,13 +1137,51 @@ number of the order.  The listing takes time and memory growing like
 (Davenport, *Multiplicative Number Theory*, 3rd ed., Chapter 6), evaluated
 in ball arithmetic from the rigorous ``L(1, chi_D)`` enclosure described
 below.  The ball contains ``h(D)``, and ``h(D)`` is taken only when the ball
-contains exactly one integer, which must be positive; the working precision
-is the bit length of ``|D|`` plus 32 bits, doubled once if the ball still
-holds more than one integer, after which the computation fails closed.  At
-``|D| = 1e14 + 31`` a direct call of this function gives ``h = 14414435``,
-PARI's value, in about 100 s and 14 MB.  A full proven run reaches
-this step at such sizes only through the structure certificate route
-described below.
+contains exactly one integer, which must be positive.  The enclosure is
+computed in up to three steps, each tried only when the previous one gives
+no such integer:
+
+#. ``L(1, chi_D)`` to an absolute tolerance sized for ``h(D)`` (below);
+#. FLINT's precision mapping at the bit length of ``|D|`` plus 32 bits;
+#. the same at twice that precision.
+
+Any failure of the first step moves on to the second.  From the second step
+on, a non-finite or non-positive enclosure fails closed, and so does a ball
+that still holds more than one integer after the third step.  So the
+computation succeeds wherever the last two steps alone succeed, with the
+same ``h(D)``.
+
+The first step sizes the work for ``rad(h) <= 1/16`` instead of for a target
+precision of ``L(1, chi_D)``.  Since ``h = sqrt(q) L(1, chi_D) / pi`` with
+``q = |D|``, this needs ``rad L <= pi / (16 sqrt(q))``.  The tolerance of the
+first sum is ``2^t`` with ``t = floor(log2(pi / (16 sqrt(q))) - log2(N / 16 +
+2) - 2)``.  The term ``N / 16 + 2`` allows for the per-term errors of the
+``N`` terms (each about ``tol / 32`` under FLINT's per-term precision) and for
+the two tails, and the last 2 bits are a margin.  ``N = sqrt(q z / pi) + 2``
+estimates the truncation index, where ``z = max(1, (1 - t) ln 2 + ln(1 + q /
+pi))`` is about where FLINT's tail bound falls below ``2^t``; ``t`` and ``N``
+are iterated four times from ``N = sqrt(60 q / pi)``.  The second sum keeps
+FLINT's tolerance relative to the first, about ``2^t sqrt(q / pi)``.  Both
+sums are accumulated at ``-t + log2 sqrt(q) + 8`` bits, at least 32.  FLINT's
+tail bound and per-term working precisions are unchanged, so the enclosure
+stays rigorous; the tolerance and precisions are cost parameters only.  This
+step deviates from FLINT's mapping of a target precision ``p`` to the
+tolerance ``2^(mmax - p')`` with ``p' = 1.001 p + 2 bits(q)`` (FLINT 3.6.0
+``src/acb_dirichlet/l_fmpq_afe.c``, ``acb_dirichlet_l_fmpq_afe``), which the
+last two steps keep.  At ``|D| = 1e14 + 319`` that mapping targets
+``2^-173``, while the first step needs about ``2^-49``; the estimated
+truncation index falls from about ``6.9e7`` to about ``4.6e7``, and each term
+is evaluated at about one limb of precision instead of three.  The sources
+consulted select no such tolerance: PARI 2.17.4 ``classno2``
+(``qfbclassno(D, 1)``) truncates the series of Cohen, *A Course in
+Computational Algebraic Number Theory*, Prop. 5.3.14, at the index of
+Cor. 5.3.16, works at 64 bits without a tail bound, and rounds.  The rule
+is therefore a Silex cost parameter, adopted as an approved change of the
+precision rule, and not a source's precision rule.
+
+At ``|D| = 1e14 + 31`` a direct call of this function gives
+``h = 14414435``, PARI's value.  A full proven run reaches this step at such
+sizes only through the structure certificate route described below.
 With generation verified up to the Minkowski-type bound and ``h_cand = h``,
 the computed relation lattice has index one in the full one, so it is
 saturated at every prime.  The route stores a verified relation-saturation
@@ -1269,7 +1307,9 @@ incomplete gamma values are the closed forms ``Gamma(1, z) = exp(-z)``,
 ``Gamma(1/2, z) = sqrt(pi) erfc(sqrt(z))`` and ``Gamma(0, z) = E_1(z)``
 (DLMF 6.2 and 8.4), evaluated with arb ball functions at block anchors and
 obtained by Taylor stepping between them, where FLINT evaluates each term
-from scratch.
+from scratch.  The analytic imaginary-quadratic class number above also
+evaluates the same sums with a tolerance sized for ``h(D)`` instead of
+FLINT's precision mapping (first step of its ladder).
 
 The stepping is Silex's own evaluator and uses no FLINT code.  Its closest
 upstream analogue is in the same FLINT file: the term loop there has a

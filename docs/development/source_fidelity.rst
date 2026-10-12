@@ -85,3 +85,14 @@ zeros ends the loop at the current precision, where Hecke would double the
 precision and might round exactly to a nonzero value; there the output can be
 less reduced than Hecke's.  See
 :doc:`../reference/algorithms_and_sources`.
+
+The analytic imaginary-quadratic class number first evaluates
+``L(1, chi_D)`` to an absolute tolerance sized for a ball of radius about
+1/16 around ``h(D)``, instead of FLINT's mapping from a target precision to
+a tolerance (FLINT 3.6.0 ``acb_dirichlet_l_fmpq_afe``).  FLINT's tail bound
+and per-term working precisions are kept, so the enclosure stays rigorous,
+and ``h(D)`` is still taken only when the ball holds one integer.  When that
+step does not isolate ``h(D)``, the previous precision steps run unchanged,
+so the result is the same and no input fails that succeeded before.  The
+change was approved as a change of precision rule; see "Class groups and
+order units" in :doc:`../reference/algorithms_and_sources`.

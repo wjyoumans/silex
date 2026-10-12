@@ -245,8 +245,8 @@ bool fmpq_poly_is_monic_integral(const fmpq_poly_t polynomial) noexcept {
 // `acb_dirichlet_l_fmpq_afe` (src/acb_dirichlet/l_fmpq_afe.c) at s = 1: the
 // same two sums, the same truncation rule and tail bound
 // (`acb_dirichlet_afe_tail_bound`), the same tolerances and working
-// precisions.  The code below from here through `quadratic_l1_afe` is derived
-// from that file:
+// precisions.  The code below from here through
+// `quadratic_l1_afe_with_tolerance` is derived from that file:
 //
 //   Copyright (C) 2021 Fredrik Johansson
 //   This file is part of FLINT, licensed under the GNU Lesser General Public
@@ -263,7 +263,10 @@ bool fmpq_poly_is_monic_integral(const fmpq_poly_t polynomial) noexcept {
 //   computed from the character;
 // - the incomplete gamma values use the closed forms below, evaluated with
 //   arb ball functions, instead of FLINT's incremental series for
-//   Gamma((s + parity) / 2, z) along the sum.
+//   Gamma((s + parity) / 2, z) along the sum;
+// - `quadratic_l1_afe_with_tolerance` takes the first sum's tolerance
+//   directly instead of FLINT's mapping from a target precision, for the
+//   analytic class number (src/class_group/class_group.cpp).
 //
 // With parity a (a = 0 for D > 0, a = 1 for D < 0) and z_n = pi n^2 / q,
 //   L(1, chi) Gamma((1 + a) / 2)
