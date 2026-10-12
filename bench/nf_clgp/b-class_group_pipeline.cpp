@@ -2482,20 +2482,23 @@ void BM_class_unit_0_1_0_imag_quadratic_3116399_proven(
             kImagQuadratic3116399ClassUnit);
 }
 
-// Times only the witness requests on the large class group (order 2528):
-// every invariant_generator_power_witness and every relation_kernel_unit, on
-// a fresh context per iteration (the class/unit computation runs with the
-// timer paused).  This is the row that reaches the extra n x n Smith form
-// and S/V check in the invariant-generator witness path for large n.  The
-// field has unit rank 0, so the relation-kernel unit count is 0 and only the
-// four invariant-generator witnesses are timed.
-void BM_class_witness_requests_imag_quadratic_3116399_proven(
-        benchmark::State& state) {
+// Times only the witness requests of a proven class/unit computation on the
+// quadratic field with the given radicand: every
+// invariant_generator_power_witness and every relation_kernel_unit, on a
+// fresh context per iteration (the class/unit computation runs with the timer
+// paused).  With require_kernel_units the row fails when the published
+// presentation has no relation-kernel units, so a row meant to time them
+// cannot silently time only the invariant-generator witnesses.
+void BM_class_witness_requests_quadratic_proven(
+        benchmark::State& state,
+        slong radicand,
+        const ExactClassUnitExpectation& expected,
+        bool require_kernel_units) {
     silex::bench_contract::initialize(state);
-    initialize_exact_class_unit_counters(state, kImagQuadratic3116399ClassUnit);
+    initialize_exact_class_unit_counters(state, expected);
     FieldOrderSetup setup;
     sflint::Fmpz d;
-    sflint::fmpz_set_si(sflint::FmpzRef(d), -3116399);
+    sflint::fmpz_set_si(sflint::FmpzRef(d), radicand);
     if (!setup.define_quadratic(sflint::FmpzConstRef(d))) {
         silex::bench_contract::fail(
                 state, "quadratic field/order setup failed",
@@ -2531,16 +2534,22 @@ void BM_class_witness_requests_imag_quadratic_3116399_proven(
             break;
         }
         if (!validate_exact_class_group_result(
-                    state, class_group,
-                    kImagQuadratic3116399ClassUnit.class_group)) {
+                    state, class_group, expected.class_group)) {
             failed = true;
             silex::bench_contract::fail(
-                    state, "class group differs from the expected 2528",
+                    state, "class group differs from the expected group",
                     silex::bench_contract::FailureReason::operation);
             break;
         }
         witnesses = 0;
         kernel_units = class_group.relation_kernel_unit_count();
+        if (require_kernel_units && kernel_units <= 0) {
+            failed = true;
+            silex::bench_contract::fail(
+                    state, "presentation has no relation-kernel units",
+                    silex::bench_contract::FailureReason::operation);
+            break;
+        }
         const slong invariants = class_group.invariant_count();
         for (slong i = 0; i < invariants && !failed; ++i) {
             silex::FactoredElement w(*setup.maximal_order.parent());
@@ -2573,6 +2582,27 @@ void BM_class_witness_requests_imag_quadratic_3116399_proven(
     if (!failed) {
         silex::bench_contract::succeed(state);
     }
+}
+
+// Times the witness requests on the large class group (order 2528).  This is
+// the row that reaches the extra n x n Smith form and S/V check in the
+// invariant-generator witness path for large n.  The field has unit rank 0,
+// so the relation-kernel unit count is 0 and only the four
+// invariant-generator witnesses are timed.
+void BM_class_witness_requests_imag_quadratic_3116399_proven(
+        benchmark::State& state) {
+    BM_class_witness_requests_quadratic_proven(
+            state, -3116399, kImagQuadratic3116399ClassUnit, false);
+}
+
+// The kernel-unit half of the witness requests: x^2 - 40001 has unit rank 1
+// and class group Z/2 x Z/16, so the row times relation_kernel_unit requests
+// (it fails if the presentation has none) besides the two
+// invariant-generator witnesses.
+void BM_class_witness_requests_real_quadratic_40001_proven(
+        benchmark::State& state) {
+    BM_class_witness_requests_quadratic_proven(
+            state, 40001, kRealQuadratic40001ClassUnit, true);
 }
 
 void BM_class_unit_0_1_0_real_quadratic_40001_proven(
@@ -2953,6 +2983,7 @@ BENCHMARK(BM_class_unit_0_1_0_real_quadratic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_proven);
 BENCHMARK(BM_class_unit_0_1_0_imag_quadratic_3116399_proven);
 BENCHMARK(BM_class_witness_requests_imag_quadratic_3116399_proven);
+BENCHMARK(BM_class_witness_requests_real_quadratic_40001_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_40001_proven);
 BENCHMARK(BM_class_unit_0_1_0_real_quadratic_100003_proven);
 BENCHMARK(BM_class_unit_0_1_0_cubic_disc23_proven);
