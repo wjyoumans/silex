@@ -1043,6 +1043,36 @@ cyclotomic field the Minkowski term falls from 442.6 to 18.9 bits, so the
 wide-unit bound falls from 454 to 30 bits and the CRT uses 1 prime instead
 of 8.
 
+Modulo each CRT prime ``p``, the reconstruction evaluates the power products
+in ``R = (Z/pZ)[x]/(f)`` for the reduced defining polynomial ``f``, with
+interleaved sliding-window exponentiation (Moller, "Algorithms for
+multi-exponentiation", SAC 2001, Section 3.1; Menezes, van Oorschot and
+Vanstone, *Handbook of Applied Cryptography*, Algorithm 14.85).  PARI's
+``FlxqV_factorback`` uses the exponents as given.  As a Silex evaluation
+choice, when ``f`` is squarefree modulo ``p`` and some exponent exceeds
+``p - 1`` in magnitude, Silex first reduces the large exponents.  By the
+Chinese remainder theorem, ``R`` is then the product of the fields
+``F_p[x]/(f_i) = F_(p^d_i)`` over the distinct irreducible factors ``f_i`` of
+``f`` (Lidl and Niederreiter, *Finite Fields*, Theorem 1.61), and every
+``a`` in ``F_q`` satisfies ``a^q = a``, zero included (Lemma 2.3).  So with
+``lambda = lcm(p^d_i - 1)``, the exponent of the unit group of ``R``, every
+element satisfies ``a^(lambda + 1) = a``.  An exponent ``e > lambda`` is
+replaced by ``((e - 1) mod lambda) + 1``, which gives the same power of every
+element of ``R``.  Plain ``e mod lambda`` would not: it turns ``a^lambda``
+into ``1`` for a zero divisor ``a``.  An exponent ``e < -lambda`` is replaced
+in the same way only for a base that is a unit of ``R``.  The prime is
+rejected before this point when a base with a negative exponent is not a
+unit, as before.  The degrees ``d_i`` come from FLINT's
+``nmod_poly_factor_distinct_deg``.  When ``f`` is not squarefree modulo
+``p``, the exponents are used as given.  The residues are the same elements
+of ``R`` either way, so no reconstructed unit changes.  The reduction saves
+work only when an exponent exceeds ``lambda``.  No row of the Silex Bench
+class/unit corpus has
+such an exponent: at the first prime above ``2^63``, the 41st cyclotomic
+polynomial splits into 8 quintics, so ``lambda = p^5 - 1`` has 316 bits,
+while the wide unit exponents of ``cyclotomic_41_phi40`` have at most 136
+bits.
+
 Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb
 coordinates of each unit against the generators' log matrix and divide by
