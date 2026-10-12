@@ -11,6 +11,7 @@
 #include <silex/residue_field.hpp>
 
 #include "ideal_lattice_lll_internal.hpp"
+#include "../abelian_group/abelian_group_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 #include "relation_search_budget_internal.hpp"
 #include "../factor_base/generation_different_route_internal.hpp"
@@ -439,6 +440,13 @@ struct ClassGroupContextStorage {
     flint::FmpzMat saturation_relation_kernel_gram_d{0, 0};
     flint::FmpzMat saturation_relation_kernel_gram_lambda{0, 0};
     bool saturation_relation_kernel_gram_valid = false;
+
+    // Smith form and right transform of the HNF basis of the last
+    // publish_presentation.  Relation appends that leave the HNF basis
+    // unchanged republish the same basis, and then the Smith form is taken
+    // from here.  Keyed only on the basis, of which S and V are a function,
+    // so it stays valid across appends, factor-base rebuilds and clear().
+    FiniteAbelianGroupSmithCache published_smith_form;
 
     void invalidate_reduced_relation_kernel() noexcept {
         reduced_relation_kernel = flint::FmpzMat(0, 0);

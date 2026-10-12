@@ -814,6 +814,133 @@ int test_lazy_right_transform_inverse() {
     return 0;
 }
 
+// A cache-taking publish gives the group the plain publish gives, on the
+// same relations and basis: same invariants, generators, reduction and
+// relation-kernel witnesses (the witness path reruns the Smith form on the
+// stored basis and compares it with the published one).
+bool cached_publish_matches_plain(
+        silex::detail::FiniteAbelianGroupSmithCache& cache,
+        const sflint::FmpzMat& relations,
+        const sflint::FmpzMat& basis) {
+    using silex::detail::FiniteAbelianGroupAccess;
+    silex::FiniteAbelianGroup cached;
+    silex::FiniteAbelianGroup plain;
+    if (!FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+                cached, sflint::FmpzMatConstRef(relations),
+                sflint::FmpzMatConstRef(basis), cache) ||
+        !FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+                plain, sflint::FmpzMatConstRef(relations),
+                sflint::FmpzMatConstRef(basis))) {
+        return false;
+    }
+    const slong k = plain.invariant_count();
+    if (cached.invariant_count() != k ||
+        cached.relation_kernel_count() != plain.relation_kernel_count()) {
+        return false;
+    }
+    for (slong i = 0; i < k; ++i) {
+        const auto cached_invariant = cached.invariant(i);
+        const auto plain_invariant = plain.invariant(i);
+        if (!cached_invariant.has_value() || !plain_invariant.has_value() ||
+            !sflint::fmpz_equal(*cached_invariant, *plain_invariant)) {
+            return false;
+        }
+    }
+    const slong m = plain.relation_count();
+    sflint::FmpzMat cached_kernel(plain.relation_kernel_count(), m);
+    sflint::FmpzMat plain_kernel(plain.relation_kernel_count(), m);
+    return generator_matrix_and_reduce_match(cached, plain) &&
+           cached.relation_kernel_matrix(sflint::FmpzMatRef(cached_kernel)) &&
+           plain.relation_kernel_matrix(sflint::FmpzMatRef(plain_kernel)) &&
+           sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(cached_kernel),
+                                  sflint::FmpzMatConstRef(plain_kernel)) &&
+           relation_kernel_identity(cached);
+}
+
+// The Smith form cache is keyed on the stored HNF basis alone: a publish with
+// more relations but the same basis (given in HNF or not) reuses it, and a
+// publish whose basis changed recomputes and replaces it.
+int test_smith_cache_reuses_unchanged_basis() {
+    silex::detail::FiniteAbelianGroupSmithCache cache;
+
+    // Rows of a lattice with HNF basis [[2, 0, 2], [0, 3, 3], [0, 0, 6]].
+    sflint::FmpzMat relations(4, 3);
+    const slong rows[4][3] = {{2, 3, 5}, {0, 3, 3}, {0, 0, 6}, {2, 0, 2}};
+    for (slong i = 0; i < 4; ++i) {
+        for (slong j = 0; j < 3; ++j) {
+            set_entry_si(relations, i, j, rows[i][j]);
+        }
+    }
+    sflint::FmpzMat basis(3, 3);
+    set_entry_si(basis, 0, 0, 2);
+    set_entry_si(basis, 0, 2, 2);
+    set_entry_si(basis, 1, 1, 3);
+    set_entry_si(basis, 1, 2, 3);
+    set_entry_si(basis, 2, 2, 6);
+    assert(cached_publish_matches_plain(cache, relations, basis));
+    assert(cache.valid && cache.compute_count == 1 && cache.reuse_count == 0);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(cache.hnf_basis),
+                                  sflint::FmpzMatConstRef(basis)));
+
+    // One more relation in the same lattice, same basis: reused.
+    sflint::FmpzMat more(5, 3);
+    for (slong i = 0; i < 4; ++i) {
+        for (slong j = 0; j < 3; ++j) {
+            set_entry_si(more, i, j, rows[i][j]);
+        }
+    }
+    set_entry_si(more, 4, 0, 4);
+    set_entry_si(more, 4, 1, 6);
+    set_entry_si(more, 4, 2, 4);
+    assert(cached_publish_matches_plain(cache, more, basis));
+    assert(cache.compute_count == 1 && cache.reuse_count == 1);
+
+    // A unimodular row mix of the same basis is brought to HNF first, so the
+    // key still matches.
+    sflint::FmpzMat mixed(3, 3);
+    set_entry_si(mixed, 0, 0, 2);
+    set_entry_si(mixed, 0, 1, 3);
+    set_entry_si(mixed, 0, 2, 5);
+    set_entry_si(mixed, 1, 1, 3);
+    set_entry_si(mixed, 1, 2, 3);
+    set_entry_si(mixed, 2, 2, -6);
+    assert(cached_publish_matches_plain(cache, more, mixed));
+    assert(cache.compute_count == 1 && cache.reuse_count == 2);
+
+    // A relation that changes the lattice changes the basis: recomputed, and
+    // the cache now holds the new basis.
+    sflint::FmpzMat grown(6, 3);
+    for (slong i = 0; i < 5; ++i) {
+        for (slong j = 0; j < 3; ++j) {
+            sflint::fmpz_set(sflint::fmpz_mat_entry(grown, i, j),
+                             entry_const(more, i, j));
+        }
+    }
+    set_entry_si(grown, 5, 2, 3);
+    sflint::FmpzMat grown_basis(3, 3);
+    set_entry_si(grown_basis, 0, 0, 2);
+    set_entry_si(grown_basis, 0, 2, 2);
+    set_entry_si(grown_basis, 1, 1, 3);
+    set_entry_si(grown_basis, 2, 2, 3);
+    assert(cached_publish_matches_plain(cache, grown, grown_basis));
+    assert(cache.compute_count == 2 && cache.reuse_count == 2);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(cache.hnf_basis),
+                                  sflint::FmpzMatConstRef(grown_basis)));
+
+    // The old basis is no longer cached.
+    assert(cached_publish_matches_plain(cache, more, basis));
+    assert(cache.compute_count == 3 && cache.reuse_count == 2);
+
+    // A basis of another size never matches.
+    sflint::FmpzMat small_relations(2, 2);
+    set_entry_si(small_relations, 0, 0, 2);
+    set_entry_si(small_relations, 1, 1, 6);
+    assert(cached_publish_matches_plain(cache, small_relations,
+                                        small_relations));
+    assert(cache.compute_count == 4 && cache.reuse_count == 2);
+    return 0;
+}
+
 int main() {
     assert(test_basic() == 0);
     assert(test_kernel_basis_check_rejects_bad_kernels() == 0);
@@ -825,5 +952,6 @@ int main() {
     assert(test_diagonal_witness_keeps_generators() == 0);
     assert(test_internal_basis_setter_witnesses() == 0);
     assert(test_lazy_right_transform_inverse() == 0);
+    assert(test_smith_cache_reuses_unchanged_basis() == 0);
     return 0;
 }

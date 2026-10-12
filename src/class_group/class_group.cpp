@@ -11900,13 +11900,22 @@ bool ClassGroupContext::publish_presentation() noexcept {
     flint::FmpzMat relation_rows(relation_count(), generator_count());
     flint::FmpzMat hnf_basis(generator_count(), generator_count());
     FiniteAbelianGroup candidate;
+    detail::FiniteAbelianGroupSmithCache& smith_cache =
+            private_storage_->published_smith_form;
+    const slong reused_before = smith_cache.reuse_count;
     if (!relations_.rows(flint::FmpzMatRef(relation_rows)) ||
         !row_module_.get_hnf_rows(flint::FmpzMatRef(hnf_basis)) ||
         !detail::FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
                 candidate,
                 flint::FmpzMatConstRef(relation_rows),
-                flint::FmpzMatConstRef(hnf_basis))) {
+                flint::FmpzMatConstRef(hnf_basis),
+                smith_cache)) {
         return false;
+    }
+    if (smith_cache.reuse_count != reused_before) {
+        SILEX_PROFILE_EVENT(
+                diagnostics_, DiagnosticsModule::class_group,
+                "class_group.publish_presentation.smith_form_reused");
     }
 
     quotient_.swap(candidate);

@@ -1,5 +1,7 @@
 #include <silex/abelian_group.hpp>
 
+#include "abelian_group_internal.hpp"
+
 #include <utility>
 
 namespace silex {
@@ -237,56 +239,9 @@ bool FiniteAbelianGroup::set_relation_matrix(
 bool FiniteAbelianGroup::set_relation_matrix_with_hnf_basis(
         flint::FmpzMatConstRef relations,
         flint::FmpzMatConstRef hnf_basis) noexcept {
-    const slong rows = flint::fmpz_mat_nrows(relations);
-    const slong columns = flint::fmpz_mat_ncols(relations);
-    if (rows < columns ||
-        flint::fmpz_mat_nrows(hnf_basis) != columns ||
-        flint::fmpz_mat_ncols(hnf_basis) != columns) {
-        return false;
-    }
-
-    FiniteAbelianGroup candidate;
-    candidate.relations_ = flint::FmpzMat(rows, columns);
-    candidate.hnf_basis_ = flint::FmpzMat(columns, columns);
-    candidate.snf_ = flint::FmpzMat(columns, columns);
-    candidate.left_transform_ = flint::FmpzMat(0, 0);
-    candidate.right_transform_ = flint::FmpzMat(columns, columns);
-    candidate.right_transform_inv_ = flint::FmpzMat(columns, columns);
-    candidate.generator_count_ = columns;
-
-    flint::fmpz_mat_set(flint::FmpzMatRef(candidate.relations_), relations);
-
-    // Store the basis in Hermite normal form: the witness path compares it
-    // with the HNF of the full relation matrix and reruns the Smith form on
-    // that same basis, so both runs must see identical input.
-    if (::fmpz_mat_is_in_hnf(hnf_basis.raw()) != 0) {
-        flint::fmpz_mat_set(flint::FmpzMatRef(candidate.hnf_basis_),
-                            hnf_basis);
-    } else {
-        ::fmpz_mat_hnf(candidate.hnf_basis_.raw(), hnf_basis.raw());
-    }
-
-    flint::FmpzMat left_reduced(columns, columns);
-    flint::fmpz_mat_snf_transform(
-            flint::FmpzMatRef(candidate.snf_),
-            flint::FmpzMatRef(left_reduced),
-            flint::FmpzMatRef(candidate.right_transform_),
-            flint::FmpzMatConstRef(candidate.hnf_basis_));
-
-    // The inverse of the right transform is filled on first use by
-    // ensure_right_transform_inv; only invariant_generator_matrix and reduce
-    // read it, and both fail before writing any output if it is not integral.
-    if (!snf_full_column_rank(flint::FmpzMatConstRef(candidate.snf_), columns) ||
-        !set_invariants(candidate.invariants_,
-                        flint::FmpzMatConstRef(candidate.snf_), columns)) {
-        return false;
-    }
-    candidate.defined_ = true;
-    candidate.has_left_transform_ = false;
-    candidate.has_right_transform_inv_ = false;
-
-    swap(candidate);
-    return true;
+    return detail::FiniteAbelianGroupAccess::
+            set_relation_matrix_with_hnf_basis_impl(*this, relations,
+                                                    hnf_basis, nullptr);
 }
 
 bool FiniteAbelianGroup::ensure_left_transform() const noexcept {
@@ -670,5 +625,104 @@ std::optional<flint::FmpzMat> FiniteAbelianGroup::invariant_coordinates(
     }
     return out;
 }
+
+
+namespace detail {
+
+bool FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis_impl(
+        FiniteAbelianGroup& group,
+        flint::FmpzMatConstRef relations,
+        flint::FmpzMatConstRef hnf_basis,
+        FiniteAbelianGroupSmithCache* cache) noexcept {
+    const slong rows = flint::fmpz_mat_nrows(relations);
+    const slong columns = flint::fmpz_mat_ncols(relations);
+    if (rows < columns ||
+        flint::fmpz_mat_nrows(hnf_basis) != columns ||
+        flint::fmpz_mat_ncols(hnf_basis) != columns) {
+        return false;
+    }
+
+    FiniteAbelianGroup candidate;
+    candidate.relations_ = flint::FmpzMat(rows, columns);
+    candidate.hnf_basis_ = flint::FmpzMat(columns, columns);
+    candidate.snf_ = flint::FmpzMat(columns, columns);
+    candidate.left_transform_ = flint::FmpzMat(0, 0);
+    candidate.right_transform_ = flint::FmpzMat(columns, columns);
+    candidate.right_transform_inv_ = flint::FmpzMat(columns, columns);
+    candidate.generator_count_ = columns;
+
+    flint::fmpz_mat_set(flint::FmpzMatRef(candidate.relations_), relations);
+
+    // Store the basis in Hermite normal form: the witness path compares it
+    // with the HNF of the full relation matrix and reruns the Smith form on
+    // that same basis, so both runs must see identical input.
+    if (::fmpz_mat_is_in_hnf(hnf_basis.raw()) != 0) {
+        flint::fmpz_mat_set(flint::FmpzMatRef(candidate.hnf_basis_),
+                            hnf_basis);
+    } else {
+        ::fmpz_mat_hnf(candidate.hnf_basis_.raw(), hnf_basis.raw());
+    }
+
+    // S and V depend only on the stored basis, which is the whole input of
+    // fmpz_mat_snf_transform here, so an equal cached basis gives the S and
+    // V this call would compute (the witness path relies on the same
+    // determinism when it reruns the Smith form on the stored basis).
+    const bool reuse =
+            cache != nullptr && cache->valid &&
+            flint::fmpz_mat_nrows(cache->hnf_basis) == columns &&
+            flint::fmpz_mat_ncols(cache->hnf_basis) == columns &&
+            flint::fmpz_mat_equal(
+                    flint::FmpzMatConstRef(cache->hnf_basis),
+                    flint::FmpzMatConstRef(candidate.hnf_basis_));
+    if (reuse) {
+        flint::fmpz_mat_set(flint::FmpzMatRef(candidate.snf_),
+                            flint::FmpzMatConstRef(cache->snf));
+        flint::fmpz_mat_set(flint::FmpzMatRef(candidate.right_transform_),
+                            flint::FmpzMatConstRef(cache->right_transform));
+    } else {
+        flint::FmpzMat left_reduced(columns, columns);
+        flint::fmpz_mat_snf_transform(
+                flint::FmpzMatRef(candidate.snf_),
+                flint::FmpzMatRef(left_reduced),
+                flint::FmpzMatRef(candidate.right_transform_),
+                flint::FmpzMatConstRef(candidate.hnf_basis_));
+    }
+
+    // The inverse of the right transform is filled on first use by
+    // ensure_right_transform_inv; only invariant_generator_matrix and reduce
+    // read it, and both fail before writing any output if it is not integral.
+    if (!snf_full_column_rank(flint::FmpzMatConstRef(candidate.snf_), columns) ||
+        !set_invariants(candidate.invariants_,
+                        flint::FmpzMatConstRef(candidate.snf_), columns)) {
+        return false;
+    }
+    candidate.defined_ = true;
+    candidate.has_left_transform_ = false;
+    candidate.has_right_transform_inv_ = false;
+
+    if (cache != nullptr) {
+        if (reuse) {
+            ++cache->reuse_count;
+        } else {
+            cache->hnf_basis = flint::FmpzMat(columns, columns);
+            cache->snf = flint::FmpzMat(columns, columns);
+            cache->right_transform = flint::FmpzMat(columns, columns);
+            flint::fmpz_mat_set(flint::FmpzMatRef(cache->hnf_basis),
+                                flint::FmpzMatConstRef(candidate.hnf_basis_));
+            flint::fmpz_mat_set(flint::FmpzMatRef(cache->snf),
+                                flint::FmpzMatConstRef(candidate.snf_));
+            flint::fmpz_mat_set(
+                    flint::FmpzMatRef(cache->right_transform),
+                    flint::FmpzMatConstRef(candidate.right_transform_));
+            cache->valid = true;
+            ++cache->compute_count;
+        }
+    }
+
+    group.swap(candidate);
+    return true;
+}
+
+}  // namespace detail
 
 }  // namespace silex
