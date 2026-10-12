@@ -996,6 +996,15 @@ Changed
 Fixed
 -----
 
+- A ``grh`` class/unit computation whose relation-search factor base exceeds
+  the size limit of ``2^14`` generators now fails with ``failure_reason``
+  ``factor_base_size_limit_exceeded``, as documented, instead of
+  ``class_unit_computation_failed``.  The relation search of fields of degree
+  at least 2 built its base on a context without the run's transaction, so
+  the refusal was not recorded (for example ``x^2 - (10^140 + 1399)``, whose
+  GRH base has more than ``2^14`` generators).  The same inputs fail as before; results,
+  labels and successful runs are unchanged.
+
 - ``FactorBase::index`` and ``FactorBase::contains`` compare prime ideals as
   ideals.  A prime equal to a base prime but recorded with other residue data
   (another residue polynomial or variable convention, or none) was reported

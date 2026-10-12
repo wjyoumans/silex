@@ -1560,7 +1560,8 @@ bool ClassGroupContext::compute_tentative_candidate_(
                         ? detail::grh_norm_bounded_base_for(
                                   class_unit_transaction_context_, order,
                                   factor_base_bound)
-                        : nullptr)) {
+                        : nullptr,
+                class_unit_transaction_context_)) {
         return false;
     }
     // The strict build contains every prime ideal of norm at most

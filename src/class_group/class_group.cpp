@@ -10800,10 +10800,17 @@ bool ClassGroupContext::build_relation_factor_base_(
 // built (the grh policy's probe base).  It is taken over and left empty, and
 // only the norm ordering of build_lll_relation_base_impl(bound, true) is
 // applied, so the base is the one that call would build.
+//
+// size_limit_run_context, when not null, is the class/unit transaction of a
+// caller building on a fresh candidate that has none attached.  It is used
+// only by the relation module size check, so a refused base names the
+// reason factor_base_size_limit_exceeded in that run; the new base is not
+// attached to it.
 bool ClassGroupContext::build_search_factor_base_(
         flint::FmpzConstRef bound,
         bool incomplete,
-        FactorBase* norm_bounded_base) noexcept {
+        FactorBase* norm_bounded_base,
+        detail::ClassUnitTransactionContext* size_limit_run_context) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.build_search_factor_base");
     if (!is_defined()) {
@@ -10837,7 +10844,9 @@ bool ClassGroupContext::build_search_factor_base_(
                                 candidate.relation_module_,
                                 candidate.base_.length(),
                                 candidate.diagnostics_,
-                                class_unit_transaction_context_)) {
+                                size_limit_run_context != nullptr
+                                        ? size_limit_run_context
+                                        : class_unit_transaction_context_)) {
         return false;
     }
 

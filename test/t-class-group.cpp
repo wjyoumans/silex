@@ -5406,6 +5406,51 @@ int test_factor_base_size_limit_fails_closed() {
     return 0;
 }
 
+// A grh class/unit transaction whose relation-search factor base exceeds
+// the relation module size limit publishes the documented reason
+// factor_base_size_limit_exceeded.  The relation search of a field of
+// degree at least 2 builds its base on a fresh candidate context with no
+// transaction attached, so the run's transaction is passed to the size
+// check.  Q(sqrt(p)), p = 10^140 + 1399 (a prime, 3 mod 4): the GRH base has
+// more than 2^14 generators.
+int test_grh_relation_search_size_limit_reason() {
+    sflint::Fmpz p;
+    sflint::fmpz_set_ui(sflint::FmpzRef(p), 10);
+    sflint::fmpz_pow_ui(sflint::FmpzRef(p), sflint::FmpzConstRef(p), 140);
+    sflint::fmpz_add_ui(sflint::FmpzRef(p), sflint::FmpzConstRef(p), 1399);
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpz_neg(sflint::FmpzRef(p), sflint::FmpzConstRef(p));
+    fmpq_poly_set_coeff_fmpz(polynomial.raw(), 0, p.raw());
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(!silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    assert(audit.policy.selected);
+    assert(audit.factor_base_size_limit_exceeded);
+    assert(audit.failure_reason != nullptr &&
+           std::strcmp(audit.failure_reason,
+                       "factor_base_size_limit_exceeded") == 0);
+    assert(!audit.final_result_published);
+    assert(!class_group.has_presentation());
+    assert(!units.is_set());
+    return 0;
+}
+
 // The two index routes of a rank-zero or quadratic class/unit pair compare
 // the candidate with the same normalization as the value they test against.
 // The analytic route divides the candidate product h_cand R_cand
@@ -6817,6 +6862,7 @@ int main() {
     test_imaginary_quadratic_proven_large_witness_forms();
     test_imaginary_quadratic_structure_certificate_rejects_subgroup();
     test_factor_base_size_limit_fails_closed();
+    test_grh_relation_search_size_limit_reason();
     test_class_unit_index_routes_share_normalization();
     test_exact_quadratic_index_below_one_fails_closed();
     test_validation_loop_exact_index_status_follows_request();
