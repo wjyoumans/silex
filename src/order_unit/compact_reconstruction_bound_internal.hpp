@@ -47,10 +47,14 @@ struct CompactCoordinateBoundReport {
     bool inverse_norm_bound_used = false;
 };
 
-// The caller certifies that generators are units of order (of the maximal
-// order) and evaluate to elements of order.  They need not be the complete
-// fundamental units: the bound needs only that each generator lies in order,
-// so it also applies to a finite-index subgroup in the middle of extraction.
+// The caller certifies that generators are units of order and evaluate to
+// elements of order; order must be a maximal order with a known basis
+// (checked: otherwise the bound is refused as invalid_input).  Exactly
+// r1 + r2 - 1 generators are required (a full-rank subgroup; fewer are
+// refused).  They need not be the complete fundamental units: the bound uses
+// only each generator's embeddings, and membership in order makes the bounded
+// coordinates integral, which reconstruction needs.  So it also applies to a
+// finite-index subgroup in the middle of extraction.
 // This private producer only ports reference's coordinate-bound calculation;
 // it does not verify those facts by expanding the compact elements.
 bool compact_unit_coordinate_bound(

@@ -4158,8 +4158,9 @@ bool pure_power_hensel_root(bool& is_power,
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.power_hensel_root");
     // Private port of reference `_roots_hensel(y^n - a, ispure=true,
-    // is_normal=true)` for monic integral degree < 10 fields.  The result is
-    // published only after exact verification; unported cases remain
+    // is_normal=true)` for monic integral fields of degree below
+    // kElementPowerRouteDegreeLimit (reference scope: degree < 10).  The
+    // result is published only after exact verification; unported cases remain
     // unsupported.
     const NumberField* parent = input.parent();
     if (parent == nullptr || parent->degree() <= 1 ||
@@ -4252,7 +4253,8 @@ bool pure_power_residue_disproves(bool& is_power,
     constexpr slong max_prime_attempts = 256;
 
     if (parent->degree() >= kElementPowerRouteDegreeLimit) {
-        // Degree 10 and higher, where pure_power_hensel_root is not ported.
+        // Degree kElementPowerRouteDegreeLimit and higher, where
+        // pure_power_hensel_root is not ported.
         // reference v0.38.6 `_roots_hensel` (Hensel.jl lines 159-161)
         // returns no roots as soon as y^n - a has no root modulo a prime
         // factor of a good prime, and in degree >= 10 it examines further
