@@ -378,6 +378,9 @@ int test_monic_integral_quadratic_fundamental_unit() {
     // b even, positive and negative; D = 12 = 2^2 * 3.
     assert_monic_quadratic_unit(2, -2, 3, 1, 1, 1, 3);     // 3 + theta
     assert_monic_quadratic_unit(-4, 1, 0, 1, 1, 1, 3);     // theta
+    // b even, d = 2 mod 4; D = 8 = 2^2 * 2.
+    assert_monic_quadratic_unit(2, -1, 2, 1, 1, 1, 2);     // 2 + theta
+    assert_monic_quadratic_unit(-2, -1, 0, 1, 1, 1, 2);    // theta
     // Non-maximal equation orders: the unit lies only in the maximal order.
     assert_monic_quadratic_unit(0, -12, 2, 1, 1, 2, 3);    // 2 + theta/2
     assert_monic_quadratic_unit(3, -9, 1, 1, 1, 3, 5);     // 1 + theta/3

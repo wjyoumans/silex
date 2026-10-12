@@ -3490,8 +3490,9 @@ bool OrderUnitGroup::compute(const Order& order) noexcept {
     }
 
     if (rank != 0) {
-        // `quadratic_fundamental_unit` accepts both the explicit quadratic
-        // backend and a canonical polynomial-defined x^2-d field.
+        // `quadratic_fundamental_unit` accepts the explicit quadratic
+        // backend and any polynomial-defined field with monic integral
+        // x^2+bx+c of positive nonsquare discriminant.
         if (rank != 1 || !order.is_maximal() ||
             order.degree() != 2) {
             return false;

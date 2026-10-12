@@ -126,13 +126,12 @@ Changed
   route publishes it.  The published unit may differ from earlier releases on
   such polynomials.  On those rows ``regulator_radius``,
   ``unit_proof_record_count``, ``relation_count``,
-  ``relation_kernel_unit_count``, ``generator_count`` and ``relation_rank``
-  change, and the documented contract of ``quadratic_fundamental_unit``
-  widens from explicit quadratic fields and ``x^2-d`` to monic integral
-  ``x^2+bx+c``.  Per-row cost moves both ways: ``real_quadratic_d100000005``
-  ``proven`` drops from about 3.9 s to 43 ms, while
-  ``real_quadratic_d100000001`` rises from about 50 ms to about 80 ms
-  (busy-machine timings).
+  ``class_group.relation_sources.search``, ``relation_kernel_unit_count``,
+  ``generator_count`` and ``relation_rank`` change, and the documented
+  contract of ``quadratic_fundamental_unit`` widens from explicit quadratic
+  fields and ``x^2-d`` to monic integral ``x^2+bx+c``.  Per-row cost moves
+  both ways: ``real_quadratic_d100000005`` ``proven`` gets faster, while
+  ``real_quadratic_d100000001`` ``proven`` gets slower.
 
 - The ``proven`` factor-base honesty check accepts a principal witness that
   also carries a prime ideal ``Q`` outside the factor base, when ``Q`` lies

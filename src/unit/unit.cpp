@@ -78,7 +78,9 @@ bool monic_integral_quadratic_radicand_map(
     // squarefree, the generator theta satisfies (2*theta + b)^2 = D, so
     // (2*theta + b)/f is a square root of d in the field: the positive one
     // at the real embedding sending theta to the larger root.  The x^2-d
-    // presentation with d squarefree is the case b = 0, f = 2.
+    // presentation with d squarefree is the case b = 0, f = 2.  f is held
+    // in `square_part`; it is not the conductor of Z[theta], which is f/2
+    // when d = 2, 3 mod 4.
     const nf_struct* raw_field = field.raw_flint_field();
     if (raw_field == nullptr || field.degree() != 2) {
         return false;
@@ -116,11 +118,11 @@ bool monic_integral_quadratic_radicand_map(
                        flint::FmpzConstRef(discriminant));
     const flint::FmpzFactorConstRef factors(factorization);
     flint::Fmpz radicand;
-    flint::Fmpz conductor;
+    flint::Fmpz square_part;
     flint::Fmpz prime;
     flint::Fmpz prime_power;
     flint::fmpz_one(flint::FmpzRef(radicand));
-    flint::fmpz_one(flint::FmpzRef(conductor));
+    flint::fmpz_one(flint::FmpzRef(square_part));
     for (slong i = 0; i < flint::fmpz_factor_num(factors); ++i) {
         const ulong exponent = flint::fmpz_factor_exp(factors, i);
         flint::fmpz_factor_get_fmpz(flint::FmpzRef(prime), factors, i);
@@ -131,19 +133,15 @@ bool monic_integral_quadratic_radicand_map(
         }
         flint::fmpz_pow_ui(flint::FmpzRef(prime_power),
                            flint::FmpzConstRef(prime), exponent / 2);
-        flint::fmpz_mul(flint::FmpzRef(conductor),
-                        flint::FmpzConstRef(conductor),
+        flint::fmpz_mul(flint::FmpzRef(square_part),
+                        flint::FmpzConstRef(square_part),
                         flint::FmpzConstRef(prime_power));
     }
-    if (flint::fmpz_is_one(flint::FmpzConstRef(radicand))) {
-        return false;
-    }
-
     flint::fmpz_set(flint::FmpzRef(out.radicand),
                     flint::FmpzConstRef(radicand));
     flint::fmpz_set(flint::FmpzRef(out.shift), flint::fmpq_num_ref(linear));
     flint::fmpz_set(flint::FmpzRef(out.scale),
-                    flint::FmpzConstRef(conductor));
+                    flint::FmpzConstRef(square_part));
     return true;
 }
 
