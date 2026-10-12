@@ -85,7 +85,9 @@ Field-level unit helpers in ``silex/unit.hpp`` cover Dirichlet unit rank,
 supported roots of unity, lower regulator bounds, supplied-unit log matrices,
 supplied-unit subgroup regulators, supplied-unit independence checks, and
 exact continued-fraction fundamental units for the explicit and canonical
-polynomial-defined ``x^2-d`` real-quadratic routes.  See
+polynomial-defined ``x^2-d`` real-quadratic routes, and for fields defined
+by a monic integral ``x^2+bx+c`` (see the release notes for the wider
+``quadratic_fundamental_unit`` contract).  See
 :doc:`../support_matrix` for the presentations qualified for 0.1.1.
 
 Next Steps

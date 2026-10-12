@@ -52,8 +52,9 @@ bool unit_lower_regulator_bound(flint::ArbRef out,
                                 const NumberField& field,
                                 slong precision) noexcept;
 
-// Accepts an explicit real quadratic field or a canonical polynomial-defined
-// x^2-d field with positive squarefree nonsquare integer d.
+// Accepts an explicit real quadratic field, a canonical polynomial-defined
+// x^2-d field with positive squarefree nonsquare integer d, or a field defined
+// by a monic integral x^2+bx+c with positive nonsquare discriminant.
 bool quadratic_fundamental_unit(Element& out,
                                 const NumberField& field) noexcept;
 
