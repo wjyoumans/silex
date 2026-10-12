@@ -930,8 +930,9 @@ Hadamard's inequality, with the basis element 1 of smallest T2 norm).  For
 :math:`r_2 > 0` the proof inverts the weighted matrix, whose determinant is
 :math:`\sqrt{|D|}` and whose weights sum to :math:`n + 2 r_2`; this pays for
 PARI's :math:`r_2 \ln 2`, with margin at least
-:math:`r_2 \ln 2 - \tfrac12 \log_2 (1 + 2 r_2 / n)`, attained on imaginary
-quadratic fields.  The CRT therefore never uses more primes than before.
+:math:`r_2 \ln 2 - \tfrac12 \log_2 (1 + 2 r_2 / n)`, sharp: attained for
+some bases of imaginary quadratic fields (for example
+:math:`\mathbb{Z}[i]` with basis :math:`1, 1+i`).  The CRT therefore never uses more primes than before.
 For the totally real degree-32 subfield of the 136th
 cyclotomic field the Minkowski term falls from 442.6 to 18.9 bits, so the
 wide-unit bound falls from 454 to 30 bits and the CRT uses 1 prime instead

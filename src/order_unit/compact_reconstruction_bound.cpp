@@ -687,10 +687,11 @@ bool compact_unit_coordinate_bound_from_source(
             // weighted matrix G (|det G| = sqrt|D|, weights summing to
             // n + 2 r2): Cramer's rule, Cauchy-Schwarz, and Hadamard's
             // inequality with the leading basis element 1 of smallest T2
-            // norm sqrt(n).  The weighted determinant pays for the
+            // value, T2(1) = n.  The weighted determinant pays for the
             // reference expression's r2 * ln 2; the margin is at least
-            // r2 * ln 2 - (1/2) log2(1 + 2 r2 / n) >= 0, and it is attained
-            // on imaginary quadratic fields.  The reference expression
+            // r2 * ln 2 - (1/2) log2(1 + 2 r2 / n) >= 0, and it is sharp:
+            // attained for some bases of imaginary quadratic fields (for
+            // example Z[i] with basis 1, 1+i).  The reference expression
             // alone still decides success, the precision ladder and failure.
             flint::Fmpz inverse_norm_bit_bound;
             if (flint::arb_is_finite(
