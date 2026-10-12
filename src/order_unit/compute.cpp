@@ -1196,6 +1196,14 @@ bool reduction_coordinates(flint::FmpzMat& out,
             }
         }
     }
+    // Intentional deviation from the reference Clgp/Map.jl:reduce_mod_units
+    // (v0.38.6): when exact rounding fails, the reference computes
+    // round_approx, doubles the precision and takes an unconditional
+    // continue, so the approximate coefficients are never applied.  Silex
+    // returns them (exact = false) and the caller applies them and retries
+    // at the same precision.  Any result is a valid unit basis; the
+    // published basis can differ from the reference's.  Kept by decision
+    // (docs/development/source_fidelity.rst).
     if (!exact_rounding) {
         for (slong i = 0; i < len; ++i) {
             for (slong j = 0; j < rank; ++j) {
@@ -2287,6 +2295,10 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
             if (exact) {
                 return true;
             }
+            // Intentional deviation: approximate coefficients are applied
+            // and the loop retries at the same precision; the reference
+            // discards them and doubles the precision (see
+            // reduction_coordinates).
             continue;
         }
         // A coordinate that is a narrow ball around a half-integer cannot be

@@ -61,3 +61,17 @@ inventing production behavior.
 Experiments must be isolated, labeled, and given an acceptance or stop
 criterion.  Benchmark improvement alone is insufficient to replace
 source-backed mathematics.
+
+Recorded intentional deviations
+-------------------------------
+
+Unit reduction applies approximate coefficients.  Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units`` (lines 640-658) computes
+``round_approx`` when exact rounding raises ``InexactError``, then doubles the
+precision and takes an unconditional ``continue``, so the approximate
+coefficients are never applied.  Silex applies them and retries at the same
+precision (``reduction_coordinates`` and ``reduce_relation_units_modulo`` in
+``src/order_unit/compute.cpp``).  Any result is a valid unit basis, but the
+published basis can differ from Hecke's.  The user decided to keep this
+behavior and document it; outputs do not change.  See
+:doc:`../reference/algorithms_and_sources`.

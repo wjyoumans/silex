@@ -854,6 +854,16 @@ precision ladder reached at the cap.  It can differ from the cap result in a
 near-tie, or beside a small nonzero coordinate whose narrow ball still
 contains 0, where more precision would have let the rounding succeed.
 
+**Deviation** (decided, kept): when exact rounding fails, Hecke v0.38.6
+``reduce_mod_units`` computes ``round_approx``, sets ``exact = false``, doubles
+the precision and takes an unconditional ``continue``, so the approximate
+coefficients are never applied (checked against the v0.38.6 source,
+``Map.jl`` lines 640-658).  Silex applies the approximate coefficients and
+retries at the same precision, ending only when an exact rounding succeeds, a
+half-integer tie stops it, or the cap is reached.  Both give a valid unit
+basis, but the published basis can differ from Hecke's.  Silex keeps this
+behavior on purpose.
+
 The approximate rounding itself ports Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:round_approx(ZZMatrix, ArbMatrix)``.  Its
 width check forms ``lower - upper`` (the floor of the lower bound minus the
