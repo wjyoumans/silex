@@ -1567,7 +1567,8 @@ relation coefficients: a vector ``c_i`` for which ``c_i R``, with ``R`` the
 relation matrix, is the factor-base exponent vector of ``g_i^{d_i}``, so the
 product of the relation generators to the powers ``c_i`` generates
 ``g_i^{d_i}``.  The presentation's ``c_i`` comes
-from the Smith transform and grows with the presentation, which makes the
+from the Smith transform and can exceed the reduced size by orders of
+magnitude (figures below), which makes the
 compact witness, and its images at the auxiliary primes, too large to use.
 Measured on commit 49dfe1d with a temporary, uncommitted print of the
 maximum coefficient bit size, on a busy machine: over the 11 beta rows

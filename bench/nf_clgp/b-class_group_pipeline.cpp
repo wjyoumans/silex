@@ -2530,6 +2530,15 @@ void BM_class_witness_requests_imag_quadratic_3116399_proven(
                     silex::bench_contract::FailureReason::operation);
             break;
         }
+        if (!validate_exact_class_group_result(
+                    state, class_group,
+                    kImagQuadratic3116399ClassUnit.class_group)) {
+            failed = true;
+            silex::bench_contract::fail(
+                    state, "class group differs from the expected 2528",
+                    silex::bench_contract::FailureReason::operation);
+            break;
+        }
         witnesses = 0;
         kernel_units = class_group.relation_kernel_unit_count();
         const slong invariants = class_group.invariant_count();
@@ -2537,16 +2546,18 @@ void BM_class_witness_requests_imag_quadratic_3116399_proven(
             silex::FactoredElement w(*setup.maximal_order.parent());
             if (!class_group.invariant_generator_power_witness(w, i)) {
                 failed = true;
+            } else {
+                ++witnesses;
             }
-            ++witnesses;
             benchmark::DoNotOptimize(w);
         }
         for (slong i = 0; i < kernel_units && !failed; ++i) {
             silex::FactoredElement w(*setup.maximal_order.parent());
             if (!class_group.relation_kernel_unit(w, i)) {
                 failed = true;
+            } else {
+                ++witnesses;
             }
-            ++witnesses;
             benchmark::DoNotOptimize(w);
         }
         if (failed) {

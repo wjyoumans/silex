@@ -786,7 +786,8 @@ Fixed
 - The class-relation saturation proof with proven units size-reduces the
   relation coefficients of each invariant-generator ``beta`` row against the
   LLL-reduced relation kernel before forming its compact witness.  The
-  presentation's coefficients grow with the presentation: in
+  presentation's coefficients can exceed the reduced size by orders of
+  magnitude: in
   ``t-silex-class-unit-matrix`` the largest raw coefficients are 414 bits
   and the reduced ones 12 bits or fewer (measured at commit 49dfe1d on a
   busy machine).  The reduced row differs from the original by a relation-kernel unit, so the ``ell``-th
