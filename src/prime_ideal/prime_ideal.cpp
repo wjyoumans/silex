@@ -3370,16 +3370,16 @@ bool PrimeIdeal::valuation(slong& out,
         return false;
     }
 
-    slong bound = 0;
+    slong norm_vp = 0;
     while (fmpz_divisible(norm.raw(), p_.raw()) != 0) {
-        if (bound == WORD_MAX) {
+        if (norm_vp == WORD_MAX) {
             return false;
         }
         fmpz_divexact(norm.raw(), norm.raw(), p_.raw());
-        ++bound;
+        ++norm_vp;
     }
 
-    bound /= f_;
+    const slong bound = norm_vp / f_;
     if (bound == 0) {
         SILEX_PRIME_IDEAL_PROFILE_EVENT(
                 diagnostics, "prime_ideal.valuation_ideal.path_norm_zero");
@@ -3392,7 +3392,14 @@ bool PrimeIdeal::valuation(slong& out,
         SILEX_PRIME_IDEAL_PROFILE_EVENT(
                 diagnostics,
                 "prime_ideal.valuation_ideal.path_principal_generator");
-        return valuation(out, *generator, diagnostics);
+        // A stored generator g means the ideal is g*O: every route that sets
+        // it (`set_principal`, `one`, `set`) stores the HNF of g*O, and
+        // replacing the HNF clears it.  So [O : g*O] = |N(g)|, and `norm_vp`
+        // is already v_p(N(g)); passing it skips recomputing the element
+        // norm by resultant.  This is the same quantity the element route
+        // computes, so the valuation is unchanged.
+        return detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+                out, *this, *generator, norm_vp, diagnostics);
     }
 
     SILEX_PRIME_IDEAL_PROFILE_EVENT(
