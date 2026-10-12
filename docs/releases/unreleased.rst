@@ -837,6 +837,18 @@ Changed
   left-transform cache, ``const`` calls may fill internal caches, so one
   object must not be used from several threads at once.
 
+- ``ResidueField::set`` copies a defined residue field's prime,
+  characteristic and modulus instead of re-running the primality and
+  irreducibility checks, which the field already passed when
+  ``set_prime`` defined it.  Every ``ResidueFieldElement`` constructor
+  copies its parent this way, so residue-field arithmetic and
+  ``ResidueFieldQuotientLog::apply`` no longer repeat those checks per
+  call.  ``set_prime`` and the ``PrimeIdeal`` constructor still validate
+  their input, and results are unchanged on the ``grh`` class/unit corpus
+  and the 65 ``proven`` benchmark rows.  On ``cyclotomic_19_phi18`` in
+  ``grh`` mode the computation takes about 13% less time (release build on
+  a busy machine, three runs each).
+
 Fixed
 -----
 
