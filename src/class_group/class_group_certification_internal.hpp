@@ -294,8 +294,10 @@ private:
     //     step does not use generation, so the check need not reach the
     //     required bound; publishing `proven` requires that, through
     //     try_promote_proven_certification_;
-    //   - the unit and regulator proof states are verified, or the caller
-    //     sets them to verified in the same transaction;
+    //   - the unit and regulator proof states are already verified before
+    //     the call (relation_saturation_proof_prereqs_verified_ requires
+    //     both), so a caller that proves them in the same transaction must
+    //     set them before calling, not after;
     //   - the caller holds a CertificationTransaction_ and returns on false,
     //     so that the transaction rolls back every change made here.
     // `required_ells` need not contain every prime dividing h_cand for
