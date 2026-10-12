@@ -21,7 +21,6 @@
 # (minimum ratio 1.0 means equality to the printed precision at gamma = 1/2).
 import re, sys
 sys.path.insert(0, sys.argv[1])
-from fractions import Fraction
 from sage.all import QQ
 from silex_research.zimmert import c_up
 text = open(sys.argv[2]).read()

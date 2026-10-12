@@ -45,3 +45,20 @@ jobs:
         run: cmake --build --preset docs
       - name: Check documentation links
         run: cmake --build --preset docs-linkcheck
+
+  diagnostics:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    steps:
+      - name: Install native dependencies
+        run: >-
+          pacman -Syu --noconfirm
+          benchmark cmake gcc git flint make ninja pkgconf python
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Configure diagnostics
+        run: cmake --preset diagnostics
+      - name: Build diagnostics
+        run: cmake --build --preset diagnostics --parallel 2
+      - name: Test diagnostics
+        run: ctest --preset diagnostics --output-on-failure
