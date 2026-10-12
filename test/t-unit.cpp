@@ -6,6 +6,7 @@
 #include "test_support.hpp"
 #include "unit/unit_internal.hpp"
 
+#include <flint/arb.h>
 #include <flint/fmpq_poly.h>
 #include <flint/fmpz_poly.h>
 #include <flint/ulong_extras.h>
@@ -254,24 +255,145 @@ int test_quadratic_fundamental_unit() {
     assert(!silex::quadratic_fundamental_unit(generic, degree_one));
     assert(generic.equal_si(7));
 
-    silex::NumberField nonsquarefree =
-            pure_quadratic_polynomial_field(12);
-    silex::Element unsupported(nonsquarefree);
-    assert(unsupported.set_si(7));
-    assert(!silex::quadratic_fundamental_unit(unsupported, nonsquarefree));
-    assert(unsupported.equal_si(7));
+    // Non-monic and non-integral quadratic presentations keep the old
+    // contract: no continued-fraction unit, output untouched.
+    sflint::FmpqPoly nonmonic_polynomial;
+    sflint::fmpq_poly_set_coeff_si(nonmonic_polynomial, 2, 2);
+    sflint::fmpq_poly_set_coeff_si(nonmonic_polynomial, 0, -3);
+    silex::NumberField nonmonic = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(nonmonic_polynomial));
+    silex::Element nonmonic_output(nonmonic);
+    assert(nonmonic_output.set_si(7));
+    assert(!silex::quadratic_fundamental_unit(nonmonic_output, nonmonic));
+    assert(nonmonic_output.equal_si(7));
 
-    sflint::FmpqPoly shifted_polynomial;
-    sflint::fmpq_poly_set_coeff_si(shifted_polynomial, 2, 1);
-    sflint::fmpq_poly_set_coeff_si(shifted_polynomial, 1, -3);
-    sflint::fmpq_poly_set_coeff_si(shifted_polynomial, 0, 1);
-    silex::NumberField shifted = silex::test::field_by_polynomial(
-            sflint::FmpqPolyConstRef(shifted_polynomial));
-    silex::Element shifted_output(shifted);
-    assert(shifted_output.set_si(7));
-    assert(!silex::quadratic_fundamental_unit(shifted_output, shifted));
-    assert(shifted_output.equal_si(7));
+    sflint::FmpqPoly nonintegral_polynomial;
+    sflint::Fmpq half;
+    sflint::fmpq_set_si(half, 1, 2);
+    sflint::fmpq_poly_set_coeff_si(nonintegral_polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_fmpq(nonintegral_polynomial, 1, half);
+    sflint::fmpq_poly_set_coeff_si(nonintegral_polynomial, 0, -2);
+    silex::NumberField nonintegral = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(nonintegral_polynomial));
+    silex::Element nonintegral_output(nonintegral);
+    assert(nonintegral_output.set_si(7));
+    assert(!silex::quadratic_fundamental_unit(nonintegral_output,
+                                              nonintegral));
+    assert(nonintegral_output.equal_si(7));
 
+    sflint::FmpqPoly imaginary_shifted_polynomial;
+    sflint::fmpq_poly_set_coeff_si(imaginary_shifted_polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(imaginary_shifted_polynomial, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(imaginary_shifted_polynomial, 0, 1);
+    silex::NumberField imaginary_shifted = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(imaginary_shifted_polynomial));
+    silex::Element imaginary_shifted_output(imaginary_shifted);
+    assert(imaginary_shifted_output.set_si(7));
+    assert(!silex::quadratic_fundamental_unit(imaginary_shifted_output,
+                                              imaginary_shifted));
+    assert(imaginary_shifted_output.equal_si(7));
+
+    return 0;
+}
+
+silex::NumberField monic_quadratic_field(slong linear,
+                                         slong constant) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, linear);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, constant);
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// The real embedding sending theta to the larger root of x^2+b*x+c, i.e.
+// the one where (2*theta + b) > 0.
+bool larger_root_embedding_value(sflint::Arb& out,
+                                 const silex::Element& value,
+                                 slong linear,
+                                 slong constant) noexcept {
+    const slong precision = 256;
+    sflint::FmpqPoly polynomial;
+    if (!value.get_fmpq_poly(sflint::FmpqPolyRef(polynomial))) {
+        return false;
+    }
+    sflint::Arb root;
+    arb_set_si(root.raw(), linear * linear - 4 * constant);
+    arb_sqrt(root.raw(), root.raw(), precision);
+    arb_sub_si(root.raw(), root.raw(), linear, precision);
+    arb_mul_2exp_si(root.raw(), root.raw(), -1);
+    arb_zero(out.raw());
+    for (slong i = fmpq_poly_degree(polynomial.raw()); i >= 0; --i) {
+        sflint::Fmpq coefficient;
+        fmpq_poly_get_coeff_fmpq(coefficient.raw(), polynomial.raw(), i);
+        sflint::Arb term;
+        arb_set_fmpq(term.raw(), coefficient.raw(), precision);
+        arb_mul(out.raw(), out.raw(), root.raw(), precision);
+        arb_add(out.raw(), out.raw(), term.raw(), precision);
+    }
+    return true;
+}
+
+// Monic integral x^2+b*x+c: the continued-fraction unit of the maximal order,
+// written through sqrt(d) = (2*theta + b)/f where b^2-4c = f^2*d, published
+// as the unit > 1 at the embedding where (2*theta + b) > 0.
+void assert_monic_quadratic_unit(slong linear,
+                                 slong constant,
+                                 slong constant_num,
+                                 ulong constant_den,
+                                 slong linear_num,
+                                 ulong linear_den,
+                                 slong radicand) noexcept {
+    silex::NumberField field = monic_quadratic_field(linear, constant);
+    silex::Element eps(field);
+    silex::Element expected(field);
+    assert(silex::quadratic_fundamental_unit(eps, field));
+    assert(set_quadratic_coeffs(expected, constant_num, constant_den,
+                                linear_num, linear_den));
+    assert(eps.equal(expected));
+
+    sflint::Arb value;
+    assert(larger_root_embedding_value(value, eps, linear, constant));
+    sflint::Arb excess;
+    arb_sub_si(excess.raw(), value.raw(), 1, 256);
+    assert(arb_is_positive(excess.raw()));
+
+    // Same regulator as the canonical x^2-d presentation of the same field.
+    silex::NumberField canonical = pure_quadratic_polynomial_field(radicand);
+    silex::Element canonical_eps(canonical);
+    assert(silex::quadratic_fundamental_unit(canonical_eps, canonical));
+    sflint::Arb canonical_value;
+    assert(larger_root_embedding_value(canonical_value, canonical_eps, 0,
+                                       -radicand));
+    assert(arb_overlaps(value.raw(), canonical_value.raw()));
+}
+
+int test_monic_integral_quadratic_fundamental_unit() {
+    // b odd, negative and positive; maximal equation order.
+    assert_monic_quadratic_unit(-1, -1, 0, 1, 1, 1, 5);    // theta
+    assert_monic_quadratic_unit(1, -1, 1, 1, 1, 1, 5);     // 1 + theta
+    assert_monic_quadratic_unit(-3, 1, -1, 1, 1, 1, 5);    // theta - 1
+    assert_monic_quadratic_unit(1, -5, 3, 1, 1, 1, 21);    // 3 + theta
+    // b even, positive and negative; D = 12 = 2^2 * 3.
+    assert_monic_quadratic_unit(2, -2, 3, 1, 1, 1, 3);     // 3 + theta
+    assert_monic_quadratic_unit(-4, 1, 0, 1, 1, 1, 3);     // theta
+    // Non-maximal equation orders: the unit lies only in the maximal order.
+    assert_monic_quadratic_unit(0, -12, 2, 1, 1, 2, 3);    // 2 + theta/2
+    assert_monic_quadratic_unit(3, -9, 1, 1, 1, 3, 5);     // 1 + theta/3
+    assert_monic_quadratic_unit(-5, -5, -1, 3, 1, 3, 5);   // (theta-1)/3
+    assert_monic_quadratic_unit(2, -44, 2, 3, 1, 6, 5);    // (theta+4)/6
+
+    // The x^2 - x - 25000001 corpus row (D = 100000005).
+    silex::NumberField large = monic_quadratic_field(-1, -25000001);
+    silex::Element large_eps(large);
+    silex::Element large_expected(large);
+    assert(silex::quadratic_fundamental_unit(large_eps, large));
+    assert(set_quadratic_coeffs(large_expected, 39996001, 1, 8000, 1));
+    assert(large_eps.equal(large_expected));
+    sflint::Fmpq norm;
+    assert(large_eps.norm(sflint::FmpqRef(norm)));
+    assert(sflint::fmpq_equal_si(norm, 1));
     return 0;
 }
 
@@ -1280,6 +1402,7 @@ int test_log_matrix_regulator_and_independence() {
 int main() {
     test_rank();
     test_quadratic_fundamental_unit();
+    test_monic_integral_quadratic_fundamental_unit();
     test_roots_of_unity();
     test_roots_of_unity_cyclotomic_fields();
     test_roots_of_unity_noncyclotomic_presentations();

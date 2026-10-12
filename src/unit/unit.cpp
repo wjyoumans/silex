@@ -24,57 +24,61 @@ bool divide_exact_checked(flint::FmpzRef out,
     return ::fmpz_divides(out.raw(), numerator.raw(), denominator.raw()) != 0;
 }
 
+// Field-generator presentation of sqrt(d): sqrt(d) = (2*theta + shift) / scale,
+// with theta the generator of the field's defining polynomial.
+struct QuadraticRadicandMap {
+    flint::Fmpz radicand;
+    flint::Fmpz shift;
+    flint::Fmpz scale;
+};
+
+// Writes (constant + linear*sqrt(d)) / (2 if half_integral else 1) in the
+// field basis through sqrt(d) = (2*theta + shift) / scale.
 bool set_quadratic_coefficients(Element& out,
                                 flint::FmpzConstRef constant,
                                 flint::FmpzConstRef linear,
-                                bool half_integral) noexcept {
+                                bool half_integral,
+                                const QuadraticRadicandMap& map) noexcept {
     flint::FmpqPoly polynomial;
+    flint::Fmpq radical_coefficient;
     flint::Fmpq coeff;
+    flint::Fmpq term;
+
+    // B = linear (/2): the coefficient of sqrt(d).
+    flint::fmpq_set_fmpz(radical_coefficient, linear);
+    if (half_integral) {
+        flint::fmpq_div_2exp(radical_coefficient, radical_coefficient, 1);
+    }
 
     flint::fmpq_poly_zero(polynomial);
+    // theta coefficient: 2*B/scale.
+    ::fmpq_mul_2exp(coeff.raw(), radical_coefficient.raw(), 1);
+    ::fmpq_div_fmpz(coeff.raw(), coeff.raw(), map.scale.raw());
+    flint::fmpq_poly_set_coeff_fmpq(polynomial, 1, coeff);
+
+    // constant coefficient: A + B*shift/scale with A = constant (/2).
+    flint::fmpq_set_fmpz(coeff, constant);
     if (half_integral) {
-        flint::fmpq_set_fmpz(coeff, constant);
         flint::fmpq_div_2exp(coeff, coeff, 1);
-        flint::fmpq_poly_set_coeff_fmpq(polynomial, 0, coeff);
-        flint::fmpq_set_fmpz(coeff, linear);
-        flint::fmpq_div_2exp(coeff, coeff, 1);
-        flint::fmpq_poly_set_coeff_fmpq(polynomial, 1, coeff);
-    } else {
-        flint::fmpq_set_fmpz(coeff, constant);
-        flint::fmpq_poly_set_coeff_fmpq(polynomial, 0, coeff);
-        flint::fmpq_set_fmpz(coeff, linear);
-        flint::fmpq_poly_set_coeff_fmpq(polynomial, 1, coeff);
     }
+    ::fmpq_mul_fmpz(term.raw(), radical_coefficient.raw(), map.shift.raw());
+    ::fmpq_div_fmpz(term.raw(), term.raw(), map.scale.raw());
+    ::fmpq_add(coeff.raw(), coeff.raw(), term.raw());
+    flint::fmpq_poly_set_coeff_fmpq(polynomial, 0, coeff);
 
     return out.set_fmpq_poly(flint::FmpqPolyConstRef(polynomial));
 }
 
-bool is_positive_squarefree_nonsquare(
-        flint::FmpzConstRef value) noexcept {
-    if (flint::fmpz_sgn(value) <= 0 || flint::fmpz_is_square(value)) {
-        return false;
-    }
-
-    flint::FmpzFactor factorization;
-    flint::fmpz_factor(flint::FmpzFactorRef(factorization), value);
-    for (slong i = 0;
-         i < flint::fmpz_factor_num(
-                     flint::FmpzFactorConstRef(factorization));
-         ++i) {
-        if (flint::fmpz_factor_exp(
-                    flint::FmpzFactorConstRef(factorization), i) != 1) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool pure_quadratic_defining_radicand(
-        flint::FmpzRef out,
+bool monic_integral_quadratic_radicand_map(
+        QuadraticRadicandMap& out,
         const NumberField& field) noexcept {
-    // reference `quadunit` is presentation-independent.  For the exact canonical
-    // presentation x^2-d, the FLINT field generator is already sqrt(d), so
-    // the existing quadratic coefficients need no generator-change map.
+    // reference `quadunit` works from a discriminant and is
+    // presentation-independent.  For a monic integral
+    // defining polynomial x^2 + b*x + c with D = b^2 - 4*c = f^2*d, d
+    // squarefree, the generator theta satisfies (2*theta + b)^2 = D, so
+    // (2*theta + b)/f is a square root of d in the field: the positive one
+    // at the real embedding sending theta to the larger root.  The x^2-d
+    // presentation with d squarefree is the case b = 0, f = 2.
     const nf_struct* raw_field = field.raw_flint_field();
     if (raw_field == nullptr || field.degree() != 2) {
         return false;
@@ -91,37 +95,73 @@ bool pure_quadratic_defining_radicand(
     flint::fmpq_poly_get_coeff_fmpq(
             flint::FmpqRef(leading), polynomial, 2);
     if (!flint::fmpq_equal_si(leading, 1) ||
-        !flint::fmpq_equal_si(linear, 0) ||
-        !flint::fmpz_is_one(flint::fmpq_den_ref(constant)) ||
-        flint::fmpz_sgn(flint::fmpq_num_ref(constant)) >= 0) {
+        !flint::fmpz_is_one(flint::fmpq_den_ref(linear)) ||
+        !flint::fmpz_is_one(flint::fmpq_den_ref(constant))) {
         return false;
     }
 
+    flint::Fmpz discriminant;
+    flint::fmpz_mul(flint::FmpzRef(discriminant),
+                    flint::fmpq_num_ref(linear),
+                    flint::fmpq_num_ref(linear));
+    flint::fmpz_submul_ui(flint::FmpzRef(discriminant),
+                          flint::fmpq_num_ref(constant), 4);
+    if (flint::fmpz_sgn(flint::FmpzConstRef(discriminant)) <= 0 ||
+        flint::fmpz_is_square(flint::FmpzConstRef(discriminant))) {
+        return false;
+    }
+
+    flint::FmpzFactor factorization;
+    flint::fmpz_factor(flint::FmpzFactorRef(factorization),
+                       flint::FmpzConstRef(discriminant));
+    const flint::FmpzFactorConstRef factors(factorization);
     flint::Fmpz radicand;
-    flint::fmpz_neg(flint::FmpzRef(radicand),
-                    flint::fmpq_num_ref(constant));
-    if (!is_positive_squarefree_nonsquare(
-                flint::FmpzConstRef(radicand))) {
+    flint::Fmpz conductor;
+    flint::Fmpz prime;
+    flint::Fmpz prime_power;
+    flint::fmpz_one(flint::FmpzRef(radicand));
+    flint::fmpz_one(flint::FmpzRef(conductor));
+    for (slong i = 0; i < flint::fmpz_factor_num(factors); ++i) {
+        const ulong exponent = flint::fmpz_factor_exp(factors, i);
+        flint::fmpz_factor_get_fmpz(flint::FmpzRef(prime), factors, i);
+        if ((exponent & 1U) != 0) {
+            flint::fmpz_mul(flint::FmpzRef(radicand),
+                            flint::FmpzConstRef(radicand),
+                            flint::FmpzConstRef(prime));
+        }
+        flint::fmpz_pow_ui(flint::FmpzRef(prime_power),
+                           flint::FmpzConstRef(prime), exponent / 2);
+        flint::fmpz_mul(flint::FmpzRef(conductor),
+                        flint::FmpzConstRef(conductor),
+                        flint::FmpzConstRef(prime_power));
+    }
+    if (flint::fmpz_is_one(flint::FmpzConstRef(radicand))) {
         return false;
     }
 
-    flint::fmpz_set(out, flint::FmpzConstRef(radicand));
+    flint::fmpz_set(flint::FmpzRef(out.radicand),
+                    flint::FmpzConstRef(radicand));
+    flint::fmpz_set(flint::FmpzRef(out.shift), flint::fmpq_num_ref(linear));
+    flint::fmpz_set(flint::FmpzRef(out.scale),
+                    flint::FmpzConstRef(conductor));
     return true;
 }
 
-bool fundamental_unit_radicand(flint::FmpzRef out,
-                               const NumberField& field) noexcept {
+bool fundamental_unit_radicand_map(QuadraticRadicandMap& out,
+                                   const NumberField& field) noexcept {
     flint::Fmpz radicand;
-    if (!field.quadratic_radicand(flint::FmpzRef(radicand)) &&
-        !pure_quadratic_defining_radicand(
-                flint::FmpzRef(radicand), field)) {
-        return false;
+    if (field.quadratic_radicand(flint::FmpzRef(radicand))) {
+        // The explicit quadratic backend's generator is sqrt(d) itself.
+        if (flint::fmpz_sgn(flint::FmpzConstRef(radicand)) <= 0) {
+            return false;
+        }
+        flint::fmpz_set(flint::FmpzRef(out.radicand),
+                        flint::FmpzConstRef(radicand));
+        flint::fmpz_zero(flint::FmpzRef(out.shift));
+        flint::fmpz_set_ui(flint::FmpzRef(out.scale), 2);
+        return true;
     }
-    if (flint::fmpz_sgn(flint::FmpzConstRef(radicand)) <= 0) {
-        return false;
-    }
-    flint::fmpz_set(out, flint::FmpzConstRef(radicand));
-    return true;
+    return monic_integral_quadratic_radicand_map(out, field);
 }
 
 bool signature_from_embeddings(Signature& out,
@@ -176,10 +216,11 @@ bool quadratic_fundamental_unit(Element& out,
         return false;
     }
 
-    flint::Fmpz radicand;
-    if (!fundamental_unit_radicand(flint::FmpzRef(radicand), field)) {
+    QuadraticRadicandMap radicand_map;
+    if (!fundamental_unit_radicand_map(radicand_map, field)) {
         return false;
     }
+    const flint::Fmpz& radicand = radicand_map.radicand;
 
     const bool odd_discriminant =
             flint::fmpz_fdiv_ui(flint::FmpzConstRef(radicand), 4) == 1;
@@ -449,7 +490,7 @@ bool quadratic_fundamental_unit(Element& out,
     }
     return set_quadratic_coefficients(
             out, flint::FmpzConstRef(published_constant),
-            flint::FmpzConstRef(linear), odd_discriminant);
+            flint::FmpzConstRef(linear), odd_discriminant, radicand_map);
 }
 
 bool unit_log_matrix(flint::ArbMatRef out,

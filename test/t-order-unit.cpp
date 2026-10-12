@@ -10149,6 +10149,72 @@ int test_positive_rank_failure_preserves_output() {
     return 0;
 }
 
+// A monic integral x^2+b*x+c whose equation order is not maximal: compute()
+// publishes the continued-fraction unit for the maximal order only, and the
+// equation order (which does not contain that unit) keeps today's failure.
+void assert_nonmaximal_monic_quadratic_units(slong linear,
+                                             slong constant,
+                                             slong constant_num,
+                                             ulong constant_den,
+                                             slong linear_num,
+                                             ulong linear_den,
+                                             const char* regulator) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, linear);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, constant);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    assert(!equation_order.is_maximal());
+    assert(maximal_order.is_maximal());
+
+    silex::OrderUnitGroup nonmaximal;
+    assert(!nonmaximal.compute(equation_order));
+    assert(!nonmaximal.is_set());
+
+    silex::OrderUnitGroup maximal;
+    assert(maximal.compute(maximal_order));
+    assert(maximal.free_rank() == 1);
+    assert(maximal.certification_status() == silex::CertificationMode::proven);
+
+    silex::FactoredElement generator(field);
+    silex::Element value(field);
+    silex::Element expected(field);
+    sflint::FmpqPoly expected_polynomial;
+    sflint::Fmpq coefficient;
+    sflint::fmpq_set_si(coefficient, constant_num, constant_den);
+    sflint::fmpq_poly_set_coeff_fmpq(expected_polynomial, 0, coefficient);
+    sflint::fmpq_set_si(coefficient, linear_num, linear_den);
+    sflint::fmpq_poly_set_coeff_fmpq(expected_polynomial, 1, coefficient);
+    assert(expected.set_fmpq_poly(
+            sflint::FmpqPolyConstRef(expected_polynomial)));
+    assert(maximal.free_generator(generator, 0));
+    assert(generator.evaluate(value));
+    assert(value.equal(expected));
+
+    sflint::Arb published;
+    sflint::Arb reference;
+    assert(maximal.regulator(sflint::ArbRef(published)));
+    arb_set_str(reference.raw(), regulator, 128);
+    assert(arb_overlaps(published.raw(), reference.raw()));
+}
+
+int test_nonmaximal_monic_quadratic_units() {
+    // x^2 - 12: index 2 in Z[(sqrt 3)]; unit 2 + sqrt(3) = 2 + theta/2.
+    assert_nonmaximal_monic_quadratic_units(
+            0, -12, 2, 1, 1, 2, "1.316957896924816708625046347 +/- 1e-25");
+    // x^2 + 3x - 9: D = 45, index 3; unit (1 + sqrt 5)/2 = 1 + theta/3.
+    assert_nonmaximal_monic_quadratic_units(
+            3, -9, 1, 1, 1, 3, "0.4812118250596034474977589134 +/- 1e-25");
+    // x^2 + 2x - 44: D = 180, index 6; unit (1 + sqrt 5)/2 = (theta + 4)/6.
+    assert_nonmaximal_monic_quadratic_units(
+            2, -44, 2, 3, 1, 6, "0.4812118250596034474977589134 +/- 1e-25");
+    return 0;
+}
+
 int test_group_keeps_parent_order_alive() {
     silex::OrderUnitGroup group = real_quadratic_unit_group();
     assert(group.is_defined());
@@ -10924,6 +10990,7 @@ int main() {
     test_imaginary_quadratic_torsion();
     test_nonmaximal_torsion_filtering();
     test_positive_rank_failure_preserves_output();
+    test_nonmaximal_monic_quadratic_units();
     test_group_keeps_parent_order_alive();
     test_set_move_and_access_failures();
     test_transform_factored_units_wide_exponents();
