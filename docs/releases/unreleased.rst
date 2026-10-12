@@ -877,6 +877,17 @@ Changed
   (release build, medians of 15 paired runs on a busy machine; the
   controlled comparison is pending).
 
+- ``ResidueFieldQuotientLog::apply`` at a prime of residue degree
+  ``f > 1`` takes the logarithm through the norm to ``F_p`` when ``ell``
+  divides ``p - 1``: ``N(x)^((p - 1)/ell) = x^((p^f - 1)/ell)``, with the
+  norm computed as a resultant, instead of raising ``x`` to
+  ``(p^f - 1)/ell`` in ``F_(p^f)``.  It returns the same logarithm, and
+  results are unchanged on the ``grh`` class/unit corpus and the 70
+  ``proven`` benchmark rows.  On ``cyclotomic_19_phi18`` in ``grh`` mode,
+  where nearly all of these logs are at residue degree 3 to 18 with
+  ``ell = 2``, the computation takes about 28% less time (release build on
+  a busy machine, eleven interleaved runs each).
+
 Fixed
 -----
 

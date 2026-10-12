@@ -1765,6 +1765,20 @@ only: baby-step giant-step runs only when ``ell`` is prime and the quotient
 generator has order ``ell``, so both routes return the unique logarithm in
 ``[0, ell)`` and the columns are the same.
 
+``ResidueFieldQuotientLog::apply`` returns, for ``x`` in ``F_q^*`` with
+``q = p^f``, the ``i`` in ``[0, ell)`` with ``zeta^i = x^((q - 1)/ell)``,
+where ``zeta`` is the stored element of order ``ell``.  At residue degree
+``f > 1`` with ``ell | p - 1`` it computes the same ``i`` through the norm
+``N`` from ``F_q`` to ``F_p``: the conjugates of ``x`` are ``x^(p^j)`` for
+``0 <= j < f``, so ``N(x) = x^((q - 1)/(p - 1))`` and
+``N(x)^((p - 1)/ell) = x^((q - 1)/ell)``; the ``ell``-th roots of unity lie
+in ``F_p``, so ``zeta`` is a constant and the degree-one walk applies.  For
+``x = a(theta)`` with monic irreducible modulus ``m``, ``N(x) = Res(m, a)``
+(Cohen, GTM 138, Proposition 4.3.4, whose proof holds over any field), taken
+with FLINT ``fmpz_mod_poly_resultant``.  This is a cost choice only: it
+replaces a power in ``F_q`` by a resultant and a power in ``F_p``, and
+returns the same logarithm.  Other ``ell`` keep the power in ``F_q``.
+
 When ``ell`` divides the torsion order, the candidates include the torsion
 generator ``zeta``, as in Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``: ``compute_candidates_for_saturate``
