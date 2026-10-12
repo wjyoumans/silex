@@ -19,6 +19,7 @@
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include "class_group/relation_saturation_internal.hpp"
 #include "order_unit/compute_internal.hpp"
 
 namespace silex::detail {
@@ -80,6 +81,25 @@ public:
     }
     static unsigned long word_quotient_log_baby_giant_calls() noexcept {
         return ComputeTestSeams::word_quotient_log_baby_giant_calls_.load(
+                std::memory_order_relaxed);
+    }
+
+    // Sets the failure injected into every later first-phase run of the
+    // relation-saturation kernel basis (SaturationKernelTestSeams) until it
+    // is set back to none.  The fallback then builds the basis from
+    // fmpz_lll, which every other route can also take, so no invariant is
+    // skipped; it only forces the fallback where the first phase would be
+    // certified.
+    static void set_saturation_kernel_failure(
+            SaturationKernelTestFailure failure) noexcept {
+        SaturationKernelTestSeams::failure_.store(failure,
+                                                  std::memory_order_relaxed);
+    }
+
+    // The number of first-phase runs an injected failure has replaced since
+    // the process started.
+    static slong saturation_kernel_failures_injected() noexcept {
+        return SaturationKernelTestSeams::injected_.load(
                 std::memory_order_relaxed);
     }
 };

@@ -5744,7 +5744,8 @@ public:
     // certificate fails, or the kernel is outside that range, the
     // LLL-reduced basis is built by fmpz_lll and copied.  The phase's row
     // operations are unimodular, so either way the result is a basis of the
-    // kernel.
+    // kernel.  Tests force either fallback through
+    // SaturationKernelTestSeams.
     static const ClassGroupContextStorage* saturation_relation_kernel(
             const ClassGroupContext& context) noexcept {
         ClassGroupContextStorage* storage = context.private_storage_.get();
@@ -5767,8 +5768,20 @@ public:
                 bits >= -kFlintUlllTruncationBits &&
                 bits <= kFlintUlllTruncationBits) {
                 flint::FmpzLll lll;
-                if (::fmpz_lll_d_with_removal_knapsack(
-                            kernel.raw(), nullptr, nullptr, lll.raw()) != -1 &&
+                int status = ::fmpz_lll_d_with_removal_knapsack(
+                        kernel.raw(), nullptr, nullptr, lll.raw());
+                const SaturationKernelTestFailure failure =
+                        SaturationKernelTestSeams::failure();
+                if (failure != SaturationKernelTestFailure::none) {
+                    // Test-only failure injection; see
+                    // SaturationKernelTestSeams.
+                    flint::fmpz_mat_zero(flint::FmpzMatRef(kernel));
+                    if (failure == SaturationKernelTestFailure::first_phase) {
+                        status = -1;
+                    }
+                    SaturationKernelTestSeams::note_injected();
+                }
+                if (status != -1 &&
                     ::fmpz_mat_is_reduced(kernel.raw(), lll.raw()->delta,
                                           lll.raw()->eta)) {
                     storage->saturation_relation_kernel = std::move(kernel);
@@ -10074,6 +10087,31 @@ bool relation_saturation_kernel_basis(
     flint::fmpz_mat_set(flint::FmpzMatRef(copy), basis);
     out = std::move(copy);
     lll_basis_built = storage->reduced_relation_kernel_valid;
+    return true;
+}
+
+bool relation_saturation_kernel_gram(
+        flint::FmpzMat& d,
+        flint::FmpzMat& lambda,
+        const ClassGroupContext& context) noexcept {
+    const ClassGroupContextStorage* storage =
+            ClassGroupRelationAccess::saturation_relation_kernel_gram(
+                    context);
+    if (storage == nullptr) {
+        return false;
+    }
+    const flint::FmpzMatConstRef d_source(
+            storage->saturation_relation_kernel_gram_d);
+    const flint::FmpzMatConstRef lambda_source(
+            storage->saturation_relation_kernel_gram_lambda);
+    flint::FmpzMat d_copy(flint::fmpz_mat_nrows(d_source),
+                          flint::fmpz_mat_ncols(d_source));
+    flint::FmpzMat lambda_copy(flint::fmpz_mat_nrows(lambda_source),
+                               flint::fmpz_mat_ncols(lambda_source));
+    flint::fmpz_mat_set(flint::FmpzMatRef(d_copy), d_source);
+    flint::fmpz_mat_set(flint::FmpzMatRef(lambda_copy), lambda_source);
+    d = std::move(d_copy);
+    lambda = std::move(lambda_copy);
     return true;
 }
 
