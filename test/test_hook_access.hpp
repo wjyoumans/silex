@@ -19,6 +19,8 @@
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include "order_unit/compute_internal.hpp"
+
 namespace silex::detail {
 
 class TestHookAccess {
@@ -47,6 +49,26 @@ public:
         return prime.set_data(flint::FmpzConstRef(prime.p_), prime.e_,
                               prime.f_, prime.ideal_, residue_polynomial,
                               false);
+    }
+
+    // While set, compute_with_class_group clears its validation summary after
+    // each failed candidate attempt, so a failure with compute_ok true looks
+    // as if validation never ran (outcome not_run).  Skips the invariant that
+    // the summary names the validation that ended the attempt; no real run
+    // reaches not_run with compute_ok true.
+    static void set_forget_validation_summary(bool on) noexcept {
+        ComputeTestSeams::forget_validation_summary_.store(
+                on, std::memory_order_relaxed);
+    }
+
+    // Arms (or disarms) one use: the next grh continuation in
+    // compute_with_relation_class_group_ does not call
+    // extend_tentative_relations_ and acts as if it returned true without
+    // appending a relation.  Later continuations run normally.  Skips the invariant that a
+    // successful extension grows relation_count().
+    static void set_continuation_appends_nothing(bool on) noexcept {
+        ComputeTestSeams::continuation_appends_nothing_.store(
+                on, std::memory_order_relaxed);
     }
 };
 

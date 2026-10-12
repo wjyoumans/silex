@@ -11281,9 +11281,115 @@ int test_reduce_stored_units_rebuilds_large_factored_units() {
     return 0;
 }
 
+
+// Runs the paired class/unit transaction for the monic irreducible
+// polynomial with coefficients `coefficients` (constant term first) on its
+// maximal order, with the factor-base bound of the CLI.
+struct TransactionRun {
+    bool ok = false;
+    silex::detail::ClassUnitTransactionReport audit;
+};
+
+TransactionRun run_transaction(const std::vector<slong>& coefficients,
+                               silex::CertificationMode mode,
+                               slong max_candidates, slong max_relations) {
+    sflint::FmpzPoly polynomial;
+    slong degree = 0;
+    for (const slong coefficient : coefficients) {
+        sflint::fmpz_poly_set_coeff_si(polynomial, degree++, coefficient);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = max_candidates;
+    options.max_relations = max_relations;
+    options.requested_certification = mode;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    TransactionRun run;
+    run.ok = silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, run.audit);
+    return run;
+}
+
+// compute_with_class_group records the last validation outcome of a failed
+// attempt only when validation ran (outcome other than not_run).  No public
+// input leaves compute_ok true with the summary at not_run, so the seam
+// clears the summary after the failed attempt.  Q(sqrt 146) in proven mode
+// with max_relations 9 fails after validation ends in no_progress.
+int test_compute_failure_records_validation_outcome_only_when_it_ran() {
+    const std::vector<slong> sqrt146 = {-146, 0, 1};
+    const TransactionRun natural = run_transaction(
+            sqrt146, silex::CertificationMode::proven, 5000, 9);
+    assert(!natural.ok);
+    assert(std::strcmp(natural.audit.failure_reason,
+                       "class_unit_computation_failed") == 0);
+    assert(natural.audit.last_validation_outcome != nullptr);
+    assert(std::strcmp(natural.audit.last_validation_outcome,
+                       "no_progress") == 0);
+
+    silex::detail::TestHookAccess::set_forget_validation_summary(true);
+    const TransactionRun forgotten = run_transaction(
+            sqrt146, silex::CertificationMode::proven, 5000, 9);
+    silex::detail::TestHookAccess::set_forget_validation_summary(false);
+    assert(!forgotten.ok);
+    assert(std::strcmp(forgotten.audit.failure_reason,
+                       "class_unit_computation_failed") == 0);
+    assert(forgotten.audit.last_validation_outcome == nullptr);
+    assert(!forgotten.audit.final_result_published);
+
+    // The seam is off again: the run repeats the natural result.
+    const TransactionRun again = run_transaction(
+            sqrt146, silex::CertificationMode::proven, 5000, 9);
+    assert(!again.ok && again.audit.last_validation_outcome != nullptr);
+    return 0;
+}
+
+// The grh continuation fails closed when extend_tentative_relations_ reports
+// success but relation_count() did not grow.  No public cap reaches this, so
+// the seam arms one continuation that skips the extension.  x^3 - 4x + 1 in
+// grh mode needs one continuation to succeed.  The exit leaves no cap
+// recorded: the latest relation-search slice was not stopped by a cap, so
+// the failure is the generic class_unit_computation_failed.
+int test_grh_continuation_without_relation_progress_fails_closed() {
+    const std::vector<slong> cubic = {1, -4, 0, 1};
+    const TransactionRun natural = run_transaction(
+            cubic, silex::CertificationMode::grh, 5000, 500);
+    assert(natural.ok && natural.audit.final_result_published);
+
+    silex::detail::TestHookAccess::set_continuation_appends_nothing(true);
+    const TransactionRun stalled = run_transaction(
+            cubic, silex::CertificationMode::grh, 5000, 500);
+    silex::detail::TestHookAccess::set_continuation_appends_nothing(false);
+    assert(!stalled.ok);
+    assert(!stalled.audit.final_result_published);
+    assert(std::strcmp(stalled.audit.failure_reason,
+                       "class_unit_computation_failed") == 0);
+    assert(stalled.audit.relation_search_budget_cap ==
+           silex::detail::RelationSearchBudgetCap::none);
+
+    // The arming was consumed: a repeat succeeds like the natural run.
+    const TransactionRun repeat = run_transaction(
+            cubic, silex::CertificationMode::grh, 5000, 500);
+    assert(repeat.ok);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
+    test_compute_failure_records_validation_outcome_only_when_it_ran();
+    test_grh_continuation_without_relation_progress_fails_closed();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
     test_unit_extraction_cache_clear();

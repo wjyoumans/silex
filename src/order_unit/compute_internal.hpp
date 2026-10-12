@@ -5,6 +5,8 @@
 #include <silex/flint/arb.hpp>
 #include <silex/order_unit.hpp>
 
+#include <atomic>
+
 #include "relation_unit_internal.hpp"
 #include "../zeta/zeta_internal.hpp"
 
@@ -85,6 +87,34 @@ struct ValidateRefineSummary {
         class_progress = false;
         unit_progress = false;
     }
+};
+
+class TestHookAccess;
+
+// Switches that only detail::TestHookAccess (test/test_hook_access.hpp) can
+// set; compute.cpp reads them on cold failure paths.  All are off by default
+// and no production code sets them, so a normal run never sees them.  Relaxed
+// atomics so a reader never races with a test setting them.
+class ComputeTestSeams {
+public:
+    // compute_with_class_group: after a failed candidate attempt, forget the
+    // validation summary, as if validation never ran.
+    static bool forget_validation_summary() noexcept {
+        return forget_validation_summary_.load(std::memory_order_relaxed);
+    }
+    // compute_with_relation_class_group_: true once per arming, when the
+    // continuation should skip its extend_tentative_relations_ call and act
+    // as if it returned true without appending a relation.  Reading consumes
+    // the arming, so a later continuation runs normally.
+    static bool take_continuation_appends_nothing() noexcept {
+        return continuation_appends_nothing_.exchange(
+                false, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<bool> forget_validation_summary_{false};
+    inline static std::atomic<bool> continuation_appends_nothing_{false};
 };
 
 const char* validate_refine_outcome_name(ValidateRefineOutcome outcome)

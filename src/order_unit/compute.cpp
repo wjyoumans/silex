@@ -3942,8 +3942,11 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
             SILEX_PROFILE_SCOPE(
                     active_diagnostics, DiagnosticsModule::unit_group,
                     "unit_group.compute_with_relation_class_group.extend_relations");
-            extend_ok = candidate_class_group.extend_tentative_relations_(
-                    order, factor_base_bound, extend_options);
+            extend_ok = detail::ComputeTestSeams::
+                                take_continuation_appends_nothing()
+                    ? true
+                    : candidate_class_group.extend_tentative_relations_(
+                              order, factor_base_bound, extend_options);
         }
         if (!extend_ok) {
             SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
@@ -4711,6 +4714,9 @@ bool OrderUnitGroup::compute_with_class_group(
         for (;;) {
             if (try_current_candidate()) {
                 return true;
+            }
+            if (detail::ComputeTestSeams::forget_validation_summary()) {
+                validate_summary = ValidateRefineSummary{};
             }
             SILEX_PROFILE_EVENT(
                     active_diagnostics, DiagnosticsModule::unit_group,
