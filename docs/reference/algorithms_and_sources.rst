@@ -797,10 +797,14 @@ The one integer LLL of this route takes the same certified first-phase
 route as ``Lat::lll_reduce`` (above): for at least two rows and entries of
 at most 250 bits it runs ``fmpz_lll_d_with_removal_knapsack`` and accepts the
 result only when ``fmpz_mat_is_reduced`` certifies it, and otherwise
-restores the input and calls ``fmpz_lll``.  FLINT documents that its own
-``fmpz_lll_is_reduced`` agrees with ``fmpz_mat_is_reduced``, so the matrix
-and transform are those ``fmpz_lll`` returns; only the certificate is
-cheaper.
+restores the input and calls ``fmpz_lll``.  The FLINT files and functions
+named here are those of the revision pinned in the ``Lat::lll_reduce``
+paragraph above (b574c48).  The matrix and transform are those ``fmpz_lll``
+returns, for three reasons: a passing ``fmpz_mat_is_reduced`` excludes zero
+Gram-Schmidt vectors, so FLINT's own check (``fmpz_mat_is_reduced`` after
+stripping initial zero rows) accepts the same output; a failed certificate
+reruns ``fmpz_lll`` from the restored input; and the double phase is
+deterministic.  Only the certificate is cheaper.
 
 The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
 rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:

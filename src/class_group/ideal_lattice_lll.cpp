@@ -1010,14 +1010,16 @@ constexpr slong kFlintUlllTruncationBits = 250;
 // The integer LLL of the rounded-embedding route, with fmpz_lll's result.
 // For at least two rows and entries of at most 250 bits, fmpz_lll runs
 // fmpz_lll_d_with_removal_knapsack and keeps its output when
-// fmpz_lll_is_reduced holds, which FLINT documents as always conclusive and
-// equal to fmpz_mat_is_reduced.  Silex runs that first phase and certifies
+// fmpz_lll_is_reduced holds.  Silex runs that first phase and certifies
 // it with fmpz_mat_is_reduced directly, the Lat::lll_reduce route
 // (docs/reference/algorithms_and_sources.rst), which skips FLINT's
 // inconclusive multiprecision pre-check that dominated the cost of this
-// LLL.  When the phase returns -1 or the certificate fails, the input is
-// restored and fmpz_lll runs from the start, so the result and the
-// transform are fmpz_lll's on every route.
+// LLL.  The result and the transform are fmpz_lll's on every route because
+// (1) a passing fmpz_mat_is_reduced excludes zero Gram-Schmidt vectors, so
+// FLINT's own check (fmpz_mat_is_reduced after stripping initial zero rows)
+// accepts the same output; (2) when the phase returns -1 or the certificate
+// fails, the input is restored and fmpz_lll runs from the start; and (3) the
+// double phase is deterministic.
 IdealLatticeOneLllRoute ideal_lattice_rounded_embedding_integer_lll(
         flint::FmpzMat& embedded,
         flint::FmpzMat& transform,
