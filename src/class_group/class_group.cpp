@@ -931,7 +931,7 @@ DirectLargePrimeStatus direct_partial_relation_row(
             // as relation.cpp's `factor_over_base_integral` exact block does.
             if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
                         valuation, *prime, integral_generator,
-                        remaining_vp)) {
+                        remaining_vp, diagnostics)) {
                 SILEX_PROFILE_EVENT(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.partial_relation_direct_large_prime_path_exact_valuation_order_element_unavailable");
