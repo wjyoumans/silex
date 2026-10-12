@@ -256,10 +256,10 @@ Changed
   the memo misses, merging the candidate's equal factors.  An origin is never
   reused and a stored factor never changes, so each answer is the comparison
   it replaces, and the log embeddings and every published result are
-  unchanged.  On ``cyclotomic_real_31_deg15`` in ``grh`` mode, 475,506 such
-  comparisons (including merges outside the memo, which still compare)
-  covered only 1,839 pairs of origins, and the row took about 8% less CPU
-  time (busy-machine comparison).
+  unchanged.  On ``cyclotomic_real_31_deg15`` in ``grh`` mode, 135,174 comparisons
+  went through the memo; a further 69,643 come from callers that use
+  ``FactoredElement::logarithmic_embedding`` directly, and those are not
+  cached.  The row took about 8% less CPU time (busy-machine comparison).
 
 - In fields of degree 10 and higher, the residue test that can prove an
   element is not a square or an ``n``-th power keeps its answer per defining
