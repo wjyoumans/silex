@@ -25,6 +25,7 @@
 #include <silex/unit.hpp>
 #include <silex/zeta.hpp>
 
+#include "../lat/certified_lll_internal.hpp"
 #include "../ideal/ideal_access_internal.hpp"
 #include "../abelian_group/abelian_group_internal.hpp"
 #include "../factor_base/factor_base_internal.hpp"
@@ -5734,20 +5735,17 @@ public:
     //
     // The basis is LLL-reduced (FLINT default parameters) in every case.  If
     // the LLL-reduced basis that relation_kernel_unit publishes from is
-    // already built it is reused.  Otherwise, for at least two rows and
-    // entries of at most FLINT's 250-bit ULLL truncation threshold
-    // (lll_with_removal_ulll.c), the kernel is reduced by
-    // fmpz_lll_d_with_removal_knapsack, the first phase of fmpz_lll's
-    // default wrapper (wrapper_with_removal_knapsack.c), and accepted only
-    // when fmpz_mat_is_reduced certifies it with the same parameters, the
-    // Lat::lll_reduce route (docs/reference/algorithms_and_sources.rst).
-    // FLINT's own check after that phase, fmpz_lll_is_reduced, dominated
-    // the cost on a 71 x 94 kernel.  When the phase returns -1 or the
-    // certificate fails, or the kernel is outside that range, the
-    // LLL-reduced basis is built by fmpz_lll and copied.  The phase's row
-    // operations are unimodular, so either way the result is a basis of the
-    // kernel.  Tests force either fallback through
-    // SaturationKernelTestSeams.
+    // already built it is reused.  Otherwise the kernel is reduced by
+    // FLINT's certified first LLL phase
+    // (lat::detail::lll_first_phase_certified, the Lat::lll_reduce route,
+    // docs/reference/algorithms_and_sources.rst), which is eligible for at
+    // least two rows and entries of at most 250 bits.  FLINT's own check
+    // after that phase, fmpz_lll_is_reduced, dominated the cost on a
+    // 71 x 94 kernel.  When the phase is not certified or not eligible, the
+    // LLL-reduced basis is built by fmpz_lll and copied.  A certified phase
+    // is the basis fmpz_lll returns, so the basis does not depend on the
+    // route.  Tests force the fallback through CertifiedLllTestSeams
+    // (lat/certified_lll_internal.hpp).
     static const ClassGroupContextStorage* saturation_relation_kernel(
             const ClassGroupContext& context) noexcept {
         ClassGroupContextStorage* storage = context.private_storage_.get();
@@ -5764,32 +5762,14 @@ public:
                         flint::FmpzMatRef(kernel))) {
                 return nullptr;
             }
-            constexpr slong kFlintUlllTruncationBits = 250;
-            const slong bits = ::fmpz_mat_max_bits(kernel.raw());
-            if (flint::fmpz_mat_nrows(kernel) > 1 &&
-                bits >= -kFlintUlllTruncationBits &&
-                bits <= kFlintUlllTruncationBits) {
-                flint::FmpzLll lll;
-                int status = ::fmpz_lll_d_with_removal_knapsack(
-                        kernel.raw(), nullptr, nullptr, lll.raw());
-                const SaturationKernelTestFailure failure =
-                        SaturationKernelTestSeams::failure();
-                if (failure != SaturationKernelTestFailure::none) {
-                    // Test-only failure injection; see
-                    // SaturationKernelTestSeams.
-                    flint::fmpz_mat_zero(flint::FmpzMatRef(kernel));
-                    if (failure == SaturationKernelTestFailure::first_phase) {
-                        status = -1;
-                    }
-                    SaturationKernelTestSeams::note_injected();
-                }
-                if (status != -1 &&
-                    ::fmpz_mat_is_reduced(kernel.raw(), lll.raw()->delta,
-                                          lll.raw()->eta)) {
-                    storage->saturation_relation_kernel = std::move(kernel);
-                    storage->saturation_relation_kernel_valid = true;
-                    return storage;
-                }
+            flint::FmpzLll lll;
+            if (lat::detail::lll_first_phase_certified(
+                        kernel.raw(), nullptr,
+                        flint::FmpzLllConstRef(lll)) ==
+                lat::detail::CertifiedLllRoute::certified) {
+                storage->saturation_relation_kernel = std::move(kernel);
+                storage->saturation_relation_kernel_valid = true;
+                return storage;
             }
         }
         if (reduced_relation_kernel(context) == nullptr) {
@@ -9286,171 +9266,26 @@ bool saturate_class_unit_context(
 }
 
 
-namespace {
-
-// Writes the finite positive double `value` exactly as
-// `mantissa * 2^-shift` with `shift >= 0`.
-bool double_as_dyadic(flint::Fmpz& mantissa,
-                      ulong& shift,
-                      double value) noexcept {
-    if (!std::isfinite(value) || !(value > 0.0)) {
-        return false;
-    }
-    int exponent = 0;
-    const double fraction = std::frexp(value, &exponent);
-    // `fraction * 2^53` is an integer below 2^53, so the conversion is exact.
-    ::fmpz_set_d(mantissa.raw(), std::ldexp(fraction, 53));
-    const slong scaled_shift = 53 - static_cast<slong>(exponent);
-    if (scaled_shift < 0) {
-        ::fmpz_mul_2exp(mantissa.raw(), mantissa.raw(),
-                        static_cast<ulong>(-scaled_shift));
-        shift = 0;
-    } else {
-        shift = static_cast<ulong>(scaled_shift);
-    }
-    return true;
-}
-
-}  // namespace
-
-bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
-                                  double delta,
-                                  double eta) noexcept {
-    // Exact form of FLINT's `fmpz_mat_is_reduced(A, delta, eta)`
-    // (`gr_mat_is_row_lll_reduced_naive`): every Gram-Schmidt norm is
-    // nonzero, |mu_ij| <= eta for j < i, and
-    // (delta - mu_{i,i-1}^2) |b*_{i-1}|^2 <= |b*_i|^2, with `delta` and
-    // `eta` read as the exact rationals of the doubles.  It uses the
-    // integral Gram-Schmidt recurrence of Cohen, A Course in Computational
-    // Algebraic Number Theory, Algorithm 2.6.7, step 2: d_0 = 1,
-    // d_i = det of the leading i x i Gram minor, lambda_ij = d_j mu_ij, so
-    // |b*_i|^2 = d_i / d_{i-1}.  Then |mu_ij| <= eta is
-    // |lambda_ij| <= eta d_j, and the Lovasz test, multiplied by
-    // d_{i-1} d_{i-2} > 0, is delta d_{i-1}^2 <= d_i d_{i-2} + lambda^2.
-    // Bases with fewer than two rows return false (callers fall back).
-    const slong rows = flint::fmpz_mat_nrows(basis);
-    const slong cols = flint::fmpz_mat_ncols(basis);
-    if (rows < 2) {
-        return false;
-    }
-    flint::Fmpz eta_mantissa;
-    flint::Fmpz delta_mantissa;
-    ulong eta_shift = 0;
-    ulong delta_shift = 0;
-    if (!double_as_dyadic(eta_mantissa, eta_shift, eta) ||
-        !double_as_dyadic(delta_mantissa, delta_shift, delta)) {
-        return false;
-    }
-
-    const fmpz_mat_struct* b = basis.raw();
-    flint::FmpzMat gram(rows, rows);
-    flint::FmpzMat lambda(rows, rows);
-    // determinants(0, i) holds d_i; d_0 = 1.
-    flint::FmpzMat determinants(1, rows + 1);
-    ::fmpz_one(::fmpz_mat_entry(determinants.raw(), 0, 0));
-    for (slong i = 0; i < rows; ++i) {
-        for (slong j = 0; j <= i; ++j) {
-            ::_fmpz_vec_dot(::fmpz_mat_entry(gram.raw(), i, j),
-                            ::fmpz_mat_entry(b, i, 0),
-                            ::fmpz_mat_entry(b, j, 0), cols);
-        }
-    }
-
-    flint::Fmpz u;
-    flint::Fmpz left;
-    flint::Fmpz right;
-    for (slong k = 0; k < rows; ++k) {
-        for (slong j = 0; j <= k; ++j) {
-            ::fmpz_set(u.raw(), ::fmpz_mat_entry(gram.raw(), k, j));
-            for (slong i = 0; i < j; ++i) {
-                ::fmpz_mul(u.raw(), u.raw(),
-                           ::fmpz_mat_entry(determinants.raw(), 0, i + 1));
-                ::fmpz_submul(u.raw(), ::fmpz_mat_entry(lambda.raw(), k, i),
-                              ::fmpz_mat_entry(lambda.raw(), j, i));
-                ::fmpz_divexact(u.raw(), u.raw(),
-                                ::fmpz_mat_entry(determinants.raw(), 0, i));
-            }
-            ::fmpz_set(j < k ? ::fmpz_mat_entry(lambda.raw(), k, j)
-                             : ::fmpz_mat_entry(determinants.raw(), 0, k + 1),
-                       u.raw());
-        }
-        const fmpz* d_k = ::fmpz_mat_entry(determinants.raw(), 0, k + 1);
-        if (::fmpz_sgn(d_k) <= 0) {
-            return false;
-        }
-        for (slong j = 0; j < k; ++j) {
-            ::fmpz_abs(left.raw(), ::fmpz_mat_entry(lambda.raw(), k, j));
-            ::fmpz_mul_2exp(left.raw(), left.raw(), eta_shift);
-            ::fmpz_mul(right.raw(), eta_mantissa.raw(),
-                       ::fmpz_mat_entry(determinants.raw(), 0, j + 1));
-            if (::fmpz_cmp(left.raw(), right.raw()) > 0) {
-                return false;
-            }
-        }
-        if (k >= 1) {
-            const fmpz* d_previous =
-                    ::fmpz_mat_entry(determinants.raw(), 0, k);
-            const fmpz* lambda_previous =
-                    ::fmpz_mat_entry(lambda.raw(), k, k - 1);
-            ::fmpz_mul(left.raw(), d_previous, d_previous);
-            ::fmpz_mul(left.raw(), left.raw(), delta_mantissa.raw());
-            ::fmpz_mul(right.raw(), d_k,
-                       ::fmpz_mat_entry(determinants.raw(), 0, k - 1));
-            ::fmpz_addmul(right.raw(), lambda_previous, lambda_previous);
-            ::fmpz_mul_2exp(right.raw(), right.raw(), delta_shift);
-            if (::fmpz_cmp(left.raw(), right.raw()) > 0) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 void reduce_unit_candidate_kernel(
         flint::FmpzMat& rows,
         const DiagnosticsContext* diagnostics) noexcept {
     (void)diagnostics;
-    const slong count = flint::fmpz_mat_nrows(rows);
-    if (count <= 1) {
+    if (flint::fmpz_mat_nrows(rows) <= 1) {
         return;
     }
+    // The shared certified first phase returns the basis fmpz_lll returns
+    // (lat/certified_lll_internal.hpp).  The transform argument is a zero
+    // matrix, as before; it does not steer the APPROX Z_BASIS reduction.
     flint::FmpzLll lll;
-    // FLINT's `fmpz_lll(B, U, fl)` is `fmpz_lll_with_removal_ulll(B, U, 250,
-    // NULL, fl)`.  For a Z_BASIS input of at most 250 bits that makes one
-    // `fmpz_lll_wrapper_with_removal_knapsack(B, U, NULL, fl)` call, which
-    // returns the `fmpz_lll_d_with_removal_knapsack` result when that pass
-    // succeeds and `fmpz_lll_is_reduced` accepts it.  Only one direction is
-    // used: if the exact test below is true then every Gram-Schmidt norm is
-    // nonzero, so FLINT's zero-row stripping for Z_BASIS is the identity and
-    // `fmpz_mat_is_reduced` holds, hence FLINT's chain accepts the pass.
-    // Run that first pass on a copy and accept it only when the exact test
-    // is true; otherwise (including inputs FLINT would accept after
-    // stripping zero rows) call `fmpz_lll` on the original rows.  Either way
-    // the result is the basis `fmpz_lll` returns.  `fmpz_mat_is_reduced` is
-    // not called instead because it measured about 10 times slower here
-    // (29.3 ms against 2.8 ms for the hand-written test on the 28 T-524
-    // kernels, busy machine).  The transform argument is a zero matrix in
-    // both calls, as before; it does not steer the APPROX Z_BASIS reduction.
-    flint::FmpzMat transform(count, count);
-    const slong bits = ::fmpz_mat_max_bits(rows.raw());
-    if (lll.raw()->rt == Z_BASIS && lll.raw()->gt == APPROX &&
-        (bits < 0 ? -bits : bits) <= 250) {
-        flint::FmpzMat candidate(count, flint::fmpz_mat_ncols(rows));
-        ::fmpz_mat_set(candidate.raw(), rows.raw());
-        const int pass = ::fmpz_lll_d_with_removal_knapsack(
-                candidate.raw(), transform.raw(), nullptr, lll.raw());
-        if (pass != -1 &&
-            integer_basis_is_lll_reduced(flint::FmpzMatConstRef(candidate),
-                                         lll.raw()->delta, lll.raw()->eta)) {
-            rows.swap(candidate);
-            return;
-        }
+    flint::FmpzMat transform(flint::fmpz_mat_nrows(rows),
+                             flint::fmpz_mat_nrows(rows));
+    if (lat::detail::certified_fmpz_lll(rows.raw(), transform.raw(),
+                                        flint::FmpzLllConstRef(lll)) ==
+        lat::detail::CertifiedLllRoute::fallback) {
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.unit_candidate_witnesses.kernel_lll_fallback");
-        ::fmpz_mat_zero(transform.raw());
     }
-    fmpz_lll(rows.raw(), transform.raw(), lll.raw());
 }
 
 bool unit_candidate_witnesses(std::vector<FactoredElement>& out,

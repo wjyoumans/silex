@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <vector>
 
@@ -249,38 +248,6 @@ bool relation_saturation_kernel_basis(flint::FmpzMat& out,
 bool relation_saturation_kernel_gram(flint::FmpzMat& d,
                                      flint::FmpzMat& lambda,
                                      const ClassGroupContext& context) noexcept;
-
-class TestHookAccess;
-
-// A failure that only detail::TestHookAccess (test/test_hook_access.hpp)
-// can inject into the first phase of the relation-saturation kernel basis
-// (ClassGroupRelationAccess::saturation_relation_kernel), as
-// lat::detail::LllTestFailure does for Lat::lll_reduce.  In both cases the
-// phase's output is zeroed after the phase runs, so the fallback is
-// exercised after the phase has changed the matrix.  first_phase: the
-// phase's status is read as -1.  certificate: the status is kept and
-// fmpz_mat_is_reduced runs on the zeroed matrix, which it does not certify.
-enum class SaturationKernelTestFailure { none, first_phase, certificate };
-
-// Read by saturation_relation_kernel each time the first phase runs.  Off
-// by default and never set by production code.  Relaxed atomics so a
-// reader never races with a test setting them.
-class SaturationKernelTestSeams {
-public:
-    static SaturationKernelTestFailure failure() noexcept {
-        return failure_.load(std::memory_order_relaxed);
-    }
-    // Counts each first-phase run that an injected failure replaced.
-    static void note_injected() noexcept {
-        injected_.fetch_add(1, std::memory_order_relaxed);
-    }
-
-private:
-    friend class TestHookAccess;
-    inline static std::atomic<SaturationKernelTestFailure> failure_{
-            SaturationKernelTestFailure::none};
-    inline static std::atomic<slong> injected_{0};
-};
 
 // The relation coefficients of the ell-local relation-saturation beta
 // rows: one row of `rows` per invariant index i with ell | d_i, in index

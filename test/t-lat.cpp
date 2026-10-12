@@ -10,6 +10,7 @@
 #include "lat/flatter_backend_internal.hpp"
 #include "lll_reference.hpp"
 #include "lat/lll_internal.hpp"
+#include "test_hook_access.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -853,6 +854,8 @@ int test_lll_certifier_boundaries() {
     auto agrees = [&](bool expected) {
         return silex::test::rational_lll_reduced(basis) == expected &&
                (fmpz_mat_is_reduced(basis.raw(), 0.99, 0.51) != 0) == expected &&
+               silex::lat::detail::lll_certificate_holds(basis,
+                       silex::flint::FmpzLllConstRef(config)) == expected &&
                (fmpz_lll_is_reduced(basis.raw(), config.raw(), 120) != 0) == expected;
     };
     silex::test::exact_binary_parameter(parameter, 0.51);
@@ -1662,8 +1665,13 @@ int test_native_cpp_raii_call_sites() {
 
 }  // namespace
 
+// Lat::lll_reduce's certified first phase returns fmpz_lll's basis on
+// every route.  The 16-bit rows take the integer certificate and the
+// 250-bit rows fmpz_mat_is_reduced (certified_lll_integer_test_max_bits).
 int test_lll_certified_routes() {
     using namespace silex::lat::detail;
+    using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
     for (const slong rows : {1, 4, 14, 15}) {
         for (const slong cols : {rows, rows + 1}) {
             for (const slong bits : {16, 250, 251, 512}) {
@@ -1682,13 +1690,26 @@ int test_lll_certified_routes() {
                 fmpz_lll(expected.raw(), transform.raw(), config.raw());
                 const bool eligible = rows >= 2 && rows <= 14 &&
                         cols <= 14 && bits <= 250;
-                for (const auto failure : {LllTestFailure::none,
-                             LllTestFailure::reducer, LllTestFailure::certification}) {
-                    const auto route = reduce_normalized_basis(reduced, input, failure);
-                    const auto expected_route = !eligible ? LllRoute::ineligible
-                            : failure == LllTestFailure::none ? LllRoute::certified
-                                                             : LllRoute::fallback;
+                for (const auto failure : {CertifiedLllTestFailure::none,
+                             CertifiedLllTestFailure::first_phase,
+                             CertifiedLllTestFailure::certificate}) {
+                    const slong injected =
+                            TestHookAccess::certified_lll_failures_injected();
+                    TestHookAccess::set_certified_lll_failure(failure);
+                    const auto route = reduce_normalized_basis(reduced, input);
+                    TestHookAccess::set_certified_lll_failure(
+                            CertifiedLllTestFailure::none);
+                    const auto expected_route =
+                            !eligible ? CertifiedLllRoute::ineligible
+                            : failure == CertifiedLllTestFailure::none
+                                    ? CertifiedLllRoute::certified
+                                    : CertifiedLllRoute::fallback;
+                    const slong expected_injected =
+                            eligible && failure != CertifiedLllTestFailure::none
+                                    ? 1 : 0;
                     if (route != expected_route ||
+                        TestHookAccess::certified_lll_failures_injected() !=
+                                injected + expected_injected ||
                         !fmpz_mat_equal(reduced.raw(), expected.raw()) ||
                         !silex::test::rational_lll_reduced(reduced)) {
                         return 1;
@@ -1700,6 +1721,111 @@ int test_lll_certified_routes() {
     return 0;
 }
 
+// certified_fmpz_lll and lll_first_phase_certified against plain fmpz_lll
+// on random bases of 4 to 280 bits, with a null, zero and identity
+// transform (the forms the call sites pass) and every injected failure.
+// The matrix and transform must equal fmpz_lll's whenever the helper
+// reports them as final.  The run must certify phase outputs on both sides
+// of the 16-bit certificate cutoff.
+int test_certified_fmpz_lll_matches_fmpz_lll() {
+    using namespace silex::lat::detail;
+    using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
+    using silex::flint::FmpzMat;
+    silex::flint::FmpzLll config;
+    const silex::flint::FmpzLllConstRef config_ref(config);
+    flint_rand_t state;
+    flint_rand_init(state);
+    slong certified_small = 0;
+    slong certified_large = 0;
+    slong fallback = 0;
+    slong ineligible = 0;
+    const flint_bitcnt_t bit_choices[] = {4, 12, 20, 40, 120, 245, 280};
+    for (slong iter = 0; iter < 700; ++iter) {
+        const slong rows = 1 + static_cast<slong>(n_randint(state, 10));
+        const slong cols = rows + static_cast<slong>(n_randint(state, 6));
+        const flint_bitcnt_t bits = bit_choices[n_randint(state, 7)];
+        FmpzMat input(rows, cols);
+        fmpz_mat_randtest(input.raw(), state, bits);
+        if (n_randint(state, 2) == 0) {
+            FmpzMat scratch(rows, rows);
+            fmpz_lll(input.raw(), scratch.raw(), config.raw());
+            if (n_randint(state, 2) == 0 && rows > 1) {
+                // Break the reduction so the phase has work to do.
+                for (slong j = 0; j < cols; ++j) {
+                    fmpz_addmul_ui(fmpz_mat_entry(input.raw(), rows - 1, j),
+                            fmpz_mat_entry(input.raw(), 0, j), 3);
+                }
+            }
+        }
+        const auto failure = static_cast<CertifiedLllTestFailure>(
+                n_randint(state, 3));
+        for (int form = 0; form < 3; ++form) {
+            FmpzMat start_transform(rows, rows);
+            if (form == 2) {
+                fmpz_mat_one(start_transform.raw());
+            }
+            fmpz_mat_struct* const no_transform = nullptr;
+            FmpzMat expected(rows, cols), expected_transform(rows, rows);
+            fmpz_mat_set(expected.raw(), input.raw());
+            fmpz_mat_set(expected_transform.raw(), start_transform.raw());
+            fmpz_lll(expected.raw(),
+                     form == 0 ? no_transform : expected_transform.raw(),
+                     config.raw());
+
+            FmpzMat actual(rows, cols), actual_transform(rows, rows);
+            fmpz_mat_set(actual.raw(), input.raw());
+            fmpz_mat_set(actual_transform.raw(), start_transform.raw());
+            TestHookAccess::set_certified_lll_failure(failure);
+            const CertifiedLllRoute route = certified_fmpz_lll(actual.raw(),
+                    form == 0 ? no_transform : actual_transform.raw(),
+                    config_ref);
+            TestHookAccess::set_certified_lll_failure(
+                    CertifiedLllTestFailure::none);
+            if (!fmpz_mat_equal(actual.raw(), expected.raw()) ||
+                (form != 0 && !fmpz_mat_equal(actual_transform.raw(),
+                                              expected_transform.raw()))) {
+                flint_rand_clear(state);
+                return 1;
+            }
+
+            // The phase-only entry point, as the saturation kernel calls it
+            // (null transform): certified means final.
+            FmpzMat phase(rows, cols);
+            fmpz_mat_set(phase.raw(), input.raw());
+            TestHookAccess::set_certified_lll_failure(failure);
+            const CertifiedLllRoute phase_route = lll_first_phase_certified(
+                    phase.raw(), no_transform, config_ref);
+            TestHookAccess::set_certified_lll_failure(
+                    CertifiedLllTestFailure::none);
+            if (phase_route != route ||
+                (phase_route == CertifiedLllRoute::certified &&
+                 !fmpz_mat_equal(phase.raw(), expected.raw())) ||
+                (phase_route == CertifiedLllRoute::ineligible &&
+                 !fmpz_mat_equal(phase.raw(), input.raw()))) {
+                flint_rand_clear(state);
+                return 1;
+            }
+            if (route == CertifiedLllRoute::certified) {
+                const slong out_bits = fmpz_mat_max_bits(actual.raw());
+                ((out_bits < 0 ? -out_bits : out_bits) <=
+                                 certified_lll_integer_test_max_bits
+                         ? certified_small
+                         : certified_large) += 1;
+            } else if (route == CertifiedLllRoute::fallback) {
+                ++fallback;
+            } else {
+                ++ineligible;
+            }
+        }
+    }
+    flint_rand_clear(state);
+    return certified_small > 0 && certified_large > 0 && fallback > 0 &&
+                   ineligible > 0
+           ? 0
+           : 1;
+}
+
 int main() {
     return test_init_set_swap_basis() != 0 || test_hnf_and_transform() != 0 ||
                    test_contains() != 0 ||
@@ -1709,6 +1835,7 @@ int main() {
                    test_lll_basis_only_contract() != 0 ||
                    test_lll_certifier_boundaries() != 0 ||
                    test_lll_certified_routes() != 0 ||
+                   test_certified_fmpz_lll_matches_fmpz_lll() != 0 ||
                    test_fplll_row_transform_boundary() != 0 ||
                    test_fplll_column_image_transform_boundary() != 0 ||
                    test_fplll_bounded_bkz_row_transform_boundary() != 0 ||

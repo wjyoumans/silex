@@ -187,6 +187,7 @@ add_library(silex
     src/diagnostics/diagnostics.cpp
     src/fmpz_smat/fmpz_smat.cpp
     src/lat/lat.cpp
+    src/lat/certified_lll.cpp
     src/lat/fplll_backend.cpp
     src/lat/flatter_backend.cpp
     src/class_group/class_relation_hnf_witness.cpp

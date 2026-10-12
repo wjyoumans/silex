@@ -13,6 +13,7 @@
 #include "class_group/relation_search_driver_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "relation/relation_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <cstdlib>
@@ -1202,7 +1203,7 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
     for (const Case& item : cases) {
         const sflint::FmpzMat basis =
                 integer_rows(item.rows, item.cols, item.entries);
-        assert(silex::detail::integer_basis_is_lll_reduced(
+        assert(silex::lat::detail::integer_basis_is_lll_reduced(
                        sflint::FmpzMatConstRef(basis), delta, eta) ==
                item.reduced);
         assert((::fmpz_mat_is_reduced(basis.raw(), delta, eta) != 0) ==
@@ -1239,7 +1240,7 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
                     ::fmpz_mat_is_reduced(basis.raw(), item.delta,
                                           item.eta) != 0;
             assert(flint_says == item.reduced);
-            assert(silex::detail::integer_basis_is_lll_reduced(
+            assert(silex::lat::detail::integer_basis_is_lll_reduced(
                            sflint::FmpzMatConstRef(basis), item.delta,
                            item.eta) == item.reduced);
         }
@@ -1270,7 +1271,7 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
         assert(::fmpz_lll_d_with_removal_knapsack(
                        pass_basis.raw(), pass_transform.raw(), nullptr,
                        lll.raw()) != -1);
-        assert(silex::detail::integer_basis_is_lll_reduced(
+        assert(silex::lat::detail::integer_basis_is_lll_reduced(
                 sflint::FmpzMatConstRef(pass_basis), delta, eta));
         sflint::FmpzMat expected(2, 2);
         ::fmpz_mat_set(expected.raw(), basis.raw());
@@ -1286,6 +1287,7 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
     slong reduced_seen = 0;
     slong fallback_seen = 0;
     slong fast_path_seen = 0;
+    slong above_cutoff_seen = 0;
     for (slong iter = 0; iter < 3000; ++iter) {
         const slong rows = 2 + static_cast<slong>(n_randint(state, 9));
         const slong cols = rows + static_cast<slong>(n_randint(state, 8));
@@ -1309,7 +1311,7 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
             }
         }
 
-        const bool exact = silex::detail::integer_basis_is_lll_reduced(
+        const bool exact = silex::lat::detail::integer_basis_is_lll_reduced(
                 sflint::FmpzMatConstRef(input), delta, eta);
         assert(exact == (::fmpz_mat_is_reduced(input.raw(), delta, eta) != 0));
         reduced_seen += exact ? 1 : 0;
@@ -1324,6 +1326,21 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
         silex::detail::reduce_unit_candidate_kernel(actual, nullptr);
         assert(::fmpz_mat_equal(actual.raw(), expected.raw()) != 0);
 
+        // The same with each failure injected into the certified first
+        // phase (CertifiedLllTestSeams): the fallback still returns
+        // fmpz_lll's basis.
+        for (const auto failure :
+             {silex::detail::CertifiedLllTestFailure::first_phase,
+              silex::detail::CertifiedLllTestFailure::certificate}) {
+            sflint::FmpzMat injected(rows, cols);
+            ::fmpz_mat_set(injected.raw(), input.raw());
+            silex::detail::TestHookAccess::set_certified_lll_failure(failure);
+            silex::detail::reduce_unit_candidate_kernel(injected, nullptr);
+            silex::detail::TestHookAccess::set_certified_lll_failure(
+                    silex::detail::CertifiedLllTestFailure::none);
+            assert(::fmpz_mat_equal(injected.raw(), expected.raw()) != 0);
+        }
+
         // The bare first pass, as reduce_unit_candidate_kernel runs it.  For
         // at most 250 bits an accepted pass is the fast path.  Above 250
         // bits fmpz_lll takes another route (see the fixed case below).
@@ -1335,15 +1352,24 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
                     pass_basis.raw(), pass_transform.raw(), nullptr,
                     lll.raw());
             if (pass != -1 &&
-                silex::detail::integer_basis_is_lll_reduced(
+                silex::lat::detail::integer_basis_is_lll_reduced(
                         sflint::FmpzMatConstRef(pass_basis), delta, eta)) {
                 const slong input_bits = ::fmpz_mat_max_bits(input.raw());
                 if ((input_bits < 0 ? -input_bits : input_bits) <= 250) {
                     ++fast_path_seen;
+                    // The shared helper certifies this phase output with
+                    // fmpz_mat_is_reduced above the 16-bit cutoff.
+                    const slong pass_bits =
+                            ::fmpz_mat_max_bits(pass_basis.raw());
+                    if ((pass_bits < 0 ? -pass_bits : pass_bits) >
+                        silex::lat::detail::
+                                certified_lll_integer_test_max_bits) {
+                        ++above_cutoff_seen;
+                    }
                 }
             }
         }
-        if (!silex::detail::integer_basis_is_lll_reduced(
+        if (!silex::lat::detail::integer_basis_is_lll_reduced(
                     sflint::FmpzMatConstRef(expected), delta, eta)) {
             ++fallback_seen;
         }
@@ -1352,6 +1378,7 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
     assert(reduced_seen > 0);
     assert(fallback_seen > 0);
     assert(fast_path_seen > 0);
+    assert(above_cutoff_seen > 0);
     return 0;
 }
 

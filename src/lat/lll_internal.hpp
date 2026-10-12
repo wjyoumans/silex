@@ -2,15 +2,16 @@
 
 #include <silex/flint/fmpz_mat.hpp>
 
+#include "certified_lll_internal.hpp"
+
 namespace silex::lat::detail {
 
-enum class LllRoute { certified, fallback, ineligible };
-enum class LllTestFailure { none, reducer, certification };
-
 // Input must be normalized, full row rank, and distinct from reduced.
-// Both matrices have the same dimensions. Failure injection is test-only.
-LllRoute reduce_normalized_basis(flint::FmpzMatRef reduced,
-        flint::FmpzMatConstRef input,
-        LllTestFailure failure = LllTestFailure::none) noexcept;
+// Both matrices have the same dimensions.  Sets `reduced` to the basis
+// fmpz_lll returns for `input` (default context, zero transform).  For at
+// most 14 rows and 14 columns it takes certified_fmpz_lll; larger inputs
+// call fmpz_lll directly and report ineligible.
+CertifiedLllRoute reduce_normalized_basis(flint::FmpzMatRef reduced,
+        flint::FmpzMatConstRef input) noexcept;
 
 }  // namespace silex::lat::detail

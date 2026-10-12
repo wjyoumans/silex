@@ -6287,21 +6287,21 @@ void relation_saturation_test_kernel_basis_is_lll(
 // of relation_kernel_unit.
 sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
         const silex::ClassGroupContext& context,
-        silex::detail::SaturationKernelTestFailure failure) {
-    using silex::detail::SaturationKernelTestFailure;
+        silex::detail::CertifiedLllTestFailure failure) {
+    using silex::detail::CertifiedLllTestFailure;
     using silex::detail::TestHookAccess;
-    const slong injected = TestHookAccess::saturation_kernel_failures_injected();
-    TestHookAccess::set_saturation_kernel_failure(failure);
+    const slong injected = TestHookAccess::certified_lll_failures_injected();
+    TestHookAccess::set_certified_lll_failure(failure);
     sflint::FmpzMat basis(0, 0);
     bool lll_basis_built = false;
     const bool built = silex::detail::relation_saturation_kernel_basis(
             basis, lll_basis_built, context);
-    TestHookAccess::set_saturation_kernel_failure(
-            SaturationKernelTestFailure::none);
-    const bool injecting = failure != SaturationKernelTestFailure::none;
+    TestHookAccess::set_certified_lll_failure(
+            CertifiedLllTestFailure::none);
+    const bool injecting = failure != CertifiedLllTestFailure::none;
     assert(built);
     assert(lll_basis_built == injecting);
-    assert(TestHookAccess::saturation_kernel_failures_injected() ==
+    assert(TestHookAccess::certified_lll_failures_injected() ==
            injected + (injecting ? 1 : 0));
     relation_saturation_test_kernel_basis_is_lll(basis, context);
     return basis;
@@ -6314,7 +6314,7 @@ sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
 // equal to the basis the certified phase gives.  Publishing the
 // presentation again resets the cached bases, so each case builds afresh.
 int test_relation_saturation_kernel_basis_fallbacks() {
-    using silex::detail::SaturationKernelTestFailure;
+    using silex::detail::CertifiedLllTestFailure;
     silex::NumberField field = degree_one_field();
     silex::Order order;
     order = silex::test::equation_order(field);
@@ -6334,16 +6334,16 @@ int test_relation_saturation_kernel_basis_fallbacks() {
     assert(context.relation_count() == 4);
 
     sflint::FmpzMat expected(0, 0);
-    for (const SaturationKernelTestFailure failure :
-         {SaturationKernelTestFailure::none,
-          SaturationKernelTestFailure::first_phase,
-          SaturationKernelTestFailure::certificate}) {
+    for (const CertifiedLllTestFailure failure :
+         {CertifiedLllTestFailure::none,
+          CertifiedLllTestFailure::first_phase,
+          CertifiedLllTestFailure::certificate}) {
         assert(context.publish_presentation());
         assert(context.relation_kernel_unit_count() == 3);
         sflint::FmpzMat basis =
                 relation_saturation_test_kernel_basis_with_failure(context,
                                                                    failure);
-        if (failure == SaturationKernelTestFailure::none) {
+        if (failure == CertifiedLllTestFailure::none) {
             expected = std::move(basis);
         } else {
             assert(::fmpz_mat_equal(basis.raw(), expected.raw()));
@@ -6358,7 +6358,7 @@ int test_relation_saturation_kernel_basis_fallbacks() {
 // Over Q with the factor base {2}: the relations 256, 16, 4 have a kernel
 // of rank 2, and adding 2 gives one of rank 3.
 int test_relation_saturation_kernel_basis_reuse_and_invalidation() {
-    using silex::detail::SaturationKernelTestFailure;
+    using silex::detail::CertifiedLllTestFailure;
     using silex::detail::TestHookAccess;
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -6385,17 +6385,17 @@ int test_relation_saturation_kernel_basis_reuse_and_invalidation() {
     // copy of that LLL-reduced basis.
     silex::FactoredElement unit_witness(field);
     assert(context.relation_kernel_unit(unit_witness, 0));
-    const slong injected = TestHookAccess::saturation_kernel_failures_injected();
-    TestHookAccess::set_saturation_kernel_failure(
-            SaturationKernelTestFailure::first_phase);
+    const slong injected = TestHookAccess::certified_lll_failures_injected();
+    TestHookAccess::set_certified_lll_failure(
+            CertifiedLllTestFailure::first_phase);
     sflint::FmpzMat basis(0, 0);
     bool lll_basis_built = false;
     const bool built = silex::detail::relation_saturation_kernel_basis(
             basis, lll_basis_built, context);
-    TestHookAccess::set_saturation_kernel_failure(
-            SaturationKernelTestFailure::none);
+    TestHookAccess::set_certified_lll_failure(
+            CertifiedLllTestFailure::none);
     assert(built && lll_basis_built);
-    assert(TestHookAccess::saturation_kernel_failures_injected() == injected);
+    assert(TestHookAccess::certified_lll_failures_injected() == injected);
     assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis)) == 2);
     relation_saturation_test_kernel_basis_is_lll(basis, context);
 
@@ -6408,19 +6408,21 @@ int test_relation_saturation_kernel_basis_reuse_and_invalidation() {
     assert(context.publish_presentation());
     assert(context.relation_kernel_unit_count() == 3);
     basis = relation_saturation_test_kernel_basis_with_failure(
-            context, SaturationKernelTestFailure::none);
+            context, CertifiedLllTestFailure::none);
     assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis)) == 3);
     return 0;
 }
 
-// Forcing the fallbacks of the saturation kernel basis leaves a proven
-// computation unchanged.  Q(sqrt(100000001)), x^2 - x - 25000000: its
-// relation kernel takes the certified first phase (see
+// Forcing the fallbacks of the certified first LLL phase, including the
+// saturation kernel basis, leaves a proven computation unchanged.
+// Q(sqrt(100000001)), x^2 - x - 25000000: its relation kernel takes the
+// certified first phase (see
 // test_relation_saturation_kernel_basis_first_phase).  With the first phase
-// failing, or its certificate failing, on every run, the proven class
-// group, its saturation records and the units are the same.
+// failing, or its certificate failing, on every run at every call site
+// (CertifiedLllTestSeams), the proven class group, its
+// saturation records and the units are the same.
 int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
-    using silex::detail::SaturationKernelTestFailure;
+    using silex::detail::CertifiedLllTestFailure;
     using silex::detail::TestHookAccess;
     silex::NumberField field = shifted_quadratic_field(-1, -25000000);
     silex::Order equation_order = silex::test::equation_order(field);
@@ -6436,25 +6438,25 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
         std::vector<silex::ProofState> saturation_states;
         sflint::Arb regulator;
     };
-    auto compute = [&](SaturationKernelTestFailure failure) {
+    auto compute = [&](CertifiedLllTestFailure failure) {
         silex::ClassGroupComputeOptions options;
         options.zeta_bf_max_cutoff = 20000;
         options.requested_certification = silex::CertificationMode::proven;
         silex::ClassGroupContext context;
         silex::OrderUnitGroup units;
         const slong injected =
-                TestHookAccess::saturation_kernel_failures_injected();
-        TestHookAccess::set_saturation_kernel_failure(failure);
+                TestHookAccess::certified_lll_failures_injected();
+        TestHookAccess::set_certified_lll_failure(failure);
         const bool computed = units.compute_with_class_group(
                 context, maximal_order,
                 sflint::FmpzConstRef(factor_base_bound), options, 128);
-        TestHookAccess::set_saturation_kernel_failure(
-                SaturationKernelTestFailure::none);
+        TestHookAccess::set_certified_lll_failure(
+                CertifiedLllTestFailure::none);
         assert(computed);
         const slong injections =
-                TestHookAccess::saturation_kernel_failures_injected() -
+                TestHookAccess::certified_lll_failures_injected() -
                 injected;
-        assert(failure == SaturationKernelTestFailure::none
+        assert(failure == CertifiedLllTestFailure::none
                        ? injections == 0
                        : injections > 0);
         assert_proven_class_group_certification(context);
@@ -6481,11 +6483,11 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
         return result;
     };
 
-    const ProvenResult expected = compute(SaturationKernelTestFailure::none);
+    const ProvenResult expected = compute(CertifiedLllTestFailure::none);
     assert(!expected.invariants.empty());
-    for (const SaturationKernelTestFailure failure :
-         {SaturationKernelTestFailure::first_phase,
-          SaturationKernelTestFailure::certificate}) {
+    for (const CertifiedLllTestFailure failure :
+         {CertifiedLllTestFailure::first_phase,
+          CertifiedLllTestFailure::certificate}) {
         const ProvenResult result = compute(failure);
         assert(result.invariants.size() == expected.invariants.size());
         for (std::size_t i = 0; i < expected.invariants.size(); ++i) {

@@ -20,6 +20,7 @@
 #include <silex/prime_ideal.hpp>
 
 #include "class_group/relation_saturation_internal.hpp"
+#include "lat/certified_lll_internal.hpp"
 #include "order_unit/compute_internal.hpp"
 
 namespace silex::detail {
@@ -84,22 +85,22 @@ public:
                 std::memory_order_relaxed);
     }
 
-    // Sets the failure injected into every later first-phase run of the
-    // relation-saturation kernel basis (SaturationKernelTestSeams) until it
-    // is set back to none.  The fallback then builds the basis from
-    // fmpz_lll, which every other route can also take, so no invariant is
-    // skipped; it only forces the fallback where the first phase would be
-    // certified.
-    static void set_saturation_kernel_failure(
-            SaturationKernelTestFailure failure) noexcept {
-        SaturationKernelTestSeams::failure_.store(failure,
-                                                  std::memory_order_relaxed);
+    // Sets the failure injected into every later run of FLINT's certified
+    // first LLL phase (CertifiedLllTestSeams, lat/certified_lll_internal.hpp),
+    // at every call site, until it is set back to none.  The caller's
+    // fallback then returns fmpz_lll's result, which every other route also
+    // returns, so no invariant is skipped; it only forces the fallback where
+    // the first phase would be certified.
+    static void set_certified_lll_failure(
+            CertifiedLllTestFailure failure) noexcept {
+        CertifiedLllTestSeams::failure_.store(failure,
+                                              std::memory_order_relaxed);
     }
 
     // The number of first-phase runs an injected failure has replaced since
     // the process started.
-    static slong saturation_kernel_failures_injected() noexcept {
-        return SaturationKernelTestSeams::injected_.load(
+    static slong certified_lll_failures_injected() noexcept {
+        return CertifiedLllTestSeams::injected_.load(
                 std::memory_order_relaxed);
     }
 };

@@ -2,6 +2,7 @@
 #include "class_group/ideal_lattice_reduction_internal.hpp"
 #include "class_group/ideal_lattice_lll_internal.hpp"
 #include "class_group/ideal_t2_enumeration_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <silex/class_group.hpp>
@@ -1469,8 +1470,9 @@ int test_octic_t2_enumeration_data_meets_lll_bounds() {
 }  // namespace
 
 // The integer LLL of the rounded-embedding route certifies FLINT's first
-// phase with fmpz_mat_is_reduced instead of letting fmpz_lll run its own
-// check; the result must be fmpz_lll's on every route.  On the octic field
+// phase exactly (lat::detail::certified_fmpz_lll) instead of letting
+// fmpz_lll run its own check; the result must be fmpz_lll's on every
+// route, on both sides of the 16-bit certificate cutoff.  On the octic field
 // of row multiquadratic_m3_m5_m7 the one-LLL basis of a degree-one prime
 // above 43 is certified on the first phase and then fails the T2 diagonal
 // checks, so the ideal is reduced by the two-LLL route, as when the whole
@@ -1509,8 +1511,11 @@ int test_rounded_embedding_certified_lll_matches_fmpz_lll() {
     sflint::fmpz_mat_mul(sflint::FmpzMatRef(input),
                          sflint::FmpzMatConstRef(hnf),
                          sflint::FmpzMatConstRef(cache.rounded_rows));
+    using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
+    using silex::lat::detail::CertifiedLllRoute;
     const auto check_routes = [](const sflint::FmpzMat& matrix,
-                                 rs::IdealLatticeOneLllRoute route) {
+                                 CertifiedLllRoute route) {
         const slong rows = sflint::fmpz_mat_nrows(matrix);
         const slong cols = sflint::fmpz_mat_ncols(matrix);
         sflint::FmpzMat reference(rows, cols);
@@ -1520,22 +1525,25 @@ int test_rounded_embedding_certified_lll_matches_fmpz_lll() {
         sflint::fmpz_mat_one(sflint::FmpzMatRef(reference_transform));
         sflint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
         ::fmpz_lll(reference.raw(), reference_transform.raw(), config.raw());
-        for (const auto failure :
-             {rs::IdealLatticeOneLllTestFailure::none,
-              rs::IdealLatticeOneLllTestFailure::reducer,
-              rs::IdealLatticeOneLllTestFailure::certificate}) {
+        for (const auto failure : {CertifiedLllTestFailure::none,
+                                   CertifiedLllTestFailure::first_phase,
+                                   CertifiedLllTestFailure::certificate}) {
             sflint::FmpzMat reduced(rows, cols);
             sflint::FmpzMat transform(0, 0);
             sflint::fmpz_mat_set(sflint::FmpzMatRef(reduced),
                                  sflint::FmpzMatConstRef(matrix));
-            const rs::IdealLatticeOneLllRoute expected_route =
-                    route != rs::IdealLatticeOneLllRoute::certified
-                            ? route
-                    : failure == rs::IdealLatticeOneLllTestFailure::none
-                            ? rs::IdealLatticeOneLllRoute::certified
-                            : rs::IdealLatticeOneLllRoute::fallback;
-            if (rs::ideal_lattice_rounded_embedding_integer_lll(
-                        reduced, transform, failure) != expected_route ||
+            const CertifiedLllRoute expected_route =
+                    route != CertifiedLllRoute::certified ? route
+                    : failure == CertifiedLllTestFailure::none
+                            ? CertifiedLllRoute::certified
+                            : CertifiedLllRoute::fallback;
+            TestHookAccess::set_certified_lll_failure(failure);
+            const CertifiedLllRoute actual_route =
+                    rs::ideal_lattice_rounded_embedding_integer_lll(reduced,
+                                                                    transform);
+            TestHookAccess::set_certified_lll_failure(
+                    CertifiedLllTestFailure::none);
+            if (actual_route != expected_route ||
                 !sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(reduced),
                                         sflint::FmpzMatConstRef(reference)) ||
                 !sflint::fmpz_mat_equal(
@@ -1546,7 +1554,33 @@ int test_rounded_embedding_certified_lll_matches_fmpz_lll() {
         }
         return true;
     };
-    assert(check_routes(input, rs::IdealLatticeOneLllRoute::certified));
+    // The bit size of FLINT's first-phase output, which selects the
+    // certificate (certified_lll_integer_test_max_bits).
+    const auto phase_output_bits = [](const sflint::FmpzMat& matrix) {
+        const slong rows = sflint::fmpz_mat_nrows(matrix);
+        sflint::FmpzMat phase(rows, sflint::fmpz_mat_ncols(matrix));
+        sflint::FmpzMat phase_transform(rows, rows);
+        sflint::fmpz_mat_set(sflint::FmpzMatRef(phase),
+                             sflint::FmpzMatConstRef(matrix));
+        sflint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
+        const int status = ::fmpz_lll_d_with_removal_knapsack(
+                phase.raw(), phase_transform.raw(), nullptr, config.raw());
+        assert(status != -1);
+        (void)status;
+        const slong bits = ::fmpz_mat_max_bits(phase.raw());
+        return bits < 0 ? -bits : bits;
+    };
+    assert(phase_output_bits(input) <=
+           silex::lat::detail::certified_lll_integer_test_max_bits);
+    assert(check_routes(input, CertifiedLllRoute::certified));
+
+    // The same lattice scaled by 2^20 is certified by fmpz_mat_is_reduced,
+    // above the integer certificate's 16-bit cutoff.
+    sflint::FmpzMat scaled(degree, degree);
+    ::fmpz_mat_scalar_mul_2exp(scaled.raw(), input.raw(), 20);
+    assert(phase_output_bits(scaled) >
+           silex::lat::detail::certified_lll_integer_test_max_bits);
+    assert(check_routes(scaled, CertifiedLllRoute::certified));
 
     // The one-LLL basis the route rejected is the fmpz_lll one, and it is
     // not the two-LLL basis the route returned.
@@ -1559,11 +1593,11 @@ int test_rounded_embedding_certified_lll_matches_fmpz_lll() {
     // to fmpz_lll directly.
     sflint::FmpzMat wide(degree, degree);
     ::fmpz_mat_scalar_mul_2exp(wide.raw(), input.raw(), 260);
-    assert(check_routes(wide, rs::IdealLatticeOneLllRoute::ineligible));
+    assert(check_routes(wide, CertifiedLllRoute::ineligible));
     sflint::FmpzMat single(1, 3);
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(single, 0, 0), 6);
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(single, 0, 2), -4);
-    assert(check_routes(single, rs::IdealLatticeOneLllRoute::ineligible));
+    assert(check_routes(single, CertifiedLllRoute::ineligible));
     return 0;
 }
 
