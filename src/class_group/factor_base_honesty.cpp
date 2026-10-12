@@ -79,6 +79,11 @@ bool full_factorization_has_principal_witness(
         return false;
     }
 
+    flint::Fmpz required_p;
+    flint::Fmpz factor_p;
+    if (!prime.rational_prime(flint::FmpzRef(required_p))) {
+        return false;
+    }
     slong prime_exponent = 0;
     for (slong i = 0; i < factorization.length(); ++i) {
         slong exponent = 0;
@@ -90,7 +95,19 @@ bool full_factorization_has_principal_witness(
             prime_exponent += exponent;
             continue;
         }
-        if (!base.contains(factor)) {
+        if (base.contains(factor)) {
+            continue;
+        }
+        // The one e = 1 ideal above a rational prime other than the
+        // required prime's, lacking from the base, is discharged by the
+        // principal ideal it divides (factor_base_proof_targets.cpp).
+        bool admissible = false;
+        if (exponent <= 0 ||
+            !factor.rational_prime(flint::FmpzRef(factor_p)) ||
+            !detail::required_prime_witness_admits_lacking_prime(
+                    admissible, base, flint::FmpzConstRef(factor_p),
+                    flint::FmpzConstRef(required_p)) ||
+            !admissible) {
             return false;
         }
     }

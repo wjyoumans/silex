@@ -2,6 +2,7 @@
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
+#include "factor_base/factor_base_internal.hpp"
 #include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "order/order_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
@@ -26,6 +27,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <initializer_list>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -147,11 +149,46 @@ bool first_prime_above(silex::PrimeIdeal& out,
            out.set(*first);
 }
 
+// The witness rule's one exception to "every other factor is in the base":
+// the single prime ideal above a rational prime q other than the required
+// prime's that the base lacks, when it has e = 1 and the base holds every
+// other prime ideal above q (at least one).  Checked here from the complete
+// decomposition of q, independently of the library helper.
+bool lacking_prime_is_admissible(const silex::PrimeIdeal& factor,
+                                 const silex::FactorBase& base,
+                                 const silex::PrimeIdeal& required_prime) noexcept {
+    sflint::Fmpz q, p;
+    if (!factor.rational_prime(sflint::FmpzRef(q)) ||
+        !required_prime.rational_prime(sflint::FmpzRef(p)) ||
+        sflint::fmpz_equal(sflint::FmpzConstRef(q), sflint::FmpzConstRef(p)) ||
+        factor.ramification_index() != 1) {
+        return false;
+    }
+    silex::PrimeIdealList primes;
+    if (!silex::decompose_prime(primes, *base.parent(), sflint::FmpzConstRef(q))) {
+        return false;
+    }
+    slong inside = 0;
+    slong outside = 0;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const silex::PrimeIdeal* prime = primes.at(i);
+        if (prime == nullptr) return false;
+        if (base.contains(*prime)) {
+            ++inside;
+        } else {
+            ++outside;
+        }
+    }
+    return inside >= 1 && outside == 1;
+}
+
+// With strict set, the rule without the lacking-prime exception.
 bool full_factorization_required_prime_result(
         bool& matches,
         const silex::Ideal& ideal,
         const silex::FactorBase& base,
-        const silex::PrimeIdeal& required_prime) noexcept {
+        const silex::PrimeIdeal& required_prime,
+        bool strict = false) noexcept {
     matches = false;
     const silex::Order* order = ideal.parent();
     if (order == nullptr ||
@@ -177,7 +214,9 @@ bool full_factorization_required_prime_result(
         }
         if (factor.equal(required_prime)) {
             required_exponent += exponent;
-        } else if (!base.contains(factor)) {
+        } else if (!base.contains(factor) &&
+                   (strict ||
+                    !lacking_prime_is_admissible(factor, base, required_prime))) {
             other_factors_are_in_base = false;
         }
     }
@@ -2555,12 +2594,238 @@ int test_direct_witness_search_keeps_lattice_fallbacks() {
 
 }  // namespace
 
+FieldSetup maximal_setup(std::initializer_list<slong> coefficients) noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    slong degree = 0;
+    for (slong c : coefficients) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, degree++, c);
+    }
+    FieldSetup setup;
+    setup.field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order =
+            silex::test::equation_order(setup.field);
+    setup.maximal_order = silex::Order(setup.field);
+    if (!setup.maximal_order.maximal_order(equation_order) ||
+        !setup.maximal_order.is_maximal()) {
+        return FieldSetup{};
+    }
+    return setup;
+}
+
+// The prime ideals above p, in decomposition order.
+std::vector<silex::PrimeIdeal> primes_above(const silex::Order& order,
+                                            slong p) {
+    sflint::Fmpz rational_prime;
+    sflint::fmpz_set_si(sflint::FmpzRef(rational_prime), p);
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, order,
+                                  sflint::FmpzConstRef(rational_prime)));
+    std::vector<silex::PrimeIdeal> out;
+    for (slong i = 0; i < primes.size(); ++i) {
+        out.emplace_back(order);
+        assert(primes.at(i) != nullptr && out.back().set(*primes.at(i)));
+    }
+    return out;
+}
+
+silex::FactorBase base_of(const silex::Order& order,
+                          std::initializer_list<const silex::PrimeIdeal*> primes) {
+    silex::FactorBase base(order);
+    for (const silex::PrimeIdeal* prime : primes) {
+        assert(silex::detail::FactorBaseBlockAccess::append_prime_for_testing(
+                base, *prime));
+    }
+    return base;
+}
+
+// Every witness predicate, direct and reference, against the expected
+// classification, with the expensive debug differentials enabled, and the
+// integral-scalar predicate too when alpha is the nonzero scalar_value.  When
+// through_lacking is set, the witness is accepted only through the lacking
+// ideal: the rule without that exception refuses it.
+void check_lacking_prime_witness(const silex::FactorBase& base,
+                                 const silex::PrimeIdeal& required,
+                                 const silex::OrderElement& alpha,
+                                 bool expected,
+                                 bool through_lacking,
+                                 slong scalar_value = 0) {
+    namespace search = silex::detail::relation_search;
+    using Mode = search::FactorBaseWitnessPredicate;
+    const silex::Order& order = *base.parent();
+    silex::Ideal principal(order);
+    assert(principal.set_principal(alpha));
+    bool reference = !expected;
+    assert(full_factorization_required_prime_result(reference, principal, base,
+                                                    required));
+    assert(reference == expected);
+    bool strict = true;
+    assert(full_factorization_required_prime_result(strict, principal, base,
+                                                    required, true));
+    assert(strict == (expected && !through_lacking));
+
+    silex::DiagnosticsContext diagnostics;
+    diagnostics.debug_level = silex::DebugLevel::expensive;
+    diagnostics.debug_modules = silex::diagnostics_all_modules;
+    slong failures = 0;
+    diagnostics.debug_failure_user = &failures;
+    diagnostics.debug_failure_callback = [](
+            void* user, silex::DiagnosticsModule, silex::DebugLevel,
+            const char*, const char*, int, const char*, const char*) noexcept {
+        ++*static_cast<slong*>(user);
+    };
+    bool ideal_matches = !expected;
+    bool element_matches = !expected;
+    assert(silex::detail::ideal_factor_over_base_with_required_prime(
+            ideal_matches, principal, base, required, &diagnostics));
+    assert(silex::detail::order_element_factor_over_base_with_required_prime(
+            element_matches, alpha, base, required, &diagnostics));
+    assert(ideal_matches == expected && element_matches == expected);
+    for (Mode mode : {Mode::selected, Mode::full_factorization,
+                      Mode::order_element_direct}) {
+        search::FactorBaseWitnessAudit audit;
+        assert(search::factor_base_principal_witness(
+                       base, required, alpha, mode, &diagnostics, &audit) ==
+               expected);
+        assert(audit.used_reference == (mode == Mode::full_factorization));
+    }
+
+    if (scalar_value != 0) {
+        sflint::Fmpz integer;
+        sflint::fmpz_set_si(sflint::FmpzRef(integer), scalar_value);
+        bool scalar_matches = !expected;
+        assert(silex::detail::scalar_factor_over_base_with_required_prime(
+                scalar_matches, sflint::FmpzConstRef(integer), base, required,
+                &diagnostics));
+        assert(scalar_matches == expected);
+        for (Mode mode : {Mode::selected, Mode::order_element_direct,
+                          Mode::full_factorization}) {
+            assert(search::factor_base_scalar_witness(
+                           base, required, sflint::FmpzConstRef(integer), mode,
+                           &diagnostics) == expected);
+        }
+    }
+    assert(failures == 0);
+}
+
+// A witness may carry valuation at the one prime ideal above q that the
+// base lacks when e = 1, the base holds every other ideal above q, and q is
+// not the required prime's rational prime: qO_K = Q_1^e_1 ... Q_g^e_g with
+// e_g = 1 puts [Q_g] in the subgroup of the others, the step
+// select_factor_base_proof_targets uses (2.17.3 buch2.c:be_honest and
+// bnftestprimes skip the last unramified ideal).  Each refusal below
+// breaks exactly one condition.
+int test_witness_through_lacking_conjugate() {
+    // Z[i]: 5 and 13 split, class number 1.
+    {
+        FieldSetup setup = maximal_setup({1, 0, 1});
+        const silex::Order& order = setup.maximal_order;
+        assert(order.is_defined());
+        const auto p13 = primes_above(order, 13);
+        const auto p5 = primes_above(order, 5);
+        assert(p13.size() == 2 && p5.size() == 2);
+        // A non-scalar a + b i with (alpha) = P13 * Q5, Q5 the ideal above 5
+        // outside the base {Q5'}.
+        const silex::FactorBase base = base_of(order, {&p5[0]});
+        silex::OrderElement alpha(order);
+        sflint::FmpzMat coordinates(1, 2);
+        bool found = false;
+        for (slong a = -8; a <= 8 && !found; ++a) {
+            for (slong b = 1; b <= 8 && !found; ++b) {
+                if (a * a + b * b != 65) continue;
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(
+                        sflint::FmpzMatRef(coordinates), 0, 0), a);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(
+                        sflint::FmpzMatRef(coordinates), 0, 1), b);
+                assert(alpha.set_coordinates(
+                        sflint::FmpzMatConstRef(coordinates)));
+                silex::Ideal principal(order);
+                slong v13 = -1, v5 = -1;
+                assert(principal.set_principal(alpha));
+                assert(p13[0].valuation(v13, principal));
+                assert(p5[1].valuation(v5, principal));
+                found = v13 == 1 && v5 == 1;
+            }
+        }
+        assert(found);
+        check_lacking_prime_witness(base, p13[0], alpha, true, true);
+        // The base holds no ideal above 5: refused.
+        check_lacking_prime_witness(base_of(order, {&p13[1]}), p13[0], alpha,
+                                    false, false);
+        // The scalar 65 = P13 P13' Q5 Q5' with P13' and Q5' in the base.
+        assert(alpha.set_si(65));
+        check_lacking_prime_witness(base_of(order, {&p13[1], &p5[0]}), p13[0],
+                                    alpha, true, true, 65);
+        // P13' lacking as well: the second lacking ideal lies above the
+        // required prime's own rational prime 13, refused.
+        check_lacking_prime_witness(base, p13[0], alpha, false, false, 65);
+    }
+    // x^3 - x - 1 (discriminant -23, class number 1): 23 = P^2 Q and
+    // 5 = R1 R2 with f(R1) = 1, f(R2) = 2.  Required R1, scalar 5 * 23.
+    {
+        FieldSetup setup = maximal_setup({-1, -1, 0, 1});
+        const silex::Order& order = setup.maximal_order;
+        assert(order.is_defined());
+        const auto p5 = primes_above(order, 5);
+        const auto p23 = primes_above(order, 23);
+        assert(p5.size() == 2 && p23.size() == 2);
+        const silex::PrimeIdeal& r1 = p5[0].residue_degree() == 1 ? p5[0] : p5[1];
+        const silex::PrimeIdeal& r2 = p5[0].residue_degree() == 1 ? p5[1] : p5[0];
+        const silex::PrimeIdeal& ramified =
+                p23[0].ramification_index() == 2 ? p23[0] : p23[1];
+        const silex::PrimeIdeal& unramified =
+                p23[0].ramification_index() == 2 ? p23[1] : p23[0];
+        assert(r1.residue_degree() == 1 && r2.residue_degree() == 2);
+        assert(ramified.ramification_index() == 2 &&
+               unramified.ramification_index() == 1);
+        silex::OrderElement alpha(order);
+        assert(alpha.set_si(5 * 23));
+        // Lacking Q (e = 1): accepted.
+        check_lacking_prime_witness(base_of(order, {&r2, &ramified}), r1, alpha,
+                                    true, true, 5 * 23);
+        // Lacking P (e = 2): refused.
+        check_lacking_prime_witness(base_of(order, {&r2, &unramified}), r1,
+                                    alpha, false, false, 5 * 23);
+    }
+    // x^3 - 2: 31 = P1 P2 P3 and 5 = R1 R2 with f(R1) = 1, f(R2) = 2.
+    {
+        FieldSetup setup = cubic_x3_minus_2();
+        const silex::Order& order = setup.maximal_order;
+        assert(order.is_defined());
+        const auto p5 = primes_above(order, 5);
+        const auto p31 = primes_above(order, 31);
+        assert(p5.size() == 2 && p31.size() == 3);
+        const silex::PrimeIdeal& r1 = p5[0].residue_degree() == 1 ? p5[0] : p5[1];
+        const silex::PrimeIdeal& r2 = p5[0].residue_degree() == 1 ? p5[1] : p5[0];
+        assert(r1.residue_degree() == 1 && r2.residue_degree() == 2);
+        silex::OrderElement alpha(order);
+        assert(alpha.set_si(5 * 31));
+        // One lacking ideal above 31: accepted.
+        check_lacking_prime_witness(base_of(order, {&r2, &p31[0], &p31[1]}), r1,
+                                    alpha, true, true, 5 * 31);
+        // Two lacking ideals above 31: refused.
+        check_lacking_prime_witness(base_of(order, {&r2, &p31[1]}), r1, alpha,
+                                    false, false, 5 * 31);
+        // The lacking ideal above 5 has f = 2, e = 1: accepted.
+        check_lacking_prime_witness(base_of(order, {&r1, &p31[1], &p31[2]}),
+                                    p31[0], alpha, true, true, 5 * 31);
+        // 31 = P1 P2 P3 with P2 in the base and P3 lacking: P3 lies above the
+        // required prime's own rational prime, refused.
+        assert(alpha.set_si(31));
+        check_lacking_prime_witness(base_of(order, {&p31[1]}), p31[0], alpha,
+                                    false, false, 31);
+    }
+    return 0;
+}
+
 int main() {
     assert(test_scalar_noncontiguous_blocks() == 0);
     assert(test_scalar_witness_reference_cases() == 0);
     assert(test_selected_witness_edge_cases() == 0);
     assert(test_witness_partial_rational_prime_blocks() == 0);
     assert(test_legacy_scan_predicate_equivalence() == 0);
+    assert(test_witness_through_lacking_conjugate() == 0);
     return test_proof_targets_require_complete_decomposition() != 0 ||
                    test_required_prime_predicates_match_full_factorization() !=
                            0 ||

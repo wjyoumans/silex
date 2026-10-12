@@ -144,6 +144,11 @@ bool required_prime_factorization_matches_reference(
         return !direct_ok;
     }
 
+    flint::Fmpz required_p;
+    flint::Fmpz factor_p;
+    if (!required_prime.rational_prime(flint::FmpzRef(required_p))) {
+        return !direct_ok;
+    }
     bool reference_matches = true;
     slong required_exponent = 0;
     for (slong i = 0; i < factorization.length(); ++i) {
@@ -155,7 +160,15 @@ bool required_prime_factorization_matches_reference(
         if (factor.equal(required_prime)) {
             required_exponent += exponent;
         } else if (!base.contains(factor)) {
-            reference_matches = false;
+            bool admissible = false;
+            if (exponent <= 0 ||
+                !factor.rational_prime(flint::FmpzRef(factor_p)) ||
+                !detail::required_prime_witness_admits_lacking_prime(
+                        admissible, base, flint::FmpzConstRef(factor_p),
+                        flint::FmpzConstRef(required_p)) ||
+                !admissible) {
+                reference_matches = false;
+            }
         }
     }
     reference_matches = reference_matches && required_exponent == 1;
@@ -287,24 +300,6 @@ bool factor_base_order_element_rational_valuation(
     return true;
 }
 
-bool factor_base_accounts_for_order_element_rational_valuation(
-        bool& accounted,
-        const FactorBase& base,
-        const OrderElement& element,
-        flint::FmpzConstRef rational_prime,
-        slong norm_valuation,
-        slong remaining_valuation,
-        const DiagnosticsContext* diagnostics) noexcept {
-    slong remaining = remaining_valuation;
-    if (!factor_base_order_element_rational_valuation(
-                remaining, nullptr, base, element, rational_prime,
-                norm_valuation, diagnostics)) {
-        return false;
-    }
-    accounted = remaining == 0;
-    return true;
-}
-
 bool scalar_factor_over_base_with_required_prime_direct(
         bool& matches,
         flint::FmpzConstRef scalar,
@@ -325,7 +320,9 @@ bool scalar_factor_over_base_with_required_prime_direct(
 
     // Source: base4.c:Q_nffactor/prV_e_muls gives v_P(m)=e_P*v_p(m).
     // buch2.c:divide_p_elt/can_factor requires complete norm accounting.
-    // Cancel the positive v_q(m) at each q: sum(e_P*f_P) must be degree.
+    // Cancel the positive v_q(m) at each q: sum(e_P*f_P) must be degree,
+    // except that a q other than the required prime's may leave its one
+    // lacking e = 1 ideal (required_prime_witness_admits_lacking_prime).
     if (required_prime.ramification_index() != 1) return true;
     flint::Fmpz required_p, q, absolute;
     if (!required_prime.rational_prime(flint::FmpzRef(required_p))) return false;
@@ -363,7 +360,17 @@ bool scalar_factor_over_base_with_required_prime_direct(
                 remaining -= e * f;
             }
         }
-        if (remaining != 0) return true;
+        if (remaining != 0) {
+            // v_Q(m) = e_Q v_q(m) > 0 at every Q | q, so the prime ideals
+            // above q outside the base carry valuation.  Only the single
+            // e = 1 ideal above a q other than the required prime's own may.
+            bool admissible = false;
+            if (!detail::required_prime_witness_admits_lacking_prime(
+                        admissible, base, flint::FmpzConstRef(q),
+                        flint::FmpzConstRef(required_p)))
+                return false;
+            if (!admissible) return true;
+        }
     }
     matches = required_seen;
     return true;
@@ -520,16 +527,36 @@ bool order_element_factor_over_base_with_required_prime_direct(
             }
         }
 
-        bool accounted = false;
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
                             "ideal.required_prime_direct_accounting");
-        if (!factor_base_accounts_for_order_element_rational_valuation(
-                    accounted, base, element,
+        slong unaccounted = remaining_valuation;
+        if (!factor_base_order_element_rational_valuation(
+                    unaccounted, nullptr, base, element,
                     flint::FmpzConstRef(rational_prime), norm_valuation,
-                    remaining_valuation, diagnostics)) {
+                    diagnostics)) {
             return false;
         }
-        if (!accounted) {
+        if (unaccounted > 0) {
+            // v_q(N(alpha)) = sum over Q | q of f_Q v_Q(alpha), so a positive
+            // remainder is carried by the primes above q outside the base.
+            // When that is the single e = 1 ideal above a rational prime q
+            // other than the required prime's, the principal ideal qO_K puts
+            // its class in the subgroup of the base ideals above q, and the
+            // witness still places the required class in the base subgroup.
+            bool admissible = false;
+            if (!detail::required_prime_witness_admits_lacking_prime(
+                        admissible, base, flint::FmpzConstRef(rational_prime),
+                        flint::FmpzConstRef(required_rational_prime))) {
+                return false;
+            }
+            if (admissible) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::ideal,
+                        "ideal.required_prime_direct.lacking_prime");
+                unaccounted = 0;
+            }
+        }
+        if (unaccounted != 0) {
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::ideal,
                     "ideal.required_prime_direct.reject_accounted");
@@ -625,6 +652,7 @@ bool ideal_factor_over_base_direct(flint::FmpzMatRef exponents,
         factors.reserve(static_cast<std::size_t>(base.length()));
     }
 
+    flint::Fmpz required_rational_prime;
     if (required_prime != nullptr) {
         slong valuation = -1;
         if (!required_prime->valuation(valuation, ideal, diagnostics)) {
@@ -635,15 +663,15 @@ bool ideal_factor_over_base_direct(flint::FmpzMatRef exponents,
             return true;
         }
 
-        flint::Fmpz p;
         flint::Fmpz required_norm;
         const slong residue_degree = required_prime->residue_degree();
         if (residue_degree <= 0 ||
-            !required_prime->rational_prime(flint::FmpzRef(p))) {
+            !required_prime->rational_prime(
+                    flint::FmpzRef(required_rational_prime))) {
             return false;
         }
         flint::fmpz_pow_ui(flint::FmpzRef(required_norm),
-                           flint::FmpzConstRef(p),
+                           flint::FmpzConstRef(required_rational_prime),
                            static_cast<ulong>(residue_degree));
         if (!flint::fmpz_divisible(flint::FmpzConstRef(remaining_norm),
                                    flint::FmpzConstRef(required_norm))) {
@@ -707,6 +735,33 @@ bool ideal_factor_over_base_direct(flint::FmpzMatRef exponents,
                     return false;
                 }
                 remaining_vp -= valuation * prime->residue_degree();
+            }
+        }
+
+        if (remaining_vp > 0 && required_prime != nullptr) {
+            // A required-prime witness may leave the remainder at the one
+            // e = 1 ideal above p that the base lacks, for p other than the
+            // required prime's rational prime; see
+            // required_prime_witness_admits_lacking_prime.
+            PrimeIdeal lacking(*parent);
+            bool admissible = false;
+            if (!lacking.is_defined() ||
+                !detail::required_prime_witness_admits_lacking_prime(
+                        admissible, base, flint::FmpzConstRef(p),
+                        flint::FmpzConstRef(required_rational_prime),
+                        audit_reconstruction ? &lacking : nullptr)) {
+                return false;
+            }
+            if (admissible) {
+                if (audit_reconstruction) {
+                    slong valuation = -1;
+                    if (!lacking.valuation(valuation, ideal, diagnostics) ||
+                        valuation <= 0 ||
+                        !copy_append(factors, *parent, lacking, valuation)) {
+                        return false;
+                    }
+                }
+                remaining_vp = 0;
             }
         }
 
@@ -1099,6 +1154,94 @@ bool ideal_is_smooth(bool& smooth,
 }
 
 namespace detail {
+
+bool required_prime_witness_admits_lacking_prime(
+        bool& admissible,
+        const FactorBase& base,
+        flint::FmpzConstRef q,
+        flint::FmpzConstRef required_rational_prime,
+        PrimeIdeal* lacking) noexcept {
+    admissible = false;
+    const Order* order = base.parent();
+    const slong degree = order == nullptr ? 0 : order->degree();
+    if (order == nullptr || degree <= 0 || !order->is_maximal() ||
+        flint::fmpz_cmp_ui(q, 2) < 0 ||
+        (lacking != nullptr && !same_order_parent(lacking->parent(), order))) {
+        return false;
+    }
+    // The required prime's own rational prime is excluded: its valuations
+    // are accounted for by the required ideal and the base alone.
+    if (flint::fmpz_equal(q, required_rational_prime)) {
+        return true;
+    }
+    slong block = -1;
+    if (!base.rational_prime_block_index_for_prime(block, q)) {
+        return true;
+    }
+
+    flint::Fmpz block_p;
+    flint::Fmpz factor_p;
+    slong length = 0;
+    if (!base.rational_prime_block_data(flint::FmpzRef(block_p), length,
+                                        block) ||
+        !flint::fmpz_equal(flint::FmpzConstRef(block_p), q) || length <= 0) {
+        return false;
+    }
+    slong missing_degree = degree;
+    for (slong offset = 0; offset < length; ++offset) {
+        slong index = -1;
+        if (!base.rational_prime_block_index(index, block, offset)) {
+            return false;
+        }
+        const PrimeIdeal* prime = base.prime_at(index);
+        if (prime == nullptr || !same_order_parent(prime->parent(), order) ||
+            !prime->has_prime_data() ||
+            !prime->rational_prime(flint::FmpzRef(factor_p)) ||
+            !flint::fmpz_equal(flint::FmpzConstRef(factor_p), q)) {
+            return false;
+        }
+        const slong e = prime->ramification_index();
+        const slong f = prime->residue_degree();
+        if (e <= 0 || f <= 0 || e > missing_degree / f) {
+            return false;
+        }
+        missing_degree -= e * f;
+    }
+    if (missing_degree == 0) {
+        return true;
+    }
+    // sum e_i f_i = n over the primes above q (Cohen, GTM 138, Section
+    // 4.8): a remainder of 1 is exactly one prime ideal, with e = f = 1.
+    if (missing_degree == 1 && lacking == nullptr) {
+        admissible = true;
+        return true;
+    }
+
+    PrimeIdealList primes;
+    if (!decompose_prime(primes, *order, q)) {
+        return false;
+    }
+    const PrimeIdeal* outside = nullptr;
+    slong outside_count = 0;
+    for (slong i = 0; i < primes.size(); ++i) {
+        const PrimeIdeal* prime = primes.at(i);
+        if (prime == nullptr) {
+            return false;
+        }
+        if (!base.contains(*prime)) {
+            outside = prime;
+            ++outside_count;
+        }
+    }
+    if (outside_count != 1 || outside->ramification_index() != 1) {
+        return true;
+    }
+    if (lacking != nullptr && !lacking->set(*outside)) {
+        return false;
+    }
+    admissible = true;
+    return true;
+}
 
 bool order_element_factor_over_base_with_one_large_prime(
         OneLargePrimeFactorStatus& status,
