@@ -481,8 +481,12 @@ bool kernel_rows_torsion_column(bool& has_torsion_column,
 // at the decompose_prime primes.  The two builders take quotient logarithms
 // against generators of the order-ell subgroup of (O/P)^x that may differ,
 // so the columns of one prime agree up to a unit factor modulo ell, which
-// leaves the kernel of the proof matrix unchanged.  Returns false when q
-// cannot be decomposed; the scan then skips q.
+// leaves the kernel of the proof matrix unchanged.  Off the root path,
+// returns false when decompose_prime fails, and the scan then skips q.  On
+// the root path, decompose_prime runs only once a direct evaluation
+// declines, and its failure is not reported: the roots whose direct
+// evaluation declined get no column, the columns already computed at the
+// other roots of q are kept, and the function returns true.
 bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
                                 const OrderUnitGroup& group,
                                 flint::FmpzConstRef q,

@@ -134,7 +134,7 @@ Changed
   root whose direct evaluation declines falls back to the prime ideal over
   it.  The two columns differ only by a nonzero scalar modulo ``ell``, so the
   proof kernel is unchanged.  The direct evaluation also gains a word-size
-  route for word-size ``q``.  Published results are unchanged on the 65
+  route for word-size ``q``.  Published results are unchanged on the 70
   ``proven`` corpus rows.
 
 - ``quadratic_fundamental_unit`` and the ``proven`` unit route now use the
