@@ -157,6 +157,16 @@ Changed
   columns are unchanged.  Published results are unchanged on the 155
   ``proven`` corpus rows that finish within 60 seconds.
 
+- That stable scan now builds the columns over each ``q`` one at a time and
+  stops at the column that ends the scan (full rank, the stability threshold,
+  or a failure), instead of building every column over ``q`` first.  The
+  columns it no longer builds were discarded unused: whether ``q`` is skipped
+  is decided before its first column, and an unavailable column is left out
+  without affecting the others, so the proof kernel and the proof records'
+  ``local_primes`` are unchanged.  On ``pure_x12_plus_7`` this avoids 5596 of
+  14892 column evaluations.  Published results are unchanged on the 155
+  ``proven`` corpus rows that finish within 60 seconds.
+
 - The Belabas-Friedman ``hR`` estimate counts the roots of the defining
   polynomial modulo the large cutoff primes with its word-size kernel for
   defining polynomials of degree up to 16, instead of up to 6.  Degrees 7 to

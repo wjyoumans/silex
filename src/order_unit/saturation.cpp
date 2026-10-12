@@ -405,6 +405,147 @@ bool degree_one_roots_in_decomposition_order(
     return true;
 }
 
+// The proof columns of detail::stable_proof_prime_columns at q, built one
+// at a time in the same order and passed to `visit_column` as each is
+// built; the scan stops building them once `visit_column` returns false.
+// Returns false, before any column is built, exactly where
+// detail::stable_proof_prime_columns returns false (the scan then skips q);
+// otherwise returns true, also when `visit_column` stopped the walk.  No
+// column that is built can make the walk give up on q: a column that is
+// unavailable is left out and the walk moves to the next prime over q.
+template <typename VisitColumn>
+bool visit_stable_proof_prime_columns(const OrderUnitGroup& group,
+                                      flint::FmpzConstRef q,
+                                      flint::FmpzConstRef ell,
+                                      VisitColumn& visit_column) noexcept {
+    const Order* order = group.parent();
+    slong proof_rank = 0;
+    if (!group.is_set() || order == nullptr ||
+        !detail::dlog_proof_rank(proof_rank, group, ell)) {
+        return false;
+    }
+
+    PrimeIdealList local;
+    std::vector<flint::Fmpz> roots;
+    if (degree_one_roots_in_decomposition_order(roots, *order, q,
+                                                group.diagnostics())) {
+        if (roots.empty()) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.no_degree_one_prime");
+            return true;
+        }
+        SILEX_PROFILE_EVENT(
+                group.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.stable_scan.degree_one_decomposition");
+        bool decomposed = false;
+        for (const flint::Fmpz& root : roots) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.degree_one_prime");
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.dlog_column_test");
+            flint::FmpzMat proof_column(proof_rank, 1);
+            if (detail::saturation_proof_prime_column_at_degree_one_root(
+                        proof_column, group, q, flint::FmpzConstRef(root),
+                        ell)) {
+                SILEX_PROFILE_EVENT(
+                        group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.direct_dlog_column_available");
+                if (!visit_column(proof_column)) {
+                    return true;
+                }
+                continue;
+            }
+
+            // The direct evaluation declines, for example when a factor of a
+            // generator vanishes or has a denominator at the root; the
+            // decompose_prime prime over this root takes the residue-field
+            // route the scan used before.
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.direct_dlog_column_unavailable");
+            if (!decomposed) {
+                decomposed = true;
+                if (!decompose_prime(local, *order, q, 1)) {
+                    // decompose_prime leaves `local` empty on failure.
+                    SILEX_PROFILE_EVENT(
+                            group.diagnostics(),
+                            DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.decompose_failed");
+                }
+            }
+            const PrimeIdeal* prime = nullptr;
+            for (slong i = 0; i < local.size() && prime == nullptr; ++i) {
+                const PrimeIdeal* candidate = local.at(i);
+                flint::Fmpz candidate_root;
+                flint::Fmpz candidate_q;
+                if (candidate != nullptr &&
+                    detail::degree_one_prime_root_mod_p(candidate_root, candidate_q,
+                                                *candidate) &&
+                    flint::fmpz_equal(flint::FmpzConstRef(candidate_q), q) &&
+                    flint::fmpz_equal(flint::FmpzConstRef(candidate_root),
+                                      flint::FmpzConstRef(root))) {
+                    prime = candidate;
+                }
+            }
+            if (prime == nullptr ||
+                !detail::saturation_proof_prime_column(proof_column, group,
+                                                       *prime, ell)) {
+                SILEX_PROFILE_EVENT(
+                        group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.dlog_column_unavailable");
+                continue;
+            }
+            if (!visit_column(proof_column)) {
+                return true;
+            }
+        }
+        return true;
+    }
+
+    if (!decompose_prime(local, *order, q, 1)) {
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.decompose_failed");
+        return false;
+    }
+    if (local.size() == 0) {
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.no_degree_one_prime");
+        return true;
+    }
+
+    SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.degree_one_decomposition");
+    for (slong i = 0; i < local.size(); ++i) {
+        const PrimeIdeal* prime = local.at(i);
+        if (prime == nullptr) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.null_prime");
+            continue;
+        }
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.degree_one_prime");
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.dlog_column_test");
+        flint::FmpzMat proof_column(proof_rank, 1);
+        if (!detail::saturation_proof_prime_column(proof_column, group,
+                                                   *prime, ell)) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.dlog_column_unavailable");
+            continue;
+        }
+        if (!visit_column(proof_column)) {
+            return true;
+        }
+    }
+    return true;
+}
+
+
 bool order_discriminant_for_saturation(flint::Fmpz& out,
                                        const Order& order) noexcept {
     return order.discriminant(flint::FmpzRef(out)) &&
@@ -723,27 +864,43 @@ bool select_stable_proof_primes(
     slong examined_primes = 0;
     // The proof columns at the degree-one primes over q, in decompose_prime
     // order (see detail::stable_proof_prime_columns), each appended to the
-    // proof matrix in turn.
+    // proof matrix as soon as it is built.  The walk over the primes above q
+    // stops at the column that ends the scan (full rank, the stability
+    // threshold, or a failure), so the columns of the remaining primes over
+    // q are never built.
+    //
+    // Why stopping early leaves the certificate unchanged: the scan is a
+    // prefix process.  Each appended column updates the kernel, the
+    // stability counter and local_prime_count from the columns before it
+    // alone, and the scan returns at the first column that reaches full
+    // rank or the threshold; the columns after it were built only to be
+    // discarded, so the published kernel, certified flag and
+    // local_prime_count depend on the same column prefix either way.
+    // Building those columns cannot change that prefix either: whether q is
+    // skipped is decided before its first column is built (see
+    // visit_stable_proof_prime_columns), and a column that turns out to be
+    // unavailable is left out without affecting the others.  Only the
+    // diagnostics counters of the unbuilt columns are no longer recorded.
     auto process_dlog_columns =
             [&](flint::FmpzConstRef q) noexcept -> ProofPrimeScanResult {
-        std::vector<flint::FmpzMat> columns;
-        if (!detail::stable_proof_prime_columns(columns, group, q, ell)) {
-            return ProofPrimeScanResult::keep_scanning;
-        }
-        for (const flint::FmpzMat& proof_column : columns) {
+        ProofPrimeScanResult result = ProofPrimeScanResult::keep_scanning;
+        auto process_column =
+                [&](const flint::FmpzMat& proof_column) noexcept -> bool {
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_scan.dlog_column");
             ++local_prime_count;
             if (!append_column(proof_matrix, proof_column)) {
-                return ProofPrimeScanResult::failed;
+                result = ProofPrimeScanResult::failed;
+                return false;
             }
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.proof_dlog_kernel_nullspace");
             if (!detail::dlog_kernel_from_matrix(current_kernel, proof_matrix,
                                                  ell)) {
-                return ProofPrimeScanResult::failed;
+                result = ProofPrimeScanResult::failed;
+                return false;
             }
 
             if (flint::fmpz_mat_nrows(current_kernel) == 0) {
@@ -752,7 +909,8 @@ bool select_stable_proof_primes(
                         "unit_group.stable_scan.certified_full_rank");
                 kernel = std::move(current_kernel);
                 certified = true;
-                return ProofPrimeScanResult::done;
+                result = ProofPrimeScanResult::done;
+                return false;
             }
 
             have_kernel = true;
@@ -773,10 +931,15 @@ bool select_stable_proof_primes(
                         "unit_group.stable_scan.stable_threshold");
                 kernel = std::move(current_kernel);
                 certified = false;
-                return ProofPrimeScanResult::done;
+                result = ProofPrimeScanResult::done;
+                return false;
             }
+            return true;
+        };
+        if (!visit_stable_proof_prime_columns(group, q, ell, process_column)) {
+            return ProofPrimeScanResult::keep_scanning;
         }
-        return ProofPrimeScanResult::keep_scanning;
+        return result;
     };
     auto process_prime_q =
             [&](flint::FmpzConstRef q) noexcept -> ProofPrimeScanResult {
@@ -1370,127 +1533,11 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
                                 flint::FmpzConstRef q,
                                 flint::FmpzConstRef ell) noexcept {
     columns.clear();
-    const Order* order = group.parent();
-    slong proof_rank = 0;
-    if (!group.is_set() || order == nullptr ||
-        !dlog_proof_rank(proof_rank, group, ell)) {
-        return false;
-    }
-
-    PrimeIdealList local;
-    std::vector<flint::Fmpz> roots;
-    if (degree_one_roots_in_decomposition_order(roots, *order, q,
-                                                group.diagnostics())) {
-        if (roots.empty()) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.no_degree_one_prime");
-            return true;
-        }
-        SILEX_PROFILE_EVENT(
-                group.diagnostics(), DiagnosticsModule::unit_group,
-                "unit_group.stable_scan.degree_one_decomposition");
-        columns.reserve(roots.size());
-        bool decomposed = false;
-        for (const flint::Fmpz& root : roots) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.degree_one_prime");
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.dlog_column_test");
-            flint::FmpzMat proof_column(proof_rank, 1);
-            if (saturation_proof_prime_column_at_degree_one_root(
-                        proof_column, group, q, flint::FmpzConstRef(root),
-                        ell)) {
-                SILEX_PROFILE_EVENT(
-                        group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.stable_scan.direct_dlog_column_available");
-                columns.push_back(std::move(proof_column));
-                continue;
-            }
-
-            // The direct evaluation declines, for example when a factor of a
-            // generator vanishes or has a denominator at the root; the
-            // decompose_prime prime over this root takes the residue-field
-            // route the scan used before.
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.direct_dlog_column_unavailable");
-            if (!decomposed) {
-                decomposed = true;
-                if (!decompose_prime(local, *order, q, 1)) {
-                    // decompose_prime leaves `local` empty on failure.
-                    SILEX_PROFILE_EVENT(
-                            group.diagnostics(),
-                            DiagnosticsModule::unit_group,
-                            "unit_group.stable_scan.decompose_failed");
-                }
-            }
-            const PrimeIdeal* prime = nullptr;
-            for (slong i = 0; i < local.size() && prime == nullptr; ++i) {
-                const PrimeIdeal* candidate = local.at(i);
-                flint::Fmpz candidate_root;
-                flint::Fmpz candidate_q;
-                if (candidate != nullptr &&
-                    degree_one_prime_root_mod_p(candidate_root, candidate_q,
-                                                *candidate) &&
-                    flint::fmpz_equal(flint::FmpzConstRef(candidate_q), q) &&
-                    flint::fmpz_equal(flint::FmpzConstRef(candidate_root),
-                                      flint::FmpzConstRef(root))) {
-                    prime = candidate;
-                }
-            }
-            if (prime == nullptr ||
-                !saturation_proof_prime_column(proof_column, group, *prime,
-                                               ell)) {
-                SILEX_PROFILE_EVENT(
-                        group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.stable_scan.dlog_column_unavailable");
-                continue;
-            }
-            columns.push_back(std::move(proof_column));
-        }
+    auto collect = [&](flint::FmpzMat& column) noexcept -> bool {
+        columns.push_back(std::move(column));
         return true;
-    }
-
-    if (!decompose_prime(local, *order, q, 1)) {
-        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
-                            "unit_group.stable_scan.decompose_failed");
-        return false;
-    }
-    if (local.size() == 0) {
-        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
-                            "unit_group.stable_scan.no_degree_one_prime");
-        return true;
-    }
-
-    SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.stable_scan.degree_one_decomposition");
-    columns.reserve(static_cast<std::size_t>(local.size()));
-    for (slong i = 0; i < local.size(); ++i) {
-        const PrimeIdeal* prime = local.at(i);
-        if (prime == nullptr) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.null_prime");
-            continue;
-        }
-        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
-                            "unit_group.stable_scan.degree_one_prime");
-        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
-                            "unit_group.stable_scan.dlog_column_test");
-        flint::FmpzMat proof_column(proof_rank, 1);
-        if (!saturation_proof_prime_column(proof_column, group, *prime,
-                                           ell)) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.dlog_column_unavailable");
-            continue;
-        }
-        columns.push_back(std::move(proof_column));
-    }
-    return true;
+    };
+    return visit_stable_proof_prime_columns(group, q, ell, collect);
 }
 
 void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,

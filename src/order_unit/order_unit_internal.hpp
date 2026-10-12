@@ -486,7 +486,10 @@ bool kernel_rows_torsion_column(bool& has_torsion_column,
 // the root path, decompose_prime runs only once a direct evaluation
 // declines, and its failure is not reported: the roots whose direct
 // evaluation declined get no column, the columns already computed at the
-// other roots of q are kept, and the function returns true.
+// other roots of q are kept, and the function returns true.  The scan
+// itself walks the same columns one at a time (saturation.cpp,
+// visit_stable_proof_prime_columns) and stops building them at the column
+// that ends it; this function builds them all.
 bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
                                 const OrderUnitGroup& group,
                                 flint::FmpzConstRef q,

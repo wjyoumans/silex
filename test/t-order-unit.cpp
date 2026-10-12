@@ -8591,6 +8591,166 @@ bool set_cyclotomic13_minus_unit_power_group(
            out.free_rank() == 5;
 }
 
+// Counts the stable proof scan's column events: dlog_column_test once per
+// column the scan builds, dlog_column once per column appended to the proof
+// matrix, dlog_column_unavailable once per column that could not be built.
+struct StableScanColumnEvents {
+    slong built = 0;
+    slong appended = 0;
+    slong unavailable = 0;
+    slong decompositions = 0;
+    slong full_rank = 0;
+};
+
+void stable_scan_column_callback(void* user,
+                                 silex::DiagnosticsModule,
+                                 silex::ProfileEvent event,
+                                 const char*,
+                                 const char* label) noexcept {
+    StableScanColumnEvents* events = static_cast<StableScanColumnEvents*>(user);
+    if (label == nullptr || event != silex::ProfileEvent::event) {
+        return;
+    }
+    if (std::strcmp(label, "unit_group.stable_scan.dlog_column_test") == 0) {
+        ++events->built;
+    } else if (std::strcmp(label, "unit_group.stable_scan.dlog_column") ==
+               0) {
+        ++events->appended;
+    } else if (std::strcmp(label,
+                           "unit_group.stable_scan.dlog_column_unavailable") ==
+               0) {
+        ++events->unavailable;
+    } else if (std::strcmp(label,
+                           "unit_group.stable_scan.degree_one_decomposition") ==
+               0) {
+        ++events->decompositions;
+    } else if (std::strcmp(label,
+                           "unit_group.stable_scan.certified_full_rank") ==
+               0) {
+        ++events->full_rank;
+    }
+}
+
+// The stable proof scan builds the columns over q only until its scan ends.
+// In Q(zeta_13) with <u_2, ..., u_6>, prove_index_bound with aux_bound 2
+// sends every prime ell up to the regulator index bound (82) to the stable
+// scan.  Every q with a degree-one prime is 1 mod 13 and has 12 of them; the
+// ell = 13 scan (proof rank 6 with the torsion generator) starts at q = 53
+// and certifies full rank after the first 6 of its 12 primes.  As in
+// test_stable_proof_prime_columns_fallback_and_wide_routes, u_2 may be
+// stored as (u_2 (zeta - r))^1 (zeta - r)^-1, so that the column at the
+// prime over q = 53 with root r is unavailable.  With r the root of the
+// third prime (index 2) the ell = 13 scan leaves that column out and needs
+// a seventh; with r the root of the tenth prime (index 9), past full rank,
+// it never reaches that prime, and its proof uses the same 6 primes as
+// without the vanishing factor.  Builds with profiling enabled also check
+// that every column built is appended or unavailable, so no scan builds a
+// column after the one that ends it, and that fewer columns are built than
+// the 12 over every q examined.
+int test_stable_proof_scan_stops_building_columns_at_full_rank() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order equation = silex::test::equation_order(field);
+    sflint::Fmpz q;
+    assert(set_fmpz_si(q, 53));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, equation, sflint::FmpzConstRef(q),
+                                  1));
+    assert(primes.size() == 12);
+
+    const slong vanishing_indices[] = {-1, 2, 9};
+    for (slong vanishing_index : vanishing_indices) {
+        std::vector<silex::FactoredElement> generators;
+        for (slong a = 2; a <= 6; ++a) {
+            sflint::FmpqPoly unit_poly;
+            for (slong i = 0; i < a; ++i) {
+                sflint::fmpq_poly_set_coeff_si(unit_poly, i, 1);
+            }
+            silex::Element unit(field);
+            assert(unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)));
+            generators.emplace_back(field);
+            if (a == 2 && vanishing_index >= 0) {
+                sflint::Fmpz root;
+                assert(primes.at(vanishing_index) != nullptr &&
+                       degree_one_residue_root(root,
+                                               *primes.at(vanishing_index)));
+                sflint::FmpqPoly linear;
+                sflint::fmpq_poly_set_coeff_si(linear, 1, 1);
+                sflint::Fmpq constant;
+                sflint::fmpq_set_fmpz(constant, sflint::FmpzConstRef(root));
+                sflint::fmpq_neg(sflint::FmpqRef(constant),
+                                 sflint::FmpqConstRef(constant));
+                sflint::fmpq_poly_set_coeff_fmpq(linear, 0, constant);
+                silex::Element vanishing(field);
+                silex::Element unit_times_vanishing(field);
+                assert(vanishing.set_fmpq_poly(
+                        sflint::FmpqPolyConstRef(linear)));
+                assert(unit_times_vanishing.multiply(unit, vanishing));
+                assert(generators.back().push(unit_times_vanishing, 1));
+                assert(generators.back().push(vanishing, -1));
+                continue;
+            }
+            assert(generators.back().set_element(unit));
+        }
+        silex::EmbeddingContext embeddings(field);
+        silex::OrderUnitGroup group(equation);
+        assert(group.set_units(equation,
+                               silex::FactoredElementSpan(generators.data(),
+                                                          generators.size()),
+                               embeddings, 256));
+        assert(group.free_rank() == 5);
+
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        StableScanColumnEvents events;
+        silex::diagnostics_set_profiling(
+                diagnostics, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::unit_group),
+                stable_scan_column_callback, &events);
+        sflint::Fmpz aux_bound;
+        assert(set_fmpz_si(aux_bound, 2));
+        silex::OrderUnitGroup proved(equation);
+        proved.set_diagnostics(&diagnostics);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(proved.prove_index_bound(status, changed, group, 1,
+                                        sflint::FmpzConstRef(aux_bound), 2,
+                                        embeddings, 256));
+        assert(status == silex::ProofState::verified);
+        assert(!changed);
+        assert(proved.certification_status() ==
+               silex::CertificationMode::proven);
+        slong ell13_local_primes = -1;
+        for (slong i = 0; i < proved.unit_proof_record_count(); ++i) {
+            sflint::Fmpz record_ell;
+            sflint::Fmpz record_aux_bound;
+            silex::ProofState record_status = silex::ProofState::not_checked;
+            slong local_primes = -1;
+            bool record_changed = true;
+            assert(proved.unit_proof_record(
+                    sflint::FmpzRef(record_ell), record_status,
+                    sflint::FmpzRef(record_aux_bound), local_primes,
+                    record_changed, i));
+            assert(record_status == silex::ProofState::verified);
+            if (sflint::fmpz_equal_si(sflint::FmpzConstRef(record_ell), 13)) {
+                ell13_local_primes = local_primes;
+            }
+        }
+        assert(ell13_local_primes == (vanishing_index == 2 ? 7 : 6));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        // Every column built is appended or unavailable: none is built
+        // after the column that ends its scan.  Building all 12 columns
+        // over each of the 31 q with degree-one primes would build 372.
+        assert(events.decompositions == 31);
+        assert(events.full_rank == proved.unit_proof_record_count());
+        assert(events.built == events.appended + events.unavailable);
+        assert(events.built < 12 * events.decompositions);
+        assert((events.unavailable == 0) == (vanishing_index < 0));
+#endif
+    }
+    return 0;
+}
+
 // Counts the stable proof's deferred and accepted kernel-row roots in the
 // first prove_local_saturated_stable_in_place_ pass of a run: with
 // prove_index_bound, the pass for the smallest ell >= aux_bound.
@@ -11686,6 +11846,7 @@ int main() {
     test_prove_index_bound_cyclotomic13_undecided_root();
     test_stable_proof_prime_columns_match_residue_field_route();
     test_stable_proof_prime_columns_fallback_and_wide_routes();
+    test_stable_proof_scan_stops_building_columns_at_full_rank();
     test_kernel_row_root_three_way_result();
     test_kernel_row_root_defers_undecidable_rows();
     test_dependent_relation_unbounded_root_failure_adjoins_y();
