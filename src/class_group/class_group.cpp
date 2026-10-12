@@ -51,6 +51,7 @@
 #include <flint/fmpz_mod_poly.h>
 #include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
+#include <flint/fmpz_vec.h>
 #include <flint/ulong_extras.h>
 #include <flint/qfb.h>
 
@@ -9285,6 +9286,168 @@ bool saturate_class_unit_context(
 }
 
 
+namespace {
+
+// Writes the finite positive double `value` exactly as
+// `mantissa * 2^-shift` with `shift >= 0`.
+bool double_as_dyadic(flint::Fmpz& mantissa,
+                      ulong& shift,
+                      double value) noexcept {
+    if (!std::isfinite(value) || !(value > 0.0)) {
+        return false;
+    }
+    int exponent = 0;
+    const double fraction = std::frexp(value, &exponent);
+    // `fraction * 2^53` is an integer below 2^53, so the conversion is exact.
+    ::fmpz_set_d(mantissa.raw(), std::ldexp(fraction, 53));
+    const slong scaled_shift = 53 - static_cast<slong>(exponent);
+    if (scaled_shift < 0) {
+        ::fmpz_mul_2exp(mantissa.raw(), mantissa.raw(),
+                        static_cast<ulong>(-scaled_shift));
+        shift = 0;
+    } else {
+        shift = static_cast<ulong>(scaled_shift);
+    }
+    return true;
+}
+
+}  // namespace
+
+bool integer_basis_is_lll_reduced(flint::FmpzMatConstRef basis,
+                                  double delta,
+                                  double eta) noexcept {
+    // Exact form of FLINT's `fmpz_mat_is_reduced(A, delta, eta)`
+    // (`gr_mat_is_row_lll_reduced_naive`): every Gram-Schmidt norm is
+    // nonzero, |mu_ij| <= eta for j < i, and
+    // (delta - mu_{i,i-1}^2) |b*_{i-1}|^2 <= |b*_i|^2, with `delta` and
+    // `eta` read as the exact rationals of the doubles.  It uses the
+    // integral Gram-Schmidt recurrence of Cohen, A Course in Computational
+    // Algebraic Number Theory, Algorithm 2.6.7, step 2: d_0 = 1,
+    // d_i = det of the leading i x i Gram minor, lambda_ij = d_j mu_ij, so
+    // |b*_i|^2 = d_i / d_{i-1}.  Then |mu_ij| <= eta is
+    // |lambda_ij| <= eta d_j, and the Lovasz test, multiplied by
+    // d_{i-1} d_{i-2} > 0, is delta d_{i-1}^2 <= d_i d_{i-2} + lambda^2.
+    // Bases with fewer than two rows return false (callers fall back).
+    const slong rows = flint::fmpz_mat_nrows(basis);
+    const slong cols = flint::fmpz_mat_ncols(basis);
+    if (rows < 2) {
+        return false;
+    }
+    flint::Fmpz eta_mantissa;
+    flint::Fmpz delta_mantissa;
+    ulong eta_shift = 0;
+    ulong delta_shift = 0;
+    if (!double_as_dyadic(eta_mantissa, eta_shift, eta) ||
+        !double_as_dyadic(delta_mantissa, delta_shift, delta)) {
+        return false;
+    }
+
+    const fmpz_mat_struct* b = basis.raw();
+    flint::FmpzMat gram(rows, rows);
+    flint::FmpzMat lambda(rows, rows);
+    // determinants(0, i) holds d_i; d_0 = 1.
+    flint::FmpzMat determinants(1, rows + 1);
+    ::fmpz_one(::fmpz_mat_entry(determinants.raw(), 0, 0));
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j <= i; ++j) {
+            ::_fmpz_vec_dot(::fmpz_mat_entry(gram.raw(), i, j),
+                            ::fmpz_mat_entry(b, i, 0),
+                            ::fmpz_mat_entry(b, j, 0), cols);
+        }
+    }
+
+    flint::Fmpz u;
+    flint::Fmpz left;
+    flint::Fmpz right;
+    for (slong k = 0; k < rows; ++k) {
+        for (slong j = 0; j <= k; ++j) {
+            ::fmpz_set(u.raw(), ::fmpz_mat_entry(gram.raw(), k, j));
+            for (slong i = 0; i < j; ++i) {
+                ::fmpz_mul(u.raw(), u.raw(),
+                           ::fmpz_mat_entry(determinants.raw(), 0, i + 1));
+                ::fmpz_submul(u.raw(), ::fmpz_mat_entry(lambda.raw(), k, i),
+                              ::fmpz_mat_entry(lambda.raw(), j, i));
+                ::fmpz_divexact(u.raw(), u.raw(),
+                                ::fmpz_mat_entry(determinants.raw(), 0, i));
+            }
+            ::fmpz_set(j < k ? ::fmpz_mat_entry(lambda.raw(), k, j)
+                             : ::fmpz_mat_entry(determinants.raw(), 0, k + 1),
+                       u.raw());
+        }
+        const fmpz* d_k = ::fmpz_mat_entry(determinants.raw(), 0, k + 1);
+        if (::fmpz_sgn(d_k) <= 0) {
+            return false;
+        }
+        for (slong j = 0; j < k; ++j) {
+            ::fmpz_abs(left.raw(), ::fmpz_mat_entry(lambda.raw(), k, j));
+            ::fmpz_mul_2exp(left.raw(), left.raw(), eta_shift);
+            ::fmpz_mul(right.raw(), eta_mantissa.raw(),
+                       ::fmpz_mat_entry(determinants.raw(), 0, j + 1));
+            if (::fmpz_cmp(left.raw(), right.raw()) > 0) {
+                return false;
+            }
+        }
+        if (k >= 1) {
+            const fmpz* d_previous =
+                    ::fmpz_mat_entry(determinants.raw(), 0, k);
+            const fmpz* lambda_previous =
+                    ::fmpz_mat_entry(lambda.raw(), k, k - 1);
+            ::fmpz_mul(left.raw(), d_previous, d_previous);
+            ::fmpz_mul(left.raw(), left.raw(), delta_mantissa.raw());
+            ::fmpz_mul(right.raw(), d_k,
+                       ::fmpz_mat_entry(determinants.raw(), 0, k - 1));
+            ::fmpz_addmul(right.raw(), lambda_previous, lambda_previous);
+            ::fmpz_mul_2exp(right.raw(), right.raw(), delta_shift);
+            if (::fmpz_cmp(left.raw(), right.raw()) > 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void reduce_unit_candidate_kernel(
+        flint::FmpzMat& rows,
+        const DiagnosticsContext* diagnostics) noexcept {
+    (void)diagnostics;
+    const slong count = flint::fmpz_mat_nrows(rows);
+    if (count <= 1) {
+        return;
+    }
+    flint::FmpzLll lll;
+    // FLINT's `fmpz_lll(B, U, fl)` is `fmpz_lll_with_removal_ulll(B, U, 250,
+    // NULL, fl)`.  For a Z_BASIS input of at most 250 bits that makes one
+    // `fmpz_lll_wrapper_with_removal_knapsack(B, U, NULL, fl)` call, which
+    // returns the `fmpz_lll_d_with_removal_knapsack` result when that pass
+    // succeeds and `fmpz_lll_is_reduced` accepts it; `fmpz_lll_is_reduced`
+    // is documented to be conclusive, equal to `fmpz_mat_is_reduced`.  Run
+    // that first pass on a copy and accept it only when the exact test
+    // agrees; otherwise run `fmpz_lll` on the original rows.  Either way the
+    // result is the basis `fmpz_lll` returns.  The transform argument is a
+    // zero matrix in both calls, as before; it does not steer the APPROX
+    // Z_BASIS reduction.
+    flint::FmpzMat transform(count, count);
+    const slong bits = ::fmpz_mat_max_bits(rows.raw());
+    if (lll.raw()->rt == Z_BASIS && lll.raw()->gt == APPROX &&
+        (bits < 0 ? -bits : bits) <= 250) {
+        flint::FmpzMat candidate(count, flint::fmpz_mat_ncols(rows));
+        ::fmpz_mat_set(candidate.raw(), rows.raw());
+        const int pass = ::fmpz_lll_d_with_removal_knapsack(
+                candidate.raw(), transform.raw(), nullptr, lll.raw());
+        if (pass != -1 &&
+            integer_basis_is_lll_reduced(flint::FmpzMatConstRef(candidate),
+                                         lll.raw()->delta, lll.raw()->eta)) {
+            rows.swap(candidate);
+            return;
+        }
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.unit_candidate_witnesses.kernel_lll_fallback");
+        ::fmpz_mat_zero(transform.raw());
+    }
+    fmpz_lll(rows.raw(), transform.raw(), lll.raw());
+}
+
 bool unit_candidate_witnesses(std::vector<FactoredElement>& out,
                                     RelationUnitCandidateBatchState& state,
                                     const ClassGroupContext& context,
@@ -9423,9 +9586,7 @@ bool unit_candidate_witnesses(std::vector<FactoredElement>& out,
             flint::fmpz_mat_nrows(flint::FmpzMatConstRef(kernel_rows));
 
     if (kernel_count > 1) {
-        flint::FmpzMat transform(kernel_count, kernel_count);
-        flint::FmpzLll lll;
-        fmpz_lll(kernel_rows.raw(), transform.raw(), lll.raw());
+        reduce_unit_candidate_kernel(kernel_rows, context.diagnostics());
     }
 
     flint::FmpzMat coefficients(1, context.relation_count());

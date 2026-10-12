@@ -3,6 +3,8 @@
 #include <silex/embedding.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_lll.hpp>
+#include <silex/flint/fmpz_mat.hpp>
 #include <silex/order_unit.hpp>
 #include <silex/relation.hpp>
 #include <silex/zeta.hpp>
@@ -1160,6 +1162,104 @@ int test_unit_logs_share_witness_rows() {
     return 0;
 }
 
+sflint::FmpzMat integer_rows(slong rows, slong cols,
+                             const std::vector<slong>& entries) {
+    sflint::FmpzMat out(rows, cols);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            ::fmpz_set_si(::fmpz_mat_entry(out.raw(), i, j),
+                          entries[static_cast<std::size_t>(i * cols + j)]);
+        }
+    }
+    return out;
+}
+
+int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
+    sflint::FmpzLll lll;
+    const double delta = lll.raw()->delta;
+    const double eta = lll.raw()->eta;
+
+    // Boundary cases of the exact test against FLINT's fmpz_mat_is_reduced:
+    // mu = 1/2, mu = 51/100 (below the double 0.51), mu = 52/100, a
+    // Lovasz ratio of exactly 99/100, a failing Lovasz pair, and a zero
+    // Gram-Schmidt vector.
+    struct Case {
+        slong rows;
+        slong cols;
+        std::vector<slong> entries;
+        bool reduced;
+    };
+    const Case cases[] = {
+            {2, 2, {2, 0, 1, 2}, true},
+            {2, 2, {100, 0, 51, 86}, true},
+            {2, 2, {100, 0, 52, 86}, false},
+            {2, 4, {10, 0, 0, 0, 0, 3, 3, 9}, true},
+            {2, 2, {10, 0, 0, 9}, false},
+            {2, 2, {1, 1, 0, 0}, false},
+            {3, 3, {0, 0, 0, 1, 0, 0, 0, 1, 0}, false},
+    };
+    for (const Case& item : cases) {
+        const sflint::FmpzMat basis =
+                integer_rows(item.rows, item.cols, item.entries);
+        assert(silex::detail::integer_basis_is_lll_reduced(
+                       sflint::FmpzMatConstRef(basis), delta, eta) ==
+               item.reduced);
+        assert((::fmpz_mat_is_reduced(basis.raw(), delta, eta) != 0) ==
+               item.reduced);
+    }
+
+    flint_rand_t state;
+    flint_rand_init(state);
+    slong reduced_seen = 0;
+    slong fallback_seen = 0;
+    for (slong iter = 0; iter < 3000; ++iter) {
+        const slong rows = 2 + static_cast<slong>(n_randint(state, 9));
+        const slong cols = rows + static_cast<slong>(n_randint(state, 8));
+        flint_bitcnt_t bits = 1 + n_randint(state, 8);
+        if (n_randint(state, 20) == 0) {
+            bits = 240 + n_randint(state, 40);
+        }
+        sflint::FmpzMat input(rows, cols);
+        ::fmpz_mat_randtest(input.raw(), state, bits);
+        if (n_randint(state, 2) == 0) {
+            sflint::FmpzMat transform(rows, rows);
+            fmpz_lll(input.raw(), transform.raw(), lll.raw());
+        }
+        if (n_randint(state, 6) == 0) {
+            const slong source = static_cast<slong>(n_randint(state, rows));
+            const slong target = static_cast<slong>(n_randint(state, rows));
+            for (slong j = 0; j < cols; ++j) {
+                ::fmpz_add(::fmpz_mat_entry(input.raw(), target, j),
+                           ::fmpz_mat_entry(input.raw(), target, j),
+                           ::fmpz_mat_entry(input.raw(), source, j));
+            }
+        }
+
+        const bool exact = silex::detail::integer_basis_is_lll_reduced(
+                sflint::FmpzMatConstRef(input), delta, eta);
+        assert(exact == (::fmpz_mat_is_reduced(input.raw(), delta, eta) != 0));
+        reduced_seen += exact ? 1 : 0;
+
+        sflint::FmpzMat expected(rows, cols);
+        ::fmpz_mat_set(expected.raw(), input.raw());
+        sflint::FmpzMat expected_transform(rows, rows);
+        fmpz_lll(expected.raw(), expected_transform.raw(), lll.raw());
+
+        sflint::FmpzMat actual(rows, cols);
+        ::fmpz_mat_set(actual.raw(), input.raw());
+        silex::detail::reduce_unit_candidate_kernel(actual, nullptr);
+        assert(::fmpz_mat_equal(actual.raw(), expected.raw()) != 0);
+        if (!silex::detail::integer_basis_is_lll_reduced(
+                    sflint::FmpzMatConstRef(expected), delta, eta)) {
+            ++fallback_seen;
+        }
+    }
+    flint_rand_clear(state);
+    assert(reduced_seen > 0);
+    assert(fallback_seen > 0);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1178,5 +1278,6 @@ int main() {
     assert(test_analytic_finish_embedding_reuse() == 0);
     assert(test_relation_kernel_basis_checks_and_fallback() == 0);
     assert(test_unit_logs_share_witness_rows() == 0);
+    assert(test_unit_candidate_kernel_lll_matches_fmpz_lll() == 0);
     return 0;
 }
