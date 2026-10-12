@@ -110,6 +110,7 @@ void FiniteAbelianGroup::swap(FiniteAbelianGroup& other) noexcept {
     std::swap(generator_count_, other.generator_count_);
     std::swap(defined_, other.defined_);
     std::swap(has_left_transform_, other.has_left_transform_);
+    std::swap(has_right_transform_inv_, other.has_right_transform_inv_);
 }
 
 void FiniteAbelianGroup::clear() noexcept {
@@ -123,6 +124,7 @@ void FiniteAbelianGroup::clear() noexcept {
     generator_count_ = 0;
     defined_ = false;
     has_left_transform_ = false;
+    has_right_transform_inv_ = false;
 }
 
 bool FiniteAbelianGroup::set(const FiniteAbelianGroup& other) noexcept {
@@ -170,6 +172,7 @@ bool FiniteAbelianGroup::set(const FiniteAbelianGroup& other) noexcept {
     copy.generator_count_ = other.generator_count_;
     copy.defined_ = true;
     copy.has_left_transform_ = other.has_left_transform_;
+    copy.has_right_transform_inv_ = other.has_right_transform_inv_;
 
     swap(copy);
     return true;
@@ -270,16 +273,17 @@ bool FiniteAbelianGroup::set_relation_matrix_with_hnf_basis(
             flint::FmpzMatRef(candidate.right_transform_),
             flint::FmpzMatConstRef(candidate.hnf_basis_));
 
+    // The inverse of the right transform is filled on first use by
+    // ensure_right_transform_inv; only invariant_generator_matrix and reduce
+    // read it.
     if (!snf_full_column_rank(flint::FmpzMatConstRef(candidate.snf_), columns) ||
-        !inverse_unimodular(
-                candidate.right_transform_inv_,
-                flint::FmpzMatConstRef(candidate.right_transform_)) ||
         !set_invariants(candidate.invariants_,
                         flint::FmpzMatConstRef(candidate.snf_), columns)) {
         return false;
     }
     candidate.defined_ = true;
     candidate.has_left_transform_ = false;
+    candidate.has_right_transform_inv_ = false;
 
     swap(candidate);
     return true;
@@ -357,6 +361,26 @@ bool FiniteAbelianGroup::ensure_left_transform() const noexcept {
 
     left_transform_.swap(full_left);
     has_left_transform_ = true;
+    return true;
+}
+
+bool FiniteAbelianGroup::ensure_right_transform_inv() const noexcept {
+    if (!is_defined()) {
+        return false;
+    }
+    if (has_right_transform_inv_) {
+        return true;
+    }
+
+    // fmpz_mat_snf_transform returns a unimodular right transform V; fail
+    // closed unless its inverse is integral.
+    flint::FmpzMat inverse(generator_count_, generator_count_);
+    if (!inverse_unimodular(inverse,
+                            flint::FmpzMatConstRef(right_transform_))) {
+        return false;
+    }
+    right_transform_inv_.swap(inverse);
+    has_right_transform_inv_ = true;
     return true;
 }
 
@@ -456,7 +480,8 @@ std::optional<flint::Fmpz> FiniteAbelianGroup::order() const noexcept {
 bool FiniteAbelianGroup::invariant_generator_matrix(
         flint::FmpzMatRef out) const noexcept {
     if (!is_defined() || flint::fmpz_mat_nrows(out) != invariant_count() ||
-        flint::fmpz_mat_ncols(out) != generator_count()) {
+        flint::fmpz_mat_ncols(out) != generator_count() ||
+        !ensure_right_transform_inv()) {
         return false;
     }
 
@@ -566,7 +591,8 @@ bool FiniteAbelianGroup::relation_kernel_row(
 
 bool FiniteAbelianGroup::reduce(flint::FmpzMatRef row) const noexcept {
     if (!is_defined() || flint::fmpz_mat_nrows(row) != 1 ||
-        flint::fmpz_mat_ncols(row) != generator_count()) {
+        flint::fmpz_mat_ncols(row) != generator_count() ||
+        !ensure_right_transform_inv()) {
         return false;
     }
 

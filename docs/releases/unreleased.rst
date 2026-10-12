@@ -772,6 +772,19 @@ Changed
   (release build, medians of nine paired runs on a busy machine; the
   controlled comparison is pending).
 
+- ``FiniteAbelianGroup`` computes the inverse of its Smith right transform
+  on the first call of ``invariant_generator_matrix`` or ``reduce`` instead
+  of on every ``set_relation_matrix``, so class-group candidates that publish
+  a presentation several times during relation collection no longer invert
+  that matrix each time (four inversions fewer on ``grh`` runs of
+  ``Q(zeta_64)`` and ``Q(zeta_41)``).  Outputs are unchanged: instance JSON
+  is identical on the ``grh`` corpus and the 65 ``proven`` benchmark rows.
+  The right transform from FLINT's Smith form is unimodular; if its inverse
+  were not integral, those two calls would now return ``false`` where
+  ``set_relation_matrix`` used to fail.  ``FiniteAbelianGroup`` has a new
+  private member, and its ``const`` calls may fill internal caches, so one
+  object must not be used from several threads at once.
+
 Fixed
 -----
 

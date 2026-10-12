@@ -14,6 +14,12 @@ namespace detail {
 class FiniteAbelianGroupAccess;
 }
 
+// Some const member functions fill internal caches on first use: the left
+// transform behind the relation-kernel and generator-relation rows, and the
+// inverse of the Smith right transform behind invariant_generator_matrix and
+// reduce.  A const call is therefore not a read-only access: one
+// FiniteAbelianGroup must not be used from several threads at once, even
+// through const member functions, without external synchronization.
 class FiniteAbelianGroup {
 public:
     FiniteAbelianGroup() noexcept = default;
@@ -73,6 +79,7 @@ private:
             flint::FmpzMatConstRef relations,
             flint::FmpzMatConstRef hnf_basis) noexcept;
     bool ensure_left_transform() const noexcept;
+    bool ensure_right_transform_inv() const noexcept;
 
     flint::FmpzMat relations_{0, 0};
     flint::FmpzMat hnf_basis_{0, 0};
@@ -84,6 +91,7 @@ private:
     slong generator_count_ = 0;
     bool defined_ = false;
     mutable bool has_left_transform_ = false;
+    mutable bool has_right_transform_inv_ = false;
 };
 
 inline void swap(FiniteAbelianGroup& left,

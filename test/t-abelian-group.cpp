@@ -707,6 +707,113 @@ int test_internal_basis_setter_witnesses() {
 
 }  // namespace
 
+// invariant_generator_matrix and reduce read the inverse Smith right
+// transform, which is filled on first use.  Copies and moves taken before or
+// after that first use, and a republished group, must all give the values a
+// fresh group gives.
+bool generator_matrix_and_reduce_match(const silex::FiniteAbelianGroup& left,
+                                       const silex::FiniteAbelianGroup& right) {
+    const slong k = left.invariant_count();
+    const slong n = left.generator_count();
+    if (right.invariant_count() != k || right.generator_count() != n) {
+        return false;
+    }
+    sflint::FmpzMat left_generators(k, n);
+    sflint::FmpzMat right_generators(k, n);
+    if (!left.invariant_generator_matrix(sflint::FmpzMatRef(left_generators)) ||
+        !right.invariant_generator_matrix(
+                sflint::FmpzMatRef(right_generators)) ||
+        !sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(left_generators),
+                                sflint::FmpzMatConstRef(right_generators))) {
+        return false;
+    }
+    sflint::FmpzMat left_row(1, n);
+    sflint::FmpzMat right_row(1, n);
+    for (slong j = 0; j < n; ++j) {
+        set_entry_si(left_row, 0, j, 7 * j + 5);
+        set_entry_si(right_row, 0, j, 7 * j + 5);
+    }
+    return left.reduce(sflint::FmpzMatRef(left_row)) &&
+           right.reduce(sflint::FmpzMatRef(right_row)) &&
+           sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(left_row),
+                                  sflint::FmpzMatConstRef(right_row));
+}
+
+int test_lazy_right_transform_inverse() {
+    // Z^2 modulo rows (2, 1), (0, 3), (4, 5): cyclic of order 6, with a
+    // nontrivial Smith right transform.
+    sflint::FmpzMat relations(3, 2);
+    set_entry_si(relations, 0, 0, 2);
+    set_entry_si(relations, 0, 1, 1);
+    set_entry_si(relations, 1, 1, 3);
+    set_entry_si(relations, 2, 0, 4);
+    set_entry_si(relations, 2, 1, 5);
+    const slong inv_6[1] = {6};
+
+    silex::FiniteAbelianGroup reference;
+    silex::FiniteAbelianGroup group;
+    silex::FiniteAbelianGroup moved_source;
+    assert(reference.set_relation_matrix(sflint::FmpzMatConstRef(relations)));
+    assert(group.set_relation_matrix(sflint::FmpzMatConstRef(relations)));
+    assert(moved_source.set_relation_matrix(
+            sflint::FmpzMatConstRef(relations)));
+    assert(invariants_are_si(group, inv_6, 1));
+
+    // Copy and move before any first use.
+    silex::FiniteAbelianGroup early_copy;
+    assert(early_copy.set(group));
+    silex::FiniteAbelianGroup moved(std::move(moved_source));
+
+    // The generator has invariant coordinate 1 and order 6.
+    sflint::FmpzMat generators(1, 2);
+    sflint::FmpzMat coords(1, 1);
+    assert(group.invariant_generator_matrix(sflint::FmpzMatRef(generators)));
+    assert(group.invariant_coordinates(sflint::FmpzMatRef(coords),
+                                       sflint::FmpzMatConstRef(generators)));
+    assert(entry_is_si(coords, 0, 0, 1));
+    sflint::FmpzMat row(1, 2);
+    sflint::Fmpz six;
+    sflint::fmpz_set_si(sflint::FmpzRef(six), 6);
+    for (slong j = 0; j < 2; ++j) {
+        sflint::fmpz_mul(sflint::fmpz_mat_entry(row, 0, j),
+                         entry_const(generators, 0, j),
+                         sflint::FmpzConstRef(six));
+    }
+    assert(group.reduce(sflint::FmpzMatRef(row)));
+    assert(matrix_is_zero(row));
+
+    // Copy after first use.
+    silex::FiniteAbelianGroup late_copy;
+    assert(late_copy.set(group));
+
+    assert(generator_matrix_and_reduce_match(reference, group));
+    assert(generator_matrix_and_reduce_match(reference, early_copy));
+    assert(generator_matrix_and_reduce_match(reference, moved));
+    assert(generator_matrix_and_reduce_match(reference, late_copy));
+
+    // Republishing replaces the cached inverse.
+    sflint::FmpzMat other_relations(2, 2);
+    set_entry_si(other_relations, 0, 0, 4);
+    set_entry_si(other_relations, 0, 1, 2);
+    set_entry_si(other_relations, 1, 1, 6);
+    silex::FiniteAbelianGroup other_reference;
+    assert(other_reference.set_relation_matrix(
+            sflint::FmpzMatConstRef(other_relations)));
+    assert(group.set_relation_matrix(sflint::FmpzMatConstRef(other_relations)));
+    assert(generator_matrix_and_reduce_match(other_reference, group));
+    assert(late_copy.set(other_reference));
+    assert(generator_matrix_and_reduce_match(other_reference, late_copy));
+
+    // Move assignment carries the cache state with the object.
+    moved = std::move(late_copy);
+    assert(generator_matrix_and_reduce_match(other_reference, moved));
+    group.clear();
+    sflint::FmpzMat unused(0, 0);
+    assert(!group.invariant_generator_matrix(sflint::FmpzMatRef(unused)));
+
+    return 0;
+}
+
 int main() {
     assert(test_basic() == 0);
     assert(test_kernel_basis_check_rejects_bad_kernels() == 0);
@@ -717,5 +824,6 @@ int main() {
     assert(test_witness_request_keeps_generators() == 0);
     assert(test_diagonal_witness_keeps_generators() == 0);
     assert(test_internal_basis_setter_witnesses() == 0);
+    assert(test_lazy_right_transform_inverse() == 0);
     return 0;
 }
