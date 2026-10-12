@@ -59,8 +59,11 @@ bool order_element_factor_over_base_with_required_prime(
 // select_factor_base_proof_targets already uses for the last unramified
 // ideal above a rational prime (2.17.3 buch2.c:be_honest and
 // bnftestprimes skip it).  When lacking is not null and the ideal is
-// admissible, it receives that ideal.  Requires a maximal order; returns
-// false only when the base or the decomposition of q cannot be read.
+// admissible, it receives that ideal.  Returns false, with admissible
+// false, when the base has no parent order or its order is not maximal, when
+// q < 2, when lacking is not null and has a different parent order, when the
+// base or the decomposition of q cannot be read, or when lacking cannot be
+// set.
 bool required_prime_witness_admits_lacking_prime(
         bool& admissible,
         const FactorBase& base,

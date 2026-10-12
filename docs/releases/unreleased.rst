@@ -109,10 +109,12 @@ Changed
   unramified, and every other prime ideal above ``q`` is in the factor base.
   The relation ``qO_K = Q_1^e_1 ... Q_g^e_g`` puts the class of ``Q`` in the
   subgroup of the factor base, the step the proof-target selection already
-  uses (PARI 2.17.3 ``buch2.c:be_honest`` and ``bnftestprimes``).  Results
-  that passed before are unchanged; a computation that failed with
-  ``factor_base_honesty_unwitnessed`` or timed out searching for a witness
-  may now succeed.  For example, the ``proven`` computation for the imaginary
+  uses (PARI 2.17.3 ``buch2.c:be_honest`` and ``bnftestprimes``).  Accepting
+  such a witness is a Silex extension; PARI's ``buch2.c:can_factor`` does
+  not accept it.  Results are unchanged on the 65 ``proven`` benchmark rows
+  that passed before (measured, not by construction); a computation that
+  failed with ``factor_base_honesty_unwitnessed`` or timed out searching for
+  a witness may now succeed.  For example, the ``proven`` computation for the imaginary
   quadratic field of discriminant ``-100000000000319`` now finishes, with
   class group invariants ``[2, 2, 3953768]``.  See
   :doc:`../reference/algorithms_and_sources`.
