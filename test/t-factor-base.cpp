@@ -6,6 +6,7 @@
 
 #include "factor_base/factor_base_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -962,7 +963,7 @@ bool set_unreduced_residue_variant(silex::PrimeIdeal& out,
     fmpz_poly_get_coeff_fmpz(constant.raw(), residue.raw(), 0);
     fmpz_add(constant.raw(), constant.raw(), p.raw());
     fmpz_poly_set_coeff_fmpz(residue.raw(), 0, constant.raw());
-    return PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
+    return silex::detail::TestHookAccess::set_alpha_residue_polynomial(
                    out, sflint::FmpzPolyConstRef(residue)) &&
            !out.equal(prime);
 }

@@ -99,6 +99,28 @@ def check_class_group_public_boundary(
                 f"exposes private implementation contract: {match.group(0)}"
             )
 
+# Test-only hooks live in test/test_hook_access.hpp.  Library sources and
+# installed headers may only forward-declare and befriend the class.
+TEST_HOOK_NAME = re.compile(r"\bTestHookAccess\b")
+TEST_HOOK_ALLOWED_LINE = re.compile(
+    r"^\s*(friend\s+)?class\s+(detail::)?TestHookAccess\s*;\s*$")
+TEST_HOOK_HEADER = re.compile(r"\btest_hook_access\.hpp\b")
+
+
+def check_test_hook_boundary(path: Path, rel: str, failures: list[str]) -> None:
+    text = strip_comments(path.read_text(encoding="utf-8"))
+    for match in TEST_HOOK_HEADER.finditer(text):
+        failures.append(f"{rel}:{line_number(text, match.start())}: production "
+                        f"code includes the test-only hook header")
+    for match in TEST_HOOK_NAME.finditer(text):
+        start = text.rfind("\n", 0, match.start()) + 1
+        end = text.find("\n", match.end())
+        line = text[start:] if end < 0 else text[start:end]
+        if not TEST_HOOK_ALLOWED_LINE.match(line):
+            failures.append(f"{rel}:{line_number(text, match.start())}: production "
+                            f"code uses test-only detail::TestHookAccess beyond its "
+                            f"forward and friend declarations")
+
 
 def iter_existing(root: Path, patterns: list[str]) -> list[Path]:
     paths: list[Path] = []
@@ -128,6 +150,7 @@ def main() -> int:
     failures: list[str] = []
     for path in checked_paths:
         check_tokens(path, str(path.relative_to(root)), failures)
+        check_test_hook_boundary(path, str(path.relative_to(root)), failures)
     for path in public_headers:
         rel = str(path.relative_to(root))
         check_public_header(path, rel, failures)

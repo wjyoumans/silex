@@ -22,6 +22,7 @@
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "order_unit/compute_internal.hpp"
 #include "order_unit/precision_cap_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <flint/fmpq_poly.h>
@@ -6239,7 +6240,7 @@ int test_class_unit_regulator_certification() {
         silex::OrderUnitGroup units(order);
         assert(real_quadratic_two_candidate(class_group, order));
         assert(real_quadratic_two_units(units, order, embeddings, epsilon2));
-        silex::detail::OrderUnitGroupAccess::mark_certification_proven(units);
+        silex::detail::TestHookAccess::mark_certification_proven(units);
         assert(units.certification_status() ==
                silex::CertificationMode::proven);
         assert(silex::detail::order_unit_torsion_is_computed(units));
@@ -7250,7 +7251,7 @@ int test_unit_proofs_require_computed_torsion() {
 
         silex::OrderUnitGroup labelled(order);
         assert(labelled.set(under));
-        OrderUnitGroupAccess::mark_certification_proven(labelled);
+        silex::detail::TestHookAccess::mark_certification_proven(labelled);
         assert(labelled.certification_status() ==
                silex::CertificationMode::proven);
 
@@ -7268,7 +7269,7 @@ int test_unit_proofs_require_computed_torsion() {
 
         silex::OrderUnitGroup good(order);
         assert(good.set(computed));
-        OrderUnitGroupAccess::mark_certification_proven(good);
+        silex::detail::TestHookAccess::mark_certification_proven(good);
         assert(class_group.try_certify_with_units(
                 good, silex::CertificationMode::proven, 256));
         assert(class_group.certification_status() ==

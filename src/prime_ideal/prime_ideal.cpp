@@ -3884,16 +3884,6 @@ bool PrimeIdealAccess::order_basis_is_p_integral(
     return prime.order_basis_is_p_integral();
 }
 
-bool PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
-        PrimeIdeal& prime,
-        flint::FmpzPolyConstRef residue_polynomial) noexcept {
-    if (!prime.has_prime_data()) {
-        return false;
-    }
-    return prime.set_data(flint::FmpzConstRef(prime.p_), prime.e_, prime.f_,
-                          prime.ideal_, residue_polynomial, false);
-}
-
 bool PrimeIdealAccess::valuation_by_power_containment_for_testing(
         slong& out,
         const PrimeIdeal& prime,

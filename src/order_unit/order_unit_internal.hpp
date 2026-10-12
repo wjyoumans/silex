@@ -187,14 +187,6 @@ public:
         return group.is_set() ? group.wide_free_generators_.get() : nullptr;
     }
 
-    // Marks a set group proven without any check.  Internal proof routes
-    // call this only after their own proof succeeds; tests use it to build a
-    // proven-labelled group whose later rejection must come from the
-    // class-group gate itself.
-    static void mark_certification_proven(OrderUnitGroup& units) noexcept {
-        units.mark_certification_proven_();
-    }
-
     // OrderUnitGroup::saturate_local_with_kernel_ for tests of the shared
     // field-modulus cache.
     static bool saturate_local_with_kernel(

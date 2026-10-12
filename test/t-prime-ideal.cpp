@@ -14,6 +14,7 @@
 #include "order/order_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
 #include "residue_field/residue_field_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <array>
@@ -458,7 +459,7 @@ int test_alpha_reduction_refuses_index_prime() {
 
     // Record g = x in the alpha convention at p = 2.
     fmpz_poly_set_coeff_si(residue_polynomial.raw(), 1, 1);
-    assert(PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
+    assert(silex::detail::TestHookAccess::set_alpha_residue_polynomial(
             prime, sflint::FmpzPolyConstRef(residue_polynomial)));
     assert(!PrimeIdealAccess::residue_uses_integral_generator(prime));
     assert(!PrimeIdealAccess::order_basis_is_p_integral(prime));

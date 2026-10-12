@@ -22,6 +22,7 @@ namespace detail {
 
 class MaximalQuadraticPrimeAccess;
 class PrimeIdealAccess;
+class TestHookAccess;
 const flint::FmpzPoly* residue_polynomial_ptr(
         const PrimeIdeal& prime) noexcept;
 const flint::Fmpz* linear_residue_root_ptr(
@@ -149,6 +150,8 @@ private:
     // Hooks that trust a caller-supplied residue root or norm valuation are
     // reachable only through the noninstalled detail::PrimeIdealAccess.
     friend class detail::PrimeIdealAccess;
+    // Test-only hooks; the class is defined only in the test tree.
+    friend class detail::TestHookAccess;
     friend const flint::FmpzPoly* detail::residue_polynomial_ptr(
             const PrimeIdeal& prime) noexcept;
     friend const flint::Fmpz* detail::linear_residue_root_ptr(

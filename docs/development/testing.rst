@@ -86,6 +86,21 @@ unit includes ``<silex/silex.hpp>`` and ``<cassert>``.  Diagnostics point at
 the ``.rst`` line.  The test compiles but does not run the fragments, so keep
 behavior claims in compiled examples or unit tests.
 
+White-box test hooks
+--------------------
+
+Internal entry points that the library itself uses go through noninstalled
+``detail::*Access`` classes in ``src/``.  A hook that only tests need, such as
+one that forces a certification label or residue data that no construction
+route would record, goes in ``detail::TestHookAccess`` instead.  That class
+is defined only in ``test/test_hook_access.hpp``, with inline definitions;
+installed headers only forward-declare it and name it as a friend of the
+class whose private state a hook forces.  The library therefore contains no
+test hooks, and production code cannot call them: outside the test tree the
+class is incomplete.  ``tools/check-cpp-profile.py`` rejects any other use of
+the class, or an include of the hook header, under ``src/`` or ``include/``.
+Each hook's comment names the invariant it skips.
+
 Review evidence
 ---------------
 

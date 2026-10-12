@@ -103,18 +103,6 @@ public:
             flint::FmpzConstRef p,
             flint::FmpzConstRef root) noexcept;
 
-    // Test hook: replaces the residue data of `prime` (which must already
-    // have prime data) with `residue_polynomial` in the alpha convention,
-    // keeping its p, e, f and ideal, without checking that p does not divide
-    // [O : Z[alpha]].  No construction route records alpha residue data at
-    // such a p; this lets tests reach the p | index refusal of
-    // PrimeIdeal::reduce and residue_variable_numerator.  It does not check
-    // that the degree of `residue_polynomial` matches the residue degree f of
-    // the prime.  For tests only.
-    static bool set_alpha_residue_polynomial_for_testing(
-            PrimeIdeal& prime,
-            flint::FmpzPolyConstRef residue_polynomial) noexcept;
-
     // Test hook: runs the exact power-containment valuation fallback (the
     // largest i <= `bound` with `element` in P^i) directly, bypassing the
     // norm, Hensel and coordinate-divisibility routes.  For tests only.

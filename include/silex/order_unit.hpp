@@ -92,6 +92,7 @@ struct UnitProofRecordData {
 };
 
 class OrderUnitGroupAccess;
+class TestHookAccess;
 struct WideFactoredUnits;
 
 // Deletes the private wide-exponent storage, whose type is incomplete here.
@@ -329,6 +330,8 @@ private:
     // Internal unit-installation hooks (trusted generators, cached torsion)
     // are reachable only through the noninstalled detail::OrderUnitGroupAccess.
     friend class detail::OrderUnitGroupAccess;
+    // Test-only hooks; the class is defined only in the test tree.
+    friend class detail::TestHookAccess;
     bool mark_unit_proof(flint::FmpzConstRef ell,
                          ProofState status,
                          flint::FmpzConstRef aux_prime_bound,

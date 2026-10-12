@@ -5,6 +5,7 @@
 #include "class_group/maximal_imaginary_quadratic_row_hnf_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
+#include "test_hook_access.hpp"
 
 #include <silex/element.hpp>
 #include <silex/factor_base.hpp>
@@ -358,7 +359,7 @@ void check_root_orientation_guard(slong index_base) noexcept {
     fmpz_poly_set_coeff_si(theta_residue.raw(), 0, -6);
     fmpz_poly_set_coeff_si(theta_residue.raw(), 1, 1);
     if (chosen == nullptr || !relabelled.set(*chosen) ||
-        !detail::PrimeIdealAccess::set_alpha_residue_polynomial_for_testing(
+        !detail::TestHookAccess::set_alpha_residue_polynomial(
                 relabelled, sflint::FmpzPolyConstRef(theta_residue))) {
         check(false, "relabelled prime construction failed", index_base);
         return;
