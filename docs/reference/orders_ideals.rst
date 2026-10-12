@@ -114,9 +114,14 @@ being represented:
 - use ``FractionalIdeal::set_principal`` with an ambient ``Element`` when the
   generator may have denominators in the order basis;
 - use ``FractionalIdeal::colon`` and ``FractionalIdeal::invert`` for
-  inverse-like operations; ``invert`` is certified by multiplying back to the
-  unit fractional ideal and returns ``false`` for noninvertible inputs while
-  preserving the output.
+  inverse-like operations; ``invert`` returns ``false`` for noninvertible
+  inputs while preserving the output.  On an order whose maximality flag is
+  set (see above), ``invert`` computes the colon ideal ``(O : I)`` directly
+  from the representation matrices of the numerator basis and does not
+  multiply back; it relies on the flag, because over a maximal order every
+  nonzero fractional ideal is invertible with inverse ``(O : I)``.  On any
+  other order, ``invert`` computes ``colon(O, I)`` and is certified by
+  multiplying back to the unit fractional ideal.
 
 Arithmetic methods such as ``add``, ``intersect``, ``multiply``,
 ``pow_fmpz``, ``colon``, and ``invert`` publish a candidate only after the
