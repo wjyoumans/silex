@@ -3587,7 +3587,9 @@ int test_analytic_class_unit_proof_requires_factor_base_generation() {
     // order, not a literal `true` (T-012): the quadratic L(1, chi) route can
     // fall back to Belabas-Friedman, so whether a held value is unconditional
     // depends on the route that produced it
-    // (src/zeta/zeta_internal.hpp:89-94).
+    // (the `unconditional` output of
+    // zeta_class_regulator_product_with_diagnostics, declared in
+    // src/zeta/zeta_internal.hpp).
     sflint::Arb reported_hR;
     bool hr_unconditional = false;
     assert(silex::detail::zeta_class_regulator_product_with_diagnostics(
