@@ -974,7 +974,9 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                            const DiagnosticsContext*
                                                    diagnostics,
                                            FactorBaseWitnessPredicate predicate,
-                                           FactorBaseHonestyScanAudit* audit) noexcept {
+                                           FactorBaseHonestyScanAudit* audit,
+                                           const flint::Fmpz*
+                                                   quadratic_discriminant) noexcept {
     honest = false;
     const Order* order = base.parent();
     if (order == nullptr || !flint::fmpz_is_prime(p) ||
@@ -986,6 +988,16 @@ bool factor_base_honest_for_rational_prime(bool& honest,
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.honesty_decompose_prime");
+        // An inert p decomposes as the single prime pO_K (e = 1, f = 2),
+        // for which select_factor_base_proof_targets selects nothing, so
+        // the decomposition is not needed (see
+        // factor_base_honesty_quadratic_discriminant).
+        if (quadratic_discriminant != nullptr &&
+            flint::fmpz_kronecker(
+                    flint::FmpzConstRef(*quadratic_discriminant), p) < 0) {
+            honest = true;
+            return true;
+        }
         if (!decompose_prime(primes, *order, p)) {
             return false;
         }
@@ -1080,6 +1092,30 @@ bool factor_base_honest_for_rational_prime(bool& honest,
 
 }  // namespace
 
+bool factor_base_honesty_quadratic_discriminant(
+        flint::FmpzRef out,
+        const Order& order) noexcept {
+    // Maximality is only ever computed (Order::is_maximal), so the order
+    // discriminant is the field discriminant.  The remaining conditions are
+    // the p-independent preconditions decompose_prime checks first, so the
+    // skip never hides a decompose_prime precondition failure.
+    const NumberField* field = order.parent();
+    if (field == nullptr || order.degree() != 2 || !order.has_basis() ||
+        !order.is_maximal()) {
+        return false;
+    }
+    const nf_struct* raw = field->raw_flint_field();
+    if (raw == nullptr) {
+        return false;
+    }
+    const slong length = fmpq_poly_length(raw->pol);
+    if (length < 2 || fmpz_is_one(fmpq_poly_denref(raw->pol)) == 0 ||
+        fmpz_is_one(fmpq_poly_numref(raw->pol) + length - 1) == 0) {
+        return false;
+    }
+    return order.discriminant(out);
+}
+
 bool factor_base_honesty_check(bool& honest,
                                const FactorBase& base,
                                flint::FmpzConstRef active_bound,
@@ -1110,6 +1146,10 @@ bool factor_base_honesty_check(bool& honest,
     // Retain one precision-keyed order embedding copy for the scan; every
     // ideal-specific setup stays local.
     detail::OrderMinkowskiEmbeddingCache embedding_cache;
+    flint::Fmpz quadratic_discriminant;
+    const bool has_quadratic_discriminant =
+            factor_base_honesty_quadratic_discriminant(
+                    flint::FmpzRef(quadratic_discriminant), *base.parent());
     flint::Fmpz p;
     // The compact relation base can omit higher-residue-degree ideals whose
     // norms still lie below the required bound.  Check the complete rational-
@@ -1128,7 +1168,9 @@ bool factor_base_honesty_check(bool& honest,
                     required_bound, subfactor_base_schedule, random_state,
                     use_direct_required_prime_witness,
                     ideal_reduction_precision, escalation, &embedding_cache,
-                    diagnostics, predicate, audit);
+                    diagnostics, predicate, audit,
+                    has_quadratic_discriminant ? &quadratic_discriminant
+                                               : nullptr);
         if (audit != nullptr) audit->final_random_state = random_state;
         if (!checked) {
             return false;

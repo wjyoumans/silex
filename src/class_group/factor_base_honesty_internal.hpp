@@ -91,6 +91,24 @@ bool factor_base_honesty_reduce_large_ideal(
         slong precision,
         const DiagnosticsContext* diagnostics) noexcept;
 
+// Sets `out` to the discriminant D of `order` and returns true when `order`
+// is the maximal order of a quadratic field whose defining polynomial is
+// monic integral (the p-independent decompose_prime preconditions), on either
+// number-field backend.  The honesty scan then skips
+// every rational prime p with Kronecker symbol (D/p) = -1 without building
+// its decomposition.  For a quadratic field of discriminant D, p is inert
+// exactly when the Kronecker symbol (D/p) is -1, p = 2 included (Cohen,
+// GTM 138, Section 5.1, decomposition of primes in quadratic fields).  Then
+// pO_K is the only prime above p (e = 1, f = 2), and
+// select_factor_base_proof_targets returns no target for it at any bound,
+// so the per-prime check is honest without a witness search; the reference
+// buch2.c:be_honest and bnftestprimes likewise leave nothing to test for an
+// inert p.  The reference quadratic class group code reads the splitting of
+// p from kronecker(D, p) in the same way (buch1.c:nthidealquad).
+bool factor_base_honesty_quadratic_discriminant(
+        flint::FmpzRef out,
+        const Order& order) noexcept;
+
 // use_direct_required_prime_witness selects the capped T2 search instead of
 // the scalar/lattice search.  Both classify each candidate with
 // factor_base_principal_witness under the given predicate, and both treat a

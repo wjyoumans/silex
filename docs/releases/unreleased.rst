@@ -258,6 +258,17 @@ Changed
   ``Q(sqrt(-3), sqrt(-5), sqrt(-7))`` and ``Q(sqrt(5), sqrt(-7), sqrt(-11))``, with the class groups and regulators of PARI's
   certified ``bnfinit``.
 
+- The ``proven`` factor-base honesty check on the maximal order of a
+  quadratic field reads each rational prime's splitting from the Kronecker
+  symbol ``(D/p)`` of the field discriminant and skips an inert ``p``
+  without computing its prime decomposition; an inert ``p`` has no proof
+  target (its only prime ideal is ``pO_K``), so results are unchanged.  Split
+  and ramified primes are decomposed as before.  Published outputs, labels
+  and counters are identical on the 65 ``proven`` and the 183 completed
+  ``grh`` benchmark rows.  On a busy machine ``proven`` for
+  ``real_quadratic_d100000005`` and ``imaginary_quadratic_d100000031``
+  takes about 3% less time.
+
 - The class-relation saturation with units keeps a stack of ``ell``-th-power
   residue characters of the relation generators and units at degree-one
   primes, grown one prime at a time for each candidate that survives the

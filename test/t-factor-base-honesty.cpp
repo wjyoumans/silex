@@ -3004,6 +3004,116 @@ int test_witness_through_lacking_conjugate() {
     return 0;
 }
 
+// The honesty scan skips a rational prime p of a maximal quadratic order
+// when the Kronecker symbol (D/p) is -1.  The symbol must classify every p
+// exactly as decompose_prime does: -1 for one prime of e = 1, f = 2
+// (inert), 0 for one prime of e = 2 (ramified), +1 for two primes of
+// e = f = 1 (split).  The fields cover p = 2 split (D = 17, -7), inert
+// (D = 5, -3), and ramified (D = -4, 40), and odd p dividing D (D = 40,
+// -4036 = -4 * 1009, 100000005 = 3 * 5 * 7 * 952381).  Polynomials other
+// than x^2 - d with d squarefree use the generic number-field backend, and
+// x^2 - 20 has the inert p = 2 dividing the index of Z[sqrt(20)].
+int test_honesty_quadratic_kronecker_matches_decomposition() {
+    struct Case {
+        std::vector<slong> coefficients;
+        slong discriminant;
+    };
+    const std::vector<Case> cases = {
+            {{1, 0, 1}, -4},    {{-17, 0, 1}, 17},   {{-5, 0, 1}, 5},
+            {{7, 0, 1}, -7},    {{3, 0, 1}, -3},     {{-10, 0, 1}, 40},
+            {{2, 1, 1}, -7},    {{-20, 0, 1}, 5},    {{1009, 0, 1}, -4036},
+            {{-25000001, -1, 1}, 100000005},
+    };
+    for (const Case& test_case : cases) {
+        const FieldSetup setup = maximal_order_setup(test_case.coefficients);
+        if (!setup.maximal_order.is_defined()) {
+            return 1;
+        }
+        sflint::Fmpz discriminant;
+        if (!silex::detail::relation_search::
+                    factor_base_honesty_quadratic_discriminant(
+                            sflint::FmpzRef(discriminant),
+                            setup.maximal_order) ||
+            ::fmpz_cmp_si(discriminant.raw(),
+                                test_case.discriminant) != 0) {
+            return 2;
+        }
+        sflint::Fmpz p;
+        sflint::fmpz_set_ui(sflint::FmpzRef(p), UWORD(2));
+        while (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(p), UWORD(200)) <= 0) {
+            silex::PrimeIdealList primes;
+            if (!silex::decompose_prime(primes, setup.maximal_order,
+                                        sflint::FmpzConstRef(p))) {
+                return 3;
+            }
+            const int symbol = sflint::fmpz_kronecker(
+                    sflint::FmpzConstRef(discriminant),
+                    sflint::FmpzConstRef(p));
+            const bool matches =
+                    symbol < 0   ? primes.size() == 1 &&
+                                         prime_has_ef(primes, 0, 1, 2)
+                    : symbol == 0 ? primes.size() == 1 &&
+                                         prime_has_ef(primes, 0, 2, 1)
+                                  : primes.size() == 2 &&
+                                         prime_has_ef(primes, 0, 1, 1) &&
+                                         prime_has_ef(primes, 1, 1, 1);
+            if (!matches) {
+                return 4;
+            }
+            sflint::fmpz_nextprime(sflint::FmpzRef(p),
+                                   sflint::FmpzConstRef(p), true);
+        }
+    }
+
+    // No pre-check outside the maximal-quadratic route: a nonmaximal
+    // quadratic order and a cubic maximal order.
+    const silex::NumberField nonmaximal_field =
+            maximal_order_setup({-5, 0, 1}).field;
+    const silex::Order nonmaximal =
+            silex::test::equation_order(nonmaximal_field);
+    const FieldSetup cubic = maximal_order_setup({-2, 0, 0, 1});
+    sflint::Fmpz unused;
+    if (silex::detail::relation_search::
+                factor_base_honesty_quadratic_discriminant(
+                        sflint::FmpzRef(unused), nonmaximal) ||
+        !cubic.maximal_order.is_defined() ||
+        silex::detail::relation_search::
+                factor_base_honesty_quadratic_discriminant(
+                        sflint::FmpzRef(unused), cubic.maximal_order)) {
+        return 5;
+    }
+
+    // D = 5: p = 2 and 3 are inert, so an empty factor base is honest up to
+    // 3 with both primes counted and no witness target.  At bound 5 the
+    // ramified prime above 5 is still decomposed and is the one target; it
+    // is principal (class number 1), so the empty base witnesses it.
+    const FieldSetup golden = maximal_order_setup({-1, -1, 1});
+    silex::FactorBase base(golden.maximal_order);
+    if (!base.is_defined() || base.length() != 0) {
+        return 6;
+    }
+    for (const ulong bound : {UWORD(3), UWORD(5)}) {
+        sflint::Fmpz required_bound;
+        sflint::fmpz_set_ui(sflint::FmpzRef(required_bound), bound);
+        bool honest = false;
+        silex::detail::relation_search::FactorBaseHonestyScanAudit audit;
+        if (!silex::detail::relation_search::factor_base_honesty_check(
+                    honest, base, sflint::FmpzConstRef(required_bound),
+                    sflint::FmpzConstRef(required_bound), nullptr, UWORD(7),
+                    false, 128,
+                    silex::detail::relation_search::
+                            FactorBaseWitnessEscalation::none,
+                    nullptr, &audit) ||
+            !honest ||
+            audit.rational_prime_checks != (bound == UWORD(3) ? 2 : 3) ||
+            audit.witness_targets != (bound == UWORD(3) ? 0 : 1) ||
+            audit.witnessed_targets != audit.witness_targets) {
+            return 7;
+        }
+    }
+    return 0;
+}
+
 int main() {
     assert(test_scalar_noncontiguous_blocks() == 0);
     assert(test_scalar_witness_reference_cases() == 0);
@@ -3040,7 +3150,9 @@ int main() {
                            0 ||
                    test_failure_detail_json() != 0 ||
                    test_budget_failure_reason_and_detail_json() != 0 ||
-                   test_direct_witness_search_keeps_lattice_fallbacks() != 0
+                   test_direct_witness_search_keeps_lattice_fallbacks() != 0 ||
+                   test_honesty_quadratic_kronecker_matches_decomposition() !=
+                           0
             ? 1
             : 0;
 }
