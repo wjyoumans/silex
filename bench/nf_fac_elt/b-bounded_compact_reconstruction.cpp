@@ -34,6 +34,8 @@ enum class Workload {
 struct CoordinateBoundContract {
     ulong coordinate_bound = 0;
     ulong bit_bound = 0;
+    ulong hadamard_bit_bound = 0;
+    bool inverse_norm_bound_used = false;
     slong attempts = 0;
     slong precision = 0;
 };
@@ -41,31 +43,41 @@ struct CoordinateBoundContract {
 struct CoordinateBoundContractMatches {
     bool coordinate_bound = false;
     bool bit_bound = false;
+    bool hadamard_bit_bound = false;
+    bool inverse_norm_bound_used = false;
     bool attempts = false;
     bool precision = false;
 
     bool all() const noexcept {
-        return coordinate_bound && bit_bound && attempts && precision;
+        return coordinate_bound && bit_bound && hadamard_bit_bound &&
+               inverse_norm_bound_used && attempts && precision;
     }
 };
 
-// These are golden evaluations of the deterministic reference expression
+// These are golden evaluations of the two deterministic expressions
 //
-//   2^ceil(log2(Minkowski bound) + log2(unit bound) + basis scale).
+//   published:  2^ceil(log2 ||S^-1||_oo + log2(unit bound) + basis scale),
+//   reference:  ceil(log2(Minkowski bound) + log2(unit bound) + basis scale),
 //
-// They come from the fixed polynomial, maximal-order basis, and generator
+// where S is the unweighted split real/imaginary embedding matrix of the
+// normalized basis and the Minkowski bound is the reference's Hadamard
+// estimate of ||S^-1||_oo.  The operator-norm bound is certified on every
+// fixture, so it is the published bound and bit_bound; the reference
+// expression is pinned as hadamard_bit_bound.  They come from independent
+// gp evaluations on the fixed polynomial, maximal-order basis, and generator
 // fixtures below, not from a warm call to the implementation under test.  In
-// each case the Arb interval isolates the listed ceiling on the first 128-bit
-// attempt.  The reordered quadratic basis is a unimodular permutation, while
-// the index-three basis exercises the nontrivial normalization transform.
+// each case the Arb intervals isolate the listed ceilings on the first
+// 128-bit attempt.  The reordered quadratic basis is a unimodular
+// permutation, while the index-three basis exercises the nontrivial
+// normalization transform (3 bits of basis scale).
 constexpr CoordinateBoundContract kQuarticDisc1412343BoundContract = {
-        8'388'608, 23, 1, 128};
+        32'768, 15, 23, true, 1, 128};
 constexpr CoordinateBoundContract kLeadingOneQuadraticBoundContract = {
-        2, 1, 1, 128};
+        2, 1, 1, true, 1, 128};
 constexpr CoordinateBoundContract kReorderedQuadraticBoundContract = {
-        2, 1, 1, 128};
+        2, 1, 1, true, 1, 128};
 constexpr CoordinateBoundContract kIndexThreeQuarticBoundContract = {
-        128, 7, 1, 128};
+        32, 5, 7, true, 1, 128};
 
 CoordinateBoundContractMatches match_coordinate_bound_contract(
         const CoordinateBoundContract& contract,
@@ -83,6 +95,9 @@ CoordinateBoundContractMatches match_coordinate_bound_contract(
                                     success &&
                     output_matches && report_matches,
             report.bit_bound == contract.bit_bound,
+            report.hadamard_bit_bound == contract.hadamard_bit_bound,
+            report.inverse_norm_bound_used ==
+                    contract.inverse_norm_bound_used,
             report.attempts == contract.attempts,
             report.precision == contract.precision,
     };
@@ -732,6 +747,10 @@ void set_coordinate_bound_contract_counters(
             matches.coordinate_bound ? 1.0 : 0.0;
     state.counters["bit_bound_exact_match"] =
             matches.bit_bound ? 1.0 : 0.0;
+    state.counters["hadamard_bit_bound_exact_match"] =
+            matches.hadamard_bit_bound ? 1.0 : 0.0;
+    state.counters["inverse_norm_bound_used_exact_match"] =
+            matches.inverse_norm_bound_used ? 1.0 : 0.0;
     state.counters["bound_attempts_exact_match"] =
             matches.attempts ? 1.0 : 0.0;
     state.counters["bound_precision_exact_match"] =

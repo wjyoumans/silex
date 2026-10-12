@@ -969,6 +969,10 @@ if(SILEX_BUILD_TESTS)
                 --require-row-counter
                 BM_bound_basis_leading_one_quadratic/manual_time:bit_bound_exact_match=1
                 --require-row-counter
+                BM_bound_basis_leading_one_quadratic/manual_time:hadamard_bit_bound_exact_match=1
+                --require-row-counter
+                BM_bound_basis_leading_one_quadratic/manual_time:inverse_norm_bound_used_exact_match=1
+                --require-row-counter
                 BM_bound_basis_leading_one_quadratic/manual_time:bound_attempts_exact_match=1
                 --require-row-counter
                 BM_bound_basis_leading_one_quadratic/manual_time:bound_precision_exact_match=1
@@ -986,6 +990,10 @@ if(SILEX_BUILD_TESTS)
                 BM_bound_basis_reordered_quadratic/manual_time:coordinate_bound_exact_match=1
                 --require-row-counter
                 BM_bound_basis_reordered_quadratic/manual_time:bit_bound_exact_match=1
+                --require-row-counter
+                BM_bound_basis_reordered_quadratic/manual_time:hadamard_bit_bound_exact_match=1
+                --require-row-counter
+                BM_bound_basis_reordered_quadratic/manual_time:inverse_norm_bound_used_exact_match=1
                 --require-row-counter
                 BM_bound_basis_reordered_quadratic/manual_time:bound_attempts_exact_match=1
                 --require-row-counter
@@ -1005,6 +1013,10 @@ if(SILEX_BUILD_TESTS)
                 --require-row-counter
                 BM_bound_basis_index_three_quartic/manual_time:bit_bound_exact_match=1
                 --require-row-counter
+                BM_bound_basis_index_three_quartic/manual_time:hadamard_bit_bound_exact_match=1
+                --require-row-counter
+                BM_bound_basis_index_three_quartic/manual_time:inverse_norm_bound_used_exact_match=1
+                --require-row-counter
                 BM_bound_basis_index_three_quartic/manual_time:bound_attempts_exact_match=1
                 --require-row-counter
                 BM_bound_basis_index_three_quartic/manual_time:bound_precision_exact_match=1
@@ -1012,6 +1024,10 @@ if(SILEX_BUILD_TESTS)
                 BM_bound_quartic_disc1412343/iterations:1/manual_time:coordinate_bound_exact_match=1
                 --require-row-counter
                 BM_bound_quartic_disc1412343/iterations:1/manual_time:bit_bound_exact_match=1
+                --require-row-counter
+                BM_bound_quartic_disc1412343/iterations:1/manual_time:hadamard_bit_bound_exact_match=1
+                --require-row-counter
+                BM_bound_quartic_disc1412343/iterations:1/manual_time:inverse_norm_bound_used_exact_match=1
                 --require-row-counter
                 BM_bound_quartic_disc1412343/iterations:1/manual_time:bound_attempts_exact_match=1
                 --require-row-counter
