@@ -23,6 +23,20 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
                               const NumberField& field,
                               ulong bound) noexcept;
 
+// Per-thread counts of the roots-of-unity memo in
+// src/unit/roots_of_unity.cpp, which stores w and a generator per defining
+// polynomial and backend.  Diagnostic only: the memo never changes a
+// computed value.
+struct RootsOfUnityCacheCounters {
+    slong hits = 0;
+    slong misses = 0;
+};
+RootsOfUnityCacheCounters roots_of_unity_cache_counters() noexcept;
+
+// Empties the roots-of-unity memo on the calling thread, so a test can
+// compare a cold computation with a memoized one.  Diagnostic only.
+void clear_roots_of_unity_cache() noexcept;
+
 // Rigorous lower bounds for the regulator R of a number field with r1 real
 // and r2 complex places and w roots of unity.  Each function writes an Arb
 // enclosure of its bound, or returns false when the bound does not apply or

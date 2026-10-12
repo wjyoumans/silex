@@ -19,6 +19,10 @@
 
 #include "unit_internal.hpp"
 
+#include <cstddef>
+#include <utility>
+#include <vector>
+
 namespace silex {
 namespace {
 
@@ -603,9 +607,9 @@ bool search_roots_for_bound(flint::FmpzRef order,
     return generator.set(result);
 }
 
-bool compute_roots_of_unity(flint::FmpzRef order,
-                            Element& generator,
-                            const NumberField& field) noexcept {
+bool compute_roots_of_unity_uncached(flint::FmpzRef order,
+                                     Element& generator,
+                                     const NumberField& field) noexcept {
     Signature sig;
     if (!sig.compute(field)) {
         return false;
@@ -650,6 +654,94 @@ bool compute_roots_of_unity(flint::FmpzRef order,
     }
     return search_roots_for_bound(order, generator, field, polynomial, scale,
                                   bound);
+}
+
+// Memo of compute_roots_of_unity.  The class-group and unit stages ask for w
+// several times per field (the torsion order of the class/regulator product,
+// the regulator lower bound, the rank-zero torsion check), and each call
+// otherwise repeats the good-prime search, whose Cantor-Zassenhaus
+// factorizations dominate on cyclotomic fields.
+//
+// Exactness: an entry is keyed by the defining polynomial and the backend,
+// compared for exact equality.  compute_roots_of_unity_uncached reads nothing
+// else (the quadratic radicand is a function of the polynomial), and it is
+// deterministic, so a hit returns the order and the generator that
+// recomputation would return.  The generator is stored by its coordinates
+// in the power basis, so a field object other than the one that filled the
+// entry receives an element of its own parent.  Only successes are stored; a
+// failure is recomputed each time, so failure behavior is unchanged.
+//
+// Lifetime and thread safety: as for the Hensel data memo in
+// src/element/hensel.cpp, the cache is thread_local (no locking; a thread
+// only sees entries it computed), holds a bounded number of entries with
+// round-robin replacement, and is read by copying an entry out.
+struct RootsOfUnityEntry {
+    flint::FmpqPoly polynomial;
+    NumberFieldBackendKind backend = NumberFieldBackendKind::generic;
+    flint::Fmpz order;
+    flint::FmpqPoly generator;
+};
+
+// A thread rarely works in more than a few fields at once.
+constexpr std::size_t kRootsOfUnityCacheCapacity = 8;
+
+struct RootsOfUnityCache {
+    std::vector<RootsOfUnityEntry> entries;
+    std::size_t next_replacement = 0;
+};
+
+thread_local RootsOfUnityCache roots_of_unity_cache_tls;
+thread_local detail::RootsOfUnityCacheCounters roots_of_unity_counters_tls;
+
+void insert_roots_of_unity_entry(RootsOfUnityEntry entry) noexcept {
+    RootsOfUnityCache& cache = roots_of_unity_cache_tls;
+    if (cache.entries.size() < kRootsOfUnityCacheCapacity) {
+        cache.entries.push_back(std::move(entry));
+        return;
+    }
+    cache.entries[cache.next_replacement] = std::move(entry);
+    cache.next_replacement =
+            (cache.next_replacement + 1) % kRootsOfUnityCacheCapacity;
+}
+
+// Writes w and a generator of the roots of unity of `field` (its parent).
+// On failure the outputs may be partially written; the public entry points
+// below compute into temporaries.
+bool compute_roots_of_unity(flint::FmpzRef order,
+                            Element& generator,
+                            const NumberField& field) noexcept {
+    const nf_struct* raw = field.raw_flint_field();
+    if (raw == nullptr) {
+        return false;
+    }
+    const NumberFieldBackendKind backend = field.backend_kind();
+    for (const RootsOfUnityEntry& entry : roots_of_unity_cache_tls.entries) {
+        if (entry.backend == backend &&
+            fmpq_poly_equal(entry.polynomial.raw(), raw->pol) != 0) {
+            if (!generator.set_fmpq_poly(
+                        flint::FmpqPolyConstRef(entry.generator))) {
+                return false;
+            }
+            fmpz_set(order.raw(), entry.order.raw());
+            ++roots_of_unity_counters_tls.hits;
+            return true;
+        }
+    }
+
+    ++roots_of_unity_counters_tls.misses;
+    if (!compute_roots_of_unity_uncached(order, generator, field)) {
+        return false;
+    }
+    RootsOfUnityEntry entry;
+    if (!generator.get_fmpq_poly(flint::FmpqPolyRef(entry.generator))) {
+        // Not memoized; the computed outputs are still valid.
+        return true;
+    }
+    fmpq_poly_set(entry.polynomial.raw(), raw->pol);
+    entry.backend = backend;
+    fmpz_set(entry.order.raw(), order.raw());
+    insert_roots_of_unity_entry(std::move(entry));
+    return true;
 }
 
 }  // namespace
@@ -712,6 +804,15 @@ bool root_of_unity_generator(Element& generator,
 
 
 namespace detail {
+
+RootsOfUnityCacheCounters roots_of_unity_cache_counters() noexcept {
+    return roots_of_unity_counters_tls;
+}
+
+void clear_roots_of_unity_cache() noexcept {
+    roots_of_unity_cache_tls.entries.clear();
+    roots_of_unity_cache_tls.next_replacement = 0;
+}
 
 bool roots_of_unity_for_bound(flint::FmpzRef order,
                               Element& generator,

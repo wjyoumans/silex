@@ -748,6 +748,95 @@ int test_roots_of_unity_public_fail_closed() {
     return 0;
 }
 
+// The per-thread roots-of-unity memo: a repeated query on the same defining
+// polynomial is a hit and returns the order and generator of the cold
+// computation, also to a different field object (whose own element it
+// writes); a failure is never stored; the cache is bounded.
+int test_roots_of_unity_memo() {
+    silex::detail::clear_roots_of_unity_cache();
+    const slong zeta9[] = {57, -36, 36, 9, 6, 0, 1};
+    silex::NumberField field = integer_polynomial_field(zeta9, 7);
+
+    silex::detail::RootsOfUnityCacheCounters before =
+            silex::detail::roots_of_unity_cache_counters();
+    sflint::Fmpz cold_order;
+    silex::Element cold_generator(field);
+    assert(silex::roots_of_unity(sflint::FmpzRef(cold_order), cold_generator,
+                                 field));
+    assert(fmpz_equal_ui(cold_order.raw(), 18) != 0);
+    silex::detail::RootsOfUnityCacheCounters after =
+            silex::detail::roots_of_unity_cache_counters();
+    assert(after.misses == before.misses + 1);
+    assert(after.hits == before.hits);
+
+    sflint::Fmpz order;
+    assert(silex::root_of_unity_order(sflint::FmpzRef(order), field));
+    assert(fmpz_equal(order.raw(), cold_order.raw()) != 0);
+    silex::Element generator(field);
+    assert(silex::root_of_unity_generator(generator, field));
+    assert(generator.equal(cold_generator));
+    before = after;
+    after = silex::detail::roots_of_unity_cache_counters();
+    assert(after.hits == before.hits + 2);
+    assert(after.misses == before.misses);
+
+    // A second field object with the same polynomial hits the entry and
+    // receives an element of its own parent with the same coordinates.
+    silex::NumberField same = integer_polynomial_field(zeta9, 7);
+    silex::Element same_generator(same);
+    assert(silex::roots_of_unity(sflint::FmpzRef(order), same_generator,
+                                 same));
+    assert(fmpz_equal_ui(order.raw(), 18) != 0);
+    assert(same_generator.has_parent(same));
+    assert(has_exact_order(same_generator, 18));
+    sflint::FmpqPoly cold_coordinates;
+    sflint::FmpqPoly same_coordinates;
+    assert(cold_generator.get_fmpq_poly(
+            sflint::FmpqPolyRef(cold_coordinates)));
+    assert(same_generator.get_fmpq_poly(
+            sflint::FmpqPolyRef(same_coordinates)));
+    assert(fmpq_poly_equal(cold_coordinates.raw(), same_coordinates.raw()) !=
+           0);
+    before = after;
+    after = silex::detail::roots_of_unity_cache_counters();
+    assert(after.hits == before.hits + 1);
+    assert(after.misses == before.misses);
+
+    // A failure (see test_roots_of_unity_public_fail_closed) is not stored.
+    const slong stalled[] = {6813116442581, 1047154163766, 94346195848,
+                             4956165560,    147295001,     2623880,
+                             31172,         242,           1};
+    silex::NumberField stalled_field = integer_polynomial_field(stalled, 9);
+    assert(!silex::root_of_unity_order(sflint::FmpzRef(order),
+                                       stalled_field));
+    assert(!silex::root_of_unity_order(sflint::FmpzRef(order),
+                                       stalled_field));
+    before = after;
+    after = silex::detail::roots_of_unity_cache_counters();
+    assert(after.misses == before.misses + 2);
+    assert(after.hits == before.hits);
+
+    // Eight more fields (Q(sqrt(p)), w = 2) evict the oldest entry, so
+    // Q(zeta_9) is computed again, with the same result.
+    const slong primes[] = {2, 3, 5, 7, 11, 13, 17, 19};
+    for (slong p : primes) {
+        const slong real_quadratic[] = {-p, 0, 1};
+        assert(silex::root_of_unity_order(
+                sflint::FmpzRef(order),
+                integer_polynomial_field(real_quadratic, 3)));
+        assert(fmpz_equal_ui(order.raw(), 2) != 0);
+    }
+    before = silex::detail::roots_of_unity_cache_counters();
+    assert(silex::roots_of_unity(sflint::FmpzRef(order), generator, field));
+    assert(fmpz_equal_ui(order.raw(), 18) != 0);
+    assert(generator.equal(cold_generator));
+    after = silex::detail::roots_of_unity_cache_counters();
+    assert(after.misses == before.misses + 1);
+
+    silex::detail::clear_roots_of_unity_cache();
+    return 0;
+}
+
 // The Hensel search for a root of Phi_m on its own: it finds primitive m-th
 // roots of unity that exist and reports failure for those that do not.
 int test_cyclotomic_root_hensel() {
@@ -1415,6 +1504,7 @@ int main() {
     test_roots_of_unity_fail_closed_against_bound();
     test_roots_of_unity_phi_reset();
     test_roots_of_unity_public_fail_closed();
+    test_roots_of_unity_memo();
     test_lower_regulator_bound();
     test_lower_regulator_bound_terms();
     test_lower_regulator_bound_maximum();
