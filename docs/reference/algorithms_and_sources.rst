@@ -1567,8 +1567,14 @@ relation coefficients: a vector ``c_i`` for which ``c_i R``, with ``R`` the
 relation matrix, is the factor-base exponent vector of ``g_i^{d_i}``, so the
 product of the relation generators to the powers ``c_i`` generates
 ``g_i^{d_i}``.  The presentation's ``c_i`` comes
-from the Smith transform and can be thousands of bits long, which makes the
+from the Smith transform and grows with the presentation, which makes the
 compact witness, and its images at the auxiliary primes, too large to use.
+Measured on commit 49dfe1d with a temporary, uncommitted print of the
+maximum coefficient bit size, on a busy machine: over the 11 beta rows
+reduced in ``t-silex-class-unit-matrix``, the raw coefficients are at most
+414 bits (286 to 414 bits for the rows with 42 relations) and the reduced
+ones at most 12 bits (2 to 12 bits for those rows).  Larger presentations
+were not measured.
 Silex size-reduces ``c_i`` against the LLL-reduced basis of the relation
 kernel (the basis that also yields the unit candidates) before forming the
 witness: with the integral Gram--Schmidt data of that basis, it subtracts
