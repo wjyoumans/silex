@@ -1526,10 +1526,13 @@ bool HnfContext::refresh(bool require_transform) noexcept {
     } else {
         SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                             "fmpz_smat.hnf_context.refresh.hnf");
-        // The first old_rows rows of `dense` are the retained canonical HNF
-        // (see accept_independent), so only the new and pending rows need
-        // eliminating against them.  The full-rank and empty-HNF cases keep
-        // fmpz_mat_hnf.
+        // The first old_rows rows of `dense` are the retained HNF, which is
+        // canonical because every producer of hnf_ (this refresh,
+        // refine_dependent via fmpz_mat_hnf, and reset_precomputed_hnf from
+        // hnf_add_rows, fmpz_mat_hnf or fmpz_mat_hnf_modular) stores a
+        // canonical HNF; accept_independent only explains why it is retained.
+        // So only the new and pending rows need eliminating against it.  The
+        // full-rank and empty-HNF cases keep fmpz_mat_hnf.
         bool incremental = false;
         if (old_rows > 0 && old_rows < ambient_dim_) {
             SILEX_PROFILE_SCOPE(
