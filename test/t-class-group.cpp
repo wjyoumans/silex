@@ -5062,6 +5062,32 @@ int test_imaginary_quadratic_structure_certificate_route() {
     return 0;
 }
 
+// The proven witness step for x^2 + 10000019 reduces binary forms above the
+// fast reduction switch (more than 9000 bits).  Every published relation
+// generator must factor to exactly its relation row.
+int test_imaginary_quadratic_proven_large_witness_forms() {
+    silex::NumberField field = shifted_quadratic_field(0, 10000019);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                maximal_order));
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(class_group, maximal_order,
+                                          sflint::FmpzConstRef(bound),
+                                          options, 128));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(class_group.relation_count() > 0);
+    assert(context_relation_rows_match_exact_generators(class_group));
+    return 0;
+}
+
 // A relation lattice of index h does not prove that the factor base
 // generates the class group (the Cl(-199) example of the structure
 // certificate's design).  D = -4363 has class group Z/9; 2, 3, 5 and 7 are
@@ -6128,6 +6154,7 @@ int main() {
     test_grh_generation_bound_bach_fallback();
     test_twin_class_generation_routes();
     test_imaginary_quadratic_structure_certificate_route();
+    test_imaginary_quadratic_proven_large_witness_forms();
     test_imaginary_quadratic_structure_certificate_rejects_subgroup();
     test_factor_base_size_limit_fails_closed();
     test_class_unit_index_routes_share_normalization();

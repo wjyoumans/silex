@@ -296,6 +296,10 @@ void test_above_switch() {
     check(compared == 72, "all large cases compared", 1000);
     check(sign_sensitive > 0, "some case separates (a, b, c) and (a, -b, c)",
           1000);
+    // The basecase alone returns the basecase vector, so a sign change shows
+    // that the fast path ran rather than its basecase fallback (the seed is
+    // fixed, so the count is deterministic).
+    check(negated > 0, "some first column negated by the fast path", 1000);
     std::printf("above switch: %d forms, %d first columns negated\n", compared,
                 negated);
 }
