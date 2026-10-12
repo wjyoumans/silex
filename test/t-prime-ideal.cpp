@@ -356,7 +356,8 @@ int test_degree_one_prime_from_root_rejects_non_roots() {
 // internal constructor refuses it and leaves its output unchanged.  The
 // squarefree condition is sufficient but not necessary: 1 is a simple root
 // mod 2 (2 does not divide f'(1)) and that alone makes (2, theta - 1)O a
-// prime with e = f = 1.  The constructor refuses it all the same.
+// prime with e = f = 1 (Hensel lifts 1 to a root of f in Z_2, so f has a
+// linear factor over Q_2).  The constructor refuses it all the same.
 int test_degree_one_prime_from_root_rejects_index_prime() {
     sflint::FmpqPoly polynomial;
     poly_cubic_disc1724(polynomial);

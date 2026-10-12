@@ -1550,8 +1550,10 @@ discriminant ``-1724``, field discriminant ``-431`` and
 ``[O_K : Z[theta]] = 2``.  Modulo 2, ``f = x^2 (x + 1)`` is not squarefree,
 yet ``r = 1`` is a simple root mod 2 (2 does not divide ``f'(1)``), which
 by itself makes ``(2, theta - 1) O_K`` a prime with ``e = f = 1``, one that
-the constructor refuses.  This is the same condition as the degree-one fast path of
-``decompose_prime``.
+the constructor refuses.  (Hensel's lemma lifts ``r`` to a root of ``f`` in
+``Z_2``, so ``f`` has a linear factor over ``Q_2``, which gives a prime above
+2 with ``e = f = 1``.)  The constructor's squarefree condition is the same
+condition as the degree-one fast path of ``decompose_prime`` uses.
 
 The unconditional unit proof ``OrderUnitGroup::prove_index_bound`` bounds the
 index of the supplied full-rank subgroup from a regulator lower bound, then
