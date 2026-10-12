@@ -627,6 +627,24 @@ toward Hecke's behavior there of rounding at the first precision.
 Attempts that pass the rounding check are unchanged, and every relation is
 still verified exactly.
 
+The small-LLL phase of the LLL relation search reduces each ideal with one
+integer LLL, as PARI 2.17.3 ``buch2.c:Fincke_Pohst_ideal`` (2461-2462) does
+on the rounded embedding matrix ``nf_get_roundG``, which
+``base1.c`` (1851) stores as ``RM_round_maxrank(G)`` (``base4.c``
+2631-2640): the embeddings scaled by ``2^e`` for ``e`` = 4, 8, 16, ...
+and rounded, until the result has full rank.  Silex rounds the order's
+Minkowski rows this way once per order and per relation route, and reduces
+``B R`` for the ideal's HNF basis ``B``.  PARI rounds the embeddings of a
+T2-reduced integral basis; Silex rounds those of its order basis, which is
+not reduced.  The rounded matrix only steers the reduction: Silex checks
+exactly that the transformed basis reproduces the LLL output, forms the
+scaled T2 Gram of the reduced basis in integers from the order Gram of the
+Hecke precision schedule above, and applies only the two diagonal bounds of
+the Hecke route's checks, on ``|b_1|^2`` and on the product of the
+``|b_i|^2``.  It skips the ``LLL.jl:_lll`` check on the size of the Gram
+transform, as this route has no Gram transform.  When a check fails, or the
+order data cannot be formed, the ideal is reduced by the Hecke route above.
+
 The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
 rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:
 RM_round_maxrank`` does.  PARI rounds the embeddings of a T2-reduced integral

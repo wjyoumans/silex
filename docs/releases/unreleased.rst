@@ -659,6 +659,34 @@ Changed
   ideal by construction.  Builds with assertions enabled still assert the
   test.  Decompositions are unchanged.
 
+- The LLL relation search reduces each ideal once, with integer LLL on the
+  ideal basis mapped through a rounded embedding of the order that is
+  computed once per order, as PARI 2.17.3 ``Fincke_Pohst_ideal``
+  (``buch2.c`` 2461-2462) does with the rounded ``M`` of ``RM_round_maxrank``
+  (``base4.c`` 2631-2640).  It previously built a floating-point T2 Gram
+  matrix for every ideal.  When the reduced basis fails the T2 bounds, or
+  the per-order data cannot be formed, the ideal is reduced by the earlier
+  route instead.  The reduced bases differ, so the relation search
+  tries other candidates and ``grh`` results change in how they were found:
+  class groups, regulator values and labels are unchanged on the test corpus,
+  while ``relation_count``, ``relation_kernel_unit_count``,
+  ``relation_sources``, ``skipped_dependent_relation_count``, the chosen
+  fundamental units, ``unit_group.regulator_radius`` (still a valid
+  enclosure) and the ``zeta_bf_proof_record()`` cutoff and error bound
+  (still GRH-conditional) can differ.  For the degree-12 field
+  ``x^12 - x^11 - x^9 + ... + 1`` the coarse index-one check now succeeds,
+  so the record has the coarse cutoff 2547 instead of the default route's.
+  ``cyclotomic_56_phi24`` reports
+  ``relation_saturation_status`` ``not_checked`` instead of ``unavailable``.
+  Of 40 compared ``grh`` runs (the test-suite class/unit field manifest and
+  eight further fields up to degree 40), 22 differ in these fields, 8 of them
+  in ``regulator_radius``; the 19 ``proven`` runs are unchanged.
+  One row is slower: for ``x^3 + x + 200`` in ``grh`` mode
+  (``cubic_x3_x_200_grh``) the first unit candidate fails the coarse
+  Belabas-Friedman check, so the run refines its validation and saturates
+  the class group, and takes about 26 ms instead of 9 ms (release build on a
+  busy machine).
+
 Fixed
 -----
 
