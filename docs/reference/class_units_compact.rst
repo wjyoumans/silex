@@ -248,6 +248,15 @@ positive regulator or a full-rank supplied subgroup is not the same thing as a
 proven full unit group; the certification mode and proof records are the
 public source of truth.
 
+Routes that publish ``proven`` by a theorem rather than by a per-prime pass
+carry zero proof records, so ``unit_proof_record_count()`` is ``0`` for them.
+In ``OrderUnitGroup::compute`` (``src/order_unit/compute.cpp``) the rank-zero
+torsion route and the rank-one quadratic route (the continued-fraction unit
+validated through ``set_units``) each build a fresh candidate, set
+``CertificationMode::proven`` directly, and do not add any proof record.  An
+empty record list therefore does not by itself mean that the result is not
+proven; read the certification mode first.
+
 The examples ``class_unit_computation.cpp``,
 ``relation_kernel_order_units.cpp``, and ``supplied_order_units.cpp`` show the
 expected public pattern: compute with explicit options, query group data

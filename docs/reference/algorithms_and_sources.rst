@@ -619,8 +619,8 @@ sequential convergent recurrence of ``quadunit_uv_basecase`` (lines 280-316):
 the ``sqrtremi`` start with its parity correction, the even-period and
 odd-period exits, ``u = (a + D*b)/q`` and ``v = (c - a - b)/q``, the
 ``u -= v`` adjustment for odd discriminant, and the final halving.
-``quadunit_uv`` (lines 428-475) is the same algorithm with a product tree of
-the partial-quotient matrices; PARI's ``quadunit`` (lines 476-518) calls it
+``quadunit_uv`` (lines 428-474) is the same algorithm with a product tree of
+the partial-quotient matrices; PARI's ``quadunit`` (lines 475-518) calls it
 for discriminants of at least ``2000000`` and the basecase below that.  The
 nonmaximal-conductor branch of ``quadunit`` (lines 492-516), which raises the
 maximal-order unit to the index from ``quadunitindex``, is not ported: Silex
