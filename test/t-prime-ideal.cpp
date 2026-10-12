@@ -1695,6 +1695,52 @@ int test_decompose_prime_route() {
     assert(route_at(decic_maximal, 43, 1) == Route::index_divisor);
     assert(route_at(decic_maximal, 101, 2) == Route::nonindex_factor);
     assert(route_at(decic_equation, 43, 0) == Route::equation_factor);
+    // The bound-1 squarefree test of a maximal non-equation order: 101 does
+    // not divide the index or the discriminant.
+    assert(route_at(decic_maximal, 101, 1) == Route::squarefree_roots);
+
+    // A non-equation order not known to be maximal is refused, whatever the
+    // prime (Q(sqrt(5)) with basis 1, 3 (1 + theta) / 2).
+    silex::Order unknown_maximality(quadratic_field);
+    sflint::FmpqMat basis(2, 2);
+    qmat_entry_si(basis, 0, 0, 1);
+    qmat_entry_frac_si(basis, 1, 0, 3, 2);
+    qmat_entry_frac_si(basis, 1, 1, 3, 2);
+    assert(unknown_maximality.set_basis(sflint::FmpqMatConstRef(basis)));
+    assert(!unknown_maximality.is_equation_order());
+    assert(!unknown_maximality.is_maximal());
+    assert(route_at(unknown_maximality, 3, 0) == Route::refused);
+    assert(route_at(unknown_maximality, 11, 0) == Route::refused);
+    assert(route_at(unknown_maximality, 11, 1) == Route::refused);
+
+    // decompose_prime_residue_degrees takes its own index-divisor path only
+    // on the index_divisor route: elsewhere it must leave the order's
+    // index-divisor cache empty.
+    const auto check_no_index_path = [](const silex::Order& order,
+                                        slong rational_prime) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, rational_prime));
+        const sflint::FmpzConstRef p_ref(p);
+        silex::PrimeIdealList all;
+        assert(silex::decompose_prime(all, order, p_ref));
+        const std::vector<slong> expected = published_residue_degrees(all);
+        std::vector<slong> degrees;
+        assert(silex::detail::decompose_prime_residue_degrees(degrees, order,
+                                                              p_ref));
+        assert(degrees == expected);
+        assert(silex::detail::OrderAccess::index_divisor_decomposition(
+                       order, p_ref) == nullptr);
+    };
+    for (const slong q : {2, 3, 5, 11, 23, 89, 101}) {
+        silex::Order fresh(decic_field);
+        assert(fresh.maximal_order(decic_equation));
+        check_no_index_path(fresh, q);
+    }
+    for (const slong q : {2, 3, 5, 31}) {
+        silex::Order fresh(cubic_field);
+        assert(fresh.maximal_order(cubic_equation));
+        check_no_index_path(fresh, q);
+    }
     return 0;
 }
 
