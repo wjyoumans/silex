@@ -793,6 +793,15 @@ fails, the one-LLL basis is used and the check waits for the next ideal;
 when the comparison inputs are malformed, the order is switched to the
 Hecke route.
 
+The one integer LLL of this route takes the same certified first-phase
+route as ``Lat::lll_reduce`` (above): for at least two rows and entries of
+at most 250 bits it runs ``fmpz_lll_d_with_removal_knapsack`` and accepts the
+result only when ``fmpz_mat_is_reduced`` certifies it, and otherwise
+restores the input and calls ``fmpz_lll``.  FLINT documents that its own
+``fmpz_lll_is_reduced`` agrees with ``fmpz_mat_is_reduced``, so the matrix
+and transform are those ``fmpz_lll`` returns; only the certificate is
+cheaper.
+
 The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
 rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:
 RM_round_maxrank`` does.  PARI rounds the embeddings of a T2-reduced integral

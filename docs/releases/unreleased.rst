@@ -120,6 +120,16 @@ Added
 Changed
 -------
 
+- The rounded-embedding LLL of the LLL relation search no longer pays
+  FLINT's multiprecision reducedness pre-check on every call.  For at least
+  two rows and entries of at most 250 bits it runs FLINT's double-precision
+  first phase (``fmpz_lll_d_with_removal_knapsack``) and accepts it only when
+  ``fmpz_mat_is_reduced`` certifies it LLL-reduced, as ``Lat::lll_reduce``
+  does; otherwise it restores the input and calls ``fmpz_lll``.  The reduced
+  basis and transform are those ``fmpz_lll`` returns, so every ideal's basis
+  and every published result is unchanged.  See "Class groups and order
+  units" in :doc:`../reference/algorithms_and_sources`.
+
 - The one-large-prime step of relation factoring builds only the prime
   ideals above the large rational prime that can contain the element, found
   by a Dedekind--Kummer divisibility test, instead of every prime above it,
