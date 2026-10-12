@@ -21,13 +21,6 @@ struct FiniteAbelianGroupSmithCache {
     // tests.
     slong reuse_count = 0;
     slong compute_count = 0;
-
-    void clear() noexcept {
-        hnf_basis = flint::FmpzMat(0, 0);
-        snf = flint::FmpzMat(0, 0);
-        right_transform = flint::FmpzMat(0, 0);
-        valid = false;
-    }
 };
 
 // Noninstalled hook for publishing a presentation from a precomputed basis of
