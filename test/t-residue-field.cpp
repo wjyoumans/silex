@@ -1299,6 +1299,191 @@ int test_copy_keeps_validated_field() {
     return 0;
 }
 
+// The log ResidueFieldQuotientLog::apply returns, computed the generic way:
+// the i in [0, ell) with zeta^i = x^((q - 1)/ell), zeta the stored quotient
+// generator.
+void reference_quotient_log(sflint::Fmpz& out,
+                            const silex::ResidueFieldQuotientLog& cache,
+                            const silex::ResidueFieldElement& element,
+                            const silex::ResidueField& residue_field,
+                            const sflint::Fmpz& ell) noexcept {
+    sflint::Fmpz exponent;
+    sflint::Fmpz i;
+    assert(residue_field.cardinality(sflint::FmpzRef(exponent)));
+    fmpz_sub_ui(exponent.raw(), exponent.raw(), 1);
+    fmpz_divexact(exponent.raw(), exponent.raw(), ell.raw());
+    silex::ResidueFieldElement image(residue_field);
+    silex::ResidueFieldElement zeta(residue_field);
+    silex::ResidueFieldElement current(residue_field);
+    assert(image.pow_fmpz(element, sflint::FmpzConstRef(exponent)));
+    assert(cache.quotient_generator(zeta));
+    assert(current.one());
+    for (fmpz_zero(i.raw()); fmpz_cmp(i.raw(), ell.raw()) < 0;
+         fmpz_add_ui(i.raw(), i.raw(), 1)) {
+        if (current.equal(image)) {
+            fmpz_set(out.raw(), i.raw());
+            return;
+        }
+        assert(current.multiply(current, zeta));
+    }
+    assert(false);
+}
+
+struct NormPathCounts {
+    slong norm_route_logs = 0;
+    slong generic_route_logs = 0;
+};
+
+// Compares apply with reference_quotient_log on every nonzero element whose
+// coefficients are taken from `digits` (all of F_q when digits lists
+// 0..p-1), for one residue field of degree > 1 and one prime ell | q - 1.
+void check_norm_path_against_reference(const silex::ResidueField& residue_field,
+                                       slong ell_value,
+                                       const std::vector<slong>& digits,
+                                       NormPathCounts& counts) noexcept {
+    const slong degree = residue_field.degree();
+    assert(degree > 1);
+    sflint::Fmpz p;
+    sflint::Fmpz ell;
+    sflint::Fmpz p_minus_one;
+    assert(residue_field.characteristic(sflint::FmpzRef(p)));
+    fmpz_set_si(ell, ell_value);
+    fmpz_sub_ui(p_minus_one.raw(), p.raw(), 1);
+    const bool ell_divides_p_minus_one =
+            fmpz_divisible(p_minus_one.raw(), ell.raw()) != 0;
+
+    silex::ResidueFieldQuotientLog cache(residue_field);
+    assert(cache.set_ell(sflint::FmpzConstRef(ell)));
+    // The new route needs zeta in F_p, which holds exactly when ell | p - 1.
+    silex::ResidueFieldElement zeta(residue_field);
+    sflint::FmpzPoly zeta_polynomial;
+    assert(cache.quotient_generator(zeta));
+    assert(zeta.get_polynomial(sflint::FmpzPolyRef(zeta_polynomial)));
+    assert((fmpz_poly_degree(zeta_polynomial.raw()) == 0) ==
+           ell_divides_p_minus_one);
+
+    std::vector<bool> seen(static_cast<std::size_t>(ell_value), false);
+    std::vector<std::size_t> index(static_cast<std::size_t>(degree), 0);
+    silex::ResidueFieldElement element(residue_field);
+    sflint::FmpzPoly polynomial;
+    sflint::Fmpz log;
+    sflint::Fmpz expected;
+    while (true) {
+        fmpz_poly_zero(polynomial.raw());
+        for (slong j = 0; j < degree; ++j) {
+            zpoly_set_coeff_si(polynomial, j,
+                               digits[index[static_cast<std::size_t>(j)]]);
+        }
+        assert(element.set_polynomial(sflint::FmpzPolyConstRef(polynomial)));
+        if (!element.is_zero()) {
+            fmpz_set_si(log, -1);
+            assert(cache.apply(sflint::FmpzRef(log), element));
+            reference_quotient_log(expected, cache, element, residue_field,
+                                   ell);
+            assert(fmpz_equal(log.raw(), expected.raw()) != 0);
+            seen[static_cast<std::size_t>(fmpz_get_si(log.raw()))] = true;
+            if (ell_divides_p_minus_one) {
+                ++counts.norm_route_logs;
+            } else {
+                ++counts.generic_route_logs;
+            }
+        }
+
+        slong j = 0;
+        while (j < degree &&
+               ++index[static_cast<std::size_t>(j)] == digits.size()) {
+            index[static_cast<std::size_t>(j)] = 0;
+            ++j;
+        }
+        if (j == degree) {
+            break;
+        }
+    }
+    for (bool hit : seen) {
+        assert(hit);
+    }
+}
+
+std::vector<slong> all_digits(slong p) {
+    std::vector<slong> digits;
+    for (slong d = 0; d < p; ++d) {
+        digits.push_back(d);
+    }
+    return digits;
+}
+
+int test_quotient_log_norm_path_matches_powmod() {
+    struct Case {
+        std::vector<slong> coefficients;  // defining polynomial, low to high
+        slong p;
+        std::vector<slong> ells;
+    };
+    // Each prime below is inert or has residue degree > 1 in the field.
+    // ell | p - 1 takes the norm route; the other ell take the generic one.
+    const std::vector<Case> cases = {
+            {{-5, 0, 1}, 3, {2}},                     // Q(sqrt 5), q = 9
+            {{-5, 0, 1}, 7, {2, 3}},                  // q = 49
+            {{-5, 0, 1}, 13, {2, 3, 7}},              // q = 169
+            {{-2, 0, 0, 1}, 7, {2, 3, 19}},           // q = 343
+            {{1, 1, 1, 1, 1, 1, 1}, 2, {7}},          // Q(zeta_7), q = 8
+            {{1, 1, 1, 1, 1, 1, 1}, 13, {2, 3, 7}},   // q = 169
+            {{1, 1, 1, 1, 1, 1, 1}, 11, {2, 5, 7, 19}},  // q = 1331
+            {{1, 1, 1, 1, 1, 1, 1}, 3, {2, 7, 13}},   // q = 729
+    };
+
+    NormPathCounts counts;
+    for (const Case& c : cases) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < c.coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           c.coefficients[i]);
+        }
+        silex::NumberField field;
+        silex::Order order = order_by_polynomial(field, polynomial);
+        sflint::Fmpz p;
+        fmpz_set_si(p, c.p);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+        assert(primes.size() >= 1);
+        silex::ResidueField residue_field;
+        assert(residue_field.set_prime(*primes.at(0)));
+        assert(residue_field.degree() > 1);
+        for (slong ell : c.ells) {
+            check_norm_path_against_reference(residue_field, ell,
+                                              all_digits(c.p), counts);
+        }
+    }
+
+    // A multiword characteristic: p = 2^89 - 1 = 3 mod 4 is inert in
+    // Q(i), and ell = 3 divides p - 1, so the norm route falls back from
+    // word arithmetic to fmpz arithmetic.  (Not ell = 2: every element of
+    // F_p is a square in F_(p^2), so set_ell's scan for a non-square would
+    // pass all p constants first.)
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+        silex::NumberField field;
+        silex::Order order = order_by_polynomial(field, polynomial);
+        sflint::Fmpz p;
+        fmpz_one(p.raw());
+        fmpz_mul_2exp(p.raw(), p.raw(), 89);
+        fmpz_sub_ui(p.raw(), p.raw(), 1);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+        assert(primes.size() == 1);
+        silex::ResidueField residue_field;
+        assert(residue_field.set_prime(*primes.at(0)));
+        assert(residue_field.degree() == 2);
+        const std::vector<slong> digits = {0, 1, 2, 3, 5, 7, 11, 1000003};
+        check_norm_path_against_reference(residue_field, 3, digits, counts);
+    }
+
+    assert(counts.norm_route_logs > 0);
+    assert(counts.generic_route_logs > 0);
+    return 0;
+}
+
 int main() {
     assert(test_degree_one() == 0);
     assert(test_field_element_keeps_parent_alive() == 0);
@@ -1309,6 +1494,7 @@ int main() {
     assert(test_multiplicative_degree_one() == 0);
     assert(test_multiplicative_quadratic() == 0);
     assert(test_quotient_logs_mod_three() == 0);
+    assert(test_quotient_log_norm_path_matches_powmod() == 0);
     assert(test_generic_nonpower_basis_set_element() == 0);
     assert(test_set_element_homomorphism_on_index_maximal_order() == 0);
     assert(test_set_factored_element_matches_factorwise_product() == 0);

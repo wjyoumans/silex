@@ -1025,6 +1025,55 @@ bool ResidueFieldQuotientLog::apply(
         }
     }
 
+    // Residue degree f > 1 with ell | p - 1: take the log through the norm
+    // to F_p.  Let q = p^f and N : F_q^* -> F_p^* the field norm.  Its
+    // Galois conjugates are x^(p^i), 0 <= i < f, so
+    // N(x) = x^(1 + p + ... + p^(f-1)) = x^((q - 1)/(p - 1)), and since
+    // ell | p - 1 the exponents multiply exactly:
+    //     N(x)^((p - 1)/ell) = x^((q - 1)/ell).
+    // The right side is the image the generic loop below computes, so the
+    // returned i in [0, ell) with zeta^i equal to it is the same.  zeta,
+    // the stored quotient generator, has order ell, and the ell-th roots of
+    // unity of F_q all lie in F_p^* (cyclic of order divisible by ell), so
+    // zeta's reduced representative is a constant.  For the monic
+    // irreducible modulus m with roots theta^(p^i) and x = a(theta),
+    // N(x) = prod_i a(theta^(p^i)) = Res(m, a) (Cohen, GTM 138,
+    // Proposition 4.3.4, with d = 1; the proof holds over any field).
+    // This replaces the powmod in F_q by one resultant over F_p and a
+    // powmod in F_p, and then reuses the degree-one walk.
+    if (parent_.degree() > 1 &&
+        fmpz_mod_poly_degree(quotient_generator_.rep_.raw(),
+                             parent_.ctx_.raw()) == 0) {
+        flint::Fmpz p_minus_one;
+        fmpz_sub_ui(p_minus_one.raw(), parent_.p_.raw(), 1);
+        if (fmpz_divisible(p_minus_one.raw(), ell_.raw()) != 0) {
+            flint::Fmpz norm_cofactor;
+            flint::Fmpz norm;
+            flint::Fmpz quotient_generator;
+            fmpz_divexact(norm_cofactor.raw(), p_minus_one.raw(),
+                          ell_.raw());
+            fmpz_mod_poly_resultant(norm.raw(), parent_.modulus_.raw(),
+                                    element.rep_.raw(), parent_.ctx_.raw());
+            fmpz_mod_poly_get_coeff_fmpz(quotient_generator.raw(),
+                                         quotient_generator_.rep_.raw(), 0,
+                                         parent_.ctx_.raw());
+            if (quotient_log_mod_prime_apply_ui(
+                        out, flint::FmpzConstRef(norm),
+                        flint::FmpzConstRef(norm_cofactor),
+                        flint::FmpzConstRef(quotient_generator),
+                        flint::FmpzConstRef(parent_.p_),
+                        flint::FmpzConstRef(ell_))) {
+                return true;
+            }
+            return detail::quotient_log_mod_prime_apply(
+                    out, flint::FmpzConstRef(norm),
+                    flint::FmpzConstRef(norm_cofactor),
+                    flint::FmpzConstRef(quotient_generator),
+                    flint::FmpzConstRef(parent_.p_),
+                    flint::FmpzConstRef(ell_));
+        }
+    }
+
     ResidueFieldElement image(parent_);
     ResidueFieldElement current(parent_);
     flint::Fmpz i;
