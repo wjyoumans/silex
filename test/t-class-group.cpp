@@ -5411,13 +5411,13 @@ int test_factor_base_size_limit_fails_closed() {
 // factor_base_size_limit_exceeded.  The relation search of a field of
 // degree at least 2 builds its base on a fresh candidate context with no
 // transaction attached, so the run's transaction is passed to the size
-// check.  Q(sqrt(p)), p = 10^140 + 1399 (a prime, 3 mod 4): the GRH base has
+// check.  Q(sqrt(p)), p = 10^130 + 1771 (a prime, 3 mod 4): the GRH base has
 // more than 2^14 generators.
 int test_grh_relation_search_size_limit_reason() {
     sflint::Fmpz p;
     sflint::fmpz_set_ui(sflint::FmpzRef(p), 10);
-    sflint::fmpz_pow_ui(sflint::FmpzRef(p), sflint::FmpzConstRef(p), 140);
-    sflint::fmpz_add_ui(sflint::FmpzRef(p), sflint::FmpzConstRef(p), 1399);
+    sflint::fmpz_pow_ui(sflint::FmpzRef(p), sflint::FmpzConstRef(p), 130);
+    sflint::fmpz_add_ui(sflint::FmpzRef(p), sflint::FmpzConstRef(p), 1771);
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
     sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
