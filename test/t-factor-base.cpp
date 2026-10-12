@@ -555,6 +555,45 @@ int test_norm_bounded_build_with_decomposition_cache() {
                             kept, sflint::FmpzConstRef(bound), other_cache));
     assert(kept.equal(copy));
 
+    // The order check runs before the prime loop: a cache bound to another
+    // order fails even though it holds no decomposition to read.
+    {
+        silex::detail::PrimeDecompositionCache bound_only;
+        bound_only.order = quadratic_order;
+        silex::FactorBase target(cubic_maximal);
+        assert(!silex::detail::FactorBaseBlockAccess::
+                        build_prime_ideal_norm_bounded_cached(
+                                target, sflint::FmpzConstRef(bound),
+                                bound_only));
+        assert(bound_only.decompositions.empty());
+    }
+    // The first build over an empty cache stores the order.
+    {
+        silex::detail::PrimeDecompositionCache first;
+        assert(!first.order.is_defined());
+        silex::FactorBase target(cubic_maximal);
+        assert(silex::detail::FactorBaseBlockAccess::
+                       build_prime_ideal_norm_bounded_cached(
+                               target, sflint::FmpzConstRef(bound), first));
+        assert(first.order.is_defined());
+    }
+
+    // The reused LLL probe base: norm-ordering the norm-bounded base is
+    // exactly build_lll_relation_base_impl(bound, true).
+    {
+        silex::FactorBase ordered(cubic_maximal);
+        silex::FactorBase incomplete(cubic_maximal);
+        assert(ordered.build_prime_ideal_norm_bounded(
+                sflint::FmpzConstRef(bound)));
+        assert(silex::detail::FactorBaseBlockAccess::
+                       order_lll_relation_base_by_norm(ordered));
+        assert(silex::detail::FactorBaseBlockAccess::
+                       build_lll_relation_base_incomplete_for_testing(
+                               incomplete, sflint::FmpzConstRef(bound)));
+        assert(ordered.equal(incomplete));
+        assert(incomplete.equal(ordered));
+    }
+
     return 0;
 }
 

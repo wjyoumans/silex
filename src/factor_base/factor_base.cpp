@@ -1506,6 +1506,12 @@ bool FactorBase::build_lll_relation_base_impl(
             *this);
 }
 
+bool detail::FactorBaseBlockAccess::
+        build_lll_relation_base_incomplete_for_testing(
+                FactorBase& base, flint::FmpzConstRef bound) noexcept {
+    return base.build_lll_relation_base_impl(bound, true);
+}
+
 bool detail::FactorBaseBlockAccess::append_prime_for_testing(
         FactorBase& base,
         const PrimeIdeal& prime) noexcept {

@@ -39,7 +39,12 @@ public:
     // PrimeDecompositionCache).  The cache must come from builds over base's parent order
     // (a cached decomposition of another order fails the build).  On
     // failure base is unchanged; the cache keeps every decomposition it
-    // holds and may have gained some.  `diagnostics` only feeds profile
+    // holds and may have gained some.  The order check runs before the
+    // prime loop: a cache that already names another order fails even when
+    // no cached decomposition would be read.  The first build over an empty
+    // cache stores the parent order in it before anything can fail, so a
+    // failed first build still binds the cache to that order.  Use one cache
+    // per order (the class-unit transaction does).  `diagnostics` only feeds profile
     // scopes; it does not change the build.
     static bool build_prime_ideal_norm_bounded_cached(
             FactorBase& base,
@@ -67,6 +72,10 @@ public:
     // build_lll_relation_base_impl(bound, true) builds.  Fails, possibly
     // leaving base unchanged, if a norm cannot be computed or a copy fails.
     static bool order_lll_relation_base_by_norm(FactorBase& base) noexcept;
+    // Test hook: base.build_lll_relation_base_impl(bound, true), the
+    // incomplete-base LLL relation base.  For tests only.
+    static bool build_lll_relation_base_incomplete_for_testing(
+            FactorBase& base, flint::FmpzConstRef bound) noexcept;
     // Test hook: FactorBase::append_prime, which the builders call.  Fails,
     // leaving base unchanged, if base already holds `prime`.  For tests only.
     static bool append_prime_for_testing(FactorBase& base,
