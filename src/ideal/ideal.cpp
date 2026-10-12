@@ -1992,8 +1992,11 @@ bool FractionalIdeal::set_integral_den(const Ideal& numerator,
 
     // `numerator` is an Ideal holding an HNF, so its lattice I is an ideal:
     // Ideal::set_hnf tests closure, the other routes that store an HNF build
-    // an ideal by construction, and only the test hook
-    // IdealAccess::set_hnf_direct stores an unchecked matrix.  Dividing the
+    // an ideal by construction (the private Ideal::set_hnf_direct is reached
+    // only from those routes: copy, the unit ideal, the product fast path,
+    // aO + bO, and an integral ideal times an element), and outside the
+    // construction routes only the test hook IdealAccess::set_hnf_direct
+    // stores an unchecked matrix.  Dividing the
     // content g out keeps an ideal: I = gJ as lattices, and for x in J and w
     // in O, g(wx) = w(gx) lies in I, so wx lies in J.  The hnf_is_ideal
     // product test of set_hnf is therefore skipped.
