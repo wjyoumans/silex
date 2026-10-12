@@ -18,6 +18,10 @@ namespace silex {
 
 class ResidueFieldElement;
 
+namespace detail {
+class FactoredElementAccess;
+}  // namespace detail
+
 enum class FactoredRootStrategy {
     automatic,
     reduced,
@@ -99,6 +103,7 @@ private:
     std::shared_ptr<FactorList> value_;
 
     friend class ResidueFieldElement;
+    friend class detail::FactoredElementAccess;
 };
 
 inline void swap(FactoredElement& left, FactoredElement& right) noexcept {

@@ -537,6 +537,24 @@ void check_repeated_factor_logs() noexcept {
     assert(cubic_value.push(c, 2));
     check_factored_log_of(cubic, cubic_value, 2);
 
+    // Values whose factors are copies made by the factored operations (in
+    // place and not, from a shared list), mixed with separately pushed equal
+    // factors, merge the same way.
+    silex::FactoredElement cubic_power(cubic);
+    assert(cubic_power.pow_si(cubic_value, 2));
+    silex::FactoredElement cubic_mixed(cubic);
+    assert(cubic_mixed.set(cubic_power));
+    assert(cubic_mixed.multiply(cubic_mixed, cubic_value));
+    assert(cubic_mixed.push(same_a, -7));
+    assert(cubic_mixed.multiply(cubic_mixed, cubic_mixed));
+    check_factored_log_of(cubic, cubic_mixed, 2);
+    silex::FactoredElement cubic_inverse(cubic);
+    assert(cubic_inverse.invert(cubic_value));
+    silex::FactoredElement cubic_ratio(cubic);
+    assert(cubic_ratio.divide(cubic_power, cubic_inverse));
+    assert(cubic_ratio.push(a, 2));
+    check_factored_log_of(cubic, cubic_ratio, 2);
+
     // Hundreds of entries over three distinct factors, as unit candidates
     // built from relation products have.
     silex::FactoredElement long_value(cubic);

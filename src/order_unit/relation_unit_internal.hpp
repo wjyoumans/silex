@@ -111,6 +111,9 @@ struct FactoredLogMemo {
     std::vector<Element> factors;
     // factor_screen_hash of each factor.
     std::vector<std::uint64_t> factor_hashes;
+    // The FactoredElementAccess origin of the factored-element factor each
+    // factor was copied from, or 0 when it was stored from a bare Element.
+    std::vector<std::uint64_t> factor_origins;
     // Open-addressing table over `factors`: a power-of-two number of slots,
     // each a factor index or empty (SIZE_MAX), probed linearly from the
     // factor's hash; kept at most half full.
@@ -124,10 +127,19 @@ struct FactoredLogMemo {
 // copy when no stored factor equals it (Element::equal, which also requires
 // the same parent).  Fails when `element` is undefined or has no parent,
 // when copying it fails, or when growing the hash table would overflow; on
-// failure memo.factors and memo.factor_hashes are not modified.
+// failure memo.factors, memo.factor_hashes and memo.factor_origins are not
+// modified.
 bool factored_log_memo_factor_index(std::size_t& index,
                                     FactoredLogMemo& memo,
                                     const Element& element) noexcept;
+
+// The same, for factor `position` of `value` (below value.length()): its
+// cached screen hash routes the search, and a stored factor with its
+// nonzero origin is equal to it without a comparison.
+bool factored_log_memo_factor_index(std::size_t& index,
+                                    FactoredLogMemo& memo,
+                                    const FactoredElement& value,
+                                    std::size_t position) noexcept;
 
 // FactoredElement::logarithmic_embedding through `memo` (a direct call when
 // `memo` is null).  Same arguments, result, and failure as the direct call.

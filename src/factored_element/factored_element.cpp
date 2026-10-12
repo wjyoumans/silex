@@ -264,14 +264,58 @@ std::uint64_t factor_screen_hash(const Element& factor,
 
 namespace {
 
+std::atomic<std::uint64_t> next_factor_origin{1};
+
+std::uint64_t fresh_factor_origin() noexcept {
+    return next_factor_origin.fetch_add(1, std::memory_order_relaxed);
+}
+
+// The origin and screen hash of a stored factor (see
+// detail::FactoredElementAccess).  A hash of 0 means not yet computed; a
+// factor whose screen hash is 0 is simply hashed again each time.
+struct FactorTag {
+    std::uint64_t origin = 0;
+    // Filled lazily by const readers, which may run on several threads
+    // sharing one list; every writer stores the same value.
+    mutable std::atomic<std::uint64_t> hash{0};
+
+    FactorTag(std::uint64_t origin_value, std::uint64_t hash_value) noexcept
+        : origin(origin_value), hash(hash_value) {}
+    FactorTag(const FactorTag& other) noexcept
+        : origin(other.origin),
+          hash(other.hash.load(std::memory_order_relaxed)) {}
+    FactorTag& operator=(const FactorTag& other) noexcept {
+        origin = other.origin;
+        hash.store(other.hash.load(std::memory_order_relaxed),
+                   std::memory_order_relaxed);
+        return *this;
+    }
+    ~FactorTag() = default;
+};
+
+std::uint64_t cached_factor_hash(const FactorTag& tag,
+                                 const Element& factor) noexcept {
+    std::uint64_t hash = tag.hash.load(std::memory_order_relaxed);
+    if (hash == 0) {
+        hash = detail::factor_screen_hash(factor,
+                                          factor.parent()->raw_flint_field());
+        tag.hash.store(hash, std::memory_order_relaxed);
+    }
+    return hash;
+}
+
 // Maps each entry to the index of its factor among the distinct factors of
 // `entries`, numbered in order of first occurrence; `first[d]` is the first
-// entry whose factor is distinct factor d.  Factors are compared with
-// Element::equal, the comparison the embedding log cache uses.
+// entry whose factor is distinct factor d.  `hashes` and `origins` hold the
+// screen hash and origin of each entry.  Factors are compared with
+// Element::equal, the comparison the embedding log cache uses; an equal
+// origin confirms equality without the comparison.
 bool distinct_factor_indices(std::vector<std::size_t>& index,
                              std::vector<std::size_t>& first,
                              FactorSpan<Element> entries,
-                             const NumberField& parent) noexcept {
+                             const std::vector<std::uint64_t>& hashes,
+                             const std::vector<std::uint64_t>& origins)
+        noexcept {
     const std::size_t count = entries.size();
     std::size_t buckets = 1;
     while (buckets < 2 * count) {
@@ -282,13 +326,10 @@ bool distinct_factor_indices(std::vector<std::size_t>& index,
     }
     constexpr std::size_t empty = std::numeric_limits<std::size_t>::max();
     std::vector<std::size_t> table(buckets, empty);
-    std::vector<std::uint64_t> hashes;
     index.assign(count, 0);
     first.clear();
-    const nf_struct* field = parent.raw_flint_field();
     for (std::size_t i = 0; i < count; ++i) {
-        const std::uint64_t hash =
-                detail::factor_screen_hash(entries[i].factor, field);
+        const std::uint64_t hash = hashes[i];
         std::size_t slot = static_cast<std::size_t>(hash) & (buckets - 1);
         for (;;) {
             const std::size_t distinct = table[slot];
@@ -296,11 +337,12 @@ bool distinct_factor_indices(std::vector<std::size_t>& index,
                 table[slot] = first.size();
                 index[i] = first.size();
                 first.push_back(i);
-                hashes.push_back(hash);
                 break;
             }
-            if (hashes[distinct] == hash &&
-                entries[first[distinct]].factor.equal(entries[i].factor)) {
+            const std::size_t j = first[distinct];
+            if (hashes[j] == hash &&
+                (origins[j] == origins[i] ||
+                 entries[j].factor.equal(entries[i].factor))) {
                 index[i] = distinct;
                 break;
             }
@@ -507,6 +549,8 @@ bool reduced_leftover_norm_source(flint::Fmpq& norm,
 // operations below push only nonzero ones.
 struct FactoredElement::FactorList {
     std::vector<FactorPower<Element>> entries;
+    // The tag of each entry, in the same order.
+    std::vector<FactorTag> tags;
 };
 
 FactoredElement::FactoredElement(const NumberField& parent) noexcept {
@@ -561,6 +605,7 @@ FactoredElement::FactorList* FactoredElement::unshared_factors() noexcept {
     if (!copy_entries(copy->entries, stored_factors(), false)) {
         return nullptr;
     }
+    copy->tags = value_->tags;
     value_ = std::move(copy);
     return value_.get();
 }
@@ -572,6 +617,7 @@ void FactoredElement::reserve_factors(std::size_t capacity) noexcept {
     FactorList* list = unshared_factors();
     if (list != nullptr) {
         list->entries.reserve(capacity);
+        list->tags.reserve(capacity);
     }
 }
 
@@ -588,7 +634,19 @@ bool FactoredElement::define(const NumberField& parent) noexcept {
 bool FactoredElement::push_copy(
         const Element& factor,
         slong exponent) noexcept {
-    if (!is_defined() || !factor.has_parent(parent_) || factor.equal_si(0)) {
+    return detail::FactoredElementAccess::push_tagged(*this, factor,
+                                                      exponent, 0, 0);
+}
+
+namespace detail {
+
+bool FactoredElementAccess::push_tagged(FactoredElement& out,
+                                        const Element& factor,
+                                        slong exponent,
+                                        std::uint64_t origin,
+                                        std::uint64_t hash) noexcept {
+    if (!out.is_defined() || !factor.has_parent(out.parent_) ||
+        factor.equal_si(0)) {
         return false;
     }
     if (exponent == 0) {
@@ -600,13 +658,44 @@ bool FactoredElement::push_copy(
     if (!copy_factor(copy, factor)) {
         return false;
     }
-    FactorList* list = unshared_factors();
+    FactoredElement::FactorList* list = out.unshared_factors();
     if (list == nullptr) {
         return false;
     }
     list->entries.push_back(FactorPower<Element>{std::move(copy), exponent});
+    list->tags.emplace_back(origin != 0 ? origin : fresh_factor_origin(),
+                            hash);
     return true;
 }
+
+bool FactoredElementAccess::push_factor(FactoredElement& out,
+                                        const FactoredElement& source,
+                                        std::size_t index,
+                                        slong exponent) noexcept {
+    const auto entries = source.stored_factors();
+    if (index >= entries.size()) {
+        return false;
+    }
+    // Read the tag before the push: `source` may be `out`.
+    const FactorTag& tag = source.value_->tags[index];
+    return push_tagged(out, entries[index].factor, exponent, tag.origin,
+                       tag.hash.load(std::memory_order_relaxed));
+}
+
+std::uint64_t FactoredElementAccess::factor_hash(
+        const FactoredElement& value,
+        std::size_t index) noexcept {
+    const FactoredElement::FactorList& list = *value.value_;
+    return cached_factor_hash(list.tags[index], list.entries[index].factor);
+}
+
+std::uint64_t FactoredElementAccess::factor_origin(
+        const FactoredElement& value,
+        std::size_t index) noexcept {
+    return value.value_->tags[index].origin;
+}
+
+}  // namespace detail
 
 bool FactoredElement::set(const FactoredElement& other) noexcept {
     if (this == &other) {
@@ -684,9 +773,23 @@ void FactoredElement::normalize() noexcept {
     }
     FactorList* list = unshared_factors();
     if (list != nullptr) {
-        std::erase_if(list->entries, [](const FactorPower<Element>& entry) {
-            return entry.exponent == 0;
-        });
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < list->entries.size(); ++i) {
+            if (list->entries[i].exponent == 0) {
+                continue;
+            }
+            if (kept != i) {
+                list->entries[kept] = std::move(list->entries[i]);
+                list->tags[kept] = list->tags[i];
+            }
+            ++kept;
+        }
+        list->entries.erase(list->entries.begin() +
+                                    static_cast<std::ptrdiff_t>(kept),
+                            list->entries.end());
+        list->tags.erase(list->tags.begin() +
+                                 static_cast<std::ptrdiff_t>(kept),
+                         list->tags.end());
     }
 }
 
@@ -715,6 +818,8 @@ bool FactoredElement::multiply(
         if (!copy_entries(appended, right.stored_factors(), false)) {
             return false;
         }
+        // Copied before unshared_factors(): `right` may be this value.
+        const std::vector<FactorTag> appended_tags = right.value_->tags;
         FactorList* list = unshared_factors();
         if (list == nullptr) {
             return false;
@@ -723,6 +828,8 @@ bool FactoredElement::multiply(
         for (auto& entry : appended) {
             list->entries.push_back(std::move(entry));
         }
+        list->tags.insert(list->tags.end(), appended_tags.begin(),
+                          appended_tags.end());
         normalize();
         return true;
     }
@@ -730,13 +837,15 @@ bool FactoredElement::multiply(
     FactoredElement result(parent_);
     result.reserve_factors(left.stored_factors().size() +
                            right.stored_factors().size());
-    for (const auto& entry : left.stored_factors()) {
-        if (!result.push_copy(entry.factor, entry.exponent)) {
+    const auto left_entries = left.stored_factors();
+    for (std::size_t k = 0; k < left_entries.size(); ++k) {
+        if (!detail::FactoredElementAccess::push_factor(result, left, k, left_entries[k].exponent)) {
             return false;
         }
     }
-    for (const auto& entry : right.stored_factors()) {
-        if (!result.push_copy(entry.factor, entry.exponent)) {
+    const auto right_entries = right.stored_factors();
+    for (std::size_t k = 0; k < right_entries.size(); ++k) {
+        if (!detail::FactoredElementAccess::push_factor(result, right, k, right_entries[k].exponent)) {
             return false;
         }
     }
@@ -767,6 +876,8 @@ bool FactoredElement::divide(
         if (!copy_entries(appended, right.stored_factors(), true)) {
             return false;
         }
+        // Copied before unshared_factors(): `right` may be this value.
+        const std::vector<FactorTag> appended_tags = right.value_->tags;
         FactorList* list = unshared_factors();
         if (list == nullptr) {
             return false;
@@ -775,6 +886,8 @@ bool FactoredElement::divide(
         for (auto& entry : appended) {
             list->entries.push_back(std::move(entry));
         }
+        list->tags.insert(list->tags.end(), appended_tags.begin(),
+                          appended_tags.end());
         normalize();
         return true;
     }
@@ -782,15 +895,17 @@ bool FactoredElement::divide(
     FactoredElement result(parent_);
     result.reserve_factors(left.stored_factors().size() +
                            right.stored_factors().size());
-    for (const auto& entry : left.stored_factors()) {
-        if (!result.push_copy(entry.factor, entry.exponent)) {
+    const auto left_entries = left.stored_factors();
+    for (std::size_t k = 0; k < left_entries.size(); ++k) {
+        if (!detail::FactoredElementAccess::push_factor(result, left, k, left_entries[k].exponent)) {
             return false;
         }
     }
-    for (const auto& entry : right.stored_factors()) {
+    const auto right_entries = right.stored_factors();
+    for (std::size_t k = 0; k < right_entries.size(); ++k) {
         slong negated = 0;
-        if (!negate_slong(negated, entry.exponent) ||
-            !result.push_copy(entry.factor, negated)) {
+        if (!negate_slong(negated, right_entries[k].exponent) ||
+            !detail::FactoredElementAccess::push_factor(result, right, k, negated)) {
             return false;
         }
     }
@@ -807,10 +922,11 @@ bool FactoredElement::invert(const FactoredElement& input) noexcept {
 
     FactoredElement result(parent_);
     result.reserve_factors(input.stored_factors().size());
-    for (const auto& entry : input.stored_factors()) {
+    const auto entries = input.stored_factors();
+    for (std::size_t k = 0; k < entries.size(); ++k) {
         slong negated = 0;
-        if (!negate_slong(negated, entry.exponent) ||
-            !result.push_copy(entry.factor, negated)) {
+        if (!negate_slong(negated, entries[k].exponent) ||
+            !detail::FactoredElementAccess::push_factor(result, input, k, negated)) {
             return false;
         }
     }
@@ -829,12 +945,13 @@ bool FactoredElement::pow_si(
 
     FactoredElement result(parent_);
     result.reserve_factors(input.stored_factors().size());
-    for (const auto& entry : input.stored_factors()) {
+    const auto entries = input.stored_factors();
+    for (std::size_t k = 0; k < entries.size(); ++k) {
         slong scaled = 0;
-        if (!multiply_slong(scaled, entry.exponent, exponent)) {
+        if (!multiply_slong(scaled, entries[k].exponent, exponent)) {
             return false;
         }
-        if (scaled != 0 && !result.push_copy(entry.factor, scaled)) {
+        if (scaled != 0 && !detail::FactoredElementAccess::push_factor(result, input, k, scaled)) {
             return false;
         }
     }
@@ -858,13 +975,14 @@ bool FactoredElement::root_si(
 
     FactoredElement result(parent_);
     result.reserve_factors(input.stored_factors().size());
-    for (const auto& entry : input.stored_factors()) {
-        if (entry.exponent % exponent != 0) {
+    const auto entries = input.stored_factors();
+    for (std::size_t k = 0; k < entries.size(); ++k) {
+        if (entries[k].exponent % exponent != 0) {
             return false;
         }
 
-        const slong divided = entry.exponent / exponent;
-        if (divided != 0 && !result.push_copy(entry.factor, divided)) {
+        const slong divided = entries[k].exponent / exponent;
+        if (divided != 0 && !detail::FactoredElementAccess::push_factor(result, input, k, divided)) {
             return false;
         }
     }
@@ -891,14 +1009,15 @@ bool FactoredElement::is_square(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.square_split");
-        for (const auto& entry : stored_factors()) {
-            const slong quotient = floor_half_slong(entry.exponent);
+        const auto entries = stored_factors();
+        for (std::size_t k = 0; k < entries.size(); ++k) {
+            const slong quotient = floor_half_slong(entries[k].exponent);
             if (quotient != 0 &&
-                !structural.push_copy(entry.factor, quotient)) {
+                !detail::FactoredElementAccess::push_factor(structural, *this, k, quotient)) {
                 return false;
             }
-            if (is_odd_slong(entry.exponent) &&
-                !leftover.push_copy(entry.factor, 1)) {
+            if (is_odd_slong(entries[k].exponent) &&
+                !detail::FactoredElementAccess::push_factor(leftover, *this, k, 1)) {
                 return false;
             }
         }
@@ -1054,17 +1173,18 @@ bool FactoredElement::is_power_si(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.reduced_split");
-        for (const auto& entry : stored_factors()) {
+        const auto entries = stored_factors();
+        for (std::size_t k = 0; k < entries.size(); ++k) {
             slong quotient = 0;
             slong remainder = 0;
             floor_divrem_positive_slong(
-                    quotient, remainder, entry.exponent, exponent);
+                    quotient, remainder, entries[k].exponent, exponent);
             if (quotient != 0 &&
-                !structural.push_copy(entry.factor, quotient)) {
+                !detail::FactoredElementAccess::push_factor(structural, *this, k, quotient)) {
                 return false;
             }
             if (remainder != 0 &&
-                !leftover.push_copy(entry.factor, remainder)) {
+                !detail::FactoredElementAccess::push_factor(leftover, *this, k, remainder)) {
                 return false;
             }
         }
@@ -1206,10 +1326,17 @@ bool FactoredElement::logarithmic_embedding(
     // Arb ball operation, so the sum stays a rigorous enclosure; it is not
     // bit-identical to an entry-by-entry sum (fewer roundings, a different
     // working precision).
+    std::vector<std::uint64_t> hashes(entries.size());
+    std::vector<std::uint64_t> origins(entries.size());
+    for (std::size_t k = 0; k < entries.size(); ++k) {
+        const FactorTag& tag = value_->tags[k];
+        hashes[k] = cached_factor_hash(tag, entries[k].factor);
+        origins[k] = tag.origin;
+    }
     std::vector<std::size_t> distinct_index;
     std::vector<std::size_t> distinct_first;
     if (!distinct_factor_indices(distinct_index, distinct_first, entries,
-                                 parent_)) {
+                                 hashes, origins)) {
         return false;
     }
     const std::size_t distinct_count = distinct_first.size();

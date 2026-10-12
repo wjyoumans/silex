@@ -515,10 +515,16 @@ bool factored_log_memo_matches(const FactoredLogMemo& memo,
         return false;
     }
     for (std::size_t i = 0; i < entries.size(); ++i) {
-        // Element::equal also requires the same parent field.
-        if (entries[i].exponent != entry.exponents[i] ||
-            !entries[i].factor.equal(
-                    memo.factors[entry.factor_indices[i]])) {
+        if (entries[i].exponent != entry.exponents[i]) {
+            return false;
+        }
+        // A stored factor copied from a factor of the same origin is equal
+        // to it; otherwise compare (Element::equal also requires the same
+        // parent field).
+        const std::size_t stored = entry.factor_indices[i];
+        if (memo.factor_origins[stored] !=
+                    FactoredElementAccess::factor_origin(value, i) &&
+            !entries[i].factor.equal(memo.factors[stored])) {
             return false;
         }
     }
@@ -542,11 +548,13 @@ void factored_log_memo_table_insert(FactoredLogMemo& memo,
     memo.factor_table[slot] = index;
 }
 
-}  // namespace
-
-bool factored_log_memo_factor_index(std::size_t& index,
-                                    FactoredLogMemo& memo,
-                                    const Element& element) noexcept {
+// factored_log_memo_factor_index for `element` with screen hash `hash` and
+// origin `origin` (0: none, matching no stored origin).
+bool factored_log_memo_factor_index_hashed(std::size_t& index,
+                                           FactoredLogMemo& memo,
+                                           const Element& element,
+                                           std::uint64_t hash,
+                                           std::uint64_t origin) noexcept {
     const NumberField* field = element.parent();
     if (!element.is_defined() || field == nullptr) {
         return false;
@@ -554,8 +562,6 @@ bool factored_log_memo_factor_index(std::size_t& index,
     if (memo.factor_table.empty()) {
         memo.factor_table.assign(16, kFactoredLogMemoEmptySlot);
     }
-    const std::uint64_t hash =
-            factor_screen_hash(element, field->raw_flint_field());
     const std::size_t mask = memo.factor_table.size() - 1;
     std::size_t slot = static_cast<std::size_t>(hash) & mask;
     for (;;) {
@@ -564,7 +570,8 @@ bool factored_log_memo_factor_index(std::size_t& index,
             break;
         }
         if (memo.factor_hashes[stored] == hash &&
-            memo.factors[stored].equal(element)) {
+            ((origin != 0 && memo.factor_origins[stored] == origin) ||
+             memo.factors[stored].equal(element))) {
             index = stored;
             return true;
         }
@@ -583,6 +590,7 @@ bool factored_log_memo_factor_index(std::size_t& index,
     }
     memo.factors.push_back(std::move(copy));
     memo.factor_hashes.push_back(hash);
+    memo.factor_origins.push_back(origin);
     index = memo.factors.size() - 1;
     if (grow) {
         memo.factor_table.assign(2 * memo.factor_table.size(),
@@ -596,6 +604,34 @@ bool factored_log_memo_factor_index(std::size_t& index,
     return true;
 }
 
+}  // namespace
+
+bool factored_log_memo_factor_index(std::size_t& index,
+                                    FactoredLogMemo& memo,
+                                    const Element& element) noexcept {
+    const NumberField* field = element.parent();
+    if (!element.is_defined() || field == nullptr) {
+        return false;
+    }
+    return factored_log_memo_factor_index_hashed(
+            index, memo, element,
+            factor_screen_hash(element, field->raw_flint_field()), 0);
+}
+
+bool factored_log_memo_factor_index(std::size_t& index,
+                                    FactoredLogMemo& memo,
+                                    const FactoredElement& value,
+                                    std::size_t position) noexcept {
+    const auto entries = value.factors();
+    if (position >= entries.size()) {
+        return false;
+    }
+    return factored_log_memo_factor_index_hashed(
+            index, memo, entries[position].factor,
+            FactoredElementAccess::factor_hash(value, position),
+            FactoredElementAccess::factor_origin(value, position));
+}
+
 bool factored_log_memo_add_entry(FactoredLogMemoEntry*& out,
                                  FactoredLogMemo& memo,
                                  const FactoredElement& value,
@@ -606,13 +642,13 @@ bool factored_log_memo_add_entry(FactoredLogMemoEntry*& out,
     entry.fingerprint = fingerprint;
     entry.factor_indices.reserve(entries.size());
     entry.exponents.reserve(entries.size());
-    for (const auto& factor : entries) {
+    for (std::size_t k = 0; k < entries.size(); ++k) {
         std::size_t index = 0;
-        if (!factored_log_memo_factor_index(index, memo, factor.factor)) {
+        if (!factored_log_memo_factor_index(index, memo, value, k)) {
             return false;
         }
         entry.factor_indices.push_back(index);
-        entry.exponents.push_back(factor.exponent);
+        entry.exponents.push_back(entries[k].exponent);
     }
     memo.entries.push_back(std::move(entry));
     out = &memo.entries.back();
@@ -1574,8 +1610,13 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
                 }
                 generator_loaded[index] = true;
             }
-            for (const auto& entry : generators[index].factors()) {
-                flint::fmpz_set_si(flint::FmpzRef(scaled), entry.exponent);
+            // push_factor keeps each factor's origin and screen hash, so
+            // the log of the reduced value hashes and matches it cheaply.
+            const FactoredElement& generator = generators[index];
+            const auto generator_entries = generator.factors();
+            for (std::size_t k = 0; k < generator_entries.size(); ++k) {
+                flint::fmpz_set_si(flint::FmpzRef(scaled),
+                                   generator_entries[k].exponent);
                 flint::fmpz_mul(flint::FmpzRef(scaled),
                                 flint::FmpzConstRef(scaled),
                                 flint::FmpzConstRef(exponent));
@@ -1585,7 +1626,8 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
                 const slong factor_exponent =
                         flint::fmpz_get_si(flint::FmpzConstRef(scaled));
                 if (factor_exponent != 0 &&
-                    !value.push(entry.factor, factor_exponent)) {
+                    !FactoredElementAccess::push_factor(
+                            value, generator, k, factor_exponent)) {
                     return false;
                 }
             }

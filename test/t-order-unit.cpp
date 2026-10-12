@@ -1315,6 +1315,138 @@ int test_factored_log_memo_factor_lookup() {
     return 0;
 }
 
+// The factor tags of FactoredElement: every stored factor keeps the screen
+// hash of its coefficients, and copies made by the factored operations keep
+// the origin of the factor they copy, so equal origins mean equal factors.
+// Separately pushed equal factors get different origins and are still
+// merged by value, in the log memo as in the direct log.
+int test_factored_element_factor_tags() {
+    using Access = silex::detail::FactoredElementAccess;
+    silex::NumberField cubic = cubic_field(-3, 1);
+    const nf_struct* field = cubic.raw_flint_field();
+    silex::Element theta(cubic);
+    assert(theta.gen());
+    silex::Element a(cubic);
+    silex::Element b(cubic);
+    silex::Element same_a(cubic);
+    assert(a.add_si(theta, 1));
+    assert(b.add_si(theta, -2));
+    assert(same_a.set(a));
+
+    silex::FactoredElement x(cubic);
+    assert(x.push(a, 2));
+    assert(x.push(b, -1));
+    assert(x.push(same_a, 3));
+    const auto check_hashes = [field](const silex::FactoredElement& value) {
+        const auto entries = value.factors();
+        for (std::size_t k = 0; k < entries.size(); ++k) {
+            assert(Access::factor_hash(value, k) ==
+                   silex::detail::factor_screen_hash(entries[k].factor,
+                                                     field));
+            assert(Access::factor_origin(value, k) != 0);
+        }
+    };
+    // Origins of `value` are those of `source` at `positions`, in order.
+    const auto check_origins = [](const silex::FactoredElement& value,
+                                  const silex::FactoredElement& source,
+                                  std::vector<std::size_t> positions) {
+        assert(static_cast<std::size_t>(value.length()) == positions.size());
+        for (std::size_t k = 0; k < positions.size(); ++k) {
+            assert(Access::factor_origin(value, k) ==
+                   Access::factor_origin(source, positions[k]));
+            assert(value.factors()[k].factor.equal(
+                    source.factors()[positions[k]].factor));
+        }
+    };
+    check_hashes(x);
+    const std::uint64_t origin_a = Access::factor_origin(x, 0);
+    assert(Access::factor_origin(x, 1) != origin_a);
+    assert(Access::factor_origin(x, 2) != origin_a);
+
+    silex::FactoredElement power(cubic);
+    assert(power.pow_si(x, 2));
+    check_hashes(power);
+    check_origins(power, x, {0, 1, 2});
+    silex::FactoredElement root(cubic);
+    assert(root.root_si(power, 2));
+    check_origins(root, x, {0, 1, 2});
+    silex::FactoredElement inverse(cubic);
+    assert(inverse.invert(x));
+    check_origins(inverse, x, {0, 1, 2});
+    silex::FactoredElement product(cubic);
+    assert(product.multiply(x, inverse));
+    check_origins(product, x, {0, 1, 2, 0, 1, 2});
+    silex::FactoredElement quotient(cubic);
+    assert(quotient.divide(inverse, x));
+    check_origins(quotient, x, {0, 1, 2, 0, 1, 2});
+
+    // In place, with the list shared with x and the operand aliased.
+    silex::FactoredElement doubled(cubic);
+    assert(doubled.set(x));
+    assert(doubled.multiply(doubled, doubled));
+    check_hashes(doubled);
+    check_origins(doubled, x, {0, 1, 2, 0, 1, 2});
+    check_origins(x, x, {0, 1, 2});
+    assert(doubled.divide(doubled, x));
+    check_origins(doubled, x, {0, 1, 2, 0, 1, 2, 0, 1, 2});
+
+    silex::FactoredElement pushed(cubic);
+    assert(Access::push_factor(pushed, x, 1, 5));
+    assert(Access::push_factor(pushed, x, 0, 0));
+    assert(!Access::push_factor(pushed, x, 3, 1));
+    assert(Access::push_factor(pushed, pushed, 0, -1));
+    check_origins(pushed, x, {1, 1});
+    assert(pushed.factors()[0].exponent == 5 &&
+           pushed.factors()[1].exponent == -1);
+    assert(pushed.push(b, 1));
+    assert(Access::factor_origin(pushed, 2) != Access::factor_origin(x, 1));
+
+    // The memo stores a factor once: by origin for copies of x's factors,
+    // by value for same_a, pushed apart from a.
+    silex::detail::FactoredLogMemo memo;
+    std::size_t index = 0;
+    assert(silex::detail::factored_log_memo_factor_index(index, memo, x, 0));
+    assert(index == 0 && memo.factor_origins[0] == origin_a);
+    assert(silex::detail::factored_log_memo_factor_index(index, memo, x, 2));
+    assert(index == 0);
+    assert(silex::detail::factored_log_memo_factor_index(index, memo,
+                                                         power, 1));
+    assert(index == 1);
+    assert(!silex::detail::factored_log_memo_factor_index(index, memo, x, 3));
+    assert(silex::detail::factored_log_memo_factor_index(index, memo, b));
+    assert(index == 1 && memo.factors.size() == 2);
+
+    // Memoized logs of values with shared and separate origins are the
+    // direct ones, and the fresh-push copy of a value hits its entry.
+    silex::FactoredElement fresh(cubic);
+    for (const auto& entry : doubled.factors()) {
+        assert(fresh.push(entry.factor, entry.exponent));
+    }
+    silex::EmbeddingContext embeddings(cubic);
+    const slong places = 3;
+    const slong precision = 64;
+    const auto mode = silex::LogEmbeddingMode::product;
+    sflint::ArbVec warm(places);
+    assert(fresh.logarithmic_embedding(sflint::ArbVecRef(warm), embeddings,
+                                       mode, 4096));
+    silex::detail::FactoredLogMemo log_memo;
+    sflint::ArbVec memoized(places);
+    sflint::ArbVec direct(places);
+    for (const silex::FactoredElement* value :
+         {&x, &product, &doubled, &fresh, &doubled}) {
+        assert(silex::detail::memoized_factored_log_embedding(
+                sflint::ArbVecRef(memoized), &log_memo, *value, embeddings,
+                mode, precision));
+        assert(value->logarithmic_embedding(sflint::ArbVecRef(direct),
+                                            embeddings, mode, precision));
+        assert(arb_vecs_identical(memoized, direct));
+    }
+    assert(log_memo.entries.size() == 3);
+    assert(log_memo.factors.size() == 2);
+    assert(log_memo.hits == 2);
+    return 0;
+}
+
 // round_arb_approx_fmpz ports the reference approximate rounding.  Its width
 // check computes floor(lower) - ceil(upper), never positive, so it never
 // rejects: a wide ball rounds to div(ceil(upper) + floor(lower), 2).  The
@@ -12221,6 +12353,7 @@ int main() {
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_after_failed_factor_log();
     test_factored_log_memo_factor_lookup();
+    test_factored_element_factor_tags();
     test_round_arb_approx_width_check();
     test_degree_one_rank_zero_group();
     test_compute_real_quadratic_proven();
