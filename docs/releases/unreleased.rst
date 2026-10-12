@@ -133,6 +133,14 @@ Changed
   result is unchanged.  See ``Lat::lll_reduce`` in
   :doc:`../reference/algorithms_and_sources`.
 
+- Publishing a class-group presentation no longer recomputes the Smith form
+  (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when
+  that basis is equal to the one of the previous publish, as it is when new
+  relations leave the lattice unchanged; the Smith form and right transform
+  of that basis are reused.  Published outputs are unchanged on the tested
+  ``grh`` and ``proven`` corpus rows.  On a busy machine, the ``grh``
+  class/unit computation of the field defined by ``x^32 + 1`` took a median
+  1563 ms instead of 1614 ms over 11 alternating runs each.
 - The rounded-embedding LLL of the LLL relation search no longer pays
   FLINT's multiprecision reducedness pre-check on every call.  For at least
   two rows and entries of at most 250 bits it runs FLINT's double-precision
