@@ -849,6 +849,17 @@ Changed
   ``grh`` mode the computation takes about 13% less time (release build on
   a busy machine, five runs each).
 
+- ``PrimeIdeal::valuation`` on an ``Ideal`` with a known principal generator
+  ``a`` reuses the power of ``p`` in the ideal norm, which equals
+  ``|N(a)|``, instead of computing ``N(a)`` again for every prime.  Class-group
+  relation candidates in maximal orders that are not the equation order take
+  this route for every factor-base prime they are tested against.
+  Valuations are unchanged: instance JSON is identical on the 184 ``grh``
+  corpus rows and the 70 ``proven`` benchmark rows.  ``grh`` CPU time on
+  ``cyclotomic_real_q10_c11_deg10`` falls by about 9% (0.64 s to 0.58 s)
+  (release build, medians of 15 paired runs on a busy machine; the
+  controlled comparison is pending).
+
 Fixed
 -----
 
