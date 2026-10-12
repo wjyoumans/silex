@@ -1037,15 +1037,8 @@ static bool ideal_lattice_fill_rounded_embedding_cache(
 lat::detail::CertifiedLllRoute ideal_lattice_rounded_embedding_integer_lll(
         flint::FmpzMat& embedded,
         flint::FmpzMat& transform) noexcept {
-    const slong rows = flint::fmpz_mat_nrows(embedded);
-    if (flint::fmpz_mat_nrows(transform) != rows ||
-        flint::fmpz_mat_ncols(transform) != rows) {
-        transform = flint::FmpzMat(rows, rows);
-    }
-    flint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
-    flint::fmpz_mat_one(flint::FmpzMatRef(transform));
-    return lat::detail::certified_fmpz_lll(embedded.raw(), transform.raw(),
-                                           flint::FmpzLllConstRef(config));
+    const flint::FmpzLll config(0.99, 0.51, Z_BASIS, APPROX);
+    return ideal_lattice_certified_lll(embedded, transform, config);
 }
 
 // The reference 2.17.3 buch2.c:2461-2462 (Fincke_Pohst_ideal):
