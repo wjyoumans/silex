@@ -125,6 +125,18 @@ Changed
   combining them with the Chinese remainder theorem, instead of multiplying
   ideals.  Published results are unchanged.
 
+- The stable auxiliary-prime scan of the ``proven`` unit saturation proof
+  (proof rank two or more) builds each ``ell``-th-power character column by
+  evaluating the units at the degree-one roots of the defining polynomial
+  modulo ``q``, as the proof-selector scan already does, instead of
+  decomposing ``q`` into prime ideals and reducing into each residue field.
+  The roots are taken in the order ``decompose_prime`` lists its primes, and a
+  root whose direct evaluation declines falls back to the prime ideal over
+  it.  The two columns differ only by a nonzero scalar modulo ``ell``, so the
+  proof kernel is unchanged.  The direct evaluation also gains a word-size
+  route for word-size ``q``.  Published results are unchanged on the 65
+  ``proven`` corpus rows.
+
 - ``quadratic_fundamental_unit`` and the ``proven`` unit route now use the
   continued-fraction fundamental unit for every monic integral ``x^2+bx+c``
   with positive nonsquare discriminant, normalised as the existing quadratic

@@ -8051,6 +8051,171 @@ bool set_cyclotomic13_u2(silex::Element& out) noexcept {
     return out.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly));
 }
 
+// Appends `column` (rows x 1) to `matrix` (rows x n).
+sflint::FmpzMat append_proof_column_for_test(const sflint::FmpzMat& matrix,
+                                             const sflint::FmpzMat& column) {
+    const slong rows = sflint::fmpz_mat_nrows(matrix);
+    const slong cols = sflint::fmpz_mat_ncols(matrix);
+    sflint::FmpzMat out(rows, cols + 1);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            sflint::fmpz_set(sflint::fmpz_mat_entry(out, i, j),
+                             sflint::fmpz_mat_entry(matrix, i, j));
+        }
+        sflint::fmpz_set(sflint::fmpz_mat_entry(out, i, cols),
+                         sflint::fmpz_mat_entry(column, i, 0));
+    }
+    return out;
+}
+
+// The stable proof scan's columns at q (stable_proof_prime_columns) against
+// the residue-field route the scan used before, saturation_proof_prime_column
+// at each prime of decompose_prime(order, q, 1): one column per degree-one
+// prime, in the same order, each the direct root evaluation at that prime.
+// The direct route takes logarithms against the ell-th power of the least
+// primitive root mod q, the residue-field route against the first residue
+// k = 1, 2, ... with k^((q - 1) / ell) != 1, so a column is the
+// residue-field column times a unit modulo ell (equal for ell = 2), and the
+// proof kernel after every column, which drives the scan, is the same.
+// Q(zeta_13): q = 1 mod 13 splits completely, so every q below has 12 roots,
+// and the equation order takes the word-size root route, whose root order
+// the scan restores to decompose_prime's.
+int test_stable_proof_prime_columns_match_residue_field_route() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    const silex::Order* orders[] = {&equation, &maximal};
+    // (ell, q): q = 1 mod ell and q = 1 mod 13.  For ell = 13, q = 79 the
+    // least primitive root is 3 and 3^6 = 18 mod 79, while the residue-field
+    // route takes 2^6 = 64 mod 79; for ell = 5, q = 521 they are
+    // 3^104 = 25 and 2^104 = 516.  Those columns differ by a unit factor.
+    const slong cases[][2] = {{2, 53}, {3, 79}, {5, 521}, {13, 79}};
+    slong scaled_columns = 0;
+    for (const silex::Order* order : orders) {
+        silex::EmbeddingContext embeddings(field);
+        silex::OrderUnitGroup group(*order);
+        assert(set_cyclotomic13_u2_power17_group(group, *order, field,
+                                                 embeddings));
+        for (const auto& item : cases) {
+            sflint::Fmpz ell;
+            sflint::Fmpz q;
+            assert(set_fmpz_si(ell, item[0]));
+            assert(set_fmpz_si(q, item[1]));
+
+            // The two quotient generators: the least primitive root g
+            // raised to (q - 1) / ell, and k^((q - 1) / ell) for the first
+            // k = 1, 2, ... where that is not 1; `factor` is the exponent t
+            // with the second equal to the first to the t.
+            const ulong q_ui = static_cast<ulong>(item[1]);
+            const ulong ell_ui = static_cast<ulong>(item[0]);
+            const ulong exponent = (q_ui - 1) / ell_ui;
+            ulong primitive = 0;
+            for (ulong g = 1; g < q_ui && primitive == 0; ++g) {
+                bool generates = true;
+                for (ulong f = 2; f <= q_ui - 1 && generates; ++f) {
+                    if ((q_ui - 1) % f == 0 && n_is_prime(f) != 0 &&
+                        n_powmod(g, static_cast<slong>((q_ui - 1) / f),
+                                 q_ui) == 1) {
+                        generates = false;
+                    }
+                }
+                if (generates) {
+                    primitive = g;
+                }
+            }
+            ulong first = 0;
+            for (ulong k = 1; k < q_ui && first == 0; ++k) {
+                if (n_powmod(k, static_cast<slong>(exponent), q_ui) != 1) {
+                    first = n_powmod(k, static_cast<slong>(exponent), q_ui);
+                }
+            }
+            const ulong zeta = n_powmod(primitive,
+                                        static_cast<slong>(exponent), q_ui);
+            ulong factor = 0;
+            for (ulong t = 1, power = zeta; t < ell_ui; ++t) {
+                if (power == first) {
+                    factor = t;
+                    break;
+                }
+                power = n_mulmod2_preinv(power, zeta, q_ui,
+                                         n_preinvert_limb(q_ui));
+            }
+            assert(factor != 0);
+
+            std::vector<sflint::FmpzMat> columns;
+            assert(silex::detail::stable_proof_prime_columns(
+                    columns, group, sflint::FmpzConstRef(q),
+                    sflint::FmpzConstRef(ell)));
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(primes, *order,
+                                          sflint::FmpzConstRef(q), 1));
+            assert(primes.size() == 12);
+            assert(static_cast<slong>(columns.size()) == primes.size());
+
+            const slong rows = sflint::fmpz_mat_nrows(columns[0]);
+            sflint::FmpzMat scan_matrix(rows, 0);
+            sflint::FmpzMat field_matrix(rows, 0);
+            for (slong i = 0; i < primes.size(); ++i) {
+                const silex::PrimeIdeal* prime = primes.at(i);
+                assert(prime != nullptr);
+                sflint::FmpzMat expected(0, 0);
+                assert(silex::detail::saturation_proof_prime_column(
+                        expected, group, *prime, sflint::FmpzConstRef(ell)));
+                const sflint::FmpzMat& column =
+                        columns[static_cast<std::size_t>(i)];
+                assert(sflint::fmpz_mat_nrows(expected) == rows);
+                assert(sflint::fmpz_mat_nrows(column) == rows);
+                assert(sflint::fmpz_mat_ncols(column) == 1);
+
+                // The column is the direct evaluation at this prime's root.
+                sflint::Fmpz root;
+                assert(degree_one_residue_root(root, *prime));
+                sflint::FmpzMat direct(0, 0);
+                assert(silex::detail::saturation_proof_prime_column_at_degree_one_root(
+                        direct, group, sflint::FmpzConstRef(q),
+                        sflint::FmpzConstRef(root),
+                        sflint::FmpzConstRef(ell)));
+                assert(fmpz_mat_equal(direct.raw(), column.raw()) != 0);
+
+                // column = t * expected mod ell, entry by entry, where the
+                // residue-field generator is the t-th power of the direct
+                // one.
+                for (slong r = 0; r < rows; ++r) {
+                    const ulong b = fmpz_fdiv_ui(
+                            fmpz_mat_entry(expected.raw(), r, 0), ell_ui);
+                    assert(fmpz_cmp_ui(fmpz_mat_entry(column.raw(), r, 0),
+                                       (factor * b) % ell_ui) == 0);
+                }
+                if (item[0] == 2) {
+                    assert(fmpz_mat_equal(column.raw(), expected.raw()) != 0);
+                }
+                if (fmpz_mat_equal(column.raw(), expected.raw()) == 0) {
+                    ++scaled_columns;
+                }
+
+                // The proof kernel after this column is the same.
+                scan_matrix = append_proof_column_for_test(scan_matrix,
+                                                           column);
+                field_matrix = append_proof_column_for_test(field_matrix,
+                                                            expected);
+                sflint::FmpzMat scan_kernel(0, 0);
+                sflint::FmpzMat field_kernel(0, 0);
+                assert(silex::detail::dlog_kernel_from_matrix(
+                        scan_kernel, scan_matrix, sflint::FmpzConstRef(ell)));
+                assert(silex::detail::dlog_kernel_from_matrix(
+                        field_kernel, field_matrix,
+                        sflint::FmpzConstRef(ell)));
+                assert(fmpz_mat_equal(scan_kernel.raw(), field_kernel.raw()) !=
+                       0);
+            }
+        }
+    }
+    // The scaled case is exercised, not only literal equality.
+    assert(scaled_columns > 0);
+    return 0;
+}
+
 // For an odd prime ell, as set_cyclotomic13_u2_power17_group, but the first
 // `powered` generators u_a (a = 2, ..., powered + 1) are replaced by
 // -u_a^ell = (-u_a)^ell, stored as the factors u_a^ell and (-1)^1: a
@@ -10964,6 +11129,7 @@ int main() {
     test_saturate_index_bounded_generators_independent_of_bound();
     test_prove_index_bound_quartic70640();
     test_prove_index_bound_cyclotomic13_undecided_root();
+    test_stable_proof_prime_columns_match_residue_field_route();
     test_kernel_row_root_three_way_result();
     test_kernel_row_root_defers_undecidable_rows();
     test_dependent_relation_unbounded_root_failure_adjoins_y();

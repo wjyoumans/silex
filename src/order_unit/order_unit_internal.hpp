@@ -469,6 +469,24 @@ bool kernel_rows_torsion_column(bool& has_torsion_column,
                                 const OrderUnitGroup& group,
                                 flint::FmpzMatConstRef kernel_rows,
                                 flint::FmpzConstRef ell) noexcept;
+// The proof columns that the stable residue-character proof scan of
+// prove_index_bound (saturation.cpp) appends for the rational prime q, one
+// per degree-one prime of the group's order over q at which a column is
+// available, in decompose_prime(order, q, 1) order.  Where the roots of the
+// defining polynomial modulo q give the degree-one primes (equation orders,
+// and maximal orders whose reduction is squarefree), each column is
+// saturation_proof_prime_column_at_degree_one_root at the root, or
+// saturation_proof_prime_column at the decompose_prime prime when the direct
+// evaluation declines; otherwise every column is saturation_proof_prime_column
+// at the decompose_prime primes.  The two builders take quotient logarithms
+// against generators of the order-ell subgroup of (O/P)^x that may differ,
+// so the columns of one prime agree up to a unit factor modulo ell, which
+// leaves the kernel of the proof matrix unchanged.  Returns false when q
+// cannot be decomposed; the scan then skips q.
+bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
+                                const OrderUnitGroup& group,
+                                flint::FmpzConstRef q,
+                                flint::FmpzConstRef ell) noexcept;
 // Test hook for the stable residue-character proof scan of
 // prove_index_bound (saturation.cpp): a positive `max_aux_primes` replaces
 // the per-scan guard of 2^16 examined primes q, and a nonzero `max_q`

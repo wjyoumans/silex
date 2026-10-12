@@ -3,6 +3,7 @@
 
 #include "../class_group/class_group_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
+#include "../residue_field/residue_field_internal.hpp"
 
 #include <atomic>
 #include <cstdio>
@@ -343,6 +344,67 @@ bool degree_one_roots_mod_q(std::vector<flint::Fmpz>& roots,
     return true;
 }
 
+// The roots r of degree_one_roots_mod_q, listed in the order in which
+// decompose_prime(order, q, 1) lists the degree-one primes (q, theta - r):
+// its degree-one branch for equation and maximal orders with a squarefree
+// reduction (prime_ideal.cpp, the `max_residue_degree == 1` branch) takes
+// fmpz_mod_poly_roots of the reduced defining polynomial, so the roots are
+// taken from the same call here.  The word-size route of
+// degree_one_roots_mod_q finds the roots of gcd(x^q - x, f mod q) instead,
+// in another order; it is kept as the cheap test for q with fewer than two
+// degree-one roots, where the order cannot differ.  Returns false, so the
+// caller decomposes q itself, when degree_one_roots_mod_q declines and for
+// maximal quadratic orders, whose decomposition factors the minimal
+// polynomial of the integral generator omega instead.
+bool degree_one_roots_in_decomposition_order(
+        std::vector<flint::Fmpz>& roots,
+        const Order& order,
+        flint::FmpzConstRef q,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (!degree_one_roots_mod_q(roots, order, q, diagnostics)) {
+        return false;
+    }
+    if (roots.size() < 2) {
+        return true;
+    }
+    if (detail::residue_polynomial_uses_quadratic_integral_generator(order)) {
+        return false;
+    }
+    if (!order.is_equation_order() || !flint::fmpz_abs_fits_ui(q)) {
+        // degree_one_roots_mod_q already took fmpz_mod_poly_roots of the
+        // reduced defining polynomial.
+        return true;
+    }
+
+    SILEX_PROFILE_SCOPE(
+            diagnostics, DiagnosticsModule::unit_group,
+            "unit_group.stable_scan.degree_one_roots_decomposition_order");
+    const nf_struct* raw_field = order.parent()->raw_flint_field();
+    flint::FmpzModCtx ctx(q.raw());
+    flint::FmpzModPoly reduced(ctx);
+    flint::FmpzModPolyFactor factorization(ctx);
+    if (!reduced.is_initialized()) {
+        return false;
+    }
+    fmpq_poly_get_integral_fmpz_mod_poly(reduced, raw_field->pol, ctx);
+    fmpz_mod_poly_roots(factorization.raw(), reduced.raw(), 0, ctx.raw());
+
+    std::vector<flint::Fmpz> ordered;
+    ordered.reserve(roots.size());
+    for (slong i = 0; i < factorization.raw()->num; ++i) {
+        flint::Fmpz root;
+        if (degree_one_root_from_mod_poly(
+                    root, factorization.raw()->poly + i, q, ctx)) {
+            ordered.push_back(std::move(root));
+        }
+    }
+    if (ordered.size() != roots.size()) {
+        return false;
+    }
+    roots = std::move(ordered);
+    return true;
+}
+
 bool order_discriminant_for_saturation(flint::Fmpz& out,
                                        const Order& order) noexcept {
     return order.discriminant(flint::FmpzRef(out)) &&
@@ -659,95 +721,16 @@ bool select_stable_proof_primes(
                                          ? max_aux_primes_override
                                          : kStableProofMaxAuxPrimes;
     slong examined_primes = 0;
-    auto process_prime_q =
+    // The proof columns at the degree-one primes over q, in decompose_prime
+    // order (see detail::stable_proof_prime_columns), each appended to the
+    // proof matrix in turn.
+    auto process_dlog_columns =
             [&](flint::FmpzConstRef q) noexcept -> ProofPrimeScanResult {
-        if (examined_primes >= max_aux_primes) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.resource_limit");
-            return ProofPrimeScanResult::exhausted;
-        }
-        ++examined_primes;
-        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
-                            "unit_group.stable_scan.candidate_q");
-        if (rational_prime_divides_order_discriminant(
-                    flint::FmpzConstRef(order_discriminant), q)) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.discriminant_skip");
+        std::vector<flint::FmpzMat> columns;
+        if (!detail::stable_proof_prime_columns(columns, group, q, ell)) {
             return ProofPrimeScanResult::keep_scanning;
         }
-        if (proof_rank == 1 && rank_one_source.has_free_generator) {
-            ProofPrimeScanResult direct_result =
-                    ProofPrimeScanResult::keep_scanning;
-            if (process_direct_rank_one_q(q, direct_result)) {
-                return direct_result;
-            }
-        }
-
-        PrimeIdealList local;
-        if (!decompose_prime(local, *order, q, 1)) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.decompose_failed");
-            return ProofPrimeScanResult::keep_scanning;
-        }
-
-        if (local.size() == 0) {
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.no_degree_one_prime");
-            return ProofPrimeScanResult::keep_scanning;
-        }
-
-        SILEX_PROFILE_EVENT(
-                group.diagnostics(), DiagnosticsModule::unit_group,
-                "unit_group.stable_scan.degree_one_decomposition");
-        for (slong i = 0; i < local.size(); ++i) {
-            const PrimeIdeal* prime = local.at(i);
-            if (prime == nullptr) {
-                SILEX_PROFILE_EVENT(
-                        group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.stable_scan.null_prime");
-                continue;
-            }
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.degree_one_prime");
-
-            if (proof_rank == 1) {
-                bool nonzero = false;
-                SILEX_PROFILE_EVENT(
-                        group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.stable_scan.rank_one_image_test");
-                if (!rank_one_proof_source_nonzero(
-                            nonzero, rank_one_source, group, *prime, ell)) {
-                    SILEX_PROFILE_EVENT(
-                            group.diagnostics(),
-                            DiagnosticsModule::unit_group,
-                            "unit_group.stable_scan.rank_one_image_unavailable");
-                    continue;
-                }
-
-                const ProofPrimeScanResult result =
-                        process_rank_one_image(nonzero);
-                if (result != ProofPrimeScanResult::keep_scanning) {
-                    return result;
-                }
-                continue;
-            }
-
-            SILEX_PROFILE_EVENT(
-                    group.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.stable_scan.dlog_column_test");
-            flint::FmpzMat proof_column(proof_rank, 1);
-            if (!detail::saturation_proof_prime_column(
-                        proof_column, group, *prime, ell)) {
-                SILEX_PROFILE_EVENT(
-                        group.diagnostics(), DiagnosticsModule::unit_group,
-                        "unit_group.stable_scan.dlog_column_unavailable");
-                continue;
-            }
+        for (const flint::FmpzMat& proof_column : columns) {
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_scan.dlog_column");
@@ -791,6 +774,87 @@ bool select_stable_proof_primes(
                 kernel = std::move(current_kernel);
                 certified = false;
                 return ProofPrimeScanResult::done;
+            }
+        }
+        return ProofPrimeScanResult::keep_scanning;
+    };
+    auto process_prime_q =
+            [&](flint::FmpzConstRef q) noexcept -> ProofPrimeScanResult {
+        if (examined_primes >= max_aux_primes) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.resource_limit");
+            return ProofPrimeScanResult::exhausted;
+        }
+        ++examined_primes;
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.candidate_q");
+        if (rational_prime_divides_order_discriminant(
+                    flint::FmpzConstRef(order_discriminant), q)) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.discriminant_skip");
+            return ProofPrimeScanResult::keep_scanning;
+        }
+        if (proof_rank == 1 && rank_one_source.has_free_generator) {
+            ProofPrimeScanResult direct_result =
+                    ProofPrimeScanResult::keep_scanning;
+            if (process_direct_rank_one_q(q, direct_result)) {
+                return direct_result;
+            }
+        }
+
+        if (proof_rank != 1) {
+            return process_dlog_columns(q);
+        }
+
+        // proof_rank == 1 without a usable direct rank-one image.
+        PrimeIdealList local;
+        if (!decompose_prime(local, *order, q, 1)) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.decompose_failed");
+            return ProofPrimeScanResult::keep_scanning;
+        }
+
+        if (local.size() == 0) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.no_degree_one_prime");
+            return ProofPrimeScanResult::keep_scanning;
+        }
+
+        SILEX_PROFILE_EVENT(
+                group.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.stable_scan.degree_one_decomposition");
+        for (slong i = 0; i < local.size(); ++i) {
+            const PrimeIdeal* prime = local.at(i);
+            if (prime == nullptr) {
+                SILEX_PROFILE_EVENT(
+                        group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.null_prime");
+                continue;
+            }
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.degree_one_prime");
+
+            bool nonzero = false;
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.rank_one_image_test");
+            if (!rank_one_proof_source_nonzero(
+                        nonzero, rank_one_source, group, *prime, ell)) {
+                SILEX_PROFILE_EVENT(
+                        group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.rank_one_image_unavailable");
+                continue;
+            }
+
+            const ProofPrimeScanResult result =
+                    process_rank_one_image(nonzero);
+            if (result != ProofPrimeScanResult::keep_scanning) {
+                return result;
             }
         }
 
@@ -1299,6 +1363,134 @@ bool select_saturation_primes_with_kernel(
     }
     return publish_saturation_selection(out, kernel, *order, selected,
                                         dlog_matrix, target_len, ell);
+}
+
+bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
+                                const OrderUnitGroup& group,
+                                flint::FmpzConstRef q,
+                                flint::FmpzConstRef ell) noexcept {
+    columns.clear();
+    const Order* order = group.parent();
+    slong proof_rank = 0;
+    if (!group.is_set() || order == nullptr ||
+        !dlog_proof_rank(proof_rank, group, ell)) {
+        return false;
+    }
+
+    PrimeIdealList local;
+    std::vector<flint::Fmpz> roots;
+    if (degree_one_roots_in_decomposition_order(roots, *order, q,
+                                                group.diagnostics())) {
+        if (roots.empty()) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.no_degree_one_prime");
+            return true;
+        }
+        SILEX_PROFILE_EVENT(
+                group.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.stable_scan.degree_one_decomposition");
+        columns.reserve(roots.size());
+        bool decomposed = false;
+        for (const flint::Fmpz& root : roots) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.degree_one_prime");
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.dlog_column_test");
+            flint::FmpzMat proof_column(proof_rank, 1);
+            if (saturation_proof_prime_column_at_degree_one_root(
+                        proof_column, group, q, flint::FmpzConstRef(root),
+                        ell)) {
+                SILEX_PROFILE_EVENT(
+                        group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.direct_dlog_column_available");
+                columns.push_back(std::move(proof_column));
+                continue;
+            }
+
+            // The direct evaluation declines, for example when a factor of a
+            // generator vanishes or has a denominator at the root; the
+            // decompose_prime prime over this root takes the residue-field
+            // route the scan used before.
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.direct_dlog_column_unavailable");
+            if (!decomposed) {
+                decomposed = true;
+                if (!decompose_prime(local, *order, q, 1)) {
+                    // decompose_prime leaves `local` empty on failure.
+                    SILEX_PROFILE_EVENT(
+                            group.diagnostics(),
+                            DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.decompose_failed");
+                }
+            }
+            const PrimeIdeal* prime = nullptr;
+            for (slong i = 0; i < local.size() && prime == nullptr; ++i) {
+                const PrimeIdeal* candidate = local.at(i);
+                flint::Fmpz candidate_root;
+                flint::Fmpz candidate_q;
+                if (candidate != nullptr &&
+                    degree_one_prime_root_mod_p(candidate_root, candidate_q,
+                                                *candidate) &&
+                    flint::fmpz_equal(flint::FmpzConstRef(candidate_q), q) &&
+                    flint::fmpz_equal(flint::FmpzConstRef(candidate_root),
+                                      flint::FmpzConstRef(root))) {
+                    prime = candidate;
+                }
+            }
+            if (prime == nullptr ||
+                !saturation_proof_prime_column(proof_column, group, *prime,
+                                               ell)) {
+                SILEX_PROFILE_EVENT(
+                        group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.dlog_column_unavailable");
+                continue;
+            }
+            columns.push_back(std::move(proof_column));
+        }
+        return true;
+    }
+
+    if (!decompose_prime(local, *order, q, 1)) {
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.decompose_failed");
+        return false;
+    }
+    if (local.size() == 0) {
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.no_degree_one_prime");
+        return true;
+    }
+
+    SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan.degree_one_decomposition");
+    columns.reserve(static_cast<std::size_t>(local.size()));
+    for (slong i = 0; i < local.size(); ++i) {
+        const PrimeIdeal* prime = local.at(i);
+        if (prime == nullptr) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.null_prime");
+            continue;
+        }
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.degree_one_prime");
+        SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan.dlog_column_test");
+        flint::FmpzMat proof_column(proof_rank, 1);
+        if (!saturation_proof_prime_column(proof_column, group, *prime,
+                                           ell)) {
+            SILEX_PROFILE_EVENT(
+                    group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.stable_scan.dlog_column_unavailable");
+            continue;
+        }
+        columns.push_back(std::move(proof_column));
+    }
+    return true;
 }
 
 void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,

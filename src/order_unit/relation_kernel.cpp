@@ -1282,6 +1282,56 @@ void word_quotient_log_baby_giant(
     }
 }
 
+// The quotient logs of `pending` (images x^((p - 1) / ell) mod p) with
+// respect to zeta, written into the rows of `out` that each target names and
+// marked in `resolved`: the first exponent i in [0, ell) with zeta^i equal
+// to the image, found by one walk over the powers of zeta shared by every
+// target or, from kWordQuotientLogBabyGiantBits on, when ell is prime and
+// zeta has order ell, by word_quotient_log_baby_giant, which gives the same
+// unique exponent.  A target with no match below ell is left unresolved.
+void word_quotient_log_resolve(
+        flint::FmpzMat& out,
+        std::vector<bool>& resolved,
+        std::vector<WordQuotientLogTarget> pending,
+        ulong zeta,
+        ulong p_ui,
+        ulong ell_ui,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (pending.empty()) {
+        return;
+    }
+
+    const ulong p_inverse = n_preinvert_limb(p_ui);
+    if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogBabyGiantBits &&
+        zeta != 1 && n_is_prime(ell_ui) != 0 &&
+        n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1) {
+        word_quotient_log_baby_giant(out, resolved, pending, zeta, p_ui,
+                                     ell_ui, diagnostics);
+        return;
+    }
+
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.residue_dlog_proof_matrix.shared_walk");
+    nmod_t mod;
+    nmod_init(&mod, p_ui);
+    ulong current = 1 % p_ui;
+    for (ulong i = 0; i < ell_ui && !pending.empty(); ++i) {
+        std::size_t k = 0;
+        while (k < pending.size()) {
+            if (pending[k].image != current) {
+                ++k;
+                continue;
+            }
+            flint::fmpz_set_ui(
+                    flint::fmpz_mat_entry(out, pending[k].row, 0), i);
+            resolved[static_cast<std::size_t>(pending[k].row)] = true;
+            pending[k] = pending.back();
+            pending.pop_back();
+        }
+        current = nmod_mul(current, zeta, mod);
+    }
+}
+
 // Quotient logs of all `images` with respect to `quotient_log`, sharing work
 // across the column.  Each entry this resolves is the value
 // ResidueFieldQuotientLog::apply returns on its word-size degree-one path
@@ -1350,38 +1400,8 @@ void word_quotient_log_shared_walk(
         target.row = static_cast<slong>(j);
         pending.push_back(target);
     }
-    if (pending.empty()) {
-        return;
-    }
-
-    if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogBabyGiantBits &&
-        zeta != 1 && n_is_prime(ell_ui) != 0 &&
-        n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1) {
-        word_quotient_log_baby_giant(out, resolved, pending, zeta, p_ui,
-                                     ell_ui, diagnostics);
-        return;
-    }
-
-    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
-                        "unit_group.residue_dlog_proof_matrix.shared_walk");
-    nmod_t mod;
-    nmod_init(&mod, p_ui);
-    ulong current = 1 % p_ui;
-    for (ulong i = 0; i < ell_ui && !pending.empty(); ++i) {
-        std::size_t k = 0;
-        while (k < pending.size()) {
-            if (pending[k].image != current) {
-                ++k;
-                continue;
-            }
-            flint::fmpz_set_ui(
-                    flint::fmpz_mat_entry(out, pending[k].row, 0), i);
-            resolved[static_cast<std::size_t>(pending[k].row)] = true;
-            pending[k] = pending.back();
-            pending.pop_back();
-        }
-        current = nmod_mul(current, zeta, mod);
-    }
+    word_quotient_log_resolve(out, resolved, std::move(pending), zeta, p_ui,
+                              ell_ui, diagnostics);
 }
 
 }  // namespace
@@ -1535,6 +1555,109 @@ bool saturation_proof_prime_column_direct_degree_one(
             ell);
 }
 
+namespace {
+
+// saturation_proof_prime_column_at_degree_one_root in word arithmetic, for
+// p, root and ell below the word size: the free generators are evaluated by
+// factored_value_at_degree_one_root_nmod, which fails exactly where
+// factored_value_at_degree_one_root does and otherwise gives the same
+// residue, and the quotient logs of the column are resolved together by
+// word_quotient_log_resolve with zeta = quotient_generator.  zeta is a
+// primitive root raised to (p - 1) / ell, so it has order ell, and the first
+// exponent in [0, ell) the walk finds is the unique one
+// quotient_log_mod_prime_apply returns.  An entry left unresolved takes
+// quotient_log_mod_prime_apply.  Returns false, leaving `candidate`
+// unspecified, when the word route does not apply or an entry cannot be
+// formed; the caller then runs the fmpz route.
+bool degree_one_root_column_word(flint::FmpzMat& candidate,
+                                 const OrderUnitGroup& group,
+                                 flint::FmpzConstRef p,
+                                 flint::FmpzConstRef root,
+                                 flint::FmpzConstRef ell,
+                                 flint::FmpzConstRef cofactor,
+                                 flint::FmpzConstRef quotient_generator)
+        noexcept {
+    const Order* order = group.parent();
+    const NumberField* field = order == nullptr ? nullptr : order->parent();
+    if (field == nullptr || !flint::fmpz_abs_fits_ui(p) ||
+        !flint::fmpz_abs_fits_ui(root) || !flint::fmpz_abs_fits_ui(ell) ||
+        !flint::fmpz_abs_fits_ui(cofactor) ||
+        !flint::fmpz_abs_fits_ui(quotient_generator) ||
+        flint::fmpz_sgn(p) <= 0 || flint::fmpz_sgn(root) < 0 ||
+        flint::fmpz_sgn(ell) <= 0) {
+        return false;
+    }
+    const ulong p_ui = flint::fmpz_get_ui(p);
+    const ulong root_ui = flint::fmpz_get_ui(root);
+    const ulong ell_ui = flint::fmpz_get_ui(ell);
+    const ulong cofactor_ui = flint::fmpz_get_ui(cofactor);
+    const ulong zeta = flint::fmpz_get_ui(quotient_generator) % p_ui;
+    const slong rank = group.free_rank();
+    const slong rows = flint::fmpz_mat_nrows(candidate);
+    if (p_ui < 2 || ell_ui < 2 || root_ui >= p_ui || zeta == 0 ||
+        rows < rank) {
+        return false;
+    }
+
+    const ulong p_inverse = n_preinvert_limb(p_ui);
+    std::vector<WordQuotientLogTarget> pending;
+    pending.reserve(static_cast<std::size_t>(rows));
+    std::vector<ulong> values;
+    values.reserve(static_cast<std::size_t>(rows));
+    for (slong i = 0; i < rank; ++i) {
+        FactoredElement generator(*field);
+        ulong value = 0;
+        if (!group.free_generator(generator, i) ||
+            !factored_value_at_degree_one_root_nmod(value, generator, p_ui,
+                                                    root_ui)) {
+            return false;
+        }
+        values.push_back(value);
+    }
+    if (rows > rank) {
+        OrderElement torsion(*order);
+        Element torsion_value(*field);
+        flint::Fmpz value;
+        if (rows != rank + 1 || !group.torsion_generator(torsion) ||
+            !torsion.get_element(torsion_value) ||
+            !element_value_at_degree_one_root(value, torsion_value, p, root)) {
+            return false;
+        }
+        values.push_back(flint::fmpz_fdiv_ui(flint::FmpzConstRef(value),
+                                             p_ui));
+    }
+    for (std::size_t j = 0; j < values.size(); ++j) {
+        if (values[j] == 0) {
+            return false;
+        }
+        WordQuotientLogTarget target;
+        target.image =
+                n_powmod2_ui_preinv(values[j], cofactor_ui, p_ui, p_inverse);
+        target.row = static_cast<slong>(j);
+        pending.push_back(target);
+    }
+
+    std::vector<bool> resolved(values.size(), false);
+    word_quotient_log_resolve(candidate, resolved, std::move(pending), zeta,
+                              p_ui, ell_ui, group.diagnostics());
+    flint::Fmpz value;
+    for (std::size_t j = 0; j < values.size(); ++j) {
+        if (resolved[j]) {
+            continue;
+        }
+        flint::fmpz_set_ui(flint::FmpzRef(value), values[j]);
+        if (!quotient_log_mod_prime_apply(
+                    flint::fmpz_mat_entry(candidate, static_cast<slong>(j), 0),
+                    flint::FmpzConstRef(value), cofactor, quotient_generator,
+                    p, ell)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 bool saturation_proof_prime_column_at_degree_one_root(
         flint::FmpzMat& out,
         const OrderUnitGroup& group,
@@ -1557,6 +1680,12 @@ bool saturation_proof_prime_column_at_degree_one_root(
 
     flint::FmpzMat candidate(proof_rank, 1);
     flint::Fmpz value;
+    if (degree_one_root_column_word(candidate, group, p, root, ell,
+                                    flint::FmpzConstRef(cofactor),
+                                    flint::FmpzConstRef(quotient_generator))) {
+        out = std::move(candidate);
+        return true;
+    }
     for (slong i = 0; i < rank; ++i) {
         FactoredElement generator(*field);
         if (!group.free_generator(generator, i) ||
