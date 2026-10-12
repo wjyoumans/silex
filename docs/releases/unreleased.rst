@@ -602,6 +602,21 @@ Changed
   them ``cyclotomic_37_phi36`` and ``cyclotomic_64_phi32``.  No other published field differs; in ``proven`` mode
   no compared field differs.
 
+- A ``proven`` class/unit computation over an imaginary quadratic field
+  reduces the very large binary forms of its witness step (more than 9000
+  bits) with a port of the recursive fast reduction of PARI 2.17.3
+  (Schönhage, ISSAC 1991; see the source map).  For ``x^2 + 100000007``
+  the witness step falls from about 25--31 s to 9--10 s and the total from
+  27--35 s to 11--13 s (release build on a busy machine; the controlled
+  comparison is pending).  Relation rows, norms, labels and instance JSON
+  are unchanged on the test corpus.  Above the switch the reduced form is
+  the same, but ``Relation::generator`` can differ in sign (171 of the 394
+  witnesses at ``x^2 + 100000007``); below it nothing changes.  The port
+  does not copy PARI's treatment of forms with ``b < 0``, which yields a
+  transformation of determinant ``-1``.  If a step of the fast path fails,
+  the reduction falls back to the earlier basecase reduction, so published
+  results and failures are as before.
+
 Fixed
 -----
 

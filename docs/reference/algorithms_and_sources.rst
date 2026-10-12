@@ -1069,6 +1069,24 @@ structure certificate fails, or the relation index is below ``h``, the run
 fails closed with the generic reason ``class_unit_computation_failed``, with
 no fallback.
 
+The reduction of the very large binary quadratic forms that the proven
+imaginary quadratic witness step produces (forms of more than 9000 bits)
+is a port of the recursive fast reduction of PARI 2.17.3
+``src/basemath/Qfb.c`` (``pqfbred_1`` through ``pqfbred_rec``, lines
+655--843, which implement Schönhage, "Fast reduction and composition of
+binary quadratic forms", ISSAC 1991, pp. 128--133), with the switch to it
+taken from ``qfbred_imag_av`` (lines 991--1002) and ``qfbredsl2_imag``
+(lines 886--907).  Below the switch the earlier basecase reduction runs
+unchanged.  The port deviates from PARI in one place: for a form with
+``b < 0`` PARI negates the second row of the transformation matrix, which
+gives determinant ``-1`` and the reduced form of the wrong class; Silex
+conjugates the matrix by ``diag(1, -1)`` instead, so the determinant stays
+``1``.  If a step of the fast path meets the condition where PARI raises
+its internal error, or the basecase reduction of a step fails, the
+reduction falls back to the full basecase reduction.  Reduced forms, and so
+class-relation rows, norms and labels, are those of the basecase; the
+generator of a relation can differ from it by sign above the switch.
+
 An analytic ``hR`` proves a class/unit pair only when it is unconditional.
 Silex has two unconditional routes: degree one, where the residue is exactly
 one, and maximal orders of explicit quadratic-backend fields whose
