@@ -809,6 +809,80 @@ int test_coordinate_bound_inverse_norm() {
     return 0;
 }
 
+// The operator-norm bound on a maximal-order basis that is not a power basis
+// and does not begin with 1, with nontrivial units: the index-three quartic
+// x^4 - 2x^2 + 3x - 5 (signature (2, 1), class number 1) with its
+// fundamental units (4 - 4x - x^2 + x^3)/3 and (-1 + x + x^2 - x^3)/3.  The
+// bound is evaluated on the normalized basis
+// [1, -(1 - x + 2x^2 + x^3)/3, x^2, x^3 + 1] and carried back to the
+// original coordinates by the 3-bit basis scale.
+// The expected values are gp evaluations on the same normalized basis:
+// log2Mbound 3.1205921974509359, log2 ||S^-1||_oo 1.2643975094907175 and
+// log2fubound 1.8739359635582340, so the reference expression totals
+// 7.9945... (8 bits) and the published operator-norm bound 6.1383... (7 bits).
+int test_coordinate_bound_inverse_norm_index_three_units() {
+    silex::NumberField field = index_three_quartic_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!basis_is_power_basis(maximal));
+    assert(!basis_begins_with_one(maximal));
+
+    constexpr slong u1[] = {4, -4, -1, 1};
+    constexpr slong u2[] = {-1, 1, 1, -1};
+    const std::span<const slong> numerators[] = {u1, u2};
+    std::vector<silex::FactoredElement> inputs;
+    for (std::span<const slong> numerator : numerators) {
+        silex::Element unit(field);
+        assert(unit.scalar_div_si(element_from_coefficients(field, numerator),
+                                  3));
+        assert(maximal.contains(unit));
+        inputs.emplace_back(field);
+        assert(inputs.back().push(unit, 1));
+    }
+
+    std::vector<silex::Element> expected;
+    sflint::Fmpz exact_maximum;
+    exact_outputs_and_bound(expected, exact_maximum, maximal, inputs);
+    assert(sflint::fmpz_equal_si(exact_maximum, 4));
+
+    silex::EmbeddingContext embeddings(field);
+    sflint::Fmpz output;
+    silex::detail::CompactCoordinateBoundReport report;
+    assert(silex::detail::compact_unit_coordinate_bound(
+            report, sflint::FmpzRef(output), maximal, factored_span(inputs),
+            embeddings));
+    assert(report.attempts == 1);
+
+    const double hadamard =
+            arf_get_d(arb_midref(report.log2_minkowski_bound.raw()),
+                      ARF_RND_NEAR);
+    const double inverse_norm =
+            arf_get_d(arb_midref(report.log2_inverse_norm_bound.raw()),
+                      ARF_RND_NEAR);
+    const double unit_bound = arf_get_d(
+            arb_midref(report.log2_unit_bound.raw()), ARF_RND_NEAR);
+    assert(hadamard > 3.1205921974509359 - 1e-9 &&
+           hadamard < 3.1205921974509359 + 1e-9);
+    assert(inverse_norm > 1.2643975094907175 - 1e-9 &&
+           inverse_norm < 1.2643975094907175 + 1e-9);
+    assert(unit_bound > 1.8739359635582340 - 1e-9 &&
+           unit_bound < 1.8739359635582340 + 1e-9);
+
+    assert(report.inverse_norm_bound_used);
+    check_bound_output(report, output, exact_maximum);
+    assert(report.hadamard_bit_bound == 8);
+    assert(report.bit_bound == 7);
+
+    silex::detail::BoundedCompactReconstructionReport reconstruction_report;
+    std::vector<silex::Element> actual;
+    assert(silex::detail::bounded_compact_reconstruct(
+            reconstruction_report, actual, maximal, inputs,
+            sflint::FmpzConstRef(output)));
+    assert_equal_outputs(actual, expected);
+    return 0;
+}
+
 // Keys of the compact field-modulus cache: an entry is returned only for its
 // own field data, prime and threshold, and entries stay sorted when a miss
 // is stored before existing entries.
@@ -1716,6 +1790,7 @@ int main() {
     assert(test_coordinate_bound_supports_reordered_basis() == 0);
     assert(test_coordinate_bound_supports_index_three_maximal_basis() == 0);
     assert(test_coordinate_bound_inverse_norm() == 0);
+    assert(test_coordinate_bound_inverse_norm_index_three_units() == 0);
     assert(test_compact_field_modulus_cache_keys() == 0);
     assert(test_compact_field_modulus_cache_shared_across_calls() == 0);
     assert(test_compact_unit_power_root_reuses_high_precision_base_logs() == 0);
