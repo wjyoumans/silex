@@ -779,11 +779,12 @@ Changed
   that matrix each time (four inversions fewer on ``grh`` runs of
   ``Q(zeta_64)`` and ``Q(zeta_41)``).  Outputs are unchanged: instance JSON
   is identical on the ``grh`` corpus and the 65 ``proven`` benchmark rows.
-  ``set_relation_matrix`` still fails exactly where it did: it now checks
-  that the right transform has determinant ``1`` or ``-1``, which for an
-  integer matrix holds exactly when its inverse is integral, instead of
-  computing that inverse.  ``FiniteAbelianGroup`` has a new
-  private member, and its ``const`` calls may fill internal caches, so one
+  One failure point moves: the right transform from FLINT's Smith form is
+  unimodular, but if its inverse were not integral, ``set_relation_matrix``
+  would now succeed and the first ``invariant_generator_matrix`` or
+  ``reduce`` call would return ``false`` instead, before writing any output.
+  ``FiniteAbelianGroup`` has a new private member.  As with the existing
+  left-transform cache, ``const`` calls may fill internal caches, so one
   object must not be used from several threads at once.
 
 Fixed

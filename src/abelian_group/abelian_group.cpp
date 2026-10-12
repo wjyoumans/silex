@@ -56,21 +56,6 @@ bool inverse_unimodular(flint::FmpzMat& inverse,
     return true;
 }
 
-// For an integer square matrix V, |det V| = 1 holds exactly when
-// inverse_unimodular(V) succeeds.  If V W = +-I with W integral, then
-// det V * det W = +-1 with both factors integers, so |det V| = 1.
-// Conversely, if |det V| = 1 then V is nonsingular, fmpz_mat_inv succeeds,
-// and its denominator divides det V (FLINT's documented contract for
-// fmpz_mat_inv; the 0 x 0, 1 x 1 and 2 x 2 branches return 1 or det V
-// itself), so it is +-1 and inverse_unimodular accepts.  Publication uses
-// this determinant test to fail exactly where the eager inverse failed,
-// while the inverse itself is computed on first use.
-bool is_unimodular(flint::FmpzMatConstRef matrix) noexcept {
-    flint::Fmpz det;
-    flint::fmpz_mat_det(flint::FmpzRef(det), matrix);
-    return flint::fmpz_is_pm1(det);
-}
-
 bool set_invariants(flint::FmpzVec& invariants,
                     flint::FmpzMatConstRef snf,
                     slong columns) noexcept {
@@ -290,10 +275,8 @@ bool FiniteAbelianGroup::set_relation_matrix_with_hnf_basis(
 
     // The inverse of the right transform is filled on first use by
     // ensure_right_transform_inv; only invariant_generator_matrix and reduce
-    // read it.  The determinant test keeps publication failing exactly where
-    // inverting the right transform here would have failed.
+    // read it, and both fail before writing any output if it is not integral.
     if (!snf_full_column_rank(flint::FmpzMatConstRef(candidate.snf_), columns) ||
-        !is_unimodular(flint::FmpzMatConstRef(candidate.right_transform_)) ||
         !set_invariants(candidate.invariants_,
                         flint::FmpzMatConstRef(candidate.snf_), columns)) {
         return false;
@@ -389,8 +372,9 @@ bool FiniteAbelianGroup::ensure_right_transform_inv() const noexcept {
         return true;
     }
 
-    // Publication checked |det V| = 1 for the right transform V, so the
-    // inverse is integral (see is_unimodular); still fail closed if not.
+    // fmpz_mat_snf_transform returns a unimodular right transform V; fail
+    // closed unless its inverse is integral.  On failure the cache is left
+    // unset and the callers return false before writing any output.
     flint::FmpzMat inverse(generator_count_, generator_count_);
     if (!inverse_unimodular(inverse,
                             flint::FmpzMatConstRef(right_transform_))) {
