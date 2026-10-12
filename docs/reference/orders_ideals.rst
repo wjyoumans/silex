@@ -68,6 +68,17 @@ lies in the order; failed conversions leave the target object unchanged.
 ``OrderElement::coordinates()`` returns an owned coordinate row, or
 ``std::nullopt`` for an undefined element.
 
+Thread Use
+~~~~~~~~~~
+
+Silex does not currently support using objects that share order data from
+several threads at once.  Copies of one ``Order`` share their stored data, and
+ideals and elements over that order refer to it through their parent handle.
+Some of that data is filled lazily through ``const`` members; for example, the
+per-order cache of index-divisor prime decompositions is updated during
+``decompose_prime`` calls, even on a ``const Order&``, without
+synchronization.  This note describes the current implementation only.
+
 Ideals
 ------
 

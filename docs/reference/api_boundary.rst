@@ -119,7 +119,9 @@ Some raw or direct-storage helpers are private implementation hooks rather
 than public API, including ``Lat::set_basis_direct``,
 ``fmpz_smat::HnfContext::replace_hnf``, and ``Ideal::set_hnf_direct``.  Keep
 them private unless a concrete benchmarked kernel or interop boundary needs
-them.
+them.  ``Ideal::set_hnf_direct`` is reachable only through the noninstalled,
+test-only ``detail::IdealAccess::set_hnf_direct`` hook, which lets tests store
+HNF shapes that no public route produces; library code must not use it.
 
 Future Binding Surface
 ----------------------
