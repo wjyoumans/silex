@@ -2523,6 +2523,20 @@ equal (``FactorBase::equal``) and whose active and required bounds are equal;
 only passed scans are kept.  PARI's ``be_honest`` has no such reuse: it runs
 once per ``bnfinit`` pass.
 
+When a ``grh`` class/unit computation does not yet validate, it adds
+relations and validates again, as Hecke v0.38.6
+``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group`` (line 293) does with
+``src/NumFieldOrd/NfOrd/Clgp/Main_LLL.jl:class_group_new_relations_via_lll``.
+That slice collects 2 relations (lines 154 and 172, once the tentative class
+number is known).  Silex starts each refill at the same 2, but doubles the
+next refill (4, 8, ...) while the validation keeps ending with the same index
+bound above one and the previous refill left the class order unchanged; any
+other round starts again at 2.  This rule is Silex's own, not in Hecke or
+PARI: ``k`` stalled rounds of 2 relations become about ``log2 k`` larger
+refills, each followed by one validation.  The relation cap
+``max_relations`` still bounds every refill.
+Proven and unknown requests keep the 2-relation refill.
+
 In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``
 object is the one place for structured failure detail; its keys depend on
 ``failure_reason``, and it is null for every reason other than

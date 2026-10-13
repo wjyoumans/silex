@@ -4014,6 +4014,11 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     }
     bool do_units = rank == 0 ||
             candidate_class_group.relation_kernel_unit_count() >= rank;
+    // Refill state across loop rounds (see the refill below).
+    slong relation_refill_target = detail::kRelationRefillInitial;
+    flint::Fmpz previous_refill_index_bound;
+    bool have_previous_refill_bound = false;
+    bool previous_refill_class_unchanged = false;
     for (;;) {
         bool candidate_units_ready = false;
         bool certified = false;
@@ -4263,7 +4268,29 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                 return false;
             }
         }
+        // A grh refill grows only while the validation repeats: same index
+        // bound (> 1) as before the previous refill, and that refill left
+        // the class order unchanged (detail::next_relation_refill_target).
+        // The first refill and every other round use the reference 2.
+        const bool refill_repeated =
+                options.requested_certification == CertificationMode::grh &&
+                have_previous_refill_bound &&
+                previous_refill_class_unchanged &&
+                flint::fmpz_cmp_ui(
+                        flint::FmpzConstRef(validate_summary.last_index_bound),
+                        1) > 0 &&
+                flint::fmpz_equal(
+                        flint::FmpzConstRef(validate_summary.last_index_bound),
+                        flint::FmpzConstRef(previous_refill_index_bound));
+        relation_refill_target = detail::next_relation_refill_target(
+                relation_refill_target, refill_repeated);
+        if (refill_repeated) {
+            SILEX_PROFILE_EVENT(active_diagnostics,
+                                DiagnosticsModule::unit_group,
+                                "unit_group.relation_refill_grown");
+        }
         detail::ClassGroupRelationOptions extend_options = local_options;
+        extend_options.extension_relation_target = relation_refill_target;
         bool extend_ok = false;
         {
             SILEX_PROFILE_SCOPE(
@@ -4304,6 +4331,10 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         const bool class_order_unchanged =
                 flint::fmpz_equal(flint::FmpzConstRef(class_order_before),
                                   flint::FmpzConstRef(class_order_after));
+        flint::fmpz_set(flint::FmpzRef(previous_refill_index_bound),
+                        flint::FmpzConstRef(validate_summary.last_index_bound));
+        have_previous_refill_bound = true;
+        previous_refill_class_unchanged = class_order_unchanged;
         if (class_order_unchanged) {
             do_units =
                     candidate_class_group.relation_kernel_unit_count() >= rank;

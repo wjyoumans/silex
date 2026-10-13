@@ -38,6 +38,12 @@ struct ClassGroupRelationOptions {
     slong relation_saturation_aux_prime_bound = 0;
     slong relation_saturation_max_appends_per_ell = 0;
     ulong zeta_bf_max_cutoff = 0;
+    // Relations an extension-only slice of the LLL route
+    // (extend_tentative_relations_) collects before it returns, once the
+    // tentative class number is known.  The default 2 is the reference
+    // `class_group_new_relations_via_lll` stop; only the grh class/unit
+    // loop raises it (detail::next_relation_refill_target).  At least 2.
+    slong extension_relation_target = 2;
     CertificationMode requested_certification = CertificationMode::unknown;
     const DiagnosticsContext* diagnostics = nullptr;
 };

@@ -12806,12 +12806,111 @@ int test_grh_validation_skips_unit_rebuild_from_unchanged_class_context() {
     return 0;
 }
 
+// The grh class/unit loop refill starts at the reference 2 relations, doubles
+// only while the validation repeats with an unchanged class order and index
+// bound, restarts at 2 otherwise, and saturates at WORD_MAX.
+int test_relation_refill_target_rule() {
+    using silex::detail::kRelationRefillInitial;
+    using silex::detail::next_relation_refill_target;
+    assert(kRelationRefillInitial == 2);
+    assert(next_relation_refill_target(kRelationRefillInitial, false) == 2);
+    assert(next_relation_refill_target(16, false) == 2);
+    assert(next_relation_refill_target(2, true) == 4);
+    assert(next_relation_refill_target(4, true) == 8);
+    assert(next_relation_refill_target(0, true) == 2);
+    assert(next_relation_refill_target(WORD_MAX / 2, true) ==
+           2 * (WORD_MAX / 2));
+    assert(next_relation_refill_target(WORD_MAX / 2 + 1, true) == WORD_MAX);
+    assert(next_relation_refill_target(WORD_MAX, true) == WORD_MAX);
+    // The internal relation options default to the reference stop.
+    const silex::detail::ClassGroupRelationOptions relation_options;
+    assert(relation_options.extension_relation_target ==
+           kRelationRefillInitial);
+    return 0;
+}
+
+struct RelationRefillEvents {
+    slong refills = 0;
+    slong grown = 0;
+};
+
+void relation_refill_callback(void* user,
+                              silex::DiagnosticsModule,
+                              silex::ProfileEvent event,
+                              const char*,
+                              const char* label) noexcept {
+    RelationRefillEvents* events = static_cast<RelationRefillEvents*>(user);
+    if (label == nullptr) {
+        return;
+    }
+    if (event == silex::ProfileEvent::begin_scope &&
+        std::strcmp(label,
+                    "unit_group.compute_with_relation_class_group."
+                    "extend_relations") == 0) {
+        ++events->refills;
+    } else if (event == silex::ProfileEvent::event &&
+               std::strcmp(label, "unit_group.relation_refill_grown") == 0) {
+        ++events->grown;
+    }
+}
+
+// Q(sqrt -34) in grh mode (h = 4) validates four times: three refills of
+// the class/unit loop, of which the last two follow a validation that
+// repeated the index bound with the class order unchanged, so they grow
+// (2, then 4, then 8 relations).  The result is the same class group.  Only
+// builds with profiling enabled see the refill events.
+int test_grh_relation_refill_grows_on_repeated_validation() {
+    sflint::FmpzPoly polynomial;
+    sflint::fmpz_poly_set_coeff_si(polynomial, 0, 34);
+    sflint::fmpz_poly_set_coeff_si(polynomial, 2, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    RelationRefillEvents events;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            relation_refill_callback, &events);
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    options.diagnostics = &diagnostics;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    assert(audit.final_result_published);
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(class_order), 4));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(events.refills == 3);
+    assert(events.grown == 2);
+#endif
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     test_grh_validation_skips_unit_rebuild_from_unchanged_class_context();
     test_compute_failure_records_validation_outcome_only_when_it_ran();
     test_grh_continuation_without_relation_progress_fails_closed();
+    test_relation_refill_target_rule();
+    test_grh_relation_refill_grows_on_repeated_validation();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
     test_unit_extraction_cache_clear();

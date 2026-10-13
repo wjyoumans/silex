@@ -1321,6 +1321,13 @@ bool ClassGroupContext::run_lll_relation_route_(
             };
 
             bool source_loop_returned = false;
+            // reference class_group_new_relations_via_lll collects 2
+            // relations per round and returns after 2 once h > 0.  An
+            // extension slice may ask for more (extension_relation_target,
+            // raised by the grh class/unit loop when its validation
+            // repeats); the target 2 is the reference loop unchanged.
+            const slong relation_target =
+                    extension_only ? options.extension_relation_target : 2;
             {
               SILEX_PROFILE_SCOPE(active_diagnostics,
                                   DiagnosticsModule::class_group,
@@ -1328,7 +1335,7 @@ bool ClassGroupContext::run_lll_relation_route_(
               while (!route_budget_exhausted() && !source_loop_returned) {
                 const slong relation_start = relation_count();
                 while (!route_budget_exhausted() &&
-                       relation_count() - relation_start < 2 &&
+                       relation_count() - relation_start < relation_target &&
                        !source_loop_returned) {
                   std::vector<slong> pivot_order;
                   {
@@ -1387,7 +1394,7 @@ bool ClassGroupContext::run_lll_relation_route_(
                     const slong relation_delta =
                         relation_count() - relation_start;
                     if (flint::fmpz_sgn(flint::FmpzConstRef(h)) > 0 &&
-                        relation_delta > 1) {
+                        relation_delta >= relation_target) {
                       source_loop_returned = true;
                       break;
                     }
@@ -1641,6 +1648,7 @@ bool ClassGroupContext::extend_tentative_relations_(
         (options.relation_saturation_aux_prime_bound != 0 &&
          options.relation_saturation_aux_prime_bound < 2) ||
         options.relation_saturation_max_appends_per_ell < 0 ||
+        options.extension_relation_target < 2 ||
         !detail::valid_certification_request(options.requested_certification)) {
         return false;
     }

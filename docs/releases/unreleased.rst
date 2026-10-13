@@ -1235,6 +1235,26 @@ Changed
   ``cyclotomic_32_phi16`` was 1.005.  Outputs are identical except
   ``unit_group.regulator_radius`` on ``simplest_cubic_a12``.
 
+- The ``grh`` class/unit computation grows the relation refill of its
+  refine loop geometrically (2, 4, 8, ...) while the validation repeats the
+  same index bound above one and the previous refill left the class order
+  unchanged; any other round restarts at 2.  ``proven`` computations are
+  unchanged.  On the release corpus the class group, invariants, regulator,
+  unit generators and proof labels are unchanged.  The relation bookkeeping
+  fields ``relation_count``, ``relation_kernel_unit_count``,
+  ``relation_sources.random_product`` and
+  ``skipped_dependent_relation_count`` differ on 14 of the 185 ``grh``
+  corpus rows: ``imaginary_quadratic_34_grh``, ``real_quadratic_d10000000005``,
+  ``imaginary_quadratic_d10000000799``, ``imaginary_quadratic_d100000000000319``,
+  ``simplest_cubic_a12``, ``pure_x5_minus_7``, ``quintic_disc401370255_proven``,
+  ``cyclotomic_7_phi6``, ``cyclotomic_19_phi18``, ``cyclotomic_52_phi24``,
+  ``lmfdb_6_6_49744125_1``, ``lmfdb_8_8_73116160000_2``,
+  ``multiquadratic_m3_m5_m7`` and ``random_d10_h4_s27_proven``
+  (``skipped_dependent_relation_count`` on all but the real quadratic,
+  the two imaginary quadratic ``d``-rows, ``pure_x5_minus_7`` and
+  ``random_d10_h4_s27_proven``).  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 Fixed
 -----
 

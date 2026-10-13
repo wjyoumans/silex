@@ -60,6 +60,28 @@ inline slong min_slong(slong left, slong right) noexcept {
     return left < right ? left : right;
 }
 
+// Relations per refill of the grh class/unit loop
+// (compute_with_relation_class_group_): the reference
+// `class_group_new_relations_via_lll` slice returns after 2 once h > 0
+// (reference source Clgp/Main_LLL.jl).
+inline constexpr slong kRelationRefillInitial = 2;
+
+// The refill target of the next grh class/unit loop slice.  `repeated` says
+// the validation just run ended with the same index bound (> 1) as the one
+// before the previous refill, and that refill left the class order
+// unchanged: the previous slice gave no measurable progress.  The target
+// then doubles (a Silex rule, not in the reference: k stalled rounds of 2
+// relations become about log2 k larger refills, each followed by one
+// validation).  Any other round restarts at the reference 2.  Saturates at WORD_MAX; the route's
+// max_relations cap still bounds every slice.
+inline slong next_relation_refill_target(slong current,
+                                         bool repeated) noexcept {
+    if (!repeated || current < kRelationRefillInitial) {
+        return kRelationRefillInitial;
+    }
+    return current > WORD_MAX / 2 ? WORD_MAX : 2 * current;
+}
+
 bool rank_zero_torsion(flint::FmpzRef best_order,
                        OrderElement& best_generator,
                        const Order& order) noexcept;
