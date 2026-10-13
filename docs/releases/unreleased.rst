@@ -176,6 +176,12 @@ Changed
   class/unit computation of the field defined by ``x^12 + 7`` took about 16%
   less CPU time (median of seven alternating runs); no controlled measurement
   has been made.  See :doc:`../reference/algorithms_and_sources`.
+- Relation factoring over the factor base no longer computes the valuation
+  of the last residue hit above a rational prime ``p`` when the factor base
+  holds every prime ideal above ``p``: it is what is left of the ``p``-adic
+  valuation of the norm after the other hits, divided by the residue degree.
+  Other cases compute it as before, so exponent rows and every published
+  result are unchanged.  See :doc:`../reference/algorithms_and_sources`.
 
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when

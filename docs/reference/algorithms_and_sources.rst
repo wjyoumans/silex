@@ -696,6 +696,27 @@ exception is a prime stored in the quadratic generator ``omega``, which is
 tested on the element's ``[1, omega]`` coordinates, its ``omega``-polynomial,
 for every ``p``, since the order is ``Z[omega]``.
 
+Relation factoring over the factor base (the integral residue screen of
+``Relation`` and the direct one-large-prime partial-relation row of the
+class-group search) needs, for each rational prime ``p`` of ``N(alpha)``,
+the valuations of ``alpha`` at the factor-base primes above ``p``.  On a
+maximal equation order the residue test above finds the primes above ``p``
+that contain ``alpha`` (the hits), and exact valuations are computed only at
+hits.  The last hit's valuation is not computed when the factor-base block
+of ``p`` holds every prime above ``p``, that is, when the sum of ``e f`` over
+the block equals ``[K : Q]`` (Cohen, GTM 138, Section 4.8; the factor base
+keeps distinct primes, one block per rational prime).  Then
+``|N(alpha)| = N(alpha O_K)`` and ``N(P) = p^f`` give
+``v_p(N(alpha)) = sum over P | p of f(P) v_P(alpha)``, every prime above
+``p`` with positive valuation is a hit, and the last hit's valuation is what
+is left of ``v_p(N(alpha))`` after the other hits, divided by its residue
+degree.  PARI 2.17.3 ``src/basemath/buch2.c:divide_p_elt`` does the same
+norm accounting, subtracting ``v f`` per prime, but computes every
+valuation.  The deduction is used only when what is left is a positive
+multiple of the residue degree; otherwise, and for blocks that miss a prime
+above ``p`` (a norm-bounded base, for example), the valuation is computed,
+so the exponent rows are unchanged.
+
 Class groups and order units
 ----------------------------
 
