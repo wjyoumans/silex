@@ -1751,6 +1751,34 @@ int test_two_lll_certified_lll_matches_fmpz_lll() {
 // 5, 11 and 13 are reduced again from a finer rounding, the T2 enumeration
 // data of every prime above 2, ..., 13 is unchanged when every first phase
 // is replaced by an injected failure, and each build reaches the helper.
+// Counts the fallback and ineligible route events of the T2 enumeration
+// setup's certified first LLL phase.
+struct CertifiedRouteCounter {
+    long fallback = 0;
+    long ineligible = 0;
+};
+
+void certified_route_callback(void* user,
+                              silex::DiagnosticsModule,
+                              silex::ProfileEvent event,
+                              const char*,
+                              const char* label) noexcept {
+    if (event != silex::ProfileEvent::event || label == nullptr) {
+        return;
+    }
+    CertifiedRouteCounter& counter =
+            *static_cast<CertifiedRouteCounter*>(user);
+    if (std::strcmp(label,
+                    "class_group.finite_enumeration_basis_lll."
+                    "certified_lll_fallback") == 0) {
+        ++counter.fallback;
+    } else if (std::strcmp(label,
+                           "class_group.finite_enumeration_basis_lll."
+                           "certified_lll_ineligible") == 0) {
+        ++counter.ineligible;
+    }
+}
+
 int test_t2_enumeration_certified_lll_matches_fmpz_lll() {
     constexpr std::array<slong, 9> coefficients = {25, 0, -100, 0, 95,
                                                    0,  -20, 0,  1};
@@ -1762,6 +1790,13 @@ int test_t2_enumeration_certified_lll_matches_fmpz_lll() {
     namespace rs = silex::detail::relation_search;
     using silex::detail::CertifiedLllTestFailure;
     using silex::detail::TestHookAccess;
+    CertifiedRouteCounter route_counter;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            certified_route_callback, &route_counter);
     constexpr std::array<ulong, 6> rational_primes = {2, 3, 5, 7, 11, 13};
     for (const ulong rational_prime : rational_primes) {
         sflint::Fmpz p;
@@ -1776,8 +1811,16 @@ int test_t2_enumeration_certified_lll_matches_fmpz_lll() {
             assert(prime->get_ideal(prime_ideal));
 
             rs::FiniteIdealT2EnumerationData expected;
+            route_counter = CertifiedRouteCounter{};
             assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
-                    expected, prime_ideal, nullptr, nullptr));
+                    expected, prime_ideal, &diagnostics, nullptr));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+            // The reference build took the certified route throughout, so
+            // fmpz_lll was never reached and the comparison below is not
+            // between two fmpz_lll runs.
+            assert(route_counter.fallback == 0);
+            assert(route_counter.ineligible == 0);
+#endif
             for (const auto failure : {CertifiedLllTestFailure::first_phase,
                                        CertifiedLllTestFailure::certificate}) {
                 const slong injected_before =

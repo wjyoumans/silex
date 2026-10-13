@@ -141,10 +141,11 @@ Changed
   :doc:`../reference/algorithms_and_sources`.
 - The integer LLL of the finite-ideal T2 enumeration setup (the reduction of
   a prime ideal's rounded embedding rows, run for each ideal of the
-  factor-base honesty check) takes the same certified first LLL phase, which
-  skips FLINT's multiprecision check of the phase output.  A failed
-  certificate restores the input and calls ``fmpz_lll``, and rows with
-  entries above 250 bits call ``fmpz_lll`` directly, so the reduced bases and
+  factor-base honesty check, and for each ideal of the finite-ideal relation
+  search in both ``grh`` and ``proven`` mode) takes the same certified first
+  LLL phase, which skips FLINT's multiprecision check of the phase output.
+  A failed certificate restores the input and calls ``fmpz_lll``, and rows
+  with entries above 250 bits call ``fmpz_lll`` directly, so the reduced bases and
   every published result are unchanged.  On a busy machine the ``proven``
   class/unit computation of the field defined by ``x^12 + 7`` took about 16%
   less CPU time (median of seven alternating runs); no controlled measurement
