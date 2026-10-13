@@ -671,31 +671,7 @@ bool Ideal::get_hnf(flint::FmpzMatRef out) const noexcept {
 }
 
 bool Ideal::set_principal(const OrderElement& generator) noexcept {
-    if (!is_defined() || generator.parent() == nullptr ||
-        !generator.parent()->has_same_data(parent_) ||
-        generator.equal_si(0)) {
-        return false;
-    }
-
-    // Source trace: reference `base4.c:idealmulelt` and `idealhnf_two` form HNF
-    // from multiplication-table rows.  For a principal ideal, those rows are
-    // the multiplication matrix of the generator in the order basis.
-    const slong n = parent_.degree();
-    flint::FmpzMat rows(n, n);
-    if (!order_element_multiplication_matrix(flint::FmpzMatRef(rows), parent_,
-                                             generator)) {
-        return false;
-    }
-
-    Ideal candidate(parent_);
-    if (!candidate.set_known_ideal_rows(flint::FmpzMatConstRef(rows)) ||
-        !candidate.principal_generator_.define(parent_) ||
-        !candidate.principal_generator_.set(generator)) {
-        return false;
-    }
-    candidate.has_principal_generator_ = true;
-    swap(candidate);
-    return true;
+    return detail::IdealAccess::set_principal(*this, generator, nullptr);
 }
 
 const OrderElement* Ideal::known_principal_generator() const noexcept {
@@ -1136,6 +1112,92 @@ bool IdealAccess::store_hnf(Ideal& ideal, flint::FmpzMatConstRef hnf,
     if (!candidate.set_hnf_direct(flint::FmpzMatConstRef(normalized))) {
         return false;
     }
+    ideal.swap(candidate);
+    return true;
+}
+
+namespace {
+
+// True when the diagonal of the n x n matrix `hnf` multiplies to `modulus`.
+bool hnf_diagonal_product_equals(flint::FmpzMatConstRef hnf,
+                                 const fmpz_t modulus) noexcept {
+    flint::Fmpz product;
+    fmpz_one(product.raw());
+    for (slong i = 0; i < fmpz_mat_nrows(hnf.raw()); ++i) {
+        fmpz_mul(product.raw(), product.raw(), fmpz_mat_entry(hnf.raw(), i, i));
+    }
+    return fmpz_equal(product.raw(), modulus) != 0;
+}
+
+// Debug cross-check of the determinant-modular route: `hnf` equals the
+// canonical HNF that fmpz_mat_hnf returns for `rows`.
+[[maybe_unused]] bool equals_full_hnf(flint::FmpzMatConstRef rows,
+                                      flint::FmpzMatConstRef hnf) noexcept {
+    flint::FmpzMat full(fmpz_mat_nrows(rows.raw()), fmpz_mat_ncols(rows.raw()));
+    fmpz_mat_hnf(full.raw(), rows.raw());
+    return fmpz_mat_equal(full.raw(), hnf.raw()) != 0;
+}
+
+}  // namespace
+
+bool IdealAccess::set_principal(Ideal& ideal, const OrderElement& generator,
+                                const fmpq* norm) noexcept {
+    if (!ideal.is_defined() || generator.parent() == nullptr ||
+        !generator.parent()->has_same_data(ideal.parent_) ||
+        generator.equal_si(0)) {
+        return false;
+    }
+
+    // Source trace: reference `base4.c:idealmulelt` and `idealhnf_two` form HNF
+    // from multiplication-table rows.  For a principal ideal, those rows are
+    // the multiplication matrix of the generator in the order basis.
+    const slong n = ideal.parent_.degree();
+    flint::FmpzMat rows(n, n);
+    if (!order_element_multiplication_matrix(flint::FmpzMatRef(rows),
+                                             ideal.parent_, generator)) {
+        return false;
+    }
+
+    Ideal candidate(ideal.parent_);
+    bool stored = false;
+    if (norm != nullptr && fmpz_is_one(fmpq_denref(norm)) != 0 &&
+        fmpz_is_zero(fmpq_numref(norm)) == 0) {
+        // The rows are the matrix M of multiplication by the generator g in
+        // the order's Z-basis, so |det M| = |N_{K/Q}(g)| = [O : gO], the
+        // known norm.  adj(M) M = det(M) I puts det(M) Z^n inside the row
+        // lattice, so |N(g)| is a positive multiple of the determinant of the
+        // full-rank row lattice: the precondition of FLINT 3.6.0
+        // fmpz_mat_hnf_modular (src/fmpz_mat/hnf_modular.c), the HNF modulo D
+        // of Domich, Kannan and Trotter (Math. Oper. Res. 12, 1987) and Cohen,
+        // "A Course in Computational Algebraic Number Theory", Algorithm
+        // 2.4.8.  FLINT documents its output as the unique row HNF of the
+        // input, the canonical form fmpz_mat_hnf returns, so the stored HNF is
+        // the one the full-HNF route below stores.  A diagonal product other
+        // than the modulus means the norm was not |det M|; that case takes
+        // the full-HNF route.
+        flint::Fmpz modulus;
+        fmpz_abs(modulus.raw(), fmpq_numref(norm));
+        flint::FmpzMat hnf(n, n);
+        ::fmpz_mat_hnf_modular(hnf.raw(), rows.raw(), modulus.raw());
+        if (hnf_diagonal_product_equals(flint::FmpzMatConstRef(hnf),
+                                        modulus.raw())) {
+            assert(equals_full_hnf(flint::FmpzMatConstRef(rows),
+                                   flint::FmpzMatConstRef(hnf)));
+            // The caller vouches for closure, as with set_known_ideal_rows.
+            if (!store_hnf(candidate, flint::FmpzMatConstRef(hnf),
+                           HnfInput::normalized, IdealTest::assert_only)) {
+                return false;
+            }
+            stored = true;
+        }
+    }
+    if ((!stored &&
+         !candidate.set_known_ideal_rows(flint::FmpzMatConstRef(rows))) ||
+        !candidate.principal_generator_.define(ideal.parent_) ||
+        !candidate.principal_generator_.set(generator)) {
+        return false;
+    }
+    candidate.has_principal_generator_ = true;
     ideal.swap(candidate);
     return true;
 }

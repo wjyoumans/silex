@@ -1,6 +1,7 @@
 #include <silex/relation.hpp>
 
 #include "relation_internal.hpp"
+#include "../ideal/ideal_access_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/abelian_group.hpp>
@@ -1470,10 +1471,19 @@ bool Relation::set_generator_impl(
         {
             SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::relation,
                                 "relation.principal_integral_ideal");
+            // known_norm, when given, is N(alpha): every caller passes the
+            // exact norm it computed for alpha (Element::norm, or the
+            // resultant with the monic defining polynomial on the equation
+            // order).  It is the modulus of the principal ideal's
+            // determinant-modular HNF.
             if (!integral_alpha.set_coordinates(
                         flint::FmpzMatConstRef(
                                 known_integral_coordinates)) ||
-                !ideal.set_principal(integral_alpha)) {
+                !(known_norm != nullptr
+                          ? detail::set_principal_ideal_known_norm(
+                                    ideal, integral_alpha,
+                                    flint::FmpqConstRef(known_norm))
+                          : ideal.set_principal(integral_alpha))) {
                 return false;
             }
         }

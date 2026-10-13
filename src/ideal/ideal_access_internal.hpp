@@ -33,6 +33,13 @@ public:
                                     flint::FmpzMatConstRef hnf) noexcept;
 
 
+    // The one routine behind Ideal::set_principal and
+    // detail::set_principal_ideal_known_norm.  `norm` is null, or the norm of
+    // `generator` as the trust helper below states; see the definition in
+    // ideal.cpp.
+    static bool set_principal(Ideal& ideal, const OrderElement& generator,
+                              const fmpq* norm) noexcept;
+
     // Implementations of detail::set_known_two_generator_ideal and
     // detail::set_integral_ideal_known_hnf, defined in ideal.cpp.
     static bool set_known_two_generator(
@@ -75,6 +82,18 @@ inline bool set_known_two_generator_ideal(
         const OrderElement& element_generator) noexcept {
     return IdealAccess::set_known_two_generator(out, scalar_generator,
                                                 element_generator);
+}
+
+// Trust helper, noninstalled.  Sets `out` to the principal ideal
+// `generator` O exactly as Ideal::set_principal does (same stored HNF, same
+// failures, `out` unchanged on failure).  The caller vouches that `norm` is
+// N_{K/Q}(generator); when it is a nonzero integer, its absolute value is the
+// modulus of a determinant-modular HNF instead of a full HNF.  Any other
+// `norm` (noninteger or zero) takes the Ideal::set_principal route.
+inline bool set_principal_ideal_known_norm(Ideal& out,
+                                           const OrderElement& generator,
+                                           flint::FmpqConstRef norm) noexcept {
+    return IdealAccess::set_principal(out, generator, norm.raw());
 }
 
 inline bool set_integral_ideal_known_hnf(FractionalIdeal& out,

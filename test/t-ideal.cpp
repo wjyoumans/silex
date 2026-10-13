@@ -482,6 +482,134 @@ int test_integral_principal_pseudorandom_identities() {
     return 0;
 }
 
+// Checks detail::set_principal_ideal_known_norm against Ideal::set_principal
+// for pseudorandom integral generators of `order`, with the true norm (the
+// determinant-modular route), and with a norm that is a proper multiple, a
+// noninteger or zero (the full-HNF route).  Both must store the same HNF.
+void check_principal_known_norm_matches(silex::Order& order,
+                                        slong degree,
+                                        slong seeds) noexcept {
+    const silex::NumberField* field = order.parent();
+    assert(field != nullptr);
+    silex::Element alpha(*field);
+    silex::OrderElement generator(order);
+    silex::Ideal expected(order);
+    silex::Ideal out(order);
+    sflint::FmpzMat expected_hnf(degree, degree);
+    sflint::FmpzMat out_hnf(degree, degree);
+    sflint::Fmpq norm;
+    sflint::Fmpq wrong_norm;
+
+    for (slong seed = 1; seed <= seeds; ++seed) {
+        sflint::FmpqPoly polynomial;
+        for (slong j = 0; j < degree; ++j) {
+            const slong c = ((seed * (7 + 3 * j) + j * j + 2) % 9) - 4;
+            sflint::fmpq_poly_set_coeff_si(polynomial, j, c);
+        }
+        if (fmpq_poly_is_zero(polynomial.raw()) != 0) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, 0, seed + 1);
+        }
+        assert(alpha.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+        if (!generator.set_element(alpha)) {
+            continue;
+        }
+        assert(alpha.norm(sflint::FmpqRef(norm)));
+        if (fmpq_is_zero(norm.raw()) != 0) {
+            continue;
+        }
+        assert(expected.set_principal(generator));
+        assert(expected.get_hnf(sflint::FmpzMatRef(expected_hnf)));
+
+        const auto check = [&](const sflint::Fmpq& value) noexcept {
+            silex::Ideal fresh(order);
+            assert(silex::detail::set_principal_ideal_known_norm(
+                    fresh, generator, sflint::FmpqConstRef(value)));
+            assert(fresh.get_hnf(sflint::FmpzMatRef(out_hnf)));
+            assert(fmpz_mat_equal(out_hnf.raw(), expected_hnf.raw()) != 0);
+            assert(fresh.equal(expected));
+            const silex::OrderElement* known =
+                    fresh.known_principal_generator();
+            assert(known != nullptr && known->equal(generator));
+        };
+        check(norm);
+        fmpq_neg(wrong_norm.raw(), norm.raw());
+        check(wrong_norm);
+        fmpq_mul_si(wrong_norm.raw(), norm.raw(), 3);
+        check(wrong_norm);
+        fmpz_mul_ui(fmpq_denref(wrong_norm.raw()),
+                    fmpq_denref(wrong_norm.raw()), 2);
+        fmpq_canonicalise(wrong_norm.raw());
+        check(wrong_norm);
+        fmpq_zero(wrong_norm.raw());
+        check(wrong_norm);
+    }
+
+    // A zero generator fails and leaves the output unchanged.
+    assert(generator.set_si(0));
+    assert(out.set_principal(generator) == false);
+    assert(generator.set_si(2));
+    assert(out.set_principal(generator));
+    assert(out.get_hnf(sflint::FmpzMatRef(expected_hnf)));
+    assert(generator.set_si(0));
+    sflint::fmpq_set_si(norm, 1, 1);
+    assert(!silex::detail::set_principal_ideal_known_norm(
+            out, generator, sflint::FmpqConstRef(norm)));
+    assert(out.get_hnf(sflint::FmpzMatRef(out_hnf)));
+    assert(fmpz_mat_equal(out_hnf.raw(), expected_hnf.raw()) != 0);
+}
+
+int test_principal_known_norm_matches_set_principal() {
+    {
+        sflint::FmpqPoly polynomial;
+        poly_x3_minus(polynomial, 2);
+        silex::NumberField field;
+        field = field_by_polynomial(polynomial);
+        silex::Order order;
+        order = silex::test::equation_order(field);
+        check_principal_known_norm_matches(order, 3, 12);
+    }
+    {
+        // Z[(1 + sqrt 5)/2]: an order basis other than the power basis.
+        sflint::FmpqPoly polynomial;
+        poly_x2_minus(polynomial, 5);
+        silex::NumberField field;
+        field = field_by_polynomial(polynomial);
+        silex::Order order(field);
+        sflint::FmpqMat basis(2, 2);
+        qmat_entry_si(basis, 0, 0, 1);
+        qmat_entry_frac_si(basis, 1, 0, 1, 2);
+        qmat_entry_frac_si(basis, 1, 1, 1, 2);
+        assert(order.set_basis(sflint::FmpqMatConstRef(basis)));
+        check_principal_known_norm_matches(order, 2, 12);
+    }
+    {
+        // Z[3 sqrt 5]: a nonmaximal order.
+        sflint::FmpqPoly polynomial;
+        poly_x2_minus(polynomial, 5);
+        silex::NumberField field;
+        field = field_by_polynomial(polynomial);
+        silex::Order order(field);
+        sflint::FmpqMat basis(2, 2);
+        qmat_entry_si(basis, 0, 0, 1);
+        qmat_entry_si(basis, 1, 1, 3);
+        assert(order.set_basis(sflint::FmpqMatConstRef(basis)));
+        check_principal_known_norm_matches(order, 2, 12);
+    }
+    {
+        // Degree 7: x^7 - 3x + 3, Eisenstein at 3.
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 7, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -3);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, 3);
+        silex::NumberField field;
+        field = field_by_polynomial(polynomial);
+        silex::Order order;
+        order = silex::test::equation_order(field);
+        check_principal_known_norm_matches(order, 7, 12);
+    }
+    return 0;
+}
+
 int test_principal_times_integral_direct_matches_fractional_product() {
     sflint::FmpqPoly polynomial;
     poly_x3_minus(polynomial, 2);
@@ -3331,6 +3459,7 @@ int main(int argc, char** argv) {
     assert(test_integral_arithmetic_quadratic() == 0);
     assert(test_integral_arithmetic_nontrivial_order_basis() == 0);
     assert(test_integral_principal_pseudorandom_identities() == 0);
+    assert(test_principal_known_norm_matches_set_principal() == 0);
     assert(test_principal_times_integral_direct_matches_fractional_product() == 0);
     assert(test_two_generator_product_matches_generic() == 0);
     assert(test_principal_times_integral_direct_nontrivial_order_basis() == 0);

@@ -250,6 +250,20 @@ extraction and multiplication.  Hecke v0.38.6
 coordinate-solve treatment of order bases whose first element is not one.
 Silex uses row HNF throughout, so upstream column indices are not copied.
 
+A principal ideal g O is the row lattice of the matrix M of multiplication by
+g in the order basis, and |det M| = |N(g)| = [O : g O].  When the relation
+search already knows N(g) exactly (the fallback that factors an integral
+relation generator as an ideal), it computes the HNF of M with FLINT 3.6.0
+``fmpz_mat_hnf_modular`` (``src/fmpz_mat/hnf_modular.c``), the HNF modulo D
+of Domich, Kannan and Trotter (1987; H. Cohen, *A Course in Computational
+Algebraic Number Theory*, Algorithm 2.4.8), with D = |N(g)|.  Its
+precondition, D a positive multiple of the lattice determinant, holds since
+adj(M) M = det(M) I.  FLINT documents the output as the unique row HNF, the
+one ``fmpz_mat_hnf`` returns, so the stored HNF is unchanged.  A diagonal
+product other than D, or a norm that is not a nonzero integer, takes the
+``fmpz_mat_hnf`` route.  Other principal-ideal constructions use
+``fmpz_mat_hnf``.
+
 The relation search inverts each search-base prime ideal P of a maximal order
 with ``detail::prime_ideal_inverse_num_den`` instead of the general inverse.
 It follows PARI 2.17.3 ``src/basemath/base4.c:pr_inv_p`` and ``pr_inv``
