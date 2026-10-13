@@ -385,6 +385,52 @@ int test_set_generator_with_integral_coordinates_and_norm() {
     return 0;
 }
 
+// On the non-equation maximal order of Q(sqrt(-47)) the residue screen does
+// not handle the integral element, so the exact-norm entry point reaches the
+// principal-ideal fallback (set_principal_ideal_known_norm).  Its exponent
+// row must equal that of set_generator, which uses set_principal.
+int test_integral_coordinates_and_norm_ideal_fallback() {
+    silex::NumberField field = quadratic_field(-47);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(maximal.is_maximal());
+    assert(!maximal.is_equation_order());
+
+    silex::FactorBase base(maximal);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 3));
+    assert(base.build(sflint::FmpzConstRef(bound)));
+    assert(base.length() == 4);
+
+    const slong cases[][2] = {{1, -1}, {2, 1}};
+    for (const auto& c : cases) {
+        sflint::FmpzMat coordinates(1, 2);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0), c[0]);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 1), c[1]);
+        silex::Element alpha(field);
+        sflint::Fmpq norm;
+        assert(set_element_from_order_coordinates(alpha, maximal,
+                                                  coordinates));
+        assert(alpha.norm(sflint::FmpqRef(norm)));
+
+        silex::Relation expected(base);
+        silex::Relation actual(base);
+        sflint::FmpzMat expected_row(1, base.length());
+        sflint::FmpzMat actual_row(1, base.length());
+        assert(expected.set_generator(alpha));
+        assert(RelationAccess::set_relation_from_integral_coordinates_and_norm(
+                actual, alpha, sflint::FmpzMatConstRef(coordinates),
+                sflint::FmpqConstRef(norm)));
+        assert(expected.exponents(sflint::FmpzMatRef(expected_row)));
+        assert(actual.exponents(sflint::FmpzMatRef(actual_row)));
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(expected_row),
+                sflint::FmpzMatConstRef(actual_row)));
+    }
+    return 0;
+}
+
 int test_quadratic_relation() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order = silex::test::equation_order(field);
@@ -905,6 +951,7 @@ int main() {
     assert(test_known_row_reuses_defined_relation() == 0);
     assert(test_set_generator_with_norm() == 0);
     assert(test_set_generator_with_integral_coordinates_and_norm() == 0);
+    assert(test_integral_coordinates_and_norm_ideal_fallback() == 0);
     assert(test_quadratic_relation() == 0);
     assert(test_repeated_residue_valuation_relation() == 0);
     assert(test_nonintegral_equation_relation_denominator_split() == 0);

@@ -262,7 +262,9 @@ precondition, D a positive multiple of the lattice determinant, holds since
 ``adj(M) M = det(M) I``.  FLINT documents the output as the unique row HNF, the
 one ``fmpz_mat_hnf`` returns, so the stored HNF is unchanged.  A diagonal
 product other than D, or a norm that is not a nonzero integer, takes the
-``fmpz_mat_hnf`` route.  Other principal-ideal constructions use
+``fmpz_mat_hnf`` route.  The norm is trusted, as the residue screen already
+trusts it for valuations: the diagonal check catches only some wrong norms (one
+that properly divides ``det M`` can pass) and is not a proof of the norm.  Other principal-ideal constructions use
 ``fmpz_mat_hnf``.
 
 The relation search inverts each search-base prime ideal P of a maximal order
