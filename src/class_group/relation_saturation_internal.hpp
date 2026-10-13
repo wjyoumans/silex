@@ -185,6 +185,13 @@ struct RelationSaturationCandidateFilter {
     // width - rank.
     std::vector<std::vector<ulong>> rows;
     std::vector<slong> pivots;
+    // Round state outside the filter proper (kept by start, which resets
+    // only the filter): the kernel rows that have already gone through
+    // saturation_relation_with_units in this round without an appended
+    // relation, sorted.  The per-prime kernels of a round can repeat a row,
+    // and its outcome cannot change before the round ends, so it is not
+    // tested again (relation_saturation_round_row_settled).
+    std::vector<std::vector<ulong>> settled_rows;
 };
 
 bool relation_saturation_candidate_filter_start(
@@ -204,6 +211,18 @@ bool relation_saturation_candidate_filter_kernel_empty(
         const RelationSaturationCandidateFilter& filter) noexcept;
 void relation_saturation_candidate_filter_failed_power_test(
         RelationSaturationCandidateFilter& filter) noexcept;
+// Whether row `row` of `kernel` was already settled in this round (see
+// RelationSaturationCandidateFilter::settled_rows); rows with an entry
+// outside [0, 2^64) are never settled.
+bool relation_saturation_round_row_settled(
+        const RelationSaturationCandidateFilter& filter,
+        flint::FmpzMatConstRef kernel,
+        slong row) noexcept;
+// Records row `row` of `kernel` as settled in this round.
+void relation_saturation_round_settle_row(
+        RelationSaturationCandidateFilter& filter,
+        flint::FmpzMatConstRef kernel,
+        slong row) noexcept;
 void relation_saturation_candidate_filter_screen(
         bool& ruled_out,
         RelationSaturationCandidateFilter& filter,

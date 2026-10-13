@@ -8849,6 +8849,68 @@ void relation_saturation_candidate_filter_screen(
     }
 }
 
+namespace {
+
+// The entries of row `row` of `kernel`, when each lies in [0, 2^64).
+bool relation_saturation_round_row_key(std::vector<ulong>& key,
+                                       flint::FmpzMatConstRef kernel,
+                                       slong row) noexcept {
+    key.clear();
+    if (row < 0 || row >= flint::fmpz_mat_nrows(kernel)) {
+        return false;
+    }
+    const slong width = flint::fmpz_mat_ncols(kernel);
+    key.reserve(static_cast<std::size_t>(width));
+    for (slong j = 0; j < width; ++j) {
+        flint::FmpzConstRef entry = flint::fmpz_mat_entry(kernel, row, j);
+        if (flint::fmpz_sgn(entry) < 0 || !flint::fmpz_abs_fits_ui(entry)) {
+            return false;
+        }
+        key.push_back(fmpz_get_ui(entry.raw()));
+    }
+    return true;
+}
+
+}  // namespace
+
+// A kernel row is the exponent vector of the inputs (relation generators,
+// free units, torsion generator) whose product the round tests.  Whether it
+// gives an appended relation depends only on that vector and on the
+// relations, units and factor base, which stay fixed until the round appends
+// (saturation_relation_with_units: the divided row, the product, its
+// deterministic power test and the refinement check).  The candidate filter
+// only removes tests of non-powers, so its state does not decide the
+// outcome either.  A row settled at one prime is therefore settled at every
+// later prime of the round.
+bool relation_saturation_round_row_settled(
+        const RelationSaturationCandidateFilter& filter,
+        flint::FmpzMatConstRef kernel,
+        slong row) noexcept {
+    if (filter.settled_rows.empty()) {
+        return false;
+    }
+    std::vector<ulong> key;
+    return relation_saturation_round_row_key(key, kernel, row) &&
+           std::binary_search(filter.settled_rows.begin(),
+                              filter.settled_rows.end(), key);
+}
+
+void relation_saturation_round_settle_row(
+        RelationSaturationCandidateFilter& filter,
+        flint::FmpzMatConstRef kernel,
+        slong row) noexcept {
+    std::vector<ulong> key;
+    if (!relation_saturation_round_row_key(key, kernel, row)) {
+        return;
+    }
+    const auto position = std::lower_bound(filter.settled_rows.begin(),
+                                           filter.settled_rows.end(), key);
+    if (position != filter.settled_rows.end() && *position == key) {
+        return;
+    }
+    filter.settled_rows.insert(position, std::move(key));
+}
+
 bool saturation_process_candidates_once(
         SaturationCandidateProcessingResult& result,
         ClassGroupContext& context,
@@ -13560,6 +13622,17 @@ bool ClassGroupContext::saturate_local_once_with_units_(
             have_relation_rows = true;
         }
 
+        // A row this round already ran without appending gives the same
+        // outcome again (detail::relation_saturation_round_row_settled).
+        if (candidate_filter != nullptr &&
+            detail::relation_saturation_round_row_settled(
+                    *candidate_filter, flint::FmpzMatConstRef(kernel), i)) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics_, DiagnosticsModule::class_group,
+                    "class_group.saturation_row_settled_with_units");
+            continue;
+        }
+
         bool is_relation = false;
         SILEX_PROFILE_EVENT(
                 diagnostics_, DiagnosticsModule::class_group,
@@ -13571,12 +13644,17 @@ bool ClassGroupContext::saturate_local_once_with_units_(
                     include_torsion, ell, relation_base_verified,
                     candidate_filter)) {
             saw_failure = true;
+            if (candidate_filter != nullptr) {
+                detail::relation_saturation_round_settle_row(
+                        *candidate_filter, flint::FmpzMatConstRef(kernel), i);
+            }
             continue;
         }
-        if (!is_relation) {
-            continue;
-        }
-        if (!relation_row_refines_(relation)) {
+        if (!is_relation || !relation_row_refines_(relation)) {
+            if (candidate_filter != nullptr) {
+                detail::relation_saturation_round_settle_row(
+                        *candidate_filter, flint::FmpzMatConstRef(kernel), i);
+            }
             continue;
         }
         if (!append_relation(relation, ClassGroupRelationSource::Saturation)) {
