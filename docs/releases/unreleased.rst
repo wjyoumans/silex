@@ -139,6 +139,16 @@ Changed
   ``fmpz_lll_is_reduced`` above that; a failed certificate restores the input
   and calls ``fmpz_lll``, so every published result is unchanged.  See
   :doc:`../reference/algorithms_and_sources`.
+- The integer LLL of the finite-ideal T2 enumeration setup (the reduction of
+  a prime ideal's rounded embedding rows, run for each ideal of the
+  factor-base honesty check) takes the same certified first LLL phase, which
+  skips FLINT's multiprecision check of the phase output.  A failed
+  certificate restores the input and calls ``fmpz_lll``, and rows with
+  entries above 250 bits call ``fmpz_lll`` directly, so the reduced bases and
+  every published result are unchanged.  On a busy machine the ``proven``
+  class/unit computation of the field defined by ``x^12 + 7`` took about 16%
+  less CPU time (median of seven alternating runs); no controlled measurement
+  has been made.  See :doc:`../reference/algorithms_and_sources`.
 
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when

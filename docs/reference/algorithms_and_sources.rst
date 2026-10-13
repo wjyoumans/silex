@@ -103,8 +103,8 @@ is retained.
 
 The certified first LLL phase is one internal helper shared by
 ``Lat::lll_reduce``, the unit-candidate kernel and the relation-saturation
-kernel basis of the class-group computation, and the rounded-embedding
-integer LLL (below).  For a ``Z_BASIS``, ``APPROX`` context, at least two rows
+kernel basis of the class-group computation, the rounded-embedding
+integer LLL and the finite-ideal T2 enumeration setup (below).  For a ``Z_BASIS``, ``APPROX`` context, at least two rows
 and coefficients of at most 250 bits it runs
 ``fmpz_lll_d_with_removal_knapsack`` with no removal bound and accepts the
 result only when an exact reducedness certificate holds with the unchanged
@@ -873,7 +873,15 @@ the next finer full-rank scale (4, 8, ... up to the working precision).
 When a finer reduction fails, or no finer scale is left, the first reduced
 basis that had quadratic-form data is kept.  The lattice and the bound rule
 are unchanged; the bound value and the enumeration order follow the new
-reduced basis.
+reduced basis.  Each of these integer LLLs (``Z_BASIS``, ``APPROX``,
+``delta = 0.99``, ``eta = 0.51``) takes the certified first LLL phase
+described with ``Lat::lll_reduce`` (above): for rounded rows with entries of
+at most 250 bits it runs ``fmpz_lll_d_with_removal_knapsack`` and accepts the
+result only when the exact certificate holds, and otherwise restores the
+rows and transform and calls ``fmpz_lll``; rows above 250 bits call
+``fmpz_lll`` directly.  The reduced rows and transform are those
+``fmpz_lll`` returns, for the three reasons given there, so the reduced
+basis, its quadratic-form data and the bound are unchanged.
 
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
