@@ -120,9 +120,9 @@ Added
 Changed
 -------
 
-- When the relation search factors an integral relation generator g through
-  its principal ideal g O, it computes the HNF of g O modulo the norm |N(g)|
-  it already knows, with FLINT's ``fmpz_mat_hnf_modular``, instead of a full
+- When the relation search factors an integral relation generator ``g`` through
+  its principal ideal ``g O``, it computes the HNF of ``g O`` modulo the norm
+  ``|N(g)|`` it already knows, with FLINT's ``fmpz_mat_hnf_modular``, instead of a full
   HNF of the multiplication matrix.  The result is the same canonical HNF,
   so published outputs are unchanged on the tested ``grh`` and ``proven``
   corpus rows.  See "Number fields, orders, and ideals" in
