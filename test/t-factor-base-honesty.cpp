@@ -7,6 +7,8 @@
 #include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "order/order_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
+#include "prime_ideal/prime_ideal_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 #include "../tools/class_unit_failure_detail.hpp"
 
@@ -17,6 +19,7 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/ideal.hpp>
 #include <silex/ideal_factorization.hpp>
 #include <silex/number_field.hpp>
@@ -214,7 +217,10 @@ bool full_factorization_required_prime_result(
             !factorization.exponent(exponent, i)) {
             return false;
         }
-        if (factor.equal(required_prime)) {
+        // Matched as ideals: the factorization may record residue data
+        // other than required_prime's for the same prime.
+        if (silex::detail::PrimeIdealAccess::ideal(factor).equal(
+                    silex::detail::PrimeIdealAccess::ideal(required_prime))) {
             required_exponent += exponent;
         } else if (!base.contains(factor) &&
                    (strict ||
@@ -1167,6 +1173,99 @@ int test_selected_witness_edge_cases() {
     assert(audit.used_reference);
     assert(fallback == search::factor_base_principal_witness(
             empty, inert, alpha, Mode::full_factorization));
+    return 0;
+}
+
+// Copies `prime`, a degree-one prime with residue polynomial x - r in the
+// alpha convention, into `out` with the residue polynomial x - r - p: the
+// same residue map onto F_p, so the same prime ideal, recorded with an
+// unreduced coefficient.  PrimeIdeal::equal tells the two apart.
+bool set_unreduced_residue_variant(silex::PrimeIdeal& out,
+                                   const silex::PrimeIdeal& prime) noexcept {
+    using silex::detail::PrimeIdealAccess;
+    sflint::FmpzPoly residue;
+    sflint::Fmpz p;
+    sflint::Fmpz constant;
+    if (prime.residue_degree() != 1 ||
+        PrimeIdealAccess::residue_uses_integral_generator(prime) ||
+        !prime.residue_polynomial(sflint::FmpzPolyRef(residue)) ||
+        !prime.rational_prime(sflint::FmpzRef(p)) || !out.set(prime)) {
+        return false;
+    }
+    fmpz_poly_get_coeff_fmpz(constant.raw(), residue.raw(), 0);
+    fmpz_add(constant.raw(), constant.raw(), p.raw());
+    fmpz_poly_set_coeff_fmpz(residue.raw(), 0, constant.raw());
+    return silex::detail::TestHookAccess::set_alpha_residue_polynomial(
+                   out, sflint::FmpzPolyConstRef(residue)) &&
+           !out.equal(prime);
+}
+
+// The witness rule matches the required prime as an ideal.  In x^3 - 2 the
+// element 1 + alpha^2 has norm 5, so (1 + alpha^2) is a degree-one prime P
+// above 5 and witnesses P over the empty base.  A copy of P recorded with
+// other residue data is the same prime and has the same witness, under the
+// full-factorization predicate and under the debug reference oracle that
+// checks the direct predicates (diagnostics preset).
+int test_witness_matches_required_prime_as_ideal() {
+    namespace search = silex::detail::relation_search;
+    using Mode = search::FactorBaseWitnessPredicate;
+    FieldSetup setup = cubic_x3_minus_2();
+    const silex::Order& order = setup.maximal_order;
+    assert(order.is_maximal());
+    silex::FactorBase empty(order);
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    silex::Element ambient(setup.field);
+    silex::OrderElement generator(order);
+    silex::Ideal principal(order);
+    assert(ambient.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    assert(generator.set_element(ambient));
+    assert(principal.set_principal(generator));
+
+    silex::IdealFactorization factorization(order);
+    silex::PrimeIdeal prime(order);
+    slong exponent = 0;
+    assert(factorization.factor(principal));
+    assert(factorization.length() == 1);
+    assert(factorization.prime(prime, 0));
+    assert(factorization.exponent(exponent, 0) && exponent == 1);
+    sflint::Fmpz p;
+    assert(prime.rational_prime(sflint::FmpzRef(p)));
+    assert(sflint::fmpz_equal_si(p, 5) && prime.residue_degree() == 1);
+
+    silex::PrimeIdeal variant(order);
+    assert(set_unreduced_residue_variant(variant, prime));
+    assert(!variant.equal(prime));
+
+    silex::DiagnosticsContext diagnostics;
+    diagnostics.debug_level = silex::DebugLevel::expensive;
+    diagnostics.debug_modules = silex::diagnostics_all_modules;
+    slong debug_failures = 0;
+    diagnostics.debug_failure_user = &debug_failures;
+    diagnostics.debug_failure_callback = [](
+            void* user, silex::DiagnosticsModule, silex::DebugLevel,
+            const char*, const char*, int, const char*, const char*) noexcept {
+        ++*static_cast<slong*>(user);
+    };
+    for (const silex::PrimeIdeal* required : {&prime, &variant}) {
+        bool reference = false;
+        assert(full_factorization_required_prime_result(
+                reference, principal, empty, *required));
+        assert(reference);
+        // The direct predicates first: under debug checks each one is
+        // compared with the reference oracle.
+        for (Mode mode : {Mode::order_element_direct, Mode::selected,
+                          Mode::full_factorization}) {
+            search::FactorBaseWitnessAudit audit;
+            assert(search::factor_base_principal_witness(
+                    empty, *required, generator, mode, &diagnostics, &audit));
+            assert(debug_failures == 0);
+            assert(audit.used_reference == (mode == Mode::full_factorization));
+        }
+    }
     return 0;
 }
 
@@ -3119,6 +3218,7 @@ int main() {
     assert(test_scalar_noncontiguous_blocks() == 0);
     assert(test_scalar_witness_reference_cases() == 0);
     assert(test_selected_witness_edge_cases() == 0);
+    assert(test_witness_matches_required_prime_as_ideal() == 0);
     assert(test_witness_partial_rational_prime_blocks() == 0);
     assert(test_legacy_scan_predicate_equivalence() == 0);
     assert(test_witness_through_lacking_conjugate() == 0);

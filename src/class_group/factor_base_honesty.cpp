@@ -12,6 +12,7 @@
 #include "relation_candidate_internal.hpp"
 #include "relation_search_internal.hpp"
 #include "../ideal_factorization/ideal_factorization_internal.hpp"
+#include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <cstdio>
 #include <vector>
@@ -91,7 +92,11 @@ bool full_factorization_has_principal_witness(
             !factorization.exponent(exponent, i)) {
             return false;
         }
-        if (factor.equal(prime)) {
+        // Matched as ideals, as base.contains matches below: the
+        // factorization may record residue data other than the required
+        // prime's for the same prime, which PrimeIdeal::equal tells apart.
+        if (detail::PrimeIdealAccess::ideal(factor).equal(
+                    detail::PrimeIdealAccess::ideal(prime))) {
             prime_exponent += exponent;
             continue;
         }
