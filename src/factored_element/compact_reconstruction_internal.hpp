@@ -63,7 +63,10 @@ const char* bounded_compact_reconstruction_status_name(
 // more than FLINT_BITS bits passes over a bounded number of primes at which
 // the reduced defining polynomial does not split into distinct linear
 // factors (counted in nonsplit_prime_skips).  Any set of usable primes whose
-// product exceeds twice the bound gives the same result.
+// product exceeds twice the bound gives the same result.  Skipped primes are
+// never used, so with a non-default prime_search_start close to
+// UWORD_MAX_PRIME the preference could turn a success into prime_exhausted;
+// this cannot happen from the default start 2^63.
 bool bounded_compact_reconstruct(
         BoundedCompactReconstructionReport& report, std::vector<Element>& out,
         const Order& order, std::span<const FactoredElement> inputs,

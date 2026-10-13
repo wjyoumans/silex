@@ -1076,17 +1076,19 @@ therefore chooses the CRT primes differently from PARI's
 bits: for each prime the CRT needs, it scans at most ``4 * degree``
 candidates (a Silex limit, not a sourced constant) and takes the first prime
 ``p`` with ``x^p = x`` modulo ``f``.  Such a prime has ``f`` split into
-distinct linear factors when ``f`` is squarefree modulo ``p``, so
+distinct linear factors, so
 ``lambda = p - 1`` (Lidl and Niederreiter, Theorem 1.61 and Lemma 2.3); by
 the Chebotarev density theorem a positive proportion of primes splits a
 Galois polynomial.  If the scan finds no such prime, the next prime of the
 PARI sequence is used and the preference stops.  The skipped primes are
 counted in the internal report field ``nonsplit_prime_skips``.  For a split
-prime the unit group exponent is at most 64 bits, so for each row whose
-exponents are large, a negative exponent is also made positive (``e`` plus a
-multiple of ``lambda``) when the sliding-window cost model finds that cheaper;
-a small negative exponent is otherwise kept, since the positive form would
-need about 63 bits.  Rows with no exponent above ``FLINT_BITS`` bits use the
+prime the unit group exponent is at most 64 bits, so a negative
+exponent is also made positive (``e`` plus a multiple of ``lambda``) when the
+sliding-window cost model finds that cheaper; a small negative exponent is
+otherwise kept, since the positive form would need about 63 bits.  This
+applies to any row with an inverse, at any prime where ``lambda`` is
+available (non-split squarefree primes included), once some exponent in the
+batch exceeds ``p - 1``; it affects cost only.  Rows with no exponent above ``FLINT_BITS`` bits use the
 PARI primes and no scan.  The residues are the same elements of ``R``, so no
 reconstructed unit changes.  For ``cyclotomic_41_phi40`` 11 primes are
 skipped, ``lambda`` has 64 bits, and the exponent bits fall from 373k to
