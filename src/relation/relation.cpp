@@ -400,7 +400,9 @@ bool factor_integral_data_over_base_by_residue_screen(
         const fmpq* known_norm,
         const fmpz_mat_struct* known_integral_coordinates,
         const fmpz_poly_struct* known_integral_polynomial,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        bool deduce_last_hit_valuation = true,
+        slong* deduced_hit_valuations = nullptr) noexcept {
     // reference fb_int_doit first handles integral elements by residue-polynomial
     // membership.  If one residue hit per factor does not account for the
     // whole p-adic norm valuation, it then computes exact valuations only for
@@ -637,6 +639,13 @@ bool factor_integral_data_over_base_by_residue_screen(
                 theta_residues &&
                 fmpz_divisible(equation_order_index.raw(), p.raw()) != 0;
         hits.clear();
+        // Sum of e(P/p) f(P/p) over the block; it equals the degree exactly
+        // when the block holds every prime above p (Cohen, GTM 138,
+        // Section 4.8), as the factor base keeps distinct primes and one
+        // block per rational prime.
+        const slong degree = parent->degree();
+        slong covered_degree = 0;
+        bool covered_degree_ok = degree > 0;
         {
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::relation,
@@ -658,6 +667,16 @@ bool factor_integral_data_over_base_by_residue_screen(
                             diagnostics,
                             "relation.factor_over_base_integral.error_missing_prime",
                             false);
+                }
+                const slong ramification = prime->ramification_index();
+                const slong residue_degree = prime->residue_degree();
+                if (ramification <= 0 || residue_degree <= 0 ||
+                    ramification > degree ||
+                    residue_degree > degree / ramification ||
+                    covered_degree > degree - ramification * residue_degree) {
+                    covered_degree_ok = false;
+                } else {
+                    covered_degree += ramification * residue_degree;
                 }
                 const flint::FmpzPoly* residue_polynomial =
                         detail::residue_polynomial_ptr(*prime);
@@ -768,12 +787,17 @@ bool factor_integral_data_over_base_by_residue_screen(
                     true);
         }
 
+        const bool block_covers_all_primes_over_p =
+                covered_degree_ok && covered_degree == degree;
         slong exact_remaining_vp = block_vp;
         {
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::relation,
                     "relation.factor_over_base_integral_exact_block");
-            for (const ResidueHit& hit : hits) {
+            const std::size_t hit_count = hits.size();
+            for (std::size_t hit_position = 0; hit_position < hit_count;
+                 ++hit_position) {
+                const ResidueHit& hit = hits[hit_position];
                 if (exact_remaining_vp == 0) {
                     break;
                 }
@@ -784,6 +808,37 @@ bool factor_integral_data_over_base_by_residue_screen(
                             diagnostics,
                             "relation.factor_over_base_integral.error_missing_hit_prime",
                             false);
+                }
+                // The last hit's valuation follows from the others.  For
+                // alpha in O_K, |N(alpha)| = N(alpha O_K) and
+                // N(P) = p^f(P/p), so v_p(N(alpha)) = sum over P | p of
+                // f(P/p) v_P(alpha) (Cohen, GTM 138, Section 4.8; reference
+                // `buch2.c:divide_p_elt` subtracts v * f from the p-adic
+                // norm valuation per prime).  The order is Z[theta] and
+                // maximal, so alpha lies in P = (p, g(theta)) exactly when
+                // g divides alpha's coordinate polynomial modulo p (Cohen,
+                // GTM 138, Theorem 4.8.13).  When the block holds every
+                // prime above p, every prime above p that divides alpha is
+                // therefore a hit, and `exact_remaining_vp` has the earlier
+                // hits' f * v subtracted, so it equals f * v_P(alpha) for
+                // the last hit P.  Any other case computes the valuation.
+                if (deduce_last_hit_valuation &&
+                    block_covers_all_primes_over_p &&
+                    hit_position + 1 == hit_count &&
+                    exact_remaining_vp > 0 &&
+                    exact_remaining_vp % hit.residue_degree == 0) {
+                    SILEX_RELATION_PROFILE_EVENT(
+                            diagnostics,
+                            "relation.factor_over_base_integral.path_deduced_valuation");
+                    valuation = exact_remaining_vp / hit.residue_degree;
+                    if (deduced_hit_valuations != nullptr) {
+                        ++*deduced_hit_valuations;
+                    }
+                    fmpz_set_si(
+                            fmpz_mat_entry(candidate.row(), 0, hit.index),
+                            valuation);
+                    exact_remaining_vp = 0;
+                    continue;
                 }
                 const bool hit_is_ramified = prime->ramification_index() != 1;
                 const bool hit_is_unique_over_p =
@@ -1352,6 +1407,30 @@ bool RelationAccess::factor_relation_row_from_integral_coordinates_and_norm(
     }
     handled = true;
     smooth = factor_status == ElementFactorOverBaseStatus::smooth;
+    return true;
+}
+
+bool RelationAccess::residue_screen_row_for_testing(
+        flint::FmpzMatRef exponents,
+        bool& handled,
+        bool& smooth,
+        const FactorBase& base,
+        flint::FmpzMatConstRef integral_coordinates,
+        flint::FmpqConstRef norm,
+        bool deduce_last_hit_valuation,
+        slong* deduced_hit_valuations) noexcept {
+    handled = false;
+    smooth = false;
+    ElementFactorOverBaseStatus status =
+            ElementFactorOverBaseStatus::unsupported;
+    if (!factor_integral_data_over_base_by_residue_screen(
+                status, exponents, nullptr, base, norm.raw(),
+                integral_coordinates.raw(), nullptr, nullptr,
+                deduce_last_hit_valuation, deduced_hit_valuations)) {
+        return false;
+    }
+    handled = status != ElementFactorOverBaseStatus::unsupported;
+    smooth = status == ElementFactorOverBaseStatus::smooth;
     return true;
 }
 

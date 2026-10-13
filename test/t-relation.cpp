@@ -930,6 +930,153 @@ int test_non_equation_maximal_screen_matches_ideal_fallback() {
     return 0;
 }
 
+// The residue screen deduces the last residue hit's valuation over p from
+// v_p(N(alpha)) when the factor-base block holds every prime above p (sum
+// of e*f over the block equals the degree), and computes it otherwise.  In
+// Q(2^(1/3)) a rational prime p = 2 mod 3 is P Q with f(P) = 1, f(Q) = 2,
+// so a norm-bounded base with bound 30 keeps only P above 11 .. 29.  Rows
+// with and without the deduction must agree with each other and with
+// PrimeIdeal::valuation, and an element p * beta (in Q) must stay with the
+// exact fallback over the norm-bounded base, where a deduction would charge
+// Q's share of the norm to P.
+int test_residue_screen_deduced_last_valuation() {
+    silex::NumberField field = cubic_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    const slong degree = maximal.degree();
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 30));
+    silex::FactorBase complete(maximal);
+    assert(complete.build(sflint::FmpzConstRef(bound)));
+    silex::FactorBase norm_bounded(maximal);
+    assert(norm_bounded.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(norm_bounded.length() < complete.length());
+
+    sflint::FmpzMat coordinates(1, degree);
+    silex::OrderElement element(maximal);
+    silex::Element field_element(field);
+    sflint::Fmpq norm;
+    auto check = [&](const silex::FactorBase& base, slong& deduced_count,
+                     bool& handled, bool& smooth) noexcept {
+        assert(element.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+        assert(element.get_element(field_element));
+        assert(field_element.norm(sflint::FmpqRef(norm)));
+        sflint::FmpzMat row(1, base.length());
+        sflint::FmpzMat computed_row(1, base.length());
+        slong deduced = 0;
+        slong computed_deduced = 0;
+        bool computed_handled = false;
+        bool computed_smooth = false;
+        assert(silex::detail::RelationAccess::residue_screen_row_for_testing(
+                sflint::FmpzMatRef(row), handled, smooth, base,
+                sflint::FmpzMatConstRef(coordinates),
+                sflint::FmpqConstRef(norm), true, &deduced));
+        assert(silex::detail::RelationAccess::residue_screen_row_for_testing(
+                sflint::FmpzMatRef(computed_row), computed_handled,
+                computed_smooth, base, sflint::FmpzMatConstRef(coordinates),
+                sflint::FmpqConstRef(norm), false, &computed_deduced));
+        assert(computed_deduced == 0);
+        assert(handled == computed_handled);
+        assert(smooth == computed_smooth);
+        deduced_count += deduced;
+        if (!handled || !smooth) {
+            return;
+        }
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(row),
+                                      sflint::FmpzMatConstRef(computed_row)));
+        silex::Ideal principal(maximal);
+        assert(principal.set_principal(element));
+        for (slong i = 0; i < base.length(); ++i) {
+            const silex::PrimeIdeal* prime = base.prime_at(i);
+            assert(prime != nullptr);
+            slong valuation = -1;
+            assert(prime->valuation(valuation, principal));
+            assert(mat_entry_is_si(row, 0, i, valuation));
+        }
+    };
+
+    slong deduced_complete = 0;
+    slong deduced_norm_bounded = 0;
+    slong smooth_complete = 0;
+    bool handled = false;
+    bool smooth = false;
+    for (slong a = -6; a <= 6; ++a) {
+        for (slong b = -6; b <= 6; ++b) {
+            for (slong c = -6; c <= 6; ++c) {
+                if (a == 0 && b == 0 && c == 0) {
+                    continue;
+                }
+                const slong values[3] = {a, b, c};
+                for (slong j = 0; j < degree; ++j) {
+                    sflint::fmpz_set_si(
+                            sflint::fmpz_mat_entry(coordinates, 0, j),
+                            values[j]);
+                }
+                check(complete, deduced_complete, handled, smooth);
+                if (handled && smooth) {
+                    ++smooth_complete;
+                }
+                check(norm_bounded, deduced_norm_bounded, handled, smooth);
+            }
+        }
+    }
+    assert(smooth_complete > 0);
+    assert(deduced_complete > 0);
+
+    // p * beta for p = 11, whose block in the norm-bounded base is only P.
+    // `screened` counts the elements whose norm is smooth over the base's
+    // rational primes, where a deduction at 11 would have given a row.
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, 11));
+    sflint::Fmpz leftover;
+    sflint::Fmpz block_prime;
+    slong screened = 0;
+    for (slong a = -3; a <= 3; ++a) {
+        for (slong b = -3; b <= 3; ++b) {
+            for (slong c = -3; c <= 3; ++c) {
+                if (a == 0 && b == 0 && c == 0) {
+                    continue;
+                }
+                const slong values[3] = {a, b, c};
+                for (slong j = 0; j < degree; ++j) {
+                    ::fmpz_mul_si(
+                            sflint::fmpz_mat_entry(coordinates, 0, j).raw(),
+                            p.raw(), values[j]);
+                }
+                slong deduced = 0;
+                check(norm_bounded, deduced, handled, smooth);
+                assert(!handled || !smooth);
+                sflint::fmpz_abs(sflint::FmpzRef(leftover),
+                                 sflint::fmpq_num_ref(
+                                         sflint::FmpqConstRef(norm)));
+                for (slong block = 0;
+                     block < norm_bounded.rational_prime_block_count();
+                     ++block) {
+                    slong length = 0;
+                    assert(norm_bounded.rational_prime_block_data(
+                            sflint::FmpzRef(block_prime), length, block));
+                    while (sflint::fmpz_divisible(
+                            sflint::FmpzConstRef(leftover),
+                            sflint::FmpzConstRef(block_prime))) {
+                        sflint::fmpz_divexact(
+                                sflint::FmpzRef(leftover),
+                                sflint::FmpzConstRef(leftover),
+                                sflint::FmpzConstRef(block_prime));
+                    }
+                }
+                if (sflint::fmpz_is_one(sflint::FmpzConstRef(leftover))) {
+                    ++screened;
+                }
+            }
+        }
+    }
+    assert(screened > 0);
+    return 0;
+}
+
 int test_relation_matrix() {
     silex::NumberField field = degree_one_field();
     silex::Order order = silex::test::equation_order(field);
@@ -1206,6 +1353,7 @@ int main() {
     assert(test_half_integral_quadratic_relation_fallback() == 0);
     assert(test_generic_cubic_relation() == 0);
     assert(test_non_equation_maximal_screen_matches_ideal_fallback() == 0);
+    assert(test_residue_screen_deduced_last_valuation() == 0);
     assert(test_relation_matrix() == 0);
     assert(test_relation_matrix_to_abelian_group() == 0);
     assert(test_cross_parent_copy_swap() == 0);

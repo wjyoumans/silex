@@ -90,6 +90,10 @@ struct DirectPartialResidueBlockCacheEntry {
     std::vector<flint::NmodPoly> word_residue_polynomials;
     std::vector<slong> prime_indices;
     std::vector<slong> residue_degrees;
+    // True when the block holds every prime ideal above its rational prime
+    // p: the sum of e(P/p) f(P/p) over the block equals the order degree.
+    // The factor base keeps distinct primes, one block per rational prime.
+    bool covers_all_primes_over_p = false;
     slong block_index = -1;
 };
 
@@ -101,7 +105,10 @@ struct DirectPartialResidueBlockCacheEntry {
 // `known_norm` must be the exact field norm of `generator` and
 // `known_integral_coordinates` its maximal-order coordinates.  With
 // `word_size_residues` false the residue test uses the multi-limb
-// `fmpz_mod` path even for word-size rational primes.  For tests only.
+// `fmpz_mod` path even for word-size rational primes.  With
+// `deduce_last_hit_valuation` false every residue-hit valuation is computed,
+// none is deduced from the norm; when `deduced_hit_valuations` is given it
+// receives the number of valuations deduced.  For tests only.
 bool direct_partial_relation_row_for_testing(
         flint::FmpzMat& out_row,
         flint::Fmpz& out_rational_large_prime,
@@ -110,7 +117,9 @@ bool direct_partial_relation_row_for_testing(
         flint::FmpzConstRef factor_base_bound,
         const fmpq* known_norm = nullptr,
         const fmpz_mat_struct* known_integral_coordinates = nullptr,
-        bool word_size_residues = true) noexcept;
+        bool word_size_residues = true,
+        bool deduce_last_hit_valuation = true,
+        slong* deduced_hit_valuations = nullptr) noexcept;
 
 struct FactorBaseGenerationRecord {
     flint::Fmpz p;

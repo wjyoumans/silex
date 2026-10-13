@@ -73,6 +73,25 @@ public:
 
     static flint::FmpzMatConstRef pending_relation_exponents_ref(
             const Relation& relation) noexcept;
+
+    // Test hook: the residue-screen factorization of integral coordinates
+    // with exact field norm `norm` over `base`.  `exponents` must be
+    // 1 x base.length().  `handled` is false when the screen leaves the
+    // element to the exact fallback; otherwise `smooth` tells whether the
+    // row in `exponents` is a factorization.  With
+    // `deduce_last_hit_valuation` false every residue-hit valuation is
+    // computed, none is deduced from the norm; when
+    // `deduced_hit_valuations` is given it receives the number of
+    // valuations deduced.  For tests only.
+    static bool residue_screen_row_for_testing(
+            flint::FmpzMatRef exponents,
+            bool& handled,
+            bool& smooth,
+            const FactorBase& base,
+            flint::FmpzMatConstRef integral_coordinates,
+            flint::FmpqConstRef norm,
+            bool deduce_last_hit_valuation,
+            slong* deduced_hit_valuations) noexcept;
 };
 
 }  // namespace silex::detail

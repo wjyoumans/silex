@@ -693,6 +693,10 @@ direct_partial_residue_block_cache(
     }
     entry.prime_indices.reserve(static_cast<std::size_t>(length));
     entry.residue_degrees.reserve(static_cast<std::size_t>(length));
+    const Order* order = base.parent();
+    const slong degree = order == nullptr ? 0 : order->degree();
+    slong covered_degree = 0;
+    bool covered_degree_ok = degree > 0;
     for (slong offset = 0; offset < length; ++offset) {
         slong index = -1;
         if (!base.rational_prime_block_index(index, block_index, offset)) {
@@ -736,7 +740,21 @@ direct_partial_residue_block_cache(
         }
         entry.prime_indices.push_back(index);
         entry.residue_degrees.push_back(prime->residue_degree());
+        const slong ramification = prime->ramification_index();
+        if (ramification <= 0 || ramification > degree ||
+            prime->residue_degree() > degree / ramification ||
+            covered_degree > degree - ramification * prime->residue_degree()) {
+            covered_degree_ok = false;
+        } else {
+            covered_degree += ramification * prime->residue_degree();
+        }
     }
+    // pO_K = prod P^e(P/p) with sum e(P/p) f(P/p) = [K : Q] (Cohen, GTM
+    // 138, Section 4.8).  The factor base holds distinct primes, one block
+    // per rational prime, so the block holds every prime above p exactly
+    // when its e*f sum reaches the degree.
+    entry.covers_all_primes_over_p =
+            covered_degree_ok && covered_degree == degree;
     return &entry;
 }
 
@@ -753,7 +771,9 @@ DirectLargePrimeStatus direct_partial_relation_row(
         std::vector<detail::DirectPartialResidueBlockCacheEntry>&
                 residue_block_cache,
         const DiagnosticsContext* diagnostics,
-        bool word_size_residues = true) noexcept {
+        bool word_size_residues = true,
+        bool deduce_last_hit_valuation = true,
+        slong* deduced_hit_valuations = nullptr) noexcept {
     // reference Rel_add.jl stores partial relations by the leftover rational
     // prime and `special_prime_ideal`, then subtracts the two `_factor!`
     // rows on a match.  This is the maximal-equation-order integral-element
@@ -1007,7 +1027,10 @@ DirectLargePrimeStatus direct_partial_relation_row(
         slong exact_remaining_vp = remaining_vp;
         Ideal exact_valuation_principal(*order);
         bool have_exact_valuation_principal = false;
-        for (const DirectPartialResidueHit& hit : hits) {
+        const std::size_t hit_count = hits.size();
+        for (std::size_t hit_position = 0; hit_position < hit_count;
+             ++hit_position) {
+            const DirectPartialResidueHit& hit = hits[hit_position];
             const PrimeIdeal* prime = base.prime_at(hit.index);
             slong valuation = -1;
             if (prime == nullptr) {
@@ -1020,7 +1043,33 @@ DirectLargePrimeStatus direct_partial_relation_row(
             // contract), and earlier blocks only divided out other rational
             // primes.  Reuse it instead of recomputing the norm per hit,
             // as relation.cpp's `factor_over_base_integral` exact block does.
-            if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+            //
+            // The last hit's valuation follows from the others.  For alpha
+            // in O_K, |N(alpha)| = N(alpha O_K) and N(P) = p^f(P/p), so
+            // v_p(N(alpha)) = sum over P | p of f(P/p) v_P(alpha) (Cohen,
+            // GTM 138, Section 4.8; reference `buch2.c:divide_p_elt`
+            // subtracts v * f from the p-adic norm valuation per prime).
+            // The order is Z[theta] and maximal, so alpha lies in
+            // P = (p, g(theta)) exactly when g divides alpha's coordinate
+            // polynomial modulo p (Cohen, GTM 138, Theorem 4.8.13).  When
+            // the block holds every prime above p, every prime above p that
+            // divides alpha is therefore a hit, and `exact_remaining_vp`
+            // has the earlier hits' f * v subtracted, so it equals
+            // f * v_P(alpha) for the last hit P.  Any other case computes
+            // the valuation as below.
+            if (deduce_last_hit_valuation &&
+                residue_block->covers_all_primes_over_p &&
+                hit_position + 1 == hit_count && exact_remaining_vp > 0 &&
+                exact_remaining_vp % hit.residue_degree == 0) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.partial_relation_direct_large_prime_path_exact_valuation_deduced");
+                valuation = exact_remaining_vp / hit.residue_degree;
+                if (deduced_hit_valuations != nullptr) {
+                    ++*deduced_hit_valuations;
+                }
+            } else if (!detail::PrimeIdealAccess::
+                               prime_ideal_valuation_with_norm_vp(
                         valuation, *prime, integral_generator,
                         remaining_vp, diagnostics)) {
                 SILEX_PROFILE_EVENT(
@@ -5160,14 +5209,17 @@ bool direct_partial_relation_row_for_testing(
         flint::FmpzConstRef factor_base_bound,
         const fmpq* known_norm,
         const fmpz_mat_struct* known_integral_coordinates,
-        bool word_size_residues) noexcept {
+        bool word_size_residues,
+        bool deduce_last_hit_valuation,
+        slong* deduced_hit_valuations) noexcept {
     flint::FmpzPoly residue_key;
     std::vector<DirectPartialResidueBlockCacheEntry> residue_block_cache;
     return direct_partial_relation_row(
                    out_row, out_rational_large_prime, residue_key, generator,
                    base, factor_base_bound, known_norm,
                    known_integral_coordinates, nullptr, residue_block_cache,
-                   nullptr, word_size_residues) ==
+                   nullptr, word_size_residues, deduce_last_hit_valuation,
+                   deduced_hit_valuations) ==
            DirectLargePrimeStatus::found;
 }
 
