@@ -280,10 +280,11 @@ bool compact_power_input_norm(flint::Fmpq& norm,
 // `element`.  `undecided`: the compact presentation could not decide, for
 // example because its reduction or the Element::is_power call on the reduced
 // remainder gave no answer; callers try their fallback, as before.  `error`:
-// invalid arguments (a parent mismatch, n <= 1, a nonpositive precision) or
-// a working element whose parent copy is undefined; the same arguments
-// cannot do better on a fallback or a rescan, so callers fail closed at
-// once.  A failure inside the compact helpers stays `undecided`, as before:
+// invalid arguments (a parent mismatch, n <= 1, a nonpositive precision), a
+// working element whose parent copy is undefined, or an order without a basis
+// (its working ideal is undefined; OrderUnitGroup::define refuses such an
+// order, so no unit group reaches this); the same arguments cannot do better
+// on a fallback or a rescan, so callers fail closed at once.  A failure inside the compact helpers stays `undecided`, as before:
 // their bool results do not separate an internal error from an inconclusive
 // computation.
 enum class CompactPowerRootResult : unsigned char {

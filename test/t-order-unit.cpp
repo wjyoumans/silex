@@ -9766,6 +9766,81 @@ int test_compact_unit_power_root_three_way_result() {
     return 0;
 }
 
+// relation_power_root fails on an error from
+// compact_unit_presentation_power_root instead of trying the factored root
+// fallback.  With u = eps^21 * (eps^-1)^10 = eps^11 in Q(sqrt 2) and
+// y = -eps, the candidate row (-1, 11) has residual exponents 10 and 10, so
+// it takes the compact route.  On the injected error the relation is
+// verified for y modulo torsion (root -eps, torsion exponent 1); the
+// fallback would have returned the 11th root eps of u with exponent 0.
+int test_relation_power_root_fails_on_compact_error() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+    silex::Element epsilon_inverse(field);
+    assert(epsilon_inverse.invert(epsilon));
+    silex::FactoredElement generator(field);
+    assert(generator.push(epsilon, 21));
+    assert(generator.push(epsilon_inverse, 10));
+    silex::FactoredElement generators[] = {std::move(generator)};
+    silex::OrderUnitGroup group(order);
+    assert(silex::detail::order_unit_group_set_units_internal(
+            group, order, silex::FactoredElementSpan(generators, 1),
+            embeddings, 128, true));
+
+    silex::Element minus_epsilon(field);
+    assert(minus_epsilon.negate(epsilon));
+    silex::FactoredElement y(field);
+    assert(y.set_element(minus_epsilon));
+
+    constexpr slong kPrecision = 128;
+    sflint::ArbVec generator_log(2);
+    silex::FactoredElement u(field);
+    assert(group.free_generator(u, 0));
+    assert(u.logarithmic_embedding(
+            sflint::ArbVecRef(generator_log), embeddings,
+            silex::LogEmbeddingMode::product, kPrecision));
+    sflint::ArbMat inverse(1, 1);
+    ::arb_inv(arb_mat_entry(inverse.raw(), 0, 0), generator_log.data(),
+              kPrecision);
+    sflint::Fmpz bound;
+    ::fmpz_set_si(bound.raw(), 11);
+
+    const slong expected[] = {-1, 11};
+    silex::detail::TestHookAccess::set_compact_unit_power_root_error(true);
+    silex::FactoredElement root(field);
+    sflint::FmpzMat relation(1, 2);
+    sflint::Fmpz torsion_exp;
+    ::fmpz_set_si(torsion_exp.raw(), 7);
+    bool recovered = false;
+    assert(silex::detail::dependent_relation_bounded_with_inverse(
+            recovered, root, relation, torsion_exp, group, y, embeddings,
+            inverse, sflint::FmpzConstRef(bound), kPrecision, false, true));
+    assert(recovered);
+    assert(candidate_row_equals(relation, expected, 2));
+    silex::Element root_value(field);
+    assert(root.evaluate(root_value));
+    assert(root_value.equal(minus_epsilon));
+    assert(::fmpz_equal_si(torsion_exp.raw(), 1));
+
+    // The seam was consumed: the same call now takes the root path.
+    ::fmpz_set_si(torsion_exp.raw(), 7);
+    recovered = false;
+    assert(silex::detail::dependent_relation_bounded_with_inverse(
+            recovered, root, relation, torsion_exp, group, y, embeddings,
+            inverse, sflint::FmpzConstRef(bound), kPrecision, false, true));
+    assert(recovered);
+    assert(candidate_row_equals(relation, expected, 2));
+    assert(root.evaluate(root_value));
+    assert(root_value.equal(epsilon));
+    assert(::fmpz_equal_si(torsion_exp.raw(), 0));
+    return 0;
+}
+
 // KernelRowRootMode::defer_undecidable skips the root attempt only where
 // Element::is_power cannot find the root of a non-rational l-th power
 // (l >= 3, degree >= 10) and the row product is not a formal l-th power.
@@ -12784,6 +12859,7 @@ int main() {
     test_stable_proof_scan_stops_building_columns_at_full_rank();
     test_kernel_row_root_three_way_result();
     test_compact_unit_power_root_three_way_result();
+    test_relation_power_root_fails_on_compact_error();
     test_kernel_row_root_defers_undecidable_rows();
     test_dependent_relation_unbounded_root_failure_adjoins_y();
     test_prove_index_bound_non_power_range_exhausted();

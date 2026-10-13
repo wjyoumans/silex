@@ -583,8 +583,9 @@ bool relation_power_root(bool& is_relation,
                                       group.diagnostics(),
                                       &field_modulus_cache)
                             : detail::CompactPowerRootResult::undecided;
-            // An error is not an undecided root: the factored fallback below
-            // gets the same arguments, so fail as its failure would.
+            // An error is not an undecided root.  It comes from invalid
+            // arguments or setup that valid callers cannot produce; fail as
+            // the old fallback failure did.
             if (compact_result == detail::CompactPowerRootResult::error) {
                 return false;
             }

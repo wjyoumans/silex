@@ -108,9 +108,11 @@ public:
     // Arms (or disarms) one use: the next
     // compact_unit_presentation_power_root call returns
     // CompactPowerRootResult::error after its argument checks, as an
-    // internal error would.  No valid call reaches that error, so this
-    // skips no invariant a run keeps; it only lets a test reach the
-    // callers' error handling.
+    // internal error would.  No valid call reaches that error: both
+    // callers check the arguments first, and OrderUnitGroup::define
+    // refuses an order without a basis, so the working ideal is defined.
+    // So this skips no invariant a run keeps; it only lets a test reach
+    // the callers' error handling.
     static void set_compact_unit_power_root_error(bool on) noexcept {
         CompactPowerRootTestSeams::unit_power_root_error_.store(
                 on, std::memory_order_relaxed);
