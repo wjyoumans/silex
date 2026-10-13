@@ -2057,7 +2057,9 @@ tests of non-powers.  So the round records each row it has run without an
 appended relation, by its exact entries, and skips that row at later primes
 (a Silex memo, not in Hecke, whose candidates are the basis of the stacked
 kernel).  This applies to undecided power tests too, such as the square
-tests of degree-16 leftovers that ``Element::is_square`` can only disprove.
+tests of degree-16 leftovers: from degree 10
+(``kElementPowerRouteDegreeLimit``) ``Element::is_square`` can only disprove
+a power, so a true power there fails the test and is recorded as settled.
 The appended relations are those of the full scan.  A skipped row is not
 counted as a power test, so the filter's count gate opens later or not at
 all; like the stopping rule, that changes only which non-powers are tested.

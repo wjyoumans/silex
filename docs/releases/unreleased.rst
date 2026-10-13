@@ -173,8 +173,9 @@ Changed
   settled in the same round of the prime scan: within a round no relation,
   unit or factor-base entry is appended, so the outcome of such a row cannot
   change at a later prime.  Published outputs are unchanged on the tested
-  ``grh`` and ``proven`` corpus rows.  The change shows only when the scan
-  runs, which is with a factor base below the usual minimum; no controlled
+  ``grh`` and ``proven`` corpus rows.  The scan runs on many ``grh`` corpus
+  rows at the default settings (for example cyclotomic, pure and quadratic
+  fields), and the memo skips rows on most of them; no controlled
   measurement has been made.  See :doc:`../reference/algorithms_and_sources`.
 
 - The rounded-embedding LLL of the LLL relation search no longer pays

@@ -2583,6 +2583,76 @@ void prepare_minus_23_index_two_candidate(silex::ClassGroupContext& context,
     assert(sflint::fmpz_equal_si(order_out, 6));
 }
 
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+struct SettledRowCounter {
+    long candidates = 0;
+    long settled = 0;
+};
+
+void settled_row_callback(void* user,
+                          silex::DiagnosticsModule,
+                          silex::ProfileEvent event,
+                          const char*,
+                          const char* label) noexcept {
+    if (event != silex::ProfileEvent::event || label == nullptr) {
+        return;
+    }
+    auto* counter = static_cast<SettledRowCounter*>(user);
+    if (std::strcmp(label,
+                    "class_group.saturation_relation_candidate_with_units") ==
+        0) {
+        ++counter->candidates;
+    } else if (std::strcmp(label,
+                           "class_group.saturation_row_settled_with_units") ==
+               0) {
+        ++counter->settled;
+    }
+}
+
+// The scan of the saturation with units skips a kernel row the round has
+// already run.  In Z[sqrt 2] with the single relation -2 = -(sqrt 2)^2 the
+// scan at ell = 2 meets the non-squares of the stacked kernel (the unit
+// 1 + sqrt 2, -1, -2 alone) at several auxiliary primes before the square
+// -2 * (-1) appends, so the skip event fires.
+int test_relation_saturation_scan_skips_settled_rows() {
+    silex::NumberField field = silex::test::quadratic_field(2);
+    silex::Order order = silex::test::equation_order(field);
+    silex::OrderUnitGroup units;
+    assert(units.compute(order));
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    SettledRowCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            settled_row_callback, &counter);
+
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz factor_base_bound;
+    assert(set_fmpz_si(factor_base_bound, 2));
+    assert(context.build_factor_base(sflint::FmpzConstRef(factor_base_bound)));
+    silex::Relation relation(*context.factor_base());
+    silex::Element alpha(field);
+    assert(alpha.set_si(-2));
+    assert(relation.set_generator(alpha));
+    assert(context.append_relation(relation));
+    assert(context.publish_presentation());
+    context.set_diagnostics(&diagnostics);
+
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 9));
+    bool changed = false;
+    bool saturated = false;
+    assert(context.saturate_relations_bounded_with_units(
+            changed, saturated, units, sflint::FmpzConstRef(aux_bound), 1,
+            1));
+    assert(changed);
+    assert(counter.candidates > 0);
+    assert(counter.settled > 0);
+    return 0;
+}
+#endif
+
 // On the Q(sqrt(-23)) candidate above (h_cand = 6, h = 3) the relations are
 // already 3-saturated, so at ell = 3 (no torsion column: w = 2) no nonzero
 // exponent vector mod 3 makes the relation generators a cube and the stacked
@@ -6893,6 +6963,9 @@ int main() {
     test_relation_saturation_candidate_filter_degree_one();
     test_relation_saturation_candidate_filter_count_gate();
     test_relation_saturation_round_settled_rows();
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    test_relation_saturation_scan_skips_settled_rows();
+#endif
     test_relation_saturation_index_bound_with_units_degree_one();
     test_relation_saturation_index_bound_checks_nondivisor_primes();
     test_relation_saturation_candidate_filter_minus_23();
