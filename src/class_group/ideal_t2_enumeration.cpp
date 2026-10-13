@@ -2,6 +2,7 @@
 
 #include <silex/flint/fmpz_lll.hpp>
 
+#include "../lat/certified_lll_internal.hpp"
 #include "class_group_internal.hpp"
 #include "ideal_minkowski_embedding_internal.hpp"
 #include "ideal_t2_enumeration_internal.hpp"
@@ -562,7 +563,26 @@ static bool finite_enumeration_basis_lll_reduce(flint::FmpzMat& reduced_basis,
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.finite_enumeration_basis_lll.flint_lll");
-        fmpz_lll(reduced_scaled_rows.raw(), transform.raw(), config.raw());
+        // FLINT's first LLL phase with an exact reducedness certificate
+        // (lat::detail::certified_fmpz_lll, the Lat::lll_reduce route,
+        // docs/reference/algorithms_and_sources.rst), which skips FLINT's
+        // multiprecision check of the phase output.  The rows and transform
+        // are what fmpz_lll returns on every route: a failed certificate
+        // restores both and runs fmpz_lll, and rows with entries above
+        // FLINT's 250-bit ULLL threshold go to fmpz_lll directly.
+        const lat::detail::CertifiedLllRoute route =
+                lat::detail::certified_fmpz_lll(reduced_scaled_rows.raw(),
+                                                transform.raw(),
+                                                flint::FmpzLllConstRef(config));
+        if (route == lat::detail::CertifiedLllRoute::fallback) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_basis_lll.certified_lll_fallback");
+        } else if (route == lat::detail::CertifiedLllRoute::ineligible) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_basis_lll.certified_lll_ineligible");
+        }
     }
 
     {

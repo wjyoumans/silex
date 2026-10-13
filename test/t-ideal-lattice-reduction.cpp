@@ -1743,6 +1743,69 @@ int test_two_lll_certified_lll_matches_fmpz_lll() {
     return 0;
 }
 
+// The integer LLL of the T2 enumeration setup (the rounded embedding rows of
+// a prime ideal, reduced once per rounding scale) goes through FLINT's
+// certified first phase (lat::detail::certified_fmpz_lll), so its result is
+// fmpz_lll's on every route.  On the octic of
+// test_octic_t2_enumeration_data_meets_lll_bounds, where some primes above
+// 5, 11 and 13 are reduced again from a finer rounding, the T2 enumeration
+// data of every prime above 2, ..., 13 is unchanged when every first phase
+// is replaced by an injected failure, and each build reaches the helper.
+int test_t2_enumeration_certified_lll_matches_fmpz_lll() {
+    constexpr std::array<slong, 9> coefficients = {25, 0, -100, 0, 95,
+                                                   0,  -20, 0,  1};
+    FieldSetup setup = monic_field(coefficients.data(),
+                                   static_cast<slong>(coefficients.size()));
+    const silex::Order& order = setup.maximal_order;
+    assert(order.degree() == 8);
+
+    namespace rs = silex::detail::relation_search;
+    using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
+    constexpr std::array<ulong, 6> rational_primes = {2, 3, 5, 7, 11, 13};
+    for (const ulong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        sflint::fmpz_set_ui(sflint::FmpzRef(p), rational_prime);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            silex::Ideal prime_ideal(order);
+            assert(prime->get_ideal(prime_ideal));
+
+            rs::FiniteIdealT2EnumerationData expected;
+            assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                    expected, prime_ideal, nullptr, nullptr));
+            for (const auto failure : {CertifiedLllTestFailure::first_phase,
+                                       CertifiedLllTestFailure::certificate}) {
+                const slong injected_before =
+                        TestHookAccess::certified_lll_failures_injected();
+                TestHookAccess::set_certified_lll_failure(failure);
+                rs::FiniteIdealT2EnumerationData actual;
+                const bool built =
+                        rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                                actual, prime_ideal, nullptr, nullptr);
+                TestHookAccess::set_certified_lll_failure(
+                        CertifiedLllTestFailure::none);
+                assert(built);
+                assert(TestHookAccess::certified_lll_failures_injected() >
+                       injected_before);
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(actual.basis),
+                        sflint::FmpzMatConstRef(expected.basis)));
+                assert(actual.quadratic_form_data ==
+                       expected.quadratic_form_data);
+                assert(actual.initial_bound_value ==
+                       expected.initial_bound_value);
+                (void)built;
+            }
+        }
+    }
+    return 0;
+}
+
 int main() {
     assert(test_ideal_lattice_result_contracts() == 0);
     assert(test_rounded_embedding_lll_contracts() == 0);
@@ -1751,6 +1814,7 @@ int main() {
     assert(test_rounded_embedding_route_check_once_per_context() == 0);
     assert(test_rounded_embedding_certified_lll_matches_fmpz_lll() == 0);
     assert(test_two_lll_certified_lll_matches_fmpz_lll() == 0);
+    assert(test_t2_enumeration_certified_lll_matches_fmpz_lll() == 0);
     assert(test_reduction_identities_and_mutation() == 0);
     assert(test_short_elements_and_reduction_matrices() == 0);
     assert(test_deterministic_failures_preserve_outputs() == 0);
