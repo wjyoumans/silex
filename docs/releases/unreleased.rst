@@ -168,6 +168,15 @@ Changed
   ``grh`` class/unit computation of the field defined by ``x^32 + 1`` was
   small and within run-to-run noise; no controlled measurement has been made.
 
+- The ``grh`` and ``proven`` class saturation with units no longer repeats the
+  power test of a kernel row whose exact integer vector it has already
+  settled in the same round of the prime scan: within a round no relation,
+  unit or factor-base entry is appended, so the outcome of such a row cannot
+  change at a later prime.  Published outputs are unchanged on the tested
+  ``grh`` and ``proven`` corpus rows.  The change shows only when the scan
+  runs, which is with a factor base below the usual minimum; no controlled
+  measurement has been made.  See :doc:`../reference/algorithms_and_sources`.
+
 - The rounded-embedding LLL of the LLL relation search no longer pays
   FLINT's multiprecision reducedness pre-check on every call.  For at least
   two rows and entries of at most 250 bits it runs FLINT's double-precision

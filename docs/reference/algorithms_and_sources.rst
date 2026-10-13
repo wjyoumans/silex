@@ -2047,6 +2047,23 @@ applies the index check that keeps the auxiliary primes regular only to such
 polynomials), or for an ``ell`` that does not fit a machine word, and the
 scan tests every row when the filter cannot be computed.
 
+Within one round the per-prime kernels often repeat a row (the same
+exponent vector of the relation generators, free units and torsion
+generator).  Whether a row gives an appended relation depends only on that
+vector and on the relations, units and factor base, which do not change
+before the round appends: the divisibility check, the product, its power
+test (deterministic) and the refinement check.  The filter only removes
+tests of non-powers.  So the round records each row it has run without an
+appended relation, by its exact entries, and skips that row at later primes
+(a Silex memo, not in Hecke, whose candidates are the basis of the stacked
+kernel).  This applies to undecided power tests too, such as the square
+tests of degree-16 leftovers that ``Element::is_square`` can only disprove.
+The appended relations are those of the full scan.  A skipped row is not
+counted as a power test, so the filter's count gate opens later or not at
+all; like the stopping rule, that changes only which non-powers are tested.
+The scan still visits every auxiliary prime up to the bound; it does not
+stop early when only settled rows recur.
+
 The class-relation saturation candidate search reads the degree-one primes
 over an auxiliary prime ``q`` from the roots of the defining polynomial ``f``
 modulo ``q``.  For a monic integral ``f`` it rejects index and discriminant
