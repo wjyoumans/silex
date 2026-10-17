@@ -3364,7 +3364,7 @@ int test_direct_route_escalation_caps_and_counters() {
 // Which escalation mode each production caller passes to the honesty scan.
 // The mode matters only when a prime has no witness, which no cheap field
 // produces on these routes, so the test reads the per-scan call counts
-// (FactorBaseHonestyCallCounts).  The relation-production prepass is the
+// (TestHookAccess).  The relation-production prepass is the
 // caller with no factor-base restart and no fallback: bounded escalation on
 // the T2 route.  The relation-search driver, with a factor-base restart
 // available, keeps the stage-0 reference flow: no escalation on the T2 route.
@@ -3386,19 +3386,20 @@ bool class_unit_honesty_call_counts(slong& direct_none,
     options.requested_certification = silex::CertificationMode::proven;
     silex::ClassGroupContext class_group;
     silex::OrderUnitGroup units;
-    search::FactorBaseHonestyCallCounts::reset();
+    silex::detail::TestHookAccess::factor_base_honesty_call_counts_reset();
     if (!units.compute_with_class_group(
                 class_group, setup.maximal_order,
                 sflint::FmpzConstRef(factor_base_bound), options, 128)) {
         return false;
     }
     using E = search::FactorBaseWitnessEscalation;
-    direct_none = search::FactorBaseHonestyCallCounts::count(true, E::none);
+    using Hook = silex::detail::TestHookAccess;
+    direct_none = Hook::factor_base_honesty_call_count(true, E::none);
     direct_bounded =
-            search::FactorBaseHonestyCallCounts::count(true, E::bounded);
+            Hook::factor_base_honesty_call_count(true, E::bounded);
     lattice_total =
-            search::FactorBaseHonestyCallCounts::count(false, E::none) +
-            search::FactorBaseHonestyCallCounts::count(false, E::bounded);
+            Hook::factor_base_honesty_call_count(false, E::none) +
+            Hook::factor_base_honesty_call_count(false, E::bounded);
     return true;
 }
 

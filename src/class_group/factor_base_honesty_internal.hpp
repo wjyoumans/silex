@@ -6,6 +6,10 @@
 #include "relation_completion_scheduler_internal.hpp"
 #include "../ideal_factorization/ideal_factorization_internal.hpp"
 
+namespace silex::detail {
+class TestHookAccess;
+}
+
 namespace silex::detail::relation_search {
 
 // Noninstalled predicate selection, independent of witness search strategy.
@@ -67,6 +71,10 @@ public:
                [escalation == FactorBaseWitnessEscalation::bounded ? 1 : 0]
                        .fetch_add(1, std::memory_order_relaxed);
     }
+
+private:
+    friend class detail::TestHookAccess;
+
     static slong count(bool direct_required_prime_witness,
                        FactorBaseWitnessEscalation escalation) noexcept {
         return counts_[direct_required_prime_witness ? 1 : 0]
@@ -82,7 +90,6 @@ public:
         }
     }
 
-private:
     inline static std::atomic<slong> counts_[2][2]{};
 };
 
@@ -139,8 +146,14 @@ bool factor_base_honesty_reduce_large_ideal(
 // candidate by its norm cofactor (counted, no witness).
 //
 // Soundness: it rejects only candidates the direct test rejects. The
-// candidate is integral (back_multiplier * ideal is the integral ideal the
-// search started from), and N(back_multiplier * x) = N(back_multiplier) N(x)
+// candidate is integral because of the back-multiplier invariant:
+// back_multiplier * (the current ideal) equals the integral twisted ideal
+// the search started from.  factor_base_honesty_primitive_part (divides by
+// the content c and multiplies back_multiplier by c) and
+// factor_base_honesty_reduce_large_ideal (replaces the ideal by m * ideal
+// and multiplies back_multiplier by 1/m) each keep it.  Nothing checks it at
+// run time, so a change to those helpers must keep it.  Also
+// N(back_multiplier * x) = N(back_multiplier) N(x)
 // because the norm is multiplicative. N(x) is the exact determinant of
 // required_prime_norm_prefilter_norm, so the integer norm it forms equals
 // the direct test's norm, and required_prime_norm_prefilter_rejects{,_norm}

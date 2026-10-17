@@ -22,6 +22,7 @@
 #include "class_group/class_group_internal.hpp"
 #include "class_group/class_group_storage_internal.hpp"
 #include "class_group/maximal_imaginary_quadratic_row_hnf_internal.hpp"
+#include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
 #include "element/element_internal.hpp"
@@ -477,6 +478,19 @@ public:
                 factor_base_bound, known_norm, known_integral_coordinates,
                 word_size_residues, deduce_last_hit_valuation,
                 deduced_hit_valuations);
+    }
+
+    // Factor-base honesty scan call counters (the test-only counters in
+    // relation_search::FactorBaseHonestyCallCounts): the scans started per
+    // route and escalation mode since the last reset.
+    static void factor_base_honesty_call_counts_reset() noexcept {
+        relation_search::FactorBaseHonestyCallCounts::reset();
+    }
+    static slong factor_base_honesty_call_count(
+            bool direct_required_prime_witness,
+            relation_search::FactorBaseWitnessEscalation escalation) noexcept {
+        return relation_search::FactorBaseHonestyCallCounts::count(
+                direct_required_prime_witness, escalation);
     }
 };
 
