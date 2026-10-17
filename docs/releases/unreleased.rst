@@ -134,8 +134,8 @@ Changed
   its ``Dict``, instead of a sorted array searched by binary search, and
   multiply by the fixed step factors with precomputed quotients.  Logarithms
   and every published result are unchanged; only the work changes (about
-  7% fewer instructions and 20% fewer cycles on the proven row
-  ``random_d9_h4_s8_proven``, busy-machine ``perf stat``).
+  7% fewer instructions on the proven row ``random_d9_h4_s8_proven``,
+  busy-machine ``perf stat`` instruction counts).
 
 - The relation residue screen in class-group relation search values a
   factor-base prime that has no residue polynomial (an index divisor) by its
