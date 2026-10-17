@@ -1168,6 +1168,24 @@ Changed
   precision (both need about ``2^20`` bits).  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- A ``grh`` class/unit computation no longer rebuilds the units in its
+  validation loop when the units were just built from the same class
+  context and that context has not changed since.  Hecke finds units once
+  per outer iteration and does not rebuild them during validation
+  (``Clgp.jl``, ``_class_unit_group`` and ``_validate_class_unit_group``).
+  The rebuild drew a fresh random subset of relations, so skipping it
+  shifts later random draws.  Class groups, class generators, regulator
+  midpoints and certification labels are unchanged on every ``grh`` corpus
+  row.  The published unit generators change on five rows:
+  ``cyclotomic_35_phi24``, ``cyclotomic_52_phi24``,
+  ``cyclotomic_real_41_deg20``, ``cyclotomic_real_q10_c11_deg10`` and
+  ``simplest_cubic_a12``.  On all of these except ``cyclotomic_52_phi24``
+  the regulator radius changes too.  ``grh`` time falls by about 30% on
+  ``simplest_cubic_a12`` and 10 to 15% on ``multiquadratic_m3_m5_m7`` and
+  ``cyclotomic_real_31_deg15`` (release build, medians of 9 to 21
+  interleaved runs on a busy machine; the controlled comparison is
+  pending).
+
 Fixed
 -----
 
