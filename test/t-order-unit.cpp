@@ -12657,9 +12657,10 @@ struct TransactionRun {
     silex::detail::ClassUnitTransactionReport audit;
 };
 
-TransactionRun run_transaction(const std::vector<slong>& coefficients,
-                               silex::CertificationMode mode,
-                               slong max_candidates, slong max_relations) {
+TransactionRun run_transaction(
+        const std::vector<slong>& coefficients, silex::CertificationMode mode,
+        slong max_candidates, slong max_relations,
+        const silex::DiagnosticsContext* diagnostics = nullptr) {
     sflint::FmpzPoly polynomial;
     slong degree = 0;
     for (const slong coefficient : coefficients) {
@@ -12674,6 +12675,7 @@ TransactionRun run_transaction(const std::vector<slong>& coefficients,
     options.max_candidates = max_candidates;
     options.max_relations = max_relations;
     options.requested_certification = mode;
+    options.diagnostics = diagnostics;
     sflint::Fmpz bound;
     assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
                                                 order));
@@ -12752,9 +12754,40 @@ int test_grh_continuation_without_relation_progress_fails_closed() {
     return 0;
 }
 
+// Under a grh request, when the outer iteration has just built the units
+// from the class context, the validation loop does not rebuild them while
+// that class context is unchanged: reference _class_unit_group (Clgp.jl)
+// finds units once per outer iteration, and _validate_class_unit_group never
+// rebuilds them.  The simplest cubic x^3 - 12x^2 - 15x - 1 (corpus row
+// simplest_cubic_a12) reaches the skip.
+int test_grh_validation_skips_unit_rebuild_from_unchanged_class_context() {
+    const std::vector<slong> cubic = {-1, -15, -12, 1};
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label =
+            "unit_group.validation_recompute.validation_loop_fresh_context_skip";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    const TransactionRun run = run_transaction(
+            cubic, silex::CertificationMode::grh, 5000, 500, &diagnostics);
+    assert(run.ok && run.audit.final_result_published);
+    assert(run.audit.class_group_certification ==
+           silex::CertificationMode::grh);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count >= 1);
+#else
+    assert(counter.count == 0);
+#endif
+    return 0;
+}
+
 }  // namespace
 
 int main() {
+    test_grh_validation_skips_unit_rebuild_from_unchanged_class_context();
     test_compute_failure_records_validation_outcome_only_when_it_ran();
     test_grh_continuation_without_relation_progress_fails_closed();
     test_grh_validation_saturation_memo_replays_unchanged_pass();

@@ -4020,6 +4020,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         bool rank_complete = false;
         ValidateRefineSummary validate_summary;
         slong revalidate_passes_done = 0;
+        bool candidate_units_from_current_class_context = false;
 
         {
             SILEX_PROFILE_SCOPE(
@@ -4110,6 +4111,11 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                     return false;
                 }
                 ++unit_add;
+                // reference _class_unit_group (Clgp.jl) finds units once per
+                // outer iteration and _validate_class_unit_group does not
+                // rebuild them, so the grh validation loop skips its unit
+                // recompute until the class context changes.
+                candidate_units_from_current_class_context = true;
             }
         }
         auto validate_candidate = [&]() noexcept {
@@ -4122,7 +4128,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                             candidate_class_group, candidate_units,
                             scratch_units, order, options, embeddings,
                             analytic_cache, validate_summary, precision,
-                            false, refresh_options)) {
+                            candidate_units_from_current_class_context,
+                            refresh_options)) {
                     return true;
                 }
                 return try_validate_refine_extra_pass(
