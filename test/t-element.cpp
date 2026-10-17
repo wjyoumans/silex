@@ -1751,6 +1751,27 @@ void test_factored_power_residue_disproof() noexcept {
         assert(evaluated.decided && !evaluated.is_power);
     }
 
+    // h(zeta) (1 + zeta), with h = x^4 + 2x^3 + 4x^2 + 2x + 1 one of the five
+    // factors of Phi_25 mod 7 (gp `factormod`): at p = 7 the first factor's
+    // residue is zero at the prime above 7 that h defines and at no other, so
+    // the product's residue is zero there and the test runs on the other
+    // four primes (condition (3) on the product).  h(zeta) lies in that prime
+    // to valuation one, so the product is not a cube; h(zeta) h(zeta)^2 is a
+    // cube whose residue is zero there too, and must not be disproved.
+    {
+        const auto factors = factored_terms(
+                phi25, {{{1, 2, 4, 2, 1}, 1, 1}, {{1, 1}, 1, 1}});
+        const ResidueDisproofDecision screened =
+                factored_residue_decision(phi25, factors, 3);
+        const ResidueDisproofDecision evaluated =
+                evaluated_residue_decision(phi25, factors, 3);
+        assert(screened.decided && !screened.is_power);
+        assert(evaluated.decided && !evaluated.is_power);
+        const auto cube = factored_terms(
+                phi25, {{{1, 2, 4, 2, 1}, 1, 1}, {{1, 2, 4, 2, 1}, 1, 2}});
+        assert(!factored_residue_decision(phi25, cube, 3).decided);
+    }
+
     // Unsupported inputs decide nothing: degree below 10, a non-positive
     // exponent of a factor, and an exponent below 2.
     {

@@ -1,4 +1,5 @@
 #include <silex/archimedean.hpp>
+#include <silex/diagnostics.hpp>
 #include <silex/factored_element.hpp>
 #include <silex/flint/arb_vec.hpp>
 #include <silex/flint/arb.hpp>
@@ -12,6 +13,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -277,7 +279,20 @@ void check_reduced_root_factored_norm() noexcept {
 // integral at the first usable prime, where the screen gives up), a rational
 // cube found after the screen, and a true cube that no step can find, which
 // stays unanswered.  Q(zeta_25) has degree 20; 1 + zeta is not a cube
-// (`nfroots` finds no root of x^3 - (1 + zeta)).
+// (`nfroots` finds no root of x^3 - (1 + zeta)).  With profiling on, the
+// screen's "not a power" event shows which answers the screen itself gave.
+void count_screen_disproofs(void* user,
+                            silex::DiagnosticsModule,
+                            silex::ProfileEvent event,
+                            const char*,
+                            const char* label) noexcept {
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label,
+                    "element.factored_power_residue_disproof.nonpower") == 0) {
+        ++*static_cast<slong*>(user);
+    }
+}
+
 void check_reduced_root_high_degree_screen() noexcept {
     sflint::FmpqPoly polynomial;
     for (slong i = 0; i <= 20; i += 5) {
@@ -307,14 +322,15 @@ void check_reduced_root_high_degree_screen() noexcept {
         std::vector<Entry> entries;
         bool answered;
         bool power;
+        bool screened;
     };
     const std::vector<Case> cases = {
             {{{&one_plus_zeta, 2}, {&zeta, 3}, {&one_plus_zeta, 5}}, true,
-             false},
-            {{{&two, 3}, {&one_plus_zeta, 1}}, true, false},
-            {{{&one_plus_zeta_seventh, 1}, {&seven, 1}}, true, false},
-            {{{&two, 1}, {&four, 1}}, true, true},
-            {{{&one_plus_zeta, 1}, {&one_plus_zeta, 2}}, false, false},
+             false, true},
+            {{{&two, 3}, {&one_plus_zeta, 1}}, true, false, true},
+            {{{&one_plus_zeta_seventh, 1}, {&seven, 1}}, true, false, false},
+            {{{&two, 1}, {&four, 1}}, true, true, false},
+            {{{&one_plus_zeta, 1}, {&one_plus_zeta, 2}}, false, false, false},
     };
     for (const Case& test : cases) {
         silex::FactoredElement input(field);
@@ -331,10 +347,25 @@ void check_reduced_root_high_degree_screen() noexcept {
         const bool plain_answered = value.is_power(
                 plain_power, plain_root, sflint::FmpzConstRef(exponent));
 
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        slong screen_disproofs = 0;
+        silex::diagnostics_set_profiling(
+                diagnostics, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::element),
+                count_screen_disproofs, &screen_disproofs);
+
         bool is_power = !test.power;
         silex::FactoredElement root(field);
         const bool answered = input.is_power_si(
-                is_power, root, 3, silex::FactoredRootStrategy::reduced);
+                is_power, root, 3, silex::FactoredRootStrategy::reduced,
+                &diagnostics);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(screen_disproofs == (test.screened ? 1 : 0));
+#else
+        assert(screen_disproofs == 0);
+#endif
         assert(answered == test.answered);
         assert(answered == plain_answered);
         if (!answered) {
