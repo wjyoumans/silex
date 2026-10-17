@@ -12111,8 +12111,8 @@ bool ClassGroupContext::set_relation_matrix(
 // - append_relation_with_outcome_ is the only writer of rows: it holds the
 //   only relations_.append call and the only relation_module_ and
 //   row_module_ replacements outside the reset paths and the sync.  Other
-//   files reach relations_ through const accessors and read row_module_
-//   only.  Its exits:
+//   files reach relations_ through const accessors and change row_module_
+//   only through sync_row_module_checkpoint_.  Its exits:
 //   - keep_nonduplicate duplicate, a modular-dependent row the policy does
 //     not retain, or a row the exact decision rejects return before
 //     relations_ or relation_module_ change.  The exact rejection may
@@ -12120,7 +12120,13 @@ bool ClassGroupContext::set_relation_matrix(
 //     neither raised the rank nor changed the HNF, so its lattice is
 //     unchanged: should_keep_dependent_relation keeps every index_refined
 //     row, and HnfContext::refine_dependent sets index_refined exactly when
-//     the HNF changes.
+//     the HNF changes.  HnfContext::add_row also leaves index_refined false
+//     without calling refine_dependent when the row reduces to zero
+//     (fmpz_smat.cpp, row_reduces_to_zero_in_current_lattice exit), and the
+//     lattice is unchanged there too.  The argument depends on the call at
+//     row_module_add_with_result in the exact decision using the default
+//     defer_dependent_refinement = false: with true, index_refined is never
+//     set and a rejection could drop a lattice-changing row.
 //   - A module duplicate (exactly equal to a row relation_module_ already
 //     retains) kept as a witness is appended to relations_ only; the
 //     lattice is unchanged.
