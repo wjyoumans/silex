@@ -3631,10 +3631,18 @@ bool saturation_relation_with_units(Relation& relation,
     }
 
     bool is_power = false;
-    if (!product.is_power_si(is_power, root, flint::fmpz_get_si(ell),
-                             FactoredRootStrategy::reduced,
-                             context.diagnostics())) {
-        return false;
+    {
+        // The square test (ell = 2) keeps the degree limit of the
+        // pure-power lift (detail::kSaturationLiftDegree): from that degree
+        // on it is decided only by the residue disproof, and an undecided
+        // product returns false here as before.
+        detail::SaturationLiftLimit square_lift_limit(
+                detail::SaturationLiftExponents::squares);
+        if (!product.is_power_si(is_power, root, flint::fmpz_get_si(ell),
+                                 FactoredRootStrategy::reduced,
+                                 context.diagnostics())) {
+            return false;
+        }
     }
     if (!is_power) {
         if (filter != nullptr) {

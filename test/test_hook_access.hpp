@@ -21,6 +21,7 @@
 
 #include "class_group/class_group_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
+#include "element/element_internal.hpp"
 #include "lat/certified_lll_internal.hpp"
 #include "order_unit/compute_internal.hpp"
 
@@ -150,6 +151,24 @@ public:
     // process started.
     static slong saturation_kernel_extensions_kept() noexcept {
         return SaturationKernelTestSeams::extension_kept_.load(
+                std::memory_order_relaxed);
+    }
+
+    // While set, pure_power_hensel_root returns "unsupported" in degree 10
+    // and higher, as before the lift ran there, so Element::is_power leaves
+    // a non-rational true power (exponent >= 2) undecided in such a field.
+    // Skips no invariant: "unsupported" is a result every caller already
+    // handles (a failed lift returns it too); it only lets a test reach the
+    // paths after an undecided root with a small fixture.
+    static void set_high_degree_power_lift_off(bool on) noexcept {
+        ElementPowerTestSeams::high_degree_lift_off_.store(
+                on, std::memory_order_relaxed);
+    }
+
+    // The number of power tests whose pure-power lift a SaturationLiftLimit
+    // scope skipped since the process started.
+    static slong saturation_lifts_skipped() noexcept {
+        return SaturationLiftLimit::skipped_lifts_.load(
                 std::memory_order_relaxed);
     }
 };

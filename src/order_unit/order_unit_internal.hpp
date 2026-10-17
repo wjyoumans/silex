@@ -537,10 +537,9 @@ enum class KernelRowRootResult : unsigned char {
     deferred,
 };
 // `attempt` tests every row.  `defer_undecidable` skips the root attempt,
-// returning `deferred`, when Element::is_power finds an l-th root in this
-// field only for rational constants (l >= 3 and field degree >= 10, see
-// element_power_test_roots_non_rational in relation_kernel.cpp) and the row
-// product is not a formal l-th power.  Such an attempt can end only in a
+// returning `deferred`, when l >= 3 and the field has degree >= 10 (see
+// kKernelRowRootDeferralDegree in relation_kernel.cpp) and the row product
+// is not a formal l-th power.  An attempt can end only in a
 // non-power, in `undecided`, or in a root of a true l-th power; the stable
 // proof step rescans after the first two as after a deferred row, and a
 // true l-th power stays in every later character kernel.  So the step uses

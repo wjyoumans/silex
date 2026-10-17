@@ -3437,11 +3437,99 @@ bool prime_search_setup(bool& usable,
     return true;
 }
 
+// STABILIZED of reference `_roots_hensel` (reference v0.38.6
+// `src/NumFieldOrd/NfOrd/Hensel.jl` lines 102-106): 2 when the field has
+// degree n >= 10, else 0.  The reference keeps the residue factor with the
+// fewest roots of the polynomial modulo P, then the largest residue degree,
+// and stops at a factor that does not improve on it once `not_better`, which
+// starts at 1, reaches STABILIZED (lines 175-188).  With 0 that is the first
+// usable factor.
+constexpr slong hensel_prime_choice_stabilized(slong degree) noexcept {
+    return degree >= 10 ? 2 : 0;
+}
+
+// Exact residue disproof before the lift of pure_power_hensel_prime_search
+// at the chosen prime, when `pre_lift` enables it.  Below degree
+// kHighDegreeResidueScanDegree it is pre_lift_residue_disproves (the chosen
+// prime and kPreLiftDisproofExtraPrimes further admissible primes); from that
+// degree on it is the memoized scan of pure_power_residue_disproves
+// (high_degree_residue_disproves), which skips the primes that cannot
+// disprove and which that function would otherwise run after a failed lift.
+// Either way a true return is an exact proof that the radicand, and hence
+// the input, is not an n-th power.
+bool pure_power_pre_lift_disproves(const flint::FmpqPoly& element_polynomial,
+                                   const nf_struct* raw_field,
+                                   slong degree,
+                                   const flint::Fmpz& chosen_prime,
+                                   slong exponent,
+                                   detail::PreLiftResidueDisproof pre_lift,
+                                   const DiagnosticsContext* diagnostics)
+        noexcept {
+    if (pre_lift != detail::PreLiftResidueDisproof::enabled) {
+        return false;
+    }
+    if (degree >= detail::kHighDegreeResidueScanDegree) {
+        return high_degree_residue_disproves(raw_field->pol,
+                                             element_polynomial, degree,
+                                             exponent, diagnostics);
+    }
+    return pre_lift_residue_disproves(element_polynomial, raw_field, degree,
+                                      chosen_prime, exponent, diagnostics);
+}
+
+// The pre-lift disproof and the Hensel lift of pure_power_hensel_prime_search
+// at the chosen factor `factor` of f mod `prime`, whose residue n-th roots
+// give `inverse_roots`.  Returns as pure_power_hensel_prime_search does.
+bool pure_power_lift_at_factor(
+        bool& is_power,
+        Element& root,
+        const Element& radicand,
+        const Element& input,
+        PowerInputNorm& input_norm,
+        const Element* root_scale,
+        const flint::FmpqPoly& element_polynomial,
+        const NumberField* parent,
+        const nf_struct* raw_field,
+        slong exponent,
+        detail::PreLiftResidueDisproof pre_lift,
+        const flint::Fmpz& prime,
+        const flint::FmpzModPoly& field_polynomial,
+        const flint::FmpzModPoly& factor,
+        const flint::FmpzModCtx& ctx,
+        std::vector<flint::FmpzPoly> inverse_roots,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (pure_power_pre_lift_disproves(element_polynomial, raw_field,
+                                      parent->degree(), prime, exponent,
+                                      pre_lift, diagnostics)) {
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                            "element.power_prelift_residue_disproof.nonpower");
+        is_power = false;
+        return true;
+    }
+    if (try_pure_power_root_at_prime(
+                root, radicand, input, input_norm, root_scale,
+                element_polynomial, raw_field, prime, field_polynomial,
+                factor, ctx, std::move(inverse_roots), exponent,
+                diagnostics)) {
+        is_power = true;
+        return true;
+    }
+    return false;
+}
+
 // Prime search and Hensel lift of pure_power_hensel_root for the radicand
 // `radicand` = input * d^n, whose power-basis coordinates are
 // `element_polynomial`; root_scale = 1/d, or nullptr when radicand is input
 // itself (d = 1).  A lifted root is published only after exact verification
 // against input; input_norm supplies N(input) (not N(radicand)).
+//
+// Prime choice as in reference `_roots_hensel` with ispure = true (see
+// hensel_prime_choice_stabilized): every examined factor whose residue is not
+// an n-th power proves "not a power" (lines 159-161); below degree 10 the
+// first factor with a residue root is lifted, and from degree 10 on the
+// factors of further primes are compared until one does not improve the
+// choice.  A residue with no root usable for lifting (zero, or p | n) is
+// skipped, as the reference skips a factor where y^n - a is not squarefree.
 bool pure_power_hensel_prime_search(
         bool& is_power,
         Element& root,
@@ -3455,46 +3543,76 @@ bool pure_power_hensel_prime_search(
         slong exponent,
         detail::PreLiftResidueDisproof pre_lift,
         const DiagnosticsContext* diagnostics) noexcept {
+    const slong stabilized = hensel_prime_choice_stabilized(parent->degree());
+    flint::Fmpz chosen_prime;
+    std::size_t chosen_index = 0;
+    std::size_t chosen_roots = static_cast<std::size_t>(exponent) + 1;
+    slong chosen_degree = 0;
+    bool have_choice = false;
+    slong not_better = 1;
+
+    // One prime of the search: f mod p and its factors, and the radicand
+    // mod p.  False when the prime is skipped; `failed` is set on an
+    // allocation failure.
+    const auto prepare_prime =
+            [&](bool& failed, const flint::Fmpz& prime,
+                const flint::FmpzModCtx& ctx,
+                flint::FmpzModPoly& field_polynomial,
+                flint::FmpzModPoly& element,
+                std::vector<flint::FmpzModPoly>& factors) noexcept {
+                failed = false;
+                // The field part (f mod p, its degree and squarefree
+                // factorization) comes from the per-(field, prime) memo
+                // above; a prime is skipped for the same reasons as before,
+                // and an element that does not reduce mod p skips it too.
+                bool usable = false;
+                if (!field_polynomial.is_initialized() ||
+                    !element.is_initialized()) {
+                    return false;
+                }
+                if (!prime_search_setup(usable, field_polynomial, factors,
+                                        raw_field, parent->backend_kind(),
+                                        parent->degree(), prime, ctx,
+                                        diagnostics)) {
+                    failed = true;
+                    return false;
+                }
+                if (!usable) {
+                    return false;
+                }
+                SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                                    "element.power_hensel_prime_project");
+                return fmpq_poly_reduce_modulus(element,
+                                                element_polynomial.raw(), ctx,
+                                                prime.raw());
+            };
+
     flint::Fmpz prime;
     fmpz_set_ui(prime.raw(), 3);
     constexpr slong max_prime_attempts = 256;
-    for (slong attempt = 0; attempt < max_prime_attempts; ++attempt) {
+    bool found = false;
+    for (slong attempt = 0; attempt < max_prime_attempts && !found;
+         ++attempt) {
         fmpz_nextprime(prime.raw(), prime.raw(), 1);
         flint::FmpzModCtx ctx(prime.raw());
         if (ctx.raw() == nullptr) {
             return false;
         }
 
-        // The field part (f mod p, its degree and squarefree
-        // factorization) comes from the per-(field, prime) memo above; a
-        // prime is skipped for the same reasons as before, and an element
-        // that does not reduce mod p skips it too.
         flint::FmpzModPoly field_polynomial(ctx);
         flint::FmpzModPoly element(ctx);
-        bool usable = false;
         std::vector<flint::FmpzModPoly> factors;
-        if (!field_polynomial.is_initialized() || !element.is_initialized()) {
-            continue;
-        }
-        if (!prime_search_setup(usable, field_polynomial, factors, raw_field,
-                                parent->backend_kind(), parent->degree(),
-                                prime, ctx, diagnostics)) {
-            return false;
-        }
-        if (!usable) {
-            continue;
-        }
-        {
-            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
-                                "element.power_hensel_prime_project");
-            if (!fmpq_poly_reduce_modulus(element,
-                                          element_polynomial.raw(), ctx,
-                                          prime.raw())) {
-                continue;
+        bool failed = false;
+        if (!prepare_prime(failed, prime, ctx, field_polynomial, element,
+                           factors)) {
+            if (failed) {
+                return false;
             }
+            continue;
         }
 
-        for (flint::FmpzModPoly& factor : factors) {
+        for (std::size_t index = 0; index < factors.size(); ++index) {
+            flint::FmpzModPoly& factor = factors[index];
             std::vector<flint::FmpzPoly> inverse_roots;
             const ResiduePowerStatus status =
                     residue_field_power_inverse_roots(
@@ -3504,33 +3622,75 @@ bool pure_power_hensel_prime_search(
                 is_power = false;
                 return true;
             }
-            if (status == ResiduePowerStatus::power) {
-                // Exact disproof before the lift; see
-                // pre_lift_residue_disproves for the admissible primes.
-                if (pre_lift == detail::PreLiftResidueDisproof::enabled &&
-                    pre_lift_residue_disproves(
-                            element_polynomial, raw_field, parent->degree(),
-                            prime, exponent, diagnostics)) {
-                    SILEX_PROFILE_EVENT(
-                            diagnostics, DiagnosticsModule::element,
-                            "element.power_prelift_residue_disproof.nonpower");
-                    is_power = false;
-                    return true;
-                }
-                if (try_pure_power_root_at_prime(
-                            root, radicand, input, input_norm, root_scale,
-                            element_polynomial, raw_field, prime,
+            if (status != ResiduePowerStatus::power) {
+                continue;
+            }
+            const slong residue_degree =
+                    fmpz_mod_poly_degree(factor.raw(), ctx.raw());
+            if (inverse_roots.size() < chosen_roots ||
+                (inverse_roots.size() == chosen_roots &&
+                 residue_degree > chosen_degree)) {
+                if (not_better >= stabilized) {
+                    // Below degree 10 (STABILIZED = 0) the first factor with
+                    // a residue root is chosen at once: lift it here.
+                    return pure_power_lift_at_factor(
+                            is_power, root, radicand, input, input_norm,
+                            root_scale, element_polynomial, parent,
+                            raw_field, exponent, pre_lift, prime,
                             field_polynomial, factor, ctx,
-                            std::move(inverse_roots), exponent, diagnostics)) {
-                    is_power = true;
-                    return true;
+                            std::move(inverse_roots), diagnostics);
                 }
-                return false;
+                fmpz_set(chosen_prime.raw(), prime.raw());
+                chosen_index = index;
+                chosen_roots = inverse_roots.size();
+                chosen_degree = residue_degree;
+                have_choice = true;
+            } else {
+                ++not_better;
+            }
+            if (not_better >= stabilized) {
+                found = true;
+                break;
             }
         }
     }
+    if (!found || !have_choice) {
+        // Resource bound only: the search stays unsupported.
+        return false;
+    }
 
-    return false;
+    // The choice was made at an earlier factor, possibly of an earlier
+    // prime: rebuild its residue data.  Every step is deterministic (see
+    // prime_search_setup), so this is the factor and the residue roots seen
+    // during the search.
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
+                        "element.power_hensel_stabilized_prime_choice");
+    flint::FmpzModCtx ctx(chosen_prime.raw());
+    if (ctx.raw() == nullptr) {
+        return false;
+    }
+    flint::FmpzModPoly field_polynomial(ctx);
+    flint::FmpzModPoly element(ctx);
+    std::vector<flint::FmpzModPoly> factors;
+    bool failed = false;
+    if (!prepare_prime(failed, chosen_prime, ctx, field_polynomial, element,
+                       factors) ||
+        chosen_index >= factors.size()) {
+        return false;
+    }
+    std::vector<flint::FmpzPoly> inverse_roots;
+    if (residue_field_power_inverse_roots(
+                inverse_roots, element, factors[chosen_index], ctx,
+                chosen_prime.raw(), exponent, diagnostics) !=
+                ResiduePowerStatus::power ||
+        inverse_roots.size() != chosen_roots) {
+        return false;
+    }
+    return pure_power_lift_at_factor(
+            is_power, root, radicand, input, input_norm, root_scale,
+            element_polynomial, parent, raw_field, exponent, pre_lift,
+            chosen_prime, field_polynomial, factors[chosen_index], ctx,
+            std::move(inverse_roots), diagnostics);
 }
 
 // Rescaling, prime search and lift of pure_power_hensel_root, after its
@@ -3871,7 +4031,7 @@ CyclotomicPrimeStatus select_cyclotomic_prime(
         const nf_struct* raw_field,
         slong degree) noexcept {
     const slong f_degree = fmpz_poly_degree(f.raw());
-    const slong stabilized = degree >= 10 ? 2 : 0;
+    const slong stabilized = hensel_prime_choice_stabilized(degree);
     slong current_num = f_degree + 1;
     slong not_better = 1;
     bool have = false;
@@ -4303,13 +4463,24 @@ bool pure_power_hensel_root(bool& is_power,
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.power_hensel_root");
     // Private port of reference `_roots_hensel(y^n - a, ispure=true,
-    // is_normal=true)` for monic integral fields of degree below
-    // kElementPowerRouteDegreeLimit (reference scope: degree < 10).  The
-    // result is published only after exact verification; unported cases remain
+    // is_normal=true)` for monic integral fields.  Like the reference
+    // (Hensel.jl lines 57-232) it has no degree limit; from degree 10 on only
+    // the prime choice changes (hensel_prime_choice_stabilized).  The result
+    // is published only after exact verification; unported cases remain
     // unsupported.
     const NumberField* parent = input.parent();
-    if (parent == nullptr || parent->degree() <= 1 ||
-        parent->degree() >= kElementPowerRouteDegreeLimit || exponent <= 1) {
+    if (parent == nullptr || parent->degree() <= 1 || exponent <= 1 ||
+        (parent->degree() >= kHighDegreeResidueScanDegree &&
+         ElementPowerTestSeams::high_degree_lift_off())) {
+        return false;
+    }
+    // The power tests of the saturation consumers named at
+    // kSaturationLiftDegree keep the degree limit the lift had before it ran
+    // in every degree; "unsupported" leaves them to the residue disproof, as
+    // before.
+    if (parent->degree() >= kSaturationLiftDegree &&
+        SaturationLiftLimit::covers(exponent)) {
+        SaturationLiftLimit::count_skipped_lift();
         return false;
     }
 
@@ -4391,9 +4562,11 @@ bool pure_power_residue_disproves(bool& is_power,
         return false;
     }
 
-    if (parent->degree() >= kElementPowerRouteDegreeLimit) {
-        // Degree kElementPowerRouteDegreeLimit and higher, where
-        // pure_power_hensel_root is not ported.
+    if (parent->degree() >= kHighDegreeResidueScanDegree) {
+        // Degree kHighDegreeResidueScanDegree and higher.  The callers run
+        // this after pure_power_hensel_root, which runs the same memoized
+        // scan before it lifts, so after a failed lift of the same radicand
+        // the answer comes from the memo.
         // reference v0.38.6 `_roots_hensel` (Hensel.jl lines 159-161)
         // returns no roots as soon as y^n - a has no root modulo a prime
         // factor of a good prime, and in degree >= 10 it examines further
@@ -4406,10 +4579,10 @@ bool pure_power_residue_disproves(bool& is_power,
         // prime: a residue that is not an n-th power proves that `input` is
         // not an n-th power.  The argument has no condition on the degree.
         // Silex extension: the reference stops after a few factors and then
-        // lifts; Silex has no lift here and scans up to
-        // kHighDegreeDisproofPrimes admissible primes instead.  A true power
-        // is never disproved, so it stays unsupported, as does any input with
-        // no disproving residue within that bound.
+        // lifts; Silex also scans up to kHighDegreeDisproofPrimes admissible
+        // primes.  A true power is never disproved, so it is decided only by
+        // a verified lifted root; an input with no disproving residue within
+        // that bound and no verified root stays unsupported.
         if (!fmpq_poly_is_monic_integral(raw_field->pol)) {
             return false;
         }
@@ -4499,7 +4672,7 @@ bool factored_power_residue_disproves(
     // same admissibility as the scan of the evaluated product, so it
     // disproves only where that scan would.
     const slong degree = parent.degree();
-    if (degree < kElementPowerRouteDegreeLimit || exponent <= 1 ||
+    if (degree < kHighDegreeResidueScanDegree || exponent <= 1 ||
         factors.empty()) {
         return false;
     }

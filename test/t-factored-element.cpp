@@ -277,8 +277,9 @@ void check_reduced_root_factored_norm() noexcept {
 // nothing.  Its answers must equal those of Element::is_power on the
 // evaluated value: definite non-powers (also with a factor that is not
 // integral at the first usable prime, where the screen gives up), a rational
-// cube found after the screen, and a true cube that no step can find, which
-// stays unanswered.  Q(zeta_25) has degree 20; 1 + zeta is not a cube
+// cube found after the screen, and a true cube that the screen cannot
+// disprove and the Hensel lift on the evaluated leftover roots.  Q(zeta_25)
+// has degree 20; 1 + zeta is not a cube
 // (`nfroots` finds no root of x^3 - (1 + zeta)).  With profiling on, the
 // screen's "not a power" event shows which answers the screen itself gave.
 void count_screen_disproofs(void* user,
@@ -330,7 +331,7 @@ void check_reduced_root_high_degree_screen() noexcept {
             {{{&two, 3}, {&one_plus_zeta, 1}}, true, false, true},
             {{{&one_plus_zeta_seventh, 1}, {&seven, 1}}, true, false, false},
             {{{&two, 1}, {&four, 1}}, true, true, false},
-            {{{&one_plus_zeta, 1}, {&one_plus_zeta, 2}}, false, false, false},
+            {{{&one_plus_zeta, 1}, {&one_plus_zeta, 2}}, true, true, false},
     };
     for (const Case& test : cases) {
         silex::FactoredElement input(field);

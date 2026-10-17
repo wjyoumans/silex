@@ -8,15 +8,112 @@
 #include <flint/nf.h>
 #include <flint/nf_elem.h>
 
+#include <atomic>
 #include <span>
 
 namespace silex::detail {
 
-// Degree from which Element::is_power (exponent >= 3) no longer runs
-// pure_power_hensel_root, which is ported only for degree < this value.
-// hensel.cpp's guards and the order-unit relation kernel's
-// element_power_test_roots_non_rational share it.
-inline constexpr slong kElementPowerRouteDegreeLimit = 10;
+// Degree from which pure_power_residue_disproves runs its scan of
+// kHighDegreeDisproofPrimes admissible primes (src/element/hensel.cpp), which
+// pure_power_hensel_root also runs before lifting, and from which
+// factored_power_residue_disproves screens factored leftovers.  It is the
+// degree below which pure_power_hensel_root used to be ported; the
+// pure-power lift now runs in every degree, and these residue routes keep
+// their limit.
+inline constexpr slong kHighDegreeResidueScanDegree = 10;
+
+// Degree from which the power tests of two saturation consumers do not lift
+// inside a SaturationLiftLimit scope: the square tests of grh relation
+// saturation with units (saturation_relation_with_units in
+// src/class_group/class_group.cpp, reached from
+// ClassGroupContext::saturate_local_once_with_units_) and the kernel-row
+// root tests of the local saturation proofs
+// (OrderUnitGroup::prove_local_saturated_ and
+// prove_local_saturated_stable_in_place_ in src/order_unit/saturation.cpp,
+// through detail::kernel_row_root).  There pure_power_hensel_root returns
+// "unsupported" in fields of this degree and higher, and the test is decided
+// only by the residue disproof, as it was before the pure-power lift ran
+// from degree 10 on.  It keeps those consumers' degree-10 limit, which the
+// public Element and FactoredElement square and power tests no longer have;
+// the limit avoids lifting candidates the residue scan could not disprove,
+// which on high-degree saturation costs time without changing the published
+// results.
+inline constexpr slong kSaturationLiftDegree = 10;
+
+class TestHookAccess;
+
+// The exponents a SaturationLiftLimit scope covers.  Ordered: a scope never
+// narrows the coverage of an enclosing one.
+enum class SaturationLiftExponents : unsigned char {
+    none,
+    // Exponent 2 only (the grh square tests).
+    squares,
+    // Every exponent (the proof's kernel-row root tests).
+    all,
+};
+
+// Scoped caller-side option of the saturation power tests (see
+// kSaturationLiftDegree).  While an object of this class lives on a thread,
+// pure_power_hensel_root on that thread returns "unsupported" for a covered
+// exponent in fields of degree kSaturationLiftDegree and higher; other
+// threads, and exponents the scope does not cover, are unaffected.
+// "Unsupported" is a result every caller already handles (a failed lift
+// returns it too), so answers that are given stay exact: "true" only after
+// the exact root check, "false" only from a residue disproof.  Scopes nest;
+// the destructor restores the previous state.
+class SaturationLiftLimit {
+public:
+    explicit SaturationLiftLimit(SaturationLiftExponents exponents) noexcept
+        : previous_(active_) {
+        if (exponents > active_) {
+            active_ = exponents;
+        }
+    }
+    ~SaturationLiftLimit() { active_ = previous_; }
+    SaturationLiftLimit(const SaturationLiftLimit&) = delete;
+    SaturationLiftLimit& operator=(const SaturationLiftLimit&) = delete;
+
+    // Whether a scope on the calling thread covers `exponent`.
+    static bool covers(slong exponent) noexcept {
+        return active_ == SaturationLiftExponents::all ||
+               (active_ == SaturationLiftExponents::squares && exponent == 2);
+    }
+
+    // Counts one power test whose lift a scope skipped
+    // (pure_power_hensel_root).  Only tests read the count, through
+    // TestHookAccess.
+    static void count_skipped_lift() noexcept {
+        skipped_lifts_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+
+    SaturationLiftExponents previous_;
+    inline static thread_local SaturationLiftExponents active_ =
+            SaturationLiftExponents::none;
+    // Power tests whose lift a scope skipped, on any thread, since the
+    // process started.
+    inline static std::atomic<slong> skipped_lifts_{0};
+};
+
+// Switch that only detail::TestHookAccess (test/test_hook_access.hpp) can
+// set.  It is off by default and no production code sets it.  While it is
+// on, pure_power_hensel_root returns "unsupported" in fields of degree
+// kHighDegreeResidueScanDegree and higher, as it did before the lift ran
+// there, so tests can still reach the paths that follow an undecided root of
+// a true power (for example the fail-closed saturation proofs).  A relaxed
+// atomic, so a reader never races with a test setting it.
+class ElementPowerTestSeams {
+public:
+    static bool high_degree_lift_off() noexcept {
+        return high_degree_lift_off_.load(std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<bool> high_degree_lift_off_{false};
+};
 
 bool ensure_parent(Element& out, const NumberField& field) noexcept;
 
@@ -136,7 +233,7 @@ struct PowerInputNormSource {
 };
 
 // Hensel-lifted `exponent`-th (respectively square) root of `input` in a
-// monic integral field of degree < 10, verified exactly before publication.
+// monic integral field of any degree, verified exactly before publication.
 // A definite "not a power" comes only from an exact residue disproof.
 // `input_norm_source`, when not null, supplies N(input) to the verification;
 // it is not part of the whole-answer memo key, since it does not change the

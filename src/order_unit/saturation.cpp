@@ -2,6 +2,7 @@
 #include "relation_unit_internal.hpp"
 
 #include "../class_group/class_group_internal.hpp"
+#include "../element/element_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
 #include "../residue_field/residue_field_internal.hpp"
 
@@ -1164,11 +1165,9 @@ bool stable_relation_saturation_step(OrderUnitGroup& out,
     // larger threshold once such a row was seen.
     bool saw_root_outside_order = false;
     // Until the first doubling of `stable` for this ell (the callers pass
-    // defer_undecidable_roots), a row whose root test can end only in a
-    // non-power, undecided, or in the root of a true ell-th power is
-    // deferred, not tested: Element::is_power finds no root of a
-    // non-rational element in that field and exponent (see
-    // kernel_row_root).  The deferred row is handled like an undecided one
+    // defer_undecidable_roots), a row of exponent ell >= 3 in a field of
+    // degree >= 10 that is not a formal ell-th power is deferred, not tested
+    // (see kernel_row_root).  The deferred row is handled like an undecided one
     // below, so `stable` doubles and the rescan uses more primes q; the
     // rescan's rows are tested as usual.  A true ell-th power stays in every
     // kernel, so it still reaches the root test at a later scan; a
@@ -2731,6 +2730,13 @@ bool OrderUnitGroup::prove_local_saturated_(
         detail::CompactFieldModulusCache* field_modulus_cache) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.prove_local_saturated");
+    // The kernel-row root tests of this proof (detail::kernel_row_root, its
+    // only power tests) keep the degree limit of the pure-power lift
+    // (detail::kSaturationLiftDegree) for every exponent: from that degree on
+    // a row's root test is decided only by the residue disproof, and an
+    // undecided row is handled as before.
+    detail::SaturationLiftLimit kernel_row_lift_limit(
+            detail::SaturationLiftExponents::all);
     detail::CompactFieldModulusCache local_field_modulus_cache;
     detail::CompactFieldModulusCache* const shared_field_modulus_cache =
             field_modulus_cache != nullptr ? field_modulus_cache
@@ -3052,6 +3058,13 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
     SILEX_PROFILE_SCOPE(
             diagnostics_, DiagnosticsModule::unit_group,
             "unit_group.prove_local_saturated_stable_in_place");
+    // The kernel-row root tests of this proof (detail::kernel_row_root, its
+    // only power tests) keep the degree limit of the pure-power lift
+    // (detail::kSaturationLiftDegree) for every exponent: from that degree on
+    // a row's root test is decided only by the residue disproof, and an
+    // undecided row is handled as before.
+    detail::SaturationLiftLimit kernel_row_lift_limit(
+            detail::SaturationLiftExponents::all);
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     if (!is_defined() || !group.is_set() ||

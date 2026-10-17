@@ -1389,8 +1389,7 @@ void test_power_gp_nonpowers() noexcept {
     }
 }
 
-// Degree 10 and higher: the Hensel root finder is not ported there, but the
-// residue disproof is exact in every degree.  Q(zeta_25) and Q(zeta_44) both
+// Degree 10 and higher: the residue disproof is exact in every degree.  Q(zeta_25) and Q(zeta_44) both
 // have degree 20.  Each non-power was checked independently with `nfroots` (no
 // root of x^n - a).  1 + zeta is a cyclotomic unit (norm Phi_25(-1) = 1),
 // so the norm alone cannot disprove it.  zeta_25 is not a fifth power: a
@@ -1427,20 +1426,161 @@ void test_power_degree_twenty_cyclotomic_residue_disproof() noexcept {
     assert(eight.set_si(8));
     assert_is_power_with_root(eight, three);
 
-    // zeta_25 = (zeta_25^17)^3 and (1 + zeta_25)^3 are cubes, but no root
-    // finder is ported in degree 20, and no residue can disprove a true
-    // power: the query stays unsupported and leaves the root unchanged.
+    // zeta_25 = (zeta_25^17)^3 and (1 + zeta_25)^3 are cubes.  No residue
+    // disproves a true power; the Hensel lift finds their roots, verified
+    // exactly.  Q(zeta_25) has no primitive cube root of unity, so each cube
+    // root is unique: zeta_25^17 and 1 + zeta_25.
     silex::Element zeta = element_from_coefficients(phi25, {0, 1});
     silex::Element one_plus_zeta = element_from_coefficients(phi25, {1, 1});
     silex::Element cube(phi25);
     assert(cube.pow_fmpz(one_plus_zeta, sflint::FmpzConstRef(three)));
-    for (const silex::Element* value : {&zeta, &cube}) {
+    sflint::Fmpz seventeen;
+    sflint::fmpz_set_si(sflint::FmpzRef(seventeen), 17);
+    silex::Element zeta_root(phi25);
+    assert(zeta_root.pow_fmpz(zeta, sflint::FmpzConstRef(seventeen)));
+    const silex::Element* values[] = {&zeta, &cube};
+    const silex::Element* roots[] = {&zeta_root, &one_plus_zeta};
+    for (std::size_t i = 0; i < std::size(values); ++i) {
         silex::Element root(phi25);
-        assert(root.set_si(7));
         bool is_power = false;
-        assert(!value->is_power(is_power, root, sflint::FmpzConstRef(three)));
-        assert(root.equal_si(7));
+        assert(values[i]->is_power(is_power, root,
+                                   sflint::FmpzConstRef(three)));
+        assert(is_power);
+        assert(root.equal(*roots[i]));
     }
+}
+
+// Hensel roots in degree 10 and higher (reference v0.38.6 `_roots_hensel`,
+// src/NumFieldOrd/NfOrd/Hensel.jl lines 57-232, which has no degree limit and
+// only changes its prime choice from degree 10 on, STABILIZED = 2).  Expected
+// roots as returned by the reference and by `nfroots`, each also checked by
+// exact powering here: in Q(zeta_19) the square roots of zeta are
+// +-zeta^10 and its only cube root is zeta^13 (no primitive cube root of
+// unity in the field); in Q(zeta_32) the square roots of zeta^4 = zeta_8 are
+// +-zeta^2 and those of 2 zeta^4 are +-(zeta^14 - zeta^6).  zeta_19 is not a
+// 19th power (a 19th root would be a root of unity of order 361), so any
+// definite answer must be "not a power".
+void assert_root_is_one_of(const silex::Element& value,
+                           slong exponent,
+                           const silex::Element& expected,
+                           bool up_to_sign) noexcept {
+    const silex::NumberField& field = *value.parent();
+    sflint::Fmpz n;
+    sflint::fmpz_set_si(sflint::FmpzRef(n), exponent);
+    silex::Element root(field);
+    bool is_power = false;
+    assert(value.is_power(is_power, root, sflint::FmpzConstRef(n)));
+    assert(is_power);
+    silex::Element check(field);
+    assert(check.pow_fmpz(root, sflint::FmpzConstRef(n)));
+    assert(check.equal(value));
+    silex::Element negated(field);
+    assert(negated.negate(expected));
+    assert(root.equal(expected) || (up_to_sign && root.equal(negated)));
+    if (exponent == 2) {
+        silex::Element square_root(field);
+        bool is_square = false;
+        assert(value.is_square(is_square, square_root));
+        assert(is_square && square_root.equal(root));
+    }
+}
+
+void test_power_high_degree_hensel_roots() noexcept {
+    silex::detail::clear_hensel_data_caches();
+    const silex::NumberField phi19 = field_from_coefficients(
+            {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1});
+    silex::Element zeta19 = element_from_coefficients(phi19, {0, 1});
+    silex::Element zeta19_10(phi19);
+    silex::Element zeta19_13(phi19);
+    sflint::Fmpz power;
+    sflint::fmpz_set_si(sflint::FmpzRef(power), 10);
+    assert(zeta19_10.pow_fmpz(zeta19, sflint::FmpzConstRef(power)));
+    sflint::fmpz_set_si(sflint::FmpzRef(power), 13);
+    assert(zeta19_13.pow_fmpz(zeta19, sflint::FmpzConstRef(power)));
+    assert_root_is_one_of(zeta19, 2, zeta19_10, true);
+    assert_root_is_one_of(zeta19, 3, zeta19_13, false);
+    sflint::Fmpz nineteen;
+    sflint::fmpz_set_si(sflint::FmpzRef(nineteen), 19);
+    assert_power_answer_consistent(zeta19, nineteen, false);
+
+    // Q(zeta_32), degree 16: f = x^16 + 1.
+    const silex::NumberField phi32 = field_from_coefficients(
+            {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1});
+    silex::Element zeta8 = element_from_coefficients(phi32, {0, 0, 0, 0, 1});
+    silex::Element two_zeta8 =
+            element_from_coefficients(phi32, {0, 0, 0, 0, 2});
+    silex::Element zeta32_2 = element_from_coefficients(phi32, {0, 0, 1});
+    silex::Element two_zeta8_root = element_from_coefficients(
+            phi32, {0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1});
+    assert_root_is_one_of(zeta8, 2, zeta32_2, true);
+    assert_root_is_one_of(two_zeta8, 2, two_zeta8_root, true);
+    sflint::Fmpz eight;
+    sflint::fmpz_set_si(sflint::FmpzRef(eight), 8);
+    assert_power_answer_consistent(zeta8, eight, false);
+
+    // Inside a SaturationLiftLimit scope for squares (the square tests of
+    // grh relation saturation with units) a square test in degree
+    // kSaturationLiftDegree and higher does not lift, so the true square
+    // zeta_8 of Q(zeta_32) is left undecided; exponent 3 still lifts, and in
+    // degree 8 (Q(zeta_16), f = x^8 + 1) the square root is still found.  A
+    // scope for every exponent (the kernel-row root tests of the local
+    // saturation proofs) also leaves the cube zeta_19 of Q(zeta_19)
+    // undecided, and a nested squares scope does not narrow it.  Leaving the
+    // scopes restores the lift.
+    const silex::NumberField phi16 =
+            field_from_coefficients({1, 0, 0, 0, 0, 0, 0, 0, 1});
+    silex::Element zeta16_square = element_from_coefficients(phi16, {0, 0, 1});
+    sflint::Fmpz two;
+    sflint::fmpz_set_si(sflint::FmpzRef(two), 2);
+    sflint::Fmpz three;
+    sflint::fmpz_set_si(sflint::FmpzRef(three), 3);
+    {
+        silex::detail::SaturationLiftLimit limit(
+                silex::detail::SaturationLiftExponents::squares);
+        assert(silex::detail::SaturationLiftLimit::covers(2));
+        assert(!silex::detail::SaturationLiftLimit::covers(3));
+        bool flag = false;
+        silex::Element root32(phi32);
+        assert(!zeta8.is_square(flag, root32));
+        assert(!zeta8.is_power(flag, root32, sflint::FmpzConstRef(two)));
+        silex::Element root19(phi19);
+        assert(zeta19.is_power(flag, root19, sflint::FmpzConstRef(three)));
+        assert(flag && root19.equal(zeta19_13));
+        silex::Element root16(phi16);
+        assert(zeta16_square.is_square(flag, root16));
+        assert(flag);
+    }
+    assert(!silex::detail::SaturationLiftLimit::covers(2));
+    {
+        silex::detail::SaturationLiftLimit limit(
+                silex::detail::SaturationLiftExponents::all);
+        {
+            silex::detail::SaturationLiftLimit inner(
+                    silex::detail::SaturationLiftExponents::squares);
+            assert(silex::detail::SaturationLiftLimit::covers(3));
+        }
+        assert(silex::detail::SaturationLiftLimit::covers(2));
+        assert(silex::detail::SaturationLiftLimit::covers(3));
+        bool flag = false;
+        silex::Element root32(phi32);
+        assert(!zeta8.is_square(flag, root32));
+        silex::Element root19(phi19);
+        assert(!zeta19.is_power(flag, root19, sflint::FmpzConstRef(three)));
+        silex::Element root16(phi16);
+        assert(zeta16_square.is_square(flag, root16));
+        assert(flag);
+    }
+    assert(!silex::detail::SaturationLiftLimit::covers(3));
+    {
+        bool flag = false;
+        silex::Element root19(phi19);
+        assert(zeta19.is_power(flag, root19, sflint::FmpzConstRef(three)));
+        assert(flag && root19.equal(zeta19_13));
+    }
+    bool flag = false;
+    silex::Element root32(phi32);
+    assert(zeta8.is_square(flag, root32));
+    assert(flag);
 }
 
 // The residue disproof of degree >= 10 memoizes the distinct-degree
@@ -2175,6 +2315,7 @@ int main() {
     test_power_prelift_named_cases_unknown_without_disproof();
     test_power_gp_nonpowers();
     test_power_degree_twenty_cyclotomic_residue_disproof();
+    test_power_high_degree_hensel_roots();
     test_power_residue_disproof_field_setup_cache_matches_cold();
     test_power_residue_disproof_answer_cache_matches_cold();
     test_factored_power_residue_disproof();

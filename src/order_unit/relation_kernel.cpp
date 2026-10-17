@@ -976,20 +976,23 @@ bool adjoinable_root_is_order_unit(const Order& order,
 
 namespace {
 
-// Whether Element::is_power (src/element/element.cpp) can find an
-// `exponent`-th root of a non-rational element of `field`.  Exponent 2 goes
-// to Element::is_square.  For an exponent >= 3 the only route that finds a
-// root of a non-rational input is pure_power_hensel_root
-// (src/element/hensel.cpp), which returns "unsupported" for a field of
-// degree >= 10 before it looks at the input; there
-// pure_power_residue_disproves can only prove that the input is not a
-// power.  So for exponent >= 3 and degree >= 10, Element::is_power finds a
-// root only of a rational constant (is_power_rational_constant).  The bound
-// must follow the pure_power_hensel_root guard; it uses the constant
-// kElementPowerRouteDegreeLimit that guard uses (element_internal.hpp).
-bool element_power_test_roots_non_rational(const NumberField& field,
-                                           slong exponent) noexcept {
-    return exponent <= 2 || field.degree() < kElementPowerRouteDegreeLimit;
+// Degree from which KernelRowRootMode::defer_undecidable defers the root
+// test of a row for an exponent >= 3.  Element::is_power used to find an
+// l-th root (l >= 3) of a non-rational element only below this degree, where
+// pure_power_hensel_root was ported, so a deferred row lost no root.  The
+// lift now runs in every degree; the deferral keeps its route and degree
+// limit as a route choice (it made the proven runs of Q(zeta_25) and
+// Q(zeta_44) about four times faster).  It is sound in any degree: a deferred
+// row is handled as an undecided one, and a true l-th power stays in every
+// later character kernel (see KernelRowRootMode).
+constexpr slong kKernelRowRootDeferralDegree = 10;
+
+// Whether kernel_row_root tests a row for `exponent` even in
+// KernelRowRootMode::defer_undecidable (exponent 2, or a field of degree
+// below kKernelRowRootDeferralDegree).
+bool kernel_row_root_tested_without_deferral(const NumberField& field,
+                                             slong exponent) noexcept {
+    return exponent <= 2 || field.degree() < kKernelRowRootDeferralDegree;
 }
 
 // Whether every factor exponent of `product` is divisible by `exponent`, so
@@ -1043,14 +1046,12 @@ KernelRowRootResult kernel_row_root(
 
     const slong exponent = flint::fmpz_get_si(ell);
     if (mode == KernelRowRootMode::defer_undecidable &&
-        !element_power_test_roots_non_rational(*field, exponent) &&
+        !kernel_row_root_tested_without_deferral(*field, exponent) &&
         !factored_is_formal_power(product, exponent)) {
-        // Both root routes below end in Element::is_power, which here finds
-        // a root only of a rational l-th power remainder.  The attempt can
-        // end only in a non-power, in `undecided` (the caller rescans after
-        // either, as after `deferred`), or in the root of a true l-th
-        // power, which the caller still meets at a later scan.  Skip the
-        // compact presentation and the factored expansion.
+        // The attempt can end only in a non-power, in `undecided` (the
+        // caller rescans after either, as after `deferred`), or in the root
+        // of a true l-th power, which the caller still meets at a later
+        // scan.  Skip the compact presentation and the factored expansion.
         SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.kernel_row_root_deferred");
         return KernelRowRootResult::deferred;

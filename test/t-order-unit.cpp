@@ -8849,10 +8849,28 @@ struct StableProofScanLimitsForTesting {
             const StableProofScanLimitsForTesting&) = delete;
 };
 
+// While alive, pure_power_hensel_root returns "unsupported" in degree 10
+// and higher (TestHookAccess::set_high_degree_power_lift_off), so
+// Element::is_power leaves a non-rational true power undecided there.
+class HighDegreePowerLiftOff {
+public:
+    HighDegreePowerLiftOff() noexcept {
+        silex::detail::TestHookAccess::set_high_degree_power_lift_off(true);
+    }
+    ~HighDegreePowerLiftOff() {
+        silex::detail::TestHookAccess::set_high_degree_power_lift_off(false);
+    }
+    HighDegreePowerLiftOff(const HighDegreePowerLiftOff&) = delete;
+    HighDegreePowerLiftOff& operator=(const HighDegreePowerLiftOff&) = delete;
+};
+
 // Q(zeta_13) with the cyclotomic units u_2^17, u_3, ..., u_6 (see
 // test_prove_index_bound_cyclotomic13_undecided_root): a subgroup of index 17
 // in the full unit group, so it is not 17-saturated, and the 17th root of
-// the first generator is u_2, which Silex cannot compute in degree 12.
+// the first generator is u_2.  Element::is_power finds u_2 by the
+// pure-power Hensel lift; under HighDegreePowerLiftOff it leaves that root
+// undecided, as it did before the lift ran in degree 10 and higher, which
+// lets these small fixtures reach the paths after an undecided root.
 silex::NumberField cyclotomic13_field() noexcept {
     sflint::FmpqPoly polynomial;
     for (slong i = 0; i <= 12; ++i) {
@@ -9649,8 +9667,9 @@ int test_kernel_row_root_three_way_result() {
                silex::detail::KernelRowRootResult::error);
     }
 
-    // u_2^17 is a 17th power, but its root u_2 is not computed in degree 12:
-    // undecided, not an error.
+    // u_2^17 is a 17th power: decided, with an exactly verified root whose
+    // 17th power is u_2^17.  When its root is not found (the lift turned
+    // off), the row is undecided, not an error.
     silex::NumberField field = cyclotomic13_field();
     silex::Order order = silex::test::verified_maximal_order(
             silex::test::equation_order(field));
@@ -9666,7 +9685,57 @@ int test_kernel_row_root_three_way_result() {
     assert(silex::detail::kernel_row_root(
                    is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
                    sflint::FmpzConstRef(ell)) ==
+           silex::detail::KernelRowRootResult::decided);
+    assert(is_power);
+    silex::FactoredElement g1(field);
+    assert(group.free_generator(g1, 0));
+    silex::Element root_value(field);
+    silex::Element root_power(field);
+    silex::Element g1_value(field);
+    assert(root.evaluate(root_value) && g1.evaluate(g1_value) &&
+           root_power.pow_fmpz(root_value, sflint::FmpzConstRef(ell)) &&
+           root_power.equal(g1_value));
+
+    HighDegreePowerLiftOff lift_off;
+    assert(silex::detail::kernel_row_root(
+                   is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                   sflint::FmpzConstRef(ell)) ==
            silex::detail::KernelRowRootResult::undecided);
+    return 0;
+}
+
+// The kernel-row root tests of the local saturation proofs keep the degree
+// limit of the pure-power lift (detail::kSaturationLiftDegree) for every
+// exponent, while kernel_row_root outside the proofs lifts (see
+// test_kernel_row_root_* above).  Against <u_2^17, u_3, ..., u_6> in
+// Q(zeta_13) (degree 12) the 17-local proof meets the row of u_2^17, a
+// 17th power the residue disproof cannot rule out, and skips its lift; the
+// group is not 17-saturated, so the proof never verifies it.
+int test_local_saturation_proof_keeps_degree_ten_lift_limit() {
+    silex::NumberField field = cyclotomic13_field();
+    assert(field.degree() >= silex::detail::kSaturationLiftDegree);
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup group(order);
+    assert(set_cyclotomic13_u2_power17_group(group, order, field, embeddings));
+    sflint::Fmpz ell;
+    assert(set_fmpz_si(ell, 17));
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 1000));
+    const slong skipped_before =
+            silex::detail::TestHookAccess::saturation_lifts_skipped();
+    silex::OrderUnitGroup proved(order);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = false;
+    (void)proved.prove_local_saturated(status, changed, group,
+                                       sflint::FmpzConstRef(ell), 1,
+                                       sflint::FmpzConstRef(aux_bound),
+                                       embeddings, 256);
+    assert(status != silex::ProofState::verified);
+    assert(silex::detail::TestHookAccess::saturation_lifts_skipped() >
+           skipped_before);
+    assert(!silex::detail::SaturationLiftLimit::covers(17));
     return 0;
 }
 
@@ -9749,8 +9818,9 @@ int test_compact_unit_power_root_three_way_result() {
         assert(!is_power);
     }
 
-    // The expanded u_2^17 in Q(zeta_13) is a 17th power whose root Silex
-    // cannot compute in degree 12: undecided, not an error.
+    // The expanded u_2^17 in Q(zeta_13) is a 17th power.  When its root is
+    // not found (the lift turned off), the result is undecided, not an
+    // error.
     silex::NumberField field = cyclotomic13_field();
     silex::Order order = silex::test::verified_maximal_order(
             silex::test::equation_order(field));
@@ -9761,6 +9831,7 @@ int test_compact_unit_power_root_three_way_result() {
     assert(group.free_generator(g1, 0));
     silex::FactoredElement root(field);
     bool is_power = false;
+    HighDegreePowerLiftOff lift_off;
     assert(silex::detail::compact_unit_presentation_power_root(
                    is_power, root, order, g1, 17, precision, precision) ==
            CompactPowerRootResult::undecided);
@@ -9847,10 +9918,11 @@ int test_relation_power_root_fails_on_compact_error() {
 // (l >= 3, degree >= 10) and the row product is not a formal l-th power.
 int test_kernel_row_root_defers_undecidable_rows() {
     {
-        // The premise: in degree 12, Element::is_power with exponent 3
-        // leaves a non-rational cube undecided and decides a rational one.
-        // If Element::is_power learns to find such roots here, update
-        // element_power_test_roots_non_rational (relation_kernel.cpp).
+        // In degree 12, Element::is_power with exponent 3 finds the root of
+        // a non-rational cube (the pure-power Hensel lift) and of a rational
+        // one.  The deferral below does not rest on a missing root: it is a
+        // route choice kept from degree kKernelRowRootDeferralDegree
+        // (relation_kernel.cpp) on, and sound in any degree.
         silex::NumberField field = cyclotomic13_field();
         sflint::FmpqPoly theta_poly;
         sflint::fmpq_poly_set_coeff_si(theta_poly, 1, 1);
@@ -9863,7 +9935,11 @@ int test_kernel_row_root_defers_undecidable_rows() {
         assert(base.set_fmpq_poly(sflint::FmpqPolyConstRef(theta_poly)));
         assert(cube.pow_fmpz(base, sflint::FmpzConstRef(three)));
         bool is_power = false;
-        assert(!cube.is_power(is_power, root, sflint::FmpzConstRef(three)));
+        assert(cube.is_power(is_power, root, sflint::FmpzConstRef(three)));
+        assert(is_power);
+        silex::Element root_cube(field);
+        assert(root_cube.pow_fmpz(root, sflint::FmpzConstRef(three)) &&
+               root_cube.equal(cube));
         silex::Element eight(field);
         sflint::Fmpz eight_value;
         assert(set_fmpz_si(eight_value, 8));
@@ -9885,8 +9961,8 @@ int test_kernel_row_root_defers_undecidable_rows() {
     sflint::fmpz_set_si(sflint::fmpz_mat_entry(rows, 1, 1), 17);
     silex::FactoredElement root(field);
     bool is_power = false;
-    // u_2^17 (expanded): degree 12 and l = 17, so the row is deferred
-    // instead of ending undecided after the full attempt.
+    // u_2^17 (expanded): degree 12 and l = 17, and not a formal 17th power,
+    // so the row is deferred, although its root u_2 would be found.
     assert(silex::detail::kernel_row_root(
                    is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
                    sflint::FmpzConstRef(ell), nullptr,
@@ -9940,9 +10016,11 @@ int test_kernel_row_root_defers_undecidable_rows() {
 // relation for y, the element returned and adjoined is y, as in reference
 // Unit/UnitGrpCtx.jl `_add_dependent_unit!` (`_transform(vcat(U.units, y),
 // m)`), and not whatever `root` held before.  Against <u_2^17, u_3, ...,
-// u_6> in Q(zeta_13), y = u_2 satisfies y^17 = g_1, but the root of the
-// expanded u_2^17 is not computed in degree 12.
+// u_6> in Q(zeta_13), y = u_2 satisfies y^17 = g_1, and with the lift
+// turned off (HighDegreePowerLiftOff) the root of the expanded u_2^17 is not
+// found.
 int test_dependent_relation_unbounded_root_failure_adjoins_y() {
+    HighDegreePowerLiftOff lift_off;
     silex::NumberField field = cyclotomic13_field();
     silex::Order order = silex::test::verified_maximal_order(
             silex::test::equation_order(field));
@@ -12968,6 +13046,51 @@ int test_lll_relation_slice_rejects_small_extension_target() {
     return 0;
 }
 
+// The square tests of grh relation saturation with units keep the degree
+// limit of the pure-power lift (detail::kSaturationLiftDegree): in
+// degree 10 and higher they are decided only by the residue disproof, as
+// before the lift ran there, while the public Element and FactoredElement
+// square tests lift in every degree.  The degree-10 field
+// x^10 - 2x^9 + 3x^7 - x^6 + 4x^5 + 2x^4 - x + 3 (silex-bench corpus row
+// random_d10_h4_s27) reaches square tests of saturation with units that the
+// residue scan does not disprove, so its grh computation skips their lifts.
+int test_grh_saturation_square_tests_keep_degree_ten_lift_limit() {
+    static constexpr slong coefficients[] = {3, -1, 0, 0, 2, 4, -1, 3, 0,
+                                             -2, 1};
+    sflint::FmpzPoly polynomial;
+    for (slong i = 0; i < 11; ++i) {
+        sflint::fmpz_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    assert(field.degree() >= silex::detail::kSaturationLiftDegree);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    const slong skipped_before = silex::detail::TestHookAccess::
+            saturation_lifts_skipped();
+    assert(units.compute_with_class_group(class_group, order,
+                                          sflint::FmpzConstRef(bound),
+                                          options, 128));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(silex::detail::TestHookAccess::saturation_lifts_skipped() >
+           skipped_before);
+    // Outside the saturation consumer the scope is not active.
+    assert(!silex::detail::SaturationLiftLimit::covers(2));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -12976,6 +13099,8 @@ int main() {
     test_grh_continuation_without_relation_progress_fails_closed();
     test_relation_refill_target_rule();
     test_grh_relation_refill_grows_on_repeated_validation();
+    test_grh_saturation_square_tests_keep_degree_ten_lift_limit();
+    test_local_saturation_proof_keeps_degree_ten_lift_limit();
     test_lll_relation_slice_rejects_small_extension_target();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
