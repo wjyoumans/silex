@@ -44,13 +44,6 @@ AnalyticFinishDecision apply_analytic_finish_check(
         HnfFinishWorkspace* finish_workspace,
         const DiagnosticsContext* diagnostics) noexcept;
 
-// Testing seam for the embedding context kept between analytic finish
-// checks: returns it refined to `precision`, reused or rebuilt as the check
-// itself would.
-EmbeddingContext* analytic_finish_embeddings_for_testing(
-        RelationSearchControlState& route_state,
-        const NumberField& field,
-        slong precision) noexcept;
 
 AnalyticFinishDecision apply_honesty_check(
         ClassGroupContext& context,
@@ -92,3 +85,22 @@ bool collect_random_relations(
         const DiagnosticsContext* diagnostics) noexcept;
 
 }  // namespace silex::detail::relation_search
+
+namespace silex::detail {
+
+class TestHookAccess;
+
+// Test entry of the analytic finish; only detail::TestHookAccess
+// (test/test_hook_access.hpp) can call it.
+class AnalyticFinishTestEntry {
+    friend class TestHookAccess;
+
+    // The embedding context kept between analytic finish checks, refined to
+    // `precision`, reused or rebuilt as the check itself would.
+    static EmbeddingContext* embeddings(
+            relation_search::RelationSearchControlState& route_state,
+            const NumberField& field,
+            slong precision) noexcept;
+};
+
+}  // namespace silex::detail

@@ -276,7 +276,7 @@ void check_both_conjugates(slong radicand, slong bound,
 // builds the row HNF.
 bool row_generator(silex::Element& out, const Fixture& fixture,
                    const sflint::FmpzMat& row, bool builder) noexcept {
-    return detail::maximal_imaginary_quadratic_row_generator_for_testing(
+    return detail::TestHookAccess::maximal_imaginary_quadratic_row_generator(
             out, fixture.order, fixture.base, sflint::FmpzMatConstRef(row),
             builder);
 }

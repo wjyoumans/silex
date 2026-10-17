@@ -1102,7 +1102,7 @@ bool principal_generator_from_factor_base_row(
         return false;
     }
     // use_row_hnf_builder is false only through the test hook
-    // maximal_imaginary_quadratic_row_generator_for_testing.
+    // MaximalImaginaryQuadraticRowTestEntry::row_generator.
     bool row_hnf_ready = false;
     if (use_row_hnf_builder) {
         SILEX_PROFILE_SCOPE(
@@ -1970,7 +1970,7 @@ bool maximal_imaginary_quadratic_row_hnf(flint::FmpzMat& hnf,
            numerator.norm(flint::FmpzRef(norm));
 }
 
-bool maximal_imaginary_quadratic_row_generator_for_testing(
+bool MaximalImaginaryQuadraticRowTestEntry::row_generator(
         Element& out,
         const Order& order,
         const FactorBase& base,

@@ -787,7 +787,7 @@ int test_analytic_finish_embedding_reuse() {
     sflint::ArbVec logs(3);
 
     silex::EmbeddingContext* first =
-            rs::analytic_finish_embeddings_for_testing(route_state, field,
+            silex::detail::TestHookAccess::analytic_finish_embeddings(route_state, field,
                                                        precision);
     assert(first != nullptr && first->precision() == precision);
     assert(silex::logarithmic_embedding(
@@ -798,7 +798,7 @@ int test_analytic_finish_embedding_reuse() {
 
     // Same precision: the context and its log cache are kept.
     silex::EmbeddingContext* again =
-            rs::analytic_finish_embeddings_for_testing(route_state, field,
+            silex::detail::TestHookAccess::analytic_finish_embeddings(route_state, field,
                                                        precision);
     assert(again == first && again->precision() == precision);
     std::uint64_t kept_version = 0;
@@ -807,7 +807,7 @@ int test_analytic_finish_embedding_reuse() {
 
     // Doubled precision: a fresh context, with no log cache yet.
     silex::EmbeddingContext* doubled =
-            rs::analytic_finish_embeddings_for_testing(route_state, field,
+            silex::detail::TestHookAccess::analytic_finish_embeddings(route_state, field,
                                                        2 * precision);
     assert(doubled != nullptr && doubled->precision() == 2 * precision);
     std::uint64_t rebuilt_version = 0;
@@ -834,7 +834,7 @@ int test_analytic_finish_embedding_reuse() {
             sflint::FmpzConstRef(factor_base_bound), options, 128));
 
     rs::RelationSearchControlState check_state;
-    assert(rs::analytic_finish_embeddings_for_testing(
+    assert(silex::detail::TestHookAccess::analytic_finish_embeddings(
                    check_state, field, check_state.analytic_finish_precision)
            != nullptr);
     assert(check_state.analytic_finish_embeddings.is_defined());

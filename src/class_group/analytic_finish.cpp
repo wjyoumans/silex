@@ -543,13 +543,6 @@ static AnalyticFinishDecision release_analytic_finish_embeddings(
     return AnalyticFinishDecision::finished;
 }
 
-EmbeddingContext* analytic_finish_embeddings_for_testing(
-        RelationSearchControlState& route_state,
-        const NumberField& field,
-        slong precision) noexcept {
-    return analytic_finish_embeddings(route_state, field, precision);
-}
-
 AnalyticFinishDecision apply_analytic_finish_check(
         ClassGroupContext& context,
         RelationSearchControlState& route_state,
@@ -705,3 +698,14 @@ AnalyticFinishDecision apply_analytic_finish_check(
 }
 
 }  // namespace silex::detail::relation_search
+
+namespace silex::detail {
+
+EmbeddingContext* AnalyticFinishTestEntry::embeddings(
+        relation_search::RelationSearchControlState& route_state,
+        const NumberField& field,
+        slong precision) noexcept {
+    return relation_search::analytic_finish_embeddings(route_state, field, precision);
+}
+
+}  // namespace silex::detail

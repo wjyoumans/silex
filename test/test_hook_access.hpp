@@ -20,7 +20,9 @@
 #include <silex/prime_ideal.hpp>
 
 #include "class_group/class_group_internal.hpp"
+#include "class_group/maximal_imaginary_quadratic_row_hnf_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
+#include "class_group/relation_search_driver_internal.hpp"
 #include "element/element_internal.hpp"
 #include "lat/certified_lll_internal.hpp"
 #include "class_group/relation_factor_base_plan_internal.hpp"
@@ -419,6 +421,30 @@ public:
             slong prec) noexcept {
         return ZetaTestEntry::quadratic_afe_gamma_step_block(
                 block, truncation, shift, q, n, target, prec);
+    }
+
+    // Class-group test entries.
+
+    // The proven witness generator of the row ideal of a maximal imaginary
+    // quadratic order (see MaximalImaginaryQuadraticRowTestEntry).
+    static bool maximal_imaginary_quadratic_row_generator(
+            Element& out,
+            const Order& order,
+            const FactorBase& base,
+            flint::FmpzMatConstRef row,
+            bool use_row_hnf_builder) noexcept {
+        return MaximalImaginaryQuadraticRowTestEntry::row_generator(
+                out, order, base, row, use_row_hnf_builder);
+    }
+
+    // The analytic finish embedding context kept in route_state, refined to
+    // precision (see AnalyticFinishTestEntry).
+    static EmbeddingContext* analytic_finish_embeddings(
+            relation_search::RelationSearchControlState& route_state,
+            const NumberField& field,
+            slong precision) noexcept {
+        return AnalyticFinishTestEntry::embeddings(
+                route_state, field, precision);
     }
 };
 
