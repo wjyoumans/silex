@@ -1243,7 +1243,7 @@ which is valid because each of them is:
 
 * H. Zimmert, "Ideale kleiner Norm in Idealklassen und eine
   Regulatorabschätzung", *Invent. Math.* 62 (1981), 367--380, Satz 2
-  (p. 372), used for ``n <= 20``: every ideal class contains an integral
+  (p. 372), used in every degree: every ideal class contains an integral
   ideal ``a`` with ``log(sqrt|d| / N(a)) >= L``, where
   ``L = r1 (-psi((1+gamma)/2) - log Gamma(1/2+gamma) + log Gamma(1+gamma) +
   (1/2) log pi) + r2 (-2 psi(1+gamma) + 2 log 2 + log(1/2+gamma) + log pi) -
@@ -1251,12 +1251,26 @@ which is valid because each of them is:
   (1+1/(2 gamma-alpha))^(-1)]`` for every ``gamma > alpha > 0``.  Silex
   takes ``alpha = gamma - gamma(gamma+1)/sqrt(1+3 gamma+3 gamma^2)`` from
   Bemerkung 1 (p. 373) and, for each signature, a fixed ``gamma`` in
-  hundredths that maximizes ``L`` over that grid; where Tabelle 1 (p. 368)
-  prints a ``gamma``, the tabulated value equals it, and ``exp(L)``
-  reproduces the printed constants.  The choice of ``gamma`` affects only
-  the size of the bound, not its validity.  Silex evaluates ``L`` with Arb
-  at 128 bits and uses the ceiling of the upper endpoint of
-  ``sqrt|d| exp(-L)``.
+  hundredths that maximizes ``L`` over the grid ``k/100``,
+  ``1 <= k <= 300``; where Tabelle 1 (p. 368) prints a ``gamma``, including
+  the rows with ``n = 100``, Silex's choice equals it, and ``exp(L)``
+  reproduces the printed constants.  Satz 2 places no restriction on the
+  degree, and its proof (p. 373, Satz 1 with ``a = r1 + r2`` and
+  ``b = r2``) does not depend on it.  For ``n <= 20`` the ``gamma`` come
+  from a hand-checked table; for ``21 <= n <= 64`` from
+  ``src/factor_base/zimmert_gamma_table.inc``, written by the generator
+  ``tools/zimmert_gamma_table.cpp`` (target ``silex-zimmert-gamma-table``;
+  to regenerate, build it and redirect its output to that file); above 64
+  Silex runs the same search when it computes the bound.  The search
+  compares the midpoints of the Arb enclosures of ``L``, taking the
+  smallest ``k`` on ties; Arb computes them in software, so the choice is
+  the same on every platform.  The choice of ``gamma`` affects only the
+  size of the bound, not its validity.  Silex evaluates ``L`` with Arb at
+  128 bits and uses the ceiling of the upper endpoint of
+  ``sqrt|d| exp(-L)``.  PARI's ``zimmertbound``
+  (``src/basemath/buch3.c``) uses Minkowski's bound above degree 20, so
+  Silex's proven bound is smaller there; on ``Q(zeta_23)`` it is 28378
+  against Minkowski's 9324407.
 * Minkowski's bound ``n! n^(-n) (4/pi)^r2 sqrt|d|`` (S. Lang, *Algebraic
   Number Theory*, p. 119, Theorem 4, as quoted by Zimmert 1981, p. 367),
   evaluated the same way.
@@ -1271,7 +1285,11 @@ constant ``27/(6 (4/pi))`` exceeds Zimmert's ``exp(L)``, so Minkowski's bound
 is the smaller one there.  For larger degrees Zimmert's bound is much smaller;
 for ``x^19 - x - 1`` it is 6135 against the former 43837247.
 ``test/t-generation-bound.cpp`` pins Zimmert's bound against an independent
-evaluation of Satz 2 and the combined bound for a corpus of fields.
+evaluation of Satz 2 (``test/zimmert_satz2_oracle.py`` above degree 20),
+checks the Tabelle 1 rows with ``n = 20`` and ``n = 100``, checks every
+``gamma`` of both tables against the search, and pins the combined bound for
+a corpus of fields.  ``test/zimmert_satz2_oracle.py --gammas 64 --check``
+compares the generated table with an independent mpmath maximization.
 ``factor_base_class_group_bound`` promises a small integral ideal in every
 class; it does not use Zimmert's twin-class bound below, which promises less.
 

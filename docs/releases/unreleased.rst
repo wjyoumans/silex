@@ -128,6 +128,20 @@ Added
 Changed
 -------
 
+- ``factor_base_class_group_bound`` and the proven generation requirement
+  now use Zimmert's bound (Zimmert 1981, Satz 2) in every degree, not only
+  up to degree 20.  Above degree 20 the bound is much smaller: for
+  ``Q(zeta_23)`` it drops from 9324407 to 28378.  The
+  ``gamma`` of Satz 2 comes from a generated table up to degree 64 and from
+  a deterministic Arb search above it.  Results for degree 20 and below are
+  unchanged, and the generation basis stays ``minkowski_type``.  In proven
+  mode, results above degree 20 are unchanged except for the reported
+  generation bound, and some rows now finish that hit the time limit
+  before.  For example ``Q(zeta_23)`` (degree 22) now finishes in about
+  14 s, where it ran past 600 s before.  These timings are from a busy
+  machine.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - When the relation search factors an integral relation generator ``g`` through
   its principal ideal ``g O``, it computes the HNF of ``g O`` modulo the norm
   ``|N(g)|`` it already knows, with FLINT's ``fmpz_mat_hnf_modular``, instead of a full
@@ -648,7 +662,7 @@ Changed
 
 - ``factor_base_class_group_bound`` now returns a smaller proven bound in
   degree 3 and above: the smallest of Zimmert's bound (Zimmert 1981,
-  Satz 2, for degree at most 20), Minkowski's bound with ``(4/pi)^r2``, and
+  Satz 2), Minkowski's bound with ``(4/pi)^r2``, and
   the former bound, which used ``2^r2`` in place of ``(4/pi)^r2``.  The
   bound never exceeds its former value; for example it drops from 463 to
   295 for ``x^3 + x + 200`` and from 43837247 to 6135 for ``x^19 - x - 1``.
