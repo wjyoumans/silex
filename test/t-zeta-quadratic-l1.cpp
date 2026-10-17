@@ -752,6 +752,91 @@ void check_step_truncation_bounds() {
     }
 }
 
+// The fail-closed paths of a block start, which planning never reaches: a
+// fault forced on every planned block (R = 2^r at least z_n, R at most the
+// largest step v_max, or an infinite truncation bound) must make the start
+// reject it at that check, and every value must then be a direct
+// evaluation that agrees with FLINT's `arb_hypgeom_gamma_upper` at 256 bits
+// and with the values of the same run without the fault.
+void check_step_start_fails_closed() {
+    using silex::detail::QuadraticAfeStepFault;
+    const double target = -70.0;
+    const slong prec = 80;
+    const slong guard = 12;
+    struct Case {
+        ulong shift;
+        ulong q;
+        ulong first;
+    };
+    // Blocks start at these indices without a fault (z about 3e-4 for
+    // a = 1, about 4 for a = 1/2 and a = 0).
+    const Case cases[] = {
+            {2, UWORD(10000000000), 1000},
+            {1, 31333, 200},
+            {0, 31333, 200},
+    };
+    const QuadraticAfeStepFault faults[] = {
+            QuadraticAfeStepFault::radius_above_z,
+            QuadraticAfeStepFault::radius_below_step,
+            QuadraticAfeStepFault::infinite_truncation,
+    };
+    const slong count = 24;
+    sflint::Arb z;
+    sflint::Arb a;
+    sflint::Arb reference;
+    for (const Case& c : cases) {
+        sflint::ArbVec stepped(count);
+        silex::detail::QuadraticAfeGammaStepCount stepped_count;
+        assert(silex::detail::quadratic_afe_gamma_stepped(
+                stepped, stepped_count, c.shift, c.q, c.first, 0, target,
+                prec, guard));
+        assert(stepped_count.blocks >= 1);
+        assert(stepped_count.stepped_values == static_cast<ulong>(count - 1));
+        assert(stepped_count.rejected_radius == 0);
+        assert(stepped_count.rejected_step == 0);
+        assert(stepped_count.rejected_truncation == 0);
+        for (const QuadraticAfeStepFault fault : faults) {
+            sflint::ArbVec values(count);
+            silex::detail::QuadraticAfeGammaStepCount fault_count;
+            assert(silex::detail::quadratic_afe_gamma_stepped(
+                    values, fault_count, c.shift, c.q, c.first, 0, target,
+                    prec, guard, fault));
+            // Every index plans a block and every start is rejected at the
+            // forced check, so no value comes from a block.
+            assert(fault_count.blocks == 0);
+            assert(fault_count.stepped_values == 0);
+            const ulong rejected =
+                    fault == QuadraticAfeStepFault::radius_above_z
+                            ? fault_count.rejected_radius
+                    : fault == QuadraticAfeStepFault::radius_below_step
+                            ? fault_count.rejected_step
+                            : fault_count.rejected_truncation;
+            assert(rejected == static_cast<ulong>(count));
+            assert(fault_count.rejected_radius + fault_count.rejected_step +
+                           fault_count.rejected_truncation ==
+                   rejected);
+
+            ::arb_set_ui(a.raw(), c.shift);
+            ::arb_mul_2exp_si(a.raw(), a.raw(), -1);
+            for (slong i = 0; i < count; ++i) {
+                const ulong n = c.first + static_cast<ulong>(i);
+                ::arb_const_pi(z.raw(), 256);
+                ::arb_mul_ui(z.raw(), z.raw(), n, 256);
+                ::arb_mul_ui(z.raw(), z.raw(), n, 256);
+                ::arb_div_ui(z.raw(), z.raw(), c.q, 256);
+                ::arb_hypgeom_gamma_upper(reference.raw(), a.raw(), z.raw(),
+                                          0, 256);
+                assert(radius_lt_2exp_si(reference, -200));
+                sflint::Arb value;
+                ::arb_set(value.raw(), values.data() + i);
+                assert(::arb_overlaps(value.raw(), reference.raw()) != 0);
+                assert(::arb_overlaps(value.raw(), stepped.data() + i) != 0);
+                assert(radius_lt_2exp_si(value, static_cast<slong>(target)));
+            }
+        }
+    }
+}
+
 // The block length of the earlier Silex bound |K| e v (rho v)^M /
 // (1 - rho v), rho = max(1, 1 / z), which planned the longest block B with
 // rho v_max <= 2^-10, and a block only if B >= 4.
@@ -911,6 +996,7 @@ int main() {
     check_route_size_cap();
     check_gamma_stepping_against_hypgeom();
     check_step_truncation_bounds();
+    check_step_start_fails_closed();
     check_step_blocks_need_fewer_terms();
     check_stepping_before_after(slow_tests_enabled());
 

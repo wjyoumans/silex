@@ -602,6 +602,37 @@ public:
         return truncation_.raw();
     }
 
+    // The check that rejected the last block `start` refused (for tests).
+    enum class Rejection : unsigned char { radius, step, truncation };
+
+    Rejection rejection() const noexcept {
+        return rejection_;
+    }
+
+    // Forces `fault` on the block planned at n, before `start` (for tests of
+    // the fail-closed paths of `start`): R = 2^r with r = ceil(log2 z_n) + 1,
+    // or r = floor(log2 v_max) - 1, both with a factor-two margin over the
+    // double estimates of z_n and v_max; or a truncation bound that `start`
+    // replaces by infinity.  Each skips the planned invariant v_max < R < z_n
+    // or the finite bound, so `start` must reject the block.
+    void force_fault(detail::QuadraticAfeStepFault fault, ulong n) noexcept {
+        const double nd = static_cast<double>(n);
+        const double bd = static_cast<double>(block_);
+        const double pi_q = 3.1415926535897932385 / static_cast<double>(q_);
+        infinite_truncation_ =
+                fault == detail::QuadraticAfeStepFault::infinite_truncation;
+        if (fault == detail::QuadraticAfeStepFault::radius_above_z) {
+            radius_exponent_ =
+                    static_cast<slong>(std::ceil(std::log2(pi_q * nd * nd))) +
+                    1;
+        } else if (fault == detail::QuadraticAfeStepFault::radius_below_step) {
+            radius_exponent_ =
+                    static_cast<slong>(std::floor(
+                            std::log2(pi_q * bd * (2.0 * nd + bd)))) -
+                    1;
+        }
+    }
+
     // Floating-point choice of R = 2^r, the block length B and the number
     // of terms M for a block anchored at n, with anchor tolerance 2^target
     // (see Scheme above).  Returns false when the block would be shorter
@@ -767,7 +798,7 @@ public:
     // anchor_value containing Gamma(a, z_n); coefficients at `prec` plus the
     // planned extra bits.  Returns false, leaving the stepper inactive, when
     // the rigorous bounds do not give R < z_n and v_max < R, or the
-    // truncation bound is not finite.
+    // truncation bound is not finite; `rejection` then names the check.
     bool start(ulong n, const flint::Arb& anchor_value, slong prec) noexcept {
         active_ = false;
         const slong cprec = prec + extra_bits_;
@@ -791,8 +822,12 @@ public:
         ::arb_mul_ui(t.raw(), t.raw(), 2 * n + block_, cprec);
         ::arb_get_mag(v_max.raw(), t.raw());
         ::arb_get_mag_lower(u.raw(), z.raw());
-        if (mag_cmp_2exp_si(u.raw(), r) <= 0 ||
-            mag_cmp_2exp_si(v_max.raw(), r) >= 0) {
+        if (mag_cmp_2exp_si(u.raw(), r) <= 0) {
+            rejection_ = Rejection::radius;
+            return false;
+        }
+        if (mag_cmp_2exp_si(v_max.raw(), r) >= 0) {
+            rejection_ = Rejection::step;
             return false;
         }
 
@@ -820,7 +855,11 @@ public:
         mag_mul_2exp_si(truncation_.raw(), truncation_.raw(), r);
         mag_div_ui(truncation_.raw(), truncation_.raw(),
                    static_cast<ulong>(terms_ + 1));
+        if (infinite_truncation_) {
+            mag_inf(truncation_.raw());
+        }
         if (!mag_is_finite(truncation_.raw())) {
+            rejection_ = Rejection::truncation;
             return false;
         }
 
@@ -978,6 +1017,8 @@ private:
     bool always_step_ = false;
     bool active_ = false;
     bool exhausted_ = false;
+    bool infinite_truncation_ = false;
+    Rejection rejection_ = Rejection::radius;
 };
 
 // FLINT `acb_dirichlet_fmpq_sum_afe` at s in {0, 1} for a real character:
@@ -4780,7 +4821,8 @@ bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
                                  ulong max_block,
                                  double target,
                                  slong prec,
-                                 slong guard) noexcept {
+                                 slong guard,
+                                 QuadraticAfeStepFault fault) noexcept {
     count = QuadraticAfeGammaStepCount{};
     if (shift > 2 || q < 1 || first < 1 || out.length() <= 0 || prec <= 0 ||
         guard < 0 ||
@@ -4797,17 +4839,36 @@ bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
     const slong zprec = anchor_prec + 64;
     flint::Arb z;
     flint::Arb value;
+    // Starts the block planned at n, with `fault` forced on it.
+    const auto start = [&](ulong n) noexcept {
+        stepper.force_fault(fault, n);
+        if (stepper.start(n, value, anchor_prec)) {
+            ++count.blocks;
+            return;
+        }
+        stepper.stop();
+        switch (stepper.rejection()) {
+        case QuadraticAfeGammaStepper::Rejection::radius:
+            ++count.rejected_radius;
+            break;
+        case QuadraticAfeGammaStepper::Rejection::step:
+            ++count.rejected_step;
+            break;
+        case QuadraticAfeGammaStepper::Rejection::truncation:
+            ++count.rejected_truncation;
+            break;
+        }
+    };
     for (slong i = 0; i < out.length(); ++i) {
         const ulong n = first + static_cast<ulong>(i);
         // The branches of `quadratic_afe_sum`, every index visited.
         if (stepper.active() && n == stepper.next_anchor()) {
             stepper.evaluate(value, n, anchor_target, anchor_prec);
             ++count.stepped_values;
-            if (!stepper.plan(n, anchor_target) ||
-                !stepper.start(n, value, anchor_prec)) {
-                stepper.stop();
+            if (stepper.plan(n, anchor_target)) {
+                start(n);
             } else {
-                ++count.blocks;
+                stepper.stop();
             }
         } else if (stepper.active()) {
             stepper.evaluate(value, n, target, prec);
@@ -4815,11 +4876,7 @@ bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
         } else if (!stepper.exhausted() && stepper.plan(n, anchor_target)) {
             quadratic_afe_gamma_direct(value, z, shift, n, q, anchor_prec,
                                        zprec);
-            if (stepper.start(n, value, anchor_prec)) {
-                ++count.blocks;
-            } else {
-                stepper.stop();
-            }
+            start(n);
         } else {
             quadratic_afe_gamma_direct(value, z, shift, n, q, prec, zprec);
         }

@@ -322,9 +322,27 @@ bool quadratic_dirichlet_l1_with_tolerance(
         slong precision,
         QuadraticAfeStepAudit* audit = nullptr) noexcept;
 
+// A fault forced on every block the stepper of `quadratic_dirichlet_l1`
+// plans, after planning and before the block starts, so that the start must
+// reject the block (for tests of its fail-closed paths): the Cauchy radius
+// R = 2^r raised to at least 2 z_n, R lowered to at most half the largest
+// step v_max of the block, or the truncation bound replaced by infinity once
+// it is computed.  Planning never produces these states.
+enum class QuadraticAfeStepFault : unsigned char {
+    none,
+    radius_above_z,
+    radius_below_step,
+    infinite_truncation,
+};
+
 struct QuadraticAfeGammaStepCount {
     ulong blocks = 0;
     ulong stepped_values = 0;
+    // Planned blocks whose start was rejected, by the check that failed:
+    // R = 2^r below z_n, v_max below R, a finite truncation bound.
+    ulong rejected_radius = 0;
+    ulong rejected_step = 0;
+    ulong rejected_truncation = 0;
 };
 
 // Test entry for the stepper of `quadratic_dirichlet_l1` alone: writes
@@ -335,17 +353,20 @@ struct QuadraticAfeGammaStepCount {
 // tolerance about 2^target at precision `prec`, and the last index of a
 // block becomes the next anchor.  Blocks are at most `max_block` long
 // (0: the default cap).  An index no block covers is evaluated directly.
+// `fault` is forced on every planned block before it starts.
 // Returns false on invalid arguments (shift > 2, q or first zero, an empty
 // `out`, or a negative precision or guard).
-bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
-                                 QuadraticAfeGammaStepCount& count,
-                                 ulong shift,
-                                 ulong q,
-                                 ulong first,
-                                 ulong max_block,
-                                 double target,
-                                 slong prec,
-                                 slong guard) noexcept;
+bool quadratic_afe_gamma_stepped(
+        flint::ArbVec& out,
+        QuadraticAfeGammaStepCount& count,
+        ulong shift,
+        ulong q,
+        ulong first,
+        ulong max_block,
+        double target,
+        slong prec,
+        slong guard,
+        QuadraticAfeStepFault fault = QuadraticAfeStepFault::none) noexcept;
 
 struct QuadraticAfeGammaStepBlock {
     ulong block = 0;
