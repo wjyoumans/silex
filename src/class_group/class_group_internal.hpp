@@ -452,6 +452,9 @@ bool hnf_finish_workspace_witness_coefficients(
 enum class RelationKernelBasisRoute : unsigned char {
     lll_extended,
     hnf_transform,
+    // finish_relation_kernel_basis only: the checked rows of FLINT's
+    // double-precision LLL phase, without FLINT's final reducedness check.
+    lll_double_extended,
 };
 
 // Binary exponent of the scale c applied to the relation columns.  It does
@@ -492,14 +495,68 @@ bool relation_kernel_basis(flint::FmpzMat& out,
                            RelationKernelBasisRoute* route,
                            flint::FmpzMatConstRef relations,
                            slong rank) noexcept;
+
+// A failure that only detail::TestHookAccess (test/test_hook_access.hpp)
+// can inject into the double-precision phase of
+// finish_relation_kernel_basis.  The phase output is zeroed after the phase
+// runs, so the fallback is exercised after the phase has changed the
+// matrix.  first_phase: the phase status is also read as -1.  kernel_rows:
+// the status is kept and the exact checks run on the zeroed matrix, whose
+// n rows all have a zero relation part, so the row-count check fails.
+enum class FinishKernelTestFailure { none, first_phase, kernel_rows };
+
+// Read by finish_relation_kernel_basis each time its phase runs.  Off by
+// default and never set by production code.  Relaxed atomics so a reader
+// never races with a test setting them.
+class FinishKernelTestSeams {
+public:
+    static FinishKernelTestFailure failure() noexcept {
+        return failure_.load(std::memory_order_relaxed);
+    }
+    // Counts each phase run that an injected failure replaced.
+    static void note_injected() noexcept {
+        injected_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<FinishKernelTestFailure> failure_{
+            FinishKernelTestFailure::none};
+    inline static std::atomic<slong> injected_{0};
+};
+
+// The kernel basis of the HNF analytic finish's unit logs only (through
+// hnf_unit_finish_coefficients); the unit witnesses and the saturation
+// kernel keep relation_kernel_basis.  It runs the first phase of fmpz_lll,
+// fmpz_lll_d_with_removal_knapsack, on [c * relations | I_n] and keeps the
+// result when the phase does not return -1 and checked_relation_kernel_rows
+// accepts it, without FLINT's final reducedness check
+// (fmpz_lll_is_reduced), which the kernel claim does not use.  Otherwise,
+// and for entries above FLINT's 250-bit ULLL truncation threshold, it is
+// relation_kernel_basis on the unchanged input.  When FLINT's check would
+// accept the phase output, the rows are relation_kernel_basis's rows.
+// Precondition: `rank` is the exact rank of `relations`.
+bool finish_relation_kernel_basis(flint::FmpzMat& out,
+                                  RelationKernelBasisRoute* route,
+                                  flint::FmpzMatConstRef relations,
+                                  slong rank) noexcept;
 // The unit-row coefficients of the HNF analytic finish: relation_kernel_basis
 // of the context's stored relations, after checking that fmpz_mat_rank of
 // those relations is the context's relation rank.  hnf_unit_log_matrix takes
-// its rows from this function, so the unit logs and the unit witnesses use
-// the same rows.
+// its rows from this function for HnfUnitLogKernel::witness, so the unit
+// logs that are combined with the unit witnesses use the same rows.
 bool hnf_unit_witness_coefficients(flint::FmpzMat& out,
                                         const ClassGroupContext& context)
         noexcept;
+// The unit-row coefficients of the finish's unit logs on the path without a
+// finish workspace: as hnf_unit_witness_coefficients, with
+// finish_relation_kernel_basis in place of relation_kernel_basis.  The rows
+// are a basis of the same kernel lattice, so the unit count and the
+// regulator they give are those of the witness rows; they can be a
+// different basis only where FLINT's reducedness check would reject the
+// double-precision phase.  Never composed with witnesses.
+bool hnf_unit_finish_coefficients(flint::FmpzMat& out,
+                                  const ClassGroupContext& context) noexcept;
 bool hnf_unit_witnesses(std::vector<FactoredElement>& out,
                              const ClassGroupContext& context) noexcept;
 bool class_relation_witnessed_hnf_basis(

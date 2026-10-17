@@ -807,6 +807,19 @@ bool hnf_regulator_multiple_from_basis(
         const flint::ArbMat& basis,
         slong degree,
         slong precision) noexcept;
+// The kernel rows that hnf_unit_log_matrix takes when it has no finish
+// workspace (a workspace supplies its HNF transform rows either way).
+enum class HnfUnitLogKernel : unsigned char {
+    // hnf_unit_witness_coefficients: the rows the unit witnesses are
+    // composed from, for logs that are combined with those witnesses.
+    witness,
+    // hnf_unit_finish_coefficients: the analytic finish's unit count and
+    // regulator product only, which do not depend on the kernel basis.
+    finish,
+};
+// `kernel` selects the rows of the unit-log matrix built here (not of a
+// probe's): witness when `unit_matrix_out` is combined with the witness
+// rows, finish for the analytic finish's regulator product.
 RegulatorPivotOutcome
 hnf_class_regulator_product_and_unit_matrix(
         flint::ArbRef out,
@@ -819,6 +832,7 @@ hnf_class_regulator_product_and_unit_matrix(
         flint::Arb* regulator_out,
         HnfFinishWorkspace* workspace,
         slong precision,
+        HnfUnitLogKernel kernel,
         const HnfUnitPivotProbe* probe = nullptr) noexcept;
 bool factored_units_from_relation_coefficients(
         std::vector<FactoredElement>& out,
@@ -853,7 +867,8 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
                               const ClassGroupContext& class_group,
                               EmbeddingContext& embeddings,
                               HnfFinishWorkspace* workspace,
-                              slong precision) noexcept;
+                              slong precision,
+                              HnfUnitLogKernel kernel) noexcept;
 // The HNF unit-log matrix and regulator pivot selection that one
 // hnf_independent_unit_count call derived.  When the class group, the
 // embeddings and the precision are unchanged, hnf_class_regulator_product

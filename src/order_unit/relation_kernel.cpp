@@ -3454,7 +3454,8 @@ RegulatorPivotOutcome hnf_independent_unit_count(
             places);
     std::vector<slong> selected;
     if (!hnf_unit_log_matrix(unit_logs, class_group, embeddings,
-                                  workspace, precision)) {
+                                  workspace, precision,
+                                  HnfUnitLogKernel::finish)) {
         // Keep the opaque upstream bool terminal for the same reason as the
         // product consumer above; selector uncertainty remains retryable.
         return RegulatorPivotOutcome::invalid;
@@ -3505,7 +3506,8 @@ bool exact_hnf_relation_units(
             hnf_class_regulator_product_and_unit_matrix(
                     flint::ArbRef(candidate_hR), &independent_count,
                     order, class_group, embeddings, analytic_hR,
-                    &unit_matrix, &expected_regulator, workspace, precision);
+                    &unit_matrix, &expected_regulator, workspace, precision,
+                    HnfUnitLogKernel::witness);
     slong target_rank = -1;
     if (product_outcome != RegulatorPivotOutcome::success ||
         order.parent() == nullptr ||

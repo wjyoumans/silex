@@ -225,6 +225,25 @@ public:
                 std::memory_order_relaxed);
     }
 
+    // Sets the failure injected into every later double-precision phase of
+    // the analytic finish's relation kernel basis (FinishKernelTestSeams,
+    // class_group/class_group_internal.hpp) until it is set back to none.
+    // The fallback then returns relation_kernel_basis's rows, which the
+    // finish also takes whenever FLINT's reducedness check would accept the
+    // phase, so no invariant is skipped; it only forces the fallback.
+    static void set_finish_kernel_failure(
+            FinishKernelTestFailure failure) noexcept {
+        FinishKernelTestSeams::failure_.store(failure,
+                                              std::memory_order_relaxed);
+    }
+
+    // The number of phase runs an injected failure has replaced since the
+    // process started.
+    static slong finish_kernel_failures_injected() noexcept {
+        return FinishKernelTestSeams::injected_.load(
+                std::memory_order_relaxed);
+    }
+
     // Sets the failure injected into every later extension-route run of the
     // relation-saturation kernel basis
     // (SaturationKernelTestSeams) until it is set back to none.  The

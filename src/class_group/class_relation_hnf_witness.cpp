@@ -164,10 +164,10 @@ bool verify_stored_relation_generator(
            principal.equal(expected);
 }
 
-}  // namespace
-
-bool lll_relation_kernel_extension(flint::FmpzMat& out,
-                                   flint::FmpzMatConstRef relations) noexcept {
+// The unreduced n x (g + n) matrix [c * relations | I_n].
+bool relation_kernel_extension_input(flint::FmpzMat& out,
+                                     flint::FmpzMatConstRef relations)
+        noexcept {
     const slong n = flint::fmpz_mat_nrows(relations);
     const slong g = flint::fmpz_mat_ncols(relations);
     if (n <= 0 || g < 0) {
@@ -184,6 +184,27 @@ bool lll_relation_kernel_extension(flint::FmpzMat& out,
         }
         flint::fmpz_one(flint::fmpz_mat_entry(flint::FmpzMatRef(extension), i,
                                               g + i));
+    }
+    out = std::move(extension);
+    return true;
+}
+
+// FLINT's ULLL truncation threshold (FLINT 3.6.0 lll.c: fmpz_lll is
+// fmpz_lll_with_removal_ulll(B, U, 250, NULL, fl)).  For a Z_BASIS input
+// with |fmpz_mat_max_bits| at most this, lll_with_removal_ulll.c makes one
+// fmpz_lll_wrapper_with_removal_knapsack(B, U, NULL, fl) call, which keeps
+// the fmpz_lll_d_with_removal_knapsack output when that phase does not
+// return -1 and fmpz_lll_is_reduced(B, fl, 120) accepts it
+// (wrapper_with_removal_knapsack.c).
+constexpr slong flint_ulll_truncation_bits = 250;
+
+}  // namespace
+
+bool lll_relation_kernel_extension(flint::FmpzMat& out,
+                                   flint::FmpzMatConstRef relations) noexcept {
+    flint::FmpzMat extension(0, 0);
+    if (!relation_kernel_extension_input(extension, relations)) {
+        return false;
     }
     // The input rows are independent (identity part), and fmpz_lll applies
     // only unimodular row operations.
@@ -328,9 +349,72 @@ bool relation_kernel_basis(flint::FmpzMat& out,
             have_extension ? &extension : nullptr);
 }
 
-bool hnf_unit_witness_coefficients(
-        flint::FmpzMat& out,
-        const ClassGroupContext& context) noexcept {
+bool finish_relation_kernel_basis(flint::FmpzMat& out,
+                                  RelationKernelBasisRoute* route,
+                                  flint::FmpzMatConstRef relations,
+                                  slong rank) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    flint::FmpzMat extension(0, 0);
+    if (rank < 0 || rank >= n ||
+        !relation_kernel_extension_input(extension, relations)) {
+        return relation_kernel_basis(out, route, relations, rank);
+    }
+
+    flint::FmpzLll lll;
+    const slong bits = ::fmpz_mat_max_bits(extension.raw());
+    if (bits >= -flint_ulll_truncation_bits &&
+        bits <= flint_ulll_truncation_bits) {
+        flint::FmpzMat reduced(n, flint::fmpz_mat_ncols(
+                                          flint::FmpzMatConstRef(extension)));
+        flint::fmpz_mat_set(flint::FmpzMatRef(reduced),
+                            flint::FmpzMatConstRef(extension));
+        // The first phase of fmpz_lll (see flint_ulll_truncation_bits).  It
+        // changes the rows only by row moves and by adding integer
+        // multiples of one row to another (lll_d.c, lll_check_babai.c), so
+        // the identity part records a unimodular transform, which is all
+        // that checked_relation_kernel_rows needs.  FLINT's final
+        // reducedness check is not run: the kernel claim rests on the two
+        // exact checks, not on the rows being LLL-reduced.
+        int status = ::fmpz_lll_d_with_removal_knapsack(reduced.raw(), nullptr,
+                                                        nullptr, lll.raw());
+        const FinishKernelTestFailure failure =
+                FinishKernelTestSeams::failure();
+        if (failure != FinishKernelTestFailure::none) {
+            // Test-only; see FinishKernelTestSeams.
+            flint::fmpz_mat_zero(flint::FmpzMatRef(reduced));
+            if (failure == FinishKernelTestFailure::first_phase) {
+                status = -1;
+            }
+            FinishKernelTestSeams::note_injected();
+        }
+        flint::FmpzMat checked(0, 0);
+        if (status != -1 &&
+            checked_relation_kernel_rows(checked, relations,
+                                         flint::FmpzMatConstRef(reduced),
+                                         rank)) {
+            out = std::move(checked);
+            if (route != nullptr) {
+                *route = RelationKernelBasisRoute::lll_double_extended;
+            }
+            return true;
+        }
+    }
+
+    // Fallback: relation_kernel_basis on the unchanged input.  fmpz_lll
+    // repeats the deterministic phase above before its own later stages.
+    ::fmpz_lll(extension.raw(), nullptr, lll.raw());
+    return relation_kernel_basis_from_extension(out, route, relations, rank,
+                                                &extension);
+}
+
+namespace {
+
+// The stored relations and their kernel rows through `basis`
+// (relation_kernel_basis or finish_relation_kernel_basis).
+template <class KernelBasis>
+bool hnf_unit_coefficients(flint::FmpzMat& out,
+                           const ClassGroupContext& context,
+                           KernelBasis basis) noexcept {
     out = flint::FmpzMat(0, 0);
     flint::FmpzMat stored(0, 0);
     if (!context_relation_matrix(stored, context)) {
@@ -347,12 +431,24 @@ bool hnf_unit_witness_coefficients(
     }
 
     flint::FmpzMat coefficients(0, 0);
-    if (!relation_kernel_basis(coefficients, nullptr,
-                               flint::FmpzMatConstRef(stored), rank)) {
+    if (!basis(coefficients, nullptr, flint::FmpzMatConstRef(stored), rank)) {
         return false;
     }
     out = std::move(coefficients);
     return true;
+}
+
+}  // namespace
+
+bool hnf_unit_witness_coefficients(
+        flint::FmpzMat& out,
+        const ClassGroupContext& context) noexcept {
+    return hnf_unit_coefficients(out, context, relation_kernel_basis);
+}
+
+bool hnf_unit_finish_coefficients(flint::FmpzMat& out,
+                                  const ClassGroupContext& context) noexcept {
+    return hnf_unit_coefficients(out, context, finish_relation_kernel_basis);
 }
 
 bool hnf_unit_witnesses(std::vector<FactoredElement>& out,

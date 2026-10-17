@@ -139,7 +139,8 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
                               const ClassGroupContext& class_group,
                               EmbeddingContext& embeddings,
                               HnfFinishWorkspace* workspace,
-                              slong precision) noexcept {
+                              slong precision,
+                              HnfUnitLogKernel kernel_rows) noexcept {
     const Order* order = class_group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     if (field == nullptr || !class_group.has_factor_base() ||
@@ -157,12 +158,17 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
                 out, *workspace, class_group, embeddings, precision);
     }
 
-    // The witness extraction (exact_hnf_relation_units) composes the units
-    // from the rows of the same function, so the logs below are those of
-    // the witnessed units.
+    // witness: the witness extraction (exact_hnf_relation_units) composes
+    // the units from the rows of the same function, so the logs below are
+    // those of the witnessed units.  finish: a basis of the same kernel
+    // lattice for the analytic finish's count and regulator product, never
+    // combined with witnesses.
     const slong relation_count = class_group.relation_count();
     flint::FmpzMat kernel(0, 0);
-    if (!hnf_unit_witness_coefficients(kernel, class_group) ||
+    const bool have_kernel = kernel_rows == HnfUnitLogKernel::finish
+            ? hnf_unit_finish_coefficients(kernel, class_group)
+            : hnf_unit_witness_coefficients(kernel, class_group);
+    if (!have_kernel ||
         flint::fmpz_mat_ncols(kernel) != relation_count ||
         flint::fmpz_mat_nrows(kernel) !=
                 relation_count - class_group.relation_rank()) {

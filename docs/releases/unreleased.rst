@@ -128,6 +128,19 @@ Added
 Changed
 -------
 
+- The ``proven`` analytic finish builds the kernel basis behind its unit
+  count and regulator product with FLINT's double-precision LLL phase
+  (``fmpz_lll_d_with_removal_knapsack``) and accepts the rows on the two
+  exact kernel checks (row count ``n`` minus the rank, ``v*A = 0``), without
+  FLINT's final reducedness check, which the kernel claim does not use; when
+  the phase fails or a check fails it uses the ``fmpz_lll`` route as before.
+  The unit witnesses and the relation-saturation kernel keep ``fmpz_lll``.
+  Decisions and every published result are unchanged on the proven and
+  ``grh`` corpora; only the running time changes (busy-machine
+  measurement: proven ``real_quadratic_d100000001`` used 60% fewer user
+  instructions, 1.45e9 to 0.58e9, and ``real_quadratic_d100000005`` 20%
+  fewer).
+
 - The baby-step giant-step quotient logarithms of the unit saturation proof
   (word-size degree-one primes, ``ell`` of 7 bits or more) look up their baby
   steps in a hash table, as the reference's ``baby_step_giant_step`` does with

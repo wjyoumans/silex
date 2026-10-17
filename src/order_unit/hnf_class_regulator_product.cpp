@@ -153,6 +153,7 @@ hnf_class_regulator_product_and_unit_matrix(
         flint::Arb* regulator_out,
         HnfFinishWorkspace* workspace,
         slong precision,
+        HnfUnitLogKernel kernel,
         const HnfUnitPivotProbe* probe) noexcept {
     if (independent_count_out != nullptr) {
         *independent_count_out = 0;
@@ -198,7 +199,7 @@ hnf_class_regulator_product_and_unit_matrix(
     std::vector<slong> built_selected;
     if (!reuse_probe) {
         if (!hnf_unit_log_matrix(built_unit_logs, class_group, embeddings,
-                                      workspace, precision)) {
+                                      workspace, precision, kernel)) {
             SILEX_LOG(diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "certify_regulator_multiple failed: HNF unit log matrix");
@@ -364,7 +365,8 @@ RegulatorPivotOutcome hnf_class_regulator_product(
     }
     return hnf_class_regulator_product_and_unit_matrix(
             out, &independent_count, order, class_group, embeddings,
-            analytic_hR, nullptr, nullptr, workspace, precision, probe);
+            analytic_hR, nullptr, nullptr, workspace, precision,
+            HnfUnitLogKernel::finish, probe);
 }
 
 }  // namespace silex::detail
