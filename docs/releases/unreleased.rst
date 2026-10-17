@@ -229,7 +229,10 @@ Changed
   defining polynomial as PARI's ``FlxqX_chinese_unit`` does.  Evaluation at
   the roots is a ring isomorphism, so the same primes are rejected, the
   residues are the same, and published outputs are unchanged on the tested
-  ``grh`` and ``proven`` corpus rows.  See
+  ``grh`` and ``proven`` corpus rows.  On a busy machine, user-space
+  instructions for ``cyclotomic_41_phi40`` in ``grh`` mode fall from
+  66.19e9 to 61.22e9 (-7.5%, ``perf stat -r 3``); the control row
+  ``cyclotomic_real_q10_c11_deg10`` is unchanged.  See
   :doc:`../reference/algorithms_and_sources`.
 
 - ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
