@@ -1079,8 +1079,6 @@ int test_relation_kernel_basis_checks_and_fallback() {
     return 0;
 }
 
-// The HNF finish unit logs are the logs of the units composed from the
-// witness coefficient rows, row by row.
 // The finish's kernel basis keeps FLINT's double-precision phase only
 // after the two exact checks, and otherwise returns relation_kernel_basis's
 // rows: when the phase status is -1, and when the checks reject the phase
@@ -1117,8 +1115,75 @@ int test_finish_relation_kernel_basis_fast_path_and_fallback() {
     assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(basis),
                                   sflint::FmpzMatConstRef(shared)));
 
-    // Both injected failures zero the phase output: the fallback must run
-    // fmpz_lll on the unchanged input, not on the phase output.
+    // The finish rows span the same lattice as an independent exact
+    // oracle, the HNF transform rows (compared by row HNF).
+    {
+        sflint::FmpzMat oracle(0, 0);
+        assert(silex::detail::hnf_transform_kernel_rows(
+                oracle, sflint::FmpzMatConstRef(relations), rank));
+        sflint::FmpzMat basis_hnf(n - rank, n);
+        sflint::FmpzMat oracle_hnf(n - rank, n);
+        ::fmpz_mat_hnf(basis_hnf.raw(), basis.raw());
+        ::fmpz_mat_hnf(oracle_hnf.raw(), oracle.raw());
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(basis_hnf),
+                                      sflint::FmpzMatConstRef(oracle_hnf)));
+    }
+
+    // Status -1 alone (the phase output left valid and passing both exact
+    // checks) must still send the finish to the fmpz_lll route.
+    {
+        const slong injected_before =
+                TestHookAccess::finish_kernel_failures_injected();
+        TestHookAccess::set_finish_kernel_failure(
+                FinishKernelTestFailure::first_phase_status);
+        sflint::FmpzMat out(0, 0);
+        RelationKernelBasisRoute taken =
+                RelationKernelBasisRoute::lll_double_extended;
+        const bool ok = silex::detail::finish_relation_kernel_basis(
+                out, &taken, sflint::FmpzMatConstRef(relations), rank);
+        TestHookAccess::set_finish_kernel_failure(
+                FinishKernelTestFailure::none);
+        assert(ok);
+        assert(TestHookAccess::finish_kernel_failures_injected() ==
+               injected_before + 1);
+        assert(taken == RelationKernelBasisRoute::lll_extended);
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(out),
+                                      sflint::FmpzMatConstRef(shared)));
+    }
+
+    // Entries over 250 bits skip the phase: the fmpz_lll route, nothing
+    // injected.
+    {
+        sflint::FmpzMat big(0, 0);
+        {
+            sflint::FmpzMat scaled = kernel_test_relations();
+            for (slong i = 0; i < n; ++i) {
+                fmpz* e = sflint::fmpz_mat_entry(sflint::FmpzMatRef(scaled),
+                                                 i, 1).raw();
+                ::fmpz_mul_2exp(e, e, 300);
+            }
+            big = std::move(scaled);
+        }
+        const slong injected_before =
+                TestHookAccess::finish_kernel_failures_injected();
+        TestHookAccess::set_finish_kernel_failure(
+                FinishKernelTestFailure::kernel_rows);
+        sflint::FmpzMat out(0, 0);
+        RelationKernelBasisRoute taken =
+                RelationKernelBasisRoute::lll_double_extended;
+        const bool ok = silex::detail::finish_relation_kernel_basis(
+                out, &taken, sflint::FmpzMatConstRef(big), rank);
+        TestHookAccess::set_finish_kernel_failure(
+                FinishKernelTestFailure::none);
+        assert(ok);
+        assert(TestHookAccess::finish_kernel_failures_injected() ==
+               injected_before);
+        assert(taken == RelationKernelBasisRoute::lll_extended);
+        assert(sflint::fmpz_mat_nrows(out) == n - rank);
+    }
+
+    // The kernel_rows injection zeroes the phase output: the fallback must
+    // run fmpz_lll on the unchanged input, not on the phase output.
     for (const FinishKernelTestFailure failure :
          {FinishKernelTestFailure::first_phase,
           FinishKernelTestFailure::kernel_rows}) {
@@ -1170,6 +1235,8 @@ int test_finish_relation_kernel_basis_fast_path_and_fallback() {
     return 0;
 }
 
+// The HNF finish unit logs are the logs of the units composed from the
+// witness coefficient rows, row by row.
 int test_unit_logs_share_witness_rows() {
     silex::NumberField field = cubic_discriminant_81_field();
     const silex::Order equation_order =

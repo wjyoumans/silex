@@ -381,8 +381,11 @@ bool finish_relation_kernel_basis(flint::FmpzMat& out,
                 FinishKernelTestSeams::failure();
         if (failure != FinishKernelTestFailure::none) {
             // Test-only; see FinishKernelTestSeams.
-            flint::fmpz_mat_zero(flint::FmpzMatRef(reduced));
-            if (failure == FinishKernelTestFailure::first_phase) {
+            if (failure != FinishKernelTestFailure::first_phase_status) {
+                flint::fmpz_mat_zero(flint::FmpzMatRef(reduced));
+            }
+            if (failure == FinishKernelTestFailure::first_phase ||
+                failure == FinishKernelTestFailure::first_phase_status) {
                 status = -1;
             }
             FinishKernelTestSeams::note_injected();

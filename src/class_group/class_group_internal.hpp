@@ -503,7 +503,14 @@ bool relation_kernel_basis(flint::FmpzMat& out,
 // matrix.  first_phase: the phase status is also read as -1.  kernel_rows:
 // the status is kept and the exact checks run on the zeroed matrix, whose
 // n rows all have a zero relation part, so the row-count check fails.
-enum class FinishKernelTestFailure { none, first_phase, kernel_rows };
+// first_phase_status: only the status is read as -1; the phase output is
+// kept, so the status check is the only thing that rejects it.
+enum class FinishKernelTestFailure {
+    none,
+    first_phase,
+    kernel_rows,
+    first_phase_status
+};
 
 // Read by finish_relation_kernel_basis each time its phase runs.  Off by
 // default and never set by production code.  Relaxed atomics so a reader
@@ -554,7 +561,10 @@ bool hnf_unit_witness_coefficients(flint::FmpzMat& out,
 // are a basis of the same kernel lattice, so the unit count and the
 // regulator they give are those of the witness rows; they can be a
 // different basis only where FLINT's reducedness check would reject the
-// double-precision phase.  Never composed with witnesses.
+// double-precision phase, and then only the precision the finish needs
+// can differ (its pivot choice, residual test and precision escalation
+// depend on the basis), never its values or labels.  Never composed with
+// witnesses.
 bool hnf_unit_finish_coefficients(flint::FmpzMat& out,
                                   const ClassGroupContext& context) noexcept;
 bool hnf_unit_witnesses(std::vector<FactoredElement>& out,

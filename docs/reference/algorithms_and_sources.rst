@@ -846,7 +846,10 @@ never uses LLL-reducedness.  Otherwise the variant takes the
 ``fmpz_lll`` route above on the unchanged input.  When FLINT's check
 would accept the phase output, ``fmpz_lll`` returns that same output, so
 the finish sees the witness rows; otherwise it sees another basis of the
-same kernel lattice, whose unit count and regulator are the same.  The
+same kernel lattice, whose unit count and regulator are the same; only
+the precision the finish needs can differ (its pivot choice, residual
+test and precision escalation depend on the basis), never its values or
+labels.  The
 finish's logs are never combined with the witness rows.  The rank
 passed in must be the exact rank of ``A``; the full-lattice claim depends on
 it.  The finish checks that the relation rank it passes equals
