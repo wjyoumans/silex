@@ -241,11 +241,8 @@ Changed
 
 - The finite-ideal T2 enumeration setup computes the Arb Gram matrix of a
   reduced ideal basis once per unordered pair of rows instead of for both
-  triangles: the lower triangle is summed as before and copied into the upper
-  one.  The lower triangle, the diagonal and every entry midpoint are
-  unchanged, and the Cholesky factorization reads only the lower triangle, so
-  the enumeration data and every published result are unchanged; published
-  outputs are identical on the tested ``proven`` corpus rows.  On an idle
+  triangles: the lower triangle is copied into the upper one, and the
+  Cholesky factorization reads only the lower triangle.  On an idle
   machine (2026-10-16, paired interleaved runs, medians) the ``proven``
   class/unit computation of the field defined by ``x^12 + 7`` took 1198 ms
   before and 1138 ms after (ratio 0.950), and the per-ideal setup of the
@@ -258,10 +255,10 @@ Changed
   The entries stay rigorous Arb enclosures of the Gram matrix, but their
   midpoints and radii can differ from the previous ones by rounding noise, so
   the double quadratic form handed to the enumeration can differ at that
-  level; this supersedes the statement above that the Gram midpoints and the
-  enumeration data are unchanged.  Published outputs are identical on the
-  tested ``proven`` corpus rows (197 rows compared; 8 more timed out at
-  120 s on both builds).  On a busy machine (``perf stat``, 3 runs each), the
+  level.  Published results are therefore not guaranteed identical in
+  general (for example, which element the enumeration finds first can
+  change); they were identical on the tested ``proven`` corpus rows (197
+  rows compared; 8 more timed out at 120 s on both builds).  On a busy machine (``perf stat``, 3 runs each), the
   ``proven`` class/unit computation used 2.9% fewer user-space instructions
   for the field defined by ``x^12 + 7`` and 6.6% fewer for the 23rd
   cyclotomic field; this has not been measured on an idle machine.
