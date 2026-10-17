@@ -1373,6 +1373,19 @@ Changed
   measured.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- ``FiniteAbelianGroup`` builds its left-transform witnesses (the rows behind
+  ``relation_kernel_matrix``, ``relation_kernel_row`` and
+  ``invariant_generator_relation_matrix``) without multiplying the whole
+  Smith left transform into the HNF transform.  It forms only the rows those
+  accessors return, which are the same exact rows as before.  The full
+  product took most of the time of the ``proven`` relation-saturation proof
+  on real quadratic fields with large discriminant.  On one busy-machine run
+  each, ``x^2 - x - 2500000001`` went from 18.9 s to 4.5 s and
+  ``x^2 - x - 250000000002`` from 11.2 s to 2.2 s.  Published outputs and
+  proof records are identical on the 177 ``proven`` corpus rows that finish
+  within 120 s.  The HNF transform of the relation matrix is still computed,
+  and it is now the largest cost on those rows.
+
 Fixed
 -----
 
