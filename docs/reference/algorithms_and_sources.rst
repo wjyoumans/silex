@@ -1131,14 +1131,20 @@ like ``2^-p`` at working precision ``p``, so Silex skips the doublings below
 the precision at which the radius would reach the bound (a Silex scheduling
 choice, not Hecke's).  Each candidate starts at the precision at which the
 previous candidate in the same extraction was decided dependent, when there
-was one (also a Silex scheduling choice).  The skipped precisions, and then
-the ones below the start, are tried last, before the full determinant, so the
-incremental test tries the same precisions as plain doubling.  Every decision
-is the true answer, so the kept units are unchanged; only the cost changes.
-In the ``grh`` computation of the real subfield of the
-31st cyclotomic field the lower bound is about ``2^-305`` and a dependent candidate's radius at 128 bits about
-``2^-56``, so such candidates are decided at 512 bits and the 256-bit pass is
-skipped.  Starting at the previous reject's precision evaluates some
+was one (also a Silex scheduling choice).  After an undecided ball the test
+first tries that estimated precision plus 32 bits, rounded up to a multiple of
+64, when this lies below the next doubling precision, and goes on to that
+doubling precision if the ball is still undecided (a Silex scheduling choice;
+the 32 bits cover the factor of two between the bound and the radius the
+decision needs, and the rough scaling of the radius).  The skipped doubling
+precisions, and then the ones below the start, are tried last, before the full
+determinant, so the incremental test tries every precision plain doubling
+tries.  Every decision is the true answer, so the kept units are unchanged;
+only the cost changes.  In the ``grh`` computation of the real subfield of the
+31st cyclotomic field the lower bound is about ``2^-305`` and a dependent
+candidate's radius at 128 bits about ``2^-56``, so the estimated precisions
+are 380 to 406 bits; such candidates are decided at 448 bits, where plain
+doubling would reach 512 after a 256-bit pass.  Starting at the previous reject's precision evaluates some
 logarithmic embeddings at a higher precision than before.  The embedding
 context caches them, and a later lookup at a lower precision returns the
 cached higher-precision ball, so the published regulator ball can come out
