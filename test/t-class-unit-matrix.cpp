@@ -3148,8 +3148,19 @@ bool check_failed_route_is_atomic(const char* name,
 }
 
 // Q(sqrt(radicand)) with a candidate class group, optionally carrying proven
-// units and an ell = 2 saturation record (so stale-record clearing and
-// restoration would be visible).
+// units and an ell = 2 saturation record.  The populated cases are no-op
+// guards: they catch a route that clears or rewrites the records before its
+// gate, but no route here writes and then fails after touching them, so a
+// missing restore of the saturation records (relation_saturation_records and
+// relation_saturation_proof_records) is not detected.  Also unobserved
+// directly: generation_structure_certified and
+// analytic_class_regulator_assumes_grh_ are seen only through
+// factor_base_generation_certification() and
+// analytic_class_regulator_certification() (the latter is unknown unless the
+// status is verified), and the imaginary case is rejected at the gate before
+// any write.  These need a src hook (a failing route that writes the
+// saturation records, the h_cand path, the record_zeta_bf_audit_ path, and
+// direct getters for the two fields); that is not done here.
 struct AtomicityFixture {
     FieldSetup setup;
     silex::ClassGroupContext class_group;
@@ -3266,8 +3277,9 @@ int test_failed_try_certify_quadratic_is_atomic() {
 }
 
 // try_certify_trivial_quotient on h = 2 with verified units and an ell = 2
-// saturation record: the route rejects h != 1 and must keep the record,
-// which a successful h = 1 certification would have cleared.
+// saturation record: the route rejects h != 1 before the point where a
+// successful h = 1 certification clears the records, so this only guards
+// against an early clear; it does not exercise record restoration.
 int test_failed_try_certify_trivial_quotient_is_atomic() {
     AtomicityFixture fx;
     if (!build_atomicity_fixture(fx, 10, true)) {
@@ -3361,13 +3373,19 @@ int test_failed_try_certify_zeta_bf_is_atomic() {
                 })) {
         return 1;
     }
-    // A cutoff of one term is rejected by the audit before any write.
+    // A cutoff of one term is rejected by the audit before any write; it runs
+    // on its own fixture so an earlier call cannot have changed the state.
+    AtomicityFixture cutoff;
+    if (!build_atomicity_fixture(cutoff, 10, true)) {
+        std::cerr << "zeta_bf atomicity: cutoff fixture unavailable\n";
+        return 1;
+    }
     return check_failed_route_is_atomic(
                    "populated real quadratic zeta_bf cutoff one",
-                   populated.class_group, populated.units, [&]() noexcept {
-                       return populated.class_group
+                   cutoff.class_group, cutoff.units, [&]() noexcept {
+                       return cutoff.class_group
                                .try_certify_class_unit_with_zeta_bf(
-                                       populated.units, 1, 192);
+                                       cutoff.units, 1, 192);
                    })
                    ? 0
                    : 1;
