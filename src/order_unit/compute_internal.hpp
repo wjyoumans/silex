@@ -756,13 +756,34 @@ bool add_dependent_unit(bool& changed,
                         slong precision,
                         DependentUnitIndexFallback* fallback) noexcept;
 
+class TestHookAccess;
+
+// Test-only override of the slack, in bits, that the incremental
+// independence test adds to its target precision after an undecided ball
+// (incremental_target_precision in compute.cpp); kOff means the default.
+// A short slack makes the target step stay undecided, so a test can reach
+// the doubling fallback.  Only detail::TestHookAccess
+// (test/test_hook_access.hpp) can set it; production code only reads it.
+class IncrementalTargetTestSeams {
+public:
+    static constexpr slong kOff = WORD_MIN;
+    static slong forced_slack() noexcept {
+        return forced_slack_.load(std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<slong> forced_slack_{kOff};
+};
+
 // The partial unit basis of the relation-unit search before it reaches full
 // rank: the reference `add_unit!` over `_isindependent` (see "Class groups
 // and order units" in docs/reference/algorithms_and_sources.rst).  A
 // candidate is kept when compact_independent's rule shows it independent of
 // the units already kept.  add_independent_unit first tries that rule on an
 // incremental enclosure of the Gram determinant, with compact_independent's
-// precision doubling and cap, and hands the candidate to
+// precision doubling and cap (and a target precision between two doublings
+// after an undecided ball), and hands the candidate to
 // compact_independent, unchanged, whenever the incremental test does not
 // decide; see the soundness note in compute.cpp.  Wherever
 // compact_independent decides, the decision is the same.  A candidate it
@@ -790,7 +811,7 @@ struct IncrementalUnitContext {
         slong gram_units = -1;
         bool gram_bordered = false;
     };
-    // One state per working precision the doubling loop has reached.
+    // One state per working precision the incremental test has tried.
     std::vector<LogState> log_states;
     // Cost hint, never a decision: the working precision at which the
     // incremental test last decided a candidate dependent, or zero.  The

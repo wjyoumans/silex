@@ -43,6 +43,39 @@ silex::NumberField real_quartic_field() noexcept {
             sflint::FmpqPolyConstRef(polynomial));
 }
 
+struct IncrementalTargetSlackOverride {
+    explicit IncrementalTargetSlackOverride(slong bits) noexcept {
+        silex::detail::TestHookAccess::set_incremental_target_slack(bits);
+    }
+    ~IncrementalTargetSlackOverride() {
+        silex::detail::TestHookAccess::set_incremental_target_slack(
+                silex::detail::IncrementalTargetTestSeams::kOff);
+    }
+};
+
+// The real cyclotomic octic Q(zeta_17)^+, the field of 2 cos(2 pi / 17),
+// with minimal polynomial x^8 + x^7 - 7x^6 - 6x^5 + 15x^4 + 10x^3 - 10x^2
+// - 4x + 1 (unit rank 7), in which theta is a unit (norm f(0) = 1).
+silex::NumberField real_octic_field() noexcept {
+    constexpr slong coefficients[9] = {1, -4, -10, 10, 15, -6, -7, 1, 1};
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (slong i = 0; i < 9; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+std::vector<slong> state_precisions(
+        const silex::detail::IncrementalUnitContext& context) {
+    std::vector<slong> precisions;
+    for (const auto& state : context.log_states) {
+        precisions.push_back(state.precision);
+    }
+    return precisions;
+}
+
 bool has_state_at(const silex::detail::IncrementalUnitContext& context,
                   slong precision) noexcept {
     for (const auto& state : context.log_states) {
@@ -420,6 +453,119 @@ int test_independent_candidate_accepted_after_skip() {
     return 0;
 }
 
+// Adds theta (accepted at 7 bits) and then `candidate` to a context over
+// the real octic at 7 bits, where the doubling precisions are 7, 14, ...,
+// 112, 224, ...  Returns the context; `changed` reports whether the
+// candidate was kept, which must agree with compact_independent.
+silex::detail::IncrementalUnitContext octic_context_after(
+        bool& changed,
+        const silex::NumberField& field,
+        silex::EmbeddingContext& embeddings,
+        const silex::FactoredElement& first,
+        const silex::FactoredElement& candidate,
+        slong precision) noexcept {
+    silex::detail::IncrementalUnitContext context;
+    assert(context.define(field, 7));
+    changed = false;
+    assert(context.add_independent_unit(changed, first, embeddings,
+                                        precision, nullptr));
+    assert(changed);
+    assert(state_precisions(context) == std::vector<slong>{precision});
+
+    std::vector<silex::FactoredElement> trial;
+    trial.emplace_back(field);
+    assert(trial.back().set(first));
+    trial.emplace_back(field);
+    assert(trial.back().set(candidate));
+    bool expected = true;
+    assert(silex::detail::compact_independent(
+            expected, embeddings,
+            silex::FactoredElementSpan(trial.data(), trial.size()),
+            precision));
+
+    changed = !expected;
+    assert(context.add_independent_unit(changed, candidate, embeddings,
+                                        precision, nullptr));
+    assert(changed == expected);
+    return context;
+}
+
+// The dependent candidate theta^2 after theta in the real octic, whose
+// lower bound B is about 2^-125.  From 7 bits the ball is undecided and its
+// target precision lies above 112, so plain doubling would decide at 224.
+// The test instead tries the target plus 32 bits rounded up to a whole
+// number of limbs, 192 bits, which lies below 224 and decides there.  The
+// next dependent candidate, theta^3, starts at that precision and decides
+// at once, so no doubling precision is ever tried above 7.
+int test_dependent_candidate_decides_at_target_step() {
+    silex::NumberField field = real_octic_field();
+    silex::Element theta(field);
+    assert(theta.gen());
+    silex::FactoredElement first(field);
+    silex::FactoredElement square(field);
+    silex::FactoredElement cube(field);
+    assert(first.push(theta, 1));
+    assert(square.push(theta, 2));
+    assert(cube.push(theta, 3));
+    silex::EmbeddingContext embeddings(field);
+
+    constexpr slong precision = 7;
+    bool changed = true;
+    silex::detail::IncrementalUnitContext context = octic_context_after(
+            changed, field, embeddings, first, square, precision);
+    assert(!changed);
+    assert(context.units.size() == 1);
+    assert(context.incremental_decisions == 2);
+    assert(context.fallback_decisions == 0);
+    assert(state_precisions(context) ==
+           (std::vector<slong>{precision, 192}));
+    assert(192 % FLINT_BITS == 0);
+    assert(16 * precision < 192 && 192 < 32 * precision);
+    assert(context.reject_precision == 192);
+
+    changed = true;
+    assert(context.add_independent_unit(changed, cube, embeddings,
+                                        precision, nullptr));
+    assert(!changed);
+    assert(context.incremental_decisions == 3);
+    assert(context.fallback_decisions == 0);
+    assert(state_precisions(context) ==
+           (std::vector<slong>{precision, 192}));
+    assert(context.reject_precision == 192);
+    return 0;
+}
+
+// The same candidate with the slack forced to -64 bits, so the target step
+// lands short of the target and its ball stays undecided.  The test then
+// takes the doubling precision it would have tried without the step, 224
+// bits, and decides there.  The decision is compact_independent's, and
+// nothing falls back to it.
+int test_undecided_target_step_falls_back_to_doubling() {
+    silex::NumberField field = real_octic_field();
+    silex::Element theta(field);
+    assert(theta.gen());
+    silex::FactoredElement first(field);
+    silex::FactoredElement square(field);
+    assert(first.push(theta, 1));
+    assert(square.push(theta, 2));
+    silex::EmbeddingContext embeddings(field);
+
+    constexpr slong precision = 7;
+    IncrementalTargetSlackOverride slack(-64);
+    bool changed = true;
+    silex::detail::IncrementalUnitContext context = octic_context_after(
+            changed, field, embeddings, first, square, precision);
+    assert(!changed);
+    assert(context.units.size() == 1);
+    assert(context.incremental_decisions == 2);
+    assert(context.fallback_decisions == 0);
+    // 128 bits is ceil64(target - 64); 224 is the next doubling precision.
+    assert(state_precisions(context) ==
+           (std::vector<slong>{precision, 128, 32 * precision}));
+    assert(context.reject_precision == 32 * precision);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -429,5 +575,7 @@ int main() {
     assert(test_dependent_candidate_skips_to_deciding_precision() == 0);
     assert(test_skipped_precisions_tried_before_fallback() == 0);
     assert(test_independent_candidate_accepted_after_skip() == 0);
+    assert(test_dependent_candidate_decides_at_target_step() == 0);
+    assert(test_undecided_target_step_falls_back_to_doubling() == 0);
     return 0;
 }

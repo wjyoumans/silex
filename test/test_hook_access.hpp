@@ -126,6 +126,17 @@ public:
                 cap > 0 ? cap : 0, std::memory_order_relaxed);
     }
 
+    // Replaces the slack the incremental independence test adds to its
+    // target precision after an undecided ball (32 bits); `bits` may be
+    // negative, so the target step stays undecided.  Skips no invariant:
+    // the slack only chooses a precision to try, and the decisions are
+    // still the ball tests'.  IncrementalTargetTestSeams::kOff restores the
+    // default.
+    static void set_incremental_target_slack(slong bits) noexcept {
+        IncrementalTargetTestSeams::forced_slack_.store(
+                bits, std::memory_order_relaxed);
+    }
+
     // A positive `max_aux_primes` replaces the per-scan guard of 2^16
     // examined primes q of the stable residue-character proof scan, and a
     // nonzero `max_q` replaces the machine-word upper end of the q range, so

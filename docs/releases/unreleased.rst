@@ -1484,6 +1484,25 @@ Changed
   measured.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- After an undecided ball, the incremental independence test of ``grh``
+  unit extraction now first tries its estimate of the deciding precision
+  plus 32 bits, rounded up to a multiple of 64, when that lies below the
+  next doubling precision, instead of going straight to that doubling
+  precision; if the ball is still undecided there it goes on doubling.
+  It still tries every precision it tried before when it stays
+  undecided, every decision is still made by the same ball tests, and the
+  kept units are unchanged.  Published outputs are identical on the 177
+  tested ``proven`` corpus rows and on 178 of the 184 tested ``grh`` rows;
+  on the other six the published regulator ball has the same midpoint and
+  a radius that differs by -5.3% to +0.2%, as with the start at the
+  previous reject's precision (logarithmic embeddings are now cached at
+  other precisions).  In the ``grh`` class/unit computation of ``real_37_deg18`` dependent candidates are decided at 576
+  bits instead of 1024, and the computation runs 7.0% fewer user-space
+  instructions; ``cyclotomic_real_31_deg15`` (448 bits instead of 512)
+  runs 1.9% fewer, and ``cyclotomic_32_phi16`` is unchanged.  No timing
+  has been measured.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - ``FiniteAbelianGroup`` builds its left-transform witnesses (the rows behind
   ``relation_kernel_matrix``, ``relation_kernel_row`` and
   ``invariant_generator_relation_matrix``) without multiplying the whole

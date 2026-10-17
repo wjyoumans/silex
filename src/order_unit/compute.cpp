@@ -200,6 +200,35 @@ slong incremental_decision_precision(const flint::Arb& determinant,
     return gap > 0 ? precision + gap : 0;
 }
 
+// The precision the incremental test tries after an undecided ball whose
+// incremental_decision_precision is `target`: target plus
+// kIncrementalTargetSlackBits, rounded up to a whole number of limbs, or
+// zero when there is no target.  A cost choice, never a decision.  The
+// target is where the radius would reach 2^(bound_exponent - 1), between
+// B/2 and B, while a decision needs a radius below about B/2, and the
+// radius scales like 2^-p only roughly; the slack covers both.  With 32
+// bits, the dependent candidates of real_37_deg18 (target 525 from 128
+// bits) go to 576 bits instead of the doubling step 1024, and those of
+// cyclotomic_real_31_deg15 (targets 380 to 406) to 448 instead of 512;
+// all of them decide there.  Tests may replace the slack through
+// IncrementalTargetTestSeams.
+constexpr slong kIncrementalTargetSlackBits = 32;
+
+slong incremental_target_precision(slong target) noexcept {
+    const slong forced = IncrementalTargetTestSeams::forced_slack();
+    const slong slack = forced == IncrementalTargetTestSeams::kOff
+                                ? kIncrementalTargetSlackBits
+                                : forced;
+    // incremental_decision_precision gives targets below 2^41 or zero.
+    constexpr slong limit = WORD(1) << 42;
+    if (target <= 0 || target >= limit || slack <= -limit ||
+        slack >= limit || target + slack <= 0) {
+        return 0;
+    }
+    const slong padded = target + slack;
+    return (padded + FLINT_BITS - 1) / FLINT_BITS * FLINT_BITS;
+}
+
 // The incremental test at the precision of `state` for the last entry of
 // context.units against the ones before it.  Returns true only when it
 // decides, with the answer in `independent`; `row` receives the
@@ -268,13 +297,14 @@ bool incremental_independence_at(bool& independent,
 // The incremental independence test for the last entry of context.units
 // against the ones before it, at compact_independent's working precisions
 // (precision doubled up to precision_doubling_cap, as
-// precision_doubling_allowed permits), in the order described in the body;
-// the cap diagnostics are left to compact_independent.  Returns true only
-// when it decides, with the answer in `independent`, the decision precision
-// in `decided_precision`, and the candidate's log row at that precision in
-// `row`.  Every decision is the true answer (below), so the order in which
-// the precisions are tried changes only the cost, and the test tries the
-// same precisions as plain doubling.
+// precision_doubling_allowed permits) and at precisions between them that
+// incremental_target_precision estimates, in the order described in the
+// body; the cap diagnostics are left to compact_independent.  Returns true
+// only when it decides, with the answer in `independent`, the decision
+// precision in `decided_precision`, and the candidate's log row at that
+// precision in `row`.  Every decision is the true answer (below), so the
+// precisions tried and their order change only the cost, and the test
+// tries every precision plain doubling tries.
 //
 // Soundness under rounding.  Let L be the true k x places matrix of log
 // rows of the kept units, v the true row of the candidate, G = L L^T,
@@ -320,14 +350,18 @@ bool incremental_independence(bool& independent,
         return false;
     }
 
-    // The working precisions are precision * 2^k up to the cap, as in
+    // The doubling precisions are precision * 2^k up to the cap, as in
     // compact_independent.  The loop starts at context.reject_precision
-    // when that is one of them (the previous dependent candidate in this
-    // context decided there; a Silex cost choice), and otherwise at
-    // `precision`.  After an undecided ball it skips the ones below
-    // incremental_decision_precision.  It tries the skipped ones next and
-    // the ones below the start last, so it tries the same precisions as
-    // the plain doubling loop.
+    // when that lies in their range (the previous dependent candidate in
+    // this context decided there; a Silex cost choice), and otherwise at
+    // `precision`.  After an undecided ball with target precision t
+    // (incremental_decision_precision), it skips the doubling precisions
+    // below t and tries incremental_target_precision(t) when that lies
+    // below the next doubling precision it has not tried; if that is still
+    // undecided, it goes on to that doubling precision (plain doubling),
+    // with no second target step in between.  It tries the skipped
+    // doubling precisions next and the ones below the start last, so it
+    // tries every precision the plain doubling loop tries.
     const auto decide_at = [&](slong work_precision,
                                slong& target_precision) noexcept {
         const std::size_t index =
@@ -349,28 +383,49 @@ bool incremental_independence(bool& independent,
                                       cap_reason)) {
         ladder.push_back(ladder.back() * 2);
     }
-    std::size_t start = 0;
-    for (std::size_t i = 0; i < ladder.size(); ++i) {
-        if (ladder[i] == context.reject_precision) {
-            start = i;
-            break;
-        }
+    slong work_precision = precision;
+    if (context.reject_precision > precision &&
+        context.reject_precision <= ladder.back()) {
+        work_precision = context.reject_precision;
+    }
+    // ladder[next] is the first doubling precision above work_precision;
+    // the ones up to it that are below work_precision are tried last.
+    std::size_t next = 0;
+    while (next < ladder.size() && ladder[next] < work_precision) {
+        ++next;
+    }
+    std::vector<slong> below(ladder.begin(),
+                             ladder.begin() +
+                                     static_cast<std::ptrdiff_t>(next));
+    if (next < ladder.size() && ladder[next] == work_precision) {
+        ++next;
     }
     std::vector<slong> deferred;
-    for (std::size_t i = start; i < ladder.size();) {
+    bool target_step = false;
+    for (;;) {
         slong target_precision = 0;
-        if (decide_at(ladder[i], target_precision)) {
+        if (decide_at(work_precision, target_precision)) {
             return true;
         }
-        ++i;
         // The last precision is never skipped, as in the doubling loop.
-        while (i + 1 < ladder.size() && ladder[i] < target_precision) {
-            deferred.push_back(ladder[i]);
-            ++i;
+        while (next + 1 < ladder.size() && ladder[next] < target_precision) {
+            deferred.push_back(ladder[next]);
+            ++next;
+        }
+        if (next >= ladder.size()) {
+            break;
+        }
+        const slong step = incremental_target_precision(target_precision);
+        if (!target_step && step > work_precision && step < ladder[next]) {
+            work_precision = step;
+            target_step = true;
+        } else {
+            work_precision = ladder[next];
+            ++next;
+            target_step = false;
         }
     }
-    deferred.insert(deferred.end(), ladder.begin(),
-                    ladder.begin() + static_cast<std::ptrdiff_t>(start));
+    deferred.insert(deferred.end(), below.begin(), below.end());
     for (const slong deferred_precision : deferred) {
         slong target_precision = 0;
         if (decide_at(deferred_precision, target_precision)) {
