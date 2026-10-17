@@ -167,8 +167,9 @@ bool incremental_prepare(IncrementalLogState& state,
 // (rows, Gram entries and the inverse all come from p-bit ball
 // arithmetic), so a radius of 2^e at `precision` reaches B = 2^b near
 // precision + e - b.  On cyclotomic_real_31_deg15, B is about 2^-305 and a
-// dependent candidate's radius about 2^-56 at 128 bits, so it decides
-// only at 512 bits, never at 256.
+// dependent candidate's radius about 2^-56 at 128 bits, so the first
+// doubling precision that decides is 512, not 256 (the target step in
+// add_independent_unit decides it at 448).
 slong incremental_decision_precision(const flint::Arb& determinant,
                                      slong places,
                                      slong degree,
@@ -358,8 +359,10 @@ bool incremental_independence(bool& independent,
     // (incremental_decision_precision), it skips the doubling precisions
     // below t and tries incremental_target_precision(t) when that lies
     // below the next doubling precision it has not tried; if that is still
-    // undecided, it goes on to that doubling precision (plain doubling),
-    // with no second target step in between.  It tries the skipped
+    // undecided, it continues as after any undecided ball: it skips the
+    // doubling precisions below the new estimate (except the last) and goes
+    // on to the next doubling precision (plain doubling), with no second
+    // target step in between.  It tries the skipped
     // doubling precisions next and the ones below the start last, so it
     // tries every precision the plain doubling loop tries.
     const auto decide_at = [&](slong work_precision,

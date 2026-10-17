@@ -1496,7 +1496,7 @@ Changed
   on the other six the published regulator ball has the same midpoint and
   a radius that differs by -5.3% to +0.2%, as with the start at the
   previous reject's precision (logarithmic embeddings are now cached at
-  other precisions).  In the ``grh`` class/unit computation of ``real_37_deg18`` dependent candidates are decided at 576
+  other precisions).  In the ``grh`` class/unit computation of ``cyclotomic_real_37_deg18`` dependent candidates are decided at 576
   bits instead of 1024, and the computation runs 7.0% fewer user-space
   instructions; ``cyclotomic_real_31_deg15`` (448 bits instead of 512)
   runs 1.9% fewer, and ``cyclotomic_32_phi16`` is unchanged.  No timing

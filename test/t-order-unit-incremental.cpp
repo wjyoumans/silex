@@ -14,6 +14,7 @@
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <vector>
 
@@ -566,6 +567,46 @@ int test_undecided_target_step_falls_back_to_doubling() {
     return 0;
 }
 
+// A candidate that starts at a reject precision between doublings and stays
+// undecided up to the cap.  The dependent candidate theta^3 after theta, with
+// the cap forced to 112 bits, starts at a reject precision of 96 bits, which
+// lies between the doubling precisions 56 and 112 of the ladder 7, 14, ...,
+// 112.  Its ball needs about 192 bits, so it is undecided at 96 and 112.  The
+// test then tries the doubling precisions below the start last, so a log
+// state exists at each of 14, 28 and 56 bits, and compact_independent, which
+// also stops at the cap, leaves the candidate undecided.
+int test_precisions_below_a_between_doubling_start_are_tried() {
+    silex::NumberField field = real_octic_field();
+    silex::Element theta(field);
+    assert(theta.gen());
+    silex::FactoredElement first(field);
+    silex::FactoredElement cube(field);
+    assert(first.push(theta, 1));
+    assert(cube.push(theta, 3));
+    silex::EmbeddingContext embeddings(field);
+
+    constexpr slong precision = 7;
+    silex::detail::IncrementalUnitContext context;
+    assert(context.define(field, precision));
+    bool changed = false;
+    assert(context.add_independent_unit(changed, first, embeddings,
+                                        precision, nullptr));
+    assert(changed);
+    context.reject_precision = 96;
+
+    PrecisionCapOverride cap(112);
+    changed = true;
+    assert(context.add_independent_unit(changed, cube, embeddings,
+                                        precision, nullptr));
+    assert(context.units.size() == 1);
+    const std::vector<slong> states = state_precisions(context);
+    for (const slong below : {14, 28, 56, 96, 112}) {
+        assert(std::find(states.begin(), states.end(), below) !=
+               states.end());
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -577,5 +618,6 @@ int main() {
     assert(test_independent_candidate_accepted_after_skip() == 0);
     assert(test_dependent_candidate_decides_at_target_step() == 0);
     assert(test_undecided_target_step_falls_back_to_doubling() == 0);
+    assert(test_precisions_below_a_between_doubling_start_are_tried() == 0);
     return 0;
 }
