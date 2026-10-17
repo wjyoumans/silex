@@ -13186,6 +13186,10 @@ struct TransactionRun {
     slong free_rank = -1;
     decltype(std::declval<const silex::OrderUnitGroup&>().regulator())
             regulator;
+    silex::ProofState relation_saturation_status =
+            silex::ProofState::not_checked;
+    slong relation_saturation_record_count = -1;
+    sflint::Fmpz class_order;
 };
 
 TransactionRun run_transaction(
@@ -13222,6 +13226,11 @@ TransactionRun run_transaction(
     if (run.ok) {
         run.free_rank = units.free_rank();
         run.regulator = units.regulator();
+        run.relation_saturation_status =
+                class_group.relation_saturation_status();
+        run.relation_saturation_record_count =
+                class_group.relation_saturation_record_count();
+        assert(class_group.order(sflint::FmpzRef(run.class_order)));
     }
     return run;
 }
@@ -13398,6 +13407,41 @@ int test_grh_validation_defers_bounded_saturation_to_extension() {
     assert(events.bounded_passes == 0);
 #else
     assert(events.deferred == 0);
+#endif
+    return 0;
+}
+
+// A bounded pass deferred behind relation extension still runs when the
+// same validation reaches index one with no relation appended since the
+// deferral, as it ran there before the deferral, so its status and
+// ell-records stay with the accepted pair.  For x^2 - x - 25000001 (corpus
+// row real_quadratic_d100000005, h = 212 = 2^2 * 53) the pass is deferred
+// at an index bound of 3 and unit refinement then gives index one; the pass
+// appends nothing and leaves one `unavailable` record per prime of h.
+int test_grh_validation_runs_deferred_saturation_before_acceptance() {
+    const std::vector<slong> quadratic = {-25000001, -1, 1};
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    DeferredSaturationEvents events;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group) |
+                    silex::diagnostics_module_bit(
+                            silex::DiagnosticsModule::class_group),
+            deferred_saturation_callback, &events);
+    const TransactionRun run = run_transaction(
+            quadratic, silex::CertificationMode::grh, 5000, 1000,
+            &diagnostics);
+    assert(run.ok && run.audit.final_result_published);
+    assert(run.audit.class_group_certification ==
+           silex::CertificationMode::grh);
+    assert(sflint::fmpz_equal_si(run.class_order, 212));
+    assert(run.relation_saturation_status ==
+           silex::ProofState::unavailable);
+    assert(run.relation_saturation_record_count == 2);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(events.deferred >= 1);
+    assert(events.bounded_passes >= 1);
 #endif
     return 0;
 }
@@ -13613,6 +13657,7 @@ int test_grh_saturation_square_tests_keep_degree_ten_lift_limit() {
 int main() {
     test_grh_validation_skips_unit_rebuild_from_unchanged_class_context();
     test_grh_validation_defers_bounded_saturation_to_extension();
+    test_grh_validation_runs_deferred_saturation_before_acceptance();
     test_compute_failure_records_validation_outcome_only_when_it_ran();
     test_grh_continuation_without_relation_progress_fails_closed();
     test_relation_refill_target_rule();

@@ -665,6 +665,7 @@ bool saturate_candidate_class_relations_with_units(
             }
             memo->deferred = true;
             memo->deferred_extension_round = memo->extension_rounds;
+            memo->deferred_relation_count = class_group.relation_count();
             ++memo->deferrals;
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::unit_group,
@@ -790,7 +791,8 @@ bool run_deferred_class_relation_saturation(
         ClassGroupContext& class_group,
         const OrderUnitGroup& units,
         const ClassGroupComputeOptions& options,
-        RelationSaturationMemo& memo) noexcept {
+        RelationSaturationMemo& memo,
+        bool before_acceptance) noexcept {
     changed = false;
     if (!memo.defer_until_extension_stalls || memo.deferral_done ||
         !memo.deferred) {
@@ -801,10 +803,17 @@ bool run_deferred_class_relation_saturation(
     const DiagnosticsContext* diagnostics =
             options.diagnostics != nullptr ? options.diagnostics
                                            : class_group.diagnostics();
-    SILEX_PROFILE_EVENT(
-            diagnostics, DiagnosticsModule::unit_group,
-            "unit_group.validation_class_relation_saturation."
-            "deferred_run_after_failed_extension");
+    if (before_acceptance) {
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::unit_group,
+                "unit_group.validation_class_relation_saturation."
+                "deferred_run_before_acceptance");
+    } else {
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::unit_group,
+                "unit_group.validation_class_relation_saturation."
+                "deferred_run_after_failed_extension");
+    }
     return saturate_candidate_class_relations_with_units(
             changed, class_group, units, options,
             flint::FmpzConstRef(memo.deferred_index_bound), false, &memo);
@@ -1411,6 +1420,39 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
 #endif
 
         if (flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) <= 0) {
+            // A bounded pass deferred behind relation extension
+            // (RelationSaturationMemo::defer_until_extension_stalls) on the
+            // relations validated here would have run before this index-one
+            // result without the deferral, and its relation_saturation_
+            // status() and ell-records stay with the accepted pair; run it
+            // now.  After any relation append since the deferral the pass's
+            // records would have been cleared, so nothing runs then.
+            RelationSaturationMemo* const saturation_memo =
+                    refresh_options.relation_saturation_memo;
+            if (requested_grh && saturation_memo != nullptr &&
+                saturation_memo->deferred &&
+                !saturation_memo->deferral_done &&
+                saturation_memo->deferred_extension_round ==
+                        saturation_memo->extension_rounds &&
+                saturation_memo->deferred_relation_count ==
+                        class_group.relation_count()) {
+                bool class_changed = false;
+                if (!run_deferred_class_relation_saturation(
+                            class_changed, class_group, units, options,
+                            *saturation_memo, true)) {
+                    summary.outcome =
+                            ValidateRefineOutcome::class_saturation_failed;
+                    return false;
+                }
+                if (class_changed) {
+                    progress_since_previous = true;
+                    summary.class_progress = true;
+                    class_progress_since_unit_refresh = true;
+                    summary.outcome =
+                            ValidateRefineOutcome::local_rank_unavailable;
+                    continue;
+                }
+            }
             if (exact_quadratic_index || requested_grh) {
                 // reference `_class_unit_group` accepts analytic index one for a
                 // GRH request and skips the later unconditional class/unit

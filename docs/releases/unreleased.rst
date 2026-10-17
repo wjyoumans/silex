@@ -1141,11 +1141,12 @@ Changed
   ``simplest_cubic_a0`` (85 relations instead of 84: the saturation relation
   is not added and one more random-product relation is used; same class
   group and units).
-  Behavior change: when validation succeeds without the deferred pass
-  having run, ``relation_saturation_status()`` reports ``not_checked``
-  where it reported ``verified`` or ``unavailable`` (seen on
-  ``simplest_cubic_a0`` and ``real_quadratic_d100000005``).  ``proven``
-  requests are unchanged.
+  When validation reaches index one with no relation appended since a
+  deferred pass, that pass runs before acceptance, so
+  ``relation_saturation_status()`` and its per-ell records are as before.
+  On ``simplest_cubic_a0`` the extension relation reaches index one before
+  the pass runs, and the status is ``not_checked`` instead of ``verified``.
+  ``proven`` requests are unchanged.
 
 - Unit-basis reduction of the stored units no longer lets their factored
   form grow without bound.  When a transform would give the stored units more

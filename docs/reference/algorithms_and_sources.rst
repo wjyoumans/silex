@@ -2776,7 +2776,13 @@ extension slice has not yet run; the pass runs once an extension slice
 has run since the deferral without lowering the index bound.  If the
 extension fails or appends no relation while a pass is deferred, Silex runs
 the deferred pass and continues if it appended relations, and otherwise
-fails as before.  The deferral is set for ``grh`` requests only; ``proven``
+fails as before.  When validation reaches index one on the same relations
+as a deferred pass (no relation appended since, for example after unit
+refinement alone), the deferred pass runs before acceptance, as it ran there
+before the deferral, so ``relation_saturation_status()`` and the per-ell
+records are the ones that pass leaves.  When an extension slice appends
+relations, the status is ``not_checked`` until a later pass, as after any
+relation append.  The deferral is set for ``grh`` requests only; ``proven``
 and ``unknown`` requests run the bounded pass at every validation as before.
 
 In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``

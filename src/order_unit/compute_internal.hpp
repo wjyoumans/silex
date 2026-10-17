@@ -704,13 +704,15 @@ struct RelationSaturationMemo {
     // deferred to the next relation-extension slice while extension keeps
     // lowering the analytic index bound.  It runs at the first pass after an
     // extension slice that did not lower the bound below the bound of the
-    // deferred pass (a stall), or when the extension itself fails
+    // deferred pass (a stall), when the extension itself fails, or before
+    // validation accepts index one on the relations of the deferred pass
     // (run_deferred_class_relation_saturation); from then on every pass runs
     // as without deferral.  The deferral only reorders the pass and the
     // extension: it never skips a pass that a stall would need, and grh
     // acceptance never rests on this saturation.
     bool defer_until_extension_stalls = false;
-    // True once a stall (or a failed extension) has run the deferred pass.
+    // True once a stall, a failed extension or an acceptance has run the
+    // deferred pass.
     bool deferral_done = false;
     // True while a deferred pass has not been run.
     bool deferred = false;
@@ -718,6 +720,12 @@ struct RelationSaturationMemo {
     // extension slice, and the slice count when they were deferred.
     flint::Fmpz deferred_index_bound;
     slong deferred_extension_round = 0;
+    // The relation count at the last deferral.  When validation reaches
+    // index one with the relations unchanged since then, the pending pass
+    // runs before acceptance, as it would have run at that deferral without
+    // the deferral (run_deferred_class_relation_saturation), so the
+    // relation_saturation_status() and ell-records it leaves are kept.
+    slong deferred_relation_count = 0;
     // Successful relation-extension slices of the class/unit loop.
     slong extension_rounds = 0;
     // Number of deferred passes, for tests.
@@ -908,15 +916,18 @@ bool saturate_candidate_class_relations_with_units(
         bool index_bound_is_exact,
         RelationSaturationMemo* memo = nullptr) noexcept;
 // Runs the bounded pass that `memo` deferred (see
-// RelationSaturationMemo::defer_until_extension_stalls) when the class/unit
-// loop's relation extension failed, and ends the deferral.  `changed` is
-// false, and nothing runs, when no pass is pending.
+// RelationSaturationMemo::defer_until_extension_stalls) and ends the
+// deferral: when the class/unit loop's relation extension failed or added
+// nothing, or (`before_acceptance`) when grh validation reaches index one
+// with the relations unchanged since the deferral.  `changed` is false, and
+// nothing runs, when no pass is pending.
 bool run_deferred_class_relation_saturation(
         bool& changed,
         ClassGroupContext& class_group,
         const OrderUnitGroup& units,
         const ClassGroupComputeOptions& options,
-        RelationSaturationMemo& memo) noexcept;
+        RelationSaturationMemo& memo,
+        bool before_acceptance = false) noexcept;
 bool complete_requested_proven_relation_saturation(
         ClassGroupContext& class_group,
         OrderUnitGroup& units,
