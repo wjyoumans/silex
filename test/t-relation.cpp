@@ -6,6 +6,7 @@
 #include <silex/relation.hpp>
 
 #include "relation/relation_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <flint/fmpq.h>
@@ -769,7 +770,7 @@ void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
             sflint::FmpzMat computed(1, base.length());
             bool computed_handled = false;
             bool computed_smooth = false;
-            assert(RelationAccess::residue_screen_row_for_testing(
+            assert(silex::detail::TestHookAccess::residue_screen_row(
                     sflint::FmpzMatRef(computed), computed_handled,
                     computed_smooth, base,
                     sflint::FmpzMatConstRef(coordinates),
@@ -994,11 +995,11 @@ int test_residue_screen_deduced_last_valuation() {
         slong computed_deduced = 0;
         bool computed_handled = false;
         bool computed_smooth = false;
-        assert(silex::detail::RelationAccess::residue_screen_row_for_testing(
+        assert(silex::detail::TestHookAccess::residue_screen_row(
                 sflint::FmpzMatRef(row), handled, smooth, base,
                 sflint::FmpzMatConstRef(coordinates),
                 sflint::FmpqConstRef(norm), true, &deduced));
-        assert(silex::detail::RelationAccess::residue_screen_row_for_testing(
+        assert(silex::detail::TestHookAccess::residue_screen_row(
                 sflint::FmpzMatRef(computed_row), computed_handled,
                 computed_smooth, base, sflint::FmpzMatConstRef(coordinates),
                 sflint::FmpqConstRef(norm), false, &computed_deduced));

@@ -28,6 +28,7 @@
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/precision_cap_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
+#include "relation/relation_internal.hpp"
 #include "sunit/sunit_internal.hpp"
 #include "zeta/zeta_internal.hpp"
 #include <silex/factor_base.hpp>
@@ -45,6 +46,28 @@ public:
     static void set_sunit_composition_overflow_at(slong n) noexcept {
         SUnitTestSeams::composition_overflow_countdown_.store(
                 n, std::memory_order_relaxed);
+    }
+
+    // The residue-screen factorization of integral coordinates with exact
+    // field norm `norm` over `base`, forwarded to the private
+    // RelationAccess member whose body uses file-local helpers of
+    // relation.cpp.  `exponents` must be 1 x base.length().  `handled` is
+    // false when the screen leaves the element to the exact fallback;
+    // otherwise `smooth` tells whether the row is a factorization.  With
+    // `deduce_last_hit_valuation` false every residue-hit valuation is
+    // computed, none is deduced from the norm; `deduced_hit_valuations`, if
+    // given, receives the number deduced.  Trusts the supplied norm.
+    static bool residue_screen_row(flint::FmpzMatRef exponents,
+                                   bool& handled,
+                                   bool& smooth,
+                                   const FactorBase& base,
+                                   flint::FmpzMatConstRef integral_coordinates,
+                                   flint::FmpqConstRef norm,
+                                   bool deduce_last_hit_valuation,
+                                   slong* deduced_hit_valuations) noexcept {
+        return RelationAccess::residue_screen_row(
+                exponents, handled, smooth, base, integral_coordinates, norm,
+                deduce_last_hit_valuation, deduced_hit_valuations);
     }
 
     // Prime-ideal test entries, forwarded to private PrimeIdealAccess

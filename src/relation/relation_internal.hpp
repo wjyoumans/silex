@@ -11,6 +11,8 @@
 
 namespace silex::detail {
 
+class TestHookAccess;
+
 // Noninstalled relation hooks for class-group relation search and tests.
 //
 // Every entry point here trusts caller-supplied data: an exact field norm,
@@ -74,6 +76,9 @@ public:
     static flint::FmpzMatConstRef pending_relation_exponents_ref(
             const Relation& relation) noexcept;
 
+private:
+    friend class TestHookAccess;
+
     // Test hook: the residue-screen factorization of integral coordinates
     // with exact field norm `norm` over `base`.  `exponents` must be
     // 1 x base.length().  `handled` is false when the screen leaves the
@@ -83,7 +88,7 @@ public:
     // computed, none is deduced from the norm; when
     // `deduced_hit_valuations` is given it receives the number of
     // valuations deduced.  For tests only.
-    static bool residue_screen_row_for_testing(
+    static bool residue_screen_row(
             flint::FmpzMatRef exponents,
             bool& handled,
             bool& smooth,

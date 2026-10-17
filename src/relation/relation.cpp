@@ -1445,7 +1445,7 @@ bool RelationAccess::factor_relation_row_from_integral_coordinates_and_norm(
     return true;
 }
 
-bool RelationAccess::residue_screen_row_for_testing(
+bool RelationAccess::residue_screen_row(
         flint::FmpzMatRef exponents,
         bool& handled,
         bool& smooth,
