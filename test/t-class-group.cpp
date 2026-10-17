@@ -2267,6 +2267,122 @@ int test_deferred_large_prime_match_cubic() {
     return 0;
 }
 
+// Two deferred partials above the same split rational prime q but over
+// different degree-one primes must not pair: the match compares the large
+// primes, not q alone.  x^3 - 12 is the field of the test above; 13 splits
+// in it.
+int test_deferred_large_prime_distinct_primes_cubic() {
+    using SearchAccess = silex::detail::ClassGroupRelationSearchAccess;
+    silex::NumberField field = cubic_field(0, -12);
+    silex::Order equation_order;
+    silex::Order maximal_order(field);
+    equation_order = silex::test::equation_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    assert(!maximal_order.is_equation_order());
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 10));
+    silex::ClassGroupContext context(maximal_order);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+
+    sflint::FmpzMat coordinates(1, maximal_order.degree());
+    sflint::FmpzMat first_coordinates(1, maximal_order.degree());
+    sflint::FmpzMat second_coordinates(1, maximal_order.degree());
+    silex::OrderElement order_element(maximal_order);
+    silex::Element element(field);
+    sflint::Fmpq norm;
+    sflint::FmpzMat row(1, base->length());
+    silex::PrimeIdeal prime(maximal_order);
+    silex::Ideal first_ideal(maximal_order);
+    silex::Ideal ideal(maximal_order);
+    silex::detail::OneLargePrimeFactorStatus status =
+            silex::detail::OneLargePrimeFactorStatus::no_candidate;
+    silex::detail::OneLargePrimeDeferral deferral;
+
+    // Find two generators whose single large prime is deferred, lies above
+    // q = 13, and differs between them.
+    bool have_first = false;
+    bool have_second = false;
+    for (slong a = -12; a <= 12 && !have_second; ++a) {
+        for (slong b = -12; b <= 12 && !have_second; ++b) {
+            for (slong c = 1; c <= 12 && !have_second; ++c) {
+                sflint::fmpz_mat_zero(sflint::FmpzMatRef(coordinates));
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0),
+                                    a);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 1),
+                                    b);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 2),
+                                    c);
+                assert(order_element.set_coordinates(
+                        sflint::FmpzMatConstRef(coordinates)));
+                assert(order_element.get_element(element));
+                assert(element.norm(sflint::FmpqRef(norm)));
+                if (!silex::detail::
+                            order_element_factor_over_base_with_one_large_prime(
+                                    status, sflint::FmpzMatRef(row), prime,
+                                    order_element, sflint::FmpqConstRef(norm),
+                                    *base, nullptr, &deferral) ||
+                    status != silex::detail::OneLargePrimeFactorStatus::
+                                      found_deferred ||
+                    fmpz_cmp_si(deferral.rational_prime.raw(), 13) != 0) {
+                    continue;
+                }
+                assert(silex::detail::order_element_deferred_large_prime(
+                        prime, order_element,
+                        sflint::FmpzConstRef(deferral.rational_prime),
+                        deferral.norm_valuation, *base));
+                assert(prime.get_ideal(ideal));
+                if (!have_first) {
+                    assert(prime.get_ideal(first_ideal));
+                    sflint::fmpz_mat_set(
+                            sflint::FmpzMatRef(first_coordinates),
+                            sflint::FmpzMatConstRef(coordinates));
+                    have_first = true;
+                } else if (!ideal.equal(first_ideal)) {
+                    sflint::fmpz_mat_set(
+                            sflint::FmpzMatRef(second_coordinates),
+                            sflint::FmpzMatConstRef(coordinates));
+                    have_second = true;
+                }
+            }
+        }
+    }
+    assert(have_first);
+    assert(have_second);
+
+    auto append = [&](const sflint::FmpzMat& coords) {
+        assert(order_element.set_coordinates(
+                sflint::FmpzMatConstRef(coords)));
+        assert(order_element.get_element(element));
+        assert(element.norm(sflint::FmpqRef(norm)));
+        bool throttle = false;
+        assert(SearchAccess::try_append_integral_generator_relation(
+                context, throttle, element, sflint::FmpzMatConstRef(coords),
+                sflint::FmpqConstRef(norm), nullptr,
+                silex::ClassGroupRelationSource::Search));
+        assert(!throttle);
+    };
+    append(first_coordinates);
+    const std::vector<silex::detail::PartialRelationEntry>* partials =
+            SearchAccess::partial_relations(context);
+    assert(partials != nullptr);
+    assert(partials->size() == 1);
+    const slong matches_before = context.relation_source_count(
+            silex::ClassGroupRelationSource::LargePrimeMatch);
+    const slong skipped_before = context.skipped_dependent_relation_count();
+    append(second_coordinates);
+    partials = SearchAccess::partial_relations(context);
+    assert(partials != nullptr);
+    assert(partials->size() == 2);
+    assert(context.relation_source_count(
+                   silex::ClassGroupRelationSource::LargePrimeMatch) ==
+           matches_before);
+    assert(context.skipped_dependent_relation_count() == skipped_before);
+    return 0;
+}
+
 // The exact-valuation branch of the direct large-prime partial-relation
 // row reuses the p-adic valuation of the element norm.  Its rows must match
 // the per-prime element valuations of the public PrimeIdeal::valuation
@@ -7889,6 +8005,7 @@ int main() {
     test_one_large_prime_match_cubic();
     test_large_prime_match_compares_prime_ideals_cubic();
     test_deferred_large_prime_match_cubic();
+    test_deferred_large_prime_distinct_primes_cubic();
     test_direct_partial_row_exact_valuation_cubic();
     test_direct_partial_row_deduced_last_valuation();
     test_compute_candidate_post_finite_refinement_cubic();

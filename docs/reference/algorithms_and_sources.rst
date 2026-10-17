@@ -731,9 +731,10 @@ and were skipped before.  The primes that are built, and their order, are
 those of ``decompose_prime``.
 
 On a maximal order that is not the equation order, the class-group search
-does not build the large prime at all when what is left of ``v_q(N(alpha))``
+does not build the large prime when the partial is found, if what is left of ``v_q(N(alpha))``
 after the factor-base valuations above ``q`` is 1.  ``|N(alpha)| =
-N(alpha O_K)`` and ``N(P) = q^f`` make that remainder the sum of
+N(alpha O_K)`` and ``N(P) = q^f`` (Cohen, GTM 138, Section 4.8, as in the
+residue screen below; PARI ``buch2.c:divide_p_elt``) make that remainder the sum of
 ``f(P) v_P(alpha)`` over the primes ``P`` above ``q`` outside the factor
 base, so a remainder of 1 means exactly one such prime, of residue degree 1
 and valuation 1, with norm ``q``.  The bound check needs only ``q``.  The
