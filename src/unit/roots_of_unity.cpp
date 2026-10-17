@@ -502,7 +502,7 @@ bool defining_polynomial_is_monic_integral(const NumberField& field) noexcept {
 
 // A primitive p^e-th root of unity in the monic integral field `field`
 // (p^e >= 3).  The exact square- and power-root chain is tried first; when it
-// fails or is unsupported (p >= 5, degree 10 or more), the Hensel root
+// fails or is unsupported (p >= 5), the Hensel root
 // search for Phi_(p^e) of reference `_torsion_units_gen` decides.  Both
 // results are certified by exact order in the caller.
 bool prime_power_component(Element& out,

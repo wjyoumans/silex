@@ -160,7 +160,13 @@ Changed
   ``cyclotomic_real_136_deg32`` in ``grh`` mode, 24% on
   ``cyclotomic_25_phi20`` in ``proven`` mode).  Published results are
   unchanged on every ``grh`` and ``proven`` corpus row that finishes within
-  300 seconds.  See "Element powers and roots" in
+  300 seconds.  The public unit-saturation calls
+  ``OrderUnitGroup::saturate_row``, ``OrderUnitGroup::saturate_local_once``
+  and ``OrderUnitGroup::saturate_bounded`` are not inside either limited
+  scope, so they now lift in degree 10 and higher.  A true ``ell``-th power
+  row that is not a formal power is now saturated with the verified root,
+  where ``saturate_row`` used to fail because the root was undecided.  See
+  "Element powers and roots" in
   :doc:`../reference/algorithms_and_sources`.
 
 - When the relation search factors an integral relation generator ``g`` through
@@ -912,10 +918,10 @@ Changed
   Before the Hensel lift, the residue of the input is tested at every prime
   above the chosen prime and above up to 40 further unramified primes; a
   residue that is not an ``n``-th power proves the input is not an ``n``-th
-  power.  In degree 10 and higher, where there is no Hensel lift, the
-  same residue test runs at up to 40 unramified primes, so ``is_power`` and
-  ``is_square`` there also return a definite ``false`` when a residue
-  disproves the input.  Inputs with no such residue are handled as before,
+  power.  In degree 10 and higher the
+  same residue test runs at up to 40 unramified primes before the Hensel
+  lift, so ``is_power`` and ``is_square`` there also return a definite
+  ``false`` when a residue disproves the input.  Inputs with no such residue are handled as before,
   and ``true`` answers and their roots are unchanged.  See "Element powers
   and roots" in :doc:`../reference/algorithms_and_sources`.
 

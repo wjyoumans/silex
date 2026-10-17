@@ -436,6 +436,10 @@ consumers keep that limit (below).
   factors of further good primes are compared, keeping the factor with the
   fewest residue roots and then the largest residue degree, until one does
   not improve the choice.  The root is lifted at the kept factor.
+  Two differences from Hecke are sound.  Hecke starts the prime search
+  above ``deg f = n`` (``p = degree(f)+1``, ``Hensel.jl`` line 83) and has
+  no cap on the number of primes.  Silex starts at 5 and stops after 256
+  primes, leaving the answer unsupported.
 * Hecke skips a prime when the reduction of ``y^n - a`` is not squarefree
   (``Hensel.jl`` lines 153-155).  Since ``y^n - a`` is inseparable modulo
   ``p`` whenever ``p | n``, Silex skips every prime ``p | n`` for lifting
@@ -2678,8 +2682,10 @@ homomorphism and ``f`` is monic integral.  The screen walks the same primes
 with the same admissibility as the scan of the expanded ``r``.  At a prime
 where some factor is not ``p``-integral, it stops without deciding, since
 the admissibility of ``r`` there is unknown.  It therefore answers ``false``
-only where the scan of the expanded leftover would.  There, no other step of
-``Element::is_power`` can answer "not a power", so every answer is
+only where the scan of the expanded leftover would.  There, the only other step of
+``Element::is_power`` that answers "not a power" is the residue disproof
+of the Hensel prime search, which is also an exact residue disproof, and
+a non-power cannot verify, so every answer is
 unchanged, except that a non-power the screen decides now returns "not a
 power" where expanding the leftover would have failed for lack of
 resources.  When it decides nothing, the leftover is expanded and tested as

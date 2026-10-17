@@ -4462,10 +4462,12 @@ bool pure_power_hensel_root(bool& is_power,
         noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "element.power_hensel_root");
-    // Private port of reference `_roots_hensel(y^n - a, ispure=true,
-    // is_normal=true)` for monic integral fields.  Like the reference
-    // (Hensel.jl lines 57-232) it has no degree limit; from degree 10 on only
-    // the prime choice changes (hensel_prime_choice_stabilized).  The result
+    // Private port of reference `_roots_hensel(y^n - a, ispure=true)` for
+    // monic integral fields (the reference's `is_power` passes
+    // `is_normal=true` only for n = 2; the rule "fewer than deg f residue
+    // roots means no root", Hensel.jl lines 163-165, is not used).  Like the
+    // reference (Hensel.jl lines 57-232) it has no degree limit; from degree
+    // 10 on only the prime choice changes (hensel_prime_choice_stabilized).  The result
     // is published only after exact verification; unported cases remain
     // unsupported.
     const NumberField* parent = input.parent();
