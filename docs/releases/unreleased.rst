@@ -186,6 +186,19 @@ Changed
   ``cyclotomic_41_phi40`` took 4940.03 ms instead of 5025.96 ms (ratio 0.983),
   with identical outputs.  See :doc:`../reference/algorithms_and_sources`.
 
+- The finite-ideal T2 enumeration setup computes the Arb Gram matrix of a
+  reduced ideal basis once per unordered pair of rows instead of for both
+  triangles: the lower triangle is summed as before and copied into the upper
+  one.  The lower triangle, the diagonal and every entry midpoint are
+  unchanged, and the Cholesky factorization reads only the lower triangle, so
+  the enumeration data and every published result are unchanged; published
+  outputs are identical on the tested ``proven`` corpus rows.  On a busy
+  machine the per-ideal setup of the ``proven`` factor-base honesty scan of
+  the 23rd cyclotomic field took about 14% less time, and the ``proven``
+  class/unit computation of the field defined by ``x^12 + 7`` took about 5%
+  less CPU time (medians of alternating runs); no controlled measurement has
+  been made.
+
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when
   that basis is equal to the one of the previous publish, as it is when new
