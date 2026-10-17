@@ -169,6 +169,18 @@ Changed
   "Element powers and roots" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The Taylor stepping of the incomplete gamma values in the real-quadratic
+  ``L(1, chi_D)`` evaluation (the sums used by the proven class-unit
+  computation of real quadratic fields) now bounds each block's truncation
+  with Johansson's Lemma 5 (arXiv:2110.10583, section 3.2.2) with a power of
+  two radius ``R`` below the anchor, as FLINT's ``arb_hypgeom`` stepping does,
+  instead of the earlier geometric bound.  The block length, the number of
+  terms (up to 48) and the choice between a block and a direct evaluation come
+  from a measured cost model.  Every value remains a rigorous enclosure;
+  published outputs and certification are unchanged on the tested ``proven``
+  corpus rows, and the radii of the intermediate balls differ.  See "Number fields, orders, and ideals" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - When the relation search factors an integral relation generator ``g`` through
   its principal ideal ``g O``, it computes the HNF of ``g O`` modulo the norm
   ``|N(g)|`` it already knows, with FLINT's ``fmpz_mat_hnf_modular``, instead of a full

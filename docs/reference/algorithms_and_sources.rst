@@ -1686,26 +1686,59 @@ absolutely convergent for ``0 <= w < z``) gives, for ``0 <= v < z`` (any
     p_m = sum_{j=0..m} |binom(a - 1, j)| z^(-j) / (m - j)!,
 
 because ``binom(a - 1, j)`` is ``(-1)^j`` for ``a = 0``, ``(-1)^j binom(2j, j)
-/ 4^j`` for ``a = 1/2``, and zero for ``j >= 1`` when ``a = 1``.  In all three
-cases ``|binom(a - 1, j)| <= 1``, so with ``rho = max(1, 1 / z)`` (``rho = 1``
-for ``a = 1``) one has ``0 <= p_m < e rho^m``, and for ``rho v < 1`` (which
-gives ``v < z`` when ``a < 1``) the terms with ``m >= M`` sum to at most
-``|K| e v (rho v)^M / (1 - rho v)`` (using ``1 / (m + 1) <= 1`` and the
-geometric series).  A block anchored at ``n0`` covers ``n0
-<= n <= n0 + B``, so ``v <= v_max = (pi / q) B (2 n0 + B)``.  Within it each
-value is the anchor ball plus the degree-``M`` polynomial in ``-v`` evaluated
-in ball arithmetic, with the truncation bound at ``v_max`` added to the
-radius; that bound is computed in upward-rounded ``mag`` arithmetic from an
-upper bound of ``|K|``, of ``v_max`` and of ``rho``, and a block is used only
-if these bounds give ``rho v_max < 1``.  The first anchor is a direct
-evaluation and each later anchor is the stepped value at the end of the
-previous block, so by induction every value is a ball containing the exact
-``Gamma(a, z_n)``.  ``B`` (so that ``rho v_max`` is about ``2^-10``), ``M``,
-and the extra precision carried by the anchors are chosen in floating point
-and affect only the width and the cost, not the validity, of the enclosure;
-where no block of at least four steps fits, or a block would need more than
-32 terms (as at 512-bit precision, where stepping was measured not to pay),
-the value is evaluated directly.
+/ 4^j`` for ``a = 1/2``, and zero for ``j >= 1`` when ``a = 1``.  This is the
+Taylor series ``sum_k c_k(z) v^k`` of ``Gamma(a, z + v)`` at ``z``.  Its
+truncation is bounded by F. Johansson, "Rapid computation of special values
+of Dirichlet L-functions", arXiv:2110.10583v1 (2021), section 3.2.2, Lemma 5
+with ``j = 0``: for ``a`` complex, ``u > 0``, ``n >= 1`` and ``0 < R < u``,
+``|c_n(u)| <= M_R(u) / (n R^(n-1))`` with ``M_R(u) = max_{|t-u|=R}
+|t^(a-1) exp(-t)|``, and so for ``N >= 1`` and ``|x| < R``, with ``C = |x| /
+R``, ``|sum_{n >= N} c_n(u) x^n| <= R M_R(u) C^N / (N (1 - C))``.  As in
+FLINT ``arb_hypgeom/gamma_upper_fmpq_step_bsplit.c``, ``M_R`` is bounded by
+``(u - R)^(a-1) exp(R - u)``, since on ``|t - u| = R < u`` one has
+``Re t >= u - R > 0`` and ``a - 1 <= 0``.  A block keeps the terms with
+``n = m + 1 <= M``, so its error is the tail from ``N = M + 1``, with ``R``
+an exact power of two.  A block anchored at ``n0`` covers ``n0 <= n <= n0 +
+B``, so ``v <= v_max = (pi / q) B (2 n0 + B)``.  Within it each value is the
+anchor ball plus the degree-``M`` polynomial in ``-v`` evaluated in ball
+arithmetic, with the bound at ``v_max`` added to the radius; the bound
+increases with ``|x|``, so it covers every value of the block.  It is
+computed in upward-rounded ``mag`` arithmetic from an upper bound of
+``v_max``, the exact ``R`` and an upper bound of ``(z_{n0} - R)^(a-1)
+exp(R - z_{n0})``.  A block is used only after checking ``R < z_{n0}``
+against a lower bound of ``z_{n0}`` and ``v_max < R`` against an upper bound
+of ``v_max``, so the lemma's hypotheses hold for the exact values, including
+for ``a = 1`` (where ``Gamma(1, .)`` is entire but the stepper still never
+uses ``R >= z_{n0}``).  The first anchor is a direct evaluation and each
+later anchor is the stepped value at the end of the previous block, so by
+induction every value is a ball containing the exact ``Gamma(a, z_n)``.
+
+The block plan is chosen in floating point and affects only the width and the
+cost, not the validity, of the enclosure.  ``R`` is a power of two below
+``z``, as in FLINT ``arb_hypgeom_gamma_upper_taylor_choose``.  For each
+number of terms ``M`` up to a cap of 48, the longest ``B`` for which some
+such ``R`` meets the anchor tolerance with ``C <= 1/2`` gives an estimated
+cost per value, and the ``M`` of least cost is kept; for its ``B``, ``R`` is
+the power of two that needs the fewest terms, with ``M`` chosen as in FLINT
+``mag_geom_choose_N``.  The anchors carry extra guard bits (an estimate of
+the binary length of the number of chained anchors) and the coefficients
+carry extra bits for the cancellation in the Horner sum, which also affect
+only the width.  Costs are in units of one Horner step (an ``arb_mul`` and
+an ``arb_add``, about 35 to 70 ns from 64 to 512 bits).  A block costs 64
+(setup) plus ``M (M + 1) / 2`` for its coefficients, and each value in it
+``M + 4``.  A block is used only when that cost per value is below the
+estimated cost of a direct evaluation, a lower envelope of FLINT timings at
+64 to 512 bits: about 8 for ``exp(-z)`` (``a = 1``), ``50 + 4 z`` for
+``sqrt(pi) erfc(sqrt(z))`` (``a = 1/2``) and ``100 + 30 z`` for ``E_1(z)``
+(``a = 0``), dropping to the constant once FLINT can use the asymptotic
+expansion.  These constants, the cap of 48 terms (caps from 32 to 96 were
+timed on ``D = 31333`` at the precision of its proven class-unit
+computation, and 48 was the fastest), and the minimum block of four steps
+are measured speed thresholds, not proof parameters: they decide only where
+blocks are used.  Without the cost test, cheap direct evaluations
+(``exp(-z)``, and ``erfc`` at small ``|D|``) were measured to get slower with
+stepping.  An index where even the shortest block would need more than the
+cap is evaluated directly.
 
 When the ``L``-value ball is not finite and positive, the quadratic route
 falls back to Belabas--Friedman, and the value is then GRH-conditional like
