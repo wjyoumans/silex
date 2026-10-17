@@ -4,8 +4,9 @@
 // exact integer Minkowski form with 2^r2.
 //
 // The pinned values were computed independently of Silex: Satz 2 evaluated
-// with mpmath at 60 digits, and the field discriminants and signatures with
-// an independent computer algebra system.
+// with mpmath at 60 digits (degree above 20: at 80 digits by
+// test/zimmert_satz2_oracle.py), and the field discriminants and signatures
+// with an independent computer algebra system.
 
 #include <silex/factor_base.hpp>
 #include <silex/flint/arb.hpp>
@@ -57,6 +58,35 @@ constexpr ZimmertRow kZimmertRows[] = {
     {20, 0, "2309"},
     {0, 9, "20716959"},
     {1, 9, "4405574"},};
+
+// Zimmert's bound alone in degree above 20 at |d| = 10^e, with the gamma
+// (hundredths) it uses: test/zimmert_satz2_oracle.py --bounds (mpmath, 80
+// digits; gamma maximises R over k/100, 1 <= k <= 300).  Degrees 21 to 64
+// take gamma from the generated table, 65 and above from the search.
+struct ZimmertHighRow {
+    slong r1;
+    slong r2;
+    ulong exponent;
+    ulong gamma_hundredths;
+    const char* bound;
+};
+
+constexpr ZimmertHighRow kZimmertHighRows[] = {
+    {21, 0, 56, 34, "4461816526040420"},
+    {1, 10, 50, 44, "3632555759654437"},
+    {0, 11, 50, 44, "1428351254775753"},
+    {0, 12, 52, 41, "1144949698937169"},
+    {32, 0, 72, 27, "4145294854867151"},
+    {0, 16, 62, 35, "3954732912154843"},
+    {0, 20, 70, 31, "1113085869162007"},
+    {64, 0, 120, 18, "1838736847234003"},
+    {0, 32, 98, 24, "1185359534516218"},
+    {65, 0, 122, 18, "3086360646852981"},
+    {1, 32, 100, 23, "2080786071392452"},
+    {81, 0, 146, 16, "1047561253645817"},
+    {100, 0, 176, 14, "1183658781616385"},
+    {0, 50, 142, 18, "4135658928221791"},
+};
 
 // Zimmert 1981, Tabelle 3 (p. 377), every row with 3 <= n <= 20: the printed
 // gamma (hundredths) and the printed value digits * 10^exponent of
@@ -324,7 +354,7 @@ constexpr FieldRow kFieldRows[] = {
      "1561", "13"},
     {"cyclotomic_23_phi22", 0, 11,
      "39471584120695485887249589623",
-     "1339491139", "9324407"},
+     "1339491139", "28378"},
     {"cyclotomic_24_phi8", 0, 4,
      "5308416",
      "89", "6"},
@@ -345,13 +375,13 @@ constexpr FieldRow kFieldRows[] = {
      "13613353", "999"},
     {"cyclotomic_35_phi24", 0, 12,
      "304383340063522342681884765625",
-     "1051250599", "4658733"},
+     "1051250599", "6317"},
     {"cyclotomic_36_phi12", 0, 6,
      "1586874322944",
      "4332", "36"},
     {"cyclotomic_39_phi24", 0, 12,
      "1706902865139206151939937338729",
-     "2489431731", "11032190"},
+     "2489431731", "14959"},
     {"cyclotomic_40_phi16", 0, 8,
      "1048576000000000000",
      "297331", "245"},
@@ -360,38 +390,38 @@ constexpr FieldRow kFieldRows[] = {
      "57366557", "4210"},
     {"cyclotomic_45_phi24", 0, 12,
      "572565594852444156646728515625",
-     "1441811354", "6389545"},
+     "1441811354", "8664"},
     {"cyclotomic_48_phi16", 0, 8,
      "1846757322198614016",
      "394589", "325"},
     {"cyclotomic_52_phi24", 0, 12,
      "53885714612646242347927893704704",
-     "13987259763", "61986072"},
+     "13987259763", "84048"},
     {"cyclotomic_56_phi24", 0, 12,
      "22459526297810799636782730182656",
-     "9030173885", "40018204"},
+     "9030173885", "54261"},
     {"cyclotomic_60_phi16", 0, 8,
      "104976000000000000",
      "94078", "78"},
     {"cyclotomic_72_phi24", 0, 12,
      "42247883974617233597120303333376",
-     "12385065221", "54885772"},
+     "12385065221", "74420"},
     {"cyclotomic_84_phi24", 0, 12,
      "711435861303500483618465120256",
-     "1607176944", "7122381"},
+     "1607176944", "9658"},
     {"cyclotomic_51_phi32", 0, 16,
      "352701833122210710593389803720131611763844129",
-     "221593098346526", "161301422505"},
+     "221593098346526", "7427130"},
     {"cyclotomic_64_phi32", 0, 16,
      "1461501637330902918203684832716283019655932542976",
-     "14264351252571977", "10383266289959"},
+     "14264351252571977", "478097873"},
     {"cyclotomic_37_phi36", 0, 18,
      "7710105884424969623139759010953858981831553019262380893",
-     "2545160735010903888", "750857335698544"},
+     "2545160735010903888", "5952820917"},
     {"cyclotomic_41_phi40", 0, 20,
      "791717805254439023624865699561776475898803884688668051353443"
          "161",
-     "1991271758539031907701", "238085525850535145"},
+     "1991271758539031907701", "313194318666"},
     {"cyclotomic_real_23_deg11", 11, 0,
      "41426511213649",
      "901", "25"},
@@ -412,12 +442,12 @@ constexpr FieldRow kFieldRows[] = {
      "881830", "1174"},
     {"cyclotomic_real_136_deg32", 32, 0,
      "151142765320815856472639544599622796222554813389533609984",
-     "2213431686212152", "2213431686212152"},
+     "2213431686212152", "50962311"},
     {"cyclotomic_real_163_deg81", 81, 0,
      "944079032563526398867950075336198896160191313866593600362194"
          "402467918886055306297936965237879312325253718038737301375553"
          "113182090904662045425093257516971382960144678736277019201",
-     "4607129166135942287226553243039933095298503353984207219", "4607129166135942287226553243039933095298503353984207219"},
+     "4607129166135942287226553243039933095298503353984207219", "3218722996420627348246212878036"},
     {"pure_x3_minus_6", 1, 1,
      "972",
      "15", "9"},
@@ -594,10 +624,9 @@ int test_not_above_former_bound() {
                     return 1;
                 }
             }
-            // For large |d| the bound is strictly smaller whenever a
-            // sharper constant applies: Zimmert's bound up to degree 20,
-            // and (4/pi)^r2 < 2^r2 once r2 > 0.
-            if (degree <= 20 || r2 > 0) {
+            // For large |d| the bound is strictly smaller: Zimmert's bound
+            // applies in every degree.
+            {
                 if (!set_decimal(abs_discriminant, discriminants[6]) ||
                     !silex::detail::generation_bound(
                             sflint::FmpzRef(bound),
@@ -665,6 +694,130 @@ int test_zimmert_twin_class_table3() {
         arb_add_ui(edge.raw(), edge.raw(), 1, 256);
         if (arb_lt(value.raw(), edge.raw()) == 0) {
             return 1;
+        }
+    }
+    return 0;
+}
+
+int test_zimmert_high_degree_pinned_values() {
+    sflint::Fmpz abs_discriminant;
+    sflint::Fmpz bound;
+    sflint::Fmpz combined;
+    sflint::Fmpz expected;
+    for (const ZimmertHighRow& row : kZimmertHighRows) {
+        fmpz_ui_pow_ui(abs_discriminant.raw(), 10, row.exponent);
+        if (silex::detail::zimmert_satz2_gamma_hundredths(row.r1, row.r2) !=
+                    row.gamma_hundredths ||
+            !set_decimal(expected, row.bound) ||
+            !silex::detail::zimmert_generation_bound(
+                    sflint::FmpzRef(bound),
+                    sflint::FmpzConstRef(abs_discriminant), row.r1, row.r2) ||
+            !fmpz_equal(bound.raw(), expected.raw())) {
+            return 1;
+        }
+        // Above degree 20 Satz 2 is far below both Minkowski forms, so it
+        // is the combined bound.
+        if (!silex::detail::generation_bound(
+                    sflint::FmpzRef(combined),
+                    sflint::FmpzConstRef(abs_discriminant), row.r1, row.r2) ||
+            !fmpz_equal(combined.raw(), expected.raw())) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Zimmert 1981, Tabelle 1 (p. 368), the rows with n = 20 and n = 100: the
+// printed gamma (hundredths) and the printed value digits * 10^exponent of
+// d^(1/2) / N(a) = exp(R), rounded down to four digits.  Silex's enclosure
+// of exp(R) at that gamma must lie in [printed, printed + 10^exponent), and
+// Silex's choice of gamma must be the printed one.
+constexpr TwinTableRow kZimmertTable1Rows[] = {
+    {20, 0, 36, 4332, 8},
+    {0, 10, 46, 5736, 5},
+    {100, 0, 14, 8448, 69},
+    {0, 50, 18, 2417, 52},
+};
+
+int test_zimmert_table1() {
+    sflint::Arb constant;
+    sflint::Arb value;
+    sflint::Arb edge;
+    for (const TwinTableRow& row : kZimmertTable1Rows) {
+        if (silex::detail::zimmert_satz2_gamma_hundredths(row.r1, row.r2) !=
+                    row.gamma_hundredths ||
+            !silex::detail::zimmert_satz2_log_lower_bound(
+                    sflint::ArbRef(constant), row.r1, row.r2,
+                    row.gamma_hundredths)) {
+            return 1;
+        }
+        arb_exp(value.raw(), constant.raw(), 256);
+        scale_by_power_of_ten(value, row.exponent);
+        arb_set_ui(edge.raw(), row.digits);
+        if (arb_ge(value.raw(), edge.raw()) == 0) {
+            return 1;
+        }
+        arb_add_ui(edge.raw(), edge.raw(), 1, 256);
+        if (arb_lt(value.raw(), edge.raw()) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Midpoint of the Satz 2 enclosure at gamma = k/100; false if k is outside
+// the search grid or the enclosure fails.
+bool satz2_midpoint(sflint::Arf& out, slong r1, slong r2, ulong k) noexcept {
+    sflint::Arb value;
+    if (k == 0 || k > 300 ||
+        !silex::detail::zimmert_satz2_log_lower_bound(sflint::ArbRef(value),
+                                                      r1, r2, k)) {
+        return false;
+    }
+    arf_set(out.raw(), arb_midref(value.raw()));
+    return true;
+}
+
+// The gamma of Satz 2: the hand-checked table (n <= 20) and the generated
+// table (21 <= n <= 64) agree with the search, and the search is used above.
+// The search is run in full for every n <= 20 and for sample degrees in the
+// generated range; every other generated entry k is checked to be the grid
+// argmax locally (midpoint at k above that at k - 1 and not below that at
+// k + 1).  The whole generated table also equals the independent mpmath
+// argmax of test/zimmert_satz2_oracle.py --gammas 64 --check.
+int test_zimmert_gamma_choice() {
+    sflint::Arf here;
+    sflint::Arf neighbour;
+    for (slong degree = 3; degree <= 66; ++degree) {
+        const bool full = degree <= 20 || degree == 21 || degree == 22 ||
+                          degree == 43 || degree >= 64;
+        for (slong r2 = 0; 2 * r2 <= degree; ++r2) {
+            const slong r1 = degree - 2 * r2;
+            const ulong gamma =
+                    silex::detail::zimmert_satz2_gamma_hundredths(r1, r2);
+            if (gamma == 0 || gamma > 300) {
+                return 1;
+            }
+            if (full) {
+                if (silex::detail::zimmert_satz2_gamma_search(r1, r2) !=
+                    gamma) {
+                    return 1;
+                }
+                continue;
+            }
+            if (!satz2_midpoint(here, r1, r2, gamma)) {
+                return 1;
+            }
+            if (gamma > 1 &&
+                (!satz2_midpoint(neighbour, r1, r2, gamma - 1) ||
+                 arf_cmp(here.raw(), neighbour.raw()) <= 0)) {
+                return 1;
+            }
+            if (gamma < 300 &&
+                (!satz2_midpoint(neighbour, r1, r2, gamma + 1) ||
+                 arf_cmp(here.raw(), neighbour.raw()) < 0)) {
+                return 1;
+            }
         }
     }
     return 0;
@@ -970,13 +1123,23 @@ int test_rejected_inputs_preserve_output() {
             return 1;
         }
     }
-    // Zimmert's bound is tabulated only up to degree 20.
-    if (silex::detail::zimmert_generation_bound(
-                sflint::FmpzRef(bound),
-                sflint::FmpzConstRef(abs_discriminant), 21, 0) ||
-        silex::detail::zimmert_generation_bound(
-                sflint::FmpzRef(bound),
-                sflint::FmpzConstRef(abs_discriminant), 1, 10)) {
+    // The gamma of Satz 2 and its enclosure reject the same signatures.
+    sflint::Arb log_lower;
+    arb_set_si(log_lower.raw(), 7);
+    for (const auto& signature : rejected) {
+        if (silex::detail::zimmert_satz2_gamma_hundredths(signature[0],
+                                                         signature[1]) != 0 ||
+            silex::detail::zimmert_satz2_gamma_search(signature[0],
+                                                      signature[1]) != 0 ||
+            silex::detail::zimmert_satz2_log_lower_bound(
+                    sflint::ArbRef(log_lower), signature[0], signature[1],
+                    50)) {
+            return 1;
+        }
+    }
+    if (silex::detail::zimmert_satz2_log_lower_bound(
+                sflint::ArbRef(log_lower), 3, 0, 0) ||
+        arb_equal_si(log_lower.raw(), 7) == 0) {
         return 1;
     }
     fmpz_zero(abs_discriminant.raw());
@@ -1103,6 +1266,9 @@ int test_proven_generation_requirement() {
 int main() {
     assert(test_not_above_former_bound() == 0);
     assert(test_zimmert_pinned_values() == 0);
+    assert(test_zimmert_high_degree_pinned_values() == 0);
+    assert(test_zimmert_table1() == 0);
+    assert(test_zimmert_gamma_choice() == 0);
     assert(test_field_pinned_values() == 0);
     assert(test_rejected_inputs_preserve_output() == 0);
     assert(test_zimmert_twin_class_table3() == 0);

@@ -353,6 +353,14 @@ if(SILEX_BUILD_TESTS)
     target_include_directories(silex-zimmert-twin-class-table PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(silex-zimmert-twin-class-table)
+
+    # Offline generator of src/factor_base/zimmert_gamma_table.inc.
+    add_executable(silex-zimmert-gamma-table
+        tools/zimmert_gamma_table.cpp)
+    target_link_libraries(silex-zimmert-gamma-table PRIVATE Silex::silex)
+    target_include_directories(silex-zimmert-gamma-table PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(silex-zimmert-gamma-table)
 endif()
 
 include(CTest)
