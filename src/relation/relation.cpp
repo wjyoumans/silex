@@ -442,10 +442,12 @@ bool factor_integral_data_over_base_by_residue_screen(
     // dividing [O : Z[theta]] and P = (p, g(theta)), O/P = F_p[x]/(g) with
     // theta -> x, and the denominator is prime to p.  The element lies in P
     // exactly when g divides the numerator modulo p.  Primes over p dividing
-    // the index carry no residue polynomial, or are not screened here; their
-    // elements take the exact fallback.  A prime recorded with the integral
-    // generator omega of a maximal quadratic order (basis [1, omega]) keeps
-    // the coordinate polynomial, which is its omega-polynomial.  The index
+    // the index carry no residue polynomial and are valued directly, as in
+    // reference `buch2.c:divide_p_elt`; a theta-residue prime over such a p
+    // is not screened here, and its element takes the exact fallback.  A
+    // prime recorded with the integral generator omega of a maximal
+    // quadratic order (basis [1, omega]) keeps the coordinate polynomial,
+    // which is its omega-polynomial.  The index
     // is the order's cached [O : Z[theta]]; it exists when Z[theta] is
     // contained in O.  Theta-residue primes are built only for a monic
     // integral defining polynomial.
@@ -595,6 +597,7 @@ bool factor_integral_data_over_base_by_residue_screen(
     bool has_principal_ideal = false;
     flint::Fmpz p;
     std::vector<ResidueHit> hits;
+    std::vector<ResidueHit> direct_primes;
     LinearResidueEvaluationScratch linear_scratch;
     const slong norm_block_count = use_factored_norm_blocks
             ? static_cast<slong>(norm_block_factors.size())
@@ -639,6 +642,7 @@ bool factor_integral_data_over_base_by_residue_screen(
                 theta_residues &&
                 fmpz_divisible(equation_order_index.raw(), p.raw()) != 0;
         hits.clear();
+        direct_primes.clear();
         // Sum of e(P/p) f(P/p) over the block; it equals the degree exactly
         // when the block holds every prime above p (Cohen, GTM 138,
         // Section 4.8), as the factor base keeps distinct primes and one
@@ -680,11 +684,25 @@ bool factor_integral_data_over_base_by_residue_screen(
                 }
                 const flint::FmpzPoly* residue_polynomial =
                         detail::residue_polynomial_ptr(*prime);
-                if (residue_polynomial == nullptr) {
+                if (residue_polynomial == nullptr && residue_degree <= 0) {
                     SILEX_RELATION_PROFILE_RETURN(
                             diagnostics,
                             "relation.factor_over_base_integral.fallback_missing_residue_polynomial",
                             true);
+                }
+                if (residue_polynomial == nullptr) {
+                    // No residue polynomial, as for the primes over an
+                    // index divisor of a non-equation maximal order: the
+                    // residue test cannot decide membership, so the prime
+                    // is valued exactly below (reference
+                    // `buch2.c:divide_p_elt` values every prime above p
+                    // the same way, through `ZC_nfval`).
+                    SILEX_RELATION_PROFILE_EVENT(
+                            diagnostics,
+                            "relation.factor_over_base_integral.direct_missing_residue_polynomial");
+                    direct_primes.push_back(
+                            ResidueHit{index, residue_degree});
+                    continue;
                 }
                 SILEX_RELATION_PROFILE_EVENT(
                         diagnostics,
@@ -768,6 +786,11 @@ bool factor_integral_data_over_base_by_residue_screen(
             residue_hit_vp += hit.residue_degree;
         }
 
+        // The hits are primes that certainly contain alpha, so each adds at
+        // least f(P/p) to v_p(N(alpha)) = sum over P | p of f(P/p) v_P(alpha)
+        // (Cohen, GTM 138, Section 4.8).  When they already account for the
+        // whole norm valuation, each hit has valuation one and every other
+        // prime above p, residue-screened or not, has valuation zero.
         if (residue_hit_vp == block_vp) {
             SILEX_RELATION_PROFILE_EVENT(
                     diagnostics,
@@ -780,11 +803,18 @@ bool factor_integral_data_over_base_by_residue_screen(
             continue;
         }
 
-        if (hits.empty()) {
+        if (hits.empty() && direct_primes.empty()) {
             SILEX_RELATION_PROFILE_RETURN(
                     diagnostics,
                     "relation.factor_over_base_integral.fallback_no_residue_hits",
                     true);
+        }
+        // Value the primes the residue test could not decide before the
+        // hits, so the last entry of the list is the only prime above p
+        // whose valuation is still unknown when the deduction below runs.
+        if (!direct_primes.empty()) {
+            hits.insert(hits.begin(), direct_primes.begin(),
+                        direct_primes.end());
         }
 
         const bool block_covers_all_primes_over_p =
@@ -809,19 +839,24 @@ bool factor_integral_data_over_base_by_residue_screen(
                             "relation.factor_over_base_integral.error_missing_hit_prime",
                             false);
                 }
-                // The last hit's valuation follows from the others.  For
+                // The last entry's valuation follows from the others.  For
                 // alpha in O_K, |N(alpha)| = N(alpha O_K) and
                 // N(P) = p^f(P/p), so v_p(N(alpha)) = sum over P | p of
                 // f(P/p) v_P(alpha) (Cohen, GTM 138, Section 4.8; reference
                 // `buch2.c:divide_p_elt` subtracts v * f from the p-adic
-                // norm valuation per prime).  The order is Z[theta] and
-                // maximal, so alpha lies in P = (p, g(theta)) exactly when
-                // g divides alpha's coordinate polynomial modulo p (Cohen,
-                // GTM 138, Theorem 4.8.13).  When the block holds every
-                // prime above p, every prime above p that divides alpha is
-                // therefore a hit, and `exact_remaining_vp` has the earlier
-                // hits' f * v subtracted, so it equals f * v_P(alpha) for
-                // the last hit P.  Any other case computes the valuation.
+                // norm valuation per prime).  The order is maximal, and for
+                // a prime screened by its residue polynomial g the residue
+                // test above decides membership exactly (alpha lies in
+                // P = (p, g) exactly when g divides alpha's polynomial in
+                // the residue variable modulo p; Cohen, GTM 138, Theorem
+                // 4.8.13), so a screened prime that is not a hit has
+                // valuation zero.
+                // When the block holds every prime above p, every prime
+                // above p that divides alpha is therefore a hit or a
+                // directly valued prime, all of which are in this list,
+                // and `exact_remaining_vp` has the earlier entries' f * v
+                // subtracted, so it equals f * v_P(alpha) for the last
+                // entry P.  Any other case computes the valuation.
                 if (deduce_last_hit_valuation &&
                     block_covers_all_primes_over_p &&
                     hit_position + 1 == hit_count &&

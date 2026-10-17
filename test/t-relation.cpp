@@ -707,6 +707,7 @@ struct ScreenFallbackCounts {
     slong screened_nonunit = 0;
     slong screened_nonsmooth = 0;
     slong screened_non_theta_integral = 0;
+    slong screened_index_smooth = 0;
     slong fallback_index_smooth = 0;
 };
 
@@ -714,7 +715,9 @@ struct ScreenFallbackCounts {
 // three ways: through the integral-coordinate screen (with its handled flag),
 // through Relation::set_generator and the coordinate entry point, and by the
 // exact principal-ideal factorization the screen falls back to.  All rows
-// must agree.  `index_prime` divides [O : Z[theta]].
+// must agree, and the screen's row with the last valuation over each prime
+// deduced from the norm must equal its row with every valuation computed.
+// `index_prime` divides [O : Z[theta]].
 void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
                                          const silex::Order& order,
                                          slong bound_value,
@@ -763,6 +766,19 @@ void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
                                    screened, handled, smooth,
                                    sflint::FmpzMatConstRef(coordinates),
                                    sflint::FmpqConstRef(norm)));
+            sflint::FmpzMat computed(1, base.length());
+            bool computed_handled = false;
+            bool computed_smooth = false;
+            assert(RelationAccess::residue_screen_row_for_testing(
+                    sflint::FmpzMatRef(computed), computed_handled,
+                    computed_smooth, base,
+                    sflint::FmpzMatConstRef(coordinates),
+                    sflint::FmpqConstRef(norm), false, nullptr));
+            assert(computed_handled == handled);
+            assert(computed_smooth == smooth);
+            const bool norm_meets_index =
+                    ::fmpz_fdiv_ui(fmpq_numref(norm.raw()),
+                                   static_cast<ulong>(index_prime)) == 0;
             if (handled) {
                 assert(smooth == expected_smooth);
                 if (smooth) {
@@ -770,7 +786,13 @@ void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
                             RelationAccess::pending_relation_exponents_ref(
                                     screened),
                             sflint::FmpzMatConstRef(expected)));
+                    assert(sflint::fmpz_mat_equal(
+                            sflint::FmpzMatConstRef(computed),
+                            sflint::FmpzMatConstRef(expected)));
                     ++counts.screened_smooth;
+                    if (norm_meets_index) {
+                        ++counts.screened_index_smooth;
+                    }
                     if (::fmpz_mat_is_zero(expected.raw()) == 0) {
                         ++counts.screened_nonunit;
                     }
@@ -783,10 +805,7 @@ void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
                 } else {
                     ++counts.screened_nonsmooth;
                 }
-            } else if (expected_smooth &&
-                       ::fmpz_fdiv_ui(fmpq_numref(norm.raw()),
-                                      static_cast<ulong>(index_prime)) ==
-                               0) {
+            } else if (expected_smooth && norm_meets_index) {
                 ++counts.fallback_index_smooth;
             }
 
@@ -871,10 +890,12 @@ void check_cubic_element_screened(const silex::Order& order,
 
 // On a non-equation maximal order the residue screen reads theta-residue
 // primes through the element's theta-polynomial (Kummer-Dedekind for p not
-// dividing [O : Z[theta]]); elements whose norm meets an index prime fall
-// back to the exact principal-ideal factorization.  Rows match that
-// factorization either way, including elements outside Z[theta] and
-// elements in index primes.
+// dividing [O : Z[theta]]).  Primes over an index divisor carry no residue
+// polynomial; the screen values them directly instead of sending the whole
+// element to the principal-ideal factorization.  Rows match that
+// factorization, including elements outside Z[theta] and elements in index
+// primes, and every smooth element whose norm meets an index prime is
+// decided by the screen.
 int test_non_equation_maximal_screen_matches_ideal_fallback() {
     {
         // Dedekind's cubic x^3 - x^2 - 2x - 8: [O : Z[theta]] = 2, and 2 is
@@ -888,11 +909,13 @@ int test_non_equation_maximal_screen_matches_ideal_fallback() {
         check_screen_matches_ideal_fallback(counts, maximal, 30, 3, 2);
         assert(counts.screened_nonunit > 0);
         assert(counts.screened_nonsmooth > 0);
-        assert(counts.fallback_index_smooth > 0);
+        assert(counts.screened_index_smooth > 0);
+        assert(counts.fallback_index_smooth == 0);
         // Z[theta] contains 2O and 1, and O/2O = F_2^3, so every element of
         // odd norm (a unit modulo all three primes over 2) is 1 modulo 2O,
-        // hence in Z[theta].  Elements outside Z[theta] all fall back here.
-        assert(counts.screened_non_theta_integral == 0);
+        // hence in Z[theta].  Elements outside Z[theta] have even norm and
+        // are decided through the directly valued primes over 2.
+        assert(counts.screened_non_theta_integral > 0);
     }
     {
         // x^3 - 19: [O : Z[theta]] = 3 (19 = 1 mod 9).
@@ -905,7 +928,8 @@ int test_non_equation_maximal_screen_matches_ideal_fallback() {
         check_screen_matches_ideal_fallback(counts, maximal, 40, 3, 3);
         assert(counts.screened_nonunit > 0);
         assert(counts.screened_non_theta_integral > 0);
-        assert(counts.fallback_index_smooth > 0);
+        assert(counts.screened_index_smooth > 0);
+        assert(counts.fallback_index_smooth == 0);
 
         // Outside Z[theta], with norms prime to the index 3 (gp idealfactor):
         // (1 + 4 theta + theta^2) / 3 has norm 50 = N(P_2) N(P_25), and
