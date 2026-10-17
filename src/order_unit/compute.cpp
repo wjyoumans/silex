@@ -38,6 +38,13 @@ namespace silex {
 
 namespace detail {
 
+// compact_independent's lower bound (1/r)^r ((21/128) log(n) / n^2)^(2r) on a
+// nonzero Gram determinant, defined in order_unit.cpp.
+bool compact_independence_lower_bound(flint::Arb& out,
+                                      slong degree,
+                                      slong rank,
+                                      slong precision) noexcept;
+
 struct RelationUnitCandidateSortKey {
     flint::Arf max_log_upper;
     std::size_t original_index = 0;
@@ -139,11 +146,58 @@ bool incremental_prepare(IncrementalLogState& state,
     return true;
 }
 
+// A working precision at which the incremental test should decide, from a
+// ball `determinant` it left undecided at `precision`: zero when there is no
+// estimate.  Only a cost estimate, never a decision.  The ball decides
+// "dependent" once its upper endpoint is below compact_independent's lower
+// bound B, and "independent" once it is positive; an undecided ball
+// contains zero, and when the true determinant is positive it is at least
+// B.  So both outcomes are decided once the radius falls below about B.
+// The radius of a ball computed at working precision p scales like 2^-p
+// (rows, Gram entries and the inverse all come from p-bit ball
+// arithmetic), so a radius of 2^e at `precision` reaches B = 2^b near
+// precision + e - b.  On cyclotomic_real_31_deg15, B is about 2^-305 and a
+// dependent candidate's radius about 2^-56 at 128 bits, so it decides
+// only at 512 bits, never at 256.
+slong incremental_decision_precision(const flint::Arb& determinant,
+                                     slong places,
+                                     slong degree,
+                                     slong precision) noexcept {
+    flint::Arb lower_bound;
+    if (!flint::arb_is_finite(determinant) ||
+        mag_is_zero(arb_radref(determinant.raw())) != 0 ||
+        !compact_independence_lower_bound(lower_bound, degree, places - 1,
+                                          precision)) {
+        return 0;
+    }
+    flint::Arf radius;
+    flint::Arf bound;
+    arf_set_mag(radius.raw(), arb_radref(determinant.raw()));
+    ::arb_get_lbound_arf(bound.raw(), lower_bound.raw(), precision);
+    if (!flint::arf_is_finite(radius) || !flint::arf_is_finite(bound) ||
+        arf_sgn(bound.raw()) <= 0) {
+        return 0;
+    }
+    // radius < 2^radius_exponent and 2^(bound_exponent - 1) <= bound.
+    const slong radius_exponent = ::arf_abs_bound_lt_2exp_si(radius.raw());
+    const slong bound_exponent = ::arf_abs_bound_lt_2exp_si(bound.raw());
+    constexpr slong limit = WORD(1) << 40;
+    if (radius_exponent <= -limit || radius_exponent >= limit ||
+        bound_exponent <= -limit || bound_exponent >= limit) {
+        return 0;
+    }
+    const slong gap = radius_exponent - (bound_exponent - 1);
+    return gap > 0 ? precision + gap : 0;
+}
+
 // The incremental test at the precision of `state` for the last entry of
 // context.units against the ones before it.  Returns true only when it
 // decides, with the answer in `independent`; `row` receives the
-// candidate's log row when one was computed.
+// candidate's log row when one was computed.  When it does not decide,
+// `target_precision` receives incremental_decision_precision of the
+// enclosure, or zero.
 bool incremental_independence_at(bool& independent,
+                                 slong& target_precision,
                                  flint::ArbVec& row,
                                  IncrementalLogState& state,
                                  const IncrementalUnitContext& context,
@@ -151,6 +205,7 @@ bool incremental_independence_at(bool& independent,
                                  slong places,
                                  slong degree) noexcept {
     independent = false;
+    target_precision = 0;
     const slong precision = state.precision;
     const slong kept = static_cast<slong>(context.units.size()) - 1;
     if (!incremental_prepare(state, context, kept, embeddings, places) ||
@@ -182,19 +237,28 @@ bool incremental_independence_at(bool& independent,
             complement.raw(), precision);
 
     bool decided = false;
-    return compact_independence_from_gram_determinant(
-                   decided, independent, determinant, places, degree,
-                   precision) &&
-           decided;
+    if (!compact_independence_from_gram_determinant(
+                decided, independent, determinant, places, degree,
+                precision)) {
+        return false;
+    }
+    if (!decided) {
+        target_precision = incremental_decision_precision(
+                determinant, places, degree, precision);
+    }
+    return decided;
 }
 
 // The incremental independence test for the last entry of context.units
-// against the ones before it, with compact_independent's precision doubling
-// and cap (precision_doubling_cap, precision_doubling_allowed); the cap
-// diagnostics are left to compact_independent.  Returns true only when it
-// decides, with the answer in `independent`, the decision precision in
-// `decided_precision`, and the candidate's log row at that precision in
-// `row`.
+// against the ones before it, at compact_independent's working precisions
+// (precision doubled up to precision_doubling_cap, as
+// precision_doubling_allowed permits), in the order described in the body;
+// the cap diagnostics are left to compact_independent.  Returns true only
+// when it decides, with the answer in `independent`, the decision precision
+// in `decided_precision`, and the candidate's log row at that precision in
+// `row`.  Every decision is the true answer (below), so the order in which
+// the precisions are tried changes only the cost, and the test decides
+// exactly when one of them decides.
 //
 // Soundness under rounding.  Let L be the true k x places matrix of log
 // rows of the kept units, v the true row of the candidate, G = L L^T,
@@ -236,24 +300,52 @@ bool incremental_independence(bool& independent,
         return false;
     }
 
-    slong work_precision = precision;
-    const slong cap = precision_doubling_cap(precision);
-    for (;;) {
+    // The working precisions are precision * 2^k up to the cap, as in
+    // compact_independent.  After an undecided ball the loop skips the
+    // ones below incremental_decision_precision, and tries the skipped
+    // ones last, so it tries the same precisions and decides whenever the
+    // plain doubling loop decides.
+    const auto decide_at = [&](slong work_precision,
+                               slong& target_precision) noexcept {
         const std::size_t index =
                 incremental_log_state(context, work_precision);
-        if (incremental_independence_at(independent, row,
+        if (incremental_independence_at(independent, target_precision, row,
                                         context.log_states[index], context,
                                         embeddings, places, degree)) {
             decided_precision = work_precision;
             return true;
         }
+        return false;
+    };
+    const char* const cap_reason =
+            "incremental independence stopped at the precision cap";
+    slong work_precision = precision;
+    const slong cap = precision_doubling_cap(precision);
+    std::vector<slong> skipped;
+    for (;;) {
+        slong target_precision = 0;
+        if (decide_at(work_precision, target_precision)) {
+            return true;
+        }
         if (!precision_doubling_allowed(work_precision, cap, nullptr,
-                                        "incremental independence stopped "
-                                        "at the precision cap")) {
-            return false;
+                                        cap_reason)) {
+            break;
         }
         work_precision *= 2;
+        while (work_precision < target_precision &&
+               precision_doubling_allowed(work_precision, cap, nullptr,
+                                          cap_reason)) {
+            skipped.push_back(work_precision);
+            work_precision *= 2;
+        }
     }
+    for (const slong skipped_precision : skipped) {
+        slong target_precision = 0;
+        if (decide_at(skipped_precision, target_precision)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 #if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS

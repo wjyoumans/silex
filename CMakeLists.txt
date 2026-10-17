@@ -915,6 +915,16 @@ if(SILEX_BUILD_TESTS)
         COMMAND t-silex-order-unit-coordinates)
     list(APPEND SILEX_TEST_NAMES silex-order-unit-coordinates)
 
+    add_executable(t-silex-order-unit-incremental
+        test/t-order-unit-incremental.cpp)
+    target_link_libraries(t-silex-order-unit-incremental PRIVATE Silex::silex)
+    target_include_directories(t-silex-order-unit-incremental PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-order-unit-incremental)
+    add_test(NAME silex-order-unit-incremental
+        COMMAND t-silex-order-unit-incremental)
+    list(APPEND SILEX_TEST_NAMES silex-order-unit-incremental)
+
     add_executable(t-silex-zeta test/t-zeta.cpp)
     target_link_libraries(t-silex-zeta PRIVATE Silex::silex)
     silex_apply_target_warnings(t-silex-zeta)

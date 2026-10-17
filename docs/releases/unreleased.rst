@@ -1316,6 +1316,19 @@ Changed
   ``real_quadratic_d10000000005`` (1.001) are within noise.  See "Class
   groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
+- The incremental independence test of ``grh`` unit extraction no longer
+  doubles its working precision one step at a time after an undecided ball.
+  It estimates from the ball's radius the precision at which the radius
+  falls below the independence lower bound and skips the doublings below
+  it; the skipped precisions are tried last, so the test tries the same
+  precisions as before and every decision is unchanged.  Published outputs
+  are identical on the 172 tested ``grh`` corpus rows.  In the ``grh``
+  class/unit computation of ``cyclotomic_real_31_deg15`` dependent
+  candidates are now decided at 512 bits without the 256-bit pass, and the
+  computation runs 4.8% fewer user-space instructions; ``cyclotomic_64_phi32``
+  is unchanged.  No timing has been measured.  See "Class groups and order
+  units" in :doc:`../reference/algorithms_and_sources`.
+
 Fixed
 -----
 

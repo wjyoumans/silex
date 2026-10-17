@@ -1065,7 +1065,17 @@ enclosure, so the result contains the true determinant, and the decision rule
 the one applied to the full determinant.  If the matrix inverse cannot be
 proved, or the ball is undecided, the precision is doubled up to the same cap
 as before, and the full Gram determinant is used when the test stays
-undecided.  Whenever the full test decides, the incremental test gives the
+undecided.  An undecided ball contains zero, and both outcomes are decided
+once its radius falls below about the lower bound; the radius shrinks like
+``2^-p`` at working precision ``p``, so Silex skips the doublings below the
+precision at which the radius would reach the bound (a Silex scheduling
+choice, not Hecke's).  The skipped precisions are tried last, before the full
+determinant, so the incremental test tries the same precisions and decides in
+the same cases as plain doubling; only the cost changes.  In the ``grh``
+computation of the real subfield of the 31st cyclotomic field the lower bound
+is about ``2^-305`` and a dependent candidate's radius at 128 bits about
+``2^-56``, so such candidates are decided at 512 bits and the 256-bit pass is
+skipped.  Whenever the full test decides, the incremental test gives the
 same decision.  Two cases differ, both sound.  A candidate that the full test
 dropped at the precision cap may now be decided, since the incremental ball
 can decide at the same level, and no cap event is then emitted.  And when the
