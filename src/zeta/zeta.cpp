@@ -403,8 +403,9 @@ void quadratic_afe_gamma_direct(flint::Arb& out,
     quadratic_afe_gamma_upper(out, shift, z, prec);
 }
 
-// Taylor stepping for the incomplete gamma values of the sums below.  This
-// evaluator is Silex's own and is not derived from FLINT.  The closest
+// Taylor stepping for the incomplete gamma values of the sums below.  The
+// block scheme is Silex's own; its truncation bound and radius choice follow
+// FLINT, as described below.  The closest
 // upstream analogue is in FLINT `acb_dirichlet/l_fmpq_afe.c`: its term loop
 // has a disabled branch that would continue Gamma(a, z_n) from the previous
 // term with `_arb_gamma_upper_fmpq_step_bsplit` (the enabled branch evaluates
@@ -516,8 +517,9 @@ void quadratic_afe_gamma_direct(flint::Arb& out,
 // this test, cheap direct evaluations (e^-z, and erfc at small |D|) were
 // measured to get slower with stepping.  The cap of 48 terms keeps the
 // coefficient cost bounded (caps from 32 to 96 were timed on D = 31333 at
-// the precision of its proven class-unit computation, and 48 was the
-// fastest); an index where even the shortest block would need more is
+// the precision of its proven class-unit computation, with the earlier plan
+// that used the longest block at the cap and no cost test; 48 was the
+// fastest there, and the sweep was not repeated with the cost-based plan); an index where even the shortest block would need more is
 // evaluated directly.
 constexpr slong quadratic_afe_step_max_terms = 48;
 constexpr ulong quadratic_afe_step_min_block = 4;

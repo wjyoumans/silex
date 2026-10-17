@@ -725,7 +725,7 @@ void check_step_truncation_bound(const StepBoundCase& c) {
 
 void check_step_truncation_bounds() {
     const StepBoundCase cases[] = {
-            // Small q: q = 31333 with z about 1.3, 5, 9 and 29, at the
+            // Small q: q = 31333 with z about 1.3, 5, 9 and 27, at the
             // anchor tolerances of 64-bit and of proven-mode (about 200-bit)
             // evaluations.
             {1, 31333, 115, -82.0, 92},
@@ -736,7 +736,7 @@ void check_step_truncation_bounds() {
             {0, 31333, 520, -210.0, 220},
             {2, 31333, 300, -210.0, 220},
             {1, 31333, 300, -82.0, 92},
-            // Large q: z about 3e-4 (a = 1), 0.13 and 3.1, and about 31 at
+            // Large q: z about 3e-4 (a = 1), 0.13 and 3.1, and about 9.8 at
             // 512 bits.
             {2, UWORD(10000000000), 1000, -82.0, 92},
             {1, UWORD(10000000000), 20000, -82.0, 92},

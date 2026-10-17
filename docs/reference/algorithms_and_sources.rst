@@ -1733,7 +1733,9 @@ estimated cost of a direct evaluation, a lower envelope of FLINT timings at
 (``a = 0``), dropping to the constant once FLINT can use the asymptotic
 expansion.  These constants, the cap of 48 terms (caps from 32 to 96 were
 timed on ``D = 31333`` at the precision of its proven class-unit
-computation, and 48 was the fastest), and the minimum block of four steps
+computation, with the earlier plan that used the longest block at the cap
+and no cost test; 48 was the fastest there, and the sweep was not repeated
+with the cost-based plan), and the minimum block of four steps
 are measured speed thresholds, not proof parameters: they decide only where
 blocks are used.  Without the cost test, cheap direct evaluations
 (``exp(-z)``, and ``erfc`` at small ``|D|``) were measured to get slower with
