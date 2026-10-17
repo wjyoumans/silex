@@ -4,9 +4,38 @@
 
 #include <silex/abelian_group.hpp>
 
+#include <atomic>
 #include <vector>
 
 namespace silex::detail {
+
+class TestHookAccess;
+
+// Switch that only detail::TestHookAccess (test/test_hook_access.hpp) can
+// set.  Off (0) by default and never set by production code; one relaxed
+// atomic load per composition call.
+class SUnitTestSeams {
+public:
+    // Counts down one composition call (an S-class invariant witness or an
+    // S-unit generator) per call while armed with n > 0; returns true on the
+    // call that reaches zero, which should then fail as an slong exponent
+    // overflow would.  Returns false when not armed.
+    static bool take_composition_overflow() noexcept {
+        slong n = composition_overflow_countdown_.load(
+                std::memory_order_relaxed);
+        while (n > 0) {
+            if (composition_overflow_countdown_.compare_exchange_weak(
+                        n, n - 1, std::memory_order_relaxed)) {
+                return n == 1;
+            }
+        }
+        return false;
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<slong> composition_overflow_countdown_{0};
+};
 
 enum class SUnitClassBuildStage {
     none,

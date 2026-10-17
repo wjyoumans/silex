@@ -24,11 +24,23 @@
 #include "element/element_internal.hpp"
 #include "lat/certified_lll_internal.hpp"
 #include "order_unit/compute_internal.hpp"
+#include "sunit/sunit_internal.hpp"
 
 namespace silex::detail {
 
 class TestHookAccess {
 public:
+    // Arms (n > 0) or disarms (0) the S-unit composition overflow: the n-th
+    // composition call of the next builds (counting S-class invariant
+    // witnesses first, then S-unit generators) is replaced by a power whose
+    // exponent product overflows slong, so it fails.  Skips the invariant
+    // that relation coefficients keep the exponent products in range.  The
+    // countdown persists across builds until it fires; set 0 to disarm.
+    static void set_sunit_composition_overflow_at(slong n) noexcept {
+        SUnitTestSeams::composition_overflow_countdown_.store(
+                n, std::memory_order_relaxed);
+    }
+
     // Labels a set unit group proven without any check.  Tests use it to
     // build a proven-labelled group whose later rejection must come from the
     // class-group gate itself.  Does nothing for an unset group.

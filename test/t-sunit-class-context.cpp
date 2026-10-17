@@ -5,6 +5,7 @@
 #include <silex/prime_ideal.hpp>
 
 #include "sunit/sunit_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -557,6 +558,50 @@ int test_composition_overflow_fails_closed() {
     return 0;
 }
 
+// The overflow reaches the build: the build reports the stage whose
+// composition overflowed and leaves the output context untouched.  Q(sqrt -14)
+// with S = {P_2} has one S-class invariant and one S-unit generator, so the
+// first composition call belongs to s_class_invariant_witnesses and the
+// second to generator_composition.
+int test_build_reports_overflow_stage() {
+    using silex::detail::SUnitClassBuildStage;
+    using silex::detail::TestHookAccess;
+    ProvenQuadraticFixture fixture = proven_quadratic(-14);
+    std::vector<silex::PrimeIdeal> selected =
+            first_prime_above(fixture.order, 2);
+    silex::detail::SUnitClassContext reference;
+    silex::detail::SUnitClassBuildResult result;
+    assert(silex::detail::build_sunit_class_context(
+            result, reference, fixture.class_group, selected));
+    assert(reference.s_class_group.invariant_count() == 1);
+    assert(reference.generators_mod_units.size() == 1);
+
+    const struct {
+        slong at;
+        SUnitClassBuildStage stage;
+    } cases[] = {
+            {1, SUnitClassBuildStage::s_class_invariant_witnesses},
+            {2, SUnitClassBuildStage::generator_composition},
+    };
+    for (const auto& c : cases) {
+        silex::detail::SUnitClassContext context;
+        TestHookAccess::set_sunit_composition_overflow_at(c.at);
+        const bool ok = silex::detail::build_sunit_class_context(
+                result, context, fixture.class_group, selected);
+        TestHookAccess::set_sunit_composition_overflow_at(0);
+        assert(!ok);
+        assert(!result.success);
+        assert(result.stage == c.stage);
+        assert(!context.defined);
+    }
+    // Disarmed: the same build succeeds again.
+    silex::detail::SUnitClassContext context;
+    assert(silex::detail::build_sunit_class_context(
+            result, context, fixture.class_group, selected));
+    assert(result.stage == SUnitClassBuildStage::none);
+    return 0;
+}
+
 // When a selected prime P equals a factor-base prime Q_k, the derived
 // valuation of an S-class witness at P adds d * generator_row_k to the
 // selected exponent instead of treating FB and S as independent coordinates.
@@ -614,6 +659,7 @@ int main() {
     assert(test_selected_primes_meeting_and_avoiding_factor_base() == 0);
     assert(test_class_number_three() == 0);
     assert(test_composition_overflow_fails_closed() == 0);
+    assert(test_build_reports_overflow_stage() == 0);
     assert(test_invariant_witness_valuation_merges_factor_base_prime() == 0);
     return 0;
 }

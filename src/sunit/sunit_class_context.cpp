@@ -70,6 +70,19 @@ bool compose_augmented_witness(
     if (!candidate.is_defined() || !candidate.one()) {
         return false;
     }
+    if (SUnitTestSeams::take_composition_overflow()) {
+        // Test seam: multiply in a power whose exponent product overflows
+        // slong, as an oversized relation coefficient would; the product
+        // refuses and the composition fails closed.
+        Element two(*out.parent());
+        FactoredElement huge(*out.parent());
+        flint::Fmpz three;
+        flint::fmpz_set_si(flint::FmpzRef(three), 3);
+        return two.is_defined() && two.set_si(2) && huge.is_defined() &&
+               huge.push(two, WORD_MAX / 2) &&
+               multiply_factored_element_power_fmpz(
+                       candidate, huge, flint::FmpzConstRef(three));
+    }
     slong col = 0;
     for (const FactoredElement& witness : class_hnf.witnesses) {
         if (!multiply_factored_element_power_fmpz(
