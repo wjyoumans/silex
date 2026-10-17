@@ -347,4 +347,25 @@ bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
                                  slong prec,
                                  slong guard) noexcept;
 
+struct QuadraticAfeGammaStepBlock {
+    ulong block = 0;
+    slong terms = 0;
+    slong radius_exponent = 0;
+};
+
+// Test entry for one block of that stepper: plans and starts a block
+// anchored at n with anchor tolerance 2^target and coefficients at `prec`,
+// the anchor evaluated directly at `prec`, and writes its length B, its
+// number of Taylor terms M, the exponent r of its Cauchy radius R = 2^r and
+// its truncation bound (Johansson 2021, Lemma 5, eq. 27) to `truncation`.
+// Returns false on invalid arguments (shift > 2, q or n zero, `prec` not
+// positive) or when no block starts at n.
+bool quadratic_afe_gamma_step_block(QuadraticAfeGammaStepBlock& block,
+                                    mag_struct* truncation,
+                                    ulong shift,
+                                    ulong q,
+                                    ulong n,
+                                    double target,
+                                    slong prec) noexcept;
+
 }  // namespace silex::detail

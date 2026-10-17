@@ -16,11 +16,14 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <initializer_list>
 
 #include <flint/acb_dirichlet.h>
 #include <flint/arb.h>
 #include <flint/arb_hypgeom.h>
+#include <flint/arb_poly.h>
+#include <flint/mag.h>
 #include <flint/ulong_extras.h>
 
 namespace {
@@ -34,6 +37,20 @@ bool radius_lt_2exp_si(const sflint::Arb& value, slong exponent) noexcept {
     sflint::arb_mul_2exp_si(target, target, exponent);
     return sflint::arb_lt(radius, target);
 }
+
+// An owned mag_t.
+struct MagGuard {
+    MagGuard() noexcept {
+        mag_init(value);
+    }
+    ~MagGuard() noexcept {
+        mag_clear(value);
+    }
+    MagGuard(const MagGuard&) = delete;
+    MagGuard& operator=(const MagGuard&) = delete;
+
+    mag_t value;
+};
 
 int kronecker(const sflint::Fmpz& discriminant, ulong n) noexcept {
     sflint::Fmpz zn;
@@ -589,19 +606,24 @@ void check_gamma_stepping_against_hypgeom() {
     const slong prec = 80;
     const slong guard = 12;
     const GammaStepCase cases[] = {
-            // a = 1 with z about 3e-4: default blocks of about 1500 indices.
-            {2, UWORD(10000000000), 1000, 4000, 0, 2},
+            // a = 1 with z about 3e-4, where R < z keeps every step below
+            // z: default blocks of about 80 indices.
+            {2, UWORD(10000000000), 1000, 4000, 0, 10},
             {2, UWORD(10000000000), 1000, 41, 4, 10},
-            // a = 1/2 and a = 0 with z about 3.1, where rho = 1: default
-            // blocks of about 1500 indices.
-            {1, UWORD(100000000000000), 10000000, 4000, 0, 2},
+            // a = 1/2 and a = 0 with z about 3.1: one default block covers
+            // all 4000 indices.
+            {1, UWORD(100000000000000), 10000000, 4000, 0, 1},
             {1, UWORD(100000000000000), 10000000, 41, 4, 10},
-            {0, UWORD(100000000000000), 10000000, 4000, 0, 2},
+            {0, UWORD(100000000000000), 10000000, 4000, 0, 1},
             {0, UWORD(100000000000000), 10000000, 41, 4, 10},
-            // a = 1/2 and a = 0 with z about 0.13, where rho = 1 / z:
-            // default blocks of about 9 indices.
-            {1, UWORD(10000000000), 20000, 100, 0, 8},
-            {0, UWORD(10000000000), 20000, 100, 0, 8},
+            // a = 1/2 and a = 0 with z about 0.13: one default block covers
+            // all 100 indices.
+            {1, UWORD(10000000000), 20000, 100, 0, 1},
+            {0, UWORD(10000000000), 20000, 100, 0, 1},
+            // a = 1/2 and a = 0 at q = 31333 with z from about 4 to 20,
+            // where the earlier bound allowed no block.
+            {1, 31333, 200, 250, 0, 2},
+            {0, 31333, 200, 250, 0, 2},
     };
     sflint::Arb z;
     sflint::Arb a;
@@ -639,15 +661,177 @@ void check_gamma_stepping_against_hypgeom() {
     }
 }
 
+// Truncation bound of one stepper block (Johansson 2021, Lemma 5, eq. 27)
+// against the true tail of the Taylor series it truncates: at the largest
+// step v_max of the block, Gamma(a, z + v_max) minus the first M + 1 Taylor
+// coefficients c_0, ..., c_M at z (FLINT `arb_hypgeom_gamma_upper_series`)
+// times v_max^n, all at 1024 bits.  The bound must contain that tail and
+// meet the anchor tolerance 2^target.
+struct StepBoundCase {
+    ulong shift;
+    ulong q;
+    ulong n;
+    double target;
+    slong prec;
+};
+
+void check_step_truncation_bound(const StepBoundCase& c) {
+    const slong hp = 1024;
+    silex::detail::QuadraticAfeGammaStepBlock block;
+    MagGuard bound;
+    assert(silex::detail::quadratic_afe_gamma_step_block(
+            block, bound.value, c.shift, c.q, c.n, c.target, c.prec));
+    assert(block.block >= 4);
+    assert(block.terms >= 1);
+    assert(mag_cmp_2exp_si(bound.value, static_cast<slong>(c.target)) <= 0);
+
+    sflint::Arb a;
+    sflint::Arb z;
+    sflint::Arb v;
+    sflint::Arb value;
+    sflint::Arb tail;
+    ::arb_set_ui(a.raw(), c.shift);
+    ::arb_mul_2exp_si(a.raw(), a.raw(), -1);
+    ::arb_const_pi(z.raw(), hp);
+    ::arb_div_ui(z.raw(), z.raw(), c.q, hp);
+    ::arb_mul_ui(v.raw(), z.raw(), block.block, hp);
+    ::arb_mul_ui(v.raw(), v.raw(), 2 * c.n + block.block, hp);
+    ::arb_mul_ui(z.raw(), z.raw(), c.n, hp);
+    ::arb_mul_ui(z.raw(), z.raw(), c.n, hp);
+
+    // Taylor coefficients of Gamma(a, z + x) in x, evaluated at v_max.
+    arb_poly_t h;
+    arb_poly_t g;
+    arb_poly_init(h);
+    arb_poly_init(g);
+    arb_poly_set_coeff_arb(h, 0, z.raw());
+    arb_poly_set_coeff_si(h, 1, 1);
+    arb_hypgeom_gamma_upper_series(g, a.raw(), h, 0, block.terms + 1, hp);
+    arb_poly_evaluate(value.raw(), g, v.raw(), hp);
+    arb_poly_clear(h);
+    arb_poly_clear(g);
+
+    ::arb_add(z.raw(), z.raw(), v.raw(), hp);
+    ::arb_hypgeom_gamma_upper(tail.raw(), a.raw(), z.raw(), 0, hp);
+    ::arb_sub(tail.raw(), tail.raw(), value.raw(), hp);
+    assert(::arb_is_finite(tail.raw()) != 0);
+    MagGuard tail_upper;
+    ::arb_get_mag(tail_upper.value, tail.raw());
+    // The tail ball is tight: its radius is far below the bound.
+    assert(mag_cmp_2exp_si(arb_radref(tail.raw()),
+                           static_cast<slong>(c.target) - 400) < 0);
+    assert(mag_cmp(tail_upper.value, bound.value) <= 0);
+}
+
+void check_step_truncation_bounds() {
+    const StepBoundCase cases[] = {
+            // Small q: q = 31333 with z about 1.3, 5, 9 and 29, at the
+            // anchor tolerances of 64-bit and of proven-mode (about 200-bit)
+            // evaluations.
+            {1, 31333, 115, -82.0, 92},
+            {0, 31333, 115, -82.0, 92},
+            {1, 31333, 220, -82.0, 92},
+            {0, 31333, 220, -82.0, 92},
+            {1, 31333, 520, -210.0, 220},
+            {0, 31333, 520, -210.0, 220},
+            {2, 31333, 300, -210.0, 220},
+            {1, 31333, 300, -82.0, 92},
+            // Large q: z about 3e-4 (a = 1), 0.13 and 3.1, and about 31 at
+            // 512 bits.
+            {2, UWORD(10000000000), 1000, -82.0, 92},
+            {1, UWORD(10000000000), 20000, -82.0, 92},
+            {0, UWORD(10000000000), 20000, -82.0, 92},
+            {1, UWORD(100000000000000), 10000000, -210.0, 220},
+            {0, UWORD(100000000000000), 10000000, -210.0, 220},
+            {2, UWORD(100000000000000), 10000000, -210.0, 220},
+            {1, UWORD(10000000000), 177000, -530.0, 540},
+            {0, UWORD(10000000000), 177000, -530.0, 540},
+    };
+    for (const StepBoundCase& c : cases) {
+        check_step_truncation_bound(c);
+    }
+}
+
+// The block length of the earlier Silex bound |K| e v (rho v)^M /
+// (1 - rho v), rho = max(1, 1 / z), which planned the longest block B with
+// rho v_max <= 2^-10, and a block only if B >= 4.
+ulong earlier_block_length(ulong shift, ulong q, ulong n) {
+    const double pi = 3.1415926535897932385;
+    const double nd = static_cast<double>(n);
+    const double z = pi * nd * nd / static_cast<double>(q);
+    const double rho = shift == 2 ? 1.0 : (z < 1.0 ? 1.0 / z : 1.0);
+    const double y = std::ldexp(static_cast<double>(q) / (pi * rho), -10);
+    return static_cast<ulong>(std::floor(y / (std::sqrt(nd * nd + y) + nd)));
+}
+
+// The number of Taylor terms the earlier bound needs for a block of length
+// B anchored at n, with anchor tolerance 2^target (none when rho v_max >= 1,
+// where that bound does not apply).
+double earlier_terms(ulong shift, ulong q, ulong n, ulong b, double target) {
+    const double pi = 3.1415926535897932385;
+    const double nd = static_cast<double>(n);
+    const double bd = static_cast<double>(b);
+    const double z = pi * nd * nd / static_cast<double>(q);
+    const double a = 0.5 * static_cast<double>(shift);
+    const double rho = shift == 2 ? 1.0 : (z < 1.0 ? 1.0 / z : 1.0);
+    const double v = pi / static_cast<double>(q) * bd * (2.0 * nd + bd);
+    if (!(rho * v < 1.0)) {
+        return HUGE_VAL;
+    }
+    const double log2_k = (-z + (a - 1.0) * std::log(z)) / std::log(2.0);
+    const double need = log2_k + std::log2(std::exp(1.0)) + std::log2(v) -
+                        std::log2(1.0 - rho * v) - target;
+    return std::fmax(1.0, std::ceil(need / -std::log2(rho * v)));
+}
+
+// For a = 1/2 and a = 0 (real D) a planned block needs no more Taylor terms
+// than the earlier bound needs for the same block, and at q = 31333 it
+// covers more than 4 indices where that bound allowed no block at all.  The
+// plan chooses B and M by estimated cost, so B itself may be shorter than
+// the earlier rule's.  (For a = 1 at z below about 1e-3, R < z makes the
+// blocks shorter than the earlier bound's, which used that Gamma(1, .) is
+// entire.)
+void check_step_blocks_need_fewer_terms() {
+    const StepBoundCase cases[] = {
+            {1, 31333, 1000, -210.0, 220},
+            {0, 31333, 1000, -210.0, 220},
+            {1, 31333, 300, -82.0, 92},
+            {0, 31333, 300, -82.0, 92},
+            {1, UWORD(10000000000), 20000, -82.0, 92},
+            {0, UWORD(10000000000), 20000, -82.0, 92},
+            {1, UWORD(100000000000000), 10000000, -82.0, 92},
+            {0, UWORD(100000000000000), 10000000, -82.0, 92},
+            {1, UWORD(100000000000000), 10000000, -210.0, 220},
+            {0, UWORD(100000000000000), 10000000, -210.0, 220},
+    };
+    for (const StepBoundCase& c : cases) {
+        silex::detail::QuadraticAfeGammaStepBlock block;
+        MagGuard bound;
+        assert(silex::detail::quadratic_afe_gamma_step_block(
+                block, bound.value, c.shift, c.q, c.n, c.target, c.prec));
+        assert(static_cast<double>(block.terms) <=
+               earlier_terms(c.shift, c.q, c.n, block.block, c.target));
+        if (c.q == 31333) {
+            assert(block.block > 4);
+            assert(earlier_block_length(c.shift, c.q, c.n) < 4);
+            assert(earlier_terms(c.shift, c.q, c.n, block.block, c.target) >
+                   2.0 * static_cast<double>(block.terms));
+        }
+    }
+}
+
 // L(1, chi_D) with stepping against the evaluation with stepping turned off
-// (every gamma value evaluated directly, as before stepping was added).  The
-// two enclosures are bit-identical in every case below.
+// (every gamma value evaluated directly, as before stepping was added).  In
+// every case below the two enclosures have the same midpoint and radii that
+// agree to a relative 2^-10: the stepped values carry their own rounding and
+// truncation radii, so the summed radii can differ in the last bits.
 struct StepComparisonCase {
     slong discriminant;
     slong precision;
-    // Whether both sums use stepping.  Below |D| about 1e10 the blocks are
-    // too short for most a, and at |D| about 1e8 at most a = 1 steps.
-    bool both_sums_step;
+    // How many of the two sums use stepping: the plan steps only where it
+    // estimates stepping to be cheaper than direct evaluation, which for
+    // small |D| excludes Gamma(1, z) = e^-z.
+    int stepped_sums;
 };
 
 void check_stepping_matches_direct(const StepComparisonCase& c) {
@@ -664,13 +848,27 @@ void check_stepping_matches_direct(const StepComparisonCase& c) {
     assert(silex::detail::quadratic_dirichlet_l1(
             sflint::ArbRef(direct), sflint::FmpzConstRef(d), c.precision,
             &off));
-    assert(::arb_equal(stepped.raw(), direct.raw()) != 0);
+    assert(::arf_equal(arb_midref(stepped.raw()),
+                       arb_midref(direct.raw())) != 0);
+    MagGuard bound;
+    mag_mul_2exp_si(bound.value, arb_radref(direct.raw()), -10);
+    mag_add(bound.value, bound.value, arb_radref(direct.raw()));
+    assert(mag_cmp(arb_radref(stepped.raw()), bound.value) <= 0);
+    mag_mul_2exp_si(bound.value, arb_radref(stepped.raw()), -10);
+    mag_add(bound.value, bound.value, arb_radref(stepped.raw()));
+    assert(mag_cmp(arb_radref(direct.raw()), bound.value) <= 0);
     for (ulong shift = 0; shift < 3; ++shift) {
         assert(off.blocks[shift] == 0);
         assert(off.stepped_values[shift] == 0);
     }
-    if (c.both_sums_step) {
+    if (c.stepped_sums == 2) {
         assert_stepping_used(on, c.discriminant);
+    } else {
+        int stepped = 0;
+        for (ulong shift = 0; shift < 3; ++shift) {
+            stepped += on.blocks[shift] > 0 ? 1 : 0;
+        }
+        assert(stepped == c.stepped_sums);
     }
 }
 
@@ -679,16 +877,15 @@ void check_stepping_matches_direct(const StepComparisonCase& c) {
 // for D = 1000000000061 without stepping) run with SILEX_TEST_SLOW=1.
 void check_stepping_before_after(bool slow) {
     const std::initializer_list<StepComparisonCase> fast_cases = {
-            {-1019, 64, false},      {-100003, 128, false},
-            {100049, 192, false},    {-99999971, 64, false},
-            {-111546435, 64, false},
+            {-1019, 64, 1},      {-100003, 128, 1}, {100049, 192, 2},
+            {-99999971, 64, 2},  {-111546435, 64, 2},
     };
     const std::initializer_list<StepComparisonCase> slow_cases = {
-            {99999989, 64, false},         {48612265, 128, false},
-            {-10000000019, 64, true},      {-10000000019, 128, true},
-            {-10000000019, 192, true},     {100000000057, 64, true},
-            {-100000000003, 64, true},     {-1000000000039, 64, true},
-            {1000000000061, 64, true},
+            {99999989, 64, 2},         {48612265, 128, 2},
+            {-10000000019, 64, 2},     {-10000000019, 128, 2},
+            {-10000000019, 192, 2},    {100000000057, 64, 2},
+            {-100000000003, 64, 2},    {-1000000000039, 64, 2},
+            {1000000000061, 64, 2},
     };
     for (const StepComparisonCase& c : fast_cases) {
         check_stepping_matches_direct(c);
@@ -713,6 +910,8 @@ int main() {
     check_failure_paths();
     check_route_size_cap();
     check_gamma_stepping_against_hypgeom();
+    check_step_truncation_bounds();
+    check_step_blocks_need_fewer_terms();
     check_stepping_before_after(slow_tests_enabled());
 
     sflint::Arb imaginary_l1;
