@@ -181,7 +181,10 @@ Changed
   holds every prime ideal above ``p``: it is what is left of the ``p``-adic
   valuation of the norm after the other hits, divided by the residue degree.
   Other cases compute it as before, so exponent rows and published results
-  are unchanged wherever the computation previously succeeded.  See :doc:`../reference/algorithms_and_sources`.
+  are unchanged wherever the computation previously succeeded.  On an idle
+  machine (2026-10-16, 21 paired runs), the ``grh`` class/unit computation of
+  ``cyclotomic_41_phi40`` took 4940.03 ms instead of 5025.96 ms (ratio 0.983),
+  with identical outputs.  See :doc:`../reference/algorithms_and_sources`.
 
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when
@@ -268,9 +271,9 @@ Changed
   ``fmpz_mat_is_reduced`` certificate, when the kernel has entries above
   250 bits, instead of running ``fmpz_lll`` on that kernel.  The
   ``fmpz_lll`` basis remains the fallback.
-  ``real_quadratic_d1000000000009`` ``proven`` takes about 14 s instead of
-  about 90 s (release build, three runs each on a busy machine; the
-  controlled comparison is pending), with identical published outputs and
+  On an idle machine (2026-10-16, release build, three paired runs),
+  ``real_quadratic_d1000000000009`` ``proven`` took 14.58 s instead of
+  104.07 s (ratio 0.140, range 0.139-0.141), with identical published outputs and
   saturation proof records; the proven corpus rows, whose kernels are
   smaller, take the route they took before.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
@@ -1209,7 +1212,14 @@ Changed
   ``cyclotomic_35_phi24``, ``cyclotomic_52_phi24``,
   ``cyclotomic_real_41_deg20``, ``cyclotomic_real_q10_c11_deg10`` and
   ``simplest_cubic_a12``.  On all of these except ``cyclotomic_52_phi24``
-  the regulator radius changes too.
+  the regulator radius changes too.  On an idle machine (2026-10-16, 31
+  paired runs), ``grh`` class/unit computations took (ratio):
+  ``multiquadratic_m3_m5_m7`` 146.03 ms instead of 170.39 ms (0.857),
+  ``simplest_cubic_a12`` 20.33 ms instead of 29.13 ms (0.698),
+  ``cyclotomic_real_31_deg15`` 169.22 ms instead of 189.10 ms (0.895) and
+  ``pure_x5_minus_7`` 24.17 ms instead of 28.27 ms (0.855); the control
+  ``cyclotomic_32_phi16`` was 1.005.  Outputs are identical except
+  ``unit_group.regulator_radius`` on ``simplest_cubic_a12``.
 
 Fixed
 -----
