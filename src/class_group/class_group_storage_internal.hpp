@@ -548,6 +548,15 @@ public:
         return context.relations_;
     }
 
+    static bool extend_lll_relation_slice(
+            ClassGroupContext& context,
+            const Order& order,
+            flint::FmpzConstRef factor_base_bound,
+            const ClassGroupRelationOptions& options) noexcept {
+        return context.extend_lll_relation_slice_(order, factor_base_bound,
+                                                  options);
+    }
+
     static void record_skipped_dependent(
             ClassGroupContext& context) noexcept {
         ++context.skipped_dependent_relations_;

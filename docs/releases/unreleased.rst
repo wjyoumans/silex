@@ -1252,8 +1252,12 @@ Changed
   ``multiquadratic_m3_m5_m7`` and ``random_d10_h4_s27_proven``
   (``skipped_dependent_relation_count`` on all but the real quadratic,
   the two imaginary quadratic ``d``-rows, ``pure_x5_minus_7`` and
-  ``random_d10_h4_s27_proven``).  See "Class groups and order units" in
-  :doc:`../reference/algorithms_and_sources`.
+  ``random_d10_h4_s27_proven``).  On a busy machine, pending an idle-machine
+  comparison, three of these rows ran repeatably slower:
+  ``simplest_cubic_a12`` (about +5 to +6%, 29.6 to 31.3 ms),
+  ``imaginary_quadratic_d100000000000319`` (about +5%, 33.5 to 35.3 ms) and
+  ``imaginary_quadratic_34_grh`` (about +10%, 7.6 to 8.4 ms).  See "Class
+  groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 Fixed
 -----

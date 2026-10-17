@@ -1687,6 +1687,7 @@ bool ClassGroupContext::extend_lll_relation_slice_(
         (options.relation_saturation_aux_prime_bound != 0 &&
          options.relation_saturation_aux_prime_bound < 2) ||
         options.relation_saturation_max_appends_per_ell < 0 ||
+        options.extension_relation_target < 2 ||
         !detail::valid_certification_request(options.requested_certification)) {
         return false;
     }

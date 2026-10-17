@@ -16,6 +16,7 @@
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/class_group_internal.hpp"
+#include "class_group/class_group_storage_internal.hpp"
 #include "factored_element/factor_screen_hash_internal.hpp"
 #include "factored_element/wide_factored_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
@@ -12896,10 +12897,67 @@ int test_grh_relation_refill_grows_on_repeated_validation() {
     sflint::Fmpz class_order;
     assert(class_group.order(sflint::FmpzRef(class_order)));
     assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(class_order), 4));
+    // Cl(Q(sqrt -34)) is cyclic of order 4: the reduced forms of
+    // discriminant -136 are (1,0,34), (2,0,17) of order 2 and (5,+-2,7) of
+    // order 4.  The grown refill publishes the same group with grh labels.
+    assert(class_group.invariant_count() == 1);
+    sflint::Fmpz invariant;
+    assert(class_group.invariant(sflint::FmpzRef(invariant), 0));
+    assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(invariant), 4));
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    assert(audit.class_group_certification == silex::CertificationMode::grh);
+    assert(audit.unit_group_certification == silex::CertificationMode::grh);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(events.refills == 3);
     assert(events.grown == 2);
 #endif
+    return 0;
+}
+
+// The LLL relation slice rejects an extension relation target below 2, as
+// extend_tentative_relations_ does.  With a target of 0 the slice would
+// collect no relation; on Q(sqrt -2) (h = 1) it would still report success.
+int test_lll_relation_slice_rejects_small_extension_target() {
+    sflint::FmpzPoly polynomial;
+    sflint::fmpz_poly_set_coeff_si(polynomial, 0, 2);
+    sflint::fmpz_poly_set_coeff_si(polynomial, 2, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    assert(class_group.has_presentation());
+
+    const slong relations_before = class_group.relation_count();
+    silex::detail::ClassGroupRelationOptions relation_options;
+    relation_options.extension_relation_target = 0;
+    assert(!silex::detail::ClassGroupRelationSearchAccess::
+                   extend_lll_relation_slice(class_group, order,
+                                             sflint::FmpzConstRef(bound),
+                                             relation_options));
+    relation_options.extension_relation_target = 1;
+    assert(!silex::detail::ClassGroupRelationSearchAccess::
+                   extend_lll_relation_slice(class_group, order,
+                                             sflint::FmpzConstRef(bound),
+                                             relation_options));
+    assert(class_group.relation_count() == relations_before);
     return 0;
 }
 
@@ -12911,6 +12969,7 @@ int main() {
     test_grh_continuation_without_relation_progress_fails_closed();
     test_relation_refill_target_rule();
     test_grh_relation_refill_grows_on_repeated_validation();
+    test_lll_relation_slice_rejects_small_extension_target();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
     test_unit_extraction_cache_clear();
