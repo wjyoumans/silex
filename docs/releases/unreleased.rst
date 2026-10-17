@@ -1543,14 +1543,15 @@ Fixed
 
 - ``ClassGroupContext::saturate_relations_bounded_with_units`` no longer
   weakens the proof metadata of a context already certified ``proven``.
-  With ``h_cand > 1`` its bounded search clears no prime of ``h_cand``, and a
-  pass that appended no relation rewrote every ``ell``-record and
+  A pass that appends no relation cannot clear a prime of ``h_cand > 1``, and
+  such a pass rewrote every ``ell``-record and
   ``relation_saturation_status()`` to ``unavailable`` while the label stayed
   ``proven``.  Such a pass now keeps the saturation status and records (it
   still records proven units), and a failed pass that appended no relation
   leaves every certification field as it found it.  Its ``changed`` and
-  ``saturated`` outputs, the relations it appends, and every pass on a
-  context that is not ``proven`` are unchanged.
+  ``saturated`` outputs, the relations it appends, every pass with
+  ``h_cand = 1``, and every successful pass on a context that is not
+  ``proven`` are unchanged.
 
 - A ``grh`` class/unit computation whose relation-search factor base exceeds
   the size limit of ``2^14`` generators now fails with ``failure_reason``

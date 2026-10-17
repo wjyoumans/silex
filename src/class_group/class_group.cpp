@@ -14150,8 +14150,11 @@ bool ClassGroupContext::saturate_relations_bounded_with_units(
         const bool appended = relation_count() != relations_before;
         transaction.finish(appended || (succeeded && !proven_before));
     }
-    // A kept `proven` context still records proven units as the pass does.
+    // A kept `proven` context still records proven units as the pass does
+    // when it reaches its recording step, which needs h_cand > 1: with
+    // h_cand = 1 the pass returns before recording anything.
     if (succeeded && proven_before && relation_count() == relations_before &&
+        flint::fmpz_cmp_ui(flint::FmpzConstRef(index), 1) > 0 &&
         units.certification_status() == CertificationMode::proven) {
         unit_proof_status_ = ProofState::verified;
         regulator_proof_status_ = ProofState::verified;

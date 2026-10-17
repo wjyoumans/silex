@@ -311,11 +311,14 @@ public:
     //   (that index equals h_cand / h only once generation is known).
     //   When it appends no relation it leaves the certification metadata
     //   unchanged if it fails or if the context is already `proven` (it
-    //   then only records proven units), so it never weakens a proof.
+    //   then only records proven units, and only when h_cand > 1), so it
+    //   never weakens a proof.
     //   Internal class/unit validation uses the
     //   index-bounded variant
     //   saturate_relations_bounded_for_index_with_units_ (the public
-    //   method forwards to it), which removes only the primes of a supplied
+    //   method runs it with h_cand as the bound inside a certification
+    //   transaction, which keeps or restores the metadata as above), which
+    //   removes only the primes of a supplied
     //   bound on h_cand / h.  It sets `verified` once those primes are
     //   removed and either the bound holds unconditionally or verified
     //   records cover every p | h_cand, and `unavailable` otherwise.  The

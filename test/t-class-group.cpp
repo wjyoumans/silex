@@ -5398,7 +5398,16 @@ int test_exact_route_keeps_verified_ell_local_proof() {
 // can clear ell = 3, so a pass on a `grh`-or-weaker context rewrites the
 // ell-record and the status to `unavailable` (its records describe the
 // search); on the `proven` context the pass, and the validation memo replay
-// that mirrors it, keep the verified ell-record and status.
+// that mirrors it, keep the verified ell-record and status.  On a `proven`
+// Q(sqrt(2)) context with h_cand = 1 and no unit proof the pass records
+// nothing, so the unit and regulator states stay `not_checked`.
+//
+// Only successful passes are covered.  The other new promise (a failed pass
+// that appended no relation restores every certification field) cannot be
+// reached through the public API: every input the pass rejects is rejected
+// before it clears any record, and after that point it fails without an
+// append only on an internal error (private storage allocation, the row
+// module checkpoint, or the torsion order of a set unit group).
 int test_bounded_saturation_keeps_proven_metadata() {
     silex::NumberField field = quadratic_field(-23);
     silex::Order equation = silex::test::equation_order(field);
@@ -5487,6 +5496,40 @@ int test_bounded_saturation_keeps_proven_metadata() {
     assert(CertificationAccess::replay_unchanged_bounded_relation_saturation(
             context, units, sflint::FmpzConstRef(class_order)));
     expect_kept();
+
+    silex::NumberField real_field = quadratic_field(2);
+    silex::Order real_order = silex::test::equation_order(real_field);
+    assert(real_order.is_maximal());
+    silex::OrderUnitGroup real_units;
+    assert(real_units.compute(real_order));
+    assert(real_units.certification_status() ==
+           silex::CertificationMode::proven);
+    silex::ClassGroupCandidateOptions real_options;
+    real_options.max_candidates = 256;
+    real_options.max_relations = 32;
+    sflint::Fmpz real_bound;
+    assert(class_group_bound_at_least_two(real_bound, real_order));
+    silex::ClassGroupContext real;
+    assert(real.compute_candidate(real_order,
+                                  sflint::FmpzConstRef(real_bound),
+                                  real_options));
+    assert(real.check_factor_base_generation_bound(
+            sflint::FmpzConstRef(real_bound)));
+    assert(real.try_certify_quadratic(silex::CertificationMode::proven));
+    assert(real.certification_status() == silex::CertificationMode::proven);
+    assert(real.unit_proof_status() == silex::ProofState::not_checked);
+    changed = true;
+    saturated = false;
+    assert(real.saturate_relations_bounded_with_units(
+            changed, saturated, real_units, sflint::FmpzConstRef(aux_bound),
+            2, 2));
+    assert(!changed);
+    assert(saturated);
+    assert(real.certification_status() == silex::CertificationMode::proven);
+    assert(real.relation_saturation_status() == silex::ProofState::verified);
+    assert(real.relation_saturation_record_count() == 0);
+    assert(real.unit_proof_status() == silex::ProofState::not_checked);
+    assert(real.regulator_proof_status() == silex::ProofState::not_checked);
     return 0;
 }
 
