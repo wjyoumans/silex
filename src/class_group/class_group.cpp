@@ -1031,6 +1031,13 @@ DirectLargePrimeStatus direct_partial_relation_row(
         for (std::size_t hit_position = 0; hit_position < hit_count;
              ++hit_position) {
             const DirectPartialResidueHit& hit = hits[hit_position];
+            // Once the hits account for all of v_p(N(alpha)), the remaining
+            // hits have valuation 0 (reference `buch2.c:divide_p_elt` stops
+            // when the norm valuation reaches 0, as relation.cpp's
+            // `factor_over_base_integral` exact block does).
+            if (exact_remaining_vp == 0) {
+                break;
+            }
             const PrimeIdeal* prime = base.prime_at(hit.index);
             slong valuation = -1;
             if (prime == nullptr) {

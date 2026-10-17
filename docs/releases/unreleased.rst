@@ -180,8 +180,8 @@ Changed
   of the last residue hit above a rational prime ``p`` when the factor base
   holds every prime ideal above ``p``: it is what is left of the ``p``-adic
   valuation of the norm after the other hits, divided by the residue degree.
-  Other cases compute it as before, so exponent rows and every published
-  result are unchanged.  See :doc:`../reference/algorithms_and_sources`.
+  Other cases compute it as before, so exponent rows and published results
+  are unchanged wherever the computation previously succeeded.  See :doc:`../reference/algorithms_and_sources`.
 
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when
