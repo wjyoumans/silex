@@ -479,8 +479,8 @@ def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
     # Proven runs stopped by a cap fail with the same reason and detail.
     # The caps are chosen to make the run fail; a corpus row with a known
     # gap would start succeeding when the gap closes.  One row per relation
-    # route of proven runs, none of which reaches a unit-group validation,
-    # so the detail holds only the cap:
+    # route of proven runs; none of them fails in a unit-group validation
+    # that would add a cause, so the detail holds only the cap:
     # - x^3 - 6x^2 - 9x - 1 (the relation-production prepass): one relation,
     #   or one candidate;
     # - x^2 - 146 (the relation-search driver): eight relations;
