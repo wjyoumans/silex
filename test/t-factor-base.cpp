@@ -601,8 +601,8 @@ int test_norm_bounded_build_with_decomposition_cache() {
                 sflint::FmpzConstRef(bound)));
         assert(silex::detail::FactorBaseBlockAccess::
                        order_lll_relation_base_by_norm(ordered));
-        assert(silex::detail::FactorBaseBlockAccess::
-                       build_lll_relation_base_incomplete_for_testing(
+        assert(silex::detail::TestHookAccess::
+                       build_lll_relation_base_incomplete(
                                incomplete, sflint::FmpzConstRef(bound)));
         assert(ordered.equal(incomplete));
         assert(incomplete.equal(ordered));
@@ -1056,7 +1056,7 @@ int test_contains_ignores_residue_representation() {
 // look complete (the sum of e f reaching the degree) while a prime above p
 // is missing.
 int test_append_rejects_repeated_prime() {
-    using silex::detail::FactorBaseBlockAccess;
+    using silex::detail::TestHookAccess;
     silex::NumberField field = cubic_field();
     silex::Order equation = silex::test::equation_order(field);
     silex::Order maximal(field);
@@ -1094,8 +1094,8 @@ int test_append_rejects_repeated_prime() {
         silex::Order imag_maximal(imag);
         assert(imag_maximal.maximal_order(imag_equation));
         silex::FactorBase imag_base(imag_maximal);
-        assert(FactorBaseBlockAccess::
-                       build_maximal_imaginary_quadratic_for_testing(
+        assert(silex::detail::TestHookAccess::
+                       build_maximal_imaginary_quadratic(
                                imag_base, sflint::FmpzConstRef(bound)));
         assert(imag_base.length() > 0);
         assert(primes_are_distinct(imag_base));
@@ -1109,12 +1109,12 @@ int test_append_rejects_repeated_prime() {
     assert(silex::decompose_prime(five, maximal, sflint::FmpzConstRef(p)));
     assert(five.size() == 2);
     silex::FactorBase pair(maximal);
-    assert(FactorBaseBlockAccess::append_prime_for_testing(pair,
+    assert(TestHookAccess::append_prime(pair,
                                                            *five.at(0)));
-    assert(!FactorBaseBlockAccess::append_prime_for_testing(pair,
+    assert(!TestHookAccess::append_prime(pair,
                                                             *five.at(0)));
     assert(pair.length() == 1 && pair.rational_prime_block_count() == 1);
-    assert(FactorBaseBlockAccess::append_prime_for_testing(pair,
+    assert(TestHookAccess::append_prime(pair,
                                                            *five.at(1)));
     assert(pair.length() == 2 && primes_are_distinct(pair));
 
@@ -1129,11 +1129,11 @@ int test_append_rejects_repeated_prime() {
         assert(prime != nullptr);
         silex::PrimeIdeal repeat(maximal);
         assert(repeat.set(*prime));
-        assert(!FactorBaseBlockAccess::append_prime_for_testing(complete,
+        assert(!TestHookAccess::append_prime(complete,
                                                                 repeat));
         silex::PrimeIdeal variant(maximal);
         if (set_unreduced_residue_variant(variant, *prime)) {
-            assert(!FactorBaseBlockAccess::append_prime_for_testing(
+            assert(!TestHookAccess::append_prime(
                     complete, variant));
             ++variants;
         }

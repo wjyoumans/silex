@@ -65,8 +65,8 @@ bool make_fixture(Fixture& fixture, slong radicand, slong bound,
     }
     sflint::fmpz_set_si(sflint::FmpzRef(value), bound);
     return incomplete
-            ? detail::FactorBaseBlockAccess::
-                      build_maximal_imaginary_quadratic_for_testing(
+            ? detail::TestHookAccess::
+                      build_maximal_imaginary_quadratic(
                               fixture.base, sflint::FmpzConstRef(value))
             : detail::FactorBaseBlockAccess::build_prime_ideal_norm_bounded(
                       fixture.base, sflint::FmpzConstRef(value), false, 0,
@@ -372,9 +372,9 @@ void check_root_orientation_guard(slong index_base) noexcept {
 
     Fixture clean{field, order, silex::FactorBase(order)};
     Fixture relabelled_base{field, order, silex::FactorBase(order)};
-    if (!detail::FactorBaseBlockAccess::append_prime_for_testing(clean.base,
+    if (!detail::TestHookAccess::append_prime(clean.base,
                                                                  *chosen) ||
-        !detail::FactorBaseBlockAccess::append_prime_for_testing(
+        !detail::TestHookAccess::append_prime(
                 relabelled_base.base, relabelled)) {
         check(false, "single-prime base construction failed", index_base);
         return;

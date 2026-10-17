@@ -2955,7 +2955,7 @@ silex::FactorBase base_of(const silex::Order& order,
                           std::initializer_list<const silex::PrimeIdeal*> primes) {
     silex::FactorBase base(order);
     for (const silex::PrimeIdeal* prime : primes) {
-        assert(silex::detail::FactorBaseBlockAccess::append_prime_for_testing(
+        assert(silex::detail::TestHookAccess::append_prime(
                 base, *prime));
     }
     return base;

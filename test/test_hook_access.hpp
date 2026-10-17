@@ -28,6 +28,8 @@
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/precision_cap_internal.hpp"
 #include "sunit/sunit_internal.hpp"
+#include "zeta/zeta_internal.hpp"
+#include <silex/factor_base.hpp>
 
 namespace silex::detail {
 
@@ -264,6 +266,41 @@ public:
     static slong saturation_lifts_skipped() noexcept {
         return SaturationLiftLimit::skipped_lifts_.load(
                 std::memory_order_relaxed);
+    }
+
+    // FactorBase::build_lll_relation_base_impl(bound, true): the
+    // incomplete-base LLL relation base.
+    static bool build_lll_relation_base_incomplete(
+            FactorBase& base, flint::FmpzConstRef bound) noexcept {
+        return base.build_lll_relation_base_impl(bound, true);
+    }
+
+    // FactorBase::append_prime, which the builders call.  Fails, leaving
+    // base unchanged, if base already holds `prime`.
+    static bool append_prime(FactorBase& base,
+                             const PrimeIdeal& prime) noexcept {
+        return base.append_prime(prime);
+    }
+
+    // The maximal imaginary-quadratic builder that ClassGroupContext reaches
+    // in an oriented quadratic class-unit transaction.
+    static bool build_maximal_imaginary_quadratic(
+            FactorBase& base, flint::FmpzConstRef bound) noexcept {
+        return base.build_maximal_imaginary_quadratic_relation_base(bound,
+                                                                    nullptr);
+    }
+
+    // The batched and per-prime linear factor counts of the zeta
+    // Belabas-Friedman prime loop (see ZetaBfTestEntry).
+    static bool zeta_bf_linear_factor_counts(
+            std::vector<ulong>& primes,
+            std::vector<slong>& batch_counts,
+            std::vector<slong>& per_prime_counts,
+            const Order& order,
+            ulong first,
+            ulong end) noexcept {
+        return ZetaBfTestEntry::linear_factor_counts(
+                primes, batch_counts, per_prime_counts, order, first, end);
     }
 };
 

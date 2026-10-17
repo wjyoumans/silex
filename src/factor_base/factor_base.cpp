@@ -1585,25 +1585,6 @@ bool FactorBase::build_lll_relation_base_impl(
             *this);
 }
 
-bool detail::FactorBaseBlockAccess::
-        build_lll_relation_base_incomplete_for_testing(
-                FactorBase& base, flint::FmpzConstRef bound) noexcept {
-    return base.build_lll_relation_base_impl(bound, true);
-}
-
-bool detail::FactorBaseBlockAccess::append_prime_for_testing(
-        FactorBase& base,
-        const PrimeIdeal& prime) noexcept {
-    return base.append_prime(prime);
-}
-
-bool detail::FactorBaseBlockAccess::
-        build_maximal_imaginary_quadratic_for_testing(
-                FactorBase& base, flint::FmpzConstRef bound) noexcept {
-    return base.build_maximal_imaginary_quadratic_relation_base(bound,
-                                                                nullptr);
-}
-
 bool detail::FactorBaseBlockAccess::order_lll_relation_base_by_norm(
         FactorBase& base) noexcept {
     struct NormIndex {

@@ -14,6 +14,7 @@ namespace silex {
 struct DiagnosticsContext;
 namespace detail {
 class FactorBaseBlockAccess;
+class TestHookAccess;
 }  // namespace detail
 
 class FactorBase {
@@ -69,6 +70,7 @@ public:
 private:
     friend class ClassGroupContext;
     friend class detail::FactorBaseBlockAccess;
+    friend class detail::TestHookAccess;
 
     struct PrimeBlock {
         flint::Fmpz rational_prime;

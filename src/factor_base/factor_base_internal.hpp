@@ -73,19 +73,6 @@ public:
     // build_lll_relation_base_impl(bound, true) builds.  Fails, possibly
     // leaving base unchanged, if a norm cannot be computed or a copy fails.
     static bool order_lll_relation_base_by_norm(FactorBase& base) noexcept;
-    // Test hook: base.build_lll_relation_base_impl(bound, true), the
-    // incomplete-base LLL relation base.  For tests only.
-    static bool build_lll_relation_base_incomplete_for_testing(
-            FactorBase& base, flint::FmpzConstRef bound) noexcept;
-    // Test hook: FactorBase::append_prime, which the builders call.  Fails,
-    // leaving base unchanged, if base already holds `prime`.  For tests only.
-    static bool append_prime_for_testing(FactorBase& base,
-                                         const PrimeIdeal& prime) noexcept;
-    // Test hook: the maximal imaginary-quadratic builder that
-    // ClassGroupContext reaches in an oriented quadratic class-unit
-    // transaction.  For tests only.
-    static bool build_maximal_imaginary_quadratic_for_testing(
-            FactorBase& base, flint::FmpzConstRef bound) noexcept;
 };
 
 // Proven generation bound used by factor_base_class_group_bound for degree

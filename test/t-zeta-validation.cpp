@@ -1,5 +1,6 @@
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "order_unit/compute_internal.hpp"
+#include "test_hook_access.hpp"
 #include "zeta/zeta_internal.hpp"
 
 #include "test_support.hpp"
@@ -973,7 +974,7 @@ bool check_linear_factor_batch_range(const silex::Order& order,
     std::vector<ulong> primes;
     std::vector<slong> batch_counts;
     std::vector<slong> per_prime_counts;
-    if (!silex::detail::zeta_bf_linear_factor_counts_for_test(
+    if (!silex::detail::TestHookAccess::zeta_bf_linear_factor_counts(
                 primes, batch_counts, per_prime_counts, order, first, end) ||
         primes.empty() || primes.size() != batch_counts.size() ||
         primes.size() != per_prime_counts.size()) {
@@ -1071,7 +1072,7 @@ bool check_linear_factor_batches() noexcept {
     std::vector<ulong> primes;
     std::vector<slong> batch_counts;
     std::vector<slong> per_prime_counts;
-    if (!silex::detail::zeta_bf_linear_factor_counts_for_test(
+    if (!silex::detail::TestHookAccess::zeta_bf_linear_factor_counts(
                 primes, batch_counts, per_prime_counts,
                 dedekind_setup.maximal_order, 2, 3) ||
         primes.size() != 1 || batch_counts[0] != -1 ||

@@ -4733,12 +4733,13 @@ bool zeta_bf_audit_cutoff_available(const Order& order,
                             work_precision, nullptr);
 }
 
-bool zeta_bf_linear_factor_counts_for_test(std::vector<ulong>& primes,
-                                           std::vector<slong>& batch_counts,
-                                           std::vector<slong>& per_prime_counts,
-                                           const Order& order,
-                                           ulong first,
-                                           ulong end) noexcept {
+bool ZetaBfTestEntry::linear_factor_counts(
+        std::vector<ulong>& primes,
+        std::vector<slong>& batch_counts,
+        std::vector<slong>& per_prime_counts,
+        const Order& order,
+        ulong first,
+        ulong end) noexcept {
     primes.clear();
     batch_counts.clear();
     per_prime_counts.clear();
