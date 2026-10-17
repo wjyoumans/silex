@@ -135,8 +135,7 @@ Changed
   ``gamma`` of Satz 2 comes from a generated table up to degree 64 and from
   a deterministic Arb search above it.  Results for degree 20 and below are
   unchanged, and the generation basis stays ``minkowski_type``.  In proven
-  mode, results above degree 20 are unchanged except for the reported
-  generation bound.  The fields ``Q(zeta_m)`` for m = 23, 35, 39, 45, 56,
+  mode the fields ``Q(zeta_m)`` for m = 23, 35, 39, 45, 56,
   72, 84 used to run past the 120 s caps used in testing (600 s for
   ``Q(zeta_23)``) and now finish; their class groups and regulators agree
   with ``grh`` mode.  See "Class groups and order units" in
