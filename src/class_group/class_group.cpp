@@ -6623,21 +6623,27 @@ bool ClassGroupCertificationAccess::
                        flint::FmpzConstRef(index));
     // The tail of saturate_relations_bounded_for_index_with_units_ when no
     // ell is cleared: every ell is marked `unavailable`, so the status is
-    // `unavailable` whatever the bound's conditionality.
-    context.private_storage_->relation_saturation_records.clear();
-    for (slong i = 0;
-         i < flint::fmpz_factor_num(flint::FmpzFactorConstRef(factorization));
-         ++i) {
-        flint::Fmpz ell;
-        flint::fmpz_factor_get_fmpz(
-                flint::FmpzRef(ell),
-                flint::FmpzFactorConstRef(factorization), i);
-        if (!context.mark_relation_saturation_(flint::FmpzConstRef(ell),
-                                               ProofState::unavailable)) {
-            return false;
+    // `unavailable` whatever the bound's conditionality.  On a context
+    // already `proven` the public pass keeps the saturation status and
+    // records (saturate_relations_bounded_with_units), so the replay does
+    // too.
+    if (context.certification_ != CertificationMode::proven) {
+        context.private_storage_->relation_saturation_records.clear();
+        for (slong i = 0;
+             i < flint::fmpz_factor_num(
+                         flint::FmpzFactorConstRef(factorization));
+             ++i) {
+            flint::Fmpz ell;
+            flint::fmpz_factor_get_fmpz(
+                    flint::FmpzRef(ell),
+                    flint::FmpzFactorConstRef(factorization), i);
+            if (!context.mark_relation_saturation_(
+                        flint::FmpzConstRef(ell), ProofState::unavailable)) {
+                return false;
+            }
         }
+        context.relation_saturation_status_ = ProofState::unavailable;
     }
-    context.relation_saturation_status_ = ProofState::unavailable;
     if (units.certification_status() == CertificationMode::proven) {
         context.unit_proof_status_ = ProofState::verified;
         context.regulator_proof_status_ = ProofState::verified;
@@ -14120,12 +14126,37 @@ bool ClassGroupContext::saturate_relations_bounded_with_units(
         return false;
     }
 
-    // The current index h_cand bounds [L_true : L_found] unconditionally:
-    // the full relation lattice L_true lies between the computed one L_found
-    // and Z^S.  That index equals h_cand / h only once generation is known.
-    return saturate_relations_bounded_for_index_with_units_(
-            changed, saturated, units, flint::FmpzConstRef(index), true,
-            aux_prime_bound, max_appends_per_ell, max_appends_total);
+    // The pass runs inside a certification transaction.  An appended
+    // relation resets the certification metadata of the old presentation
+    // (append_relation) and the pass then records its search for the new
+    // one, so that outcome is always kept.  With no relation appended the
+    // presentation is unchanged, and the transaction restores every
+    // certification field when the pass fails, or when the context was
+    // already `proven`: a bounded search cannot clear a prime of h_cand > 1,
+    // so its `unavailable` records and status would only weaken the proof
+    // metadata recorded for this presentation.
+    const slong relations_before = relation_count();
+    const bool proven_before = certification_ == CertificationMode::proven;
+    bool succeeded = false;
+    {
+        CertificationTransaction_ transaction(*this);
+        // The current index h_cand bounds [L_true : L_found]
+        // unconditionally: the full relation lattice L_true lies between
+        // the computed one L_found and Z^S.  That index equals h_cand / h
+        // only once generation is known.
+        succeeded = saturate_relations_bounded_for_index_with_units_(
+                changed, saturated, units, flint::FmpzConstRef(index), true,
+                aux_prime_bound, max_appends_per_ell, max_appends_total);
+        const bool appended = relation_count() != relations_before;
+        transaction.finish(appended || (succeeded && !proven_before));
+    }
+    // A kept `proven` context still records proven units as the pass does.
+    if (succeeded && proven_before && relation_count() == relations_before &&
+        units.certification_status() == CertificationMode::proven) {
+        unit_proof_status_ = ProofState::verified;
+        regulator_proof_status_ = ProofState::verified;
+    }
+    return succeeded;
 }
 
 bool ClassGroupContext::saturate_relations_bounded_for_index_with_units_(

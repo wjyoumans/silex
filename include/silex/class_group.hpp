@@ -309,6 +309,9 @@ public:
     //   ell-local proof.  Its bound is h_cand itself, which bounds the index
     //   of the computed relation lattice in the full one unconditionally
     //   (that index equals h_cand / h only once generation is known).
+    //   When it appends no relation it leaves the certification metadata
+    //   unchanged if it fails or if the context is already `proven` (it
+    //   then only records proven units), so it never weakens a proof.
     //   Internal class/unit validation uses the
     //   index-bounded variant
     //   saturate_relations_bounded_for_index_with_units_ (the public

@@ -144,7 +144,9 @@ public:
     // replaced by one `unavailable` record per prime ell of h_cand,
     // relation_saturation_status() becomes `unavailable`, and with proven
     // `units` the unit and regulator proofs are recorded as that pass
-    // records them.  Nothing is searched.  For the grh validation memo
+    // records them; on a `proven` context the saturation status and
+    // records are kept, as that pass keeps them.  Nothing is searched.  For
+    // the grh validation memo
     // (RelationSaturationMemo): the caller asserts that a pass on the same
     // relation and unit lattices appended nothing.  Returns false, changing
     // nothing, unless the current h_cand equals `expected_class_order` and

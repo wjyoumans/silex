@@ -5393,6 +5393,103 @@ int test_exact_route_keeps_verified_ell_local_proof() {
     return 0;
 }
 
+// The public bounded saturation pass never weakens the metadata of a
+// `proven` context.  On Q(sqrt(-23)) with h_cand = h = 3 no bounded search
+// can clear ell = 3, so a pass on a `grh`-or-weaker context rewrites the
+// ell-record and the status to `unavailable` (its records describe the
+// search); on the `proven` context the pass, and the validation memo replay
+// that mirrors it, keep the verified ell-record and status.
+int test_bounded_saturation_keeps_proven_metadata() {
+    silex::NumberField field = quadratic_field(-23);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::OrderUnitGroup units;
+    assert(units.compute(maximal));
+    assert(units.certification_status() == silex::CertificationMode::proven);
+
+    sflint::Fmpz aux_bound;
+    sflint::Fmpz ell;
+    sflint::Fmpz class_order;
+    assert(set_fmpz_si(aux_bound, 200));
+    assert(set_fmpz_si(ell, 3));
+    assert(set_fmpz_si(class_order, 3));
+    sflint::Fmpz record_ell;
+    silex::ProofState record_status = silex::ProofState::not_checked;
+    bool changed = true;
+    bool saturated = true;
+
+    silex::ClassGroupContext unproven;
+    prepare_minus_23_candidate(unproven, maximal, 1, 3);
+    assert(unproven.try_certify_with_units(
+            units, silex::CertificationMode::unknown, 128));
+    assert(unproven.try_prove_relation_saturation_with_units(
+            units, sflint::FmpzConstRef(ell),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(unproven.certification_status() ==
+           silex::CertificationMode::unknown);
+    assert(unproven.saturate_relations_bounded_with_units(
+            changed, saturated, units, sflint::FmpzConstRef(aux_bound), 2, 2));
+    assert(!changed);
+    assert(!saturated);
+    assert(unproven.relation_saturation_status() ==
+           silex::ProofState::unavailable);
+    assert(unproven.relation_saturation_record_count() == 1);
+    assert(unproven.relation_saturation_record(
+            sflint::FmpzRef(record_ell), record_status, 0));
+    assert(record_status == silex::ProofState::unavailable);
+
+    silex::ClassGroupContext context;
+    prepare_minus_23_candidate(context, maximal, 1, 3);
+    assert(context.try_certify_with_units(
+            units, silex::CertificationMode::unknown, 128));
+    assert(context.try_prove_relation_saturation_with_units(
+            units, sflint::FmpzConstRef(ell),
+            sflint::FmpzConstRef(aux_bound)));
+    assert(context.try_certify_quadratic(silex::CertificationMode::proven));
+    assert(context.certification_status() ==
+           silex::CertificationMode::proven);
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::verified);
+
+    const auto expect_kept = [&]() {
+        assert(context.certification_status() ==
+               silex::CertificationMode::proven);
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+        assert(context.relation_saturation_record_count() == 1);
+        assert(context.relation_saturation_record(
+                sflint::FmpzRef(record_ell), record_status, 0));
+        assert(sflint::fmpz_equal_si(record_ell, 3));
+        assert(record_status == silex::ProofState::verified);
+        silex::ProofState proof_status = silex::ProofState::not_checked;
+        slong rank = -1;
+        slong target_rank = -1;
+        slong local_primes = -1;
+        assert(CertificationAccess::relation_saturation_proof_record(
+                context, sflint::FmpzConstRef(ell), proof_status, rank,
+                target_rank, local_primes));
+        assert(proof_status == silex::ProofState::verified);
+    };
+
+    changed = true;
+    saturated = true;
+    assert(context.saturate_relations_bounded_with_units(
+            changed, saturated, units, sflint::FmpzConstRef(aux_bound), 2, 2));
+    assert(!changed);
+    assert(!saturated);
+    assert(context.relation_count() == 2);
+    expect_kept();
+    assert(context.unit_proof_status() == silex::ProofState::verified);
+    assert(context.regulator_proof_status() == silex::ProofState::verified);
+
+    assert(CertificationAccess::replay_unchanged_bounded_relation_saturation(
+            context, units, sflint::FmpzConstRef(class_order)));
+    expect_kept();
+    return 0;
+}
+
 int test_compute_candidate_preserves_on_failure() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -8051,6 +8148,7 @@ int main() {
     test_relation_saturation_kernel_fallbacks_keep_proven_result();
     test_grh_request_takes_belabas_friedman_residue();
     test_exact_route_keeps_verified_ell_local_proof();
+    test_bounded_saturation_keeps_proven_metadata();
     test_compute_candidate_preserves_on_failure();
     test_move_and_swap();
     test_grh_provenance_records();
