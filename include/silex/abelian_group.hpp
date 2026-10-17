@@ -84,6 +84,9 @@ private:
     flint::FmpzMat relations_{0, 0};
     flint::FmpzMat hnf_basis_{0, 0};
     mutable flint::FmpzMat snf_{0, 0};
+    // Partial: only rows i < n with a non-unit Smith entry and the kernel
+    // rows n..m are populated; the other rows are zero, so the matrix is not
+    // unimodular.  Callers may read only those rows (see ensure_left_transform).
     mutable flint::FmpzMat left_transform_{0, 0};
     mutable flint::FmpzMat right_transform_{0, 0};
     mutable flint::FmpzMat right_transform_inv_{0, 0};

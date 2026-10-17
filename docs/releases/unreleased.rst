@@ -1384,7 +1384,8 @@ Changed
   ``x^2 - x - 250000000002`` from 11.2 s to 2.2 s.  Published outputs and
   proof records are identical on the 177 ``proven`` corpus rows that finish
   within 120 s.  The HNF transform of the relation matrix is still computed,
-  and it is now the largest cost on those rows.
+  and on ``x^2 - x - 2500000001``, the one row profiled, it is now the
+  largest cost.
 
 Fixed
 -----

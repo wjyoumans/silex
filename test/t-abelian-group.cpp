@@ -947,7 +947,8 @@ int test_smith_cache_reuses_unchanged_basis() {
 // rows with a non-unit Smith entry; this reference forms the full product and
 // checks that every row the accessors return is the same exact integer row.
 // The pseudo-random relation matrices give groups whose Smith form mixes
-// unit and non-unit entries, all non-unit entries, and none.
+// unit and non-unit entries, or has only unit entries.  Every-entry-non-unit
+// (rank == n) is not generated and not asserted.
 int test_witness_rows_match_full_left_product() {
     const slong m = 7;
     const slong n = 4;
