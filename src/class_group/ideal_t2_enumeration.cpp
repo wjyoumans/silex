@@ -659,6 +659,15 @@ static bool finite_quadratic_form_volume_bound(
     return false;
 }
 
+// The Gram matrix of the embedding rows, G[i][j] = <row_i, row_j>.  G is
+// symmetric, so only the lower triangle j <= i is computed, and each entry is
+// copied to G[j][i].  A lower entry is summed with the same arb_mul and
+// arb_add calls, in the same order, as when both triangles were computed, so
+// it is the same ball.  An upper entry keeps its midpoint, since the midpoint
+// of a ball product or sum is the correctly rounded product or sum of the
+// midpoints; only its radius can differ, by Arb's upward-rounded magnitude
+// arithmetic.  The readers of G use the lower triangle (arb_mat_cho), the
+// diagonal, and the entry midpoints, so they see what they saw before.
 static bool build_embedding_gram(flint::ArbMat& out,
                           const flint::ArbMat& embedding_rows,
                           slong precision) noexcept {
@@ -672,7 +681,7 @@ static bool build_embedding_gram(flint::ArbMat& out,
     flint::Arb sum;
     flint::Arb term;
     for (slong i = 0; i < rows; ++i) {
-        for (slong j = 0; j < rows; ++j) {
+        for (slong j = 0; j <= i; ++j) {
             flint::arb_zero(sum);
             for (slong k = 0; k < cols; ++k) {
                 flint::arb_mul(term,
@@ -683,6 +692,10 @@ static bool build_embedding_gram(flint::ArbMat& out,
             }
             flint::arb_set(flint::arb_mat_entry_ref(out, i, j),
                            flint::ArbConstRef(sum));
+            if (j != i) {
+                flint::arb_set(flint::arb_mat_entry_ref(out, j, i),
+                               flint::ArbConstRef(sum));
+            }
         }
     }
     return true;

@@ -1,6 +1,7 @@
 #include "class_group/class_group_storage_internal.hpp"
 #include "class_group/ideal_lattice_reduction_internal.hpp"
 #include "class_group/ideal_lattice_lll_internal.hpp"
+#include "class_group/ideal_minkowski_embedding_internal.hpp"
 #include "class_group/ideal_t2_enumeration_internal.hpp"
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
@@ -27,6 +28,7 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -1467,6 +1469,123 @@ int test_octic_t2_enumeration_data_meets_lll_bounds() {
     return 0;
 }
 
+
+// The T2 quadratic form of `data` (Gram-Schmidt pivots B_k on the diagonal,
+// mu_{i,k} at row k, column i > k) must reproduce every entry, in both
+// triangles, of the Minkowski Gram matrix of data.basis computed here
+// independently: G_ij = sum_{k <= min(i, j)} mu_{i,k} mu_{j,k} B_k with
+// mu_{k,k} = 1.  The double LDL^T backward error is a small multiple of
+// 2^-53 sqrt(G_ii G_jj), far below the 2^-30 tolerance.
+bool t2_enumeration_data_is_basis_gram(
+        const silex::Order& order,
+        const silex::detail::relation_search::FiniteIdealT2EnumerationData&
+                data) noexcept {
+    const slong degree = order.degree();
+    if (degree <= 0 || sflint::fmpz_mat_nrows(data.basis) != degree ||
+        data.quadratic_form_data.size() !=
+                static_cast<std::size_t>(degree * degree)) {
+        return false;
+    }
+    constexpr slong kGramPrecision = 256;
+    sflint::ArbMat rows(degree, degree);
+    if (!silex::detail::build_ideal_minkowski_embedding_rows(
+                rows, sflint::FmpzMatConstRef(data.basis), order,
+                kGramPrecision)) {
+        return false;
+    }
+    std::vector<double> gram(static_cast<std::size_t>(degree * degree));
+    arb_t sum;
+    arb_t term;
+    arb_init(sum);
+    arb_init(term);
+    for (slong i = 0; i < degree; ++i) {
+        for (slong j = 0; j < degree; ++j) {
+            arb_zero(sum);
+            for (slong k = 0; k < degree; ++k) {
+                arb_mul(term, arb_mat_entry(rows.raw(), i, k),
+                        arb_mat_entry(rows.raw(), j, k), kGramPrecision);
+                arb_add(sum, sum, term, kGramPrecision);
+            }
+            gram[static_cast<std::size_t>(i * degree + j)] =
+                    arf_get_d(arb_midref(sum), ARF_RND_NEAR);
+        }
+    }
+    arb_clear(sum);
+    arb_clear(term);
+
+    const auto form = [&](slong row, slong column) {
+        return data.quadratic_form_data[static_cast<std::size_t>(
+                row * degree + column)];
+    };
+    const auto mu = [&](slong i, slong k) {
+        return i == k ? 1.0 : form(k, i);
+    };
+    for (slong i = 0; i < degree; ++i) {
+        for (slong j = 0; j < degree; ++j) {
+            double value = 0.0;
+            for (slong k = 0; k <= std::min(i, j); ++k) {
+                value += mu(i, k) * mu(j, k) * form(k, k);
+            }
+            const double expected =
+                    gram[static_cast<std::size_t>(i * degree + j)];
+            const double scale = std::sqrt(
+                    gram[static_cast<std::size_t>(i * degree + i)] *
+                    gram[static_cast<std::size_t>(j * degree + j)]);
+            if (!std::isfinite(value) || !std::isfinite(scale) ||
+                scale <= 0.0 ||
+                std::fabs(value - expected) > std::ldexp(scale, -30)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// x^5 - 3x + 1 has signature (3, 1), so the Minkowski rows mix real and
+// complex places.  The quadratic form of each T2 enumeration context must be
+// the full symmetric Gram matrix of its reduced basis.
+int test_t2_enumeration_quadratic_form_is_basis_gram() {
+    constexpr std::array<slong, 6> coefficients = {1, -3, 0, 0, 0, 1};
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    for (std::size_t i = 0; i < coefficients.size(); ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                       coefficients[i]);
+    }
+    const silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation_order));
+    assert(order.degree() == 5);
+
+    constexpr std::array<ulong, 5> rational_primes = {2, 3, 5, 7, 11};
+    slong checked = 0;
+    for (const ulong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        sflint::fmpz_set_ui(sflint::FmpzRef(p), rational_prime);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            assert(prime != nullptr);
+            silex::Ideal prime_ideal(order);
+            assert(prime->get_ideal(prime_ideal));
+
+            silex::detail::relation_search::FiniteIdealT2EnumerationData data;
+            assert(silex::detail::relation_search::
+                           build_finite_ideal_t2_enumeration_data_with_retry(
+                                   data, prime_ideal, nullptr, nullptr));
+            assert(t2_enumeration_data_is_basis_gram(order, data));
+            ++checked;
+        }
+    }
+    assert(checked >= 5);
+    return 0;
+}
+
 }  // namespace
 
 // The integer LLL of the rounded-embedding route certifies FLINT's first
@@ -1865,5 +1984,6 @@ int main() {
            0);
     assert(test_skewed_basis_t2_enumeration_data_builds() == 0);
     assert(test_octic_t2_enumeration_data_meets_lll_bounds() == 0);
+    assert(test_t2_enumeration_quadratic_form_is_basis_gram() == 0);
     return 0;
 }
