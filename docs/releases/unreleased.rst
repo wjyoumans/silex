@@ -137,6 +137,17 @@ Changed
   7% fewer instructions on the proven row ``random_d9_h4_s8_proven``,
   busy-machine ``perf stat`` instruction counts).
 
+- The capped T2 witness search of the ``proven`` factor-base honesty check
+  rejects a candidate whose norm is not smooth over the factor-base and
+  required rational primes from its coordinates, with the exact norm from the
+  order's multiplication table times the norm of the search's back
+  multiplier, before building the candidate element, and tells rational
+  scalars apart from the same coordinates.  These are exactly the candidates
+  the direct order-element test rejects by its norm cofactor
+  (``buch2.c:can_factor``), and each still counts as a factor attempt, so
+  witnesses, caps, honesty verdicts and every published result are
+  unchanged; only the running time changes, on degree 2 to 4 fields.
+
 - The relation residue screen in class-group relation search values a
   factor-base prime that has no residue polynomial (an index divisor) by its
   exact valuation of the element, with the known norm, instead of sending the
