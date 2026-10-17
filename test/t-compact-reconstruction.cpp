@@ -21,6 +21,8 @@
 #include <flint/arb.h>
 #include <flint/arf.h>
 #include <flint/flint.h>
+#include <flint/fmpq.h>
+#include <flint/fmpq_mat.h>
 #include <flint/fmpz.h>
 #include <flint/fmpz_mat.h>
 #include <flint/nmod_mat.h>
@@ -2486,6 +2488,227 @@ int test_wide_reconstruction_split_prime_rejections() {
     return 0;
 }
 
+// Q(zeta_5), defined by Phi_5 = x^4 + x^3 + x^2 + x + 1.
+silex::NumberField cyclotomic_5_field() noexcept {
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 4; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// The evaluation-form route inverts a base coordinate by coordinate.  In
+// Q(zeta_5) with the bases u = 1 + zeta and u^2 of
+// test_wide_reconstruction_prefers_split_primes and the base zeta with the
+// exponents -1 and -2: the wide u exponents send the batch to the split
+// prime p, and the small negative zeta exponents stay negative after the
+// reduction modulo p - 1, so the products use the evaluated inverse of zeta.
+// The outputs are u zeta^-1 and u^-1 zeta^-2.
+int test_wide_reconstruction_split_prime_uses_inverse() {
+    silex::NumberField field = cyclotomic_5_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    const ulong split_prime = first_large_prime_one_mod(5);
+
+    silex::Element zeta(field);
+    silex::Element unit(field);
+    assert(zeta.gen());
+    assert(unit.add_si(zeta, 1));
+    silex::detail::WideFactoredUnits wide;
+    for (int i = 0; i < 3; ++i) {
+        wide.bases.emplace_back(field);
+    }
+    assert(wide.bases[0].add_si(zeta, 1));
+    assert(wide.bases[1].multiply(unit, unit));
+    assert(wide.bases[2].gen());
+    wide.exponents = sflint::FmpzMat(2, 3);
+    fmpz* row0 = fmpz_mat_entry(wide.exponents.raw(), 0, 0);
+    fmpz* row1 = fmpz_mat_entry(wide.exponents.raw(), 1, 0);
+    fmpz_one_2exp(row0 + 0, 71);
+    fmpz_add_ui(row0 + 0, row0 + 0, 1);
+    fmpz_one_2exp(row0 + 1, 70);
+    fmpz_neg(row0 + 1, row0 + 1);
+    fmpz_set_si(row0 + 2, -1);
+    fmpz_one_2exp(row1 + 0, 72);
+    fmpz_add_ui(row1 + 0, row1 + 0, 1);
+    fmpz_neg(row1 + 0, row1 + 0);
+    fmpz_one_2exp(row1 + 1, 71);
+    fmpz_set_si(row1 + 2, -2);
+
+    std::vector<silex::FactoredElement> plain;
+    plain.emplace_back(field);
+    plain.emplace_back(field);
+    assert(plain[0].push(unit, 1));
+    assert(plain[0].push(zeta, -1));
+    assert(plain[1].push(unit, -1));
+    assert(plain[1].push(zeta, -2));
+    std::vector<silex::Element> expected;
+    sflint::Fmpz bound;
+    exact_outputs_and_bound(expected, bound, maximal, plain);
+
+    silex::detail::BoundedCompactReconstructionOptions options;
+    options.prime_search_start = split_prime - 1;
+    silex::detail::BoundedCompactReconstructionReport report;
+    std::vector<silex::Element> actual;
+    assert(silex::detail::bounded_compact_reconstruct(
+            report, actual, maximal, wide, sflint::FmpzConstRef(bound),
+            options));
+    assert(report.status ==
+           silex::detail::BoundedCompactReconstructionStatus::success);
+    assert(report.prime_trials == 1 && report.primes_used == 1);
+    assert(report.nonsplit_prime_skips == 0);
+    assert(report.last_prime == split_prime);
+    assert_exact_crt_crossing(report, sflint::FmpzConstRef(bound));
+    assert_equal_outputs(actual, expected);
+    return 0;
+}
+
+// The two routes give the same residues at one split prime p.  The order
+// Z[zeta] of Q(zeta_5) is given by the basis 1, 1 + zeta, zeta + zeta^2,
+// zeta^2 + zeta^3, so its basis matrix B is not the identity.  A batch with
+// wide exponents is reconstructed at p by the evaluation-form route and the
+// same outputs u^3 and u^-2 (u = 1 + zeta) given with small exponents by the
+// power-basis route.  Each uses p alone, so its outputs are the centered
+// residues at p, and both equal the exact outputs: the change to order
+// coordinates through (B W)^-1 matches the one through B^-1.
+int test_wide_reconstruction_split_prime_matches_power_basis() {
+    silex::NumberField field = cyclotomic_5_field();
+    silex::Order order(field);
+    sflint::FmpqMat basis(4, 4);
+    for (slong row = 0; row < 4; ++row) {
+        fmpq_set_si(fmpq_mat_entry(basis.raw(), row, row), 1, 1);
+        if (row > 0) {
+            fmpq_set_si(fmpq_mat_entry(basis.raw(), row, row - 1), 1, 1);
+        }
+    }
+    assert(order.set_basis(sflint::FmpqMatConstRef(basis)));
+    sflint::FmpqMat stored(4, 4);
+    assert(order.get_basis(sflint::FmpqMatRef(stored)));
+    assert(fmpq_mat_equal(stored.raw(), basis.raw()));
+    const ulong split_prime = first_large_prime_one_mod(5);
+
+    silex::Element zeta(field);
+    silex::Element unit(field);
+    assert(zeta.gen());
+    assert(unit.add_si(zeta, 1));
+    silex::detail::WideFactoredUnits wide;
+    wide.bases.emplace_back(field);
+    wide.bases.emplace_back(field);
+    assert(wide.bases[0].add_si(zeta, 1));
+    assert(wide.bases[1].multiply(unit, unit));
+    wide.exponents = sflint::FmpzMat(2, 2);
+    fmpz* e00 = fmpz_mat_entry(wide.exponents.raw(), 0, 0);
+    fmpz* e01 = fmpz_mat_entry(wide.exponents.raw(), 0, 1);
+    fmpz* e10 = fmpz_mat_entry(wide.exponents.raw(), 1, 0);
+    fmpz* e11 = fmpz_mat_entry(wide.exponents.raw(), 1, 1);
+    fmpz_one_2exp(e00, 71);
+    fmpz_add_ui(e00, e00, 3);
+    fmpz_one_2exp(e01, 70);
+    fmpz_neg(e01, e01);
+    fmpz_one_2exp(e10, 72);
+    fmpz_add_ui(e10, e10, 2);
+    fmpz_neg(e10, e10);
+    fmpz_one_2exp(e11, 71);
+
+    std::vector<silex::FactoredElement> plain;
+    plain.emplace_back(field);
+    plain.emplace_back(field);
+    assert(plain[0].push(unit, 3));
+    assert(plain[1].push(unit, -2));
+    std::vector<silex::Element> expected;
+    sflint::Fmpz bound;
+    exact_outputs_and_bound(expected, bound, order, plain);
+
+    silex::detail::BoundedCompactReconstructionOptions options;
+    options.prime_search_start = split_prime - 1;
+    for (int run = 0; run < 2; ++run) {
+        silex::detail::BoundedCompactReconstructionReport report;
+        std::vector<silex::Element> actual;
+        if (run == 0) {
+            assert(silex::detail::bounded_compact_reconstruct(
+                    report, actual, order, wide, sflint::FmpzConstRef(bound),
+                    options));
+        } else {
+            assert(silex::detail::bounded_compact_reconstruct(
+                    report, actual, order, plain,
+                    sflint::FmpzConstRef(bound), options));
+        }
+        assert(report.status ==
+               silex::detail::BoundedCompactReconstructionStatus::success);
+        assert(report.prime_trials == 1 && report.primes_used == 1);
+        assert(report.last_prime == split_prime);
+        assert_exact_crt_crossing(report, sflint::FmpzConstRef(bound));
+        assert_equal_outputs(actual, expected);
+    }
+    return 0;
+}
+
+// The evaluation-form route rejects a split prime p for the order basis when
+// B W, hence B, is singular modulo p.  The order Z + p Z[zeta] of Q(zeta_5)
+// has the integral basis 1, p zeta, p zeta^2, p zeta^3, which is singular
+// modulo p, while Phi_5 splits there.  The batch with wide exponents
+// u^(2^71) (u^2)^(-2^70) = 1 is rejected at p and reconstructed at the next
+// split prime q; the primes between them are passed over as nonsplit.
+int test_wide_reconstruction_split_prime_order_basis_rejection() {
+    silex::NumberField field = cyclotomic_5_field();
+    const ulong split_prime = first_large_prime_one_mod(5);
+    ulong next_split_prime = n_nextprime(split_prime, 1);
+    std::size_t nonsplit = 0;
+    while (next_split_prime % 5 != 1) {
+        ++nonsplit;
+        next_split_prime = n_nextprime(next_split_prime, 1);
+    }
+
+    silex::Order order(field);
+    sflint::FmpqMat basis(4, 4);
+    fmpq_set_si(fmpq_mat_entry(basis.raw(), 0, 0), 1, 1);
+    for (slong row = 1; row < 4; ++row) {
+        fmpq_set_ui(fmpq_mat_entry(basis.raw(), row, row), split_prime, 1);
+    }
+    assert(order.set_basis(sflint::FmpqMatConstRef(basis)));
+
+    silex::Element zeta(field);
+    silex::Element unit(field);
+    silex::Element one(field);
+    assert(zeta.gen());
+    assert(unit.add_si(zeta, 1));
+    assert(one.one());
+    silex::detail::WideFactoredUnits wide;
+    wide.bases.emplace_back(field);
+    wide.bases.emplace_back(field);
+    assert(wide.bases[0].add_si(zeta, 1));
+    assert(wide.bases[1].multiply(unit, unit));
+    wide.exponents = sflint::FmpzMat(1, 2);
+    fmpz* e00 = fmpz_mat_entry(wide.exponents.raw(), 0, 0);
+    fmpz* e01 = fmpz_mat_entry(wide.exponents.raw(), 0, 1);
+    fmpz_one_2exp(e00, 71);
+    fmpz_one_2exp(e01, 70);
+    fmpz_neg(e01, e01);
+
+    sflint::Fmpz bound;
+    fmpz_one(bound.raw());
+    silex::detail::BoundedCompactReconstructionOptions options;
+    options.prime_search_start = split_prime - 1;
+    silex::detail::BoundedCompactReconstructionReport report;
+    std::vector<silex::Element> actual;
+    assert(silex::detail::bounded_compact_reconstruct(
+            report, actual, order, wide, sflint::FmpzConstRef(bound),
+            options));
+    assert(report.status ==
+           silex::detail::BoundedCompactReconstructionStatus::success);
+    assert(report.prime_trials == 2 && report.primes_used == 1);
+    assert(report.order_basis_prime_rejections == 1);
+    assert(report.field_polynomial_prime_rejections == 0);
+    assert(report.denominator_prime_rejections == 0);
+    assert(report.noninvertible_prime_rejections == 0);
+    assert(report.nonsplit_prime_skips == nonsplit);
+    assert(report.last_prime == next_split_prime);
+    assert(actual.size() == 1 && actual[0].equal(one));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -2497,6 +2720,9 @@ int main() {
     assert(test_modular_power_products_fallback_uses_inverse() == 0);
     assert(test_wide_reconstruction_prefers_split_primes() == 0);
     assert(test_wide_reconstruction_split_prime_rejections() == 0);
+    assert(test_wide_reconstruction_split_prime_uses_inverse() == 0);
+    assert(test_wide_reconstruction_split_prime_matches_power_basis() == 0);
+    assert(test_wide_reconstruction_split_prime_order_basis_rejection() == 0);
     assert(test_shared_exponent_matrix_and_centered_crt() == 0);
     assert(test_denominator_prime_exclusion() == 0);
     assert(test_field_polynomial_denominator_prime_exclusion() == 0);
