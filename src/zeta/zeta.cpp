@@ -2663,10 +2663,18 @@ bool grh_factor_base_bound_impl(
     // search also stops once the criterion fails at a cutoff at least Bach's
     // bound; the BDF bound would then exceed Bach's (see
     // `factor_base_bound_bdf_search_impl`), so the result is unchanged.
-    const bool bdf_computed =
+    const detail::BdfSearchOutcome bdf_outcome =
             factor_base_bound_bdf_search(flint::FmpzRef(bdf), order, &bach,
-                                         diagnostics) ==
-            detail::BdfSearchOutcome::found;
+                                         diagnostics);
+    const bool bdf_computed = bdf_outcome == detail::BdfSearchOutcome::found;
+    // The generation basis records only that Bach's bound was used; this
+    // note tells a BDF failure apart from a BDF bound above Bach's.
+    if (bdf_outcome == detail::BdfSearchOutcome::failed) {
+        SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                  LogLevel::detail,
+                  "BDF generation bound could not be computed or decided; "
+                  "using Bach's bound");
+    }
     const bool use_bach =
             !bdf_computed ||
             flint::fmpz_cmp(flint::FmpzConstRef(bdf),

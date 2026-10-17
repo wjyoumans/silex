@@ -668,7 +668,11 @@ Changed
   be computed or decided (for example for a non-monic defining polynomial,
   or an interval comparison in its search that cannot be decided), and the
   generation record then names Bach's theorem
-  (``ClassGroupGenerationBasis::bach``).  A ``grh`` request on a monic
+  (``ClassGroupGenerationBasis::bach``).  With logging compiled in, this
+  fallback also emits a ``detail`` log note in the ``class_group`` module,
+  "BDF generation bound could not be computed or decided; using Bach's
+  bound", which tells it apart from a Bach bound below the BDF bound (both
+  record ``bach``).  A ``grh`` request on a monic
   presentation whose criterion search cannot be decided used to fail closed
   at policy selection and now uses Bach's bound.  Proven results and the
   failure rules are unchanged; a ``grh`` request on a non-monic presentation

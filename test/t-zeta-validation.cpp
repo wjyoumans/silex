@@ -5,7 +5,9 @@
 #include "test_support.hpp"
 
 #include <silex/class_group.hpp>
+#include <silex/diagnostics.hpp>
 #include <silex/flint/fmpq.hpp>
+#include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
@@ -610,6 +612,81 @@ bool theorem7_bound_near(const silex::Order& order,
     return sflint::arb_contains(window, bound);
 }
 
+// Counts the class-group log note that the BDF generation bound could not
+// be computed or decided.
+void count_bdf_failure_logs(void* user,
+                            silex::DiagnosticsModule,
+                            silex::LogLevel,
+                            const char*,
+                            const char* message,
+                            const char*) noexcept {
+    if (message != nullptr &&
+        std::strcmp(message,
+                    "BDF generation bound could not be computed or "
+                    "decided; using Bach's bound") == 0) {
+        ++*static_cast<slong*>(user);
+    }
+}
+
+// The GRH generation bound records only that Bach's bound was used, both
+// when it is below the BDF bound and when the BDF criterion cannot be
+// computed or decided; only the latter emits a class-group log note (when
+// logging is compiled in).  4x^3 + x + 100 defines the field of
+// x^3 + x + 200, and the residue-degree route of the BDF criterion needs a
+// monic integral defining polynomial, so for that presentation the bound is
+// Bach's alone, 2317, while x^3 + x + 200 has the BDF bound 19.
+bool check_bdf_failure_note() noexcept {
+    slong notes = 0;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_logging(
+            diagnostics, silex::LogLevel::detail,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            count_bdf_failure_logs, &notes);
+#if defined(SILEX_ENABLE_LOGGING) && SILEX_ENABLE_LOGGING
+    const slong expected_notes = 1;
+#else
+    const slong expected_notes = 0;
+#endif
+
+    const slong monic_coefficients[] = {200, 1, 0};
+    const FieldSetup monic = setup_from_coefficients(monic_coefficients, 3);
+    sflint::Fmpz bound;
+    bool bach_selected = true;
+    if (!silex::detail::grh_factor_base_bound_with_diagnostics(
+                sflint::FmpzRef(bound), monic.maximal_order, &diagnostics,
+                &bach_selected) ||
+        !sflint::fmpz_equal_si(bound, 19) || bach_selected || notes != 0) {
+        return false;
+    }
+
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, 4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 100);
+    const silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    // Z[2 beta] = Z[alpha], with basis 1, 2 beta, 4 beta^2.
+    sflint::FmpqMat alpha_basis(3, 3);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 0, 0), 1, 1);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 1, 1), 2, 1);
+    fmpq_set_si(fmpq_mat_entry(alpha_basis.raw(), 2, 2), 4, 1);
+    const silex::Order alpha_order = silex::Order::from_basis(
+            field, sflint::FmpqMatConstRef(alpha_basis));
+    silex::Order maximal(field);
+    if (!alpha_order.is_defined() || !maximal.maximal_order(alpha_order)) {
+        return false;
+    }
+    bach_selected = false;
+    return silex::detail::grh_factor_base_bound_with_diagnostics(
+                   sflint::FmpzRef(bound), maximal, &diagnostics,
+                   &bach_selected) &&
+           sflint::fmpz_equal_si(bound, 2317) && bach_selected &&
+           notes == expected_notes;
+}
+
 bool check_theorem7_bound_reference() noexcept {
     const slong simplest_cubic[] = {-1, -9, -6};
     const slong octic[] = {-1, -1, 0, 0, 0, 0, 0, 0};
@@ -1181,6 +1258,7 @@ int main() {
                    !check_transaction_failure_leaves_outputs_unset(quartic) ||
                    !check_residue_degree_differentials() ||
                    !check_bdf_search_stop() ||
+                   !check_bdf_failure_note() ||
                    !check_theorem7_bound_reference() ||
                    !check_index_one_products() ||
                    !check_index_one_cache(
