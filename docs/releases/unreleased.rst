@@ -1128,6 +1128,25 @@ Changed
   result instead of failing.  The skip never adds a proof label, and
   ``proven`` requests are unchanged.
 
+- A ``grh`` class/unit computation now runs its first relation-extension
+  slice before the first bounded ``ell = 2`` class-relation saturation, as
+  Hecke v0.38.6 ``Clgp.jl:_class_unit_group`` (lines 248-258) saturates at 2
+  only after an extension round that did not improve the index bound.  The
+  bounded pass still runs if the extension stalls, fails or appends nothing,
+  and a failed extension with a deferred pass now runs that pass and
+  continues when it appended relations.  Class groups, unit groups,
+  regulators and proof labels are unchanged on the class/unit benchmark
+  corpus; on the benchmark rows compared, the
+  relation and generator lists are identical except for
+  ``simplest_cubic_a0`` (85 relations instead of 84: the saturation relation
+  is not added and one more random-product relation is used; same class
+  group and units).
+  Behavior change: when validation succeeds without the deferred pass
+  having run, ``relation_saturation_status()`` reports ``not_checked``
+  where it reported ``verified`` or ``unavailable`` (seen on
+  ``simplest_cubic_a0`` and ``real_quadratic_d100000005``).  ``proven``
+  requests are unchanged.
+
 - Unit-basis reduction of the stored units no longer lets their factored
   form grow without bound.  When a transform would give the stored units more
   than 5000 factors in total (20000 before the change to relation-unit

@@ -2766,6 +2766,19 @@ ends a one-round stall.  The relation cap ``max_relations`` still bounds
 every refill.
 Proven and unknown requests keep the 2-relation refill.
 
+A ``grh`` computation does not run the bounded ``ell = 2`` class-relation
+saturation before the first relation-extension slice.  Hecke v0.38.6
+``Clgp.jl:_class_unit_group`` (lines 248-258) saturates at 2 only when the
+last extension round brought no improvement of the index bound and no
+saturation was done yet, and its first round has no improvement measure.
+Silex defers the bounded pass while the index bound is above one and the
+extension slice has not yet run; the pass runs once an extension slice
+has run since the deferral without lowering the index bound.  If the
+extension fails or appends no relation while a pass is deferred, Silex runs
+the deferred pass and continues if it appended relations, and otherwise
+fails as before.  The deferral is set for ``grh`` requests only; ``proven``
+and ``unknown`` requests run the bounded pass at every validation as before.
+
 In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``
 object is the one place for structured failure detail; its keys depend on
 ``failure_reason``, and it is null for every reason other than
