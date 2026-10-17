@@ -4268,8 +4268,92 @@ int test_prime_ideal_inverse_declines_outside_contract() {
 
 }  // namespace
 
+// PrimeIdealAccess::same_prime_ideal, the same-prime test shared by the
+// factor-base lookup and the class-group partial-relation pairing.  Over each
+// rational prime with at least two primes above it, every prime matches
+// itself and a copy, and no other prime above p (different ideals, whatever
+// their e and f).  A copy given a different, equally valid residue
+// polynomial (constant term shifted by p) still matches although
+// PrimeIdeal::equal rejects it.  x^3 - x^2 - 2x - 8: 2 is a common index
+// divisor and splits into three degree-one primes.  x^3 - 10: 3 = P^2 Q
+// divides the index.
+int test_same_prime_ideal_compares_ideals() {
+    const std::vector<std::vector<slong>> fields = {
+            {-8, -2, -1, 1},
+            {-10, 0, 0, 1},
+    };
+    slong checked_index_divisor = 0;
+    slong checked_non_index = 0;
+    slong checked_residue_change = 0;
+    for (const std::vector<slong>& coefficients : fields) {
+        sflint::FmpqPoly polynomial;
+        poly_from_coefficients(polynomial, coefficients);
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        assert(!maximal.is_equation_order());
+        for (ulong q = 2; q < 60; q = n_nextprime(q, 0)) {
+            sflint::Fmpz p;
+            assert(set_fmpz_si(p, static_cast<slong>(q)));
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(primes, maximal,
+                                          sflint::FmpzConstRef(p)));
+            if (primes.size() < 2) {
+                continue;
+            }
+            const bool index_divisor =
+                    (coefficients[0] == -8 && q == 2) ||
+                    (coefficients[0] == -10 && q == 3);
+            if (index_divisor) {
+                ++checked_index_divisor;
+            } else {
+                ++checked_non_index;
+            }
+            for (slong i = 0; i < primes.size(); ++i) {
+                const silex::PrimeIdeal& left = *primes.at(i);
+                silex::PrimeIdeal copy(maximal);
+                assert(copy.set(left));
+                assert(PrimeIdealAccess::same_prime_ideal(left, left));
+                assert(PrimeIdealAccess::same_prime_ideal(left, copy));
+                assert(PrimeIdealAccess::same_prime_ideal(copy, left));
+                for (slong j = 0; j < primes.size(); ++j) {
+                    assert(PrimeIdealAccess::same_prime_ideal(
+                                   left, *primes.at(j)) == (i == j));
+                }
+
+                sflint::FmpzPoly residue;
+                if (!left.residue_polynomial(sflint::FmpzPolyRef(residue))) {
+                    continue;
+                }
+                sflint::Fmpz constant;
+                fmpz_poly_get_coeff_fmpz(constant.raw(), residue.raw(), 0);
+                fmpz_add(constant.raw(), constant.raw(), p.raw());
+                fmpz_poly_set_coeff_fmpz(residue.raw(), 0, constant.raw());
+                assert(silex::detail::TestHookAccess::
+                               set_alpha_residue_polynomial(
+                                       copy,
+                                       sflint::FmpzPolyConstRef(residue)));
+                assert(!copy.equal(left));
+                assert(PrimeIdealAccess::same_prime_ideal(copy, left));
+                for (slong j = 0; j < primes.size(); ++j) {
+                    assert(PrimeIdealAccess::same_prime_ideal(
+                                   copy, *primes.at(j)) == (i == j));
+                }
+                ++checked_residue_change;
+            }
+        }
+    }
+    assert(checked_index_divisor == 2);
+    assert(checked_non_index > 0);
+    assert(checked_residue_change > 0);
+    return 0;
+}
+
 int main() {
     assert(test_degree_one() == 0);
+    assert(test_same_prime_ideal_compares_ideals() == 0);
     assert(test_degree_one_prime_from_root_matches_decomposition() == 0);
     assert(test_degree_one_prime_from_root_rejects_non_roots() == 0);
     assert(test_degree_one_prime_from_root_rejects_index_prime() == 0);

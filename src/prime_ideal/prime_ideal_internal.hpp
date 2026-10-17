@@ -121,6 +121,20 @@ public:
         return prime.ideal_;
     }
 
+    // Whether `left` and `right`, two primes of one order, are the same
+    // prime ideal: their integral ideals compare equal under Ideal::equal,
+    // which compares canonical HNFs.  e and f then agree too, provided the
+    // order is maximal and the recorded e and f are correct (a prime ideal
+    // of a maximal order has well-defined e and f).  Unlike PrimeIdeal::
+    // equal, this ignores the residue data each construction recorded (the
+    // residue polynomial, its variable convention and whether one was
+    // recorded at all).  The one same-prime test shared by the factor-base
+    // lookup and the class-group partial-relation pairing.
+    static bool same_prime_ideal(const PrimeIdeal& left,
+                                 const PrimeIdeal& right) noexcept {
+        return ideal(left).equal(ideal(right));
+    }
+
     // The residue-polynomial convention recorded when `prime` was built.
     static bool residue_uses_integral_generator(
             const PrimeIdeal& prime) noexcept;

@@ -1147,19 +1147,6 @@ bool is_inert_prime_decomposition(const PrimeIdealList& decomposed,
            prime->residue_degree() == degree;
 }
 
-// Two primes of one order with the same rational prime are the same prime
-// ideal exactly when their integral ideals are equal; e and f are then equal
-// too, provided the order is maximal and the recorded e and f are correct
-// (a prime ideal of a maximal order has well-defined e and f).  Ideal::equal compares HNFs, which are canonical, so this does not
-// depend on the residue data a construction recorded (PrimeIdeal::equal also
-// compares the residue polynomial, its variable convention and whether one
-// was recorded at all).
-bool same_prime_ideal(const PrimeIdeal& left,
-                      const PrimeIdeal& right) noexcept {
-    return detail::PrimeIdealAccess::ideal(left).equal(
-            detail::PrimeIdealAccess::ideal(right));
-}
-
 bool generation_bound_inputs_valid(flint::FmpzConstRef abs_discriminant,
                                    slong real_places,
                                    slong complex_pairs) noexcept {
@@ -1997,8 +1984,8 @@ slong FactorBase::index(const PrimeIdeal& prime) const noexcept {
     // comparison decides equality.
     const PrimeBlock& prime_block = blocks_[static_cast<std::size_t>(block)];
     for (slong index : prime_block.indices) {
-        if (same_prime_ideal(primes_[static_cast<std::size_t>(index)],
-                             prime)) {
+        if (detail::PrimeIdealAccess::same_prime_ideal(
+                    primes_[static_cast<std::size_t>(index)], prime)) {
             return index;
         }
     }
