@@ -1248,15 +1248,19 @@ Changed
   ``pure_x5_minus_7``, ``pure_x8_minus_3``, ``lmfdb_8_8_73116160000_2`` and
   ``multiquadratic_m3_m5_m7``; ``skipped_dependent_relation_count`` differs
   too on ``simplest_cubic_a12``, ``lmfdb_8_8_73116160000_2`` and
-  ``multiquadratic_m3_m5_m7``.  On a busy machine (paired runs, 31 rounds,
-  pending an idle-machine comparison) two of these rows ran repeatably
-  slower: ``imaginary_quadratic_34_grh`` (about +3%, 7.23 to 7.46 ms) and
-  ``pure_x8_minus_3`` (about +1%, 38.2 to 38.8 ms).  Faster rows:
-  ``multiquadratic_m3_m5_m7`` (146.0 to 117.8 ms), ``lmfdb_8_8_73116160000_2``
-  (139.7 to 120.9 ms), ``pure_x5_minus_7`` (24.2 to 21.9 ms),
-  ``simplest_cubic_a12``, ``lmfdb_6_6_49744125_1`` and
-  ``quintic_disc401370255_proven`` (about 5% each; the last two publish
-  unchanged output).  See "Class
+  ``multiquadratic_m3_m5_m7``.  On an idle machine (2026-10-16, release
+  build, 31 paired rounds;
+  ratio is candidate over baseline) two of these rows were slower:
+  ``imaginary_quadratic_34_grh`` 7.38 ms instead of 7.19 ms (1.026; 7.38 ms
+  instead of 7.18 ms, 1.028, in an 81-round rerun) and ``pure_x8_minus_3``
+  38.91 ms instead of 38.44 ms (1.012; 38.86 ms instead of 38.46 ms, 1.010, in
+  the 81-round rerun).  Faster rows: ``multiquadratic_m3_m5_m7`` 117.74 ms
+  instead of 146.06 ms (0.806), ``lmfdb_8_8_73116160000_2`` 121.26 ms instead
+  of 139.98 ms (0.866), ``pure_x5_minus_7`` 21.85 ms instead of 24.23 ms
+  (0.902), ``simplest_cubic_a12`` 19.13 ms instead of 20.35 ms (0.940) and
+  ``lmfdb_6_6_49744125_1`` 25.63 ms instead of 26.81 ms (0.956; output
+  unchanged).  The controls ``cyclotomic_32_phi16`` (1.005) and
+  ``real_quadratic_d10000000005`` (1.001) are within noise.  See "Class
   groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 Fixed
