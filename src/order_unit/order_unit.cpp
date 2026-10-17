@@ -28,9 +28,6 @@
 #include <utility>
 
 namespace silex {
-namespace {
-
-}  // namespace
 
 namespace detail {
 

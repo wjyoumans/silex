@@ -6,7 +6,6 @@
 #include "../prime_ideal/prime_ideal_internal.hpp"
 #include "../residue_field/residue_field_internal.hpp"
 
-#include <atomic>
 #include <cstdio>
 #include <limits>
 #include <utility>
