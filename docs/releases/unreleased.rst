@@ -1133,8 +1133,9 @@ Changed
   One consequence: a resource or factoring failure in that re-factoring can no
   longer fail the saturation pass.  Instance JSON is identical on the 184
   ``grh`` corpus rows and the 70 ``proven`` benchmark rows.  ``grh`` CPU time
-  on ``real_quadratic_d100000000000009`` falls from about 0.27 s to 0.17 s
-  (release build, medians of 11 interleaved runs on a busy machine; the
+  on ``real_quadratic_d100000000000009`` falls from about 0.53 s to 0.42 s
+  (about -20%; release build on a busy machine, measured after the rebase
+  with ``cyclotomic_real_41_deg20`` as a control row that stayed flat; the
   controlled comparison is pending).
 - ``PrimeIdeal::valuation`` on an ``Ideal`` with a known principal generator
   ``a`` reuses the power of ``p`` in the ideal norm, which equals

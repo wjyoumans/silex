@@ -505,6 +505,18 @@ struct ClassGroupContextStorage {
 
 class ClassGroupRelationSearchAccess {
 public:
+    static bool saturate_relations_bounded(
+            ClassGroupContext& context,
+            bool& changed,
+            bool& saturated,
+            flint::FmpzConstRef aux_prime_bound,
+            slong max_appends_per_ell,
+            slong max_appends_total) noexcept {
+        return context.saturate_relations_bounded_(
+                changed, saturated, aux_prime_bound, max_appends_per_ell,
+                max_appends_total);
+    }
+
     static slong relation_kernel_units_target(
             const ClassGroupContext& context) noexcept {
         return context.relation_kernel_units_target_;

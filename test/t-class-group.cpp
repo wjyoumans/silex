@@ -2399,6 +2399,7 @@ int test_saturation_relations_match_refactored_generator() {
         sflint::FmpzMat computed_rows(relation_count, generator_count);
         assert(computed.relations(sflint::FmpzMatRef(computed_rows)));
 
+        for (int with_units = 0; with_units < 2; ++with_units)
         for (slong ell : row.ells) {
             sflint::Fmpz ell_fmpz;
             assert(set_fmpz_si(ell_fmpz, ell));
@@ -2433,9 +2434,18 @@ int test_saturation_relations_match_refactored_generator() {
             assert(set_fmpz_si(aux_bound, 200));
             bool changed = false;
             bool saturated = false;
-            assert(context.saturate_relations_bounded_with_units(
-                    changed, saturated, units,
-                    sflint::FmpzConstRef(aux_bound), 2, 2));
+            if (with_units != 0) {
+                assert(context.saturate_relations_bounded_with_units(
+                        changed, saturated, units,
+                        sflint::FmpzConstRef(aux_bound), 2, 2));
+            } else {
+                // The class-only pass (saturation_relation).
+                assert(silex::detail::ClassGroupRelationSearchAccess::
+                               saturate_relations_bounded(
+                                       context, changed, saturated,
+                                       sflint::FmpzConstRef(aux_bound), 2,
+                                       2));
+            }
             assert(changed);
             const slong appended = context.relation_source_count(
                     silex::ClassGroupRelationSource::Saturation);
