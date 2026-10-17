@@ -1504,7 +1504,9 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
             // reference keeps the current UnitGrpCtx and only changes it through
             // saturation/root acceptance.  If this native validation pass has
             // not changed the class context since the units were built from it,
-            // rebuilding the same relation-kernel units is redundant.
+            // the rebuild (a fresh relation subset at a larger unit_add) is
+            // deferred to the next outer iteration, matching Clgp.jl
+            // _class_unit_group.
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::unit_group,
                     "unit_group.validation_recompute.validation_loop_fresh_context_skip");

@@ -1176,15 +1176,13 @@ Changed
   The rebuild drew a fresh random subset of relations, so skipping it
   shifts later random draws.  Class groups, class generators, regulator
   midpoints and certification labels are unchanged on every ``grh`` corpus
-  row.  The published unit generators change on five rows:
+  row that completed (``cyclotomic_real_163_deg81`` timed out on both builds
+  and was not compared).  The published unit generators change on five rows,
+  and on each the new generators generate the same unit group as the old:
   ``cyclotomic_35_phi24``, ``cyclotomic_52_phi24``,
   ``cyclotomic_real_41_deg20``, ``cyclotomic_real_q10_c11_deg10`` and
   ``simplest_cubic_a12``.  On all of these except ``cyclotomic_52_phi24``
-  the regulator radius changes too.  ``grh`` time falls by about 30% on
-  ``simplest_cubic_a12`` and 10 to 15% on ``multiquadratic_m3_m5_m7`` and
-  ``cyclotomic_real_31_deg15`` (release build, medians of 9 to 21
-  interleaved runs on a busy machine; the controlled comparison is
-  pending).
+  the regulator radius changes too.
 
 Fixed
 -----

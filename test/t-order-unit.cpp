@@ -12655,6 +12655,9 @@ int test_reduce_stored_units_rebuilds_large_factored_units() {
 struct TransactionRun {
     bool ok = false;
     silex::detail::ClassUnitTransactionReport audit;
+    slong free_rank = -1;
+    decltype(std::declval<const silex::OrderUnitGroup&>().regulator())
+            regulator;
 };
 
 TransactionRun run_transaction(
@@ -12688,6 +12691,10 @@ TransactionRun run_transaction(
     run.ok = silex::detail::compute_class_unit_transaction(
             units, class_group, order, sflint::FmpzConstRef(bound), options,
             128, run.audit);
+    if (run.ok) {
+        run.free_rank = units.free_rank();
+        run.regulator = units.regulator();
+    }
     return run;
 }
 
@@ -12776,6 +12783,17 @@ int test_grh_validation_skips_unit_rebuild_from_unchanged_class_context() {
     assert(run.ok && run.audit.final_result_published);
     assert(run.audit.class_group_certification ==
            silex::CertificationMode::grh);
+    // The published unit group is still full: rank 2 and the corpus
+    // regulator 0.5254546821225724 (simplest_cubic_a12).
+    assert(run.free_rank == 2);
+    assert(run.regulator.has_value());
+    {
+        sflint::Arb expected;
+        sflint::arb_set_d(expected, 0.5254546821225724);
+        ::arb_add_error_2exp_si(expected.raw(), -30);
+        assert(::arb_overlaps(expected.raw(), run.regulator->raw()) != 0);
+        assert(::arb_rel_error_bits(run.regulator->raw()) < -20);
+    }
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(counter.count >= 1);
 #else
