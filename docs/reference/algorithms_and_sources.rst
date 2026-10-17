@@ -413,12 +413,14 @@ Element powers and roots
 ``Element::is_power`` and ``Element::is_square`` answer rational constants
 exactly, route quadratic squares through the radicand, and otherwise use a
 private port of the pure-power Hensel root finder for monic integral fields of
-degree less than 10.  A definite ``true`` is published only after the lifted
+every degree.  A definite ``true`` is published only after the lifted
 candidate ``c`` satisfies ``c^n == a`` exactly, and a definite ``false`` only
-after a residue disproof (below); every unported or unverified case returns
-failure (unsupported) and leaves the caller's root unchanged.  In degree 10
-and higher there is no lift, so only the residue disproof can answer, and
-only with ``false``.
+after a residue disproof (below); every unported or unverified case, and
+every lift that ends without a verified candidate, returns failure
+(unsupported) and leaves the caller's root unchanged.  Earlier versions
+lifted only in degree less than 10, so in degree 10 and higher only the
+residue disproof could answer, and only with ``false``; two saturation
+consumers keep that limit (below).
 
 * Hensel lifting follows Hecke v0.38.6
   ``src/NumFieldOrd/NfOrd/Hensel.jl:_roots_hensel`` (lines 57-232, with
@@ -426,6 +428,14 @@ only with ``false``.
   candidate check (lines 612-622), and the Friedrich-Fieker lifting exponent
   ``_lifting_expo`` (lines 674-756), with the equation order in place of
   ``any_order(K)``.
+* The prime choice follows the same routine with ``ispure = true``
+  (``Hensel.jl`` lines 102-106 and 175-188).  Every examined factor of a
+  good prime whose residue is not an ``n``-th power proves ``false`` (lines
+  159-161).  Below degree 10 (``STABILIZED = 0``) the first factor with a
+  residue root is lifted.  From degree 10 on (``STABILIZED = 2``) the
+  factors of further good primes are compared, keeping the factor with the
+  fewest residue roots and then the largest residue degree, until one does
+  not improve the choice.  The root is lifted at the kept factor.
 * Hecke skips a prime when the reduction of ``y^n - a`` is not squarefree
   (``Hensel.jl`` lines 153-155).  Since ``y^n - a`` is inseparable modulo
   ``p`` whenever ``p | n``, Silex skips every prime ``p | n`` for lifting
@@ -439,7 +449,8 @@ only with ``false``.
   only the first factor of the first good prime before lifting (in degree
   below 10), and when no lifted candidate verifies it answers ``false``;
   Silex instead fails closed there.  So that such inputs still get an exact
-  answer without the lift, Silex first applies the residue test to every
+  answer without the lift, Silex first applies the residue test, in degree
+  below 10, to every
   factor of the chosen prime and of up to 40 further admissible primes, and
   answers ``false`` at the first residue that is not an ``n``-th power; if
   there is none, the lift runs exactly as before.  A rational prime ``p`` is
@@ -473,9 +484,13 @@ only with ``false``.
   ``y^n - a`` has no root modulo a factor of a good prime, and which in
   degree 10 and higher examines further factors before lifting
   (``STABILIZED = 2``, lines 102-106).  Hecke stops after a few factors and
-  then lifts; Silex has no lift here and scans more primes.  A true power is
-  never disproved, so it and every input with no disproving residue within
-  the prime bound still return failure (unsupported).  The bound 40 (the
+  then lifts; Silex runs this scan as its pre-lift disproof in degree 10 and
+  higher, in place of the scan of the chosen prime above, and lifts only
+  when it finds no disproving residue.  The scan is memoized, so after a
+  failed lift the same input is answered from the memo.  A true power is
+  never disproved: the lift answers it, or, when no lifted candidate
+  verifies, it returns failure (unsupported), as does a non-power with no
+  disproving residue within the prime bound.  The bound 40 (the
   same as the pre-lift disproof) is a resource limit only, and any value is
   sound.  Every true power runs to the bound.  A
   residue can fail to be an ``n``-th power only in a residue field of order
@@ -557,6 +572,29 @@ builds, while Silex accepts ``n`` up to ``2^63 - 1`` and must not form
   ideal of ``x``), and it is sound as a disproof: per project decision, it is
   not promoted to a definite ``false``, and the existing residue disproof
   above still runs on the original, unscaled ``a``.
+
+**Silex route choice**: two saturation consumers keep the degree limit the
+lift had before it ran in every degree (``kSaturationLiftDegree = 10``,
+``src/element/element_internal.hpp``).  The square tests of class-relation
+saturation with units (``saturation_relation_with_units``, reached from
+``ClassGroupContext::saturate_local_once_with_units_``) and the kernel-row
+root tests of the local saturation proofs
+(``OrderUnitGroup::prove_local_saturated_`` and
+``prove_local_saturated_stable_in_place_``, through ``kernel_row_root``, for
+every exponent) run inside a scope in which the lift returns failure
+(unsupported) in degree 10 and higher.  Those tests are then decided only by
+the residue disproof, and an undecided test is handled by the consumer as
+before (see the saturation sections below).  This changes no answer that is
+given: ``true`` still needs the exact check and ``false`` a residue
+disproof.  On the ``grh`` and ``proven`` corpora following the lift there
+published the same results and only added time (``cyclotomic_real_136_deg32``
+``grh`` about 15% and ``cyclotomic_25_phi20`` ``proven`` about 24% more
+instructions).  The deferral of ``ell >= 3`` kernel rows in the stable proof
+step (``kKernelRowRootDeferralDegree``, below) and the factored residue
+screen of the reduced power test (``kHighDegreeResidueScanDegree``) keep
+their degree-10 routes as well.  The public ``Element`` and
+``FactoredElement`` square and power tests, and kernel-row root tests outside
+the proofs, lift in every degree.
 
 Embedding root contexts
 -----------------------
@@ -2034,8 +2072,9 @@ primes: the group is then ``ell``-saturated, so no pre-scan row has a root to
 adjoin, and the path below would end in the same scan.  Otherwise the
 pre-scan rows are tested and the Hecke loop runs as before.  A kernel row whose ``ell``-th root Silex cannot
 decide (the compact root and the factored root both leave it undecided, for
-example because ``Element::is_power`` decides in degree 10 and higher only
-by residue disproof, never by a root) is treated like a row
+example because the root tests of these proofs do not lift in degree 10 and
+higher, see Element powers and roots, and decide there only by residue
+disproof, never by a root) is treated like a row
 that is not an ``ell``-th power: the scan doubles ``stable`` and continues.
 This follows ``saturate!`` (Hecke v0.38.6 ``Saturate.jl``, lines 396-411),
 whose ``is_power`` reports ``false`` whenever it finds no root, and it does
@@ -2043,9 +2082,10 @@ not change the certification rule: ``ell`` is verified only by an empty
 character kernel, and the group grows only by an exactly verified root.  A
 row that is an ``ell``-th power whose root Silex cannot compute stays in
 every kernel, so its proof fails closed as ``unavailable`` only at the
-resource guard below.  For ``ell >= 3`` in degree 10 and higher,
-``Element::is_power`` finds a root only of a rational constant, so a root
-attempt can end only in a non-power, undecided (the scan doubles
+resource guard below.  For ``ell >= 3`` in degree 10 and higher
+(``kKernelRowRootDeferralDegree``), the proof's root test finds a root only
+of a rational constant or of a formal ``ell``-th power, so a root
+attempt on any other row can end only in a non-power, undecided (the scan doubles
 ``stable`` after either), or with the root of a true ``ell``-th power.
 Until the first doubling of ``stable`` for such an ``ell``, the scan
 therefore does not attempt a row that is not a formal ``ell``-th power of
@@ -2196,9 +2236,9 @@ tests of non-powers.  So the round records each row it has run without an
 appended relation, by its exact entries, and skips that row at later primes
 (a Silex memo, not in Hecke, whose candidates are the basis of the stacked
 kernel).  This applies to undecided power tests too, such as the square
-tests of degree-16 leftovers: from degree 10
-(``kElementPowerRouteDegreeLimit``) ``Element::is_square`` can only disprove
-a power, so a true power there fails the test and is recorded as settled.
+tests of degree-16 leftovers: from degree 10 (``kSaturationLiftDegree``)
+these square tests do not lift and can only disprove a power, so a true
+power there fails the test and is recorded as settled.
 The appended relations are those of the full scan.  A skipped row is not
 counted as a power test, so the filter's count gate opens later or not at
 all; like the stopping rule, that changes only which non-powers are tested.

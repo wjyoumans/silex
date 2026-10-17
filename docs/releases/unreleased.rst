@@ -141,6 +141,28 @@ Changed
   with ``grh`` mode.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- ``Element::is_power`` and ``Element::is_square`` (and the factored-element
+  root tests built on them) now find roots in fields of degree 10 and higher,
+  where they previously could only answer ``false`` from a residue disproof
+  and reported every true power as unsupported.  The pure-power Hensel lift
+  now runs in every degree and, from degree 10 on, chooses its prime as
+  Hecke's ``_roots_hensel`` does there (``STABILIZED = 2``).  For example,
+  ``zeta_19`` is now found to be a cube in ``Q(zeta_19)``, and ``zeta_8`` and
+  ``2 zeta_8`` squares in ``Q(zeta_32)``.  A ``true`` answer still needs the
+  exact check ``c^n == a``, a ``false`` answer still needs a residue
+  disproof, and a lift that ends without a verified root is still reported
+  as unsupported.  Two saturation consumers keep the old degree-10 limit:
+  the square tests of ``grh`` and ``proven`` class-relation saturation with
+  units, and the kernel-row root tests of the local unit saturation proofs
+  (``OrderUnitGroup::prove_local_saturated`` and the proofs of
+  ``prove_index_bound``).  Following the lift there gave the same results
+  with more work (about 15% more instructions on
+  ``cyclotomic_real_136_deg32`` in ``grh`` mode, 24% on
+  ``cyclotomic_25_phi20`` in ``proven`` mode).  Published results are
+  unchanged on every ``grh`` and ``proven`` corpus row that finishes within
+  300 seconds.  See "Element powers and roots" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - When the relation search factors an integral relation generator ``g`` through
   its principal ideal ``g O``, it computes the HNF of ``g O`` modulo the norm
   ``|N(g)|`` it already knows, with FLINT's ``fmpz_mat_hnf_modular``, instead of a full
