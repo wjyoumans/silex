@@ -221,6 +221,17 @@ Changed
   unit and published output is unchanged.  See
   :doc:`../reference/algorithms_and_sources`.
 
+- At a CRT prime found to split by that preference, the compact-representation
+  reconstruction computes the modular power products in evaluation form: the
+  values of each base at the roots of the defining polynomial modulo ``p`` are
+  multiplied coordinate-wise, and the interpolation back is folded into the
+  change to order coordinates, instead of multiplying polynomials modulo the
+  defining polynomial as PARI's ``FlxqX_chinese_unit`` does.  Evaluation at
+  the roots is a ring isomorphism, so the same primes are rejected, the
+  residues are the same, and published outputs are unchanged on the tested
+  ``grh`` and ``proven`` corpus rows.  See
+  :doc:`../reference/algorithms_and_sources`.
+
 - ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
   and the unit-candidate and relation-saturation kernel bases of the
   class-group computation share one certified first LLL phase.  Its exact

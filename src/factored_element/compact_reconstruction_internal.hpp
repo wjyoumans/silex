@@ -105,6 +105,29 @@ void modular_power_products(
         std::span<const ModularPowerProductFactor> factors,
         const flint::NmodPoly& modulus) noexcept;
 
+// One factor of a batch of power products in the ring (Z/pZ)^n with
+// coordinate-wise operations: the n coordinates of the base, those of its
+// inverse (required when some exponent is negative, otherwise empty), and one
+// exponent per output.
+struct EvaluatedPowerProductFactor {
+    std::span<const ulong> base;
+    std::span<const ulong> inverse;
+    const std::vector<flint::Fmpz>* exponents = nullptr;
+};
+
+// Row i of values receives the n = values.ncols coordinates of
+// prod_k base_k^exponents_k[i] in (Z/pZ)^n, p = values.mod.n, by the same
+// interleaved sliding-window evaluation as modular_power_products.  When p is
+// prime the ring is a product of copies of F_p, its unit group exponent is
+// p - 1, and the exponents are reduced as in modular_power_products with
+// lambda = p - 1.  When the monic modulus f of modular_power_products is the
+// product of the x - r_j over n distinct r_j, evaluation at the r_j is a ring
+// isomorphism from (Z/pZ)[x]/(f) to (Z/pZ)^n, so the coordinates of the
+// evaluated bases give the evaluations of the products.
+void modular_power_products_evaluated(
+        flint::NmodMat& values,
+        std::span<const EvaluatedPowerProductFactor> factors) noexcept;
+
 // Sets out to the exponent lambda of the unit group of (Z/pZ)[x]/(modulus)
 // and returns true when p = modulus.mod.n is prime and modulus is monic,
 // nonconstant and squarefree modulo p.  The ring is then the product of the

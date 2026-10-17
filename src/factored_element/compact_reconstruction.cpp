@@ -246,19 +246,124 @@ bool reduce_factor_polynomials(std::vector<flint::NmodPoly>& bases,
 }
 
 // Odd powers base^1, base^3, ..., base^(2^width - 1) of one base (or of its
-// inverse) modulo the modulus: the sliding-window table of Handbook of
-// Applied Cryptography, Algorithm 14.85 step 1.
+// inverse) in the ring of the power products: the sliding-window table of
+// Handbook of Applied Cryptography, Algorithm 14.85 step 1.
+template <typename Value>
 struct OddPowerTable {
-    std::vector<flint::NmodPoly> odd_powers;
+    std::vector<Value> odd_powers;
     ulong width = 0;
 };
 
 // One window of a sliding-window recoding: multiply by odd_power at bit
 // position `position` of the left-to-right evaluation.
+template <typename Value>
 struct WindowStep {
     flint_bitcnt_t position = 0;
-    const flint::NmodPoly* odd_power = nullptr;
+    const Value* odd_power = nullptr;
 };
+
+// The ring (Z/pZ)[x]/(modulus), elements in the power basis.
+class PolynomialPowerRing {
+public:
+    using Value = flint::NmodPoly;
+
+    explicit PolynomialPowerRing(const flint::NmodPoly& modulus) noexcept
+        : modulus_(modulus) {}
+
+    Value make() const noexcept {
+        return Value(modulus_.raw()->mod.n);
+    }
+
+    void set(Value& out, const Value& value) const noexcept {
+        nmod_poly_set(out.raw(), value.raw());
+    }
+
+    void one(Value& out) const noexcept {
+        nmod_poly_one(out.raw());
+    }
+
+    void mul(Value& out, const Value& left, const Value& right) const noexcept {
+        nmod_poly_mulmod(out.raw(), left.raw(), right.raw(), modulus_.raw());
+    }
+
+    void store(flint::NmodMat& out, slong row, const Value& value) const
+            noexcept {
+        for (slong i = 0; i < nmod_mat_ncols(out.raw()); ++i) {
+            nmod_mat_entry(out.raw(), row, i) =
+                    nmod_poly_get_coeff_ui(value.raw(), i);
+        }
+    }
+
+private:
+    const flint::NmodPoly& modulus_;
+};
+
+// The ring (Z/pZ)^length with coordinate-wise operations.
+class EvaluationPowerRing {
+public:
+    using Value = std::vector<ulong>;
+
+    EvaluationPowerRing(nmod_t modulus, std::size_t length) noexcept
+        : modulus_(modulus), length_(length) {}
+
+    Value make() const noexcept {
+        return Value(length_, 0);
+    }
+
+    void set(Value& out, std::span<const ulong> value) const noexcept {
+        std::copy(value.begin(), value.end(), out.begin());
+    }
+
+    void one(Value& out) const noexcept {
+        std::fill(out.begin(), out.end(), nmod_set_ui(1, modulus_));
+    }
+
+    void mul(Value& out, std::span<const ulong> left,
+             std::span<const ulong> right) const noexcept {
+        for (std::size_t i = 0; i < length_; ++i) {
+            out[i] = nmod_mul(left[i], right[i], modulus_);
+        }
+    }
+
+    void store(flint::NmodMat& out, slong row, const Value& value) const
+            noexcept {
+        for (std::size_t i = 0; i < length_; ++i) {
+            nmod_mat_entry(out.raw(), row, static_cast<slong>(i)) = value[i];
+        }
+    }
+
+private:
+    nmod_t modulus_;
+    std::size_t length_ = 0;
+};
+
+const flint::NmodPoly& factor_base(
+        const ModularPowerProductFactor& factor) noexcept {
+    return *factor.base;
+}
+
+const flint::NmodPoly& factor_inverse(
+        const ModularPowerProductFactor& factor) noexcept {
+    return *factor.inverse;
+}
+
+bool factor_has_inverse(const ModularPowerProductFactor& factor) noexcept {
+    return factor.inverse != nullptr;
+}
+
+std::span<const ulong> factor_base(
+        const EvaluatedPowerProductFactor& factor) noexcept {
+    return factor.base;
+}
+
+std::span<const ulong> factor_inverse(
+        const EvaluatedPowerProductFactor& factor) noexcept {
+    return factor.inverse;
+}
+
+bool factor_has_inverse(const EvaluatedPowerProductFactor& factor) noexcept {
+    return !factor.inverse.empty();
+}
 
 // Window width minimizing the operation count for a table shared by exponents
 // of total bit length total_bits.  Cost model: the table costs one squaring
@@ -299,25 +404,24 @@ ulong sliding_window_width(flint_bitcnt_t total_bits,
     return choose_sliding_window(total_bits, maximum_bits).width;
 }
 
-void build_odd_power_table(OddPowerTable& table, const flint::NmodPoly& base,
-                           ulong width, const flint::NmodPoly& modulus) noexcept {
-    const ulong prime = modulus.raw()->mod.n;
+template <typename Ring, typename Base>
+void build_odd_power_table(OddPowerTable<typename Ring::Value>& table,
+                           const Ring& ring, const Base& base,
+                           ulong width) noexcept {
     const std::size_t size = static_cast<std::size_t>(UWORD(1) << (width - 1));
     table.width = width;
     table.odd_powers.clear();
     table.odd_powers.reserve(size);
-    table.odd_powers.emplace_back(prime);
-    nmod_poly_set(table.odd_powers.back().raw(), base.raw());
+    table.odd_powers.emplace_back(ring.make());
+    ring.set(table.odd_powers.back(), base);
     if (size == 1) {
         return;
     }
-    flint::NmodPoly square(prime);
-    nmod_poly_mulmod(square.raw(), base.raw(), base.raw(), modulus.raw());
+    typename Ring::Value square = ring.make();
+    ring.mul(square, base, base);
     for (std::size_t i = 1; i < size; ++i) {
-        table.odd_powers.emplace_back(prime);
-        nmod_poly_mulmod(table.odd_powers.back().raw(),
-                         table.odd_powers[i - 1].raw(), square.raw(),
-                         modulus.raw());
+        table.odd_powers.emplace_back(ring.make());
+        ring.mul(table.odd_powers.back(), table.odd_powers[i - 1], square);
     }
 }
 
@@ -325,9 +429,10 @@ void build_odd_power_table(OddPowerTable& table, const flint::NmodPoly& base,
 // (Handbook of Applied Cryptography, Algorithm 14.85 step 3): each maximal
 // window of at most table.width bits that starts and ends with a one becomes
 // one multiplication by the matching odd power at the window's lowest bit.
-void append_window_steps(std::vector<WindowStep>& steps,
+template <typename Value>
+void append_window_steps(std::vector<WindowStep<Value>>& steps,
                          const flint::Fmpz& magnitude,
-                         const OddPowerTable& table) noexcept {
+                         const OddPowerTable<Value>& table) noexcept {
     slong high = static_cast<slong>(fmpz_bits(magnitude.raw())) - 1;
     while (high >= 0) {
         if (fmpz_tstbit(magnitude.raw(), static_cast<ulong>(high)) == 0) {
@@ -346,24 +451,147 @@ void append_window_steps(std::vector<WindowStep>& steps,
                             fmpz_tstbit(magnitude.raw(),
                                         static_cast<ulong>(bit)));
         }
-        steps.push_back(WindowStep{static_cast<flint_bitcnt_t>(low),
-                                   &table.odd_powers[(value - 1) / 2]});
+        steps.push_back(WindowStep<Value>{static_cast<flint_bitcnt_t>(low),
+                                          &table.odd_powers[(value - 1) / 2]});
         high = low - 1;
     }
 }
 
+// The roots of a modulus f of degree `degree` that splits into distinct
+// linear factors modulo p, or false when nmod_poly_roots does not return
+// `degree` distinct roots.
+bool distinct_roots(std::vector<ulong>& roots, const flint::NmodPoly& modulus,
+                    slong degree) noexcept {
+    flint::NmodPolyFactor linear_factors;
+    nmod_poly_roots(linear_factors.raw(), modulus.raw(), 0);
+    if (linear_factors.raw()->num != degree) {
+        return false;
+    }
+    roots.resize(static_cast<std::size_t>(degree));
+    for (slong j = 0; j < degree; ++j) {
+        const nmod_poly_struct* factor = linear_factors.raw()->p + j;
+        if (nmod_poly_degree(factor) != 1 ||
+            nmod_poly_get_coeff_ui(factor, 1) != 1) {
+            return false;
+        }
+        roots[static_cast<std::size_t>(j)] =
+                nmod_neg(nmod_poly_get_coeff_ui(factor, 0), modulus.raw()->mod);
+    }
+    return true;
+}
+
+// build_prime_residues at a prime where the reduced defining polynomial f is
+// the product of the x - r_j over its distinct roots r_1, ..., r_n.  By the
+// Chinese remainder theorem for F_p[x] with the pairwise coprime moduli
+// x - r_j, reduction modulo them, which is evaluation at the r_j, is a ring
+// isomorphism F_p[x]/(f) -> F_p^n, and its inverse is Lagrange interpolation
+// (von zur Gathen and Gerhard, Modern Computer Algebra, Sections 5.2 and
+// 5.4).  The power products are therefore computed coordinate-wise: a ring
+// multiplication is n products in F_p and an inverse is n inverses in F_p.
+// An element is a unit exactly when no coordinate is zero, that is when it
+// is coprime to f, which is when nmod_poly_invmod succeeds, so the same
+// primes are rejected.  Interpolation is folded into the change to order
+// coordinates: with the rows of B the order basis in power coordinates and
+// W[i][j] = r_j^i, the element with order-coordinate row c has evaluation row
+// c (B W), so c = (evaluation row) (B W)^-1.  W is invertible (a Vandermonde
+// matrix of distinct points), so B W is invertible exactly when B is, and the
+// same primes are rejected for the order basis.  The residues equal those of
+// the power-basis route because the map is an isomorphism.
+//
+// Deviation from the reference: FlxqX_chinese_unit (buch2.c:1025-1043)
+// computes the products in F_p[x]/(T) with FlxqV_factorback; this route
+// computes the same element of that ring through the isomorphism.
+bool build_split_prime_residues(BoundedCompactReconstructionReport& report,
+                                flint::NmodMat& residues,
+                                const std::vector<PreparedFactor>& factors,
+                                const flint::FmpqMat& order_basis,
+                                slong degree, ulong prime,
+                                const std::vector<ulong>& roots) noexcept {
+    const nmod_t modulus = residues.raw()->mod;
+    const std::size_t length = static_cast<std::size_t>(degree);
+    flint::NmodMat basis_mod(degree, degree, prime);
+    flint::NmodMat powers(degree, degree, prime);
+    for (slong j = 0; j < degree; ++j) {
+        ulong power = nmod_set_ui(1, modulus);
+        for (slong i = 0; i < degree; ++i) {
+            nmod_mat_entry(powers.raw(), i, j) = power;
+            power = nmod_mul(power, roots[static_cast<std::size_t>(j)],
+                             modulus);
+        }
+    }
+    flint::NmodMat basis_values(degree, degree, prime);
+    flint::NmodMat basis_values_inverse(degree, degree, prime);
+    if (!reduce_order_basis(basis_mod, order_basis, prime)) {
+        ++report.order_basis_prime_rejections;
+        return false;
+    }
+    nmod_mat_mul(basis_values.raw(), basis_mod.raw(), powers.raw());
+    if (nmod_mat_inv(basis_values_inverse.raw(), basis_values.raw()) == 0) {
+        ++report.order_basis_prime_rejections;
+        return false;
+    }
+
+    flint::NmodPoly base(prime);
+    std::vector<ulong> base_values(factors.size() * length);
+    std::vector<ulong> inverse_values(factors.size() * length);
+    for (std::size_t row = 0; row < factors.size(); ++row) {
+        if (!reduce_power_polynomial(base, factors[row].power_polynomial,
+                                     degree - 1, prime)) {
+            ++report.denominator_prime_rejections;
+            return false;
+        }
+        nmod_poly_evaluate_nmod_vec(base_values.data() + row * length,
+                                    base.raw(), roots.data(), degree);
+    }
+
+    std::vector<EvaluatedPowerProductFactor> power_factors(factors.size());
+    for (std::size_t row = 0; row < factors.size(); ++row) {
+        const std::span<const ulong> values(base_values.data() + row * length,
+                                            length);
+        power_factors[row].base = values;
+        power_factors[row].exponents = &factors[row].exponents;
+        if (!factors[row].needs_inverse) {
+            continue;
+        }
+        ulong* inverse = inverse_values.data() + row * length;
+        for (std::size_t j = 0; j < length; ++j) {
+            if (values[j] == 0) {
+                ++report.noninvertible_prime_rejections;
+                return false;
+            }
+            inverse[j] = n_invmod(values[j], prime);
+        }
+        power_factors[row].inverse = std::span<const ulong>(inverse, length);
+    }
+
+    flint::NmodMat power_values(nmod_mat_nrows(residues.raw()), degree, prime);
+    modular_power_products_evaluated(power_values, power_factors);
+    nmod_mat_mul(residues.raw(), power_values.raw(),
+                 basis_values_inverse.raw());
+    return true;
+}
+
+// `split` asserts that the defining polynomial reduced modulo prime splits
+// into distinct linear factors; the products are then computed in evaluation
+// form (build_split_prime_residues).  Otherwise, or when its roots are not
+// found, they are computed in the power basis.
 bool build_prime_residues(BoundedCompactReconstructionReport& report,
                           flint::NmodMat& residues,
                           const std::vector<PreparedFactor>& factors,
                           const flint::FmpqPoly& defining_polynomial,
                           const flint::FmpqMat& order_basis, slong degree,
-                          ulong prime) noexcept {
+                          ulong prime, bool split) noexcept {
     flint::NmodPoly modulus(prime);
     if (!reduce_power_polynomial(modulus, defining_polynomial, degree, prime) ||
         nmod_poly_degree(modulus.raw()) != degree ||
         nmod_poly_get_coeff_ui(modulus.raw(), degree) != 1) {
         ++report.field_polynomial_prime_rejections;
         return false;
+    }
+    std::vector<ulong> roots;
+    if (split && distinct_roots(roots, modulus, degree)) {
+        return build_split_prime_residues(report, residues, factors,
+                                          order_basis, degree, prime, roots);
     }
 
     flint::NmodMat basis_mod(degree, degree, prime);
@@ -537,15 +765,18 @@ void reduce_exponent(flint::Fmpz& out, const flint::Fmpz& exponent,
 }
 
 // Exponent rows of the factors after reduction modulo the exponent lambda of
-// the unit group of R = (Z/pZ)[x]/(modulus).  A row that changes is copied
-// into storage and reduced there; every other row stays the caller's.
+// the unit group of R, which is (Z/pZ)[x]/(*modulus) when modulus is given
+// and (Z/pZ)^n otherwise.  A row that changes is copied into storage and
+// reduced there; every other row stays the caller's.
 //
 // Soundness.  modular_unit_group_exponent returns lambda only when p is prime
 // and the modulus is monic, nonconstant and squarefree modulo p (a product of
 // distinct linear factors, its lambda = p - 1 case, is squarefree).  Then R is
 // the product of the fields F_q = F_p[x]/(f_i) over the irreducible factors
 // f_i of the modulus (Chinese remainder theorem; Lidl and Niederreiter,
-// Finite Fields, Theorem 1.61), and lambda = lcm(q - 1).
+// Finite Fields, Theorem 1.61), and lambda = lcm(q - 1).  Without a modulus,
+// lambda = p - 1 is used only when p is prime: R is then the product of n
+// copies of the field F_p.
 //  (a) e > 0, any base: in each F_q, a^q = a for every a, zero included
 //      (Lidl and Niederreiter, Lemma 2.3), and q - 1 divides lambda, so
 //      a^(lambda + 1) = a in R and a^e = a^(((e - 1) mod lambda) + 1).
@@ -565,11 +796,12 @@ void reduce_exponent(flint::Fmpz& out, const flint::Fmpz& exponent,
 // exponents than for a base table and an inverse table; squarings are left
 // out of that comparison as they are of the width choice, and after the
 // reduction no entry exceeds lambda in either form.
+template <typename Factor>
 void reduce_power_product_exponents(
         std::vector<const std::vector<flint::Fmpz>*>& rows,
         std::vector<std::vector<flint::Fmpz>>& storage,
-        std::span<const ModularPowerProductFactor> factors,
-        const flint::NmodPoly& modulus) noexcept {
+        std::span<const Factor> factors, ulong prime,
+        const flint::NmodPoly* modulus) noexcept {
     rows.resize(factors.size());
     for (std::size_t row = 0; row < factors.size(); ++row) {
         rows[row] = factors[row].exponents;
@@ -577,11 +809,10 @@ void reduce_power_product_exponents(
 
     // lambda >= p - 1, so nothing reduces unless some magnitude exceeds
     // p - 1; only then is lambda computed.
-    const ulong prime = modulus.raw()->mod.n;
     const auto reducible = [](const flint::Fmpz& exponent,
-                              const ModularPowerProductFactor& factor) {
+                              const Factor& factor) {
         return fmpz_sgn(exponent.raw()) > 0 ||
-               (fmpz_sgn(exponent.raw()) < 0 && factor.inverse != nullptr);
+               (fmpz_sgn(exponent.raw()) < 0 && factor_has_inverse(factor));
     };
     flint::Fmpz floor;
     fmpz_set_ui(floor.raw(), prime - 1);
@@ -596,7 +827,16 @@ void reduce_power_product_exponents(
         }
     }
     flint::Fmpz lambda;
-    if (!large || !modular_unit_group_exponent(lambda, modulus)) {
+    if (!large) {
+        return;
+    }
+    if (modulus != nullptr) {
+        if (!modular_unit_group_exponent(lambda, *modulus)) {
+            return;
+        }
+    } else if (n_is_prime(prime) != 0) {
+        fmpz_set_ui(lambda.raw(), prime - 1);
+    } else {
         return;
     }
 
@@ -604,7 +844,7 @@ void reduce_power_product_exponents(
     storage.reserve(factors.size());
     std::vector<flint::Fmpz> reduced;
     for (std::size_t row = 0; row < factors.size(); ++row) {
-        const ModularPowerProductFactor& factor = factors[row];
+        const Factor& factor = factors[row];
         const std::vector<flint::Fmpz>& exponents = *factor.exponents;
         // reduced[i] = ((e - 1) mod lambda) + 1 for every nonzero entry e
         // that may be reduced; zero and the other entries stay as given.
@@ -649,6 +889,102 @@ void reduce_power_product_exponents(
                      use_reduced ? reduced[i].raw() : exponents[i].raw());
         }
         rows[row] = &kept;
+    }
+}
+
+// The power products of modular_power_products in the ring of `ring`; the
+// factor exponents are those of exponent_rows.
+template <typename Ring, typename Factor>
+void interleaved_power_products(
+        flint::NmodMat& out, const Ring& ring,
+        std::span<const Factor> factors,
+        const std::vector<const std::vector<flint::Fmpz>*>& exponent_rows)
+        noexcept {
+    using Value = typename Ring::Value;
+    const slong output_count = nmod_mat_nrows(out.raw());
+
+    // One table per base and exponent sign that occurs, built once and
+    // shared by every output.
+    std::vector<OddPowerTable<Value>> positive_tables(factors.size());
+    std::vector<OddPowerTable<Value>> negative_tables(factors.size());
+    for (std::size_t row = 0; row < factors.size(); ++row) {
+        flint_bitcnt_t positive_bits = 0;
+        flint_bitcnt_t negative_bits = 0;
+        flint_bitcnt_t positive_maximum = 0;
+        flint_bitcnt_t negative_maximum = 0;
+        for (const flint::Fmpz& exponent : *exponent_rows[row]) {
+            const flint_bitcnt_t bits = fmpz_bits(exponent.raw());
+            if (fmpz_sgn(exponent.raw()) > 0) {
+                positive_bits += bits;
+                positive_maximum = std::max(positive_maximum, bits);
+            } else if (fmpz_sgn(exponent.raw()) < 0) {
+                negative_bits += bits;
+                negative_maximum = std::max(negative_maximum, bits);
+            }
+        }
+        if (positive_bits != 0) {
+            build_odd_power_table(
+                    positive_tables[row], ring, factor_base(factors[row]),
+                    sliding_window_width(positive_bits, positive_maximum));
+        }
+        if (negative_bits != 0) {
+            build_odd_power_table(
+                    negative_tables[row], ring, factor_inverse(factors[row]),
+                    sliding_window_width(negative_bits, negative_maximum));
+        }
+    }
+
+    std::vector<WindowStep<Value>> steps;
+    Value value = ring.make();
+    Value product = ring.make();
+    flint::Fmpz magnitude;
+    for (slong column = 0; column < output_count; ++column) {
+        const std::size_t index = static_cast<std::size_t>(column);
+        steps.clear();
+        for (std::size_t row = 0; row < factors.size(); ++row) {
+            const flint::Fmpz& exponent = (*exponent_rows[row])[index];
+            if (fmpz_is_zero(exponent.raw()) != 0) {
+                continue;
+            }
+            fmpz_abs(magnitude.raw(), exponent.raw());
+            append_window_steps(steps, magnitude,
+                                fmpz_sgn(exponent.raw()) < 0
+                                        ? negative_tables[row]
+                                        : positive_tables[row]);
+        }
+        std::sort(steps.begin(), steps.end(),
+                  [](const WindowStep<Value>& left,
+                     const WindowStep<Value>& right) {
+                      return left.position > right.position;
+                  });
+
+        // Interleaved left-to-right evaluation: one squaring per bit position
+        // below the highest window, shared by all bases of this output.
+        ring.one(value);
+        bool started = false;
+        std::size_t next = 0;
+        if (!steps.empty()) {
+            for (slong position = static_cast<slong>(steps.front().position);
+                 position >= 0; --position) {
+                if (started) {
+                    ring.mul(product, value, value);
+                    value.swap(product);
+                }
+                while (next < steps.size() &&
+                       steps[next].position ==
+                               static_cast<flint_bitcnt_t>(position)) {
+                    if (started) {
+                        ring.mul(product, value, *steps[next].odd_power);
+                        value.swap(product);
+                    } else {
+                        ring.set(value, *steps[next].odd_power);
+                        started = true;
+                    }
+                    ++next;
+                }
+            }
+        }
+        ring.store(out, column, value);
     }
 }
 
@@ -705,106 +1041,27 @@ void modular_power_products(
         flint::NmodMat& power_residues,
         std::span<const ModularPowerProductFactor> factors,
         const flint::NmodPoly& modulus) noexcept {
-    const ulong prime = modulus.raw()->mod.n;
-    const slong output_count = nmod_mat_nrows(power_residues.raw());
-    const slong degree = nmod_mat_ncols(power_residues.raw());
-
     std::vector<const std::vector<flint::Fmpz>*> exponent_rows;
     std::vector<std::vector<flint::Fmpz>> reduced_exponents;
     reduce_power_product_exponents(exponent_rows, reduced_exponents, factors,
-                                   modulus);
+                                   modulus.raw()->mod.n, &modulus);
+    interleaved_power_products(power_residues, PolynomialPowerRing(modulus),
+                               factors, exponent_rows);
+}
 
-    // One table per base and exponent sign that occurs, built once and
-    // shared by every output.
-    std::vector<OddPowerTable> positive_tables(factors.size());
-    std::vector<OddPowerTable> negative_tables(factors.size());
-    for (std::size_t row = 0; row < factors.size(); ++row) {
-        flint_bitcnt_t positive_bits = 0;
-        flint_bitcnt_t negative_bits = 0;
-        flint_bitcnt_t positive_maximum = 0;
-        flint_bitcnt_t negative_maximum = 0;
-        for (const flint::Fmpz& exponent : *exponent_rows[row]) {
-            const flint_bitcnt_t bits = fmpz_bits(exponent.raw());
-            if (fmpz_sgn(exponent.raw()) > 0) {
-                positive_bits += bits;
-                positive_maximum = std::max(positive_maximum, bits);
-            } else if (fmpz_sgn(exponent.raw()) < 0) {
-                negative_bits += bits;
-                negative_maximum = std::max(negative_maximum, bits);
-            }
-        }
-        if (positive_bits != 0) {
-            build_odd_power_table(
-                    positive_tables[row], *factors[row].base,
-                    sliding_window_width(positive_bits, positive_maximum),
-                    modulus);
-        }
-        if (negative_bits != 0) {
-            build_odd_power_table(
-                    negative_tables[row], *factors[row].inverse,
-                    sliding_window_width(negative_bits, negative_maximum),
-                    modulus);
-        }
-    }
-
-    std::vector<WindowStep> steps;
-    flint::NmodPoly value(prime);
-    flint::NmodPoly product(prime);
-    flint::Fmpz magnitude;
-    for (slong column = 0; column < output_count; ++column) {
-        const std::size_t index = static_cast<std::size_t>(column);
-        steps.clear();
-        for (std::size_t row = 0; row < factors.size(); ++row) {
-            const flint::Fmpz& exponent = (*exponent_rows[row])[index];
-            if (fmpz_is_zero(exponent.raw()) != 0) {
-                continue;
-            }
-            fmpz_abs(magnitude.raw(), exponent.raw());
-            append_window_steps(steps, magnitude,
-                                fmpz_sgn(exponent.raw()) < 0
-                                        ? negative_tables[row]
-                                        : positive_tables[row]);
-        }
-        std::sort(steps.begin(), steps.end(),
-                  [](const WindowStep& left, const WindowStep& right) {
-                      return left.position > right.position;
-                  });
-
-        // Interleaved left-to-right evaluation: one squaring per bit position
-        // below the highest window, shared by all bases of this output.
-        nmod_poly_one(value.raw());
-        bool started = false;
-        std::size_t next = 0;
-        if (!steps.empty()) {
-            for (slong position = static_cast<slong>(steps.front().position);
-                 position >= 0; --position) {
-                if (started) {
-                    nmod_poly_mulmod(product.raw(), value.raw(), value.raw(),
-                                     modulus.raw());
-                    value.swap(product);
-                }
-                while (next < steps.size() &&
-                       steps[next].position ==
-                               static_cast<flint_bitcnt_t>(position)) {
-                    if (started) {
-                        nmod_poly_mulmod(product.raw(), value.raw(),
-                                         steps[next].odd_power->raw(),
-                                         modulus.raw());
-                        value.swap(product);
-                    } else {
-                        nmod_poly_set(value.raw(),
-                                      steps[next].odd_power->raw());
-                        started = true;
-                    }
-                    ++next;
-                }
-            }
-        }
-        for (slong i = 0; i < degree; ++i) {
-            nmod_mat_entry(power_residues.raw(), column, i) =
-                    nmod_poly_get_coeff_ui(value.raw(), i);
-        }
-    }
+void modular_power_products_evaluated(
+        flint::NmodMat& values,
+        std::span<const EvaluatedPowerProductFactor> factors) noexcept {
+    const nmod_t modulus = values.raw()->mod;
+    std::vector<const std::vector<flint::Fmpz>*> exponent_rows;
+    std::vector<std::vector<flint::Fmpz>> reduced_exponents;
+    reduce_power_product_exponents(exponent_rows, reduced_exponents, factors,
+                                   modulus.n, nullptr);
+    interleaved_power_products(
+            values,
+            EvaluationPowerRing(modulus, static_cast<std::size_t>(
+                                                 nmod_mat_ncols(values.raw()))),
+            factors, exponent_rows);
 }
 
 const char* bounded_compact_reconstruction_status_name(
@@ -886,6 +1143,10 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
     // so the limit of 4 * degree candidates finds one with probability
     // 1 - (1 - 1 / degree)^(4 degree) > 1 - e^-4 there.  When the limit is
     // reached, that candidate is tried as before and the preference ends.
+    // A prime found to split here is also passed to build_prime_residues as
+    // split, which then computes the products in evaluation form; every other
+    // prime, including every prime of a batch without such an exponent, uses
+    // the power basis.
     bool prefer_split_primes = false;
     for (const PreparedFactor& factor : factors) {
         for (const flint::Fmpz& exponent : factor.exponents) {
@@ -907,9 +1168,11 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
         }
         const ulong prime = n_nextprime(prime_cursor, 1);
         prime_cursor = prime;
+        bool split = false;
         if (prefer_split_primes) {
             if (defining_polynomial_splits(defining_polynomial, degree,
                                            prime)) {
+                split = true;
                 split_prime_scan = 0;
             } else if (++split_prime_scan < split_prime_scan_limit) {
                 ++report.nonsplit_prime_skips;
@@ -925,7 +1188,7 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
                                 prime);
         if (!build_prime_residues(report, residues, factors,
                                   defining_polynomial, order_basis, degree,
-                                  prime)) {
+                                  prime, split)) {
             continue;
         }
 

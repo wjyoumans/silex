@@ -1222,6 +1222,23 @@ skipped, ``lambda`` has 64 bits, and the exponent bits fall from 373k to
 179k; for the degree-32 real subfield of the 136th cyclotomic field, 40
 primes are skipped and the exponent bits fall from 159k to 150k.
 
+At a prime found to split by that scan, Silex also computes the power
+products in evaluation form, which PARI does not: ``FlxqX_chinese_unit``
+works in ``F_p[x]/(T)`` through ``FlxqV_factorback``.  With ``r_1, ..., r_n``
+the distinct roots of ``f`` modulo ``p``, evaluation at the ``r_j`` is a ring
+isomorphism from ``R`` to ``F_p^n`` (the Chinese remainder theorem for
+``F_p[x]`` with the coprime moduli ``x - r_j``, whose inverse is Lagrange
+interpolation; von zur Gathen and Gerhard, *Modern Computer Algebra*,
+sections 5.2 and 5.4).  Each multiplication of the interleaved
+sliding-window evaluation becomes ``n`` products in ``F_p`` and each inverse
+``n`` inverses.  A base is invertible exactly when none of its values is
+zero, and the matrix of the basis values at the roots is invertible exactly
+when the order basis is invertible modulo ``p``, so the same primes are
+rejected.  Interpolation is folded into the change to order coordinates: a
+row of values times the inverse of that matrix is the row of order
+coordinates.  The residues are the same, so no reconstructed unit changes.
+Primes not found to split by the scan use the power basis.
+
 Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb
 coordinates of each unit against the generators' log matrix and divide by

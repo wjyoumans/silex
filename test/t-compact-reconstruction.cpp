@@ -27,6 +27,7 @@
 #include <flint/nmod_poly.h>
 #include <flint/ulong_extras.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -2054,6 +2055,199 @@ int test_modular_power_products_split_modulus() {
     return 0;
 }
 
+// Coordinate-wise reference for modular_power_products_evaluated: every
+// coordinate of every output is a product of fmpz_powm powers of the base
+// coordinate, or of the inverse coordinate for a negative exponent.
+void reference_evaluated_power_products(
+        sflint::NmodMat& out,
+        const std::vector<silex::detail::EvaluatedPowerProductFactor>& factors) {
+    sflint::Fmpz modulus;
+    sflint::Fmpz value;
+    sflint::Fmpz power;
+    sflint::Fmpz magnitude;
+    fmpz_set_ui(modulus.raw(), out.raw()->mod.n);
+    for (slong row = 0; row < nmod_mat_nrows(out.raw()); ++row) {
+        for (slong j = 0; j < nmod_mat_ncols(out.raw()); ++j) {
+            const std::size_t coordinate = static_cast<std::size_t>(j);
+            fmpz_one(value.raw());
+            for (const auto& factor : factors) {
+                const sflint::Fmpz& exponent =
+                        (*factor.exponents)[static_cast<std::size_t>(row)];
+                if (fmpz_is_zero(exponent.raw()) != 0) {
+                    continue;
+                }
+                const ulong base = fmpz_sgn(exponent.raw()) < 0
+                                           ? factor.inverse[coordinate]
+                                           : factor.base[coordinate];
+                fmpz_abs(magnitude.raw(), exponent.raw());
+                fmpz_set_ui(power.raw(), base);
+                fmpz_powm(power.raw(), power.raw(), magnitude.raw(),
+                          modulus.raw());
+                fmpz_mul(value.raw(), value.raw(), power.raw());
+                fmpz_mod(value.raw(), value.raw(), modulus.raw());
+            }
+            nmod_mat_entry(out.raw(), row, j) = fmpz_get_ui(value.raw());
+        }
+    }
+}
+
+// Evaluation form against power-basis form.  For a modulus that is the
+// product of the x - r_j over distinct r_j, evaluation at the r_j is a ring
+// isomorphism (Z/pZ)[x]/(modulus) -> (Z/pZ)^n, so the coordinates computed by
+// modular_power_products_evaluated from the evaluated bases and their
+// coordinate-wise inverses are the evaluations of the residues of
+// modular_power_products.  Random split moduli, bases (a zero divisor among
+// them, with positive exponents only) and exponents of both signs up to
+// 140 bits; also a composite modulus, where no exponent is reduced, against
+// coordinate-wise powering.
+int test_modular_power_products_evaluated_match_polynomial() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    const ulong primes[] = {UWORD(5), UWORD(101),
+                            n_nextprime(UWORD(1) << 40, 1),
+                            n_nextprime(UWORD(1) << (FLINT_BITS - 1), 1),
+                            first_large_prime_one_mod(41)};
+    struct Shape {
+        slong degree;
+        std::size_t bases;
+        std::size_t outputs;
+        flint_bitcnt_t max_bits;
+    };
+    const Shape shapes[] = {{1, 1, 1, 8},   {2, 3, 4, 70},  {4, 5, 3, 140},
+                            {7, 4, 6, 64},  {12, 6, 5, 140}, {40, 6, 4, 140}};
+    for (const ulong prime : primes) {
+        for (const Shape& shape : shapes) {
+            if (static_cast<ulong>(shape.degree) > prime ||
+                (shape.degree == 40) != (prime % 41 == 1)) {
+                continue;
+            }
+            for (int sign_mode = 0; sign_mode < 2; ++sign_mode) {
+                const std::size_t length =
+                        static_cast<std::size_t>(shape.degree);
+                // Distinct roots: Phi_41 for degree 40, random otherwise.
+                sflint::NmodPoly modulus(prime);
+                std::vector<ulong> roots;
+                if (shape.degree == 40) {
+                    cyclotomic_41_modulus(modulus);
+                    const ulong root = n_powmod2_ui_preinv(
+                            n_primitive_root_prime(prime), (prime - 1) / 41,
+                            prime, n_preinvert_limb(prime));
+                    ulong power = root;
+                    for (slong j = 0; j < 40; ++j) {
+                        roots.push_back(power);
+                        power = n_mulmod2_preinv(power, root, prime,
+                                                 n_preinvert_limb(prime));
+                    }
+                } else {
+                    while (roots.size() < length) {
+                        const ulong root = n_randint(state, prime);
+                        if (std::find(roots.begin(), roots.end(), root) ==
+                            roots.end()) {
+                            roots.push_back(root);
+                        }
+                    }
+                    nmod_poly_product_roots_nmod_vec(
+                            modulus.raw(), roots.data(), shape.degree);
+                }
+                PowerProductCase input;
+                random_power_product_case(input, state, modulus, shape.bases,
+                                          shape.outputs, shape.max_bits,
+                                          sign_mode == 1);
+                if (shape.degree > 1) {
+                    // The zero divisor x - r_0, positive exponents only.
+                    product_modulus(input.bases[0],
+                                    {{nmod_neg(roots[0], modulus.raw()->mod),
+                                      1}});
+                    for (sflint::Fmpz& exponent : input.exponents[0]) {
+                        fmpz_abs(exponent.raw(), exponent.raw());
+                    }
+                    input.has_inverse[0] = false;
+                }
+
+                std::vector<std::vector<ulong>> base_values(input.bases.size());
+                std::vector<std::vector<ulong>> inverse_values(
+                        input.bases.size());
+                std::vector<silex::detail::ModularPowerProductFactor> factors;
+                std::vector<silex::detail::EvaluatedPowerProductFactor>
+                        evaluated;
+                for (std::size_t k = 0; k < input.bases.size(); ++k) {
+                    base_values[k].resize(length);
+                    nmod_poly_evaluate_nmod_vec(base_values[k].data(),
+                                                input.bases[k].raw(),
+                                                roots.data(), shape.degree);
+                    factors.push_back(
+                            {&input.bases[k],
+                             input.has_inverse[k] ? &input.inverses[k]
+                                                  : nullptr,
+                             &input.exponents[k]});
+                    silex::detail::EvaluatedPowerProductFactor factor;
+                    factor.base = base_values[k];
+                    factor.exponents = &input.exponents[k];
+                    if (input.has_inverse[k]) {
+                        for (const ulong value : base_values[k]) {
+                            assert(value != 0);
+                            inverse_values[k].push_back(
+                                    n_invmod(value, prime));
+                        }
+                        factor.inverse = inverse_values[k];
+                    }
+                    evaluated.push_back(factor);
+                }
+
+                const slong outputs = static_cast<slong>(shape.outputs);
+                sflint::NmodMat power_residues(outputs, shape.degree, prime);
+                sflint::NmodMat expected(outputs, shape.degree, prime);
+                sflint::NmodMat actual(outputs, shape.degree, prime);
+                silex::detail::modular_power_products(power_residues, factors,
+                                                      modulus);
+                sflint::NmodPoly residue(prime);
+                for (slong row = 0; row < outputs; ++row) {
+                    nmod_poly_zero(residue.raw());
+                    for (slong i = 0; i < shape.degree; ++i) {
+                        nmod_poly_set_coeff_ui(
+                                residue.raw(), i,
+                                nmod_mat_entry(power_residues.raw(), row, i));
+                    }
+                    nmod_poly_evaluate_nmod_vec(
+                            nmod_mat_entry_ptr(expected.raw(), row, 0),
+                            residue.raw(), roots.data(), shape.degree);
+                }
+                silex::detail::modular_power_products_evaluated(actual,
+                                                                evaluated);
+                assert(nmod_mat_equal(expected.raw(), actual.raw()) != 0);
+                reference_evaluated_power_products(expected, evaluated);
+                assert(nmod_mat_equal(expected.raw(), actual.raw()) != 0);
+            }
+        }
+    }
+
+    // A composite modulus: the exponents are used as given.
+    const ulong composite = UWORD(1000000);
+    std::vector<ulong> base_values = {3, 7, 999999};
+    std::vector<ulong> inverse_values;
+    for (const ulong value : base_values) {
+        inverse_values.push_back(n_invmod(value, composite));
+    }
+    std::vector<sflint::Fmpz> exponents(3);
+    fmpz_one_2exp(exponents[0].raw(), 90);
+    fmpz_set_si(exponents[1].raw(), -12345);
+    fmpz_one_2exp(exponents[2].raw(), 100);
+    fmpz_neg(exponents[2].raw(), exponents[2].raw());
+    fmpz_add_ui(exponents[2].raw(), exponents[2].raw(), 7);
+    std::vector<silex::detail::EvaluatedPowerProductFactor> evaluated(1);
+    evaluated[0].base = base_values;
+    evaluated[0].inverse = inverse_values;
+    evaluated[0].exponents = &exponents;
+    sflint::NmodMat expected(3, 3, composite);
+    sflint::NmodMat actual(3, 3, composite);
+    silex::detail::modular_power_products_evaluated(actual, evaluated);
+    reference_evaluated_power_products(expected, evaluated);
+    assert(nmod_mat_equal(expected.raw(), actual.raw()) != 0);
+
+    flint_rand_clear(state);
+    return 0;
+}
+
 // Without lambda (a repeated factor) the exponents are used as given, so a
 // negative exponent does use the inverse: replacing it by a value that is
 // not an inverse changes the product.
@@ -2198,6 +2392,100 @@ int test_wide_reconstruction_prefers_split_primes() {
     return 0;
 }
 
+// The evaluation-form route at split primes rejects the same primes as the
+// power-basis route.  Q(zeta_5) with the bases u = 1 + zeta and u^2 of
+// test_wide_reconstruction_prefers_split_primes, the integer q and the
+// rational 1 / r, where q < r are the first two primes = 1 mod 5 after the
+// start: q and 1 / r enter every output with opposite exponents of 2^70, so
+// the outputs stay u and u^-1.  At q the reduced defining polynomial splits,
+// but q has a negative exponent and is 0 modulo q (a noninvertible
+// rejection); at r the denominator of 1 / r vanishes (a denominator
+// rejection); the next split prime is used.
+int test_wide_reconstruction_split_prime_rejections() {
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 4; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    const ulong start = UWORD(1) << (FLINT_BITS - 1);
+    ulong split_primes[3] = {0, 0, 0};
+    for (ulong prime = start, found = 0; found < 3;) {
+        prime = n_nextprime(prime, 1);
+        if (prime % 5 == 1) {
+            split_primes[found++] = prime;
+        }
+    }
+
+    silex::Element zeta(field);
+    silex::Element unit(field);
+    assert(zeta.gen());
+    assert(unit.add_si(zeta, 1));
+    sflint::Fmpz value;
+    silex::detail::WideFactoredUnits wide;
+    for (int i = 0; i < 6; ++i) {
+        wide.bases.emplace_back(field);
+    }
+    assert(wide.bases[0].add_si(zeta, 1));
+    assert(wide.bases[1].multiply(unit, unit));
+    fmpz_set_ui(value.raw(), split_primes[0]);
+    assert(wide.bases[2].set_fmpz(sflint::FmpzConstRef(value)));
+    assert(wide.bases[3].set_fmpz(sflint::FmpzConstRef(value)));
+    fmpz_set_ui(value.raw(), split_primes[1]);
+    silex::Element denominator(field);
+    assert(denominator.set_fmpz(sflint::FmpzConstRef(value)));
+    assert(wide.bases[4].invert(denominator));
+    assert(wide.bases[5].invert(denominator));
+    wide.exponents = sflint::FmpzMat(2, 6);
+    fmpz* row0 = fmpz_mat_entry(wide.exponents.raw(), 0, 0);
+    fmpz* row1 = fmpz_mat_entry(wide.exponents.raw(), 1, 0);
+    fmpz_one_2exp(row0 + 0, 71);
+    fmpz_add_ui(row0 + 0, row0 + 0, 1);
+    fmpz_one_2exp(row0 + 1, 70);
+    fmpz_neg(row0 + 1, row0 + 1);
+    fmpz_one_2exp(row1 + 0, 72);
+    fmpz_add_ui(row1 + 0, row1 + 0, 1);
+    fmpz_neg(row1 + 0, row1 + 0);
+    fmpz_one_2exp(row1 + 1, 71);
+    for (fmpz* row : {row0, row1}) {
+        for (slong k = 2; k < 6; k += 2) {
+            fmpz_one_2exp(row + k, 70);
+            fmpz_neg(row + k + 1, row + k);
+        }
+    }
+
+    std::vector<silex::FactoredElement> plain;
+    plain.emplace_back(field);
+    plain.emplace_back(field);
+    assert(plain[0].push(unit, 1));
+    assert(plain[1].push(unit, -1));
+    std::vector<silex::Element> expected;
+    sflint::Fmpz bound;
+    exact_outputs_and_bound(expected, bound, maximal, plain);
+
+    silex::detail::BoundedCompactReconstructionOptions options;
+    options.prime_search_start = start;
+    silex::detail::BoundedCompactReconstructionReport report;
+    std::vector<silex::Element> actual;
+    assert(silex::detail::bounded_compact_reconstruct(
+            report, actual, maximal, wide, sflint::FmpzConstRef(bound),
+            options));
+    assert(report.status ==
+           silex::detail::BoundedCompactReconstructionStatus::success);
+    assert(report.prime_trials == 3 && report.primes_used == 1);
+    assert(report.noninvertible_prime_rejections == 1);
+    assert(report.denominator_prime_rejections == 1);
+    assert(report.order_basis_prime_rejections == 0);
+    assert(report.last_prime == split_primes[2]);
+    assert_exact_crt_crossing(report, sflint::FmpzConstRef(bound));
+    assert_equal_outputs(actual, expected);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -2205,8 +2493,10 @@ int main() {
     assert(test_modular_unit_group_exponent() == 0);
     assert(test_modular_power_products_reduced_exponents() == 0);
     assert(test_modular_power_products_split_modulus() == 0);
+    assert(test_modular_power_products_evaluated_match_polynomial() == 0);
     assert(test_modular_power_products_fallback_uses_inverse() == 0);
     assert(test_wide_reconstruction_prefers_split_primes() == 0);
+    assert(test_wide_reconstruction_split_prime_rejections() == 0);
     assert(test_shared_exponent_matrix_and_centered_crt() == 0);
     assert(test_denominator_prime_exclusion() == 0);
     assert(test_field_polynomial_denominator_prime_exclusion() == 0);
