@@ -6055,7 +6055,8 @@ bool ClassGroupCertificationAccess::
         !context.check_factor_base_generation_bound(
                 flint::FmpzConstRef(required_bound)) ||
         !context.order(flint::FmpzRef(class_order)) ||
-        !flint::fmpz_equal(flint::FmpzConstRef(class_order), exact_order)) {
+        !flint::fmpz_equal(flint::FmpzConstRef(class_order), exact_order) ||
+        CertificationFailureTestSeams::take_exact_order_mismatch()) {
         return false;
     }
 
@@ -6074,6 +6075,7 @@ bool ClassGroupCertificationAccess::publish_exact_class_order_proof(
         ClassGroupContext& context,
         flint::FmpzConstRef exact_order) noexcept {
     if (!record_exact_class_order_saturation(context, exact_order) ||
+        CertificationFailureTestSeams::take_exact_order_publish_failure() ||
         !context.relation_saturation_covers_class_order_()) {
         return false;
     }
@@ -6544,6 +6546,17 @@ bool ClassGroupCertificationAccess::
     }
     flint::fmpz_set(out, flint::FmpzConstRef(index));
     return transaction.finish(true);
+}
+
+bool ClassGroupCertificationAccess::generation_structure_certified(
+        const ClassGroupContext& context) noexcept {
+    return context.private_storage_ != nullptr &&
+           context.private_storage_->generation_structure_certified;
+}
+
+bool ClassGroupCertificationAccess::analytic_class_regulator_assumes_grh(
+        const ClassGroupContext& context) noexcept {
+    return context.analytic_class_regulator_assumes_grh_;
 }
 
 bool ClassGroupCertificationAccess::relation_saturation_proof_record(
@@ -13121,6 +13134,7 @@ bool ClassGroupContext::try_certify_class_unit_with_zeta_bf(
                 hr_unconditional) ||
         !record_zeta_bf_audit_(flint::ArbConstRef(error_bound), cutoff,
                                max_cutoff, precision, work_precision) ||
+        detail::CertificationFailureTestSeams::take_zeta_bf_record_failure() ||
         !try_promote_proven_certification_()) {
         return false;
     }

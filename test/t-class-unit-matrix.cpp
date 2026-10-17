@@ -7,6 +7,7 @@
 #include <silex/zeta.hpp>
 
 #include "class_group/class_group_certification_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -3067,6 +3068,8 @@ struct CertificationExtras {
     silex::ClassUnitCompletenessBasis basis =
             silex::ClassUnitCompletenessBasis::none;
     silex::CertificationMode analytic = silex::CertificationMode::unknown;
+    bool structure_certified = false;
+    bool assumes_grh = false;
     bool proof_present[4] = {false, false, false, false};
     silex::ProofState proof_status[4] = {};
     slong proof_rank[4] = {0, 0, 0, 0};
@@ -3089,6 +3092,10 @@ bool capture_full_state(FullState& out,
             class_group.class_unit_completeness_certification();
     out.extras.basis = class_group.class_unit_completeness_basis();
     out.extras.analytic = class_group.analytic_class_regulator_certification();
+    out.extras.structure_certified =
+            AtomicityAccess::generation_structure_certified(class_group);
+    out.extras.assumes_grh =
+            AtomicityAccess::analytic_class_regulator_assumes_grh(class_group);
     const slong ells[4] = {2, 3, 5, 7};
     for (int i = 0; i < 4; ++i) {
         sflint::Fmpz ell;
@@ -3106,7 +3113,9 @@ bool same_full_state(const FullState& left, const FullState& right) noexcept {
     if (!same_pair_public_snapshot(left.pair, right.pair) ||
         left.extras.completeness != right.extras.completeness ||
         left.extras.basis != right.extras.basis ||
-        left.extras.analytic != right.extras.analytic) {
+        left.extras.analytic != right.extras.analytic ||
+        left.extras.structure_certified != right.extras.structure_certified ||
+        left.extras.assumes_grh != right.extras.assumes_grh) {
         return false;
     }
     for (int i = 0; i < 4; ++i) {
@@ -3148,19 +3157,18 @@ bool check_failed_route_is_atomic(const char* name,
 }
 
 // Q(sqrt(radicand)) with a candidate class group, optionally carrying proven
-// units and an ell = 2 saturation record.  The populated cases are no-op
-// guards: they catch a route that clears or rewrites the records before its
-// gate, but no route here writes and then fails after touching them, so a
-// missing restore of the saturation records (relation_saturation_records and
-// relation_saturation_proof_records) is not detected.  Also unobserved
-// directly: generation_structure_certified and
-// analytic_class_regulator_assumes_grh_ are seen only through
-// factor_base_generation_certification() and
-// analytic_class_regulator_certification() (the latter is unknown unless the
-// status is verified), and the imaginary case is rejected at the gate before
-// any write.  These need a src hook (a failing route that writes the
-// saturation records, the h_cand path, the record_zeta_bf_audit_ path, and
-// direct getters for the two fields); that is not done here.
+// units and an ell = 2 saturation record.  The populated cases of the natural
+// failures (no hook) are no-op guards: they catch a route that clears or
+// rewrites the records before its gate, but the natural failures all happen
+// before the saturation records are touched.  The hooked cases further down
+// (CertificationFailureTestSeams) fail after the records are written, so
+// they observe the restore of relation_saturation_records and
+// relation_saturation_proof_records, and the snapshot reads
+// generation_structure_certified and analytic_class_regulator_assumes_grh_
+// directly.  generation_structure_certified is written only on the planned
+// structure-certificate route (a relation module past its size limit, set
+// by the class/unit transaction plan), which no small fixture reaches, so
+// its restore is compared but never differs from false here.
 struct AtomicityFixture {
     FieldSetup setup;
     silex::ClassGroupContext class_group;
@@ -3391,6 +3399,123 @@ int test_failed_try_certify_zeta_bf_is_atomic() {
                    : 1;
 }
 
+// Imaginary quadratic Q(sqrt(-47)), h = 5, with rank-zero units: the
+// exact-order routes fail after the generation check and, for the publish
+// failure, after the ell = 5 saturation records are written.  Each case
+// starts from a fresh fixture.  The failure is injected
+// (CertificationFailureTestSeams): a fresh candidate never has the wrong
+// order, and publication cannot otherwise fail once the records are written.
+bool build_imaginary_fixture(AtomicityFixture& fx) noexcept {
+    if (!build_atomicity_fixture(fx, -47, false)) {
+        return false;
+    }
+    sflint::Fmpz order;
+    return fx.units.compute(fx.setup.maximal_order) &&
+           fx.units.is_set() && fx.units.free_rank() == 0 &&
+           fx.class_group.order(sflint::FmpzRef(order)) &&
+           sflint::fmpz_cmp_ui(sflint::FmpzConstRef(order), 5) == 0 &&
+           fx.class_group.factor_base_generation_checked_status() ==
+                   silex::ProofState::not_checked;
+}
+
+int test_hooked_imaginary_failures_are_atomic() {
+    using silex::detail::TestHookAccess;
+    {
+        AtomicityFixture fx;
+        if (!build_imaginary_fixture(fx)) {
+            std::cerr << "hooked imaginary: fixture unavailable\n";
+            return 1;
+        }
+        TestHookAccess::arm_exact_order_publish_failure();
+        const bool ok = check_failed_route_is_atomic(
+                "imaginary h = 5 try_certify_quadratic, publish fails",
+                fx.class_group, fx.units, [&]() noexcept {
+                    return fx.class_group.try_certify_quadratic(
+                            silex::CertificationMode::proven);
+                });
+        TestHookAccess::disarm_certification_failures();
+        if (!ok) {
+            return 1;
+        }
+    }
+    {
+        AtomicityFixture fx;
+        if (!build_imaginary_fixture(fx)) {
+            std::cerr << "hooked imaginary: fixture unavailable\n";
+            return 1;
+        }
+        TestHookAccess::arm_exact_order_mismatch();
+        const bool ok = check_failed_route_is_atomic(
+                "imaginary h = 5 try_certify_quadratic, h_cand mismatch",
+                fx.class_group, fx.units, [&]() noexcept {
+                    return fx.class_group.try_certify_quadratic(
+                            silex::CertificationMode::proven);
+                });
+        TestHookAccess::disarm_certification_failures();
+        if (!ok) {
+            return 1;
+        }
+    }
+    {
+        // T-067: the rank-zero exact route with index one and h > 1 writes
+        // the generation check and the ell = 5 records, then publication
+        // fails.
+        AtomicityFixture fx;
+        if (!build_imaginary_fixture(fx)) {
+            std::cerr << "hooked imaginary: fixture unavailable\n";
+            return 1;
+        }
+        TestHookAccess::arm_exact_order_publish_failure();
+        const bool ok = check_failed_route_is_atomic(
+                "rank-zero imaginary h = 5 exact index route, publish fails",
+                fx.class_group, fx.units, [&]() noexcept {
+                    sflint::Fmpz index;
+                    return AtomicityAccess::
+                            rank_zero_quadratic_class_index_bound(
+                                    sflint::FmpzRef(index), fx.class_group,
+                                    fx.units,
+                                    silex::CertificationMode::proven);
+                });
+        TestHookAccess::disarm_certification_failures();
+        if (!ok) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// try_certify_class_unit_with_zeta_bf with the audit record written and the
+// route then failing (the injected failure stands for a failing
+// try_promote_proven_certification_): the analytic status, the GRH flag
+// (set for degree two), and the audit record must be restored.
+int test_hooked_zeta_bf_failure_is_atomic() {
+    using silex::detail::TestHookAccess;
+    for (const bool populated : {false, true}) {
+        AtomicityFixture fx;
+        if (!build_atomicity_fixture(fx, 10, populated) ||
+            !fx.units.compute(fx.setup.maximal_order) ||
+            fx.units.certification_status() !=
+                    silex::CertificationMode::proven) {
+            std::cerr << "hooked zeta_bf: fixture unavailable\n";
+            return 1;
+        }
+        TestHookAccess::arm_zeta_bf_record_failure();
+        const bool ok = check_failed_route_is_atomic(
+                populated ? "populated zeta_bf, record then failure"
+                          : "unchecked zeta_bf, record then failure",
+                fx.class_group, fx.units, [&]() noexcept {
+                    return fx.class_group
+                            .try_certify_class_unit_with_zeta_bf(
+                                    fx.units, 20000, 192);
+                });
+        TestHookAccess::disarm_certification_failures();
+        if (!ok) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -3398,6 +3523,8 @@ int main() {
     status |= test_failed_try_certify_quadratic_is_atomic();
     status |= test_failed_try_certify_trivial_quotient_is_atomic();
     status |= test_failed_class_unit_with_units_is_atomic();
+    status |= test_hooked_imaginary_failures_are_atomic();
+    status |= test_hooked_zeta_bf_failure_is_atomic();
     status |= test_failed_try_certify_zeta_bf_is_atomic();
     status |= test_public_paired_certification_request_validation();
     status |=

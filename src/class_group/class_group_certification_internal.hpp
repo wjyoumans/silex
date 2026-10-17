@@ -19,6 +19,14 @@ public:
             flint::FmpzConstRef discriminant,
             flint::FmpzConstRef exact_order) noexcept;
 
+    // Test observers of two fields the public getters show only through a
+    // label: generation_structure_certified and
+    // analytic_class_regulator_assumes_grh_.
+    static bool generation_structure_certified(
+            const ClassGroupContext& context) noexcept;
+    static bool analytic_class_regulator_assumes_grh(
+            const ClassGroupContext& context) noexcept;
+
     // True when the context runs inside a `proven` class/unit transaction
     // whose imaginary quadratic factor-base plan kept the compact base past
     // the relation module size limit

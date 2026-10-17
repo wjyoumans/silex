@@ -320,6 +320,46 @@ private:
     inline static std::atomic<bool> unit_power_root_error_{false};
 };
 
+// Switches that only detail::TestHookAccess (test/test_hook_access.hpp) can
+// set.  Off by default and never set by production code; each is a relaxed
+// atomic load on a certification route that is not a hot path.  Each makes
+// one failure point of a certification route fail, once per arming, after
+// the route has already written its certification state, so a test can
+// check that the route's transaction restores that state.
+class CertificationFailureTestSeams {
+public:
+    // publish_exact_class_order_proof: fail after the per-ell saturation
+    // records of the exact class order have been written.
+    static bool take_exact_order_publish_failure() noexcept {
+        return exact_order_publish_failure_.load(std::memory_order_relaxed) &&
+               exact_order_publish_failure_.exchange(
+                       false, std::memory_order_relaxed);
+    }
+
+    // try_certify_imaginary_quadratic_from_exact_order: treat the candidate
+    // order as different from the exact class number, after the generation
+    // check has written.
+    static bool take_exact_order_mismatch() noexcept {
+        return exact_order_mismatch_.load(std::memory_order_relaxed) &&
+               exact_order_mismatch_.exchange(
+                       false, std::memory_order_relaxed);
+    }
+
+    // try_certify_class_unit_with_zeta_bf: fail after record_zeta_bf_audit_
+    // has written the audit record.
+    static bool take_zeta_bf_record_failure() noexcept {
+        return zeta_bf_record_failure_.load(std::memory_order_relaxed) &&
+               zeta_bf_record_failure_.exchange(
+                       false, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<bool> exact_order_publish_failure_{false};
+    inline static std::atomic<bool> exact_order_mismatch_{false};
+    inline static std::atomic<bool> zeta_bf_record_failure_{false};
+};
+
 CompactPowerRootResult compact_unit_presentation_power_root(
         bool& is_power,
         FactoredElement& root,

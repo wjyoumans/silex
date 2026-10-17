@@ -159,6 +159,32 @@ public:
                 on, std::memory_order_relaxed);
     }
 
+    // Make the next call of the named certification route fail once, after
+    // the route has written its certification state
+    // (CertificationFailureTestSeams, class_group_internal.hpp).  Each
+    // switch consumes itself.  A failure is a result every route already
+    // returns; this only lets a test reach it with a valid fixture.
+    static void arm_exact_order_publish_failure() noexcept {
+        CertificationFailureTestSeams::exact_order_publish_failure_.store(
+                true, std::memory_order_relaxed);
+    }
+    static void arm_exact_order_mismatch() noexcept {
+        CertificationFailureTestSeams::exact_order_mismatch_.store(
+                true, std::memory_order_relaxed);
+    }
+    static void arm_zeta_bf_record_failure() noexcept {
+        CertificationFailureTestSeams::zeta_bf_record_failure_.store(
+                true, std::memory_order_relaxed);
+    }
+    static void disarm_certification_failures() noexcept {
+        CertificationFailureTestSeams::exact_order_publish_failure_.store(
+                false, std::memory_order_relaxed);
+        CertificationFailureTestSeams::exact_order_mismatch_.store(
+                false, std::memory_order_relaxed);
+        CertificationFailureTestSeams::zeta_bf_record_failure_.store(
+                false, std::memory_order_relaxed);
+    }
+
     // The number of extension-route saturation kernel bases kept since the
     // process started.
     static slong saturation_kernel_extensions_kept() noexcept {
