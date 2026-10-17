@@ -79,6 +79,15 @@ void incremental_row_dot(flint::Arb& out,
 
 using IncrementalLogState = IncrementalUnitContext::LogState;
 
+// What incremental_independence_at leaves, for an accepted candidate, to
+// extend the Gram inverse of its log state: enclosures of G^{-1} L v and of
+// the Schur complement (see incremental_gram_bordered_inverse).
+struct IncrementalGramBorder {
+    flint::ArbVec inverse_projection{0};
+    flint::Arb complement;
+    bool available = false;
+};
+
 // The memo of `context` at `precision`, created empty on first use.
 std::size_t incremental_log_state(IncrementalUnitContext& context,
                                   slong precision) noexcept {
@@ -115,6 +124,7 @@ bool incremental_prepare(IncrementalLogState& state,
     }
 
     state.gram_units = -1;
+    state.gram_bordered = false;
     flint::ArbMat gram(kept, kept);
     flint::ArbMat inverse(kept, kept);
     flint::Arb determinant;
@@ -195,10 +205,12 @@ slong incremental_decision_precision(const flint::Arb& determinant,
 // decides, with the answer in `independent`; `row` receives the
 // candidate's log row when one was computed.  When it does not decide,
 // `target_precision` receives incremental_decision_precision of the
-// enclosure, or zero.
+// enclosure, or zero.  When it decides "independent", `border` receives
+// what the accept path needs to extend the Gram inverse of `state`.
 bool incremental_independence_at(bool& independent,
                                  slong& target_precision,
                                  flint::ArbVec& row,
+                                 IncrementalGramBorder& border,
                                  IncrementalLogState& state,
                                  const IncrementalUnitContext& context,
                                  EmbeddingContext& embeddings,
@@ -245,6 +257,10 @@ bool incremental_independence_at(bool& independent,
     if (!decided) {
         target_precision = incremental_decision_precision(
                 determinant, places, degree, precision);
+    } else if (independent) {
+        border.inverse_projection = std::move(inverse_projection);
+        arb_swap(border.complement.raw(), complement.raw());
+        border.available = true;
     }
     return decided;
 }
@@ -271,7 +287,9 @@ bool incremental_independence_at(bool& independent,
 // computed in ball arithmetic from enclosures: the rows from
 // logarithmic_embedding (the call compact_log_matrix makes), the Gram
 // entries, g and c from arb_dot, G^{-1} from arb_mat_inv, and det(G) from
-// arb_mat_det.  arb_mat_inv returns zero unless it proves the ball matrix,
+// arb_mat_det, or both from incremental_gram_bordered_inverse after an
+// accepted unit (its own soundness note shows they enclose the same true
+// values).  arb_mat_inv returns zero unless it proves the ball matrix,
 // and so the true G, invertible, and otherwise encloses the true inverse;
 // the test is then skipped at that precision.  Ball operations are
 // inclusion monotone, so the computed ball contains the true Gram
@@ -287,11 +305,13 @@ bool incremental_independence_at(bool& independent,
 bool incremental_independence(bool& independent,
                               slong& decided_precision,
                               flint::ArbVec& row,
+                              IncrementalGramBorder& border,
                               IncrementalUnitContext& context,
                               EmbeddingContext& embeddings,
                               slong precision) noexcept {
     independent = false;
     decided_precision = 0;
+    border.available = false;
     const slong kept = static_cast<slong>(context.units.size()) - 1;
     slong places = 0;
     const slong degree = context.field->degree();
@@ -309,8 +329,9 @@ bool incremental_independence(bool& independent,
         const std::size_t index =
                 incremental_log_state(context, work_precision);
         if (incremental_independence_at(independent, target_precision, row,
-                                        context.log_states[index], context,
-                                        embeddings, places, degree)) {
+                                        border, context.log_states[index],
+                                        context, embeddings, places,
+                                        degree)) {
             decided_precision = work_precision;
             return true;
         }
@@ -347,6 +368,21 @@ bool incremental_independence(bool& independent,
     return false;
 }
 
+// Marks every log state whose Gram enclosures came from
+// incremental_gram_bordered_inverse for a full recompute from its rows.
+// Returns true when there was one.
+bool discard_bordered_gram_states(IncrementalUnitContext& context) noexcept {
+    bool discarded = false;
+    for (IncrementalLogState& state : context.log_states) {
+        if (state.gram_bordered) {
+            state.gram_units = -1;
+            state.gram_bordered = false;
+            discarded = true;
+        }
+    }
+    return discarded;
+}
+
 #if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
 // True unless compact_independent decides the other way.
 bool incremental_independence_agrees(bool independent,
@@ -360,6 +396,88 @@ bool incremental_independence_agrees(bool independent,
 #endif
 
 }  // namespace
+
+// Soundness under rounding.  Let L be the true k x places matrix of log rows
+// of the kept units, v the true row of an accepted unit, G = L L^T,
+// p = L v, c = v.v, w = G^{-1} p and s = c - p^T w.  G is a Gram matrix,
+// so it and G^{-1} are symmetric and p^T G^{-1} = w^T.  When G is
+// invertible and s != 0, the block inverse of the bordered Gram matrix
+// (Horn and Johnson, Matrix Analysis, 2nd ed., 0.7.3, with Schur
+// complement s of G) is
+//     [[G, p], [p^T, c]]^{-1} = [[G^{-1} + w w^T / s, -w / s],
+//                                [-w^T / s,            1 / s]],
+// and its determinant is det(G) s (0.8.5).  The inputs are balls that
+// contain G^{-1}, det(G), w and s: `inverse` and `determinant` come from
+// arb_mat_inv and arb_mat_det of a ball Gram matrix containing G (or from
+// this function one unit earlier), and incremental_independence_at
+// computes w and s with arb_dot from those balls and from ball rows that
+// contain L and v.  Every output entry is computed from these balls by
+// arb_inv, arb_mul, arb_add and arb_neg, which are inclusion monotone and
+// round outward, so each output ball contains the corresponding entry of
+// the formula evaluated at the true values, that is, the true bordered
+// inverse and determinant, whatever the rounding.  Several entries reuse
+// the same balls (w, 1/s) independently; that only widens the enclosures,
+// it cannot exclude the true value.  The upper triangle is the mirror of
+// the lower one: the true bordered inverse is symmetric, so the ball for
+// entry (i, j) also contains entry (j, i).  The formula needs s != 0, which
+// is proved by requiring the complement ball to be positive (arb_inv of a
+// ball containing zero would give an infinite ball anyway).  The function
+// also requires positive determinant balls, as incremental_prepare does
+// for arb_mat_det, so the result satisfies the same contract as a full
+// recompute: enclosures of the inverse and a positive enclosure of the
+// determinant of the Gram matrix of the k + 1 rows.  It encloses the same
+// true values as arb_mat_inv and arb_mat_det of the k + 1 rows, usually
+// with wider radii; a test that does not decide on them falls back to the
+// full recompute (add_independent_unit), so wider radii change the cost,
+// never a decision.
+bool incremental_gram_bordered_inverse(flint::ArbMat& inverse_out,
+                                       flint::Arb& determinant_out,
+                                       const flint::ArbMat& inverse,
+                                       const flint::Arb& determinant,
+                                       const flint::ArbVec& inverse_projection,
+                                       const flint::Arb& complement,
+                                       slong precision) noexcept {
+    const slong kept = arb_mat_nrows(inverse.raw());
+    if (precision <= 0 || arb_mat_ncols(inverse.raw()) != kept ||
+        inverse_projection.length() != kept ||
+        !flint::arb_is_positive(complement) ||
+        !flint::arb_is_positive(determinant)) {
+        return false;
+    }
+    flint::Arb reciprocal;
+    arb_inv(reciprocal.raw(), complement.raw(), precision);
+    // scaled = w / s
+    flint::ArbVec scaled(kept);
+    for (slong i = 0; i < kept; ++i) {
+        arb_mul(scaled.data() + i, inverse_projection.data() + i,
+                reciprocal.raw(), precision);
+    }
+    flint::ArbMat next(kept + 1, kept + 1);
+    for (slong i = 0; i < kept; ++i) {
+        for (slong j = 0; j <= i; ++j) {
+            arb_ptr entry = arb_mat_entry(next.raw(), i, j);
+            arb_mul(entry, inverse_projection.data() + i, scaled.data() + j,
+                    precision);
+            arb_add(entry, entry, arb_mat_entry(inverse.raw(), i, j),
+                    precision);
+            arb_set(arb_mat_entry(next.raw(), j, i), entry);
+        }
+        arb_ptr border_entry = arb_mat_entry(next.raw(), kept, i);
+        arb_neg(border_entry, scaled.data() + i);
+        arb_set(arb_mat_entry(next.raw(), i, kept), border_entry);
+    }
+    arb_set(arb_mat_entry(next.raw(), kept, kept), reciprocal.raw());
+    flint::Arb next_determinant;
+    arb_mul(next_determinant.raw(), determinant.raw(), complement.raw(),
+            precision);
+    if (arb_mat_is_finite(next.raw()) == 0 ||
+        !flint::arb_is_positive(next_determinant)) {
+        return false;
+    }
+    inverse_out.swap(next);
+    determinant_out.swap(next_determinant);
+    return true;
+}
 
 bool IncrementalUnitContext::define(const NumberField& parent,
                                     slong rank) noexcept {
@@ -399,8 +517,20 @@ bool IncrementalUnitContext::add_independent_unit(
     bool independent = false;
     slong decided_precision = 0;
     flint::ArbVec row(0);
-    if (incremental_independence(independent, decided_precision, row, *this,
-                                 embeddings, precision)) {
+    IncrementalGramBorder border;
+    bool decided = incremental_independence(independent, decided_precision,
+                                            row, border, *this, embeddings,
+                                            precision);
+    // A test that did not decide on bordered Gram enclosures runs again on
+    // full recomputes, the enclosures it used before they were bordered, so
+    // a candidate reaches compact_independent only when it would have
+    // without them.
+    if (!decided && discard_bordered_gram_states(*this)) {
+        decided = incremental_independence(independent, decided_precision,
+                                           row, border, *this, embeddings,
+                                           precision);
+    }
+    if (decided) {
         ++incremental_decisions;
         SILEX_DEBUG_CHECK(
                 diagnostics, DiagnosticsModule::unit_group,
@@ -431,6 +561,26 @@ bool IncrementalUnitContext::add_independent_unit(
                 *this, decided_precision)];
         if (state.rows.size() + 1 == units.size()) {
             state.rows.push_back(std::move(row));
+            // The test at decided_precision just used this state's Gram
+            // enclosures for the units before the accepted one; extend them
+            // to it (soundness note at incremental_gram_bordered_inverse)
+            // instead of recomputing them on the next call.  A full-rank
+            // context takes no more candidates, so it skips the update.
+            const slong count = static_cast<slong>(units.size());
+            if (!full_rank && border.available &&
+                state.gram_units + 1 == count) {
+                flint::ArbMat inverse(0, 0);
+                flint::Arb determinant;
+                if (incremental_gram_bordered_inverse(
+                            inverse, determinant, state.gram_inverse,
+                            state.gram_determinant, border.inverse_projection,
+                            border.complement, state.precision)) {
+                    state.gram_inverse.swap(inverse);
+                    state.gram_determinant.swap(determinant);
+                    state.gram_units = count;
+                    state.gram_bordered = true;
+                }
+            }
         }
     }
     return true;

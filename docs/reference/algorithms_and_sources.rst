@@ -1055,8 +1055,15 @@ each candidate unit, whether its logarithmic row is independent of the rows
 already kept.  Hecke ``src/NumFieldOrd/NfOrd/Unit/Independent.jl:_isindependent``
 tests the Gram determinant of the kept rows plus the candidate against a lower
 bound.  Silex keeps the rows, the inverse of their Gram matrix ``G`` and ``det G``
-(rebuilding ``G`` from the rows when the kept count changes) and evaluates
-that determinant incrementally.  With ``L`` the kept rows, ``v`` the
+and evaluates that determinant incrementally.  After an accepted candidate it
+extends the inverse by the block-inverse formula (Horn and Johnson, 0.7.3),
+``[[G, g], [g^T, c]]^{-1} = [[G^{-1} + w w^T / s, -w / s], [-w^T / s, 1 / s]]``
+with ``w = G^{-1} g`` and ``s = c - g^T w``, and the determinant to
+``det(G) s``, from the balls the test just computed, in place of rebuilding
+``G`` from the rows; the extension needs a positive ball ``s`` and otherwise
+the next test rebuilds ``G``.  These balls also contain the true values, but
+are usually wider, so a test that stays undecided on them is run again from
+rebuilt Gram matrices before the full Gram determinant is used.  With ``L`` the kept rows, ``v`` the
 candidate row, ``g = L v`` and ``c = v . v``, the Schur complement identity
 (Horn and Johnson, *Matrix Analysis*, 0.8.5) gives
 ``det [[G, g], [g^T, c]] = det(G) (c - g^T G^{-1} g)``.  Every factor is a ball

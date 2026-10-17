@@ -778,13 +778,17 @@ struct IncrementalUnitContext {
     // decision by itself.  rows[i] encloses the product-mode log embedding
     // of units[i].  When gram_units equals the number of kept units,
     // gram_inverse and gram_determinant enclose the inverse and the
-    // determinant of the Gram matrix of those rows.
+    // determinant of the Gram matrix of those rows.  gram_bordered marks
+    // enclosures that incremental_gram_bordered_inverse extended after an
+    // accepted unit, not recomputed from the rows; add_independent_unit
+    // recomputes them before handing a candidate to compact_independent.
     struct LogState {
         slong precision = 0;
         std::vector<flint::ArbVec> rows;
         flint::ArbMat gram_inverse{0, 0};
         flint::Arb gram_determinant;
         slong gram_units = -1;
+        bool gram_bordered = false;
     };
     // One state per working precision the doubling loop has reached.
     std::vector<LogState> log_states;
@@ -806,6 +810,23 @@ struct IncrementalUnitContext {
                               slong precision,
                               const DiagnosticsContext* diagnostics) noexcept;
 };
+
+// Extends enclosures `inverse` of G^{-1} and `determinant` of det(G), for
+// the Gram matrix G of k rows, to the Gram matrix of those rows and one more
+// row v, given enclosures `inverse_projection` of G^{-1} L v and
+// `complement` of the Schur complement v.v - (L v)^T G^{-1} L v (L the k
+// rows).  The bordered inverse and the determinant det(G) times the
+// complement land in `inverse_out` and `determinant_out`; see the
+// soundness note in compute.cpp.  Returns false, leaving the outputs
+// unspecified, unless the complement and determinant balls are positive,
+// the shapes agree and every output entry is finite.
+bool incremental_gram_bordered_inverse(flint::ArbMat& inverse_out,
+                                       flint::Arb& determinant_out,
+                                       const flint::ArbMat& inverse,
+                                       const flint::Arb& determinant,
+                                       const flint::ArbVec& inverse_projection,
+                                       const flint::Arb& complement,
+                                       slong precision) noexcept;
 
 bool recompute_units_from_class_context(OrderUnitGroup& units,
                                         const Order& order,
