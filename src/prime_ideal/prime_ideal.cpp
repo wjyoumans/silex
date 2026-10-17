@@ -14,6 +14,7 @@
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/flint/fmpz_vec.hpp>
+#include <silex/flint/nmod_mat.hpp>
 #include <silex/lat.hpp>
 
 #include <flint/fmpq.h>
@@ -24,6 +25,7 @@
 #include <flint/fmpz_mod_poly.h>
 #include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
+#include <flint/nmod_mat.h>
 
 #include <algorithm>
 #include <new>
@@ -858,6 +860,137 @@ bool valuation_by_coordinate_divisibility(
     }
 
     out = value;
+    return true;
+}
+
+bool anti_uniformizer_multiplier_matrix(flint::FmpzMat& out,
+                                        const Order& order,
+                                        const Ideal& prime_ideal,
+                                        flint::FmpzConstRef p) noexcept {
+    // Anti-uniformizer for a prime P over p of a maximal order O, for primes
+    // without the Kummer quotient map T/u (index divisors and primes whose
+    // order basis is not the power basis).  Source trace: reference
+    // `base2.c:get_pr` (PARI/GP 2.17.3) stores, for a prime P = (p, u)
+    // from the Buchmann-Lenstra split, `t = FpM_deplin(zk_multable(nf, u),
+    // p)`, an anti-uniformizer with O + (t/p) O = P^-1, and `base3.c:
+    // ZC_nfvalrem` values elements by the coordinate-divisibility loop of
+    // `valuation_by_coordinate_divisibility`; Cohen, GTM 138, Section 4.8.3
+    // (Algorithm 4.8.17) computes valuations the same way.  Silex keeps no
+    // two-element generator for these primes, so the linear system uses the
+    // HNF Z-basis b_1..b_n of P instead of (p, u):
+    //
+    //   beta in O with beta b_i in pO for every i  <=>  beta P in pO
+    //                                              <=>  beta in pP^-1.
+    //
+    // (beta p is always in pO, so rows of P that vanish mod p add no
+    // condition.)  pP^-1 / pO has F_p-dimension f > 0, and any beta in
+    // pP^-1 not in pO is valid: P^-1 / O is a simple O-module (no ideal lies
+    // strictly between O and P^-1), so beta/p generates it, O + (beta/p) O =
+    // P^-1, v_P(beta/p) = -1 and v_Q(beta/p) >= 0 for every other Q.  Then
+    // for x in O: x in P iff x P^-1 in O iff x beta/p in O, and x beta/p has
+    // P-valuation one less, so the loop counts exactly v_P(x) (capped at the
+    // bound), the value of the largest k with x in P^k that the containment
+    // fallback returns.  Like FpM_deplin, any nonzero kernel vector is
+    // taken; the valuation does not depend on the choice.
+    //
+    // The system is solved over F_p with word-size arithmetic; a prime that
+    // does not fit in a word returns false and keeps the containment
+    // fallback.
+    const slong n = order.degree();
+    if (n <= 0 || !order.is_maximal() || !prime_ideal.has_hnf() ||
+        fmpz_abs_fits_ui(p.raw()) == 0 || fmpz_cmp_ui(p.raw(), 1) <= 0 ||
+        !fmpz_mat_shape(flint::FmpzMatConstRef(out), n, n)) {
+        return false;
+    }
+    const ulong modulus = fmpz_get_ui(p.raw());
+
+    flint::FmpzMat hnf(n, n);
+    flint::FmpzMat table(n * n, n);
+    Order table_order = order;
+    if (!prime_ideal.get_hnf(flint::FmpzMatRef(hnf)) ||
+        !table_order.multiplication_table(flint::FmpzMatRef(table))) {
+        return false;
+    }
+
+    // Only the HNF rows that are nonzero mod p give conditions.
+    flint::NmodMat generators(n, n, modulus);
+    flint::NmodMat table_mod(n * n, n, modulus);
+    fmpz_mat_get_nmod_mat(generators.raw(), hnf.raw());
+    fmpz_mat_get_nmod_mat(table_mod.raw(), table.raw());
+    std::vector<slong> rows;
+    for (slong i = 0; i < n; ++i) {
+        for (slong k = 0; k < n; ++k) {
+            if (nmod_mat_entry(generators.raw(), i, k) != 0) {
+                rows.push_back(i);
+                break;
+            }
+        }
+    }
+    if (rows.empty()) {
+        return false;
+    }
+
+    // Row r*n + l, column j of `system` is coordinate l of omega_j * b_i
+    // mod p for the r-th kept row i, so a column vector beta solves
+    // system * beta = 0 exactly when beta * b_i is in pO for every i.
+    const nmod_t mod = generators.raw()->mod;
+    const slong system_rows = static_cast<slong>(rows.size()) * n;
+    flint::NmodMat system(system_rows, n, modulus);
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        const slong i = rows[r];
+        for (slong k = 0; k < n; ++k) {
+            const ulong coefficient = nmod_mat_entry(generators.raw(), i, k);
+            if (coefficient == 0) {
+                continue;
+            }
+            for (slong j = 0; j < n; ++j) {
+                for (slong l = 0; l < n; ++l) {
+                    ulong& target = nmod_mat_entry(
+                            system.raw(), static_cast<slong>(r) * n + l, j);
+                    target = nmod_add(
+                            target,
+                            nmod_mul(coefficient,
+                                     nmod_mat_entry(table_mod.raw(),
+                                                    j * n + k, l),
+                                     mod),
+                            mod);
+                }
+            }
+        }
+    }
+
+    flint::NmodMat kernel(n, n, modulus);
+    const slong nullity = nmod_mat_nullspace(kernel.raw(), system.raw());
+    if (nullity <= 0) {
+        return false;
+    }
+
+    flint::FmpzVec beta(n);
+    flint::Fmpz entry;
+    bool nonzero = false;
+    for (slong j = 0; j < n; ++j) {
+        fmpz_set_ui(entry.raw(), nmod_mat_entry(kernel.raw(), j, 0));
+        fmpz_center_mod_prime(beta.data() + j, entry.raw(), p.raw());
+        nonzero = nonzero || fmpz_is_zero(beta.data() + j) == 0;
+    }
+    if (!nonzero) {
+        return false;
+    }
+
+    // Row i of `out` is the order coordinates of omega_i * beta, the layout
+    // of `order_multiplier_matrix_from_coordinates`, from the table above.
+    flint::fmpz_mat_zero(flint::FmpzMatRef(out));
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            if (fmpz_is_zero(beta.data() + j) != 0) {
+                continue;
+            }
+            for (slong k = 0; k < n; ++k) {
+                fmpz_addmul(fmpz_mat_entry(out.raw(), i, k), beta.data() + j,
+                            fmpz_mat_entry(table.raw(), i * n + j, k));
+            }
+        }
+    }
     return true;
 }
 
@@ -2664,6 +2797,9 @@ struct PrimeIdeal::CoordinateValuationCache {
         : multiplier_matrix(degree, degree) {}
 
     flint::FmpzMat multiplier_matrix;
+    // True when the map is the anti-uniformizer from the HNF of P rather
+    // than the Kummer quotient map T/u.
+    bool from_anti_uniformizer = false;
 };
 
 PrimeIdeal::PrimeIdeal() noexcept = default;
@@ -3350,7 +3486,10 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
 
     const flint::FmpzMat* multiplier =
             coordinate_valuation_matrix_cached();
-    if (multiplier != nullptr &&
+    const bool anti_uniformizer =
+            multiplier != nullptr &&
+            coordinate_valuation_cache_->from_anti_uniformizer;
+    if (multiplier != nullptr && !anti_uniformizer &&
         valuation_by_coordinate_divisibility(
                 out, parent_, element,
                 flint::FmpzMatConstRef(*multiplier),
@@ -3359,6 +3498,63 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
                 diagnostics,
                 "prime_ideal.valuation_order_element.path_coordinate_divisibility");
         return true;
+    }
+
+    if ((multiplier == nullptr || anti_uniformizer) && parent_.is_maximal()) {
+        // No Kummer quotient map for this prime (an index divisor, or an
+        // order basis other than the power basis).  Take the first step of
+        // the containment definition exactly as the fallback does, so
+        // v_P(a) = 0 still costs one membership test.  Only when
+        // v_P(a) >= 1 and the bound allows more, use an anti-uniformizer
+        // from the HNF of P (reference `base2.c:get_pr`; see
+        // `anti_uniformizer_multiplier_matrix`), built once per prime and
+        // kept in the coordinate-valuation cache, instead of the P^k
+        // containment tests whose general HNF products dominated.
+        {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::prime_ideal,
+                    "prime_ideal.valuation_containment_initial_contains");
+            if (!ideal_.contains(element)) {
+                SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                        diagnostics,
+                        "prime_ideal.valuation_order_element.path_not_in_prime");
+                out = 0;
+                return true;
+            }
+        }
+        if (bound == 1) {
+            SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                    diagnostics,
+                    "prime_ideal.valuation_order_element.path_in_prime_bound_one");
+            out = 1;
+            return true;
+        }
+
+        if (multiplier == nullptr) {
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
+                                "prime_ideal.valuation_anti_uniformizer_build");
+            std::unique_ptr<CoordinateValuationCache> next(
+                    new (std::nothrow)
+                            CoordinateValuationCache(parent_.degree()));
+            if (next != nullptr &&
+                anti_uniformizer_multiplier_matrix(
+                        next->multiplier_matrix, parent_, ideal_,
+                        flint::FmpzConstRef(p_))) {
+                next->from_anti_uniformizer = true;
+                coordinate_valuation_cache_ = std::move(next);
+                multiplier = &coordinate_valuation_cache_->multiplier_matrix;
+            }
+        }
+        if (multiplier != nullptr &&
+            valuation_by_coordinate_divisibility(
+                    out, parent_, element,
+                    flint::FmpzMatConstRef(*multiplier),
+                    flint::FmpzConstRef(p_), bound, diagnostics)) {
+            SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                    diagnostics,
+                    "prime_ideal.valuation_order_element.path_anti_uniformizer");
+            return true;
+        }
     }
 
     SILEX_PRIME_IDEAL_PROFILE_EVENT(
@@ -3950,6 +4146,26 @@ bool PrimeIdealAccess::valuation_by_power_containment_for_testing(
         const OrderElement& element,
         slong bound) noexcept {
     return prime.valuation_by_power_containment(out, element, bound, nullptr);
+}
+
+bool PrimeIdealAccess::anti_uniformizer_valuation_for_testing(
+        slong& out,
+        const PrimeIdeal& prime,
+        const OrderElement& element,
+        slong bound) noexcept {
+    if (!prime.has_prime_data() ||
+        !same_order_parent(element.parent(), &prime.parent_)) {
+        return false;
+    }
+    const slong n = prime.parent_.degree();
+    flint::FmpzMat multiplier(n, n);
+    return anti_uniformizer_multiplier_matrix(
+                   multiplier, prime.parent_, prime.ideal_,
+                   flint::FmpzConstRef(prime.p_)) &&
+           valuation_by_coordinate_divisibility(
+                   out, prime.parent_, element,
+                   flint::FmpzMatConstRef(multiplier),
+                   flint::FmpzConstRef(prime.p_), bound, nullptr);
 }
 
 bool PrimeIdealAccess::index_divisor_prime_ideals_for_testing(

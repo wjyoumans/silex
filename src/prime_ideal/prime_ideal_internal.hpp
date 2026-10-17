@@ -152,6 +152,17 @@ public:
             const OrderElement& element,
             slong bound) noexcept;
 
+    // Test hook: values `element` at `prime` by coordinate divisibility
+    // with the anti-uniformizer taken from the HNF of P, the route used for
+    // primes without a Kummer quotient map, for every prime of a maximal
+    // order (Kummer primes included), so tests can compare it with the
+    // power-containment fallback.  For tests only.
+    static bool anti_uniformizer_valuation_for_testing(
+            slong& out,
+            const PrimeIdeal& prime,
+            const OrderElement& element,
+            slong bound) noexcept;
+
     // Test hook: splits O/(p, I_p) for a prime p dividing the index of the
     // maximal order `order` and writes its prime ideals in the order
     // decompose_prime publishes them.  It skips the separating-element search

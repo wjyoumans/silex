@@ -2396,6 +2396,159 @@ int test_valuation_power_containment_matches_gp() {
     return 0;
 }
 
+// Differential sweep for the anti-uniformizer valuation route.  For every
+// prime above p in a set of fields whose maximal orders differ from their
+// equation orders (so index divisors appear, ramified or not) and fields
+// with ramified primes, the coordinate-divisibility valuation with the
+// anti-uniformizer taken from the HNF of P must equal the exact
+// power-containment valuation at every bound, and so must the public
+// element valuation, which now takes that route for primes without a Kummer
+// quotient map.  Elements include products of basis elements of P so that
+// valuations above one occur.
+int test_valuation_anti_uniformizer_matches_containment() {
+    const std::vector<std::vector<slong>> fields = {
+            // x^3 - x^2 - 2x - 8: 2 is a common index divisor, split.
+            {-8, -2, -1, 1},
+            // x^3 - 10: 3 = P^2 Q divides the index.
+            {-10, 0, 0, 1},
+            // Q(sqrt(-7), sqrt(17)): 2 splits completely, index 2^3 * 3.
+            {36, 0, -5, 0, 1},
+            // Q(sqrt(2), sqrt(3)): 2 is ramified and divides the index.
+            {1, 0, -10, 0, 1},
+            {474, -4, 5, -2, 1},
+            {7, 0, 0, 0, 0, 0, 1},
+            // polredabs of Q(sqrt(-23), sqrt(-31), sqrt(-47)): index
+            // 2^20 * 3^2 * 2803; 23, 31 and 47 ramify.
+            {34784, -16936, 19212, -4654, 2583, -310, 108, -4, 1},
+    };
+    slong checked_index_positive = 0;
+    slong checked_ramified_positive = 0;
+    slong checked_above_one = 0;
+    for (const std::vector<slong>& coefficients : fields) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial,
+                                           static_cast<slong>(i),
+                                           coefficients[i]);
+        }
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        const slong n = maximal.degree();
+        sflint::Fmpz index;
+        assert(equation.index_in(sflint::FmpzRef(index), maximal));
+
+        for (slong rational_prime : {2, 3, 5, 7, 23, 31, 47}) {
+            sflint::Fmpz p;
+            assert(set_fmpz_si(p, rational_prime));
+            const bool index_prime =
+                    fmpz_divisible(index.raw(), p.raw()) != 0;
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(primes, maximal,
+                                          sflint::FmpzConstRef(p)));
+            for (slong prime_index = 0; prime_index < primes.size();
+                 ++prime_index) {
+                const silex::PrimeIdeal* prime = primes.at(prime_index);
+                assert(prime != nullptr);
+                silex::Ideal prime_ideal(maximal);
+                sflint::FmpzMat hnf(n, n);
+                assert(prime->get_ideal(prime_ideal));
+                assert(prime_ideal.get_hnf(sflint::FmpzMatRef(hnf)));
+
+                std::vector<silex::OrderElement> elements;
+                for (slong t = 0; t < 12; ++t) {
+                    sflint::FmpzMat coordinates(1, n);
+                    bool nonzero = false;
+                    for (slong j = 0; j < n; ++j) {
+                        const slong c = ((7 * t + 3 * j + j * j * t) % 11) - 5;
+                        fmpz_set_si(fmpz_mat_entry(coordinates.raw(), 0, j),
+                                    c);
+                        nonzero = nonzero || c != 0;
+                    }
+                    if (!nonzero) {
+                        continue;
+                    }
+                    silex::OrderElement element(maximal);
+                    assert(element.set_coordinates(
+                            sflint::FmpzMatConstRef(coordinates)));
+                    elements.push_back(std::move(element));
+                }
+                // Products of up to three HNF basis elements of P (each in
+                // P), times a sample element, reach valuations above one.
+                std::vector<silex::OrderElement> basis;
+                for (slong i = 0; i < n; ++i) {
+                    sflint::FmpzMat row(1, n);
+                    for (slong j = 0; j < n; ++j) {
+                        fmpz_set(fmpz_mat_entry(row.raw(), 0, j),
+                                 fmpz_mat_entry(hnf.raw(), i, j));
+                    }
+                    silex::OrderElement element(maximal);
+                    assert(element.set_coordinates(
+                            sflint::FmpzMatConstRef(row)));
+                    basis.push_back(std::move(element));
+                }
+                const std::size_t samples = elements.size();
+                for (std::size_t i = 0; i < basis.size(); ++i) {
+                    silex::OrderElement product(maximal);
+                    assert(product.set(basis[i]));
+                    for (std::size_t k = 1; k <= 2; ++k) {
+                        silex::OrderElement next(maximal);
+                        assert(next.multiply(
+                                product,
+                                basis[(i + 3 * k) % basis.size()]));
+                        product = std::move(next);
+                        silex::OrderElement mixed(maximal);
+                        assert(mixed.multiply(product,
+                                              elements[(i + k) % samples]));
+                        elements.push_back(std::move(mixed));
+                    }
+                }
+
+                for (const silex::OrderElement& element : elements) {
+                    if (element.equal_si(0)) {
+                        continue;
+                    }
+                    for (slong bound : {0, 1, 2, 5, 40}) {
+                        slong expected = -1;
+                        slong value = -1;
+                        assert(PrimeIdealAccess::
+                                       valuation_by_power_containment_for_testing(
+                                               expected, *prime, element,
+                                               bound));
+                        assert(PrimeIdealAccess::
+                                       anti_uniformizer_valuation_for_testing(
+                                               value, *prime, element,
+                                               bound));
+                        assert(value == expected);
+                        if (bound == 40) {
+                            assert(expected < bound);
+                            slong public_value = -1;
+                            assert(prime->valuation(public_value, element));
+                            assert(public_value == expected);
+                            if (expected > 0 && index_prime) {
+                                ++checked_index_positive;
+                            }
+                            if (expected > 0 &&
+                                prime->ramification_index() > 1) {
+                                ++checked_ramified_positive;
+                            }
+                            if (expected > 1) {
+                                ++checked_above_one;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert(checked_index_positive > 0);
+    assert(checked_ramified_positive > 0);
+    assert(checked_above_one > 0);
+    return 0;
+}
+
 // Differential check for the principal-ideal valuation route.  For an ideal
 // with a known generator a, PrimeIdeal::valuation(Ideal) reuses the p-adic
 // valuation of the ideal norm [O : aO] = |N(a)| instead of recomputing N(a).
@@ -4108,6 +4261,7 @@ int main() {
     assert(test_valuation_order_element_ramified_nonunique_containment() == 0);
     assert(test_valuation_power_containment_matches_definition() == 0);
     assert(test_valuation_power_containment_matches_gp() == 0);
+    assert(test_valuation_anti_uniformizer_matches_containment() == 0);
     assert(test_principal_ideal_valuation_matches_element_valuation() ==
            0);
     assert(test_valuation_fractional_element_and_factored() == 0);
