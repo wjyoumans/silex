@@ -4499,7 +4499,8 @@ bool factored_power_residue_disproves(
     // same admissibility as the scan of the evaluated product, so it
     // disproves only where that scan would.
     const slong degree = parent.degree();
-    if (degree < 10 || exponent <= 1 || factors.empty()) {
+    if (degree < kElementPowerRouteDegreeLimit || exponent <= 1 ||
+        factors.empty()) {
         return false;
     }
     const nf_struct* raw_field = parent.raw_flint_field();
