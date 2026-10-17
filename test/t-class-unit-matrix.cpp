@@ -3420,6 +3420,7 @@ bool build_imaginary_fixture(AtomicityFixture& fx) noexcept {
 
 int test_hooked_imaginary_failures_are_atomic() {
     using silex::detail::TestHookAccess;
+    int status = 0;
     {
         AtomicityFixture fx;
         if (!build_imaginary_fixture(fx)) {
@@ -3434,9 +3435,7 @@ int test_hooked_imaginary_failures_are_atomic() {
                             silex::CertificationMode::proven);
                 });
         TestHookAccess::disarm_certification_failures();
-        if (!ok) {
-            return 1;
-        }
+        status |= ok ? 0 : 1;
     }
     {
         AtomicityFixture fx;
@@ -3452,9 +3451,7 @@ int test_hooked_imaginary_failures_are_atomic() {
                             silex::CertificationMode::proven);
                 });
         TestHookAccess::disarm_certification_failures();
-        if (!ok) {
-            return 1;
-        }
+        status |= ok ? 0 : 1;
     }
     {
         // T-067: the rank-zero exact route with index one and h > 1 writes
@@ -3477,11 +3474,9 @@ int test_hooked_imaginary_failures_are_atomic() {
                                     silex::CertificationMode::proven);
                 });
         TestHookAccess::disarm_certification_failures();
-        if (!ok) {
-            return 1;
-        }
+        status |= ok ? 0 : 1;
     }
-    return 0;
+    return status;
 }
 
 // try_certify_class_unit_with_zeta_bf with the audit record written and the
@@ -3490,6 +3485,7 @@ int test_hooked_imaginary_failures_are_atomic() {
 // (set for degree two), and the audit record must be restored.
 int test_hooked_zeta_bf_failure_is_atomic() {
     using silex::detail::TestHookAccess;
+    int status = 0;
     for (const bool populated : {false, true}) {
         AtomicityFixture fx;
         if (!build_atomicity_fixture(fx, 10, populated) ||
@@ -3506,14 +3502,12 @@ int test_hooked_zeta_bf_failure_is_atomic() {
                 fx.class_group, fx.units, [&]() noexcept {
                     return fx.class_group
                             .try_certify_class_unit_with_zeta_bf(
-                                    fx.units, 20000, 192);
+                                    fx.units, 20000, 64);
                 });
         TestHookAccess::disarm_certification_failures();
-        if (!ok) {
-            return 1;
-        }
+        status |= ok ? 0 : 1;
     }
-    return 0;
+    return status;
 }
 
 }  // namespace
