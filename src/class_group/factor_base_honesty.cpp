@@ -15,6 +15,7 @@
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <cstdio>
+#include <utility>
 #include <vector>
 
 namespace silex::detail::relation_search {
@@ -319,7 +320,163 @@ bool factor_base_honesty_reduce_large_ideal(
     return true;
 }
 
+bool required_prime_witness_prefilter_init_base(
+        RequiredPrimeWitnessPrefilter& prefilter,
+        const FactorBase& base,
+        FactorBaseWitnessPredicate predicate) noexcept {
+    prefilter.norm.ready = false;
+    prefilter.norm.base_ready = false;
+    prefilter.back_is_one = true;
+    // As init_honesty_norm_prefilter: only where
+    // factor_base_principal_witness takes the direct order-element test.
+    if ((predicate != FactorBaseWitnessPredicate::selected &&
+         predicate != FactorBaseWitnessPredicate::order_element_direct) ||
+        !detail::required_prime_norm_prefilter_init_base(prefilter.norm,
+                                                         base)) {
+        return false;
+    }
+    const Order* order = base.parent();
+    OrderElement one(*order);
+    flint::FmpzMat coordinates(1, order->degree());
+    if (!one.is_defined() || !one.one() ||
+        !one.get_coordinates(flint::FmpzMatRef(coordinates))) {
+        prefilter.norm.base_ready = false;
+        return false;
+    }
+    prefilter.one_coordinates = std::move(coordinates);
+    flint::fmpq_one(flint::FmpqRef(prefilter.back_norm));
+    return true;
+}
+
+bool required_prime_witness_prefilter_set_required_prime(
+        RequiredPrimeWitnessPrefilter& prefilter,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime) noexcept {
+    return detail::required_prime_norm_prefilter_set_required_prime(
+            prefilter.norm, base, required_prime);
+}
+
+bool required_prime_witness_prefilter_set_back_multiplier(
+        RequiredPrimeWitnessPrefilter& prefilter,
+        const Element& back_multiplier) noexcept {
+    prefilter.back_is_one = back_multiplier.equal_si(1);
+    if (prefilter.back_is_one) {
+        flint::fmpq_one(flint::FmpqRef(prefilter.back_norm));
+        return true;
+    }
+    if (!back_multiplier.norm(flint::FmpqRef(prefilter.back_norm))) {
+        // A zero norm makes rejects decline, so no stale norm is used.
+        flint::fmpq_zero(flint::FmpqRef(prefilter.back_norm));
+        return false;
+    }
+    return true;
+}
+
+bool required_prime_witness_prefilter_is_scalar(
+        bool& scalar,
+        RequiredPrimeWitnessPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    scalar = false;
+    const slong n = prefilter.norm.degree;
+    const fmpz_mat_struct* a = coordinates.raw();
+    const fmpz_mat_struct* c = prefilter.one_coordinates.raw();
+    if (!prefilter.norm.base_ready || n <= 0 || ::fmpz_mat_nrows(a) != 1 ||
+        ::fmpz_mat_ncols(a) != n || ::fmpz_mat_nrows(c) != 1 ||
+        ::fmpz_mat_ncols(c) != n) {
+        return false;
+    }
+    // The order basis is a Q-basis of the field and c, the coordinates of
+    // 1, is nonzero, so x = sum a_i w_i lies in Q = Q * 1 exactly when a is
+    // a rational multiple of c: a_i c_k = a_k c_i for every i, at one k with
+    // c_k != 0 (then a = (a_k / c_k) c).  The zero row counts as scalar, as
+    // element_is_scalar_rational counts the zero element.
+    slong k = 0;
+    while (k < n && ::fmpz_is_zero(fmpz_mat_entry(c, 0, k)) != 0) {
+        ++k;
+    }
+    if (k == n) {
+        return false;
+    }
+    const fmpz* a_k = fmpz_mat_entry(a, 0, k);
+    const fmpz* c_k = fmpz_mat_entry(c, 0, k);
+    fmpz* minor = prefilter.scratch.raw();
+    for (slong i = 0; i < n; ++i) {
+        if (i == k) {
+            continue;
+        }
+        ::fmpz_mul(minor, fmpz_mat_entry(a, 0, i), c_k);
+        ::fmpz_submul(minor, a_k, fmpz_mat_entry(c, 0, i));
+        if (::fmpz_is_zero(minor) == 0) {
+            return true;
+        }
+    }
+    scalar = true;
+    return true;
+}
+
+bool required_prime_witness_prefilter_rejects(
+        bool& rejected,
+        RequiredPrimeWitnessPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    rejected = false;
+    if (!prefilter.norm.ready) {
+        return false;
+    }
+    if (prefilter.back_is_one) {
+        return detail::required_prime_norm_prefilter_rejects(
+                rejected, prefilter.norm, coordinates);
+    }
+    const fmpz* numerator = fmpq_numref(prefilter.back_norm.raw());
+    const fmpz* denominator = fmpq_denref(prefilter.back_norm.raw());
+    fmpz* norm = prefilter.candidate_norm.raw();
+    if (::fmpz_is_zero(numerator) != 0 ||
+        !detail::required_prime_norm_prefilter_norm(
+                flint::FmpzRef(prefilter.candidate_norm), prefilter.norm,
+                coordinates)) {
+        return false;
+    }
+    // N(back_multiplier * x) = N(back_multiplier) N(x); an integral
+    // candidate has an integer norm, and any other is left to the unchanged
+    // path.
+    ::fmpz_mul(norm, norm, numerator);
+    if (::fmpz_divisible(norm, denominator) == 0) {
+        return false;
+    }
+    ::fmpz_divexact(norm, norm, denominator);
+    return detail::required_prime_norm_prefilter_rejects_norm(
+            rejected, prefilter.norm,
+            flint::FmpzConstRef(prefilter.candidate_norm));
+}
+
 namespace {
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+// The direct classification of a T2 candidate the prefilter rejected: a
+// completed non-match by the norm cofactor.
+bool t2_prefilter_reject_agrees_with_direct(
+        const FactorBase& base,
+        const PrimeIdeal& required_prime,
+        flint::FmpzMatConstRef coordinates,
+        const Element& back_multiplier) noexcept {
+    const Order* order = base.parent();
+    OrderElement current(*order);
+    OrderElement candidate(*order);
+    Element element(*order->parent());
+    Element product(*order->parent());
+    bool matches = true;
+    detail::RequiredPrimeDirectAudit audit;
+    return current.is_defined() && candidate.is_defined() &&
+           element.is_defined() && product.is_defined() &&
+           current.set_coordinates(coordinates) &&
+           current.get_element(element) &&
+           product.multiply(back_multiplier, element) &&
+           candidate.set_element(product) &&
+           detail::order_element_factor_over_base_with_required_prime(
+                   matches, candidate, base, required_prime, nullptr,
+                   &audit) &&
+           !matches && audit.rejected_by_cofactor;
+}
+#endif
 
 RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         const FactorBase& base,
@@ -330,6 +487,7 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         RequiredPrimeWitnessExhaustion& exhaustion,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         FactorBaseWitnessPredicate predicate,
+        RequiredPrimeWitnessPrefilter* prefilter,
         const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.honesty_enumerate_witness");
@@ -373,6 +531,14 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         return RequiredPrimeWitnessSearchResult::failed;
     }
 
+    // Ready only for the direct predicates and a readable back multiplier;
+    // see RequiredPrimeWitnessPrefilter for why its decisions are the
+    // unchanged path's.
+    const bool use_prefilter =
+            prefilter != nullptr && prefilter->norm.ready &&
+            required_prime_witness_prefilter_set_back_multiplier(
+                    *prefilter, back_multiplier);
+
     ++exhaustion.ideals;
     slong factor_attempts = 0;
     while (enumeration.next()) {
@@ -390,11 +556,17 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
                 coordinates, flint::FmpzMatConstRef(coefficients),
                 flint::FmpzMatConstRef(t2_context.basis));
         bool scalar = false;
-        if (!order_element.set_coordinates(
-                    flint::FmpzMatConstRef(coordinates)) ||
-            !order_element.get_element(current_element) ||
-            !element_is_scalar_rational(scalar, current_element)) {
-            return RequiredPrimeWitnessSearchResult::failed;
+        bool built = false;
+        if (!use_prefilter ||
+            !required_prime_witness_prefilter_is_scalar(
+                    scalar, *prefilter, flint::FmpzMatConstRef(coordinates))) {
+            if (!order_element.set_coordinates(
+                        flint::FmpzMatConstRef(coordinates)) ||
+                !order_element.get_element(current_element) ||
+                !element_is_scalar_rational(scalar, current_element)) {
+                return RequiredPrimeWitnessSearchResult::failed;
+            }
+            built = true;
         }
         if (scalar) {
             continue;
@@ -404,6 +576,35 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
             return RequiredPrimeWitnessSearchResult::exhausted;
         }
         ++factor_attempts;
+
+        // The direct test would reject this candidate by its norm cofactor:
+        // a counted attempt and no witness, decided before building it.
+        bool rejected = false;
+        if (use_prefilter &&
+            required_prime_witness_prefilter_rejects(
+                    rejected, *prefilter,
+                    flint::FmpzMatConstRef(coordinates)) &&
+            rejected) {
+            ++prefilter->rejected_count;
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.honesty_enumerate_witness.norm_prefilter_reject");
+            SILEX_DEBUG_CHECK(
+                    diagnostics, DiagnosticsModule::class_group,
+                    DebugLevel::expensive,
+                    "T2 honesty norm prefilter rejection matches the direct test",
+                    t2_prefilter_reject_agrees_with_direct(
+                            base, required_prime,
+                            flint::FmpzMatConstRef(coordinates),
+                            back_multiplier));
+            continue;
+        }
+        if (!built &&
+            (!order_element.set_coordinates(
+                     flint::FmpzMatConstRef(coordinates)) ||
+             !order_element.get_element(current_element))) {
+            return RequiredPrimeWitnessSearchResult::failed;
+        }
 
         if (!original_element.multiply(back_multiplier, current_element) ||
             !order_element.set_element(original_element)) {
@@ -436,6 +637,7 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
         RequiredPrimeWitnessExhaustion& exhaustion,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         FactorBaseWitnessPredicate predicate,
+        RequiredPrimeWitnessPrefilter* prefilter,
         const DiagnosticsContext* diagnostics) noexcept {
     const Order* order = base.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
@@ -461,7 +663,7 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
 
     RequiredPrimeWitnessSearchResult result = enumerate_required_prime_witness(
             base, required_prime, current, back_multiplier, effort,
-            exhaustion, embedding_cache, predicate, diagnostics);
+            exhaustion, embedding_cache, predicate, prefilter, diagnostics);
     if (result != RequiredPrimeWitnessSearchResult::exhausted ||
         subfactor_base_schedule == nullptr) {
         return result;
@@ -509,7 +711,8 @@ RequiredPrimeWitnessSearchResult find_required_prime_witness(
         }
         result = enumerate_required_prime_witness(
                 base, required_prime, current, back_multiplier, effort,
-                exhaustion, embedding_cache, predicate, diagnostics);
+                exhaustion, embedding_cache, predicate, prefilter,
+                diagnostics);
         if (result != RequiredPrimeWitnessSearchResult::exhausted) {
             return result;
         }
@@ -981,7 +1184,9 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                            FactorBaseWitnessPredicate predicate,
                                            FactorBaseHonestyScanAudit* audit,
                                            const flint::Fmpz*
-                                                   quadratic_discriminant) noexcept {
+                                                   quadratic_discriminant,
+                                           RequiredPrimeWitnessPrefilter*
+                                                   witness_prefilter) noexcept {
     honest = false;
     const Order* order = base.parent();
     if (order == nullptr || !flint::fmpz_is_prime(p) ||
@@ -1030,6 +1235,13 @@ bool factor_base_honest_for_rational_prime(bool& honest,
         bool witnessed = false;
         FactorBaseWitnessSearchEffort effort;
         RequiredPrimeWitnessExhaustion exhaustion;
+        // Not ready for this prime when a precondition fails; the
+        // enumeration then builds every candidate.
+        if (use_direct_required_prime_witness && witness_prefilter != nullptr &&
+            witness_prefilter->norm.base_ready) {
+            (void) required_prime_witness_prefilter_set_required_prime(
+                    *witness_prefilter, base, *prime);
+        }
         for (slong stage = 0;
              stage <= max_stage && !witnessed;
              ++stage) {
@@ -1043,7 +1255,7 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                 base, *prime, subfactor_base_schedule,
                                 random_state, ideal_reduction_precision,
                                 effort, exhaustion, embedding_cache,
-                                predicate, diagnostics);
+                                predicate, witness_prefilter, diagnostics);
                 if (result == RequiredPrimeWitnessSearchResult::failed) {
                     return false;
                 }
@@ -1153,6 +1365,12 @@ bool factor_base_honesty_check(bool& honest,
     // Retain one precision-keyed order embedding copy for the scan; every
     // ideal-specific setup stays local.
     detail::OrderMinkowskiEmbeddingCache embedding_cache;
+    // One norm-prefilter base part for the scan's T2 witness searches.
+    RequiredPrimeWitnessPrefilter witness_prefilter;
+    if (use_direct_required_prime_witness) {
+        (void) required_prime_witness_prefilter_init_base(
+                witness_prefilter, base, predicate);
+    }
     flint::Fmpz quadratic_discriminant;
     const bool has_quadratic_discriminant =
             factor_base_honesty_quadratic_discriminant(
@@ -1177,8 +1395,13 @@ bool factor_base_honesty_check(bool& honest,
                     ideal_reduction_precision, escalation, &embedding_cache,
                     diagnostics, predicate, audit,
                     has_quadratic_discriminant ? &quadratic_discriminant
-                                               : nullptr);
-        if (audit != nullptr) audit->final_random_state = random_state;
+                                               : nullptr,
+                    &witness_prefilter);
+        if (audit != nullptr) {
+            audit->final_random_state = random_state;
+            audit->t2_norm_prefilter_rejections =
+                    witness_prefilter.rejected_count;
+        }
         if (!checked) {
             return false;
         }

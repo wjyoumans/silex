@@ -1481,19 +1481,26 @@ bool required_prime_norm_prefilter_init(
         RequiredPrimeNormPrefilter& prefilter,
         const FactorBase& base,
         const PrimeIdeal& required_prime) noexcept {
+    return required_prime_norm_prefilter_init_base(prefilter, base) &&
+           required_prime_norm_prefilter_set_required_prime(
+                   prefilter, base, required_prime);
+}
+
+bool required_prime_norm_prefilter_init_base(
+        RequiredPrimeNormPrefilter& prefilter,
+        const FactorBase& base) noexcept {
     prefilter.ready = false;
+    prefilter.base_ready = false;
+    prefilter.base_source = nullptr;
     prefilter.degree = 0;
     prefilter.word_table_ready = false;
-    // The preconditions of order_element_factor_over_base_with_required_prime_direct
-    // for an element of base.parent(); when one fails the direct path reports
-    // an evaluation failure, which the prefilter leaves to it.
+    // The order preconditions of
+    // order_element_factor_over_base_with_required_prime_direct for an
+    // element of base.parent(); when one fails the direct path reports an
+    // evaluation failure, which the prefilter leaves to it.
     const Order* order = base.parent();
     if (order == nullptr || order->parent() == nullptr ||
-        !order->is_maximal() ||
-        !same_order_parent(required_prime.parent(), order) ||
-        !required_prime.has_prime_data() ||
-        required_prime.residue_degree() <= 0 ||
-        base.contains(required_prime)) {
+        !order->is_maximal()) {
         return false;
     }
     const slong n = order->degree();
@@ -1505,11 +1512,7 @@ bool required_prime_norm_prefilter_init(
     // when one cannot be read, and so is the prefilter.
     flint::Fmpz p;
     slong block_length = 0;
-    if (!required_prime.rational_prime(flint::FmpzRef(p)) ||
-        fmpz_cmp_ui(p.raw(), 2) < 0) {
-        return false;
-    }
-    ::fmpz_set(prefilter.smooth_product.raw(), p.raw());
+    ::fmpz_one(prefilter.base_product.raw());
     const slong block_count = base.rational_prime_block_count();
     for (slong block = 0; block < block_count; ++block) {
         if (!base.rational_prime_block_data(flint::FmpzRef(p), block_length,
@@ -1517,8 +1520,8 @@ bool required_prime_norm_prefilter_init(
             fmpz_cmp_ui(p.raw(), 2) < 0) {
             return false;
         }
-        ::fmpz_mul(prefilter.smooth_product.raw(),
-                   prefilter.smooth_product.raw(), p.raw());
+        ::fmpz_mul(prefilter.base_product.raw(),
+                   prefilter.base_product.raw(), p.raw());
     }
 
     // Multiplication table of the order basis w_0, ..., w_(n-1).
@@ -1565,6 +1568,35 @@ bool required_prime_norm_prefilter_init(
     prefilter.multiplication_table = std::move(table);
     prefilter.multiplication_matrix = flint::FmpzMat(n, n);
     prefilter.degree = n;
+    prefilter.base_source = &base;
+    prefilter.base_ready = true;
+    return true;
+}
+
+bool required_prime_norm_prefilter_set_required_prime(
+        RequiredPrimeNormPrefilter& prefilter,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime) noexcept {
+    prefilter.ready = false;
+    // The required-prime preconditions of the direct path.
+    const Order* order = base.parent();
+    if (!prefilter.base_ready || prefilter.base_source != &base ||
+        order == nullptr ||
+        !same_order_parent(required_prime.parent(), order) ||
+        !required_prime.has_prime_data() ||
+        required_prime.residue_degree() <= 0 ||
+        base.contains(required_prime)) {
+        return false;
+    }
+    // The direct cofactor test also removes the required rational prime;
+    // it is skipped when that prime cannot be read, and so is the prefilter.
+    flint::Fmpz p;
+    if (!required_prime.rational_prime(flint::FmpzRef(p)) ||
+        fmpz_cmp_ui(p.raw(), 2) < 0) {
+        return false;
+    }
+    ::fmpz_mul(prefilter.smooth_product.raw(), prefilter.base_product.raw(),
+               p.raw());
     prefilter.ready = true;
     return true;
 }
@@ -1679,11 +1711,21 @@ bool required_prime_norm_prefilter_rejects_fmpz(
         RequiredPrimeNormPrefilter& prefilter,
         flint::FmpzMatConstRef coordinates) noexcept {
     rejected = false;
-    if (!required_prime_norm_prefilter_norm(
-                flint::FmpzRef(prefilter.norm), prefilter, coordinates)) {
+    return required_prime_norm_prefilter_norm(
+                   flint::FmpzRef(prefilter.norm), prefilter, coordinates) &&
+           required_prime_norm_prefilter_rejects_norm(
+                   rejected, prefilter, flint::FmpzConstRef(prefilter.norm));
+}
+
+bool required_prime_norm_prefilter_rejects_norm(
+        bool& rejected,
+        RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzConstRef norm) noexcept {
+    rejected = false;
+    if (!prefilter.ready) {
         return false;
     }
-    if (::fmpz_is_zero(prefilter.norm.raw()) != 0) {
+    if (::fmpz_is_zero(norm.raw()) != 0) {
         return true;
     }
     // Source: buch2.c:can_factor rejects when Z_ppo(N, F->prodZ) is not 1;
@@ -1691,7 +1733,7 @@ bool required_prime_norm_prefilter_rejects_fmpz(
     // until it is 1. The cofactor is 1 exactly when the direct path's
     // cofactor, |N| with every factor-base rational prime and the required
     // rational prime removed, is 1.
-    ::fmpz_abs(prefilter.cofactor.raw(), prefilter.norm.raw());
+    ::fmpz_abs(prefilter.cofactor.raw(), norm.raw());
     ::fmpz_gcd(prefilter.divisor.raw(), prefilter.cofactor.raw(),
                prefilter.smooth_product.raw());
     while (::fmpz_is_one(prefilter.divisor.raw()) == 0) {

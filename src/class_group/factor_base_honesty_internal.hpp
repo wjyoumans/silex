@@ -4,6 +4,7 @@
 
 #include "factor_base_honesty_failure_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
+#include "../ideal_factorization/ideal_factorization_internal.hpp"
 
 namespace silex::detail::relation_search {
 
@@ -111,6 +112,9 @@ struct FactorBaseHonestyScanAudit {
     slong escalated_witnessed_targets = 0;
     slong max_search_stage = 0;
     ulong final_random_state = 0;
+    // T2 witness candidates rejected by RequiredPrimeWitnessPrefilter
+    // before they were built; each is also counted as a factor attempt.
+    slong t2_norm_prefilter_rejections = 0;
     // Set when the scan stops at a required prime with no witness.
     FactorBaseHonestyFailure unwitnessed;
 };
@@ -124,6 +128,79 @@ bool factor_base_honesty_reduce_large_ideal(
         Element& back_multiplier,
         slong precision,
         const DiagnosticsContext* diagnostics) noexcept;
+
+// The norm prefilter of the T2 required-prime witness enumeration
+// (enumerate_required_prime_witness). A candidate there is
+// back_multiplier * x for x in the enumerated ideal, given by the order
+// coordinates of x. The prefilter decides, from those coordinates and the
+// norm of back_multiplier, two things the unchanged path decides after
+// building the candidate: whether x is a rational scalar (skipped
+// uncounted), and whether the direct order-element test rejects the
+// candidate by its norm cofactor (counted, no witness).
+//
+// Soundness: it rejects only candidates the direct test rejects. The
+// candidate is integral (back_multiplier * ideal is the integral ideal the
+// search started from), and N(back_multiplier * x) = N(back_multiplier) N(x)
+// because the norm is multiplicative. N(x) is the exact determinant of
+// required_prime_norm_prefilter_norm, so the integer norm it forms equals
+// the direct test's norm, and required_prime_norm_prefilter_rejects{,_norm}
+// reject exactly when that norm is nonzero and not smooth over the
+// factor-base and required rational primes, which is the direct test's
+// cofactor rejection (buch2.c:can_factor, Z_ppo against prodZ).  If
+// N(back_multiplier) N(x) is not an integer the prefilter does not reject,
+// leaving the unchanged path to report it.
+//
+// Set up once per honesty scan (init_base), then per required prime and per
+// enumerated ideal. Ready only where factor_base_principal_witness takes the
+// direct test; single-threaded.
+struct RequiredPrimeWitnessPrefilter {
+    detail::RequiredPrimeNormPrefilter norm;
+    // Order coordinates of 1, a 1 x degree row.
+    flint::FmpzMat one_coordinates{0, 0};
+    bool back_is_one = true;
+    flint::Fmpq back_norm;
+    flint::Fmpz candidate_norm;
+    flint::Fmpz scratch;
+    // Candidates rejected over the prefilter's life.
+    slong rejected_count = 0;
+};
+
+// The base part, for the direct predicates (selected and
+// order_element_direct) only. Returns false, with the prefilter not ready,
+// otherwise or when a precondition of the norm prefilter fails.
+bool required_prime_witness_prefilter_init_base(
+        RequiredPrimeWitnessPrefilter& prefilter,
+        const FactorBase& base,
+        FactorBaseWitnessPredicate predicate) noexcept;
+
+// Readies a prefilter whose base part is set for this base for one required
+// prime; returns false, not ready, otherwise.
+bool required_prime_witness_prefilter_set_required_prime(
+        RequiredPrimeWitnessPrefilter& prefilter,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime) noexcept;
+
+// Records N(back_multiplier) for the candidates of one enumerated ideal.
+bool required_prime_witness_prefilter_set_back_multiplier(
+        RequiredPrimeWitnessPrefilter& prefilter,
+        const Element& back_multiplier) noexcept;
+
+// Whether the order element with these coordinates (1 x degree) is a
+// rational scalar, as element_is_scalar_rational decides on the element.
+// Requires a ready prefilter.
+bool required_prime_witness_prefilter_is_scalar(
+        bool& scalar,
+        RequiredPrimeWitnessPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept;
+
+// Sets rejected exactly when the direct order-element test would reject
+// back_multiplier * x, for x with these coordinates, by its norm cofactor.
+// Returns false, with rejected false, when the prefilter is not ready or
+// cannot decide; the candidate then takes the unchanged path.
+bool required_prime_witness_prefilter_rejects(
+        bool& rejected,
+        RequiredPrimeWitnessPrefilter& prefilter,
+        flint::FmpzMatConstRef coordinates) noexcept;
 
 // Sets `out` to the discriminant D of `order` and returns true when `order`
 // is the maximal order of a quadratic field whose defining polynomial is

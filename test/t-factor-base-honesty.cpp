@@ -1,6 +1,7 @@
 #include "class_group/class_group_internal.hpp"
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
+#include "class_group/relation_candidate_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
 #include "ideal/ideal_access_internal.hpp"
@@ -22,6 +23,7 @@
 #include <silex/flint/fmpz_poly.hpp>
 #include <silex/ideal.hpp>
 #include <silex/ideal_factorization.hpp>
+#include <silex/lat.hpp>
 #include <silex/number_field.hpp>
 #include <silex/order.hpp>
 #include <silex/order_element.hpp>
@@ -3400,6 +3402,355 @@ bool class_unit_honesty_call_counts(slong& direct_none,
     return true;
 }
 
+// The T2 witness enumeration's norm prefilter against the direct order-element
+// test, candidate by candidate. Each candidate is back * x for x in an ideal
+// the search enumerates (the required prime P, P times a rational scalar
+// ideal after factor_base_honesty_primitive_part, and P times a large base
+// prime power after factor_base_honesty_reduce_large_ideal), given by the
+// order coordinates of x as in enumerate_required_prime_witness. The
+// prefilter must decide every integral candidate, reject exactly the
+// candidates the direct test rejects by their norm cofactor, and classify
+// rational scalars as element_is_scalar_rational does.
+struct T2PrefilterCounts {
+    slong rejected = 0;
+    slong kept = 0;
+    slong witnesses = 0;
+    slong scalars = 0;
+    slong back_rejected = 0;
+};
+
+int check_t2_prefilter_ideal(const silex::FactorBase& base,
+                             const silex::PrimeIdeal& required,
+                             search::RequiredPrimeWitnessPrefilter& prefilter,
+                             const silex::Ideal& ideal,
+                             const silex::Element& back,
+                             slong radius,
+                             T2PrefilterCounts& counts) {
+    const silex::Order& order = *base.parent();
+    const slong n = order.degree();
+    sflint::FmpzMat hnf(n, n);
+    silex::lat::Lat lattice(n);
+    silex::lat::Lat reduced(n);
+    sflint::FmpzMat basis(n, n);
+    if (!search::required_prime_witness_prefilter_set_back_multiplier(
+                prefilter, back) ||
+        !ideal.get_hnf(sflint::FmpzMatRef(hnf)) ||
+        !lattice.set_basis(sflint::FmpzMatConstRef(hnf)) ||
+        !lattice.lll_reduce(reduced) || reduced.nrows() != n ||
+        !reduced.get_basis(sflint::FmpzMatRef(basis))) {
+        return 1;
+    }
+    const bool back_is_one = back.equal_si(1);
+
+    sflint::FmpzMat coordinates(1, n);
+    silex::OrderElement x(order);
+    silex::OrderElement candidate(order);
+    silex::Element element(*order.parent());
+    silex::Element product(*order.parent());
+    const auto check = [&]() -> bool {
+        bool scalar = true;
+        bool reference_scalar = false;
+        if (!x.set_coordinates(sflint::FmpzMatConstRef(coordinates)) ||
+            !x.get_element(element) ||
+            !silex::detail::relation_search::element_is_scalar_rational(
+                    reference_scalar, element) ||
+            !search::required_prime_witness_prefilter_is_scalar(
+                    scalar, prefilter,
+                    sflint::FmpzMatConstRef(coordinates)) ||
+            scalar != reference_scalar) {
+            return false;
+        }
+        if (scalar) {
+            ++counts.scalars;
+            return true;
+        }
+        bool matches = true;
+        bool rejected = false;
+        silex::detail::RequiredPrimeDirectAudit audit;
+        if (!product.multiply(back, element) ||
+            !candidate.set_element(product) ||
+            !silex::detail::order_element_factor_over_base_with_required_prime(
+                    matches, candidate, base, required, nullptr, &audit) ||
+            !search::required_prime_witness_prefilter_rejects(
+                    rejected, prefilter,
+                    sflint::FmpzMatConstRef(coordinates)) ||
+            rejected != audit.rejected_by_cofactor ||
+            (rejected && matches)) {
+            return false;
+        }
+        rejected ? ++counts.rejected : ++counts.kept;
+        counts.back_rejected += rejected && !back_is_one ? 1 : 0;
+        counts.witnesses += matches ? 1 : 0;
+        return true;
+    };
+
+    // Every nonzero combination in [-radius, radius]^n of the reduced basis.
+    std::vector<slong> digits(static_cast<std::size_t>(n), -radius);
+    for (;;) {
+        bool nonzero = false;
+        for (slong j = 0; j < n; ++j) {
+            sflint::fmpz_zero(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(coordinates), 0,
+                                           j));
+        }
+        for (slong i = 0; i < n; ++i) {
+            const slong d = digits[static_cast<std::size_t>(i)];
+            nonzero = nonzero || d != 0;
+            for (slong j = 0; j < n; ++j) {
+                fmpz_addmul_si(fmpz_mat_entry(coordinates.raw(), 0, j),
+                               fmpz_mat_entry(basis.raw(), i, j), d);
+            }
+        }
+        if (nonzero && !check()) {
+            return 1;
+        }
+        slong i = 0;
+        while (i < n && digits[static_cast<std::size_t>(i)] == radius) {
+            digits[static_cast<std::size_t>(i)] = -radius;
+            ++i;
+        }
+        if (i == n) {
+            break;
+        }
+        ++digits[static_cast<std::size_t>(i)];
+    }
+    // Rational scalars of the ideal: multiples of the order coordinates of
+    // its least positive integer, found as k * 1 for the HNF corner entry.
+    silex::OrderElement one(order);
+    sflint::FmpzMat one_coordinates(1, n);
+    if (!one.one() ||
+        !one.get_coordinates(sflint::FmpzMatRef(one_coordinates))) {
+        return 1;
+    }
+    for (slong k = -3; k <= 3; ++k) {
+        if (k == 0) {
+            continue;
+        }
+        for (slong j = 0; j < n; ++j) {
+            fmpz_mul_si(fmpz_mat_entry(coordinates.raw(), 0, j),
+                        fmpz_mat_entry(one_coordinates.raw(), 0, j), k);
+        }
+        bool scalar = false;
+        if (!search::required_prime_witness_prefilter_is_scalar(
+                    scalar, prefilter,
+                    sflint::FmpzMatConstRef(coordinates)) ||
+            !scalar) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int check_t2_prefilter_field(const FieldSetup& setup,
+                             slong base_bound,
+                             std::initializer_list<slong> required_primes,
+                             slong radius,
+                             T2PrefilterCounts& counts) {
+    const silex::Order& order = setup.maximal_order;
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), base_bound);
+    silex::FactorBase base(order);
+    search::RequiredPrimeWitnessPrefilter prefilter;
+    silex::PrimeIdeal twist_prime(order);
+    if (!order.is_maximal() || !base.build(sflint::FmpzConstRef(bound)) ||
+        base.length() == 0 || !base.prime(twist_prime, base.length() - 1) ||
+        !search::required_prime_witness_prefilter_init_base(
+                prefilter, base, search::FactorBaseWitnessPredicate::selected)) {
+        return 1;
+    }
+    for (slong p : required_primes) {
+        silex::PrimeIdeal required(order);
+        if (!first_prime_above(required, order, p) ||
+            base.contains(required) ||
+            !search::required_prime_witness_prefilter_set_required_prime(
+                    prefilter, base, required)) {
+            return 1;
+        }
+        silex::Ideal prime_ideal(order);
+        silex::Ideal twist(order);
+        silex::Ideal product(order);
+        silex::Ideal scalar_ideal(order);
+        silex::Element back(*order.parent());
+        silex::Element scalar(*order.parent());
+        silex::OrderElement scalar_generator(order);
+        if (!required.get_ideal(prime_ideal) || !back.one() ||
+            check_t2_prefilter_ideal(base, required, prefilter, prime_ideal,
+                                     back, radius, counts) != 0) {
+            return 1;
+        }
+        // P * 6O: the primitive part is P with back multiplier 6.
+        if (!scalar.set_si(6) || !scalar_generator.set_element(scalar) ||
+            !scalar_ideal.set_principal(scalar_generator) ||
+            !product.multiply(prime_ideal, scalar_ideal) || !back.one() ||
+            !search::factor_base_honesty_primitive_part(product, back) ||
+            back.equal_si(1) ||
+            check_t2_prefilter_ideal(base, required, prefilter, product, back,
+                                     radius, counts) != 0) {
+            return 1;
+        }
+        // P * Q^40 for a base prime Q, reduced by the large-ideal step.
+        if (!twist_prime.get_ideal(twist) || !product.set(prime_ideal)) {
+            return 1;
+        }
+        for (slong e = 0; e < 40; ++e) {
+            silex::Ideal next(order);
+            if (!next.multiply(product, twist)) {
+                return 1;
+            }
+            product.swap(next);
+        }
+        if (!back.one() ||
+            !search::factor_base_honesty_primitive_part(product, back) ||
+            !search::factor_base_honesty_reduce_large_ideal(product, back,
+                                                            128, nullptr) ||
+            back.equal_si(1) ||
+            check_t2_prefilter_ideal(base, required, prefilter, product, back,
+                                     radius, counts) != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int test_t2_witness_prefilter_matches_direct() {
+    // Corpus field real_quadratic_d1000000000009 with its proven factor-base
+    // bound 293, an imaginary quadratic, a cubic, and two quartics.
+    T2PrefilterCounts counts;
+    const FieldSetup d1e12 = maximal_order_setup({-250000000002, -1, 1});
+    if (check_t2_prefilter_field(d1e12, 293, {307, 311, 1009}, 25, counts) !=
+                0 ||
+        check_t2_prefilter_field(maximal_order_setup({7, 0, 1}), 7,
+                                 {11, 23}, 20, counts) != 0 ||
+        check_t2_prefilter_field(cubic_x3_minus_2(), 7, {11, 31}, 5,
+                                 counts) != 0 ||
+        check_t2_prefilter_field(maximal_order_setup({1, 0, -10, 0, 1}), 7,
+                                 {23}, 3, counts) != 0 ||
+        check_t2_prefilter_field(
+                truncated_decomposition_counterexample_fixture(), 7, {11}, 3,
+                counts) != 0) {
+        return 1;
+    }
+    if (counts.rejected == 0 || counts.kept == 0 || counts.witnesses == 0 ||
+        counts.back_rejected == 0) {
+        return 2;
+    }
+
+    // Not ready for the full-factorization predicate or outside degrees 2 to
+    // 4; such scans build every candidate.
+    search::RequiredPrimeWitnessPrefilter prefilter;
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 7);
+    silex::FactorBase quadratic_base(d1e12.maximal_order);
+    const FieldSetup quintic = ramified_last_fixture();
+    silex::FactorBase quintic_base(quintic.maximal_order);
+    if (!quadratic_base.build(sflint::FmpzConstRef(bound)) ||
+        search::required_prime_witness_prefilter_init_base(
+                prefilter, quadratic_base,
+                search::FactorBaseWitnessPredicate::full_factorization) ||
+        prefilter.norm.base_ready || prefilter.norm.ready ||
+        !quintic_base.build(sflint::FmpzConstRef(bound)) ||
+        search::required_prime_witness_prefilter_init_base(
+                prefilter, quintic_base,
+                search::FactorBaseWitnessPredicate::selected) ||
+        prefilter.norm.base_ready) {
+        return 3;
+    }
+    return 0;
+}
+
+// Whole T2-route honesty scans with the prefilter (the direct predicates)
+// against the same scans without it (the full-factorization predicate): the
+// same verdicts, audits and random-state stream, with the prefilter
+// rejecting candidates only on the direct predicates. In a debug-check
+// build every rejection is also checked against the direct test.
+int test_t2_scan_prefilter_matches_full_factorization() {
+    using Mode = search::FactorBaseWitnessPredicate;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    diagnostics.debug_level = silex::DebugLevel::expensive;
+    diagnostics.debug_modules = silex::diagnostics_all_modules;
+    slong debug_failures = 0;
+    diagnostics.debug_failure_user = &debug_failures;
+    diagnostics.debug_failure_callback = [](
+            void* user, silex::DiagnosticsModule, silex::DebugLevel,
+            const char*, const char*, int, const char*, const char*) noexcept {
+        ++*static_cast<slong*>(user);
+    };
+    struct Row {
+        std::vector<slong> coefficients;
+        ulong active;
+        ulong required;
+    };
+    const std::vector<Row> rows = {
+            {{-250000000002, -1, 1}, 293, 700},
+            {{-6236, 0, 1}, 3, 60},
+            {{-15, 0, 0, 1}, 2, 30},
+            {{-2, 0, 0, 1}, 7, 40},
+            {{1, 0, -10, 0, 1}, 7, 30},
+    };
+    slong rejections = 0;
+    for (const Row& row : rows) {
+        FieldSetup setup = maximal_order_setup(row.coefficients);
+        sflint::Fmpz active, required;
+        sflint::fmpz_set_ui(sflint::FmpzRef(active), row.active);
+        sflint::fmpz_set_ui(sflint::FmpzRef(required), row.required);
+        silex::FactorBase base(setup.maximal_order);
+        if (!setup.maximal_order.is_defined() ||
+            !base.build_relation_completion_base(
+                    sflint::FmpzConstRef(active)) ||
+            base.length() == 0) {
+            return 1;
+        }
+        // Twists over the whole base, so later ideals carry a back
+        // multiplier.
+        silex::detail::SubfactorBaseSchedule schedule;
+        for (slong i = 0; i < base.length(); ++i) {
+            schedule.subfactor_base.push_back(i);
+        }
+        schedule.excluded_indices.assign(
+                static_cast<std::size_t>(base.length()), 0);
+        // Bounded escalation only raises the caps; it is left out to keep
+        // the full-factorization scans short.
+        const auto escalation = search::FactorBaseWitnessEscalation::none;
+        bool expected_honest = false;
+        search::FactorBaseHonestyScanAudit expected;
+        const bool expected_ok = search::factor_base_honesty_check(
+                expected_honest, base, sflint::FmpzConstRef(active),
+                sflint::FmpzConstRef(required), &schedule, UWORD(42),
+                true, 128, escalation, nullptr, &expected,
+                Mode::full_factorization);
+        if (!expected_ok || expected.t2_norm_prefilter_rejections != 0) {
+            return 2;
+        }
+        for (Mode mode : {Mode::selected, Mode::order_element_direct}) {
+            bool honest = !expected_honest;
+            search::FactorBaseHonestyScanAudit audit;
+            const bool ok = search::factor_base_honesty_check(
+                    honest, base, sflint::FmpzConstRef(active),
+                    sflint::FmpzConstRef(required), &schedule, UWORD(42),
+                    true, 128, escalation, &diagnostics, &audit, mode);
+            if (!ok || honest != expected_honest ||
+                audit.rational_prime_checks !=
+                        expected.rational_prime_checks ||
+                audit.witness_targets != expected.witness_targets ||
+                audit.witnessed_targets != expected.witnessed_targets ||
+                audit.escalated_witnessed_targets !=
+                        expected.escalated_witnessed_targets ||
+                audit.max_search_stage != expected.max_search_stage ||
+                audit.final_random_state != expected.final_random_state ||
+                audit.unwitnessed.recorded !=
+                        expected.unwitnessed.recorded ||
+                !sflint::fmpz_equal(audit.unwitnessed.p,
+                                    expected.unwitnessed.p)) {
+                return 3;
+            }
+            rejections += audit.t2_norm_prefilter_rejections;
+        }
+    }
+    // The d1000000000009 and x^2 - 6236 rows reject candidates.
+    return debug_failures == 0 && rejections > 0 ? 0 : 4;
+}
+
 int test_routes_pass_intended_escalation_mode() {
     slong direct_none = 0;
     slong direct_bounded = 0;
@@ -3462,7 +3813,9 @@ int main() {
                    test_lll_relation_slice_cap_refusal_is_noted() != 0 ||
                    test_direct_witness_search_keeps_lattice_fallbacks() != 0 ||
                    test_honesty_quadratic_kronecker_matches_decomposition() !=
-                           0
+                           0 ||
+                   test_t2_witness_prefilter_matches_direct() != 0 ||
+                   test_t2_scan_prefilter_matches_full_factorization() != 0
             ? 1
             : 0;
 }

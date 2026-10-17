@@ -78,11 +78,22 @@ bool required_prime_witness_admits_lacking_prime(
 // precondition of the direct path holds, every factor-base rational prime
 // block is readable, and the degree is 2 to 4; otherwise callers keep the
 // direct path. Scratch members make it single-threaded.
+//
+// Setup has two parts: required_prime_norm_prefilter_init_base reads the
+// order and factor base once, and
+// required_prime_norm_prefilter_set_required_prime completes it for one
+// required prime, so a scan over many required primes of one base pays the
+// base part once. required_prime_norm_prefilter_init does both.
 struct RequiredPrimeNormPrefilter {
     bool ready = false;
+    // The base part is set for base_source, which must stay unchanged while
+    // the prefilter is used.
+    bool base_ready = false;
+    const FactorBase* base_source = nullptr;
     slong degree = 0;
-    // Product of the factor-base rational primes and the required prime's
-    // rational prime.
+    // Product of the factor-base rational primes.
+    flint::Fmpz base_product;
+    // base_product times the required prime's rational prime.
     flint::Fmpz smooth_product;
     // Row i * degree + j holds the order coordinates of w_i * w_j.
     flint::FmpzMat multiplication_table{0, 0};
@@ -103,6 +114,22 @@ inline constexpr slong required_prime_norm_prefilter_word_limit =
         (WORD(1) << (FLINT_BITS / 2 - 1)) - 1;
 
 bool required_prime_norm_prefilter_init(
+        RequiredPrimeNormPrefilter& prefilter,
+        const FactorBase& base,
+        const PrimeIdeal& required_prime) noexcept;
+
+// The required-prime-independent part of required_prime_norm_prefilter_init:
+// the order preconditions, base_product and the multiplication table. Sets
+// base_ready and clears ready; returns false, with base_ready false, when a
+// precondition fails.
+bool required_prime_norm_prefilter_init_base(
+        RequiredPrimeNormPrefilter& prefilter,
+        const FactorBase& base) noexcept;
+
+// Completes a prefilter whose base part was set for this base: the
+// required-prime preconditions of the direct path and smooth_product. Sets
+// ready exactly when they hold; returns false, with ready false, otherwise.
+bool required_prime_norm_prefilter_set_required_prime(
         RequiredPrimeNormPrefilter& prefilter,
         const FactorBase& base,
         const PrimeIdeal& required_prime) noexcept;
@@ -138,6 +165,14 @@ bool required_prime_norm_prefilter_rejects_fmpz(
         bool& rejected,
         RequiredPrimeNormPrefilter& prefilter,
         flint::FmpzMatConstRef coordinates) noexcept;
+
+// The cofactor decision of the fmpz path for an element whose exact norm is
+// given: rejected exactly when the norm is nonzero and not smooth over the
+// primes of smooth_product. Requires a ready prefilter.
+bool required_prime_norm_prefilter_rejects_norm(
+        bool& rejected,
+        RequiredPrimeNormPrefilter& prefilter,
+        flint::FmpzConstRef norm) noexcept;
 
 // Evaluation success is separate from classification. Requires a nonzero
 // integral scalar and a known maximal order; input objects are not modified.
