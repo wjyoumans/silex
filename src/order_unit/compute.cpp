@@ -1814,6 +1814,111 @@ bool fmpz_matrix_is_zero(const flint::FmpzMat& matrix) noexcept {
     return true;
 }
 
+namespace {
+
+// One factor of a reduced value before it is stored: factor `index` of
+// `source` with exponent `exponent`, and that factor's screen hash and
+// origin.
+struct PendingUnitFactor {
+    const FactoredElement* source = nullptr;
+    std::size_t index = 0;
+    slong exponent = 0;
+    std::uint64_t hash = 0;
+    std::uint64_t origin = 0;
+};
+
+// Stores in `out` (empty on entry) the factors of `pending` with equal
+// factors merged: one entry per distinct factor, in order of first
+// occurrence, holding that first occurrence (with its origin and screen
+// hash) and the sum of the exponents of its equal entries; a factor whose
+// exponents cancel is left out.  Factors are equal as in the factored log
+// embedding's merge (src/factored_element/factored_element.cpp,
+// distinct_factor_indices): equal screen hash, then equal origin or
+// Element::equal.  The log sum takes one term per distinct factor with a
+// nonzero merged exponent, in order of first occurrence, so the merged list
+// gives the same terms in the same order with the same exponents.
+//
+// Sets `merged` false, with `out` unchanged, when an exponent sum does not
+// fit an slong or every exponent cancels; the caller then stores `pending`
+// as it is.  False when a factor cannot be stored.
+bool push_merged_unit_factors(FactoredElement& out,
+                              bool& merged,
+                              std::vector<PendingUnitFactor>& pending)
+        noexcept {
+    merged = false;
+    const std::size_t count = pending.size();
+    std::size_t buckets = 1;
+    while (buckets < 2 * count) {
+        if (buckets > std::numeric_limits<std::size_t>::max() / 4) {
+            return true;
+        }
+        buckets *= 2;
+    }
+    constexpr std::size_t empty = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> table(buckets, empty);
+    std::vector<std::size_t> first;
+    std::vector<slong> sums;
+    for (std::size_t i = 0; i < count; ++i) {
+        PendingUnitFactor& entry = pending[i];
+        entry.hash = FactoredElementAccess::factor_hash(*entry.source,
+                                                        entry.index);
+        entry.origin = FactoredElementAccess::factor_origin(*entry.source,
+                                                            entry.index);
+        std::size_t slot =
+                static_cast<std::size_t>(entry.hash) & (buckets - 1);
+        for (;;) {
+            const std::size_t distinct = table[slot];
+            if (distinct == empty) {
+                table[slot] = first.size();
+                first.push_back(i);
+                sums.push_back(entry.exponent);
+                break;
+            }
+            const PendingUnitFactor& held = pending[first[distinct]];
+            if (held.hash == entry.hash &&
+                (held.origin == entry.origin ||
+                 held.source->factors()[held.index].factor.equal(
+                         entry.source->factors()[entry.index].factor))) {
+                const slong sum = sums[distinct];
+                const slong add = entry.exponent;
+                if ((add > 0 &&
+                     sum > std::numeric_limits<slong>::max() - add) ||
+                    (add < 0 &&
+                     sum < std::numeric_limits<slong>::min() - add)) {
+                    return true;
+                }
+                sums[distinct] = sum + add;
+                break;
+            }
+            slot = (slot + 1) & (buckets - 1);
+        }
+    }
+
+    std::size_t terms = 0;
+    for (const slong sum : sums) {
+        if (sum != 0) {
+            ++terms;
+        }
+    }
+    if (terms == 0) {
+        return true;
+    }
+    for (std::size_t d = 0; d < first.size(); ++d) {
+        if (sums[d] == 0) {
+            continue;
+        }
+        const PendingUnitFactor& entry = pending[first[d]];
+        if (!FactoredElementAccess::push_factor(out, *entry.source,
+                                                entry.index, sums[d])) {
+            return false;
+        }
+    }
+    merged = true;
+    return true;
+}
+
+}  // namespace
+
 bool apply_unit_reduction(std::vector<FactoredElement>& values,
                                 const OrderUnitGroup& group,
                                 const flint::FmpzMat& coefficients) noexcept {
@@ -1827,14 +1932,21 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
         return false;
     }
 
-    // value_i * prod_j g_j^(-c_ij), built by appending the factors of each
-    // g_j, with exponents scaled by -c_ij, to the copy of value_i in place.
-    // This is the factor list free_generator, pow_si, multiply and set build
-    // (multiply concatenates left then right factors and merges nothing),
-    // without re-copying the growing reduced value at every step.  The exits
-    // are those of that path: false when a scaled exponent overflows slong
-    // (pow_si) or a copy fails, and true with `values` unchanged when -c_ij
-    // does not fit an slong.  Each generator is copied once, on first use.
+    // value_i * prod_j g_j^(-c_ij).  The factors of value_i and of each g_j
+    // with c_ij != 0, the latter with exponents scaled by -c_ij, are
+    // collected in that order, the order in which free_generator, pow_si,
+    // multiply and set would concatenate them, and equal factors are then
+    // merged (push_merged_unit_factors).  The generators of a relation unit
+    // group are long products of a few distinct relation elements, so the
+    // concatenated list repeats them many times; the merged list holds each
+    // once, as the reference's factored-element dictionary does
+    // (NfOrd/FacElem.jl:149-205), and its log embedding takes the same
+    // terms.  A row with c_i = 0 keeps value_i's list.  When the merge does
+    // not apply (an exponent sum past slong, or everything cancels), the
+    // concatenated list is stored.  The exits are those of the concatenating
+    // path: false when a scaled exponent overflows slong (pow_si) or a copy
+    // fails, and true with `values` unchanged when -c_ij does not fit an
+    // slong.  Each generator is copied once, on first use.
     std::vector<FactoredElement> generators;
     generators.reserve(static_cast<std::size_t>(rank));
     for (slong j = 0; j < rank; ++j) {
@@ -1844,12 +1956,15 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
 
     std::vector<FactoredElement> reduced;
     reduced.reserve(values.size());
+    std::vector<PendingUnitFactor> pending;
     flint::Fmpz scaled;
     for (slong i = 0; i < len; ++i) {
-        reduced.emplace_back(*field);
-        FactoredElement& value = reduced.back();
-        if (!value.set(values[static_cast<std::size_t>(i)])) {
-            return false;
+        const FactoredElement& input = values[static_cast<std::size_t>(i)];
+        pending.clear();
+        const std::size_t input_length = input.factors().size();
+        for (std::size_t k = 0; k < input_length; ++k) {
+            pending.push_back(PendingUnitFactor{
+                    &input, k, input.factors()[k].exponent, 0, 0});
         }
         for (slong j = 0; j < rank; ++j) {
             const flint::FmpzConstRef coefficient =
@@ -1871,8 +1986,6 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
                 }
                 generator_loaded[index] = true;
             }
-            // push_factor keeps each factor's origin and screen hash, so
-            // the log of the reduced value hashes and matches it cheaply.
             const FactoredElement& generator = generators[index];
             const auto generator_entries = generator.factors();
             for (std::size_t k = 0; k < generator_entries.size(); ++k) {
@@ -1886,11 +1999,40 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
                 }
                 const slong factor_exponent =
                         flint::fmpz_get_si(flint::FmpzConstRef(scaled));
-                if (factor_exponent != 0 &&
-                    !FactoredElementAccess::push_factor(
-                            value, generator, k, factor_exponent)) {
-                    return false;
+                if (factor_exponent != 0) {
+                    pending.push_back(PendingUnitFactor{
+                            &generator, k, factor_exponent, 0, 0});
                 }
+            }
+        }
+
+        reduced.emplace_back(*field);
+        FactoredElement& value = reduced.back();
+        if (pending.size() == input_length) {
+            // No generator factor: value_i unchanged (its list is shared).
+            if (!value.set(input)) {
+                return false;
+            }
+            continue;
+        }
+        bool merged = false;
+        if (!push_merged_unit_factors(value, merged, pending)) {
+            return false;
+        }
+        if (merged) {
+            continue;
+        }
+        // push_factor keeps each factor's origin and screen hash, so the
+        // log of the reduced value hashes and matches it cheaply.
+        if (!value.set(input)) {
+            return false;
+        }
+        for (std::size_t k = input_length; k < pending.size(); ++k) {
+            const PendingUnitFactor& entry = pending[k];
+            if (!FactoredElementAccess::push_factor(value, *entry.source,
+                                                    entry.index,
+                                                    entry.exponent)) {
+                return false;
             }
         }
     }

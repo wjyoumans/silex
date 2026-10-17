@@ -912,11 +912,12 @@ int test_reduce_mod_units_half_integer_tie() {
 }
 
 // The reduction step value * prod_j g_j^(-c_j) as it was first written:
-// copy the generator, raise it to -c_j, multiply and copy back.  The test
-// below pins apply_unit_reduction to the factor list this builds, including
-// its two exits: false when a scaled factor exponent overflows slong (as
-// pow_si reports), and true with the values unchanged when -c_j itself does
-// not fit an slong.
+// copy the generator, raise it to -c_j, multiply and copy back.  This
+// concatenates factor lists and merges nothing.  The test below pins
+// apply_unit_reduction to this list with equal factors merged
+// (merge_equal_factors), and to its two exits: false when a scaled factor
+// exponent overflows slong (as pow_si reports), and true with the values
+// unchanged when -c_j itself does not fit an slong.
 bool reference_apply_unit_reduction(
         std::vector<silex::FactoredElement>& values,
         const silex::OrderUnitGroup& group,
@@ -956,6 +957,48 @@ bool reference_apply_unit_reduction(
     return true;
 }
 
+// `value` with equal factors merged: one entry per distinct factor, in
+// order of first occurrence, with the sum of its exponents; a factor whose
+// exponents cancel is left out.
+silex::FactoredElement merge_equal_factors(
+        const silex::FactoredElement& value) {
+    const auto entries = value.factors();
+    std::vector<std::size_t> first;
+    std::vector<slong> sums;
+    for (std::size_t k = 0; k < entries.size(); ++k) {
+        std::size_t d = 0;
+        while (d < first.size() &&
+               !entries[first[d]].factor.equal(entries[k].factor)) {
+            ++d;
+        }
+        if (d == first.size()) {
+            first.push_back(k);
+            sums.push_back(0);
+        }
+        sums[d] += entries[k].exponent;
+    }
+    silex::FactoredElement merged(*value.parent());
+    for (std::size_t d = 0; d < first.size(); ++d) {
+        if (sums[d] != 0) {
+            assert(merged.push(entries[first[d]].factor, sums[d]));
+        }
+    }
+    return merged;
+}
+
+bool arb_vecs_identical(const sflint::ArbVec& left,
+                        const sflint::ArbVec& right) noexcept {
+    if (left.length() != right.length()) {
+        return false;
+    }
+    for (slong i = 0; i < left.length(); ++i) {
+        if (!arb_equal(left.data() + i, right.data() + i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool same_factor_lists(const std::vector<silex::FactoredElement>& left,
                        const std::vector<silex::FactoredElement>& right) {
     if (left.size() != right.size()) {
@@ -987,10 +1030,12 @@ std::vector<silex::FactoredElement> copy_factored_values(
     return out;
 }
 
-// apply_unit_reduction appends each generator's factors, with exponent
-// -c_j * e, to the reduced value in place.  It must build exactly the
-// factor list of the copy/pow/multiply/set path above (no merging of equal
-// factors), and keep that path's failure and early-exit behaviour.
+// apply_unit_reduction stores value * prod_j g_j^(-c_j) with equal factors
+// merged: exactly the factor list of the copy/pow/multiply/set path above
+// after merge_equal_factors, which has the same factored log embedding,
+// bit for bit.  When the merge does not apply (every exponent cancels, or
+// an exponent sum overflows slong) it stores that path's list unmerged.  It
+// keeps that path's failure and early-exit behaviour.
 int test_apply_unit_reduction_factor_list() {
     silex::NumberField cubic = cubic_field(-3, 1);
     silex::Order order;
@@ -1051,12 +1096,89 @@ int test_apply_unit_reduction_factor_list() {
     set_zmat_entry_si(coefficients, 2, 0, -3);
     set_zmat_entry_si(coefficients, 2, 1, 4);
     std::vector<silex::FactoredElement> actual = copy_factored_values(values);
-    std::vector<silex::FactoredElement> expected =
+    std::vector<silex::FactoredElement> concatenated =
             copy_factored_values(values);
     assert(silex::detail::apply_unit_reduction(actual, group, coefficients));
-    assert(reference_apply_unit_reduction(expected, group, coefficients));
+    assert(reference_apply_unit_reduction(concatenated, group, coefficients));
+    std::vector<silex::FactoredElement> expected;
+    for (const auto& value : concatenated) {
+        expected.push_back(merge_equal_factors(value));
+    }
+    // The merge shortens some list; row 1 has no coefficient and keeps its
+    // list.
+    assert(!same_factor_lists(expected, concatenated));
     assert(same_factor_lists(actual, expected));
-    assert(actual[0].length() > values[0].length());
+    assert(actual[1].length() == 1);
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        const auto fs = actual[i].factors();
+        for (slong a = 0; a < actual[i].length(); ++a) {
+            for (slong b = a + 1; b < actual[i].length(); ++b) {
+                assert(!fs[a].factor.equal(fs[b].factor));
+            }
+        }
+        assert(concatenated[i].length() >= actual[i].length());
+        silex::Element merged_value(cubic);
+        silex::Element concatenated_value(cubic);
+        assert(actual[i].evaluate(merged_value));
+        assert(concatenated[i].evaluate(concatenated_value));
+        assert(merged_value.equal(concatenated_value));
+        for (const auto mode : {silex::LogEmbeddingMode::plain,
+                                silex::LogEmbeddingMode::product}) {
+            for (const slong precision : {slong(64), slong(300)}) {
+                // x^3 - 3x + 1 is totally real: three places.
+                sflint::ArbVec merged_log(3);
+                sflint::ArbVec concatenated_log(3);
+                assert(actual[i].logarithmic_embedding(
+                        sflint::ArbVecRef(merged_log), embeddings, mode,
+                        precision));
+                assert(concatenated[i].logarithmic_embedding(
+                        sflint::ArbVecRef(concatenated_log), embeddings,
+                        mode, precision));
+                assert(arb_vecs_identical(merged_log, concatenated_log));
+            }
+        }
+    }
+    assert(concatenated[0].length() > actual[0].length());
+
+    // Reducing a generator by itself cancels every exponent: the merge does
+    // not apply and the concatenated list (the value 1) is stored.
+    std::vector<silex::FactoredElement> unit_values;
+    unit_values.emplace_back(cubic);
+    assert(group.free_generator(unit_values[0], 0));
+    sflint::FmpzMat cancel(1, 2);
+    set_zmat_entry_si(cancel, 0, 0, 1);
+    actual = copy_factored_values(unit_values);
+    concatenated = copy_factored_values(unit_values);
+    assert(silex::detail::apply_unit_reduction(actual, group, cancel));
+    assert(reference_apply_unit_reduction(concatenated, group, cancel));
+    assert(same_factor_lists(actual, concatenated));
+    assert(actual[0].length() == 2 * unit_values[0].length());
+
+    // A merged exponent past slong: the concatenated list is stored.  The
+    // exponents of g_0's factor F sum to t != 0, so F^(+-max) * g_0 holds
+    // F to a power past slong.
+    silex::FactoredElement g0(cubic);
+    assert(group.free_generator(g0, 0));
+    const silex::Element& f = g0.factors()[0].factor;
+    slong t = 0;
+    for (const auto& entry : g0.factors()) {
+        if (entry.factor.equal(f)) {
+            t += entry.exponent;
+        }
+    }
+    assert(t != 0);
+    std::vector<silex::FactoredElement> large;
+    large.emplace_back(cubic);
+    assert(large[0].push(f, t > 0 ? std::numeric_limits<slong>::max()
+                                  : std::numeric_limits<slong>::min()));
+    sflint::FmpzMat times_g0(1, 2);
+    set_zmat_entry_si(times_g0, 0, 0, -1);
+    actual = copy_factored_values(large);
+    concatenated = copy_factored_values(large);
+    assert(silex::detail::apply_unit_reduction(actual, group, times_g0));
+    assert(reference_apply_unit_reduction(concatenated, group, times_g0));
+    assert(same_factor_lists(actual, concatenated));
+    assert(actual[0].length() == 1 + g0.length());
 
     // A scaled exponent past slong fails, as pow_si does, with the values
     // unchanged even though row 0 was already reduced.
@@ -1089,19 +1211,6 @@ int test_apply_unit_reduction_factor_list() {
     assert(!silex::detail::apply_unit_reduction(actual, group, wrong));
     assert(same_factor_lists(actual, values));
     return 0;
-}
-
-bool arb_vecs_identical(const sflint::ArbVec& left,
-                        const sflint::ArbVec& right) noexcept {
-    if (left.length() != right.length()) {
-        return false;
-    }
-    for (slong i = 0; i < left.length(); ++i) {
-        if (!arb_equal(left.data() + i, right.data() + i)) {
-            return false;
-        }
-    }
-    return true;
 }
 
 // The factored log memo returns exactly what a fresh
