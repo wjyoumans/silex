@@ -192,7 +192,7 @@ static bool route_control_equal(
 }
 
 RegulatorPivotFinishTestResult
-regulator_pivot_finish_for_testing(
+RegulatorPivotFinishTestEntry::finish(
         RegulatorPivotFinishPath path,
         RegulatorPivotOutcome outcome,
         slong independent_count,

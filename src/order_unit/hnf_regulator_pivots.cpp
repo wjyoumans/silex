@@ -193,7 +193,7 @@ static RegulatorPivotOutcome regulator_pivot_rows(
     return RegulatorPivotOutcome::success;
 }
 
-RegulatorPivotOutcome regulator_pivot_rows_for_testing(
+RegulatorPivotOutcome RegulatorPivotTestEntry::rows(
         std::vector<slong>& out,
         flint::ArbMatConstRef matrix,
         slong precision) noexcept {
@@ -350,7 +350,7 @@ RegulatorPivotOutcome regulator_pivot_unit_indices(
     return RegulatorPivotOutcome::success;
 }
 
-RegulatorPivotOutcome regulator_pivot_unit_indices_for_testing(
+RegulatorPivotOutcome RegulatorPivotTestEntry::unit_indices(
         std::vector<slong>& out,
         std::vector<slong>& pivot_rows,
         const flint::ArbMat& unit_logs,

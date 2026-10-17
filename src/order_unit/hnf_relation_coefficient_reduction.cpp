@@ -152,7 +152,7 @@ bool rescale_arb_matrix_to_int(flint::FmpzMat& out,
     return true;
 }
 
-bool relation_kernel_rescale_log_matrix_for_testing(
+bool RelationKernelRescaleTestEntry::rescale_log_matrix(
         flint::FmpzMatRef rows,
         flint::ArbMatConstRef matrix,
         slong precision,

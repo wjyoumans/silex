@@ -345,11 +345,18 @@ bool compact_independent_from_log_matrix(bool& independent,
                                          slong len,
                                          slong places,
                                          slong precision) noexcept;
-bool relation_kernel_rescale_log_matrix_for_testing(
-        flint::FmpzMatRef rows,
-        flint::ArbMatConstRef matrix,
-        slong precision,
-        slong word_bits) noexcept;
+class TestHookAccess;
+
+// Test entry of the relation-kernel log-matrix word rescaling; only
+// detail::TestHookAccess (test/test_hook_access.hpp) can call it.
+class RelationKernelRescaleTestEntry {
+    friend class TestHookAccess;
+    static bool rescale_log_matrix(
+            flint::FmpzMatRef rows,
+            flint::ArbMatConstRef matrix,
+            slong precision,
+            slong word_bits) noexcept;
+};
 slong relation_kernel_native_word_bits() noexcept;
 bool transformed_hnf_unit_coefficients_from_regulator_matrix(
         flint::FmpzMat& out,
@@ -429,18 +436,25 @@ RegulatorPivotOutcome regulator_pivot_unit_indices(
         slong places,
         slong precision,
         std::vector<slong>* pivot_rows_out = nullptr) noexcept;
-RegulatorPivotOutcome regulator_pivot_rows_for_testing(
-        std::vector<slong>& out,
-        flint::ArbMatConstRef matrix,
-        slong precision) noexcept;
-RegulatorPivotOutcome regulator_pivot_unit_indices_for_testing(
-        std::vector<slong>& out,
-        std::vector<slong>& pivot_rows,
-        const flint::ArbMat& unit_logs,
-        const Signature& sig,
-        slong rank,
-        slong places,
-        slong precision) noexcept;
+class TestHookAccess;
+
+// Test entries of the regulator pivot selection; only
+// detail::TestHookAccess (test/test_hook_access.hpp) can call them.
+class RegulatorPivotTestEntry {
+    friend class TestHookAccess;
+    static RegulatorPivotOutcome rows(
+            std::vector<slong>& out,
+            flint::ArbMatConstRef matrix,
+            slong precision) noexcept;
+    static RegulatorPivotOutcome unit_indices(
+            std::vector<slong>& out,
+            std::vector<slong>& pivot_rows,
+            const flint::ArbMat& unit_logs,
+            const Signature& sig,
+            slong rank,
+            slong places,
+            slong precision) noexcept;
+};
 bool regulator_ubound_lt(const flint::Arb& left,
                          const flint::Arb& right,
                          slong precision) noexcept;
@@ -929,15 +943,19 @@ RegulatorPivotOutcome hnf_class_regulator_product(
 
 namespace relation_search {
 
-RegulatorPivotFinishTestResult
-regulator_pivot_finish_for_testing(
-        RegulatorPivotFinishPath path,
-        RegulatorPivotOutcome outcome,
-        slong independent_count,
-        slong target_rank,
-        bool factor_base_restart_available,
-        slong analytic_finish_precision,
-        slong analytic_precision_doublings) noexcept;
+// Test entry of the regulator pivot finish action; only
+// detail::TestHookAccess (test/test_hook_access.hpp) can call it.
+class RegulatorPivotFinishTestEntry {
+    friend class detail::TestHookAccess;
+    static RegulatorPivotFinishTestResult finish(
+            RegulatorPivotFinishPath path,
+            RegulatorPivotOutcome outcome,
+            slong independent_count,
+            slong target_rank,
+            bool factor_base_restart_available,
+            slong analytic_finish_precision,
+            slong analytic_precision_doublings) noexcept;
+};
 
 }  // namespace relation_search
 

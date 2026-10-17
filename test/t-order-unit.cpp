@@ -149,7 +149,7 @@ void assert_regulator_pivot_rows(
         const sflint::ArbMat& matrix,
         const std::vector<slong>& expected) noexcept {
     std::vector<slong> actual;
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             actual, sflint::ArbMatConstRef(matrix), 256) ==
            silex::detail::RegulatorPivotOutcome::success);
     assert(actual == expected);
@@ -2509,24 +2509,24 @@ int test_relation_kernel_rescale_log_matrix_word_rounding() {
     set_zmat_entry_str(expected64, 1, 1,
                        "-950737950171172051122527404032");
 
-    assert(silex::detail::relation_kernel_rescale_log_matrix_for_testing(
+    assert(silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
             sflint::FmpzMatRef(rows32), sflint::ArbMatConstRef(matrix), 65,
             32));
     assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(rows32),
                                   sflint::FmpzMatConstRef(expected32)));
-    assert(silex::detail::relation_kernel_rescale_log_matrix_for_testing(
+    assert(silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
             sflint::FmpzMatRef(rows64), sflint::ArbMatConstRef(matrix), 65,
             64));
     assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(rows64),
                                   sflint::FmpzMatConstRef(expected64)));
 
-    assert(!silex::detail::relation_kernel_rescale_log_matrix_for_testing(
+    assert(!silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
             sflint::FmpzMatRef(rows64), sflint::ArbMatConstRef(matrix), 65,
             16));
-    assert(!silex::detail::relation_kernel_rescale_log_matrix_for_testing(
+    assert(!silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
             sflint::FmpzMatRef(rows64), sflint::ArbMatConstRef(matrix), 0,
             64));
-    assert(!silex::detail::relation_kernel_rescale_log_matrix_for_testing(
+    assert(!silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
             sflint::FmpzMatRef(rows64), sflint::ArbMatConstRef(matrix), -1,
             64));
     assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(rows64),
@@ -2537,16 +2537,14 @@ int test_relation_kernel_rescale_log_matrix_word_rounding() {
     for (const slong word_bits : {slong{32}, slong{64}}) {
         const slong maximum_safe_precision =
                 std::numeric_limits<slong>::max() - (word_bits - 1);
-        assert(silex::detail::
-                       relation_kernel_rescale_log_matrix_for_testing(
+        assert(silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
                                sflint::FmpzMatRef(empty_rows),
                                sflint::ArbMatConstRef(empty_matrix),
                                maximum_safe_precision, word_bits));
         sflint::FmpzMat overflow_rows(2, 2);
         sflint::fmpz_mat_set(sflint::FmpzMatRef(overflow_rows),
                              sflint::FmpzMatConstRef(expected64));
-        assert(!silex::detail::
-                        relation_kernel_rescale_log_matrix_for_testing(
+        assert(!silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
                                 sflint::FmpzMatRef(overflow_rows),
                                 sflint::ArbMatConstRef(matrix),
                                 maximum_safe_precision + 1, word_bits));
@@ -2558,7 +2556,7 @@ int test_relation_kernel_rescale_log_matrix_word_rounding() {
     const slong native_word_bits =
             silex::detail::relation_kernel_native_word_bits();
     assert(native_word_bits == 32 || native_word_bits == 64);
-    assert(silex::detail::relation_kernel_rescale_log_matrix_for_testing(
+    assert(silex::detail::TestHookAccess::relation_kernel_rescale_log_matrix(
             sflint::FmpzMatRef(native_rows), sflint::ArbMatConstRef(matrix),
             65, native_word_bits));
     assert(sflint::fmpz_mat_equal(
@@ -2975,7 +2973,7 @@ int test_regulator_pivot_arb_ambiguity_and_invalidity() {
     sflint::ArbMat earlier_equal(2, 1);
     set_arb_mat_entry_interval_si_2exp(earlier_equal, 0, 0, 3, -2, 5, -2);
     set_arb_mat_entry_si_2exp(earlier_equal, 1, 0, 1, 0);
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(earlier_equal), 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(pivots.empty());
@@ -2985,7 +2983,7 @@ int test_regulator_pivot_arb_ambiguity_and_invalidity() {
     set_arb_mat_entry_interval_si_2exp(
             later_outranks, 1, 0, 3, -1, 5, -1);
     pivots = {47};
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(later_outranks), 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(pivots.empty());
@@ -2997,7 +2995,7 @@ int test_regulator_pivot_arb_ambiguity_and_invalidity() {
     assert_regulator_pivot_rows(contains_zero, std::vector<slong>{0});
     ::arb_add_error_2exp_si(arb_mat_entry(contains_zero.raw(), 1, 0), 2);
     pivots = {47};
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(contains_zero), 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(pivots.empty());
@@ -3008,7 +3006,7 @@ int test_regulator_pivot_arb_ambiguity_and_invalidity() {
             arb_mat_entry(earlier_contains_zero.raw(), 0, 0), 0);
     set_arb_mat_entry_si_2exp(earlier_contains_zero, 1, 0, 1, 0);
     pivots = {47};
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(earlier_contains_zero), 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(pivots.empty());
@@ -3017,7 +3015,7 @@ int test_regulator_pivot_arb_ambiguity_and_invalidity() {
     set_arb_mat_entry_interval_si_2exp(
             threshold_crossing, 0, 0, 3, -33, 1, -31);
     pivots = {47};
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(threshold_crossing), 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(pivots.empty());
@@ -3031,7 +3029,7 @@ int test_regulator_pivot_arb_ambiguity_and_invalidity() {
     set_arb_mat_entry_si_2exp(nonfinite_tail, 0, 0, 1, 0);
     ::arb_pos_inf(arb_mat_entry(nonfinite_tail.raw(), 0, 1));
     pivots = {47};
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(nonfinite_tail), 256) ==
            silex::detail::RegulatorPivotOutcome::invalid);
     assert(pivots.empty());
@@ -3044,13 +3042,13 @@ int test_regulator_pivot_arb_ambiguity_and_invalidity() {
     set_arb_mat_entry_interval_si_2exp(
             late_ambiguity, 1, 1, 3, -33, 1, -31);
     pivots = {47};
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(late_ambiguity), 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(pivots.empty());
 
     pivots = {47};
-    assert(silex::detail::regulator_pivot_rows_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_rows(
             pivots, sflint::ArbMatConstRef(exact_zero), 0) ==
            silex::detail::RegulatorPivotOutcome::invalid);
     assert(pivots.empty());
@@ -3064,7 +3062,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
 
     sflint::ArbMat discarded(1, 2);
     set_arb_mat_entry_si_2exp(discarded, 0, 0, 1, -3);
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, discarded, signature, 1, 2, 256) ==
            silex::detail::RegulatorPivotOutcome::success);
     assert(selected.empty());
@@ -3073,7 +3071,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     sflint::ArbMat retained(1, 2);
     set_arb_mat_entry_si_2exp(retained, 0, 0, 1, -2);
     set_arb_mat_entry_si_2exp(retained, 0, 1, 1, 0);
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, retained, signature, 1, 2, 256) ==
            silex::detail::RegulatorPivotOutcome::success);
     assert((selected == std::vector<slong>{0}));
@@ -3083,7 +3081,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     set_arb_mat_entry_si_2exp(ambiguous, 0, 1, 0, 0);
     selected = {47};
     pivots = {47};
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, ambiguous, signature, 1, 2, 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(selected.empty());
@@ -3093,7 +3091,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     ::arb_add_error_2exp_si(arb_mat_entry(ambiguous.raw(), 0, 0), -2);
     selected = {47};
     pivots = {47};
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, ambiguous, signature, 1, 2, 256) ==
            silex::detail::RegulatorPivotOutcome::precision_inconclusive);
     assert(selected.empty());
@@ -3103,7 +3101,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     sflint::ArbMat resolved(1, 2);
     set_arb_mat_entry_interval_si_2exp(resolved, 0, 0, 3, -4, 5, -4);
     set_arb_mat_entry_si_2exp(resolved, 0, 1, 1, 0);
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, resolved, signature, 1, 2, 256) ==
            silex::detail::RegulatorPivotOutcome::success);
     assert((selected == std::vector<slong>{0}));
@@ -3113,7 +3111,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     ::arb_pos_inf(arb_mat_entry(resolved.raw(), 0, 1));
     selected = {47};
     pivots = {47};
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, resolved, signature, 1, 2, 256) ==
            silex::detail::RegulatorPivotOutcome::invalid);
     assert(selected.empty());
@@ -3126,7 +3124,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     ::arb_pos_inf(arb_mat_entry(late_invalid.raw(), 1, 1));
     selected = {47};
     pivots = {47};
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, late_invalid, signature, 1, 2, 256) ==
            silex::detail::RegulatorPivotOutcome::invalid);
     assert(selected.empty());
@@ -3140,19 +3138,19 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     set_arb_mat_entry_si_2exp(mapped, 1, 0, 1, -3);
     set_arb_mat_entry_si_2exp(mapped, 2, 1, 1, -2);
     set_arb_mat_entry_si_2exp(mapped, 2, 2, 1, 0);
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, mapped, signature3, 2, 3, 256) ==
            silex::detail::RegulatorPivotOutcome::success);
     assert((selected == std::vector<slong>{0, 2}));
 
     selected = {47};
     pivots = {47};
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, mapped, silex::Signature(2, 0), 2, 3, 256) ==
            silex::detail::RegulatorPivotOutcome::invalid);
     assert(selected.empty());
     assert(pivots.empty());
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, mapped,
             silex::Signature(std::numeric_limits<slong>::max(),
                              std::numeric_limits<slong>::max()),
@@ -3167,7 +3165,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
             arb_mat_entry(rank_zero_ambiguous.raw(), 0, 0), -2);
     selected = {47};
     pivots = {47};
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, rank_zero_ambiguous, silex::Signature(1, 0),
             0, 1, 256) ==
            silex::detail::RegulatorPivotOutcome::success);
@@ -3176,7 +3174,7 @@ int test_regulator_pivot_clean_cols_and_mapping() {
     ::arb_pos_inf(arb_mat_entry(rank_zero_ambiguous.raw(), 0, 0));
     selected = {47};
     pivots = {47};
-    assert(silex::detail::regulator_pivot_unit_indices_for_testing(
+    assert(silex::detail::TestHookAccess::regulator_pivot_unit_indices(
             selected, pivots, rank_zero_ambiguous, silex::Signature(1, 0),
             0, 1, 256) ==
            silex::detail::RegulatorPivotOutcome::success);
@@ -3233,15 +3231,13 @@ int test_regulator_pivot_finish_route_matrix() {
     for (const Path path : {Path::independent_unit_preprobe,
                             Path::regulator_product}) {
         const auto full =
-                silex::detail::relation_search::
-                        regulator_pivot_finish_for_testing(
+                silex::detail::TestHookAccess::regulator_pivot_finish(
                                 path, Outcome::success, 3, 3, true, 160, 0);
         assert(full.action == Action::proceed);
         assert(full.all_control_state_unchanged);
 
         const auto partial =
-                silex::detail::relation_search::
-                        regulator_pivot_finish_for_testing(
+                silex::detail::TestHookAccess::regulator_pivot_finish(
                                 path, Outcome::success, 1, 3, true, 160, 0);
         assert(partial.action == Action::request_relations);
         assert(!partial.goal_reached_after);
@@ -3275,8 +3271,7 @@ int test_regulator_pivot_finish_route_matrix() {
                partial.factor_base_restart_allow_past_half_before);
 
         const auto precision =
-                silex::detail::relation_search::
-                        regulator_pivot_finish_for_testing(
+                silex::detail::TestHookAccess::regulator_pivot_finish(
                                 path, Outcome::precision_inconclusive, 0, 3,
                                 false, 160, 0);
         assert(precision.action == Action::retry_precision);
@@ -3293,16 +3288,14 @@ int test_regulator_pivot_finish_route_matrix() {
                precision.factor_base_restart_allow_past_half_before);
 
         const auto precision_cap =
-                silex::detail::relation_search::
-                        regulator_pivot_finish_for_testing(
+                silex::detail::TestHookAccess::regulator_pivot_finish(
                                 path, Outcome::precision_inconclusive, 0, 3,
                                 false, 40960, 0);
         assert(precision_cap.action == Action::failed);
         assert(precision_cap.all_control_state_unchanged);
 
         const auto restart =
-                silex::detail::relation_search::
-                        regulator_pivot_finish_for_testing(
+                silex::detail::TestHookAccess::regulator_pivot_finish(
                                 path, Outcome::precision_inconclusive, 0, 3,
                                 true, 160, 7);
         assert(restart.action == Action::restart_factor_base);
@@ -3319,8 +3312,7 @@ int test_regulator_pivot_finish_route_matrix() {
         assert(!restart.factor_base_restart_allow_past_half_after);
 
         const auto invalid =
-                silex::detail::relation_search::
-                        regulator_pivot_finish_for_testing(
+                silex::detail::TestHookAccess::regulator_pivot_finish(
                                 path, Outcome::invalid, 0, 3, true, 160, 7);
         assert(invalid.action == Action::failed);
         assert(invalid.all_control_state_unchanged);

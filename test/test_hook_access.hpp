@@ -492,6 +492,52 @@ public:
         return relation_search::FactorBaseHonestyCallCounts::count(
                 direct_required_prime_witness, escalation);
     }
+
+    // Relation-kernel log-matrix word rescaling (see
+    // RelationKernelRescaleTestEntry).
+    static bool relation_kernel_rescale_log_matrix(
+            flint::FmpzMatRef rows,
+            flint::ArbMatConstRef matrix,
+            slong precision,
+            slong word_bits) noexcept {
+        return RelationKernelRescaleTestEntry::rescale_log_matrix(
+                rows, matrix, precision, word_bits);
+    }
+
+    // Regulator pivot selection (see RegulatorPivotTestEntry).
+    static RegulatorPivotOutcome regulator_pivot_rows(
+            std::vector<slong>& out,
+            flint::ArbMatConstRef matrix,
+            slong precision) noexcept {
+        return RegulatorPivotTestEntry::rows(out, matrix, precision);
+    }
+    static RegulatorPivotOutcome regulator_pivot_unit_indices(
+            std::vector<slong>& out,
+            std::vector<slong>& pivot_rows,
+            const flint::ArbMat& unit_logs,
+            const Signature& sig,
+            slong rank,
+            slong places,
+            slong precision) noexcept {
+        return RegulatorPivotTestEntry::unit_indices(
+                out, pivot_rows, unit_logs, sig, rank, places, precision);
+    }
+
+    // Regulator pivot finish action (see RegulatorPivotFinishTestEntry).
+    static RegulatorPivotFinishTestResult
+    regulator_pivot_finish(
+            RegulatorPivotFinishPath path,
+            RegulatorPivotOutcome outcome,
+            slong independent_count,
+            slong target_rank,
+            bool factor_base_restart_available,
+            slong analytic_finish_precision,
+            slong analytic_precision_doublings) noexcept {
+        return relation_search::RegulatorPivotFinishTestEntry::finish(
+                path, outcome, independent_count, target_rank,
+                factor_base_restart_available, analytic_finish_precision,
+                analytic_precision_doublings);
+    }
 };
 
 }  // namespace silex::detail
