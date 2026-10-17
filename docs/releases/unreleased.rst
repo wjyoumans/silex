@@ -222,8 +222,8 @@ Changed
   the prime ideal's polynomial instead of falling back to a principal-ideal
   factorization.  Published results are unchanged: 185 corpus rows in
   ``grh`` and 185 in ``proven`` mode gave identical published output before
-  and after (``grh``: 184 finished, 1 timeout on both; ``proven``: 167
-  finished, 18 timeouts on both), and the screen agreed with the
+  and after (``grh``: 184 finished, 1 timeout on both; ``proven``: 168
+  finished, 17 timeouts on both), and the screen agreed with the
   principal-ideal fallback on every decision checked.  See "Class groups and
   order units" in :doc:`../reference/algorithms_and_sources`.
 

@@ -444,8 +444,9 @@ bool factor_integral_data_over_base_by_residue_screen(
     // elements take the exact fallback.  A prime recorded with the integral
     // generator omega of a maximal quadratic order (basis [1, omega]) keeps
     // the coordinate polynomial, which is its omega-polynomial.  The index
-    // is the order's cached [O : Z[theta]]; it exists only when the defining
-    // polynomial is monic integral and O contains Z[theta].
+    // is the order's cached [O : Z[theta]]; it exists when Z[theta] is
+    // contained in O.  Theta-residue primes are built only for a monic
+    // integral defining polynomial.
     const bool theta_residues = !parent->is_equation_order();
     flint::Fmpz equation_order_index;
     if (theta_residues &&
