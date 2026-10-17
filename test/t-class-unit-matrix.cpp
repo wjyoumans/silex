@@ -6,6 +6,7 @@
 #include <silex/unit.hpp>
 #include <silex/zeta.hpp>
 
+#include "class_group/class_group_certification_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -3048,8 +3049,338 @@ int test_real_quadratic_proven_d100000005() {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Failure atomicity of the certification routes (T-010, T-079).
+//
+// A failed try_certify_quadratic, try_certify_trivial_quotient,
+// try_certify_class_unit_with_zeta_bf, or class_unit_with_units attempt must
+// leave the class group exactly as it found it: records, statuses, and labels.
+// The comparison is the full public pair snapshot plus the ell-local proof
+// records, the completeness fields, and the analytic certification label.
+// ---------------------------------------------------------------------------
+namespace {
+
+using AtomicityAccess = silex::detail::ClassGroupCertificationAccess;
+
+struct CertificationExtras {
+    silex::CertificationMode completeness = silex::CertificationMode::unknown;
+    silex::ClassUnitCompletenessBasis basis =
+            silex::ClassUnitCompletenessBasis::none;
+    silex::CertificationMode analytic = silex::CertificationMode::unknown;
+    bool proof_present[4] = {false, false, false, false};
+    silex::ProofState proof_status[4] = {};
+    slong proof_rank[4] = {0, 0, 0, 0};
+    slong proof_target[4] = {0, 0, 0, 0};
+    slong proof_local[4] = {0, 0, 0, 0};
+};
+
+struct FullState {
+    PairPublicSnapshot pair;
+    CertificationExtras extras;
+};
+
+bool capture_full_state(FullState& out,
+                        const silex::ClassGroupContext& class_group,
+                        const silex::OrderUnitGroup& units) noexcept {
+    if (!capture_pair_public_snapshot(out.pair, class_group, units)) {
+        return false;
+    }
+    out.extras.completeness =
+            class_group.class_unit_completeness_certification();
+    out.extras.basis = class_group.class_unit_completeness_basis();
+    out.extras.analytic = class_group.analytic_class_regulator_certification();
+    const slong ells[4] = {2, 3, 5, 7};
+    for (int i = 0; i < 4; ++i) {
+        sflint::Fmpz ell;
+        sflint::fmpz_set_si(sflint::FmpzRef(ell), ells[i]);
+        out.extras.proof_present[i] =
+                AtomicityAccess::relation_saturation_proof_record(
+                        class_group, sflint::FmpzConstRef(ell),
+                        out.extras.proof_status[i], out.extras.proof_rank[i],
+                        out.extras.proof_target[i], out.extras.proof_local[i]);
+    }
+    return true;
+}
+
+bool same_full_state(const FullState& left, const FullState& right) noexcept {
+    if (!same_pair_public_snapshot(left.pair, right.pair) ||
+        left.extras.completeness != right.extras.completeness ||
+        left.extras.basis != right.extras.basis ||
+        left.extras.analytic != right.extras.analytic) {
+        return false;
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (left.extras.proof_present[i] != right.extras.proof_present[i] ||
+            (left.extras.proof_present[i] &&
+             (left.extras.proof_status[i] != right.extras.proof_status[i] ||
+              left.extras.proof_rank[i] != right.extras.proof_rank[i] ||
+              left.extras.proof_target[i] != right.extras.proof_target[i] ||
+              left.extras.proof_local[i] != right.extras.proof_local[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Runs `attempt`, which must fail, and requires the full state to be equal
+// before and after.
+template <typename Attempt>
+bool check_failed_route_is_atomic(const char* name,
+                                  silex::ClassGroupContext& class_group,
+                                  const silex::OrderUnitGroup& units,
+                                  Attempt&& attempt) noexcept {
+    FullState before;
+    FullState after;
+    if (!capture_full_state(before, class_group, units)) {
+        std::cerr << name << ": snapshot before unavailable\n";
+        return false;
+    }
+    if (attempt()) {
+        std::cerr << name << ": the route was expected to fail\n";
+        return false;
+    }
+    if (!capture_full_state(after, class_group, units) ||
+        !same_full_state(before, after)) {
+        std::cerr << name << ": failed route changed the class group\n";
+        return false;
+    }
+    return true;
+}
+
+// Q(sqrt(radicand)) with a candidate class group, optionally carrying proven
+// units and an ell = 2 saturation record (so stale-record clearing and
+// restoration would be visible).
+struct AtomicityFixture {
+    FieldSetup setup;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    sflint::Fmpz factor_base_bound;
+};
+
+bool build_atomicity_fixture(AtomicityFixture& fx,
+                             slong radicand,
+                             bool with_units_and_saturation,
+                             slong bound_override = 0) noexcept {
+    const slong coefficients[2] = {-radicand, 0};
+    fx.setup = setup_from_coefficients(coefficients, 2);
+    silex::ClassGroupComputeOptions unused;
+    if (!configure_matrix_options(unused, fx.factor_base_bound,
+                                  fx.setup.maximal_order,
+                                  silex::CertificationMode::unknown)) {
+        return false;
+    }
+    if (bound_override > 0) {
+        sflint::fmpz_set_si(sflint::FmpzRef(fx.factor_base_bound),
+                            bound_override);
+    }
+    silex::ClassGroupCandidateOptions options;
+    options.max_candidates = 256;
+    options.max_relations = 64;
+    if (!fx.class_group.compute_candidate(
+                fx.setup.maximal_order,
+                sflint::FmpzConstRef(fx.factor_base_bound), options)) {
+        return false;
+    }
+    if (!with_units_and_saturation) {
+        return true;
+    }
+    if (!fx.units.compute(fx.setup.maximal_order) ||
+        fx.units.certification_status() !=
+                silex::CertificationMode::proven ||
+        !fx.class_group.check_factor_base_generation_bound(
+                sflint::FmpzConstRef(fx.factor_base_bound)) ||
+        !fx.class_group.try_certify_with_units(
+                fx.units, silex::CertificationMode::unknown, 80)) {
+        return false;
+    }
+    sflint::Fmpz index_bound;
+    sflint::Fmpz aux_bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(index_bound), 2);
+    sflint::fmpz_set_si(sflint::FmpzRef(aux_bound), 31);
+    return AtomicityAccess::
+            try_prove_relation_saturation_index_bound_with_units(
+                    fx.class_group, fx.units,
+                    sflint::FmpzConstRef(index_bound),
+                    sflint::FmpzConstRef(aux_bound)) &&
+           fx.class_group.relation_saturation_record_count() > 0;
+}
+
+// try_certify_quadratic on a real quadratic field with h = 2: the route runs
+// the generation check, which writes the checked bound, status, and records,
+// and then rejects h_cand != 1.
+int test_failed_try_certify_quadratic_is_atomic() {
+    AtomicityFixture fx;
+    if (!build_atomicity_fixture(fx, 10, false)) {
+        std::cerr << "quadratic atomicity: fixture unavailable\n";
+        return 1;
+    }
+    if (fx.class_group.factor_base_generation_checked_status() !=
+        silex::ProofState::not_checked) {
+        std::cerr << "quadratic atomicity: generation already checked\n";
+        return 1;
+    }
+    if (!check_failed_route_is_atomic(
+                "real quadratic h = 2 try_certify_quadratic",
+                fx.class_group, fx.units, [&]() noexcept {
+                    return fx.class_group.try_certify_quadratic(
+                            silex::CertificationMode::proven);
+                })) {
+        return 1;
+    }
+    // The same route on a context that already holds proven units and an
+    // ell = 2 saturation record.
+    AtomicityFixture populated;
+    if (!build_atomicity_fixture(populated, 10, true)) {
+        std::cerr << "quadratic atomicity: populated fixture unavailable\n";
+        return 1;
+    }
+    if (!check_failed_route_is_atomic(
+                "populated real quadratic try_certify_quadratic",
+                populated.class_group, populated.units, [&]() noexcept {
+                    return populated.class_group.try_certify_quadratic(
+                            silex::CertificationMode::proven);
+                })) {
+        return 1;
+    }
+    // An imaginary quadratic field whose factor base is too small to prove
+    // generation is rejected at the exact-route gate.
+    AtomicityFixture imaginary;
+    if (!build_atomicity_fixture(imaginary, -47, false, 2)) {
+        std::cerr << "quadratic atomicity: imaginary fixture unavailable\n";
+        return 1;
+    }
+    if (imaginary.class_group.factor_base_generation_status() ==
+        silex::ProofState::verified) {
+        std::cerr << "quadratic atomicity: generation unexpectedly verified\n";
+        return 1;
+    }
+    if (!check_failed_route_is_atomic(
+                "imaginary quadratic unproved generation",
+                imaginary.class_group, imaginary.units, [&]() noexcept {
+                    return imaginary.class_group.try_certify_quadratic(
+                            silex::CertificationMode::proven);
+                })) {
+        return 1;
+    }
+    return 0;
+}
+
+// try_certify_trivial_quotient on h = 2 with verified units and an ell = 2
+// saturation record: the route rejects h != 1 and must keep the record,
+// which a successful h = 1 certification would have cleared.
+int test_failed_try_certify_trivial_quotient_is_atomic() {
+    AtomicityFixture fx;
+    if (!build_atomicity_fixture(fx, 10, true)) {
+        std::cerr << "trivial quotient atomicity: fixture unavailable\n";
+        return 1;
+    }
+    if (fx.class_group.unit_proof_status() != silex::ProofState::verified) {
+        std::cerr << "trivial quotient atomicity: units not verified\n";
+        return 1;
+    }
+    return check_failed_route_is_atomic(
+                   "h = 2 try_certify_trivial_quotient", fx.class_group,
+                   fx.units, [&]() noexcept {
+                       return fx.class_group.try_certify_trivial_quotient(
+                               silex::CertificationMode::proven);
+                   })
+                   ? 0
+                   : 1;
+}
+
+// class_unit_with_units given an hR that is a multiple of the true product:
+// the route records nothing it cannot back, after having run the generation
+// check.
+int test_failed_class_unit_with_units_is_atomic() {
+    AtomicityFixture fx;
+    if (!build_atomicity_fixture(fx, 10, false)) {
+        std::cerr << "class_unit_with_units atomicity: fixture unavailable\n";
+        return 1;
+    }
+    if (!fx.units.compute(fx.setup.maximal_order) ||
+        fx.units.certification_status() != silex::CertificationMode::proven) {
+        std::cerr << "class_unit_with_units atomicity: units unavailable\n";
+        return 1;
+    }
+    sflint::Arb product;
+    if (!fx.units.class_regulator_product(
+                sflint::ArbRef(product), fx.class_group, 192)) {
+        std::cerr << "class_unit_with_units atomicity: product unavailable\n";
+        return 1;
+    }
+    sflint::Arb wrong_product;
+    sflint::arb_mul_ui(wrong_product, product, 3, 192);
+    return check_failed_route_is_atomic(
+                   "class_unit_with_units with hR times three",
+                   fx.class_group, fx.units, [&]() noexcept {
+                       return AtomicityAccess::try_certify_class_unit_with_units(
+                               fx.class_group, fx.units,
+                               sflint::ArbConstRef(wrong_product), 192,
+                               false);
+                   })
+                   ? 0
+                   : 1;
+}
+
+// try_certify_class_unit_with_zeta_bf at 4 bits of precision: the audit and
+// the generation check run (the check writes the checked bound, status, and
+// per-prime records on a context that has not been checked), then the index
+// test cannot certify and the route fails.
+int test_failed_try_certify_zeta_bf_is_atomic() {
+    AtomicityFixture fresh;
+    if (!build_atomicity_fixture(fresh, 10, false) ||
+        !fresh.units.compute(fresh.setup.maximal_order) ||
+        fresh.units.certification_status() !=
+                silex::CertificationMode::proven ||
+        fresh.class_group.factor_base_generation_checked_status() !=
+                silex::ProofState::not_checked) {
+        std::cerr << "zeta_bf atomicity: fresh fixture unavailable\n";
+        return 1;
+    }
+    if (!check_failed_route_is_atomic(
+                "unchecked real quadratic zeta_bf at 4 bits",
+                fresh.class_group, fresh.units, [&]() noexcept {
+                    return fresh.class_group
+                            .try_certify_class_unit_with_zeta_bf(
+                                    fresh.units, 20000, 4);
+                })) {
+        return 1;
+    }
+
+    AtomicityFixture populated;
+    if (!build_atomicity_fixture(populated, 10, true)) {
+        std::cerr << "zeta_bf atomicity: populated fixture unavailable\n";
+        return 1;
+    }
+    if (!check_failed_route_is_atomic(
+                "populated real quadratic zeta_bf at 4 bits",
+                populated.class_group, populated.units, [&]() noexcept {
+                    return populated.class_group
+                            .try_certify_class_unit_with_zeta_bf(
+                                    populated.units, 20000, 4);
+                })) {
+        return 1;
+    }
+    // A cutoff of one term is rejected by the audit before any write.
+    return check_failed_route_is_atomic(
+                   "populated real quadratic zeta_bf cutoff one",
+                   populated.class_group, populated.units, [&]() noexcept {
+                       return populated.class_group
+                               .try_certify_class_unit_with_zeta_bf(
+                                       populated.units, 1, 192);
+                   })
+                   ? 0
+                   : 1;
+}
+
+}  // namespace
+
 int main() {
     int status = 0;
+    status |= test_failed_try_certify_quadratic_is_atomic();
+    status |= test_failed_try_certify_trivial_quotient_is_atomic();
+    status |= test_failed_class_unit_with_units_is_atomic();
+    status |= test_failed_try_certify_zeta_bf_is_atomic();
     status |= test_public_paired_certification_request_validation();
     status |=
             test_public_paired_cross_order_failure_preserves_existing_outputs();

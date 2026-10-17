@@ -809,6 +809,8 @@ if(SILEX_BUILD_TESTS)
     add_executable(t-silex-class-unit-matrix
         test/t-class-unit-matrix.cpp)
     target_link_libraries(t-silex-class-unit-matrix PRIVATE Silex::silex)
+    target_include_directories(t-silex-class-unit-matrix PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-class-unit-matrix)
     add_test(NAME silex-class-unit-matrix
         COMMAND t-silex-class-unit-matrix)
