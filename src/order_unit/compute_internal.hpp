@@ -694,6 +694,34 @@ struct RelationSaturationMemo {
     slong attempt_limit = 0;
     // Number of passes skipped through the memo, for tests.
     slong skips = 0;
+
+    // Deferral of the bounded pass behind relation extension, set only by
+    // the grh class/unit loop.  Reference Clgp.jl:_class_unit_group
+    // (lines 248-258) saturates at 2 only after an outer round whose unit
+    // search did not improve the index (`isone(improved)`); its first round
+    // reports no improvement (FindUnits.jl lines 100 and 276 start from
+    // index 0) and goes straight to new relations.  Here the bounded pass is likewise
+    // deferred to the next relation-extension slice while extension keeps
+    // lowering the analytic index bound.  It runs at the first pass after an
+    // extension slice that did not lower the bound below the bound of the
+    // deferred pass (a stall), or when the extension itself fails
+    // (run_deferred_class_relation_saturation); from then on every pass runs
+    // as without deferral.  The deferral only reorders the pass and the
+    // extension: it never skips a pass that a stall would need, and grh
+    // acceptance never rests on this saturation.
+    bool defer_until_extension_stalls = false;
+    // True once a stall (or a failed extension) has run the deferred pass.
+    bool deferral_done = false;
+    // True while a deferred pass has not been run.
+    bool deferred = false;
+    // The smallest index bound of the deferred passes since the last
+    // extension slice, and the slice count when they were deferred.
+    flint::Fmpz deferred_index_bound;
+    slong deferred_extension_round = 0;
+    // Successful relation-extension slices of the class/unit loop.
+    slong extension_rounds = 0;
+    // Number of deferred passes, for tests.
+    slong deferrals = 0;
 };
 
 struct ValidationUnitRefreshOptions {
@@ -879,6 +907,16 @@ bool saturate_candidate_class_relations_with_units(
         flint::FmpzConstRef index_bound,
         bool index_bound_is_exact,
         RelationSaturationMemo* memo = nullptr) noexcept;
+// Runs the bounded pass that `memo` deferred (see
+// RelationSaturationMemo::defer_until_extension_stalls) when the class/unit
+// loop's relation extension failed, and ends the deferral.  `changed` is
+// false, and nothing runs, when no pass is pending.
+bool run_deferred_class_relation_saturation(
+        bool& changed,
+        ClassGroupContext& class_group,
+        const OrderUnitGroup& units,
+        const ClassGroupComputeOptions& options,
+        RelationSaturationMemo& memo) noexcept;
 bool complete_requested_proven_relation_saturation(
         ClassGroupContext& class_group,
         OrderUnitGroup& units,

@@ -3761,6 +3761,108 @@ int test_grh_validation_saturation_memo_invalidated_by_change() {
     return 0;
 }
 
+// The grh deferral of the bounded pass behind relation extension
+// (RelationSaturationMemo::defer_until_extension_stalls).  In the
+// degree-one field with factor base {2} and the single relation (-4), h_cand
+// is 2 and a pass at ell = 2 appends the relation (2), so a pass that runs
+// is visible as a new relation.  The pass is deferred until an extension
+// slice leaves the index bound where the deferred pass saw it.
+int test_grh_validation_saturation_deferred_until_extension_stalls() {
+    silex::NumberField field = degree_one_field();
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::OrderUnitGroup units(order);
+    assert(units.compute(order));
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    options.max_relations = 500;
+
+    auto make_context = [&](silex::ClassGroupContext& context) {
+        sflint::Fmpz bound;
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+        assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+        const silex::FactorBase* base = context.factor_base();
+        assert(base != nullptr);
+        silex::Relation relation(*base);
+        silex::Element alpha(field);
+        assert(alpha.set_si(-4));
+        assert(relation.set_generator(alpha));
+        assert(context.append_relation(relation));
+        assert(context.publish_presentation());
+    };
+    auto pass = [&](bool& changed, silex::ClassGroupContext& context,
+                    slong index_bound,
+                    silex::detail::RelationSaturationMemo* memo) {
+        sflint::Fmpz bound;
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound),
+                            static_cast<ulong>(index_bound));
+        return silex::detail::saturate_candidate_class_relations_with_units(
+                changed, context, units, options,
+                sflint::FmpzConstRef(bound), false, memo);
+    };
+
+    // Deferred at the first pass and at a repeat in the same extension
+    // round, which keeps the smaller bound.
+    silex::ClassGroupContext context(order);
+    make_context(context);
+    silex::detail::RelationSaturationMemo memo;
+    memo.defer_until_extension_stalls = true;
+    bool changed = true;
+    assert(pass(changed, context, 3, &memo));
+    assert(!changed && context.relation_count() == 1);
+    assert(memo.deferred && !memo.deferral_done && memo.deferrals == 1);
+    assert(sflint::fmpz_equal_si(memo.deferred_index_bound, 3));
+    assert(pass(changed, context, 4, &memo));
+    assert(!changed && context.relation_count() == 1 && memo.deferrals == 2);
+    assert(sflint::fmpz_equal_si(memo.deferred_index_bound, 3));
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+
+    // An extension slice that lowered the bound: deferred again.
+    ++memo.extension_rounds;
+    assert(pass(changed, context, 2, &memo));
+    assert(!changed && context.relation_count() == 1 && memo.deferrals == 3);
+    assert(sflint::fmpz_equal_si(memo.deferred_index_bound, 2));
+
+    // An extension slice that left the bound at 2 stalled: the pass runs,
+    // and so does every later pass.
+    ++memo.extension_rounds;
+    assert(pass(changed, context, 2, &memo));
+    assert(changed && context.relation_count() == 2);
+    assert(memo.deferral_done && !memo.deferred && memo.deferrals == 3);
+    bool ran = false;
+    assert(silex::detail::run_deferred_class_relation_saturation(
+            ran, context, units, options, memo));
+    assert(!ran && context.relation_count() == 2);
+
+    // Without the flag (the default, and every request but grh) nothing is
+    // deferred.
+    silex::ClassGroupContext plain(order);
+    make_context(plain);
+    silex::detail::RelationSaturationMemo plain_memo;
+    assert(pass(changed, plain, 3, &plain_memo));
+    assert(changed && plain.relation_count() == 2);
+    assert(plain_memo.deferrals == 0);
+
+    // A failed extension runs the pending pass at once and ends the
+    // deferral.
+    silex::ClassGroupContext failed(order);
+    make_context(failed);
+    silex::detail::RelationSaturationMemo failed_memo;
+    failed_memo.defer_until_extension_stalls = true;
+    assert(silex::detail::run_deferred_class_relation_saturation(
+            ran, failed, units, options, failed_memo));
+    assert(!ran && failed.relation_count() == 1 &&
+           !failed_memo.deferral_done);
+    assert(pass(changed, failed, 3, &failed_memo));
+    assert(!changed && failed.relation_count() == 1);
+    assert(silex::detail::run_deferred_class_relation_saturation(
+            ran, failed, units, options, failed_memo));
+    assert(ran && failed.relation_count() == 2);
+    assert(failed_memo.deferral_done && !failed_memo.deferred);
+    return 0;
+}
+
 int test_relation_kernel_units_index_bounded_cubic_rank_target() {
     silex::NumberField field = cubic_field(-2, -5);
     silex::Order equation_order;
@@ -13232,6 +13334,74 @@ int test_grh_validation_skips_unit_rebuild_from_unchanged_class_context() {
     return 0;
 }
 
+struct DeferredSaturationEvents {
+    slong deferred = 0;
+    slong bounded_passes = 0;
+};
+
+void deferred_saturation_callback(void* user,
+                                  silex::DiagnosticsModule,
+                                  silex::ProfileEvent event,
+                                  const char*,
+                                  const char* label) noexcept {
+    DeferredSaturationEvents* events =
+            static_cast<DeferredSaturationEvents*>(user);
+    if (label == nullptr) {
+        return;
+    }
+    if (event == silex::ProfileEvent::event &&
+        std::strcmp(label,
+                    "unit_group.validation_class_relation_saturation."
+                    "deferred_to_extension") == 0) {
+        ++events->deferred;
+    }
+    if (event == silex::ProfileEvent::begin_scope &&
+        std::strcmp(label,
+                    "class_group.saturate_relations_bounded_with_units") ==
+                0) {
+        ++events->bounded_passes;
+    }
+}
+
+// Under a grh request the bounded class-relation saturation waits for the
+// next relation-extension slice (reference Clgp.jl:248-258).  For x^6 - 3
+// (corpus row pure_x6_minus_3, h = 1) the first validation sees an index
+// bound above one and h_cand = 2, and the extension slice alone brings the
+// bound to one, so the bounded pass never runs.
+int test_grh_validation_defers_bounded_saturation_to_extension() {
+    const std::vector<slong> pure = {-3, 0, 0, 0, 0, 0, 1};
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    DeferredSaturationEvents events;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group) |
+                    silex::diagnostics_module_bit(
+                            silex::DiagnosticsModule::class_group),
+            deferred_saturation_callback, &events);
+    const TransactionRun run = run_transaction(
+            pure, silex::CertificationMode::grh, 5000, 1000, &diagnostics);
+    assert(run.ok && run.audit.final_result_published);
+    assert(run.audit.class_group_certification ==
+           silex::CertificationMode::grh);
+    // Rank 3 and the corpus regulator 38.994309113587113116900.
+    assert(run.free_rank == 3);
+    assert(run.regulator.has_value());
+    {
+        sflint::Arb expected;
+        sflint::arb_set_d(expected, 38.994309113587113);
+        ::arb_add_error_2exp_si(expected.raw(), -30);
+        assert(::arb_overlaps(expected.raw(), run.regulator->raw()) != 0);
+    }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(events.deferred >= 1);
+    assert(events.bounded_passes == 0);
+#else
+    assert(events.deferred == 0);
+#endif
+    return 0;
+}
+
 // The grh class/unit loop refill starts at the reference 2 relations, keeps
 // 2 after a single repeated validation, doubles from the second consecutive
 // repeat on, restarts at 2 when a round does not repeat, and saturates at
@@ -13442,6 +13612,7 @@ int test_grh_saturation_square_tests_keep_degree_ten_lift_limit() {
 
 int main() {
     test_grh_validation_skips_unit_rebuild_from_unchanged_class_context();
+    test_grh_validation_defers_bounded_saturation_to_extension();
     test_compute_failure_records_validation_outcome_only_when_it_ran();
     test_grh_continuation_without_relation_progress_fails_closed();
     test_relation_refill_target_rule();
@@ -13451,6 +13622,7 @@ int main() {
     test_lll_relation_slice_rejects_small_extension_target();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
+    test_grh_validation_saturation_deferred_until_extension_stalls();
     test_unit_extraction_cache_clear();
     test_precision_doubling_cap_default_value();
     test_precision_doubling_cap_forced_failures();

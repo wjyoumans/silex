@@ -643,6 +643,39 @@ bool saturate_candidate_class_relations_with_units(
         return true;
     }
 
+    // Extension before the first bounded pass (see
+    // RelationSaturationMemo::defer_until_extension_stalls).  A pass is
+    // deferred unless an extension slice has run since the last deferred
+    // pass without lowering the index bound below that pass's bound.
+    if (memo != nullptr && !index_bound_is_exact &&
+        memo->defer_until_extension_stalls && !memo->deferral_done) {
+        const bool new_round =
+                memo->extension_rounds != memo->deferred_extension_round;
+        const bool stalled = memo->deferred && new_round &&
+                flint::fmpz_cmp(index_bound,
+                                flint::FmpzConstRef(
+                                        memo->deferred_index_bound)) >= 0;
+        if (!stalled) {
+            if (!memo->deferred || new_round ||
+                flint::fmpz_cmp(index_bound,
+                                flint::FmpzConstRef(
+                                        memo->deferred_index_bound)) < 0) {
+                flint::fmpz_set(flint::FmpzRef(memo->deferred_index_bound),
+                                index_bound);
+            }
+            memo->deferred = true;
+            memo->deferred_extension_round = memo->extension_rounds;
+            ++memo->deferrals;
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::unit_group,
+                    "unit_group.validation_class_relation_saturation."
+                    "deferred_to_extension");
+            return true;
+        }
+        memo->deferral_done = true;
+        memo->deferred = false;
+    }
+
     flint::Fmpz aux_bound;
     relation_saturation_aux_bound(aux_bound, options);
     // The exact imaginary-quadratic index h_cand / h bounds the saturation
@@ -750,6 +783,31 @@ bool saturate_candidate_class_relations_with_units(
     }
 
     return true;
+}
+
+bool run_deferred_class_relation_saturation(
+        bool& changed,
+        ClassGroupContext& class_group,
+        const OrderUnitGroup& units,
+        const ClassGroupComputeOptions& options,
+        RelationSaturationMemo& memo) noexcept {
+    changed = false;
+    if (!memo.defer_until_extension_stalls || memo.deferral_done ||
+        !memo.deferred) {
+        return true;
+    }
+    memo.deferral_done = true;
+    memo.deferred = false;
+    const DiagnosticsContext* diagnostics =
+            options.diagnostics != nullptr ? options.diagnostics
+                                           : class_group.diagnostics();
+    SILEX_PROFILE_EVENT(
+            diagnostics, DiagnosticsModule::unit_group,
+            "unit_group.validation_class_relation_saturation."
+            "deferred_run_after_failed_extension");
+    return saturate_candidate_class_relations_with_units(
+            changed, class_group, units, options,
+            flint::FmpzConstRef(memo.deferred_index_bound), false, &memo);
 }
 
 bool try_certify_candidate_with_zeta(ClassGroupContext& class_group,

@@ -4501,8 +4501,12 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     // saturation once per loop iteration; while h_cand and the candidate
     // regulator stay put, a pass that found nothing is not run again (see
     // detail::RelationSaturationMemo).
+    // The same memo defers that pass behind relation extension until an
+    // extension slice stalls (RelationSaturationMemo::
+    // defer_until_extension_stalls; reference Clgp.jl:248-258).
     detail::RelationSaturationMemo relation_saturation_memo;
     if (options.requested_certification == CertificationMode::grh) {
+        relation_saturation_memo.defer_until_extension_stalls = true;
         refresh_options.relation_saturation_memo = &relation_saturation_memo;
     }
     if (rank > 1 || (transaction && rank > 0)) {
@@ -4813,7 +4817,19 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                     : candidate_class_group.extend_tentative_relations_(
                               order, factor_base_bound, extend_options);
         }
-        if (!extend_ok) {
+        const bool extension_progress = extend_ok &&
+                candidate_class_group.relation_count() > relation_count_before;
+        bool deferred_saturation_changed = false;
+        if (!extension_progress &&
+            !detail::run_deferred_class_relation_saturation(
+                    deferred_saturation_changed, candidate_class_group,
+                    candidate_units, options, relation_saturation_memo)) {
+            return false;
+        }
+        // A bounded pass deferred behind this extension runs now, since
+        // the extension stalled; when it finds relations the loop goes on
+        // as after an extension slice.
+        if (!extend_ok && !deferred_saturation_changed) {
             SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "class/unit continuation did not add a relation "
@@ -4821,13 +4837,17 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
             record_relation_search_budget_cap();
             return false;
         }
-        if (candidate_class_group.relation_count() <= relation_count_before) {
+        if (!extension_progress && !deferred_saturation_changed) {
             SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "class/unit continuation made no relation "
                       "progress");
             record_relation_search_budget_cap();
             return false;
+        }
+        if (extension_progress &&
+            relation_saturation_memo.extension_rounds < WORD_MAX) {
+            ++relation_saturation_memo.extension_rounds;
         }
         flint::Fmpz class_order_after;
         {
