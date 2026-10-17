@@ -1839,7 +1839,7 @@ struct PendingUnitFactor {
 // gives the same terms in the same order with the same exponents.
 //
 // Sets `merged` false, with `out` unchanged, when an exponent sum does not
-// fit an slong or every exponent cancels; the caller then stores `pending`
+// fit an slong, every exponent cancels, or the bucket count guard trips; the caller then stores `pending`
 // as it is.  False when a factor cannot be stored.
 bool push_merged_unit_factors(FactoredElement& out,
                               bool& merged,
@@ -1939,8 +1939,9 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
     // merged (push_merged_unit_factors).  The generators of a relation unit
     // group are long products of a few distinct relation elements, so the
     // concatenated list repeats them many times; the merged list holds each
-    // once, as the reference's factored-element dictionary does
-    // (NfOrd/FacElem.jl:149-205), and its log embedding takes the same
+    // once, as the reference's reduce_mod_units does by multiplying
+    // FacElem values (Clgp/Map.jl, Misc/FactoredElem.jl mul!; the order of
+    // first occurrence is ours), and its log embedding takes the same
     // terms.  A row with c_i = 0 keeps value_i's list.  When the merge does
     // not apply (an exponent sum past slong, or everything cancels), the
     // concatenated list is stored.  The exits are those of the concatenating

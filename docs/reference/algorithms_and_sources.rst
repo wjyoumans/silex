@@ -1282,12 +1282,15 @@ behavior on purpose.
 The reduced value ``value * prod_j g_j^(-c_j)`` is stored with equal factors
 merged: one entry per distinct factor, in order of first occurrence, with
 the sum of its exponents, and no entry for a factor whose exponents cancel.
-This is how a Hecke ``FacElem`` dictionary holds the product
-(``src/NumFieldOrd/NfOrd/FacElem.jl``, 149-205).  Factors are compared as
-``FactoredElement::logarithmic_embedding`` compares them when it merges equal
-bases (Hecke's ``conjugates_arb_log`` for ``FacElem``, below), so the stored
-list gives that embedding the same terms in the same order, and its result
-is unchanged.
+This follows Hecke v0.38.6 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``,
+which multiplies by ``U.units[j]^(-V[i,j])`` with ``mul!`` on ``FacElem``
+(``src/Misc/FactoredElem.jl``, 281-289), adding exponents per key with
+``add_to_key!(..., remove_zero = true)``.  Hecke's dictionary has no
+order; the order of first occurrence is Silex's choice.  Factors are
+compared as ``FactoredElement::logarithmic_embedding`` compares them when it
+merges equal bases (see "Factored elements and analytic products"), so the
+stored list gives that embedding the same terms in the same order, and its
+result is unchanged.
 The generators of a relation unit group are long products of a few distinct
 relation elements; without the merge, every reduction appends each
 generator's whole list again.  When an exponent sum does not fit ``slong``,

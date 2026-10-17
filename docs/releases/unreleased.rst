@@ -1114,9 +1114,10 @@ Changed
 
 - Reducing relation units modulo the unit group now stores each reduced
   value with equal factors merged: one entry per distinct factor, in order of
-  first occurrence, with the summed exponent, as a Hecke ``FacElem``
-  dictionary holds the product (``src/NumFieldOrd/NfOrd/FacElem.jl``,
-  149-205).  Before, each reduction appended every generator's whole factor
+  first occurrence, with the summed exponent, as Hecke's
+  ``reduce_mod_units`` does by ``mul!`` on a ``FacElem``
+  (``src/NumFieldOrd/NfOrd/Clgp/Map.jl`` and ``src/Misc/FactoredElem.jl``;
+  the order of first occurrence is Silex's choice).  Before, each reduction appended every generator's whole factor
   list again, so the stored units repeated a few dozen relation elements
   thousands of times.  When a summed exponent does not fit ``slong``, or
   every exponent cancels, the concatenated list is stored as before.
