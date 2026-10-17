@@ -145,6 +145,13 @@ public:
         CompactPowerRootTestSeams::unit_power_root_error_.store(
                 on, std::memory_order_relaxed);
     }
+
+    // The number of extension-route saturation kernel bases kept since the
+    // process started.
+    static slong saturation_kernel_extensions_kept() noexcept {
+        return SaturationKernelTestSeams::extension_kept_.load(
+                std::memory_order_relaxed);
+    }
 };
 
 }  // namespace silex::detail

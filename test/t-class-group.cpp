@@ -6785,7 +6785,8 @@ int test_relation_saturation_kernel_basis_reuse_and_invalidation() {
 // failing, or its certificate failing, on every run at every call site
 // (CertifiedLllTestSeams), and with the extension route forced (certified,
 // or with its checks or its certificate failing; SaturationKernelTestSeams),
-// the proven class group, its saturation records and the units are the
+// the proven class group, its saturation records with their proof records
+// (rank, target rank and auxiliary-prime count) and the units are the
 // same.
 int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     using silex::detail::CertifiedLllTestFailure;
@@ -6803,6 +6804,9 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
         std::vector<sflint::Fmpz> invariants;
         std::vector<sflint::Fmpz> saturation_ells;
         std::vector<silex::ProofState> saturation_states;
+        std::vector<slong> saturation_ranks;
+        std::vector<slong> saturation_target_ranks;
+        std::vector<slong> saturation_local_primes;
         sflint::Arb regulator;
     };
     auto compute = [&](CertifiedLllTestFailure failure,
@@ -6816,6 +6820,8 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
         const slong injected =
                 TestHookAccess::certified_lll_failures_injected() +
                 TestHookAccess::saturation_kernel_failures_injected();
+        const slong extensions_kept =
+                TestHookAccess::saturation_kernel_extensions_kept();
         TestHookAccess::set_certified_lll_failure(failure);
         TestHookAccess::set_saturation_kernel_failure(extension_failure);
         TestHookAccess::set_saturation_kernel_force_extension(
@@ -6837,6 +6843,17 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                        extension_failure == SaturationKernelTestFailure::none
                        ? injections == 0
                        : injections > 0);
+        // The forced extension route ran and, with no failure injected,
+        // its basis was kept; without forcing, the kernel is small enough
+        // that it never runs.
+        const slong extensions =
+                TestHookAccess::saturation_kernel_extensions_kept() -
+                extensions_kept;
+        assert(force_extension &&
+                               extension_failure ==
+                                       SaturationKernelTestFailure::none
+                       ? extensions > 0
+                       : extensions == 0);
         assert_proven_class_group_certification(context);
         assert(units.certification_status() ==
                silex::CertificationMode::proven);
@@ -6856,6 +6873,18 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                     sflint::FmpzRef(result.saturation_ells.back()), state,
                     i));
             result.saturation_states.push_back(state);
+            silex::ProofState proof_status = silex::ProofState::not_checked;
+            slong rank = -1;
+            slong target_rank = -1;
+            slong local_primes = -1;
+            assert(CertificationAccess::relation_saturation_proof_record(
+                    context,
+                    sflint::FmpzConstRef(result.saturation_ells.back()),
+                    proof_status, rank, target_rank, local_primes));
+            assert(proof_status == state);
+            result.saturation_ranks.push_back(rank);
+            result.saturation_target_ranks.push_back(target_rank);
+            result.saturation_local_primes.push_back(local_primes);
         }
         assert(units.regulator(sflint::ArbRef(result.regulator)));
         return result;
@@ -6899,6 +6928,11 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                     sflint::FmpzConstRef(expected.saturation_ells[i])));
             assert(result.saturation_states[i] ==
                    expected.saturation_states[i]);
+            assert(result.saturation_ranks[i] == expected.saturation_ranks[i]);
+            assert(result.saturation_target_ranks[i] ==
+                   expected.saturation_target_ranks[i]);
+            assert(result.saturation_local_primes[i] ==
+                   expected.saturation_local_primes[i]);
         }
         assert(::arb_equal(result.regulator.raw(),
                            expected.regulator.raw()));

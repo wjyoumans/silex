@@ -300,6 +300,11 @@ public:
     static void note_injected() noexcept {
         injected_.fetch_add(1, std::memory_order_relaxed);
     }
+    // Counts each extension-route basis that saturation_relation_kernel
+    // kept.
+    static void note_extension_kept() noexcept {
+        extension_kept_.fetch_add(1, std::memory_order_relaxed);
+    }
 
 private:
     friend class TestHookAccess;
@@ -307,6 +312,7 @@ private:
             SaturationKernelTestFailure::none};
     inline static std::atomic<bool> force_extension_route_{false};
     inline static std::atomic<slong> injected_{0};
+    inline static std::atomic<slong> extension_kept_{0};
 };
 
 // The relation coefficients of the ell-local relation-saturation beta

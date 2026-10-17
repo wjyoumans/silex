@@ -5827,6 +5827,7 @@ public:
                 if (extension_saturation_kernel(basis, context,
                                                 flint::fmpz_mat_nrows(
                                                         kernel))) {
+                    SaturationKernelTestSeams::note_extension_kept();
                     storage->saturation_relation_kernel = std::move(basis);
                     storage->saturation_relation_kernel_valid = true;
                     return storage;
