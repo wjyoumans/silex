@@ -176,6 +176,16 @@ public:
         CertificationFailureTestSeams::zeta_bf_record_failure_.store(
                 true, std::memory_order_relaxed);
     }
+    // True while any of the switches above is still armed, that is, the
+    // armed route has not reached its seam.
+    static bool certification_failure_pending() noexcept {
+        return CertificationFailureTestSeams::exact_order_publish_failure_
+                       .load(std::memory_order_relaxed) ||
+               CertificationFailureTestSeams::exact_order_mismatch_.load(
+                       std::memory_order_relaxed) ||
+               CertificationFailureTestSeams::zeta_bf_record_failure_.load(
+                       std::memory_order_relaxed);
+    }
     static void disarm_certification_failures() noexcept {
         CertificationFailureTestSeams::exact_order_publish_failure_.store(
                 false, std::memory_order_relaxed);

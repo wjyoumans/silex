@@ -3418,6 +3418,19 @@ bool build_imaginary_fixture(AtomicityFixture& fx) noexcept {
                    silex::ProofState::not_checked;
 }
 
+// Ends a hooked case: the armed seam must have been consumed (otherwise the
+// route failed before reaching it and the case tested nothing new).  Always
+// disarms.
+bool finish_hooked_case(bool ok) {
+    const bool consumed =
+            !silex::detail::TestHookAccess::certification_failure_pending();
+    silex::detail::TestHookAccess::disarm_certification_failures();
+    if (!consumed) {
+        std::cerr << "hooked case: the armed seam was not reached\n";
+    }
+    return ok && consumed;
+}
+
 int test_hooked_imaginary_failures_are_atomic() {
     using silex::detail::TestHookAccess;
     int status = 0;
@@ -3434,8 +3447,7 @@ int test_hooked_imaginary_failures_are_atomic() {
                     return fx.class_group.try_certify_quadratic(
                             silex::CertificationMode::proven);
                 });
-        TestHookAccess::disarm_certification_failures();
-        status |= ok ? 0 : 1;
+        status |= finish_hooked_case(ok) ? 0 : 1;
     }
     {
         AtomicityFixture fx;
@@ -3450,8 +3462,7 @@ int test_hooked_imaginary_failures_are_atomic() {
                     return fx.class_group.try_certify_quadratic(
                             silex::CertificationMode::proven);
                 });
-        TestHookAccess::disarm_certification_failures();
-        status |= ok ? 0 : 1;
+        status |= finish_hooked_case(ok) ? 0 : 1;
     }
     {
         // T-067: the rank-zero exact route with index one and h > 1 writes
@@ -3473,8 +3484,7 @@ int test_hooked_imaginary_failures_are_atomic() {
                                     fx.units,
                                     silex::CertificationMode::proven);
                 });
-        TestHookAccess::disarm_certification_failures();
-        status |= ok ? 0 : 1;
+        status |= finish_hooked_case(ok) ? 0 : 1;
     }
     return status;
 }
@@ -3504,8 +3514,7 @@ int test_hooked_zeta_bf_failure_is_atomic() {
                             .try_certify_class_unit_with_zeta_bf(
                                     fx.units, 20000, 64);
                 });
-        TestHookAccess::disarm_certification_failures();
-        status |= ok ? 0 : 1;
+        status |= finish_hooked_case(ok) ? 0 : 1;
     }
     return status;
 }
