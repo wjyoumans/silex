@@ -32,6 +32,11 @@ struct FiniteAbelianGroupSmithCache {
 // Hermite normal form.  A basis that does not span the relation lattice
 // publishes invariants of that basis, and witness requests then fail closed
 // because the HNF of the full relation matrix differs from the stored basis.
+// For ClassGroupContext::publish_presentation the precondition is invariant
+// (I) of the relation-lattice audit in the comment above that function
+// (src/class_group/class_group.cpp), which walks every mutation path of the
+// relation rows and the row-module checkpoint; an expensive-level debug
+// check there asserts that every relation row lies in the basis lattice.
 //
 // The overload taking a FiniteAbelianGroupSmithCache publishes exactly the
 // group the plain overload publishes; it reuses the cached Smith form and

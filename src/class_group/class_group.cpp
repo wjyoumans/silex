@@ -12109,7 +12109,10 @@ bool ClassGroupContext::set_relation_matrix(
 //       span the same lattice, and while row_module_synced_ is set,
 //       row_module_ spans it too.
 //
-// No check runs here; (I) holds on every mutation path:
+// Release builds do not check (I) here; an expensive-level debug check below
+// asserts that every relations_ row reduces to zero modulo row_module_'s
+// HNF (the inclusion L(relations_) in L(row_module_)).  (I) holds on every
+// mutation path:
 // - clear(), define() and the moved-from state hold no rows.  The base
 //   builders (build_factor_base, build_relation_factor_base_,
 //   build_search_factor_base_, set_factor_base) and set_relation_matrix
@@ -12145,6 +12148,27 @@ bool ClassGroupContext::set_relation_matrix(
 //     row.
 // set_relation_matrix publishes from relations_ directly and does not rely
 // on (I).
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+namespace {
+
+// True when every row of `rows` reduces to zero modulo the HNF of `module`,
+// that is, lies in its row lattice.  False also when a reduction fails.
+// Evaluated only by the publish_presentation debug check.
+bool rows_reduce_to_zero_in_lattice(fmpz_smat::HnfContext& module,
+                                    flint::FmpzMatConstRef rows) noexcept {
+    for (slong i = 0; i < flint::fmpz_mat_nrows(rows); ++i) {
+        bool reduces_to_zero = false;
+        if (!module.fmpz_mat_row_reduces_to_zero(reduces_to_zero, rows, i) ||
+            !reduces_to_zero) {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+#endif
+
 bool ClassGroupContext::publish_presentation() noexcept {
     if (!has_factor_base()) {
         return false;
@@ -12160,8 +12184,16 @@ bool ClassGroupContext::publish_presentation() noexcept {
             private_storage_->published_smith_form;
     const slong reused_before = smith_cache.reuse_count;
     if (!relations_.rows(flint::FmpzMatRef(relation_rows)) ||
-        !row_module_.get_hnf_rows(flint::FmpzMatRef(hnf_basis)) ||
-        !detail::FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+        !row_module_.get_hnf_rows(flint::FmpzMatRef(hnf_basis))) {
+        return false;
+    }
+    SILEX_DEBUG_CHECK(
+            diagnostics_, DiagnosticsModule::class_group,
+            DebugLevel::expensive,
+            "published relation rows lie in the row-module lattice",
+            rows_reduce_to_zero_in_lattice(
+                    row_module_, flint::FmpzMatConstRef(relation_rows)));
+    if (!detail::FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
                 candidate,
                 flint::FmpzMatConstRef(relation_rows),
                 flint::FmpzMatConstRef(hnf_basis),

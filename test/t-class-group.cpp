@@ -676,6 +676,185 @@ int test_keep_nonduplicate_skips_exact_repeat_only() {
     return 0;
 }
 
+// Counts failed debug checks and runs of the publish_presentation
+// relation-lattice check (an expensive check logs its label before it runs).
+struct PublishLatticeCheckCounts {
+    slong failures = 0;
+    slong runs = 0;
+};
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+void count_publish_lattice_check_failure(void* user,
+                                         silex::DiagnosticsModule,
+                                         silex::DebugLevel,
+                                         const char*,
+                                         const char*,
+                                         int,
+                                         const char*,
+                                         const char*) noexcept {
+    ++static_cast<PublishLatticeCheckCounts*>(user)->failures;
+}
+
+void count_publish_lattice_check_run(void* user,
+                                     silex::DiagnosticsModule,
+                                     silex::LogLevel,
+                                     const char*,
+                                     const char* message,
+                                     const char* detail) noexcept {
+    if (message != nullptr && detail != nullptr &&
+        std::strcmp(message, "running expensive debug check") == 0 &&
+        std::strcmp(detail,
+                    "published relation rows lie in the row-module "
+                    "lattice") == 0) {
+        ++static_cast<PublishLatticeCheckCounts*>(user)->runs;
+    }
+}
+#endif
+
+// The published invariants equal those of an independent
+// FiniteAbelianGroup::set_relation_matrix on the stored relations.
+bool published_invariants_match_relations(
+        const silex::ClassGroupContext& context) noexcept {
+    const std::optional<sflint::FmpzMat> rows = context.relations();
+    silex::FiniteAbelianGroup independent;
+    if (!rows.has_value() ||
+        !independent.set_relation_matrix(sflint::FmpzMatConstRef(*rows)) ||
+        independent.invariant_count() != context.invariant_count()) {
+        return false;
+    }
+    for (slong i = 0; i < context.invariant_count(); ++i) {
+        const std::optional<sflint::Fmpz> published = context.invariant(i);
+        const std::optional<sflint::Fmpz> expected = independent.invariant(i);
+        if (!published.has_value() || !expected.has_value() ||
+            fmpz_equal(published->raw(), expected->raw()) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Invariant (I) of the publish_presentation relation-lattice audit: after a
+// mixed sequence of native appends (kept, exact rejections and duplicate
+// skips), keep appends (a module-duplicate witness and a dependent row) and
+// keep_nonduplicate appends (a skipped repeat and a kept dependent row),
+// publish_presentation publishes the invariants of the stored relations.
+// Under SILEX_ENABLE_DEBUG_CHECKS the expensive publish check runs on every
+// publish and does not fail.
+int test_publish_matches_relation_lattice_after_mixed_appends() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    silex::NumberField field = degree_one_field();
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(context.generator_count() == 3);
+
+    PublishLatticeCheckCounts counts;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    const silex::DiagnosticsModuleMask class_group_mask =
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group);
+    silex::diagnostics_set_debug_checks(
+            diagnostics, silex::DebugLevel::expensive, class_group_mask,
+            count_publish_lattice_check_failure, &counts);
+    silex::diagnostics_set_logging(diagnostics, silex::LogLevel::detail,
+                                   class_group_mask,
+                                   count_publish_lattice_check_run, &counts);
+#endif
+    context.set_diagnostics(&diagnostics);
+
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Relation relation(*base);
+    silex::Element alpha(field);
+    bool skipped = true;
+    // Exponent rows over the primes (2, 3, 5).
+    const auto set_relation = [&](slong numerator, slong denominator) {
+        assert(alpha.set_si_over_si(numerator, denominator));
+        assert(relation.set_generator(alpha));
+    };
+
+    // Native appends before any presentation take the exact decision.
+    set_relation(12, 1);  // (2, 1, 0): rank
+    assert(context.append_relation(relation));
+    set_relation(18, 1);  // (1, 2, 0): rank
+    assert(context.append_relation(relation));
+    assert(context.relation_count() == 2);
+    set_relation(216, 1);  // (3, 3, 0), in the lattice: rejected
+    assert(context.append_relation(relation));
+    set_relation(12, 1);  // stored row again: duplicate, skipped
+    assert(context.append_relation(relation));
+    set_relation(2, 3);  // (1, -1, 0), in the lattice: rejected
+    assert(context.append_relation(relation));
+    assert(context.relation_count() == 2);
+    assert(context.skipped_dependent_relation_count() == 3);
+    set_relation(25, 1);  // (0, 0, 2): rank
+    assert(context.append_relation(relation));
+    assert(context.relation_count() == 3);
+    assert(context.relation_rank() == 3);
+
+    // Z^3 / <(2,1,0), (1,2,0), (0,0,2)> = Z/6.
+    assert(context.publish_presentation());
+    assert(counts.failures == 0);
+    assert(published_invariants_match_relations(context));
+    assert(context.invariant_count() == 1);
+    assert(context.order().has_value() &&
+           sflint::fmpz_equal_si(*context.order(), 6));
+
+    // keep: a module duplicate kept as a witness, then a dependent row.
+    set_relation(12, 1);
+    assert(Access::append_search_relation(skipped, context, relation));
+    assert(!skipped);
+    set_relation(216, 1);
+    assert(Access::append_search_relation(skipped, context, relation));
+    assert(!skipped);
+    assert(context.relation_count() == 5);
+
+    // keep_nonduplicate: a stored row is skipped, a new dependent row kept.
+    set_relation(18, 1);
+    assert(Access::append_keep_nonduplicate_relation(skipped, context,
+                                                     relation));
+    assert(skipped);
+    set_relation(2, 3);
+    assert(Access::append_keep_nonduplicate_relation(skipped, context,
+                                                     relation));
+    assert(!skipped);
+    assert(context.relation_count() == 6);
+    assert(context.skipped_dependent_relation_count() == 4);
+    assert(!context.has_presentation());
+
+    // Native again: an in-lattice row is rejected after the keep appends
+    // left the row-module checkpoint unsynced, then (0, 0, 1) refines the
+    // index and is kept.
+    set_relation(144, 1);  // (4, 2, 0)
+    assert(context.append_relation(relation));
+    assert(context.relation_count() == 6);
+    assert(context.skipped_dependent_relation_count() == 5);
+    set_relation(5, 1);
+    assert(context.append_relation(relation));
+    assert(context.relation_count() == 7);
+
+    // Z^3 / <(2,1,0), (1,2,0), (0,0,1)> = Z/3.
+    assert(context.publish_presentation());
+    assert(counts.failures == 0);
+    assert(published_invariants_match_relations(context));
+    assert(context.invariant_count() == 1);
+    assert(context.order().has_value() &&
+           sflint::fmpz_equal_si(*context.order(), 3));
+
+    context.set_diagnostics(nullptr);
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    assert(counts.runs == 2);
+#else
+    assert(counts.runs == 0);
+#endif
+    return 0;
+}
+
 int test_set_relation_matrix_preserves_on_failure() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -7447,6 +7626,7 @@ int main() {
     test_relation_sources_reset_with_factor_base();
     test_append_tracks_rank_and_skips_nonrefining_dependent_rows();
     test_keep_nonduplicate_skips_exact_repeat_only();
+    test_publish_matches_relation_lattice_after_mixed_appends();
     test_append_keeps_index_refining_dependent_rows();
     test_factor_base_prime_search_masks();
     test_compute_candidate_coordinate_search();
