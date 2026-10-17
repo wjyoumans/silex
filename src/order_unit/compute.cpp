@@ -321,9 +321,13 @@ bool incremental_independence(bool& independent,
     }
 
     // The working precisions are precision * 2^k up to the cap, as in
-    // compact_independent.  After an undecided ball the loop skips the
-    // ones below incremental_decision_precision, and tries the skipped
-    // ones last, so it tries the same precisions as the plain doubling loop.
+    // compact_independent.  The loop starts at context.reject_precision
+    // when that is one of them (the previous dependent candidate in this
+    // context decided there; a Silex cost choice), and otherwise at
+    // `precision`.  After an undecided ball it skips the ones below
+    // incremental_decision_precision.  It tries the skipped ones next and
+    // the ones below the start last, so it tries the same precisions as
+    // the plain doubling loop.
     const auto decide_at = [&](slong work_precision,
                                slong& target_precision) noexcept {
         const std::size_t index =
@@ -339,29 +343,37 @@ bool incremental_independence(bool& independent,
     };
     const char* const cap_reason =
             "incremental independence stopped at the precision cap";
-    slong work_precision = precision;
     const slong cap = precision_doubling_cap(precision);
-    std::vector<slong> skipped;
-    for (;;) {
-        slong target_precision = 0;
-        if (decide_at(work_precision, target_precision)) {
-            return true;
-        }
-        if (!precision_doubling_allowed(work_precision, cap, nullptr,
-                                        cap_reason)) {
+    std::vector<slong> ladder{precision};
+    while (precision_doubling_allowed(ladder.back(), cap, nullptr,
+                                      cap_reason)) {
+        ladder.push_back(ladder.back() * 2);
+    }
+    std::size_t start = 0;
+    for (std::size_t i = 0; i < ladder.size(); ++i) {
+        if (ladder[i] == context.reject_precision) {
+            start = i;
             break;
         }
-        work_precision *= 2;
-        while (work_precision < target_precision &&
-               precision_doubling_allowed(work_precision, cap, nullptr,
-                                          cap_reason)) {
-            skipped.push_back(work_precision);
-            work_precision *= 2;
+    }
+    std::vector<slong> deferred;
+    for (std::size_t i = start; i < ladder.size();) {
+        slong target_precision = 0;
+        if (decide_at(ladder[i], target_precision)) {
+            return true;
+        }
+        ++i;
+        // The last precision is never skipped, as in the doubling loop.
+        while (i + 1 < ladder.size() && ladder[i] < target_precision) {
+            deferred.push_back(ladder[i]);
+            ++i;
         }
     }
-    for (const slong skipped_precision : skipped) {
+    deferred.insert(deferred.end(), ladder.begin(),
+                    ladder.begin() + static_cast<std::ptrdiff_t>(start));
+    for (const slong deferred_precision : deferred) {
         slong target_precision = 0;
-        if (decide_at(skipped_precision, target_precision)) {
+        if (decide_at(deferred_precision, target_precision)) {
             return true;
         }
     }
@@ -491,6 +503,7 @@ bool IncrementalUnitContext::define(const NumberField& parent,
     units.reserve(static_cast<std::size_t>(rank));
     full_rank = false;
     log_states.clear();
+    reject_precision = 0;
     incremental_decisions = 0;
     fallback_decisions = 0;
     return true;
@@ -550,6 +563,9 @@ bool IncrementalUnitContext::add_independent_unit(
         }
     }
     if (!independent) {
+        if (decided_precision > 0) {
+            reject_precision = decided_precision;
+        }
         units.pop_back();
         return true;
     }

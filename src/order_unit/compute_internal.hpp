@@ -792,6 +792,11 @@ struct IncrementalUnitContext {
     };
     // One state per working precision the doubling loop has reached.
     std::vector<LogState> log_states;
+    // Cost hint, never a decision: the working precision at which the
+    // incremental test last decided a candidate dependent, or zero.  The
+    // next candidate tries that precision first (see
+    // incremental_independence in compute.cpp).
+    slong reject_precision = 0;
 
     // For tests: candidates the incremental test decided, and candidates
     // passed to compact_independent.

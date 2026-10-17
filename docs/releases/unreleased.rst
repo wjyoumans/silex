@@ -1387,6 +1387,25 @@ Changed
   and on ``x^2 - x - 2500000001``, the one row profiled, it is now the
   largest cost.
 
+- Each candidate of the incremental independence test of ``grh`` unit
+  extraction now starts at the working precision at which the previous
+  candidate in the same extraction was decided dependent, and tries the
+  lower precisions last.  The test still tries the same precisions, every
+  decision is the true answer, and the kept units are unchanged.  Because
+  some logarithmic embeddings are now cached at a higher precision, the
+  published ``regulator_radius`` changes on 9 of the 172 tested ``grh``
+  corpus rows, with identical midpoints: it grows by at most 1% on
+  ``cyclotomic_17_phi16``, ``cyclotomic_19_phi18``, ``cyclotomic_39_phi24``,
+  ``cyclotomic_40_phi16``, ``cyclotomic_44_phi20``, ``cyclotomic_56_phi24``,
+  ``cyclotomic_72_phi24``, ``nonadecic_x19_minus_x_minus_1_proven`` and
+  ``tetradecic_x14_minus_x_minus_1_proven``.  Every other published output
+  is identical.  On a busy machine the ``grh`` class/unit computation of
+  ``cyclotomic_real_31_deg15`` ran 2.0% fewer user-space instructions,
+  ``nonadecic_x19_minus_x_minus_1_proven`` 9.5% fewer, and
+  ``cyclotomic_64_phi32`` the same number; a few rows ran up to 0.4% more
+  (``cyclotomic_39_phi24``).  No timing has been measured.  See "Class
+  groups and order units" in :doc:`../reference/algorithms_and_sources`.
+
 Fixed
 -----
 

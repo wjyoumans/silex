@@ -761,6 +761,12 @@ int test_incremental_unit_context_matches_compact_independent() {
                                                 nullptr));
             ++calls;
             assert(changed == expected);
+            // A dependent candidate records its decision precision, one of
+            // the doubling precisions, as the next candidate's start.
+            if (!changed) {
+                assert(context.reject_precision >= precision);
+                assert(context.reject_precision % precision == 0);
+            }
             assert(context.units.size() == (changed ? trial.size()
                                                     : trial.size() - 1));
         }
