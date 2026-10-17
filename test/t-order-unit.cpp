@@ -766,6 +766,8 @@ int test_incremental_unit_context_matches_compact_independent() {
             if (!changed) {
                 assert(context.reject_precision >= precision);
                 assert(context.reject_precision % precision == 0);
+                const slong ratio = context.reject_precision / precision;
+                assert((ratio & (ratio - 1)) == 0);
             }
             assert(context.units.size() == (changed ? trial.size()
                                                     : trial.size() - 1));
@@ -788,6 +790,12 @@ int test_incremental_unit_context_matches_compact_independent() {
             assert(first.precision == precision);
             assert(!first.rows.empty());
             assert(first.gram_units == -1);
+            // The first reject is at 64 bits, and every later candidate
+            // starts there, so the one-bit state is never brought to more
+            // than the one row of the first prepare.  Starting at the base
+            // precision would grow it to the kept units of each candidate.
+            assert(context.reject_precision == 64);
+            assert(first.rows.size() == 1);
         }
 
         // A full-rank context takes no more candidates.

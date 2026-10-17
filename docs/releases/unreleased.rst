@@ -1391,7 +1391,9 @@ Changed
   extraction now starts at the working precision at which the previous
   candidate in the same extraction was decided dependent, and tries the
   lower precisions last.  The test still tries the same precisions, every
-  decision is the true answer, and the kept units are unchanged.  Because
+  decision is the true answer, and the kept units are unchanged on the
+  tested corpus (a candidate at the precision cap could in principle be
+  decided differently).  Because
   some logarithmic embeddings are now cached at a higher precision, the
   published ``regulator_radius`` changes on 9 of the 172 tested ``grh``
   corpus rows, with identical midpoints: it grows by at most 1% on

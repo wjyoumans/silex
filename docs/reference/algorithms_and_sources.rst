@@ -1102,7 +1102,8 @@ skipped.  Starting at the previous reject's precision evaluates some
 logarithmic embeddings at a higher precision than before.  The embedding
 context caches them, and a later lookup at a lower precision returns the
 cached higher-precision ball, so the published regulator ball can come out
-with a slightly different radius around the same midpoint.  Whenever the full test decides, the incremental test gives the
+with a slightly different radius.  On the tested corpus the midpoints were
+identical.  Whenever the full test decides, the incremental test gives the
 same decision.  Two cases differ, both sound.  A candidate that the full test
 dropped at the precision cap may now be decided, since the incremental ball
 can decide at the same level, and no cap event is then emitted.  And when the
