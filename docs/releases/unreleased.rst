@@ -128,6 +128,15 @@ Added
 Changed
 -------
 
+- The relation residue screen in class-group relation search values a
+  factor-base prime that has no residue polynomial (an index divisor) by its
+  exact valuation of the element, with the known norm, instead of sending the
+  whole element to the principal-ideal factorization fallback.  Primes whose
+  residue description comes from the index or the denominator of the generator
+  still use the fallback.  Relations, valuations and every published result
+  are unchanged; only the running time of relation search at fields with
+  index divisors in the factor base changes.
+
 - Valuations at primes of a maximal order that have no Kummer quotient map
   (such as index divisors) are, when the bound is at least two, the element
   lies in the prime, the norm shortcut does not apply and the rational prime
