@@ -136,10 +136,53 @@ int test_skipped_precisions_tried_before_fallback() {
     return 0;
 }
 
+// The independent candidate theta - 1 (also a unit: norm f(1) = 1) after
+// theta, started at 1 bit.  The Gram determinant ball is undecided at 1 bit
+// and the test decides at 4 bits.  The accepted unit's log row must land in
+// the log state at that decision precision, and only there.  (This does not
+// separate the new schedule from plain doubling: the determinant of an
+// independent pair is far above the lower bound, so both decide at 4 bits.)
+int test_independent_candidate_accepted_after_skip() {
+    silex::NumberField field = real_quartic_field();
+    silex::Element theta(field);
+    assert(theta.gen());
+    silex::Element shifted(field);
+    assert(shifted.add_si(theta, -1));
+    silex::FactoredElement first(field);
+    silex::FactoredElement second(field);
+    assert(first.push(theta, 1));
+    assert(second.push(shifted, 1));
+    silex::EmbeddingContext embeddings(field);
+
+    constexpr slong precision = 1;
+    silex::detail::IncrementalUnitContext context;
+    assert(context.define(field, 3));
+    bool changed = false;
+    assert(context.add_independent_unit(changed, first, embeddings,
+                                        precision, nullptr));
+    assert(changed);
+
+    changed = false;
+    assert(context.add_independent_unit(changed, second, embeddings,
+                                        precision, nullptr));
+    assert(changed);
+    assert(context.units.size() == 2);
+    assert(context.incremental_decisions == 2);
+    assert(context.fallback_decisions == 0);
+    for (const auto& state : context.log_states) {
+        assert(state.rows.size() ==
+               (state.precision == 4 * precision ? 2u : 1u));
+    }
+    assert(context.log_states.back().precision == 4 * precision);
+    assert(context.log_states.back().rows.size() == 2);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     assert(test_dependent_candidate_skips_to_deciding_precision() == 0);
     assert(test_skipped_precisions_tried_before_fallback() == 0);
+    assert(test_independent_candidate_accepted_after_skip() == 0);
     return 0;
 }

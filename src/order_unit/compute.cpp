@@ -152,7 +152,7 @@ bool incremental_prepare(IncrementalLogState& state,
 // "dependent" once its upper endpoint is below compact_independent's lower
 // bound B, and "independent" once it is positive; an undecided ball
 // contains zero, and when the true determinant is positive it is at least
-// B.  So both outcomes are decided once the radius falls below about B.
+// B.  So both outcomes are decided once the radius falls below about B/2.
 // The radius of a ball computed at working precision p scales like 2^-p
 // (rows, Gram entries and the inverse all come from p-bit ball
 // arithmetic), so a radius of 2^e at `precision` reaches B = 2^b near
@@ -257,8 +257,8 @@ bool incremental_independence_at(bool& independent,
 // when it decides, with the answer in `independent`, the decision precision
 // in `decided_precision`, and the candidate's log row at that precision in
 // `row`.  Every decision is the true answer (below), so the order in which
-// the precisions are tried changes only the cost, and the test decides
-// exactly when one of them decides.
+// the precisions are tried changes only the cost, and the test tries the
+// same precisions as plain doubling.
 //
 // Soundness under rounding.  Let L be the true k x places matrix of log
 // rows of the kept units, v the true row of the candidate, G = L L^T,
@@ -303,8 +303,7 @@ bool incremental_independence(bool& independent,
     // The working precisions are precision * 2^k up to the cap, as in
     // compact_independent.  After an undecided ball the loop skips the
     // ones below incremental_decision_precision, and tries the skipped
-    // ones last, so it tries the same precisions and decides whenever the
-    // plain doubling loop decides.
+    // ones last, so it tries the same precisions as the plain doubling loop.
     const auto decide_at = [&](slong work_precision,
                                slong& target_precision) noexcept {
         const std::size_t index =
