@@ -661,13 +661,13 @@ static bool finite_quadratic_form_volume_bound(
 
 // The Gram matrix of the embedding rows, G[i][j] = <row_i, row_j>.  G is
 // symmetric, so only the lower triangle j <= i is computed, and each entry is
-// copied to G[j][i].  A lower entry is summed with the same arb_mul and
-// arb_add calls, in the same order, as when both triangles were computed, so
-// it is the same ball.  An upper entry keeps its midpoint, since the midpoint
-// of a ball product or sum is the correctly rounded product or sum of the
-// midpoints; only its radius can differ, by Arb's upward-rounded magnitude
-// arithmetic.  The readers of G use the lower triangle (arb_mat_cho), the
-// diagonal, and the entry midpoints, so they see what they saw before.
+// copied to G[j][i].  Each lower entry is one arb_dot of two contiguous rows.
+// Like every Arb operation, arb_dot returns a ball that contains the exact
+// dot product of the input balls, so G stays a rigorous enclosure.  Its
+// midpoint comes from FLINT's dot-product accumulation rather than a sum of
+// rounded products, so an entry can differ from the arb_mul/arb_add sum by
+// rounding noise.  The readers of G use the lower triangle (arb_mat_cho), the
+// diagonal, and the entry midpoints.
 static bool build_embedding_gram(flint::ArbMat& out,
                           const flint::ArbMat& embedding_rows,
                           slong precision) noexcept {
@@ -678,23 +678,16 @@ static bool build_embedding_gram(flint::ArbMat& out,
         return false;
     }
 
-    flint::Arb sum;
-    flint::Arb term;
     for (slong i = 0; i < rows; ++i) {
         for (slong j = 0; j <= i; ++j) {
-            flint::arb_zero(sum);
-            for (slong k = 0; k < cols; ++k) {
-                flint::arb_mul(term,
-                               flint::arb_mat_entry_ref(embedding_rows, i, k),
-                               flint::arb_mat_entry_ref(embedding_rows, j, k),
-                               precision);
-                flint::arb_add(sum, sum, term, precision);
-            }
-            flint::arb_set(flint::arb_mat_entry_ref(out, i, j),
-                           flint::ArbConstRef(sum));
+            flint::ArbRef entry = flint::arb_mat_entry_ref(out, i, j);
+            ::arb_dot(entry.raw(), nullptr, 0,
+                      flint::arb_mat_entry_ref(embedding_rows, i, 0).raw(), 1,
+                      flint::arb_mat_entry_ref(embedding_rows, j, 0).raw(), 1,
+                      cols, precision);
             if (j != i) {
                 flint::arb_set(flint::arb_mat_entry_ref(out, j, i),
-                               flint::ArbConstRef(sum));
+                               flint::ArbConstRef(entry.raw()));
             }
         }
     }
