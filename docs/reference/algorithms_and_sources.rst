@@ -2523,7 +2523,9 @@ where some factor is not ``p``-integral, it stops without deciding, since
 the admissibility of ``r`` there is unknown.  It therefore answers ``false``
 only where the scan of the expanded leftover would.  There, no other step of
 ``Element::is_power`` can answer "not a power", so every answer is
-unchanged.  When it decides nothing, the leftover is expanded and tested as
+unchanged, except that a non-power the screen decides now returns "not a
+power" where expanding the leftover would have failed for lack of
+resources.  When it decides nothing, the leftover is expanded and tested as
 before, with the full scan.  The one-prime limit is a resource bound only:
 each prime costs a pass over all factors, which a true power pays without
 benefit.

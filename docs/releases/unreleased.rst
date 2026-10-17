@@ -230,7 +230,9 @@ Changed
   product.  The disproof answers
   "not a power" only where the residue disproof on the expanded leftover
   would.  Otherwise the leftover is expanded and tested as before, so every
-  answer is unchanged.  ``grh`` saturation on ``Q(zeta_52)`` (degree 24)
+  answer is unchanged, with one accepted exception: a non-power that the
+  disproof decides now returns "not a power" where expanding the leftover
+  would have run out of resources and returned a failure.  ``grh`` saturation on ``Q(zeta_52)`` (degree 24)
   no longer expands most of its non-cube leftovers.  See "Factored elements and
   analytic products" in
   :doc:`../reference/algorithms_and_sources`.
