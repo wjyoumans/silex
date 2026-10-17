@@ -829,7 +829,7 @@ void check_step_start_fails_closed() {
                 assert(radius_lt_2exp_si(reference, -200));
                 sflint::Arb value;
                 ::arb_set(value.raw(), values.data() + i);
-                assert(::arb_overlaps(value.raw(), reference.raw()) != 0);
+                assert(::arb_contains(value.raw(), reference.raw()) != 0);
                 assert(::arb_overlaps(value.raw(), stepped.data() + i) != 0);
                 assert(radius_lt_2exp_si(value, static_cast<slong>(target)));
             }
