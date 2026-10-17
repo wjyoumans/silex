@@ -23,7 +23,10 @@
 #include "class_group/relation_saturation_internal.hpp"
 #include "element/element_internal.hpp"
 #include "lat/certified_lll_internal.hpp"
+#include "class_group/relation_factor_base_plan_internal.hpp"
 #include "order_unit/compute_internal.hpp"
+#include "order_unit/order_unit_internal.hpp"
+#include "order_unit/precision_cap_internal.hpp"
 #include "sunit/sunit_internal.hpp"
 
 namespace silex::detail {
@@ -39,6 +42,49 @@ public:
     static void set_sunit_composition_overflow_at(slong n) noexcept {
         SUnitTestSeams::composition_overflow_countdown_.store(
                 n, std::memory_order_relaxed);
+    }
+
+    // Runs the exact power-containment valuation fallback (the largest
+    // i <= `bound` with `element` in P^i) directly, bypassing the norm,
+    // Hensel and coordinate-divisibility routes.  Skips the routing that
+    // production valuation does; the result is still the exact valuation.
+    static bool valuation_by_power_containment(slong& out,
+                                               const PrimeIdeal& prime,
+                                               const OrderElement& element,
+                                               slong bound) noexcept {
+        return prime.valuation_by_power_containment(out, element, bound,
+                                                    nullptr);
+    }
+
+    // A positive `cap` replaces the cap computed by precision_doubling_cap;
+    // zero restores the default.
+    static void set_precision_doubling_cap(slong cap) noexcept {
+        PrecisionCapTestSeams::forced_cap_.store(
+                cap > 0 ? cap : 0, std::memory_order_relaxed);
+    }
+
+    // A positive `max_aux_primes` replaces the per-scan guard of 2^16
+    // examined primes q of the stable residue-character proof scan, and a
+    // nonzero `max_q` replaces the machine-word upper end of the q range, so
+    // a test can reach the guard or the end of the range quickly.  Zero
+    // restores each default.
+    static void set_stable_proof_scan_limits(slong max_aux_primes,
+                                             ulong max_q) noexcept {
+        StableProofTestSeams::max_aux_primes_.store(
+                max_aux_primes > 0 ? max_aux_primes : 0,
+                std::memory_order_relaxed);
+        StableProofTestSeams::max_q_.store(max_q, std::memory_order_relaxed);
+    }
+
+    // A positive `columns` replaces kRelationModuleMaxColumns as the number
+    // of prime ideals up to the generation bound past which a `proven`
+    // imaginary quadratic plan keeps its compact base, so a test can take
+    // the structure-certificate route on a small field.  Zero restores the
+    // default.
+    static void set_quadratic_structure_certificate_column_limit(
+            slong columns) noexcept {
+        QuadraticStructureCertificateTestSeams::column_limit_.store(
+                columns > 0 ? columns : 0, std::memory_order_relaxed);
     }
 
     // Labels a set unit group proven without any check.  Tests use it to

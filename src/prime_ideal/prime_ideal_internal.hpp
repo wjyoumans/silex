@@ -157,15 +157,6 @@ public:
             flint::FmpzConstRef p,
             flint::FmpzConstRef root) noexcept;
 
-    // Test hook: runs the exact power-containment valuation fallback (the
-    // largest i <= `bound` with `element` in P^i) directly, bypassing the
-    // norm, Hensel and coordinate-divisibility routes.  For tests only.
-    static bool valuation_by_power_containment_for_testing(
-            slong& out,
-            const PrimeIdeal& prime,
-            const OrderElement& element,
-            slong bound) noexcept;
-
     // Test hook: values `element` at `prime` by coordinate divisibility
     // with the anti-uniformizer taken from the HNF of P, the route used for
     // primes without a Kummer quotient map, for every prime of a maximal

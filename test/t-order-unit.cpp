@@ -506,10 +506,10 @@ void torsion_event_callback(void* user,
 // false, then checks the same call succeeds with the default cap.
 struct PrecisionCapOverride {
     explicit PrecisionCapOverride(slong cap) noexcept {
-        silex::detail::set_precision_doubling_cap_for_testing(cap);
+        silex::detail::TestHookAccess::set_precision_doubling_cap(cap);
     }
     ~PrecisionCapOverride() {
-        silex::detail::set_precision_doubling_cap_for_testing(0);
+        silex::detail::TestHookAccess::set_precision_doubling_cap(0);
     }
 };
 
@@ -9192,11 +9192,11 @@ int test_prove_index_bound_cyclotomic13_undecided_root() {
 struct StableProofScanLimitsForTesting {
     StableProofScanLimitsForTesting(slong max_aux_primes,
                                     ulong max_q) noexcept {
-        silex::detail::set_stable_proof_scan_limits_for_testing(
+        silex::detail::TestHookAccess::set_stable_proof_scan_limits(
                 max_aux_primes, max_q);
     }
     ~StableProofScanLimitsForTesting() {
-        silex::detail::set_stable_proof_scan_limits_for_testing(0, 0);
+        silex::detail::TestHookAccess::set_stable_proof_scan_limits(0, 0);
     }
     StableProofScanLimitsForTesting(const StableProofScanLimitsForTesting&) =
             delete;

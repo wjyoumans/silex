@@ -30,11 +30,6 @@
 namespace silex {
 namespace {
 
-// Test-only override of the shared precision-doubling cap; zero means off.
-// Production code only reads it.  Relaxed atomic so a reader on another
-// thread never races with a test setting it.
-std::atomic<slong> g_precision_doubling_cap_override{0};
-
 }  // namespace
 
 namespace detail {
@@ -212,7 +207,7 @@ bool compact_independence_from_gram_determinant(
 
 slong precision_doubling_cap(slong requested) noexcept {
     const slong forced =
-            g_precision_doubling_cap_override.load(std::memory_order_relaxed);
+            PrecisionCapTestSeams::forced_cap();
     if (forced > 0) {
         return forced;
     }
@@ -238,11 +233,6 @@ bool precision_doubling_allowed(slong work_precision,
     SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.precision_doubling_cap");
     return false;
-}
-
-void set_precision_doubling_cap_for_testing(slong cap) noexcept {
-    g_precision_doubling_cap_override.store(cap > 0 ? cap : 0,
-                                            std::memory_order_relaxed);
 }
 
 bool compact_independent(bool& independent,

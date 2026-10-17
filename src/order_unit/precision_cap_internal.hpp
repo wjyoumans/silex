@@ -3,6 +3,8 @@
 #include <silex/diagnostics.hpp>
 #include <flint/flint.h>
 
+#include <atomic>
+
 namespace silex {
 namespace detail {
 
@@ -25,9 +27,22 @@ bool precision_doubling_allowed(slong work_precision,
                                 const DiagnosticsContext* diagnostics,
                                 const char* reason) noexcept;
 
-// Test hook: a positive value replaces the cap computed by
-// precision_doubling_cap; zero restores the default.
-void set_precision_doubling_cap_for_testing(slong cap) noexcept;
+class TestHookAccess;
+
+// Test-only override of the cap computed by precision_doubling_cap; zero
+// means off.  Only detail::TestHookAccess (test/test_hook_access.hpp) can set
+// it; production code only reads it.  Relaxed atomic so a reader on another
+// thread never races with a test setting it.
+class PrecisionCapTestSeams {
+public:
+    static slong forced_cap() noexcept {
+        return forced_cap_.load(std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<slong> forced_cap_{0};
+};
 
 }  // namespace detail
 }  // namespace silex

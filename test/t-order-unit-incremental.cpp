@@ -11,6 +11,7 @@
 #include "order_unit/compute_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/precision_cap_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -21,10 +22,10 @@ namespace sflint = silex::flint;
 
 struct PrecisionCapOverride {
     explicit PrecisionCapOverride(slong cap) noexcept {
-        silex::detail::set_precision_doubling_cap_for_testing(cap);
+        silex::detail::TestHookAccess::set_precision_doubling_cap(cap);
     }
     ~PrecisionCapOverride() {
-        silex::detail::set_precision_doubling_cap_for_testing(0);
+        silex::detail::TestHookAccess::set_precision_doubling_cap(0);
     }
 };
 

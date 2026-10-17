@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <atomic>
 #include <vector>
 
 #include <silex/class_group.hpp>
@@ -513,13 +514,29 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
                                 const OrderUnitGroup& group,
                                 flint::FmpzConstRef q,
                                 flint::FmpzConstRef ell) noexcept;
-// Test hook for the stable residue-character proof scan of
-// prove_index_bound (saturation.cpp): a positive `max_aux_primes` replaces
-// the per-scan guard of 2^16 examined primes q, and a nonzero `max_q`
-// replaces the machine-word upper end of the q range, so a test can reach
-// the guard or the end of the range quickly.  Zero restores each default.
-void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,
-                                              ulong max_q) noexcept;
+class TestHookAccess;
+
+// Test-only overrides for the stable residue-character proof scan of
+// prove_index_bound (saturation.cpp): a positive max_aux_primes replaces the
+// per-scan guard of 2^16 examined primes q, and a nonzero max_q replaces the
+// machine-word upper end of the q range; zero means off.  Only
+// detail::TestHookAccess (test/test_hook_access.hpp) can set them;
+// production code only reads them.  Relaxed atomics so a reader on another
+// thread never races with a test setting them.
+class StableProofTestSeams {
+public:
+    static slong max_aux_primes() noexcept {
+        return max_aux_primes_.load(std::memory_order_relaxed);
+    }
+    static ulong max_q() noexcept {
+        return max_q_.load(std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<slong> max_aux_primes_{0};
+    inline static std::atomic<ulong> max_q_{0};
+};
 // Outcome of kernel_row_root.  `decided`: `is_power` is set and, when it is
 // true, `root` holds an exactly verified l-th root of the row product.
 // `undecided`: neither the compact presentation nor the factored fallback

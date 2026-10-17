@@ -5979,16 +5979,16 @@ int test_imaginary_quadratic_structure_certificate_route() {
         assert(reference.factor_base_generation_basis() !=
                silex::ClassGroupGenerationBasis::structure_certificate);
 
-        silex::detail::relation_search::
-                set_quadratic_structure_certificate_column_limit_for_testing(
+        silex::detail::TestHookAccess::
+                set_quadratic_structure_certificate_column_limit(
                         1);
         silex::ClassGroupContext forced;
         silex::OrderUnitGroup forced_units;
         const bool computed = forced_units.compute_with_class_group(
                 forced, maximal_order, sflint::FmpzConstRef(bound), options,
                 128);
-        silex::detail::relation_search::
-                set_quadratic_structure_certificate_column_limit_for_testing(
+        silex::detail::TestHookAccess::
+                set_quadratic_structure_certificate_column_limit(
                         0);
         assert(computed);
         assert(forced.certification_status() ==

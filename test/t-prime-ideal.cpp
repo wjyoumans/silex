@@ -2175,8 +2175,7 @@ int test_valuation_power_containment_matches_definition() {
                     }
                     for (slong bound : {0, 1, 3, 7}) {
                         slong fast = -1;
-                        assert(silex::detail::PrimeIdealAccess::
-                                       valuation_by_power_containment_for_testing(
+                        assert(silex::detail::TestHookAccess::valuation_by_power_containment(
                                                fast, *prime, element,
                                                bound));
                         const slong expected =
@@ -2381,8 +2380,7 @@ int test_valuation_power_containment_matches_gp() {
                         }
                     }
                     slong v = -1;
-                    assert(silex::detail::PrimeIdealAccess::
-                                   valuation_by_power_containment_for_testing(
+                    assert(silex::detail::TestHookAccess::valuation_by_power_containment(
                                            v, *primes.at(index), elements[r],
                                            bound));
                     assert(v == expected);
@@ -2548,8 +2546,7 @@ int test_valuation_anti_uniformizer_matches_containment() {
                     for (slong bound : {0, 1, 2, 5, 40}) {
                         slong expected = -1;
                         slong value = -1;
-                        assert(PrimeIdealAccess::
-                                       valuation_by_power_containment_for_testing(
+                        assert(silex::detail::TestHookAccess::valuation_by_power_containment(
                                                expected, *prime, element,
                                                bound));
                         if (!PrimeIdealAccess::
@@ -2680,8 +2677,7 @@ int test_principal_ideal_valuation_matches_element_valuation() {
                     assert(prime->valuation(by_element, element));
                     assert(prime->valuation(by_principal, principal));
                     assert(prime->valuation(by_plain, plain));
-                    assert(silex::detail::PrimeIdealAccess::
-                                   valuation_by_power_containment_for_testing(
+                    assert(silex::detail::TestHookAccess::valuation_by_power_containment(
                                            by_definition, *prime, element,
                                            bound));
                     assert(by_definition < bound);

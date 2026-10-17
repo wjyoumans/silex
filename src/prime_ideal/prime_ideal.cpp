@@ -4142,14 +4142,6 @@ bool PrimeIdealAccess::order_basis_is_p_integral(
     return prime.order_basis_is_p_integral();
 }
 
-bool PrimeIdealAccess::valuation_by_power_containment_for_testing(
-        slong& out,
-        const PrimeIdeal& prime,
-        const OrderElement& element,
-        slong bound) noexcept {
-    return prime.valuation_by_power_containment(out, element, bound, nullptr);
-}
-
 bool PrimeIdealAccess::anti_uniformizer_valuation_for_testing(
         slong& out,
         const PrimeIdeal& prime,

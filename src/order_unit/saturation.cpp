@@ -684,14 +684,6 @@ enum class ProofPrimeScanResult {
 // end of the machine-word range of q.
 inline constexpr slong kStableProofMaxAuxPrimes = slong{1} << 16;
 
-// Test-only overrides of the per-scan guard kStableProofMaxAuxPrimes and of
-// the upper end of the q range (the machine-word maximum); zero means off.
-// Production code only reads them, through
-// set_stable_proof_scan_limits_for_testing.  Relaxed atomics so a reader on
-// another thread never races with a test setting them.
-std::atomic<slong> g_stable_proof_max_aux_primes_override{0};
-std::atomic<ulong> g_stable_proof_max_q_override{0};
-
 // `range_exhausted` is set when the scan returns a nonempty kernel because no
 // rational prime q = 1 mod ell is left in the machine-word range, so a later
 // scan with a larger threshold would return the same kernel.
@@ -857,8 +849,7 @@ bool select_stable_proof_primes(
     // proof condition (an empty kernel).  No auxiliary bound limits the scan;
     // only the kStableProofMaxAuxPrimes resource guard does.
     const slong max_aux_primes_override =
-            g_stable_proof_max_aux_primes_override.load(
-                    std::memory_order_relaxed);
+            detail::StableProofTestSeams::max_aux_primes();
     const slong max_aux_primes = max_aux_primes_override > 0
                                          ? max_aux_primes_override
                                          : kStableProofMaxAuxPrimes;
@@ -1026,7 +1017,7 @@ bool select_stable_proof_primes(
     };
 
     const ulong max_q_override =
-            g_stable_proof_max_q_override.load(std::memory_order_relaxed);
+            detail::StableProofTestSeams::max_q();
     const ulong max_q_ui = max_q_override > 0
                                    ? max_q_override
                                    : std::numeric_limits<ulong>::max();
@@ -1537,14 +1528,6 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
         return true;
     };
     return visit_stable_proof_prime_columns(group, q, ell, collect);
-}
-
-void set_stable_proof_scan_limits_for_testing(slong max_aux_primes,
-                                              ulong max_q) noexcept {
-    g_stable_proof_max_aux_primes_override.store(
-            max_aux_primes > 0 ? max_aux_primes : 0,
-            std::memory_order_relaxed);
-    g_stable_proof_max_q_override.store(max_q, std::memory_order_relaxed);
 }
 
 }  // namespace detail
