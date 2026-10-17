@@ -11656,8 +11656,15 @@ bool ClassGroupContext::try_partial_relation_(
                                      rational_large_prime.raw()) != 0 &&
                         ::fmpz_poly_equal(stored.residue_key.raw(),
                                           residue_key.raw()) != 0;
+                // The two large primes come from different relations'
+                // factorizations, which may record different residue data
+                // for one prime ideal, so compare the ideals (canonical HNFs)
+                // rather than PrimeIdeal::equal.  A stored entry keyed only
+                // by residue has no prime data and never matches here.
                 const bool prime_match =
-                        have_large_prime && stored.prime.equal(large_prime);
+                        have_large_prime && stored.prime.has_prime_data() &&
+                        detail::PrimeIdealAccess::ideal(stored.prime).equal(
+                                detail::PrimeIdealAccess::ideal(large_prime));
                 if (!residue_match && !prime_match) {
                     continue;
                 }

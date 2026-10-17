@@ -701,6 +701,16 @@ public:
                           ->direct_partial_residue_blocks.size();
     }
 
+    // The stored partial (one-large-prime) relations of `context`, or
+    // nullptr before its private storage exists.  White-box hook for the
+    // large-prime matching tests.
+    static std::vector<PartialRelationEntry>* partial_relations(
+            ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? nullptr
+                : &context.private_storage_->partial_relations;
+    }
+
     // `norm` must be the exact field norm of `generator` and
     // `integral_coordinates` its coordinates.
     static bool try_append_integral_generator_relation(

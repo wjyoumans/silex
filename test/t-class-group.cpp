@@ -2021,6 +2021,122 @@ int test_one_large_prime_match_cubic() {
     return 0;
 }
 
+// A partial relation found by full ideal factorization is keyed by its large
+// prime ideal alone.  A later relation with the same large prime must pair
+// with it even when the stored prime records different residue data for the
+// same ideal, as two factorizations may.  x^3 - 12 has alpha^2 / 2 integral,
+// so its maximal order is not Z[alpha] and the direct residue-key route is
+// unsupported; both relations take the full-factorization route.
+int test_large_prime_match_compares_prime_ideals_cubic() {
+    using SearchAccess = silex::detail::ClassGroupRelationSearchAccess;
+    silex::NumberField field = cubic_field(0, -12);
+    silex::Order equation_order;
+    silex::Order maximal_order(field);
+    equation_order = silex::test::equation_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    assert(maximal_order.is_maximal());
+    assert(!maximal_order.is_equation_order());
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 10));
+    silex::ClassGroupContext context(maximal_order);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+
+    // Find a generator stored as a full-factorization partial relation.
+    sflint::FmpzMat coordinates(1, maximal_order.degree());
+    silex::OrderElement order_element(maximal_order);
+    silex::Element element(field);
+    silex::Element first(field);
+    std::size_t stored_index = 0;
+    bool found = false;
+    for (slong a = -6; a <= 6 && !found; ++a) {
+        for (slong b = -6; b <= 6 && !found; ++b) {
+            for (slong c = 1; c <= 6 && !found; ++c) {
+                const std::vector<silex::detail::PartialRelationEntry>*
+                        before = SearchAccess::partial_relations(context);
+                const std::size_t size_before =
+                        before == nullptr ? 0 : before->size();
+                bool partial_throttle_exit = false;
+                sflint::fmpz_mat_zero(sflint::FmpzMatRef(coordinates));
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0),
+                                    a);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 1),
+                                    b);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 2),
+                                    c);
+                assert(order_element.set_coordinates(
+                        sflint::FmpzMatConstRef(coordinates)));
+                assert(order_element.get_element(element));
+                assert(context.try_append_generator_relation(
+                        partial_throttle_exit, element,
+                        silex::ClassGroupRelationSource::Search));
+                assert(!partial_throttle_exit);
+                const std::vector<silex::detail::PartialRelationEntry>*
+                        after = SearchAccess::partial_relations(context);
+                if (after != nullptr && after->size() == size_before + 1 &&
+                    !after->back().has_residue_key &&
+                    after->back().prime.has_prime_data()) {
+                    stored_index = after->size() - 1;
+                    assert(first.set(after->back().generator));
+                    found = true;
+                }
+            }
+        }
+    }
+    assert(found);
+
+    // Give the stored prime a different, equally valid residue polynomial
+    // (the constant term shifted by p): the same prime ideal, structurally
+    // different data.
+    std::vector<silex::detail::PartialRelationEntry>* partials =
+            SearchAccess::partial_relations(context);
+    assert(partials != nullptr);
+    silex::PrimeIdeal& stored_prime = (*partials)[stored_index].prime;
+    silex::PrimeIdeal original(maximal_order);
+    assert(original.set(stored_prime));
+    sflint::Fmpz p;
+    sflint::FmpzPoly residue;
+    assert(stored_prime.rational_prime(sflint::FmpzRef(p)));
+    assert(stored_prime.residue_polynomial(sflint::FmpzPolyRef(residue)));
+    sflint::Fmpz constant;
+    fmpz_poly_get_coeff_fmpz(constant.raw(), residue.raw(), 0);
+    fmpz_add(constant.raw(), constant.raw(), p.raw());
+    fmpz_poly_set_coeff_fmpz(residue.raw(), 0, constant.raw());
+    assert(silex::detail::TestHookAccess::set_alpha_residue_polynomial(
+            stored_prime, sflint::FmpzPolyConstRef(residue)));
+    assert(!stored_prime.equal(original));
+    silex::Ideal stored_ideal(maximal_order);
+    silex::Ideal original_ideal(maximal_order);
+    assert(stored_prime.get_ideal(stored_ideal));
+    assert(original.get_ideal(original_ideal));
+    assert(stored_ideal.equal(original_ideal));
+
+    // 2 * first has the same single large prime (the primes over 2 have
+    // norm at most 8 and lie in the base), so it pairs with the stored
+    // relation, which is then consumed rather than joined by a second one.
+    silex::Element two(field);
+    silex::Element second(field);
+    assert(two.set_si(2));
+    assert(second.multiply(first, two));
+    const std::size_t size_before = partials->size();
+    const slong matches_before = context.relation_source_count(
+            silex::ClassGroupRelationSource::LargePrimeMatch);
+    const slong skipped_before = context.skipped_dependent_relation_count();
+    bool partial_throttle_exit = false;
+    assert(context.try_append_generator_relation(
+            partial_throttle_exit, second,
+            silex::ClassGroupRelationSource::Search));
+    partials = SearchAccess::partial_relations(context);
+    assert(partials != nullptr);
+    assert(partials->size() + 1 == size_before);
+    assert(context.relation_source_count(
+                   silex::ClassGroupRelationSource::LargePrimeMatch) +
+                   context.skipped_dependent_relation_count() >
+           matches_before + skipped_before);
+    assert(context_relation_rows_match_exact_generators(context));
+    return 0;
+}
+
 // The exact-valuation branch of the direct large-prime partial-relation
 // row reuses the p-adic valuation of the element norm.  Its rows must match
 // the per-prime element valuations of the public PrimeIdeal::valuation
@@ -7641,6 +7757,7 @@ int main() {
     test_try_certify_with_units_zeta_quadratic();
     test_compute_candidate_random_product_relation_cubic();
     test_one_large_prime_match_cubic();
+    test_large_prime_match_compares_prime_ideals_cubic();
     test_direct_partial_row_exact_valuation_cubic();
     test_direct_partial_row_deduced_last_valuation();
     test_compute_candidate_post_finite_refinement_cubic();
