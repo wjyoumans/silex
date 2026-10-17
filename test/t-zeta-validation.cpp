@@ -949,12 +949,12 @@ bool same_grh_default_product(
 }
 
 // The word kernel's prime limit for a defining polynomial of `degree`:
-// 2^30 up to degree 8 and 2^29 for degrees 9 to 16, where the lazy
+// 2^30 up to degree 8 and 2^29 for degrees 9 to 20, where the lazy
 // reductions of the kernel stay below 2^64 (src/zeta/zeta.cpp,
-// bf_word_linear_factor_prime_limit); 0 above degree 16, which the word
+// bf_word_linear_factor_prime_limit); 0 above degree 20, which the word
 // kernel does not cover.
 ulong word_linear_factor_prime_limit(slong degree) noexcept {
-    if (degree > 16) {
+    if (degree > 20) {
         return 0;
     }
     return degree <= 8 ? UWORD(1) << 30 : UWORD(1) << 29;
@@ -1003,7 +1003,7 @@ bool check_linear_factor_batch(const FieldSetup& setup,
     // limit for the degree, where residues are largest and the lazy sums
     // come closest to 2^64.  Above degree 8 the limit is 2^29, and the
     // primes just below 2^30, where the degree 8 limit applies, must be
-    // left to the per-prime path.  Above degree 16 no prime is batched; the
+    // left to the per-prime path.  Above degree 20 no prime is batched; the
     // 2^29 range checks that.
     const slong degree = setup.maximal_order.degree();
     const ulong word_limit = word_linear_factor_prime_limit(degree);
@@ -1042,19 +1042,28 @@ bool check_linear_factor_batches() noexcept {
     const slong octic[] = {1, 0, 0, 0, 0, 0, 0, 0};
     const slong nonic[] = {-2, 0, 0, 0, 0, 0, 0, 0, 0};
     // The 11th, 17th and 19th cyclotomic polynomials (degrees 10, 16 and
-    // 18): degree 16 is the word kernel's largest; degree 18 is left to the
-    // per-prime path.
+    // 18) and the 13th (degree 12).
     const slong cyclotomic_11[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
     const slong cyclotomic_17[] = {1, 1, 1, 1, 1, 1, 1, 1,
                                    1, 1, 1, 1, 1, 1, 1, 1};
     const slong cyclotomic_19[] = {1, 1, 1, 1, 1, 1, 1, 1, 1,
                                    1, 1, 1, 1, 1, 1, 1, 1, 1};
-    // The 13th cyclotomic polynomial (degree 12, inside the word kernel's
-    // 11-15 range) and x^17 - 2 (degree 17, one above the kernel's largest
-    // degree, so no prime is batched).
     const slong cyclotomic_13[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    // Degrees 17 to 20, the top of the word kernel's range: x^17 - 2,
+    // x^19 - x - 1, the 27th cyclotomic polynomial x^18 + x^9 + 1 and the
+    // 25th, x^20 + x^15 + x^10 + x^5 + 1 (degree 20, the kernel's
+    // largest).  x^21 - 2 (degree 21, one above it) is left to the
+    // per-prime path.
     const slong degree_17[] = {-2, 0, 0, 0, 0, 0, 0, 0, 0,
                                0,  0, 0, 0, 0, 0, 0, 0};
+    const slong cyclotomic_27[] = {1, 0, 0, 0, 0, 0, 0, 0, 0,
+                                   1, 0, 0, 0, 0, 0, 0, 0, 0};
+    const slong degree_19[] = {-1, -1, 0, 0, 0, 0, 0, 0, 0, 0,
+                               0,  0,  0, 0, 0, 0, 0, 0, 0};
+    const slong cyclotomic_25[] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+                                   1, 0, 0, 0, 0, 1, 0, 0, 0, 0};
+    const slong degree_21[] = {-2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                               0,  0, 0, 0, 0, 0, 0, 0, 0, 0};
     // x^3 - x^2 - 2x - 8 (Dedekind): 2 divides the index of Z[x].
     const slong dedekind[] = {-8, -2, -1};
     const FieldSetup dedekind_setup = setup_from_coefficients(dedekind, 3);
@@ -1113,9 +1122,17 @@ bool check_linear_factor_batches() noexcept {
            check_linear_factor_batch(
                    setup_from_coefficients(cyclotomic_13, 12), true) &&
            check_linear_factor_batch(
-                   setup_from_coefficients(degree_17, 17), false) &&
+                   setup_from_coefficients(degree_17, 17), true) &&
            check_linear_factor_batch(
-                   setup_from_coefficients(cyclotomic_19, 18), false) &&
+                   setup_from_coefficients(cyclotomic_19, 18), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(cyclotomic_27, 18), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(degree_19, 19), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(cyclotomic_25, 20), true) &&
+           check_linear_factor_batch(
+                   setup_from_coefficients(degree_21, 21), false) &&
            check_linear_factor_batch(dedekind_setup, true) &&
            check_linear_factor_batch(non_monic_setup, false);
 }

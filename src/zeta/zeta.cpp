@@ -1611,12 +1611,13 @@ bool bf_linear_factor_count_from_squarefree_nmod(
 // reduces correctly (its quotient estimate holds for every 64-bit value).
 // p < L gives M <= L - 2, and the limits below satisfy the condition with
 // M = L - 1: L = 2^30 for d <= 8 (2d - 1 <= 15 < 16 = 2^64 / 2^60), and
-// L = 2^29 for 9 <= d <= 16 (2d - 1 <= 31 < 64 = 2^64 / 2^58).  The bound
-// is checked at compile time for every instantiated degree
-// (bf_word_linear_factor_sums_fit).  At d = 9 the old limit 2^30 would
-// fail: 17 (2^30 - 2)^2 > 2^64.  Primes at or above the limit, and higher
-// degrees, are left to the per-prime FLINT path.
-constexpr slong kBfWordLinearFactorMaxDegree = WORD(16);
+// L = 2^29 for 9 <= d <= 20 (2d - 1 <= 39 < 64 = 2^64 / 2^58; at d = 20,
+// 39 (2^29 - 1)^2 < 39 * 2^58 < 2^63.3).  The bound is checked at compile
+// time for every instantiated degree (bf_word_linear_factor_sums_fit).  At
+// d = 9 the limit 2^30 would fail: 17 (2^30 - 2)^2 > 2^64.  Primes at or
+// above the limit, and higher degrees, are left to the per-prime FLINT
+// path.
+constexpr slong kBfWordLinearFactorMaxDegree = WORD(20);
 
 constexpr ulong bf_word_linear_factor_prime_limit(slong degree) noexcept {
     return degree <= WORD(8) ? UWORD(1) << 30 : UWORD(1) << 29;
@@ -1630,6 +1631,8 @@ constexpr bool bf_word_linear_factor_sums_fit(slong degree) noexcept {
            residue * residue <=
                    UWORD_MAX / static_cast<ulong>(2 * degree - 1);
 }
+
+static_assert(bf_word_linear_factor_sums_fit(kBfWordLinearFactorMaxDegree));
 
 static_assert(FLINT_BITS == 64);
 
@@ -1821,6 +1824,14 @@ slong bf_word_linear_factor_count_dispatch(const ulong* f,
         return bf_word_linear_factor_count<15>(f, modulus);
     case 16:
         return bf_word_linear_factor_count<16>(f, modulus);
+    case 17:
+        return bf_word_linear_factor_count<17>(f, modulus);
+    case 18:
+        return bf_word_linear_factor_count<18>(f, modulus);
+    case 19:
+        return bf_word_linear_factor_count<19>(f, modulus);
+    case 20:
+        return bf_word_linear_factor_count<20>(f, modulus);
     default:
         return -1;
     }
