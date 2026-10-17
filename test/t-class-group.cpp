@@ -16,6 +16,7 @@
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
+#include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "ideal/ideal_access_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "order_unit/compute_internal.hpp"
@@ -2126,6 +2127,135 @@ int test_large_prime_match_compares_prime_ideals_cubic() {
     assert(context.try_append_generator_relation(
             partial_throttle_exit, second,
             silex::ClassGroupRelationSource::Search));
+    partials = SearchAccess::partial_relations(context);
+    assert(partials != nullptr);
+    assert(partials->size() + 1 == size_before);
+    assert(context.relation_source_count(
+                   silex::ClassGroupRelationSource::LargePrimeMatch) +
+                   context.skipped_dependent_relation_count() >
+           matches_before + skipped_before);
+    assert(context_relation_rows_match_exact_generators(context));
+    return 0;
+}
+
+// On an order other than the equation order, a partial relation whose
+// leftover norm is a single rational prime q is stored with its large prime
+// deferred: q and the generator's coordinates, no prime ideal.  A later
+// partial above the same q builds both large primes and pairs with it as the
+// eager prime would.  x^3 - 12 is the field of the test above.
+int test_deferred_large_prime_match_cubic() {
+    using SearchAccess = silex::detail::ClassGroupRelationSearchAccess;
+    silex::NumberField field = cubic_field(0, -12);
+    silex::Order equation_order;
+    silex::Order maximal_order(field);
+    equation_order = silex::test::equation_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    assert(!maximal_order.is_equation_order());
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 10));
+    silex::ClassGroupContext context(maximal_order);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+
+    sflint::FmpzMat coordinates(1, maximal_order.degree());
+    silex::OrderElement order_element(maximal_order);
+    silex::Element element(field);
+    sflint::Fmpq norm;
+    auto append = [&](bool& throttle) {
+        assert(order_element.set_coordinates(
+                sflint::FmpzMatConstRef(coordinates)));
+        assert(order_element.get_element(element));
+        assert(element.norm(sflint::FmpqRef(norm)));
+        assert(SearchAccess::try_append_integral_generator_relation(
+                context, throttle, element,
+                sflint::FmpzMatConstRef(coordinates),
+                sflint::FmpqConstRef(norm), nullptr,
+                silex::ClassGroupRelationSource::Search));
+    };
+
+    // Find a generator stored with a deferred large prime.
+    sflint::FmpzMat first_coordinates(1, maximal_order.degree());
+    sflint::Fmpz q;
+    bool found = false;
+    for (slong a = -6; a <= 6 && !found; ++a) {
+        for (slong b = -6; b <= 6 && !found; ++b) {
+            for (slong c = 1; c <= 6 && !found; ++c) {
+                const std::vector<silex::detail::PartialRelationEntry>*
+                        before = SearchAccess::partial_relations(context);
+                const std::size_t size_before =
+                        before == nullptr ? 0 : before->size();
+                sflint::fmpz_mat_zero(sflint::FmpzMatRef(coordinates));
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0),
+                                    a);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 1),
+                                    b);
+                sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 2),
+                                    c);
+                bool throttle = false;
+                append(throttle);
+                assert(!throttle);
+                const std::vector<silex::detail::PartialRelationEntry>*
+                        after = SearchAccess::partial_relations(context);
+                if (after != nullptr && after->size() == size_before + 1 &&
+                    after->back().has_deferred_prime) {
+                    const silex::detail::PartialRelationEntry& entry =
+                            after->back();
+                    assert(!entry.has_residue_key);
+                    assert(!entry.prime.has_prime_data());
+                    assert(fmpz_cmp_si(entry.rational_prime.raw(), 10) > 0);
+                    fmpz_set(q.raw(), entry.rational_prime.raw());
+                    sflint::fmpz_mat_set(
+                            sflint::FmpzMatRef(first_coordinates),
+                            sflint::FmpzMatConstRef(coordinates));
+                    found = true;
+                }
+            }
+        }
+    }
+    assert(found);
+
+    // The eager search assigns the same large prime above q, of degree 1.
+    sflint::FmpzMat row(1, base->length());
+    silex::PrimeIdeal eager(maximal_order);
+    silex::PrimeIdeal deferred(maximal_order);
+    silex::detail::OneLargePrimeFactorStatus status =
+            silex::detail::OneLargePrimeFactorStatus::no_candidate;
+    silex::detail::OneLargePrimeDeferral deferral;
+    assert(order_element.set_coordinates(
+            sflint::FmpzMatConstRef(first_coordinates)));
+    assert(order_element.get_element(element));
+    assert(element.norm(sflint::FmpqRef(norm)));
+    assert(silex::detail::order_element_factor_over_base_with_one_large_prime(
+            status, sflint::FmpzMatRef(row), eager, order_element,
+            sflint::FmpqConstRef(norm), *base));
+    assert(status == silex::detail::OneLargePrimeFactorStatus::found);
+    assert(silex::detail::order_element_factor_over_base_with_one_large_prime(
+            status, sflint::FmpzMatRef(row), deferred, order_element,
+            sflint::FmpqConstRef(norm), *base, nullptr, &deferral));
+    assert(status == silex::detail::OneLargePrimeFactorStatus::found_deferred);
+    assert(fmpz_equal(deferral.rational_prime.raw(), q.raw()));
+    assert(silex::detail::order_element_deferred_large_prime(
+            deferred, order_element,
+            sflint::FmpzConstRef(deferral.rational_prime),
+            deferral.norm_valuation, *base));
+    assert(deferred.equal(eager));
+    assert(deferred.residue_degree() == 1);
+
+    // 2 * first has the same single large prime (the primes over 2 lie in
+    // the base), so it is deferred too and pairs with the stored relation,
+    // which is consumed.
+    std::vector<silex::detail::PartialRelationEntry>* partials =
+            SearchAccess::partial_relations(context);
+    assert(partials != nullptr);
+    const std::size_t size_before = partials->size();
+    const slong matches_before = context.relation_source_count(
+            silex::ClassGroupRelationSource::LargePrimeMatch);
+    const slong skipped_before = context.skipped_dependent_relation_count();
+    fmpz_mat_scalar_mul_si(coordinates.raw(), first_coordinates.raw(), 2);
+    bool throttle = false;
+    append(throttle);
     partials = SearchAccess::partial_relations(context);
     assert(partials != nullptr);
     assert(partials->size() + 1 == size_before);
@@ -7758,6 +7888,7 @@ int main() {
     test_compute_candidate_random_product_relation_cubic();
     test_one_large_prime_match_cubic();
     test_large_prime_match_compares_prime_ideals_cubic();
+    test_deferred_large_prime_match_cubic();
     test_direct_partial_row_exact_valuation_cubic();
     test_direct_partial_row_deduced_last_valuation();
     test_compute_candidate_post_finite_refinement_cubic();

@@ -522,6 +522,20 @@ int test_order_element_factor_over_base_with_one_large_prime() {
     assert(row_matches_factorization(row, base, full));
     assert(exponent_of_prime(full, large_prime) == 1);
 
+    // 3 is inert, so the q-part left at q = 3 is 9, not 3: the large prime
+    // has degree 2 and is built even when deferral is offered.
+    silex::detail::OneLargePrimeDeferral deferral;
+    silex::PrimeIdeal offered(order);
+    sflint::FmpzMat offered_row(1, base.length());
+    assert(silex::detail::order_element_factor_over_base_with_one_large_prime(
+            status, sflint::FmpzMatRef(offered_row), offered, element,
+            sflint::FmpqConstRef(norm), base, nullptr, &deferral));
+    assert(status == silex::detail::OneLargePrimeFactorStatus::found);
+    assert(offered.equal(large_prime));
+    assert(offered.residue_degree() == 2);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(offered_row),
+                                  sflint::FmpzMatConstRef(row)));
+
     const slong no_candidate_values[] = {2, 9, 21};
     for (slong value : no_candidate_values) {
         assert(element.set_si(value));
@@ -531,6 +545,13 @@ int test_order_element_factor_over_base_with_one_large_prime() {
                        order_element_factor_over_base_with_one_large_prime(
                                status, sflint::FmpzMatRef(row), large_prime,
                                element, sflint::FmpqConstRef(norm), base));
+        assert(status ==
+               silex::detail::OneLargePrimeFactorStatus::no_candidate);
+        assert(silex::detail::
+                       order_element_factor_over_base_with_one_large_prime(
+                               status, sflint::FmpzMatRef(row), large_prime,
+                               element, sflint::FmpqConstRef(norm), base,
+                               nullptr, &deferral));
         assert(status ==
                silex::detail::OneLargePrimeFactorStatus::no_candidate);
     }
@@ -750,7 +771,10 @@ bool row_is_filled(const sflint::FmpzMat& row, slong value) noexcept {
 // norm a^3 - 2.  At a = 5 (3 * 41) and a = 9 (727, which splits completely)
 // the one large prime is the degree-one prime (p, theta - a), found among
 // the primes above p that can contain the element.  At a = 7 (11 * 31) and
-// for 31 (three primes of norm 31) there are two large primes.
+// for 31 (three primes of norm 31) there are two large primes.  With
+// deferral offered, the found cases leave a q-part of exactly q, so they are
+// deferred and the deferred build gives the same prime; the others, and
+// (5 - theta)^2 (one degree-one prime with valuation 2), are rejected.
 int test_order_element_factor_one_large_prime_cubic() {
     const slong coefficients[] = {-2, 0, 0, 1};
     silex::NumberField field = field_from_coefficients(coefficients, 4);
@@ -798,21 +822,62 @@ int test_order_element_factor_one_large_prime_cubic() {
         assert(full.factor(principal));
         assert(row_matches_factorization(row, base, full));
         assert(exponent_of_prime(full, large_prime) == 1);
+
+        silex::detail::OneLargePrimeDeferral deferral;
+        silex::PrimeIdeal deferred(order);
+        sflint::FmpzMat deferred_row(1, base.length());
+        assert(silex::detail::
+                       order_element_factor_over_base_with_one_large_prime(
+                               status, sflint::FmpzMatRef(deferred_row),
+                               deferred, element, sflint::FmpqConstRef(norm),
+                               base, nullptr, &deferral));
+        assert(status ==
+               silex::detail::OneLargePrimeFactorStatus::found_deferred);
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(deferred_row),
+                                      sflint::FmpzMatConstRef(row)));
+        sflint::Fmpz large_norm;
+        assert(large_prime.norm(sflint::FmpzRef(large_norm)));
+        assert(fmpz_equal(deferral.rational_prime.raw(), large_norm.raw()));
+        assert(deferral.norm_valuation == 1);
+        assert(silex::detail::order_element_deferred_large_prime(
+                deferred, element,
+                sflint::FmpzConstRef(deferral.rational_prime),
+                deferral.norm_valuation, base));
+        assert(deferred.equal(large_prime));
     }
 
+    auto rejected_both_ways = [&]() {
+        silex::detail::OneLargePrimeDeferral deferral;
+        assert(silex::detail::
+                       order_element_factor_over_base_with_one_large_prime(
+                               status, sflint::FmpzMatRef(row), large_prime,
+                               element, sflint::FmpqConstRef(norm), base));
+        assert(status ==
+               silex::detail::OneLargePrimeFactorStatus::no_candidate);
+        assert(silex::detail::
+                       order_element_factor_over_base_with_one_large_prime(
+                               status, sflint::FmpzMatRef(row), large_prime,
+                               element, sflint::FmpqConstRef(norm), base,
+                               nullptr, &deferral));
+        assert(status ==
+               silex::detail::OneLargePrimeFactorStatus::no_candidate);
+    };
+
     set_a_minus_theta(7);
-    assert(silex::detail::order_element_factor_over_base_with_one_large_prime(
-            status, sflint::FmpzMatRef(row), large_prime, element,
-            sflint::FmpqConstRef(norm), base));
-    assert(status == silex::detail::OneLargePrimeFactorStatus::no_candidate);
+    rejected_both_ways();
 
     assert(element.set_si(31));
     assert(element.get_element(ambient));
     assert(ambient.norm(sflint::FmpqRef(norm)));
-    assert(silex::detail::order_element_factor_over_base_with_one_large_prime(
-            status, sflint::FmpzMatRef(row), large_prime, element,
-            sflint::FmpqConstRef(norm), base));
-    assert(status == silex::detail::OneLargePrimeFactorStatus::no_candidate);
+    rejected_both_ways();
+
+    set_a_minus_theta(5);
+    silex::OrderElement square(order);
+    assert(square.multiply(element, element));
+    assert(element.set(square));
+    assert(element.get_element(ambient));
+    assert(ambient.norm(sflint::FmpqRef(norm)));
+    rejected_both_ways();
     return 0;
 }
 

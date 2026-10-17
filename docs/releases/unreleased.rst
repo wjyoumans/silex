@@ -356,6 +356,14 @@ Changed
   outputs are unchanged.  See "Local algebra and relations" in
   :doc:`../reference/algorithms_and_sources`.
 
+- On a maximal order that is not the equation order, a class-group partial
+  relation whose large prime has norm a rational prime ``q`` no longer
+  builds that prime ideal when it is found.  It is stored with ``q``, and the
+  prime ideals are built only when a second partial relation lies above the
+  same ``q``.  The store, match and drop decisions are unchanged, so
+  published outputs are unchanged.  See "Local algebra and relations" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` analytic finish no longer computes the HNF transform of
   the relation matrix at every check.  It checks the relation rank with
   ``fmpz_mat_rank`` and computes the transform only when the LLL kernel

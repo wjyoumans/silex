@@ -730,6 +730,20 @@ when ``g_i`` divides ``A`` modulo ``p``; the primes left out have valuation 0
 and were skipped before.  The primes that are built, and their order, are
 those of ``decompose_prime``.
 
+On a maximal order that is not the equation order, the class-group search
+does not build the large prime at all when what is left of ``v_q(N(alpha))``
+after the factor-base valuations above ``q`` is 1.  ``|N(alpha)| =
+N(alpha O_K)`` and ``N(P) = q^f`` make that remainder the sum of
+``f(P) v_P(alpha)`` over the primes ``P`` above ``q`` outside the factor
+base, so a remainder of 1 means exactly one such prime, of residue degree 1
+and valuation 1, with norm ``q``.  The bound check needs only ``q``.  The
+partial relation is stored with ``q`` and its generator's coordinates, and
+both large primes are built, by the step above, only when a stored partial
+lies above the same ``q``; partials above different rational primes never
+pair.  Any other remainder is decided by building the primes, as before.
+The store, match and drop decisions, and so the published outputs, are
+those of building every large prime at once.
+
 A relation generator ``alpha`` in a maximal order is first factored by a
 residue screen.  For each rational prime ``p`` dividing ``N(alpha)``, it
 tests ``alpha`` against the residue polynomial of every factor-base prime

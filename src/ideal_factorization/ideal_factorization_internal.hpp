@@ -17,14 +17,46 @@ namespace detail {
 enum class OneLargePrimeFactorStatus {
     no_candidate,
     found,
+    // The large prime is the one prime ideal above the recorded rational
+    // prime q that lies outside the base and contains the element; it has
+    // residue degree 1 and valuation 1.  It is not built:
+    // order_element_deferred_large_prime builds it.
+    found_deferred,
 };
 
+// The rational prime q under a found_deferred large prime and the q-adic
+// valuation of the element norm.
+struct OneLargePrimeDeferral {
+    flint::Fmpz rational_prime;
+    slong norm_valuation = 0;
+};
+
+// With `deferral` null the large prime is always built (status found).  With
+// `deferral` set, a large prime whose rational prime q leaves a q-part of
+// exactly q after the base valuations is reported as found_deferred instead,
+// with q and the norm valuation in *deferral; every other case is decided as
+// with `deferral` null.
 bool order_element_factor_over_base_with_one_large_prime(
         OneLargePrimeFactorStatus& status,
         flint::FmpzMatRef exponents,
         PrimeIdeal& large_prime,
         const OrderElement& element,
         flint::FmpqConstRef norm,
+        const FactorBase& base,
+        const DiagnosticsContext* diagnostics = nullptr,
+        OneLargePrimeDeferral* deferral = nullptr) noexcept;
+
+// Builds the large prime of a found_deferred result for `element`, given the
+// rational prime and norm valuation recorded in its OneLargePrimeDeferral:
+// the prime ideal order_element_factor_over_base_with_one_large_prime would
+// have returned with `deferral` null.  Returns false on failure, including
+// when the primes above `rational_prime` do not leave exactly one such
+// prime.
+bool order_element_deferred_large_prime(
+        PrimeIdeal& large_prime,
+        const OrderElement& element,
+        flint::FmpzConstRef rational_prime,
+        slong norm_valuation,
         const FactorBase& base,
         const DiagnosticsContext* diagnostics = nullptr) noexcept;
 

@@ -1254,7 +1254,8 @@ bool order_element_factor_over_base_with_one_large_prime(
         const OrderElement& element,
         flint::FmpqConstRef norm,
         const FactorBase& base,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        OneLargePrimeDeferral* deferral) noexcept {
     // reference `_factor!` and reference `can_factor` retain an integral element while
     // distributing its known norm over factor-base prime ideals.  Apply that
     // same exact valuation contract while permitting the one non-base prime
@@ -1288,6 +1289,7 @@ bool order_element_factor_over_base_with_one_large_prime(
                        flint::FmpzConstRef(norm_abs));
 
     bool have_large_prime = false;
+    bool have_deferred_prime = false;
     slong large_exponent = 0;
     const slong factor_count = flint::fmpz_factor_num(
             flint::FmpzFactorConstRef(norm_factorization));
@@ -1313,6 +1315,26 @@ bool order_element_factor_over_base_with_one_large_prime(
             return true;
         }
         if (remaining == 0) {
+            continue;
+        }
+        // A deferred large prime lies above an earlier rational prime, so
+        // any prime ideal outside the base above this one is a second large
+        // prime: the search below would end here too.
+        if (have_deferred_prime) {
+            return true;
+        }
+        // The element is integral in a maximal order and the base valuations
+        // above q are exact, so remaining is the sum of v_P(element) f(P)
+        // over the prime ideals P above q outside the base, since
+        // |N(element)| = N(element O) is the product of N(P)^v_P(element)
+        // with N(P) = q^f(P).  When it is 1
+        // there is exactly one such P with positive valuation, and it has
+        // v_P = f(P) = 1, which is what the search below would find.  Record
+        // q and leave building P to the caller.
+        if (deferral != nullptr && remaining == 1 && !have_large_prime) {
+            ::fmpz_set(deferral->rational_prime.raw(), rational_prime.raw());
+            deferral->norm_valuation = norm_valuation;
+            have_deferred_prime = true;
             continue;
         }
 
@@ -1374,6 +1396,11 @@ bool order_element_factor_over_base_with_one_large_prime(
         }
     }
 
+    if (have_deferred_prime) {
+        flint::fmpz_mat_set(exponents, flint::FmpzMatConstRef(candidate_row));
+        status = OneLargePrimeFactorStatus::found_deferred;
+        return true;
+    }
     if (!have_large_prime || large_exponent != 1) {
         return true;
     }
@@ -1383,6 +1410,55 @@ bool order_element_factor_over_base_with_one_large_prime(
     flint::fmpz_mat_set(exponents, flint::FmpzMatConstRef(candidate_row));
     status = OneLargePrimeFactorStatus::found;
     return true;
+}
+
+bool order_element_deferred_large_prime(
+        PrimeIdeal& large_prime,
+        const OrderElement& element,
+        flint::FmpzConstRef rational_prime,
+        slong norm_valuation,
+        const FactorBase& base,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::ideal,
+                        "ideal.order_element_deferred_large_prime");
+    const Order* order = element.parent();
+    if (order == nullptr || !order->is_maximal() || element.equal_si(0) ||
+        !same_order_parent(base.parent(), order) ||
+        !same_order_parent(large_prime.parent(), order) ||
+        norm_valuation <= 0) {
+        return false;
+    }
+
+    // The same primes, in the same order and with the same valuations, as
+    // the search in order_element_factor_over_base_with_one_large_prime.
+    std::vector<PrimeIdeal> decomposed;
+    if (!detail::PrimeIdealAccess::decompose_prime_containing(
+                decomposed, element, rational_prime, diagnostics)) {
+        return false;
+    }
+    const PrimeIdeal* found = nullptr;
+    for (const PrimeIdeal& candidate : decomposed) {
+        if (base.contains(candidate)) {
+            continue;
+        }
+        slong valuation = -1;
+        if (!scoped_prime_ideal_valuation(
+                    "ideal_factorization.valuation_caller_deferred_large_prime",
+                    valuation, candidate, element, norm_valuation,
+                    diagnostics) ||
+            valuation < 0) {
+            return false;
+        }
+        if (valuation == 0) {
+            continue;
+        }
+        if (found != nullptr || valuation != 1 ||
+            candidate.residue_degree() != 1) {
+            return false;
+        }
+        found = &candidate;
+    }
+    return found != nullptr && large_prime.set(*found);
 }
 
 bool ideal_factor_over_base_with_required_prime(

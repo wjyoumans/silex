@@ -11643,15 +11643,72 @@ bool ClassGroupContext::try_partial_relation_(
     bool have_large_prime = false;
     bool have_residue_key = false;
     bool have_partial_row = false;
+    // A large prime known only by its rational prime q (residue degree 1,
+    // valuation 1); see detail::OneLargePrimeFactorStatus::found_deferred.
+    // It is built only when a stored partial lies above the same q, the
+    // first point where its identity as an ideal is needed; the store, match
+    // and drop decisions are those of building it at once.
+    detail::OneLargePrimeDeferral deferral;
+    bool have_deferred_large_prime = false;
     if (!large_prime.is_defined()) {
         return false;
     }
 
+    auto build_deferred_large_prime = [&]() noexcept -> bool {
+        if (!have_deferred_large_prime) {
+            return true;
+        }
+        OrderElement order_generator(parent_);
+        if (known_integral_coordinates == nullptr ||
+            !order_generator.is_defined() ||
+            !order_generator.set_coordinates(flint::FmpzMatConstRef(
+                    known_integral_coordinates)) ||
+            !detail::order_element_deferred_large_prime(
+                    large_prime, order_generator,
+                    flint::FmpzConstRef(deferral.rational_prime),
+                    deferral.norm_valuation, base_, diagnostics_)) {
+            return false;
+        }
+        have_deferred_large_prime = false;
+        have_large_prime = true;
+        return true;
+    };
+    auto build_stored_large_prime =
+            [&](detail::PartialRelationEntry& stored) noexcept -> bool {
+        if (!stored.has_deferred_prime) {
+            return true;
+        }
+        OrderElement order_generator(parent_);
+        if (!order_generator.is_defined() ||
+            !order_generator.set_coordinates(flint::FmpzMatConstRef(
+                    stored.deferred_coordinates)) ||
+            !detail::order_element_deferred_large_prime(
+                    stored.prime, order_generator,
+                    flint::FmpzConstRef(stored.rational_prime),
+                    stored.deferred_norm_valuation, base_, diagnostics_)) {
+            return false;
+        }
+        stored.has_deferred_prime = false;
+        stored.deferred_coordinates = flint::FmpzMat(0, 0);
+        return true;
+    };
+
     auto match_or_store_large_prime = [&]() noexcept -> bool {
         SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                             "class_group.partial_relation_match_or_store");
-        if (!have_large_prime && !have_residue_key) {
+        if (!have_large_prime && !have_residue_key &&
+            !have_deferred_large_prime) {
             return true;
+        }
+        // Every entry records the rational prime under its large prime, so
+        // the ideal comparison below runs only within one rational prime.
+        if (have_large_prime &&
+            !large_prime.rational_prime(flint::FmpzRef(rational_large_prime))) {
+            return false;
+        }
+        if (have_deferred_large_prime) {
+            ::fmpz_set(rational_large_prime.raw(),
+                       deferral.rational_prime.raw());
         }
 
         std::size_t match_index = partial_state.partial_relations.size();
@@ -11674,11 +11731,23 @@ bool ClassGroupContext::try_partial_relation_(
                 // for one prime ideal, so compare the ideals (canonical HNFs)
                 // with the shared same-prime test rather than
                 // PrimeIdeal::equal.  A stored entry keyed only by residue
-                // has no prime data and never matches here.
-                const bool prime_match =
-                        have_large_prime && stored.prime.has_prime_data() &&
-                        detail::PrimeIdealAccess::same_prime_ideal(
-                                stored.prime, large_prime);
+                // has no prime data and never matches here.  Prime ideals
+                // above different rational primes differ, so only entries
+                // above the same rational prime are compared, and a deferred
+                // large prime on either side is built first.
+                bool prime_match = false;
+                if ((have_large_prime || have_deferred_large_prime) &&
+                    (stored.prime.has_prime_data() ||
+                     stored.has_deferred_prime) &&
+                    ::fmpz_equal(stored.rational_prime.raw(),
+                                 rational_large_prime.raw()) != 0) {
+                    if (!build_deferred_large_prime() ||
+                        !build_stored_large_prime(stored)) {
+                        return false;
+                    }
+                    prime_match = detail::PrimeIdealAccess::same_prime_ideal(
+                            stored.prime, large_prime);
+                }
                 if (!residue_match && !prime_match) {
                     continue;
                 }
@@ -11813,9 +11882,17 @@ bool ClassGroupContext::try_partial_relation_(
             if (have_large_prime && !entry.prime.set(large_prime)) {
                 return false;
             }
+            ::fmpz_set(entry.rational_prime.raw(), rational_large_prime.raw());
+            if (have_deferred_large_prime) {
+                entry.deferred_coordinates = flint::FmpzMat(
+                        ::fmpz_mat_nrows(known_integral_coordinates),
+                        ::fmpz_mat_ncols(known_integral_coordinates));
+                ::fmpz_mat_set(entry.deferred_coordinates.raw(),
+                               known_integral_coordinates);
+                entry.deferred_norm_valuation = deferral.norm_valuation;
+                entry.has_deferred_prime = true;
+            }
             if (have_residue_key) {
-                ::fmpz_set(entry.rational_prime.raw(),
-                           rational_large_prime.raw());
                 ::fmpz_poly_set(entry.residue_key.raw(), residue_key.raw());
                 entry.has_residue_key = true;
             }
@@ -11878,7 +11955,7 @@ bool ClassGroupContext::try_partial_relation_(
             detail::order_element_factor_over_base_with_one_large_prime(
                     factor_status, flint::FmpzMatRef(partial_row), large_prime,
                     order_generator, flint::FmpqConstRef(known_norm), base_,
-                    diagnostics_)) {
+                    diagnostics_, &deferral)) {
             if (factor_status ==
                 detail::OneLargePrimeFactorStatus::no_candidate) {
                 SILEX_PROFILE_EVENT(
@@ -11887,12 +11964,19 @@ bool ClassGroupContext::try_partial_relation_(
                 return true;
             }
 
+            // A deferred large prime has residue degree 1, so its norm is
+            // its rational prime.
+            const bool deferred = factor_status ==
+                    detail::OneLargePrimeFactorStatus::found_deferred;
             flint::Fmpz large_norm;
             flint::Fmpz norm_bound;
             flint::fmpz_mul(flint::FmpzRef(norm_bound),
                             flint::FmpzConstRef(factor_base_build_bound_),
                             flint::FmpzConstRef(factor_base_build_bound_));
-            if (!large_prime.norm(flint::FmpzRef(large_norm)) ||
+            if (deferred) {
+                ::fmpz_set(large_norm.raw(), deferral.rational_prime.raw());
+            }
+            if ((!deferred && !large_prime.norm(flint::FmpzRef(large_norm))) ||
                 flint::fmpz_cmp(flint::FmpzConstRef(large_norm),
                                 flint::FmpzConstRef(norm_bound)) > 0) {
                 SILEX_PROFILE_EVENT(
@@ -11904,7 +11988,8 @@ bool ClassGroupContext::try_partial_relation_(
             SILEX_PROFILE_EVENT(
                     diagnostics_, DiagnosticsModule::class_group,
                     "class_group.partial_relation_retained_integral_found");
-            have_large_prime = true;
+            have_large_prime = !deferred;
+            have_deferred_large_prime = deferred;
             have_partial_row = true;
             return match_or_store_large_prime();
         }

@@ -30,13 +30,22 @@ struct PartialRelationEntry {
           generator(*order.parent()) {
     }
 
+    // The large prime ideal, when built.  A deferred entry has none yet:
+    // it records the order coordinates of `generator` and the norm
+    // valuation at rational_prime, from which
+    // order_element_deferred_large_prime builds it on the first stored or
+    // incoming partial above the same rational prime.
     PrimeIdeal prime;
     Element generator;
     flint::FmpzMat row{0, 0};
+    // The rational prime under the large prime, for every entry.
     flint::Fmpz rational_prime;
     flint::FmpzPoly residue_key;
+    flint::FmpzMat deferred_coordinates{0, 0};
+    slong deferred_norm_valuation = 0;
     bool has_residue_key = false;
     bool has_row = false;
+    bool has_deferred_prime = false;
 };
 
 struct DirectPartialResidueBlockCacheEntry {
