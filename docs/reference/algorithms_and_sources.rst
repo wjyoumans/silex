@@ -1279,6 +1279,22 @@ representatives are kept differs, so the published generators and basis can
 differ from Hecke's.  Silex keeps this
 behavior on purpose.
 
+The reduced value ``value * prod_j g_j^(-c_j)`` is stored with equal factors
+merged: one entry per distinct factor, in order of first occurrence, with
+the sum of its exponents, and no entry for a factor whose exponents cancel.
+This is how a Hecke ``FacElem`` dictionary holds the product
+(``src/NumFieldOrd/NfOrd/FacElem.jl``, 149-205).  Factors are compared as
+``FactoredElement::logarithmic_embedding`` compares them when it merges equal
+bases (Hecke's ``conjugates_arb_log`` for ``FacElem``, below), so the stored
+list gives that embedding the same terms in the same order, and its result
+is unchanged.
+The generators of a relation unit group are long products of a few distinct
+relation elements; without the merge, every reduction appends each
+generator's whole list again.  When an exponent sum does not fit ``slong``,
+or every exponent cancels, the concatenated product is stored instead, as
+before.  The merge applies only to this reduction; ``FactoredElement``
+arithmetic still does not merge factors.
+
 The approximate rounding itself ports Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:round_approx(ZZMatrix, ArbMatrix)``.  Its
 width check forms ``lower - upper`` (the floor of the lower bound minus the

@@ -1098,7 +1098,8 @@ Changed
 
 - Unit-basis reduction of the stored units no longer lets their factored
   form grow without bound.  When a transform would give the stored units more
-  than 20000 factors in total, or they already exceed that total (as after
+  than 5000 factors in total (20000 before the change to relation-unit
+  reduction below), or they already exceed that total (as after
   an adjoin), on an order known to be maximal the units are rebuilt as single
   field elements by the existing wide path (``rebuild_wide_unit_generators``,
   the port of PARI 2.17.3 ``buch2.c`` ``vec_chinese_units``, 1214-1240).  The
@@ -1110,6 +1111,50 @@ Changed
   benchmark corpus (degree at most 40, ``grh``) 10 fields differ in it, among
   them ``cyclotomic_37_phi36`` and ``cyclotomic_64_phi32``.  No other published field differs; in ``proven`` mode
   no compared field differs.
+
+- Reducing relation units modulo the unit group now stores each reduced
+  value with equal factors merged: one entry per distinct factor, in order of
+  first occurrence, with the summed exponent, as a Hecke ``FacElem``
+  dictionary holds the product (``src/NumFieldOrd/NfOrd/FacElem.jl``,
+  149-205).  Before, each reduction appended every generator's whole factor
+  list again, so the stored units repeated a few dozen relation elements
+  thousands of times.  When a summed exponent does not fit ``slong``, or
+  every exponent cancels, the concatenated list is stored as before.
+  ``FactoredElement`` arithmetic and ``normalize`` still do not merge
+  factors.  With merged lists the stored-unit rebuild cutoff of the entry
+  above is lowered from 20000 to 5000 factors, a measured Silex cost
+  choice.  On the class/unit benchmark corpus (``grh``) this cuts the
+  user-space instructions of ``cyclotomic_real_31_deg15`` by about 33% and of
+  ``cyclotomic_52_phi24`` by about 38%, and of the corpus by about 4.5%; no
+  field takes more than 0.1% more instructions.  Units, class groups,
+  regulator values, labels and statuses are unchanged.  Each published unit
+  generator is the same unit written as a different product: the factor
+  lists change on 21 ``grh`` fields (``pure_x8_minus_3``, ``lmfdb_8_0_76488065_1``,
+  ``random_d10_h4_s27_proven``, ``cyclotomic_36_phi12``,
+  ``cyclotomic_real_23_deg11``, ``cyclotomic_real_31_deg15``,
+  ``cyclotomic_48_phi16``, ``cyclotomic_real_64_deg16``,
+  ``septendecic_x17_minus_x_minus_1_proven``,
+  ``octodecic_x18_minus_x_plus_1_proven``,
+  ``cyclotomic_real_q10_c11_deg10``, ``cyclotomic_19_phi18``,
+  ``cyclotomic_27_phi18``, ``nonadecic_x19_minus_x_minus_1_proven``,
+  ``cyclotomic_real_37_deg18``, ``cyclotomic_72_phi24``,
+  ``cyclotomic_23_phi22``, ``cyclotomic_52_phi24``, ``cyclotomic_45_phi24``,
+  ``cyclotomic_35_phi24``, ``cyclotomic_37_phi36``) and, in ``proven`` mode,
+  on ``quintic_disc11119_proven``.  Most lists get shorter (for example
+  8769 to 1895 factors in total for ``cyclotomic_real_q10_c11_deg10``, and
+  7041 to 11 for ``cyclotomic_35_phi24``, now rebuilt).  Where the rebuild now
+  happens at an earlier reduction, the published generators carry a few
+  factors instead of one (``cyclotomic_real_31_deg15``,
+  ``cyclotomic_real_64_deg16``, ``cyclotomic_real_37_deg18``,
+  ``cyclotomic_52_phi24``: 14, 15, 17 and 11 factors in total become 94, 31,
+  49 and 62).  The published ``unit_group.regulator_radius``, still a valid
+  enclosure, changes on 6 ``grh`` fields: ``cyclotomic_real_31_deg15``
+  (7.54e-31 to 7.75e-31), ``cyclotomic_real_64_deg16`` (2.137e-29 to
+  2.125e-29), ``cyclotomic_real_37_deg18`` (1.20e-28 to 1.26e-28),
+  ``cyclotomic_35_phi24`` (8.26e-30 to 8.17e-30), ``cyclotomic_52_phi24``
+  (1.286e-29 to 1.277e-29) and ``cyclotomic_37_phi36`` (2.10e-23 to
+  2.01e-23).  No other published field differs; in ``proven`` mode no
+  compared instance output differs.
 
 - A ``proven`` class/unit computation over an imaginary quadratic field
   reduces the very large binary forms of its witness step (more than 9000

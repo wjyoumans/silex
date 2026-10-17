@@ -2500,7 +2500,19 @@ bool transform_factored_units_wide(std::vector<FactoredElement>& units,
 // equal to the factored ones, so the cutoff changes no unit, group or
 // regulator value; it changes how the stored generators are written, and so
 // the regulator enclosure computed from them, whose radius may change.
-constexpr std::size_t kStoredUnitRebuildFactorCount = 20000;
+//
+// The value is measured, not derived.  Since apply_unit_reduction merges
+// equal factors, the stored units reach a given count later than they did
+// with concatenated lists, and the earlier value 20000 no longer rebuilt
+// lists that were cheaper to rebuild than to keep: on the grh class/unit
+// benchmark corpus (degree at most 40), 5000 cuts the user-space
+// instructions of cyclotomic_52_phi24 by 21% and of cyclotomic_real_31_deg15
+// by 21% against 20000, rebuilds the 7041-factor generators of
+// cyclotomic_35_phi24 (whose evaluation cost about 0.5 s) at 0.5% more
+// instructions, and leaves no row slower than with concatenated lists and
+// the old value.  Lower values rebuild more final lists, which costs some
+// rows up to 4% more instructions for a further corpus gain under 1%.
+constexpr std::size_t kStoredUnitRebuildFactorCount = 5000;
 
 std::size_t factored_units_length(
         std::span<const FactoredElement> units) noexcept {
