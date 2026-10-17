@@ -12091,6 +12091,46 @@ bool ClassGroupContext::set_relation_matrix(
     return true;
 }
 
+// The published invariants are those of hnf_basis (FiniteAbelianGroupAccess
+// takes the basis as given; abelian_group_internal.hpp), so they are correct
+// only if row_module_, after the sync below, spans the row lattice of
+// relations_.  The sync makes row_module_ the HNF checkpoint of
+// relation_module_, so the invariant is
+//
+//   (I) the rows of relations_ and the rows retained in relation_module_
+//       span the same lattice, and while row_module_synced_ is set,
+//       row_module_ spans it too.
+//
+// No check runs here; (I) holds on every mutation path:
+// - clear(), define() and the moved-from state hold no rows.  The base
+//   builders (build_factor_base, build_relation_factor_base_,
+//   build_search_factor_base_, set_factor_base) and set_relation_matrix
+//   start a candidate from an empty RelationMatrix and
+//   reset_relation_modules, and swap()/move exchange all three members
+//   together.
+// - append_relation_with_outcome_ is the only writer of rows: it holds the
+//   only relations_.append call and the only relation_module_ and
+//   row_module_ replacements outside the reset paths and the sync.  Other
+//   files reach relations_ through const accessors and read row_module_
+//   only.  Its exits:
+//   - keep_nonduplicate duplicate, a modular-dependent row the policy does
+//     not retain, or a row the exact decision rejects return before
+//     relations_ or relation_module_ change.  The exact rejection may
+//     replace row_module_ with row_module_ + row, but only when the row
+//     neither raised the rank nor changed the HNF, so its lattice is
+//     unchanged: should_keep_dependent_relation keeps every index_refined
+//     row, and HnfContext::refine_dependent sets index_refined exactly when
+//     the HNF changes.
+//   - A module duplicate (exactly equal to a row relation_module_ already
+//     retains) kept as a witness is appended to relations_ only; the
+//     lattice is unchanged.
+//   - Otherwise relations_.append runs first and returns on failure; only
+//     then relation_module_ is replaced by module_candidate, a copy of
+//     relation_module_ plus this row.  row_module_ is either marked unsynced
+//     or, on the exact path, replaced by the synced row_module_ plus this
+//     row.
+// set_relation_matrix publishes from relations_ directly and does not rely
+// on (I).
 bool ClassGroupContext::publish_presentation() noexcept {
     if (!has_factor_base()) {
         return false;
