@@ -1494,24 +1494,20 @@ bool t2_enumeration_data_is_basis_gram(
         return false;
     }
     std::vector<double> gram(static_cast<std::size_t>(degree * degree));
-    arb_t sum;
-    arb_t term;
-    arb_init(sum);
-    arb_init(term);
+    sflint::Arb sum;
+    sflint::Arb term;
     for (slong i = 0; i < degree; ++i) {
         for (slong j = 0; j < degree; ++j) {
-            arb_zero(sum);
+            arb_zero(sum.raw());
             for (slong k = 0; k < degree; ++k) {
-                arb_mul(term, arb_mat_entry(rows.raw(), i, k),
+                arb_mul(term.raw(), arb_mat_entry(rows.raw(), i, k),
                         arb_mat_entry(rows.raw(), j, k), kGramPrecision);
-                arb_add(sum, sum, term, kGramPrecision);
+                arb_add(sum.raw(), sum.raw(), term.raw(), kGramPrecision);
             }
             gram[static_cast<std::size_t>(i * degree + j)] =
-                    arf_get_d(arb_midref(sum), ARF_RND_NEAR);
+                    arf_get_d(arb_midref(sum.raw()), ARF_RND_NEAR);
         }
     }
-    arb_clear(sum);
-    arb_clear(term);
 
     const auto form = [&](slong row, slong column) {
         return data.quadratic_form_data[static_cast<std::size_t>(

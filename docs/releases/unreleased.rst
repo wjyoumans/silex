@@ -192,12 +192,13 @@ Changed
   one.  The lower triangle, the diagonal and every entry midpoint are
   unchanged, and the Cholesky factorization reads only the lower triangle, so
   the enumeration data and every published result are unchanged; published
-  outputs are identical on the tested ``proven`` corpus rows.  On a busy
-  machine the per-ideal setup of the ``proven`` factor-base honesty scan of
-  the 23rd cyclotomic field took about 14% less time, and the ``proven``
-  class/unit computation of the field defined by ``x^12 + 7`` took about 5%
-  less CPU time (medians of alternating runs); no controlled measurement has
-  been made.
+  outputs are identical on the tested ``proven`` corpus rows.  On an idle
+  machine (2026-10-16, paired interleaved runs, medians) the ``proven``
+  class/unit computation of the field defined by ``x^12 + 7`` took 1198 ms
+  before and 1138 ms after (ratio 0.950), and the per-ideal setup of the
+  ``proven`` factor-base honesty scan of the 23rd cyclotomic field took about
+  18% less time (21.4% more setups in 45 s); a control row was unchanged
+  (ratio 1.000).
 
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when
