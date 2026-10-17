@@ -160,8 +160,8 @@ bool required_prime_factorization_matches_reference(
         // Matched as ideals, as base.contains matches: the factorization
         // may record residue data other than required_prime's for the same
         // prime.
-        if (detail::PrimeIdealAccess::ideal(factor).equal(
-                    detail::PrimeIdealAccess::ideal(required_prime))) {
+        if (detail::PrimeIdealAccess::same_prime_ideal(
+                    factor, required_prime)) {
             required_exponent += exponent;
         } else if (!base.contains(factor)) {
             bool admissible = false;
@@ -1358,9 +1358,8 @@ bool order_element_factor_over_base_with_one_large_prime(
                 }
                 have_large_prime = true;
                 large_exponent = valuation;
-            } else if (detail::PrimeIdealAccess::ideal(candidate_large_prime)
-                               .equal(detail::PrimeIdealAccess::ideal(
-                                       *prime))) {
+            } else if (detail::PrimeIdealAccess::same_prime_ideal(
+                                       candidate_large_prime, *prime)) {
                 if (valuation >
                     std::numeric_limits<slong>::max() - large_exponent) {
                     return false;

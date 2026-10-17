@@ -95,8 +95,8 @@ bool full_factorization_has_principal_witness(
         // Matched as ideals, as base.contains matches below: the
         // factorization may record residue data other than the required
         // prime's for the same prime, which PrimeIdeal::equal tells apart.
-        if (detail::PrimeIdealAccess::ideal(factor).equal(
-                    detail::PrimeIdealAccess::ideal(prime))) {
+        if (detail::PrimeIdealAccess::same_prime_ideal(factor,
+                                                              prime)) {
             prime_exponent += exponent;
             continue;
         }

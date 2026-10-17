@@ -219,8 +219,8 @@ bool full_factorization_required_prime_result(
         }
         // Matched as ideals: the factorization may record residue data
         // other than required_prime's for the same prime.
-        if (silex::detail::PrimeIdealAccess::ideal(factor).equal(
-                    silex::detail::PrimeIdealAccess::ideal(required_prime))) {
+        if (silex::detail::PrimeIdealAccess::same_prime_ideal(
+                    factor, required_prime)) {
             required_exponent += exponent;
         } else if (!base.contains(factor) &&
                    (strict ||
