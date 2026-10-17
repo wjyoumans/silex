@@ -3342,7 +3342,8 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
     // `valuation(norm(a), p) / f` when a single prime ideal lies over the
     // rational prime (`e*f == degree(O)`) in small-degree orders.  reference
     // `base3.c:ZC_nfvalrem` exposes the same integral-coordinate valuation
-    // contract, with a broader anti-uniformizer route that is not ported here.
+    // contract; its anti-uniformizer route is ported below for maximal orders
+    // without a Kummer quotient map (see `anti_uniformizer_multiplier_matrix`).
     if (norm_vp == 0) {
         SILEX_PRIME_IDEAL_PROFILE_EVENT(
                 diagnostics,
@@ -3501,8 +3502,9 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
     }
 
     if ((multiplier == nullptr || anti_uniformizer) && parent_.is_maximal()) {
-        // No Kummer quotient map for this prime (an index divisor, or an
-        // order basis other than the power basis).  Take the first step of
+        // No Kummer quotient map for this prime (no residue polynomial, as
+        // at an index divisor; a field polynomial that is not monic integral;
+        // or a failed Kummer division).  Take the first step of
         // the containment definition exactly as the fallback does, so
         // v_P(a) = 0 still costs one membership test.  Only when
         // v_P(a) >= 1 and the bound allows more, use an anti-uniformizer

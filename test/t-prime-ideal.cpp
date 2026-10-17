@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -2403,8 +2404,31 @@ int test_valuation_power_containment_matches_gp() {
 // anti-uniformizer taken from the HNF of P must equal the exact
 // power-containment valuation at every bound, and so must the public
 // element valuation, which now takes that route for primes without a Kummer
-// quotient map.  Elements include products of basis elements of P so that
-// valuations above one occur.
+// quotient map (when its bound is at least two, the element lies in P, the
+// norm shortcut does not apply, p fits in a word and P != pO; otherwise it
+// falls back to containment).  Elements include products of basis elements of
+// P so that valuations above one occur.  In a build with profiling enabled
+// the sweep also asserts that the public valuation reached the
+// path_anti_uniformizer event at least once.
+struct AntiUniformizerRouteCounter {
+    slong count = 0;
+};
+
+void anti_uniformizer_route_callback(void* user,
+                                     silex::DiagnosticsModule,
+                                     silex::ProfileEvent event,
+                                     const char*,
+                                     const char* label) noexcept {
+    AntiUniformizerRouteCounter* counter =
+            static_cast<AntiUniformizerRouteCounter*>(user);
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label,
+                    "prime_ideal.valuation_order_element."
+                    "path_anti_uniformizer") == 0) {
+        ++counter->count;
+    }
+}
+
 int test_valuation_anti_uniformizer_matches_containment() {
     const std::vector<std::vector<slong>> fields = {
             // x^3 - x^2 - 2x - 8: 2 is a common index divisor, split.
@@ -2415,7 +2439,10 @@ int test_valuation_anti_uniformizer_matches_containment() {
             {36, 0, -5, 0, 1},
             // Q(sqrt(2), sqrt(3)): 2 is ramified and divides the index.
             {1, 0, -10, 0, 1},
+            // Quartic with a maximal order that is not the equation order.
             {474, -4, 5, -2, 1},
+            // Sextic x^6 + 7 with a maximal order that is not the equation
+            // order.
             {7, 0, 0, 0, 0, 0, 1},
             // polredabs of Q(sqrt(-23), sqrt(-31), sqrt(-47)): index
             // 2^20 * 3^2 * 2803; 23, 31 and 47 ramify.
@@ -2424,6 +2451,14 @@ int test_valuation_anti_uniformizer_matches_containment() {
     slong checked_index_positive = 0;
     slong checked_ramified_positive = 0;
     slong checked_above_one = 0;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    AntiUniformizerRouteCounter route_counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::prime_ideal),
+            anti_uniformizer_route_callback, &route_counter);
     for (const std::vector<slong>& coefficients : fields) {
         sflint::FmpqPoly polynomial;
         for (std::size_t i = 0; i < coefficients.size(); ++i) {
@@ -2521,8 +2556,9 @@ int test_valuation_anti_uniformizer_matches_containment() {
                                     anti_uniformizer_valuation_for_testing(
                                             value, *prime, element, bound)) {
                             // Only P = pO has no anti-uniformizer condition
-                            // (every HNF row vanishes mod p); the valuation
-                            // code never takes this route there.
+                            // (every HNF row vanishes mod p); the helper
+                            // declines there and the valuation falls back to
+                            // containment.
                             assert(prime->ramification_index() == 1);
                             assert(prime->residue_degree() == n);
                             value = expected;
@@ -2531,7 +2567,8 @@ int test_valuation_anti_uniformizer_matches_containment() {
                         if (bound == 40) {
                             assert(expected < bound);
                             slong public_value = -1;
-                            assert(prime->valuation(public_value, element));
+                            assert(prime->valuation(public_value, element,
+                                                    &diagnostics));
                             assert(public_value == expected);
                             if (expected > 0 && index_prime) {
                                 ++checked_index_positive;
@@ -2552,6 +2589,10 @@ int test_valuation_anti_uniformizer_matches_containment() {
     assert(checked_index_positive > 0);
     assert(checked_ramified_positive > 0);
     assert(checked_above_one > 0);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The public valuation (not only the test hook) took the route.
+    assert(route_counter.count > 0);
+#endif
     return 0;
 }
 

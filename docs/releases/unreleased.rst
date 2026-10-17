@@ -128,9 +128,10 @@ Added
 Changed
 -------
 
-- Valuations at index-divisor primes of a maximal order (primes where the
-  order basis is not the power basis, or that have no Kummer quotient map) are
-  counted with an anti-uniformizer, found once per prime by a linear system
+- Valuations at primes of a maximal order that have no Kummer quotient map
+  (such as index divisors) are, when the bound is at least two, the element
+  lies in the prime, the norm shortcut does not apply and the rational prime
+  fits in a word, counted with an anti-uniformizer, found once per prime by a linear system
   over ``F_p``, instead of testing containment in successive powers of the
   prime ideal.  Valuations, factorizations and every published result are
   unchanged; only the work changes (about 23% fewer instructions on the
