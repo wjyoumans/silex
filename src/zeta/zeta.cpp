@@ -4696,7 +4696,7 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
     return true;
 }
 
-bool zeta_bf_theorem7_error_bound(flint::ArbRef out,
+bool ZetaTestEntry::bf_theorem7_error_bound(flint::ArbRef out,
                                   const Order& order,
                                   ulong cutoff,
                                   slong precision) noexcept {
@@ -4833,7 +4833,7 @@ bool quadratic_dirichlet_l1_with_tolerance(flint::ArbRef out,
     return true;
 }
 
-bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
+bool ZetaTestEntry::quadratic_afe_gamma_stepped(flint::ArbVec& out,
                                  QuadraticAfeGammaStepCount& count,
                                  ulong shift,
                                  ulong q,
@@ -4905,7 +4905,7 @@ bool quadratic_afe_gamma_stepped(flint::ArbVec& out,
     return true;
 }
 
-bool quadratic_afe_gamma_step_block(QuadraticAfeGammaStepBlock& block,
+bool ZetaTestEntry::quadratic_afe_gamma_step_block(QuadraticAfeGammaStepBlock& block,
                                     mag_struct* truncation,
                                     ulong shift,
                                     ulong q,

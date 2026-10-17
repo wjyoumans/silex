@@ -1,4 +1,5 @@
 #include "class_group/class_group_internal.hpp"
+#include "test_hook_access.hpp"
 #include "zeta/zeta_internal.hpp"
 
 #include <silex/class_group.hpp>
@@ -631,7 +632,7 @@ void check_gamma_stepping_against_hypgeom() {
     for (const GammaStepCase& c : cases) {
         sflint::ArbVec values(c.count);
         silex::detail::QuadraticAfeGammaStepCount count;
-        assert(silex::detail::quadratic_afe_gamma_stepped(
+        assert(silex::detail::TestHookAccess::quadratic_afe_gamma_stepped(
                 values, count, c.shift, c.q, c.first, c.max_block, target,
                 prec, guard));
         // Every value after the first, direct anchor comes from a block.
@@ -679,7 +680,7 @@ void check_step_truncation_bound(const StepBoundCase& c) {
     const slong hp = 1024;
     silex::detail::QuadraticAfeGammaStepBlock block;
     MagGuard bound;
-    assert(silex::detail::quadratic_afe_gamma_step_block(
+    assert(silex::detail::TestHookAccess::quadratic_afe_gamma_step_block(
             block, bound.value, c.shift, c.q, c.n, c.target, c.prec));
     assert(block.block >= 4);
     assert(block.terms >= 1);
@@ -787,7 +788,7 @@ void check_step_start_fails_closed() {
     for (const Case& c : cases) {
         sflint::ArbVec stepped(count);
         silex::detail::QuadraticAfeGammaStepCount stepped_count;
-        assert(silex::detail::quadratic_afe_gamma_stepped(
+        assert(silex::detail::TestHookAccess::quadratic_afe_gamma_stepped(
                 stepped, stepped_count, c.shift, c.q, c.first, 0, target,
                 prec, guard));
         assert(stepped_count.blocks >= 1);
@@ -798,7 +799,7 @@ void check_step_start_fails_closed() {
         for (const QuadraticAfeStepFault fault : faults) {
             sflint::ArbVec values(count);
             silex::detail::QuadraticAfeGammaStepCount fault_count;
-            assert(silex::detail::quadratic_afe_gamma_stepped(
+            assert(silex::detail::TestHookAccess::quadratic_afe_gamma_stepped(
                     values, fault_count, c.shift, c.q, c.first, 0, target,
                     prec, guard, fault));
             // Every index plans a block and every start is rejected at the
@@ -892,7 +893,7 @@ void check_step_blocks_need_fewer_terms() {
     for (const StepBoundCase& c : cases) {
         silex::detail::QuadraticAfeGammaStepBlock block;
         MagGuard bound;
-        assert(silex::detail::quadratic_afe_gamma_step_block(
+        assert(silex::detail::TestHookAccess::quadratic_afe_gamma_step_block(
                 block, bound.value, c.shift, c.q, c.n, c.target, c.prec));
         assert(static_cast<double>(block.terms) <=
                earlier_terms(c.shift, c.q, c.n, block.block, c.target));

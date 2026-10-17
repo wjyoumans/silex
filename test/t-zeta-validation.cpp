@@ -602,7 +602,7 @@ bool theorem7_bound_near(const silex::Order& order,
                          ulong cutoff,
                          double expected) noexcept {
     sflint::Arb bound;
-    if (!silex::detail::zeta_bf_theorem7_error_bound(
+    if (!silex::detail::TestHookAccess::zeta_bf_theorem7_error_bound(
                 sflint::ArbRef(bound), order, cutoff, 128) ||
         !sflint::arb_is_finite(bound)) {
         return false;
@@ -699,9 +699,9 @@ bool check_theorem7_bound_reference() noexcept {
            theorem7_bound_near(x8.maximal_order, 279, 0.4289) &&
            theorem7_bound_near(x8.maximal_order, 603, 0.2206) &&
            // Theorem 7 needs X > 9; the BF term needs a multiple of 9.
-           !silex::detail::zeta_bf_theorem7_error_bound(
+           !silex::detail::TestHookAccess::zeta_bf_theorem7_error_bound(
                    sflint::ArbRef(unused), cubic.maximal_order, 9, 128) &&
-           !silex::detail::zeta_bf_theorem7_error_bound(
+           !silex::detail::TestHookAccess::zeta_bf_theorem7_error_bound(
                    sflint::ArbRef(unused), cubic.maximal_order, 280, 128);
 }
 
@@ -762,7 +762,7 @@ bool check_index_one_product(const FieldSetup& setup,
     sflint::Arb preceding_bound;
     sflint::Arb tail_target;
     sflint::arb_set_d(tail_target, 0.25 - 1.0 / 1048576.0);
-    if (!silex::detail::zeta_bf_theorem7_error_bound(
+    if (!silex::detail::TestHookAccess::zeta_bf_theorem7_error_bound(
                 sflint::ArbRef(preceding_bound), setup.maximal_order,
                 expected_cutoff - 9, 64) ||
         sflint::arb_lt(preceding_bound, tail_target)) {

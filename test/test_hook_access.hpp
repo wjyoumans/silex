@@ -361,6 +361,46 @@ public:
         return ZetaBfTestEntry::linear_factor_counts(
                 primes, batch_counts, per_prime_counts, order, first, end);
     }
+
+    // Zeta test entries (see ZetaTestEntry): the Belabas-Friedman Theorem 7
+    // bound at a given cutoff, and the stepped incomplete gamma values and
+    // blocks of the real-quadratic L(1, chi) evaluation.
+    static bool zeta_bf_theorem7_error_bound(flint::ArbRef out,
+                                             const Order& order,
+                                             ulong cutoff,
+                                             slong precision) noexcept {
+        return ZetaTestEntry::bf_theorem7_error_bound(out, order, cutoff,
+                                                      precision);
+    }
+
+    static bool quadratic_afe_gamma_stepped(
+            flint::ArbVec& out,
+            QuadraticAfeGammaStepCount& count,
+            ulong shift,
+            ulong q,
+            ulong first,
+            ulong max_block,
+            double target,
+            slong prec,
+            slong guard,
+            QuadraticAfeStepFault fault = QuadraticAfeStepFault::none)
+            noexcept {
+        return ZetaTestEntry::quadratic_afe_gamma_stepped(
+                out, count, shift, q, first, max_block, target, prec, guard,
+                fault);
+    }
+
+    static bool quadratic_afe_gamma_step_block(
+            QuadraticAfeGammaStepBlock& block,
+            mag_struct* truncation,
+            ulong shift,
+            ulong q,
+            ulong n,
+            double target,
+            slong prec) noexcept {
+        return ZetaTestEntry::quadratic_afe_gamma_step_block(
+                block, truncation, shift, q, n, target, prec);
+    }
 };
 
 }  // namespace silex::detail

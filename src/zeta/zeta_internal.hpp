@@ -261,14 +261,6 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
         const FactorBase* residue_degree_base = nullptr,
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr) noexcept;
 
-// Test entry: the Belabas-Friedman 2015 Theorem 7 bound used above, at
-// `cutoff` (a multiple of 9, at least 18), with the prime-ideal sum over
-// the norms below `cutoff`.
-bool zeta_bf_theorem7_error_bound(flint::ArbRef out,
-                                  const Order& order,
-                                  ulong cutoff,
-                                  slong precision) noexcept;
-
 bool zeta_bf_audit_cutoff_available(const Order& order,
                                     ulong max_cutoff,
                                     slong precision) noexcept;
@@ -351,48 +343,63 @@ struct QuadraticAfeGammaStepCount {
     ulong rejected_truncation = 0;
 };
 
-// Test entry for the stepper of `quadratic_dirichlet_l1` alone: writes
-// Gamma(shift / 2, pi n^2 / q) for n = first, ..., first + out.length() - 1
-// to `out`, taking the branches of that sum at every index.  A block is
-// planned with anchor tolerance 2^(target - guard) and anchored at a value
-// evaluated directly at precision prec + guard; values inside a block have
-// tolerance about 2^target at precision `prec`, and the last index of a
-// block becomes the next anchor.  Blocks are at most `max_block` long
-// (0: the default cap).  An index no block covers is evaluated directly.
-// `fault` is forced on every planned block before it starts.
-// Returns false on invalid arguments (shift > 2, q or first zero, an empty
-// `out`, or a negative precision or guard).
-bool quadratic_afe_gamma_stepped(
-        flint::ArbVec& out,
-        QuadraticAfeGammaStepCount& count,
-        ulong shift,
-        ulong q,
-        ulong first,
-        ulong max_block,
-        double target,
-        slong prec,
-        slong guard,
-        QuadraticAfeStepFault fault = QuadraticAfeStepFault::none) noexcept;
-
 struct QuadraticAfeGammaStepBlock {
     ulong block = 0;
     slong terms = 0;
     slong radius_exponent = 0;
 };
 
-// Test entry for one block of that stepper: plans and starts a block
-// anchored at n with anchor tolerance 2^target and coefficients at `prec`,
-// the anchor evaluated directly at `prec`, and writes its length B, its
-// number of Taylor terms M, the exponent r of its Cauchy radius R = 2^r and
-// its truncation bound (Johansson 2021, Lemma 5, eq. 27) to `truncation`.
-// Returns false on invalid arguments (shift > 2, q or n zero, `prec` not
-// positive) or when no block starts at n.
-bool quadratic_afe_gamma_step_block(QuadraticAfeGammaStepBlock& block,
-                                    mag_struct* truncation,
-                                    ulong shift,
-                                    ulong q,
-                                    ulong n,
-                                    double target,
-                                    slong prec) noexcept;
+// Test entries of the zeta sources; only detail::TestHookAccess
+// (test/test_hook_access.hpp) can call them.
+class ZetaTestEntry {
+    friend class TestHookAccess;
+
+    // Test entry: the Belabas-Friedman 2015 Theorem 7 bound used by
+    // `zeta_class_regulator_product_with_diagnostics`, at
+    // `cutoff` (a multiple of 9, at least 18), with the prime-ideal sum over
+    // the norms below `cutoff`.
+    static bool bf_theorem7_error_bound(flint::ArbRef out,
+                                        const Order& order,
+                                        ulong cutoff,
+                                        slong precision) noexcept;
+
+    // Test entry for the stepper of `quadratic_dirichlet_l1` alone: writes
+    // Gamma(shift / 2, pi n^2 / q) for n = first, ..., first + out.length() - 1
+    // to `out`, taking the branches of that sum at every index.  A block is
+    // planned with anchor tolerance 2^(target - guard) and anchored at a value
+    // evaluated directly at precision prec + guard; values inside a block have
+    // tolerance about 2^target at precision `prec`, and the last index of a
+    // block becomes the next anchor.  Blocks are at most `max_block` long
+    // (0: the default cap).  An index no block covers is evaluated directly.
+    // `fault` is forced on every planned block before it starts.
+    // Returns false on invalid arguments (shift > 2, q or first zero, an empty
+    // `out`, or a negative precision or guard).
+    static bool quadratic_afe_gamma_stepped(
+            flint::ArbVec& out,
+            QuadraticAfeGammaStepCount& count,
+            ulong shift,
+            ulong q,
+            ulong first,
+            ulong max_block,
+            double target,
+            slong prec,
+            slong guard,
+            QuadraticAfeStepFault fault = QuadraticAfeStepFault::none) noexcept;
+
+    // Test entry for one block of that stepper: plans and starts a block
+    // anchored at n with anchor tolerance 2^target and coefficients at `prec`,
+    // the anchor evaluated directly at `prec`, and writes its length B, its
+    // number of Taylor terms M, the exponent r of its Cauchy radius R = 2^r and
+    // its truncation bound (Johansson 2021, Lemma 5, eq. 27) to `truncation`.
+    // Returns false on invalid arguments (shift > 2, q or n zero, `prec` not
+    // positive) or when no block starts at n.
+    static bool quadratic_afe_gamma_step_block(QuadraticAfeGammaStepBlock& block,
+                                               mag_struct* truncation,
+                                               ulong shift,
+                                               ulong q,
+                                               ulong n,
+                                               double target,
+                                               slong prec) noexcept;
+};
 
 }  // namespace silex::detail
