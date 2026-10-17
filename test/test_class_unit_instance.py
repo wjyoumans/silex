@@ -415,8 +415,10 @@ def assert_computation_failure_cause(exe: Path, root: Path) -> None:
         - Decimal("10.461390098444553736850")
     ) < Decimal("1e-20")
     # x^3 - 6x^2 - 9x - 1 with a 12-relation cap: proven validation stops
-    # without progress, so the transaction fails with
-    # class_unit_computation_failed and the cause must reach failure_detail.
+    # without progress after the cap stopped the relation search, so the
+    # transaction fails with relation_search_budget_exhausted, and
+    # failure_detail keeps the last validation outcome as `cause` next to
+    # the cap.
     instance = run_json(
         [
             str(exe),
@@ -430,29 +432,12 @@ def assert_computation_failure_cause(exe: Path, root: Path) -> None:
         root,
     )
     assert instance["success"] is False
-    assert instance["failure_reason"] == "class_unit_computation_failed"
+    assert instance["failure_reason"] == "relation_search_budget_exhausted"
     detail = instance["failure_detail"]
     assert isinstance(detail, dict)
+    assert set(detail) == {"cause", "cap"}
     assert detail["cause"].startswith("last unit-group validation outcome: ")
-    # The same x^3 - 6x^2 - 9x - 1 with a one-relation cap fails with the same
-    # reason before unit-group validation runs, a path that records no
-    # outcome: detail is null.  The cap is meant to make it fail; a corpus
-    # row with a known gap would start succeeding when the gap closes.
-    unrecorded = run_json(
-        [
-            str(exe),
-            "--coeffs",
-            "-1,-9,-6,1",
-            "--mode",
-            "proven",
-            "--max-relations",
-            "1",
-        ],
-        root,
-    )
-    assert unrecorded["success"] is False
-    assert unrecorded["failure_reason"] == "class_unit_computation_failed"
-    assert unrecorded["failure_detail"] is None
+    assert detail["cap"] == "max_relations"
 
 
 def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
@@ -491,6 +476,51 @@ def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
         assert instance["failure_stage"] == "total"
         assert instance["failure_reason"] == "relation_search_budget_exhausted"
         assert instance["failure_detail"] == {"cap": cap}
+    # Proven runs stopped by a cap fail with the same reason and detail.
+    # The caps are chosen to make the run fail; a corpus row with a known
+    # gap would start succeeding when the gap closes.  One row per relation
+    # route of proven runs, none of which reaches a unit-group validation,
+    # so the detail holds only the cap:
+    # - x^3 - 6x^2 - 9x - 1 (the relation-production prepass): one relation,
+    #   or one candidate;
+    # - x^2 - 146 (the relation-search driver): eight relations;
+    # - x^2 + 23 (the imaginary-quadratic backend): one relation, or one
+    #   candidate;
+    # - x^4 - 10x^2 + 1 with twelve relations: the relation search stops
+    #   at the cap, and the unit step then finds a unit rank defect (with
+    #   thirteen relations the run succeeds).
+    for coeffs, flag, value, cap in (
+        ("-1,-9,-6,1", "--max-relations", "1", "max_relations"),
+        ("-1,-9,-6,1", "--max-candidates", "1", "max_candidates"),
+        ("-146,0,1", "--max-relations", "8", "max_relations"),
+        ("23,0,1", "--max-relations", "1", "max_relations"),
+        ("23,0,1", "--max-candidates", "1", "max_candidates"),
+        ("1,0,-10,0,1", "--max-relations", "12", "max_relations"),
+    ):
+        instance = run_json(
+            [str(exe), "--coeffs", coeffs, "--mode", "proven", flag, value],
+            root,
+        )
+        assert instance["success"] is False
+        assert instance["final_result_published"] is False
+        assert instance["failure_stage"] == "total"
+        assert instance["failure_reason"] == "relation_search_budget_exhausted"
+        assert instance["failure_detail"] == {"cap": cap}
+    succeeded = run_json(
+        [
+            str(exe),
+            "--coeffs",
+            "1,0,-10,0,1",
+            "--mode",
+            "proven",
+            "--max-relations",
+            "13",
+        ],
+        root,
+    )
+    assert succeeded["success"] is True
+    assert succeeded["failure_reason"] is None
+    assert succeeded["failure_detail"] is None
 
 
 def main() -> int:

@@ -137,12 +137,15 @@ struct ClassUnitTransactionReport {
     // factor_base_honesty_failure; read only to name a failed transaction's
     // reason.
     bool factor_base_size_limit_exceeded = false;
-    // The search cap (candidate or relation budget) that stopped the grh
-    // LLL relation search and so ended the class/unit computation: set only
-    // where the computation fails because of it (the tentative candidate,
-    // a refused continuation slice, or a continuation slice that added no
-    // relation), none otherwise; read only to name a failed transaction's
-    // reason and detail.
+    // The search cap (candidate or relation budget) that stopped the
+    // relation search and so ended the class/unit computation: set only
+    // where the computation fails because of it, none otherwise; read only
+    // to name a failed transaction's reason and detail.  grh: the tentative
+    // candidate, a refused continuation slice, or a continuation slice that
+    // added no relation.  proven: the computation gives up after a cap
+    // stopped one of its relation searches or refused it a larger
+    // relation-kernel target
+    // (ClassUnitTransactionContext::relation_search_budget_cap_reached).
     RelationSearchBudgetCap relation_search_budget_cap =
             RelationSearchBudgetCap::none;
 
@@ -197,7 +200,25 @@ struct ClassUnitTransactionContext {
     FactorBase* grh_norm_bounded_base = nullptr;
     const flint::Fmpz* grh_norm_bounded_base_bound = nullptr;
     TransactionFactorBaseHonesty factor_base_honesty{};
+    // The cap (candidate or relation budget) that most recently stopped a
+    // relation search of this run short of its goal, or refused the proven
+    // computation a larger relation-kernel target; none while no cap has.
+    // Written through note_relation_search_budget_cap; read only where the
+    // proven class/unit computation gives up, to name its failure
+    // (ClassUnitTransactionReport::relation_search_budget_cap).
+    RelationSearchBudgetCap relation_search_budget_cap_reached =
+            RelationSearchBudgetCap::none;
 };
+
+// Notes in the run `context`, if any, that `cap` stopped one of its
+// relation searches (no change for none).
+inline void note_relation_search_budget_cap(
+        ClassUnitTransactionContext* context,
+        RelationSearchBudgetCap cap) noexcept {
+    if (context != nullptr && cap != RelationSearchBudgetCap::none) {
+        context->relation_search_budget_cap_reached = cap;
+    }
+}
 
 inline bool uses_class_unit_kernel(
         const ClassUnitTransactionContext* context) noexcept {

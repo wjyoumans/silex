@@ -232,13 +232,15 @@ bool check_transaction_failure_leaves_outputs_unset(
     const bool computed = silex::detail::compute_class_unit_transaction(
             units, class_group, setup.maximal_order,
             sflint::FmpzConstRef(factor_base_bound), options, 128, audit);
-    // A computation that fails without reaching the honesty checkpoint keeps
-    // the generic reason.
+    // A computation that the candidate cap stops before the honesty
+    // checkpoint reports the budget reason and names the cap.
     return !computed &&
            audit.failure_stage == silex::detail::ClassUnitStage::total &&
            audit.failure_reason != nullptr &&
            std::strcmp(audit.failure_reason,
-                       "class_unit_computation_failed") == 0 &&
+                       "relation_search_budget_exhausted") == 0 &&
+           audit.relation_search_budget_cap ==
+                   silex::detail::RelationSearchBudgetCap::max_candidates &&
            !audit.factor_base_honesty_failure.recorded &&
            !audit.final_result_published &&
            audit.class_group_certification ==

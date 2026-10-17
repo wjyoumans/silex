@@ -14,6 +14,7 @@
 #include "../relation/relation_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 #include "relation_search_internal.hpp"
+#include "../order_unit/class_unit_transaction_internal.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1333,6 +1334,9 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
     }
 
     if (base_.length() > options.max_relations) {
+        detail::note_relation_search_budget_cap(
+                class_unit_transaction_context_,
+                detail::RelationSearchBudgetCap::max_relations);
         return SpecializedRelationBackendStatus::failed;
     }
 
@@ -1389,6 +1393,9 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
         // HNF publication below; it does not relax the random-search restart
         // envelope used by nontrivial class groups.
         if (base_.length() > options.max_candidates) {
+            detail::note_relation_search_budget_cap(
+                    class_unit_transaction_context_,
+                    detail::RelationSearchBudgetCap::max_candidates);
             return SpecializedRelationBackendStatus::failed;
         }
         for (slong i = 0; i < base_.length(); ++i) {
@@ -1741,6 +1748,9 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                 }
             }
             if (target_relations >= options.max_relations) {
+                detail::note_relation_search_budget_cap(
+                        class_unit_transaction_context_,
+                        detail::RelationSearchBudgetCap::max_relations);
                 return SpecializedRelationBackendStatus::failed;
             }
             ++target_relations;
@@ -1756,6 +1766,11 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
 
         if (candidates_tried >= options.max_candidates ||
             staged_relation_count >= options.max_relations) {
+            detail::note_relation_search_budget_cap(
+                    class_unit_transaction_context_,
+                    detail::relation_search_budget_cap_reached(
+                            candidates_tried, options.max_candidates,
+                            staged_relation_count, options.max_relations));
             return SpecializedRelationBackendStatus::failed;
         }
 

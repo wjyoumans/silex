@@ -964,6 +964,15 @@ bool ClassGroupContext::run_relation_search_route_(
         final_route_storage.analytic_finish_product_precision = 0;
         final_route_storage.analytic_finish_product_valid = false;
     }
+    // The search phases above stop on the candidate and relation caps,
+    // which also bound their relation targets, so a cap reached when the
+    // route ends limited it.  The run's transaction keeps the cap for a
+    // proven computation that gives up later.
+    detail::note_relation_search_budget_cap(
+            class_unit_transaction_context_,
+            detail::relation_search_budget_cap_reached(
+                    route_state.candidates_tried, options.max_candidates,
+                    route_state.accepted_relations, options.max_relations));
 
     return goal_reached;
 }

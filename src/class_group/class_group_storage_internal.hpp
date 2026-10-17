@@ -652,6 +652,17 @@ public:
                 order, factor_base_bound, options);
     }
 
+    // The LLL relation slice the proven class/unit continuation runs on the
+    // current candidate.
+    static bool extend_lll_relation_slice(
+            ClassGroupContext& context,
+            const Order& order,
+            flint::FmpzConstRef factor_base_bound,
+            const ClassGroupRelationOptions& options) noexcept {
+        return context.extend_lll_relation_slice_(
+                order, factor_base_bound, options);
+    }
+
     static bool sync_row_module_checkpoint(
             ClassGroupContext& context) noexcept {
         return context.sync_row_module_checkpoint_();

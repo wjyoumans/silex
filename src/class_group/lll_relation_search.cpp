@@ -1495,13 +1495,19 @@ bool ClassGroupContext::run_lll_relation_route_(
     // these two tests (route_budget_exhausted).  A partial-relation
     // throttle stop is not a budget, and the caps are unlimited by default.
     if (search_ok && !goal_reached && !partial_throttle_exit) {
-        if (candidates_tried >= options.max_candidates) {
-            route_storage.lll_route_budget_cap =
-                    detail::RelationSearchBudgetCap::max_candidates;
-        } else if (accepted_relations >= options.max_relations) {
-            route_storage.lll_route_budget_cap =
-                    detail::RelationSearchBudgetCap::max_relations;
-        }
+        route_storage.lll_route_budget_cap =
+                detail::relation_search_budget_cap_reached(
+                        candidates_tried, options.max_candidates,
+                        accepted_relations, options.max_relations);
+    }
+    // The run's transaction keeps any cap reached, for a proven
+    // computation that gives up later.
+    if (search_ok) {
+        detail::note_relation_search_budget_cap(
+                class_unit_transaction_context_,
+                detail::relation_search_budget_cap_reached(
+                        candidates_tried, options.max_candidates,
+                        accepted_relations, options.max_relations));
     }
 
     SILEX_LOG(active_diagnostics, DiagnosticsModule::class_group,
@@ -1670,11 +1676,18 @@ bool ClassGroupContext::extend_lll_relation_slice_(
         options.target_relation_kernel_units < 0 ||
         options.post_finite_refinement_phase_budget < 0 ||
         options.max_candidates < 0 || options.max_relations < 0 ||
-        relation_count() >= options.max_relations ||
         (options.relation_saturation_aux_prime_bound != 0 &&
          options.relation_saturation_aux_prime_bound < 2) ||
         options.relation_saturation_max_appends_per_ell < 0 ||
         !detail::valid_certification_request(options.requested_certification)) {
+        return false;
+    }
+    // The relation cap counts every relation of the context, so once it is
+    // reached no slice may run.
+    if (relation_count() >= options.max_relations) {
+        detail::note_relation_search_budget_cap(
+                class_unit_transaction_context_,
+                detail::RelationSearchBudgetCap::max_relations);
         return false;
     }
 

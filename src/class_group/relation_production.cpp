@@ -190,6 +190,20 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                             std::move(next_state));
                 };
 
+                // Every collection step below stops on the candidate and
+                // relation caps, which also bound its relation target, so a
+                // cap reached when the prepass ends limited it.  The run's
+                // transaction keeps the cap for a proven computation that
+                // gives up later.
+                auto note_budget_cap = [&]() noexcept {
+                    detail::note_relation_search_budget_cap(
+                            class_unit_transaction_context_,
+                            detail::relation_search_budget_cap_reached(
+                                    route_state.candidates_tried,
+                                    options.max_candidates,
+                                    route_state.accepted_relations,
+                                    options.max_relations));
+                };
                 bool goal_reached = false;
                 auto compute_need =
                         [&](RelationNeedDecision& decision) noexcept {
@@ -360,6 +374,7 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                             execution_storage
                                     .analytic_finish_product_valid = false;
                         }
+                        note_budget_cap();
                         store_live_state();
                         return true;
                     }
@@ -475,8 +490,12 @@ bool ClassGroupContext::run_relation_production_prepass_route_(
                 if (prepass_ok && goal_reached &&
                     (!run_finish_guard ||
                      opportunistic_finish_guard)) {
+                    note_budget_cap();
                     store_live_state();
                     return true;
+                }
+                if (prepass_ok) {
+                    note_budget_cap();
                 }
             }
         }

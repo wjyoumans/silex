@@ -4429,6 +4429,18 @@ bool OrderUnitGroup::compute_with_class_group(
                 rank, active_diagnostics);
     }
 
+    // Called only where the proven computation below gives up: names the
+    // cap, if one stopped a relation search of this run or refused it a
+    // larger relation-kernel target, in the transaction report
+    // (relation_search_budget_internal.hpp).
+    auto record_proven_relation_search_budget_cap = [&class_group]() noexcept {
+        detail::ClassUnitTransactionContext* const run_context =
+                class_group.class_unit_transaction_context_;
+        if (run_context != nullptr) {
+            run_context->audit.relation_search_budget_cap =
+                    run_context->relation_search_budget_cap_reached;
+        }
+    };
     const slong lower_target = rank;
     const slong rank_one_surplus_target = rank == 1
             ? max_slong(lower_target, rank + kRankOneAdaptiveSurplus)
@@ -5175,7 +5187,10 @@ bool OrderUnitGroup::compute_with_class_group(
                 }
             }
 
+            // A target increase that the relation cap alone refuses (the
+            // same request without the cap is granted) is a cap stop.
             slong missing_unit_bump = 0;
+            slong uncapped_bump = 0;
             if (compute_ok &&
                 missing_unit_target_bump(
                         missing_unit_bump, rank, independent_unit_count, target,
@@ -5183,6 +5198,13 @@ bool OrderUnitGroup::compute_with_class_group(
                 SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                           LogLevel::detail,
                           "raising relation-kernel target for missing unit rank");
+            } else if (compute_ok &&
+                       missing_unit_target_bump(
+                               uncapped_bump, rank, independent_unit_count,
+                               target, WORD_MAX)) {
+                detail::note_relation_search_budget_cap(
+                        class_group.class_unit_transaction_context_,
+                        detail::RelationSearchBudgetCap::max_relations);
             }
 
             slong analytic_bump = 0;
@@ -5198,6 +5220,17 @@ bool OrderUnitGroup::compute_with_class_group(
                         post_finite_refinement_phase_budget,
                         kComputePostFinitePhaseBudget);
                 ++analytic_bumps_done;
+            } else if (compute_ok &&
+                       analytic_bumps_done < kComputeAnalyticBumpMaxPasses &&
+                       validation_target_bump(
+                               uncapped_bump, validate_summary, rank, target,
+                               WORD_MAX,
+                               options.requested_certification ==
+                                       CertificationMode::proven,
+                               rank_complete)) {
+                detail::note_relation_search_budget_cap(
+                        class_group.class_unit_transaction_context_,
+                        detail::RelationSearchBudgetCap::max_relations);
             }
 
             if (missing_unit_bump > 0) {
@@ -5293,6 +5326,7 @@ bool OrderUnitGroup::compute_with_class_group(
                     SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                               LogLevel::detail,
                               "class/unit computation did not certify");
+                    record_proven_relation_search_budget_cap();
                     return false;
                 }
             } else if (rank == 1 && rank_one_surplus_started &&
@@ -5303,6 +5337,7 @@ bool OrderUnitGroup::compute_with_class_group(
                 SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                           LogLevel::detail,
                           "class/unit target fallback exhausted");
+                record_proven_relation_search_budget_cap();
                 return false;
             } else {
                 SILEX_PROFILE_EVENT(

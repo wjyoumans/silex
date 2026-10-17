@@ -2725,6 +2725,64 @@ int test_budget_failure_reason_and_detail_json() {
             : 1;
 }
 
+// The LLL relation slice of the proven continuation refuses to run once the
+// relation count has reached the relation cap, and notes that cap in the
+// run's transaction, so a proven computation that then gives up reports
+// relation_search_budget_exhausted.  A refusal for an invalid argument is
+// not a cap stop and notes nothing.
+int test_lll_relation_slice_cap_refusal_is_noted() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    using silex::detail::RelationSearchBudgetCap;
+    FieldSetup setup = imaginary_quadratic_fixture(21);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    silex::ClassGroupContext context(setup.maximal_order);
+    if (!context.is_defined() ||
+        !context.build_factor_base(sflint::FmpzConstRef(bound)) ||
+        context.factor_base() == nullptr) {
+        return 1;
+    }
+    // The slice needs a published presentation: (2) = P2^2.
+    silex::Relation relation(*context.factor_base());
+    silex::Element two(setup.field);
+    if (!two.set_si(2) || !relation.set_generator(two) ||
+        !context.append_relation(relation) ||
+        !context.publish_presentation() || context.relation_count() != 1) {
+        return 1;
+    }
+    silex::detail::ClassUnitTransactionReport audit;
+    silex::detail::ClassUnitTransactionContext transaction{
+            audit, nullptr, {}, {}, false};
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               &transaction);
+    silex::detail::ClassGroupRelationOptions options =
+            silex::detail::class_group_relation_options(
+                    setup.maximal_order, silex::ClassGroupComputeOptions{});
+    options.requested_certification = silex::CertificationMode::proven;
+
+    silex::detail::ClassGroupRelationOptions invalid = options;
+    invalid.max_candidates = -1;
+    const bool invalid_refused =
+            !Access::extend_lll_relation_slice(
+                    context, setup.maximal_order, sflint::FmpzConstRef(bound),
+                    invalid) &&
+            transaction.relation_search_budget_cap_reached ==
+                    RelationSearchBudgetCap::none;
+
+    options.max_relations = context.relation_count();
+    const bool capped_refused =
+            !Access::extend_lll_relation_slice(
+                    context, setup.maximal_order, sflint::FmpzConstRef(bound),
+                    options) &&
+            context.relation_count() == 1 &&
+            transaction.relation_search_budget_cap_reached ==
+                    RelationSearchBudgetCap::max_relations;
+
+    silex::detail::ClassUnitTransactionAccess::set_run_context(context,
+                                                               nullptr);
+    return invalid_refused && capped_refused ? 0 : 1;
+}
+
 // Escalation runs only where an unwitnessed prime is final: a caller with a
 // factor-base restart or a fallback route keeps the stage-0 caps of the
 // reference be_honest.
@@ -3251,6 +3309,7 @@ int main() {
                            0 ||
                    test_failure_detail_json() != 0 ||
                    test_budget_failure_reason_and_detail_json() != 0 ||
+                   test_lll_relation_slice_cap_refusal_is_noted() != 0 ||
                    test_direct_witness_search_keeps_lattice_fallbacks() != 0 ||
                    test_honesty_quadratic_kronecker_matches_decomposition() !=
                            0
