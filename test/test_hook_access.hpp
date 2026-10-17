@@ -20,6 +20,7 @@
 #include <silex/prime_ideal.hpp>
 
 #include "class_group/class_group_internal.hpp"
+#include "class_group/class_group_storage_internal.hpp"
 #include "class_group/maximal_imaginary_quadratic_row_hnf_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
@@ -456,6 +457,26 @@ public:
             slong precision) noexcept {
         return AnalyticFinishTestEntry::embeddings(
                 route_state, field, precision);
+    }
+
+    // The direct large-prime partial relation factorization (see
+    // DirectPartialRelationTestEntry).
+    static bool direct_partial_relation_row(
+            flint::FmpzMat& out_row,
+            flint::Fmpz& out_rational_large_prime,
+            const Element& generator,
+            const FactorBase& base,
+            flint::FmpzConstRef factor_base_bound,
+            const fmpq* known_norm = nullptr,
+            const fmpz_mat_struct* known_integral_coordinates = nullptr,
+            bool word_size_residues = true,
+            bool deduce_last_hit_valuation = true,
+            slong* deduced_hit_valuations = nullptr) noexcept {
+        return DirectPartialRelationTestEntry::row(
+                out_row, out_rational_large_prime, generator, base,
+                factor_base_bound, known_norm, known_integral_coordinates,
+                word_size_residues, deduce_last_hit_valuation,
+                deduced_hit_valuations);
     }
 };
 

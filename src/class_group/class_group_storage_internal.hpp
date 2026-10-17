@@ -106,29 +106,37 @@ struct DirectPartialResidueBlockCacheEntry {
     slong block_index = -1;
 };
 
-// Test hook: runs the direct large-prime partial-relation factorization
-// (the residue-polynomial branch of reference Rel_add.jl `_factor!`) on
-// `generator` over `base` with a fresh residue-block cache.  Returns true
-// and writes the factor-base row and leftover rational prime when that
-// branch finds a single large prime; returns false otherwise.  When given,
-// `known_norm` must be the exact field norm of `generator` and
-// `known_integral_coordinates` its maximal-order coordinates.  With
-// `word_size_residues` false the residue test uses the multi-limb
-// `fmpz_mod` path even for word-size rational primes.  With
-// `deduce_last_hit_valuation` false every residue-hit valuation is computed,
-// none is deduced from the norm; when `deduced_hit_valuations` is given it
-// receives the number of valuations deduced.  For tests only.
-bool direct_partial_relation_row_for_testing(
-        flint::FmpzMat& out_row,
-        flint::Fmpz& out_rational_large_prime,
-        const Element& generator,
-        const FactorBase& base,
-        flint::FmpzConstRef factor_base_bound,
-        const fmpq* known_norm = nullptr,
-        const fmpz_mat_struct* known_integral_coordinates = nullptr,
-        bool word_size_residues = true,
-        bool deduce_last_hit_valuation = true,
-        slong* deduced_hit_valuations = nullptr) noexcept;
+class TestHookAccess;
+
+// Test entry of the direct large-prime partial relation; only
+// detail::TestHookAccess (test/test_hook_access.hpp) can call it.
+class DirectPartialRelationTestEntry {
+    friend class TestHookAccess;
+
+    // Test hook: runs the direct large-prime partial-relation factorization
+    // (the residue-polynomial branch of reference Rel_add.jl `_factor!`) on
+    // `generator` over `base` with a fresh residue-block cache.  Returns true
+    // and writes the factor-base row and leftover rational prime when that
+    // branch finds a single large prime; returns false otherwise.  When given,
+    // `known_norm` must be the exact field norm of `generator` and
+    // `known_integral_coordinates` its maximal-order coordinates.  With
+    // `word_size_residues` false the residue test uses the multi-limb
+    // `fmpz_mod` path even for word-size rational primes.  With
+    // `deduce_last_hit_valuation` false every residue-hit valuation is computed,
+    // none is deduced from the norm; when `deduced_hit_valuations` is given it
+    // receives the number of valuations deduced.  For tests only.
+    static bool row(
+            flint::FmpzMat& out_row,
+            flint::Fmpz& out_rational_large_prime,
+            const Element& generator,
+            const FactorBase& base,
+            flint::FmpzConstRef factor_base_bound,
+            const fmpq* known_norm = nullptr,
+            const fmpz_mat_struct* known_integral_coordinates = nullptr,
+            bool word_size_residues = true,
+            bool deduce_last_hit_valuation = true,
+            slong* deduced_hit_valuations = nullptr) noexcept;
+};
 
 struct FactorBaseGenerationRecord {
     flint::Fmpz p;

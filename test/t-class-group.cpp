@@ -2437,19 +2437,19 @@ int test_direct_partial_row_exact_valuation_cubic() {
                 assert(order_element.set_coordinates(
                         sflint::FmpzMatConstRef(coordinates)));
                 assert(order_element.get_element(element));
-                const bool have_row = silex::detail::
-                        direct_partial_relation_row_for_testing(
+                const bool have_row = silex::detail::TestHookAccess::
+                        direct_partial_relation_row(
                                 row, large_prime, element, *base,
                                 sflint::FmpzConstRef(bound));
                 assert(element.norm(sflint::FmpqRef(norm)));
-                const bool have_known_row = silex::detail::
-                        direct_partial_relation_row_for_testing(
+                const bool have_known_row = silex::detail::TestHookAccess::
+                        direct_partial_relation_row(
                                 known_row, known_large_prime, element,
                                 *base, sflint::FmpzConstRef(bound),
                                 norm.raw(), coordinates.raw());
                 assert(have_row == have_known_row);
-                const bool have_multi_limb_row = silex::detail::
-                        direct_partial_relation_row_for_testing(
+                const bool have_multi_limb_row = silex::detail::TestHookAccess::
+                        direct_partial_relation_row(
                                 multi_limb_row, multi_limb_large_prime,
                                 element, *base, sflint::FmpzConstRef(bound),
                                 nullptr, nullptr, false);
@@ -2594,14 +2594,14 @@ int test_direct_partial_row_deduced_last_valuation() {
                 sflint::FmpzMatConstRef(coordinates)));
         assert(order_element.get_element(element));
         slong deduced = 0;
-        const bool have_row = silex::detail::
-                direct_partial_relation_row_for_testing(
+        const bool have_row = silex::detail::TestHookAccess::
+                direct_partial_relation_row(
                         row, large_prime, element, base,
                         sflint::FmpzConstRef(bound), nullptr, nullptr, true,
                         true, &deduced);
         slong computed_deduced = 0;
-        const bool have_computed_row = silex::detail::
-                direct_partial_relation_row_for_testing(
+        const bool have_computed_row = silex::detail::TestHookAccess::
+                direct_partial_relation_row(
                         computed_row, computed_large_prime, element, base,
                         sflint::FmpzConstRef(bound), nullptr, nullptr, true,
                         false, &computed_deduced);

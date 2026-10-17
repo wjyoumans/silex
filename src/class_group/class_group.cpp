@@ -5216,7 +5216,7 @@ bool compact_infinite_reduction(
 
 namespace detail {
 
-bool direct_partial_relation_row_for_testing(
+bool DirectPartialRelationTestEntry::row(
         flint::FmpzMat& out_row,
         flint::Fmpz& out_rational_large_prime,
         const Element& generator,
