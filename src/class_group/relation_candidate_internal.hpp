@@ -34,8 +34,9 @@ struct OrderCoordinateElementConversion {
 // the bound used is instead the T2 bound
 // |Res(f, a)|^2 = prod_i |a(r_i)|^2 <= (T2(a) / n)^n <= (lambda ||a||_2^2 / n)^n,
 // the inequality of arithmetic and geometric means on the n values
-// |a(r_i)|^2, with T2(a) = sum_i |a(r_i)|^2 the T2 form of Cohen, GTM 138
-// (used there for polynomial reduction), followed by the
+// |a(r_i)|^2, with T2(a) = sum_i |a(r_i)|^2 the quadratic form that Cohen
+// calls "size" (GTM 138, Section 4.4.2, Definition 4.4.10 and the form
+// size(M_x), p. 169), followed by the
 // Rayleigh-quotient bound x^T G x <= lambda_max(G) x^T x for the real
 // symmetric T2 Gram matrix G of the power basis (Horn and Johnson, Matrix
 // Analysis, Theorem 4.2.2), where lambda >= lambda_max(G) is certified once
@@ -43,9 +44,12 @@ struct OrderCoordinateElementConversion {
 // on ball enclosures of G built from arb_fmpz_poly_complex_roots, or else
 // lambda = trace(G), its upper end, since G is positive semidefinite.  It
 // is not computed when the exact power sums p_k of f show
-// lambda_max(G) >= max |p_(2j)| >= n ||f||_2^2, where it can never beat the
-// Hadamard bound.  The bound is evaluated with mag_t upper-bound
-// arithmetic, so every rounding is outward.  Split primes are searched lazily;
+// lambda_max(G) >= max |p_(2j)| >= n ||f||_2^2, where the real-valued T2
+// bound is never below the real-valued Hadamard bound.  The rounded bit
+// counts the CRT compares can differ by a few bits, so the skip may pass
+// up a slightly smaller modulus; that affects speed only.  The bound is
+// evaluated with mag_t upper-bound arithmetic, so every rounding is
+// outward.  Split primes are searched lazily;
 // when they do not cover a candidate's bound, the caller computes
 // fmpz_poly_resultant instead, so the value is always the exact resultant.
 struct SplitPrimeResultant {
@@ -56,7 +60,8 @@ struct SplitPrimeResultant {
     flint_bitcnt_t field_norm_squared_bits = 0;
     ulong last_tested_prime = 0;
     slong tested_primes = 0;
-    // Split primes used by the last handled call.
+    // Test-only diagnostic: split primes used by the last handled call.
+    // A call that is not handled leaves it unchanged.
     slong last_prime_count = 0;
     bool enabled = false;
     bool search_exhausted = false;

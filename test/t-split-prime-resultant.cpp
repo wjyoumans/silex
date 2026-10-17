@@ -283,19 +283,31 @@ int test_reset_keeps_split_primes_for_same_field() {
 // AM-GM inequality |N(a)|^2 <= (T2(a) / n)^n is an equality, so these
 // candidates sit within a fraction of a bit of the T2 bound.  Sweeping
 // |c| across 2^k - 1, 2^k and 2^k + 1 places |Res| on both sides of every
-// modulus size the bound can choose.
+// modulus size the bound can choose.  Counts the handled calls and, among
+// them, the values c for which c x^(n-1) used no more split primes than
+// the constant c: the two have the same T2 bound up to rounding, while
+// the Hadamard bound of c x^(n-1) is larger by ||f||_2^(n-1).
+struct TightCandidateCounts {
+    int handled = 0;
+    int pairs = 0;
+    int pairs_without_extra_primes = 0;
+};
+
 int compare_tight_candidates(relation_search::SplitPrimeResultant& evaluator,
-                             const sflint::FmpzPoly& field) noexcept {
+                             const sflint::FmpzPoly& field,
+                             TightCandidateCounts& counts) noexcept {
     const slong degree = fmpz_poly_degree(field.raw());
     sflint::FmpzPoly coordinate;
     sflint::Fmpz c;
     sflint::Fmpz expected;
     sflint::Fmpz actual;
+    counts = TightCandidateCounts{};
     for (slong k = 1; k <= 40; ++k) {
         for (const slong offset : {-1, 0, 1}) {
             fmpz_one(c.raw());
             fmpz_mul_2exp(c.raw(), c.raw(), static_cast<ulong>(k));
             fmpz_add_si(c.raw(), c.raw(), offset);
+            slong constant_prime_count = 0;
             for (const slong power : {static_cast<slong>(0), degree / 2,
                                       degree - 1}) {
                 for (const int sign : {1, -1}) {
@@ -319,6 +331,23 @@ int compare_tight_candidates(relation_search::SplitPrimeResultant& evaluator,
                                      static_cast<long>(k));
                         return 1;
                     }
+                    if (!handled) {
+                        continue;
+                    }
+                    ++counts.handled;
+                    if (sign < 0) {
+                        continue;
+                    }
+                    if (power == 0) {
+                        constant_prime_count = evaluator.last_prime_count;
+                    } else if (power == degree - 1 &&
+                               constant_prime_count > 0) {
+                        ++counts.pairs;
+                        if (evaluator.last_prime_count <=
+                            constant_prime_count) {
+                            ++counts.pairs_without_extra_primes;
+                        }
+                    }
                 }
             }
         }
@@ -326,13 +355,20 @@ int compare_tight_candidates(relation_search::SplitPrimeResultant& evaluator,
     return 0;
 }
 
+// Each field makes 720 calls; at least half must be handled so the values
+// are actually compared.  On Phi_17 and Phi_41 the T2 bound must be the
+// one selected for most c x^(n-1).
 int test_t2_bound_matches_resultant_on_tight_candidates() {
+    constexpr int kMinimumHandled = 360;
     for (const slong m : {17, 41}) {
         sflint::FmpzPoly field;
         set_prime_cyclotomic(field, m);
         relation_search::SplitPrimeResultant evaluator;
         evaluator.reset(field.raw());
-        if (compare_tight_candidates(evaluator, field) != 0) {
+        TightCandidateCounts counts;
+        if (compare_tight_candidates(evaluator, field, counts) != 0 ||
+            counts.handled < kMinimumHandled || counts.pairs == 0 ||
+            2 * counts.pairs_without_extra_primes < counts.pairs) {
             return 1;
         }
     }
@@ -340,7 +376,11 @@ int test_t2_bound_matches_resultant_on_tight_candidates() {
     set_real_abelian_degree_17(field);
     relation_search::SplitPrimeResultant evaluator;
     evaluator.reset(field.raw());
-    return compare_tight_candidates(evaluator, field);
+    TightCandidateCounts counts;
+    return compare_tight_candidates(evaluator, field, counts) != 0 ||
+                           counts.handled < kMinimumHandled
+                   ? 1
+                   : 0;
 }
 
 int test_t2_bound_for_prime_cyclotomic() {
@@ -370,31 +410,6 @@ int test_t2_bound_for_prime_cyclotomic() {
         return 1;
     }
 
-    // The minimal polynomial of 2 cos(2 pi / 41) has power sums
-    // p_38 > 20 ||f||_2^2 (its roots lie near +-2), so the T2 bound cannot
-    // beat the Hadamard bound and is not computed; values stay exact.
-    {
-        constexpr slong real_coefficients[] = {
-                1,    -10,  -55, 165,  495,  -792, -1716,
-                1716, 3003, -2002, -3003, 1365, 1820, -560,
-                -680, 136,  153, -18,  -19,  1,    1};
-        sflint::FmpzPoly real_field;
-        slong i = 0;
-        for (const slong coefficient : real_coefficients) {
-            fmpz_poly_set_coeff_si(real_field.raw(), i, coefficient);
-            ++i;
-        }
-        relation_search::SplitPrimeResultant real_evaluator;
-        real_evaluator.reset(real_field.raw());
-        if (compare_with_resultant(real_evaluator, real_field, 11, 50, 12) !=
-                    50 ||
-            real_evaluator.t2_bound_state !=
-                    relation_search::SplitPrimeResultant::T2BoundState::
-                            unavailable) {
-            return 1;
-        }
-    }
-
     arf_t lower;
     arf_t upper;
     arf_init(lower);
@@ -408,7 +423,35 @@ int test_t2_bound_for_prime_cyclotomic() {
             arf_cmp(evaluator.t2_ratio_bound.raw(), upper) <= 0;
     arf_clear(lower);
     arf_clear(upper);
-    return in_range ? 0 : 1;
+    if (!in_range) {
+        return 1;
+    }
+
+    // The minimal polynomial of 2 cos(2 pi / 41) has power sums
+    // p_38 > 20 ||f||_2^2 (its roots lie near +-2), so the T2 bound cannot
+    // beat the Hadamard bound and is not computed; values stay exact.
+    // Resetting the Phi_41 evaluator to this field discards its bound.
+    constexpr slong real_coefficients[] = {
+            1,    -10,  -55, 165,  495,  -792, -1716,
+            1716, 3003, -2002, -3003, 1365, 1820, -560,
+            -680, 136,  153, -18,  -19,  1,    1};
+    sflint::FmpzPoly real_field;
+    slong i = 0;
+    for (const slong coefficient : real_coefficients) {
+        fmpz_poly_set_coeff_si(real_field.raw(), i, coefficient);
+        ++i;
+    }
+    evaluator.reset(real_field.raw());
+    if (evaluator.t2_bound_state !=
+        relation_search::SplitPrimeResultant::T2BoundState::not_computed) {
+        return 1;
+    }
+    return compare_with_resultant(evaluator, real_field, 11, 50, 12) == 50 &&
+                           evaluator.t2_bound_state ==
+                                   relation_search::SplitPrimeResultant::
+                                           T2BoundState::unavailable
+                   ? 0
+                   : 1;
 }
 
 }  // namespace

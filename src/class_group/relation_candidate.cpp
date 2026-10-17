@@ -167,8 +167,10 @@ bool certified_t2_ratio_bound(flint::Arf& out,
     }
     // lambda_max(G) >= G[j][j] = sum_i |r_i|^(2j) >= |p_(2j)|, the exact
     // power sums of the monic f.  When some |p_(2j)| >= n ||f||_2^2, then
-    // lambda / n >= ||f||_2^2 and the T2 bound is never below the
-    // Hadamard bound, so the roots are not computed.
+    // lambda / n >= ||f||_2^2 and the real-valued T2 bound is never below
+    // the real-valued Hadamard bound, so the roots are not computed.  (The
+    // rounded bit counts can still differ by a few bits; that costs speed
+    // only.)
     {
         flint::FmpzPoly power_sums;
         flint::Fmpz field_norm_squared;
