@@ -6593,6 +6593,31 @@ sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
     return basis;
 }
 
+// As above, for a failure injected into the extension route
+// (SaturationKernelTestSeams), with the extension route forced by the
+// caller.
+sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
+        const silex::ClassGroupContext& context,
+        silex::detail::SaturationKernelTestFailure failure) {
+    using silex::detail::SaturationKernelTestFailure;
+    using silex::detail::TestHookAccess;
+    const slong injected = TestHookAccess::saturation_kernel_failures_injected();
+    TestHookAccess::set_saturation_kernel_failure(failure);
+    sflint::FmpzMat basis(0, 0);
+    bool lll_basis_built = false;
+    const bool built = silex::detail::relation_saturation_kernel_basis(
+            basis, lll_basis_built, context);
+    TestHookAccess::set_saturation_kernel_failure(
+            SaturationKernelTestFailure::none);
+    const bool injecting = failure != SaturationKernelTestFailure::none;
+    assert(built);
+    assert(lll_basis_built == injecting);
+    assert(TestHookAccess::saturation_kernel_failures_injected() ==
+           injected + (injecting ? 1 : 0));
+    relation_saturation_test_kernel_basis_is_lll(basis, context);
+    return basis;
+}
+
 // Over Q with the factor base {2}, the relations 256, 16, 4, 2 have a
 // relation kernel of rank 3 with small entries, so the first phase builds
 // the saturation kernel basis.  When the phase reports failure or its
