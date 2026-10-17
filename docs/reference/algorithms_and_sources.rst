@@ -745,8 +745,12 @@ dividing ``[O : Z[theta]]`` on the ``theta``-polynomial numerator of the
 element, by the ``modprinit`` branch above (Cohen, GTM 138, Theorem 4.8.13).
 That numerator's denominator divides the order basis denominator, so it is
 prime to ``p``.  The index is the order's cached ``[O : Z[theta]]``, which
-exists when ``Z[theta]`` is contained in ``O``.  An element whose norm is
-divisible by an index divisor goes to the principal-ideal factorization.  The
+exists when ``Z[theta]`` is contained in ``O``.  A prime over an index
+divisor ``p`` that carries no residue polynomial is valued directly in the
+screen (PARI ``buch2.c:divide_p_elt`` values every prime with ``ZC_nfval``).
+Only a ``theta``-residue prime over a ``p`` dividing ``[O : Z[theta]]``, or
+over a ``p`` dividing the denominator of the element's ``theta``-polynomial,
+sends the element to the principal-ideal factorization.  The
 exception is a prime stored in the quadratic generator ``omega``, which is
 tested on the element's ``[1, omega]`` coordinates, its ``omega``-polynomial,
 for every ``p``, since the order is ``Z[omega]``.
@@ -763,9 +767,10 @@ the block equals ``[K : Q]`` (Cohen, GTM 138, Section 4.8; the factor base
 keeps distinct primes, one block per rational prime).  Then
 ``|N(alpha)| = N(alpha O_K)`` and ``N(P) = p^f`` give
 ``v_p(N(alpha)) = sum over P | p of f(P) v_P(alpha)``, every prime above
-``p`` with positive valuation is a hit, and the last hit's valuation is what
-is left of ``v_p(N(alpha))`` after the other hits, divided by its residue
-degree.  PARI 2.17.3 ``src/basemath/buch2.c:divide_p_elt`` does the same
+``p`` with positive valuation is a hit or a directly valued prime (a prime
+with no residue polynomial, valued first), and the last entry's valuation is
+what is left of ``v_p(N(alpha))`` after the other entries, divided by its
+residue degree.  PARI 2.17.3 ``src/basemath/buch2.c:divide_p_elt`` does the same
 norm accounting, subtracting ``v f`` per prime, but computes every
 valuation.  The deduction is used only when what is left is a positive
 multiple of the residue degree; otherwise, and for blocks that miss a prime
