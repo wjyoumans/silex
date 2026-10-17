@@ -3,6 +3,7 @@
 #include "abelian_group_internal.hpp"
 
 #include <utility>
+#include <vector>
 
 namespace silex {
 namespace {
@@ -299,13 +300,51 @@ bool FiniteAbelianGroup::ensure_left_transform() const noexcept {
         return false;
     }
 
+    // Only two parts of the left transform are ever read: the kernel rows
+    // n..m-1 (relation_kernel_row, relation_kernel_matrix), which are the
+    // bottom rows of T unchanged, and the top rows i with a non-unit Smith
+    // entry S_ii (invariant_generator_relation_matrix).  So only those top
+    // rows of diag(U_H, I) * T are formed: row i is (U_H)_i * T_top, the same
+    // exact integer row the full product gives.  The other top rows stay zero
+    // and are never read.  The full n x n by n x m product dominated the
+    // proven saturation route on real quadratic fields with large
+    // discriminant, where T_top has entries of hundreds of thousands of bits
+    // and only one or two invariants are non-trivial.
     flint::FmpzMat full_left(m, m);
     {
-        flint::FmpzMatConstWindow hnf_left_top(hnf_left, 0, 0, n, m);
-        flint::FmpzMatWindow full_left_top(full_left, 0, 0, n, m);
-        flint::fmpz_mat_mul(full_left_top.ref(),
-                            flint::FmpzMatConstRef(basis_left),
-                            hnf_left_top.const_ref());
+        std::vector<slong> invariant_rows;
+        for (slong i = 0; i < n; ++i) {
+            if (!flint::fmpz_is_pm1(entry_const(snf_, i, i))) {
+                invariant_rows.push_back(i);
+            }
+        }
+        const slong k = static_cast<slong>(invariant_rows.size());
+        if (k > 0) {
+            flint::FmpzMat left_rows(k, n);
+            for (slong r = 0; r < k; ++r) {
+                for (slong j = 0; j < n; ++j) {
+                    flint::fmpz_set(
+                            flint::fmpz_mat_entry(
+                                    flint::FmpzMatRef(left_rows), r, j),
+                            entry_const(basis_left, invariant_rows[r], j));
+                }
+            }
+            flint::FmpzMat product(k, m);
+            flint::FmpzMatConstWindow hnf_left_top(hnf_left, 0, 0, n, m);
+            flint::fmpz_mat_mul(flint::FmpzMatRef(product),
+                                flint::FmpzMatConstRef(left_rows),
+                                hnf_left_top.const_ref());
+            for (slong r = 0; r < k; ++r) {
+                for (slong j = 0; j < m; ++j) {
+                    flint::fmpz_set(
+                            flint::fmpz_mat_entry(
+                                    flint::FmpzMatRef(full_left),
+                                    invariant_rows[r], j),
+                            flint::fmpz_mat_entry(
+                                    flint::FmpzMatConstRef(product), r, j));
+                }
+            }
+        }
     }
     {
         flint::FmpzMatConstWindow hnf_left_bottom(hnf_left, n, 0, m, m);

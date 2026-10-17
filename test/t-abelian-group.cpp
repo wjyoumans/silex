@@ -941,6 +941,121 @@ int test_smith_cache_reuses_unchanged_basis() {
     return 0;
 }
 
+// The witness rows are the rows of diag(U_H, I) * T that the accessors read,
+// where T * relations = [H; 0] is fmpz_mat_hnf_transform and U_H * H * V = S
+// is fmpz_mat_snf_transform of H.  ensure_left_transform forms only the top
+// rows with a non-unit Smith entry; this reference forms the full product and
+// checks that every row the accessors return is the same exact integer row.
+// The pseudo-random relation matrices give groups whose Smith form mixes
+// unit and non-unit entries, all non-unit entries, and none.
+int test_witness_rows_match_full_left_product() {
+    const slong m = 7;
+    const slong n = 4;
+    ulong state = 12345;
+    slong mixed = 0;
+    slong trivial = 0;
+    slong compared = 0;
+    for (slong trial = 0; trial < 60; ++trial) {
+        sflint::FmpzMat relations(m, n);
+        for (slong i = 0; i < m; ++i) {
+            for (slong j = 0; j < n; ++j) {
+                state = state * UWORD(6364136223846793005) +
+                        UWORD(1442695040888963407);
+                const slong value = static_cast<slong>((state >> 33) % 9) - 4;
+                // Scale some columns so non-unit invariants are common.
+                set_entry_si(relations, i, j,
+                             (j >= 2 && trial % 3 != 2) ? 2 * value : value);
+            }
+        }
+        silex::FiniteAbelianGroup group;
+        if (!group.set_relation_matrix(
+                    sflint::FmpzMatConstRef(relations))) {
+            continue;
+        }
+
+        sflint::FmpzMat hnf_full(m, n);
+        sflint::FmpzMat transform(m, m);
+        ::fmpz_mat_hnf_transform(hnf_full.raw(), transform.raw(),
+                                 relations.raw());
+        sflint::FmpzMat hnf_top(n, n);
+        for (slong i = 0; i < n; ++i) {
+            for (slong j = 0; j < n; ++j) {
+                sflint::fmpz_set(
+                        sflint::fmpz_mat_entry(sflint::FmpzMatRef(hnf_top),
+                                               i, j),
+                        entry_const(hnf_full, i, j));
+            }
+        }
+        sflint::FmpzMat snf(n, n);
+        sflint::FmpzMat snf_left(n, n);
+        sflint::FmpzMat snf_right(n, n);
+        sflint::fmpz_mat_snf_transform(sflint::FmpzMatRef(snf),
+                                       sflint::FmpzMatRef(snf_left),
+                                       sflint::FmpzMatRef(snf_right),
+                                       sflint::FmpzMatConstRef(hnf_top));
+        sflint::FmpzMat transform_top(n, m);
+        for (slong i = 0; i < n; ++i) {
+            for (slong j = 0; j < m; ++j) {
+                sflint::fmpz_set(sflint::fmpz_mat_entry(
+                                         sflint::FmpzMatRef(transform_top),
+                                         i, j),
+                                 entry_const(transform, i, j));
+            }
+        }
+        sflint::FmpzMat full_top(n, m);
+        sflint::fmpz_mat_mul(sflint::FmpzMatRef(full_top),
+                             sflint::FmpzMatConstRef(snf_left),
+                             sflint::FmpzMatConstRef(transform_top));
+
+        const slong rank = group.invariant_count();
+        sflint::FmpzMat combinations(rank, m);
+        assert(group.invariant_generator_relation_matrix(
+                sflint::FmpzMatRef(combinations)));
+        slong k = 0;
+        for (slong i = 0; i < n; ++i) {
+            if (sflint::fmpz_is_pm1(entry_const(snf, i, i))) {
+                continue;
+            }
+            const bool negate = sflint::fmpz_sgn(entry_const(snf, i, i)) < 0;
+            for (slong j = 0; j < m; ++j) {
+                sflint::Fmpz expected;
+                sflint::fmpz_set(sflint::FmpzRef(expected),
+                                 entry_const(full_top, i, j));
+                if (negate) {
+                    sflint::fmpz_neg(sflint::FmpzRef(expected),
+                                     sflint::FmpzConstRef(expected));
+                }
+                assert(sflint::fmpz_equal(entry_const(combinations, k, j),
+                                          sflint::FmpzConstRef(expected)));
+            }
+            ++k;
+        }
+        assert(k == rank);
+
+        sflint::FmpzMat kernel(m - n, m);
+        assert(group.relation_kernel_matrix(sflint::FmpzMatRef(kernel)));
+        for (slong i = 0; i < m - n; ++i) {
+            for (slong j = 0; j < m; ++j) {
+                assert(sflint::fmpz_equal(entry_const(kernel, i, j),
+                                          entry_const(transform, n + i, j)));
+            }
+        }
+        assert(generator_relation_identity(group));
+        assert(relation_kernel_identity(group));
+        ++compared;
+        if (rank > 0 && rank < n) {
+            ++mixed;
+        }
+        if (rank == 0) {
+            ++trivial;
+        }
+    }
+    assert(compared > 0);
+    assert(mixed > 0);
+    assert(trivial > 0);
+    return 0;
+}
+
 int main() {
     assert(test_basic() == 0);
     assert(test_kernel_basis_check_rejects_bad_kernels() == 0);
@@ -953,5 +1068,6 @@ int main() {
     assert(test_internal_basis_setter_witnesses() == 0);
     assert(test_lazy_right_transform_inverse() == 0);
     assert(test_smith_cache_reuses_unchanged_basis() == 0);
+    assert(test_witness_rows_match_full_left_product() == 0);
     return 0;
 }
