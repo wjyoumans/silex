@@ -30,7 +30,9 @@
 #include <flint/fmpq_poly.h>
 #include <flint/ulong_extras.h>
 
+#include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
@@ -5909,6 +5911,236 @@ int test_residue_quotient_log_column_walk_fallbacks_at_seven_bits() {
         }
     }
     return 0;
+}
+
+// Reference for test_word_quotient_logs_match_walk_and_sorted_baby_giant:
+// the first i in [0, ell) with zeta^i == image mod p, as the shared walk and
+// quotient_log_mod_prime_apply define the quotient log.
+bool word_quotient_log_walk_reference(ulong& out,
+                                      ulong image,
+                                      ulong zeta,
+                                      ulong p,
+                                      ulong ell) noexcept {
+    const ulong p_inverse = n_preinvert_limb(p);
+    ulong current = 1 % p;
+    for (ulong i = 0; i < ell; ++i) {
+        if (current == image) {
+            out = i;
+            return true;
+        }
+        current = n_mulmod2_preinv(current, zeta, p, p_inverse);
+    }
+    return false;
+}
+
+// Reference for the same test: the baby-step giant-step table as a sorted
+// array searched by std::lower_bound, which word_quotient_log_baby_giant used
+// before its table became a hash table.  Only called where that route
+// applies (ell prime of at least 7 bits, zeta != 1 of order ell).
+bool word_quotient_log_sorted_baby_giant_reference(ulong& out,
+                                                   ulong image,
+                                                   ulong zeta,
+                                                   ulong p,
+                                                   ulong ell) noexcept {
+    struct Step {
+        ulong value;
+        ulong exponent;
+    };
+    const ulong p_inverse = n_preinvert_limb(p);
+    const ulong m = n_sqrt(ell) + 1;
+    std::vector<Step> steps;
+    ulong current = 1 % p;
+    for (ulong j = 0; j <= m; ++j) {
+        steps.push_back(Step{current, j});
+        current = n_mulmod2_preinv(current, zeta, p, p_inverse);
+    }
+    std::sort(steps.begin(), steps.end(),
+              [](const Step& left, const Step& right) {
+                  return left.value < right.value;
+              });
+    const ulong giant = n_powmod2_ui_preinv(zeta, ell - m, p, p_inverse);
+    ulong y = image;
+    for (ulong i = 0; i < m; ++i) {
+        const auto found = std::lower_bound(
+                steps.begin(), steps.end(), y,
+                [](const Step& step, ulong value) { return step.value < value; });
+        if (found != steps.end() && found->value == y) {
+            out = (i * m + found->exponent) % ell;
+            return true;
+        }
+        y = n_mulmod2_preinv(y, giant, p, p_inverse);
+    }
+    return false;
+}
+
+// Slot of `value` in a table of 2^bits slots under the multiplicative hash
+// of word_quotient_log_baby_giant; only used to confirm that the generated
+// cases put several baby steps on one slot.
+std::size_t word_quotient_log_hash_slot_for_test(ulong value,
+                                                 unsigned bits) noexcept {
+    return static_cast<std::size_t>(
+            (static_cast<std::uint64_t>(value) * UINT64_C(0x9E3779B97F4A7C15)) >>
+            (64 - bits));
+}
+
+ulong test_splitmix64(std::uint64_t& state) noexcept {
+    state += UINT64_C(0x9E3779B97F4A7C15);
+    std::uint64_t z = state;
+    z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)) * UINT64_C(0x94D049BB133111EB);
+    return static_cast<ulong>(z ^ (z >> 31));
+}
+
+// Differential test of the word-size quotient logs (word_quotient_log_resolve
+// through word_quotient_logs_for_test) against the first-match walk and, on
+// the baby-step giant-step route, against the former sorted-array table.
+// Cases: ell around the 7-bit route cutoff (61, 63, 64, 67, 127, 128, 131)
+// and up to 20 bits, with primes p = k ell + 1 from 10 to 64 bits (either
+// side of 2^63, where the giant steps change multiplication routine); zeta of
+// order ell, of order 1 (zeta = 1), of order 2 (zeta = p - 1, for even ell),
+// of a proper divisor order for composite ell, and of order not dividing ell.
+// Images: zeta^e for e = 0, 1, m - 1, m, m + 1, ell - 1 (m = isqrt(ell) + 1,
+// the baby-step count) and random e, repeated images, and residues outside
+// <zeta> (left unresolved by every route).  The test also checks that the
+// baby-step route ran and that the cases put several baby steps on one hash
+// slot, so the probe sequence was exercised.
+int test_word_quotient_logs_match_walk_and_sorted_baby_giant() {
+    std::uint64_t state = UINT64_C(0x5EED00619);
+    const ulong ells[] = {2,   3,   4,    6,     61,     63,     64,
+                          67,  127, 128,  131,   257,    4093,   16381,
+                          32749, 65537, 262139, 1048573};
+    const unsigned p_bits[] = {10, 20, 31, 32, 40, 62, 63, 64};
+    slong baby_giant_cases = 0;
+    slong colliding_cases = 0;
+    slong checked = 0;
+    for (const ulong ell : ells) {
+        for (const unsigned bits : p_bits) {
+            if (FLINT_BIT_COUNT(ell) + 2 > bits) {
+                continue;
+            }
+            // p = k ell + 1 prime with p of about `bits` bits.
+            ulong p = 0;
+            const ulong k_base = (UWORD(1) << (bits - 1)) / ell;
+            for (ulong k = k_base + (test_splitmix64(state) % 64);; ++k) {
+                if (n_is_prime(k * ell + 1) != 0) {
+                    p = k * ell + 1;
+                    break;
+                }
+            }
+            const ulong p_inverse = n_preinvert_limb(p);
+            const ulong cofactor = (p - 1) / ell;
+            std::vector<ulong> zetas;
+            // Order ell (or a divisor of ell if the base is unlucky).
+            for (int t = 0; t < 2; ++t) {
+                const ulong g = 2 + test_splitmix64(state) % (p - 3);
+                zetas.push_back(n_powmod2_ui_preinv(g, cofactor, p, p_inverse));
+            }
+            zetas.push_back(1);
+            if (ell % 2 == 0) {
+                zetas.push_back(p - 1);
+            }
+            if (n_is_prime(ell) == 0 && ell > 3) {
+                // Order dividing the proper divisor d = ell / q of ell, q
+                // the smallest prime factor of ell.
+                ulong q = 2;
+                while (ell % q != 0) {
+                    ++q;
+                }
+                const ulong d = ell / q;
+                const ulong g = 2 + test_splitmix64(state) % (p - 3);
+                zetas.push_back(n_powmod2_ui_preinv(g, (p - 1) / d, p,
+                                                    p_inverse));
+            }
+            // Generally of order not dividing ell.
+            zetas.push_back(2 + test_splitmix64(state) % (p - 3));
+            for (const ulong zeta : zetas) {
+                if (zeta == 0 || zeta >= p) {
+                    continue;
+                }
+                const ulong m = n_sqrt(ell) + 1;
+                std::vector<ulong> exponents = {0, 1, m - 1, m, m + 1,
+                                                ell - 1};
+                for (int t = 0; t < 6; ++t) {
+                    exponents.push_back(test_splitmix64(state) % ell);
+                }
+                std::vector<ulong> images;
+                for (const ulong e : exponents) {
+                    images.push_back(
+                            n_powmod2_ui_preinv(zeta, e % ell, p, p_inverse));
+                }
+                images.push_back(images[images.size() - 1]);
+                images.push_back(images[3]);
+                for (int t = 0; t < 3; ++t) {
+                    images.push_back(1 + test_splitmix64(state) % (p - 1));
+                }
+                const bool baby_giant =
+                        FLINT_BIT_COUNT(ell) >= 7 && zeta != 1 &&
+                        n_is_prime(ell) != 0 &&
+                        n_powmod2_ui_preinv(zeta, ell, p, p_inverse) == 1;
+                std::vector<ulong> logs;
+                std::vector<bool> resolved;
+                const unsigned long bsgs_before = silex::detail::
+                        TestHookAccess::word_quotient_log_baby_giant_calls();
+                const bool ok = silex::detail::word_quotient_logs_for_test(
+                        logs, resolved, images, zeta, p, ell);
+                const unsigned long bsgs_after = silex::detail::
+                        TestHookAccess::word_quotient_log_baby_giant_calls();
+                assert(ok);
+                assert(bsgs_after - bsgs_before == (baby_giant ? 1u : 0u));
+                if (!ok || logs.size() != images.size() ||
+                    bsgs_after - bsgs_before != (baby_giant ? 1u : 0u)) {
+                    return 1;
+                }
+                for (std::size_t j = 0; j < images.size(); ++j) {
+                    ulong walk = 0;
+                    const bool walk_found = word_quotient_log_walk_reference(
+                            walk, images[j], zeta, p, ell);
+                    bool matches = resolved[j] == walk_found &&
+                                   (!walk_found || logs[j] == walk);
+                    if (baby_giant) {
+                        ulong sorted = 0;
+                        const bool sorted_found =
+                                word_quotient_log_sorted_baby_giant_reference(
+                                        sorted, images[j], zeta, p, ell);
+                        matches = matches && sorted_found == walk_found &&
+                                  (!sorted_found || sorted == walk);
+                    }
+                    assert(matches);
+                    if (!matches) {
+                        return 1;
+                    }
+                    ++checked;
+                }
+                if (baby_giant) {
+                    ++baby_giant_cases;
+                    unsigned index_bits = 4;
+                    while ((std::size_t{1} << index_bits) < 2 * (m + 1)) {
+                        ++index_bits;
+                    }
+                    std::vector<bool> used(std::size_t{1} << index_bits,
+                                           false);
+                    ulong current = 1;
+                    bool collided = false;
+                    for (ulong j = 0; j <= m; ++j) {
+                        const std::size_t slot =
+                                word_quotient_log_hash_slot_for_test(
+                                        current, index_bits);
+                        collided = collided || used[slot];
+                        used[slot] = true;
+                        current = n_mulmod2_preinv(current, zeta, p,
+                                                   p_inverse);
+                    }
+                    colliding_cases += collided ? 1 : 0;
+                }
+            }
+        }
+    }
+    assert(baby_giant_cases >= 40);
+    assert(colliding_cases >= 20);
+    assert(checked > 1000);
+    return baby_giant_cases >= 40 && colliding_cases >= 20 && checked > 1000
+                   ? 0
+                   : 1;
 }
 
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
@@ -13186,6 +13418,7 @@ int main() {
     test_residue_quotient_log_column_mixes_resolved_and_apply_entries();
     test_residue_quotient_log_column_route_follows_the_bit_cutoff();
     test_residue_quotient_log_column_walk_fallbacks_at_seven_bits();
+    test_word_quotient_logs_match_walk_and_sorted_baby_giant();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();
     test_unit_proof_records();

@@ -2219,7 +2219,12 @@ for smaller ``ell``: on the measured proven unit saturation rows, where
 on (busy-machine probe data, not a controlled measurement).  This is a cost choice
 only: baby-step giant-step runs only when ``ell`` is prime and the quotient
 generator has order ``ell``, so both routes return the unique logarithm in
-``[0, ell)`` and the columns are the same.
+``[0, ell)`` and the columns are the same.  The baby steps
+``zeta^0, ..., zeta^m`` (``m = isqrt(ell) + 1``) are kept, like Hecke's
+``cache`` ``Dict``, in a hash table (open addressing, at most half full), and
+the fixed baby and giant step factors are applied with FLINT's
+``n_mulmod_shoup`` when ``p < 2^(FLINT_BITS - 1)``.  Neither choice changes a
+logarithm.
 
 ``ResidueFieldQuotientLog::apply`` returns, for ``x`` in ``F_q^*`` with
 ``q = p^f``, the ``i`` in ``[0, ell)`` with ``zeta^i = x^((q - 1)/ell)``,

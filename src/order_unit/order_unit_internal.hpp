@@ -608,6 +608,20 @@ bool residue_quotient_log_column(
         const ResidueFieldQuotientLog& quotient_log,
         flint::FmpzConstRef ell,
         const DiagnosticsContext* diagnostics) noexcept;
+// Test entry for the word-size quotient logs of residue_quotient_log_column
+// on its degree-one path (word_quotient_log_resolve in relation_kernel.cpp).
+// For each j, `resolved[j]` is set when images[j] (a residue mod p, already
+// raised to (p - 1) / ell) equals zeta^i for some i in [0, ell), and then
+// logs[j] is the first such i; otherwise logs[j] is 0.  The route (shared walk
+// or baby-step giant-step) is chosen as in production.  Returns false, with
+// nothing resolved, when p < 2, ell < 2, zeta is not in [1, p), or an image
+// is not below p.
+bool word_quotient_logs_for_test(std::vector<ulong>& logs,
+                                 std::vector<bool>& resolved,
+                                 const std::vector<ulong>& images,
+                                 ulong zeta,
+                                 ulong p,
+                                 ulong ell) noexcept;
 bool residue_dlog_matrix_direct_degree_one(flint::FmpzMat& out,
                                            const OrderUnitGroup& group,
                                            const PrimeIdeal& prime,

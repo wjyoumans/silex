@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <new>
@@ -1218,11 +1219,16 @@ struct WordQuotientLogTarget {
     slong row = 0;
 };
 
-// One baby step of word_quotient_log_baby_giant: zeta^exponent.
+// One slot of the baby-step table of word_quotient_log_baby_giant:
+// zeta^exponent, or an empty slot when value is kWordQuotientLogEmptySlot.
 struct WordQuotientLogBabyStep {
     ulong value = 0;
     ulong exponent = 0;
 };
+
+// Marks an empty slot of the baby-step table.  Every baby step and every
+// giant-step value is a residue below p <= UWORD_MAX, so none equals it.
+constexpr ulong kWordQuotientLogEmptySlot = UWORD_MAX;
 
 // Reference `mod_p` (NumFieldOrd/NfOrd/Clgp/Saturate.jl:6-46 at the pinned
 // v0.38.6 revision) fills one table of all generator powers per prime when
@@ -1260,42 +1266,74 @@ void word_quotient_log_baby_giant(
     nmod_t ell_mod;
     nmod_init(&ell_mod, ell_ui);
     const ulong m = n_sqrt(ell_ui) + 1;
-    std::vector<WordQuotientLogBabyStep> baby_steps;
-    baby_steps.reserve(static_cast<std::size_t>(m) + 1);
+    // The baby steps are kept, as the reference's `cache` Dict, in a hash
+    // table: open addressing with linear probing, at most half full, indexed
+    // by the top bits of value times the 64-bit golden-ratio constant.  A
+    // lookup only answers whether a value is a baby step and with which
+    // exponent, so the table layout never changes a logarithm.
+    flint_bitcnt_t index_bits = 4;
+    while ((std::size_t{1} << index_bits) <
+           2 * (static_cast<std::size_t>(m) + 1)) {
+        ++index_bits;
+    }
+    const std::size_t mask = (std::size_t{1} << index_bits) - 1;
+    const auto slot_of = [index_bits](ulong value) noexcept {
+        return static_cast<std::size_t>(
+                (static_cast<std::uint64_t>(value) *
+                 UINT64_C(0x9E3779B97F4A7C15)) >>
+                (64 - index_bits));
+    };
+    // Both step multipliers are fixed, so below 2^(FLINT_BITS - 1) they are
+    // applied by n_mulmod_shoup with a precomputed quotient (its documented
+    // range), and by nmod_mul above it; either gives the same residue.
+    const bool shoup = p_ui < (UWORD(1) << (FLINT_BITS - 1));
+    const auto step = [shoup, &mod](ulong value, ulong factor,
+                                    ulong factor_precomp) noexcept {
+        return shoup ? n_mulmod_shoup(factor, value, factor_precomp, mod.n)
+                     : nmod_mul(value, factor, mod);
+    };
+    const ulong zeta_precomp =
+            shoup ? n_mulmod_precomp_shoup(zeta, p_ui) : 0;
+    WordQuotientLogBabyStep empty;
+    empty.value = kWordQuotientLogEmptySlot;
+    std::vector<WordQuotientLogBabyStep> table(mask + 1, empty);
     ulong current = 1 % p_ui;
     for (ulong j = 0; j <= m; ++j) {
-        WordQuotientLogBabyStep step;
-        step.value = current;
-        step.exponent = j;
-        baby_steps.push_back(step);
-        current = nmod_mul(current, zeta, mod);
+        // zeta^0, ..., zeta^m are distinct because m < ell, the order of
+        // zeta; a repeated value would keep its first (smallest) exponent.
+        std::size_t slot = slot_of(current);
+        while (table[slot].value != kWordQuotientLogEmptySlot &&
+               table[slot].value != current) {
+            slot = (slot + 1) & mask;
+        }
+        if (table[slot].value == kWordQuotientLogEmptySlot) {
+            table[slot].value = current;
+            table[slot].exponent = j;
+        }
+        current = step(current, zeta, zeta_precomp);
     }
-    // zeta^0, ..., zeta^m are distinct because m < ell, the order of zeta.
-    std::sort(baby_steps.begin(), baby_steps.end(),
-              [](const WordQuotientLogBabyStep& left,
-                 const WordQuotientLogBabyStep& right) {
-                  return left.value < right.value;
-              });
     // zeta^(-m) = zeta^(ell - m) since zeta has order ell.
     const ulong giant = nmod_pow_ui(zeta, ell_ui - m, mod);
+    const ulong giant_precomp =
+            shoup ? n_mulmod_precomp_shoup(giant, p_ui) : 0;
     for (const WordQuotientLogTarget& target : pending) {
         ulong y = target.image;
         for (ulong i = 0; i < m; ++i) {
-            const auto found = std::lower_bound(
-                    baby_steps.begin(), baby_steps.end(), y,
-                    [](const WordQuotientLogBabyStep& step, ulong value) {
-                        return step.value < value;
-                    });
-            if (found != baby_steps.end() && found->value == y) {
-                // i < m and found->exponent <= m are both below ell.
+            std::size_t slot = slot_of(y);
+            while (table[slot].value != kWordQuotientLogEmptySlot &&
+                   table[slot].value != y) {
+                slot = (slot + 1) & mask;
+            }
+            if (table[slot].value == y) {
+                // i < m and table[slot].exponent <= m are both below ell.
                 const ulong exponent = nmod_add(nmod_mul(i, m, ell_mod),
-                                                found->exponent, ell_mod);
+                                                table[slot].exponent, ell_mod);
                 flint::fmpz_set_ui(
                         flint::fmpz_mat_entry(out, target.row, 0), exponent);
                 resolved[static_cast<std::size_t>(target.row)] = true;
                 break;
             }
-            y = nmod_mul(y, giant, mod);
+            y = step(y, giant, giant_precomp);
         }
     }
 }
@@ -1425,6 +1463,40 @@ void word_quotient_log_shared_walk(
 }
 
 }  // namespace
+
+bool word_quotient_logs_for_test(std::vector<ulong>& logs,
+                                 std::vector<bool>& resolved,
+                                 const std::vector<ulong>& images,
+                                 ulong zeta,
+                                 ulong p,
+                                 ulong ell) noexcept {
+    logs.assign(images.size(), 0);
+    resolved.assign(images.size(), false);
+    if (p < 2 || ell < 2 || zeta == 0 || zeta >= p) {
+        return false;
+    }
+    std::vector<WordQuotientLogTarget> pending;
+    pending.reserve(images.size());
+    for (std::size_t j = 0; j < images.size(); ++j) {
+        if (images[j] >= p) {
+            return false;
+        }
+        WordQuotientLogTarget target;
+        target.image = images[j];
+        target.row = static_cast<slong>(j);
+        pending.push_back(target);
+    }
+    flint::FmpzMat out(static_cast<slong>(images.size()), 1);
+    word_quotient_log_resolve(out, resolved, std::move(pending), zeta, p, ell,
+                              nullptr);
+    for (std::size_t j = 0; j < images.size(); ++j) {
+        if (resolved[j]) {
+            logs[j] = flint::fmpz_get_ui(flint::fmpz_mat_entry(
+                    flint::FmpzMatConstRef(out), static_cast<slong>(j), 0));
+        }
+    }
+    return true;
+}
 
 bool residue_quotient_log_column(
         flint::FmpzMat& out,
