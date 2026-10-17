@@ -253,6 +253,19 @@ Changed
   18% less time (21.4% more setups in 45 s); a control row was unchanged
   (ratio 1.000).
 
+- Each lower-triangle entry of that T2 enumeration Gram matrix is now one
+  ``arb_dot`` of two embedding rows instead of a sum of ``arb_mul`` products.
+  The entries stay rigorous Arb enclosures of the Gram matrix, but their
+  midpoints and radii can differ from the previous ones by rounding noise, so
+  the double quadratic form handed to the enumeration can differ at that
+  level; this supersedes the statement above that the Gram midpoints and the
+  enumeration data are unchanged.  Published outputs are identical on the
+  tested ``proven`` corpus rows (197 rows compared; 8 more timed out at
+  120 s on both builds).  On a busy machine (``perf stat``, 3 runs each), the
+  ``proven`` class/unit computation used 2.9% fewer user-space instructions
+  for the field defined by ``x^12 + 7`` and 6.6% fewer for the 23rd
+  cyclotomic field; this has not been measured on an idle machine.
+
 - Publishing a class-group presentation no longer recomputes the Smith form
   (``fmpz_mat_snf_transform``) of the HNF basis of the relation lattice when
   that basis is equal to the one of the previous publish, as it is when new
