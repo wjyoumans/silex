@@ -1591,7 +1591,7 @@ silex::detail::DecomposePrimeRoute route_at(const silex::Order& order,
                                             slong max_residue_degree) {
     sflint::Fmpz p;
     assert(set_fmpz_si(p, rational_prime));
-    return PrimeIdealAccess::decompose_prime_route_for_testing(
+    return silex::detail::TestHookAccess::decompose_prime_route(
             order, sflint::FmpzConstRef(p), max_residue_degree);
 }
 
@@ -1788,9 +1788,9 @@ int check_recursive_split_matches_enumeration(
     assert(set_fmpz_si(p, rational_prime));
     std::vector<silex::Ideal> enumerated;
     std::vector<silex::Ideal> split;
-    assert(PrimeIdealAccess::index_divisor_prime_ideals_for_testing(
+    assert(silex::detail::TestHookAccess::index_divisor_prime_ideals(
             enumerated, maximal, sflint::FmpzConstRef(p), false));
-    assert(PrimeIdealAccess::index_divisor_prime_ideals_for_testing(
+    assert(silex::detail::TestHookAccess::index_divisor_prime_ideals(
             split, maximal, sflint::FmpzConstRef(p), true));
     assert(static_cast<slong>(enumerated.size()) == count);
     assert(split.size() == enumerated.size());
@@ -2549,8 +2549,7 @@ int test_valuation_anti_uniformizer_matches_containment() {
                         assert(silex::detail::TestHookAccess::valuation_by_power_containment(
                                                expected, *prime, element,
                                                bound));
-                        if (!PrimeIdealAccess::
-                                    anti_uniformizer_valuation_for_testing(
+                        if (!silex::detail::TestHookAccess::anti_uniformizer_valuation(
                                             value, *prime, element, bound)) {
                             // Only P = pO has no anti-uniformizer condition
                             // (every HNF row vanishes mod p); the helper

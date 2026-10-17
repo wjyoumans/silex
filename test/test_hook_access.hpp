@@ -27,6 +27,7 @@
 #include "order_unit/compute_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
 #include "order_unit/precision_cap_internal.hpp"
+#include "prime_ideal/prime_ideal_internal.hpp"
 #include "sunit/sunit_internal.hpp"
 #include "zeta/zeta_internal.hpp"
 #include <silex/factor_base.hpp>
@@ -44,6 +45,41 @@ public:
     static void set_sunit_composition_overflow_at(slong n) noexcept {
         SUnitTestSeams::composition_overflow_countdown_.store(
                 n, std::memory_order_relaxed);
+    }
+
+    // Prime-ideal test entries, forwarded to private PrimeIdealAccess
+    // members whose bodies use file-local helpers of prime_ideal.cpp.
+
+    // Values `element` at `prime` by coordinate divisibility with the
+    // anti-uniformizer from the HNF of P (the route for primes without a
+    // Kummer quotient map), for every prime of a maximal order, so tests can
+    // compare it with the power-containment fallback.
+    static bool anti_uniformizer_valuation(slong& out,
+                                           const PrimeIdeal& prime,
+                                           const OrderElement& element,
+                                           slong bound) noexcept {
+        return PrimeIdealAccess::anti_uniformizer_valuation(out, prime,
+                                                            element, bound);
+    }
+
+    // Splits O/(p, I_p) for a prime p dividing the index of the maximal
+    // order, by bounded enumeration (`recursive_split` false) or the
+    // recursive split (true); skips the separating-element search.
+    static bool index_divisor_prime_ideals(std::vector<Ideal>& out,
+                                           const Order& order,
+                                           flint::FmpzConstRef p,
+                                           bool recursive_split) noexcept {
+        return PrimeIdealAccess::index_divisor_prime_ideals(
+                out, order, p, recursive_split);
+    }
+
+    // The route decompose_prime(.., order, p, max_residue_degree) takes.
+    static DecomposePrimeRoute decompose_prime_route(
+            const Order& order,
+            flint::FmpzConstRef p,
+            slong max_residue_degree) noexcept {
+        return PrimeIdealAccess::decompose_prime_route_for_max_degree(
+                order, p, max_residue_degree);
     }
 
     // Runs the exact power-containment valuation fallback (the largest

@@ -157,36 +157,6 @@ public:
             flint::FmpzConstRef p,
             flint::FmpzConstRef root) noexcept;
 
-    // Test hook: values `element` at `prime` by coordinate divisibility
-    // with the anti-uniformizer taken from the HNF of P, the route used for
-    // primes without a Kummer quotient map, for every prime of a maximal
-    // order (Kummer primes included), so tests can compare it with the
-    // power-containment fallback.  For tests only.
-    static bool anti_uniformizer_valuation_for_testing(
-            slong& out,
-            const PrimeIdeal& prime,
-            const OrderElement& element,
-            slong bound) noexcept;
-
-    // Test hook: splits O/(p, I_p) for a prime p dividing the index of the
-    // maximal order `order` and writes its prime ideals in the order
-    // decompose_prime publishes them.  It skips the separating-element search
-    // and uses the bounded idempotent enumeration (`recursive_split` false)
-    // or the recursive split (true), so tests can compare the two on one
-    // algebra.  Returns false if the chosen method fails.  For tests only.
-    static bool index_divisor_prime_ideals_for_testing(
-            std::vector<Ideal>& out,
-            const Order& order,
-            flint::FmpzConstRef p,
-            bool recursive_split) noexcept;
-
-    // Test hook: the route decompose_prime(.., order, p, max_residue_degree)
-    // takes, from the classifier decompose_prime uses.  For tests only.
-    static DecomposePrimeRoute decompose_prime_route_for_testing(
-            const Order& order,
-            flint::FmpzConstRef p,
-            slong max_residue_degree) noexcept;
-
     // Builds into `out` (defined over `order`) the prime ideal
     // (p, g(theta)) of the irreducible factor `factor` of the defining
     // polynomial modulo p with multiplicity `ramification_index`, as
@@ -230,6 +200,40 @@ public:
             const OrderElement& element,
             slong norm_vp,
             const DiagnosticsContext* diagnostics = nullptr) noexcept;
+
+private:
+    friend class TestHookAccess;
+
+    // Test hook: values `element` at `prime` by coordinate divisibility
+    // with the anti-uniformizer taken from the HNF of P, the route used for
+    // primes without a Kummer quotient map, for every prime of a maximal
+    // order (Kummer primes included), so tests can compare it with the
+    // power-containment fallback.  For tests only.
+    static bool anti_uniformizer_valuation(
+            slong& out,
+            const PrimeIdeal& prime,
+            const OrderElement& element,
+            slong bound) noexcept;
+
+    // Test hook: splits O/(p, I_p) for a prime p dividing the index of the
+    // maximal order `order` and writes its prime ideals in the order
+    // decompose_prime publishes them.  It skips the separating-element search
+    // and uses the bounded idempotent enumeration (`recursive_split` false)
+    // or the recursive split (true), so tests can compare the two on one
+    // algebra.  Returns false if the chosen method fails.  For tests only.
+    static bool index_divisor_prime_ideals(
+            std::vector<Ideal>& out,
+            const Order& order,
+            flint::FmpzConstRef p,
+            bool recursive_split) noexcept;
+
+    // Test hook: the route decompose_prime(.., order, p, max_residue_degree)
+    // takes, from the classifier decompose_prime uses.  For tests only.
+    static DecomposePrimeRoute decompose_prime_route_for_max_degree(
+            const Order& order,
+            flint::FmpzConstRef p,
+            slong max_residue_degree) noexcept;
+
 };
 
 }  // namespace silex::detail

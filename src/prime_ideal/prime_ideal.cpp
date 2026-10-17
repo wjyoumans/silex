@@ -4142,7 +4142,7 @@ bool PrimeIdealAccess::order_basis_is_p_integral(
     return prime.order_basis_is_p_integral();
 }
 
-bool PrimeIdealAccess::anti_uniformizer_valuation_for_testing(
+bool PrimeIdealAccess::anti_uniformizer_valuation(
         slong& out,
         const PrimeIdeal& prime,
         const OrderElement& element,
@@ -4162,7 +4162,7 @@ bool PrimeIdealAccess::anti_uniformizer_valuation_for_testing(
                    flint::FmpzConstRef(prime.p_), bound, nullptr);
 }
 
-bool PrimeIdealAccess::index_divisor_prime_ideals_for_testing(
+bool PrimeIdealAccess::index_divisor_prime_ideals(
         std::vector<Ideal>& out,
         const Order& order,
         flint::FmpzConstRef p,
@@ -4416,7 +4416,7 @@ DecomposePrimeRoute decompose_prime_route(const Order& order,
 
 }  // namespace
 
-DecomposePrimeRoute PrimeIdealAccess::decompose_prime_route_for_testing(
+DecomposePrimeRoute PrimeIdealAccess::decompose_prime_route_for_max_degree(
         const Order& order,
         flint::FmpzConstRef p,
         slong max_residue_degree) noexcept {
