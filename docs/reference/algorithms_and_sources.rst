@@ -704,6 +704,15 @@ the integral generator ``omega`` of PARI ``quadgen``/``quadpoly``, whose
 generator in use is chosen by one shared predicate when a prime is built and
 stored in the prime, so it cannot drift from the stored residue polynomial.
 
+Valuations at index-divisor primes of a maximal order use an
+anti-uniformizer ``beta/p`` with ``O + (beta/p) O = P^-1``: the element
+``beta`` is any nonzero solution in ``O/pO`` of ``beta b_i in pO`` for the
+Hermite basis rows ``b_i`` of ``P`` that are nonzero mod ``p``, and the
+valuation counts how often ``x (beta/p)`` stays integral.  This follows PARI
+2.17.3 ``base2.c`` ``get_pr`` and ``base3.c`` ``ZC_nfvalrem`` and Cohen, GTM
+138, Algorithm 4.8.17; Silex solves for ``beta`` from the Hermite basis
+because it keeps no two-element generator for these primes.
+
 The one-large-prime step of relation factoring takes valuations of an element
 ``alpha`` of the maximal order at the primes above each rational prime ``p``
 of its norm that the factor base does not account for.  When

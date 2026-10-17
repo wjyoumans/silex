@@ -128,6 +128,17 @@ Added
 Changed
 -------
 
+- Valuations at index-divisor primes of a maximal order (primes where the
+  order basis is not the power basis, or that have no Kummer quotient map) are
+  counted with an anti-uniformizer, found once per prime by a linear system
+  over ``F_p``, instead of testing containment in successive powers of the
+  prime ideal.  Valuations, factorizations and every published result are
+  unchanged; only the work changes (about 23% fewer instructions on the
+  ``grh`` row ``multiquadratic_m23_m31_m47``).  Primes that do not fit in a
+  machine word keep the earlier route.  The method follows the
+  coordinate-divisibility valuation of the reference number-field system and
+  Cohen, GTM 138, Section 4.8.3.
+
 - ``factor_base_class_group_bound`` and the proven generation requirement
   now use Zimmert's bound (Zimmert 1981, Satz 2) in every degree, not only
   up to degree 20.  Above degree 20 the bound is much smaller: for
