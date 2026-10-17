@@ -1236,27 +1236,27 @@ Changed
   ``unit_group.regulator_radius`` on ``simplest_cubic_a12``.
 
 - The ``grh`` class/unit computation grows the relation refill of its
-  refine loop geometrically (2, 4, 8, ...) while the validation repeats the
-  same index bound above one and the previous refill left the class order
-  unchanged; any other round restarts at 2.  ``proven`` computations are
-  unchanged.  On the release corpus the class group, invariants, regulator,
+  refine loop geometrically (4, 8, ...) once the validation has repeated the
+  same index bound above one, with the class order unchanged by the refill,
+  twice in a row; a single repeat keeps the 2-relation refill, and any other
+  round restarts at 2.  ``proven`` computations are unchanged.  On the
+  release corpus the class group, invariants, regulator, regulator radius,
   unit generators and proof labels are unchanged.  The relation bookkeeping
-  fields ``relation_count``, ``relation_kernel_unit_count``,
-  ``relation_sources.random_product`` and
-  ``skipped_dependent_relation_count`` differ on 14 of the 185 ``grh``
-  corpus rows: ``imaginary_quadratic_34_grh``, ``real_quadratic_d10000000005``,
-  ``imaginary_quadratic_d10000000799``, ``imaginary_quadratic_d100000000000319``,
-  ``simplest_cubic_a12``, ``pure_x5_minus_7``, ``quintic_disc401370255_proven``,
-  ``cyclotomic_7_phi6``, ``cyclotomic_19_phi18``, ``cyclotomic_52_phi24``,
-  ``lmfdb_6_6_49744125_1``, ``lmfdb_8_8_73116160000_2``,
-  ``multiquadratic_m3_m5_m7`` and ``random_d10_h4_s27_proven``
-  (``skipped_dependent_relation_count`` on all but the real quadratic,
-  the two imaginary quadratic ``d``-rows, ``pure_x5_minus_7`` and
-  ``random_d10_h4_s27_proven``).  On a busy machine, pending an idle-machine
-  comparison, three of these rows ran repeatably slower:
-  ``simplest_cubic_a12`` (about +5 to +6%, 29.6 to 31.3 ms),
-  ``imaginary_quadratic_d100000000000319`` (about +5%, 33.5 to 35.3 ms) and
-  ``imaginary_quadratic_34_grh`` (about +10%, 7.6 to 8.4 ms).  See "Class
+  fields ``relation_count``, ``relation_kernel_unit_count`` and
+  ``relation_sources.random_product`` differ on 6 of the 185 ``grh`` corpus
+  rows: ``imaginary_quadratic_34_grh``, ``simplest_cubic_a12``,
+  ``pure_x5_minus_7``, ``pure_x8_minus_3``, ``lmfdb_8_8_73116160000_2`` and
+  ``multiquadratic_m3_m5_m7``; ``skipped_dependent_relation_count`` differs
+  too on ``simplest_cubic_a12``, ``lmfdb_8_8_73116160000_2`` and
+  ``multiquadratic_m3_m5_m7``.  On a busy machine (paired runs, 31 rounds,
+  pending an idle-machine comparison) two of these rows ran repeatably
+  slower: ``imaginary_quadratic_34_grh`` (about +3%, 7.23 to 7.46 ms) and
+  ``pure_x8_minus_3`` (about +1%, 38.2 to 38.8 ms).  Faster rows:
+  ``multiquadratic_m3_m5_m7`` (146.0 to 117.8 ms), ``lmfdb_8_8_73116160000_2``
+  (139.7 to 120.9 ms), ``pure_x5_minus_7`` (24.2 to 21.9 ms),
+  ``simplest_cubic_a12``, ``lmfdb_6_6_49744125_1`` and
+  ``quintic_disc401370255_proven`` (about 5% each; the last two publish
+  unchanged output).  See "Class
   groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 Fixed

@@ -2528,13 +2528,17 @@ relations and validates again, as Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group`` (line 293) does with
 ``src/NumFieldOrd/NfOrd/Clgp/Main_LLL.jl:class_group_new_relations_via_lll``.
 That slice collects 2 relations (lines 154 and 172, once the tentative class
-number is known).  Silex starts each refill at the same 2, but doubles the
-next refill (4, 8, ...) while the validation keeps ending with the same index
-bound above one and the previous refill left the class order unchanged; any
-other round starts again at 2.  This rule is Silex's own, not in Hecke or
-PARI: ``k`` stalled rounds of 2 relations become about ``log2 k`` larger
-refills, each followed by one validation.  The relation cap
-``max_relations`` still bounds every refill.
+number is known).  Silex starts each refill at the same 2.  A validation
+repeats when it ends with the same index bound above one as before the
+previous refill and that refill left the class order unchanged.  After a
+single repeat the next refill is still 2; from the second consecutive repeat
+on, each refill doubles the previous one (4, 8, ...).  Any round that does
+not repeat starts again at 2.  This rule is Silex's own, not in Hecke or
+PARI: a long stall of 2-relation rounds becomes a few larger refills, each
+followed by one validation.  Growing after a single repeat only added
+relations on the release corpus, where the next 2-relation refill usually
+ends a one-round stall.  The relation cap ``max_relations`` still bounds
+every refill.
 Proven and unknown requests keep the 2-relation refill.
 
 In the ``silex-class-unit-instance`` JSON, the top-level ``failure_detail``

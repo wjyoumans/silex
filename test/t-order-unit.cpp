@@ -12807,22 +12807,28 @@ int test_grh_validation_skips_unit_rebuild_from_unchanged_class_context() {
     return 0;
 }
 
-// The grh class/unit loop refill starts at the reference 2 relations, doubles
-// only while the validation repeats with an unchanged class order and index
-// bound, restarts at 2 otherwise, and saturates at WORD_MAX.
+// The grh class/unit loop refill starts at the reference 2 relations, keeps
+// 2 after a single repeated validation, doubles from the second consecutive
+// repeat on, restarts at 2 when a round does not repeat, and saturates at
+// WORD_MAX.
 int test_relation_refill_target_rule() {
+    using silex::detail::kRelationRefillGrowthRepeats;
     using silex::detail::kRelationRefillInitial;
     using silex::detail::next_relation_refill_target;
     assert(kRelationRefillInitial == 2);
-    assert(next_relation_refill_target(kRelationRefillInitial, false) == 2);
-    assert(next_relation_refill_target(16, false) == 2);
-    assert(next_relation_refill_target(2, true) == 4);
-    assert(next_relation_refill_target(4, true) == 8);
-    assert(next_relation_refill_target(0, true) == 2);
-    assert(next_relation_refill_target(WORD_MAX / 2, true) ==
+    assert(kRelationRefillGrowthRepeats == 2);
+    assert(next_relation_refill_target(kRelationRefillInitial, 0) == 2);
+    assert(next_relation_refill_target(16, 0) == 2);
+    // One repeat: the stall limit keeps the reference refill.
+    assert(next_relation_refill_target(2, 1) == 2);
+    assert(next_relation_refill_target(16, 1) == 2);
+    assert(next_relation_refill_target(2, 2) == 4);
+    assert(next_relation_refill_target(4, 3) == 8);
+    assert(next_relation_refill_target(0, 2) == 2);
+    assert(next_relation_refill_target(WORD_MAX / 2, 5) ==
            2 * (WORD_MAX / 2));
-    assert(next_relation_refill_target(WORD_MAX / 2 + 1, true) == WORD_MAX);
-    assert(next_relation_refill_target(WORD_MAX, true) == WORD_MAX);
+    assert(next_relation_refill_target(WORD_MAX / 2 + 1, 5) == WORD_MAX);
+    assert(next_relation_refill_target(WORD_MAX, WORD_MAX) == WORD_MAX);
     // The internal relation options default to the reference stop.
     const silex::detail::ClassGroupRelationOptions relation_options;
     assert(relation_options.extension_relation_target ==
@@ -12856,10 +12862,11 @@ void relation_refill_callback(void* user,
 }
 
 // Q(sqrt -34) in grh mode (h = 4) validates four times: three refills of
-// the class/unit loop, of which the last two follow a validation that
-// repeated the index bound with the class order unchanged, so they grow
-// (2, then 4, then 8 relations).  The result is the same class group.  Only
-// builds with profiling enabled see the refill events.
+// the class/unit loop.  The second and third follow validations that
+// repeated the index bound with the class order unchanged; the second is a
+// single repeat and keeps 2 relations, the third is the second consecutive
+// repeat and grows to 4 (2, 2, then 4 relations).  The result is the same
+// class group.  Only builds with profiling enabled see the refill events.
 int test_grh_relation_refill_grows_on_repeated_validation() {
     sflint::FmpzPoly polynomial;
     sflint::fmpz_poly_set_coeff_si(polynomial, 0, 34);
@@ -12911,7 +12918,7 @@ int test_grh_relation_refill_grows_on_repeated_validation() {
     assert(audit.unit_group_certification == silex::CertificationMode::grh);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(events.refills == 3);
-    assert(events.grown == 2);
+    assert(events.grown == 1);
 #endif
     return 0;
 }

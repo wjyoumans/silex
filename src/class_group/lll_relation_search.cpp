@@ -1325,7 +1325,7 @@ bool ClassGroupContext::run_lll_relation_route_(
             // relations per round and returns after 2 once h > 0.  An
             // extension slice may ask for more (extension_relation_target,
             // raised by the grh class/unit loop when its validation
-            // repeats); the target 2 is the reference loop unchanged.
+            // keeps repeating); the target 2 is the reference loop unchanged.
             const slong relation_target =
                     extension_only ? options.extension_relation_target : 2;
             {

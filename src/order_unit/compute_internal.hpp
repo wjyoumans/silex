@@ -66,17 +66,26 @@ inline slong min_slong(slong left, slong right) noexcept {
 // (reference source Clgp/Main_LLL.jl).
 inline constexpr slong kRelationRefillInitial = 2;
 
-// The refill target of the next grh class/unit loop slice.  `repeated` says
-// the validation just run ended with the same index bound (> 1) as the one
-// before the previous refill, and that refill left the class order
-// unchanged: the previous slice gave no measurable progress.  The target
-// then doubles (a Silex rule, not in the reference: k stalled rounds of 2
-// relations become about log2 k larger refills, each followed by one
-// validation).  Any other round restarts at the reference 2.  Saturates at WORD_MAX; the route's
-// max_relations cap still bounds every slice.
+// Consecutive repeated validations a grh refill waits for before it grows
+// (see next_relation_refill_target).
+inline constexpr slong kRelationRefillGrowthRepeats = 2;
+
+// The refill target of the next grh class/unit loop slice.
+// `repeated_rounds` counts the consecutive validations, up to the one just
+// run, that each ended with the same index bound (> 1) as the one before
+// the previous refill while that refill left the class order unchanged:
+// refills that gave no measurable progress.  Once that count reaches
+// kRelationRefillGrowthRepeats the target doubles (a Silex rule, not in
+// the reference: a long stall of 2-relation rounds becomes a few larger
+// refills, each followed by one validation).  A single repeat keeps the
+// reference 2: on the release corpus the next 2-relation slice usually ends
+// a one-round stall, and growing there only added relations.  Any round
+// without a repeat restarts at 2.  Saturates at WORD_MAX; the
+// route's max_relations cap still bounds every slice.
 inline slong next_relation_refill_target(slong current,
-                                         bool repeated) noexcept {
-    if (!repeated || current < kRelationRefillInitial) {
+                                         slong repeated_rounds) noexcept {
+    if (repeated_rounds < kRelationRefillGrowthRepeats ||
+        current < kRelationRefillInitial) {
         return kRelationRefillInitial;
     }
     return current > WORD_MAX / 2 ? WORD_MAX : 2 * current;

@@ -4019,6 +4019,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     flint::Fmpz previous_refill_index_bound;
     bool have_previous_refill_bound = false;
     bool previous_refill_class_unchanged = false;
+    slong repeated_refill_rounds = 0;
     for (;;) {
         bool candidate_units_ready = false;
         bool certified = false;
@@ -4268,10 +4269,11 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                 return false;
             }
         }
-        // A grh refill grows only while the validation repeats: same index
-        // bound (> 1) as before the previous refill, and that refill left
-        // the class order unchanged (detail::next_relation_refill_target).
-        // The first refill and every other round use the reference 2.
+        // A grh validation repeats when it ends with the same index bound
+        // (> 1) as before the previous refill and that refill left the class
+        // order unchanged.  The refill grows from the second consecutive
+        // repeat on (detail::next_relation_refill_target); the first refill
+        // and every other round use the reference 2.
         const bool refill_repeated =
                 options.requested_certification == CertificationMode::grh &&
                 have_previous_refill_bound &&
@@ -4282,9 +4284,14 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
                 flint::fmpz_equal(
                         flint::FmpzConstRef(validate_summary.last_index_bound),
                         flint::FmpzConstRef(previous_refill_index_bound));
+        if (!refill_repeated) {
+            repeated_refill_rounds = 0;
+        } else if (repeated_refill_rounds < WORD_MAX) {
+            ++repeated_refill_rounds;
+        }
         relation_refill_target = detail::next_relation_refill_target(
-                relation_refill_target, refill_repeated);
-        if (refill_repeated) {
+                relation_refill_target, repeated_refill_rounds);
+        if (relation_refill_target > detail::kRelationRefillInitial) {
             SILEX_PROFILE_EVENT(active_diagnostics,
                                 DiagnosticsModule::unit_group,
                                 "unit_group.relation_refill_grown");
