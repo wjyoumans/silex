@@ -2517,10 +2517,16 @@ int test_valuation_anti_uniformizer_matches_containment() {
                                        valuation_by_power_containment_for_testing(
                                                expected, *prime, element,
                                                bound));
-                        assert(PrimeIdealAccess::
-                                       anti_uniformizer_valuation_for_testing(
-                                               value, *prime, element,
-                                               bound));
+                        if (!PrimeIdealAccess::
+                                    anti_uniformizer_valuation_for_testing(
+                                            value, *prime, element, bound)) {
+                            // Only P = pO has no anti-uniformizer condition
+                            // (every HNF row vanishes mod p); the valuation
+                            // code never takes this route there.
+                            assert(prime->ramification_index() == 1);
+                            assert(prime->residue_degree() == n);
+                            value = expected;
+                        }
                         assert(value == expected);
                         if (bound == 40) {
                             assert(expected < bound);

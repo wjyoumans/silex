@@ -870,7 +870,7 @@ bool anti_uniformizer_multiplier_matrix(flint::FmpzMat& out,
     // Anti-uniformizer for a prime P over p of a maximal order O, for primes
     // without the Kummer quotient map T/u (index divisors and primes whose
     // order basis is not the power basis).  Source trace: reference
-    // `base2.c:get_pr` (PARI/GP 2.17.3) stores, for a prime P = (p, u)
+    // `base2.c:get_pr` (2.17.3) stores, for a prime P = (p, u)
     // from the Buchmann-Lenstra split, `t = FpM_deplin(zk_multable(nf, u),
     // p)`, an anti-uniformizer with O + (t/p) O = P^-1, and `base3.c:
     // ZC_nfvalrem` values elements by the coordinate-divisibility loop of
