@@ -538,6 +538,28 @@ public:
                 factor_base_restart_available, analytic_finish_precision,
                 analytic_precision_doublings);
     }
+
+    // Bounded best-denominator rational reconstruction (see
+    // FmpqBestDenominatorTestEntry).
+    static bool fmpq_best_denominator_bounded(
+            flint::Fmpq& out,
+            flint::FmpqConstRef value,
+            flint::FmpzConstRef max_denominator) noexcept {
+        return FmpqBestDenominatorTestEntry::bounded(out, value,
+                                                     max_denominator);
+    }
+
+    // Word-size quotient logs of the degree-one residue column (see
+    // WordQuotientLogsTestEntry).
+    static bool word_quotient_logs(std::vector<ulong>& logs,
+                                   std::vector<bool>& resolved,
+                                   const std::vector<ulong>& images,
+                                   ulong zeta,
+                                   ulong p,
+                                   ulong ell) noexcept {
+        return WordQuotientLogsTestEntry::logs(logs, resolved, images, zeta,
+                                               p, ell);
+    }
 };
 
 }  // namespace silex::detail

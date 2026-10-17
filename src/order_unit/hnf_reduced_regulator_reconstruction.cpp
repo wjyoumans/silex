@@ -349,7 +349,7 @@ bool rational_approximation_error_bits_ok(
 
 }  // namespace
 
-bool fmpq_best_denominator_bounded_for_testing(
+bool FmpqBestDenominatorTestEntry::bounded(
         flint::Fmpq& out,
         flint::FmpqConstRef value,
         flint::FmpzConstRef max_denominator) noexcept {

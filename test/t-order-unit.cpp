@@ -2741,7 +2741,7 @@ int test_best_denominator_convergents_are_canonical() {
     auto best = [](const sflint::Fmpq& value,
                    const sflint::Fmpz& max_denominator) noexcept {
         sflint::Fmpq out;
-        const bool ok = silex::detail::fmpq_best_denominator_bounded_for_testing(
+        const bool ok = silex::detail::TestHookAccess::fmpq_best_denominator_bounded(
                 out, sflint::FmpqConstRef(value),
                 sflint::FmpzConstRef(max_denominator));
         assert(ok);
@@ -6093,7 +6093,7 @@ ulong test_splitmix64(std::uint64_t& state) noexcept {
 }
 
 // Differential test of the word-size quotient logs (word_quotient_log_resolve
-// through word_quotient_logs_for_test) against the first-match walk and, on
+// through TestHookAccess::word_quotient_logs) against the first-match walk and, on
 // the baby-step giant-step route, against the former sorted-array table.
 // Cases: ell around the 7-bit route cutoff (61, 63, 64, 67, 127, 128, 131)
 // and up to 20 bits, with primes p = k ell + 1 from 10 to 64 bits (either
@@ -6182,7 +6182,7 @@ int test_word_quotient_logs_match_walk_and_sorted_baby_giant() {
                 std::vector<bool> resolved;
                 const unsigned long bsgs_before = silex::detail::
                         TestHookAccess::word_quotient_log_baby_giant_calls();
-                const bool ok = silex::detail::word_quotient_logs_for_test(
+                const bool ok = silex::detail::TestHookAccess::word_quotient_logs(
                         logs, resolved, images, zeta, p, ell);
                 const unsigned long bsgs_after = silex::detail::
                         TestHookAccess::word_quotient_log_baby_giant_calls();

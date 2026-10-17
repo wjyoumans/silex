@@ -1464,12 +1464,12 @@ void word_quotient_log_shared_walk(
 
 }  // namespace
 
-bool word_quotient_logs_for_test(std::vector<ulong>& logs,
-                                 std::vector<bool>& resolved,
-                                 const std::vector<ulong>& images,
-                                 ulong zeta,
-                                 ulong p,
-                                 ulong ell) noexcept {
+bool WordQuotientLogsTestEntry::logs(std::vector<ulong>& logs,
+                                     std::vector<bool>& resolved,
+                                     const std::vector<ulong>& images,
+                                     ulong zeta,
+                                     ulong p,
+                                     ulong ell) noexcept {
     logs.assign(images.size(), 0);
     resolved.assign(images.size(), false);
     if (p < 2 || ell < 2 || zeta == 0 || zeta >= p) {
