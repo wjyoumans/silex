@@ -70,11 +70,12 @@ Added
   field ``failure_detail`` holds structured detail about a failure, with keys
   that depend on ``failure_reason``.  For ``class_unit_computation_failed``
   it holds ``cause``, free text naming the last unit-group validation
-  outcome reached (null when validation never ran).  It is null except for
-  that reason and ``factor_base_honesty_unwitnessed``, where it names the
-  unwitnessed prime (``p``, a decimal string, and ``residue_degree``), the
-  witness search route (``search``, ``lattice`` or ``t2``), the stage of its
-  last search
+  outcome reached (null when validation never ran).  For
+  ``relation_search_budget_exhausted`` it holds ``cap`` (below).  It is null
+  except for those reasons and ``factor_base_honesty_unwitnessed``, where it
+  names the unwitnessed prime (``p``, a decimal string, and
+  ``residue_degree``), the witness search route (``search``, ``lattice`` or
+  ``t2``), the stage of its last search
   (``stage`` and ``max_stage``), and that stage's caps: ``radius``,
   ``twists`` and ``random_tries`` on the lattice route, or
   ``random_tries``, ``factor_attempts`` and ``element_steps`` on the T2
@@ -92,11 +93,18 @@ Added
   ``class_unit_computation_failed``.  Its ``failure_detail`` holds ``cap``,
   the option name of the cap that stopped the search (``max_candidates`` or
   ``max_relations``), preceded by the same ``cause`` key as for
-  ``class_unit_computation_failed`` when a unit-group validation ran.  Only
-  failing ``grh`` runs change; ``proven`` runs stopped by a cap still report
-  ``class_unit_computation_failed``, and successful runs, results and labels
-  are unchanged.  See "Class groups and order units" in
-  :doc:`../reference/algorithms_and_sources`.
+  ``class_unit_computation_failed`` when a unit-group validation ran.
+  ``proven`` runs report the same reason and detail when they fail after a
+  cap was reached by one of their relation searches (even one that reached
+  its goal) or after the relation cap alone refused a larger relation-kernel
+  target; the detail keeps the final ``cause`` next to the cap, so a later
+  failure with another cause stays visible.  For example
+  ``x^3 - 6x^2 - 9x - 1`` with ``--max-relations 12`` now reports
+  ``relation_search_budget_exhausted`` with ``cause`` and ``cap``
+  ``max_relations``, and with ``--max-relations 1`` only ``cap``.  The tool's
+  default caps count for ``proven`` runs as well.  Only failing runs
+  change; successful runs, results and labels are unchanged.  See "Class
+  groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 - A ``proven`` request for a maximal imaginary quadratic order whose base up
   to the generation bound would exceed the factor-base size limit of 2^14

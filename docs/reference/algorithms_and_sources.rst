@@ -2443,7 +2443,19 @@ candidate cap (``ClassGroupComputeOptions::max_candidates``, counted per call
 of the relation route) or reached the relation cap (``max_relations``,
 counted over all relations of the candidate) before it had a presentation,
 the relation cap refused a continuation slice, or a continuation slice spent
-its candidate cap without adding a relation.  Both caps are unlimited by
+its candidate cap without adding a relation.  A ``proven`` computation
+reports the same reason when it gives up after a cap was reached by one of
+its relation searches (the relation-production prepass, the relation-search
+driver, the imaginary-quadratic relation backend, or the LLL relation route
+and its continuation slices, which the relation cap refuses once the
+relation count has reached it), counting a search that ended at its goal
+with a cap reached, or after the relation cap alone refused it a larger
+relation-kernel target.  The rule is broad on purpose: a cap can leave a
+search with too few relations for a later step, which then fails for its
+own reason (``x^4 - 10x^2 + 1`` with ``--max-relations 12`` ends in a unit
+rank defect and succeeds with 13), so a ``proven`` run that reached a cap
+names it even when its final failure has another cause, and
+``failure_detail`` then keeps that cause next to the cap.  Both caps are unlimited by
 default; ``silex-class-unit-instance`` sets them.  The caps and these stops
 are Silex's own bounds: Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp.jl:_class_unit_group`` and
