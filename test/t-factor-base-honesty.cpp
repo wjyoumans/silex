@@ -3514,8 +3514,8 @@ int check_t2_prefilter_ideal(const silex::FactorBase& base,
         }
         ++digits[static_cast<std::size_t>(i)];
     }
-    // Rational scalars of the ideal: multiples of the order coordinates of
-    // its least positive integer, found as k * 1 for the HNF corner entry.
+    // Rational scalars k * 1, k in [-3, 3] (k = 0 skipped); is_scalar does not
+    // depend on ideal membership.
     silex::OrderElement one(order);
     sflint::FmpzMat one_coordinates(1, n);
     if (!one.one() ||
