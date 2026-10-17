@@ -1914,10 +1914,18 @@ the basis does not depend on the route.  The ``[c*A | I]`` route returns an
 LLL-reduced basis of the same lattice that need not equal that one, so the
 reduced ``c_i`` below can differ by a kernel vector from those of the
 ``fmpz_lll`` basis.  As shown below, this does not change the rank modulo
-``ell`` at any set of auxiliary primes.  Whether an auxiliary prime is
-usable also depends on which relation generators occur in ``beta_i`` (a
-generator that vanishes at the prime makes Silex skip it), so the number of
-primes the proof uses is not shown to be route-independent; on
+``ell`` at any set of auxiliary primes usable on both routes.  Whether an
+auxiliary prime ``q`` is usable also depends on which relation generators
+occur in ``beta_i`` (a generator that vanishes at the prime, or whose
+denominator is divisible by ``q``, makes Silex skip it), so the number of
+primes the proof uses is not shown to be route-independent.  Within the
+auxiliary-prime bound, the proof's status (verified, or unavailable within
+the bound) and the relations appended after it can then also differ.  The
+``[c*A | I]`` route runs only when the ``fmpz_lll`` basis has not been built
+yet; when the unit candidates were requested first, that basis is reused.
+So on kernels with entries above 250 bits the proof record can depend on
+whether kernel units were requested before the saturation proof.  Soundness
+and the published labels do not depend on the route.  On
 ``real_quadratic_d1000000000009`` the proof records were identical to those
 of the ``fmpz_lll`` route.  With the integral Gram--Schmidt data of that
 basis, Silex subtracts

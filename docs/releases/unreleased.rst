@@ -261,11 +261,12 @@ Changed
   ``[c*A | I]`` reduction, with the same exact checks and an
   ``fmpz_mat_is_reduced`` certificate, when the kernel has entries above
   250 bits, instead of running ``fmpz_lll`` on that kernel.  The
-  ``fmpz_lll`` basis remains the fallback.  On a busy machine,
+  ``fmpz_lll`` basis remains the fallback.
   ``real_quadratic_d1000000000009`` ``proven`` takes about 14 s instead of
-  about 90 s, with identical published outputs and saturation proof
-  records; the proven corpus rows, whose kernels are smaller, take the
-  route they took before.  See "Class groups and order units" in
+  about 90 s (release build, three runs each on a busy machine; the
+  controlled comparison is pending), with identical published outputs and
+  saturation proof records; the proven corpus rows, whose kernels are
+  smaller, take the route they took before.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 - The exact class number of an imaginary quadratic field with
