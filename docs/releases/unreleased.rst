@@ -1351,7 +1351,10 @@ Changed
   rebuilding the Gram matrix and inverting it again for the next candidate.
   The extended balls enclose the same values; when a test stays undecided
   on them it runs again on rebuilt ones before the full Gram determinant
-  is used, so decisions are unchanged.  Published outputs are identical on
+  is used.  Every decision is still the true answer; in rare cases a
+  candidate that the old code left undecided at the precision cap is now
+  decided (and kept when independent).  The corpus showed no such case.
+  Published outputs are identical on
   the 172 tested ``grh`` corpus rows.  The ``grh`` class/unit
   computation of ``cyclotomic_real_31_deg15`` runs 2.4% fewer user-space
   instructions, ``cyclotomic_64_phi32`` 0.1% fewer.  No timing has been

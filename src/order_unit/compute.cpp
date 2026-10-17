@@ -428,8 +428,9 @@ bool incremental_independence_agrees(bool independent,
 // determinant of the Gram matrix of the k + 1 rows.  It encloses the same
 // true values as arb_mat_inv and arb_mat_det of the k + 1 rows, usually
 // with wider radii; a test that does not decide on them falls back to the
-// full recompute (add_independent_unit), so wider radii change the cost,
-// never a decision.
+// full recompute (add_independent_unit).  Every decision is a true answer;
+// it can differ from a full recompute only by deciding a candidate that
+// the full recompute leaves undecided at the precision cap.
 bool incremental_gram_bordered_inverse(flint::ArbMat& inverse_out,
                                        flint::Arb& determinant_out,
                                        const flint::ArbMat& inverse,
@@ -521,10 +522,9 @@ bool IncrementalUnitContext::add_independent_unit(
     bool decided = incremental_independence(independent, decided_precision,
                                             row, border, *this, embeddings,
                                             precision);
-    // A test that did not decide on bordered Gram enclosures runs again on
-    // full recomputes, the enclosures it used before they were bordered, so
-    // a candidate reaches compact_independent only when it would have
-    // without them.
+    // A test that did not decide on bordered Gram enclosures is retested on
+    // recomputed enclosures before compact_independent.  Decisions remain
+    // true answers.
     if (!decided && discard_bordered_gram_states(*this)) {
         decided = incremental_independence(independent, decided_precision,
                                            row, border, *this, embeddings,
