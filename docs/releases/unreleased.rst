@@ -136,10 +136,10 @@ Changed
   a deterministic Arb search above it.  Results for degree 20 and below are
   unchanged, and the generation basis stays ``minkowski_type``.  In proven
   mode, results above degree 20 are unchanged except for the reported
-  generation bound, and some rows now finish that hit the time limit
-  before.  For example ``Q(zeta_23)`` (degree 22) now finishes in about
-  14 s, where it ran past 600 s before.  These timings are from a busy
-  machine.  See "Class groups and order units" in
+  generation bound.  The fields ``Q(zeta_m)`` for m = 23, 35, 39, 45, 56,
+  72, 84 used to run past the 120 s caps used in testing (600 s for
+  ``Q(zeta_23)``) and now finish; their class groups and regulators agree
+  with ``grh`` mode.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
 - When the relation search factors an integral relation generator ``g`` through
