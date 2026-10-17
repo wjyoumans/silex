@@ -3272,6 +3272,154 @@ int test_honesty_quadratic_kronecker_matches_decomposition() {
     return 0;
 }
 
+// Runs one honesty scan on the capped T2 search (the route no production
+// scan with a null schedule uses on its own) over `coefficients`, whose
+// maximal order has base norm bound `active` (1 keeps the empty base).
+bool run_direct_scan(bool& honest,
+                     search::FactorBaseHonestyScanAudit& audit,
+                     HonestyLogCapture& capture,
+                     const std::vector<slong>& coefficients,
+                     ulong active,
+                     ulong required,
+                     search::FactorBaseWitnessEscalation escalation) noexcept {
+    FieldSetup setup = maximal_order_setup(coefficients);
+    if (!setup.maximal_order.is_defined()) {
+        return false;
+    }
+    sflint::Fmpz active_bound;
+    sflint::Fmpz required_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), active);
+    sflint::fmpz_set_ui(sflint::FmpzRef(required_bound), required);
+    silex::FactorBase base(setup.maximal_order);
+    if (!base.is_defined() ||
+        (active > 1 && !base.build_relation_completion_base(
+                               sflint::FmpzConstRef(active_bound)))) {
+        return false;
+    }
+    silex::DiagnosticsContext diagnostics;
+    enable_honesty_log(diagnostics, capture);
+    honest = true;
+    return search::factor_base_honesty_check(
+            honest, base, sflint::FmpzConstRef(active_bound),
+            sflint::FmpzConstRef(required_bound), nullptr, UWORD(0), true,
+            128, escalation, &diagnostics, &audit);
+}
+
+// Escalation on the capped T2 route (use_direct_required_prime_witness).
+// Z[x]/(x^3 - 15) has class number 2 and the prime above 2 (ramified,
+// 2 O = P^3) is not principal, so with the empty base no search can witness
+// it.  Without escalation the scan stops at the stage-0 caps (50 random
+// tries, 500 factored candidates and 10^6 enumeration steps per ideal); with
+// bounded escalation it runs three more stages, doubling each cap, and
+// reports the final caps in the audit and the log.  The null schedule means
+// no twists, so one ideal is searched, and it stops at the candidate cap:
+// factor_attempt_cap_hits counts that stop and element_step_cap_hits stays 0.
+int test_direct_route_escalation_caps_and_counters() {
+    const std::vector<slong> cubic = {-15, 0, 0, 1};
+    {
+        bool honest = true;
+        search::FactorBaseHonestyScanAudit audit;
+        HonestyLogCapture capture;
+        if (!run_direct_scan(honest, audit, capture, cubic, 1, 30,
+                             search::FactorBaseWitnessEscalation::none) ||
+            honest || audit.max_search_stage != 0 ||
+            audit.witness_targets != 1 || audit.witnessed_targets != 0 ||
+            !audit.unwitnessed.recorded ||
+            !audit.unwitnessed.direct_witness_search ||
+            audit.unwitnessed.stage != 0 || audit.unwitnessed.max_stage != 0 ||
+            audit.unwitnessed.random_tries != 50 ||
+            audit.unwitnessed.factor_attempts != 500 ||
+            audit.unwitnessed.element_steps != 1000000 ||
+            !logged_caps(capture,
+                         "stage=0/0 search=t2 random_tries=50 "
+                         "factor_attempts=500 element_steps=1000000 "
+                         "ideals=1 factor_attempt_cap_hits=1 "
+                         "element_step_cap_hits=0")) {
+            return 1;
+        }
+    }
+    {
+        bool honest = true;
+        search::FactorBaseHonestyScanAudit audit;
+        HonestyLogCapture capture;
+        if (!run_direct_scan(honest, audit, capture, cubic, 1, 30,
+                             search::FactorBaseWitnessEscalation::bounded) ||
+            honest || audit.max_search_stage !=
+                              search::kFactorBaseHonestyEscalationStages ||
+            audit.witnessed_targets != 0 ||
+            !final_stage_t2_failure(audit.unwitnessed, 2) ||
+            !logged_caps(capture,
+                         "stage=3/3 search=t2 random_tries=400 "
+                         "factor_attempts=4000 element_steps=8000000 "
+                         "ideals=1 factor_attempt_cap_hits=1 "
+                         "element_step_cap_hits=0")) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Which escalation mode each production caller passes to the honesty scan.
+// The mode matters only when a prime has no witness, which no cheap field
+// produces on these routes, so the test reads the per-scan call counts
+// (FactorBaseHonestyCallCounts).  The relation-production prepass is the
+// caller with no factor-base restart and no fallback: bounded escalation on
+// the T2 route.  The relation-search driver, with a factor-base restart
+// available, keeps the stage-0 reference flow: no escalation on the T2 route.
+// Both pass the capped T2 search; only the quadratic backend (not reached by
+// any cheap fixture) passes the lattice search.
+bool class_unit_honesty_call_counts(slong& direct_none,
+                                    slong& direct_bounded,
+                                    slong& lattice_total,
+                                    const std::vector<slong>& coefficients,
+                                    ulong bound) noexcept {
+    FieldSetup setup = maximal_order_setup(coefficients);
+    if (!setup.maximal_order.is_defined()) {
+        return false;
+    }
+    sflint::Fmpz factor_base_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(factor_base_bound), bound);
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    search::FactorBaseHonestyCallCounts::reset();
+    if (!units.compute_with_class_group(
+                class_group, setup.maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128)) {
+        return false;
+    }
+    using E = search::FactorBaseWitnessEscalation;
+    direct_none = search::FactorBaseHonestyCallCounts::count(true, E::none);
+    direct_bounded =
+            search::FactorBaseHonestyCallCounts::count(true, E::bounded);
+    lattice_total =
+            search::FactorBaseHonestyCallCounts::count(false, E::none) +
+            search::FactorBaseHonestyCallCounts::count(false, E::bounded);
+    return true;
+}
+
+int test_routes_pass_intended_escalation_mode() {
+    slong direct_none = 0;
+    slong direct_bounded = 0;
+    slong lattice = 0;
+    // Prepass: Z[x]/(x^3 - 15), base bound 2.
+    if (!class_unit_honesty_call_counts(direct_none, direct_bounded, lattice,
+                                        {-15, 0, 0, 1}, 2) ||
+        direct_bounded != 1 || direct_none != 0 || lattice != 0) {
+        return 1;
+    }
+    // Relation-search driver with a factor-base restart available:
+    // Z[x]/(x^2 - 6236) (real quadratic, d = 4 * 1559), base bound 3.
+    if (!class_unit_honesty_call_counts(direct_none, direct_bounded, lattice,
+                                        {-6236, 0, 1}, 3) ||
+        direct_none != 1 || direct_bounded != 0 || lattice != 0) {
+        return 2;
+    }
+    return 0;
+}
+
 int main() {
     assert(test_scalar_noncontiguous_blocks() == 0);
     assert(test_scalar_witness_reference_cases() == 0);
@@ -3299,6 +3447,8 @@ int main() {
                            0 ||
                    test_bounded_escalation_reports_final_caps() != 0 ||
                    test_escalation_only_without_recovery() != 0 ||
+                   test_direct_route_escalation_caps_and_counters() != 0 ||
+                   test_routes_pass_intended_escalation_mode() != 0 ||
                    test_terminal_honesty_failure_names_transaction_reason() !=
                            0 ||
                    test_later_attempt_clears_honesty_failure() != 0 ||

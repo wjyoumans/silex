@@ -1138,6 +1138,8 @@ bool factor_base_honesty_check(bool& honest,
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.factor_base_honesty_check");
     honest = false;
+    FactorBaseHonestyCallCounts::record(use_direct_required_prime_witness,
+                                        escalation);
     if (audit != nullptr) {
         *audit = FactorBaseHonestyScanAudit{};
         audit->final_random_state = random_seed;

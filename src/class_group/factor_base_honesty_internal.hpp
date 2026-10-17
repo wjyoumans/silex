@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "factor_base_honesty_failure_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 
@@ -50,6 +52,38 @@ constexpr FactorBaseWitnessEscalation factor_base_witness_escalation(
     return recovery_available ? FactorBaseWitnessEscalation::none
                               : FactorBaseWitnessEscalation::bounded;
 }
+
+// Counts the honesty scans started, by search route and escalation mode, so a
+// route-level test can check which mode each production caller passed.  The
+// routes differ only in the arguments they pass and a field's honest scans
+// pass at stage 0, so the mode is not otherwise observable.  One relaxed
+// increment per scan; it feeds no decision.
+class FactorBaseHonestyCallCounts {
+public:
+    static void record(bool direct_required_prime_witness,
+                       FactorBaseWitnessEscalation escalation) noexcept {
+        counts_[direct_required_prime_witness ? 1 : 0]
+               [escalation == FactorBaseWitnessEscalation::bounded ? 1 : 0]
+                       .fetch_add(1, std::memory_order_relaxed);
+    }
+    static slong count(bool direct_required_prime_witness,
+                       FactorBaseWitnessEscalation escalation) noexcept {
+        return counts_[direct_required_prime_witness ? 1 : 0]
+                      [escalation == FactorBaseWitnessEscalation::bounded ? 1
+                                                                          : 0]
+                              .load(std::memory_order_relaxed);
+    }
+    static void reset() noexcept {
+        for (auto& row : counts_) {
+            for (auto& entry : row) {
+                entry.store(0, std::memory_order_relaxed);
+            }
+        }
+    }
+
+private:
+    inline static std::atomic<slong> counts_[2][2]{};
+};
 
 // Under bounded escalation, when a required prime has no witness at the
 // stage-0 caps, the witness search effort for that prime (lattice radius,
