@@ -1424,6 +1424,13 @@ bool OrderAccess::equation_order_index(flint::FmpzRef out,
     return true;
 }
 
+const flint::FmpqMat* OrderAccess::basis(const Order& order) noexcept {
+    if (!order.has_basis()) {
+        return nullptr;
+    }
+    return &order.data_->basis_;
+}
+
 const std::vector<IndexDivisorPrimeRecord>*
 OrderAccess::index_divisor_decomposition(const Order& order,
                                          flint::FmpzConstRef p) noexcept {

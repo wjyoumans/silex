@@ -1,5 +1,6 @@
 #pragma once
 
+#include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/order.hpp>
@@ -79,6 +80,13 @@ public:
     // `nf_get_index`.
     static bool equation_order_index(flint::FmpzRef out,
                                      const Order& order) noexcept;
+
+    // The order's basis rows (power-basis coordinates) as stored in its shared
+    // data, read without the copy Order::get_basis makes.  Returns null when
+    // `order` is undefined or has no basis.  The pointer stays valid while
+    // the order data lives: no operation changes the basis of existing order
+    // data (set_basis and the factories build fresh data).
+    static const flint::FmpqMat* basis(const Order& order) noexcept;
 
     // Full decomposition of the prime p in `order`, before any residue-degree
     // filter, as decompose_prime last stored it for this order data, in the

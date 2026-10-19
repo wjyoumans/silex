@@ -9,6 +9,8 @@
 
 #include <utility>
 
+#include "../order/order_internal.hpp"
+
 namespace silex {
 namespace {
 
@@ -30,6 +32,17 @@ void set_element_from_power_row(Element& out,
     for (slong j = 0; j < fmpq_mat_ncols(power_row.raw()); ++j) {
         fmpq_poly_set_coeff_fmpq(polynomial.raw(), j,
                                  fmpq_mat_entry(power_row.raw(), 0, j));
+    }
+    out.set_fmpq_poly(flint::FmpqPolyConstRef(polynomial));
+}
+
+void set_element_from_integral_power_row(
+        Element& out,
+        flint::FmpzMatConstRef power_row) noexcept {
+    flint::FmpqPoly polynomial;
+    for (slong j = 0; j < fmpz_mat_ncols(power_row.raw()); ++j) {
+        fmpq_poly_set_coeff_fmpz(polynomial.raw(), j,
+                                 fmpz_mat_entry(power_row.raw(), 0, j));
     }
     out.set_fmpq_poly(flint::FmpqPolyConstRef(polynomial));
 }
@@ -179,16 +192,25 @@ bool OrderElement::set_coordinates(flint::FmpzMatConstRef coordinates) noexcept 
         return false;
     }
 
-    flint::FmpqMat basis(parent_.degree(), parent_.degree());
-    flint::FmpqMat power_row(1, parent_.degree());
-    if (!parent_.get_basis(flint::FmpqMatRef(basis))) {
+    const flint::FmpqMat* basis = detail::OrderAccess::basis(parent_);
+    if (basis == nullptr) {
         return false;
     }
 
-    fmpq_mat_mul_r_fmpz_mat(power_row.raw(), coordinates.raw(), basis.raw());
-
     Element next_value(*parent_.parent());
-    set_element_from_power_row(next_value, flint::FmpqMatConstRef(power_row));
+    // fmpq_mat_is_one is an exact test: every diagonal entry must be 1 with
+    // denominator 1 and every other entry 0.  Then the power-basis row
+    // coordinates * basis equals `coordinates` itself, so the multiply is
+    // skipped and the integral coordinates are the power-basis coefficients.
+    if (fmpq_mat_is_one(basis->raw()) != 0) {
+        set_element_from_integral_power_row(next_value, coordinates);
+    } else {
+        flint::FmpqMat power_row(1, parent_.degree());
+        fmpq_mat_mul_r_fmpz_mat(power_row.raw(), coordinates.raw(),
+                                basis->raw());
+        set_element_from_power_row(next_value,
+                                   flint::FmpqMatConstRef(power_row));
+    }
 
     value_.swap(next_value);
     fmpz_mat_set(coords_.raw(), coordinates.raw());

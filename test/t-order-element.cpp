@@ -304,6 +304,104 @@ int test_move_clear_and_redefine() {
     return 0;
 }
 
+// Checks set_coordinates against the element `coeffs` (numerators over
+// `den`) in the power basis, and that get_coordinates returns the input row.
+void assert_set_coordinates_gives(const silex::Order& order,
+                                  const sflint::FmpzMat& row,
+                                  const slong* numerators,
+                                  ulong den) noexcept {
+    const slong degree = order.degree();
+    silex::OrderElement value(order);
+    assert(value.set_coordinates(sflint::FmpzMatConstRef(row)));
+
+    sflint::FmpqPoly expected_polynomial;
+    for (slong j = 0; j < degree; ++j) {
+        sflint::Fmpq coefficient;
+        sflint::fmpq_set_si(coefficient, numerators[j], den);
+        sflint::fmpq_poly_set_coeff_fmpq(expected_polynomial, j,
+                                         sflint::FmpqConstRef(coefficient));
+    }
+    silex::Element expected(*order.parent());
+    assert(expected.set_fmpq_poly(
+            sflint::FmpqPolyConstRef(expected_polynomial)));
+    silex::Element actual(*order.parent());
+    assert(value.get_element(actual));
+    assert(actual.equal(expected));
+
+    sflint::FmpzMat back(1, degree);
+    assert(value.get_coordinates(sflint::FmpzMatRef(back)));
+    const sflint::FmpzMat& back_view = back;
+    for (slong j = 0; j < degree; ++j) {
+        assert(sflint::fmpz_equal(sflint::fmpz_mat_entry(back_view, 0, j),
+                                  sflint::fmpz_mat_entry(row, 0, j)));
+    }
+}
+
+// set_coordinates on an identity basis (equation order, built by the factory
+// or through set_basis) reads the coordinates as power-basis coefficients;
+// a basis with denominators, including one whose numerators alone form the
+// identity, goes through the basis multiply.
+int test_set_coordinates_identity_and_general_basis() {
+    sflint::FmpqPoly cubic;
+    sflint::fmpq_poly_set_coeff_si(cubic, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(cubic, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(cubic, 0, -3);
+    silex::NumberField cubic_field = field_by_polynomial(cubic);
+
+    sflint::FmpzMat cubic_row(1, 3);
+    fmpz_mat_entry_si(cubic_row, 0, 0, 3);
+    fmpz_mat_entry_si(cubic_row, 0, 1, -1);
+    fmpz_mat_entry_si(cubic_row, 0, 2, 2);
+    const slong cubic_expected[] = {3, -1, 2};
+
+    silex::Order factory = silex::test::equation_order(cubic_field);
+    assert(factory.is_equation_order());
+    assert_set_coordinates_gives(factory, cubic_row, cubic_expected, 1);
+
+    silex::Order explicit_identity(cubic_field);
+    sflint::FmpqMat identity(3, 3);
+    for (slong i = 0; i < 3; ++i) {
+        fmpq_mat_entry_si(identity, i, i, 1);
+    }
+    assert(explicit_identity.set_basis(sflint::FmpqMatConstRef(identity)));
+    assert(explicit_identity.is_equation_order());
+    assert_set_coordinates_gives(explicit_identity, cubic_row, cubic_expected,
+                                 1);
+
+    // x^2 - 8: theta / 2 is integral, so diag(1, 1/2) is an order basis whose
+    // numerators form the identity matrix.
+    sflint::FmpqPoly quadratic;
+    poly_x2_minus(quadratic, 8);
+    silex::NumberField quadratic_field = field_by_polynomial(quadratic);
+    silex::Order half(quadratic_field);
+    sflint::FmpqMat half_basis(2, 2);
+    fmpq_mat_entry_si(half_basis, 0, 0, 1);
+    sflint::fmpq_set_si(sflint::fmpq_mat_entry(half_basis, 1, 1), 1, 2);
+    assert(half.set_basis(sflint::FmpqMatConstRef(half_basis)));
+    assert(!half.is_equation_order());
+    sflint::FmpzMat quadratic_row(1, 2);
+    fmpz_mat_entry_si(quadratic_row, 0, 0, 3);
+    fmpz_mat_entry_si(quadratic_row, 0, 1, 4);
+    const slong half_expected[] = {3, 2};
+    assert_set_coordinates_gives(half, quadratic_row, half_expected, 1);
+
+    // x^2 - 5 with basis 1, (1 + theta) / 2: off-diagonal denominators.
+    sflint::FmpqPoly golden;
+    poly_x2_minus(golden, 5);
+    silex::NumberField golden_field = field_by_polynomial(golden);
+    silex::Order maximal(golden_field);
+    sflint::FmpqMat golden_basis(2, 2);
+    fmpq_mat_entry_si(golden_basis, 0, 0, 1);
+    sflint::fmpq_set_si(sflint::fmpq_mat_entry(golden_basis, 1, 0), 1, 2);
+    sflint::fmpq_set_si(sflint::fmpq_mat_entry(golden_basis, 1, 1), 1, 2);
+    assert(maximal.set_basis(sflint::FmpqMatConstRef(golden_basis)));
+    fmpz_mat_entry_si(quadratic_row, 0, 0, 1);
+    fmpz_mat_entry_si(quadratic_row, 0, 1, 1);
+    const slong golden_expected[] = {3, 1};
+    assert_set_coordinates_gives(maximal, quadratic_row, golden_expected, 2);
+    return 0;
+}
+
 silex::OrderElement local_order_element() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 2);
@@ -340,5 +438,6 @@ int main() {
     assert(test_swap() == 0);
     assert(test_move_clear_and_redefine() == 0);
     assert(test_keeps_parent_order_alive() == 0);
+    assert(test_set_coordinates_identity_and_general_basis() == 0);
     return 0;
 }
