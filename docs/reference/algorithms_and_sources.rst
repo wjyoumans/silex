@@ -830,8 +830,10 @@ belong to the zero rows of the HNF, which are an exact kernel basis; the
 HNF transform is computed only in that case.  As
 in the reducer paragraph below, the basis claim relies on FLINT's guarantee
 that ``fmpz_lll`` applies only unimodular row operations; Silex adds no
-determinant check.  The witness rows and the relation-saturation kernel keep
-FLINT's final reducedness check.  The analytic finish's unit logs, used only
+determinant check.  The witness rows keep FLINT's final reducedness check, and
+so does the relation-saturation kernel on its fallback routes; on its
+extension route the kernel rows are accepted only when ``fmpz_mat_is_reduced``
+certifies them.  The analytic finish's unit logs, used only
 for its count of independent units and its regulator product, take a
 variant without that check: for entries of at most 250 bits, FLINT's ULLL
 truncation threshold, it runs ``fmpz_lll_d_with_removal_knapsack``, the
@@ -2134,44 +2136,63 @@ ones at most 12 bits (2 to 12 bits for those rows).  Larger presentations
 were not measured.
 Silex size-reduces ``c_i`` against an LLL-reduced basis of the relation
 kernel before forming the witness.  If the basis that yields the unit
-candidates is already built, it is reused.  Otherwise, for a kernel with at
-least two rows and entries of at most 250 bits, the basis comes from the
-certified first LLL phase described with ``Lat::lll_reduce`` above:
-``fmpz_lll_d_with_removal_knapsack``, accepted only when the exact
-certificate holds with FLINT's default parameters, and ``fmpz_lll`` (whose
-result is also kept for the unit candidates) when the reducer fails or the
-certificate fails.  For a kernel with at least two rows and entries of more
-than 250 bits, where ``fmpz_lll`` of
-the kernel itself took most of a 90 s ``proven`` run of
-``real_quadratic_d1000000000009`` (38 rows of up to 151685 bits, busy
-machine), the basis comes from the
-small kernel basis of the ``proven`` analytic finish above: the reduction
-of ``[c*A | I]`` for the presentation's relation matrix ``A``, with the
-same two exact checks, accepted only when ``fmpz_mat_is_reduced`` certifies
-the kernel rows with FLINT's default parameters; ``fmpz_lll`` is used when
-the reducer fails or a check or the certificate fails.  A kernel with one
-row takes ``fmpz_lll``.  The reducer's row operations are unimodular, and
-the checked rows of ``[c*A | I]`` are a kernel basis, so the result is a
-basis of the kernel on every route.  With FLINT's default routing a certified first phase
-is exactly the basis ``fmpz_lll`` returns for that kernel (``fmpz_lll`` keeps
-it when ``fmpz_lll_is_reduced`` holds), so for kernels of at most 250 bits
-the basis does not depend on the route.  The ``[c*A | I]`` route returns an
-LLL-reduced basis of the same lattice that need not equal that one, so the
-reduced ``c_i`` below can differ by a kernel vector from those of the
-``fmpz_lll`` basis.  As shown below, this does not change the rank modulo
-``ell`` at any set of auxiliary primes usable on both routes.  Whether an
-auxiliary prime ``q`` is usable also depends on which relation generators
-occur in ``beta_i`` (a generator that vanishes at the prime, or whose
-denominator is divisible by ``q``, makes Silex skip it), so the number of
-primes the proof uses is not shown to be route-independent.  Within the
-auxiliary-prime bound, the proof's status (verified, or unavailable within
-the bound) and the relations appended after it can then also differ.  The
-``[c*A | I]`` route runs only when the ``fmpz_lll`` basis has not been built
-yet; when the unit candidates were requested first, that basis is reused.
-So on kernels with entries above 250 bits the proof record can depend on
-whether kernel units were requested before the saturation proof.  Soundness
-and the published labels do not depend on the route.  On
-``real_quadratic_d1000000000009`` the proof records were identical to those
+candidates is already built, it is reused.  Otherwise a kernel with at least
+two rows takes the extension route: the reduction of ``[c*A | I]`` for the
+presentation's relation matrix ``A`` by the small-kernel helper of the
+``proven`` analytic finish above, with the same two exact checks, accepted
+only when ``fmpz_mat_is_reduced`` certifies the kernel rows with FLINT's
+default parameters.  Its kernel rows are the basis, and the remaining rows
+of the reduced matrix are kept as image rows.  This replaces the earlier
+route for these kernels, which read the kernel from the left transform of
+the presentation's Hermite normal form.  When the extension route fails a
+check or its certificate, or the kernel has one row, the kernel is read
+from the left transform of the presentation, and for entries of at most
+250 bits it is then reduced by the certified first LLL phase described with
+``Lat::lll_reduce`` above (``fmpz_lll_d_with_removal_knapsack``, accepted
+only when the exact certificate holds with FLINT's default parameters),
+with ``fmpz_lll`` (whose result is also kept for the unit candidates) when
+the reducer fails, the certificate fails, or the entries are larger.  The
+reducer's row operations are unimodular and the checked rows of
+``[c*A | I]`` are a kernel basis, so the result is a basis of the kernel on
+every route.  With FLINT's default routing a certified first phase is
+exactly the basis ``fmpz_lll`` returns for that kernel (``fmpz_lll`` keeps
+it when ``fmpz_lll_is_reduced`` holds), but the extension route returns an
+LLL-reduced basis of the same lattice that need not equal it.
+
+On the extension route the beta coefficients are also read from the reduced
+matrix, not from the presentation's Smith transform.  Write the reduced
+rows as ``U [c*A | I]`` with ``U`` unimodular and ``image`` the
+identity parts of the rows with nonzero ``A`` part; then ``B = image * A``
+is a basis of the row lattice of ``A``.  This is the construction of
+Havas, Majewski and Matthews, "Extended gcd and Hermite normal form
+algorithms via lattice basis reduction", *Experimental Mathematics* 7
+(1998), section 6, in which a unimodular matrix ``P = [Q; R]`` is read off
+the reduction, with ``QB = C`` and ``RB = 0``, and the rows of ``R`` form a
+``Z`` basis of the kernel (their ``N(G)``); the nonzero rows ``QB`` are the
+image.  Cohen, GTM 138, section 2.7, treats the kernel and image of an
+integer matrix.  The vector ``d_i (V^-1)_i``, where ``(V^-1)_i`` is the
+matching row of the invariant generator matrix, lies in the row lattice of
+``A``, so ``x * B`` equal to it has a unique rational solution ``x``, which
+is integral, and ``c_i = x * image`` satisfies ``c_i A =`` the exponent row
+of ``g_i^{d_i}``.  Silex solves for ``x`` with ``fmpz_mat_solve``, accepts it
+only when the denominator divides every entry and ``c * A`` equals the
+target rows exactly, and otherwise reads the presentation's row.  The solved row and the
+presentation's row differ by a relation-kernel vector, so the size reduction
+below and its soundness argument apply to either.  Since every multi-row
+kernel now takes this route, the reduced ``c_i`` below can differ by a
+kernel vector from those of the earlier routes.  As shown below, this does
+not change the rank modulo ``ell`` at any set of auxiliary primes usable on
+both routes.  Whether an auxiliary prime ``q`` is usable also depends on
+which relation generators occur in ``beta_i`` (a generator that vanishes at
+the prime, or whose denominator is divisible by ``q``, makes Silex skip it),
+so the number of primes the proof uses is not shown to be route-independent.
+Within the auxiliary-prime bound, the proof's status (verified, or
+unavailable within the bound) and the relations appended after it can then
+also differ.  The extension route runs only when the ``fmpz_lll`` basis has
+not been built yet; when the unit candidates were requested first, that
+basis is reused, so the proof record can depend on whether kernel units were
+requested before the saturation proof.  Soundness and the published labels
+do not depend on the route.  On ``real_quadratic_d1000000000009`` the proof records were identical to those
 of the ``fmpz_lll`` route.  With the integral Gram--Schmidt data of that
 basis, Silex subtracts
 ``round(mu)`` times each basis row, last row first, as in sub-algorithm RED
