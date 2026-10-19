@@ -163,6 +163,16 @@ Changed
   took 6.4 s after (5.0-6.9 s); the small ``real_quadratic_d100000001``,
   below the crossover, took 0.05 s before and after.
 
+- ``decompose_prime`` reads the order's memoised multiplication table
+  (``Order::multiplication_table``) when it splits a prime that divides the
+  index, instead of forming every basis product through
+  ``OrderElement::multiply`` on each call.  The table and every published
+  result are unchanged on the ``grh`` corpus (184 rows compared;
+  ``cyclotomic_real_163_deg81`` timed out at 180 s on both builds); only the
+  work changes (busy-machine callgrind instruction counts: ``grh``
+  ``cyclotomic_real_q10_c11_deg10`` 3.0% fewer, ``multiquadratic_m3_m5_m7``
+  2.7% fewer, control ``cyclotomic_real_37_deg18`` unchanged).
+
 - ``decompose_prime`` rebuilds the index-divisor primes it keeps in the
   order's shared data without re-running the ideal closure test on each
   stored Hermite normal form: every stored matrix is one the library already
