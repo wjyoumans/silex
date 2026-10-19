@@ -183,6 +183,19 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` 3.0% fewer, ``multiquadratic_m3_m5_m7``
   2.7% fewer, control ``cyclotomic_real_37_deg18`` unchanged).
 
+- The ``proven`` analytic finish no longer reduces its relation kernel from
+  scratch at every finish check.  The finish workspace keeps the
+  double-precision LLL phase output of its last finish kernel and, after
+  relations are appended, starts the next reduction from that output
+  extended by the new relation rows, a basis of the same lattice; the rows
+  are accepted on the same two exact checks, and the full reduction is the
+  fallback.  Published outputs are identical on the ``proven`` corpus (178
+  rows compared, ``multiquadratic_m23_m31_m47`` included; seven large
+  cyclotomic rows timed out at 120 s on both builds).  Callgrind
+  instruction counts (busy machine): ``simplest_quartic_t10`` 34.0% fewer
+  (6.70G to 4.42G), ``pure_x6_minus_2`` 2.3% fewer.  No timing has been
+  measured.
+
 - ``decompose_prime`` rebuilds the index-divisor primes it keeps in the
   order's shared data without re-running the ideal closure test on each
   stored Hermite normal form: every stored matrix is one the library already
