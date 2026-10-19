@@ -1048,7 +1048,8 @@ bool index_prime_records(std::vector<detail::IndexDivisorPrimeRecord>& out,
 // Ideal::set_hnf (builds with assertions enabled still run it).  Records are
 // written only by index_prime_records, which copies the HNF of an Ideal of
 // this order that decompose_prime has already built and published, and the
-// cache is read back only for that order and p.  Each such Ideal was
+// cache is read back only for that order and p (the basis is fixed for an
+// OrderData and Order::set does not copy the cache; see order.cpp).  Each such Ideal was
 // accepted as an ideal when first built: through the checked set_hnf
 // (ideal_from_mod_kernel, ideal_from_pradical_quotient_component), as the
 // preimage of an ideal of O/pO (ideal_from_mod_rows), or as pO + gO

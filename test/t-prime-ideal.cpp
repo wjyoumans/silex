@@ -1333,7 +1333,9 @@ int test_index_divisor_cache_ramified_hnf() {
     assert(check_index_divisor_cache_matches_fresh(
                    {1201, 598, -524, -146, 69, 2, 4, -4, 1}, {2}, {1, 0, 2},
                    &hnf_records) == 0);
-    assert(hnf_records > 0);
+    // Two primes over 2 are cached, none with a principal
+    // generator.
+    assert(hnf_records == 2);
     return 0;
 }
 
