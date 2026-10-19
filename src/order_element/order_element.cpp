@@ -198,11 +198,12 @@ bool OrderElement::set_coordinates(flint::FmpzMatConstRef coordinates) noexcept 
     }
 
     Element next_value(*parent_.parent());
-    // fmpq_mat_is_one is an exact test: every diagonal entry must be 1 with
-    // denominator 1 and every other entry 0.  Then the power-basis row
-    // coordinates * basis equals `coordinates` itself, so the multiply is
-    // skipped and the integral coordinates are the power-basis coefficients.
-    if (fmpq_mat_is_one(basis->raw()) != 0) {
+    // basis_is_identity is the exact fmpq_mat_is_one test: every diagonal
+    // entry is 1 with denominator 1 and every other entry 0.  Then the
+    // power-basis row coordinates * basis equals `coordinates` itself, so the
+    // multiply is skipped and the integral coordinates are the power-basis
+    // coefficients.
+    if (detail::OrderAccess::basis_is_identity(parent_)) {
         set_element_from_integral_power_row(next_value, coordinates);
     } else {
         flint::FmpqMat power_row(1, parent_.degree());

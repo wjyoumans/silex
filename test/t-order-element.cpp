@@ -385,6 +385,14 @@ int test_set_coordinates_identity_and_general_basis() {
     const slong half_expected[] = {3, 2};
     assert_set_coordinates_gives(half, quadratic_row, half_expected, 1);
 
+    // Order::set copies orders whose identity test has already run.
+    silex::Order factory_copy(cubic_field);
+    assert(factory_copy.set(factory));
+    assert_set_coordinates_gives(factory_copy, cubic_row, cubic_expected, 1);
+    silex::Order half_copy(quadratic_field);
+    assert(half_copy.set(half));
+    assert_set_coordinates_gives(half_copy, quadratic_row, half_expected, 1);
+
     // x^2 - 5 with basis 1, (1 + theta) / 2: off-diagonal denominators.
     sflint::FmpqPoly golden;
     poly_x2_minus(golden, 5);

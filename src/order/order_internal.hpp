@@ -88,6 +88,14 @@ public:
     // data (set_basis and the factories build fresh data).
     static const flint::FmpqMat* basis(const Order& order) noexcept;
 
+    // Whether the order's basis is exactly the identity matrix
+    // (fmpq_mat_is_one: diagonal entries 1 with denominator 1, all other
+    // entries 0), so order coordinates are power-basis coefficients.  The
+    // answer is cached in the order's shared data on first use, in the same
+    // unsynchronized way as the equation order index.  False when `order`
+    // has no basis.
+    static bool basis_is_identity(const Order& order) noexcept;
+
     // Full decomposition of the prime p in `order`, before any residue-degree
     // filter, as decompose_prime last stored it for this order data, in the
     // order decompose_prime published it.  Returns null when nothing is
