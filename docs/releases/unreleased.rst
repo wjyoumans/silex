@@ -152,6 +152,16 @@ Changed
   took 6.4 s after (5.0-6.9 s); the small ``real_quadratic_d100000001``,
   below the crossover, took 0.05 s before and after.
 
+- ``decompose_prime`` rebuilds the index-divisor primes it keeps in the
+  order's shared data without re-running the ideal closure test on each
+  stored Hermite normal form: every stored matrix is one the library already
+  built and published as an ideal of the same order, and builds with
+  assertions enabled still run the test.  Decompositions and every published
+  result are unchanged on the ``grh`` corpus; only the work changes
+  (busy-machine callgrind instruction counts: ``grh``
+  ``cyclotomic_real_q10_c11_deg10`` 7.6% fewer, ``multiquadratic_m3_m5_m7``
+  11.0% fewer).
+
 - The ``proven`` analytic finish builds the kernel basis behind its unit
   count and regulator product with FLINT's double-precision LLL phase
   (``fmpz_lll_d_with_removal_knapsack``) and accepts the rows on the two
