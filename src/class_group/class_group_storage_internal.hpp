@@ -255,7 +255,12 @@ struct HnfFinishWorkspace {
     // finish_extension_relation_count relations that the last finish kernel
     // was read from (see hnf_finish_workspace_kernel).  Unlike the kernel
     // caches it is kept across syncs that append relations: the next finish
-    // kernel starts its reduction from it.
+    // kernel starts its reduction from it.  The kernel claim for rows read
+    // from it rests on its identity part being unimodular, which the exact
+    // checks do not detect: only the phase may write it
+    // (finish_extension_kernel_rows, from the phase output of an input with
+    // a unimodular identity part).  Relations are only ever appended, and a
+    // relation part that does not match them only makes the checks fail.
     flint::FmpzMat finish_extension{0, 0};
     slong finish_extension_relation_count = 0;
     slong generator_count = 0;

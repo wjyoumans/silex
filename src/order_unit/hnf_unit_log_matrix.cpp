@@ -93,8 +93,11 @@ bool hnf_finish_workspace_unit_log_matrix(
         workspace.unit_logs_valid = false;
     }
 
-    // The unit rows are the workspace's kernel rows of `kernel_rows`'s kind,
-    // as without a workspace (see hnf_finish_workspace_kernel).
+    // The unit rows are the workspace's kernel rows of `kernel_rows`'s kind
+    // (see hnf_finish_workspace_kernel).  The witness rows are the ones
+    // computed without a workspace; the finish rows are a basis of the same
+    // kernel lattice that can differ from them, since the workspace extends
+    // the reduction of an earlier finish kernel.
     const bool finish_kernel = kernel_rows == HnfUnitLogKernel::finish;
     if (workspace.unit_logs_valid &&
         workspace.unit_logs_finish_kernel != finish_kernel) {
