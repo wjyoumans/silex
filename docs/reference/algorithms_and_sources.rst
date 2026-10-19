@@ -1209,6 +1209,46 @@ candidate without doubling, whereas the incremental loop retries at ``2p``,
 where the embedding's own cap is larger, and may decide.  Both cases need
 about ``2^20`` bits of precision.
 
+When the incremental ball for a candidate ``u`` is undecided, Silex first tries
+to decide it dependent from a rational relation.  The coordinates
+``w = G^{-1} L v`` already computed for the block inverse are balls; the
+reconstruction that dependent-relation extraction uses (Hecke
+``Unit/Relation.jl:_find_rational_relation!``) turns them into integers
+``c_1, ..., c_k`` and ``m >= 1`` with ``c_i = -m a_i``, ``a_i`` the simplest
+rational in ball ``i``.  The guess is not trusted.  With ``l`` the product-mode
+logarithmic embedding, which is a homomorphism on units, the element
+``z = u^m prod u_i^{c_i}`` has ``l(z) = m l(u) + sum c_i l(u_i)``, and an
+enclosure of this is computed with exact integer multipliers.  The check is the
+torsion test of Hecke ``src/NumFieldOrd/NfOrd/FacElem.jl:is_torsion_unit``
+(lines 24-72, v0.38.6; the bound ``log(1 + log(d) / (6 d^2))`` is at line 40,
+and Hecke does not name its source there): ``z`` is declared a root of unity
+only when every ``|log|sigma(z)||`` (the product-mode entry halved at a complex
+place) is at most a ball containing that bound, ``d`` here the degree of the
+field.  The result needed is Dobrowolski's: a nonzero algebraic integer of
+degree ``d`` that is not a root of unity has house (largest absolute value of a
+conjugate) greater than ``1 + log(d) / (6 d^2)`` (Dobrowolski, Bull. Acad.
+Polon. Sci. Ser. Sci. Math. Astronom. Phys. 26 (1978), 291-292).  The primary
+paper was not read for this entry: the statement is taken from Smyth's survey,
+*Mahler measure of algebraic numbers: a survey*, arXiv math/0701397, Section
+7.1 (reference [53]), and a reviewer should check it against the paper.  The
+inequality is strict, so a house at most the bound gives a root of unity with
+no further argument.  The degree ``e`` of ``z`` divides the field degree
+``d``; for ``e = 1``, ``z = +-1``, and for ``2 <= e <= d`` the function
+``log(x) / x^2`` decreases for ``x >= 2``, so ``log(e) / (6 e^2) >=
+log(d) / (6 d^2)`` and the field-degree bound is no larger than the one for
+``e``.  Hence a passing check shows ``z`` is a root of unity, ``l(z) = 0``,
+``m l(u) = -sum c_i l(u_i)`` with ``m >= 1``, the true Gram determinant of the
+rows is zero, and "dependent" is the answer the full test gives.  The step
+only ever sets "dependent": a failed reconstruction, a non-torsion or
+inconclusive check leaves the test undecided, and it goes on as before (more
+precision, then the full determinant), so the kept units are unchanged.  The
+step assumes, like the lower bound of the Gram test, that the entries of the
+unit list are units.  It uses no denominator bound for the guess, since only the
+check decides.  The decision no longer waits for the Gram ball to shrink, which
+changes the precision at which some logarithmic embeddings are evaluated and so,
+by the caching described above, the radius of the published regulator ball;
+the midpoint is unchanged.
+
 The unit-basis transform that follows a reduction applies the integer matrix
 to the stored factored units.  Hecke keeps factored elements as ``FacElem``
 dictionaries with ``ZZRingElem`` exponents (``FactoredElem.jl:_transform``,

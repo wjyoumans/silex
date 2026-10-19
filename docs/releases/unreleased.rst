@@ -294,6 +294,26 @@ Changed
   (busy-machine callgrind instruction counts: ``grh``
   ``cyclotomic_real_q10_c11_deg10`` 7.6% fewer, ``multiquadratic_m3_m5_m7``
   11.0% fewer).
+- ``grh`` incremental independence decides a dependent candidate unit without
+  waiting for its Gram-determinant ball to shrink: when the incremental ball is
+  undecided, it reconstructs a rational relation from the coordinates of the
+  candidate's logarithmic row in the kept rows and accepts "dependent" only if
+  the relation's unit is shown a root of unity by Hecke's ``is_torsion_unit``
+  test (every ``|log|sigma||`` at most ``log(1 + log(d) / (6 d^2))``, with
+  Dobrowolski's bound on the house of a non-root-of-unity).  A failed or
+  inconclusive check leaves the test as before.  Kept units, labels, class and
+  unit data are unchanged on the full ``grh`` and ``proven`` corpora; only
+  ``unit_group.regulator_radius`` differs (the regulator value is identical) on
+  ``cyclotomic_17_phi16``, ``cyclotomic_19_phi18``, ``cyclotomic_32_phi16``,
+  ``cyclotomic_33_phi20``, ``cyclotomic_39_phi24``, ``cyclotomic_40_phi16``,
+  ``cyclotomic_44_phi20``, ``cyclotomic_48_phi16``, ``cyclotomic_56_phi24``,
+  ``cyclotomic_60_phi16``, ``cyclotomic_72_phi24``, ``cyclotomic_84_phi24``,
+  ``cyclotomic_real_31_deg15`` (7.7484e-31 to 7.7615e-31),
+  ``cyclotomic_real_q10_c11_deg10``, and the ``grh`` runs of the
+  ``x^16 - x - 1``, ``x^17 - x - 1`` and ``x^19 - x - 1`` rows
+  (``hexadecic_``, ``septendecic_`` and ``nonadecic_x*_minus_x_minus_1_proven``),
+  because precisions at which embeddings are evaluated change.  See
+  "Class groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
 - The ``proven`` analytic finish builds the kernel basis behind its unit
   count and regulator product with FLINT's double-precision LLL phase
