@@ -146,11 +146,8 @@ Changed
   of from the full rational characteristic polynomial.  The value is the same
   on every input; only the size of the numbers changes.  On the ``proven``
   ``multiquadratic_m23_m31_m47`` row the saturation proof's unit products
-  have coefficients of 2-7 million bits over 24-bit denominators, and the
-  row took 170 s instead of 249 s (busy machine, one run each; the control
-  ``cyclotomic_real_41_deg20`` took 8.4-11.1 s before and 7.8-9.5 s after,
-  five runs each).  Every published result is unchanged on the ``proven``
-  corpus.
+  have coefficients of 2-7 million bits over 24-bit denominators, while the
+  reduced matrix entries have at most ``d log_2 L`` bits.
 
 - The ``proven`` relation-saturation proof takes the relation-kernel basis of
   every multi-row kernel over a presentation with more than 32 generators,
