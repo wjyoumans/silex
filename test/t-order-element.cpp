@@ -410,6 +410,66 @@ int test_set_coordinates_identity_and_general_basis() {
     return 0;
 }
 
+// is_equation_order must agree with the uncached identity test on the
+// order's own basis (false when no basis is set).
+void assert_equation_order_matches_uncached(const silex::Order& order) {
+    bool expected = false;
+    if (order.has_basis()) {
+        sflint::FmpqMat basis(order.degree(), order.degree());
+        assert(order.get_basis(sflint::FmpqMatRef(basis)));
+        expected = fmpq_mat_is_one(basis.raw()) != 0;
+    }
+    assert(order.is_equation_order() == expected);
+}
+
+int test_is_equation_order_matches_uncached() {
+    sflint::FmpqPoly cubic;
+    sflint::fmpq_poly_set_coeff_si(cubic, 3, 1);
+    sflint::fmpq_poly_set_coeff_si(cubic, 1, 1);
+    sflint::fmpq_poly_set_coeff_si(cubic, 0, -3);
+    silex::NumberField cubic_field = field_by_polynomial(cubic);
+
+    silex::Order bare(cubic_field);
+    assert_equation_order_matches_uncached(bare);
+
+    silex::Order factory = silex::test::equation_order(cubic_field);
+    // A copy made before the flag is read on the source, then after.
+    silex::Order early(cubic_field);
+    assert(early.set(factory));
+    assert_equation_order_matches_uncached(factory);
+    silex::Order late(cubic_field);
+    assert(late.set(factory));
+    assert_equation_order_matches_uncached(early);
+    assert_equation_order_matches_uncached(late);
+
+    silex::Order identity_order(cubic_field);
+    sflint::FmpqMat identity(3, 3);
+    for (slong i = 0; i < 3; ++i) {
+        fmpq_mat_entry_si(identity, i, i, 1);
+    }
+    assert(identity_order.set_basis(sflint::FmpqMatConstRef(identity)));
+    assert_equation_order_matches_uncached(identity_order);
+
+    sflint::FmpqPoly quadratic;
+    poly_x2_minus(quadratic, 8);
+    silex::NumberField quadratic_field = field_by_polynomial(quadratic);
+    silex::Order half(quadratic_field);
+    sflint::FmpqMat half_basis(2, 2);
+    fmpq_mat_entry_si(half_basis, 0, 0, 1);
+    sflint::fmpq_set_si(sflint::fmpq_mat_entry(half_basis, 1, 1), 1, 2);
+    assert(half.set_basis(sflint::FmpqMatConstRef(half_basis)));
+    silex::Order half_early(quadratic_field);
+    assert(half_early.set(half));
+    assert_equation_order_matches_uncached(half);
+    assert(!half.is_equation_order());
+    silex::Order half_late(quadratic_field);
+    assert(half_late.set(half));
+    assert_equation_order_matches_uncached(half_early);
+    assert_equation_order_matches_uncached(half_late);
+    assert(!half_late.is_equation_order());
+    return 0;
+}
+
 silex::OrderElement local_order_element() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 2);
@@ -439,6 +499,7 @@ int test_keeps_parent_order_alive() {
 
 int main() {
     assert(test_basic_nonmaximal_coordinates() == 0);
+    assert(test_is_equation_order_matches_uncached() == 0);
     assert(test_arithmetic() == 0);
     assert(test_integer_and_failure_preservation() == 0);
     assert(test_arithmetic_parent_mismatch_preserves_output() == 0);

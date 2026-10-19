@@ -886,7 +886,7 @@ bool Order::has_basis() const noexcept {
 }
 
 bool Order::is_equation_order() const noexcept {
-    return is_defined() && data_->has_basis_ && fmpq_mat_is_one(data_->basis_.raw()) != 0;
+    return detail::OrderAccess::basis_is_identity(*this);
 }
 
 bool Order::maximality_known() const noexcept {
@@ -940,7 +940,10 @@ bool Order::set_basis(flint::FmpqMatConstRef basis) noexcept {
     fmpq_mat_set(next.data_->basis_inv_.raw(), basis_inv.raw());
     next.data_->has_basis_ = true;
     next.data_->has_basis_inv_ = true;
-    if (fmpq_mat_is_one(basis.raw()) != 0) {
+    const bool basis_is_one = fmpq_mat_is_one(basis.raw()) != 0;
+    next.data_->basis_is_identity_ = basis_is_one;
+    next.data_->has_basis_is_identity_ = true;
+    if (basis_is_one) {
         next.data_->specialization_ = EquationOrderData{};
         if (next.data_->degree_ == 1) {
             next.data_->maximality_is_known_ = true;
