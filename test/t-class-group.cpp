@@ -7755,7 +7755,7 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     };
     auto compute = [&](CertifiedLllTestFailure failure,
                        SaturationKernelTestFailure extension_failure,
-                       bool force_extension) {
+                       bool force_transform) {
         silex::ClassGroupComputeOptions options;
         options.zeta_bf_max_cutoff = 20000;
         options.requested_certification = silex::CertificationMode::proven;
@@ -7768,8 +7768,9 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                 TestHookAccess::saturation_kernel_extensions_kept();
         TestHookAccess::set_certified_lll_failure(failure);
         TestHookAccess::set_saturation_kernel_failure(extension_failure);
-        TestHookAccess::set_saturation_kernel_force_extension(
-                force_extension);
+        const slong beta_solved = TestHookAccess::saturation_beta_rows_solved();
+        TestHookAccess::set_saturation_kernel_force_transform(
+                force_transform);
         const bool computed = units.compute_with_class_group(
                 context, maximal_order,
                 sflint::FmpzConstRef(factor_base_bound), options, 128);
@@ -7777,7 +7778,7 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                 CertifiedLllTestFailure::none);
         TestHookAccess::set_saturation_kernel_failure(
                 SaturationKernelTestFailure::none);
-        TestHookAccess::set_saturation_kernel_force_extension(false);
+        TestHookAccess::set_saturation_kernel_force_transform(false);
         assert(computed);
         const slong injections =
                 TestHookAccess::certified_lll_failures_injected() +
@@ -7787,17 +7788,25 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                        extension_failure == SaturationKernelTestFailure::none
                        ? injections == 0
                        : injections > 0);
-        // The forced extension route ran and, with no failure injected,
-        // its basis was kept; without forcing, the kernel is small enough
-        // that it never runs.
+        // On the default route the multi-row kernel takes the extension
+        // route, keeps its basis, and the beta rows are solved from its
+        // image rows; forcing the transform route or failing the extension
+        // route makes neither happen.
         const slong extensions =
                 TestHookAccess::saturation_kernel_extensions_kept() -
                 extensions_kept;
-        assert(force_extension &&
-                               extension_failure ==
-                                       SaturationKernelTestFailure::none
-                       ? extensions > 0
-                       : extensions == 0);
+        const slong solved =
+                TestHookAccess::saturation_beta_rows_solved() - beta_solved;
+        const bool extension_expected =
+                !force_transform &&
+                failure == CertifiedLllTestFailure::none &&
+                extension_failure == SaturationKernelTestFailure::none;
+        if (extension_expected) {
+            assert(extensions > 0 && solved > 0);
+        } else if (force_transform ||
+                   extension_failure != SaturationKernelTestFailure::none) {
+            assert(extensions == 0 && solved == 0);
+        }
         assert_proven_class_group_certification(context);
         assert(units.certification_status() ==
                silex::CertificationMode::proven);
@@ -7841,9 +7850,13 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     struct Case {
         CertifiedLllTestFailure failure;
         SaturationKernelTestFailure extension_failure;
-        bool force_extension;
+        bool force_transform;
     };
     const Case cases[] = {
+            {CertifiedLllTestFailure::first_phase,
+             SaturationKernelTestFailure::none, true},
+            {CertifiedLllTestFailure::certificate,
+             SaturationKernelTestFailure::none, true},
             {CertifiedLllTestFailure::first_phase,
              SaturationKernelTestFailure::none, false},
             {CertifiedLllTestFailure::certificate,
@@ -7851,13 +7864,13 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
             {CertifiedLllTestFailure::none,
              SaturationKernelTestFailure::none, true},
             {CertifiedLllTestFailure::none,
-             SaturationKernelTestFailure::first_phase, true},
+             SaturationKernelTestFailure::first_phase, false},
             {CertifiedLllTestFailure::none,
-             SaturationKernelTestFailure::certificate, true},
+             SaturationKernelTestFailure::certificate, false},
     };
     for (const Case& c : cases) {
         const ProvenResult result = compute(
-                c.failure, c.extension_failure, c.force_extension);
+                c.failure, c.extension_failure, c.force_transform);
         assert(result.invariants.size() == expected.invariants.size());
         for (std::size_t i = 0; i < expected.invariants.size(); ++i) {
             assert(sflint::fmpz_equal(
@@ -7991,8 +8004,64 @@ int test_relation_saturation_beta_rows_size_reduced() {
         // saturated, so membership in its rational span suffices) and is
         // size-reduced against that kernel basis: |mu(row, l)| <= 1/2.
         sflint::FmpzMat coefficients(0, 0);
+        const slong solved_before =
+                silex::detail::TestHookAccess::saturation_beta_rows_solved();
         assert(silex::detail::relation_saturation_beta_coefficients(
                 coefficients, context, units, sflint::FmpzConstRef(ell)));
+        // The kernel basis came from the extension route, so the rows were
+        // solved from its image rows.
+        assert(silex::detail::TestHookAccess::saturation_beta_rows_solved() ==
+               solved_before + 1);
+        {
+            // With the solve failing, the rows are read from the left
+            // transform instead; size reduction against the same kernel
+            // basis maps both rows of a coset to the same vector.
+            silex::detail::TestHookAccess::set_saturation_kernel_failure(
+                    silex::detail::SaturationKernelTestFailure::beta_solve);
+            sflint::FmpzMat transform_rows(0, 0);
+            const bool ok =
+                    silex::detail::relation_saturation_beta_coefficients(
+                            transform_rows, context, units,
+                            sflint::FmpzConstRef(ell));
+            silex::detail::TestHookAccess::set_saturation_kernel_failure(
+                    silex::detail::SaturationKernelTestFailure::none);
+            assert(ok);
+            assert(silex::detail::TestHookAccess::saturation_beta_rows_solved() ==
+                   solved_before + 1);
+            // The two readings differ by a relation-kernel vector (rows
+            // at a tie |mu| = 1/2 of the size reduction may differ).
+            assert(sflint::fmpz_mat_nrows(
+                           sflint::FmpzMatConstRef(transform_rows)) ==
+                   sflint::fmpz_mat_nrows(
+                           sflint::FmpzMatConstRef(coefficients)));
+            for (slong b = 0; b < sflint::fmpz_mat_nrows(
+                                          sflint::FmpzMatConstRef(coefficients));
+                 ++b) {
+                sflint::FmpzMat stack(kernel_rows + 1, relation_count);
+                for (slong j = 0; j < relation_count; ++j) {
+                    for (slong r = 0; r < kernel_rows; ++r) {
+                        sflint::fmpz_set(
+                                sflint::fmpz_mat_entry(
+                                        sflint::FmpzMatRef(stack), r, j),
+                                sflint::fmpz_mat_entry(
+                                        sflint::FmpzMatConstRef(kernel), r,
+                                        j));
+                    }
+                    fmpz_sub(sflint::fmpz_mat_entry(sflint::FmpzMatRef(stack),
+                                                    kernel_rows, j)
+                                     .raw(),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(coefficients), b,
+                                     j)
+                                     .raw(),
+                             sflint::fmpz_mat_entry(
+                                     sflint::FmpzMatConstRef(transform_rows),
+                                     b, j)
+                                     .raw());
+                }
+                assert(fmpz_mat_rank(stack.raw()) == kernel_rows);
+            }
+        }
         {
             sflint::FmpzMat refused(0, 0);
             assert(!silex::detail::relation_saturation_beta_coefficients(
