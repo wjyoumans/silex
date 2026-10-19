@@ -413,7 +413,11 @@ bool ClassRelationModuleContext::rollback_add(
         rel_gens_.pop_last_row();
         rel_relation_indices_.pop_back();
     }
-    checkpoint_valid_ = undo.checkpoint_valid;
+    // A checkpoint taken or rebuilt since the add no longer matches the
+    // record, so the restored flag must also agree with the counts.
+    checkpoint_valid_ = undo.checkpoint_valid &&
+                        checkpoint_basis_count_ == basis_count() &&
+                        checkpoint_extra_count_ == extra_count();
     undo.changed = false;
     undo.basis_row = false;
     undo.mod_rank_position = -1;

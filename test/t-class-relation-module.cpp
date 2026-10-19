@@ -397,6 +397,46 @@ int test_rollback_restores_state_before_add() {
     return 0;
 }
 
+// A checkpoint taken between an add and its rollback leaves the restored
+// module with an invalid checkpoint whose counts are zero, as if the
+// checkpoint had been taken before the add; the rollback never marks a
+// checkpoint valid that does not cover the remaining rows.
+int test_rollback_after_take_checkpoint_keeps_checkpoint_invalid() {
+    silex::detail::ClassRelationModuleContext context;
+    silex::detail::ClassRelationModuleContext reference;
+    silex::detail::ClassRelationModuleAddResult result;
+    silex::detail::ClassRelationModuleAddUndo undo;
+    silex::fmpz_smat::HnfContext checkpoint;
+    sflint::FmpzMat rows(4, 4);
+
+    set_entry(rows, 0, 0, 1);
+    set_entry(rows, 0, 1, 3);
+    set_entry(rows, 0, 3, 4);
+    set_entry(rows, 1, 2, 1);
+    set_entry(rows, 1, 3, 2);
+    set_entry(rows, 2, 0, 2);
+    set_entry(rows, 2, 1, 6);
+    set_entry(rows, 2, 3, 8);
+    set_entry(rows, 3, 1, 1);
+    set_entry(rows, 3, 3, 5);
+
+    if (!context.reset(4, 7) || !add_rows(context, rows, 3) ||
+        !context.checkpoint_context(checkpoint) ||
+        !context.add_fmpz_mat_row(undo, result, rows, 3, 3, false) ||
+        !undo.changed || !undo.checkpoint_valid ||
+        !context.take_checkpoint_context(checkpoint) ||
+        !context.rollback_add(undo)) {
+        return 1;
+    }
+    if (!reference.reset(4, 7) || !add_rows(reference, rows, 3) ||
+        !reference.checkpoint_context(checkpoint) ||
+        !reference.take_checkpoint_context(checkpoint) ||
+        !context.same_state_as(reference)) {
+        return 1;
+    }
+    return 0;
+}
+
 // Every in-place add, at whatever modular pivot position it lands, rolls back
 // to the exact prior state; the module then takes the row for real.
 int test_rollback_after_each_add_of_a_row_stream() {
@@ -444,7 +484,9 @@ int main() {
                            0 ||
                    test_copy_and_move_contracts() != 0 ||
                    test_rollback_restores_state_before_add() != 0 ||
-                   test_rollback_after_each_add_of_a_row_stream() != 0
+                   test_rollback_after_each_add_of_a_row_stream() != 0 ||
+                   test_rollback_after_take_checkpoint_keeps_checkpoint_invalid() !=
+                           0
             ? 1
             : 0;
 }
