@@ -528,9 +528,32 @@ int test_incremental_finish_workspace_lifecycle() {
             7));
     assert(!workspace->unit_logs_valid);
 
+    // The cached kernel bases are refreshed by a sync that adds relations.
+    for (const bool finish : {true, false}) {
+        const sflint::FmpzMat* const kernel =
+                silex::detail::hnf_finish_workspace_kernel(
+                        *workspace, context, finish);
+        assert(kernel != nullptr);
+        assert(sflint::fmpz_mat_nrows(*kernel) ==
+               context.relation_count() - context.relation_rank());
+        assert(sflint::fmpz_mat_ncols(*kernel) == context.relation_count());
+    }
+    assert(workspace->finish_kernel_valid && workspace->witness_kernel_valid);
+
     append_integer_relation(context, field, 12);
     assert(silex::detail::sync_hnf_finish_workspace(
             *workspace, context));
+    assert(!workspace->finish_kernel_valid &&
+           !workspace->witness_kernel_valid);
+    for (const bool finish : {true, false}) {
+        const sflint::FmpzMat* const kernel =
+                silex::detail::hnf_finish_workspace_kernel(
+                        *workspace, context, finish);
+        assert(kernel != nullptr);
+        assert(sflint::fmpz_mat_nrows(*kernel) ==
+               context.relation_count() - context.relation_rank());
+        assert(sflint::fmpz_mat_ncols(*kernel) == context.relation_count());
+    }
     assert_finish_workspace_exact(context, *workspace);
 
     sflint::FmpzMat transform_before(

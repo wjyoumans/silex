@@ -1573,13 +1573,25 @@ Fixed
   without a workspace, so ``multiquadratic_m23_m31_m47`` (previously
   ``class_unit_computation_failed`` in about one second) now certifies
   ``proven`` with class group ``[3, 15, 30]`` and the regulator that ``grh``
-  and PARI give.  Published unit generators may differ wherever this path
-  ran, since the witness rows are another basis of the same kernel lattice.
-  On the proven class/unit corpus, 51 rows change the radius of the published
-  regulator ball and 51 change the number of local primes the unit and
-  saturation proofs try on some prime; the DUMP hashes of relation rows,
-  relation generators, invariant generator matrix and units, every class
-  group, label, certification status and regulator value are unchanged.
+  and PARI give.  No unit generator changed on any corpus row (the unit hashes
+  are identical), but the generators are not shown to be independent of the
+  route, since the witness rows are another basis of the same kernel
+  lattice (see "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`).
+  On the proven class/unit corpus, 72 distinct rows change: 30 change both the
+  radius of the published regulator ball and the number of local primes the
+  unit and saturation proofs try on some prime, 21 change only the radius,
+  and 21 change only the local primes.  The rows are mostly the cyclotomic
+  and real cyclotomic fields (``cyclotomic_*_phi*``,
+  ``cyclotomic_real_*_deg*``), with the ``pure_x*``, ``simplest_cubic_*``,
+  ``simplest_quartic_*``, ``lmfdb_*`` (radius only except
+  ``lmfdb_6_6_46411625_1``), ``random_d*_h*_s*_proven`` and
+  ``x<n>_minus_x_minus_1_proven`` (``hexadecic``, ``septendecic``,
+  ``nonadecic``, ``tridecic``, ``undecic``) families and
+  ``cubic_seeded_h4_proven``, ``quartic_x4_plus_1_proven``.  The DUMP hashes
+  of relation rows, relation generators, invariant generator matrix and
+  units, every class group, label, certification status and regulator value
+  are unchanged.
 
 - ``ClassGroupContext::saturate_relations_bounded_with_units`` no longer
   weakens the proof metadata of a context already certified ``proven``.
