@@ -45,7 +45,7 @@ bool compact_independence_lower_bound(flint::Arb& out,
                                       slong rank,
                                       slong precision) noexcept;
 
-// Defined below.  torsion_log_bound encloses Hecke's is_torsion_unit bound
+// Defined below.  torsion_log_bound encloses the torsion-test bound
 // log(1 + log(n) / (6 n^2)) for a unit of a degree-n field;
 // torsion_status_from_logs is the per-place test of
 // unit_candidate_torsion_status on an enclosure `logs` of the product-mode
@@ -256,8 +256,8 @@ slong incremental_target_precision(slong target) noexcept {
 // Guess.  For a dependent candidate, v = sum_i w_i l(u_i) and the w_i are
 // rational (log rows of units span a lattice, so dependence over R is
 // dependence over Q).  dependent_relation_rational_candidate, the
-// reconstruction of Hecke Unit/Relation.jl `_find_rational_relation!` that
-// add_dependent_unit uses, turns the balls of w into integers
+// rational-relation reconstruction that add_dependent_unit uses, turns the
+// balls of w into integers
 // (c_1, ..., c_k, m) with c_i = -m a_i, a_i the simplest rational in ball i
 // and m >= 1 the lcm of their denominators.  The guess needs no
 // denominator bound for soundness, since only the check below decides; the
@@ -270,8 +270,8 @@ slong incremental_target_precision(slong target) noexcept {
 // the enclosures of l(u) and l(u_i) by arb_mul_fmpz and arb_addmul_fmpz,
 // which are inclusion monotone with exact integer factors, so it contains
 // l(z) whatever the rounding.  torsion_status_from_logs is the per-place
-// test of unit_candidate_torsion_status (Hecke FacElem.jl
-// is_torsion_unit, lines 24-72 of v0.38.6, bound at line 40): it reports
+// test of unit_candidate_torsion_status (the torsion
+// test of docs/reference/algorithms_and_sources.rst): it reports
 // torsion only when every |log|sigma(z)|| (halving the product-mode entry
 // at a complex place) is at most a ball containing
 // log(1 + log(n) / (6 n^2)), n the field degree, so then
