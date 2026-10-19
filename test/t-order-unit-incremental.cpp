@@ -54,6 +54,23 @@ struct IncrementalTargetSlackOverride {
     }
 };
 
+using RelationMode = silex::detail::IncrementalRelationTestSeams::Mode;
+
+// Forces the relation step of the incremental test (see
+// incremental_relation_dependent in compute.cpp) for the scope.  The tests
+// of the lower-bound ladder below force it to fail_reconstruction, so their
+// dependent candidates are decided by the lower bound B, as before the
+// relation step.
+struct IncrementalRelationOverride {
+    explicit IncrementalRelationOverride(RelationMode mode) noexcept {
+        silex::detail::TestHookAccess::set_incremental_relation_mode(mode);
+    }
+    ~IncrementalRelationOverride() {
+        silex::detail::TestHookAccess::set_incremental_relation_mode(
+                RelationMode::off);
+    }
+};
+
 // The real cyclotomic octic Q(zeta_17)^+, the field of 2 cos(2 pi / 17),
 // with minimal polynomial x^8 + x^7 - 7x^6 - 6x^5 + 15x^4 + 10x^3 - 10x^2
 // - 4x + 1 (unit rank 7), in which theta is a unit (norm f(0) = 1).
@@ -251,6 +268,7 @@ int test_dependent_candidate_skips_to_deciding_precision() {
     assert(first.push(theta, 1));
     assert(square.push(theta, 2));
     silex::EmbeddingContext embeddings(field);
+    IncrementalRelationOverride relation(RelationMode::fail_reconstruction);
 
     constexpr slong precision = 8;
     silex::detail::IncrementalUnitContext context;
@@ -302,6 +320,7 @@ int test_skipped_precisions_tried_before_fallback() {
     assert(first.push(theta, 1));
     assert(square.push(theta, 2));
     silex::EmbeddingContext embeddings(field);
+    IncrementalRelationOverride relation(RelationMode::fail_reconstruction);
 
     constexpr slong precision = 8;
     silex::detail::IncrementalUnitContext context;
@@ -509,6 +528,7 @@ int test_dependent_candidate_decides_at_target_step() {
     assert(square.push(theta, 2));
     assert(cube.push(theta, 3));
     silex::EmbeddingContext embeddings(field);
+    IncrementalRelationOverride relation(RelationMode::fail_reconstruction);
 
     constexpr slong precision = 7;
     bool changed = true;
@@ -550,6 +570,7 @@ int test_undecided_target_step_falls_back_to_doubling() {
     assert(first.push(theta, 1));
     assert(square.push(theta, 2));
     silex::EmbeddingContext embeddings(field);
+    IncrementalRelationOverride relation(RelationMode::fail_reconstruction);
 
     constexpr slong precision = 7;
     IncrementalTargetSlackOverride slack(-64);
@@ -584,6 +605,7 @@ int test_precisions_below_a_between_doubling_start_are_tried() {
     assert(first.push(theta, 1));
     assert(cube.push(theta, 3));
     silex::EmbeddingContext embeddings(field);
+    IncrementalRelationOverride relation(RelationMode::fail_reconstruction);
 
     constexpr slong precision = 7;
     silex::detail::IncrementalUnitContext context;
@@ -607,6 +629,158 @@ int test_precisions_below_a_between_doubling_start_are_tried() {
     return 0;
 }
 
+// The sextic x^6 - 2, of signature (2, 2) and unit rank 3, in which
+// theta - 1 is a unit (norm -f(1) = 1).  It has complex places, whose
+// product-mode log entries the torsion check halves.
+silex::NumberField sextic_with_complex_places() noexcept {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 6, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -2);
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// Adds u^2 and then u^3 to a context of rank `rank` at `precision`, with
+// `diagnostics` (nullable).  u^3 is dependent (z = (u^3)^2 (u^2)^-3 = 1,
+// so the reconstructed relation has m = 2), as compact_independent
+// confirms.  Returns the context.
+silex::detail::IncrementalUnitContext square_then_cube(
+        const silex::NumberField& field,
+        silex::EmbeddingContext& embeddings,
+        const silex::Element& u,
+        slong rank,
+        slong precision,
+        const silex::DiagnosticsContext* diagnostics) noexcept {
+    silex::FactoredElement square(field);
+    silex::FactoredElement cube(field);
+    assert(square.push(u, 2));
+    assert(cube.push(u, 3));
+
+    std::vector<silex::FactoredElement> trial;
+    trial.emplace_back(field);
+    assert(trial.back().set(square));
+    trial.emplace_back(field);
+    assert(trial.back().set(cube));
+    bool expected = true;
+    assert(silex::detail::compact_independent(
+            expected, embeddings,
+            silex::FactoredElementSpan(trial.data(), trial.size()),
+            precision));
+    assert(!expected);
+
+    silex::detail::IncrementalUnitContext context;
+    assert(context.define(field, rank));
+    bool changed = false;
+    assert(context.add_independent_unit(changed, square, embeddings,
+                                        precision, diagnostics));
+    assert(changed);
+    changed = true;
+    assert(context.add_independent_unit(changed, cube, embeddings, precision,
+                                        diagnostics));
+    assert(!changed);
+    assert(context.units.size() == 1);
+    assert(context.incremental_decisions == 2);
+    assert(context.fallback_decisions == 0);
+    return context;
+}
+
+// The relation step decides a dependent candidate at the starting
+// precision, where the Gram determinant ball is still undecided: in the
+// real octic (B about 2^-125) at 64 bits, and in the sextic x^6 - 2 (B
+// about 2^-46, complex places) at 32 bits.  The relation u^3 against u^2
+// has m = 2, and its unit passes the torsion check, so no other precision
+// is tried.
+int test_dependent_candidate_decided_by_relation() {
+    struct Case {
+        silex::NumberField field;
+        slong unit_shift;
+        slong rank;
+        slong precision;
+    };
+    Case cases[] = {{real_octic_field(), 0, 7, 64},
+                    {sextic_with_complex_places(), -1, 3, 32}};
+    for (Case& c : cases) {
+        silex::Element theta(c.field);
+        silex::Element u(c.field);
+        assert(theta.gen());
+        assert(u.add_si(theta, c.unit_shift));
+        silex::EmbeddingContext embeddings(c.field);
+        const silex::detail::IncrementalUnitContext context =
+                square_then_cube(c.field, embeddings, u, c.rank, c.precision,
+                                 nullptr);
+        assert(context.relation_decisions == 1);
+        assert(state_precisions(context) ==
+               std::vector<slong>{c.precision});
+        assert(context.reject_precision == c.precision);
+    }
+    return 0;
+}
+
+// A forced failure of the relation step, either no reconstructed relation
+// or a perturbed one (m + 1, so the relation unit is u^3, not a root of
+// unity, and the torsion check cannot pass), decides nothing: the dependent
+// candidate goes on to the lower-bound path and is decided there, at a
+// higher precision, as before the relation step.  The decision is the same
+// and nothing falls back to compact_independent.
+int test_forced_relation_failure_takes_lower_bound_path() {
+    silex::NumberField field = real_octic_field();
+    silex::Element theta(field);
+    assert(theta.gen());
+    constexpr slong precision = 64;
+    for (const RelationMode mode : {RelationMode::fail_reconstruction,
+                                    RelationMode::perturb_relation}) {
+        IncrementalRelationOverride relation(mode);
+        silex::EmbeddingContext embeddings(field);
+        const silex::detail::IncrementalUnitContext context =
+                square_then_cube(field, embeddings, theta, 7, precision,
+                                 nullptr);
+        assert(context.relation_decisions == 0);
+        assert(context.log_states.size() > 1);
+        assert(context.reject_precision > precision);
+    }
+    return 0;
+}
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+void count_debug_failure(void* user,
+                         silex::DiagnosticsModule,
+                         silex::DebugLevel,
+                         const char*,
+                         const char*,
+                         int,
+                         const char*,
+                         const char*) noexcept {
+    ++*static_cast<slong*>(user);
+}
+#endif
+
+// With expensive debug checks on, a candidate decided dependent by the
+// relation step is checked against compact_independent, which must decide
+// it and call it dependent (add_independent_unit's debug check); no check
+// may fail.  Without debug checks this only repeats the decision.
+int test_relation_decision_debug_check() {
+    silex::NumberField field = sextic_with_complex_places();
+    silex::Element theta(field);
+    silex::Element u(field);
+    assert(theta.gen());
+    assert(u.add_si(theta, -1));
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    slong failures = 0;
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    silex::diagnostics_set_debug_checks(
+            diagnostics, silex::DebugLevel::expensive,
+            silex::diagnostics_all_modules, count_debug_failure, &failures);
+#endif
+    silex::EmbeddingContext embeddings(field);
+    const silex::detail::IncrementalUnitContext context =
+            square_then_cube(field, embeddings, u, 3, 32, &diagnostics);
+    assert(context.relation_decisions == 1);
+    assert(failures == 0);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -618,6 +792,9 @@ int main() {
     assert(test_independent_candidate_accepted_after_skip() == 0);
     assert(test_dependent_candidate_decides_at_target_step() == 0);
     assert(test_undecided_target_step_falls_back_to_doubling() == 0);
+    assert(test_dependent_candidate_decided_by_relation() == 0);
+    assert(test_forced_relation_failure_takes_lower_bound_path() == 0);
+    assert(test_relation_decision_debug_check() == 0);
     assert(test_precisions_below_a_between_doubling_start_are_tried() == 0);
     return 0;
 }

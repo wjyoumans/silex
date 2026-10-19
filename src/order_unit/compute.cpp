@@ -45,6 +45,21 @@ bool compact_independence_lower_bound(flint::Arb& out,
                                       slong rank,
                                       slong precision) noexcept;
 
+// Defined below.  torsion_log_bound encloses Hecke's is_torsion_unit bound
+// log(1 + log(n) / (6 n^2)) for a unit of a degree-n field;
+// torsion_status_from_logs is the per-place test of
+// unit_candidate_torsion_status on an enclosure `logs` of the product-mode
+// log embedding of a unit (places r1 and later complex, holding
+// 2 log|sigma|): torsion when every |log|sigma|| lies at most `bound`.
+bool torsion_log_bound(flint::Arb& out,
+                       slong& log_precision,
+                       slong degree) noexcept;
+void torsion_status_from_logs(RelationTorsionStatus& status,
+                              const flint::ArbVec& logs,
+                              slong r1,
+                              const flint::Arb& bound,
+                              slong precision) noexcept;
+
 struct RelationUnitCandidateSortKey {
     flint::Arf max_log_upper;
     std::size_t original_index = 0;
@@ -230,14 +245,130 @@ slong incremental_target_precision(slong target) noexcept {
     return (padded + FLINT_BITS - 1) / FLINT_BITS * FLINT_BITS;
 }
 
+// The relation step of the incremental test, for an undecided ball: sets
+// `dependent` when it proves the candidate u = context.units.back()
+// dependent on the kept units u_1, ..., u_k, and otherwise leaves it false
+// (the test then goes on as without this step).  `inverse_projection` and
+// `row` are the enclosures of w = G^{-1} L v and of v = l(u) that
+// incremental_independence_at computed at the precision of `state`, whose
+// rows enclose l(u_1), ..., l(u_k); l is the product-mode log embedding.
+//
+// Guess.  For a dependent candidate, v = sum_i w_i l(u_i) and the w_i are
+// rational (log rows of units span a lattice, so dependence over R is
+// dependence over Q).  dependent_relation_rational_candidate, the
+// reconstruction of Hecke Unit/Relation.jl `_find_rational_relation!` that
+// add_dependent_unit uses, turns the balls of w into integers
+// (c_1, ..., c_k, m) with c_i = -m a_i, a_i the simplest rational in ball i
+// and m >= 1 the lcm of their denominators.  The guess needs no
+// denominator bound for soundness, since only the check below decides; the
+// bound passed is the largest slong, so no candidate is refused for its
+// size (a larger m only widens the ball of l(z) below).
+//
+// Check (soundness under rounding).  z = u^m prod_i u_i^{c_i} is a unit of
+// the same field, and l is a homomorphism, so
+// l(z) = m l(u) + sum_i c_i l(u_i) exactly.  The ball `logs` is computed from
+// the enclosures of l(u) and l(u_i) by arb_mul_fmpz and arb_addmul_fmpz,
+// which are inclusion monotone with exact integer factors, so it contains
+// l(z) whatever the rounding.  torsion_status_from_logs is the per-place
+// test of unit_candidate_torsion_status (Hecke FacElem.jl
+// is_torsion_unit, lines 24-72 of v0.38.6, bound at line 40): it reports
+// torsion only when every |log|sigma(z)|| (halving the product-mode entry
+// at a complex place) is at most a ball containing
+// log(1 + log(n) / (6 n^2)), n the field degree, so then
+// max |sigma(z)| <= 1 + log(n) / (6 n^2).  Dobrowolski (1978): a nonzero
+// algebraic integer of degree d that is not a root of unity has
+// max |sigma(z)| > 1 + log(d) / (6 d^2).  The degree d of z divides n; for
+// d = 1, z = +-1 is a root of unity, and for 2 <= d <= n,
+// log(d) / (6 d^2) >= log(n) / (6 n^2) because log(x) / x^2 decreases for
+// x >= 2.  So z is a root of unity, l(z) = 0, and
+// m l(u) = -sum_i c_i l(u_i) with m >= 1: l(u) lies in the span of the kept
+// rows, the true Gram determinant of the k + 1 rows is zero, and
+// "dependent" is the true answer, the one compact_independent gives
+// whenever it decides (its rule calls an exact zero dependent).  Any
+// failure, an empty guess, or a non-torsion or inconclusive check proves
+// nothing and leaves `dependent` false.  This rests on the same hypothesis
+// as compact_independent's lower bound: the entries of context.units are
+// units.  Tests can force the guess to fail or perturb it through
+// IncrementalRelationTestSeams.
+void incremental_relation_dependent(bool& dependent,
+                                    const flint::ArbVec& inverse_projection,
+                                    const flint::ArbVec& row,
+                                    const IncrementalLogState& state,
+                                    EmbeddingContext& embeddings,
+                                    slong places,
+                                    slong degree) noexcept {
+    dependent = false;
+    const slong kept = inverse_projection.length();
+    const slong precision = state.precision;
+    const IncrementalRelationTestSeams::Mode mode =
+            IncrementalRelationTestSeams::forced_mode();
+    if (kept <= 0 || row.length() != places ||
+        static_cast<slong>(state.rows.size()) < kept ||
+        mode == IncrementalRelationTestSeams::Mode::fail_reconstruction) {
+        return;
+    }
+    Signature sig;
+    if (embeddings.is_set()) {
+        sig = embeddings.signature();
+    } else if (embeddings.parent() == nullptr ||
+               !signature(sig, *embeddings.parent())) {
+        return;
+    }
+    if (sig.r1() + sig.r2() != places) {
+        return;
+    }
+
+    flint::ArbMat coordinates(kept, 1);
+    for (slong i = 0; i < kept; ++i) {
+        arb_set(arb_mat_entry(coordinates.raw(), i, 0),
+                inverse_projection.data() + i);
+    }
+    flint::FmpzMat relation(1, kept + 1);
+    bool found = false;
+    if (!dependent_relation_rational_candidate(found, relation, coordinates,
+                                               WORD_MAX) ||
+        !found) {
+        return;
+    }
+    fmpz* const exponent = ::fmpz_mat_entry(relation.raw(), 0, kept);
+    if (mode == IncrementalRelationTestSeams::Mode::perturb_relation) {
+        fmpz_add_ui(exponent, exponent, 1);
+    }
+
+    // logs = m v + sum_i c_i l(u_i), an enclosure of l(z).
+    flint::ArbVec logs(places);
+    for (slong j = 0; j < places; ++j) {
+        arb_ptr entry = logs.data() + j;
+        arb_mul_fmpz(entry, row.data() + j, exponent, precision);
+        for (slong i = 0; i < kept; ++i) {
+            arb_addmul_fmpz(
+                    entry,
+                    state.rows[static_cast<std::size_t>(i)].data() + j,
+                    ::fmpz_mat_entry(relation.raw(), 0, i), precision);
+        }
+    }
+
+    slong bound_precision = precision;
+    flint::Arb bound;
+    if (!torsion_log_bound(bound, bound_precision, degree)) {
+        return;
+    }
+    RelationTorsionStatus status = RelationTorsionStatus::inconclusive;
+    torsion_status_from_logs(status, logs, sig.r1(), bound, precision);
+    dependent = status == RelationTorsionStatus::torsion;
+}
+
 // The incremental test at the precision of `state` for the last entry of
 // context.units against the ones before it.  Returns true only when it
 // decides, with the answer in `independent`; `row` receives the
 // candidate's log row when one was computed.  When it does not decide,
 // `target_precision` receives incremental_decision_precision of the
 // enclosure, or zero.  When it decides "independent", `border` receives
-// what the accept path needs to extend the Gram inverse of `state`.
+// what the accept path needs to extend the Gram inverse of `state`.  When
+// the ball is undecided it first tries incremental_relation_dependent, and
+// a dependent candidate decided that way sets `by_relation`.
 bool incremental_independence_at(bool& independent,
+                                 bool& by_relation,
                                  slong& target_precision,
                                  flint::ArbVec& row,
                                  IncrementalGramBorder& border,
@@ -247,6 +378,7 @@ bool incremental_independence_at(bool& independent,
                                  slong places,
                                  slong degree) noexcept {
     independent = false;
+    by_relation = false;
     target_precision = 0;
     const slong precision = state.precision;
     const slong kept = static_cast<slong>(context.units.size()) - 1;
@@ -285,6 +417,13 @@ bool incremental_independence_at(bool& independent,
         return false;
     }
     if (!decided) {
+        bool dependent = false;
+        incremental_relation_dependent(dependent, inverse_projection, row,
+                                       state, embeddings, places, degree);
+        if (dependent) {
+            by_relation = true;
+            return true;
+        }
         target_precision = incremental_decision_precision(
                 determinant, places, degree, precision);
     } else if (independent) {
@@ -328,12 +467,15 @@ bool incremental_independence_at(bool& independent,
 // midpoint as if it were exact.  compact_independence_from_gram_determinant
 // applies compact_independent's rule and lower bound to that ball, and the
 // rule is sound for any enclosure of the true determinant: below the lower
-// bound or exactly zero means dependent, positive means independent.  So a
+// bound or exactly zero means dependent, positive means independent.  A
+// dependent decision by incremental_relation_dependent is also the true
+// answer (its soundness note).  So a
 // decision here is the true answer, which is also the answer
 // compact_independent gives whenever it decides.  When this test does not
 // decide before the cap (or a row, inverse or bound is unavailable), the
 // caller runs compact_independent itself, unchanged.
 bool incremental_independence(bool& independent,
+                              bool& by_relation,
                               slong& decided_precision,
                               flint::ArbVec& row,
                               IncrementalGramBorder& border,
@@ -341,6 +483,7 @@ bool incremental_independence(bool& independent,
                               EmbeddingContext& embeddings,
                               slong precision) noexcept {
     independent = false;
+    by_relation = false;
     decided_precision = 0;
     border.available = false;
     const slong kept = static_cast<slong>(context.units.size()) - 1;
@@ -369,8 +512,9 @@ bool incremental_independence(bool& independent,
                                slong& target_precision) noexcept {
         const std::size_t index =
                 incremental_log_state(context, work_precision);
-        if (incremental_independence_at(independent, target_precision, row,
-                                        border, context.log_states[index],
+        if (incremental_independence_at(independent, by_relation,
+                                        target_precision, row, border,
+                                        context.log_states[index],
                                         context, embeddings, places,
                                         degree)) {
             decided_precision = work_precision;
@@ -454,6 +598,18 @@ bool discard_bordered_gram_states(IncrementalUnitContext& context) noexcept {
 }
 
 #if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+// True when compact_independent, the B-bound path, decides and calls the
+// last unit dependent.  Stricter than incremental_independence_agrees:
+// an undecided compact_independent (cap or failed embedding) also fails.
+bool incremental_relation_dependence_confirmed(
+        EmbeddingContext& embeddings,
+        FactoredElementSpan units,
+        slong precision) noexcept {
+    bool direct = true;
+    return compact_independent(direct, embeddings, units, precision) &&
+           !direct;
+}
+
 // True unless compact_independent decides the other way.
 bool incremental_independence_agrees(bool independent,
                                      EmbeddingContext& embeddings,
@@ -564,6 +720,7 @@ bool IncrementalUnitContext::define(const NumberField& parent,
     reject_precision = 0;
     incremental_decisions = 0;
     fallback_decisions = 0;
+    relation_decisions = 0;
     return true;
 }
 
@@ -587,21 +744,34 @@ bool IncrementalUnitContext::add_independent_unit(
     }
 
     bool independent = false;
+    bool by_relation = false;
     slong decided_precision = 0;
     flint::ArbVec row(0);
     IncrementalGramBorder border;
-    bool decided = incremental_independence(independent, decided_precision,
-                                            row, border, *this, embeddings,
-                                            precision);
+    bool decided = incremental_independence(independent, by_relation,
+                                            decided_precision, row, border,
+                                            *this, embeddings, precision);
     // A test that did not decide on bordered Gram enclosures is retested on
     // recomputed enclosures before compact_independent.  Decisions remain
     // true answers.
     if (!decided && discard_bordered_gram_states(*this)) {
-        decided = incremental_independence(independent, decided_precision,
-                                           row, border, *this, embeddings,
-                                           precision);
+        decided = incremental_independence(independent, by_relation,
+                                           decided_precision, row, border,
+                                           *this, embeddings, precision);
     }
-    if (decided) {
+    if (decided && by_relation) {
+        ++incremental_decisions;
+        ++relation_decisions;
+        SILEX_DEBUG_CHECK(
+                diagnostics, DiagnosticsModule::unit_group,
+                DebugLevel::expensive,
+                "relation-decided dependent candidate is dependent by "
+                "compact_independent",
+                incremental_relation_dependence_confirmed(
+                        embeddings,
+                        FactoredElementSpan(units.data(), units.size()),
+                        precision));
+    } else if (decided) {
         ++incremental_decisions;
         SILEX_DEBUG_CHECK(
                 diagnostics, DiagnosticsModule::unit_group,
@@ -1180,6 +1350,42 @@ bool torsion_log_bound(flint::Arb& out,
     return true;
 }
 
+void torsion_status_from_logs(RelationTorsionStatus& status,
+                              const flint::ArbVec& logs,
+                              slong r1,
+                              const flint::Arb& bound,
+                              slong precision) noexcept {
+    status = RelationTorsionStatus::inconclusive;
+    const slong places = logs.length();
+    if (places <= 0) {
+        return;
+    }
+    flint::Arb value;
+    flint::Arb difference;
+    slong small_places = 0;
+    for (slong i = 0; i < places; ++i) {
+        flint::arb_abs(flint::ArbRef(value),
+                       flint::ArbConstRef(logs.data() + i));
+        if (i >= r1) {
+            flint::arb_div_ui(value, value, 2, precision);
+        }
+        if (flint::arb_is_positive(value)) {
+            status = RelationTorsionStatus::non_torsion;
+            return;
+        }
+        flint::arb_sub(difference, bound, value, precision);
+        if (flint::arb_is_nonnegative(difference.raw())) {
+            ++small_places;
+        } else {
+            status = RelationTorsionStatus::inconclusive;
+            return;
+        }
+    }
+
+    status = small_places == places ? RelationTorsionStatus::torsion
+                                    : RelationTorsionStatus::inconclusive;
+}
+
 bool unit_candidate_torsion_status(
         RelationTorsionStatus& status,
         RelationUnitExtractionState& extraction_state,
@@ -1219,30 +1425,7 @@ bool unit_candidate_torsion_status(
     extraction_state.torsion_precision =
             max_slong(extraction_state.torsion_precision, log_precision);
 
-    flint::Arb value;
-    flint::Arb difference;
-    slong small_places = 0;
-    for (slong i = 0; i < places; ++i) {
-        flint::arb_abs(flint::ArbRef(value),
-                       flint::ArbConstRef(logs.data() + i));
-        if (i >= sig.r1()) {
-            flint::arb_div_ui(value, value, 2, log_precision);
-        }
-        if (flint::arb_is_positive(value)) {
-            status = RelationTorsionStatus::non_torsion;
-            return true;
-        }
-        flint::arb_sub(difference, bound, value, log_precision);
-        if (flint::arb_is_nonnegative(difference.raw())) {
-            ++small_places;
-        } else {
-            status = RelationTorsionStatus::inconclusive;
-            return true;
-        }
-    }
-
-    status = small_places == places ? RelationTorsionStatus::torsion
-                                    : RelationTorsionStatus::inconclusive;
+    torsion_status_from_logs(status, logs, sig.r1(), bound, log_precision);
     return true;
 }
 

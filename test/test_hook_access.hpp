@@ -153,6 +153,17 @@ public:
                 bits, std::memory_order_relaxed);
     }
 
+    // Forces the relation step of the incremental independence test to
+    // find no candidate or to check a perturbed one, so it decides nothing
+    // and the test goes on with the lower-bound rule alone.  Skips no
+    // invariant: the step only adds dependent decisions, each proved by
+    // the torsion check.  Mode::off restores the default.
+    static void set_incremental_relation_mode(
+            IncrementalRelationTestSeams::Mode mode) noexcept {
+        IncrementalRelationTestSeams::forced_mode_.store(
+                mode, std::memory_order_relaxed);
+    }
+
     // A positive `max_aux_primes` replaces the per-scan guard of 2^16
     // examined primes q of the stable residue-character proof scan, and a
     // nonzero `max_q` replaces the machine-word upper end of the q range, so

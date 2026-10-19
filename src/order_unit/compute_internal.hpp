@@ -812,6 +812,26 @@ private:
     inline static std::atomic<slong> forced_slack_{kOff};
 };
 
+// Test-only override of the relation step of the incremental independence
+// test (incremental_relation_dependent in compute.cpp).  fail_reconstruction
+// makes the rational reconstruction report no candidate; perturb_relation
+// adds one to the reconstructed denominator m, so the relation unit is no
+// longer a root of unity and the torsion check cannot pass.  Either way the
+// step decides nothing and the test goes on as without it.  Only
+// detail::TestHookAccess (test/test_hook_access.hpp) can set it; production
+// code only reads it.
+class IncrementalRelationTestSeams {
+public:
+    enum class Mode : int { off, fail_reconstruction, perturb_relation };
+    static Mode forced_mode() noexcept {
+        return forced_mode_.load(std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<Mode> forced_mode_{Mode::off};
+};
+
 // The partial unit basis of the relation-unit search before it reaches full
 // rank: the reference `add_unit!` over `_isindependent` (see "Class groups
 // and order units" in docs/reference/algorithms_and_sources.rst).  A
@@ -821,7 +841,10 @@ private:
 // precision doubling and cap (and a target precision between two doublings
 // after an undecided ball), and hands the candidate to
 // compact_independent, unchanged, whenever the incremental test does not
-// decide; see the soundness note in compute.cpp.  Wherever
+// decide; see the soundness note in compute.cpp.  On an undecided ball it
+// also tries to prove the candidate dependent by a relation whose unit
+// passes the torsion test of unit_candidate_torsion_status (soundness note
+// at incremental_relation_dependent).  Wherever
 // compact_independent decides, the decision is the same.  A candidate it
 // dropped at the cap, or after a failed logarithmic embedding, may now be
 // decided at higher precision (both need about 2^20 bits).
@@ -855,10 +878,13 @@ struct IncrementalUnitContext {
     // incremental_independence in compute.cpp).
     slong reject_precision = 0;
 
-    // For tests: candidates the incremental test decided, and candidates
-    // passed to compact_independent.
+    // For tests: candidates the incremental test decided, candidates
+    // passed to compact_independent, and, among the incremental decisions,
+    // the dependent ones decided by a verified relation
+    // (incremental_relation_dependent in compute.cpp).
     slong incremental_decisions = 0;
     slong fallback_decisions = 0;
+    slong relation_decisions = 0;
 
     bool define(const NumberField& parent, slong rank) noexcept;
     // Appends `candidate` to `units` when it is independent of them and

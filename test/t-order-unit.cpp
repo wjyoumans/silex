@@ -697,11 +697,12 @@ int test_precision_doubling_cap_forced_failures() {
 // theta - 1 and theta + 2 are units (norms f(0), f(1), f(-2), all 1).  Each
 // add must agree with compact_independent on the same span, the dependent
 // candidates theta^2 and theta (theta - 1)^3 must be rejected, and no
-// candidate may fall back.  From 16 bits the dependent candidates need the
-// doubling, which the incremental test runs itself, so it holds more than
-// one precision state.  At one bit the Gram inverse of the kept rows cannot
-// be proved, and the test must reach the doubling-only path (rows memoised,
-// no Gram state) and still decide.
+// candidate may fall back.  This holds with the relation step of the
+// incremental test and with the step forced off.  With it off, from 16 bits
+// the dependent candidates need the doubling, which the incremental test
+// runs itself, so it holds more than one precision state.  At one bit the
+// Gram inverse of the kept rows cannot be proved, and the test must reach
+// the doubling-only path (rows memoised, no Gram state) and still decide.
 int test_incremental_unit_context_matches_compact_independent() {
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
@@ -737,75 +738,87 @@ int test_incremental_unit_context_matches_compact_independent() {
     add_candidate(theta, 1, &theta_minus_one, 3, true);
     add_candidate(theta_plus_two, 1, nullptr, 0, false);
 
-    for (const slong precision : {WORD(1), WORD(16), WORD(128)}) {
-        silex::detail::IncrementalUnitContext context;
-        assert(context.define(field, 3));
-        silex::EmbeddingContext embeddings(field);
-        slong calls = 0;
-        for (std::size_t i = 0; i < candidates.size(); ++i) {
-            std::vector<silex::FactoredElement> trial;
-            for (const silex::FactoredElement& unit : context.units) {
+    using RelationMode = silex::detail::IncrementalRelationTestSeams::Mode;
+    for (const RelationMode mode :
+         {RelationMode::fail_reconstruction, RelationMode::off}) {
+        silex::detail::TestHookAccess::set_incremental_relation_mode(mode);
+        const bool lower_bound_only = mode != RelationMode::off;
+        for (const slong precision : {WORD(1), WORD(16), WORD(128)}) {
+            silex::detail::IncrementalUnitContext context;
+            assert(context.define(field, 3));
+            silex::EmbeddingContext embeddings(field);
+            slong calls = 0;
+            for (std::size_t i = 0; i < candidates.size(); ++i) {
+                std::vector<silex::FactoredElement> trial;
+                for (const silex::FactoredElement& unit : context.units) {
+                    trial.emplace_back(field);
+                    assert(trial.back().set(unit));
+                }
                 trial.emplace_back(field);
-                assert(trial.back().set(unit));
-            }
-            trial.emplace_back(field);
-            assert(trial.back().set(candidates[i]));
-            bool expected = false;
-            assert(silex::detail::compact_independent(
-                    expected, embeddings,
-                    silex::FactoredElementSpan(trial.data(), trial.size()),
-                    precision));
-            assert(expected == (dependent[i] == 0));
+                assert(trial.back().set(candidates[i]));
+                bool expected = false;
+                assert(silex::detail::compact_independent(
+                        expected, embeddings,
+                        silex::FactoredElementSpan(trial.data(), trial.size()),
+                        precision));
+                assert(expected == (dependent[i] == 0));
 
-            bool changed = false;
-            assert(context.add_independent_unit(changed, candidates[i],
-                                                embeddings, precision,
-                                                nullptr));
-            ++calls;
-            assert(changed == expected);
-            // A dependent candidate records its decision precision, one of
-            // the doubling precisions, as the next candidate's start.
-            if (!changed) {
-                assert(context.reject_precision >= precision);
-                assert(context.reject_precision % precision == 0);
-                const slong ratio = context.reject_precision / precision;
-                assert((ratio & (ratio - 1)) == 0);
+                bool changed = false;
+                assert(context.add_independent_unit(changed, candidates[i],
+                                                    embeddings, precision,
+                                                    nullptr));
+                ++calls;
+                assert(changed == expected);
+                // A dependent candidate records its decision precision, one of
+                // the doubling precisions, as the next candidate's start.
+                if (!changed && lower_bound_only) {
+                    assert(context.reject_precision >= precision);
+                    assert(context.reject_precision % precision == 0);
+                    const slong ratio = context.reject_precision / precision;
+                    assert((ratio & (ratio - 1)) == 0);
+                }
+                assert(context.units.size() == (changed ? trial.size()
+                                                        : trial.size() - 1));
             }
-            assert(context.units.size() == (changed ? trial.size()
-                                                    : trial.size() - 1));
-        }
-        assert(context.full_rank);
-        assert(context.incremental_decisions == calls);
-        assert(context.fallback_decisions == 0);
-        if (precision == 16) {
-            assert(context.log_states.size() > 1);
-        }
-        if (precision == 1) {
-            // At one bit the Gram matrix of the kept rows cannot be
-            // inverted (arb_mat_inv fails or det(G) is not positive), so
-            // incremental_prepare fails after computing the rows and the
-            // test only doubles the precision: the state at the starting
-            // precision holds rows but no Gram inverse.
-            assert(context.log_states.size() > 1);
-            const silex::detail::IncrementalUnitContext::LogState& first =
-                    context.log_states.front();
-            assert(first.precision == precision);
-            assert(!first.rows.empty());
-            assert(first.gram_units == -1);
-            // The first reject is at 64 bits, and every later candidate
-            // starts there, so the one-bit state is never brought to more
-            // than the one row of the first prepare.  Starting at the base
-            // precision would grow it to the kept units of each candidate.
-            assert(context.reject_precision == 64);
-            assert(first.rows.size() == 1);
-        }
+            assert(context.full_rank);
+            assert(context.incremental_decisions == calls);
+            assert(context.fallback_decisions == 0);
+            if (lower_bound_only) {
+                assert(context.relation_decisions == 0);
+            }
+            if (precision == 16 && lower_bound_only) {
+                assert(context.log_states.size() > 1);
+            }
+            if (precision == 1 && lower_bound_only) {
+                // At one bit the Gram matrix of the kept rows cannot be
+                // inverted (arb_mat_inv fails or det(G) is not positive), so
+                // incremental_prepare fails after computing the rows and the
+                // test only doubles the precision: the state at the starting
+                // precision holds rows but no Gram inverse.
+                assert(context.log_states.size() > 1);
+                const silex::detail::IncrementalUnitContext::LogState& first =
+                        context.log_states.front();
+                assert(first.precision == precision);
+                assert(!first.rows.empty());
+                assert(first.gram_units == -1);
+                // The first reject is at 64 bits, and every later candidate
+                // starts there, so the one-bit state is never brought to more
+                // than the one row of the first prepare.  Starting at the base
+                // precision would grow it to the kept units of each candidate.
+                assert(context.reject_precision == 64);
+                assert(first.rows.size() == 1);
+            }
 
-        // A full-rank context takes no more candidates.
-        bool changed = true;
-        assert(!context.add_independent_unit(changed, candidates[0],
-                                             embeddings, precision, nullptr));
-        assert(!changed);
+            // A full-rank context takes no more candidates.
+            bool changed = true;
+            assert(!context.add_independent_unit(changed, candidates[0],
+                                                 embeddings, precision,
+                                                 nullptr));
+            assert(!changed);
+        }
     }
+    silex::detail::TestHookAccess::set_incremental_relation_mode(
+            silex::detail::IncrementalRelationTestSeams::Mode::off);
     return 0;
 }
 
