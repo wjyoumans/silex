@@ -1620,6 +1620,14 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` and 9.5% fewer for the field defined by
   ``x^16 + 1``.  No timing has been measured.
 
+- ``Order::is_equation_order`` reads the cached identity-basis flag instead
+  of testing the basis matrix on every call, and ``Order::set_basis`` fills
+  the flag from the test it already runs.  The result is the same as before
+  for every order.  Published outputs are identical on the tested ``grh``
+  corpus rows.  Under callgrind the ``grh`` class/unit computation ran 3.0%
+  fewer instructions for ``cyclotomic_19_phi18`` and 2.3% fewer for the field
+  defined by ``x^16 + 1``.  No timing has been measured.
+
 Fixed
 -----
 
