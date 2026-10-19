@@ -629,6 +629,11 @@ bool SparseMat::append_row(const SparseRow& row) noexcept {
     return true;
 }
 
+void SparseMat::pop_last_row() noexcept {
+    nnz_ -= row_data_.back().length();
+    row_data_.pop_back();
+}
+
 bool SparseMat::append_fmpz_mat_row(flint::FmpzMatConstRef matrix, slong row) noexcept {
     if (matrix.raw() == nullptr || row < 0 || row >= flint::fmpz_mat_nrows(matrix) ||
         flint::fmpz_mat_ncols(matrix) != cols_) {
@@ -847,9 +852,19 @@ void ModRankContext::reset() noexcept {
 }
 
 bool ModRankContext::add_row(bool* independent, const SparseRow& row) noexcept {
+    return add_row_recording(independent, row, nullptr, nullptr, nullptr);
+}
+
+bool ModRankContext::add_row_recording(bool* independent,
+                                       const SparseRow& row,
+                                       slong* position,
+                                       std::vector<ulong>* eliminated,
+                                       slong* displaced_pivot) noexcept {
     if (independent == nullptr || !is_set_ || !row.fits_columns(ambient_dim_)) {
         return false;
     }
+    const bool recording = position != nullptr && eliminated != nullptr &&
+                           displaced_pivot != nullptr;
 
     const slong n = ambient_dim_;
     nmod_t mod;
@@ -888,9 +903,17 @@ bool ModRankContext::add_row(bool* independent, const SparseRow& row) noexcept {
         ++pos;
     }
 
+    if (recording) {
+        eliminated->assign(static_cast<std::size_t>(rank_), 0);
+        *position = pos;
+        *displaced_pivot = pivots_[static_cast<std::size_t>(rank_)];
+    }
     for (slong i = 0; i < rank_; ++i) {
         const ulong c = nmod_mat_entry(basis_.raw(), i, pivot);
         if (c != 0) {
+            if (recording) {
+                (*eliminated)[static_cast<std::size_t>(i)] = c;
+            }
             ulong* const basis_row = nmod_mat_entry_ptr(basis_.raw(), i, 0);
             nmod_row_submul(basis_row, vector.data(), n, c, mod);
         }
@@ -914,6 +937,72 @@ bool ModRankContext::add_row(bool* independent, const SparseRow& row) noexcept {
     *independent = true;
 
     return true;
+}
+
+// Inverts add_row_recording exactly.  The independent add normalized the new
+// row v to v[pivot] = 1, replaced every earlier basis row b by
+// b - b[pivot] v, inserted v at `position` and shifted the later rows down
+// one slot.  Adding eliminated[k] v back to old row k restores it mod p; the
+// rows then move back up.  Rows at or after rank_ are zero in every
+// ModRankContext (set_prime_ui and reset zero them, set copies them, and
+// add_row writes only rows below the new rank), so the vacated row is zeroed
+// and the overwritten pivot slot is restored from the record.
+bool ModRankContext::undo_add_row(slong position,
+                                  const std::vector<ulong>& eliminated,
+                                  slong displaced_pivot) noexcept {
+    if (!is_set_ || rank_ <= 0 || position < 0 || position >= rank_ ||
+        eliminated.size() != static_cast<std::size_t>(rank_ - 1)) {
+        return false;
+    }
+
+    const slong n = ambient_dim_;
+    nmod_t mod;
+    nmod_init(&mod, prime_);
+    const ulong* const added = nmod_mat_entry_ptr(basis_.raw(), position, 0);
+    for (slong i = 0; i < rank_; ++i) {
+        if (i == position) {
+            continue;
+        }
+        const slong old_index = i < position ? i : i - 1;
+        const ulong c = eliminated[static_cast<std::size_t>(old_index)];
+        if (c == 0) {
+            continue;
+        }
+        ulong* const basis_row = nmod_mat_entry_ptr(basis_.raw(), i, 0);
+        for (slong j = 0; j < n; ++j) {
+            if (added[j] != 0) {
+                basis_row[j] = nmod_add(basis_row[j],
+                                        nmod_mul(c, added[j], mod), mod);
+            }
+        }
+    }
+
+    for (slong i = position; i + 1 < rank_; ++i) {
+        pivots_[static_cast<std::size_t>(i)] =
+                pivots_[static_cast<std::size_t>(i + 1)];
+        for (slong j = 0; j < n; ++j) {
+            nmod_mat_entry(basis_.raw(), i, j) =
+                    nmod_mat_entry(basis_.raw(), i + 1, j);
+        }
+    }
+    --rank_;
+    pivots_[static_cast<std::size_t>(rank_)] = displaced_pivot;
+    for (slong j = 0; j < n; ++j) {
+        nmod_mat_entry(basis_.raw(), rank_, j) = 0;
+    }
+    return true;
+}
+
+bool ModRankContext::same_state_as(const ModRankContext& other) const noexcept {
+    if (is_set_ != other.is_set_) {
+        return false;
+    }
+    if (!is_set_) {
+        return true;
+    }
+    return ambient_dim_ == other.ambient_dim_ && rank_ == other.rank_ &&
+           prime_ == other.prime_ && pivots_ == other.pivots_ &&
+           ::nmod_mat_equal(basis_.raw(), other.basis_.raw()) != 0;
 }
 
 bool ModRankContext::row_is_independent(

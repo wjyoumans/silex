@@ -18,6 +18,17 @@ struct ClassRelationModuleAddResult {
     bool modular_independent = false;
 };
 
+// Record of one add_fmpz_mat_row, filled when the add retains the row, so
+// rollback_add can restore the context to its state before the add.
+struct ClassRelationModuleAddUndo {
+    bool changed = false;
+    bool basis_row = false;
+    bool checkpoint_valid = false;
+    slong mod_rank_position = -1;
+    slong mod_rank_displaced_pivot = 0;
+    std::vector<ulong> mod_rank_eliminated;
+};
+
 class ClassRelationModuleContext {
 public:
     ClassRelationModuleContext() noexcept = default;
@@ -59,6 +70,27 @@ public:
                           slong row,
                           slong relation_index,
                           bool always = true) noexcept;
+    // As above, and records in `undo` how to reverse a retaining add.  An
+    // add that does not retain the row (a duplicate, or a modular-dependent
+    // row with always false) changes nothing and leaves undo.changed false.
+    // undo.changed must be false on entry.  On failure the context is
+    // unchanged.
+    bool add_fmpz_mat_row(ClassRelationModuleAddUndo& undo,
+                          ClassRelationModuleAddResult& result,
+                          flint::FmpzMatConstRef matrix,
+                          slong row,
+                          slong relation_index,
+                          bool always) noexcept;
+    // Restores the state before the add recorded in `undo`, which must be the
+    // latest change to this context.  Returns true with nothing to do when
+    // undo.changed is false; fails without changing the context when the
+    // record does not match it.  Clears `undo` on success.
+    bool rollback_add(ClassRelationModuleAddUndo& undo) noexcept;
+    // Exact equality of the retained rows, their relation indices, the
+    // modular basis, and the checkpoint bookkeeping (not the checkpoint HNF
+    // itself, which adds and rollbacks never touch).
+    bool same_state_as(const ClassRelationModuleContext& other) const noexcept;
+
     bool classify_fmpz_mat_row(ClassRelationModuleAddResult& result,
                                flint::FmpzMatConstRef matrix,
                                slong row,
@@ -78,7 +110,8 @@ public:
     bool checkpoint_index(flint::FmpzRef out) noexcept;
 
 private:
-    bool add_sparse_row(ClassRelationModuleAddResult& result,
+    bool add_sparse_row(ClassRelationModuleAddUndo& undo,
+                        ClassRelationModuleAddResult& result,
                         const fmpz_smat::SparseRow& row,
                         slong relation_index,
                         bool always) noexcept;

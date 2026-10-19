@@ -121,6 +121,12 @@ public:
     bool rank_mod_prime_ui(slong* rank, ulong p) const noexcept;
 
 private:
+    friend class detail::ClassRelationModuleContext;
+
+    // Removes the last row.  Private rollback of an append_row for
+    // ClassRelationModuleContext; the matrix must have a row.
+    void pop_last_row() noexcept;
+
     std::vector<SparseRow> row_data_;
     slong cols_ = 0;
     slong nnz_ = 0;
@@ -162,6 +168,24 @@ public:
             slong row) noexcept;
 
 private:
+    friend class detail::ClassRelationModuleContext;
+
+    // add_row that also records, when the row is independent, what
+    // undo_add_row needs: the insertion position of the new basis row, the
+    // coefficients that eliminated its pivot column from the earlier basis
+    // rows (old row order), and the pivot slot the insertion overwrote.
+    bool add_row_recording(bool* independent,
+                           const SparseRow& row,
+                           slong* position,
+                           std::vector<ulong>* eliminated,
+                           slong* displaced_pivot) noexcept;
+    // Exact inverse of the latest independent add_row_recording.  Fails
+    // without changing the context when the record does not fit it.
+    bool undo_add_row(slong position,
+                      const std::vector<ulong>& eliminated,
+                      slong displaced_pivot) noexcept;
+    bool same_state_as(const ModRankContext& other) const noexcept;
+
     flint::NmodMat basis_{0, 0, 2};
     std::vector<slong> pivots_;
     slong ambient_dim_ = 0;

@@ -297,6 +297,140 @@ int test_copy_and_move_contracts() {
             : 0;
 }
 
+bool add_rows(silex::detail::ClassRelationModuleContext& context,
+              const sflint::FmpzMat& rows,
+              slong count) noexcept {
+    silex::detail::ClassRelationModuleAddResult result;
+    for (slong i = 0; i < count; ++i) {
+        if (!context.add_fmpz_mat_row(result, rows, i, i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// An in-place add followed by rollback_add restores the module exactly: the
+// retained rows and indices, the modular basis (including a middle insertion
+// that eliminated a column of an earlier basis row), and the checkpoint
+// bookkeeping.  Adds that retain nothing leave the module unchanged.
+int test_rollback_restores_state_before_add() {
+    silex::detail::ClassRelationModuleContext context;
+    silex::detail::ClassRelationModuleContext snapshot;
+    silex::detail::ClassRelationModuleContext reference;
+    silex::detail::ClassRelationModuleAddResult result;
+    silex::detail::ClassRelationModuleAddUndo undo;
+    silex::fmpz_smat::HnfContext checkpoint;
+    sflint::FmpzMat rows(6, 4);
+
+    // r0, r1 have modular pivots 0 and 2; r2 = 2 r0 is an extra row.
+    set_entry(rows, 0, 0, 1);
+    set_entry(rows, 0, 1, 3);
+    set_entry(rows, 0, 3, 4);
+    set_entry(rows, 1, 2, 1);
+    set_entry(rows, 1, 3, 2);
+    set_entry(rows, 2, 0, 2);
+    set_entry(rows, 2, 1, 6);
+    set_entry(rows, 2, 3, 8);
+    // r3 has pivot 1 and is inserted between the two basis rows; it
+    // eliminates the entry 3 in column 1 of r0.
+    set_entry(rows, 3, 1, 1);
+    set_entry(rows, 3, 3, 5);
+    // r4 = 3 r0 is modular dependent but not a duplicate.
+    set_entry(rows, 4, 0, 3);
+    set_entry(rows, 4, 1, 9);
+    set_entry(rows, 4, 3, 12);
+
+    if (!context.reset(4, 7) || !add_rows(context, rows, 3) ||
+        !context.checkpoint_context(checkpoint) || !snapshot.set(context) ||
+        !context.same_state_as(snapshot)) {
+        return 1;
+    }
+
+    // Independent row, rejected after the add.
+    if (!context.add_fmpz_mat_row(undo, result, rows, 3, 3, false) ||
+        !result.retained || !result.modular_independent || !undo.changed ||
+        !undo.basis_row || undo.mod_rank_position != 1 ||
+        context.rank() != 3 || context.same_state_as(snapshot) ||
+        !context.rollback_add(undo) || undo.changed ||
+        !context.same_state_as(snapshot) || context.rank() != 2 ||
+        context.basis_count() != 2 || context.extra_count() != 1) {
+        return 1;
+    }
+
+    // Modular-dependent row retained as an extra row, then rolled back.
+    if (!context.add_fmpz_mat_row(undo, result, rows, 4, 4, true) ||
+        !result.retained || result.modular_independent || !undo.changed ||
+        undo.basis_row || context.extra_count() != 2 ||
+        !context.rollback_add(undo) || !context.same_state_as(snapshot)) {
+        return 1;
+    }
+
+    // Adds that retain nothing change nothing; rollback is a no-op.
+    if (!context.add_fmpz_mat_row(undo, result, rows, 4, 4, false) ||
+        result.retained || undo.changed ||
+        !context.add_fmpz_mat_row(undo, result, rows, 1, 4, true) ||
+        !result.duplicate || undo.changed ||
+        !context.rollback_add(undo) || !context.same_state_as(snapshot)) {
+        return 1;
+    }
+
+    // After the rollbacks the module evolves as if they never happened.
+    if (!reference.reset(4, 7) || !add_rows(reference, rows, 3) ||
+        !reference.checkpoint_context(checkpoint) ||
+        !reference.add_fmpz_mat_row(result, rows, 3, 3) ||
+        !context.add_fmpz_mat_row(result, rows, 3, 3) ||
+        !context.same_state_as(reference)) {
+        return 1;
+    }
+
+    // A pending record refuses a second add; a checkpoint rebuilt over the
+    // added row refuses the rollback.  Neither changes the module.
+    silex::detail::ClassRelationModuleContext after;
+    if (!context.add_fmpz_mat_row(undo, result, rows, 4, 4, true) ||
+        !undo.changed || !after.set(context) ||
+        context.add_fmpz_mat_row(undo, result, rows, 5, 5, true) ||
+        !context.same_state_as(after) ||
+        !context.checkpoint_context(checkpoint) || !after.set(context) ||
+        context.rollback_add(undo) || !context.same_state_as(after)) {
+        return 1;
+    }
+    return 0;
+}
+
+// Every in-place add, at whatever modular pivot position it lands, rolls back
+// to the exact prior state; the module then takes the row for real.
+int test_rollback_after_each_add_of_a_row_stream() {
+    constexpr slong kColumns = 6;
+    constexpr slong kRows = 24;
+    silex::detail::ClassRelationModuleContext context;
+    silex::detail::ClassRelationModuleContext snapshot;
+    silex::detail::ClassRelationModuleAddResult result;
+    sflint::FmpzMat rows(kRows, kColumns);
+    ulong state = 12345;
+    for (slong i = 0; i < kRows; ++i) {
+        for (slong j = 0; j < kColumns; ++j) {
+            state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+            const slong value = static_cast<slong>((state >> 33) % 7) - 3;
+            set_entry(rows, i, j, (j * 5 + i) % 4 == 0 ? value : 0);
+        }
+    }
+    if (!context.reset(kColumns, 5)) {
+        return 1;
+    }
+    slong independent_rollbacks = 0;
+    for (slong i = 0; i < kRows; ++i) {
+        silex::detail::ClassRelationModuleAddUndo undo;
+        if (!snapshot.set(context) ||
+            !context.add_fmpz_mat_row(undo, result, rows, i, i, true) ||
+            !context.rollback_add(undo) || !context.same_state_as(snapshot) ||
+            !context.add_fmpz_mat_row(result, rows, i, i)) {
+            return 1;
+        }
+        independent_rollbacks += result.modular_independent ? 1 : 0;
+    }
+    return independent_rollbacks >= 3 ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
@@ -308,7 +442,9 @@ int main() {
                            0 ||
                    test_checkpoints_follow_canonical_hnf_across_partial_rank() !=
                            0 ||
-                   test_copy_and_move_contracts() != 0
+                   test_copy_and_move_contracts() != 0 ||
+                   test_rollback_restores_state_before_add() != 0 ||
+                   test_rollback_after_each_add_of_a_row_stream() != 0
             ? 1
             : 0;
 }

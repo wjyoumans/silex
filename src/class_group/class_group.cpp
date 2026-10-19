@@ -11389,8 +11389,10 @@ bool ClassGroupContext::append_relation_with_outcome_(
         }
     }
 
-    detail::ClassRelationModuleContext module_candidate;
-    module_candidate.set_diagnostics(diagnostics_);
+    // relation_module_ takes the row in place; module_undo reverses that
+    // add on every failure exit below, so a failed append leaves the module
+    // as it was.
+    detail::ClassRelationModuleAddUndo module_undo;
     detail::ClassRelationModuleAddResult add_result;
     RowModuleAddResult exact_add_result;
     fmpz_smat::HnfContext exact_module_candidate;
@@ -11438,17 +11440,10 @@ bool ClassGroupContext::append_relation_with_outcome_(
                             "class_group.append_relation_module_update");
         {
             SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
-                                "class_group.append_relation_module_copy");
-            if (!module_candidate.set(relation_module_)) {
-                return false;
-            }
-        }
-        {
-            SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                                 "class_group.append_relation_module_add");
-            if (!module_candidate.add_fmpz_mat_row(
-                        add_result, flint::FmpzMatConstRef(row), 0,
-                        stored_relation_index, retain_modular_dependent)) {
+            if (!relation_module_.add_fmpz_mat_row(
+                        module_undo, add_result, flint::FmpzMatConstRef(row),
+                        0, stored_relation_index, retain_modular_dependent)) {
                 return false;
             }
         }
@@ -11535,16 +11530,10 @@ bool ClassGroupContext::append_relation_with_outcome_(
                                 "class_group.append_relation_module_update");
             {
                 SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
-                                    "class_group.append_relation_module_copy");
-                if (!module_candidate.set(relation_module_)) {
-                    return false;
-                }
-            }
-            {
-                SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                                     "class_group.append_relation_module_add");
-                if (!module_candidate.add_fmpz_mat_row(
-                            add_result, flint::FmpzMatConstRef(row), 0,
+                if (!relation_module_.add_fmpz_mat_row(
+                            module_undo, add_result,
+                            flint::FmpzMatConstRef(row), 0,
                             stored_relation_index, retain_modular_dependent)) {
                     return false;
                 }
@@ -11552,10 +11541,14 @@ bool ClassGroupContext::append_relation_with_outcome_(
         }
 
         if (!add_result.retained) {
-            if (!module_candidate.add_fmpz_mat_row(
-                        add_result, flint::FmpzMatConstRef(row), 0,
-                        stored_relation_index, true) ||
-                !add_result.retained || add_result.duplicate) {
+            // The add above retained nothing, so module_undo is still empty.
+            if (!relation_module_.add_fmpz_mat_row(
+                        module_undo, add_result, flint::FmpzMatConstRef(row),
+                        0, stored_relation_index, true)) {
+                return false;
+            }
+            if (!add_result.retained || add_result.duplicate) {
+                static_cast<void>(relation_module_.rollback_add(module_undo));
                 return false;
             }
         }
@@ -11576,6 +11569,9 @@ bool ClassGroupContext::append_relation_with_outcome_(
         SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                             "class_group.append_relation_store");
         if (!relations_.append(relation)) {
+            // module_undo records the only change since entry, so the
+            // rollback restores relation_module_ exactly.
+            static_cast<void>(relation_module_.rollback_add(module_undo));
             return false;
         }
         relation_sources_.push_back(source);
@@ -11584,7 +11580,6 @@ bool ClassGroupContext::append_relation_with_outcome_(
     }
 
     if (relation_module_changed) {
-        relation_module_.swap(module_candidate);
         relation_rank_ = relation_module_.rank();
         row_module_synced_ = false;
     }
@@ -12463,11 +12458,11 @@ bool ClassGroupContext::set_relation_matrix(
 //   - A module duplicate (exactly equal to a row relation_module_ already
 //     retains) kept as a witness is appended to relations_ only; the
 //     lattice is unchanged.
-//   - Otherwise relations_.append runs first and returns on failure; only
-//     then relation_module_ is replaced by module_candidate, a copy of
-//     relation_module_ plus this row.  row_module_ is either marked unsynced
-//     or, on the exact path, replaced by the synced row_module_ plus this
-//     row.
+//   - Otherwise relation_module_ takes this row in place, recording the
+//     change in module_undo; relations_.append then runs, and on its failure
+//     rollback_add restores relation_module_ exactly before returning.
+//     row_module_ is either marked unsynced or, on the exact path, replaced
+//     by the synced row_module_ plus this row.
 // set_relation_matrix publishes from relations_ directly and does not rely
 // on (I).
 #if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS

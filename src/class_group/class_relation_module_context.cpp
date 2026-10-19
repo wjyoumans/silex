@@ -359,8 +359,20 @@ bool ClassRelationModuleContext::add_fmpz_mat_row(
         slong row,
         slong relation_index,
         bool always) noexcept {
+    ClassRelationModuleAddUndo undo;
+    return add_fmpz_mat_row(undo, result, matrix, row, relation_index,
+                            always);
+}
+
+bool ClassRelationModuleContext::add_fmpz_mat_row(
+        ClassRelationModuleAddUndo& undo,
+        ClassRelationModuleAddResult& result,
+        flint::FmpzMatConstRef matrix,
+        slong row,
+        slong relation_index,
+        bool always) noexcept {
     result = {};
-    if (!is_set_ || !fmpz_mat_is_row(matrix, row) ||
+    if (undo.changed || !is_set_ || !fmpz_mat_is_row(matrix, row) ||
         flint::fmpz_mat_ncols(matrix) != ambient_dim_ ||
         relation_index < 0) {
         return false;
@@ -371,7 +383,78 @@ bool ClassRelationModuleContext::add_fmpz_mat_row(
         return false;
     }
 
-    return add_sparse_row(result, sparse_row, relation_index, always);
+    return add_sparse_row(undo, result, sparse_row, relation_index, always);
+}
+
+bool ClassRelationModuleContext::rollback_add(
+        ClassRelationModuleAddUndo& undo) noexcept {
+    if (!undo.changed) {
+        return true;
+    }
+    if (!is_set_) {
+        return false;
+    }
+    // The checkpoint must not yet cover the row being removed.
+    if (undo.basis_row) {
+        if (basis_count() <= 0 || bas_relation_indices_.empty() ||
+            checkpoint_basis_count_ >= basis_count() ||
+            !mod_rank_.undo_add_row(undo.mod_rank_position,
+                                    undo.mod_rank_eliminated,
+                                    undo.mod_rank_displaced_pivot)) {
+            return false;
+        }
+        bas_gens_.pop_last_row();
+        bas_relation_indices_.pop_back();
+    } else {
+        if (extra_count() <= 0 || rel_relation_indices_.empty() ||
+            checkpoint_extra_count_ >= extra_count()) {
+            return false;
+        }
+        rel_gens_.pop_last_row();
+        rel_relation_indices_.pop_back();
+    }
+    checkpoint_valid_ = undo.checkpoint_valid;
+    undo.changed = false;
+    undo.basis_row = false;
+    undo.mod_rank_position = -1;
+    undo.mod_rank_eliminated.clear();
+    return true;
+}
+
+bool ClassRelationModuleContext::same_state_as(
+        const ClassRelationModuleContext& other) const noexcept {
+    if (is_set_ != other.is_set_) {
+        return false;
+    }
+    if (!is_set_) {
+        return true;
+    }
+    if (ambient_dim_ != other.ambient_dim_ || prime_ != other.prime_ ||
+        checkpoint_basis_count_ != other.checkpoint_basis_count_ ||
+        checkpoint_extra_count_ != other.checkpoint_extra_count_ ||
+        checkpoint_valid_ != other.checkpoint_valid_ ||
+        bas_relation_indices_ != other.bas_relation_indices_ ||
+        rel_relation_indices_ != other.rel_relation_indices_ ||
+        bas_gens_.nrows() != other.bas_gens_.nrows() ||
+        bas_gens_.nnz() != other.bas_gens_.nnz() ||
+        rel_gens_.nrows() != other.rel_gens_.nrows() ||
+        rel_gens_.nnz() != other.rel_gens_.nnz() ||
+        !mod_rank_.same_state_as(other.mod_rank_)) {
+        return false;
+    }
+    for (slong i = 0; i < bas_gens_.nrows(); ++i) {
+        if (!sparse_rows_equal(bas_gens_.row_ref(i),
+                               other.bas_gens_.row_ref(i))) {
+            return false;
+        }
+    }
+    for (slong i = 0; i < rel_gens_.nrows(); ++i) {
+        if (!sparse_rows_equal(rel_gens_.row_ref(i),
+                               other.rel_gens_.row_ref(i))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool ClassRelationModuleContext::classify_fmpz_mat_row(
@@ -394,12 +477,13 @@ bool ClassRelationModuleContext::classify_fmpz_mat_row(
 }
 
 bool ClassRelationModuleContext::add_sparse_row(
+        ClassRelationModuleAddUndo& undo,
         ClassRelationModuleAddResult& result,
         const fmpz_smat::SparseRow& sparse_row,
         slong relation_index,
         bool always) noexcept {
     result = {};
-    if (!is_set_ || relation_index < 0 ||
+    if (undo.changed || !is_set_ || relation_index < 0 ||
         !sparse_row.fits_columns(ambient_dim_)) {
         return false;
     }
@@ -409,17 +493,31 @@ bool ClassRelationModuleContext::add_sparse_row(
         return true;
     }
 
+    // A dependent row leaves mod_rank_ unchanged; an independent one is
+    // recorded so a failed append below can be undone.
     bool independent = false;
-    if (!mod_rank_.add_row(&independent, sparse_row)) {
+    if (!mod_rank_.add_row_recording(&independent, sparse_row,
+                                     &undo.mod_rank_position,
+                                     &undo.mod_rank_eliminated,
+                                     &undo.mod_rank_displaced_pivot)) {
         return false;
     }
     result.modular_independent = independent;
 
     if (independent) {
         if (!bas_gens_.append_row(sparse_row)) {
+            // mod_rank_ was just changed by the recorded add; this inverse
+            // cannot fail on its own record.
+            static_cast<void>(mod_rank_.undo_add_row(
+                    undo.mod_rank_position, undo.mod_rank_eliminated,
+                    undo.mod_rank_displaced_pivot));
+            result = {};
             return false;
         }
         bas_relation_indices_.push_back(relation_index);
+        undo.changed = true;
+        undo.basis_row = true;
+        undo.checkpoint_valid = checkpoint_valid_;
         result.retained = true;
         checkpoint_valid_ = false;
         return true;
@@ -427,9 +525,13 @@ bool ClassRelationModuleContext::add_sparse_row(
 
     if (always) {
         if (!rel_gens_.append_row(sparse_row)) {
+            result = {};
             return false;
         }
         rel_relation_indices_.push_back(relation_index);
+        undo.changed = true;
+        undo.basis_row = false;
+        undo.checkpoint_valid = checkpoint_valid_;
         result.retained = true;
         checkpoint_valid_ = false;
     }
