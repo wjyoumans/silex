@@ -837,6 +837,16 @@ int test_maximal_order_table_matches_basis_products() {
     silex::NumberField power_field = field_by_polynomial(pure_poly);
     assert(table_matches_basis_products(
             silex::test::equation_order(power_field)));
+
+    // Z + 2 O_K of x^3 - 2: neither maximal nor an equation order.
+    silex::Order sub(power_field);
+    sflint::FmpqMat sub_basis(3, 3);
+    mat_entry_si(sub_basis, 0, 0, 1);
+    mat_entry_si(sub_basis, 1, 1, 2);
+    mat_entry_si(sub_basis, 2, 2, 2);
+    assert(sub.set_basis(sflint::FmpqMatConstRef(sub_basis)));
+    assert(!sub.is_equation_order());
+    assert(table_matches_basis_products(sub));
     return 0;
 }
 
