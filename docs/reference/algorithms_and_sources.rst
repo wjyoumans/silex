@@ -859,10 +859,22 @@ it.  The finish checks that the relation rank it passes equals
 two routes return different bases of the same kernel lattice.  A finish
 workspace, which keeps the HNF and its transform across relation batches,
 takes its unit rows from these same bases (the witness rows for the witness
-extraction, the finish variant for the analytic finish), computed once per
-sync; it never takes them from the zero-row part of its own HNF transform,
-which is an exact but unreduced kernel basis whose entries can have tens of
-thousands of bits and which no finish precision can use.  The class
+extraction, the finish variant for the analytic finish), computed at most
+once per sync; it never takes them from the zero-row part of its own HNF
+transform, which is an exact but unreduced kernel basis whose entries can
+have tens of thousands of bits and which no finish precision can use.  For
+the finish rows the workspace keeps the phase output of its last finish
+kernel, ``U * [c*A_m | I_m]`` for the first ``m`` relations and a
+unimodular ``U``.  After a sync appends relations, the phase input is that
+matrix, padded with zero columns for the new relations, followed by the new
+rows ``[c*a_i | e_i]``: that is ``diag(U, I) * [c*A | I_n]``, a basis of the
+same lattice whose identity part is again unimodular, so the same two exact
+checks and the exact rank give the same kernel claim.  When the phase or the
+checks fail on it, the workspace runs the phase on ``[c*A | I_n]``, and
+then the finish variant above.  The workspace's finish rows can therefore be
+another basis of the same kernel lattice than the path without a workspace,
+depending on the relation counts at which earlier finish checks ran; as
+above, only the precision the finish needs can depend on that basis.  The class
 group, the regulator, and the unit lattice do not depend on the
 route; later LLL reductions start from the basis they receive, so the
 specific unit generators are not shown to be route-independent.  On the

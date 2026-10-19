@@ -436,9 +436,15 @@ bool class_group_relation_rows(
 bool sync_hnf_finish_workspace(
         HnfFinishWorkspace& workspace,
         const ClassGroupContext& context) noexcept;
-// The workspace's kernel rows of the processed relations, computed once per
-// sync: hnf_unit_finish_coefficients when `finish` is set and
-// hnf_unit_witness_coefficients otherwise.  The zero-row part of the HNF
+// The workspace's kernel rows of the processed relations, computed at most
+// once per sync: hnf_unit_witness_coefficients when `finish` is not set.
+// When it is set, the double-precision phase of finish_relation_kernel_basis
+// with its two exact checks, started from the reduced extension the
+// workspace kept from its previous finish kernel and extended by the
+// appended relations (a unimodular image of [c * relations | I_n]); when
+// that fails, from [c * relations | I_n]; and when that fails too,
+// hnf_unit_finish_coefficients.  The finish rows are a basis of the same
+// kernel lattice either way.  The zero-row part of the HNF
 // transform is an exact kernel basis as well, but it is not reduced (its
 // entries can have tens of thousands of bits), so neither the finish nor the
 // witness extraction takes its unit rows from it.  Null on failure.

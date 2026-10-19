@@ -251,6 +251,13 @@ struct HnfFinishWorkspace {
     // unit_logs_finish_kernel is set and of the witness rows otherwise.
     flint::FmpzMat finish_kernel{0, 0};
     flint::FmpzMat witness_kernel{0, 0};
+    // The reduced [c * relations | I] matrix of the first
+    // finish_extension_relation_count relations that the last finish kernel
+    // was read from (see hnf_finish_workspace_kernel).  Unlike the kernel
+    // caches it is kept across syncs that append relations: the next finish
+    // kernel starts its reduction from it.
+    flint::FmpzMat finish_extension{0, 0};
+    slong finish_extension_relation_count = 0;
     slong generator_count = 0;
     slong processed_relation_count = 0;
     slong relation_rank = 0;
@@ -263,6 +270,7 @@ struct HnfFinishWorkspace {
     bool unit_logs_finish_kernel = false;
     bool finish_kernel_valid = false;
     bool witness_kernel_valid = false;
+    bool finish_extension_valid = false;
 
     void clear() noexcept {
         hnf = flint::FmpzMat(0, 0);
@@ -271,6 +279,8 @@ struct HnfFinishWorkspace {
         unit_logs = flint::ArbMat(0, 0);
         finish_kernel = flint::FmpzMat(0, 0);
         witness_kernel = flint::FmpzMat(0, 0);
+        finish_extension = flint::FmpzMat(0, 0);
+        finish_extension_relation_count = 0;
         generator_count = 0;
         processed_relation_count = 0;
         relation_rank = 0;
@@ -283,6 +293,7 @@ struct HnfFinishWorkspace {
         unit_logs_finish_kernel = false;
         finish_kernel_valid = false;
         witness_kernel_valid = false;
+        finish_extension_valid = false;
     }
 };
 

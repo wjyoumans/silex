@@ -616,6 +616,116 @@ int test_finish_workspace_requires_factor_base() {
     return 0;
 }
 
+// Two kernel bases span the same lattice (compared by row HNF).
+void assert_same_row_lattice(const sflint::FmpzMat& a,
+                             const sflint::FmpzMat& b) noexcept {
+    assert(sflint::fmpz_mat_nrows(a) == sflint::fmpz_mat_nrows(b));
+    assert(sflint::fmpz_mat_ncols(a) == sflint::fmpz_mat_ncols(b));
+    sflint::FmpzMat a_hnf(sflint::fmpz_mat_nrows(a), sflint::fmpz_mat_ncols(a));
+    sflint::FmpzMat b_hnf(sflint::fmpz_mat_nrows(b), sflint::fmpz_mat_ncols(b));
+    ::fmpz_mat_hnf(a_hnf.raw(), a.raw());
+    ::fmpz_mat_hnf(b_hnf.raw(), b.raw());
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(a_hnf),
+                                  sflint::FmpzMatConstRef(b_hnf)));
+}
+
+// The workspace's finish kernel after a sync that appends relations starts
+// its reduction from the reduced extension kept from the previous finish
+// kernel.  The rows are a basis of the full kernel of the live relations;
+// a cached extension that fails the exact checks falls back to the
+// reduction of [c * relations | I_n], whose rows are
+// hnf_unit_finish_coefficients's.
+int test_finish_workspace_kernel_extends_cached_reduction() {
+    silex::NumberField field = degree_one_field();
+    silex::Order order = silex::test::equation_order(field);
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 3);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    auto* workspace = silex::detail::class_group_finish_workspace(context);
+    assert(workspace != nullptr);
+
+    for (const slong value : {4, 9, 6}) {
+        append_integer_relation(context, field, value);
+    }
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(!workspace->finish_extension_valid);
+    const sflint::FmpzMat* kernel =
+            silex::detail::hnf_finish_workspace_kernel(*workspace, context,
+                                                       true);
+    assert(kernel != nullptr);
+    sflint::FmpzMat expected(0, 0);
+    assert(silex::detail::hnf_unit_finish_coefficients(expected, context));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(*kernel),
+                                  sflint::FmpzMatConstRef(expected)));
+    assert(workspace->finish_extension_valid);
+    assert(workspace->finish_extension_relation_count == 3);
+
+    // The sync drops the kernel but keeps the extension; the next kernel
+    // extends it.
+    for (const slong value : {12, 18, 8}) {
+        append_integer_relation(context, field, value);
+    }
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(!workspace->finish_kernel_valid);
+    assert(workspace->finish_extension_valid);
+    assert(workspace->finish_extension_relation_count == 3);
+    kernel = silex::detail::hnf_finish_workspace_kernel(*workspace, context,
+                                                        true);
+    assert(kernel != nullptr);
+    const slong n = context.relation_count();
+    const slong g = context.generator_count();
+    const slong rank = context.relation_rank();
+    assert(sflint::fmpz_mat_nrows(*kernel) == n - rank);
+    assert(sflint::fmpz_mat_ncols(*kernel) == n);
+    assert(workspace->finish_extension_relation_count == n);
+    assert(sflint::fmpz_mat_nrows(workspace->finish_extension) == n);
+    assert(sflint::fmpz_mat_ncols(workspace->finish_extension) == g + n);
+    {
+        sflint::FmpzMat relations(n, g);
+        assert(context.relations(sflint::FmpzMatRef(relations)));
+        sflint::FmpzMat product(n - rank, g);
+        sflint::fmpz_mat_mul(sflint::FmpzMatRef(product),
+                             sflint::FmpzMatConstRef(*kernel),
+                             sflint::FmpzMatConstRef(relations));
+        assert(::fmpz_mat_is_zero(product.raw()) != 0);
+        assert(silex::detail::hnf_unit_finish_coefficients(expected,
+                                                           context));
+        assert_same_row_lattice(*kernel, expected);
+    }
+
+    // A cached extension whose relation part no longer matches the
+    // relations: every cached row has a nonzero relation part, so the
+    // extended input yields too few zero rows and the exact checks reject
+    // it.  The kernel is then the one of [c * relations | I_n].
+    append_integer_relation(context, field, 27);
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    for (slong i = 0; i < n; ++i) {
+        fmpz* entry = sflint::fmpz_mat_entry(
+                              sflint::FmpzMatRef(workspace->finish_extension),
+                              i, 0)
+                              .raw();
+        ::fmpz_add_ui(entry, entry, 1);
+    }
+    kernel = silex::detail::hnf_finish_workspace_kernel(*workspace, context,
+                                                        true);
+    assert(kernel != nullptr);
+    assert(silex::detail::hnf_unit_finish_coefficients(expected, context));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(*kernel),
+                                  sflint::FmpzMatConstRef(expected)));
+    assert(workspace->finish_extension_valid);
+    assert(workspace->finish_extension_relation_count ==
+           context.relation_count());
+
+    context.clear();
+    workspace = silex::detail::class_group_finish_workspace(context);
+    assert(workspace != nullptr);
+    assert(!workspace->finish_extension_valid);
+    assert(workspace->finish_extension_relation_count == 0);
+    assert(sflint::fmpz_mat_nrows(workspace->finish_extension) == 0);
+    return 0;
+}
+
 // Local saturation compares the kernel relation's factor base with the
 // context base once per residue-dlog kernel; a mismatch, an undefined relation,
 // or a context without a factor base must still be rejected, and filling the
@@ -1678,6 +1788,7 @@ int main() {
     assert(test_rank_deficient_failure_is_transactional() == 0);
     assert(test_incremental_finish_workspace_lifecycle() == 0);
     assert(test_finish_workspace_requires_factor_base() == 0);
+    assert(test_finish_workspace_kernel_extends_cached_reduction() == 0);
     assert(test_saturation_kernel_relation_base_check() == 0);
     assert(test_default_completion_populates_finish_workspace() == 0);
     assert(test_corrupted_known_row_rejected() == 0);
