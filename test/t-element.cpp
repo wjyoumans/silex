@@ -531,6 +531,18 @@ void test_power_leading_coefficient_large_coefficients() noexcept {
                                  element_from_fraction(octic, {0, 1}, 3)));
         assert_power_of_root_found(octic_shifted, 3);
     }
+
+    // The inputs above do not depend on the precision of the reduction
+    // (they also pass with entries reduced modulo L).  Here it matters:
+    // a = ((-3 + sqrt(5)) / 6)^4 = (47 - 21 sqrt(5)) / 162 has L = 162 and
+    // integral matrix Z = [[47, -105], [-21, 47]], so chi_Z = x^2 - 94 x + 4
+    // and lc(P_a) = lcm(162 / gcd(94, 162), 162^2 / gcd(4, 162^2)) = 6561
+    // = 9^4.  Reducing Z only modulo L^{d-1} = 162 gives x^2 - 94 x + 3406
+    // and the value 13122 = 2 * 9^4, which is no fourth power, so the root
+    // would not be found.
+    silex::NumberField sqrt_five = field_from_coefficients({-5, 0, 1});
+    assert_power_of_root_found(element_from_fraction(sqrt_five, {-3, 1}, 6),
+                               4);
 }
 
 // Elements whose residue is an n-th power at the first factor of the first
