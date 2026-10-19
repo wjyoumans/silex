@@ -13299,6 +13299,18 @@ int test_grh_continuation_without_relation_progress_fails_closed() {
     const TransactionRun repeat = run_transaction(
             cubic, silex::CertificationMode::grh, 5000, 500);
     assert(repeat.ok);
+
+    // Accepted fallback: with a bounded saturation deferred behind the
+    // extension and the extension skipped, the deferred pass runs and, when
+    // it appends relations, the loop continues and the run succeeds.  The
+    // simplest cubic x^3 - 3x - 1 (corpus row simplest_cubic_a0) gains its
+    // index-one relation from that pass.
+    const std::vector<slong> simplest = {-1, -3, 0, 1};
+    silex::detail::TestHookAccess::set_continuation_appends_nothing(true);
+    const TransactionRun deferred = run_transaction(
+            simplest, silex::CertificationMode::grh, 5000, 500);
+    silex::detail::TestHookAccess::set_continuation_appends_nothing(false);
+    assert(deferred.ok && deferred.audit.final_result_published);
     return 0;
 }
 

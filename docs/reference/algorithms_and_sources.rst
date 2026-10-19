@@ -2768,12 +2768,21 @@ Proven and unknown requests keep the 2-relation refill.
 
 A ``grh`` computation does not run the bounded ``ell = 2`` class-relation
 saturation before the first relation-extension slice.  Hecke v0.38.6
-``Clgp.jl:_class_unit_group`` (lines 248-258) saturates at 2 only when the
-last extension round brought no improvement of the index bound and no
-saturation was done yet, and its first round has no improvement measure.
-Silex defers the bounded pass while the index bound is above one and the
-extension slice has not yet run; the pass runs once an extension slice
-has run since the deferral without lowering the index bound.  If the
+``Clgp.jl:_class_unit_group`` (lines 248-258) saturates at 2 only when
+``improved`` is one and no saturation was done yet; ``improved`` is the
+factor by which the unit search of that round (``FindUnits.jl``, lines 98
+and 276) lowered the index, measured from the index after the previous
+round's new relations, and the first round returns 0 (``FindUnits.jl`` line
+278), so it goes straight to new relations.  Hecke's finishing loop
+(``Clgp.jl`` lines 267-281) also saturates at each prime below twice the
+index in every round, the first included, whenever the index is between 1
+and 20 (without ``use_aut``).  Silex does not follow either rule exactly:
+it defers the bounded pass while the index bound is above one and the
+extension slice has not yet run, for every index, which departs from
+Hecke's finishing loop at small indices; and its stall test is an
+adaptation, the pass running once an extension slice, with its unit
+refresh, has run since the deferral without lowering the index bound below
+the bound at the deferral, not Hecke's per-round unit-search measure.  If the
 extension fails or appends no relation while a pass is deferred, Silex runs
 the deferred pass and continues if it appended relations, and otherwise
 fails as before.  When validation reaches index one on the same relations

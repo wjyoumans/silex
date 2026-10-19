@@ -699,8 +699,8 @@ struct RelationSaturationMemo {
     // the grh class/unit loop.  Reference Clgp.jl:_class_unit_group
     // (lines 248-258) saturates at 2 only after an outer round whose unit
     // search did not improve the index (`isone(improved)`); its first round
-    // reports no improvement (FindUnits.jl lines 100 and 276 start from
-    // index 0) and goes straight to new relations.  Here the bounded pass is likewise
+    // reports no improvement (FindUnits.jl line 278, `return 1, 0`) and
+    // goes straight to new relations.  Here the bounded pass is likewise
     // deferred to the next relation-extension slice while extension keeps
     // lowering the analytic index bound.  It runs at the first pass after an
     // extension slice that did not lower the bound below the bound of the

@@ -1129,9 +1129,14 @@ Changed
   ``proven`` requests are unchanged.
 
 - A ``grh`` class/unit computation now runs its first relation-extension
-  slice before the first bounded ``ell = 2`` class-relation saturation, as
-  Hecke v0.38.6 ``Clgp.jl:_class_unit_group`` (lines 248-258) saturates at 2
-  only after an extension round that did not improve the index bound.  The
+  slice before the first bounded ``ell = 2`` class-relation saturation, an
+  adaptation of Hecke v0.38.6 ``Clgp.jl:_class_unit_group`` (lines 248-258),
+  which saturates at 2 only when the unit search of a round did not lower
+  the index (its first round has no such measure).  Unlike Hecke's finishing
+  loop (lines 267-281), which saturates at small primes for indices below
+  20 in every round, Silex defers the pass for every index, and its stall
+  test is the index bound not dropping across an extension slice rather than
+  Hecke's per-round unit-search measure.  The
   bounded pass still runs if the extension stalls, fails or appends nothing,
   and a failed extension with a deferred pass now runs that pass and
   continues when it appended relations.  Class groups, unit groups,
@@ -1139,7 +1144,7 @@ Changed
   corpus; on the benchmark rows compared, the
   relation and generator lists are identical except for
   ``simplest_cubic_a0`` (85 relations instead of 84: the saturation relation
-  is not added and one more random-product relation is used; same class
+  is not added and two more random-product relations are used; same class
   group and units).
   When validation reaches index one with no relation appended since a
   deferred pass, that pass runs before acceptance, so
