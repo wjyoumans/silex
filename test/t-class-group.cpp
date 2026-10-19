@@ -7220,9 +7220,12 @@ int test_relation_saturation_size_reduce_row() {
 // basis relation_saturation_beta_coefficients size-reduces against, after
 // checking it: it spans the same lattice, is LLL-reduced with FLINT's
 // default parameters (fmpz_mat_is_reduced), and is cached.  For more than
-// one row it comes from the certified extension route, which leaves the
-// LLL-reduced basis read by relation_kernel_unit unbuilt.  When that route
-// is skipped (SaturationKernelTestSeams force_transform_route) or fails, it
+// one row the default route depends on the generator count: above
+// kSaturationKernelTransformMaxGenerators generators it comes from the
+// certified extension route, which leaves the LLL-reduced basis read by
+// relation_kernel_unit unbuilt.  When that route is not taken (at or below
+// the crossover, or with SaturationKernelTestSeams force_transform_route)
+// or fails, it
 // comes, for entries of at most 250 bits, from FLINT's double-precision
 // first phase when that phase is certified, which also leaves that basis
 // unbuilt; `expect_first_phase` asserts that route.  Otherwise it is a copy

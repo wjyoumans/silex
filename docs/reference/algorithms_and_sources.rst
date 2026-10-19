@@ -2178,14 +2178,26 @@ When the extension route runs first, the beta coefficients are also read
 from the reduced matrix, not from the presentation's Smith transform.  Write the reduced
 rows as ``U [c*A | I]`` with ``U`` unimodular and ``image`` the
 identity parts of the rows with nonzero ``A`` part; then ``B = image * A``
-is a basis of the row lattice of ``A``.  This is the construction of
+is a basis of the row lattice of ``A``.  The argument is elementary.  The
+rows of ``U A`` span the row lattice of ``A`` because ``U`` is unimodular.
+Silex accepts the route only when exactly ``n - g`` reduced rows have zero
+``A`` part, so the other ``g`` rows, whose ``A`` parts are the rows of
+``B``, span that lattice, which has rank ``g``; hence they are independent
+and ``B`` is a basis.  If ``x A = 0``, write ``x = y U`` with ``y``
+integral; then ``x A`` is the combination of the rows of ``B`` with the
+coefficients of ``y`` at the image rows, so those coefficients vanish and
+``x`` is an integer combination of the identity parts of the zero-part rows,
+which are therefore a kernel basis.  The analogous construction is that of
 Havas, Majewski and Matthews, "Extended gcd and Hermite normal form
 algorithms via lattice basis reduction", *Experimental Mathematics* 7
-(1998), section 6, in which a unimodular matrix ``P = [Q; R]`` is read off
-the reduction, with ``QB = C`` and ``RB = 0``, and the rows of ``R`` form a
-``Z`` basis of the kernel (their ``N(G)``); the nonzero rows ``QB`` are the
-image.  Cohen, GTM 138, section 2.7, treats the kernel and image of an
-integer matrix.  The vector ``d_i (V^-1)_i``, where ``(V^-1)_i`` is the
+(1998), section 6: for their LLL-based Hermite normal form algorithm
+(Algorithm 4) applied to an input matrix ``G``, with ``PG = H`` in Hermite
+normal form and ``P = [Q; R]``, they state ``QG = C`` (the nonzero rows of
+``H``) and ``RG = 0``, with the rows of ``R`` a ``Z`` basis of ``N(G)``.
+Their result concerns that algorithm, not plain ``fmpz_lll`` on
+``[c*A | I]`` with a fixed ``c``, so Silex relies on the argument above, not
+on their theorem.  Cohen, GTM 138, section 2.7, treats the kernel and image
+of an integer matrix.  The vector ``d_i (V^-1)_i``, where ``(V^-1)_i`` is the
 matching row of the invariant generator matrix, lies in the row lattice of
 ``A``, so ``x * B`` equal to it has a unique rational solution ``x``, which
 is integral, and ``c_i = x * image`` satisfies ``c_i A =`` the exponent row

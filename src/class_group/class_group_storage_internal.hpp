@@ -464,9 +464,12 @@ struct ClassGroupContextStorage {
     // relation-saturation beta size reduction
     // (relation_saturation_beta_coefficients) and never by
     // relation_kernel_unit.  It is a copy of reduced_relation_kernel when
-    // that is already built.  Otherwise, for at least two rows, it is the
-    // checked kernel rows of the reduced [c * A | I] certified LLL-reduced
-    // (the extension route), and when that route fails, FLINT's
+    // that is already built.  Otherwise, for at least two rows over a
+    // presentation with more than kSaturationKernelTransformMaxGenerators
+    // generators, it is the checked kernel rows of the reduced [c * A | I]
+    // certified LLL-reduced (the extension route).  At or below that
+    // crossover, or when that route fails, it is read from the left
+    // transform and reduced by FLINT's
     // double-precision reduction pass certified exactly LLL-reduced
     // (lat::detail::lll_first_phase_certified), or a copy of the fmpz_lll
     // basis when that certificate is not obtained

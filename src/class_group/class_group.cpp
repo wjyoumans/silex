@@ -5886,10 +5886,15 @@ public:
     // the identity parts of the rows of the reduced [c * A | I] with a
     // nonzero relation part.  The rows of that reduced matrix are U * [c * A
     // | I] for a unimodular U (fmpz_lll applies only unimodular row
-    // operations), so B = image * A is a basis of the row lattice of A
-    // (Havas, Majewski and Matthews, Experimental Mathematics 7 (1998),
-    // section 6: for a unimodular P = [Q; R] with P G = B, Q G = C is the
-    // nonzero rows of B and R G = 0; Cohen, GTM 138, section 2.7.1).
+    // operations), so the rows of U * A span the row lattice of A; the
+    // n - g rows with zero relation part contribute nothing, so the g rows
+    // of B = image * A span that rank-g lattice and are a basis of it.
+    // (The analogous construction is Havas, Majewski and Matthews,
+    // Experimental Mathematics 7 (1998), section 6: for their Algorithm 4
+    // on an input G, with P G = H in Hermite normal form and P = [Q; R],
+    // Q G = C is the nonzero rows of H and R G = 0.  That result is for
+    // their algorithm, not plain fmpz_lll, so the argument here is the
+    // one above; see also Cohen, GTM 138, section 2.7.)
     // d_i * (V^-1)_i lies in that
     // lattice, so x * B = d_i * (V^-1)_i has a unique rational solution x,
     // which is integral, and c = x * image.  The solution is computed by
