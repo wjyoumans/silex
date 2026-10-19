@@ -302,6 +302,8 @@ struct QuadraticAfeStepAudit {
     bool stepping = true;
     // A fault forced on every block planned in a sum once `fault_after`
     // blocks of that sum have started (0: on every block).
+    // `blocks` is cumulative over the audit object's lifetime, so use a
+    // fresh audit for each `quadratic_dirichlet_l1` call.
     QuadraticAfeStepFault fault = QuadraticAfeStepFault::none;
     ulong fault_after = 0;
     // Blocks started, and values taken from a block (an anchor carried

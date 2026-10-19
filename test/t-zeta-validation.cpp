@@ -630,7 +630,8 @@ void count_bdf_failure_logs(void* user,
 }
 
 // The GRH generation bound records only that Bach's bound was used, both
-// when it is below the BDF bound (the search stops) and when the BDF
+// when it is below the BDF bound (the search stops, or, after an undecided
+// comparison, returns a bound above Bach's) and when the BDF
 // criterion cannot be computed or decided; only the latter emits a
 // class-group log note (when logging is compiled in).  4x^3 + x + 100
 // defines the field of x^3 + x + 200, and the residue-degree route of the
