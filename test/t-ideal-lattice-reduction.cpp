@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1582,6 +1583,171 @@ int test_t2_enumeration_quadratic_form_is_basis_gram() {
     return 0;
 }
 
+
+bool same_t2_enumeration_data(
+        const silex::detail::relation_search::FiniteIdealT2EnumerationData& a,
+        const silex::detail::relation_search::FiniteIdealT2EnumerationData&
+                b) noexcept {
+    return sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(a.basis),
+                                  sflint::FmpzMatConstRef(b.basis)) &&
+           a.quadratic_form_data == b.quadratic_form_data &&
+           a.initial_bound_value == b.initial_bound_value &&
+           a.rounding_scale == b.rounding_scale;
+}
+
+// The T2 enumeration setup starts its rounding-scale loop at the embedding
+// cache's hint, the smallest scale accepted so far for an ideal of the order.
+// On the octic field of row multiquadratic_m3_m5_m7, prime ideals above small
+// primes are accepted at different scales without a hint.  Checks:
+// - without a hint (no cache, or a fresh one) the data are the full loop's,
+//   and a fresh cache's hint becomes the accepted scale;
+// - the hint is a running minimum: an ideal accepted only at a finer scale
+//   keeps its full-loop data and does not raise the hint;
+// - an ideal whose full loop accepts a coarser scale than the hint gets a
+//   basis of the same lattice that meets the LLL bounds, at the hint's scale;
+// - when no scale at or above the hint is accepted (here the hint lies above
+//   every scale of the working precision), the full loop runs again, so the
+//   data are the full loop's and the hint drops to the accepted scale.
+int test_t2_enumeration_rounding_scale_hint() {
+    namespace rs = silex::detail::relation_search;
+    constexpr std::array<slong, 9> m3_m5_m7 = {1201, 598, -524, -146, 69,
+                                              2,    4,   -4,   1};
+    FieldSetup setup = monic_field(m3_m5_m7.data(),
+                                   static_cast<slong>(m3_m5_m7.size()));
+    const silex::Order& order = setup.maximal_order;
+    assert(order.degree() == 8);
+
+    // coarse: an ideal accepted at the smallest scale seen; fine: one
+    // accepted only at a larger scale.
+    silex::Ideal coarse(order);
+    silex::Ideal fine(order);
+    rs::FiniteIdealT2EnumerationData coarse_expected;
+    rs::FiniteIdealT2EnumerationData fine_expected;
+    bool have_coarse = false;
+    bool have_fine = false;
+    constexpr std::array<ulong, 6> rational_primes = {2, 3, 5, 7, 11, 13};
+    for (const ulong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        sflint::fmpz_set_ui(sflint::FmpzRef(p), rational_prime);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size(); ++i) {
+            silex::Ideal prime_ideal(order);
+            assert(primes.at(i)->get_ideal(prime_ideal));
+            rs::FiniteIdealT2EnumerationData data;
+            assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                    data, prime_ideal, nullptr, nullptr));
+            assert(data.rounding_scale >= 4);
+            if (!have_coarse ||
+                data.rounding_scale < coarse_expected.rounding_scale) {
+                assert(coarse.set(prime_ideal));
+                coarse_expected = std::move(data);
+                have_coarse = true;
+            }
+        }
+    }
+    for (const ulong rational_prime : rational_primes) {
+        sflint::Fmpz p;
+        sflint::fmpz_set_ui(sflint::FmpzRef(p), rational_prime);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order,
+                                      sflint::FmpzConstRef(p)));
+        for (slong i = 0; i < primes.size() && !have_fine; ++i) {
+            silex::Ideal prime_ideal(order);
+            assert(primes.at(i)->get_ideal(prime_ideal));
+            rs::FiniteIdealT2EnumerationData data;
+            assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                    data, prime_ideal, nullptr, nullptr));
+            if (data.rounding_scale > coarse_expected.rounding_scale) {
+                assert(fine.set(prime_ideal));
+                fine_expected = std::move(data);
+                have_fine = true;
+            }
+        }
+    }
+    assert(have_coarse && have_fine);
+    const slong coarse_scale = coarse_expected.rounding_scale;
+    const slong fine_scale = fine_expected.rounding_scale;
+
+    // No hint: a fresh cache gives the full loop's data.
+    {
+        silex::detail::OrderMinkowskiEmbeddingCache cache;
+        assert(cache.t2_rounding_scale_hint == 0);
+        rs::FiniteIdealT2EnumerationData data;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, fine, nullptr, &cache));
+        assert(same_t2_enumeration_data(data, fine_expected));
+        assert(cache.t2_rounding_scale_hint == fine_scale);
+    }
+
+    // Running minimum: coarse sets the hint, fine does not raise it.
+    {
+        silex::detail::OrderMinkowskiEmbeddingCache cache;
+        rs::FiniteIdealT2EnumerationData data;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, coarse, nullptr, &cache));
+        assert(same_t2_enumeration_data(data, coarse_expected));
+        assert(cache.t2_rounding_scale_hint == coarse_scale);
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, fine, nullptr, &cache));
+        assert(same_t2_enumeration_data(data, fine_expected));
+        assert(cache.t2_rounding_scale_hint == coarse_scale);
+    }
+
+    // A raised start: after fine, coarse is reduced from the hint's
+    // rounding.  The lattice and the LLL bound test are unchanged.
+    {
+        silex::detail::OrderMinkowskiEmbeddingCache cache;
+        rs::FiniteIdealT2EnumerationData data;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, fine, nullptr, &cache));
+        assert(cache.t2_rounding_scale_hint == fine_scale);
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, coarse, nullptr, &cache));
+        assert(data.rounding_scale >= fine_scale);
+        assert(same_lattice_as_ideal(sflint::FmpzMatConstRef(data.basis),
+                                     coarse));
+        assert(t2_enumeration_data_is_reduced_ideal_basis(coarse, order,
+                                                          data));
+        assert(cache.t2_rounding_scale_hint == fine_scale);
+    }
+
+    // A start above every scale of the working precision accepts nothing,
+    // so the full loop runs again.
+    {
+        silex::detail::OrderMinkowskiEmbeddingCache cache;
+        rs::FiniteIdealT2EnumerationData data;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, fine, nullptr, &cache));
+        cache.t2_rounding_scale_hint = 4096;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, coarse, nullptr, &cache));
+        assert(same_t2_enumeration_data(data, coarse_expected));
+        assert(cache.t2_rounding_scale_hint == coarse_scale);
+    }
+
+    // The hint belongs to the cached order: a different order clears it.
+    {
+        FieldSetup other = cubic_x3_minus_2();
+        silex::Ideal other_prime(other.maximal_order);
+        assert(degree_one_prime_ideal_above_five(other_prime,
+                                                 other.maximal_order));
+        rs::FiniteIdealT2EnumerationData other_expected;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                other_expected, other_prime, nullptr, nullptr));
+        silex::detail::OrderMinkowskiEmbeddingCache cache;
+        rs::FiniteIdealT2EnumerationData data;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, fine, nullptr, &cache));
+        assert(cache.t2_rounding_scale_hint == fine_scale);
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, other_prime, nullptr, &cache));
+        assert(same_t2_enumeration_data(data, other_expected));
+        assert(cache.t2_rounding_scale_hint == other_expected.rounding_scale);
+    }
+    return 0;
+}
 }  // namespace
 
 // The integer LLL of the rounded-embedding route certifies FLINT's first
@@ -1981,5 +2147,6 @@ int main() {
     assert(test_skewed_basis_t2_enumeration_data_builds() == 0);
     assert(test_octic_t2_enumeration_data_meets_lll_bounds() == 0);
     assert(test_t2_enumeration_quadratic_form_is_basis_gram() == 0);
+    assert(test_t2_enumeration_rounding_scale_hint() == 0);
     return 0;
 }

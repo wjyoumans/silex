@@ -25,6 +25,9 @@ struct FiniteIdealT2EnumerationData {
     flint::FmpzMat basis{0, 0};
     std::vector<double> quadratic_form_data;
     double initial_bound_value = 0.0;
+    // Rounding scale of the accepted reduced basis; 0 when the basis is the
+    // first one with quadratic-form data (no scale was accepted).
+    slong rounding_scale = 0;
 };
 
 class FiniteQuadraticFormEnumerationContext {

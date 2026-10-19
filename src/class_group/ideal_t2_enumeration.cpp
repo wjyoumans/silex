@@ -757,6 +757,87 @@ static bool reduce_finite_enumeration_basis_from_scale(
     return true;
 }
 
+enum class T2BasisSelection { failed, fallback, accepted };
+
+// The rounding-scale loop of one T2 enumeration setup, started at
+// start_rounding_scale (see build_finite_ideal_t2_enumeration_data_at_precision
+// for the rule).  On `accepted`, basis and quadratic_form_data hold the
+// reduced basis accepted at accepted_rounding_scale; on `fallback`, they hold
+// the first reduced basis that had quadratic-form data.
+static T2BasisSelection select_finite_enumeration_basis(
+        flint::FmpzMat& basis,
+        std::vector<double>& quadratic_form_data,
+        slong& accepted_rounding_scale,
+        flint::FmpzMat& transform,
+        flint::ArbMat& embedding_rows,
+        flint::ArbMat& gram,
+        flint::ArbMat& cholesky,
+        const flint::FmpzMat& original_basis,
+        const flint::ArbMat& original_embedding_rows,
+        slong precision,
+        slong embedding_precision,
+        slong start_rounding_scale,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const slong degree = flint::fmpz_mat_nrows(original_basis);
+    flint::FmpzMat fallback_basis(degree, degree);
+    std::vector<double> fallback_quadratic_form_data;
+    bool have_fallback = false;
+    slong min_rounding_scale = start_rounding_scale;
+    for (;;) {
+        slong rounding_scale = 0;
+        if (!reduce_finite_enumeration_basis_from_scale(
+                    basis, transform, rounding_scale, embedding_rows, gram,
+                    cholesky, original_basis, original_embedding_rows,
+                    precision, embedding_precision, min_rounding_scale,
+                    diagnostics)) {
+            if (!have_fallback) {
+                return T2BasisSelection::failed;
+            }
+            basis.swap(fallback_basis);
+            quadratic_form_data.swap(fallback_quadratic_form_data);
+            return T2BasisSelection::fallback;
+        }
+        bool have_quadratic_form = false;
+        {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_setup.quadratic_form_data");
+            const bool within_lll_bounds =
+                    finite_enumeration_basis_within_lll_bounds(gram, cholesky);
+            have_quadratic_form =
+                    quadratic_form_data_from_arb_gram(quadratic_form_data,
+                                                      gram);
+            if (have_quadratic_form && within_lll_bounds) {
+                accepted_rounding_scale = rounding_scale;
+                return T2BasisSelection::accepted;
+            }
+            if (!have_quadratic_form) {
+                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                          LogLevel::detail,
+                          "T2 context quadratic_form_data data failed");
+            } else {
+                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                          LogLevel::detail,
+                          "T2 context reduced basis outside LLL bounds");
+            }
+        }
+        if (have_quadratic_form && !have_fallback) {
+            fallback_basis.swap(basis);
+            fallback_quadratic_form_data.swap(quadratic_form_data);
+            have_fallback = true;
+        }
+        if (rounding_scale > precision / 2) {
+            if (!have_fallback) {
+                return T2BasisSelection::failed;
+            }
+            basis.swap(fallback_basis);
+            quadratic_form_data.swap(fallback_quadratic_form_data);
+            return T2BasisSelection::fallback;
+        }
+        min_rounding_scale = 2 * rounding_scale;
+    }
+}
+
 static bool build_finite_ideal_t2_enumeration_data_at_precision(
         FiniteIdealT2EnumerationData& out,
         const Ideal& ideal,
@@ -827,61 +908,50 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
     // single reduction from the first scale accepted before is still the
     // result when no finer basis is accepted.  The ideal lattice and the
     // bound rule applied to the result do not change.
-    flint::FmpzMat fallback_basis(degree, degree);
-    std::vector<double> fallback_quadratic_form_data;
-    bool have_fallback = false;
-    slong min_rounding_scale = kT2EnumerationInitialRoundingScale;
-    for (;;) {
-        slong rounding_scale = 0;
-        if (!reduce_finite_enumeration_basis_from_scale(
-                    basis, transform, rounding_scale, embedding_rows, gram,
-                    cholesky, original_basis, original_embedding_rows,
-                    precision, embedding_precision, min_rounding_scale,
-                    diagnostics)) {
-            if (!have_fallback) {
-                return false;
-            }
-            basis.swap(fallback_basis);
-            quadratic_form_data.swap(fallback_quadratic_form_data);
-            break;
-        }
-        bool have_quadratic_form = false;
-        {
-            SILEX_PROFILE_SCOPE(
-                    diagnostics, DiagnosticsModule::class_group,
-                    "class_group.finite_enumeration_setup.quadratic_form_data");
-            const bool within_lll_bounds =
-                    finite_enumeration_basis_within_lll_bounds(gram, cholesky);
-            have_quadratic_form =
-                    quadratic_form_data_from_arb_gram(quadratic_form_data,
-                                                      gram);
-            if (have_quadratic_form && within_lll_bounds) {
-                break;
-            }
-            if (!have_quadratic_form) {
-                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                          LogLevel::detail,
-                          "T2 context quadratic_form_data data failed");
-            } else {
-                SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                          LogLevel::detail,
-                          "T2 context reduced basis outside LLL bounds");
-            }
-        }
-        if (have_quadratic_form && !have_fallback) {
-            fallback_basis.swap(basis);
-            fallback_quadratic_form_data.swap(quadratic_form_data);
-            have_fallback = true;
-        }
-        if (rounding_scale > precision / 2) {
-            if (!have_fallback) {
-                return false;
-            }
-            basis.swap(fallback_basis);
-            quadratic_form_data.swap(fallback_quadratic_form_data);
-            break;
-        }
-        min_rounding_scale = 2 * rounding_scale;
+    //
+    // The scale loop starts at the smallest scale accepted so far for an ideal
+    // of this order (the embedding cache's hint) rather than at the first
+    // scale, skipping the coarser attempts that the ideals before it needed
+    // to reject.  From the hint on, the attempts are those of the full loop.
+    // An ideal whose full loop would accept a coarser scale instead gets the
+    // basis reduced from the hint's rounding: the same lattice, accepted by
+    // the same LLL bound test.  When no scale at or above the hint is
+    // accepted, the loop runs again from the first scale, so the fallback and
+    // failure results are those of the full loop.
+    slong start_rounding_scale = kT2EnumerationInitialRoundingScale;
+    if (embedding_cache != nullptr &&
+        embedding_cache->t2_rounding_scale_hint > start_rounding_scale) {
+        start_rounding_scale = embedding_cache->t2_rounding_scale_hint;
+    }
+    slong accepted_rounding_scale = 0;
+    T2BasisSelection selection = select_finite_enumeration_basis(
+            basis, quadratic_form_data, accepted_rounding_scale, transform,
+            embedding_rows, gram, cholesky, original_basis,
+            original_embedding_rows, precision, embedding_precision,
+            start_rounding_scale, diagnostics);
+    if (selection != T2BasisSelection::accepted &&
+        start_rounding_scale != kT2EnumerationInitialRoundingScale) {
+        SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                  LogLevel::detail,
+                  "T2 context rounding scale hint not accepted; full loop");
+        selection = select_finite_enumeration_basis(
+                basis, quadratic_form_data, accepted_rounding_scale,
+                transform, embedding_rows, gram, cholesky, original_basis,
+                original_embedding_rows, precision, embedding_precision,
+                kT2EnumerationInitialRoundingScale, diagnostics);
+    }
+    if (selection == T2BasisSelection::failed) {
+        return false;
+    }
+    if (selection == T2BasisSelection::fallback) {
+        accepted_rounding_scale = 0;
+    } else if (embedding_cache != nullptr &&
+               (embedding_cache->t2_rounding_scale_hint == 0 ||
+                accepted_rounding_scale <
+                        embedding_cache->t2_rounding_scale_hint)) {
+        // A running minimum: a later ideal accepted only at a finer scale
+        // does not raise the hint.
+        embedding_cache->t2_rounding_scale_hint = accepted_rounding_scale;
     }
 
     double initial_enumeration_bound = 0.0;
@@ -901,6 +971,7 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
     out.basis = std::move(basis);
     out.quadratic_form_data = std::move(quadratic_form_data);
     out.initial_bound_value = initial_enumeration_bound;
+    out.rounding_scale = accepted_rounding_scale;
     return true;
 }
 

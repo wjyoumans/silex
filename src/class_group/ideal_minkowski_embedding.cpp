@@ -103,6 +103,9 @@ bool build_ideal_minkowski_embedding_rows(
             return false;
         }
         if (cache != nullptr) {
+            if (!cache->has_order || !cache->order.has_same_data(order)) {
+                cache->t2_rounding_scale_hint = 0;
+            }
             cache->order = order;
             cache->embedding_precision = precision;
             cache->has_order = true;
