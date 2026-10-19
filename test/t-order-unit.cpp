@@ -10694,6 +10694,120 @@ int test_prove_index_bound_prescan_stable_first() {
     return 0;
 }
 
+// Event order of the prove_local_saturated pass in which the stable dry run
+// does not verify and the pre-scan then adjoins a root.
+struct PrescanAdjoinEvents {
+    // 'n' = stable-first not verified, 'v' = stable-first verified,
+    // 'r' = a saturate_local_with_kernel pass began.
+    std::string order;
+};
+
+void prescan_adjoin_callback(void* user, silex::DiagnosticsModule,
+                             silex::ProfileEvent event, const char*,
+                             const char* label) noexcept {
+    PrescanAdjoinEvents* events = static_cast<PrescanAdjoinEvents*>(user);
+    if (label == nullptr) {
+        return;
+    }
+    if (event == silex::ProfileEvent::begin_scope &&
+        std::strcmp(label, "unit_group.saturate_local_with_kernel") == 0) {
+        events->order += 'r';
+    } else if (event == silex::ProfileEvent::event &&
+               std::strcmp(label,
+                           "unit_group.proof_prescan_stable_first_verified") ==
+                       0) {
+        events->order += 'v';
+    } else if (event == silex::ProfileEvent::event &&
+               std::strcmp(label, "unit_group.proof_prescan_stable_first_"
+                                  "not_verified") == 0) {
+        events->order += 'n';
+    }
+}
+
+// The stable dry run does not verify and a pre-scan kernel row is a true
+// ell-th power, so the root is adjoined.  In Q(sqrt 22) with the group
+// <eps^3>, eps = 197 + 42 sqrt(22) (see the test above), ell = 3 and
+// aux_bound = 10 (q range ended at 10): eps^3 is a cube at every prime, so
+// the pre-scan keeps it in its kernel and the dry run cannot empty the
+// kernel.  The event order is the dry run ("not verified") before the first
+// root pass; the root pass adjoins eps (the group changes) and the pass
+// restarts: its dry run again does not verify and the root pass finds no
+// further root, so the range-limited proof ends unavailable.  The event
+// order is checked only in profiling builds.
+int test_prove_index_bound_prescan_not_verified_then_adjoined_root() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -22);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::EmbeddingContext embeddings(field);
+    silex::OrderUnitGroup start(order);
+    {
+        sflint::FmpqPoly unit_poly;
+        sflint::fmpq_poly_set_coeff_si(unit_poly, 0, 197);
+        sflint::fmpq_poly_set_coeff_si(unit_poly, 1, 42);
+        silex::Element unit(field);
+        silex::Element square(field);
+        silex::Element cube(field);
+        silex::FactoredElement generator(field);
+        assert(unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)));
+        assert(square.multiply(unit, unit));
+        assert(cube.multiply(square, unit));
+        assert(generator.set_element(cube));
+        assert(start.set_units(order,
+                               silex::FactoredElementSpan(&generator, 1),
+                               embeddings, 256));
+        assert(start.free_rank() == 1);
+    }
+    sflint::Fmpz aux_bound;
+    assert(set_fmpz_si(aux_bound, 10));
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    PrescanAdjoinEvents events;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::unit_group),
+            prescan_adjoin_callback, &events);
+    const StableProofScanLimitsForTesting limits(0, 10);
+    silex::OrderUnitGroup proved(order);
+    proved.set_diagnostics(&diagnostics);
+    silex::ProofState status = silex::ProofState::not_checked;
+    bool changed = false;
+    assert(proved.prove_index_bound(status, changed, start, 1,
+                                    sflint::FmpzConstRef(aux_bound), 2,
+                                    embeddings, 256));
+    assert(changed);
+    assert(status == silex::ProofState::unavailable);
+    // The adjoined root eps replaces eps^3: the stored generator is a cube
+    // root of the start generator.
+    assert(proved.free_rank() == 1);
+    silex::FactoredElement stored(field);
+    silex::Element stored_value(field);
+    assert(proved.free_generator(stored, 0));
+    assert(stored.evaluate(stored_value));
+    silex::Element cubed(field);
+    silex::Element negated(field);
+    silex::Element start_value(field);
+    assert(cubed.multiply(stored_value, stored_value));
+    assert(cubed.multiply(cubed, stored_value));
+    silex::FactoredElement start_generator(field);
+    assert(start.free_generator(start_generator, 0));
+    assert(start_generator.evaluate(start_value));
+    assert(negated.negate(start_value));
+    assert(!stored_value.equal(start_value));
+    assert(cubed.equal(start_value) || cubed.equal(negated));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // Dry run (n) before the first root pass (r), which adjoins eps; the
+    // restart repeats both, with no further root.
+    assert(events.order == "nrnr");
+#endif
+    return 0;
+}
+
 // On the stable scan a kernel row whose free part is divisible by ell but
 // whose torsion exponent is not is a candidate like any other (the reference
 // `saturate!` forms prod R[j]^e[j] * zeta^e[end]); it is not skipped.  When
@@ -13100,11 +13214,13 @@ int test_rebasis_keeps_group_torsion() {
     return 0;
 }
 
-// Stored units past the reduction's factor-count cutoff (20000 factors) are
-// rebuilt as single field elements equal to the units the unpadded basis
-// reduces to.  The padding (u2 u2^-1)^10000 is a formal product equal to 1
-// that the factored form does not merge, so u2 is stored with 20001
-// factors.  The reduced basis {u2, u3} takes the identity-transform path,
+// Stored units past the reduction's factor-count cutoff
+// (kStoredUnitRebuildFactorCount, 5000 factors) are rebuilt as single field
+// elements equal to the units the unpadded basis reduces to.  The padding
+// (u2 u2^-1)^3000 is a formal product equal to 1 that the factored form
+// does not merge, so u2 is stored with 6001 factors: past 5000 but below
+// the earlier cutoff of 20000, so a cutoff raised back above 6001 fails
+// the test.  The reduced basis {u2, u3} takes the identity-transform path,
 // the skewed basis {u2, u2^5 u3} the transform path.  The rebuild needs an
 // order known to be maximal; on Z[zeta_7] not marked maximal it fails, and
 // the reduction keeps the factored units (identity transform) or the merged
@@ -13114,7 +13230,7 @@ int test_reduce_stored_units_rebuilds_large_factored_units() {
     silex::EmbeddingContext embeddings(c.field);
     silex::Order maximal(c.field);
     assert(maximal.maximal_order(c.order));
-    constexpr slong kPaddingPairs = 10000;
+    constexpr slong kPaddingPairs = 3000;
     for (const bool known_maximal : {true, false}) {
         const silex::Order& order = known_maximal ? maximal : c.order;
         for (const slong e21 : {slong(0), slong(5)}) {
@@ -13659,6 +13775,15 @@ int test_grh_saturation_square_tests_keep_degree_ten_lift_limit() {
            silex::CertificationMode::grh);
     assert(silex::detail::TestHookAccess::saturation_lifts_skipped() >
            skipped_before);
+    // Independent oracle (GP 2.17.4):
+    //   K = bnfinit(x^10-2*x^9+3*x^7-x^6+4*x^5+2*x^4-x+3, 1);
+    //   bnfcertify(K) -> 1; K.no -> 2; K.clgp.cyc -> [2]; K.sign -> [0, 5].
+    // The class number is 2, certified unconditionally; the "h4" of the
+    // corpus row name is not the class number.
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_equal_si(class_order, 2));
+    assert(units.free_rank() == 4);
     // Outside the saturation consumer the scope is not active.
     assert(!silex::detail::SaturationLiftLimit::covers(2));
     return 0;
@@ -13786,6 +13911,7 @@ int main() {
     test_dependent_relation_unbounded_root_failure_adjoins_y();
     test_prove_index_bound_non_power_range_exhausted();
     test_prove_index_bound_prescan_stable_first();
+    test_prove_index_bound_prescan_not_verified_then_adjoined_root();
     test_stable_scan_twisted_row_is_non_power_not_unavailable();
     test_prove_index_bound_roots_power_after_deferred_rescan();
     test_prove_index_bound_range_exhausted_tests_rows_at_once();
