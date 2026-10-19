@@ -128,6 +128,17 @@ Added
 Changed
 -------
 
+- Appending a relation to a class-group computation adds the row to the
+  relation module in place instead of first copying the whole module
+  (modular rank basis, retained rows and HNF checkpoint).  The add records
+  how to undo itself, and every failure after it restores the module exactly,
+  so a failed append still leaves the module unchanged.  Published results
+  are unchanged on every row of the ``grh`` corpus that finishes (184 rows
+  compared); only the work changes (callgrind instruction counts, ``grh``
+  mode: ``pure_x3_minus_6`` 25% fewer, ``real_quadratic_5`` 10%,
+  ``imaginary_quadratic_34`` 11%, ``simplest_cubic_a12`` 8%,
+  ``cyclotomic_64_phi32`` 3%).
+
 - The ``proven`` relation-saturation proof takes the relation-kernel basis of
   every multi-row kernel over a presentation with more than 32 generators,
   and the relation coefficients of its beta rows, from the LLL reduction of ``[c*A | I]`` (the same reduction as the analytic
