@@ -2137,21 +2137,36 @@ were not measured.
 Silex size-reduces ``c_i`` against an LLL-reduced basis of the relation
 kernel before forming the witness.  If the basis that yields the unit
 candidates is already built, it is reused.  Otherwise a kernel with at least
-two rows takes the extension route: the reduction of ``[c*A | I]`` for the
+two rows over a presentation with more than 32 generators takes the
+extension route first: the reduction of ``[c*A | I]`` for the
 presentation's relation matrix ``A`` by the small-kernel helper of the
 ``proven`` analytic finish above, with the same two exact checks, accepted
 only when ``fmpz_mat_is_reduced`` certifies the kernel rows with FLINT's
 default parameters.  Its kernel rows are the basis, and the remaining rows
-of the reduced matrix are kept as image rows.  This replaces the earlier
-route for these kernels, which read the kernel from the left transform of
-the presentation's Hermite normal form.  When the extension route fails a
-check or its certificate, or the kernel has one row, the kernel is read
-from the left transform of the presentation, and for entries of at most
-250 bits it is then reduced by the certified first LLL phase described with
-``Lat::lll_reduce`` above (``fmpz_lll_d_with_removal_knapsack``, accepted
-only when the exact certificate holds with FLINT's default parameters),
-with ``fmpz_lll`` (whose result is also kept for the unit candidates) when
-the reducer fails, the certificate fails, or the entries are larger.  The
+of the reduced matrix are kept as image rows.  For these presentations this
+replaces the earlier route, which read the kernel from the left transform
+of the presentation's Hermite normal form; the HNF transform behind that
+left transform dominated the ``proven`` running time on real quadratic
+fields with large discriminant.  The cutoff of 32 generators is a measured
+size crossover, not a sourced rule: the extra LLL reduction of
+``[c*A | I]`` costs more than the left transform on small presentations
+(busy-machine measurement on the ``proven`` corpus: the left transform
+built the kernel faster on every presentation with at most 31 generators,
+for ``real_quadratic_d100000001``, with 23, in 20 ms against 78 ms; the two
+routes were level at 37 generators; from 57 generators the extension route
+was faster by a factor of 8 or more, for ``real_quadratic_d10000000005``,
+with 64, in 0.11 s against 3.8 s).  When the extension route fails a
+check or its certificate, or the kernel has one row, or the presentation
+has at most 32 generators, the kernel is read from the left transform of
+the presentation, and for entries of at most 250 bits it is then reduced by
+the certified first LLL phase described with ``Lat::lll_reduce`` above
+(``fmpz_lll_d_with_removal_knapsack``, accepted only when the exact
+certificate holds with FLINT's default parameters), with ``fmpz_lll`` (whose
+result is also kept for the unit candidates) when the reducer fails or the
+certificate fails.  For larger entries, where ``fmpz_lll`` of the kernel
+itself can take minutes, the basis comes from the extension route unless it
+already ran (without keeping its image rows, so the beta coefficients come
+from the left transform), and from ``fmpz_lll`` when that route fails.  The
 reducer's row operations are unimodular and the checked rows of
 ``[c*A | I]`` are a kernel basis, so the result is a basis of the kernel on
 every route.  With FLINT's default routing a certified first phase is
@@ -2159,8 +2174,8 @@ exactly the basis ``fmpz_lll`` returns for that kernel (``fmpz_lll`` keeps
 it when ``fmpz_lll_is_reduced`` holds), but the extension route returns an
 LLL-reduced basis of the same lattice that need not equal it.
 
-On the extension route the beta coefficients are also read from the reduced
-matrix, not from the presentation's Smith transform.  Write the reduced
+When the extension route runs first, the beta coefficients are also read
+from the reduced matrix, not from the presentation's Smith transform.  Write the reduced
 rows as ``U [c*A | I]`` with ``U`` unimodular and ``image`` the
 identity parts of the rows with nonzero ``A`` part; then ``B = image * A``
 is a basis of the row lattice of ``A``.  This is the construction of
@@ -2178,9 +2193,10 @@ of ``g_i^{d_i}``.  Silex solves for ``x`` with ``fmpz_mat_solve``, accepts it
 only when the denominator divides every entry and ``c * A`` equals the
 target rows exactly, and otherwise reads the presentation's row.  The solved row and the
 presentation's row differ by a relation-kernel vector, so the size reduction
-below and its soundness argument apply to either.  Since every multi-row
-kernel now takes this route, the reduced ``c_i`` below can differ by a
-kernel vector from those of the earlier routes.  As shown below, this does
+below and its soundness argument apply to either.  Since multi-row kernels
+over presentations above the crossover now take this route, the reduced
+``c_i`` below can differ by a kernel vector from those of the earlier
+routes.  As shown below, this does
 not change the rank modulo ``ell`` at any set of auxiliary primes usable on
 both routes.  Whether an auxiliary prime ``q`` is usable also depends on
 which relation generators occur in ``beta_i`` (a generator that vanishes at

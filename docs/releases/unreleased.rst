@@ -129,25 +129,28 @@ Changed
 -------
 
 - The ``proven`` relation-saturation proof takes the relation-kernel basis of
-  every multi-row kernel, and the relation coefficients of its beta rows,
-  from the LLL reduction of ``[c*A | I]`` (the same reduction as the analytic
+  every multi-row kernel over a presentation with more than 32 generators,
+  and the relation coefficients of its beta rows, from the LLL reduction of ``[c*A | I]`` (the same reduction as the analytic
   finish's kernel basis) instead of the left transform of the presentation's
   Hermite normal form: the kernel rows are the rows with zero ``A`` part,
   accepted on the exact checks and ``fmpz_mat_is_reduced``, and each beta row
   is solved exactly against the remaining rows (Havas, Majewski and Matthews,
   1998, section 6), checked as ``c*A`` equal to the exponent rows, and
-  size-reduced as before.  A failed check, a kernel of one row, or an
-  unsolvable system reads the presentation's left transform as before.
+  size-reduced as before.  A failed check, a kernel of one row, a
+  presentation with at most 32 generators, or an unsolvable system reads
+  the presentation's left transform as before.  The cutoff is a measured
+  size crossover: on small presentations the extra reduction costs more
+  than the left transform.
   Labels, certification and saturation statuses, and the published class
   group and units are unchanged on every row of the proven corpus that
   finishes (177 rows compared with the previous commit: no proof-record
   field changed on any row, including the ``rank``, ``target_rank`` and
   ``local_primes`` of every saturation record); only the running time
-  changes.  Busy-machine measurement (3 repetitions each): proven
-  ``real_quadratic_d10000000005`` 2.4-4.1 s before and 0.34-0.60 s after;
-  ``real_quadratic_d100000000000009`` did not finish within 300 s before and
-  took 4.8 s after; the small ``real_quadratic_d100000001`` took 0.08 s
-  before and 0.13-0.16 s after.
+  changes.  Busy-machine measurement (3 repetitions each, medians): proven
+  ``real_quadratic_d10000000005`` 2.44 s before and 0.35 s after;
+  ``real_quadratic_d100000000000009`` did not finish within 120 s before and
+  took 6.4 s after (5.0-6.9 s); the small ``real_quadratic_d100000001``,
+  below the crossover, took 0.05 s before and after.
 
 - The ``proven`` analytic finish builds the kernel basis behind its unit
   count and regulator product with FLINT's double-precision LLL phase
