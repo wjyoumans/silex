@@ -1224,10 +1224,16 @@ bool same_decomposition(const silex::PrimeIdealList& left,
 // fills the cache, possibly under a bound that drops primes), must give what
 // the first call on a fresh maximal order gives for the same bound, prime
 // order included, and the cache must hold the unbounded decomposition.
+// A stored prime without a principal generator is rebuilt from its HNF
+// without the release-build ideal test, so each such HNF must also pass the
+// checked Ideal::set_hnf, and an unbounded read must publish that ideal.
+// When `hnf_records` is not null it receives the number of such records.
 int check_index_divisor_cache_matches_fresh(
         const std::vector<slong>& low_to_high,
         const std::vector<slong>& rational_primes,
-        const std::vector<slong>& bounds) {
+        const std::vector<slong>& bounds,
+        slong* hnf_records = nullptr) {
+    slong hnf_record_count = 0;
     sflint::FmpqPoly polynomial;
     poly_from_coefficients(polynomial, low_to_high);
 
@@ -1275,6 +1281,30 @@ int check_index_divisor_cache_matches_fresh(
                                           sflint::FmpzConstRef(p), bound));
             assert(same_decomposition(from_cache, cached, direct, fresh));
         }
+
+        const std::vector<silex::detail::IndexDivisorPrimeRecord>* stored =
+                silex::detail::OrderAccess::index_divisor_decomposition(
+                        cached, sflint::FmpzConstRef(p));
+        assert(stored != nullptr);
+        silex::PrimeIdealList all;
+        assert(silex::decompose_prime(all, cached, sflint::FmpzConstRef(p)));
+        assert(all.size() == static_cast<slong>(stored->size()));
+        for (slong i = 0; i < all.size(); ++i) {
+            const silex::detail::IndexDivisorPrimeRecord& record =
+                    (*stored)[static_cast<std::size_t>(i)];
+            if (record.has_principal_generator) {
+                continue;
+            }
+            ++hnf_record_count;
+            silex::Ideal checked(cached);
+            assert(checked.set_hnf(sflint::FmpzMatConstRef(record.hnf)));
+            silex::Ideal published(cached);
+            assert(all.at(i)->get_ideal(published));
+            assert(published.equal(checked));
+        }
+    }
+    if (hnf_records != nullptr) {
+        *hnf_records = hnf_record_count;
     }
     return 0;
 }
@@ -1285,9 +1315,26 @@ int check_index_divisor_cache_matches_fresh(
 // p^g <= 4096, so the bounded enumeration splits them.  Each cached p is
 // keyed separately on the one order.
 int test_index_divisor_cache_more_primes_than_p() {
-    return check_index_divisor_cache_matches_fresh(
-            {38188288, 1822160, -1462612, -62792, 24143, 602, -220, -2, 1},
-            {2, 3}, {1, 0, 2});
+    slong hnf_records = 0;
+    assert(check_index_divisor_cache_matches_fresh(
+                   {38188288, 1822160, -1462612, -62792, 24143, 602, -220,
+                    -2, 1},
+                   {2, 3}, {1, 0, 2}, &hnf_records) == 0);
+    // 8 + 4 primes, none with a known principal generator.
+    assert(hnf_records == 12);
+    return 0;
+}
+
+// Q(sqrt(-3), sqrt(-5), sqrt(-7)), p = 2: 2 ramifies (through sqrt(-5)) and
+// divides the index, so the bounded ramified split builds the primes from
+// the p-radical quotient and the cache rebuilds them from their HNFs.
+int test_index_divisor_cache_ramified_hnf() {
+    slong hnf_records = 0;
+    assert(check_index_divisor_cache_matches_fresh(
+                   {1201, 598, -524, -146, 69, 2, 4, -4, 1}, {2}, {1, 0, 2},
+                   &hnf_records) == 0);
+    assert(hnf_records > 0);
+    return 0;
 }
 
 // Q(sqrt(-3), sqrt(-5), sqrt(-7)), p = 11: 11^4 > 4096, so the bounded
@@ -4369,6 +4416,7 @@ int main() {
     assert(test_index_divisor_monogenic_order_unchanged_unramified() == 0);
     assert(test_index_divisor_monogenic_order_unchanged_ramified() == 0);
     assert(test_index_divisor_cache_more_primes_than_p() == 0);
+    assert(test_index_divisor_cache_ramified_hnf() == 0);
     assert(test_index_divisor_cache_recursive_split() == 0);
     assert(test_index_divisor_cache_monogenic() == 0);
     assert(test_index_divisor_cache_inert_principal() == 0);

@@ -1041,8 +1041,19 @@ bool index_prime_records(std::vector<detail::IndexDivisorPrimeRecord>& out,
 // Rebuilds, in stored order, the primes of `records` whose residue degree
 // passes `max_residue_degree`.  An ideal stored with a known principal
 // generator is rebuilt from that generator, as it was first built; any other
-// is rebuilt from its HNF through the checked Ideal::set_hnf.  Both give the
-// ideal first published, since the HNF of a full-rank lattice is unique.
+// is rebuilt from its HNF.  Both give the ideal first published, since the
+// HNF of a full-rank lattice is unique.
+//
+// The HNF rebuild skips the release-build hnf_is_ideal test of
+// Ideal::set_hnf (builds with assertions enabled still run it).  Records are
+// written only by index_prime_records, which copies the HNF of an Ideal of
+// this order that decompose_prime has already built and published, and the
+// cache is read back only for that order and p.  Each such Ideal was
+// accepted as an ideal when first built: through the checked set_hnf
+// (ideal_from_mod_kernel, ideal_from_pradical_quotient_component), as the
+// preimage of an ideal of O/pO (ideal_from_mod_rows), or as pO + gO
+// (set_known_two_generator_ideal).  Re-testing the same matrix adds nothing;
+// had it failed, the caller would recompute and publish the same HNF.
 bool index_prime_data_from_records(
         std::vector<IndexPrimeData>& out,
         const Order& order,
@@ -1068,7 +1079,8 @@ bool index_prime_data_from_records(
                 !prime.ideal.set_principal(generator)) {
                 return false;
             }
-        } else if (!prime.ideal.set_hnf(flint::FmpzMatConstRef(record.hnf))) {
+        } else if (!detail::IdealAccess::set_known_ideal_hnf(
+                           prime.ideal, flint::FmpzMatConstRef(record.hnf))) {
             return false;
         }
         prime.ramification_index = record.ramification_index;
