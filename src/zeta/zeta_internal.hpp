@@ -279,6 +279,19 @@ bool class_regulator_product_estimate_with_diagnostics(
 // character modulo |D|.
 int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept;
 
+// A fault forced on the blocks the stepper of `quadratic_dirichlet_l1`
+// plans, after planning and before the block starts, so that the start must
+// reject the block (for tests of its fail-closed paths): the Cauchy radius
+// R = 2^r raised to at least 2 z_n, R lowered to at most half the largest
+// step v_max of the block, or the truncation bound replaced by infinity once
+// it is computed.  Planning never produces these states.
+enum class QuadraticAfeStepFault : unsigned char {
+    none,
+    radius_above_z,
+    radius_below_step,
+    infinite_truncation,
+};
+
 // Test controls and counters of the Taylor stepping of the incomplete gamma
 // values Gamma(a, z) in `quadratic_dirichlet_l1`.  The counters are indexed
 // by shift = 2a: the sums use a = 1/2 and a = 0 for real D, a = 1 and
@@ -287,10 +300,19 @@ struct QuadraticAfeStepAudit {
     // False turns stepping off, so that every value is evaluated directly,
     // as the evaluation did before stepping was added.
     bool stepping = true;
+    // A fault forced on every block planned in a sum once `fault_after`
+    // blocks of that sum have started (0: on every block).
+    QuadraticAfeStepFault fault = QuadraticAfeStepFault::none;
+    ulong fault_after = 0;
     // Blocks started, and values taken from a block (an anchor carried
     // over from the previous block included).
     ulong blocks[3] = {0, 0, 0};
     ulong stepped_values[3] = {0, 0, 0};
+    // Planned blocks whose start was rejected, by the check that failed:
+    // R = 2^r below z_n, v_max below R, a finite truncation bound.
+    ulong rejected_radius[3] = {0, 0, 0};
+    ulong rejected_step[3] = {0, 0, 0};
+    ulong rejected_truncation[3] = {0, 0, 0};
 };
 
 // L(1, chi_D) for a fundamental discriminant D with |D| >= 3 fitting a
@@ -319,19 +341,6 @@ bool quadratic_dirichlet_l1_with_tolerance(
         slong log2_tolerance,
         slong precision,
         QuadraticAfeStepAudit* audit = nullptr) noexcept;
-
-// A fault forced on every block the stepper of `quadratic_dirichlet_l1`
-// plans, after planning and before the block starts, so that the start must
-// reject the block (for tests of its fail-closed paths): the Cauchy radius
-// R = 2^r raised to at least 2 z_n, R lowered to at most half the largest
-// step v_max of the block, or the truncation bound replaced by infinity once
-// it is computed.  Planning never produces these states.
-enum class QuadraticAfeStepFault : unsigned char {
-    none,
-    radius_above_z,
-    radius_below_step,
-    infinite_truncation,
-};
 
 struct QuadraticAfeGammaStepCount {
     ulong blocks = 0;

@@ -1021,6 +1021,47 @@ private:
     Rejection rejection_ = Rejection::radius;
 };
 
+// Starts the block that `stepper` planned at n, anchored at `anchor_value`
+// containing Gamma(shift / 2, z_n), with coefficients at `prec`.  With
+// `audit`, the fault it names is forced on the block once `fault_after`
+// blocks of this shift have started, and the started block, or the check
+// that rejected the start, is counted.  A rejected start leaves the stepper
+// inactive, so the caller evaluates the values directly until a later block
+// starts.  Shared by `quadratic_afe_sum` and its test entry.
+bool quadratic_afe_start_block(QuadraticAfeGammaStepper& stepper,
+                               ulong n,
+                               const flint::Arb& anchor_value,
+                               slong prec,
+                               ulong shift,
+                               detail::QuadraticAfeStepAudit* audit) noexcept {
+    if (audit != nullptr &&
+        audit->fault != detail::QuadraticAfeStepFault::none &&
+        audit->blocks[shift] >= audit->fault_after) {
+        stepper.force_fault(audit->fault, n);
+    }
+    if (stepper.start(n, anchor_value, prec)) {
+        if (audit != nullptr) {
+            ++audit->blocks[shift];
+        }
+        return true;
+    }
+    stepper.stop();
+    if (audit != nullptr) {
+        switch (stepper.rejection()) {
+        case QuadraticAfeGammaStepper::Rejection::radius:
+            ++audit->rejected_radius[shift];
+            break;
+        case QuadraticAfeGammaStepper::Rejection::step:
+            ++audit->rejected_step[shift];
+            break;
+        case QuadraticAfeGammaStepper::Rejection::truncation:
+            ++audit->rejected_truncation[shift];
+            break;
+        }
+    }
+    return false;
+}
+
 // FLINT `acb_dirichlet_fmpq_sum_afe` at s in {0, 1} for a real character:
 //   sum_{n >= 1} chi(n) Gamma((s + parity) / 2, pi n^2 / q) / n^s,
 // truncated at the first n whose tail bound is below `abs_tol`, which is then
@@ -1121,11 +1162,11 @@ void quadratic_afe_sum(flint::Arb& res,
             if (audit != nullptr) {
                 ++audit->stepped_values[shift];
             }
-            if (!stepper.plan(n, anchor_target) ||
-                !stepper.start(n, term, anchor_wp)) {
+            if (!stepper.plan(n, anchor_target)) {
                 stepper.stop();
-            } else if (audit != nullptr) {
-                ++audit->blocks[shift];
+            } else {
+                quadratic_afe_start_block(stepper, n, term, anchor_wp, shift,
+                                          audit);
             }
         } else if (stepper.active()) {
             if (chi != 0) {
@@ -1139,11 +1180,8 @@ void quadratic_afe_sum(flint::Arb& res,
             quadratic_afe_gamma_direct(term, z, shift, n, q, anchor_wp,
                                        wp2 + guard);
             have_term = true;
-            if (!stepper.start(n, term, anchor_wp)) {
-                stepper.stop();
-            } else if (audit != nullptr) {
-                ++audit->blocks[shift];
-            }
+            quadratic_afe_start_block(stepper, n, term, anchor_wp, shift,
+                                      audit);
         }
 
         if (chi == 0) {
@@ -4859,26 +4897,10 @@ bool ZetaTestEntry::quadratic_afe_gamma_stepped(flint::ArbVec& out,
     const slong zprec = anchor_prec + 64;
     flint::Arb z;
     flint::Arb value;
-    // Starts the block planned at n, with `fault` forced on it.
-    const auto start = [&](ulong n) noexcept {
-        stepper.force_fault(fault, n);
-        if (stepper.start(n, value, anchor_prec)) {
-            ++count.blocks;
-            return;
-        }
-        stepper.stop();
-        switch (stepper.rejection()) {
-        case QuadraticAfeGammaStepper::Rejection::radius:
-            ++count.rejected_radius;
-            break;
-        case QuadraticAfeGammaStepper::Rejection::step:
-            ++count.rejected_step;
-            break;
-        case QuadraticAfeGammaStepper::Rejection::truncation:
-            ++count.rejected_truncation;
-            break;
-        }
-    };
+    // `fault` on every block; the counters of `audit` at `shift` are
+    // copied to `count` at the end.
+    QuadraticAfeStepAudit audit;
+    audit.fault = fault;
     for (slong i = 0; i < out.length(); ++i) {
         const ulong n = first + static_cast<ulong>(i);
         // The branches of `quadratic_afe_sum`, every index visited.
@@ -4886,7 +4908,8 @@ bool ZetaTestEntry::quadratic_afe_gamma_stepped(flint::ArbVec& out,
             stepper.evaluate(value, n, anchor_target, anchor_prec);
             ++count.stepped_values;
             if (stepper.plan(n, anchor_target)) {
-                start(n);
+                quadratic_afe_start_block(stepper, n, value, anchor_prec,
+                                          shift, &audit);
             } else {
                 stepper.stop();
             }
@@ -4896,12 +4919,17 @@ bool ZetaTestEntry::quadratic_afe_gamma_stepped(flint::ArbVec& out,
         } else if (!stepper.exhausted() && stepper.plan(n, anchor_target)) {
             quadratic_afe_gamma_direct(value, z, shift, n, q, anchor_prec,
                                        zprec);
-            start(n);
+            quadratic_afe_start_block(stepper, n, value, anchor_prec, shift,
+                                      &audit);
         } else {
             quadratic_afe_gamma_direct(value, z, shift, n, q, prec, zprec);
         }
         ::arb_set(out.data() + i, value.raw());
     }
+    count.blocks = audit.blocks[shift];
+    count.rejected_radius = audit.rejected_radius[shift];
+    count.rejected_step = audit.rejected_step[shift];
+    count.rejected_truncation = audit.rejected_truncation[shift];
     return true;
 }
 

@@ -838,6 +838,91 @@ void check_step_start_fails_closed() {
     }
 }
 
+// The fail-closed paths of a block start in the sums of
+// `quadratic_dirichlet_l1` itself.  A fault forced on every planned block,
+// or on every block after the first of each sum (then the start planned at
+// the anchor ending the first block is rejected), must make every such start
+// reject its block at the forced check; the values are then evaluated
+// directly, and the enclosure must contain the one computed without
+// stepping at 64 more bits and overlap the one computed without the fault.
+void check_l1_start_fails_closed() {
+    using silex::detail::QuadraticAfeStepFault;
+    struct Case {
+        slong discriminant;
+        slong precision;
+    };
+    // Both sums step at these sizes (see check_stepping_before_after).
+    const Case cases[] = {{-99999971, 64}, {100049, 192}};
+    const QuadraticAfeStepFault faults[] = {
+            QuadraticAfeStepFault::radius_above_z,
+            QuadraticAfeStepFault::radius_below_step,
+            QuadraticAfeStepFault::infinite_truncation,
+    };
+    for (const Case& c : cases) {
+        sflint::Fmpz d;
+        sflint::fmpz_set_si(sflint::FmpzRef(d), c.discriminant);
+        sflint::Arb reference;
+        silex::detail::QuadraticAfeStepAudit direct;
+        direct.stepping = false;
+        assert(silex::detail::quadratic_dirichlet_l1(
+                sflint::ArbRef(reference), sflint::FmpzConstRef(d),
+                c.precision + 64, &direct));
+        assert(radius_lt_2exp_si(reference, -(c.precision + 32)));
+        sflint::Arb plain;
+        silex::detail::QuadraticAfeStepAudit plain_audit;
+        assert(silex::detail::quadratic_dirichlet_l1(
+                sflint::ArbRef(plain), sflint::FmpzConstRef(d), c.precision,
+                &plain_audit));
+        assert_stepping_used(plain_audit, c.discriminant);
+        const ulong unused = c.discriminant < 0 ? 0 : 2;
+        for (ulong shift = 0; shift < 3; ++shift) {
+            assert(plain_audit.rejected_radius[shift] == 0);
+            assert(plain_audit.rejected_step[shift] == 0);
+            assert(plain_audit.rejected_truncation[shift] == 0);
+            if (shift != unused) {
+                assert(plain_audit.blocks[shift] >= 2);
+            }
+        }
+        for (const QuadraticAfeStepFault fault : faults) {
+            for (const ulong after : {UWORD(0), UWORD(1)}) {
+                silex::detail::QuadraticAfeStepAudit audit;
+                audit.fault = fault;
+                audit.fault_after = after;
+                sflint::Arb value;
+                assert(silex::detail::quadratic_dirichlet_l1(
+                        sflint::ArbRef(value), sflint::FmpzConstRef(d),
+                        c.precision, &audit));
+                for (ulong shift = 0; shift < 3; ++shift) {
+                    const ulong rejected =
+                            audit.rejected_radius[shift] +
+                            audit.rejected_step[shift] +
+                            audit.rejected_truncation[shift];
+                    if (shift == unused) {
+                        assert(audit.blocks[shift] == 0);
+                        assert(audit.stepped_values[shift] == 0);
+                        assert(rejected == 0);
+                        continue;
+                    }
+                    const ulong forced =
+                            fault == QuadraticAfeStepFault::radius_above_z
+                                    ? audit.rejected_radius[shift]
+                            : fault == QuadraticAfeStepFault::radius_below_step
+                                    ? audit.rejected_step[shift]
+                                    : audit.rejected_truncation[shift];
+                    assert(audit.blocks[shift] == after);
+                    assert(forced >= 1);
+                    assert(forced == rejected);
+                    assert((audit.stepped_values[shift] == 0) ==
+                           (after == 0));
+                }
+                assert(::arb_contains(value.raw(), reference.raw()) != 0);
+                assert(::arb_overlaps(value.raw(), plain.raw()) != 0);
+                assert(radius_lt_2exp_si(value, -(c.precision - 16)));
+            }
+        }
+    }
+}
+
 // The block length of the earlier Silex bound |K| e v (rho v)^M /
 // (1 - rho v), rho = max(1, 1 / z), which planned the longest block B with
 // rho v_max <= 2^-10, and a block only if B >= 4.
@@ -998,6 +1083,7 @@ int main() {
     check_gamma_stepping_against_hypgeom();
     check_step_truncation_bounds();
     check_step_start_fails_closed();
+    check_l1_start_fails_closed();
     check_step_blocks_need_fewer_terms();
     check_stepping_before_after(slow_tests_enabled());
 
