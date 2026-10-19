@@ -139,6 +139,19 @@ Changed
   ``imaginary_quadratic_34`` 11%, ``simplest_cubic_a12`` 8%,
   ``cyclotomic_64_phi32`` 3%).
 
+- The Hensel ``is_power`` path computes the leading coefficient of an
+  element's primitive integral characteristic polynomial (its ``n``-th power
+  pre-filter and height bound) from the integral multiplication matrix
+  reduced modulo ``L^d``, with ``L`` the matrix's common denominator, instead
+  of from the full rational characteristic polynomial.  The value is the same
+  on every input; only the size of the numbers changes.  On the ``proven``
+  ``multiquadratic_m23_m31_m47`` row the saturation proof's unit products
+  have coefficients of 2-7 million bits over 24-bit denominators, and the
+  row took 170 s instead of 249 s (busy machine, one run each; the control
+  ``cyclotomic_real_41_deg20`` took 8.4-11.1 s before and 7.8-9.5 s after,
+  five runs each).  Every published result is unchanged on the ``proven``
+  corpus.
+
 - The ``proven`` relation-saturation proof takes the relation-kernel basis of
   every multi-row kernel over a presentation with more than 32 generators,
   and the relation coefficients of its beta rows, from the LLL reduction of ``[c*A | I]`` (the same reduction as the analytic
