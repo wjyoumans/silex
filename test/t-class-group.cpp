@@ -7220,13 +7220,13 @@ int test_relation_saturation_size_reduce_row() {
 // basis relation_saturation_beta_coefficients size-reduces against, after
 // checking it: it spans the same lattice, is LLL-reduced with FLINT's
 // default parameters (fmpz_mat_is_reduced), and is cached.  For more than
-// one row and entries of at most 250 bits it comes from FLINT's
-// double-precision first phase when that phase is certified, so the
-// LLL-reduced basis read by relation_kernel_unit is left unbuilt;
-// `expect_first_phase` asserts that route.  For more than one row and
-// larger entries it may come from the certified extension route, which also
-// leaves that basis unbuilt.  Otherwise it is a copy of that LLL-reduced
-// basis, which is then built.
+// one row it comes from the certified extension route, which leaves the
+// LLL-reduced basis read by relation_kernel_unit unbuilt.  When that route
+// is skipped (SaturationKernelTestSeams force_transform_route) or fails, it
+// comes, for entries of at most 250 bits, from FLINT's double-precision
+// first phase when that phase is certified, which also leaves that basis
+// unbuilt; `expect_first_phase` asserts that route.  Otherwise it is a copy
+// of that LLL-reduced basis, which is then built.
 void relation_saturation_test_kernel_basis(
         sflint::FmpzMat& kernel,
         const silex::ClassGroupContext& context,
@@ -7269,15 +7269,17 @@ void relation_saturation_test_kernel_basis(
 }
 
 // The saturation kernel basis from FLINT's certified first LLL phase.
-// Q(sqrt(100000001)), x^2 - x - 25000000, in GRH mode: the relation kernel
-// has more than one row and entries of at most 250 bits, so the basis the
-// beta rows are size-reduced against comes from
-// fmpz_lll_d_with_removal_knapsack certified by the exact certificate
-// (lat::detail::lll_certificate_holds), without building the LLL-reduced
-// basis of relation_kernel_unit.  With
+// Q(sqrt(100000001)), x^2 - x - 25000000, in GRH mode, with the extension
+// route skipped: the relation kernel has more than one row and entries of
+// at most 250 bits, so the basis the beta rows are size-reduced against
+// comes from fmpz_lll_d_with_removal_knapsack certified by the exact
+// certificate (lat::detail::lll_certificate_holds), without building the
+// LLL-reduced basis of relation_kernel_unit.  With
 // proven units, each beta coefficient row differs from the presentation's
 // row by a kernel vector and is size-reduced against that basis.
 int test_relation_saturation_kernel_basis_first_phase() {
+    using silex::detail::TestHookAccess;
+    TestHookAccess::set_saturation_kernel_force_transform(true);
     silex::NumberField field = shifted_quadratic_field(-1, -25000000);
     silex::Order equation_order = silex::test::equation_order(field);
     silex::Order maximal_order(field);
@@ -7405,6 +7407,7 @@ int test_relation_saturation_kernel_basis_first_phase() {
     assert(silex::detail::relation_saturation_kernel_basis(
             basis, lll_basis_built, context));
     assert(!lll_basis_built);
+    TestHookAccess::set_saturation_kernel_force_transform(false);
     return 0;
 }
 
@@ -7466,8 +7469,10 @@ sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
 }
 
 // As above, for a failure injected into the extension route
-// (SaturationKernelTestSeams), with the extension route forced by the
-// caller.
+// (SaturationKernelTestSeams).  The fallback reads the kernel from the left
+// transform; on the small kernels used here FLINT's first phase is
+// certified there, so the LLL-reduced basis of relation_kernel_unit stays
+// unbuilt, and the basis is the one fmpz_lll returns.
 sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
         const silex::ClassGroupContext& context,
         silex::detail::SaturationKernelTestFailure failure) {
@@ -7483,7 +7488,7 @@ sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
             SaturationKernelTestFailure::none);
     const bool injecting = failure != SaturationKernelTestFailure::none;
     assert(built);
-    assert(lll_basis_built == injecting);
+    assert(!lll_basis_built);
     assert(TestHookAccess::saturation_kernel_failures_injected() ==
            injected + (injecting ? 1 : 0));
     relation_saturation_test_kernel_basis_is_lll(basis, context);
@@ -7491,13 +7496,16 @@ sflint::FmpzMat relation_saturation_test_kernel_basis_with_failure(
 }
 
 // Over Q with the factor base {2}, the relations 256, 16, 4, 2 have a
-// relation kernel of rank 3 with small entries, so the first phase builds
-// the saturation kernel basis.  When the phase reports failure or its
+// relation kernel of rank 3 with small entries, so with the extension route
+// skipped the first phase builds the saturation kernel basis.  When the
+// phase reports failure or its
 // result is not certified, the fallback builds the basis from fmpz_lll,
 // equal to the basis the certified phase gives.  Publishing the
 // presentation again resets the cached bases, so each case builds afresh.
 int test_relation_saturation_kernel_basis_fallbacks() {
     using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
+    TestHookAccess::set_saturation_kernel_force_transform(true);
     silex::NumberField field = degree_one_field();
     silex::Order order;
     order = silex::test::equation_order(field);
@@ -7532,16 +7540,19 @@ int test_relation_saturation_kernel_basis_fallbacks() {
             assert(::fmpz_mat_equal(basis.raw(), expected.raw()));
         }
     }
+    TestHookAccess::set_saturation_kernel_force_transform(false);
     return 0;
 }
 
-// The extension route of the saturation kernel basis, forced on a small
-// kernel.  Over Q with the factor base {2}, the relations 256, 16, 4, 2
-// have a relation kernel of rank 3.  The route reduces [c * relations | I]
-// and keeps the checked kernel rows: the basis spans the exact kernel, is
-// certified LLL-reduced, and leaves the LLL-reduced basis of
-// relation_kernel_unit unbuilt.  When its row checks or its certificate
-// fail, the fallback builds the basis from fmpz_lll.
+// The extension route of the saturation kernel basis, which every kernel of
+// more than one row takes first.  Over Q with the factor base {2}, the
+// relations 256, 16, 4, 2 have a relation kernel of rank 3 with small
+// entries.  The route reduces [c * relations | I] and keeps the checked
+// kernel rows: the basis spans the exact kernel, is certified LLL-reduced,
+// and leaves the LLL-reduced basis of relation_kernel_unit unbuilt.  When
+// its row checks or its certificate fail, or when it is skipped
+// (force_transform_route), the kernel is read from the left transform.  A
+// kernel of one row (the relations 256, 16) never takes the route.
 int test_relation_saturation_kernel_basis_extension_route() {
     using silex::detail::SaturationKernelTestFailure;
     using silex::detail::TestHookAccess;
@@ -7562,7 +7573,6 @@ int test_relation_saturation_kernel_basis_extension_route() {
         assert(context.append_relation(relation));
     }
 
-    TestHookAccess::set_saturation_kernel_force_extension(true);
     assert(context.publish_presentation());
     assert(context.relation_kernel_unit_count() == 3);
     silex::FiniteAbelianGroup presentation;
@@ -7572,12 +7582,15 @@ int test_relation_saturation_kernel_basis_extension_route() {
     std::optional<sflint::FmpzMat> relations = presentation.relations();
     assert(kernel.has_value() && relations.has_value());
     const slong injected = TestHookAccess::saturation_kernel_failures_injected();
+    slong kept = TestHookAccess::saturation_kernel_extensions_kept();
     sflint::FmpzMat basis(0, 0);
     bool lll_basis_built = true;
     assert(silex::detail::relation_saturation_kernel_basis(
             basis, lll_basis_built, context));
     assert(!lll_basis_built);
     assert(TestHookAccess::saturation_kernel_failures_injected() == injected);
+    assert(TestHookAccess::saturation_kernel_extensions_kept() == kept + 1);
+    kept = TestHookAccess::saturation_kernel_extensions_kept();
     assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis)) == 3 &&
            sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(basis)) == 4);
     sflint::FmpzLll lll;
@@ -7608,8 +7621,40 @@ int test_relation_saturation_kernel_basis_extension_route() {
           SaturationKernelTestFailure::certificate}) {
         assert(context.publish_presentation());
         relation_saturation_test_kernel_basis_with_failure(context, failure);
+        assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
     }
-    TestHookAccess::set_saturation_kernel_force_extension(false);
+
+    // Skipped: the basis comes from the left transform through the
+    // certified first phase, which equals fmpz_lll of the exact kernel.
+    TestHookAccess::set_saturation_kernel_force_transform(true);
+    assert(context.publish_presentation());
+    lll_basis_built = true;
+    assert(silex::detail::relation_saturation_kernel_basis(
+            basis, lll_basis_built, context));
+    TestHookAccess::set_saturation_kernel_force_transform(false);
+    assert(!lll_basis_built);
+    assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
+    relation_saturation_test_kernel_basis_is_lll(basis, context);
+
+    // One kernel row: the left transform, then fmpz_lll.
+    silex::ClassGroupContext single(order);
+    assert(single.build_factor_base(sflint::FmpzConstRef(bound)));
+    const silex::FactorBase* single_base = single.factor_base();
+    assert(single_base != nullptr);
+    silex::Relation single_relation(*single_base);
+    for (const slong generator : {256, 16}) {
+        assert(alpha.set_si(generator));
+        assert(single_relation.set_generator(alpha));
+        assert(single.append_relation(single_relation));
+    }
+    assert(single.publish_presentation());
+    assert(single.relation_kernel_unit_count() == 1);
+    lll_basis_built = false;
+    assert(silex::detail::relation_saturation_kernel_basis(
+            basis, lll_basis_built, single));
+    assert(lll_basis_built);
+    assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
+    relation_saturation_test_kernel_basis_is_lll(basis, single);
     return 0;
 }
 
@@ -7660,16 +7705,18 @@ int test_relation_saturation_kernel_basis_reuse_and_invalidation() {
     assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis)) == 2);
     relation_saturation_test_kernel_basis_is_lll(basis, context);
 
-    // A new presentation resets both bases and the Gram data: the first
-    // phase builds the rank-3 basis, and relation_kernel_unit's basis is
-    // left unbuilt.
+    // A new presentation resets both bases and the Gram data: with the
+    // extension route skipped, the first phase builds the rank-3 basis, and
+    // relation_kernel_unit's basis is left unbuilt.
     assert(alpha.set_si(2));
     assert(relation.set_generator(alpha));
     assert(context.append_relation(relation));
     assert(context.publish_presentation());
     assert(context.relation_kernel_unit_count() == 3);
+    TestHookAccess::set_saturation_kernel_force_transform(true);
     basis = relation_saturation_test_kernel_basis_with_failure(
             context, CertifiedLllTestFailure::none);
+    TestHookAccess::set_saturation_kernel_force_transform(false);
     assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis)) == 3);
     return 0;
 }

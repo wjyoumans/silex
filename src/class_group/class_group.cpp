@@ -5785,17 +5785,22 @@ public:
         return storage;
     }
 
-    // The kernel route of saturation_relation_kernel for kernels outside the
-    // first phase's range: the shared small-kernel helper reduces
-    // [c * relations | I_n] for the presentation's n x g relation matrix by
-    // fmpz_lll and keeps the identity parts of the rows whose relation part
-    // is zero, accepted only when exactly kernel_rows such rows exist and
-    // each satisfies v * relations == 0 (checked_relation_kernel_rows,
+    // The extension route of saturation_relation_kernel: the shared
+    // small-kernel helper reduces [c * relations | I_n] for the
+    // presentation's n x g relation matrix by fmpz_lll and keeps the
+    // identity parts of the rows whose relation part is zero, accepted only
+    // when exactly kernel_rows such rows exist and each satisfies
+    // v * relations == 0 (checked_relation_kernel_rows,
     // class_group_internal.hpp).  The rows are then accepted only when
-    // fmpz_mat_is_reduced certifies them with FLINT's default parameters,
-    // as for the first phase.  Sets out and returns true on that success
-    // only; the caller then falls back to the fmpz_lll basis.
+    // fmpz_mat_is_reduced certifies them with FLINT's default parameters.
+    // On that success only, sets out to those rows and image to the
+    // identity parts of the other n - kernel_rows rows, in their reduced
+    // order, and returns true; the caller then falls back to the route
+    // through the left transform.  The image rows carry no certificate of
+    // their own: solved_invariant_generator_relation_rows checks every row
+    // it derives from them exactly.
     static bool extension_saturation_kernel(flint::FmpzMat& out,
+                                            flint::FmpzMat& image,
                                             const ClassGroupContext& context,
                                             slong kernel_rows) noexcept {
         const slong n = context.quotient_.relation_count();
@@ -5837,7 +5842,149 @@ public:
                                    lll.raw()->eta)) {
             return false;
         }
+        // checked_relation_kernel_rows found exactly kernel_rows rows with
+        // a zero relation part, so exactly n - kernel_rows rows remain.
+        const flint::FmpzMatConstRef reduced(extension);
+        flint::FmpzMat image_rows(n - kernel_rows, n);
+        slong found = 0;
+        for (slong i = 0; i < n; ++i) {
+            bool zero_relation_part = true;
+            for (slong j = 0; j < g && zero_relation_part; ++j) {
+                zero_relation_part = flint::fmpz_is_zero(
+                        flint::fmpz_mat_entry(reduced, i, j));
+            }
+            if (zero_relation_part) {
+                continue;
+            }
+            if (found == n - kernel_rows) {
+                return false;
+            }
+            for (slong j = 0; j < n; ++j) {
+                flint::fmpz_set(flint::fmpz_mat_entry(
+                                        flint::FmpzMatRef(image_rows), found,
+                                        j),
+                                flint::fmpz_mat_entry(reduced, i, g + j));
+            }
+            ++found;
+        }
+        if (found != n - kernel_rows) {
+            return false;
+        }
         out = std::move(rows);
+        image = std::move(image_rows);
+        return true;
+    }
+
+    // The rows `indices` of invariant_generator_relation_matrix up to the
+    // relation kernel, without the left transform: for each invariant index
+    // i, an integer row c with c * A = d_i * (V^-1)_i, where A is the
+    // presentation's n x g relation matrix, d_i its i-th invariant and
+    // (V^-1)_i the matching row of invariant_generator_matrix.  The
+    // presentation's row satisfies the same identity (its left transform L
+    // has L * A * V = [S; 0]), so the two differ by a relation-kernel
+    // vector.  `image` is the g x n matrix of extension_saturation_kernel:
+    // the identity parts of the rows of the reduced [c * A | I] with a
+    // nonzero relation part.  The rows of that reduced matrix are U * [c * A
+    // | I] for a unimodular U (fmpz_lll applies only unimodular row
+    // operations), so B = image * A is a basis of the row lattice of A
+    // (Havas, Majewski and Matthews, Experimental Mathematics 7 (1998),
+    // section 6: for a unimodular P = [Q; R] with P G = B, Q G = C is the
+    // nonzero rows of B and R G = 0; Cohen, GTM 138, section 2.7.1).
+    // d_i * (V^-1)_i lies in that
+    // lattice, so x * B = d_i * (V^-1)_i has a unique rational solution x,
+    // which is integral, and c = x * image.  The solution is computed by
+    // fmpz_mat_solve on the transposed square system, and the result is
+    // accepted only when the denominator divides every entry and
+    // c * A == d_i * (V^-1)_i holds exactly for every row; the check is
+    // what the beta rows rely on, so unimodularity is not assumed.  Fails
+    // otherwise, and the caller then reads the left transform.
+    static bool solved_invariant_generator_relation_rows(
+            flint::FmpzMat& out,
+            const ClassGroupContext& context,
+            flint::FmpzMatConstRef image,
+            const std::vector<slong>& indices) noexcept {
+        const slong n = context.quotient_.relation_count();
+        const slong g = context.quotient_.generator_count();
+        const slong invariant_count = context.quotient_.invariant_count();
+        const slong k = static_cast<slong>(indices.size());
+        if (!context.has_presentation() || g <= 0 ||
+            flint::fmpz_mat_nrows(image) != g ||
+            flint::fmpz_mat_ncols(image) != n) {
+            return false;
+        }
+        flint::FmpzMat relations(n, g);
+        flint::FmpzMat generators(invariant_count, g);
+        if (!context.quotient_.relations(flint::FmpzMatRef(relations)) ||
+            !context.quotient_.invariant_generator_matrix(
+                    flint::FmpzMatRef(generators))) {
+            return false;
+        }
+        // targets^T: column b is d_i * (V^-1)_i for i = indices[b].
+        flint::FmpzMat targets_t(g, k);
+        flint::Fmpz invariant;
+        for (slong b = 0; b < k; ++b) {
+            const slong i = indices[static_cast<std::size_t>(b)];
+            if (i < 0 || i >= invariant_count ||
+                !context.quotient_.invariant(flint::FmpzRef(invariant), i)) {
+                return false;
+            }
+            for (slong j = 0; j < g; ++j) {
+                flint::fmpz_mul(
+                        flint::fmpz_mat_entry(flint::FmpzMatRef(targets_t), j,
+                                              b),
+                        flint::FmpzConstRef(invariant),
+                        flint::fmpz_mat_entry(
+                                flint::FmpzMatConstRef(generators), i, j));
+            }
+        }
+        flint::FmpzMat basis(g, g);
+        flint::fmpz_mat_mul(flint::FmpzMatRef(basis), image,
+                            flint::FmpzMatConstRef(relations));
+        if (SaturationKernelTestSeams::failure() ==
+            SaturationKernelTestFailure::beta_solve) {
+            // Test-only failure injection: the zero matrix is singular.
+            flint::fmpz_mat_zero(flint::FmpzMatRef(basis));
+            SaturationKernelTestSeams::note_injected();
+        }
+        flint::FmpzMat basis_t(g, g);
+        ::fmpz_mat_transpose(basis_t.raw(), basis.raw());
+        flint::FmpzMat solution_t(g, k);
+        flint::Fmpz den;
+        if (::fmpz_mat_solve(solution_t.raw(), den.raw(), basis_t.raw(),
+                             targets_t.raw()) == 0 ||
+            flint::fmpz_is_zero(flint::FmpzConstRef(den))) {
+            return false;
+        }
+        flint::FmpzMat solution(k, g);
+        for (slong b = 0; b < k; ++b) {
+            for (slong j = 0; j < g; ++j) {
+                const flint::FmpzConstRef entry = flint::fmpz_mat_entry(
+                        flint::FmpzMatConstRef(solution_t), j, b);
+                if (!flint::fmpz_divisible(entry,
+                                           flint::FmpzConstRef(den))) {
+                    return false;
+                }
+                flint::fmpz_divexact(
+                        flint::fmpz_mat_entry(flint::FmpzMatRef(solution), b,
+                                              j),
+                        entry, flint::FmpzConstRef(den));
+            }
+        }
+        flint::FmpzMat coefficients(k, n);
+        flint::fmpz_mat_mul(flint::FmpzMatRef(coefficients),
+                            flint::FmpzMatConstRef(solution), image);
+        // The exact check: coefficients * A == targets.
+        flint::FmpzMat product(k, g);
+        flint::fmpz_mat_mul(flint::FmpzMatRef(product),
+                            flint::FmpzMatConstRef(coefficients),
+                            flint::FmpzMatConstRef(relations));
+        flint::FmpzMat targets(k, g);
+        ::fmpz_mat_transpose(targets.raw(), targets_t.raw());
+        if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(product),
+                                   flint::FmpzMatConstRef(targets))) {
+            return false;
+        }
+        out = std::move(coefficients);
         return true;
     }
 
@@ -5847,25 +5994,28 @@ public:
     //
     // The basis is LLL-reduced (FLINT default parameters) in every case.  If
     // the LLL-reduced basis that relation_kernel_unit publishes from is
-    // already built it is reused.  Otherwise the kernel is reduced by
-    // FLINT's certified first LLL phase
+    // already built it is reused.  Otherwise a kernel of at least two rows
+    // takes extension_saturation_kernel (the shared small-kernel helper of
+    // the proven analytic finish), certified by fmpz_mat_is_reduced, and
+    // its image rows are kept for the beta coefficients
+    // (solved_invariant_generator_relation_rows).  This route never forms
+    // the left transform of the presentation, whose HNF transform of the
+    // full relation matrix dominated the proven route on real quadratic
+    // fields with large discriminant.  When it fails a check or its
+    // certificate, or the kernel has one row, the kernel is read from the
+    // left transform.  For at least two rows and entries of at most
+    // 250 bits it is then reduced by FLINT's certified first LLL phase
     // (lat::detail::lll_first_phase_certified, the Lat::lll_reduce route,
-    // docs/reference/algorithms_and_sources.rst), which is eligible for at
-    // least two rows and entries of at most 250 bits.  FLINT's own check
-    // after that phase, fmpz_lll_is_reduced, dominated the cost on a
-    // 71 x 94 kernel.  For at least two rows with larger entries, where
-    // fmpz_lll of the kernel itself can take minutes, the basis comes from
-    // extension_saturation_kernel (the shared small-kernel helper of the
-    // proven analytic finish), certified by fmpz_mat_is_reduced.  When the
-    // phase is not certified or not eligible, or the extension route fails
-    // a check or its certificate, or the kernel has one row, the
-    // LLL-reduced basis is built by fmpz_lll and copied.  A certified phase
-    // is the basis fmpz_lll returns; the extension route's checked rows are
-    // a kernel basis (see checked_relation_kernel_rows), so every route
-    // returns a basis of the kernel.  Tests force the first-phase fallback
-    // through CertifiedLllTestSeams (lat/certified_lll_internal.hpp), and
-    // reach the extension route on small kernels and force its fallbacks
-    // through SaturationKernelTestSeams.
+    // docs/reference/algorithms_and_sources.rst).  When the phase is not
+    // certified or not eligible, the LLL-reduced basis is built by fmpz_lll
+    // and copied.  A certified phase is the basis fmpz_lll returns; the
+    // extension route's checked rows are a kernel basis (see
+    // checked_relation_kernel_rows), so every route returns a basis of the
+    // kernel.  Tests send multi-row kernels through the left transform with
+    // SaturationKernelTestSeams::force_transform_route, force the
+    // first-phase fallback through CertifiedLllTestSeams
+    // (lat/certified_lll_internal.hpp), and force the extension route's
+    // fallbacks through SaturationKernelTestSeams.
     static const ClassGroupContextStorage* saturation_relation_kernel(
             const ClassGroupContext& context) noexcept {
         ClassGroupContextStorage* storage = context.private_storage_.get();
@@ -5876,39 +6026,37 @@ public:
             return storage;
         }
         if (!storage->reduced_relation_kernel_valid) {
-            flint::FmpzMat kernel(context.relation_kernel_unit_count(),
-                                  context.relation_count());
+            const slong kernel_rows = context.relation_kernel_unit_count();
+            if (kernel_rows > 1 &&
+                !SaturationKernelTestSeams::force_transform_route()) {
+                flint::FmpzMat basis(0, 0);
+                flint::FmpzMat image(0, 0);
+                if (extension_saturation_kernel(basis, image, context,
+                                                kernel_rows)) {
+                    SaturationKernelTestSeams::note_extension_kept();
+                    storage->saturation_relation_kernel = std::move(basis);
+                    storage->saturation_relation_image_transform =
+                            std::move(image);
+                    storage->saturation_relation_image_valid = true;
+                    storage->saturation_relation_kernel_valid = true;
+                    return storage;
+                }
+            }
+            flint::FmpzMat kernel(kernel_rows, context.relation_count());
             if (!context.quotient_.relation_kernel_matrix(
                         flint::FmpzMatRef(kernel))) {
                 return nullptr;
             }
-            constexpr slong kFlintUlllTruncationBits = 250;
-            const slong bits = ::fmpz_mat_max_bits(kernel.raw());
-            const bool in_first_phase_range =
-                    bits >= -kFlintUlllTruncationBits &&
-                    bits <= kFlintUlllTruncationBits;
-            if (flint::fmpz_mat_nrows(kernel) > 1 &&
-                (!in_first_phase_range ||
-                 SaturationKernelTestSeams::force_extension_route())) {
-                flint::FmpzMat basis(0, 0);
-                if (extension_saturation_kernel(basis, context,
-                                                flint::fmpz_mat_nrows(
-                                                        kernel))) {
-                    SaturationKernelTestSeams::note_extension_kept();
-                    storage->saturation_relation_kernel = std::move(basis);
-                    storage->saturation_relation_kernel_valid = true;
-                    return storage;
-                }
-            } else {
-                flint::FmpzLll lll;
-                if (lat::detail::lll_first_phase_certified(
-                            kernel.raw(), nullptr,
-                            flint::FmpzLllConstRef(lll)) ==
-                    lat::detail::CertifiedLllRoute::certified) {
-                    storage->saturation_relation_kernel = std::move(kernel);
-                    storage->saturation_relation_kernel_valid = true;
-                    return storage;
-                }
+            // The phase checks its own eligibility (at least two rows,
+            // entries of at most 250 bits) and leaves an ineligible kernel
+            // unchanged.
+            flint::FmpzLll lll;
+            if (lat::detail::lll_first_phase_certified(
+                        kernel.raw(), nullptr, flint::FmpzLllConstRef(lll)) ==
+                lat::detail::CertifiedLllRoute::certified) {
+                storage->saturation_relation_kernel = std::move(kernel);
+                storage->saturation_relation_kernel_valid = true;
+                return storage;
             }
         }
         if (reduced_relation_kernel(context) == nullptr) {
@@ -10395,11 +10543,34 @@ bool relation_saturation_beta_coefficients(
     }
     const ClassGroupContextStorage* kernel =
             ClassGroupRelationAccess::saturation_relation_kernel_gram(context);
-    flint::FmpzMat coefficients(context.invariant_count(), relation_count);
-    if (kernel == nullptr ||
-        !ClassGroupRelationAccess::invariant_generator_relation_matrix(
-                flint::FmpzMatRef(coefficients), context)) {
+    if (kernel == nullptr) {
         return false;
+    }
+    // Row b of `coefficients` is invariant index row_index[b]: the solved
+    // rows hold only `indices`, the left transform's rows every invariant.
+    // Both satisfy c * A = d_i * (V^-1)_i, so they differ by a kernel
+    // vector and the size reduction below applies to either.
+    flint::FmpzMat coefficients(0, 0);
+    std::vector<slong> row_index;
+    if (kernel->saturation_relation_image_valid &&
+        ClassGroupRelationAccess::solved_invariant_generator_relation_rows(
+                coefficients, context,
+                flint::FmpzMatConstRef(
+                        kernel->saturation_relation_image_transform),
+                indices)) {
+        SaturationKernelTestSeams::note_beta_solved();
+        row_index.resize(indices.size());
+        for (std::size_t b = 0; b < indices.size(); ++b) {
+            row_index[b] = static_cast<slong>(b);
+        }
+    } else {
+        flint::FmpzMat all(context.invariant_count(), relation_count);
+        if (!ClassGroupRelationAccess::invariant_generator_relation_matrix(
+                    flint::FmpzMatRef(all), context)) {
+            return false;
+        }
+        coefficients = std::move(all);
+        row_index = indices;
     }
     flint::FmpzMat row(1, relation_count);
     for (std::size_t b = 0; b < indices.size(); ++b) {
@@ -10407,8 +10578,8 @@ bool relation_saturation_beta_coefficients(
             flint::fmpz_set(
                     flint::fmpz_mat_entry(flint::FmpzMatRef(row), 0, j),
                     flint::fmpz_mat_entry(
-                            flint::FmpzMatConstRef(coefficients), indices[b],
-                            j));
+                            flint::FmpzMatConstRef(coefficients),
+                            row_index[b], j));
         }
         if (!size_reduce_row_against_basis(
                     flint::FmpzMatRef(row),

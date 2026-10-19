@@ -272,11 +272,12 @@ public:
     }
 
     // Sends every later saturation kernel basis of more than one row
-    // through the extension route (SaturationKernelTestSeams) until it is
-    // set back to false.  That route is certified like the first phase and
-    // falls back to fmpz_lll in the same way, so no invariant is skipped.
-    static void set_saturation_kernel_force_extension(bool force) noexcept {
-        SaturationKernelTestSeams::force_extension_route_.store(
+    // through the presentation's left transform instead of the extension
+    // route (SaturationKernelTestSeams) until it is set back to false.  It
+    // is the route those kernels take whenever the extension route fails,
+    // so no invariant is skipped.
+    static void set_saturation_kernel_force_transform(bool force) noexcept {
+        SaturationKernelTestSeams::force_transform_route_.store(
                 force, std::memory_order_relaxed);
     }
 
@@ -340,6 +341,13 @@ public:
     // process started.
     static slong saturation_kernel_extensions_kept() noexcept {
         return SaturationKernelTestSeams::extension_kept_.load(
+                std::memory_order_relaxed);
+    }
+
+    // The number of beta coefficient sets solved from the extension
+    // route's image rows since the process started.
+    static slong saturation_beta_rows_solved() noexcept {
+        return SaturationKernelTestSeams::beta_solved_.load(
                 std::memory_order_relaxed);
     }
 

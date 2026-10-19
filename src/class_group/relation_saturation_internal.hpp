@@ -278,8 +278,17 @@ class TestHookAccess;
 // reduction runs, so the fallback is exercised after the reduction has
 // changed the matrix.  first_phase: the reduced extension is zeroed, so its
 // kernel-row count check fails.  certificate: fmpz_mat_is_reduced runs on
-// the zeroed basis, which it does not certify.
-enum class SaturationKernelTestFailure { none, first_phase, certificate };
+// the zeroed basis, which it does not certify.  beta_solve: the kernel
+// route is untouched, and the lattice basis that
+// ClassGroupRelationAccess::solved_invariant_generator_relation_rows solves
+// against is zeroed, so the solve fails and the beta coefficients are read
+// from the left transform.
+enum class SaturationKernelTestFailure {
+    none,
+    first_phase,
+    certificate,
+    beta_solve
+};
 
 // Read by saturation_relation_kernel each time it builds a basis.  Off by
 // default and never set by production code.  Relaxed atomics so a reader
@@ -289,11 +298,12 @@ public:
     static SaturationKernelTestFailure failure() noexcept {
         return failure_.load(std::memory_order_relaxed);
     }
-    // When set, a kernel of more than one row takes the extension route
-    // even when its entries are within the first phase's range, so tests
-    // reach that route on small kernels.
-    static bool force_extension_route() noexcept {
-        return force_extension_route_.load(std::memory_order_relaxed);
+    // When set, a kernel of more than one row skips the extension route
+    // and takes the route through the presentation's left transform, as a
+    // kernel of one row does, so tests can compare the two routes and reach
+    // the first phase and its fallbacks on multi-row kernels.
+    static bool force_transform_route() noexcept {
+        return force_transform_route_.load(std::memory_order_relaxed);
     }
     // Counts each extension-route run that an injected
     // failure replaced.
@@ -305,24 +315,36 @@ public:
     static void note_extension_kept() noexcept {
         extension_kept_.fetch_add(1, std::memory_order_relaxed);
     }
+    // Counts each set of beta coefficient rows that
+    // relation_saturation_beta_coefficients solved from the extension
+    // route's image rows instead of reading the left transform.
+    static void note_beta_solved() noexcept {
+        beta_solved_.fetch_add(1, std::memory_order_relaxed);
+    }
 
 private:
     friend class TestHookAccess;
     inline static std::atomic<SaturationKernelTestFailure> failure_{
             SaturationKernelTestFailure::none};
-    inline static std::atomic<bool> force_extension_route_{false};
+    inline static std::atomic<bool> force_transform_route_{false};
     inline static std::atomic<slong> injected_{0};
     inline static std::atomic<slong> extension_kept_{0};
+    inline static std::atomic<slong> beta_solved_{0};
 };
 
 // The relation coefficients of the ell-local relation-saturation beta
 // rows: one row of `rows` per invariant index i with ell | d_i, in index
-// order, equal to the presentation's coefficient row of g_i^{d_i}
-// (invariant_generator_relation_matrix) size-reduced against an
-// LLL-reduced basis of the relation kernel kept for this purpose (see
-// ClassGroupRelationAccess::saturation_relation_kernel), so the two differ
-// by a relation-kernel vector.  Requires `units` to be proven for the same
-// order; see the definition for the soundness condition.
+// order: a coefficient row c with c * A equal to the exponent row of
+// g_i^{d_i}, size-reduced against an LLL-reduced basis of the relation
+// kernel kept for this purpose (see
+// ClassGroupRelationAccess::saturation_relation_kernel).  The row c is the
+// integer solution read off the reduced [c * A | I] when the kernel basis
+// came from that extension route
+// (ClassGroupRelationAccess::solved_invariant_generator_relation_rows), and
+// the presentation's row (invariant_generator_relation_matrix) otherwise;
+// either differs from the presentation's row by a relation-kernel vector.
+// Requires `units` to be proven for the same order; see the definition for
+// the soundness condition.
 bool relation_saturation_beta_coefficients(flint::FmpzMat& rows,
                                            const ClassGroupContext& context,
                                            const OrderUnitGroup& units,
