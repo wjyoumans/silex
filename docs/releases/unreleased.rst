@@ -1566,6 +1566,21 @@ Changed
 Fixed
 -----
 
+- The ``proven`` analytic finish and the unit witness extraction no longer
+  take their unit rows from the zero-row part of the finish workspace's HNF
+  transform, an exact but unreduced kernel basis whose entries can have tens
+  of thousands of bits.  They use the same reduced kernel bases as the path
+  without a workspace, so ``multiquadratic_m23_m31_m47`` (previously
+  ``class_unit_computation_failed`` in about one second) now certifies
+  ``proven`` with class group ``[3, 15, 30]`` and the regulator that ``grh``
+  and PARI give.  Published unit generators may differ wherever this path
+  ran, since the witness rows are another basis of the same kernel lattice.
+  On the proven class/unit corpus, 51 rows change the radius of the published
+  regulator ball and 51 change the number of local primes the unit and
+  saturation proofs try on some prime; the DUMP hashes of relation rows,
+  relation generators, invariant generator matrix and units, every class
+  group, label, certification status and regulator value are unchanged.
+
 - ``ClassGroupContext::saturate_relations_bounded_with_units`` no longer
   weakens the proof metadata of a context already certified ``proven``.
   A pass that appends no relation cannot clear a prime of ``h_cand > 1``, and
