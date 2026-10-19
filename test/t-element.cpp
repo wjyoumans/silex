@@ -495,6 +495,44 @@ void assert_definitely_not_power(const silex::Element& value,
     assert(root.equal_si(7));
 }
 
+// Leading-coefficient pre-filter of the Hensel power path on elements
+// whose coefficients are much larger than their denominator.
+void test_power_leading_coefficient_large_coefficients() noexcept {
+    // Small denominator, huge coefficients: the leading coefficient of the
+    // primitive characteristic polynomial is computed from the integral
+    // multiplication matrix reduced modulo L^d (L its common denominator),
+    // so the reduction changes every entry here.  c = 2^200 + (1 + i)/2 has
+    // primitive characteristic polynomial 2x^2 - 2(2^201 + 1)x + ... with
+    // lc 2, so lc(P_{c^3}) must come out as exactly 8 = 2^3 (any other
+    // value fails the exact-cube pre-filter and the root is not found).
+    // The same holds in degree 8 for c = 2^120 + theta / 3 in
+    // Q(sqrt(-3), sqrt(-5), sqrt(-7)), where N(theta) = 1201 is prime to 3.
+    silex::NumberField gaussian = imaginary_quadratic_field();
+    {
+        silex::Element big_shift(gaussian);
+        sflint::Fmpz two_power;
+        sflint::fmpz_set_si(sflint::FmpzRef(two_power), 1);
+        sflint::fmpz_mul_2exp(sflint::FmpzRef(two_power),
+                              sflint::FmpzConstRef(two_power), 200);
+        assert(big_shift.set_fmpz(sflint::FmpzConstRef(two_power)));
+        silex::Element shifted(gaussian);
+        assert(shifted.add(big_shift,
+                           element_from_fraction(gaussian, {1, 1}, 2)));
+        assert_power_of_root_found(shifted, 3);
+
+        silex::NumberField octic = multiquadratic_m3_m5_m7_field();
+        silex::Element octic_shift(octic);
+        sflint::fmpz_set_si(sflint::FmpzRef(two_power), 1);
+        sflint::fmpz_mul_2exp(sflint::FmpzRef(two_power),
+                              sflint::FmpzConstRef(two_power), 120);
+        assert(octic_shift.set_fmpz(sflint::FmpzConstRef(two_power)));
+        silex::Element octic_shifted(octic);
+        assert(octic_shifted.add(octic_shift,
+                                 element_from_fraction(octic, {0, 1}, 3)));
+        assert_power_of_root_found(octic_shifted, 3);
+    }
+}
+
 // Elements whose residue is an n-th power at the first factor of the first
 // good prime, so the Hensel lift runs and verifies no candidate.  Before the
 // pre-lift residue disproof these queries failed (unknown); a non-power
@@ -2310,6 +2348,7 @@ int main() {
     test_power_huge_exponent_unit_candidates();
     test_power_height_check_keeps_roots();
     test_power_non_integral_unit_norm_roots();
+    test_power_leading_coefficient_large_coefficients();
     test_power_prelift_residue_disproof();
     test_power_prelift_disproof_differential();
     test_power_prelift_named_cases_unknown_without_disproof();

@@ -2119,6 +2119,30 @@ flint_bitcnt_t element_coefficient_bits(const Element& element) noexcept {
 // and log lc(P) is the finite-place part of log M(P) = d h(element): it is
 // the sum over finite places v of d_v log max(1, |element|_v) (Bombieri and
 // Gubler, Heights in Diophantine Geometry, sections 1.5-1.6).
+//
+// Computation.  Let A be the d x d rational multiplication matrix of element
+// in the power basis, chi(x) = det(x I - A) = x^d + c_{d-1} x^{d-1} + ... +
+// c_0 its monic characteristic polynomial, and Z = L A with L >= 1 the least
+// common denominator of the entries of A, so Z is integral.  Then
+//   (1) lc(P) = lcm_i den(c_i).  The least positive integer m with
+//       m chi in Z[x] is lcm_i den(c_i); m chi is primitive, since a prime p
+//       dividing all of its coefficients would leave (m / p) chi integral
+//       (its x^d coefficient is m), contradicting minimality.  P is the
+//       unique primitive integral multiple of chi with positive leading
+//       coefficient, so P = m chi and lc(P) = m.
+//   (2) chi(x) = L^{-d} det(L x I - Z) = L^{-d} chi_Z(L x), so with
+//       chi_Z(x) = sum z_i x^i (z_i in Z), c_i = z_i / L^{d-i} and
+//       den(c_i) = L^{d-i} / gcd(z_i, L^{d-i}).
+//   (3) Each z_i is a polynomial with integer coefficients in the entries of
+//       Z (Leibniz expansion of det(x I - Z)), so z_i mod L^d is unchanged
+//       when the entries of Z are reduced mod L^d.  Since L^{d-i} divides
+//       L^d, gcd(z_i, L^{d-i}) = gcd(y_i, L^{d-i}) for the coefficients y_i
+//       of the characteristic polynomial of Z mod L^d.
+// So lc(P) is computed exactly from a matrix whose entries have at most
+// d log_2 L bits instead of the full size of the coefficients of element,
+// which is what makes the large unit products of class-group saturation
+// cheap here; the value is the one the rational characteristic polynomial
+// gives (den(chi) / content(numerator(chi)) in FLINT's representation).
 bool primitive_characteristic_leading_coefficient(
         flint::Fmpz& out,
         const Element& element) noexcept {
@@ -2130,24 +2154,41 @@ bool primitive_characteristic_leading_coefficient(
         return false;
     }
 
-    // The characteristic polynomial chi is monic in Q[x]; FLINT stores it as
-    // an integral numerator over den with gcd(content(numerator), den) = 1,
-    // so lc of the primitive part is den / content(numerator).
     flint::FmpqMat matrix(degree, degree);
-    flint::FmpqPoly characteristic;
     multiplication_matrix(matrix.raw(), raw_field, degree,
                           element.raw_flint_element());
-    fmpq_mat_charpoly(characteristic.raw(), matrix.raw());
-    if (fmpq_poly_degree(characteristic.raw()) != degree) {
+    flint::FmpzMat integral(degree, degree);
+    flint::Fmpz scale;
+    fmpq_mat_get_fmpz_mat_matwise(integral.raw(), scale.raw(), matrix.raw());
+    if (fmpz_sgn(scale.raw()) <= 0) {
         return false;
     }
-    flint::Fmpz content;
-    _fmpz_vec_content(content.raw(), characteristic.raw()->coeffs,
-                      degree + 1);
-    if (fmpz_is_zero(content.raw()) != 0) {
+    fmpz_one(out.raw());
+    if (fmpz_is_one(scale.raw()) != 0) {
+        // A is integral, so chi is monic integral and P = chi.
+        return true;
+    }
+
+    flint::Fmpz modulus;
+    fmpz_pow_ui(modulus.raw(), scale.raw(), static_cast<ulong>(degree));
+    fmpz_mat_scalar_smod(integral.raw(), integral.raw(), modulus.raw());
+    flint::FmpzPoly characteristic;
+    fmpz_mat_charpoly(characteristic.raw(), integral.raw());
+    if (fmpz_poly_degree(characteristic.raw()) != degree) {
         return false;
     }
-    fmpz_divexact(out.raw(), characteristic.raw()->den, content.raw());
+
+    flint::Fmpz scale_power;
+    flint::Fmpz coefficient;
+    flint::Fmpz common;
+    fmpz_one(scale_power.raw());
+    for (slong i = degree - 1; i >= 0; --i) {
+        fmpz_mul(scale_power.raw(), scale_power.raw(), scale.raw());
+        fmpz_poly_get_coeff_fmpz(coefficient.raw(), characteristic.raw(), i);
+        fmpz_gcd(common.raw(), coefficient.raw(), scale_power.raw());
+        fmpz_divexact(common.raw(), scale_power.raw(), common.raw());
+        fmpz_lcm(out.raw(), out.raw(), common.raw());
+    }
     return true;
 }
 
