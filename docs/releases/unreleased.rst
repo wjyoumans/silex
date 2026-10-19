@@ -1587,6 +1587,18 @@ Changed
   (``cyclotomic_39_phi24``).  No timing has been measured.  See "Class
   groups and order units" in :doc:`../reference/algorithms_and_sources`.
 
+- ``OrderElement::set_coordinates`` reads the order basis in place instead of
+  copying it on every call, and when the basis is exactly the identity
+  matrix (as for an equation order) it takes the coordinates as power-basis
+  coefficients without the basis multiply.  Whether the basis is the
+  identity is decided once per order and cached.  The element set is the
+  same as before.  Published outputs are identical on the tested ``grh``
+  corpus rows (184 rows compared; ``cyclotomic_real_163_deg81`` timed out at
+  120 s on both builds).  Under callgrind the ``grh`` class/unit computation
+  ran 7.0% fewer instructions for ``cyclotomic_19_phi18``, 2.1% fewer for
+  ``cyclotomic_real_q10_c11_deg10`` and 9.5% fewer for the field defined by
+  ``x^16 + 1``.  No timing has been measured.
+
 Fixed
 -----
 
