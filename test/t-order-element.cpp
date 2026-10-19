@@ -467,6 +467,7 @@ int test_is_equation_order_matches_uncached() {
     assert_equation_order_matches_uncached(half_early);
     assert_equation_order_matches_uncached(half_late);
     assert(!half_late.is_equation_order());
+    assert(!silex::Order().is_equation_order());
     return 0;
 }
 

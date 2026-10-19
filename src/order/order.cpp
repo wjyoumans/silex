@@ -61,11 +61,11 @@ struct OrderData {
     mutable bool has_minkowski_embedding_rows_ = false;
     mutable bool has_discriminant_ = false;
     mutable bool has_equation_order_index_ = false;
-    // Whether basis_ is exactly the identity, filled on first use by
-    // OrderAccess::basis_is_identity.  Like the index above it depends only
-    // on the basis, which never changes for one OrderData.
-    mutable bool basis_is_identity_ = false;
-    mutable bool has_basis_is_identity_ = false;
+    // Whether basis_ is exactly the identity.  Written together with basis_
+    // (Order::set, Order::set_basis) and never afterwards, so concurrent
+    // const readers need no synchronisation; meaningful only when the order
+    // has a basis.
+    bool basis_is_identity_ = false;
     // Decompositions of index-divisor primes, filled by decompose_prime
     // through OrderAccess::store_index_divisor_decomposition.  Like the index
     // above they depend only on the basis and the parent field.  Each entry
@@ -856,7 +856,6 @@ bool Order::set(const Order& other) noexcept {
     copy.data_->has_equation_order_index_ =
             other.data_->has_equation_order_index_;
     copy.data_->basis_is_identity_ = other.data_->basis_is_identity_;
-    copy.data_->has_basis_is_identity_ = other.data_->has_basis_is_identity_;
     copy.data_->maximality_is_known_ = other.data_->maximality_is_known_;
     copy.data_->maximal_ = other.data_->maximal_;
     copy.data_->specialization_ = other.data_->specialization_;
@@ -942,7 +941,6 @@ bool Order::set_basis(flint::FmpqMatConstRef basis) noexcept {
     next.data_->has_basis_inv_ = true;
     const bool basis_is_one = fmpq_mat_is_one(basis.raw()) != 0;
     next.data_->basis_is_identity_ = basis_is_one;
-    next.data_->has_basis_is_identity_ = true;
     if (basis_is_one) {
         next.data_->specialization_ = EquationOrderData{};
         if (next.data_->degree_ == 1) {
@@ -1445,12 +1443,7 @@ bool OrderAccess::basis_is_identity(const Order& order) noexcept {
     if (!order.has_basis()) {
         return false;
     }
-    const OrderData& data = *order.data_;
-    if (!data.has_basis_is_identity_) {
-        data.basis_is_identity_ = fmpq_mat_is_one(data.basis_.raw()) != 0;
-        data.has_basis_is_identity_ = true;
-    }
-    return data.basis_is_identity_;
+    return order.data_->basis_is_identity_;
 }
 
 const std::vector<IndexDivisorPrimeRecord>*
