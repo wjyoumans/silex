@@ -2174,9 +2174,6 @@ bool primitive_characteristic_leading_coefficient(
     fmpz_mat_scalar_smod(integral.raw(), integral.raw(), modulus.raw());
     flint::FmpzPoly characteristic;
     fmpz_mat_charpoly(characteristic.raw(), integral.raw());
-    if (fmpz_poly_degree(characteristic.raw()) != degree) {
-        return false;
-    }
 
     flint::Fmpz scale_power;
     flint::Fmpz coefficient;
