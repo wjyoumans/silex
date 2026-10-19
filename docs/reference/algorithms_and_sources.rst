@@ -854,7 +854,13 @@ finish's logs are never combined with the witness rows.  The rank
 passed in must be the exact rank of ``A``; the full-lattice claim depends on
 it.  The finish checks that the relation rank it passes equals
 ``fmpz_mat_rank`` of ``A``, the number of nonzero rows of its HNF.  The
-two routes return different bases of the same kernel lattice.  The class
+two routes return different bases of the same kernel lattice.  A finish
+workspace, which keeps the HNF and its transform across relation batches,
+takes its unit rows from these same bases (the witness rows for the witness
+extraction, the finish variant for the analytic finish), computed once per
+sync; it never takes them from the zero-row part of its own HNF transform,
+which is an exact but unreduced kernel basis whose entries can have tens of
+thousands of bits and which no finish precision can use.  The class
 group, the regulator, and the unit lattice do not depend on the
 route; later LLL reductions start from the basis they receive, so the
 specific unit generators are not shown to be route-independent.  On the

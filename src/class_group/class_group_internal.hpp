@@ -436,6 +436,17 @@ bool class_group_relation_rows(
 bool sync_hnf_finish_workspace(
         HnfFinishWorkspace& workspace,
         const ClassGroupContext& context) noexcept;
+// The workspace's kernel rows of the processed relations, computed once per
+// sync: hnf_unit_finish_coefficients when `finish` is set and
+// hnf_unit_witness_coefficients otherwise.  The zero-row part of the HNF
+// transform is an exact kernel basis as well, but it is not reduced (its
+// entries can have tens of thousands of bits), so neither the finish nor the
+// witness extraction takes its unit rows from it.  Null on failure.
+const flint::FmpzMat* hnf_finish_workspace_kernel(
+        HnfFinishWorkspace& workspace,
+        const ClassGroupContext& context,
+        bool finish) noexcept;
+// A copy of hnf_finish_workspace_kernel's witness rows.
 bool hnf_finish_workspace_witness_coefficients(
         flint::FmpzMat& out,
         HnfFinishWorkspace& workspace,

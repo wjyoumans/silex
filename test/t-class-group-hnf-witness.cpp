@@ -1323,6 +1323,48 @@ int test_unit_logs_share_witness_rows() {
         }
     }
 
+    // The finish workspace takes its finish and witness rows, and so its
+    // unit logs, from these reduced kernel bases, not from the unreduced
+    // zero-row part of its HNF transform.
+    {
+        auto* workspace =
+                silex::detail::class_group_finish_workspace(class_group);
+        assert(workspace != nullptr);
+        assert(silex::detail::sync_hnf_finish_workspace(*workspace,
+                                                        class_group));
+        const sflint::FmpzMat* const finish_kernel =
+                silex::detail::hnf_finish_workspace_kernel(
+                        *workspace, class_group, true);
+        assert(finish_kernel != nullptr);
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(*finish_kernel),
+                sflint::FmpzMatConstRef(finish_coefficients)));
+        sflint::FmpzMat workspace_witness(0, 0);
+        assert(silex::detail::hnf_finish_workspace_witness_coefficients(
+                workspace_witness, *workspace, class_group));
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(workspace_witness),
+                sflint::FmpzMatConstRef(coefficients)));
+        const silex::detail::HnfUnitLogKernel kinds[] = {
+                silex::detail::HnfUnitLogKernel::finish,
+                silex::detail::HnfUnitLogKernel::witness};
+        for (const auto kind : kinds) {
+            sflint::ArbMat with_workspace(relation_count - rank, places);
+            assert(silex::detail::hnf_unit_log_matrix(
+                    with_workspace, class_group, embeddings, workspace,
+                    precision, kind));
+            for (slong unit = 0; unit < relation_count - rank; ++unit) {
+                for (slong place = 0; place < places; ++place) {
+                    assert(::arb_equal(
+                                   arb_mat_entry(with_workspace.raw(), unit,
+                                                 place),
+                                   arb_mat_entry(logs.raw(), unit, place)) !=
+                           0);
+                }
+            }
+        }
+    }
+
     // Only the finish logs run the phase: with the checks forced to reject
     // it, the finish logs come from the fallback (the same rows here) and
     // the witness logs never reach the phase.

@@ -244,6 +244,13 @@ struct HnfFinishWorkspace {
     flint::FmpzMat relation_transform{0, 0};
     flint::ArbMat relation_logs{0, 0};
     flint::ArbMat unit_logs{0, 0};
+    // Kernel rows of the processed relations, kept until the next sync
+    // changes the relations: hnf_unit_finish_coefficients for the analytic
+    // finish and hnf_unit_witness_coefficients for the witness extraction.
+    // unit_logs holds the logs of the finish rows when
+    // unit_logs_finish_kernel is set and of the witness rows otherwise.
+    flint::FmpzMat finish_kernel{0, 0};
+    flint::FmpzMat witness_kernel{0, 0};
     slong generator_count = 0;
     slong processed_relation_count = 0;
     slong relation_rank = 0;
@@ -253,12 +260,17 @@ struct HnfFinishWorkspace {
     bool exact_valid = false;
     bool relation_logs_valid = false;
     bool unit_logs_valid = false;
+    bool unit_logs_finish_kernel = false;
+    bool finish_kernel_valid = false;
+    bool witness_kernel_valid = false;
 
     void clear() noexcept {
         hnf = flint::FmpzMat(0, 0);
         relation_transform = flint::FmpzMat(0, 0);
         relation_logs = flint::ArbMat(0, 0);
         unit_logs = flint::ArbMat(0, 0);
+        finish_kernel = flint::FmpzMat(0, 0);
+        witness_kernel = flint::FmpzMat(0, 0);
         generator_count = 0;
         processed_relation_count = 0;
         relation_rank = 0;
@@ -268,6 +280,9 @@ struct HnfFinishWorkspace {
         exact_valid = false;
         relation_logs_valid = false;
         unit_logs_valid = false;
+        unit_logs_finish_kernel = false;
+        finish_kernel_valid = false;
+        witness_kernel_valid = false;
     }
 };
 

@@ -17,7 +17,8 @@ bool hnf_finish_workspace_unit_log_matrix(
         HnfFinishWorkspace& workspace,
         const ClassGroupContext& class_group,
         EmbeddingContext& embeddings,
-        slong precision) noexcept {
+        slong precision,
+        HnfUnitLogKernel kernel_rows) noexcept {
     if (!sync_hnf_finish_workspace(workspace, class_group)) {
         return false;
     }
@@ -92,6 +93,15 @@ bool hnf_finish_workspace_unit_log_matrix(
         workspace.unit_logs_valid = false;
     }
 
+    // The unit rows are the workspace's kernel rows of `kernel_rows`'s kind,
+    // as without a workspace (see hnf_finish_workspace_kernel).
+    const bool finish_kernel = kernel_rows == HnfUnitLogKernel::finish;
+    if (workspace.unit_logs_valid &&
+        workspace.unit_logs_finish_kernel != finish_kernel) {
+        workspace.unit_logs = flint::ArbMat(0, 0);
+        workspace.unit_log_precision = 0;
+        workspace.unit_logs_valid = false;
+    }
     if (workspace.unit_logs_valid) {
         if (workspace.unit_log_precision != precision ||
             flint::arb_mat_nrows_value(workspace.unit_logs) != unit_columns ||
@@ -103,13 +113,18 @@ bool hnf_finish_workspace_unit_log_matrix(
         return true;
     }
 
+    const flint::FmpzMat* const kernel =
+            hnf_finish_workspace_kernel(workspace, class_group, finish_kernel);
+    if (kernel == nullptr || flint::fmpz_mat_nrows(*kernel) != unit_columns ||
+        flint::fmpz_mat_ncols(*kernel) != relation_count) {
+        return false;
+    }
+
     flint::ArbMat unit_logs(unit_columns, places);
     for (slong dep = 0; dep < unit_columns; ++dep) {
-        const slong transform_row = workspace.relation_rank + dep;
         for (slong relation = 0; relation < relation_count; ++relation) {
             const auto exponent = flint::fmpz_mat_entry(
-                    flint::FmpzMatConstRef(workspace.relation_transform),
-                    transform_row, relation);
+                    flint::FmpzMatConstRef(*kernel), dep, relation);
             if (flint::fmpz_is_zero(exponent)) {
                 continue;
             }
@@ -128,6 +143,7 @@ bool hnf_finish_workspace_unit_log_matrix(
     workspace.unit_logs = std::move(unit_logs);
     workspace.unit_log_precision = precision;
     workspace.unit_logs_valid = true;
+    workspace.unit_logs_finish_kernel = finish_kernel;
     flint::arb_mat_set(flint::ArbMatRef(out),
                        flint::ArbMatConstRef(workspace.unit_logs));
     return true;
@@ -155,7 +171,8 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
 
     if (workspace != nullptr) {
         return hnf_finish_workspace_unit_log_matrix(
-                out, *workspace, class_group, embeddings, precision);
+                out, *workspace, class_group, embeddings, precision,
+                kernel_rows);
     }
 
     // witness: the witness extraction (exact_hnf_relation_units) composes

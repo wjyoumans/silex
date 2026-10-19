@@ -247,6 +247,11 @@ bool sync_hnf_finish_workspace(
     workspace.unit_logs = flint::ArbMat(0, 0);
     workspace.unit_log_precision = 0;
     workspace.unit_logs_valid = false;
+    workspace.unit_logs_finish_kernel = false;
+    workspace.finish_kernel = flint::FmpzMat(0, 0);
+    workspace.finish_kernel_valid = false;
+    workspace.witness_kernel = flint::FmpzMat(0, 0);
+    workspace.witness_kernel_valid = false;
     if (!incremental) {
         workspace.relation_logs = flint::ArbMat(0, 0);
         workspace.relation_log_precision = 0;
@@ -256,25 +261,50 @@ bool sync_hnf_finish_workspace(
     return true;
 }
 
+const flint::FmpzMat* hnf_finish_workspace_kernel(
+        HnfFinishWorkspace& workspace,
+        const ClassGroupContext& context,
+        bool finish) noexcept {
+    if (!sync_hnf_finish_workspace(workspace, context)) {
+        return nullptr;
+    }
+
+    flint::FmpzMat& kernel =
+            finish ? workspace.finish_kernel : workspace.witness_kernel;
+    bool& valid = finish ? workspace.finish_kernel_valid
+                         : workspace.witness_kernel_valid;
+    if (!valid) {
+        flint::FmpzMat rows(0, 0);
+        const bool have_rows =
+                finish ? hnf_unit_finish_coefficients(rows, context)
+                       : hnf_unit_witness_coefficients(rows, context);
+        if (!have_rows ||
+            flint::fmpz_mat_nrows(rows) !=
+                    workspace.processed_relation_count -
+                            workspace.relation_rank ||
+            flint::fmpz_mat_ncols(rows) !=
+                    workspace.processed_relation_count) {
+            return nullptr;
+        }
+        kernel = std::move(rows);
+        valid = true;
+    }
+    return &kernel;
+}
+
 bool hnf_finish_workspace_witness_coefficients(
         flint::FmpzMat& out,
         HnfFinishWorkspace& workspace,
         const ClassGroupContext& context) noexcept {
-    if (!sync_hnf_finish_workspace(workspace, context)) {
+    const flint::FmpzMat* const kernel =
+            hnf_finish_workspace_kernel(workspace, context, false);
+    if (kernel == nullptr) {
         return false;
     }
-
-    const slong relation_count = workspace.processed_relation_count;
-    const slong rank = workspace.relation_rank;
-    flint::FmpzMat coefficients(relation_count - rank, relation_count);
-    for (slong row = rank; row < relation_count; ++row) {
-        if (!fmpz_mat_copy_row(
-                    flint::FmpzMatRef(coefficients), row - rank,
-                    flint::FmpzMatConstRef(workspace.relation_transform),
-                    row)) {
-            return false;
-        }
-    }
+    flint::FmpzMat coefficients(flint::fmpz_mat_nrows(*kernel),
+                                flint::fmpz_mat_ncols(*kernel));
+    flint::fmpz_mat_set(flint::FmpzMatRef(coefficients),
+                        flint::FmpzMatConstRef(*kernel));
     out = std::move(coefficients);
     return true;
 }
