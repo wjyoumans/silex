@@ -1175,6 +1175,9 @@ void set_small_trinary_coords(flint::FmpzVec& out, slong value) noexcept {
     }
 }
 
+// Row i * n + j holds the order coordinates of b_i * b_j.  This is the
+// order's own table, memoised on the shared order data (the copy shares it),
+// so repeated decompose_prime misses on one order build it once.
 bool build_multiplication_table(flint::FmpzMat& out,
                                 const Order& order) noexcept {
     const slong n = order.degree();
@@ -1182,38 +1185,8 @@ bool build_multiplication_table(flint::FmpzMat& out,
         return false;
     }
 
-    OrderElement left(order);
-    OrderElement right(order);
-    OrderElement product(order);
-    flint::FmpzVec left_coords(n);
-    flint::FmpzVec right_coords(n);
-    flint::FmpzMat row(1, n);
-    flint::FmpzMat coords(1, n);
-    if (!left.is_defined() || !right.is_defined() || !product.is_defined()) {
-        return false;
-    }
-
-    for (slong i = 0; i < n; ++i) {
-        set_identity_coords(left_coords, i);
-        if (!order_element_from_coords(left, order, left_coords)) {
-            return false;
-        }
-
-        for (slong j = 0; j < n; ++j) {
-            set_identity_coords(right_coords, j);
-            if (!order_element_from_coords(right, order, right_coords) ||
-                !product.multiply(left, right) ||
-                !product.get_coordinates(flint::FmpzMatRef(coords))) {
-                return false;
-            }
-            for (slong k = 0; k < n; ++k) {
-                fmpz_set(fmpz_mat_entry(out.raw(), i * n + j, k),
-                         fmpz_mat_entry(coords.raw(), 0, k));
-            }
-        }
-    }
-
-    return true;
+    Order table_order = order;
+    return table_order.multiplication_table(flint::FmpzMatRef(out));
 }
 
 void set_identity_coords_mod(flint::FmpzVec& out,

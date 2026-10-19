@@ -2,6 +2,7 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/ideal.hpp>
 #include <silex/order.hpp>
+#include <silex/order_element.hpp>
 
 #include "order/order_internal.hpp"
 #include "test_support.hpp"
@@ -760,6 +761,85 @@ int test_dedekind_criterion_equation_orders() {
     return 0;
 }
 
+// Prime decomposition reads b_i * b_j at row i * n + j of
+// Order::multiplication_table.  Check that table entry by entry against the
+// products of the basis elements formed one at a time with OrderElement.
+bool table_matches_basis_products(const silex::Order& input) noexcept {
+    silex::Order order = input;
+    const slong n = order.degree();
+    sflint::FmpzMat table(n * n, n);
+    if (!order.multiplication_table(sflint::FmpzMatRef(table))) {
+        return false;
+    }
+
+    silex::OrderElement left(order);
+    silex::OrderElement right(order);
+    silex::OrderElement product(order);
+    sflint::FmpzMat left_coords(1, n);
+    sflint::FmpzMat right_coords(1, n);
+    sflint::FmpzMat coords(1, n);
+    for (slong i = 0; i < n; ++i) {
+        sflint::fmpz_mat_zero(sflint::FmpzMatRef(left_coords));
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(left_coords, 0, i), 1);
+        if (!left.set_coordinates(sflint::FmpzMatConstRef(left_coords))) {
+            return false;
+        }
+        for (slong j = 0; j < n; ++j) {
+            sflint::fmpz_mat_zero(sflint::FmpzMatRef(right_coords));
+            sflint::fmpz_set_si(sflint::fmpz_mat_entry(right_coords, 0, j), 1);
+            if (!right.set_coordinates(
+                        sflint::FmpzMatConstRef(right_coords)) ||
+                !product.multiply(left, right) ||
+                !product.get_coordinates(sflint::FmpzMatRef(coords))) {
+                return false;
+            }
+            for (slong k = 0; k < n; ++k) {
+                if (::fmpz_equal(::fmpz_mat_entry(table.raw(), i * n + j, k),
+                                 ::fmpz_mat_entry(coords.raw(), 0, k)) == 0) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+int test_maximal_order_table_matches_basis_products() {
+    // Dedekind's x^3 - x^2 - 2x - 8: O_K is not monogenic and is not the
+    // equation order.
+    sflint::FmpqPoly dedekind_poly;
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 0, -8);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 1, -2);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 2, -1);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 3, 1);
+    silex::NumberField dedekind_field = field_by_polynomial(dedekind_poly);
+    silex::Order dedekind_maximal(dedekind_field);
+    assert(dedekind_maximal.maximal_order(
+            silex::test::equation_order(dedekind_field)));
+    assert(!dedekind_maximal.is_equation_order());
+    assert(table_matches_basis_products(dedekind_maximal));
+    // A second read comes from the memoised table on the shared order data.
+    assert(table_matches_basis_products(dedekind_maximal));
+
+    // x^3 - 16 = (2 * 2^(1/3))^3 - 16: O_K = Z[2^(1/3)] is monogenic but is
+    // not the equation order of the defining polynomial.
+    sflint::FmpqPoly pure_poly;
+    poly_x3_minus(pure_poly, 16);
+    silex::NumberField pure_field = field_by_polynomial(pure_poly);
+    silex::Order pure_maximal(pure_field);
+    assert(pure_maximal.maximal_order(
+            silex::test::equation_order(pure_field)));
+    assert(!pure_maximal.is_equation_order());
+    assert(table_matches_basis_products(pure_maximal));
+
+    // Equation order of x^3 - 2 (monogenic, power basis).
+    poly_x3_minus(pure_poly, 2);
+    silex::NumberField power_field = field_by_polynomial(pure_poly);
+    assert(table_matches_basis_products(
+            silex::test::equation_order(power_field)));
+    return 0;
+}
+
 silex::Order local_equation_order() {
     silex::NumberField field = quadratic_field(2);
     return silex::Order::equation_order(field);
@@ -1186,5 +1266,6 @@ int main() {
     assert(test_general_conductor_cubic() == 0);
     assert(test_conductor_and_contraction_failures() == 0);
     assert(test_cached_equation_order_index() == 0);
+    assert(test_maximal_order_table_matches_basis_products() == 0);
     return 0;
 }
