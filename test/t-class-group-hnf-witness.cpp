@@ -12,6 +12,7 @@
 #include "class_group/class_group_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
 #include "order_unit/order_unit_internal.hpp"
+#include "order_unit/relation_unit_internal.hpp"
 #include "relation/relation_internal.hpp"
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
@@ -1950,6 +1951,112 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
     return 0;
 }
 
+// solve_unit_candidate_system returns what fmpz_mat_solve_dixon_den
+// returns, fills the Dixon cache on the first basis, keeps it while the
+// basis is unchanged, replaces it for a new basis, and reports a singular
+// basis without caching it.
+bool unit_candidate_system_matches_flint(
+        silex::detail::RelationUnitCandidateBatchState& state,
+        const sflint::FmpzMat& basis, const sflint::FmpzMat& rhs) {
+    const slong n = ::fmpz_mat_nrows(basis.raw());
+    const slong cols = ::fmpz_mat_ncols(rhs.raw());
+    sflint::FmpzMat expected(n, cols);
+    sflint::Fmpz expected_den;
+    if (::fmpz_mat_solve_dixon_den(expected.raw(), expected_den.raw(),
+                                   basis.raw(), rhs.raw()) == 0) {
+        return false;
+    }
+    sflint::FmpzMat actual(n, cols);
+    sflint::Fmpz actual_den;
+    if (!silex::detail::solve_unit_candidate_system(
+                actual, actual_den, state, sflint::FmpzMatConstRef(basis),
+                sflint::FmpzMatConstRef(rhs))) {
+        return false;
+    }
+    return ::fmpz_mat_equal(actual.raw(), expected.raw()) != 0 &&
+           ::fmpz_equal(actual_den.raw(), expected_den.raw()) != 0 &&
+           state.dixon_prime != 0 &&
+           ::fmpz_mat_equal(state.dixon_basis.raw(), basis.raw()) != 0;
+}
+
+void fill_random(sflint::FmpzMat& matrix, ::flint_rand_t state,
+                 flint_bitcnt_t bits) {
+    for (slong i = 0; i < ::fmpz_mat_nrows(matrix.raw()); ++i) {
+        for (slong j = 0; j < ::fmpz_mat_ncols(matrix.raw()); ++j) {
+            ::fmpz_randtest(::fmpz_mat_entry(matrix.raw(), i, j), state,
+                            bits);
+        }
+    }
+}
+
+int test_unit_candidate_system_dixon_cache() {
+    ::flint_rand_t random;
+    ::flint_rand_init(random);
+
+    // Random nonsingular systems of several sizes; entry sizes up to 80 bits
+    // make the lifting run past the first stabilization checks.
+    const slong sizes[] = {1, 2, 6, 20, 40};
+    const flint_bitcnt_t bits[] = {4, 20, 80};
+    for (const slong n : sizes) {
+        for (const flint_bitcnt_t b : bits) {
+            sflint::FmpzMat basis(n, n);
+            do {
+                fill_random(basis, random, b);
+            } while (::fmpz_mat_rank(basis.raw()) != n);
+            silex::detail::RelationUnitCandidateBatchState state;
+            assert(state.dixon_prime == 0);
+            sflint::FmpzMat rhs(n, 3);
+            fill_random(rhs, random, b);
+            assert(unit_candidate_system_matches_flint(state, basis, rhs));
+            const ulong prime = state.dixon_prime;
+
+            // Unchanged basis, new right-hand side: the cache is reused.
+            sflint::FmpzMat other_rhs(n, 5);
+            fill_random(other_rhs, random, b + 7);
+            assert(unit_candidate_system_matches_flint(state, basis,
+                                                       other_rhs));
+            assert(state.dixon_prime == prime);
+
+            // A new basis replaces the cached entry.
+            sflint::FmpzMat next(n, n);
+            do {
+                fill_random(next, random, b);
+            } while (::fmpz_mat_rank(next.raw()) != n ||
+                     ::fmpz_mat_equal(next.raw(), basis.raw()) != 0);
+            assert(unit_candidate_system_matches_flint(state, next, rhs));
+
+            // Returning to the first basis still gives FLINT's answer.
+            assert(unit_candidate_system_matches_flint(state, basis,
+                                                       other_rhs));
+        }
+    }
+
+    // A singular basis fails and leaves no cache entry behind.
+    {
+        sflint::FmpzMat basis(3, 3);
+        sflint::FmpzMat rhs(3, 1);
+        for (slong j = 0; j < 3; ++j) {
+            ::fmpz_set_si(::fmpz_mat_entry(basis.raw(), 0, j), j + 1);
+            ::fmpz_set_si(::fmpz_mat_entry(basis.raw(), 1, j), 2 * (j + 1));
+            ::fmpz_set_si(::fmpz_mat_entry(basis.raw(), 2, j), j * j - 4);
+            ::fmpz_set_si(::fmpz_mat_entry(rhs.raw(), j, 0), j);
+        }
+        silex::detail::RelationUnitCandidateBatchState state;
+        sflint::FmpzMat identity(3, 3);
+        ::fmpz_mat_one(identity.raw());
+        assert(unit_candidate_system_matches_flint(state, identity, rhs));
+        sflint::FmpzMat solution(3, 1);
+        sflint::Fmpz den;
+        assert(!silex::detail::solve_unit_candidate_system(
+                solution, den, state, sflint::FmpzMatConstRef(basis),
+                sflint::FmpzMatConstRef(rhs)));
+        assert(state.dixon_prime == 0);
+    }
+
+    ::flint_rand_clear(random);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1972,5 +2079,6 @@ int main() {
     assert(test_finish_relation_kernel_basis_fast_path_and_fallback() == 0);
     assert(test_unit_logs_share_witness_rows() == 0);
     assert(test_unit_candidate_kernel_lll_matches_fmpz_lll() == 0);
+    assert(test_unit_candidate_system_dixon_cache() == 0);
     return 0;
 }

@@ -9704,6 +9704,145 @@ void reduce_unit_candidate_kernel(
     }
 }
 
+namespace {
+
+// Writes the rational matrix `rational` over its least common denominator
+// and reports whether it solves `basis * X = rhs` exactly.
+bool unit_candidate_solution_checks(flint::FmpzMat& solution,
+                                    flint::Fmpz& denominator,
+                                    const flint::FmpqMat& rational,
+                                    flint::FmpzMatConstRef basis,
+                                    flint::FmpzMatConstRef rhs) noexcept {
+    ::fmpq_mat_get_fmpz_mat_matwise(solution.raw(), denominator.raw(),
+                                    rational.raw());
+    flint::FmpzMat product(flint::fmpz_mat_nrows(rhs),
+                           flint::fmpz_mat_ncols(rhs));
+    flint::FmpzMat scaled(flint::fmpz_mat_nrows(rhs),
+                          flint::fmpz_mat_ncols(rhs));
+    ::fmpz_mat_mul(product.raw(), basis.raw(), solution.raw());
+    ::fmpz_mat_scalar_mul_fmpz(scaled.raw(), rhs.raw(), denominator.raw());
+    return flint::fmpz_mat_equal(flint::FmpzMatConstRef(product),
+                                 flint::FmpzMatConstRef(scaled));
+}
+
+}  // namespace
+
+// Solves `basis * solution = denominator * rhs` for a nonsingular square
+// `basis` with the result of FLINT's `fmpz_mat_solve_dixon_den`: the exact
+// rational solution written over its least common denominator.
+//
+// Source trace: FLINT 3.6.0 `src/fmpz_mat/solve_dixon_den.c` calls
+// `fmpq_mat_solve_fmpz_mat_dixon` and `fmpq_mat_get_fmpz_mat_matwise`.
+// `fmpq_mat_solve_fmpz_mat_dixon` (`src/fmpq_mat/solve_dixon.c`) bounds the
+// solution with `fmpz_mat_solve_bound`, picks a prime p and the inverse of
+// `basis` modulo p with `fmpz_mat_find_good_prime_and_invert`, and runs the
+// static `_fmpq_mat_solve_dixon`: Dixon's p-adic lifting, which at the
+// iterations i = 1, 2, 3, 5, 8, ... (next = floor(1.4 i) + 1) reconstructs
+// the rational solution modulo p^(i+1) and stops once it solves the system
+// exactly, and otherwise reconstructs at the modulus bound
+// 2 max(N, D)^2.  The loop below is adapted from `_fmpq_mat_solve_dixon`
+// (Copyright (C) 2011 Fredrik Johansson, LGPL-3.0-or-later) with the same
+// bound, prime, schedule and exact check; it keeps FLINT's integer product
+// `basis * y` (USE_SLOW_MULTIPLICATION).  The deviation: the prime and the
+// inverse depend only on `basis`, so `state` keeps them and calls with an
+// unchanged basis skip `fmpz_mat_find_good_prime_and_invert`.  The output
+// is the unique rational solution in every case, so it does not depend on
+// the cache.
+bool solve_unit_candidate_system(flint::FmpzMat& solution,
+                                 flint::Fmpz& denominator,
+                                 RelationUnitCandidateBatchState& state,
+                                 flint::FmpzMatConstRef basis,
+                                 flint::FmpzMatConstRef rhs) noexcept {
+    const slong n = flint::fmpz_mat_nrows(basis);
+    const slong cols = flint::fmpz_mat_ncols(rhs);
+    flint::Fmpz numerator_bound;
+    flint::Fmpz denominator_bound;
+    ::fmpz_mat_solve_bound(numerator_bound.raw(), denominator_bound.raw(),
+                           basis.raw(), rhs.raw());
+
+    if (state.dixon_prime == 0 ||
+        !flint::fmpz_mat_equal(
+                flint::FmpzMatConstRef(state.dixon_basis), basis)) {
+        state.dixon_prime = 0;
+        flint::NmodMat inverse(n, n, 1);
+        const ulong prime = ::fmpz_mat_find_good_prime_and_invert(
+                inverse.raw(), basis.raw(), denominator_bound.raw());
+        if (prime == 0) {
+            return false;
+        }
+        flint::FmpzMat copy(n, n);
+        flint::fmpz_mat_set(flint::FmpzMatRef(copy), basis);
+        state.dixon_basis.swap(copy);
+        state.dixon_inverse.swap(inverse);
+        state.dixon_prime = prime;
+    }
+    const ulong prime = state.dixon_prime;
+
+    flint::Fmpz modulus_bound;
+    if (::fmpz_cmpabs(numerator_bound.raw(), denominator_bound.raw()) < 0) {
+        ::fmpz_mul(modulus_bound.raw(), denominator_bound.raw(),
+                   denominator_bound.raw());
+    } else {
+        ::fmpz_mul(modulus_bound.raw(), numerator_bound.raw(),
+                   numerator_bound.raw());
+    }
+    ::fmpz_mul_ui(modulus_bound.raw(), modulus_bound.raw(), UWORD(2));
+
+    flint::FmpzMat lifted(n, cols);
+    flint::FmpzMat digit(n, cols);
+    flint::FmpzMat product(n, cols);
+    flint::FmpzMat residual(n, cols);
+    flint::fmpz_mat_set(flint::FmpzMatRef(residual), rhs);
+    flint::NmodMat residual_mod(n, cols, prime);
+    flint::NmodMat digit_mod(n, cols, prime);
+    flint::FmpqMat rational(n, cols);
+    flint::Fmpz power;
+    ::fmpz_one(power.raw());
+
+    slong iteration = 1;
+    slong next_check = 1;
+    while (::fmpz_cmp(power.raw(), modulus_bound.raw()) <= 0) {
+        // digit = basis^-1 * residual (mod p); lifted += digit * p^i.
+        ::fmpz_mat_get_nmod_mat(residual_mod.raw(), residual.raw());
+        ::nmod_mat_mul(digit_mod.raw(), state.dixon_inverse.raw(),
+                       residual_mod.raw());
+        ::fmpz_mat_scalar_addmul_nmod_mat_fmpz(lifted.raw(), digit_mod.raw(),
+                                               power.raw());
+        ::fmpz_mul_ui(power.raw(), power.raw(), prime);
+        if (::fmpz_cmp(power.raw(), modulus_bound.raw()) > 0) {
+            break;
+        }
+
+        if (iteration == next_check) {
+            next_check = static_cast<slong>(
+                                 static_cast<double>(iteration) * 1.4) +
+                         1;
+            if (::fmpq_mat_set_fmpz_mat_mod_fmpz(rational.raw(),
+                                                 lifted.raw(),
+                                                 power.raw()) != 0 &&
+                unit_candidate_solution_checks(solution, denominator,
+                                               rational, basis, rhs)) {
+                return true;
+            }
+        }
+        ++iteration;
+
+        // residual = (residual - basis * digit) / p.
+        ::fmpz_mat_set_nmod_mat_unsigned(digit.raw(), digit_mod.raw());
+        ::fmpz_mat_mul(product.raw(), basis.raw(), digit.raw());
+        ::fmpz_mat_sub(residual.raw(), residual.raw(), product.raw());
+        ::fmpz_mat_scalar_divexact_ui(residual.raw(), residual.raw(), prime);
+    }
+
+    if (::fmpq_mat_set_fmpz_mat_mod_fmpz(rational.raw(), lifted.raw(),
+                                         power.raw()) == 0) {
+        return false;
+    }
+    ::fmpq_mat_get_fmpz_mat_matwise(solution.raw(), denominator.raw(),
+                                    rational.raw());
+    return true;
+}
+
 bool unit_candidate_witnesses(std::vector<FactoredElement>& out,
                                     RelationUnitCandidateBatchState& state,
                                     const ClassGroupContext& context,
@@ -9802,9 +9941,10 @@ bool unit_candidate_witnesses(std::vector<FactoredElement>& out,
 
     flint::Fmpz denominator;
     flint::FmpzMat solution_transpose(generators, extra_count);
-    if (::fmpz_mat_solve_dixon_den(
-                solution_transpose.raw(), denominator.raw(),
-                basis_transpose.raw(), extra_transpose.raw()) == 0 ||
+    if (!solve_unit_candidate_system(
+                solution_transpose, denominator, state,
+                flint::FmpzMatConstRef(basis_transpose),
+                flint::FmpzMatConstRef(extra_transpose)) ||
         flint::fmpz_is_zero(flint::FmpzConstRef(denominator))) {
         return false;
     }

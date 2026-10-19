@@ -11,6 +11,8 @@
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/nmod_mat.hpp>
 #include <silex/order_unit.hpp>
 
 #include "../factored_element/factor_screen_hash_internal.hpp"
@@ -39,6 +41,14 @@ struct RelationUnitCandidateBatchState {
     std::vector<slong> relations_used;
     slong extra_relation_count = 0;
     ulong random_state = UWORD(0x9e3779b97f4a7c15);
+    // Dixon setup of the last transposed relation basis solved by
+    // unit_candidate_witnesses: the basis, the prime FLINT's
+    // fmpz_mat_find_good_prime_and_invert chose for it (0 when nothing is
+    // cached), and the inverse modulo that prime.  A call whose basis equals
+    // the cached one reuses them; any other basis replaces the entry.
+    flint::FmpzMat dixon_basis{0, 0};
+    flint::NmodMat dixon_inverse{0, 0, 2};
+    ulong dixon_prime = 0;
 };
 
 struct ReduceUnitsInverseCacheEntry {

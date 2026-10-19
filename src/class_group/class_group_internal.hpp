@@ -416,6 +416,16 @@ inline bool prime_to_fractional_ideal(FractionalIdeal& out,
 void reduce_unit_candidate_kernel(
         flint::FmpzMat& rows,
         const DiagnosticsContext* diagnostics) noexcept;
+// Solves `basis * solution = denominator * rhs` for a nonsingular square
+// `basis`, returning the result of FLINT's `fmpz_mat_solve_dixon_den` (the
+// exact rational solution over its least common denominator).  The Dixon
+// prime and the inverse of `basis` modulo it are kept in `state` and reused
+// while `basis` is unchanged.  Returns false when `basis` is singular.
+bool solve_unit_candidate_system(flint::FmpzMat& solution,
+                                 flint::Fmpz& denominator,
+                                 RelationUnitCandidateBatchState& state,
+                                 flint::FmpzMatConstRef basis,
+                                 flint::FmpzMatConstRef rhs) noexcept;
 bool unit_candidate_witnesses(std::vector<FactoredElement>& out,
                                     RelationUnitCandidateBatchState& state,
                                     const ClassGroupContext& context,
