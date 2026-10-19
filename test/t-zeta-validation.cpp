@@ -630,12 +630,13 @@ void count_bdf_failure_logs(void* user,
 }
 
 // The GRH generation bound records only that Bach's bound was used, both
-// when it is below the BDF bound and when the BDF criterion cannot be
-// computed or decided; only the latter emits a class-group log note (when
-// logging is compiled in).  4x^3 + x + 100 defines the field of
-// x^3 + x + 200, and the residue-degree route of the BDF criterion needs a
-// monic integral defining polynomial, so for that presentation the bound is
-// Bach's alone, 2317, while x^3 + x + 200 has the BDF bound 19.
+// when it is below the BDF bound (the search stops) and when the BDF
+// criterion cannot be computed or decided; only the latter emits a
+// class-group log note (when logging is compiled in).  4x^3 + x + 100
+// defines the field of x^3 + x + 200, and the residue-degree route of the
+// BDF criterion needs a monic integral defining polynomial, so for that
+// presentation the bound is Bach's alone, 2317, while x^3 + x + 200 has the
+// BDF bound 19.
 bool check_bdf_failure_note() noexcept {
     slong notes = 0;
     silex::DiagnosticsContext diagnostics;
@@ -660,6 +661,30 @@ bool check_bdf_failure_note() noexcept {
                 &bach_selected) ||
         !sflint::fmpz_equal_si(bound, 19) || bach_selected || notes != 0) {
         return false;
+    }
+
+    // A stop bound below the BDF bound 19 in place of Bach's: the search
+    // stops at the failing doubling 8 or at the failing bisection midpoint
+    // 18 (`stopped`, see check_bdf_search_stop), so the stop bound is the
+    // bound and is reported as Bach's, without the note.
+    using silex::detail::TestHookAccess;
+    for (const slong stop_value : {8, 18}) {
+        sflint::Fmpz stop;
+        sflint::fmpz_set_si(sflint::FmpzRef(stop), stop_value);
+        sflint::Fmpz unchanged;
+        sflint::fmpz_set_si(sflint::FmpzRef(unchanged), 7);
+        bach_selected = false;
+        if (silex::detail::grh_bdf_factor_base_bound_search(
+                    sflint::FmpzRef(unchanged), monic.maximal_order, &stop,
+                    nullptr) != silex::detail::BdfSearchOutcome::stopped ||
+            !sflint::fmpz_equal_si(unchanged, 7) ||
+            !TestHookAccess::zeta_grh_factor_base_bound_with_stop(
+                    sflint::FmpzRef(bound), monic.maximal_order, stop,
+                    &diagnostics, &bach_selected) ||
+            !sflint::fmpz_equal_si(bound, stop_value) || !bach_selected ||
+            notes != 0) {
+            return false;
+        }
     }
 
     sflint::FmpqPoly polynomial;

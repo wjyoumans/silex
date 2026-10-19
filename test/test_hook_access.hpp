@@ -397,7 +397,8 @@ public:
     }
 
     // Zeta test entries (see ZetaTestEntry): the Belabas-Friedman Theorem 7
-    // bound at a given cutoff, and the stepped incomplete gamma values and
+    // bound at a given cutoff, the GRH generation bound with a given stop
+    // bound in place of Bach's, and the stepped incomplete gamma values and
     // blocks of the real-quadratic L(1, chi) evaluation.
     static bool zeta_bf_theorem7_error_bound(flint::ArbRef out,
                                              const Order& order,
@@ -405,6 +406,16 @@ public:
                                              slong precision) noexcept {
         return ZetaTestEntry::bf_theorem7_error_bound(out, order, cutoff,
                                                       precision);
+    }
+
+    static bool zeta_grh_factor_base_bound_with_stop(
+            flint::FmpzRef out,
+            const Order& order,
+            const flint::Fmpz& stop_bound,
+            const DiagnosticsContext* diagnostics,
+            bool* bach_selected) noexcept {
+        return ZetaTestEntry::grh_factor_base_bound_with_stop(
+                out, order, stop_bound, diagnostics, bach_selected);
     }
 
     static bool quadratic_afe_gamma_stepped(

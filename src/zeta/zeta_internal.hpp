@@ -372,6 +372,19 @@ class ZetaTestEntry {
                                         ulong cutoff,
                                         slong precision) noexcept;
 
+    // Test entry: `grh_factor_base_bound_with_diagnostics` with `stop_bound`
+    // in place of Bach's bound, both as the stop bound of the BDF search and
+    // as the bound the BDF bound is compared with.  A stop bound below the
+    // BDF bound reaches the case where the search stops (`stopped`) and the
+    // stop bound is used without the note of a BDF failure; with Bach's
+    // actual bound, real fields reach it only at enormous discriminants.
+    static bool grh_factor_base_bound_with_stop(
+            flint::FmpzRef out,
+            const Order& order,
+            const flint::Fmpz& stop_bound,
+            const DiagnosticsContext* diagnostics,
+            bool* bach_selected) noexcept;
+
     // Test entry for the stepper of `quadratic_dirichlet_l1` alone: writes
     // Gamma(shift / 2, pi n^2 / q) for n = first, ..., first + out.length() - 1
     // to `out`, taking the branches of that sum at every index.  A block is

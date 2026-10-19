@@ -2692,16 +2692,16 @@ bool factor_base_bound_bach(flint::FmpzRef out,
     return ::arb_get_unique_fmpz(out.raw(), rounded.raw()) != 0;
 }
 
-bool grh_factor_base_bound_impl(
-        flint::FmpzRef out,
-        const Order& order,
-        const DiagnosticsContext* diagnostics,
-        bool* bach_selected) noexcept {
+// The GRH generation bound of `grh_factor_base_bound_impl` (below) once
+// Bach's bound `bach` is known: min(BDF, Bach), or `bach` alone when the BDF
+// criterion cannot be computed or decided.  A test entry passes a value below
+// Bach's bound here (see ZetaTestEntry::grh_factor_base_bound_with_stop).
+bool grh_factor_base_bound_from_bach(flint::FmpzRef out,
+                                     const Order& order,
+                                     const flint::Fmpz& bach,
+                                     const DiagnosticsContext* diagnostics,
+                                     bool* bach_selected) noexcept {
     flint::Fmpz bdf;
-    flint::Fmpz bach;
-    if (!factor_base_bound_bach(flint::FmpzRef(bach), order)) {
-        return false;
-    }
     // Bach's bound alone is used when the Belabas-Diaz y Diaz-Friedman
     // criterion cannot be computed or decided: a non-monic defining
     // polynomial (its residue-degree route needs a monic integral one), a
@@ -2737,6 +2737,19 @@ bool grh_factor_base_bound_impl(
         flint::fmpz_one(out);
     }
     return flint::fmpz_sgn(out) > 0;
+}
+
+bool grh_factor_base_bound_impl(
+        flint::FmpzRef out,
+        const Order& order,
+        const DiagnosticsContext* diagnostics,
+        bool* bach_selected) noexcept {
+    flint::Fmpz bach;
+    if (!factor_base_bound_bach(flint::FmpzRef(bach), order)) {
+        return false;
+    }
+    return grh_factor_base_bound_from_bach(out, order, bach, diagnostics,
+                                           bach_selected);
 }
 
 double tail_residue_backtransform(long R1,
@@ -4869,6 +4882,16 @@ bool quadratic_dirichlet_l1_with_tolerance(flint::ArbRef out,
     }
     flint::arb_set(out, flint::ArbConstRef(value));
     return true;
+}
+
+bool ZetaTestEntry::grh_factor_base_bound_with_stop(
+        flint::FmpzRef out,
+        const Order& order,
+        const flint::Fmpz& stop_bound,
+        const DiagnosticsContext* diagnostics,
+        bool* bach_selected) noexcept {
+    return grh_factor_base_bound_from_bach(out, order, stop_bound,
+                                           diagnostics, bach_selected);
 }
 
 bool ZetaTestEntry::quadratic_afe_gamma_stepped(flint::ArbVec& out,
