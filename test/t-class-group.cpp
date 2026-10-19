@@ -7545,14 +7545,18 @@ int test_relation_saturation_kernel_basis_fallbacks() {
 }
 
 // The extension route of the saturation kernel basis, which every kernel of
-// more than one row takes first.  Over Q with the factor base {2}, the
-// relations 256, 16, 4, 2 have a relation kernel of rank 3 with small
-// entries.  The route reduces [c * relations | I] and keeps the checked
-// kernel rows: the basis spans the exact kernel, is certified LLL-reduced,
-// and leaves the LLL-reduced basis of relation_kernel_unit unbuilt.  When
-// its row checks or its certificate fail, or when it is skipped
-// (force_transform_route), the kernel is read from the left transform.  A
-// kernel of one row (the relations 256, 16) never takes the route.
+// more than one row takes first above the size crossover
+// (kSaturationKernelTransformMaxGenerators).  Over Q with the factor base
+// {2}, the relations 256, 16, 4, 2 have a relation kernel of rank 3 with
+// small entries over one generator, below the crossover, so by default the
+// kernel is read from the left transform and no extension-route basis is
+// kept.  With the route forced (force_extension_route) it reduces
+// [c * relations | I] and keeps the checked kernel rows: the basis spans
+// the exact kernel, is certified LLL-reduced, and leaves the LLL-reduced
+// basis of relation_kernel_unit unbuilt.  When its row checks or its
+// certificate fail, or when it is skipped (force_transform_route), the
+// kernel is read from the left transform.  A kernel of one row (the
+// relations 256, 16) never takes the route.
 int test_relation_saturation_kernel_basis_extension_route() {
     using silex::detail::SaturationKernelTestFailure;
     using silex::detail::TestHookAccess;
@@ -7585,6 +7589,21 @@ int test_relation_saturation_kernel_basis_extension_route() {
     slong kept = TestHookAccess::saturation_kernel_extensions_kept();
     sflint::FmpzMat basis(0, 0);
     bool lll_basis_built = true;
+
+    // Below the crossover: the left transform and the certified first
+    // phase, with no extension-route basis kept.
+    assert(presentation.generator_count() <=
+           silex::detail::kSaturationKernelTransformMaxGenerators);
+    assert(silex::detail::relation_saturation_kernel_basis(
+            basis, lll_basis_built, context));
+    assert(!lll_basis_built);
+    assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
+    relation_saturation_test_kernel_basis_is_lll(basis, context);
+
+    // Forced: the extension route.
+    TestHookAccess::set_saturation_kernel_force_extension(true);
+    assert(context.publish_presentation());
+    lll_basis_built = true;
     assert(silex::detail::relation_saturation_kernel_basis(
             basis, lll_basis_built, context));
     assert(!lll_basis_built);
@@ -7624,8 +7643,9 @@ int test_relation_saturation_kernel_basis_extension_route() {
         assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
     }
 
-    // Skipped: the basis comes from the left transform through the
-    // certified first phase, which equals fmpz_lll of the exact kernel.
+    // Skipped (force_transform_route overrides force_extension_route): the
+    // basis comes from the left transform through the certified first
+    // phase, which equals fmpz_lll of the exact kernel.
     TestHookAccess::set_saturation_kernel_force_transform(true);
     assert(context.publish_presentation());
     lll_basis_built = true;
@@ -7635,6 +7655,7 @@ int test_relation_saturation_kernel_basis_extension_route() {
     assert(!lll_basis_built);
     assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
     relation_saturation_test_kernel_basis_is_lll(basis, context);
+    TestHookAccess::set_saturation_kernel_force_extension(false);
 
     // One kernel row: the left transform, then fmpz_lll.
     silex::ClassGroupContext single(order);
@@ -7725,10 +7746,12 @@ int test_relation_saturation_kernel_basis_reuse_and_invalidation() {
 // saturation kernel basis, leaves a proven computation unchanged.
 // Q(sqrt(100000001)), x^2 - x - 25000000: its relation kernel takes the
 // certified first phase (see
-// test_relation_saturation_kernel_basis_first_phase).  With the first phase
-// failing, or its certificate failing, on every run at every call site
-// (CertifiedLllTestSeams), and with the extension route forced (certified,
-// or with its checks or its certificate failing; SaturationKernelTestSeams),
+// test_relation_saturation_kernel_basis_first_phase); the presentation is
+// below the size crossover, so by default the kernel is read from the left
+// transform.  With the first phase failing, or its certificate failing, on
+// every run at every call site (CertifiedLllTestSeams), with the transform
+// route forced, and with the extension route forced (certified, or with its
+// checks or its certificate failing; SaturationKernelTestSeams),
 // the proven class group, its saturation records with their proof records
 // (rank, target rank and auxiliary-prime count) and the units are the
 // same.
@@ -7736,6 +7759,7 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     using silex::detail::CertifiedLllTestFailure;
     using silex::detail::SaturationKernelTestFailure;
     using silex::detail::TestHookAccess;
+    enum class Route { automatic, transform, extension };
     silex::NumberField field = shifted_quadratic_field(-1, -25000000);
     silex::Order equation_order = silex::test::equation_order(field);
     silex::Order maximal_order(field);
@@ -7755,7 +7779,7 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     };
     auto compute = [&](CertifiedLllTestFailure failure,
                        SaturationKernelTestFailure extension_failure,
-                       bool force_transform) {
+                       Route route) {
         silex::ClassGroupComputeOptions options;
         options.zeta_bf_max_cutoff = 20000;
         options.requested_certification = silex::CertificationMode::proven;
@@ -7770,7 +7794,9 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
         TestHookAccess::set_saturation_kernel_failure(extension_failure);
         const slong beta_solved = TestHookAccess::saturation_beta_rows_solved();
         TestHookAccess::set_saturation_kernel_force_transform(
-                force_transform);
+                route == Route::transform);
+        TestHookAccess::set_saturation_kernel_force_extension(
+                route == Route::extension);
         const bool computed = units.compute_with_class_group(
                 context, maximal_order,
                 sflint::FmpzConstRef(factor_base_bound), options, 128);
@@ -7779,6 +7805,7 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
         TestHookAccess::set_saturation_kernel_failure(
                 SaturationKernelTestFailure::none);
         TestHookAccess::set_saturation_kernel_force_transform(false);
+        TestHookAccess::set_saturation_kernel_force_extension(false);
         assert(computed);
         const slong injections =
                 TestHookAccess::certified_lll_failures_injected() +
@@ -7788,22 +7815,28 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                        extension_failure == SaturationKernelTestFailure::none
                        ? injections == 0
                        : injections > 0);
-        // On the default route the multi-row kernel takes the extension
-        // route, keeps its basis, and the beta rows are solved from its
-        // image rows; forcing the transform route or failing the extension
-        // route makes neither happen.
+        // This presentation is below the size crossover, so on the default
+        // route the multi-row kernel is read from the left transform, as
+        // when the transform route is forced.  With the extension route
+        // forced the kernel takes it, keeps its basis, and the beta rows
+        // are solved from its image rows; failing the extension route
+        // makes neither happen.
+        silex::FiniteAbelianGroup presentation;
+        assert(context.presentation(presentation));
+        assert(presentation.generator_count() <=
+               silex::detail::kSaturationKernelTransformMaxGenerators);
         const slong extensions =
                 TestHookAccess::saturation_kernel_extensions_kept() -
                 extensions_kept;
         const slong solved =
                 TestHookAccess::saturation_beta_rows_solved() - beta_solved;
         const bool extension_expected =
-                !force_transform &&
+                route == Route::extension &&
                 failure == CertifiedLllTestFailure::none &&
                 extension_failure == SaturationKernelTestFailure::none;
         if (extension_expected) {
             assert(extensions > 0 && solved > 0);
-        } else if (force_transform ||
+        } else if (route != Route::extension ||
                    extension_failure != SaturationKernelTestFailure::none) {
             assert(extensions == 0 && solved == 0);
         }
@@ -7845,32 +7878,34 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
 
     const ProvenResult expected =
             compute(CertifiedLllTestFailure::none,
-                    SaturationKernelTestFailure::none, false);
+                    SaturationKernelTestFailure::none, Route::automatic);
     assert(!expected.invariants.empty());
     struct Case {
         CertifiedLllTestFailure failure;
         SaturationKernelTestFailure extension_failure;
-        bool force_transform;
+        Route route;
     };
     const Case cases[] = {
             {CertifiedLllTestFailure::first_phase,
-             SaturationKernelTestFailure::none, true},
+             SaturationKernelTestFailure::none, Route::automatic},
             {CertifiedLllTestFailure::certificate,
-             SaturationKernelTestFailure::none, true},
+             SaturationKernelTestFailure::none, Route::automatic},
             {CertifiedLllTestFailure::first_phase,
-             SaturationKernelTestFailure::none, false},
+             SaturationKernelTestFailure::none, Route::extension},
             {CertifiedLllTestFailure::certificate,
-             SaturationKernelTestFailure::none, false},
+             SaturationKernelTestFailure::none, Route::extension},
             {CertifiedLllTestFailure::none,
-             SaturationKernelTestFailure::none, true},
+             SaturationKernelTestFailure::none, Route::transform},
             {CertifiedLllTestFailure::none,
-             SaturationKernelTestFailure::first_phase, false},
+             SaturationKernelTestFailure::none, Route::extension},
             {CertifiedLllTestFailure::none,
-             SaturationKernelTestFailure::certificate, false},
+             SaturationKernelTestFailure::first_phase, Route::extension},
+            {CertifiedLllTestFailure::none,
+             SaturationKernelTestFailure::certificate, Route::extension},
     };
     for (const Case& c : cases) {
-        const ProvenResult result = compute(
-                c.failure, c.extension_failure, c.force_transform);
+        const ProvenResult result =
+                compute(c.failure, c.extension_failure, c.route);
         assert(result.invariants.size() == expected.invariants.size());
         for (std::size_t i = 0; i < expected.invariants.size(); ++i) {
             assert(sflint::fmpz_equal(
@@ -8008,8 +8043,11 @@ int test_relation_saturation_beta_rows_size_reduced() {
                 silex::detail::TestHookAccess::saturation_beta_rows_solved();
         assert(silex::detail::relation_saturation_beta_coefficients(
                 coefficients, context, units, sflint::FmpzConstRef(ell)));
-        // The kernel basis came from the extension route, so the rows were
-        // solved from its image rows.
+        // The presentation is above the size crossover, so the kernel basis
+        // came from the extension route by default and the rows were solved
+        // from its image rows.
+        assert(presentation.generator_count() >
+               silex::detail::kSaturationKernelTransformMaxGenerators);
         assert(silex::detail::TestHookAccess::saturation_beta_rows_solved() ==
                solved_before + 1);
         {

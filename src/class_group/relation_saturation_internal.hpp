@@ -290,6 +290,22 @@ enum class SaturationKernelTestFailure {
     beta_solve
 };
 
+// The size crossover of ClassGroupRelationAccess::saturation_relation_kernel.
+// A kernel of more than one row takes the extension route first only when
+// the presentation has more generators (columns of its relation matrix)
+// than this; otherwise it is read from the presentation's left transform
+// first, as before the extension route existed.  Chosen by measurement, not
+// from a source: on the proven corpus (busy-machine timings), the
+// left-transform route built the
+// kernel faster on every presentation with at most 31 generators
+// (real_quadratic_d100000001, 23 generators: 20 ms against 78 ms, about
+// 0.08 s against 0.13 s per run), the two routes were level at 37
+// (real_quadratic_d100000005), and from 57 generators the HNF transform of
+// the left transform dominated (real_quadratic_d10000000005, 64
+// generators: 3.8 s against 0.11 s).  Both routes return a kernel basis,
+// so the cutoff changes the cost only.
+inline constexpr slong kSaturationKernelTransformMaxGenerators = 32;
+
 // Read by saturation_relation_kernel each time it builds a basis.  Off by
 // default and never set by production code.  Relaxed atomics so a reader
 // never races with a test setting them.
@@ -298,12 +314,19 @@ public:
     static SaturationKernelTestFailure failure() noexcept {
         return failure_.load(std::memory_order_relaxed);
     }
-    // When set, a kernel of more than one row skips the extension route
-    // and takes the route through the presentation's left transform, as a
-    // kernel of one row does, so tests can compare the two routes and reach
-    // the first phase and its fallbacks on multi-row kernels.
+    // When set, a kernel of more than one row is read from the
+    // presentation's left transform first whatever the presentation's size,
+    // as a kernel of one row is, so tests can compare the two routes and
+    // reach the first phase and its fallbacks on multi-row kernels.
+    // Overrides force_extension_route.
     static bool force_transform_route() noexcept {
         return force_transform_route_.load(std::memory_order_relaxed);
+    }
+    // When set, a kernel of more than one row takes the extension route
+    // first whatever the presentation's size, so tests reach that route on
+    // presentations below kSaturationKernelTransformMaxGenerators.
+    static bool force_extension_route() noexcept {
+        return force_extension_route_.load(std::memory_order_relaxed);
     }
     // Counts each extension-route run that an injected
     // failure replaced.
@@ -327,6 +350,7 @@ private:
     inline static std::atomic<SaturationKernelTestFailure> failure_{
             SaturationKernelTestFailure::none};
     inline static std::atomic<bool> force_transform_route_{false};
+    inline static std::atomic<bool> force_extension_route_{false};
     inline static std::atomic<slong> injected_{0};
     inline static std::atomic<slong> extension_kept_{0};
     inline static std::atomic<slong> beta_solved_{0};

@@ -5995,27 +5995,35 @@ public:
     // The basis is LLL-reduced (FLINT default parameters) in every case.  If
     // the LLL-reduced basis that relation_kernel_unit publishes from is
     // already built it is reused.  Otherwise a kernel of at least two rows
-    // takes extension_saturation_kernel (the shared small-kernel helper of
-    // the proven analytic finish), certified by fmpz_mat_is_reduced, and
+    // over a presentation with more than
+    // kSaturationKernelTransformMaxGenerators generators (the measured size
+    // crossover, relation_saturation_internal.hpp) takes
+    // extension_saturation_kernel (the shared small-kernel helper of the
+    // proven analytic finish) first, certified by fmpz_mat_is_reduced, and
     // its image rows are kept for the beta coefficients
-    // (solved_invariant_generator_relation_rows).  This route never forms
+    // (solved_invariant_generator_relation_rows).  That route never forms
     // the left transform of the presentation, whose HNF transform of the
     // full relation matrix dominated the proven route on real quadratic
     // fields with large discriminant.  When it fails a check or its
-    // certificate, or the kernel has one row, the kernel is read from the
-    // left transform.  For at least two rows and entries of at most
-    // 250 bits it is then reduced by FLINT's certified first LLL phase
+    // certificate, or the kernel has one row, or the presentation is at or
+    // below the crossover, the kernel is read from the left transform.  For
+    // at least two rows and entries of at most 250 bits it is then reduced
+    // by FLINT's certified first LLL phase
     // (lat::detail::lll_first_phase_certified, the Lat::lll_reduce route,
-    // docs/reference/algorithms_and_sources.rst).  When the phase is not
-    // certified or not eligible, the LLL-reduced basis is built by fmpz_lll
-    // and copied.  A certified phase is the basis fmpz_lll returns; the
+    // docs/reference/algorithms_and_sources.rst).  For at least two rows
+    // with larger entries, where fmpz_lll of the kernel itself can take
+    // minutes, the basis comes from extension_saturation_kernel unless that
+    // route already ran, without its image rows.  When the phase is not
+    // certified or not eligible, or the extension route fails a check or
+    // its certificate, the LLL-reduced basis is built by fmpz_lll and
+    // copied.  A certified phase is the basis fmpz_lll returns; the
     // extension route's checked rows are a kernel basis (see
     // checked_relation_kernel_rows), so every route returns a basis of the
-    // kernel.  Tests send multi-row kernels through the left transform with
-    // SaturationKernelTestSeams::force_transform_route, force the
-    // first-phase fallback through CertifiedLllTestSeams
-    // (lat/certified_lll_internal.hpp), and force the extension route's
-    // fallbacks through SaturationKernelTestSeams.
+    // kernel.  Tests choose the first route of a multi-row kernel with
+    // SaturationKernelTestSeams::force_transform_route and
+    // force_extension_route, force the first-phase fallback through
+    // CertifiedLllTestSeams (lat/certified_lll_internal.hpp), and force the
+    // extension route's fallbacks through SaturationKernelTestSeams.
     static const ClassGroupContextStorage* saturation_relation_kernel(
             const ClassGroupContext& context) noexcept {
         ClassGroupContextStorage* storage = context.private_storage_.get();
@@ -6027,8 +6035,13 @@ public:
         }
         if (!storage->reduced_relation_kernel_valid) {
             const slong kernel_rows = context.relation_kernel_unit_count();
-            if (kernel_rows > 1 &&
-                !SaturationKernelTestSeams::force_transform_route()) {
+            const bool extension_first =
+                    kernel_rows > 1 &&
+                    !SaturationKernelTestSeams::force_transform_route() &&
+                    (SaturationKernelTestSeams::force_extension_route() ||
+                     context.quotient_.generator_count() >
+                             kSaturationKernelTransformMaxGenerators);
+            if (extension_first) {
                 flint::FmpzMat basis(0, 0);
                 flint::FmpzMat image(0, 0);
                 if (extension_saturation_kernel(basis, image, context,
@@ -6047,16 +6060,37 @@ public:
                         flint::FmpzMatRef(kernel))) {
                 return nullptr;
             }
-            // The phase checks its own eligibility (at least two rows,
-            // entries of at most 250 bits) and leaves an ineligible kernel
-            // unchanged.
-            flint::FmpzLll lll;
-            if (lat::detail::lll_first_phase_certified(
-                        kernel.raw(), nullptr, flint::FmpzLllConstRef(lll)) ==
-                lat::detail::CertifiedLllRoute::certified) {
-                storage->saturation_relation_kernel = std::move(kernel);
-                storage->saturation_relation_kernel_valid = true;
-                return storage;
+            constexpr slong kFlintUlllTruncationBits = 250;
+            const slong bits = ::fmpz_mat_max_bits(kernel.raw());
+            const bool in_first_phase_range =
+                    bits >= -kFlintUlllTruncationBits &&
+                    bits <= kFlintUlllTruncationBits;
+            if (kernel_rows > 1 && !in_first_phase_range) {
+                // Entries beyond the first phase's range: fmpz_lll of the
+                // kernel itself can take minutes, so the basis comes from
+                // the extension route, once.  The left transform is built
+                // already, so its image rows are not kept and the beta
+                // rows are read from the left transform.
+                flint::FmpzMat basis(0, 0);
+                flint::FmpzMat image(0, 0);
+                if (!extension_first &&
+                    extension_saturation_kernel(basis, image, context,
+                                                kernel_rows)) {
+                    SaturationKernelTestSeams::note_extension_kept();
+                    storage->saturation_relation_kernel = std::move(basis);
+                    storage->saturation_relation_kernel_valid = true;
+                    return storage;
+                }
+            } else {
+                flint::FmpzLll lll;
+                if (lat::detail::lll_first_phase_certified(
+                            kernel.raw(), nullptr,
+                            flint::FmpzLllConstRef(lll)) ==
+                    lat::detail::CertifiedLllRoute::certified) {
+                    storage->saturation_relation_kernel = std::move(kernel);
+                    storage->saturation_relation_kernel_valid = true;
+                    return storage;
+                }
             }
         }
         if (reduced_relation_kernel(context) == nullptr) {

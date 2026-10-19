@@ -272,12 +272,24 @@ public:
     }
 
     // Sends every later saturation kernel basis of more than one row
-    // through the presentation's left transform instead of the extension
-    // route (SaturationKernelTestSeams) until it is set back to false.  It
-    // is the route those kernels take whenever the extension route fails,
-    // so no invariant is skipped.
+    // through the presentation's left transform first, whatever the
+    // presentation's size (SaturationKernelTestSeams), until it is set back
+    // to false.  It is the route those kernels take at or below the size
+    // crossover and whenever the extension route fails, so no invariant is
+    // skipped.  Overrides set_saturation_kernel_force_extension.
     static void set_saturation_kernel_force_transform(bool force) noexcept {
         SaturationKernelTestSeams::force_transform_route_.store(
+                force, std::memory_order_relaxed);
+    }
+
+    // Sends every later saturation kernel basis of more than one row
+    // through the extension route first, whatever the presentation's size
+    // (SaturationKernelTestSeams), until it is set back to false.  It is
+    // the route those kernels take above the size crossover, and every
+    // failure of it falls back to the left transform, so no invariant is
+    // skipped.
+    static void set_saturation_kernel_force_extension(bool force) noexcept {
+        SaturationKernelTestSeams::force_extension_route_.store(
                 force, std::memory_order_relaxed);
     }
 
