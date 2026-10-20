@@ -448,8 +448,8 @@ bool sync_hnf_finish_workspace(
         const ClassGroupContext& context) noexcept;
 // The workspace's kernel rows of the processed relations, computed at most
 // once per sync: hnf_unit_witness_coefficients when `finish` is not set.
-// When it is set, the double-precision phase of finish_relation_kernel_basis
-// with its two exact checks, started from the reduced extension the
+// When it is set, relation_kernel_phase_rows (the double-precision phase
+// with its two exact checks), started from the reduced extension the
 // workspace kept from its previous finish kernel and extended by the
 // appended relations (a unimodular image of [c * relations | I_n]); when
 // that fails, from [c * relations | I_n]; and when that fails too,
@@ -493,6 +493,12 @@ inline constexpr ulong relation_kernel_lll_scale_bits = 40;
 // out = the fmpz_lll-reduced n x (g + n) matrix [c * relations | I_n].
 bool lll_relation_kernel_extension(flint::FmpzMat& out,
                                    flint::FmpzMatConstRef relations) noexcept;
+// out = the unreduced n x (g + n) matrix [c * relations | I_n], the input of
+// lll_relation_kernel_extension and finish_relation_kernel_basis.  Fails
+// when `relations` has no rows.
+bool relation_kernel_extension_input(flint::FmpzMat& out,
+                                     flint::FmpzMatConstRef relations)
+        noexcept;
 // Applies the two exact checks to a reduced extension and, when both hold,
 // sets out to the (n - rank) x n kernel rows in their reduced order.
 // Precondition: `rank` is the exact rank of `relations`; the claim that the
@@ -524,8 +530,8 @@ bool relation_kernel_basis(flint::FmpzMat& out,
                            slong rank) noexcept;
 
 // A failure that only detail::TestHookAccess (test/test_hook_access.hpp)
-// can inject into the double-precision phase of
-// finish_relation_kernel_basis.  The phase output is zeroed after the phase
+// can inject into the double-precision phase of relation_kernel_phase_rows
+// (finish_relation_kernel_basis and the finish workspace).  The phase output is zeroed after the phase
 // runs, so the fallback is exercised after the phase has changed the
 // matrix.  first_phase: the phase status is also read as -1.  kernel_rows:
 // the status is kept and the exact checks run on the zeroed matrix, whose
@@ -539,7 +545,7 @@ enum class FinishKernelTestFailure {
     first_phase_status
 };
 
-// Read by finish_relation_kernel_basis each time its phase runs.  Off by
+// Read by relation_kernel_phase_rows each time its phase runs.  Off by
 // default and never set by production code.  Relaxed atomics so a reader
 // never races with a test setting them.
 class FinishKernelTestSeams {
@@ -559,39 +565,51 @@ private:
     inline static std::atomic<slong> injected_{0};
 };
 
-// The kernel basis of the HNF analytic finish's unit logs only (through
-// hnf_unit_finish_coefficients); the unit witnesses and the saturation
-// kernel keep relation_kernel_basis.  It runs the first phase of fmpz_lll,
-// fmpz_lll_d_with_removal_knapsack, on [c * relations | I_n] and keeps the
-// result when the phase does not return -1 and checked_relation_kernel_rows
-// accepts it, without FLINT's final reducedness check
-// (fmpz_lll_is_reduced), which the kernel claim does not use.  Otherwise,
-// and for entries above FLINT's 250-bit ULLL truncation threshold, it is
+// The double-precision phase of relation-kernel reduction, shared by
+// finish_relation_kernel_basis and the finish workspace.  For an n x (g + n)
+// `extension` that is a unimodular image of [c * relations | I_n] with
+// entries of at most FLINT's 250-bit ULLL truncation threshold, it runs the
+// first phase of fmpz_lll, fmpz_lll_d_with_removal_knapsack, on `extension`
+// in place and sets out to checked_relation_kernel_rows of the result when
+// the phase does not return -1 and both exact checks pass.  FLINT's final
+// reducedness check (fmpz_lll_is_reduced) is not run; the kernel claim does
+// not use it.  False above the threshold (`extension` unchanged) and when
+// the phase or a check fails (`extension` changed).  Precondition: `rank`
+// is the exact rank of `relations`.
+bool relation_kernel_phase_rows(flint::FmpzMat& out,
+                                flint::FmpzMat& extension,
+                                flint::FmpzMatConstRef relations,
+                                slong rank) noexcept;
+// The kernel basis of the HNF unit rows (through
+// hnf_unit_witness_coefficients and hnf_unit_finish_coefficients); the
+// saturation kernel keeps lll_relation_kernel_extension.  It is
+// relation_kernel_phase_rows on [c * relations | I_n] when that succeeds,
+// and otherwise, for an empty kernel, and for entries above the threshold,
 // relation_kernel_basis on the unchanged input.  When FLINT's check would
-// accept the phase output, the rows are relation_kernel_basis's rows.
+// accept the phase output, the rows are relation_kernel_basis's rows;
+// otherwise they are another basis of the same kernel lattice.
 // Precondition: `rank` is the exact rank of `relations`.
 bool finish_relation_kernel_basis(flint::FmpzMat& out,
                                   RelationKernelBasisRoute* route,
                                   flint::FmpzMatConstRef relations,
                                   slong rank) noexcept;
-// The unit-row coefficients of the HNF analytic finish: relation_kernel_basis
-// of the context's stored relations, after checking that fmpz_mat_rank of
-// those relations is the context's relation rank.  hnf_unit_log_matrix takes
-// its rows from this function for HnfUnitLogKernel::witness, so the unit
-// logs that are combined with the unit witnesses use the same rows.
+// The unit-row coefficients of the HNF unit witnesses:
+// finish_relation_kernel_basis of the context's stored relations, after
+// checking that fmpz_mat_rank of those relations is the context's relation
+// rank.  hnf_unit_log_matrix takes its rows from this function for
+// HnfUnitLogKernel::witness, so the unit logs that are combined with the
+// unit witnesses use the same rows.  The rows are a deterministic function
+// of the stored relations.
 bool hnf_unit_witness_coefficients(flint::FmpzMat& out,
                                         const ClassGroupContext& context)
         noexcept;
 // The unit-row coefficients of the finish's unit logs on the path without a
-// finish workspace: as hnf_unit_witness_coefficients, with
-// finish_relation_kernel_basis in place of relation_kernel_basis.  The rows
-// are a basis of the same kernel lattice, so the unit count and the
-// regulator they give are those of the witness rows; they can be a
-// different basis only where FLINT's reducedness check would reject the
-// double-precision phase, and then only the precision the finish needs
-// can differ (its pivot choice, residual test and precision escalation
-// depend on the basis), never its values or labels.  Never composed with
-// witnesses.
+// finish workspace: the rows of hnf_unit_witness_coefficients.  With a
+// finish workspace the finish rows can be another basis of the same kernel
+// lattice (hnf_finish_workspace_kernel), and then only the precision the
+// finish needs can differ (its pivot choice, residual test and precision
+// escalation depend on the basis), never its values or labels.  Never
+// composed with witnesses.
 bool hnf_unit_finish_coefficients(flint::FmpzMat& out,
                                   const ClassGroupContext& context) noexcept;
 bool hnf_unit_witnesses(std::vector<FactoredElement>& out,

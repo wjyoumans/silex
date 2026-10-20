@@ -830,12 +830,11 @@ belong to the zero rows of the HNF, which are an exact kernel basis; the
 HNF transform is computed only in that case.  As
 in the reducer paragraph below, the basis claim relies on FLINT's guarantee
 that ``fmpz_lll`` applies only unimodular row operations; Silex adds no
-determinant check.  The witness rows keep FLINT's final reducedness check, and
-so does the relation-saturation kernel on its fallback routes; on its
-extension route the kernel rows are accepted only when ``fmpz_mat_is_reduced``
-certifies them.  The analytic finish's unit logs, used only
-for its count of independent units and its regulator product, take a
-variant without that check: for entries of at most 250 bits, FLINT's ULLL
+determinant check.  The relation-saturation kernel keeps FLINT's final
+reducedness check on its fallback routes; on its extension route the kernel
+rows are accepted only when ``fmpz_mat_is_reduced`` certifies them.  The unit
+witnesses and the analytic finish's unit logs (its count of independent units
+and its regulator product) take a variant without that check: for entries of at most 250 bits, FLINT's ULLL
 truncation threshold, it runs ``fmpz_lll_d_with_removal_knapsack``, the
 double-precision first phase that ``fmpz_lll`` runs on such a matrix
 (FLINT 3.6.0 ``lll.c``, ``lll_with_removal_ulll.c``,
@@ -847,12 +846,14 @@ unimodular transform, which is all the two checks need; the kernel claim
 never uses LLL-reducedness.  Otherwise the variant takes the
 ``fmpz_lll`` route above on the unchanged input.  When FLINT's check
 would accept the phase output, ``fmpz_lll`` returns that same output, so
-the finish sees the witness rows; otherwise it sees another basis of the
-same kernel lattice, whose unit count and regulator are the same; only
-the precision the finish needs can differ (its pivot choice, residual
-test and precision escalation depend on the basis), never its values or
-labels.  The
-finish's logs are never combined with the witness rows.  The rank
+the rows are those of the ``fmpz_lll`` route; otherwise they are another
+basis of the same kernel lattice, which can be less reduced, and the unit
+witnesses composed from them are equally valid generators of the same unit
+lattice.  The finish's unit count and regulator do not depend on the basis;
+only the precision the finish needs can (its pivot choice, residual test and
+precision escalation depend on the basis), never its values or labels.
+Without a finish workspace the finish rows are the witness rows.
+The finish's logs are never combined with the witness rows.  The rank
 passed in must be the exact rank of ``A``; the full-lattice claim depends on
 it.  The finish checks that the relation rank it passes equals
 ``fmpz_mat_rank`` of ``A``, the number of nonzero rows of its HNF.  The

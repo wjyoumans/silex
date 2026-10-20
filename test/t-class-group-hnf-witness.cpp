@@ -897,6 +897,68 @@ int test_finish_workspace_empty_kernel_drops_extension() {
     return 0;
 }
 
+// The workspace's phase is relation_kernel_phase_rows, so the test seam
+// reaches it.  With the phase forced to fail, the finish kernel runs it
+// three times (the extended attempt, the attempt from scratch and the
+// finish_relation_kernel_basis fallback), keeps no extension and returns
+// fmpz_lll's rows; the witness kernel runs it once and returns them too.
+int test_finish_workspace_phase_seam() {
+    using silex::detail::FinishKernelTestFailure;
+    using silex::detail::TestHookAccess;
+    silex::NumberField field = degree_one_field();
+    silex::Order order = silex::test::equation_order(field);
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 3);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    auto* workspace = silex::detail::class_group_finish_workspace(context);
+    assert(workspace != nullptr);
+    for (const slong value : {24, 256, 32, 12}) {
+        append_kept_integer_relation(context, field, value);
+    }
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(silex::detail::hnf_finish_workspace_kernel(*workspace, context,
+                                                      true) != nullptr);
+    for (const slong value : {9, 96, 8}) {
+        append_kept_integer_relation(context, field, value);
+    }
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(workspace->finish_extension_valid);
+    assert(workspace->finish_extension_relation_count == 4);
+
+    const sflint::FmpzMat relations = context_relations(context);
+    sflint::FmpzMat expected(0, 0);
+    silex::detail::RelationKernelBasisRoute route =
+            silex::detail::RelationKernelBasisRoute::hnf_transform;
+    assert(silex::detail::relation_kernel_basis(
+            expected, &route, sflint::FmpzMatConstRef(relations),
+            context.relation_rank()));
+    assert(route == silex::detail::RelationKernelBasisRoute::lll_extended);
+
+    const slong injected_before =
+            TestHookAccess::finish_kernel_failures_injected();
+    TestHookAccess::set_finish_kernel_failure(
+            FinishKernelTestFailure::first_phase);
+    const sflint::FmpzMat* const finish =
+            silex::detail::hnf_finish_workspace_kernel(*workspace, context,
+                                                       true);
+    const slong injected_finish =
+            TestHookAccess::finish_kernel_failures_injected();
+    const sflint::FmpzMat* const witness =
+            silex::detail::hnf_finish_workspace_kernel(*workspace, context,
+                                                       false);
+    TestHookAccess::set_finish_kernel_failure(FinishKernelTestFailure::none);
+    assert(finish != nullptr && witness != nullptr);
+    assert(injected_finish == injected_before + 3);
+    assert(TestHookAccess::finish_kernel_failures_injected() ==
+           injected_finish + 1);
+    assert(same_fmpz_mat(*finish, expected));
+    assert(same_fmpz_mat(*witness, expected));
+    assert(!workspace->finish_extension_valid);
+    assert(workspace->finish_extension_relation_count == 0);
+    return 0;
+}
+
 // Local saturation compares the kernel relation's factor base with the
 // context base once per residue-dlog kernel; a mismatch, an undefined relation,
 // or a context without a factor base must still be rejected, and filling the
@@ -1539,6 +1601,121 @@ int test_finish_relation_kernel_basis_fast_path_and_fallback() {
     return 0;
 }
 
+// A rank-1 3 x 2 relation matrix (found by a random search over FLINT
+// 3.6.0) on which FLINT's double-precision phase returns rows that pass
+// both exact kernel checks but that fmpz_lll_is_reduced(B, fl, 120)
+// rejects, so fmpz_lll goes on past the phase and returns other rows.
+sflint::FmpzMat reducedness_reject_relations() noexcept {
+    sflint::FmpzMat relations(3, 2);
+    const char* const entries[3][2] = {
+            {"-18569808020596702233246257627680428864",
+             "11975549859021595733032372160691185404654036916887616"},
+            {"61427344241331", "-39614099556302503221902835839"},
+            {"-1842820327239930", "1188422986689075096657085075170"}};
+    for (slong i = 0; i < 3; ++i) {
+        for (slong j = 0; j < 2; ++j) {
+            assert(::fmpz_set_str(sflint::fmpz_mat_entry(
+                                          sflint::FmpzMatRef(relations), i,
+                                          j)
+                                          .raw(),
+                                  entries[i][j], 10) == 0);
+        }
+    }
+    return relations;
+}
+
+// Where FLINT's reducedness check would reject the double-precision phase,
+// finish_relation_kernel_basis (the unit witness and finish kernel) keeps
+// the phase rows on the two exact checks: a basis of the same kernel
+// lattice as fmpz_lll's rows and the HNF transform rows, though not the
+// same rows.  When the phase is forced to fail it returns fmpz_lll's rows.
+int test_finish_relation_kernel_basis_without_reducedness() {
+    using silex::detail::FinishKernelTestFailure;
+    using silex::detail::RelationKernelBasisRoute;
+    using silex::detail::TestHookAccess;
+    const sflint::FmpzMat relations = reducedness_reject_relations();
+    const slong n = 3;
+    const slong g = 2;
+    const slong rank = 1;
+    assert(::fmpz_mat_rank(relations.raw()) == rank);
+
+    // The fixture's premise: the phase passes the exact checks, FLINT's
+    // check rejects it, and fmpz_lll's rows differ from the phase rows.
+    sflint::FmpzMat phase(0, 0);
+    assert(silex::detail::relation_kernel_extension_input(
+            phase, sflint::FmpzMatConstRef(relations)));
+    assert(::fmpz_mat_max_bits(phase.raw()) <= 250);
+    sflint::FmpzLll lll;
+    assert(::fmpz_lll_d_with_removal_knapsack(phase.raw(), nullptr, nullptr,
+                                              lll.raw()) != -1);
+    assert(::fmpz_lll_is_reduced(phase.raw(), lll.raw(), 120) == 0);
+    sflint::FmpzMat phase_rows(0, 0);
+    assert(silex::detail::checked_relation_kernel_rows(
+            phase_rows, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(phase), rank));
+    sflint::FmpzMat reduced(0, 0);
+    assert(silex::detail::lll_relation_kernel_extension(
+            reduced, sflint::FmpzMatConstRef(relations)));
+    assert(::fmpz_lll_is_reduced(reduced.raw(), lll.raw(), 120) != 0);
+    assert(!sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(reduced),
+                                   sflint::FmpzMatConstRef(phase)));
+
+    sflint::FmpzMat full(0, 0);
+    RelationKernelBasisRoute full_route =
+            RelationKernelBasisRoute::hnf_transform;
+    assert(silex::detail::relation_kernel_basis(
+            full, &full_route, sflint::FmpzMatConstRef(relations), rank));
+    assert(full_route == RelationKernelBasisRoute::lll_extended);
+    sflint::FmpzMat oracle(0, 0);
+    assert(silex::detail::hnf_transform_kernel_rows(
+            oracle, sflint::FmpzMatConstRef(relations), rank));
+
+    sflint::FmpzMat basis(0, 0);
+    RelationKernelBasisRoute route = RelationKernelBasisRoute::hnf_transform;
+    assert(silex::detail::finish_relation_kernel_basis(
+            basis, &route, sflint::FmpzMatConstRef(relations), rank));
+    assert(route == RelationKernelBasisRoute::lll_double_extended);
+    assert(sflint::fmpz_mat_nrows(basis) == n - rank);
+    assert(sflint::fmpz_mat_ncols(basis) == n);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(basis),
+                                  sflint::FmpzMatConstRef(phase_rows)));
+    sflint::FmpzMat product(n - rank, g);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(product),
+                         sflint::FmpzMatConstRef(basis),
+                         sflint::FmpzMatConstRef(relations));
+    assert(::fmpz_mat_is_zero(product.raw()) != 0);
+    assert(!sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(basis),
+                                   sflint::FmpzMatConstRef(full)));
+    assert(same_row_lattice(sflint::FmpzMatConstRef(basis),
+                            sflint::FmpzMatConstRef(full)));
+    assert(same_row_lattice(sflint::FmpzMatConstRef(basis),
+                            sflint::FmpzMatConstRef(oracle)));
+
+    // The fallback: a failed phase or failed checks give fmpz_lll's rows.
+    for (const FinishKernelTestFailure failure :
+         {FinishKernelTestFailure::first_phase,
+          FinishKernelTestFailure::kernel_rows,
+          FinishKernelTestFailure::first_phase_status}) {
+        const slong injected_before =
+                TestHookAccess::finish_kernel_failures_injected();
+        TestHookAccess::set_finish_kernel_failure(failure);
+        sflint::FmpzMat out(0, 0);
+        RelationKernelBasisRoute taken =
+                RelationKernelBasisRoute::lll_double_extended;
+        const bool ok = silex::detail::finish_relation_kernel_basis(
+                out, &taken, sflint::FmpzMatConstRef(relations), rank);
+        TestHookAccess::set_finish_kernel_failure(
+                FinishKernelTestFailure::none);
+        assert(ok);
+        assert(TestHookAccess::finish_kernel_failures_injected() ==
+               injected_before + 1);
+        assert(taken == RelationKernelBasisRoute::lll_extended);
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(out),
+                                      sflint::FmpzMatConstRef(full)));
+    }
+    return 0;
+}
+
 // The HNF finish unit logs are the logs of the units composed from the
 // witness coefficient rows, row by row.
 int test_unit_logs_share_witness_rows() {
@@ -1575,7 +1752,9 @@ int test_unit_logs_share_witness_rows() {
     assert(sflint::fmpz_mat_nrows(coefficients) == relation_count - rank);
     assert(relation_count - rank > 0);
 
-    // The witness rows are the shared kernel basis of the stored relations.
+    // The witness rows are finish_relation_kernel_basis's rows of the stored
+    // relations; FLINT's check accepts the phase here, so they are also
+    // relation_kernel_basis's rows.
     sflint::FmpzMat stored(relation_count, class_group.generator_count());
     assert(class_group.relations(sflint::FmpzMatRef(stored)));
     assert(::fmpz_mat_rank(stored.raw()) == rank);
@@ -1597,9 +1776,8 @@ int test_unit_logs_share_witness_rows() {
             logs, class_group, embeddings, nullptr, precision,
             silex::detail::HnfUnitLogKernel::witness));
 
-    // The finish rows come from FLINT's double-precision phase without its
-    // reducedness check; where that check accepts, as here, they are the
-    // witness rows, and so are the finish logs.
+    // The finish rows are the witness rows (the same function of the
+    // stored relations), and so are the finish logs.
     sflint::FmpzMat finish_coefficients(0, 0);
     assert(silex::detail::hnf_unit_finish_coefficients(finish_coefficients,
                                                        class_group));
@@ -1669,9 +1847,9 @@ int test_unit_logs_share_witness_rows() {
         }
     }
 
-    // Only the finish logs run the phase: with the checks forced to reject
-    // it, the finish logs come from the fallback (the same rows here) and
-    // the witness logs never reach the phase.
+    // The finish and the witness logs both run the phase: with the checks
+    // forced to reject it, both come from the fallback (the same rows
+    // here).
     {
         using silex::detail::FinishKernelTestFailure;
         using silex::detail::TestHookAccess;
@@ -1694,11 +1872,15 @@ int test_unit_logs_share_witness_rows() {
         assert(finish_ok && witness_ok);
         assert(injected_finish == injected_before + 1);
         assert(TestHookAccess::finish_kernel_failures_injected() ==
-               injected_finish);
+               injected_finish + 1);
         for (slong unit = 0; unit < relation_count - rank; ++unit) {
             for (slong place = 0; place < places; ++place) {
                 assert(::arb_equal(
                                arb_mat_entry(fallback_logs.raw(), unit,
+                                             place),
+                               arb_mat_entry(logs.raw(), unit, place)) != 0);
+                assert(::arb_equal(
+                               arb_mat_entry(witness_logs.raw(), unit,
                                              place),
                                arb_mat_entry(logs.raw(), unit, place)) != 0);
             }
@@ -2097,6 +2279,7 @@ int main() {
     assert(test_finish_workspace_requires_factor_base() == 0);
     assert(test_finish_workspace_kernel_extends_cached_reduction() == 0);
     assert(test_finish_workspace_empty_kernel_drops_extension() == 0);
+    assert(test_finish_workspace_phase_seam() == 0);
     assert(test_saturation_kernel_relation_base_check() == 0);
     assert(test_default_completion_populates_finish_workspace() == 0);
     assert(test_corrupted_known_row_rejected() == 0);
@@ -2107,6 +2290,7 @@ int main() {
     assert(test_analytic_finish_embedding_reuse() == 0);
     assert(test_relation_kernel_basis_checks_and_fallback() == 0);
     assert(test_finish_relation_kernel_basis_fast_path_and_fallback() == 0);
+    assert(test_finish_relation_kernel_basis_without_reducedness() == 0);
     assert(test_unit_logs_share_witness_rows() == 0);
     assert(test_unit_candidate_kernel_lll_matches_fmpz_lll() == 0);
     assert(test_unit_candidate_system_dixon_cache() == 0);

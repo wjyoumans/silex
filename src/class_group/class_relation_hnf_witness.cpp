@@ -164,7 +164,17 @@ bool verify_stored_relation_generator(
            principal.equal(expected);
 }
 
-// The unreduced n x (g + n) matrix [c * relations | I_n].
+// FLINT's ULLL truncation threshold (FLINT 3.6.0 lll.c: fmpz_lll is
+// fmpz_lll_with_removal_ulll(B, U, 250, NULL, fl)).  For a Z_BASIS input
+// with |fmpz_mat_max_bits| at most this, lll_with_removal_ulll.c makes one
+// fmpz_lll_wrapper_with_removal_knapsack(B, U, NULL, fl) call, which keeps
+// the fmpz_lll_d_with_removal_knapsack output when that phase does not
+// return -1 and fmpz_lll_is_reduced(B, fl, 120) accepts it
+// (wrapper_with_removal_knapsack.c).
+constexpr slong flint_ulll_truncation_bits = 250;
+
+}  // namespace
+
 bool relation_kernel_extension_input(flint::FmpzMat& out,
                                      flint::FmpzMatConstRef relations)
         noexcept {
@@ -188,17 +198,6 @@ bool relation_kernel_extension_input(flint::FmpzMat& out,
     out = std::move(extension);
     return true;
 }
-
-// FLINT's ULLL truncation threshold (FLINT 3.6.0 lll.c: fmpz_lll is
-// fmpz_lll_with_removal_ulll(B, U, 250, NULL, fl)).  For a Z_BASIS input
-// with |fmpz_mat_max_bits| at most this, lll_with_removal_ulll.c makes one
-// fmpz_lll_wrapper_with_removal_knapsack(B, U, NULL, fl) call, which keeps
-// the fmpz_lll_d_with_removal_knapsack output when that phase does not
-// return -1 and fmpz_lll_is_reduced(B, fl, 120) accepts it
-// (wrapper_with_removal_knapsack.c).
-constexpr slong flint_ulll_truncation_bits = 250;
-
-}  // namespace
 
 bool lll_relation_kernel_extension(flint::FmpzMat& out,
                                    flint::FmpzMatConstRef relations) noexcept {
@@ -349,6 +348,44 @@ bool relation_kernel_basis(flint::FmpzMat& out,
             have_extension ? &extension : nullptr);
 }
 
+bool relation_kernel_phase_rows(flint::FmpzMat& out,
+                                flint::FmpzMat& extension,
+                                flint::FmpzMatConstRef relations,
+                                slong rank) noexcept {
+    const slong bits = ::fmpz_mat_max_bits(extension.raw());
+    if (bits < -flint_ulll_truncation_bits ||
+        bits > flint_ulll_truncation_bits) {
+        return false;
+    }
+
+    // The first phase of fmpz_lll (see flint_ulll_truncation_bits).  It
+    // changes the rows only by row moves and by adding integer multiples of
+    // one row to another (lll_d.c, lll_check_babai.c), so the identity part
+    // records a unimodular transform, which is all that
+    // checked_relation_kernel_rows needs.  FLINT's final reducedness check
+    // is not run: the kernel claim rests on the two exact checks, not on
+    // the rows being LLL-reduced.
+    flint::FmpzLll lll;
+    int status = ::fmpz_lll_d_with_removal_knapsack(extension.raw(), nullptr,
+                                                    nullptr, lll.raw());
+    const FinishKernelTestFailure failure = FinishKernelTestSeams::failure();
+    if (failure != FinishKernelTestFailure::none) {
+        // Test-only; see FinishKernelTestSeams.
+        if (failure != FinishKernelTestFailure::first_phase_status) {
+            flint::fmpz_mat_zero(flint::FmpzMatRef(extension));
+        }
+        if (failure == FinishKernelTestFailure::first_phase ||
+            failure == FinishKernelTestFailure::first_phase_status) {
+            status = -1;
+        }
+        FinishKernelTestSeams::note_injected();
+    }
+    return status != -1 &&
+           checked_relation_kernel_rows(out, relations,
+                                        flint::FmpzMatConstRef(extension),
+                                        rank);
+}
+
 bool finish_relation_kernel_basis(flint::FmpzMat& out,
                                   RelationKernelBasisRoute* route,
                                   flint::FmpzMatConstRef relations,
@@ -360,51 +397,23 @@ bool finish_relation_kernel_basis(flint::FmpzMat& out,
         return relation_kernel_basis(out, route, relations, rank);
     }
 
-    flint::FmpzLll lll;
-    const slong bits = ::fmpz_mat_max_bits(extension.raw());
-    if (bits >= -flint_ulll_truncation_bits &&
-        bits <= flint_ulll_truncation_bits) {
-        flint::FmpzMat reduced(n, flint::fmpz_mat_ncols(
-                                          flint::FmpzMatConstRef(extension)));
-        flint::fmpz_mat_set(flint::FmpzMatRef(reduced),
-                            flint::FmpzMatConstRef(extension));
-        // The first phase of fmpz_lll (see flint_ulll_truncation_bits).  It
-        // changes the rows only by row moves and by adding integer
-        // multiples of one row to another (lll_d.c, lll_check_babai.c), so
-        // the identity part records a unimodular transform, which is all
-        // that checked_relation_kernel_rows needs.  FLINT's final
-        // reducedness check is not run: the kernel claim rests on the two
-        // exact checks, not on the rows being LLL-reduced.
-        int status = ::fmpz_lll_d_with_removal_knapsack(reduced.raw(), nullptr,
-                                                        nullptr, lll.raw());
-        const FinishKernelTestFailure failure =
-                FinishKernelTestSeams::failure();
-        if (failure != FinishKernelTestFailure::none) {
-            // Test-only; see FinishKernelTestSeams.
-            if (failure != FinishKernelTestFailure::first_phase_status) {
-                flint::fmpz_mat_zero(flint::FmpzMatRef(reduced));
-            }
-            if (failure == FinishKernelTestFailure::first_phase ||
-                failure == FinishKernelTestFailure::first_phase_status) {
-                status = -1;
-            }
-            FinishKernelTestSeams::note_injected();
+    // The phase runs on a copy: the fallback needs the unchanged input.
+    flint::FmpzMat reduced(n, flint::fmpz_mat_ncols(
+                                      flint::FmpzMatConstRef(extension)));
+    flint::fmpz_mat_set(flint::FmpzMatRef(reduced),
+                        flint::FmpzMatConstRef(extension));
+    flint::FmpzMat checked(0, 0);
+    if (relation_kernel_phase_rows(checked, reduced, relations, rank)) {
+        out = std::move(checked);
+        if (route != nullptr) {
+            *route = RelationKernelBasisRoute::lll_double_extended;
         }
-        flint::FmpzMat checked(0, 0);
-        if (status != -1 &&
-            checked_relation_kernel_rows(checked, relations,
-                                         flint::FmpzMatConstRef(reduced),
-                                         rank)) {
-            out = std::move(checked);
-            if (route != nullptr) {
-                *route = RelationKernelBasisRoute::lll_double_extended;
-            }
-            return true;
-        }
+        return true;
     }
 
     // Fallback: relation_kernel_basis on the unchanged input.  fmpz_lll
     // repeats the deterministic phase above before its own later stages.
+    flint::FmpzLll lll;
     ::fmpz_lll(extension.raw(), nullptr, lll.raw());
     return relation_kernel_basis_from_extension(out, route, relations, rank,
                                                 &extension);
@@ -412,12 +421,10 @@ bool finish_relation_kernel_basis(flint::FmpzMat& out,
 
 namespace {
 
-// The stored relations and their kernel rows through `basis`
-// (relation_kernel_basis or finish_relation_kernel_basis).
-template <class KernelBasis>
+// The stored relations and their kernel rows through
+// finish_relation_kernel_basis.
 bool hnf_unit_coefficients(flint::FmpzMat& out,
-                           const ClassGroupContext& context,
-                           KernelBasis basis) noexcept {
+                           const ClassGroupContext& context) noexcept {
     out = flint::FmpzMat(0, 0);
     flint::FmpzMat stored(0, 0);
     if (!context_relation_matrix(stored, context)) {
@@ -434,7 +441,8 @@ bool hnf_unit_coefficients(flint::FmpzMat& out,
     }
 
     flint::FmpzMat coefficients(0, 0);
-    if (!basis(coefficients, nullptr, flint::FmpzMatConstRef(stored), rank)) {
+    if (!finish_relation_kernel_basis(coefficients, nullptr,
+                                      flint::FmpzMatConstRef(stored), rank)) {
         return false;
     }
     out = std::move(coefficients);
@@ -446,12 +454,12 @@ bool hnf_unit_coefficients(flint::FmpzMat& out,
 bool hnf_unit_witness_coefficients(
         flint::FmpzMat& out,
         const ClassGroupContext& context) noexcept {
-    return hnf_unit_coefficients(out, context, relation_kernel_basis);
+    return hnf_unit_coefficients(out, context);
 }
 
 bool hnf_unit_finish_coefficients(flint::FmpzMat& out,
                                   const ClassGroupContext& context) noexcept {
-    return hnf_unit_coefficients(out, context, finish_relation_kernel_basis);
+    return hnf_unit_coefficients(out, context);
 }
 
 bool hnf_unit_witnesses(std::vector<FactoredElement>& out,

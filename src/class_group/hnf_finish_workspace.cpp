@@ -2,10 +2,6 @@
 
 #include <utility>
 
-#include <flint/fmpz_lll.h>
-
-#include <silex/flint/fmpz_lll.hpp>
-
 namespace silex::detail {
 
 namespace {
@@ -176,14 +172,9 @@ bool append_hnf_finish_workspace(
     return true;
 }
 
-// FLINT's ULLL truncation threshold, as in finish_relation_kernel_basis
-// (FLINT 3.6.0 lll.c: fmpz_lll is fmpz_lll_with_removal_ulll(B, U, 250,
-// NULL, fl)).  Above it fmpz_lll does not start with the double-precision
-// phase, so neither does the workspace.
-constexpr slong finish_extension_phase_max_bits = 250;
-
 // The n x (g + n) input of the finish kernel's reduction.  Without a usable
-// cached extension it is [c * relations | I_n], the input of
+// cached extension it is [c * relations | I_n]
+// (relation_kernel_extension_input), the input of
 // finish_relation_kernel_basis.  With one, of the first m < n relations,
 // its first m rows are the cached reduced rows, padded with zeros in the
 // identity columns of the new relations, and row i >= m is
@@ -206,10 +197,16 @@ bool finish_extension_input(flint::FmpzMat& out,
                m < n &&
                flint::fmpz_mat_nrows(workspace.finish_extension) == m &&
                flint::fmpz_mat_ncols(workspace.finish_extension) == g + m;
-    const slong first_new = extended ? m : 0;
 
-    flint::FmpzMat input(n, g + n);
-    for (slong i = 0; i < first_new; ++i) {
+    flint::FmpzMat input(0, 0);
+    if (!relation_kernel_extension_input(input, relations)) {
+        return false;
+    }
+    // Rows i < m of [c * relations | I_n] are zero in the columns from
+    // g + m on, so overwriting their first g + m entries with the cached
+    // rows gives the padded cached rows.
+    const slong cached_rows = extended ? m : 0;
+    for (slong i = 0; i < cached_rows; ++i) {
         for (slong j = 0; j < g + m; ++j) {
             flint::fmpz_set(
                     flint::fmpz_mat_entry(flint::FmpzMatRef(input), i, j),
@@ -219,46 +216,12 @@ bool finish_extension_input(flint::FmpzMat& out,
                             i, j));
         }
     }
-    for (slong i = first_new; i < n; ++i) {
-        for (slong j = 0; j < g; ++j) {
-            flint::fmpz_mul_2exp(
-                    flint::fmpz_mat_entry(flint::FmpzMatRef(input), i, j),
-                    flint::fmpz_mat_entry(relations, i, j),
-                    relation_kernel_lll_scale_bits);
-        }
-        flint::fmpz_one(
-                flint::fmpz_mat_entry(flint::FmpzMatRef(input), i, g + i));
-    }
     out = std::move(input);
     return true;
 }
 
-// The first phase of fmpz_lll, fmpz_lll_d_with_removal_knapsack, on
-// `extension` in place, and checked_relation_kernel_rows on its output, as
-// in finish_relation_kernel_basis.  The phase changes the rows only by row
-// moves and by adding integer multiples of one row to another, so the
-// identity part stays unimodular; the kernel claim rests on the two exact
-// checks and the exact rank, not on the rows being LLL-reduced.
-bool finish_extension_phase_rows(flint::FmpzMat& rows_out,
-                                 flint::FmpzMat& extension,
-                                 flint::FmpzMatConstRef relations,
-                                 slong rank) noexcept {
-    const slong bits = ::fmpz_mat_max_bits(extension.raw());
-    if (bits < -finish_extension_phase_max_bits ||
-        bits > finish_extension_phase_max_bits) {
-        return false;
-    }
-    flint::FmpzLll lll;
-    const int status = ::fmpz_lll_d_with_removal_knapsack(
-            extension.raw(), nullptr, nullptr, lll.raw());
-    return status != -1 &&
-           checked_relation_kernel_rows(rows_out, relations,
-                                        flint::FmpzMatConstRef(extension),
-                                        rank);
-}
-
 // The finish kernel through finish_extension_input and
-// finish_extension_phase_rows; on success the reduced extension replaces
+// relation_kernel_phase_rows; on success the reduced extension replaces
 // the workspace's cached one.  `use_cache` false starts from
 // [c * relations | I_n].  `extended` reports whether the cached extension
 // was used.
@@ -273,7 +236,7 @@ bool finish_extension_kernel_rows(flint::FmpzMat& out,
     flint::FmpzMat rows(0, 0);
     if (!finish_extension_input(extension, extended, workspace, relations,
                                 use_cache) ||
-        !finish_extension_phase_rows(rows, extension, relations, rank)) {
+        !relation_kernel_phase_rows(rows, extension, relations, rank)) {
         return false;
     }
     workspace.finish_extension = std::move(extension);

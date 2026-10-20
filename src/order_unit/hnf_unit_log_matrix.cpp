@@ -231,7 +231,7 @@ bool hnf_unit_log_matrix(flint::ArbMat& out,
     // Ar = real_i(A) for the zero/HNF-unit columns.  The kernel rows are
     // retained-relation dependencies: the zero rows of FLINT's row-oriented
     // hnf = transform * relation_rows, or a checked LLL basis of the same
-    // left kernel (relation_kernel_basis).
+    // left kernel (finish_relation_kernel_basis).
     for (slong dep = 0; dep < unit_columns; ++dep) {
         for (slong relation = 0; relation < relation_count; ++relation) {
             const auto exponent = flint::fmpz_mat_entry(
