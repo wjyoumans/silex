@@ -1653,6 +1653,31 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` and 9.5% fewer for the field defined by
   ``x^16 + 1``.  No timing has been measured.
 
+- The ``proven`` T2 enumeration of an ideal starts its rounding-scale loop at
+  a per-order hint (the smallest scale accepted so far for that order)
+  instead of at scale 4, which skips the scales the order has already
+  rejected.  If no scale at or above the hint is accepted, the loop reruns
+  from scale 4, so fallback and failure results are those of the unhinted
+  loop.  The lattice and the reduction test are unchanged; only the starting
+  scale moves, so an ideal whose own loop would accept a coarser scale than
+  the hint gets a different, equally valid basis of the same lattice.  On
+  the ``proven`` corpus (185 rows compared, 177 with output on both builds)
+  class groups, generators, units and proof records are identical, and
+  the changes are two rows' bookkeeping and one enclosure.  On
+  ``cyclotomic_real_37_deg18``, ``class_group.skipped_dependent_relation_count``
+  goes from 3 to 16.  On ``lmfdb_8_8_82944000000_1``,
+  ``class_group.relation_count`` goes from 22 to 32,
+  ``class_group.relation_kernel_unit_count`` from 12 to 22,
+  ``class_group.relation_sources.search`` from 22 to 32, and
+  ``unit_group.regulator_radius`` from 4.919e-44 to 8.750e-44 (a larger
+  rigorous enclosure of the same regulator).  That row is also slower, by
+  5.3% in callgrind instructions (5.974e8 to 6.288e8).  Instruction counts
+  elsewhere: ``cyclotomic_real_q10_c11_deg10`` 23.6% fewer (1.1384e10 to
+  8.700e9), ``multiquadratic_m23_m31_m47`` 26.4% fewer (``perf stat``
+  user instructions, 3.2209e12 to 2.3701e12; busy-machine wall time 454 s to
+  324 s), and the control ``imaginary_quadratic_d10000000799`` +0.02%.  No
+  controlled timing has been measured.
+
 - ``Order::is_equation_order`` reads the cached identity-basis flag instead
   of testing the basis matrix on every call, and ``Order::set_basis`` fills
   the flag from the test it already runs.  The result is the same as before
