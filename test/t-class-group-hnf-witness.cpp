@@ -1953,7 +1953,8 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
 
 // solve_unit_candidate_system returns what fmpz_mat_solve_dixon_den
 // returns, fills the Dixon cache on the first basis, keeps it while the
-// basis is unchanged, replaces it for a new basis, and reports a singular
+// basis is unchanged, replaces it for a new basis, reaches the final
+// reconstruction past the modulus bound, and reports a singular
 // basis without caching it.
 bool unit_candidate_system_matches_flint(
         silex::detail::RelationUnitCandidateBatchState& state,
@@ -2009,13 +2010,19 @@ int test_unit_candidate_system_dixon_cache() {
             fill_random(rhs, random, b);
             assert(unit_candidate_system_matches_flint(state, basis, rhs));
             const ulong prime = state.dixon_prime;
+            const ulong* const inverse_entries =
+                    state.dixon_inverse.raw()->entries;
 
-            // Unchanged basis, new right-hand side: the cache is reused.
+            // Unchanged basis, new right-hand side: the cache is reused.  A
+            // recomputed inverse is a new allocation swapped in while the
+            // old one is still live, so an unchanged entries pointer shows
+            // the cached inverse was kept.
             sflint::FmpzMat other_rhs(n, 5);
             fill_random(other_rhs, random, b + 7);
             assert(unit_candidate_system_matches_flint(state, basis,
                                                        other_rhs));
             assert(state.dixon_prime == prime);
+            assert(state.dixon_inverse.raw()->entries == inverse_entries);
 
             // A new basis replaces the cached entry.
             sflint::FmpzMat next(n, n);
@@ -2029,6 +2036,29 @@ int test_unit_candidate_system_dixon_cache() {
             assert(unit_candidate_system_matches_flint(state, basis,
                                                        other_rhs));
         }
+    }
+
+    // The final reconstruction past the modulus bound.  For the 1 x 1
+    // system a x = 1 with a = 2^300 + 1, fmpz_mat_solve_bound gives
+    // D >= |a| and N = D, so the bound is 2 D^2 >= 2 a^2.  Rational
+    // reconstruction of 1/a modulo m needs a <= floor(sqrt(m / 2)), that is
+    // m >= 2 a^2, and the stabilization checks only run at odd moduli
+    // p^i <= 2 D^2, which lie below 2 a^2 unless they fall in the window
+    // [2 a^2, 2 D^2] of relative width about 2^-29 left by the det-bound
+    // rounding.  So the checks at i = 1, 2, 3, 5, 8 fail and the solution
+    // comes from the reconstruction after the loop.
+    {
+        sflint::FmpzMat basis(1, 1);
+        ::fmpz_one(::fmpz_mat_entry(basis.raw(), 0, 0));
+        ::fmpz_mul_2exp(::fmpz_mat_entry(basis.raw(), 0, 0),
+                        ::fmpz_mat_entry(basis.raw(), 0, 0), 300);
+        ::fmpz_add_ui(::fmpz_mat_entry(basis.raw(), 0, 0),
+                      ::fmpz_mat_entry(basis.raw(), 0, 0), 1);
+        sflint::FmpzMat rhs(1, 2);
+        ::fmpz_one(::fmpz_mat_entry(rhs.raw(), 0, 0));
+        ::fmpz_set_si(::fmpz_mat_entry(rhs.raw(), 0, 1), -1);
+        silex::detail::RelationUnitCandidateBatchState state;
+        assert(unit_candidate_system_matches_flint(state, basis, rhs));
     }
 
     // A singular basis fails and leaves no cache entry behind.
