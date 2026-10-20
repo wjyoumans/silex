@@ -9756,7 +9756,11 @@ bool unit_candidate_solution_checks(flint::FmpzMat& solution,
 //   and calls with an unchanged basis skip
 //   `fmpz_mat_find_good_prime_and_invert`;
 // - a failed final reconstruction returns false, where FLINT ignores the
-//   result (under the bound it cannot fail).
+//   result (under the bound it cannot fail);
+// - the final reconstruction is checked exactly as well, where FLINT
+//   returns it unchecked (under the bound it is the solution), so a wrong
+//   inverse in `state` makes the solve fail instead of returning a wrong
+//   solution.
 // The output is the unique rational solution in every case, so it does not
 // depend on the cache.
 bool solve_unit_candidate_system(flint::FmpzMat& solution,
@@ -9845,13 +9849,10 @@ bool solve_unit_candidate_system(flint::FmpzMat& solution,
         ::fmpz_mat_scalar_divexact_ui(residual.raw(), residual.raw(), prime);
     }
 
-    if (::fmpq_mat_set_fmpz_mat_mod_fmpz(rational.raw(), lifted.raw(),
-                                         power.raw()) == 0) {
-        return false;
-    }
-    ::fmpq_mat_get_fmpz_mat_matwise(solution.raw(), denominator.raw(),
-                                    rational.raw());
-    return true;
+    return ::fmpq_mat_set_fmpz_mat_mod_fmpz(rational.raw(), lifted.raw(),
+                                            power.raw()) != 0 &&
+           unit_candidate_solution_checks(solution, denominator, rational,
+                                          basis, rhs);
 }
 
 bool unit_candidate_witnesses(std::vector<FactoredElement>& out,

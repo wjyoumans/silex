@@ -5,6 +5,7 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_lll.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/nmod_mat.hpp>
 #include <silex/order_unit.hpp>
 #include <silex/relation.hpp>
 #include <silex/zeta.hpp>
@@ -2136,8 +2137,8 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
 // solve_unit_candidate_system returns what fmpz_mat_solve_dixon_den
 // returns, fills the Dixon cache on the first basis, keeps it while the
 // basis is unchanged, replaces it for a new basis, reaches the final
-// reconstruction past the modulus bound, and reports a singular
-// basis without caching it.
+// reconstruction past the modulus bound, fails on a corrupted cached
+// inverse, and reports a singular basis without caching it.
 bool unit_candidate_system_matches_flint(
         silex::detail::RelationUnitCandidateBatchState& state,
         const sflint::FmpzMat& basis, const sflint::FmpzMat& rhs) {
@@ -2240,6 +2241,48 @@ int test_unit_candidate_system_dixon_cache() {
         ::fmpz_one(::fmpz_mat_entry(rhs.raw(), 0, 0));
         ::fmpz_set_si(::fmpz_mat_entry(rhs.raw(), 0, 1), -1);
         silex::detail::RelationUnitCandidateBatchState state;
+        assert(unit_candidate_system_matches_flint(state, basis, rhs));
+    }
+
+    // A corrupted cached inverse is a detected failure.  With one entry of
+    // the cached inverse changed, the first lifted digit is wrong, so no
+    // stabilization check passes and the lifting runs to the final
+    // reconstruction past the modulus bound.  FLINT returns that
+    // reconstruction unchecked, and for a 1 x 1 system it often succeeds
+    // with a wrong value; here it is checked exactly, so every corrupted
+    // solve fails, while the restored cache gives FLINT's answer again.
+    for (const slong n : {1, 6}) {
+        const slong cols = n == 1 ? 1 : 3;
+        sflint::FmpzMat basis(n, n);
+        do {
+            fill_random(basis, random, 20);
+        } while (::fmpz_mat_rank(basis.raw()) != n);
+        sflint::FmpzMat rhs(n, cols);
+        do {
+            fill_random(rhs, random, 20);
+        } while (::fmpz_mat_is_zero(rhs.raw()) != 0);
+        silex::detail::RelationUnitCandidateBatchState state;
+        assert(unit_candidate_system_matches_flint(state, basis, rhs));
+        const ulong prime = state.dixon_prime;
+        sflint::NmodMat good(n, n, prime);
+        ::nmod_mat_set(good.raw(), state.dixon_inverse.raw());
+        for (ulong k = 1; k <= 16; ++k) {
+            ::nmod_mat_set(state.dixon_inverse.raw(), good.raw());
+            const slong i = static_cast<slong>(k % static_cast<ulong>(n));
+            const slong j =
+                    static_cast<slong>((5 * k) % static_cast<ulong>(n));
+            const ulong entry =
+                    ::nmod_mat_get_entry(state.dixon_inverse.raw(), i, j);
+            ::nmod_mat_set_entry(state.dixon_inverse.raw(), i, j,
+                                 ::n_addmod(entry, k, prime));
+            sflint::FmpzMat solution(n, cols);
+            sflint::Fmpz den;
+            assert(!silex::detail::solve_unit_candidate_system(
+                    solution, den, state, sflint::FmpzMatConstRef(basis),
+                    sflint::FmpzMatConstRef(rhs)));
+            assert(state.dixon_prime == prime);
+        }
+        ::nmod_mat_set(state.dixon_inverse.raw(), good.raw());
         assert(unit_candidate_system_matches_flint(state, basis, rhs));
     }
 

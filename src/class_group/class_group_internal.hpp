@@ -420,7 +420,9 @@ void reduce_unit_candidate_kernel(
 // `basis`, returning the result of FLINT's `fmpz_mat_solve_dixon_den` (the
 // exact rational solution over its least common denominator).  The Dixon
 // prime and the inverse of `basis` modulo it are kept in `state` and reused
-// while `basis` is unchanged.  Returns false when `basis` is singular.
+// while `basis` is unchanged.  Returns false when `basis` is singular, and
+// when no reconstruction solves the system exactly (which needs a wrong
+// cached inverse: every returned solution is checked exactly).
 bool solve_unit_candidate_system(flint::FmpzMat& solution,
                                  flint::Fmpz& denominator,
                                  RelationUnitCandidateBatchState& state,

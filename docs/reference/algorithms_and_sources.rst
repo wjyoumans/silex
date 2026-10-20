@@ -2575,7 +2575,9 @@ The linear solve behind this step uses a Dixon lifting loop adapted from
 FLINT 3.6.0 ``src/fmpq_mat/solve_dixon.c`` (``_fmpq_mat_solve_dixon``; bound,
 prime, schedule and exact check unchanged).  Silex keeps the prime and the
 inverse across calls while the unit basis is unchanged; the result is the
-same unique rational solution.
+same unique rational solution.  Silex also checks the final reconstruction
+past the modulus bound exactly, which FLINT returns unchecked, so a wrong
+cached inverse makes the solve fail instead of returning a wrong solution.
 
 A ``proven`` unit computation from a class-group context runs its
 relation-kernel units through the index-bounded saturation pass
