@@ -707,24 +707,28 @@ bool ClassRelationModuleContext::rebuild_checkpoint() noexcept {
     const slong old_rows = checkpoint_.rank();
     const slong new_basis_rows = basis_count() - checkpoint_basis_count_;
     const slong new_extra_rows = extra_count() - checkpoint_extra_count_;
-    if (old_rows == ambient_dim_ && old_rows > 0 && new_basis_rows == 0) {
+    const bool full_rank_checkpoint = old_rows == ambient_dim_ && old_rows > 0;
+    flint::Fmpz checkpoint_index;
+    const bool checkpoint_index_valid =
+            full_rank_checkpoint &&
+            checkpoint_.full_rank_index(flint::FmpzRef(checkpoint_index)) &&
+            flint::fmpz_sgn(flint::FmpzConstRef(checkpoint_index)) > 0;
+    if (full_rank_checkpoint && new_basis_rows == 0) {
         // Invariant: checkpoint_ holds the canonical row HNF H of the lattice
         // spanned by the first checkpoint_basis_count_ basis rows and
         // checkpoint_extra_count_ extra rows, as reset_precomputed_hnf left it
-        // (identity transform, index |det H|).  When H has full rank and
-        // every extra row added since lies in the lattice of H, the rows of H
-        // and the new rows span that same lattice, and the row HNF of a
+        // (identity transform, index |det H|).  This holds only because
+        // nothing calls add_row on checkpoint_ in place; an in-place update
+        // would leave a state this skip must not reuse.  When H has full rank
+        // and every extra row added since lies in the lattice of H, the rows
+        // of H and the new rows span that same lattice, and the row HNF of a
         // lattice is unique (the fmpz_mat_hnf contract), so the rebuild below
         // would recompute H and reset checkpoint_ to the state it already
         // holds.  Membership is the exact remainder test of a row modulo the
         // full-rank, upper-triangular H, the test HnfContext::refine_dependent
         // uses to leave its HNF unchanged.  A failed test, or a row outside
         // the lattice, leaves the decision to the full rebuild.
-        flint::Fmpz checkpoint_index;
-        bool lattice_unchanged =
-                checkpoint_.full_rank_index(
-                        flint::FmpzRef(checkpoint_index)) &&
-                flint::fmpz_sgn(flint::FmpzConstRef(checkpoint_index)) > 0;
+        bool lattice_unchanged = checkpoint_index_valid;
         for (slong i = checkpoint_extra_count_;
              lattice_unchanged && i < extra_count(); ++i) {
             bool reduces_to_zero = false;
@@ -765,15 +769,12 @@ bool ClassRelationModuleContext::rebuild_checkpoint() noexcept {
         return false;
     }
     slong incremental_rank = -1;
-    if (old_rows == ambient_dim_ && old_rows > 0) {
+    if (full_rank_checkpoint) {
         // Adding rows enlarges a full-rank lattice, so its new index divides
         // the retained checkpoint index.  This is FLINT's modular-HNF modulus
         // contract and the retained-index direction used by reference check_index
         // and reference hnfadd_i.
-        flint::Fmpz checkpoint_index;
-        if (!checkpoint_.full_rank_index(
-                    flint::FmpzRef(checkpoint_index)) ||
-            flint::fmpz_sgn(flint::FmpzConstRef(checkpoint_index)) <= 0) {
+        if (!checkpoint_index_valid) {
             return false;
         }
         ::fmpz_mat_hnf_modular(hnf.raw(), dense.raw(),
