@@ -1966,7 +1966,9 @@ bool bf_word_square_for_test(std::vector<ulong>& symmetric,
 // Test support for ZetaBfTestEntry::word_frobenius: x^p mod f and the root
 // count by both squarings, for a monic `f` of degree 2 to
 // kBfWordLinearFactorMaxDegree with coefficients reduced modulo the prime p
-// below the word kernel's prime limit for the degree.
+// below the word kernel's prime limit for the degree. `f` need not be
+// squarefree: the returned "count" is then deg gcd(f, x^p - x), not a root
+// count.
 template <slong Degree>
 bool bf_word_frobenius_for_test(std::vector<ulong>& symmetric,
                                 std::vector<ulong>& full,
