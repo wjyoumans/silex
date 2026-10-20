@@ -75,6 +75,8 @@ Current targets:
 - `b-silex-nf_ord_pmaximal_overorder`: p-maximal overorder construction.
 - `b-silex-nf_clgp`: class-group and paired class/unit rows.
 - `b-silex-nf_clgp_factor_base_honesty`: focused internal factor-base rows.
+- `b-silex-nf_clgp_sunit`: in-process `BM_sunit_*` rows timing
+  `compute_sunit_groups` on small `test/data/sunit_fields.json` fields.
 - `b-silex-nf_fac_elt`: factored and compact element operations.
 - `b-silex-nf_fac_elt_compact_reconstruction`: coordinate-bound, direct, and
   bounded-CRT compact reconstruction.

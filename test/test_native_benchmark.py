@@ -33,6 +33,7 @@ EXPECTED_TARGETS = {
     "b-silex-lat_lll",
     "b-silex-nf_clgp",
     "b-silex-nf_clgp_factor_base_honesty",
+    "b-silex-nf_clgp_sunit",
     "b-silex-nf_fac_elt",
     "b-silex-nf_fac_elt_compact_reconstruction",
     "b-silex-nf_idl",

@@ -51,6 +51,15 @@ mode emits source-neutral JSON lines containing polynomial coefficients,
 factor-base and required-prime lattices in the polynomial power basis, and
 each candidate's expected classification for an independent exact oracle.
 
+The `b-silex-nf_clgp_sunit` target holds the `BM_sunit_*` rows: an in-process
+quick comparison for S-unit changes. Each row times only
+`compute_sunit_groups`; the proven class group, ordinary units and prime
+selection are built in untimed setup, and one untimed run checks the S-class
+order and ranks against `test/data/sunit_fields.json`. The rows cover the
+manifest fields that select all primes above a rational prime and run well
+under a second. Single-prime-ideal witness rows stay with
+`tools/bench/run-sunit-instance.py`.
+
 ## Reproduce a field
 
 Run an exact failing or slow field with a process timeout before promoting it

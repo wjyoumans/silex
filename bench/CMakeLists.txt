@@ -102,6 +102,8 @@ silex_add_benchmark(b-silex-nf_clgp_factor_base_honesty
         nf_clgp/b-factor_base_honesty_witness.cpp)
 target_include_directories(b-silex-nf_clgp_factor_base_honesty
         PRIVATE ${PROJECT_SOURCE_DIR}/src)
+silex_add_benchmark(b-silex-nf_clgp_sunit
+        nf_clgp/b-sunit.cpp)
 silex_add_benchmark(b-silex-nf_fac_elt
         nf_fac_elt/b-roots_compact.cpp)
 silex_add_benchmark(b-silex-nf_fac_elt_compact_reconstruction
@@ -294,6 +296,11 @@ silex_benchmark_release_rows(b-silex-nf_clgp_factor_base_honesty
     BM_honesty_search_selected_quintic
     BM_honesty_lattice_quartic
     BM_honesty_lattice_quintic)
+silex_benchmark_release_rows(b-silex-nf_clgp_sunit
+    BM_sunit_cubic_x3_minus_2_empty_s
+    BM_sunit_cubic_x3_minus_2_primes_2_3_5_7
+    BM_sunit_real_quadratic_5_split_11
+    BM_sunit_real_quadratic_5_ramified_5)
 silex_benchmark_release_rows(b-silex-nf_fac_elt
     BM_nf_elt_is_square_quadratic
     BM_nf_elt_is_power_quadratic_square
