@@ -5,7 +5,9 @@
 #include <flint/fmpz_mat.h>
 
 #include <cassert>
+#include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -943,7 +945,9 @@ int test_smith_cache_reuses_unchanged_basis() {
 
 // The witness rows are the rows of diag(U_H, I) * T that the accessors read,
 // where T * relations = [H; 0] is fmpz_mat_hnf_transform and U_H * H * V = S
-// is fmpz_mat_snf_transform of H.  ensure_left_transform forms only the top
+// is hnf_basis_smith_transform of H (the route the publish and the witness
+// path both use; test_unit_pivot_smith_matches_full checks it against
+// fmpz_mat_snf_transform).  ensure_left_transform forms only the top
 // rows with a non-unit Smith entry; this reference forms the full product and
 // checks that every row the accessors return is the same exact integer row.
 // The pseudo-random relation matrices give groups whose Smith form mixes
@@ -990,10 +994,10 @@ int test_witness_rows_match_full_left_product() {
         sflint::FmpzMat snf(n, n);
         sflint::FmpzMat snf_left(n, n);
         sflint::FmpzMat snf_right(n, n);
-        sflint::fmpz_mat_snf_transform(sflint::FmpzMatRef(snf),
-                                       sflint::FmpzMatRef(snf_left),
-                                       sflint::FmpzMatRef(snf_right),
-                                       sflint::FmpzMatConstRef(hnf_top));
+        silex::detail::hnf_basis_smith_transform(
+                sflint::FmpzMatRef(snf), sflint::FmpzMatRef(snf_left),
+                sflint::FmpzMatRef(snf_right),
+                sflint::FmpzMatConstRef(hnf_top));
         sflint::FmpzMat transform_top(n, m);
         for (slong i = 0; i < n; ++i) {
             for (slong j = 0; j < m; ++j) {
@@ -1057,6 +1061,177 @@ int test_witness_rows_match_full_left_product() {
     return 0;
 }
 
+namespace {
+
+bool is_unimodular(const sflint::FmpzMat& matrix) noexcept {
+    sflint::Fmpz det;
+    ::fmpz_mat_det(det.raw(), matrix.raw());
+    return sflint::fmpz_is_pm1(sflint::FmpzConstRef(det));
+}
+
+// Pseudo-random n x n basis in row Hermite normal form whose diagonal is 1
+// except at the positions with nonunit[i] set, where it is 2..7; entries
+// above a pivot d_j are drawn from [0, d_j), so rows of unit pivots carry
+// nonzero entries in the nonunit columns.
+sflint::FmpzMat random_unit_pivot_hnf(slong n,
+                                      const std::vector<bool>& nonunit,
+                                      ulong& state) noexcept {
+    const auto next = [&state]() noexcept {
+        state = state * UWORD(6364136223846793005) +
+                UWORD(1442695040888963407);
+        return state >> 33;
+    };
+    sflint::FmpzMat basis(n, n);
+    for (slong j = 0; j < n; ++j) {
+        const slong pivot =
+                nonunit[static_cast<std::size_t>(j)]
+                        ? static_cast<slong>(2 + next() % 6)
+                        : 1;
+        set_entry_si(basis, j, j, pivot);
+        for (slong i = 0; i < j; ++i) {
+            set_entry_si(basis, i, j, static_cast<slong>(next()) % pivot);
+        }
+    }
+    return basis;
+}
+
+// U * H * V = S, U and V unimodular, S equal to the Smith form of the full
+// fmpz_mat_snf_transform, and every row of H * V a combination of the rows
+// of S (column j of H * V is a multiple of S_jj).
+bool smith_transform_valid(const sflint::FmpzMat& basis,
+                           const sflint::FmpzMat& snf,
+                           const sflint::FmpzMat& left,
+                           const sflint::FmpzMat& right,
+                           const sflint::FmpzMat& full_snf) noexcept {
+    const slong n = sflint::fmpz_mat_nrows(basis);
+    sflint::FmpzMat basis_right(n, n);
+    sflint::FmpzMat product(n, n);
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(basis_right),
+                         sflint::FmpzMatConstRef(basis),
+                         sflint::FmpzMatConstRef(right));
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(product),
+                         sflint::FmpzMatConstRef(left),
+                         sflint::FmpzMatConstRef(basis_right));
+    if (!sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(product),
+                                sflint::FmpzMatConstRef(snf)) ||
+        !sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(snf),
+                                sflint::FmpzMatConstRef(full_snf)) ||
+        !is_unimodular(left) || !is_unimodular(right)) {
+        return false;
+    }
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            if (!sflint::fmpz_divisible(
+                        sflint::FmpzConstRef(sflint::fmpz_mat_entry(
+                                sflint::FmpzMatConstRef(basis_right), i, j)),
+                        entry_const(snf, j, j))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+// hnf_basis_smith_transform splits off the unit pivots of an HNF basis and
+// runs fmpz_mat_snf_transform on the rest.  On random HNF bases with
+// identity blocks it must give the Smith form of the full
+// fmpz_mat_snf_transform with valid unimodular transforms, and a group
+// published from the basis must have those invariants.  Without unit pivots
+// it is fmpz_mat_snf_transform of the whole basis, transforms included.
+int test_unit_pivot_smith_matches_full() {
+    using silex::detail::FiniteAbelianGroupAccess;
+    ulong state = 98765;
+    slong reduced = 0;
+    slong whole = 0;
+    slong trivial = 0;
+    for (slong trial = 0; trial < 120; ++trial) {
+        const slong n = 1 + trial % 12;
+        std::vector<bool> nonunit(static_cast<std::size_t>(n), false);
+        slong nonunit_count = 0;
+        for (slong i = 0; i < n; ++i) {
+            state = state * UWORD(6364136223846793005) +
+                    UWORD(1442695040888963407);
+            // Every eighth trial has no unit pivot; every eighth (shifted)
+            // has only unit pivots; the rest have about one in four.
+            const bool pick = trial % 8 == 0
+                                      ? true
+                                      : (trial % 8 != 4 &&
+                                         (state >> 33) % 4 == 0);
+            nonunit[static_cast<std::size_t>(i)] = pick;
+            nonunit_count += pick ? 1 : 0;
+        }
+        const sflint::FmpzMat basis =
+                random_unit_pivot_hnf(n, nonunit, state);
+        assert(::fmpz_mat_is_in_hnf(basis.raw()) != 0);
+
+        sflint::FmpzMat full_snf(n, n);
+        sflint::FmpzMat full_left(n, n);
+        sflint::FmpzMat full_right(n, n);
+        sflint::fmpz_mat_snf_transform(sflint::FmpzMatRef(full_snf),
+                                       sflint::FmpzMatRef(full_left),
+                                       sflint::FmpzMatRef(full_right),
+                                       sflint::FmpzMatConstRef(basis));
+        sflint::FmpzMat snf(n, n);
+        sflint::FmpzMat left(n, n);
+        sflint::FmpzMat right(n, n);
+        silex::detail::hnf_basis_smith_transform(
+                sflint::FmpzMatRef(snf), sflint::FmpzMatRef(left),
+                sflint::FmpzMatRef(right), sflint::FmpzMatConstRef(basis));
+        assert(smith_transform_valid(basis, snf, left, right, full_snf));
+        assert(smith_transform_valid(basis, full_snf, full_left, full_right,
+                                     full_snf));
+        if (nonunit_count == n) {
+            assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(left),
+                                          sflint::FmpzMatConstRef(full_left)));
+            assert(sflint::fmpz_mat_equal(
+                    sflint::FmpzMatConstRef(right),
+                    sflint::FmpzMatConstRef(full_right)));
+            ++whole;
+        } else if (nonunit_count == 0) {
+            assert(matrix_is_identity(snf));
+            ++trivial;
+        } else {
+            ++reduced;
+        }
+
+        // Publish from the basis with two extra relation rows (sums of basis
+        // rows) and compare the invariants with the full Smith form.
+        sflint::FmpzMat relations(n + 2, n);
+        for (slong i = 0; i < n; ++i) {
+            for (slong j = 0; j < n; ++j) {
+                sflint::fmpz_set(sflint::fmpz_mat_entry(relations, i, j),
+                                 entry_const(basis, i, j));
+                sflint::fmpz_add(
+                        sflint::fmpz_mat_entry(relations, n + i % 2, j),
+                        entry_const(relations, n + i % 2, j),
+                        entry_const(basis, i, j));
+            }
+        }
+        silex::FiniteAbelianGroup group;
+        assert(FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+                group, sflint::FmpzMatConstRef(relations),
+                sflint::FmpzMatConstRef(basis)));
+        slong k = 0;
+        for (slong i = 0; i < n; ++i) {
+            if (entry_is_si(full_snf, i, i, 1)) {
+                continue;
+            }
+            sflint::Fmpz value;
+            assert(group.invariant(sflint::FmpzRef(value), k));
+            assert(sflint::fmpz_equal(sflint::FmpzConstRef(value),
+                                      entry_const(full_snf, i, i)));
+            ++k;
+        }
+        assert(k == group.invariant_count());
+        assert(generator_relation_identity(group));
+        assert(relation_kernel_identity(group));
+    }
+    assert(reduced > 0 && whole > 0 && trivial > 0);
+    return 0;
+}
+
 int main() {
     assert(test_basic() == 0);
     assert(test_kernel_basis_check_rejects_bad_kernels() == 0);
@@ -1070,5 +1245,6 @@ int main() {
     assert(test_lazy_right_transform_inverse() == 0);
     assert(test_smith_cache_reuses_unchanged_basis() == 0);
     assert(test_witness_rows_match_full_left_product() == 0);
+    assert(test_unit_pivot_smith_matches_full() == 0);
     return 0;
 }

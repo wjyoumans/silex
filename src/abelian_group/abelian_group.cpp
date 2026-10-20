@@ -257,7 +257,8 @@ bool FiniteAbelianGroup::ensure_left_transform() const noexcept {
     // rows.  The published Smith form, invariants and generators come from
     // the stored HNF basis and are never replaced here.  Take the HNF of the
     // full relation matrix, T * relations = [H; 0] with T unimodular, fail
-    // closed unless H is the stored basis, and rerun the Smith form on H:
+    // closed unless H is the stored basis, and rerun the Smith form on H
+    // through the same route as the publish (hnf_basis_smith_transform):
     // U_H * H * V = S.  Then diag(U_H, I) * T * relations * V = [S; 0].
     const slong m = relation_count();
     const slong n = generator_count();
@@ -283,16 +284,16 @@ bool FiniteAbelianGroup::ensure_left_transform() const noexcept {
     flint::FmpzMat basis_snf(n, n);
     flint::FmpzMat basis_left(n, n);
     flint::FmpzMat basis_right(n, n);
-    flint::fmpz_mat_snf_transform(
+    detail::hnf_basis_smith_transform(
             flint::FmpzMatRef(basis_snf),
             flint::FmpzMatRef(basis_left),
             flint::FmpzMatRef(basis_right),
             flint::FmpzMatConstRef(hnf_top));
     // Same input as the published Smith form; the left transform is only
     // consistent with the published generators if S and V are reproduced.
-    // This equality check is defensive: it cannot fire while FLINT is
-    // deterministic on identical input, and it guards against differences
-    // between FLINT versions.
+    // This equality check is defensive: it cannot fire while
+    // hnf_basis_smith_transform is deterministic on identical input, and it
+    // guards against differences between FLINT versions.
     if (!flint::fmpz_mat_equal(flint::FmpzMatConstRef(basis_snf),
                                flint::FmpzMatConstRef(snf_)) ||
         !flint::fmpz_mat_equal(flint::FmpzMatConstRef(basis_right),
@@ -366,7 +367,7 @@ bool FiniteAbelianGroup::ensure_right_transform_inv() const noexcept {
         return true;
     }
 
-    // fmpz_mat_snf_transform returns a unimodular right transform V; fail
+    // hnf_basis_smith_transform returns a unimodular right transform V; fail
     // closed unless its inverse is integral.  On failure the cache is left
     // unset and the callers return false before writing any output.
     flint::FmpzMat inverse(generator_count_, generator_count_);
@@ -668,6 +669,122 @@ std::optional<flint::FmpzMat> FiniteAbelianGroup::invariant_coordinates(
 
 namespace detail {
 
+// Smith form of a basis after splitting off its unit pivots.
+//
+// Source: Cohen, A Course in Computational Algebraic Number Theory (GTM
+// 138), Algorithm 5.5.2, steps 10 and 12 (pp. 257-258): in the Hermite
+// normal form of the class group relation lattice, for every i with
+// h_ii = 1 suppress row and column i, and take the Smith form (Algorithm
+// 2.4.14) of the remaining matrix W.  Reference implementations split off
+// the unit pivots the same way before their Smith form (see "Class groups
+// and order units" in docs/reference/algorithms_and_sources.rst); they are
+// a reference here, not the source of this code.  Cohen does not give the
+// transforms, so here is the argument for them.
+//
+// Call i a unit pivot when column i of the basis H is the unit vector e_i.
+// For H in row Hermite normal form these are exactly the i with H_ii = 1:
+// entries above a pivot are reduced modulo it and entries below it are
+// zero.  Let P (p entries) be the unit pivots and Q (q entries) the other
+// indices, both increasing.
+//  (1) The column operations col_j -= H_ij * col_i for i in P and j in Q
+//      clear row i of H off the diagonal and change no other entry, because
+//      col_i = e_i.  Together they are V1 = I - N with N_ij = H_ij for i in
+//      P, j in Q and zero elsewhere; N^2 = 0, so V1 is unimodular.  H * V1
+//      agrees with the identity on rows P and on columns P, and its Q x Q
+//      block is H_QQ.
+//  (2) With the permutation matrix Pi that lists P first and then Q,
+//      Pi^T * H * V1 * Pi = diag(I_p, H_QQ).
+//  (3) fmpz_mat_snf_transform gives U_Q * H_QQ * V_Q = S_Q.  Then
+//      U = diag(I_p, U_Q) * Pi^T and V = V1 * Pi * diag(I_p, V_Q) are
+//      unimodular and U * H * V = diag(I_p, S_Q).
+// S_Q is diagonal and nonnegative with each entry dividing the next, and 1
+// divides every entry, so diag(I_p, S_Q) is in Smith form (FLINT's order,
+// unit entries first).  By the uniqueness of the Smith form (Cohen, Theorem
+// 2.4.12) it is the matrix fmpz_mat_snf_transform returns for H, so the
+// invariants are unchanged.  U and V are valid transforms but need not be
+// FLINT's, since Smith transforms are not unique.  Entrywise, with P_r the
+// r-th unit pivot and Q_t the t-th other index:
+//   V[P_r][r] = 1,  V[Q_t][p + s] = (V_Q)_ts,
+//   V[P_r][p + s] = -(H_PQ * V_Q)_rs,  U[r][P_r] = 1,
+//   U[p + s][Q_t] = (U_Q)_st,
+// and every other entry is zero.  A basis without unit pivots goes to
+// fmpz_mat_snf_transform whole.
+void hnf_basis_smith_transform(flint::FmpzMatRef snf,
+                               flint::FmpzMatRef left,
+                               flint::FmpzMatRef right,
+                               flint::FmpzMatConstRef basis) noexcept {
+    const slong n = flint::fmpz_mat_nrows(basis);
+    std::vector<slong> units;
+    std::vector<slong> others;
+    for (slong i = 0; i < n; ++i) {
+        bool unit_column = flint::fmpz_is_one(
+                flint::fmpz_mat_entry(basis, i, i));
+        for (slong k = 0; unit_column && k < n; ++k) {
+            unit_column = k == i || flint::fmpz_is_zero(
+                                            flint::fmpz_mat_entry(basis, k, i));
+        }
+        (unit_column ? units : others).push_back(i);
+    }
+    if (units.empty()) {
+        flint::fmpz_mat_snf_transform(snf, left, right, basis);
+        return;
+    }
+
+    const slong p = static_cast<slong>(units.size());
+    const slong q = static_cast<slong>(others.size());
+    flint::fmpz_mat_zero(snf);
+    flint::fmpz_mat_zero(left);
+    flint::fmpz_mat_zero(right);
+    for (slong r = 0; r < p; ++r) {
+        flint::fmpz_one(flint::fmpz_mat_entry(snf, r, r));
+        flint::fmpz_one(flint::fmpz_mat_entry(left, r, units[r]));
+        flint::fmpz_one(flint::fmpz_mat_entry(right, units[r], r));
+    }
+    if (q == 0) {
+        return;
+    }
+
+    flint::FmpzMat block(q, q);
+    flint::FmpzMat cross(p, q);
+    for (slong s = 0; s < q; ++s) {
+        for (slong t = 0; t < q; ++t) {
+            flint::fmpz_set(flint::fmpz_mat_entry(block, s, t),
+                            flint::fmpz_mat_entry(basis, others[s],
+                                                  others[t]));
+        }
+        for (slong r = 0; r < p; ++r) {
+            flint::fmpz_set(flint::fmpz_mat_entry(cross, r, s),
+                            flint::fmpz_mat_entry(basis, units[r],
+                                                  others[s]));
+        }
+    }
+    flint::FmpzMat block_snf(q, q);
+    flint::FmpzMat block_left(q, q);
+    flint::FmpzMat block_right(q, q);
+    flint::fmpz_mat_snf_transform(flint::FmpzMatRef(block_snf),
+                                  flint::FmpzMatRef(block_left),
+                                  flint::FmpzMatRef(block_right),
+                                  flint::FmpzMatConstRef(block));
+    flint::FmpzMat cross_right(p, q);
+    flint::fmpz_mat_mul(flint::FmpzMatRef(cross_right),
+                        flint::FmpzMatConstRef(cross),
+                        flint::FmpzMatConstRef(block_right));
+    for (slong s = 0; s < q; ++s) {
+        flint::fmpz_set(flint::fmpz_mat_entry(snf, p + s, p + s),
+                        entry_const(block_snf, s, s));
+        for (slong t = 0; t < q; ++t) {
+            flint::fmpz_set(flint::fmpz_mat_entry(right, others[t], p + s),
+                            entry_const(block_right, t, s));
+            flint::fmpz_set(flint::fmpz_mat_entry(left, p + s, others[t]),
+                            entry_const(block_left, s, t));
+        }
+        for (slong r = 0; r < p; ++r) {
+            flint::fmpz_neg(flint::fmpz_mat_entry(right, units[r], p + s),
+                            entry_const(cross_right, r, s));
+        }
+    }
+}
+
 bool FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis_impl(
         FiniteAbelianGroup& group,
         flint::FmpzMatConstRef relations,
@@ -703,8 +820,8 @@ bool FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis_impl(
     }
 
     // S and V depend only on the stored basis, which is the whole input of
-    // fmpz_mat_snf_transform here, so an equal cached basis gives the S and
-    // V this call would compute (the witness path relies on the same
+    // hnf_basis_smith_transform here, so an equal cached basis gives the S
+    // and V this call would compute (the witness path relies on the same
     // determinism when it reruns the Smith form on the stored basis).
     const bool reuse =
             cache != nullptr && cache->valid &&
@@ -720,7 +837,7 @@ bool FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis_impl(
                             flint::FmpzMatConstRef(cache->right_transform));
     } else {
         flint::FmpzMat left_reduced(columns, columns);
-        flint::fmpz_mat_snf_transform(
+        hnf_basis_smith_transform(
                 flint::FmpzMatRef(candidate.snf_),
                 flint::FmpzMatRef(left_reduced),
                 flint::FmpzMatRef(candidate.right_transform_),

@@ -7,21 +7,35 @@ namespace silex::detail {
 // Smith form of the last HNF basis published through a cache-taking
 // set_relation_matrix_with_hnf_basis call: the stored basis (after it was
 // brought to Hermite normal form), the Smith form S and the right transform
-// V that fmpz_mat_snf_transform returned for it.  S and V are a function of
-// the basis alone, so a later publish whose stored basis is equal takes them
-// from here instead of running fmpz_mat_snf_transform again.  Only results
-// that published a group are recorded.
+// V that hnf_basis_smith_transform returned for it.  S and V are a function
+// of the basis alone, so a later publish whose stored basis is equal takes
+// them from here instead of running hnf_basis_smith_transform again.  Only
+// results that published a group are recorded.
 struct FiniteAbelianGroupSmithCache {
     flint::FmpzMat hnf_basis{0, 0};
     flint::FmpzMat snf{0, 0};
     flint::FmpzMat right_transform{0, 0};
     bool valid = false;
     // Number of successful publishes that took S and V from the cache, and
-    // number that ran fmpz_mat_snf_transform and recorded them; read by
+    // number that ran hnf_basis_smith_transform and recorded them; read by
     // tests.
     slong reuse_count = 0;
     slong compute_count = 0;
 };
+
+// Smith form S, left transform U and right transform V of a square integer
+// matrix with U * basis * V = S, U and V unimodular; all four are n x n and
+// the outputs must not alias the input.  Unit pivots (columns of the basis
+// equal to a unit vector, which for a basis in Hermite normal form are the
+// columns with diagonal entry 1) are split off first and only the remaining
+// block reaches fmpz_mat_snf_transform; see the definition for the source and
+// the argument.  S is the Smith form fmpz_mat_snf_transform returns for the
+// basis; U and V are valid transforms but can differ from the ones it
+// returns.  Every Smith form of a FiniteAbelianGroup basis comes from here.
+void hnf_basis_smith_transform(flint::FmpzMatRef snf,
+                               flint::FmpzMatRef left,
+                               flint::FmpzMatRef right,
+                               flint::FmpzMatConstRef basis) noexcept;
 
 // Noninstalled hook for publishing a presentation from a precomputed basis of
 // the relation lattice, so callers that already maintain an HNF checkpoint
