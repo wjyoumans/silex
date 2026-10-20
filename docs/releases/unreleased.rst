@@ -128,6 +128,27 @@ Added
 Changed
 -------
 
+- ``FiniteAbelianGroup`` takes the Smith form of its Hermite normal form
+  basis after splitting off the unit pivots (Cohen, Algorithm 5.5.2, steps
+  10 and 12): the columns with diagonal entry 1 are cleared by unimodular
+  column operations and only the remaining block goes to
+  ``fmpz_mat_snf_transform``.  This covers class group presentations, whose
+  relation HNF is mostly identity.  Invariants are unchanged (the Smith form
+  is unique), but the Smith transforms can differ, so a group can publish
+  different, equally valid invariant generators.  On the ``grh`` corpus (184
+  rows compared; ``cyclotomic_real_163_deg81`` timed out at 120 s on both
+  builds) labels, invariants, units, regulators and proof records are
+  unchanged.  The invariant generator matrix changed on three rows:
+  ``cyclotomic_41_phi40`` and ``imaginary_quadratic_d100000000000319``
+  publish the same generators in another order (two generators of equal
+  order swapped), and ``real_quadratic_d100000000000009`` publishes a
+  different first generator of order 2.  Busy-machine callgrind instruction
+  counts, ``grh`` mode: ``real_quadratic_d100000000000009`` 28.6% fewer
+  (1.535e9 to 1.096e9), ``imaginary_quadratic_34_grh`` 5.9% fewer,
+  ``cyclotomic_64_phi32`` 1.5% fewer, control ``simplest_cubic_a12``
+  0.1% fewer.  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - Appending a relation to a class-group computation adds the row to the
   relation module in place instead of first copying the whole module
   (modular rank basis, retained rows and HNF checkpoint).  The add records

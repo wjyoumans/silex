@@ -812,6 +812,23 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+Every Smith form of a finite abelian presentation (``FiniteAbelianGroup``,
+including the class group presentation published from the relation HNF
+checkpoint) is taken from the HNF basis after its unit pivots are split off.
+This follows H. Cohen, *A Course in Computational Algebraic Number Theory*,
+Algorithm 5.5.2, steps 10 and 12: suppress row and column ``i`` of the HNF for
+every ``h_ii = 1`` and take the Smith form of the remaining matrix.  PARI
+2.17.3 does the same reduction (``src/basemath/hnf_snf.c:hnfspec_i`` removes
+the rows with a single unit entry, and only the dense remainder reaches
+``ZM_snfall`` from ``buch2.c``).  Silex reimplements the textbook step: the
+unit-pivot columns of a row HNF are unit vectors, unimodular column
+operations clear their rows, ``fmpz_mat_snf_transform`` runs on the remaining
+block, and the transforms are assembled around it (the argument is in
+``src/abelian_group/abelian_group.cpp``).  The Smith form, and so the
+invariants, equal those of ``fmpz_mat_snf_transform`` on the whole basis by
+uniqueness of the Smith form (Cohen, Theorem 2.4.12); the transforms, and so
+the invariant generators, can differ, as Smith transforms are not unique.
+
 The ``proven`` analytic finish needs a small basis of the integer kernel
 of the relation matrix ``A`` (the unit exponent rows).  Silex reduces the
 rows of ``[c*A | I]`` with ``fmpz_lll`` for a power-of-two scale ``c`` of
