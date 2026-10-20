@@ -708,9 +708,11 @@ int test_small_lll_torsion_orbit_skip_keeps_counters() {
         slong accepted = 0;
         bool goal = false;
         bool throttle = false;
+        slong rejected = 0;
     };
     auto run = [&](silex::ClassGroupContext& context,
-                   rs::SmallLllTorsionOrbit* torsion_orbit) {
+                   rs::SmallLllTorsionOrbit* torsion_orbit,
+                   const silex::detail::ClassGroupRelationOptions& run_options) {
         Outcome out;
         assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
         Access::use_route_generator_relation_policy(context);
@@ -725,38 +727,61 @@ int test_small_lll_torsion_orbit_skip_keeps_counters() {
         }
         out.accepted = context.relation_count();
         assert(rs::collect_order_small_lll_relations(
-                context, order, unit_ideal, &prefilter, WORD_MAX, options,
+                context, order, unit_ideal, &prefilter, WORD_MAX, run_options,
                 out.tried, out.accepted, out.goal, out.throttle,
                 silex::ClassGroupRelationSource::Search, WORD(-1), nullptr,
                 torsion_orbit));
+        out.rejected = prefilter.rejected_count;
         return out;
     };
 
-    silex::ClassGroupContext full(order);
-    silex::ClassGroupContext skipping(order);
-    rs::SmallLllTorsionOrbit orbit;
-    const Outcome a = run(full, nullptr);
-    const Outcome b = run(skipping, &orbit);
-    assert(orbit.skipped_candidates > 0);
-    assert(a.tried == b.tried);
-    assert(a.accepted == b.accepted);
-    assert(a.goal == b.goal);
-    assert(a.throttle == b.throttle);
-    assert(full.skipped_dependent_relation_count() ==
-           skipping.skipped_dependent_relation_count());
-    assert(skipping.skipped_dependent_relation_count() >=
-           orbit.skipped_candidates);
-    assert(full.relation_count() == skipping.relation_count());
-    const silex::RelationMatrix& full_rows = Access::relations(full);
-    const silex::RelationMatrix& skipping_rows = Access::relations(skipping);
-    sflint::FmpzMat row(1, full.generator_count());
-    for (slong i = 0; i < full.relation_count(); ++i) {
-        assert(full_rows.row(sflint::FmpzMatRef(row), i));
-        assert(skipping_rows.row_equal(sflint::FmpzMatConstRef(row), i));
-        const silex::Element* left = full_rows.generator_at(i);
-        const silex::Element* right = skipping_rows.generator_at(i);
-        assert(left != nullptr && right != nullptr && left->equal(*right));
-    }
+    auto compare = [&](const silex::detail::ClassGroupRelationOptions& opts,
+                       slong& tried_out, slong& skipped_out) {
+        silex::ClassGroupContext full(order);
+        silex::ClassGroupContext skipping(order);
+        rs::SmallLllTorsionOrbit orbit;
+        const Outcome a = run(full, nullptr, opts);
+        const Outcome b = run(skipping, &orbit, opts);
+        assert(a.tried == b.tried);
+        assert(a.accepted == b.accepted);
+        assert(a.goal == b.goal);
+        assert(a.throttle == b.throttle);
+        assert(a.rejected == b.rejected);
+        assert(full.skipped_dependent_relation_count() ==
+               skipping.skipped_dependent_relation_count());
+        assert(skipping.skipped_dependent_relation_count() >=
+               orbit.skipped_candidates);
+        assert(full.relation_count() == skipping.relation_count());
+        const silex::RelationMatrix& full_rows = Access::relations(full);
+        const silex::RelationMatrix& skipping_rows =
+                Access::relations(skipping);
+        sflint::FmpzMat row(1, full.generator_count());
+        for (slong i = 0; i < full.relation_count(); ++i) {
+            assert(full_rows.row(sflint::FmpzMatRef(row), i));
+            assert(skipping_rows.row_equal(sflint::FmpzMatConstRef(row), i));
+            const silex::Element* left = full_rows.generator_at(i);
+            const silex::Element* right = skipping_rows.generator_at(i);
+            assert(left != nullptr && right != nullptr && left->equal(*right));
+        }
+        tried_out = a.tried;
+        skipped_out = orbit.skipped_candidates;
+    };
+
+    slong full_tried = 0;
+    slong full_skipped = 0;
+    compare(options, full_tried, full_skipped);
+    assert(full_skipped > 0);
+
+    // A finite candidate budget that runs out partway through the orbit
+    // skips: the skip stops with the full test at the same candidate.
+    silex::detail::ClassGroupRelationOptions limited = options;
+    limited.max_candidates = full_tried - full_skipped / 2;
+    assert(limited.max_candidates > 0 && limited.max_candidates < full_tried);
+    slong limited_tried = 0;
+    slong limited_skipped = 0;
+    compare(limited, limited_tried, limited_skipped);
+    assert(limited_tried == limited.max_candidates);
+    assert(limited_skipped > 0 && limited_skipped < full_skipped);
 
     // A field with a real place has only +-1: the orbit stays off.
     silex::NumberField real_field = cubic_field(-3, 1);
@@ -765,6 +790,24 @@ int test_small_lll_torsion_orbit_skip_keeps_counters() {
     rs::SmallLllTorsionOrbit real_orbit;
     rs::build_small_lll_torsion_orbit(real_orbit, real_order, nullptr);
     assert(!real_orbit.active);
+
+    // Even degree, yet still off: a real quadratic (has real places) and
+    // Q(sqrt(-5)) (totally complex, only +-1).
+    silex::NumberField real_quadratic = quadratic_field(2);
+    silex::Order real_quadratic_order;
+    real_quadratic_order = silex::test::equation_order(real_quadratic);
+    rs::SmallLllTorsionOrbit real_quadratic_orbit;
+    rs::build_small_lll_torsion_orbit(real_quadratic_orbit,
+                                      real_quadratic_order, nullptr);
+    assert(!real_quadratic_orbit.active);
+    silex::NumberField imaginary_quadratic = quadratic_field(-5);
+    silex::Order imaginary_quadratic_order;
+    imaginary_quadratic_order =
+            silex::test::equation_order(imaginary_quadratic);
+    rs::SmallLllTorsionOrbit imaginary_quadratic_orbit;
+    rs::build_small_lll_torsion_orbit(imaginary_quadratic_orbit,
+                                      imaginary_quadratic_order, nullptr);
+    assert(!imaginary_quadratic_orbit.active);
     return 0;
 }
 

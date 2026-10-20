@@ -326,7 +326,9 @@ Changed
   class groups, regulators and every published result are unchanged; only the
   work changes (callgrind instruction counts: 14.7% fewer on
   ``cyclotomic_32_phi16``, 12.2% on ``cyclotomic_48_phi16``, 6.9% on
-  ``cyclotomic_17_phi16``, controls within 0.1%).
+  ``cyclotomic_17_phi16``, controls within 0.1%; these figures were measured
+  before the early exit for odd degree was added, which does not affect the
+  degree 16 fields named, so odd-degree controls may differ slightly).
 
 - The relation residue screen in class-group relation search values a
   factor-base prime that has no residue polynomial (an index divisor) by its
