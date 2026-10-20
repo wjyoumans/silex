@@ -130,8 +130,8 @@ Changed
 
 - ``FiniteAbelianGroup`` takes the Smith form of its Hermite normal form
   basis after splitting off the unit pivots (Cohen, Algorithm 5.5.2, steps
-  10 and 12): the columns with diagonal entry 1 are cleared by unimodular
-  column operations and only the remaining block goes to
+  10 and 12): the rows of the pivots with diagonal entry 1 are cleared by
+  unimodular column operations and only the remaining block goes to
   ``fmpz_mat_snf_transform``.  This covers class group presentations, whose
   relation HNF is mostly identity.  Invariants are unchanged (the Smith form
   is unique), but the Smith transforms can differ, so a group can publish

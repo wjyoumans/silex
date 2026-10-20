@@ -672,7 +672,7 @@ namespace detail {
 // Smith form of a basis after splitting off its unit pivots.
 //
 // Source: Cohen, A Course in Computational Algebraic Number Theory (GTM
-// 138), Algorithm 5.5.2, steps 10 and 12 (pp. 257-258): in the Hermite
+// 138), Algorithm 5.5.2, steps 10 and 12 (p. 257): in the Hermite
 // normal form of the class group relation lattice, for every i with
 // h_ii = 1 suppress row and column i, and take the Smith form (Algorithm
 // 2.4.14) of the remaining matrix W.  Reference implementations split off

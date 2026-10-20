@@ -23,7 +23,7 @@ struct FiniteAbelianGroupSmithCache {
     slong compute_count = 0;
 };
 
-// Smith form S, left transform U and right transform V of a square integer
+// Smith form S, left transform U and right transform V of a nonsingular square integer
 // matrix with U * basis * V = S, U and V unimodular; all four are n x n and
 // the outputs must not alias the input.  Unit pivots (columns of the basis
 // equal to a unit vector, which for a basis in Hermite normal form are the
