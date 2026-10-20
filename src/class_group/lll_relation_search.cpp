@@ -326,7 +326,7 @@ void build_small_lll_torsion_orbit(SmallLllTorsionOrbit& out,
         !order.is_equation_order()) {
         return;
     }
-    if (!is_totally_complex(*field)) {
+    if (n % 2 != 0 || !is_totally_complex(*field)) {
         return;
     }
     flint::Fmpz w;
