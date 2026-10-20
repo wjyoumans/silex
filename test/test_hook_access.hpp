@@ -430,6 +430,25 @@ public:
                 primes, batch_counts, per_prime_counts, order, first, end);
     }
 
+    // The word kernel's two squarings and Frobenius powers (see
+    // ZetaBfTestEntry).
+    static bool zeta_bf_word_square(std::vector<ulong>& symmetric,
+                                    std::vector<ulong>& full,
+                                    const std::vector<ulong>& power) noexcept {
+        return ZetaBfTestEntry::word_square(symmetric, full, power);
+    }
+
+    static bool zeta_bf_word_frobenius(std::vector<ulong>& symmetric,
+                                       std::vector<ulong>& full,
+                                       slong& symmetric_count,
+                                       slong& full_count,
+                                       const std::vector<ulong>& f,
+                                       ulong p) noexcept {
+        return ZetaBfTestEntry::word_frobenius(symmetric, full,
+                                               symmetric_count, full_count, f,
+                                               p);
+    }
+
     // Zeta test entries (see ZetaTestEntry): the Belabas-Friedman Theorem 7
     // bound at a given cutoff, the GRH generation bound with a given stop
     // bound in place of Bach's, and the stepped incomplete gamma values and

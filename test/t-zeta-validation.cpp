@@ -987,6 +987,119 @@ ulong word_linear_factor_prime_limit(slong degree) noexcept {
     return degree <= 8 ? UWORD(1) << 30 : UWORD(1) << 29;
 }
 
+// Deterministic xorshift64 stream for the word kernel inputs.
+ulong next_word(ulong& state) noexcept {
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    return state;
+}
+
+// A word kernel input below `bound` (positive): uniform, or within 64 of
+// the top, or zero, so that both large residues, where the lazy sums come
+// closest to 2^64, and sparse inputs occur.
+ulong word_kernel_entry(ulong& state, ulong bound) noexcept {
+    const ulong r = next_word(state);
+    switch (r & 3) {
+    case 0:
+        return 0;
+    case 1: {
+        const ulong offset = (r >> 2) % 64;
+        return offset < bound ? bound - 1 - offset : 0;
+    }
+    default:
+        return (r >> 2) % bound;
+    }
+}
+
+bool word_square_matches(const std::vector<ulong>& power) noexcept {
+    std::vector<ulong> symmetric;
+    std::vector<ulong> full;
+    if (!silex::detail::TestHookAccess::zeta_bf_word_square(symmetric, full,
+                                                            power)) {
+        return false;
+    }
+    // The schoolbook square, independent of both kernel paths.
+    std::vector<ulong> reference(2 * power.size() - 1, 0);
+    for (std::size_t i = 0; i < power.size(); ++i) {
+        for (std::size_t j = 0; j < power.size(); ++j) {
+            reference[i + j] += power[i] * power[j];
+        }
+    }
+    return symmetric == full && symmetric == reference;
+}
+
+bool word_frobenius_matches(const std::vector<ulong>& f, ulong p) noexcept {
+    std::vector<ulong> symmetric;
+    std::vector<ulong> full;
+    slong symmetric_count = -1;
+    slong full_count = -1;
+    return silex::detail::TestHookAccess::zeta_bf_word_frobenius(
+                   symmetric, full, symmetric_count, full_count, f, p) &&
+           symmetric.size() + 1 == f.size() && symmetric == full &&
+           symmetric_count == full_count && symmetric_count >= 0 &&
+           symmetric_count < static_cast<slong>(f.size());
+}
+
+// The word kernel's symmetric squaring gives exactly the integers of the
+// full i, j square, and the whole kernel (x^p mod f and the root count)
+// agrees with the full-square path, at every degree the dispatcher
+// instantiates (2 to 20), on random inputs, inputs at the largest residue
+// the prime limit allows, and primes from 2 to just below the limit.
+bool check_word_kernel_squarings() noexcept {
+    ulong state = UWORD(0x9e3779b97f4a7c15);
+    for (slong degree = 2; degree <= 20; ++degree) {
+        const std::size_t size = static_cast<std::size_t>(degree);
+        const ulong limit = word_linear_factor_prime_limit(degree);
+        const ulong top = limit - 2;
+        // Entries above limit - 2 are outside the kernel's overflow bound.
+        std::vector<ulong> power(size, top);
+        std::vector<ulong> rejected(size, 0);
+        rejected[size - 1] = top + 1;
+        std::vector<ulong> symmetric;
+        std::vector<ulong> full;
+        if (!word_square_matches(power) ||
+            !word_square_matches(std::vector<ulong>(size, 0)) ||
+            silex::detail::TestHookAccess::zeta_bf_word_square(
+                    symmetric, full, rejected)) {
+            return false;
+        }
+        for (int trial = 0; trial < 300; ++trial) {
+            for (ulong& entry : power) {
+                entry = word_kernel_entry(state, top + 1);
+            }
+            if (!word_square_matches(power)) {
+                return false;
+            }
+        }
+
+        // The largest primes below the limit, the smallest primes and
+        // random primes in between.
+        std::vector<ulong> primes = {2, 3, 5, 7};
+        for (ulong p = n_nextprime(limit - 400, 1); p < limit;
+             p = n_nextprime(p, 1)) {
+            primes.push_back(p);
+        }
+        for (int i = 0; i < 6; ++i) {
+            const ulong p = n_nextprime(next_word(state) % (limit - 400), 1);
+            primes.push_back(p);
+        }
+        std::vector<ulong> f(size + 1, 0);
+        f[size] = 1;
+        for (const ulong p : primes) {
+            for (int trial = 0; trial < 8; ++trial) {
+                for (std::size_t i = 0; i < size; ++i) {
+                    f[i] = word_kernel_entry(state, p);
+                }
+                if (!word_frobenius_matches(f, p)) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 // The batched linear factor counts of the BF prime loop agree with the
 // per-prime nmod path on every prime of [first, end), cover every prime
 // that path covers below the word kernel's prime limit for the degree, cover
@@ -1316,7 +1429,8 @@ int main() {
                            setup_from_coefficients(x3_plus_x_plus_200, 3)) ||
                    !check_linear_factor_count_cache(
                            setup_from_coefficients(d12_coefficients, 12)) ||
-                   !check_linear_factor_batches()
+                   !check_linear_factor_batches() ||
+                   !check_word_kernel_squarings()
             ? 1
             : 0;
 }

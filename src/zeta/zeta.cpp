@@ -1637,7 +1637,11 @@ bool bf_linear_factor_count_from_squarefree_nmod(
 // Word-size overflow.  Every stored residue is at most M = p - 1.  The
 // unreduced sums the kernel forms are:
 //   - square[s] = sum of power[i] power[j] over i + j = s, 0 <= i, j < d:
-//     at most min(s + 1, 2d - 1 - s) <= d products, each at most M^2;
+//     at most min(s + 1, 2d - 1 - s) <= d products, each at most M^2.
+//     The kernel adds power[i]^2 and 2 power[i] power[j] for i < j
+//     (bf_word_square); these nonnegative terms sum to the same integer,
+//     so the sum and this bound are unchanged, and every partial sum is
+//     at most the sum;
 //   - for j < d, square[j] + sum over d <= k <= 2d - 2 of
 //     reduce(square[k]) reduction[k - d][j]: at most (j + 1) + (d - 1)
 //     <= 2d - 1 products, each at most M^2 (j = d - 1 attains 2d - 1);
@@ -1739,12 +1743,46 @@ slong bf_word_gcd_degree(std::array<ulong, Degree + 1>& a,
     return b_degree == 0 ? 0 : a_degree;
 }
 
-// `f` holds the Degree + 1 coefficients of a monic polynomial reduced
-// modulo `modulus.n`, squarefree modulo it.  Returns the number of its
-// roots modulo the prime.
-template <slong Degree>
-slong bf_word_linear_factor_count(const ulong* f,
-                                  const BfWordModulus& modulus) noexcept {
+// How the word kernel squares x^(2^k ...) mod f: `symmetric` forms each
+// cross product power[i] power[j], i < j, once and doubles it,
+// d (d + 1) / 2 products; `full` is the plain i, j double loop, d^2
+// products, kept as the reference the tests compare against.
+enum class BfWordSquare { symmetric, full };
+
+// square[s] = sum of power[i] power[j] over i + j = s, 0 <= i, j < d, as an
+// unreduced integer.  Both orders add the same nonnegative products, so the
+// result is the same integer, and every partial sum is at most it.
+template <slong Degree, BfWordSquare Square>
+void bf_word_square(
+        std::array<ulong, 2 * static_cast<std::size_t>(Degree) - 1>& square,
+        const std::array<ulong, static_cast<std::size_t>(Degree)>& power)
+        noexcept {
+    constexpr std::size_t kDegree = static_cast<std::size_t>(Degree);
+    square.fill(0);
+    if constexpr (Square == BfWordSquare::full) {
+        for (std::size_t i = 0; i < kDegree; ++i) {
+            for (std::size_t j = 0; j < kDegree; ++j) {
+                square[i + j] += power[i] * power[j];
+            }
+        }
+    } else {
+        for (std::size_t i = 0; i < kDegree; ++i) {
+            const ulong twice = power[i] + power[i];
+            square[2 * i] += power[i] * power[i];
+            for (std::size_t j = i + 1; j < kDegree; ++j) {
+                square[i + j] += twice * power[j];
+            }
+        }
+    }
+}
+
+// `power` receives x^p mod f, p = modulus.n, for the monic `f` of degree
+// Degree with coefficients reduced modulo p.
+template <slong Degree, BfWordSquare Square>
+void bf_word_frobenius(std::array<ulong, static_cast<std::size_t>(Degree)>&
+                               power,
+                       const ulong* f,
+                       const BfWordModulus& modulus) noexcept {
     static_assert(Degree >= 2 &&
                   Degree <= kBfWordLinearFactorMaxDegree &&
                   bf_word_linear_factor_sums_fit(Degree));
@@ -1767,16 +1805,12 @@ slong bf_word_linear_factor_count(const ulong* f,
     }
 
     // x^p mod f by left-to-right binary powering from x.
-    std::array<ulong, kDegree> power{};
+    power.fill(0);
     power[1] = 1;
     for (slong bit = static_cast<slong>(FLINT_BIT_COUNT(n)) - 2; bit >= 0;
          --bit) {
-        std::array<ulong, 2 * kDegree - 1> square{};
-        for (std::size_t i = 0; i < kDegree; ++i) {
-            for (std::size_t j = 0; j < kDegree; ++j) {
-                square[i + j] += power[i] * power[j];
-            }
-        }
+        std::array<ulong, 2 * kDegree - 1> square;
+        bf_word_square<Degree, Square>(square, power);
         for (std::size_t k = kDegree; k < 2 * kDegree - 1; ++k) {
             square[k] = bf_word_reduce(square[k], modulus);
         }
@@ -1796,8 +1830,17 @@ slong bf_word_linear_factor_count(const ulong* f,
             power[0] = bf_word_mulmod(top, reduction[0][0], modulus);
         }
     }
+}
 
-    // gcd(f, x^p - x).
+// The number of roots modulo the prime of f, deg gcd(f, x^p - x), from x^p
+// mod f in `power` (overwritten).
+template <slong Degree>
+slong bf_word_linear_factor_count_from_frobenius(
+        std::array<ulong, static_cast<std::size_t>(Degree)>& power,
+        const ulong* f,
+        const BfWordModulus& modulus) noexcept {
+    constexpr std::size_t kDegree = static_cast<std::size_t>(Degree);
+    const ulong n = modulus.n;
     power[1] = power[1] == 0 ? n - 1 : power[1] - 1;
     slong frobenius_degree = Degree - 1;
     while (frobenius_degree >= 0 &&
@@ -1817,6 +1860,18 @@ slong bf_word_linear_factor_count(const ulong* f,
     }
     return bf_word_gcd_degree<Degree>(a, Degree, b, frobenius_degree,
                                       modulus);
+}
+
+// `f` holds the Degree + 1 coefficients of a monic polynomial reduced
+// modulo `modulus.n`, squarefree modulo it.  Returns the number of its
+// roots modulo the prime.
+template <slong Degree, BfWordSquare Square = BfWordSquare::symmetric>
+slong bf_word_linear_factor_count(const ulong* f,
+                                  const BfWordModulus& modulus) noexcept {
+    std::array<ulong, static_cast<std::size_t>(Degree)> power;
+    bf_word_frobenius<Degree, Square>(power, f, modulus);
+    return bf_word_linear_factor_count_from_frobenius<Degree>(power, f,
+                                                              modulus);
 }
 
 // The number of roots modulo the prime `p` of the monic polynomial with
@@ -1873,6 +1928,85 @@ slong bf_word_linear_factor_count_dispatch(const ulong* f,
     default:
         return -1;
     }
+}
+
+// Test support for ZetaBfTestEntry::word_square: both squarings of `power`
+// when it has between 2 and kBfWordLinearFactorMaxDegree entries, each below
+// the word kernel's prime limit for that degree minus one.
+template <slong Degree>
+bool bf_word_square_for_test(std::vector<ulong>& symmetric,
+                             std::vector<ulong>& full,
+                             const std::vector<ulong>& power) noexcept {
+    constexpr std::size_t kDegree = static_cast<std::size_t>(Degree);
+    if (power.size() != kDegree) {
+        if constexpr (Degree < kBfWordLinearFactorMaxDegree) {
+            return bf_word_square_for_test<Degree + 1>(symmetric, full,
+                                                       power);
+        } else {
+            return false;
+        }
+    }
+    const ulong limit = bf_word_linear_factor_prime_limit(Degree);
+    std::array<ulong, kDegree> input{};
+    for (std::size_t i = 0; i < kDegree; ++i) {
+        if (power[i] > limit - 2) {
+            return false;
+        }
+        input[i] = power[i];
+    }
+    std::array<ulong, 2 * kDegree - 1> symmetric_square{};
+    std::array<ulong, 2 * kDegree - 1> full_square{};
+    bf_word_square<Degree, BfWordSquare::symmetric>(symmetric_square, input);
+    bf_word_square<Degree, BfWordSquare::full>(full_square, input);
+    symmetric.assign(symmetric_square.begin(), symmetric_square.end());
+    full.assign(full_square.begin(), full_square.end());
+    return true;
+}
+
+// Test support for ZetaBfTestEntry::word_frobenius: x^p mod f and the root
+// count by both squarings, for a monic `f` of degree 2 to
+// kBfWordLinearFactorMaxDegree with coefficients reduced modulo the prime p
+// below the word kernel's prime limit for the degree.
+template <slong Degree>
+bool bf_word_frobenius_for_test(std::vector<ulong>& symmetric,
+                                std::vector<ulong>& full,
+                                slong& symmetric_count,
+                                slong& full_count,
+                                const std::vector<ulong>& f,
+                                ulong p) noexcept {
+    constexpr std::size_t kDegree = static_cast<std::size_t>(Degree);
+    if (f.size() != kDegree + 1) {
+        if constexpr (Degree < kBfWordLinearFactorMaxDegree) {
+            return bf_word_frobenius_for_test<Degree + 1>(
+                    symmetric, full, symmetric_count, full_count, f, p);
+        } else {
+            return false;
+        }
+    }
+    if (p < 2 || p >= bf_word_linear_factor_prime_limit(Degree) ||
+        n_is_prime(p) == 0 || f[kDegree] != 1) {
+        return false;
+    }
+    for (std::size_t i = 0; i < kDegree; ++i) {
+        if (f[i] >= p) {
+            return false;
+        }
+    }
+    const BfWordModulus modulus = bf_word_modulus(p);
+    std::array<ulong, kDegree> symmetric_power{};
+    std::array<ulong, kDegree> full_power{};
+    bf_word_frobenius<Degree, BfWordSquare::symmetric>(symmetric_power,
+                                                       f.data(), modulus);
+    bf_word_frobenius<Degree, BfWordSquare::full>(full_power, f.data(),
+                                                  modulus);
+    symmetric.assign(symmetric_power.begin(), symmetric_power.end());
+    full.assign(full_power.begin(), full_power.end());
+    symmetric_count =
+            bf_word_linear_factor_count<Degree, BfWordSquare::symmetric>(
+                    f.data(), modulus);
+    full_count = bf_word_linear_factor_count<Degree, BfWordSquare::full>(
+            f.data(), modulus);
+    return true;
 }
 
 bool bf_residue_degrees_from_small_squarefree_nmod(
@@ -4782,6 +4916,28 @@ bool zeta_bf_audit_cutoff_available(const Order& order,
     const slong work_precision = FLINT_MAX(precision + 64, WORD(192));
     return bf_select_cutoff(cutoff, order, target, max_cutoff, true,
                             work_precision, nullptr);
+}
+
+bool ZetaBfTestEntry::word_square(std::vector<ulong>& symmetric,
+                                  std::vector<ulong>& full,
+                                  const std::vector<ulong>& power) noexcept {
+    symmetric.clear();
+    full.clear();
+    return bf_word_square_for_test<2>(symmetric, full, power);
+}
+
+bool ZetaBfTestEntry::word_frobenius(std::vector<ulong>& symmetric,
+                                     std::vector<ulong>& full,
+                                     slong& symmetric_count,
+                                     slong& full_count,
+                                     const std::vector<ulong>& f,
+                                     ulong p) noexcept {
+    symmetric.clear();
+    full.clear();
+    symmetric_count = -1;
+    full_count = -1;
+    return bf_word_frobenius_for_test<2>(symmetric, full, symmetric_count,
+                                         full_count, f, p);
 }
 
 bool ZetaBfTestEntry::linear_factor_counts(

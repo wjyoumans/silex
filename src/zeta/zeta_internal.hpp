@@ -184,6 +184,23 @@ class ZetaBfTestEntry {
                                      const Order& order,
                                      ulong first,
                                      ulong end) noexcept;
+    // The word kernel's unreduced square of x^k mod f, with symmetric
+    // squaring in `symmetric` and the full i, j loop in `full`, for
+    // `power` of 2 to 20 entries, each at most the kernel's prime limit for
+    // that degree minus two.  Returns false otherwise.
+    static bool word_square(std::vector<ulong>& symmetric,
+                            std::vector<ulong>& full,
+                            const std::vector<ulong>& power) noexcept;
+    // x^p mod f and the number of roots of f modulo p from the word kernel,
+    // with symmetric and with full squaring, for a monic `f` (low to high)
+    // of degree 2 to 20 with coefficients reduced modulo the prime p below
+    // the kernel's prime limit for the degree.  Returns false otherwise.
+    static bool word_frobenius(std::vector<ulong>& symmetric,
+                               std::vector<ulong>& full,
+                               slong& symmetric_count,
+                               slong& full_count,
+                               const std::vector<ulong>& f,
+                               ulong p) noexcept;
 };
 
 // `unconditional`, when given, is set to true exactly when the product came
