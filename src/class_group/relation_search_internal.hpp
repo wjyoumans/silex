@@ -15,6 +15,42 @@ namespace silex::detail::relation_search {
 struct NormPrefilter;
 struct IdealLatticeRoundedEmbeddingCache;
 
+// Torsion orbits of small-LLL candidates.
+//
+// In a totally complex field with w > 2 roots of unity, let Z be the
+// order-coordinate matrix of multiplication by a primitive w-th root of
+// unity zeta (row j holds the coordinates of zeta * b_j).  Candidate
+// coordinates u and u * Z^k describe alpha and zeta^k * alpha.  These
+// generate the same ideal, so they have the same |N(alpha)| (the norm
+// prefilter decides on that alone) and, when alpha is smooth, the same
+// factor-base exponent row.  The candidate loop uses this only to skip a
+// candidate whose full test is known to end in the keep_nonduplicate
+// duplicate-row skip of append_relation_with_outcome_; see
+// try_small_lll_orbit_skip (lll_relation_search.cpp).  Fields with a real
+// place have w = 2 and are left inactive.
+struct SmallLllTorsionOrbit {
+    bool active = false;
+    slong degree = 0;
+    slong torsion_order = 0;
+    // Z^k = numerators[k - 1] / denominators[k - 1], k = 1..w-1, exactly.
+    std::vector<flint::FmpzMat> numerators;
+    std::vector<flint::Fmpz> denominators;
+    // key_rows[k * degree + j] = (Z^k c)_j mod a fixed prime for a fixed
+    // vector c, k = 0..w-1, so that the key c . (u Z^k) of an image is
+    // u . (Z^k c).  Keys only index exact checks; they decide nothing.
+    std::vector<ulong> key_rows;
+    // Candidates the loop skipped through this data.
+    slong skipped_candidates = 0;
+};
+
+// Leaves `out` inactive (the loop then tests every candidate in full) when
+// the field is not totally complex, has only +-1, or any step fails; a
+// failure here never fails the relation route.
+void build_small_lll_torsion_orbit(SmallLllTorsionOrbit& out,
+                                   const Order& order,
+                                   const NormPrefilter* norm_prefilter)
+        noexcept;
+
 bool publish_and_check_compute_goal(
         ClassGroupContext& context,
         slong target_relation_kernel_units,
@@ -72,7 +108,8 @@ bool collect_order_small_lll_relations(
         bool& partial_throttle_exit,
         ClassGroupRelationSource source = ClassGroupRelationSource::Search,
         slong max_good_relations = WORD(-1),
-        IdealLatticeRoundedEmbeddingCache* lll_cache = nullptr) noexcept;
+        IdealLatticeRoundedEmbeddingCache* lll_cache = nullptr,
+        SmallLllTorsionOrbit* torsion_orbit = nullptr) noexcept;
 
 bool collect_private_direct_t2_relations_den(
         ClassGroupContext& context,

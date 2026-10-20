@@ -12,6 +12,7 @@
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/class_group_internal.hpp"
+#include "class_group/relation_candidate_internal.hpp"
 #include "class_group/relation_factor_base_plan_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_internal.hpp"
@@ -674,6 +675,96 @@ int test_keep_nonduplicate_skips_exact_repeat_only() {
     assert(skipped);
     assert(context.relation_count() == 2);
     assert(context.skipped_dependent_relation_count() == 2);
+    return 0;
+}
+
+// The small-LLL torsion-orbit skip passes over a candidate only when its
+// full test would count it and then skip its exponent row as an exact
+// repeat of a stored row (keep_nonduplicate).  Over Q(zeta_16) the reduced
+// unit-ideal basis yields many root-of-unity multiples of earlier smooth
+// candidates; the loop with the skip must leave every count, flag and
+// stored relation exactly as the loop without it.
+int test_small_lll_torsion_orbit_skip_keeps_counters() {
+    namespace rs = silex::detail::relation_search;
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 8, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order order;
+    order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    assert(order.is_equation_order());
+    silex::Ideal unit_ideal(order);
+    assert(unit_ideal.is_defined() && unit_ideal.one());
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 40));
+    silex::detail::ClassGroupRelationOptions options;
+
+    struct Outcome {
+        slong tried = 0;
+        slong accepted = 0;
+        bool goal = false;
+        bool throttle = false;
+    };
+    auto run = [&](silex::ClassGroupContext& context,
+                   rs::SmallLllTorsionOrbit* torsion_orbit) {
+        Outcome out;
+        assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+        Access::use_route_generator_relation_policy(context);
+        rs::NormPrefilter prefilter;
+        assert(rs::build_norm_prefilter(prefilter, *context.factor_base(),
+                                        sflint::FmpzConstRef(bound), false));
+        if (torsion_orbit != nullptr) {
+            rs::build_small_lll_torsion_orbit(*torsion_orbit, order,
+                                              &prefilter);
+            assert(torsion_orbit->active);
+            assert(torsion_orbit->torsion_order == 16);
+        }
+        out.accepted = context.relation_count();
+        assert(rs::collect_order_small_lll_relations(
+                context, order, unit_ideal, &prefilter, WORD_MAX, options,
+                out.tried, out.accepted, out.goal, out.throttle,
+                silex::ClassGroupRelationSource::Search, WORD(-1), nullptr,
+                torsion_orbit));
+        return out;
+    };
+
+    silex::ClassGroupContext full(order);
+    silex::ClassGroupContext skipping(order);
+    rs::SmallLllTorsionOrbit orbit;
+    const Outcome a = run(full, nullptr);
+    const Outcome b = run(skipping, &orbit);
+    assert(orbit.skipped_candidates > 0);
+    assert(a.tried == b.tried);
+    assert(a.accepted == b.accepted);
+    assert(a.goal == b.goal);
+    assert(a.throttle == b.throttle);
+    assert(full.skipped_dependent_relation_count() ==
+           skipping.skipped_dependent_relation_count());
+    assert(skipping.skipped_dependent_relation_count() >=
+           orbit.skipped_candidates);
+    assert(full.relation_count() == skipping.relation_count());
+    const silex::RelationMatrix& full_rows = Access::relations(full);
+    const silex::RelationMatrix& skipping_rows = Access::relations(skipping);
+    sflint::FmpzMat row(1, full.generator_count());
+    for (slong i = 0; i < full.relation_count(); ++i) {
+        assert(full_rows.row(sflint::FmpzMatRef(row), i));
+        assert(skipping_rows.row_equal(sflint::FmpzMatConstRef(row), i));
+        const silex::Element* left = full_rows.generator_at(i);
+        const silex::Element* right = skipping_rows.generator_at(i);
+        assert(left != nullptr && right != nullptr && left->equal(*right));
+    }
+
+    // A field with a real place has only +-1: the orbit stays off.
+    silex::NumberField real_field = cubic_field(-3, 1);
+    silex::Order real_order;
+    real_order = silex::test::equation_order(real_field);
+    rs::SmallLllTorsionOrbit real_orbit;
+    rs::build_small_lll_torsion_orbit(real_orbit, real_order, nullptr);
+    assert(!real_orbit.active);
     return 0;
 }
 
@@ -8285,6 +8376,7 @@ int main() {
     test_relation_sources_reset_with_factor_base();
     test_append_tracks_rank_and_skips_nonrefining_dependent_rows();
     test_keep_nonduplicate_skips_exact_repeat_only();
+    test_small_lll_torsion_orbit_skip_keeps_counters();
     test_publish_matches_relation_lattice_after_mixed_appends();
     test_append_keeps_index_refining_dependent_rows();
     test_factor_base_prime_search_masks();

@@ -11490,6 +11490,25 @@ bool ClassGroupContext::append_relation(
     return append_relation_with_outcome_(outcome, relation, source);
 }
 
+bool ClassGroupContext::relations_contain_row_(
+        bool& contains,
+        flint::FmpzMatConstRef row) const noexcept {
+    return relation_matrix_contains_row(contains, relations_,
+                                        relations_.rows_, row);
+}
+
+void ClassGroupContext::capture_generator_relation_row_(
+        const Relation& relation) noexcept {
+    if (private_storage_ == nullptr ||
+        private_storage_->generator_relation_row_capture == nullptr) {
+        return;
+    }
+    private_storage_->generator_relation_row_captured = relation.exponents(
+            flint::FmpzMatRef(
+                    *private_storage_->generator_relation_row_capture));
+    private_storage_->generator_relation_row_capture = nullptr;
+}
+
 bool ClassGroupContext::append_relation_with_outcome_(
         RelationAppendOutcome& outcome,
         const Relation& relation,
@@ -11809,6 +11828,7 @@ bool ClassGroupContext::try_append_generator_relation(
         return try_partial_relation_(partial_throttle_exit, generator);
     }
 
+    capture_generator_relation_row_(relation);
     bool zero_row = true;
     if (!relation_exponents_are_zero(zero_row, relation)) {
         return false;
@@ -11864,6 +11884,7 @@ bool ClassGroupContext::try_append_generator_relation_with_norm_(
         return try_partial_relation_(partial_throttle_exit, generator);
     }
 
+    capture_generator_relation_row_(relation);
     bool zero_row = true;
     if (!relation_exponents_are_zero(zero_row, relation)) {
         return false;
@@ -11927,6 +11948,7 @@ bool ClassGroupContext::try_append_integral_generator_relation_(
                         : integral_coordinate_polynomial->raw());
     }
 
+    capture_generator_relation_row_(relation);
     bool zero_row = true;
     if (!relation_exponents_are_zero(zero_row, relation)) {
         return false;

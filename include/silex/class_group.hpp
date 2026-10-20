@@ -558,6 +558,10 @@ private:
                                slong work_precision) noexcept;
     bool relation_row_refines_(const Relation& relation) noexcept;
     bool sync_row_module_checkpoint_() noexcept;
+    bool relations_contain_row_(bool& contains,
+                                flint::FmpzMatConstRef row) const noexcept;
+    void capture_generator_relation_row_(
+            const Relation& relation) noexcept;
     bool append_relation_with_outcome_(RelationAppendOutcome& outcome,
                                        const Relation& relation,
                                        ClassGroupRelationSource source)

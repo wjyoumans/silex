@@ -420,6 +420,12 @@ struct ClassGroupContextStorage {
     // check runs once per order and not once per relation-route slice.
     relation_search::IdealLatticeRoundedEmbeddingCache
             lll_rounded_embedding_cache;
+    // Row capture of the small-LLL torsion-orbit skip.  While armed (non-null)
+    // the first generator relation that factors over the base copies its
+    // exponent row here and disarms the capture; the candidate loop arms it
+    // around one candidate test and disarms it after.
+    flint::FmpzMat* generator_relation_row_capture = nullptr;
+    bool generator_relation_row_captured = false;
     std::optional<RelationFinishState> finish_state;
     HnfFinishWorkspace hnf_finish_workspace;
     slong analytic_finish_precision = 0;
@@ -556,6 +562,8 @@ struct ClassGroupContextStorage {
         native_post_finite_reduced_lattices.clear();
         lll_rounded_embedding_cache =
                 relation_search::IdealLatticeRoundedEmbeddingCache();
+        generator_relation_row_capture = nullptr;
+        generator_relation_row_captured = false;
         finish_state.reset();
         hnf_finish_workspace.clear();
         analytic_finish_precision = 0;
@@ -617,6 +625,54 @@ public:
     static void record_skipped_dependent(
             ClassGroupContext& context) noexcept {
         ++context.skipped_dependent_relations_;
+    }
+
+    // Small-LLL torsion-orbit skip hooks (lll_relation_search.cpp).
+    static bool generator_relation_policy_keeps_nonduplicate(
+            const ClassGroupContext& context) noexcept {
+        return context.generator_relation_policy_ ==
+               ClassGroupContext::DependentRelationPolicy::keep_nonduplicate;
+    }
+
+    // Sets the generator-relation policy the LLL relation route uses
+    // (keep_nonduplicate).  White-box hook for the torsion-orbit skip test,
+    // which runs the small-LLL candidate loop outside the route.
+    static void use_route_generator_relation_policy(
+            ClassGroupContext& context) noexcept {
+        context.generator_relation_policy_ =
+                ClassGroupContext::DependentRelationPolicy::keep_nonduplicate;
+    }
+
+    // The same stored-row test the keep_nonduplicate append makes before it
+    // counts a skipped duplicate (append_relation_with_outcome_).
+    static bool relations_contain_row(
+            bool& contains,
+            const ClassGroupContext& context,
+            flint::FmpzMatConstRef row) noexcept {
+        return context.relations_contain_row_(contains, row);
+    }
+
+    static void arm_generator_relation_row_capture(
+            ClassGroupContext& context,
+            flint::FmpzMat* row) noexcept {
+        if (context.private_storage_ == nullptr) {
+            return;
+        }
+        context.private_storage_->generator_relation_row_capture = row;
+        context.private_storage_->generator_relation_row_captured = false;
+    }
+
+    // Disarms the capture; true when a row was captured while armed.
+    static bool disarm_generator_relation_row_capture(
+            ClassGroupContext& context) noexcept {
+        if (context.private_storage_ == nullptr) {
+            return false;
+        }
+        const bool captured =
+                context.private_storage_->generator_relation_row_captured;
+        context.private_storage_->generator_relation_row_capture = nullptr;
+        context.private_storage_->generator_relation_row_captured = false;
+        return captured;
     }
 
     static bool append_search_relation(

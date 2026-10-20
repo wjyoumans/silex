@@ -2,6 +2,9 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/ideal.hpp>
 #include <silex/ideal_factorization.hpp>
+#include <silex/order_element.hpp>
+#include <silex/signature.hpp>
+#include <silex/unit.hpp>
 
 #include "class_group_certification_internal.hpp"
 #include "class_group_internal.hpp"
@@ -14,10 +17,14 @@
 #include "../order_unit/class_unit_transaction_internal.hpp"
 
 #include <flint/fmpq_poly.h>
+#include <flint/fmpq_mat.h>
 #include <flint/fmpz.h>
+#include <flint/fmpz_mat.h>
+#include <flint/ulong_extras.h>
 
 #include <algorithm>
 #include <numeric>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -188,6 +195,233 @@ bool set_small_lll_next_candidate(
     return true;
 }
 
+namespace {
+
+constexpr ulong kSmallLllOrbitKeyPrime = UWORD(2147483647);
+
+ulong small_lll_orbit_key(const ulong* key_row,
+                          const fmpz_mat_t coordinates,
+                          slong degree) noexcept {
+    ulong key = 0;
+    for (slong j = 0; j < degree; ++j) {
+        const ulong value = fmpz_fdiv_ui(
+                fmpz_mat_entry(coordinates, 0, j), kSmallLllOrbitKeyPrime);
+        key = (key + value * key_row[j]) % kSmallLllOrbitKeyPrime;
+    }
+    return key;
+}
+
+// Per-ideal record of candidates whose generator relation factored over
+// the base: their coordinates and exponent row.
+struct SmallLllOrbitEntry {
+    flint::FmpzMat coordinates{0, 0};
+    flint::FmpzMat row{0, 0};
+};
+
+struct SmallLllOrbitState {
+    std::vector<SmallLllOrbitEntry> entries;
+    // key of an image u * Z^k -> (entry index, k).
+    std::unordered_multimap<ulong, std::pair<slong, slong>> image_keys;
+    flint::FmpzMat image{0, 0};
+    flint::Fmpz scaled;
+};
+
+// True (`skip` set) only when `coordinates` is exactly u * Z^k for a
+// recorded entry u whose exponent row is, at this moment, a stored relation
+// row.  The full candidate test would then (relation_candidate.cpp
+// try_coordinate_candidate_den and class_group.cpp try_append_*_generator_
+// relation_ / append_relation_with_outcome_) pass the norm prefilter, count
+// the candidate, factor zeta^k * alpha to the same row, and under the
+// keep_nonduplicate policy count one skipped dependent relation and change
+// nothing else.  The caller applies exactly those effects.
+void try_small_lll_orbit_skip(bool& skip,
+                              const ClassGroupContext& context,
+                              const SmallLllTorsionOrbit& orbit,
+                              SmallLllOrbitState& state,
+                              const flint::FmpzMat& coordinates) noexcept {
+    skip = false;
+    if (state.entries.empty() ||
+        !ClassGroupRelationSearchAccess::
+                generator_relation_policy_keeps_nonduplicate(context)) {
+        return;
+    }
+    const slong n = orbit.degree;
+    const ulong key = small_lll_orbit_key(orbit.key_rows.data(),
+                                          coordinates.raw(), n);
+    const auto range = state.image_keys.equal_range(key);
+    for (auto it = range.first; it != range.second; ++it) {
+        const SmallLllOrbitEntry& entry =
+                state.entries[static_cast<std::size_t>(it->second.first)];
+        const std::size_t power = static_cast<std::size_t>(it->second.second);
+        fmpz_mat_mul(state.image.raw(), entry.coordinates.raw(),
+                     orbit.numerators[power - 1].raw());
+        const fmpz* den = orbit.denominators[power - 1].raw();
+        bool equal = true;
+        for (slong j = 0; j < n && equal; ++j) {
+            const fmpz* value = fmpz_mat_entry(coordinates.raw(), 0, j);
+            if (fmpz_is_one(den)) {
+                equal = fmpz_equal(value,
+                                   fmpz_mat_entry(state.image.raw(), 0, j));
+            } else {
+                fmpz_mul(state.scaled.raw(), value, den);
+                equal = fmpz_equal(state.scaled.raw(),
+                                   fmpz_mat_entry(state.image.raw(), 0, j));
+            }
+        }
+        if (!equal) {
+            continue;
+        }
+        bool contains = false;
+        if (ClassGroupRelationSearchAccess::relations_contain_row(
+                    contains, context, flint::FmpzMatConstRef(entry.row)) &&
+            contains) {
+            skip = true;
+        }
+        return;
+    }
+}
+
+void record_small_lll_orbit_entry(SmallLllOrbitState& state,
+                                  const SmallLllTorsionOrbit& orbit,
+                                  const flint::FmpzMat& coordinates,
+                                  flint::FmpzMat& row) noexcept {
+    const slong n = orbit.degree;
+    const slong index = static_cast<slong>(state.entries.size());
+    SmallLllOrbitEntry entry;
+    entry.coordinates = flint::FmpzMat(1, n);
+    fmpz_mat_set(entry.coordinates.raw(), coordinates.raw());
+    entry.row = flint::FmpzMat(1, fmpz_mat_ncols(row.raw()));
+    entry.row.swap(row);
+    for (slong k = 1; k < orbit.torsion_order; ++k) {
+        state.image_keys.emplace(
+                small_lll_orbit_key(
+                        orbit.key_rows.data() +
+                                static_cast<std::size_t>(k * n),
+                        coordinates.raw(), n),
+                std::pair<slong, slong>(index, k));
+    }
+    state.entries.push_back(std::move(entry));
+}
+
+}  // namespace
+
+void build_small_lll_torsion_orbit(SmallLllTorsionOrbit& out,
+                                   const Order& order,
+                                   const NormPrefilter* norm_prefilter)
+        noexcept {
+    out.active = false;
+    out.skipped_candidates = 0;
+    out.numerators.clear();
+    out.denominators.clear();
+    out.key_rows.clear();
+    const NumberField* field = order.parent();
+    const slong n = order.degree();
+    if (field == nullptr || n <= 0) {
+        return;
+    }
+    // The coordinate-norm prefilter reads coordinates as power-basis
+    // coefficients; keep the orbit off unless that reading is the order's.
+    if (norm_prefilter != nullptr && norm_prefilter->valid &&
+        norm_prefilter->has_equation_order_norm_polynomial &&
+        !order.is_equation_order()) {
+        return;
+    }
+    if (!is_totally_complex(*field)) {
+        return;
+    }
+    flint::Fmpz w;
+    Element zeta(*field);
+    if (!zeta.is_defined() ||
+        !roots_of_unity(flint::FmpzRef(w), zeta, *field) ||
+        fmpz_cmp_ui(w.raw(), 2) <= 0 || !fmpz_fits_si(w.raw())) {
+        return;
+    }
+    const slong torsion_order = fmpz_get_si(w.raw());
+
+    flint::FmpqMat z(n, n);
+    flint::FmpzMat unit_row(1, n);
+    flint::FmpqMat image_row(1, n);
+    OrderElement basis_element(order);
+    Element basis_value(*field);
+    Element product(*field);
+    if (!basis_element.is_defined() || !basis_value.is_defined() ||
+        !product.is_defined()) {
+        return;
+    }
+    for (slong j = 0; j < n; ++j) {
+        fmpz_mat_zero(unit_row.raw());
+        fmpz_one(fmpz_mat_entry(unit_row.raw(), 0, j));
+        if (!basis_element.set_coordinates(
+                    flint::FmpzMatConstRef(unit_row)) ||
+            !basis_element.get_element(basis_value) ||
+            !product.multiply(zeta, basis_value) ||
+            !order.coordinates(flint::FmpqMatRef(image_row), product)) {
+            return;
+        }
+        for (slong i = 0; i < n; ++i) {
+            fmpq_set(fmpq_mat_entry(z.raw(), j, i),
+                     fmpq_mat_entry(image_row.raw(), 0, i));
+        }
+    }
+
+    flint::FmpzMat z_num(n, n);
+    flint::Fmpz z_den;
+    fmpq_mat_get_fmpz_mat_matwise(z_num.raw(), z_den.raw(), z.raw());
+    out.numerators.reserve(static_cast<std::size_t>(torsion_order - 1));
+    out.denominators.reserve(static_cast<std::size_t>(torsion_order - 1));
+    for (slong k = 1; k < torsion_order; ++k) {
+        flint::FmpzMat numerator(n, n);
+        flint::Fmpz denominator;
+        if (k == 1) {
+            fmpz_mat_set(numerator.raw(), z_num.raw());
+            fmpz_set(denominator.raw(), z_den.raw());
+        } else {
+            fmpz_mat_mul(numerator.raw(), out.numerators.back().raw(),
+                         z_num.raw());
+            fmpz_mul(denominator.raw(), out.denominators.back().raw(),
+                     z_den.raw());
+        }
+        out.numerators.push_back(std::move(numerator));
+        out.denominators.push_back(std::move(denominator));
+    }
+
+    // key vector c and its images Z^k c / d_k mod p.
+    out.key_rows.assign(static_cast<std::size_t>(torsion_order * n), 0);
+    for (slong j = 0; j < n; ++j) {
+        out.key_rows[static_cast<std::size_t>(j)] =
+                UWORD(1) + (static_cast<ulong>(j + 1) * UWORD(2654435761)) %
+                                   (kSmallLllOrbitKeyPrime - 1);
+    }
+    for (slong k = 1; k < torsion_order; ++k) {
+        const fmpz_mat_struct* numerator =
+                out.numerators[static_cast<std::size_t>(k - 1)].raw();
+        const ulong den = fmpz_fdiv_ui(
+                out.denominators[static_cast<std::size_t>(k - 1)].raw(),
+                kSmallLllOrbitKeyPrime);
+        if (den == 0) {
+            out.key_rows.clear();
+            return;
+        }
+        const ulong den_inverse = n_invmod(den, kSmallLllOrbitKeyPrime);
+        for (slong j = 0; j < n; ++j) {
+            ulong value = 0;
+            for (slong i = 0; i < n; ++i) {
+                const ulong entry = fmpz_fdiv_ui(
+                        fmpz_mat_entry(numerator, j, i),
+                        kSmallLllOrbitKeyPrime);
+                value = (value + entry * out.key_rows[
+                                 static_cast<std::size_t>(i)]) %
+                        kSmallLllOrbitKeyPrime;
+            }
+            out.key_rows[static_cast<std::size_t>(k * n + j)] =
+                    (value * den_inverse) % kSmallLllOrbitKeyPrime;
+        }
+    }
+    out.degree = n;
+    out.torsion_order = torsion_order;
+    out.active = true;
+}
+
 bool collect_order_small_lll_relations(
         ClassGroupContext& context,
         const Order& order,
@@ -201,7 +435,8 @@ bool collect_order_small_lll_relations(
         bool& partial_throttle_exit,
         ClassGroupRelationSource source,
         slong max_good_relations,
-        IdealLatticeRoundedEmbeddingCache* lll_cache) noexcept {
+        IdealLatticeRoundedEmbeddingCache* lll_cache,
+        SmallLllTorsionOrbit* torsion_orbit) noexcept {
     const DiagnosticsContext* diagnostics = context.diagnostics();
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.small_lll.collect_order");
@@ -238,6 +473,14 @@ bool collect_order_small_lll_relations(
 
 
     flint::FmpzMat coordinates(1, order.degree());
+    const bool use_orbit = torsion_orbit != nullptr && torsion_orbit->active &&
+            torsion_orbit->degree == order.degree();
+    SmallLllOrbitState orbit_state;
+    flint::FmpzMat captured_row(use_orbit ? 1 : 0,
+                                use_orbit ? context.generator_count() : 0);
+    if (use_orbit) {
+        orbit_state.image = flint::FmpzMat(1, order.degree());
+    }
     slong count = 0;
     slong good_relations = 0;
     const slong processed_limit =
@@ -252,19 +495,51 @@ bool collect_order_small_lll_relations(
             break;
         }
         const slong relation_count_before = context.relation_count();
-        {
+        bool orbit_skip = false;
+        // try_coordinate_candidate returns at once on either budget; leave
+        // that case to it.
+        if (use_orbit && candidates_tried < options.max_candidates &&
+            accepted_relations < options.max_relations) {
+            try_small_lll_orbit_skip(orbit_skip, context, *torsion_orbit,
+                                     orbit_state, coordinates);
+        }
+        if (orbit_skip) {
+            // The full test's only effects for this candidate: it is
+            // counted, and its row is a duplicate of a stored row.
+            ++candidates_tried;
+            ++torsion_orbit->skipped_candidates;
+            SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::class_group,
+                                "class_group.candidate_relation");
+            ClassGroupRelationSearchAccess::record_skipped_dependent(context);
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail, "skipped duplicate relation");
+        } else {
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::class_group,
                     "class_group.small_lll.candidate_try");
-            if (!try_coordinate_candidate(
-                        context, order, coordinates, norm_prefilter,
-                        source,
-                        target_relation_kernel_units,
-                        options.max_candidates, options.max_relations,
-                        candidates_tried, accepted_relations,
-                        options.requested_certification, goal_reached,
-                        partial_throttle_exit)) {
+            if (use_orbit) {
+                ClassGroupRelationSearchAccess::
+                        arm_generator_relation_row_capture(context,
+                                                           &captured_row);
+            }
+            const bool tried = try_coordinate_candidate(
+                    context, order, coordinates, norm_prefilter,
+                    source,
+                    target_relation_kernel_units,
+                    options.max_candidates, options.max_relations,
+                    candidates_tried, accepted_relations,
+                    options.requested_certification, goal_reached,
+                    partial_throttle_exit);
+            const bool captured =
+                    use_orbit &&
+                    ClassGroupRelationSearchAccess::
+                            disarm_generator_relation_row_capture(context);
+            if (!tried) {
                 return false;
+            }
+            if (captured) {
+                record_small_lll_orbit_entry(orbit_state, *torsion_orbit,
+                                             coordinates, captured_row);
             }
         }
         if (context.relation_count() > relation_count_before) {
@@ -968,7 +1243,8 @@ bool collect_pivot_lll_ideal(
         slong& accepted_relations,
         bool& goal_reached,
         bool& partial_throttle_exit,
-        IdealLatticeRoundedEmbeddingCache* lll_cache = nullptr) noexcept {
+        IdealLatticeRoundedEmbeddingCache* lll_cache = nullptr,
+        SmallLllTorsionOrbit* torsion_orbit = nullptr) noexcept {
     const DiagnosticsContext* diagnostics = context.diagnostics();
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.pivot_lll_ideal");
@@ -1033,7 +1309,7 @@ bool collect_pivot_lll_ideal(
                     candidates_tried, accepted_relations, goal_reached,
                     partial_throttle_exit,
                     ClassGroupRelationSource::RandomProduct, max_good,
-                    lll_cache)) {
+                    lll_cache, torsion_orbit)) {
             return false;
         }
     }
@@ -1171,6 +1447,18 @@ bool ClassGroupContext::run_lll_relation_route_(
         }
     }
 
+    // Exact torsion-orbit data for skipping small-LLL candidates that are
+    // root-of-unity multiples of an earlier smooth candidate of the same
+    // ideal (inactive unless the field is totally complex with w > 2).
+    detail::relation_search::SmallLllTorsionOrbit torsion_orbit;
+    {
+        SILEX_PROFILE_SCOPE(active_diagnostics,
+                            DiagnosticsModule::class_group,
+                            "class_group.route.small_lll_torsion_orbit");
+        detail::relation_search::build_small_lll_torsion_orbit(
+                torsion_orbit, order, &norm_prefilter);
+    }
+
     // Per-order rounded embedding, order Gram and route-check result, kept
     // in the context so every per-ideal reduction of this and later route
     // slices of the context shares them.
@@ -1193,7 +1481,7 @@ bool ClassGroupContext::run_lll_relation_route_(
                 source_loop_target_units, options,
                 candidates_tried, accepted_relations, goal_reached,
                 partial_throttle_exit, ClassGroupRelationSource::Search,
-                WORD(-1), &lll_cache);
+                WORD(-1), &lll_cache, &torsion_orbit);
     }
     if (search_ok && (extension_only || !goal_reached) &&
         !partial_throttle_exit) {
@@ -1365,7 +1653,7 @@ bool ClassGroupContext::run_lll_relation_route_(
                               source_loop_target_units, options,
                               candidates_tried, accepted_relations,
                               goal_reached, partial_throttle_exit,
-                              &lll_cache)) {
+                              &lll_cache, &torsion_orbit)) {
                         search_ok = false;
                         break;
                       }
