@@ -707,6 +707,38 @@ bool ClassRelationModuleContext::rebuild_checkpoint() noexcept {
     const slong old_rows = checkpoint_.rank();
     const slong new_basis_rows = basis_count() - checkpoint_basis_count_;
     const slong new_extra_rows = extra_count() - checkpoint_extra_count_;
+    if (old_rows == ambient_dim_ && old_rows > 0 && new_basis_rows == 0) {
+        // Invariant: checkpoint_ holds the canonical row HNF H of the lattice
+        // spanned by the first checkpoint_basis_count_ basis rows and
+        // checkpoint_extra_count_ extra rows, as reset_precomputed_hnf left it
+        // (identity transform, index |det H|).  When H has full rank and
+        // every extra row added since lies in the lattice of H, the rows of H
+        // and the new rows span that same lattice, and the row HNF of a
+        // lattice is unique (the fmpz_mat_hnf contract), so the rebuild below
+        // would recompute H and reset checkpoint_ to the state it already
+        // holds.  Membership is the exact remainder test of a row modulo the
+        // full-rank, upper-triangular H, the test HnfContext::refine_dependent
+        // uses to leave its HNF unchanged.  A failed test, or a row outside
+        // the lattice, leaves the decision to the full rebuild.
+        flint::Fmpz checkpoint_index;
+        bool lattice_unchanged =
+                checkpoint_.full_rank_index(
+                        flint::FmpzRef(checkpoint_index)) &&
+                flint::fmpz_sgn(flint::FmpzConstRef(checkpoint_index)) > 0;
+        for (slong i = checkpoint_extra_count_;
+             lattice_unchanged && i < extra_count(); ++i) {
+            bool reduces_to_zero = false;
+            lattice_unchanged =
+                    checkpoint_.row_reduces_to_zero_in_current_lattice(
+                            reduces_to_zero, rel_gens_.row_ref(i)) &&
+                    reduces_to_zero;
+        }
+        if (lattice_unchanged) {
+            checkpoint_extra_count_ = extra_count();
+            checkpoint_valid_ = true;
+            return true;
+        }
+    }
     const slong dense_rows = old_rows + new_basis_rows + new_extra_rows;
     flint::FmpzMat dense(dense_rows, ambient_dim_);
     flint::FmpzMat hnf(dense_rows, ambient_dim_);

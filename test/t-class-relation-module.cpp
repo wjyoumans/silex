@@ -267,6 +267,64 @@ int test_checkpoints_follow_canonical_hnf_across_partial_rank() {
     return 0;
 }
 
+// Checks the published full-rank checkpoint after each step: its index, that
+// its HNF is the canonical HNF of every retained row, and that its transform
+// is the identity on those HNF rows.
+bool full_rank_checkpoint_is(
+        silex::detail::ClassRelationModuleContext& context,
+        slong expected_index) noexcept {
+    sflint::Fmpz index;
+    sflint::FmpzMat transform(context.ambient_dim(), context.ambient_dim());
+    sflint::FmpzMat one(context.ambient_dim(), context.ambient_dim());
+    sflint::fmpz_mat_one(one);
+    return context.checkpoint_index(index) &&
+           sflint::fmpz_equal_si(index, expected_index) &&
+           context.checkpoint_hnf_transform(transform) &&
+           sflint::fmpz_mat_equal(transform, one) &&
+           checkpoint_is_canonical_hnf_of_all_rows(context);
+}
+
+// Once the checkpoint has full rank, extra rows inside its lattice leave it
+// unchanged, while a batch with one row outside the lattice (after or before
+// rows inside it) refines it to the HNF of all rows.
+int test_full_rank_checkpoint_over_lattice_and_new_rows() {
+    silex::detail::ClassRelationModuleContext context;
+    silex::detail::ClassRelationModuleAddResult result;
+    sflint::FmpzMat rows(10, 2);
+    const slong entries[10][2] = {{2, 0}, {0, 3}, {4, 3}, {2, 6}, {-6, 9},
+                                  {2, 3}, {4, 1}, {0, 7}, {1, 0}, {3, 5}};
+    for (slong i = 0; i < 10; ++i) {
+        set_entry(rows, i, 0, entries[i][0]);
+        set_entry(rows, i, 1, entries[i][1]);
+    }
+
+    if (!context.reset(2, 5) ||
+        !context.add_fmpz_mat_row(result, rows, 0, 0) ||
+        !context.add_fmpz_mat_row(result, rows, 1, 1) ||
+        !full_rank_checkpoint_is(context, 6) ||
+        // One row, then two rows, inside the lattice of index 6.
+        !context.add_fmpz_mat_row(result, rows, 2, 2) ||
+        !result.retained || !full_rank_checkpoint_is(context, 6) ||
+        !context.add_fmpz_mat_row(result, rows, 3, 3) ||
+        !context.add_fmpz_mat_row(result, rows, 4, 4) ||
+        !full_rank_checkpoint_is(context, 6) ||
+        // A row inside, then one outside: index 6 becomes 2.
+        !context.add_fmpz_mat_row(result, rows, 5, 5) ||
+        !context.add_fmpz_mat_row(result, rows, 6, 6) ||
+        !full_rank_checkpoint_is(context, 2) ||
+        // A row inside the refined lattice, then a batch whose first row
+        // lies outside it.
+        !context.add_fmpz_mat_row(result, rows, 7, 7) ||
+        !full_rank_checkpoint_is(context, 2) ||
+        !context.add_fmpz_mat_row(result, rows, 8, 8) ||
+        !context.add_fmpz_mat_row(result, rows, 9, 9) ||
+        !full_rank_checkpoint_is(context, 1) ||
+        context.relation_count() != 10) {
+        return 1;
+    }
+    return 0;
+}
+
 int test_copy_and_move_contracts() {
     static_assert(!std::is_copy_constructible_v<
                   silex::detail::ClassRelationModuleContext>);
@@ -481,6 +539,8 @@ int main() {
                    test_checkpoint_incrementally_refines_published_lattice() !=
                            0 ||
                    test_checkpoints_follow_canonical_hnf_across_partial_rank() !=
+                           0 ||
+                   test_full_rank_checkpoint_over_lattice_and_new_rows() !=
                            0 ||
                    test_copy_and_move_contracts() != 0 ||
                    test_rollback_restores_state_before_add() != 0 ||
