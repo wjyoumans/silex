@@ -19,7 +19,10 @@
 #include <flint/fmpz.h>
 #include <flint/fmpz_mod_poly.h>
 #include <flint/fmpz_poly.h>
+#include <flint/nmod.h>
+#include <flint/ulong_extras.h>
 
+#include <cstddef>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -133,8 +136,30 @@ struct ResidueReductionBlockScratch {
     }
 };
 
+// Scratch for the linear-root residue test of one rational prime block.
+// `value` serves the fmpz evaluation.  For a prime p with 2 <= p < 2^64 the
+// word-size evaluation reads `nmod_t mod` and the coordinate (or theta-
+// numerator) residues mod p, which are computed once for the block on the
+// first linear prime that needs them and reused by every other linear prime
+// above p.  `begin_block` must be called whenever p changes.
 struct LinearResidueEvaluationScratch {
     flint::Fmpz value;
+    nmod_t mod{};
+    bool word_prime = false;
+    bool coordinate_residues_ready = false;
+    bool polynomial_residues_ready = false;
+    std::vector<ulong> coordinate_residues;
+    std::vector<ulong> polynomial_residues;
+
+    void begin_block(flint::FmpzConstRef p) noexcept {
+        coordinate_residues_ready = false;
+        polynomial_residues_ready = false;
+        word_prime = fmpz_cmp_ui(p.raw(), 2) >= 0 &&
+                     fmpz_abs_fits_ui(p.raw()) != 0;
+        if (word_prime) {
+            nmod_init(&mod, fmpz_get_ui(p.raw()));
+        }
+    }
 };
 
 #define SILEX_RELATION_PROFILE_EVENT(diagnostics, label) \
@@ -265,7 +290,50 @@ bool reduce_polynomial_mod_residue_with_block_scratch(
     return true;
 }
 
-bool coordinate_polynomial_vanishes_at_linear_root_mod_prime(
+// Word-size Horner evaluation of sum residues[i] x^i at x = root mod p.
+//
+// Overflow argument.  begin_block admits only 2 <= p <= 2^64 - 1, so p is
+// one limb and nmod_init gives the normalised preinverse for it.  Every
+// residue comes from fmpz_fdiv_ui(., p), which returns the floor remainder,
+// an integer in [0, p) for every fmpz including negative and multi-limb
+// values; so do `root_word` and the running value.  Each Horner step
+// multiplies the running value by the fixed root and adds one residue:
+// - below 2^(FLINT_BITS - 1) the product is n_mulmod_shoup with the
+//   quotient floor(root_word 2^64 / p) from n_mulmod_precomp_shoup, which
+//   is documented for p < 2^(FLINT_BITS - 1) and operands in [0, p) and
+//   returns the residue in [0, p) (as in relation_kernel.cpp);
+// - from 2^(FLINT_BITS - 1) to 2^64 - 1 it is nmod_mul, which forms the
+//   full two-limb product and reduces it with the preinverse for every
+//   one-limb modulus, for operands in [0, p).
+// nmod_add takes operands in [0, p) and never forms a + b when that sum
+// would reach p, so it cannot wrap.  No intermediate exceeds a limb.  The
+// value is the residue of the same polynomial at the same root as the fmpz
+// path below (fmpz_mod with p > 0 also returns the representative in
+// [0, p)), so the two paths give the same zero test.  For p >= 2^64, or
+// p < 2, the caller keeps the fmpz path.
+bool word_residues_vanish_at_root(const std::vector<ulong>& residues,
+                                  flint::FmpzConstRef root,
+                                  nmod_t mod) noexcept {
+    const ulong root_word = fmpz_fdiv_ui(root.raw(), mod.n);
+    ulong value = 0;
+    if (mod.n < (UWORD(1) << (FLINT_BITS - 1))) {
+        const ulong root_precomp =
+                n_mulmod_precomp_shoup(root_word, mod.n);
+        for (std::size_t i = residues.size(); i-- > 0;) {
+            value = nmod_add(n_mulmod_shoup(root_word, value, root_precomp,
+                                            mod.n),
+                             residues[i], mod);
+        }
+    } else {
+        for (std::size_t i = residues.size(); i-- > 0;) {
+            value = nmod_add(nmod_mul(value, root_word, mod), residues[i],
+                             mod);
+        }
+    }
+    return value == 0;
+}
+
+bool coordinate_polynomial_vanishes_at_linear_root_mod_prime_fmpz(
         bool& out,
         LinearResidueEvaluationScratch& scratch,
         flint::FmpzMatConstRef coordinates,
@@ -293,8 +361,44 @@ bool coordinate_polynomial_vanishes_at_linear_root_mod_prime(
     return true;
 }
 
-// Whether `polynomial` vanishes at `root` modulo p.
-bool polynomial_vanishes_at_linear_root_mod_prime(
+// Whether the coordinate polynomial vanishes at `root` modulo p, the prime
+// passed to scratch.begin_block.  Word-size primes use the block's cached
+// coordinate residues; the others use the fmpz evaluation.
+bool coordinate_polynomial_vanishes_at_linear_root_mod_prime(
+        bool& out,
+        LinearResidueEvaluationScratch& scratch,
+        flint::FmpzMatConstRef coordinates,
+        flint::FmpzConstRef root,
+        flint::FmpzConstRef p) noexcept {
+    if (!scratch.word_prime) {
+        return coordinate_polynomial_vanishes_at_linear_root_mod_prime_fmpz(
+                out, scratch, coordinates, root, p);
+    }
+    out = false;
+    if (flint::fmpz_mat_nrows(coordinates) != 1) {
+        return false;
+    }
+    const slong cols = flint::fmpz_mat_ncols(coordinates);
+    if (cols <= 0) {
+        out = true;
+        return true;
+    }
+    if (!scratch.coordinate_residues_ready) {
+        scratch.coordinate_residues.resize(static_cast<std::size_t>(cols));
+        for (slong i = 0; i < cols; ++i) {
+            scratch.coordinate_residues[static_cast<std::size_t>(i)] =
+                    fmpz_fdiv_ui(
+                            flint::fmpz_mat_entry(coordinates, 0, i).raw(),
+                            scratch.mod.n);
+        }
+        scratch.coordinate_residues_ready = true;
+    }
+    out = word_residues_vanish_at_root(scratch.coordinate_residues, root,
+                                       scratch.mod);
+    return true;
+}
+
+bool polynomial_vanishes_at_linear_root_mod_prime_fmpz(
         bool& out,
         LinearResidueEvaluationScratch& scratch,
         const fmpz_poly_struct* polynomial,
@@ -312,6 +416,37 @@ bool polynomial_vanishes_at_linear_root_mod_prime(
         fmpz_mod(scratch.value.raw(), scratch.value.raw(), p.raw());
     }
     out = fmpz_is_zero(scratch.value.raw()) != 0;
+    return true;
+}
+
+// Whether `polynomial` vanishes at `root` modulo p, the prime passed to
+// scratch.begin_block; word-size primes use the block's cached coefficient
+// residues.
+bool polynomial_vanishes_at_linear_root_mod_prime(
+        bool& out,
+        LinearResidueEvaluationScratch& scratch,
+        const fmpz_poly_struct* polynomial,
+        flint::FmpzConstRef root,
+        flint::FmpzConstRef p) noexcept {
+    if (!scratch.word_prime) {
+        return polynomial_vanishes_at_linear_root_mod_prime_fmpz(
+                out, scratch, polynomial, root, p);
+    }
+    out = false;
+    if (polynomial == nullptr) {
+        return false;
+    }
+    if (!scratch.polynomial_residues_ready) {
+        const slong length = fmpz_poly_length(polynomial);
+        scratch.polynomial_residues.resize(static_cast<std::size_t>(length));
+        for (slong i = 0; i < length; ++i) {
+            scratch.polynomial_residues[static_cast<std::size_t>(i)] =
+                    fmpz_fdiv_ui(polynomial->coeffs + i, scratch.mod.n);
+        }
+        scratch.polynomial_residues_ready = true;
+    }
+    out = word_residues_vanish_at_root(scratch.polynomial_residues, root,
+                                       scratch.mod);
     return true;
 }
 
@@ -656,6 +791,7 @@ bool factor_integral_data_over_base_by_residue_screen(
                     "relation.factor_over_base_integral_residue_scan");
             ResidueReductionBlockScratch reduction_scratch;
             ResidueReductionBlockScratch theta_reduction_scratch;
+            linear_scratch.begin_block(flint::FmpzConstRef(p));
             for (slong offset = 0; offset < length; ++offset) {
                 slong index = -1;
                 if (!base.rational_prime_block_index(index, block_index,
@@ -1466,6 +1602,44 @@ bool RelationAccess::residue_screen_row(
     }
     handled = status != ElementFactorOverBaseStatus::unsupported;
     smooth = status == ElementFactorOverBaseStatus::smooth;
+    return true;
+}
+
+bool RelationAccess::linear_root_residue_paths(
+        std::vector<int>& results,
+        bool& word_path,
+        flint::FmpzMatConstRef coordinates,
+        flint::FmpzMatConstRef roots,
+        flint::FmpzConstRef p) noexcept {
+    results.clear();
+    word_path = false;
+    if (flint::fmpz_mat_nrows(coordinates) != 1 ||
+        flint::fmpz_mat_nrows(roots) != 1 || fmpz_sgn(p.raw()) <= 0) {
+        return false;
+    }
+    flint::FmpzPoly polynomial;
+    integral_coordinates_to_polynomial(polynomial, coordinates);
+    LinearResidueEvaluationScratch fmpz_scratch;
+    LinearResidueEvaluationScratch scratch;
+    scratch.begin_block(p);
+    word_path = scratch.word_prime;
+    for (slong j = 0; j < flint::fmpz_mat_ncols(roots); ++j) {
+        const flint::FmpzConstRef root = flint::fmpz_mat_entry(roots, 0, j);
+        bool values[4] = {false, false, false, false};
+        if (!coordinate_polynomial_vanishes_at_linear_root_mod_prime_fmpz(
+                    values[0], fmpz_scratch, coordinates, root, p) ||
+            !coordinate_polynomial_vanishes_at_linear_root_mod_prime(
+                    values[1], scratch, coordinates, root, p) ||
+            !polynomial_vanishes_at_linear_root_mod_prime_fmpz(
+                    values[2], fmpz_scratch, polynomial.raw(), root, p) ||
+            !polynomial_vanishes_at_linear_root_mod_prime(
+                    values[3], scratch, polynomial.raw(), root, p)) {
+            return false;
+        }
+        for (const bool value : values) {
+            results.push_back(value ? 1 : 0);
+        }
+    }
     return true;
 }
 

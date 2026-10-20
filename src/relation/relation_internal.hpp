@@ -9,6 +9,8 @@
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/fmpz_poly.hpp>
 
+#include <vector>
+
 namespace silex::detail {
 
 class TestHookAccess;
@@ -97,6 +99,22 @@ private:
             flint::FmpqConstRef norm,
             bool deduce_last_hit_valuation,
             slong* deduced_hit_valuations) noexcept;
+
+    // Test hook: the linear-root residue test of the screen.  The 1 x n
+    // `coordinates` are read as the polynomial sum c_i x^i and tested at
+    // each entry of the 1 x k `roots` modulo p, both as coordinates and as
+    // a polynomial, and both by the fmpz evaluation and by the production
+    // dispatch, which takes the word-size path when 2 <= p < 2^64.  One
+    // block scratch serves every root, as in the screen.  `results`
+    // receives, per root, {coordinate fmpz, coordinate dispatch, polynomial
+    // fmpz, polynomial dispatch} as 0/1; `word_path` tells whether p took
+    // the word-size path.  For tests only.
+    static bool linear_root_residue_paths(
+            std::vector<int>& results,
+            bool& word_path,
+            flint::FmpzMatConstRef coordinates,
+            flint::FmpzMatConstRef roots,
+            flint::FmpzConstRef p) noexcept;
 };
 
 }  // namespace silex::detail

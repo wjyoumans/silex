@@ -15,6 +15,7 @@
 #include <flint/fmpz_mat.h>
 
 #include <cassert>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -1362,6 +1363,93 @@ int test_keeps_factor_base_alive() {
     return 0;
 }
 
+// The word-size linear-root residue test of the factor-base screen agrees
+// with the fmpz evaluation, for coordinates of any sign and size, roots
+// outside [0, p), one-limb primes up to 2^64 - 59, and the fmpz fallback
+// for p >= 2^64.  Each case also includes a root at which the polynomial
+// vanishes, so both answers are exercised.
+int test_linear_root_residue_word_path_matches_fmpz() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    const char* primes[] = {"2", "3", "5", "17", "65537", "2147483647",
+                            "2305843009213693951",
+                            "9223372036854775837",
+                            "18446744073709551557",
+                            "18446744073709551629",
+                            "340282366920938463463374607431768211507"};
+    sflint::Fmpz two64;
+    fmpz_one(two64.raw());
+    fmpz_mul_2exp(two64.raw(), two64.raw(), 64);
+    slong zero_hits = 0;
+    for (const char* prime_text : primes) {
+        sflint::Fmpz p;
+        assert(fmpz_set_str(p.raw(), prime_text, 10) == 0);
+        const bool expect_word = fmpz_cmp(p.raw(), two64.raw()) < 0;
+        for (slong length = 0; length <= 17; ++length) {
+            for (slong trial = 0; trial < 6; ++trial) {
+                sflint::FmpzMat coordinates(1, length);
+                for (slong i = 0; i < length; ++i) {
+                    fmpz_randtest(fmpz_mat_entry(coordinates.raw(), 0, i),
+                                  state, 1 + 40 * trial);
+                }
+                sflint::Fmpz root;
+                fmpz_randm(root.raw(), state, p.raw());
+                // Shift the constant coordinate so the polynomial vanishes
+                // at `root` modulo p.
+                if (length > 0) {
+                    sflint::Fmpz value;
+                    sflint::Fmpz power;
+                    fmpz_one(power.raw());
+                    for (slong i = 0; i < length; ++i) {
+                        fmpz_addmul(value.raw(),
+                                    fmpz_mat_entry(coordinates.raw(), 0, i),
+                                    power.raw());
+                        fmpz_mul(power.raw(), power.raw(), root.raw());
+                    }
+                    fmpz_mod(value.raw(), value.raw(), p.raw());
+                    fmpz_sub(fmpz_mat_entry(coordinates.raw(), 0, 0),
+                             fmpz_mat_entry(coordinates.raw(), 0, 0),
+                             value.raw());
+                }
+                sflint::FmpzMat roots(1, 6);
+                fmpz_set(fmpz_mat_entry(roots.raw(), 0, 0), root.raw());
+                fmpz_add(fmpz_mat_entry(roots.raw(), 0, 1), root.raw(),
+                         p.raw());
+                fmpz_sub(fmpz_mat_entry(roots.raw(), 0, 2), root.raw(),
+                         p.raw());
+                fmpz_randm(fmpz_mat_entry(roots.raw(), 0, 3), state, p.raw());
+                fmpz_randtest(fmpz_mat_entry(roots.raw(), 0, 4), state, 150);
+                fmpz_sub_ui(fmpz_mat_entry(roots.raw(), 0, 5), p.raw(), 1);
+
+                std::vector<int> results;
+                bool word_path = !expect_word;
+                assert(silex::detail::TestHookAccess::
+                               linear_root_residue_paths(
+                                       results, word_path,
+                                       sflint::FmpzMatConstRef(coordinates),
+                                       sflint::FmpzMatConstRef(roots),
+                                       sflint::FmpzConstRef(p)));
+                assert(word_path == expect_word);
+                assert(results.size() == 6 * 4);
+                for (std::size_t j = 0; j < 6; ++j) {
+                    const int* r = results.data() + 4 * j;
+                    assert(r[0] == r[1]);
+                    assert(r[2] == r[3]);
+                    assert(r[0] == r[2]);
+                    zero_hits += r[0];
+                }
+                // The constructed root and its shifts by p are zeros.
+                for (std::size_t j = 0; j < 3; ++j) {
+                    assert(results[4 * j] == 1);
+                }
+            }
+        }
+    }
+    assert(zero_hits > 0);
+    flint_rand_clear(state);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1383,5 +1471,6 @@ int main() {
     assert(test_relation_matrix_to_abelian_group() == 0);
     assert(test_cross_parent_copy_swap() == 0);
     assert(test_keeps_factor_base_alive() == 0);
+    assert(test_linear_root_residue_word_path_matches_fmpz() == 0);
     return 0;
 }

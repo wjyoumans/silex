@@ -37,6 +37,8 @@
 #include "zeta/zeta_internal.hpp"
 #include <silex/factor_base.hpp>
 
+#include <vector>
+
 namespace silex::detail {
 
 class TestHookAccess {
@@ -72,6 +74,18 @@ public:
         return RelationAccess::residue_screen_row(
                 exponents, handled, smooth, base, integral_coordinates, norm,
                 deduce_last_hit_valuation, deduced_hit_valuations);
+    }
+
+    // The linear-root residue test by the fmpz evaluation and by the
+    // production (word-size when p fits a limb) dispatch; see
+    // RelationAccess::linear_root_residue_paths.
+    static bool linear_root_residue_paths(std::vector<int>& results,
+                                          bool& word_path,
+                                          flint::FmpzMatConstRef coordinates,
+                                          flint::FmpzMatConstRef roots,
+                                          flint::FmpzConstRef p) noexcept {
+        return RelationAccess::linear_root_residue_paths(
+                results, word_path, coordinates, roots, p);
     }
 
     // Prime-ideal test entries, forwarded to private PrimeIdealAccess

@@ -160,6 +160,19 @@ Changed
   ``imaginary_quadratic_34`` 11%, ``simplest_cubic_a12`` 8%,
   ``cyclotomic_64_phi32`` 3%).
 
+- The relation residue screen in class-group relation search tests an
+  element against the degree-one primes of a factor-base block in word-size
+  arithmetic when the rational prime ``p`` is below ``2^64``.  It reduces the
+  element's coordinates (or its polynomial in the generator) modulo ``p``
+  once per block and evaluates them at each prime's root with FLINT's
+  ``n_mulmod_shoup`` (``p`` below ``2^63``) or ``nmod_mul``, instead of a
+  Horner evaluation in ``fmpz`` with a reduction at every step.  Larger
+  primes keep the ``fmpz`` evaluation.  The screen's answers are the same,
+  and published results are unchanged on every row of the ``grh`` corpus
+  that finishes (184 rows compared); only the work changes (callgrind
+  instruction counts, ``grh`` mode: ``cyclotomic_32_phi16`` 8% fewer,
+  ``cyclotomic_real_64_deg16`` 0.7%).
+
 - The Hensel ``is_power`` path computes the leading coefficient of an
   element's primitive integral characteristic polynomial (its ``n``-th power
   pre-filter and height bound) from the integral multiplication matrix
