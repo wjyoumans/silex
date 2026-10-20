@@ -1737,6 +1737,17 @@ Changed
   for ``real_quadratic_d100000000000009`` and 1.3% fewer for
   ``cyclotomic_64_phi32``.  No timing has been measured.
 
+- The least positive integer in an ideal, used by the two-generator ideal
+  product, is found by forward substitution on the ideal's triangular Hermite
+  normal form instead of a general rational linear solve.  Every division in
+  the substitution is by a common factor, so it is exact, and the result is
+  the same integer as before.  Published outputs are identical on the ``grh``
+  corpus (184 rows compared) and on the ``proven`` corpus rows that finish
+  (176 rows compared, 87 of which reach this routine).
+  Under callgrind the ``grh`` class/unit computation ran 5.4% fewer
+  instructions for ``cyclotomic_32_phi16`` and 4.7% fewer for
+  ``cyclotomic_real_64_deg16``.  No timing has been measured.
+
 Fixed
 -----
 
