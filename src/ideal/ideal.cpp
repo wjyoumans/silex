@@ -1519,15 +1519,37 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out, const Ideal& left,
             mh.swap(mk);
         }
         // Extract from k (the smaller minimum; right wins ties).
-        flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n), reduced(2 * n, n);
+        flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n);
         const bool found = extract_two_generator(row, matrix, order,
                 flint::FmpzMatConstRef(k), mk, options, report);
         if (output_report != nullptr) *output_report = report;
         if (!found) return false;
         two_generator_rows(rows, flint::FmpzMatConstRef(h),
                            flint::FmpzConstRef(mk), flint::FmpzMatConstRef(matrix));
-        fmpz_mat_hnf(reduced.raw(), rows.raw());
-        flint::FmpzMatConstWindow top(reduced, 0, 0, n, n);
+        // Source trace: reference `base4.c:idealHNF_mul_two` returns
+        // ZM_hnfmodid(m, a * x[1,1]) for the rows m = [x a; M_alpha x], with
+        // a the scalar generator and x[1,1] the minimum of x.  Here the rows
+        // mk H and H M_beta span mk h + beta h = h (mk O + beta O) = h k,
+        // because extract_two_generator verified k = mk O + beta O.  Since
+        // mh is in h and mk is in k, mh mk lies in the ideal h k, so
+        // mh mk Z^n is inside the row lattice and every elementary divisor
+        // divides mh mk.  That is the contract of FLINT
+        // fmpz_mat_hnf_modular_eldiv with D = mh mk, whose result is the
+        // unique HNF that fmpz_mat_hnf returns.  The argument uses only that
+        // h k is an ideal of the order, not that the order is maximal.
+        flint::Fmpz exponent;
+        fmpz_mul(exponent.raw(), mh.raw(), mk.raw());
+        if (fmpz_is_one(exponent.raw())) {
+            // Not reached for non-scalar h and k (a minimum of one means the
+            // unit ideal); FLINT's word path would reduce modulo 1.
+            flint::FmpzMat full(2 * n, n);
+            fmpz_mat_hnf(full.raw(), rows.raw());
+            rows.swap(full);
+        } else {
+            fmpz_mat_hnf_modular_eldiv(rows.raw(), exponent.raw());
+        }
+        // The window is taken after the HNF, which may permute row storage.
+        flint::FmpzMatConstWindow top(rows, 0, 0, n, n);
         fmpz_mul(ch.raw(), ch.raw(), ck.raw());
         fmpz_mat_scalar_mul_fmpz(result.raw(), top.raw(), ch.raw());
     }

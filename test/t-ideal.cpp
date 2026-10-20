@@ -7,6 +7,7 @@
 #include "../src/ideal/hnf_membership_internal.hpp"
 #include "../src/ideal/ideal_access_internal.hpp"
 #include "../src/ideal/two_generator_internal.hpp"
+#include "../src/order/order_internal.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -2283,10 +2284,13 @@ int test_known_two_generator_hnf_matches_generic() {
 }
 
 // The generic branch of try_ideal_product_hnf takes the HNF of the rows
-// [mk H; H M_beta] (fmpz_mat_hnf).  Compare it with
+// [mk H; H M_beta] modulo mh mk (fmpz_mat_hnf_modular_eldiv).  Compare it with
 // the plain fmpz_mat_hnf of all n^2 basis products, over maximal orders with
 // trivial and nontrivial index, ideals with content, equal minima, squares and
 // word and multiword moduli.  Outside a maximal order the branch is refused.
+// The modulus needs only that h k is an ideal, not maximality: on a
+// non-maximal order whose flag is forced through the test hook, every product
+// the branch returns is still the plain product.
 void plain_product_hnf(sflint::FmpzMat& out, const silex::Ideal& left,
                        const silex::Ideal& right) noexcept {
     const silex::Order& order = *left.parent();
@@ -2413,6 +2417,29 @@ int test_general_product_hnf_matches_plain_hnf() {
             plain_product_hnf(expected, a, b);
             assert(product.multiply(a, b) && product.get_hnf(sflint::FmpzMatRef(actual)));
             assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+
+            // Forced flag: the branch runs on Z[10^(1/3)], index 3 in the
+            // maximal order, and its products stay exact.
+            std::vector<silex::Ideal> forced;
+            for (slong point : {2, 3, -2, 7, 11}) {
+                forced.emplace_back(equation);
+                assert(silex::test::ideal_product::evaluation_ideal(forced.back(), polynomial, point));
+            }
+            silex::detail::OrderAccess::set_maximality_unchecked(equation, true);
+            slong forced_generic = 0;
+            for (const silex::Ideal& left : forced) {
+                for (const silex::Ideal& right : forced) {
+                    if (left.is_one() || right.is_one()) continue;
+                    silex::detail::TwoGeneratorSearchReport report;
+                    if (!silex::detail::try_ideal_product_hnf(sflint::FmpzMatRef(actual), left,
+                                                              right, {}, &report)) continue;
+                    if (report.verified) ++forced_generic;
+                    plain_product_hnf(expected, left, right);
+                    assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+                }
+            }
+            silex::detail::OrderAccess::set_maximality_unchecked(equation, false);
+            assert(forced_generic > 0);
         }
     }
     assert(generic >= 100 && multiword > 0);

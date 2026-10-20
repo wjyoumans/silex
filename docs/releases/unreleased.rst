@@ -199,6 +199,18 @@ Changed
   instruction counts, ``grh`` mode: ``cyclotomic_32_phi16`` 8% fewer,
   ``cyclotomic_real_64_deg16`` 0.7%).
 
+- The general product of two integral ideals (neither scalar nor with a known
+  principal generator) reduces the ``2n x n`` rows ``[m_k H; H M_beta]``
+  with FLINT's ``fmpz_mat_hnf_modular_eldiv`` modulo ``m_h m_k``, the
+  product of the two ideals' minima, as PARI's ``idealHNF_mul_two`` does
+  with ``ZM_hnfmodid``, instead of a full ``fmpz_mat_hnf``.  The product
+  ideal contains ``m_h m_k``, so the modulus is valid in any order and does
+  not rely on the order's maximality flag; the result is the same canonical
+  HNF.  Published results are unchanged on every row of the ``grh`` corpus
+  that finishes (184 rows compared); callgrind instruction counts, ``grh``
+  mode: ``cyclotomic_32_phi16`` 1.8% fewer, ``cyclotomic_real_64_deg16``
+  4.4% fewer.
+
 - The Hensel ``is_power`` path computes the leading coefficient of an
   element's primitive integral characteristic polynomial (its ``n``-th power
   pre-filter and height bound) from the integral multiplication matrix
