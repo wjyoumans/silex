@@ -149,6 +149,18 @@ Changed
   0.1% fewer.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The word-size kernel that counts the roots of the defining polynomial
+  modulo each prime in the Belabas-Friedman prime loop squares ``x^k mod f``
+  symmetrically: each cross product is formed once and doubled, so a degree
+  ``d`` square takes ``d(d + 1)/2`` products instead of ``d^2`` (136 instead
+  of 256 at degree 16).  The unreduced sums are the same integers, so the
+  counts, the zeta intervals and published results are unchanged: the
+  Belabas-Friedman class-regulator intervals are bit-identical on every
+  corpus field of degree 2 to 20 (170 fields), and the ``grh`` corpus
+  outputs are unchanged on every row that finishes (184 rows).  Callgrind
+  instruction counts, ``grh`` mode: ``cyclotomic_32_phi16`` 2.0% fewer,
+  ``cyclotomic_real_64_deg16`` 1.3% fewer.
+
 - Appending a relation to a class-group computation adds the row to the
   relation module in place instead of first copying the whole module
   (modular rank basis, retained rows and HNF checkpoint).  The add records
