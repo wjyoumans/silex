@@ -161,6 +161,20 @@ Changed
   instruction counts, ``grh`` mode: ``cyclotomic_32_phi16`` 2.0% fewer,
   ``cyclotomic_real_64_deg16`` 1.3% fewer.
 
+- Once the relation module's HNF checkpoint has full rank, refreshing it
+  first reduces each relation added since modulo the checkpoint HNF and keeps
+  the checkpoint when every one reduces to zero, instead of recomputing the
+  HNF of the checkpoint and the new rows with ``fmpz_mat_hnf_modular``.  Rows
+  inside the checkpoint lattice cannot change it, and the HNF of a lattice is
+  unique, so the skipped work would have reproduced the stored checkpoint; a
+  row outside the lattice still triggers the full refresh.  On the ``grh``
+  corpus 550 of 611 full-rank refreshes are skipped.  Published results are
+  unchanged on every row of the ``grh`` and ``proven`` corpora that
+  finishes (184 and 177 rows compared); only the work changes (callgrind
+  instruction counts, ``grh`` mode: ``simplest_cubic_a12`` 15% fewer,
+  ``real_quadratic_d100000000000009`` 4.9%,
+  ``lmfdb_8_8_73116160000_2`` 2.4%, ``cyclotomic_35_phi24`` 0.2%).
+
 - Appending a relation to a class-group computation adds the row to the
   relation module in place instead of first copying the whole module
   (modular rank basis, retained rows and HNF checkpoint).  The add records
