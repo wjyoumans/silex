@@ -316,6 +316,18 @@ Changed
   witnesses, caps, honesty verdicts and every published result are
   unchanged; only the running time changes, on degree 2 to 4 fields.
 
+- The small-LLL candidate loop of class-group relation search skips a
+  candidate that is a root of unity times a candidate already tried for the
+  same ideal, in imaginary and totally complex fields of even degree.  The
+  candidate would give the same relation up to a unit already in the unit
+  group, so it adds no new relation.  Each skipped candidate keeps its
+  counters, matches are confirmed exactly (hash keys only index candidates),
+  and when the orbit cannot be built the skip is off, so relation counts,
+  class groups, regulators and every published result are unchanged; only the
+  work changes (callgrind instruction counts: 14.7% fewer on
+  ``cyclotomic_32_phi16``, 12.2% on ``cyclotomic_48_phi16``, 6.9% on
+  ``cyclotomic_17_phi16``, controls within 0.1%).
+
 - The relation residue screen in class-group relation search values a
   factor-base prime that has no residue polynomial (an index divisor) by its
   exact valuation of the element, with the known norm, instead of sending the
