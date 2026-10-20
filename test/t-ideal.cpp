@@ -2425,8 +2425,23 @@ int test_general_product_hnf_matches_plain_hnf() {
                 forced.emplace_back(equation);
                 assert(silex::test::ideal_product::evaluation_ideal(forced.back(), polynomial, point));
             }
+            // The evaluation ideals are principal, so invertible.  Add the
+            // singular prime P = (3, theta - 1), which is not: P^2 =
+            // <9, 3u, u^2> with u = theta - 1 has index 27, not N(P)^2 = 9.
+            {
+                silex::Element theta(field), shifted(field);
+                silex::OrderElement u(equation);
+                sflint::Fmpz three;
+                fmpz_set_ui(three.raw(), 3);
+                assert(theta.gen() && shifted.add_si(theta, -1) && u.set_element(shifted));
+                forced.emplace_back(equation);
+                assert(silex::detail::set_known_two_generator_ideal(
+                        forced.back(), sflint::FmpzConstRef(three), u));
+            }
+            const silex::Ideal& singular = forced.back();
             silex::detail::OrderAccess::set_maximality_unchecked(equation, true);
             slong forced_generic = 0;
+            bool singular_square = false;
             for (const silex::Ideal& left : forced) {
                 for (const silex::Ideal& right : forced) {
                     if (left.is_one() || right.is_one()) continue;
@@ -2436,10 +2451,16 @@ int test_general_product_hnf_matches_plain_hnf() {
                     if (report.verified) ++forced_generic;
                     plain_product_hnf(expected, left, right);
                     assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+                    if (&left == &singular && &right == &singular && report.verified) {
+                        sflint::Fmpz index;
+                        fmpz_mat_det(index.raw(), expected.raw());
+                        assert(fmpz_equal_ui(index.raw(), 27));
+                        singular_square = true;
+                    }
                 }
             }
             silex::detail::OrderAccess::set_maximality_unchecked(equation, false);
-            assert(forced_generic > 0);
+            assert(forced_generic > 0 && singular_square);
         }
     }
     assert(generic >= 100 && multiword > 0);

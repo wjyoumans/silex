@@ -1537,17 +1537,12 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out, const Ideal& left,
         // fmpz_mat_hnf_modular_eldiv with D = mh mk, whose result is the
         // unique HNF that fmpz_mat_hnf returns.  The argument uses only that
         // h k is an ideal of the order, not that the order is maximal.
+        // mh mk > 1: a minimum of one would put 1 in the primitive h (or k),
+        // making it O and the original ideal scalar, which the scalar
+        // branches above have already handled.
         flint::Fmpz exponent;
         fmpz_mul(exponent.raw(), mh.raw(), mk.raw());
-        if (fmpz_is_one(exponent.raw())) {
-            // Not reached for non-scalar h and k (a minimum of one means the
-            // unit ideal); FLINT's word path would reduce modulo 1.
-            flint::FmpzMat full(2 * n, n);
-            fmpz_mat_hnf(full.raw(), rows.raw());
-            rows.swap(full);
-        } else {
-            fmpz_mat_hnf_modular_eldiv(rows.raw(), exponent.raw());
-        }
+        fmpz_mat_hnf_modular_eldiv(rows.raw(), exponent.raw());
         // The window is taken after the HNF, which may permute row storage.
         flint::FmpzMatConstWindow top(rows, 0, 0, n, n);
         fmpz_mul(ch.raw(), ch.raw(), ck.raw());
