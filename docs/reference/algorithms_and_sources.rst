@@ -1032,8 +1032,8 @@ integer LLL sites, with the ``GRAM`` certificate and size cutoff described
 there.
 
 The finite-ideal T2 enumeration reduces the ideal lattice from its embeddings
-rounded at an integer scale, starting at 4 as PARI ``src/basemath/base4.c:
-RM_round_maxrank`` does.  PARI rounds the embeddings of a T2-reduced integral
+rounded at an integer scale; the scales are 4, 8, ... as in PARI
+``src/basemath/base4.c: RM_round_maxrank``.  PARI rounds the embeddings of a T2-reduced integral
 basis; Silex's order basis is not reduced, so the rounding error times the LLL
 transform can swamp the reduced vectors (for the degree-one primes above 89 in
 the real cyclotomic field of conductor 11 and degree 10, the last
@@ -1044,6 +1044,16 @@ misses Hecke's ideal-LLL acceptance bounds (``LLL.jl:_lll``: the bound on
 ``|b_1|^2`` and the bound on the product of the ``|b_i|^2``, with ``d`` the
 determinant of the Gram matrix), Silex reduces the same lattice again from
 the next finer full-rank scale (4, 8, ... up to the working precision).
+The loop for an ideal starts at a per-order hint, the smallest scale accepted
+for an earlier ideal of the same order, instead of at 4; the hint lowers only
+when a rerun from 4 accepts a coarser scale.  If the hinted loop ends in
+fallback or failure, the loop reruns in full from 4, so those results are the
+unhinted loop's.  An ideal whose own loop would accept a scale below the hint
+gets a different, equally valid basis of the same lattice (the acceptance
+test is applied to its own Gram matrix), and the T2 enumeration only searches
+for witnesses that are verified exactly, so this cannot yield a false proof.
+Sharing one rounding per field has PARI precedent: ``buch2.c:
+Fincke_Pohst_ideal`` uses ``nf_get_roundG(nf)`` for every ideal.
 When a finer reduction fails, or no finer scale is left, the first reduced
 basis that had quadratic-form data is kept.  The lattice and the bound rule
 are unchanged; the bound value and the enumeration order follow the new

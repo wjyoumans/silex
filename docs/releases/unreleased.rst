@@ -1653,15 +1653,18 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` and 9.5% fewer for the field defined by
   ``x^16 + 1``.  No timing has been measured.
 
-- The ``proven`` T2 enumeration of an ideal starts its rounding-scale loop at
-  a per-order hint (the smallest scale accepted so far for that order)
-  instead of at scale 4, which skips the scales the order has already
-  rejected.  If no scale at or above the hint is accepted, the loop reruns
+- The T2 enumeration of an ideal (all modes) starts its rounding-scale loop
+  at a per-order hint (the smallest scale accepted so far for that order)
+  instead of at scale 4, which skips scales below the smallest scale accepted
+  for an earlier ideal of the order.  The ``grh`` corpus outputs are
+  unchanged.  If no scale at or above the hint is accepted, the loop reruns
   from scale 4, so fallback and failure results are those of the unhinted
   loop.  The lattice and the reduction test are unchanged; only the starting
   scale moves, so an ideal whose own loop would accept a coarser scale than
   the hint gets a different, equally valid basis of the same lattice.  On
-  the ``proven`` corpus (185 rows compared, 177 with output on both builds)
+  the ``proven`` corpus (185 rows compared, 177 with output on both builds;
+  ``cyclotomic_72_phi24`` timed out only on the candidate and was identical
+  when rerun without the cap)
   class groups, generators, units and proof records are identical, and
   the changes are two rows' bookkeeping and one enclosure.  On
   ``cyclotomic_real_37_deg18``, ``class_group.skipped_dependent_relation_count``

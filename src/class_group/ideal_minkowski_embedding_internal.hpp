@@ -14,7 +14,8 @@ struct OrderMinkowskiEmbeddingCache {
     bool has_order_embedding_rows = false;
     // Smallest rounding scale at which a T2 enumeration basis of an ideal of
     // `order` was accepted (ideal_t2_enumeration.cpp), or 0 when none was.
-    // The next ideal's scale loop starts there.  Cleared when `order` changes.
+    // The next ideal's scale loop starts there.  It lowers only when the rerun
+    // from scale 4 accepts a coarser scale.  Cleared when `order` changes.
     slong t2_rounding_scale_hint = 0;
 };
 

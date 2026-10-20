@@ -1714,7 +1714,9 @@ int test_t2_enumeration_rounding_scale_hint() {
     }
 
     // A start above every scale of the working precision accepts nothing,
-    // so the full loop runs again.
+    // so the full loop runs again.  The quadratic-form fallback of the hinted
+    // pass is covered only through this rerun branch, which it shares with
+    // `failed`.
     {
         silex::detail::OrderMinkowskiEmbeddingCache cache;
         rs::FiniteIdealT2EnumerationData data;
