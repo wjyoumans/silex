@@ -259,7 +259,8 @@ struct HnfFinishWorkspace {
     // from it rests on its identity part being unimodular, which the exact
     // checks do not detect: only the phase may write it
     // (finish_extension_kernel_rows, from the phase output of an input with
-    // a unimodular identity part).  Relations are only ever appended, and a
+    // a unimodular identity part).  The kernel_rows test seam
+    // (FinishKernelTestFailure) violates this when rank is 0; tests use rank >= 1.  Relations are only ever appended, and a
     // relation part that does not match them only makes the checks fail.
     flint::FmpzMat finish_extension{0, 0};
     slong finish_extension_relation_count = 0;

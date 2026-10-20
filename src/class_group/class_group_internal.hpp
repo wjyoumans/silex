@@ -535,7 +535,10 @@ bool relation_kernel_basis(flint::FmpzMat& out,
 // runs, so the fallback is exercised after the phase has changed the
 // matrix.  first_phase: the phase status is also read as -1.  kernel_rows:
 // the status is kept and the exact checks run on the zeroed matrix, whose
-// n rows all have a zero relation part, so the row-count check fails.
+// n rows all have a zero relation part.  The row-count check (n - rank rows)
+// fails only when rank >= 1; with rank 0 the n zero rows pass both exact
+// checks, so tests must use rank >= 1 (otherwise the workspace would cache
+// the zeroed, non-unimodular extension and return zero rows as the basis).
 // first_phase_status: only the status is read as -1; the phase output is
 // kept, so the status check is the only thing that rejects it.
 enum class FinishKernelTestFailure {
