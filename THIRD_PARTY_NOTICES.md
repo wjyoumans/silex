@@ -105,7 +105,16 @@ keeps FLINT's extended-gcd row update and adds a divisible-entry shortcut, a
 pivot-index walk, and skipped reductions; the source comments record the
 deviations.
 
+The Dixon lifting loop of the unit-candidate linear solve,
+`solve_unit_candidate_system` in `src/class_group/class_group.cpp`, is adapted
+from the static `_fmpq_mat_solve_dixon` in FLINT 3.6.0
+`src/fmpq_mat/solve_dixon.c`. The adaptation keeps FLINT's bound, prime,
+lifting schedule, and exact check, and keeps the prime and inverse across
+calls with an unchanged basis; the source comment records the deviation.
+
 Copyright (C) 2021 Fredrik Johansson (`l_fmpq_afe.c`).
+
+Copyright (C) 2011 Fredrik Johansson (`solve_dixon.c`).
 
 Copyright (C) 2014, 2015 Alex J. Best (`hnf_pernet_stein.c`).
 

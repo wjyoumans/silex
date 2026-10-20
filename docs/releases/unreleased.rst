@@ -1661,6 +1661,16 @@ Changed
   fewer instructions for ``cyclotomic_19_phi18`` and 2.3% fewer for the field
   defined by ``x^16 + 1``.  No timing has been measured.
 
+- The ``grh`` unit-candidate linear solve keeps its Dixon prime and inverse
+  while the unit basis is unchanged, instead of recomputing them on every
+  call.  The solution is the same unique rational solution, and published
+  outputs are identical on 184 of 185 ``grh`` corpus rows
+  (``cyclotomic_real_163_deg81`` timed out in both builds).  Under callgrind
+  the ``grh`` class/unit computation ran 12.3% fewer instructions for
+  ``real_quadratic_5``, 10.7% fewer for ``simplest_cubic_a12``, 25.7% fewer
+  for ``real_quadratic_d100000000000009`` and 1.3% fewer for
+  ``cyclotomic_64_phi32``.  No timing has been measured.
+
 Fixed
 -----
 
