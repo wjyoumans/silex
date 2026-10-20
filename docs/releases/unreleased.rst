@@ -196,6 +196,23 @@ Changed
   (6.70G to 4.42G), ``pure_x6_minus_2`` 2.3% fewer.  No timing has been
   measured.
 
+- The ``proven`` HNF unit witnesses take their relation-kernel rows from the
+  same route as the analytic finish: FLINT's double-precision LLL phase
+  (``fmpz_lll_d_with_removal_knapsack``) on ``[c*A | I_n]``, accepted on the
+  exact kernel checks (row count ``n`` minus the rank, ``v*A = 0``, exact
+  rank), with the ``fmpz_lll`` route as the fallback.  FLINT's final
+  reducedness check, which the kernel claim does not use, no longer runs on
+  the witness kernel.  Where that check would have rejected the phase, the
+  witness rows are another basis of the same kernel lattice and the unit
+  generators are equally valid generators of the same unit group.  Published
+  outputs are identical on the ``proven`` corpus (178 rows compared,
+  ``multiquadratic_m23_m31_m47`` included; seven large cyclotomic rows timed
+  out at 120 s on both builds).  Callgrind instruction counts (busy
+  machine): ``simplest_quartic_t10`` 68.2% fewer (4.41G to 1.40G),
+  ``pure_x6_minus_2`` 46.4% fewer (299M to 160M), control
+  ``imaginary_quadratic_d10000000799`` unchanged.  No timing has been
+  measured.
+
 - ``decompose_prime`` rebuilds the index-divisor primes it keeps in the
   order's shared data without re-running the ideal closure test on each
   stored Hermite normal form: every stored matrix is one the library already
@@ -212,7 +229,7 @@ Changed
   exact kernel checks (row count ``n`` minus the rank, ``v*A = 0``), without
   FLINT's final reducedness check, which the kernel claim does not use; when
   the phase fails or a check fails it uses the ``fmpz_lll`` route as before.
-  The unit witnesses and the relation-saturation kernel keep ``fmpz_lll``.
+  The relation-saturation kernel keeps ``fmpz_lll``.
   Decisions and every published result are unchanged on the proven and
   ``grh`` corpora; only the running time changes (busy-machine
   measurement: proven ``real_quadratic_d100000001`` used 60% fewer user
