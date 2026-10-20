@@ -1253,10 +1253,14 @@ void primitive_hnf(flint::FmpzMat& h, flint::Fmpz& content) noexcept {
     fmpz_mat_scalar_divexact_fmpz(h.raw(), h.raw(), content.raw());
 }
 
-bool ideal_minimum(flint::Fmpz& minimum, flint::FmpzMatConstRef coordinates,
-                   flint::FmpzMatConstRef h) noexcept {
+}  // namespace
+
+bool ideal_minimum_generic(flint::Fmpz& minimum,
+                           flint::FmpzMatConstRef coordinates,
+                           flint::FmpzMatConstRef h) noexcept {
     // Source: assure_has_minimum solves in the ideal basis when 1 is not the
-    // first order-basis element. Here H is row HNF, so solve H^t x = [1]_O^t.
+    // first order-basis element. The rows of H are the ideal basis, so solve
+    // H^t x = [1]_O^t; this is ideal_minimum's route for nontriangular H.
     const slong n = fmpz_mat_ncols(h.raw());
     flint::FmpzMat transposed(n, n), rhs(n, 1), solution(n, 1);
     flint::Fmpz denominator, common;
@@ -1273,6 +1277,72 @@ bool ideal_minimum(flint::Fmpz& minimum, flint::FmpzMatConstRef coordinates,
     fmpz_abs(minimum.raw(), minimum.raw());
     return fmpz_sgn(minimum.raw()) > 0;
 }
+
+bool ideal_minimum(flint::Fmpz& minimum, flint::FmpzMatConstRef coordinates,
+                   flint::FmpzMatConstRef h) noexcept {
+    // Source: assure_has_minimum solves in the ideal basis when 1 is not the
+    // first order-basis element. The minimum is the least m > 0 with m x
+    // integral, where x H = [1]_O, that is H^t x^t = [1]_O^t.
+    //
+    // Every caller passes a stored ideal HNF (fmpz_mat_hnf or its modular
+    // variants, or that matrix divided by its content): FLINT's row HNF is
+    // upper triangular with a positive diagonal, so H^t is lower triangular
+    // and x follows by forward substitution, column j giving
+    //   x_j = (c_j - sum_{i<j} H[i][j] x_i) / H[j][j].
+    // Any other square input keeps the generic rational solve.
+    //
+    // Exactness: x is kept as y / d with integer y and d > 0. With
+    // s = c_j d - sum_{i<j} H[i][j] y_i, x_j = s / (d H[j][j]). Put
+    // g = gcd(s, H[j][j]) > 0, a = H[j][j] / g and b = s / g; both
+    // divisions are exact because g divides each dividend. After a sign
+    // change making a > 0, x_j = b / (d a), so d becomes d a, the earlier
+    // y_i are multiplied by a and y_j = b. Then m x is integral exactly when
+    // d / gcd(d, y) divides m, the value the generic solve returns as
+    // den / gcd(den, solution): x is unique because H is nonsingular.
+    const slong n = fmpz_mat_ncols(h.raw());
+    if (fmpz_mat_nrows(h.raw()) != n || fmpz_mat_nrows(coordinates.raw()) != 1 ||
+        fmpz_mat_ncols(coordinates.raw()) != n) return false;
+    for (slong j = 0; j < n; ++j) {
+        bool triangular = !fmpz_is_zero(fmpz_mat_entry(h.raw(), j, j));
+        for (slong i = j + 1; triangular && i < n; ++i) {
+            triangular = fmpz_is_zero(fmpz_mat_entry(h.raw(), i, j)) != 0;
+        }
+        if (!triangular) return ideal_minimum_generic(minimum, coordinates, h);
+    }
+    flint::FmpzMat numerators(1, n);
+    flint::Fmpz denominator, sum, divisor, scale;
+    fmpz_one(denominator.raw());
+    for (slong j = 0; j < n; ++j) {
+        const fmpz* diagonal = fmpz_mat_entry(h.raw(), j, j);
+        fmpz_mul(sum.raw(), fmpz_mat_entry(coordinates.raw(), 0, j), denominator.raw());
+        for (slong i = 0; i < j; ++i) {
+            fmpz_submul(sum.raw(), fmpz_mat_entry(h.raw(), i, j),
+                        fmpz_mat_entry(numerators.raw(), 0, i));
+        }
+        fmpz_gcd(divisor.raw(), sum.raw(), diagonal);
+        fmpz_divexact(scale.raw(), diagonal, divisor.raw());
+        fmpz* numerator = fmpz_mat_entry(numerators.raw(), 0, j);
+        fmpz_divexact(numerator, sum.raw(), divisor.raw());
+        if (fmpz_sgn(scale.raw()) < 0) {
+            fmpz_neg(scale.raw(), scale.raw());
+            fmpz_neg(numerator, numerator);
+        }
+        if (fmpz_is_one(scale.raw())) continue;
+        fmpz_mul(denominator.raw(), denominator.raw(), scale.raw());
+        for (slong i = 0; i < j; ++i) {
+            fmpz_mul(fmpz_mat_entry(numerators.raw(), 0, i),
+                     fmpz_mat_entry(numerators.raw(), 0, i), scale.raw());
+        }
+    }
+    fmpz_set(divisor.raw(), denominator.raw());
+    for (slong i = 0; i < n && !fmpz_is_one(divisor.raw()); ++i) {
+        fmpz_gcd(divisor.raw(), divisor.raw(), fmpz_mat_entry(numerators.raw(), 0, i));
+    }
+    fmpz_divexact(minimum.raw(), denominator.raw(), divisor.raw());
+    return true;
+}
+
+namespace {
 
 void two_generator_rows(flint::FmpzMat& rows, flint::FmpzMatConstRef h,
                         flint::FmpzConstRef scalar,

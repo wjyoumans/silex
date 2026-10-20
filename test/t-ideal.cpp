@@ -2643,6 +2643,170 @@ int test_two_generator_search_matches_plain_hnf() {
     return 0;
 }
 
+// Forward substitution in ideal_minimum against the fmpz_mat_solve route and
+// the rational lcm of denominators; both must agree on the return value.
+void check_ideal_minimum(const sflint::FmpzMat& h, const sflint::FmpzMat& one,
+                         bool nonsingular) noexcept {
+    sflint::Fmpz minimum, generic, plain;
+    fmpz_set_si(minimum.raw(), -7);
+    fmpz_set_si(generic.raw(), -7);
+    const bool ok = silex::detail::ideal_minimum(
+            minimum, sflint::FmpzMatConstRef(one), sflint::FmpzMatConstRef(h));
+    const bool generic_ok = silex::detail::ideal_minimum_generic(
+            generic, sflint::FmpzMatConstRef(one), sflint::FmpzMatConstRef(h));
+    assert(ok == generic_ok && ok == nonsingular);
+    if (!ok) return;
+    assert(fmpz_equal(minimum.raw(), generic.raw()));
+    plain_ideal_minimum(plain, h, one);
+    assert(fmpz_equal(minimum.raw(), plain.raw()));
+}
+
+int test_ideal_minimum_forward_substitution_matches_solve() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    flint_rand_set_seed(state, 0x4d494e49UL, 0x4d554dUL);
+    // Non-square-free and prime-power diagonals, a multiword prime power and
+    // units; entry 0 marks a random diagonal below 2^70.
+    const slong diagonals[] = {1, 1, 1, 2, 3, 4, 8, 9, 12, 16, 18, 25, 27, 36, 49, 0};
+    const slong choices = static_cast<slong>(sizeof(diagonals) / sizeof(diagonals[0]));
+    slong integral = 0, fractional = 0, square_diagonal = 0, multiword = 0;
+    slong signed_cases = 0, dense = 0, singular = 0;
+    for (slong trial = 0; trial < 1500; ++trial) {
+        const slong n = 1 + static_cast<slong>(n_randint(state, 8));
+        const slong form = trial % 3;  // 0 HNF, 1 HNF with prime-power powers, 2 signed
+        sflint::FmpzMat h(n, n), one(1, n), z(1, n);
+        bool square = false;
+        for (slong j = 0; j < n; ++j) {
+            fmpz* d = fmpz_mat_entry(h.raw(), j, j);
+            const slong pick = diagonals[n_randint(state, static_cast<ulong>(choices))];
+            if (pick == 0) {
+                fmpz_randbits(d, state, 1 + static_cast<flint_bitcnt_t>(n_randint(state, 70)));
+                fmpz_abs(d, d);
+                if (fmpz_is_zero(d)) fmpz_one(d);
+            } else {
+                fmpz_set_si(d, pick);
+            }
+            if (form == 1 && n_randint(state, 3) == 0) {
+                fmpz_ui_pow_ui(d, n_randint(state, 2) == 0 ? 2 : 3,
+                               1 + n_randint(state, 70));
+            }
+            if (form == 2 && n_randint(state, 4) == 0) fmpz_neg(d, d);
+            // 4 | d or 9 | d covers the listed non-square-free choices.
+            square = square || fmpz_fdiv_ui(d, 4) == 0 || fmpz_fdiv_ui(d, 9) == 0;
+            if (!fmpz_abs_fits_ui(d)) ++multiword;
+            for (slong i = 0; i < j; ++i) {
+                fmpz* entry = fmpz_mat_entry(h.raw(), i, j);
+                if (form == 2) {
+                    fmpz_randtest(entry, state, 40);
+                } else {
+                    sflint::Fmpz bound;
+                    fmpz_abs(bound.raw(), d);
+                    fmpz_randm(entry, state, bound.raw());
+                }
+            }
+        }
+        if (form != 2) assert(fmpz_mat_is_in_hnf(h.raw()));
+        if (form == 2) ++signed_cases;
+        if (square) ++square_diagonal;
+        const slong target = trial % 4;
+        if (target == 0) {
+            fmpz_one(fmpz_mat_entry(one.raw(), 0, 0));
+        } else if (target == 1) {
+            // c = z H: x = z is integral, every division is exact, minimum 1.
+            for (slong j = 0; j < n; ++j) fmpz_randtest(fmpz_mat_entry(z.raw(), 0, j), state, 20);
+            fmpz_mat_mul(one.raw(), z.raw(), h.raw());
+        } else if (target == 2) {
+            fmpz_mat_randtest(one.raw(), state, 30);
+        } else {
+            // c = z H + e_k: integral plus one basis-vector perturbation.
+            for (slong j = 0; j < n; ++j) fmpz_randtest(fmpz_mat_entry(z.raw(), 0, j), state, 10);
+            fmpz_mat_mul(one.raw(), z.raw(), h.raw());
+            fmpz* entry = fmpz_mat_entry(one.raw(), 0,
+                    static_cast<slong>(n_randint(state, static_cast<ulong>(n))));
+            fmpz_add_ui(entry, entry, 1);
+        }
+        check_ideal_minimum(h, one, true);
+        sflint::Fmpz minimum;
+        assert(silex::detail::ideal_minimum(minimum, sflint::FmpzMatConstRef(one),
+                                            sflint::FmpzMatConstRef(h)));
+        if (target == 1) assert(fmpz_is_one(minimum.raw()));
+        ++(fmpz_is_one(minimum.raw()) ? integral : fractional);
+
+        if (n >= 2) {
+            // Not triangular: a swapped row pair takes the generic solve.
+            sflint::FmpzMat swapped(n, n);
+            fmpz_mat_set(swapped.raw(), h.raw());
+            fmpz_mat_swap_rows(swapped.raw(), nullptr, 0, n - 1);
+            check_ideal_minimum(swapped, one, true);
+            ++dense;
+            // Triangular but singular: both routes report failure.
+            sflint::FmpzMat zeroed(n, n);
+            fmpz_mat_set(zeroed.raw(), h.raw());
+            const slong k = static_cast<slong>(n_randint(state, static_cast<ulong>(n)));
+            for (slong j = 0; j < n; ++j) fmpz_zero(fmpz_mat_entry(zeroed.raw(), k, j));
+            check_ideal_minimum(zeroed, one, false);
+            ++singular;
+        }
+    }
+    flint_rand_clear(state);
+    assert(integral >= 300 && fractional >= 600 && square_diagonal >= 500 &&
+           multiword >= 100 && signed_cases >= 400 && dense >= 1000 && singular >= 1000);
+
+    // Stored HNFs of ideals in maximal orders, and their primitive parts.
+    sflint::FmpqPoly polynomial;
+    slong ideals_checked = 0, nonsquarefree = 0;
+    for (slong which = 0; which < 3; ++which) {
+        sflint::fmpq_poly_zero(polynomial);
+        if (which == 0) {
+            poly_x2_minus(polynomial, 5);
+        } else if (which == 1) {
+            poly_x3_minus(polynomial, 10);
+        } else {
+            silex::test::ideal_product::polynomial(polynomial, 4);
+        }
+        silex::NumberField field = field_by_polynomial(polynomial);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order order(field);
+        assert(order.maximal_order(equation) && order.is_maximal());
+        const slong n = order.degree();
+        std::vector<silex::Ideal> ideals;
+        for (slong point : {WORD(2), WORD(3), WORD(-2), WORD(7), WORD(12)}) {
+            ideals.emplace_back(order);
+            assert(silex::test::ideal_product::evaluation_ideal(ideals.back(), polynomial, point));
+        }
+        const std::size_t base = ideals.size();
+        for (std::size_t i = 0; i < base; ++i) {
+            ideals.emplace_back(order);
+            assert(ideals.back().multiply(ideals[i], ideals[i]));
+            ideals.emplace_back(order);
+            assert(ideals.back().multiply(ideals[ideals.size() - 2], ideals[i]));
+            ideals.emplace_back(order);
+            assert(ideals.back().multiply(ideals[i], ideals[(i + 1) % base]));
+        }
+        sflint::FmpzMat one(1, n), h(n, n);
+        silex::OrderElement unity(order);
+        assert(unity.one() && unity.get_coordinates(sflint::FmpzMatRef(one)));
+        for (const silex::Ideal& ideal : ideals) {
+            assert(ideal.get_hnf(sflint::FmpzMatRef(h)));
+            for (slong j = 0; j < n; ++j) {
+                const fmpz* d = fmpz_mat_entry(h.raw(), j, j);
+                if (fmpz_fdiv_ui(d, 4) == 0 || fmpz_fdiv_ui(d, 9) == 0) {
+                    ++nonsquarefree;
+                    break;
+                }
+            }
+            check_ideal_minimum(h, one, true);
+            sflint::Fmpz content;
+            fmpz_mat_content(content.raw(), h.raw());
+            fmpz_mat_scalar_divexact_fmpz(h.raw(), h.raw(), content.raw());
+            check_ideal_minimum(h, one, true);
+            ++ideals_checked;
+        }
+    }
+    assert(ideals_checked >= 60 && nonsquarefree >= 10);
+    return 0;
+}
+
 int test_nonprincipal_product_and_associativity() {
     sflint::FmpqPoly f;
     poly_x2_minus(f, -5);
@@ -3424,6 +3588,7 @@ int main(int argc, char** argv) {
     assert(test_known_two_generator_hnf_matches_generic() == 0);
     assert(test_general_product_hnf_matches_plain_hnf() == 0);
     assert(test_two_generator_search_matches_plain_hnf() == 0);
+    assert(test_ideal_minimum_forward_substitution_matches_solve() == 0);
     for (slong degree : {2, 3, 4, 6, 8, 12}) {
         for (slong kind = 0; kind < 5; ++kind) {
             silex::Order order;
