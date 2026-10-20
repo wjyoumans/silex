@@ -9738,16 +9738,27 @@ bool unit_candidate_solution_checks(flint::FmpzMat& solution,
 // `basis` modulo p with `fmpz_mat_find_good_prime_and_invert`, and runs the
 // static `_fmpq_mat_solve_dixon`: Dixon's p-adic lifting, which at the
 // iterations i = 1, 2, 3, 5, 8, ... (next = floor(1.4 i) + 1) reconstructs
-// the rational solution modulo p^(i+1) and stops once it solves the system
-// exactly, and otherwise reconstructs at the modulus bound
-// 2 max(N, D)^2.  The loop below is adapted from `_fmpq_mat_solve_dixon`
-// (Copyright (C) 2011 Fredrik Johansson, LGPL-3.0-or-later) with the same
-// bound, prime, schedule and exact check; it keeps FLINT's integer product
-// `basis * y` (USE_SLOW_MULTIPLICATION).  The deviation: the prime and the
-// inverse depend only on `basis`, so `state` keeps them and calls with an
-// unchanged basis skip `fmpz_mat_find_good_prime_and_invert`.  The output
-// is the unique rational solution in every case, so it does not depend on
-// the cache.
+// the rational solution modulo p^i and stops once it solves the system
+// exactly, and otherwise reconstructs modulo the first power of p above the
+// modulus bound 2 max(N, D)^2.  The loop below has the same bound, prime,
+// schedule and exact check, and keeps FLINT's integer product `basis * y`
+// (USE_SLOW_MULTIPLICATION).  It is derived from that FLINT routine:
+//
+//   Copyright (C) 2019 William Hart
+//   Copyright (C) 2019 Fredrik Johansson
+//   This file is part of FLINT, licensed under the GNU Lesser General Public
+//   License, version 3 or (at your option) any later version
+//   (LGPL-3.0-or-later); see <https://www.gnu.org/licenses/>.
+//
+// The adaptation is distributed with Silex under GPL-3.0-or-later.
+// Intentional deviations from FLINT:
+// - the prime and the inverse depend only on `basis`, so `state` keeps them
+//   and calls with an unchanged basis skip
+//   `fmpz_mat_find_good_prime_and_invert`;
+// - a failed final reconstruction returns false, where FLINT ignores the
+//   result (under the bound it cannot fail).
+// The output is the unique rational solution in every case, so it does not
+// depend on the cache.
 bool solve_unit_candidate_system(flint::FmpzMat& solution,
                                  flint::Fmpz& denominator,
                                  RelationUnitCandidateBatchState& state,

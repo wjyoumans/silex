@@ -110,11 +110,12 @@ The Dixon lifting loop of the unit-candidate linear solve,
 from the static `_fmpq_mat_solve_dixon` in FLINT 3.6.0
 `src/fmpq_mat/solve_dixon.c`. The adaptation keeps FLINT's bound, prime,
 lifting schedule, and exact check, and keeps the prime and inverse across
-calls with an unchanged basis; the source comment records the deviation.
+calls with an unchanged basis; the source comment records the deviations.
 
 Copyright (C) 2021 Fredrik Johansson (`l_fmpq_afe.c`).
 
-Copyright (C) 2011 Fredrik Johansson (`solve_dixon.c`).
+Copyright (C) 2019 William Hart, Copyright (C) 2019 Fredrik Johansson
+(`fmpq_mat/solve_dixon.c`).
 
 Copyright (C) 2014, 2015 Alex J. Best (`hnf_pernet_stein.c`).
 
