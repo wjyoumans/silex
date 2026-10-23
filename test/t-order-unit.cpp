@@ -6,6 +6,7 @@
 #include <silex/flint/arf.hpp>
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_lll.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/ideal.hpp>
 #include <silex/prime_ideal.hpp>
@@ -13047,6 +13048,69 @@ int test_group_wide_form_failure_move_clear() {
 // u2 = v1^3 v2^2.  Reduction combines u2 with a multiple of u1 whose merged
 // exponents exceed slong, so the group keeps the wide form and its free
 // generators are the rebuilt units.
+// The FLINT fallback of the stored-unit LLL returns fmpz_lll's reduced
+// rows and transform on every route of the certified first phase: on
+// scaled-log-like rows (r rows, r + 1 columns, 20 to 120 bits, some skewed by
+// a unimodular row operation as when stored units are not reduced), with
+// the phase certified, with injected phase and certificate failures (the
+// fmpz_lll fallback), and on rows above FLINT's 250-bit ULLL threshold
+// (ineligible, plain fmpz_lll).
+int test_reduce_unit_log_rows_with_flint_matches_fmpz_lll() {
+    using silex::detail::CertifiedLllTestFailure;
+    using silex::detail::TestHookAccess;
+    using silex::lat::detail::CertifiedLllRoute;
+    flint_rand_t state;
+    flint_rand_init(state);
+    const flint_bitcnt_t bit_choices[] = {20, 60, 120, 300};
+    slong certified = 0;
+    slong fallback = 0;
+    slong ineligible = 0;
+    for (slong iter = 0; iter < 120; ++iter) {
+        const slong rows = 2 + static_cast<slong>(n_randint(state, 7));
+        const flint_bitcnt_t bits = bit_choices[iter % 4];
+        sflint::FmpzMat scaled(rows, rows + 1);
+        fmpz_mat_randtest(scaled.raw(), state, bits);
+        if (n_randint(state, 2) == 0) {
+            for (slong j = 0; j <= rows; ++j) {
+                fmpz_addmul_ui(fmpz_mat_entry(scaled.raw(), rows - 1, j),
+                               fmpz_mat_entry(scaled.raw(), 0, j), 5);
+            }
+        }
+        sflint::FmpzMat expected(rows, rows + 1);
+        sflint::FmpzMat expected_transform(rows, rows);
+        fmpz_mat_set(expected.raw(), scaled.raw());
+        fmpz_mat_one(expected_transform.raw());
+        sflint::FmpzLll config;
+        fmpz_lll(expected.raw(), expected_transform.raw(), config.raw());
+
+        const auto failure = static_cast<CertifiedLllTestFailure>(iter % 3);
+        sflint::FmpzMat reduced(rows, rows + 1);
+        sflint::FmpzMat transform(rows, rows);
+        TestHookAccess::set_certified_lll_failure(failure);
+        const CertifiedLllRoute route =
+                silex::detail::reduce_unit_log_rows_with_flint(
+                        reduced, transform, scaled, nullptr);
+        TestHookAccess::set_certified_lll_failure(
+                CertifiedLllTestFailure::none);
+        assert(fmpz_mat_equal(reduced.raw(), expected.raw()));
+        assert(fmpz_mat_equal(transform.raw(), expected_transform.raw()));
+        if (route == CertifiedLllRoute::certified) {
+            assert(failure == CertifiedLllTestFailure::none);
+            ++certified;
+        } else if (route == CertifiedLllRoute::fallback) {
+            ++fallback;
+        } else {
+            assert(bits > 250);
+            ++ineligible;
+        }
+    }
+    flint_rand_clear(state);
+    assert(certified > 0);
+    assert(fallback > 0);
+    assert(ineligible > 0);
+    return 0;
+}
+
 int test_reduce_stored_units_keeps_wide_form() {
     WideTransformCase c(true);
     silex::EmbeddingContext embeddings(c.field);
@@ -14131,6 +14195,7 @@ int main() {
     test_transform_factored_units_overflow_flag();
     test_transform_factored_units_wide_failure();
     test_group_wide_form_failure_move_clear();
+    test_reduce_unit_log_rows_with_flint_matches_fmpz_lll();
     test_reduce_stored_units_keeps_wide_form();
     test_rebasis_keeps_group_torsion();
     test_reduce_stored_units_rebuilds_large_factored_units();

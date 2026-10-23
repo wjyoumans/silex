@@ -12,6 +12,7 @@
 #include "../factored_element/compact_reconstruction_internal.hpp"
 #include "../factored_element/factor_screen_hash_internal.hpp"
 #include "../factored_element/wide_factored_internal.hpp"
+#include "../lat/certified_lll_internal.hpp"
 #include "../lat/flatter_backend_internal.hpp"
 #include "../lat/fplll_backend_internal.hpp"
 
@@ -2488,18 +2489,25 @@ bool reduce_unit_log_rows_with_fplll(
     return true;
 }
 
-void reduce_unit_log_rows_with_flint(flint::FmpzMat& reduced,
-                                           flint::FmpzMat& transform,
-                                           const flint::FmpzMat& scaled,
-                                           const DiagnosticsContext* diagnostics)
-        noexcept {
+lat::detail::CertifiedLllRoute reduce_unit_log_rows_with_flint(
+        flint::FmpzMat& reduced,
+        flint::FmpzMat& transform,
+        const flint::FmpzMat& scaled,
+        const DiagnosticsContext* diagnostics) noexcept {
     flint::fmpz_mat_set(flint::FmpzMatRef(reduced),
                         flint::FmpzMatConstRef(scaled));
     flint::fmpz_mat_one(flint::FmpzMatRef(transform));
     flint::FmpzLll lll;
-    fmpz_lll(reduced.raw(), transform.raw(), lll.raw());
+    // fmpz_lll's result through the shared certified first phase
+    // (certified_lll_internal.hpp): FLINT's first phase with an exact
+    // reducedness certificate in place of FLINT's multiprecision check of
+    // the phase output, and plain fmpz_lll on the restored input otherwise.
+    const lat::detail::CertifiedLllRoute route =
+            lat::detail::certified_fmpz_lll(reduced.raw(), transform.raw(),
+                                            flint::FmpzLllConstRef(lll));
     profile_unit_lll_backend(
             diagnostics, "unit_group.reduce_stored_units.lll_backend.flint");
+    return route;
 }
 
 bool reduce_unit_log_rows(flint::FmpzMat& reduced,

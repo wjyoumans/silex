@@ -16,6 +16,7 @@
 #include <silex/order_unit.hpp>
 
 #include "../factored_element/factor_screen_hash_internal.hpp"
+#include "../lat/certified_lll_internal.hpp"
 
 namespace silex::detail {
 
@@ -243,6 +244,15 @@ bool reduce_stored_relation_units(bool& changed,
                                OrderUnitGroup& group,
                                EmbeddingContext& embeddings,
                                slong precision) noexcept;
+// FLINT fallback of the stored-unit LLL: sets `reduced` and `transform`
+// (sized like `scaled` and square) to what fmpz_lll(scaled, identity)
+// returns in FLINT's default context, through the shared certified first
+// phase (lat::detail::certified_fmpz_lll), and returns its route.
+lat::detail::CertifiedLllRoute reduce_unit_log_rows_with_flint(
+        flint::FmpzMat& reduced,
+        flint::FmpzMat& transform,
+        const flint::FmpzMat& scaled,
+        const DiagnosticsContext* diagnostics) noexcept;
 // Sets units[i] to prod_j units[j]^transform[i, j] with word-size factored
 // exponents.  Fails, leaving units unchanged, when an exponent overflows or
 // the inputs are invalid; `overflowed` is true only in the first case.
