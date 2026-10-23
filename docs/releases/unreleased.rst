@@ -149,6 +149,20 @@ Changed
   ``simplest_quartic_t10`` 3.0% fewer, ``pure_x6_minus_2`` 1.9% fewer,
   ``multiquadratic_m23_m31`` 0.2% fewer.  No timing has been measured.
 
+- When ``decompose_prime`` splits a prime ``p`` that divides the index of a
+  maximal order (the Frobenius kernels, the etale split and the p-radical
+  quotient of ``O/pO``), it reduces the order's multiplication table modulo
+  ``p`` once instead of reducing each table entry for every term of every
+  product.  For ``p`` that fits a word the products use word arithmetic
+  with one reduction per output coordinate; larger ``p`` keep ``fmpz``
+  residues, also with one reduction per coordinate.  Every product is the
+  same residue as before, so decompositions and published results are
+  unchanged: ``grh`` outputs are identical on the 171 corpus rows that
+  finish within 120 s (``cyclotomic_real_163_deg81`` timed out on both
+  builds).  Busy-machine callgrind instruction counts, ``grh`` mode:
+  ``cyclotomic_real_q10_c11_deg10`` 8.7% fewer (2.267e9 to 2.070e9); control
+  ``cyclotomic_real_64_deg16`` unchanged.
+
 - The split-prime resultant search of class-group relation search
   (defining polynomials of degree 16 and more) skips a candidate prime ``p``
   whose Jacobi symbol ``(disc(f) / p)`` is not +1, where ``disc(f)`` is the
