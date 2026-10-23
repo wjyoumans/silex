@@ -301,8 +301,9 @@ Changed
   the relation's unit is shown a root of unity by Hecke's ``is_torsion_unit``
   test (every ``|log|sigma||`` at most ``log(1 + log(d) / (6 d^2))``, with
   Dobrowolski's bound on the house of a non-root-of-unity).  A failed or
-  inconclusive check leaves the test as before.  Kept units, labels, class and
-  unit data are unchanged on the full ``grh`` and ``proven`` corpora; only
+  inconclusive check leaves the test as before.  Labels, class and unit data
+  (kept units inferred from identical regulator values and relation counts)
+  are unchanged on the full ``grh`` and ``proven`` corpora; only
   ``unit_group.regulator_radius`` differs (the regulator value is identical) on
   ``cyclotomic_17_phi16``, ``cyclotomic_19_phi18``, ``cyclotomic_32_phi16``,
   ``cyclotomic_33_phi20``, ``cyclotomic_39_phi24``, ``cyclotomic_40_phi16``,

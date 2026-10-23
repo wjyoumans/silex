@@ -630,7 +630,7 @@ int test_precisions_below_a_between_doubling_start_are_tried() {
 }
 
 // The sextic x^6 - 2, of signature (2, 2) and unit rank 3, in which
-// theta - 1 is a unit (norm -f(1) = 1).  It has complex places, whose
+// theta - 1 is a unit (norm f(1) = -1).  It has complex places, whose
 // product-mode log entries the torsion check halves.
 silex::NumberField sextic_with_complex_places() noexcept {
     sflint::FmpqPoly polynomial;
@@ -781,6 +781,41 @@ int test_relation_decision_debug_check() {
     return 0;
 }
 
+// A dependent candidate whose relation unit is a root of unity other than
+// 1: -u against the kept u gives m = 1 and z = (-u) u^-1 = -1.  The relation
+// step must accept this through the torsion check on z != 1.
+int test_relation_unit_nontrivial_root_of_unity() {
+    silex::NumberField field = sextic_with_complex_places();
+    silex::Element theta(field);
+    silex::Element u(field);
+    silex::Element minus_one(field);
+    assert(theta.gen());
+    assert(u.add_si(theta, -1));
+    assert(minus_one.set_si(-1));
+    silex::FactoredElement kept(field);
+    silex::FactoredElement negated(field);
+    assert(kept.push(u, 1));
+    assert(negated.push(minus_one, 1));
+    assert(negated.push(u, 1));
+
+    constexpr slong precision = 32;
+    silex::EmbeddingContext embeddings(field);
+    silex::detail::IncrementalUnitContext context;
+    assert(context.define(field, 3));
+    bool changed = false;
+    assert(context.add_independent_unit(changed, kept, embeddings, precision,
+                                        nullptr));
+    assert(changed);
+    changed = true;
+    assert(context.add_independent_unit(changed, negated, embeddings,
+                                        precision, nullptr));
+    assert(!changed);
+    assert(context.units.size() == 1);
+    assert(context.relation_decisions == 1);
+    assert(context.fallback_decisions == 0);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -795,6 +830,7 @@ int main() {
     assert(test_dependent_candidate_decided_by_relation() == 0);
     assert(test_forced_relation_failure_takes_lower_bound_path() == 0);
     assert(test_relation_decision_debug_check() == 0);
+    assert(test_relation_unit_nontrivial_root_of_unity() == 0);
     assert(test_precisions_below_a_between_doubling_start_are_tried() == 0);
     return 0;
 }

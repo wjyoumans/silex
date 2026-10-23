@@ -1230,9 +1230,10 @@ conjugate) greater than ``1 + log(d) / (6 d^2)`` (Dobrowolski, Bull. Acad.
 Polon. Sci. Ser. Sci. Math. Astronom. Phys. 26 (1978), 291-292).  The primary
 paper was not read for this entry: the statement is taken from Smyth's survey,
 *Mahler measure of algebraic numbers: a survey*, arXiv math/0701397, Section
-7.1 (reference [53]), and a reviewer should check it against the paper.  The
-inequality is strict, so a house at most the bound gives a root of unity with
-no further argument.  The degree ``e`` of ``z`` divides the field degree
+7.1 (reference [53]).  The inequality need not be strict for this use: for
+``d >= 2`` the bound is transcendental (Hermite-Lindemann) while the house is
+algebraic, so a house at most the bound gives a root of unity with no further
+argument.  The degree ``e`` of ``z`` divides the field degree
 ``d``; for ``e = 1``, ``z = +-1``, and for ``2 <= e <= d`` the function
 ``log(x) / x^2`` decreases for ``x >= 2``, so ``log(e) / (6 e^2) >=
 log(d) / (6 d^2)`` and the field-degree bound is no larger than the one for
