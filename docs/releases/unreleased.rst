@@ -133,6 +133,22 @@ Added
 Changed
 -------
 
+- The FLINT route of the stored-unit reduction (the LLL of the scaled unit
+  log rows, run when a unit group's stored units are reduced) takes the
+  shared certified first LLL phase, which replaces FLINT's multiprecision
+  check of the phase output by an exact reducedness certificate.  A failed
+  certificate restores the input and calls ``fmpz_lll``, and rows with
+  entries above 250 bits call ``fmpz_lll`` directly, so the reduced rows,
+  the transform and the stored units are those ``fmpz_lll`` returns on every
+  route.  In ``grh`` mode, published outputs and unit generators are
+  identical on the 184 corpus and fixture rows that finish within 120 s on
+  both builds (``cyclotomic_real_163_deg81`` timed out on both).
+  Callgrind instruction counts (busy machine, ``grh``):
+  ``cyclotomic_real_64_deg16`` 3.2% fewer, ``cyclotomic_real_q10_c11_deg10``
+  0.9% fewer, ``cyclotomic_19_phi18`` 0.8% fewer.  No timing has been
+  measured.  See ``Lat::lll_reduce`` in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` finish workspace no longer keeps the transform of its
   relation HNF.  A sync that appends relations computes only the HNF of the
   old HNF rows followed by the new relations, which by uniqueness of the HNF

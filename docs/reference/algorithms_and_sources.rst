@@ -104,7 +104,9 @@ is retained.
 The certified first LLL phase is one internal helper shared by
 ``Lat::lll_reduce``, the unit-candidate kernel and the relation-saturation
 kernel basis of the class-group computation, the rounded-embedding
-integer LLL and the finite-ideal T2 enumeration setup (below).  For a ``Z_BASIS``, ``APPROX`` context, at least two rows
+integer LLL, the finite-ideal T2 enumeration setup (below) and the FLINT
+route of the stored-unit reduction (the LLL of the scaled unit log rows,
+which the optional flatter and fplll routes precede when built in).  For a ``Z_BASIS``, ``APPROX`` context, at least two rows
 and coefficients of at most 250 bits it runs
 ``fmpz_lll_d_with_removal_knapsack`` with no removal bound and accepts the
 result only when an exact reducedness certificate holds with the unchanged
