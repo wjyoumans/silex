@@ -4089,30 +4089,29 @@ bool residue_variable_numerator(flint::FmpzPoly& numerator,
                                    flint::FmpzConstRef(p), element);
 }
 
-bool quadratic_minimal_polynomial_factor_word(
-        flint::FmpzModPolyFactor& out,
-        flint::FmpzPolyConstRef minimal_polynomial,
-        flint::FmpzConstRef p,
-        const flint::FmpzModCtx& context) noexcept {
-    // Cohen, GTM 138, Proposition 5.1.4: with D the discriminant of the
-    // minimal polynomial of omega, p is ramified when p | D, split when D is
-    // a nonzero square modulo p and inert otherwise; a root r of x^2 + b x + c
-    // modulo p gives the factor x - r and the prime p Z + (omega - r) Z.
-    // The square root is FLINT's n_sqrtmod (Tonelli-Shanks, Algorithm
-    // 1.5.1), checked by squaring before it is used.
-    const fmpz_poly_struct* f = minimal_polynomial.raw();
-    if (out.context() != context.raw() || context.raw() == nullptr ||
-        fmpz_poly_degree(f) != 2 || fmpz_is_one(f->coeffs + 2) == 0 ||
-        fmpz_sgn(p.raw()) <= 0 || fmpz_abs_fits_ui(p.raw()) == 0 ||
-        fmpz_equal(p.raw(), fmpz_mod_ctx_modulus(context.raw())) == 0) {
+bool monic_quadratic_factor_word(flint::FmpzModPolyFactor& out,
+                                 flint::FmpzModPolyConstRef reduced,
+                                 const flint::FmpzModCtx& context) noexcept {
+    // Cohen, GTM 138, Proposition 5.1.4 (and the Dedekind-Kummer theorem,
+    // Theorem 4.8.13, for a defining polynomial): with D = b^2 - 4c the
+    // discriminant of x^2 + b x + c, an odd prime p is ramified when p | D,
+    // split when D is a nonzero square modulo p and inert otherwise.  The
+    // square root is FLINT's n_sqrtmod (Tonelli-Shanks, Algorithm 1.5.1),
+    // checked by squaring before it is used.
+    const fmpz_mod_ctx_struct* ctx = context.raw();
+    const fmpz_mod_poly_struct* f = reduced.raw();
+    if (ctx == nullptr || out.context() != ctx ||
+        fmpz_mod_poly_degree(f, ctx) != 2 || fmpz_is_one(f->coeffs + 2) == 0 ||
+        fmpz_abs_fits_ui(fmpz_mod_ctx_modulus(ctx)) == 0) {
         return false;
     }
-    const ulong prime = fmpz_get_ui(p.raw());
+    const ulong prime = fmpz_get_ui(fmpz_mod_ctx_modulus(ctx));
     if (prime < 2) {
         return false;
     }
-    const ulong b = fmpz_fdiv_ui(f->coeffs + 1, prime);
-    const ulong c = fmpz_fdiv_ui(f->coeffs + 0, prime);
+    // Coefficients of a fmpz_mod_poly are reduced into [0, p).
+    const ulong b = fmpz_get_ui(f->coeffs + 1);
+    const ulong c = fmpz_get_ui(f->coeffs + 0);
 
     enum class Splitting { inert, ramified, split };
     Splitting splitting = Splitting::inert;
@@ -4156,53 +4155,38 @@ bool quadratic_minimal_polynomial_factor_word(
     }
 
     out.raw()->num = 0;
+    if (splitting == Splitting::inert) {
+        fmpz_mod_poly_factor_insert(out.raw(), f, 1, ctx);
+        return true;
+    }
     flint::FmpzModPoly factor(context);
     if (!factor.is_initialized()) {
         return false;
-    }
-    if (splitting == Splitting::inert) {
-        fmpz_mod_poly_set_fmpz_poly(factor.raw(), f, context.raw());
-        fmpz_mod_poly_factor_insert(out.raw(), factor.raw(), 1,
-                                    context.raw());
-        return true;
     }
     const slong root_count = splitting == Splitting::split ? 2 : 1;
     const slong exponent = splitting == Splitting::ramified ? 2 : 1;
     flint::Fmpz coefficient;
     for (slong i = 0; i < root_count; ++i) {
         // x - r with -r represented in [0, p).
-        fmpz_mod_poly_zero(factor.raw(), context.raw());
-        fmpz_mod_poly_set_coeff_ui(factor.raw(), 1, 1, context.raw());
+        fmpz_mod_poly_zero(factor.raw(), ctx);
+        fmpz_mod_poly_set_coeff_ui(factor.raw(), 1, 1, ctx);
         fmpz_set_ui(coefficient.raw(), roots[i]);
-        fmpz_mod_neg(coefficient.raw(), coefficient.raw(), context.raw());
-        fmpz_mod_poly_set_coeff_fmpz(factor.raw(), 0, coefficient.raw(),
-                                     context.raw());
-        fmpz_mod_poly_factor_insert(out.raw(), factor.raw(), exponent,
-                                    context.raw());
+        fmpz_mod_neg(coefficient.raw(), coefficient.raw(), ctx);
+        fmpz_mod_poly_set_coeff_fmpz(factor.raw(), 0, coefficient.raw(), ctx);
+        fmpz_mod_poly_factor_insert(out.raw(), factor.raw(), exponent, ctx);
     }
     return true;
 }
 
-namespace {
-
-// The factors of omega's minimal polynomial modulo the prime p: the closed
-// form for word-size p, and FLINT's generic factorization of `reduced` (the
-// same polynomial reduced modulo p) otherwise.
-void factor_quadratic_minimal_polynomial(
+void factor_with_quadratic_closed_form(
         flint::FmpzModPolyFactor& out,
-        const flint::FmpzModPoly& reduced,
-        const flint::FmpzPoly& minimal_polynomial,
-        flint::FmpzConstRef p,
+        flint::FmpzModPolyConstRef reduced,
         const flint::FmpzModCtx& context) noexcept {
-    if (quadratic_minimal_polynomial_factor_word(
-                out, flint::FmpzPolyConstRef(minimal_polynomial.raw()), p,
-                context)) {
+    if (monic_quadratic_factor_word(out, reduced, context)) {
         return;
     }
     fmpz_mod_poly_factor(out.raw(), reduced.raw(), context.raw());
 }
-
-}  // namespace
 
 bool MaximalQuadraticPrimeAccess::set_from_integral_generator_factor(
         PrimeIdeal& out,
@@ -4298,8 +4282,8 @@ bool MaximalQuadraticPrimeAccess::set_first_degree_one_prime(
                 "prime_ideal.maximal_quadratic.factor");
         fmpz_mod_poly_set_fmpz_poly(reduced.raw(), minimal_polynomial.raw(),
                                     context.raw());
-        factor_quadratic_minimal_polynomial(factorization, reduced,
-                                            minimal_polynomial, p, context);
+        factor_with_quadratic_closed_form(
+                factorization, flint::FmpzModPolyConstRef(reduced), context);
     }
 
     const slong count = factorization.raw()->num;
@@ -4717,8 +4701,9 @@ bool PrimeIdealAccess::decompose_prime_containing(
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::prime_ideal,
                 "prime_ideal.decompose_prime_containing.factor_field_polynomial");
-        fmpz_mod_poly_factor(factorization.raw(),
-                             reduced_field_polynomial.raw(), ctx.raw());
+        factor_with_quadratic_closed_form(
+                factorization,
+                flint::FmpzModPolyConstRef(reduced_field_polynomial), ctx);
     }
     const slong factor_count = factorization.raw()->num;
     if (factor_count <= 0) {
@@ -4970,9 +4955,9 @@ bool decompose_prime(PrimeIdealList& out,
         flint::FmpzModPolyFactor quadratic_factorization(ctx);
         fmpz_mod_poly_set_fmpz_poly(
                 reduced_quadratic.raw(), minimal_polynomial.raw(), ctx.raw());
-        detail::factor_quadratic_minimal_polynomial(
-                quadratic_factorization, reduced_quadratic,
-                minimal_polynomial, p, ctx);
+        detail::factor_with_quadratic_closed_form(
+                quadratic_factorization,
+                flint::FmpzModPolyConstRef(reduced_quadratic), ctx);
 
         const slong factor_count = quadratic_factorization.raw()->num;
         if (factor_count <= 0 || !candidates.reserve(factor_count)) {
@@ -5081,8 +5066,9 @@ bool decompose_prime(PrimeIdealList& out,
                         "prime_ideal.decompose_prime.nonindex_factor_field_polynomial");
                 fmpz_mod_poly_set(reduced.raw(), reduced_field_polynomial.raw(),
                                   ctx.raw());
-                fmpz_mod_poly_factor(factorization.raw(), reduced.raw(),
-                                     ctx.raw());
+                detail::factor_with_quadratic_closed_form(
+                        factorization, flint::FmpzModPolyConstRef(reduced),
+                        ctx);
             }
 
             const slong num_factors = factorization.raw()->num;
@@ -5251,7 +5237,8 @@ bool decompose_prime(PrimeIdealList& out,
                 "prime_ideal.decompose_prime.equation_factor_field_polynomial");
         fmpz_mod_poly_set(reduced.raw(), reduced_field_polynomial.raw(),
                           ctx.raw());
-        fmpz_mod_poly_factor(factorization.raw(), reduced.raw(), ctx.raw());
+        detail::factor_with_quadratic_closed_form(
+                factorization, flint::FmpzModPolyConstRef(reduced), ctx);
     }
     if (!order.is_maximal() && !factorization_is_squarefree(factorization)) {
         return false;

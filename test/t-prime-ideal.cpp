@@ -4480,11 +4480,10 @@ struct ClosedFormTally {
     slong inert = 0;
 };
 
-void check_quadratic_closed_form_factor(const sflint::Fmpz& radicand,
-                                        const sflint::Fmpz& p,
-                                        ClosedFormTally& tally) noexcept {
-    sflint::FmpzPoly minimal_polynomial;
-    omega_minimal_polynomial(minimal_polynomial, radicand);
+void check_quadratic_closed_form_factor(
+        const sflint::FmpzPoly& minimal_polynomial,
+        const sflint::Fmpz& p,
+        ClosedFormTally& tally) noexcept {
     sflint::FmpzModCtx ctx(p.raw());
     sflint::FmpzModPoly reduced(ctx);
     sflint::FmpzModPolyFactor closed(ctx);
@@ -4492,9 +4491,8 @@ void check_quadratic_closed_form_factor(const sflint::Fmpz& radicand,
     fmpz_mod_poly_set_fmpz_poly(reduced.raw(), minimal_polynomial.raw(),
                                 ctx.raw());
     fmpz_mod_poly_factor(generic.raw(), reduced.raw(), ctx.raw());
-    assert(silex::detail::quadratic_minimal_polynomial_factor_word(
-            closed, sflint::FmpzPolyConstRef(minimal_polynomial),
-            sflint::FmpzConstRef(p), ctx));
+    assert(silex::detail::monic_quadratic_factor_word(
+            closed, sflint::FmpzModPolyConstRef(reduced), ctx));
     assert(same_factor_set(closed, generic, ctx));
     const slong num = closed.raw()->num;
     if (num == 2) {
@@ -4559,14 +4557,32 @@ int test_quadratic_closed_form_factor_matches_flint() {
     primes.push_back(mersenne61);
     assert(n_is_prime(mersenne61) != 0 && n_is_prime(below_2_64) != 0);
 
+    // omega's minimal polynomials, and monic quadratics x^2 + b x + c with
+    // other b (defining polynomials on the Dedekind-Kummer routes).
+    std::vector<sflint::FmpzPoly> polynomials;
+    for (const sflint::Fmpz& radicand : radicands) {
+        polynomials.emplace_back();
+        omega_minimal_polynomial(polynomials.back(), radicand);
+    }
+    const slong general[][2] = {{3, 7}, {2, 5}, {3, -27}, {1, 9}, {4, 1},
+                                {-7, 10}, {5, 0}, {-1, 25000000000080},
+                                {101, -2500000001}};
+    for (const auto& bc : general) {
+        polynomials.emplace_back();
+        fmpz_poly_set_coeff_si(polynomials.back().raw(), 2, 1);
+        fmpz_poly_set_coeff_si(polynomials.back().raw(), 1, bc[0]);
+        fmpz_poly_set_coeff_si(polynomials.back().raw(), 0, bc[1]);
+    }
+
     ClosedFormTally large_tally;
     ClosedFormTally tally;
-    for (const sflint::Fmpz& radicand : radicands) {
+    for (const sflint::FmpzPoly& polynomial : polynomials) {
         for (const ulong prime : primes) {
             sflint::Fmpz p;
             fmpz_set_ui(p.raw(), prime);
             check_quadratic_closed_form_factor(
-                    radicand, p, prime > (UWORD(1) << 62) ? large_tally : tally);
+                    polynomial, p,
+                    prime > (UWORD(1) << 62) ? large_tally : tally);
         }
     }
     assert(tally.split > 0 && tally.ramified > 0 && tally.inert > 0);
@@ -4583,10 +4599,25 @@ int test_quadratic_closed_form_factor_matches_flint() {
     sflint::FmpzPoly minimal_polynomial;
     omega_minimal_polynomial(minimal_polynomial, radicand);
     sflint::FmpzModCtx ctx(p.raw());
+    sflint::FmpzModPoly reduced(ctx);
+    fmpz_mod_poly_set_fmpz_poly(reduced.raw(), minimal_polynomial.raw(),
+                                ctx.raw());
     sflint::FmpzModPolyFactor closed(ctx);
-    assert(!silex::detail::quadratic_minimal_polynomial_factor_word(
-            closed, sflint::FmpzPolyConstRef(minimal_polynomial),
-            sflint::FmpzConstRef(p), ctx));
+    assert(!silex::detail::monic_quadratic_factor_word(
+            closed, sflint::FmpzModPolyConstRef(reduced), ctx));
+    // So is a polynomial of another degree, or one that is not monic.
+    sflint::FmpzModCtx small_ctx(UWORD(101));
+    sflint::FmpzModPoly other(small_ctx);
+    sflint::FmpzModPolyFactor other_factors(small_ctx);
+    fmpz_mod_poly_set_coeff_ui(other.raw(), 3, 1, small_ctx.raw());
+    fmpz_mod_poly_set_coeff_ui(other.raw(), 0, 2, small_ctx.raw());
+    assert(!silex::detail::monic_quadratic_factor_word(
+            other_factors, sflint::FmpzModPolyConstRef(other), small_ctx));
+    fmpz_mod_poly_zero(other.raw(), small_ctx.raw());
+    fmpz_mod_poly_set_coeff_ui(other.raw(), 2, 3, small_ctx.raw());
+    fmpz_mod_poly_set_coeff_ui(other.raw(), 0, 2, small_ctx.raw());
+    assert(!silex::detail::monic_quadratic_factor_word(
+            other_factors, sflint::FmpzModPolyConstRef(other), small_ctx));
     return 0;
 }
 
@@ -4692,6 +4723,147 @@ int test_quadratic_decompose_prime_closed_form_matches_flint_primes() {
         }
     }
     assert(checked_split > 0);
+    return 0;
+}
+
+// decompose_prime on an order of a quadratic field defined by a monic
+// quadratic f that is not x^2 - d (so not the quadratic backend), on the
+// Dedekind-Kummer routes: the primes are those built from FLINT's factors
+// of f modulo p, as sets, and for word-size p they follow the closed form's
+// factor order, a split prime's two primes by increasing root of f modulo p.
+void check_quadratic_dedekind_kummer_route(const silex::Order& order,
+                                           const sflint::FmpzPoly& f,
+                                           const sflint::Fmpz& p,
+                                           slong& checked_split) {
+    using Route = silex::detail::DecomposePrimeRoute;
+    const Route route = silex::detail::TestHookAccess::decompose_prime_route(
+            order, sflint::FmpzConstRef(p), 0);
+    if (route == Route::index_divisor) {
+        return;
+    }
+    assert(route == Route::nonindex_factor || route == Route::equation_factor);
+    sflint::FmpzModCtx ctx(p.raw());
+    sflint::FmpzModPoly reduced(ctx);
+    sflint::FmpzModPolyFactor generic(ctx);
+    fmpz_mod_poly_set_fmpz_poly(reduced.raw(), f.raw(), ctx.raw());
+    fmpz_mod_poly_factor(generic.raw(), reduced.raw(), ctx.raw());
+
+    silex::PrimeIdealList list;
+    if (!silex::decompose_prime(list, order, sflint::FmpzConstRef(p))) {
+        // A non-maximal equation order at a prime where f is not squarefree.
+        assert(!order.is_maximal() && route == Route::equation_factor);
+        slong total = 0;
+        for (slong j = 0; j < generic.raw()->num; ++j) {
+            total += generic.raw()->exp[j];
+        }
+        assert(total > generic.raw()->num);
+        return;
+    }
+    assert(list.size() == generic.raw()->num);
+    for (slong j = 0; j < generic.raw()->num; ++j) {
+        silex::PrimeIdeal reference(order);
+        assert(PrimeIdealAccess::set_defining_polynomial_factor_prime(
+                reference, order, sflint::FmpzConstRef(p),
+                generic.raw()->poly + j, generic.raw()->exp[j], ctx, nullptr));
+        slong matches = 0;
+        for (slong i = 0; i < list.size(); ++i) {
+            matches += same_prime_data(reference, *list.at(i), order) ? 1 : 0;
+        }
+        assert(matches == 1);
+    }
+    if (fmpz_abs_fits_ui(p.raw()) == 0) {
+        return;
+    }
+    sflint::FmpzModPolyFactor closed(ctx);
+    assert(silex::detail::monic_quadratic_factor_word(
+            closed, sflint::FmpzModPolyConstRef(reduced), ctx));
+    assert(closed.raw()->num == list.size());
+    for (slong i = 0; i < closed.raw()->num; ++i) {
+        silex::PrimeIdeal expected(order);
+        assert(PrimeIdealAccess::set_defining_polynomial_factor_prime(
+                expected, order, sflint::FmpzConstRef(p),
+                closed.raw()->poly + i, closed.raw()->exp[i], ctx, nullptr));
+        assert(same_prime_data(expected, *list.at(i), order));
+    }
+    if (closed.raw()->num == 2) {
+        sflint::Fmpz r0;
+        sflint::Fmpz r1;
+        linear_factor_root(r0, closed.raw()->poly + 0, ctx);
+        linear_factor_root(r1, closed.raw()->poly + 1, ctx);
+        assert(fmpz_cmp(r0.raw(), r1.raw()) < 0);
+        ++checked_split;
+    }
+}
+
+int test_quadratic_dedekind_kummer_closed_form_matches_flint_primes() {
+    // x^2 + x + 9 (D = -35) and x^2 - x - 2500000001 (D = 10000000005):
+    // maximal equation orders.  x^2 + 2x + 5 (D = -16) and x^2 + 3x - 27
+    // (D = 117 = 9 * 13): Z[theta] has index 2 and 3 in the maximal order,
+    // which takes the nonindex route at other primes; their equation orders
+    // take the equation route.  x^2 - x + 25000000000080 is
+    // imaginary_quadratic_d100000000000319.
+    const std::vector<std::vector<slong>> fields = {
+            {9, 1, 1}, {-2500000001, -1, 1}, {5, 2, 1}, {-27, 3, 1},
+            {25000000000080, -1, 1}};
+    std::vector<sflint::Fmpz> primes;
+    for (ulong q = 2; q < 200; q = n_nextprime(q, 1)) {
+        primes.emplace_back();
+        fmpz_set_ui(primes.back().raw(), q);
+    }
+    for (const ulong start : {UWORD(1) << 62, UWORD(1) << 63,
+                              UWORD(0xFFFFFFFFFFFFF000)}) {
+        ulong q = start;
+        for (int i = 0; i < 6; ++i) {
+            q = n_nextprime(q, 1);
+            primes.emplace_back();
+            fmpz_set_ui(primes.back().raw(), q);
+        }
+    }
+    {
+        sflint::Fmpz q;
+        fmpz_one(q.raw());
+        fmpz_mul_2exp(q.raw(), q.raw(), 64);
+        for (int i = 0; i < 3; ++i) {
+            fmpz_nextprime(q.raw(), q.raw(), 1);
+            primes.emplace_back();
+            fmpz_set(primes.back().raw(), q.raw());
+        }
+    }
+
+    slong checked_split = 0;
+    slong checked_nonindex = 0;
+    for (const std::vector<slong>& low_to_high : fields) {
+        sflint::FmpqPoly polynomial;
+        poly_from_coefficients(polynomial, low_to_high);
+        sflint::FmpzPoly f;
+        for (std::size_t i = 0; i < low_to_high.size(); ++i) {
+            fmpz_poly_set_coeff_si(f.raw(), static_cast<slong>(i),
+                                   low_to_high[i]);
+        }
+        silex::NumberField field;
+        silex::Order equation = order_by_polynomial(field, polynomial);
+        assert(field.backend_kind() !=
+               silex::NumberFieldBackendKind::quadratic);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        for (const sflint::Fmpz& p : primes) {
+            check_quadratic_dedekind_kummer_route(maximal, f, p,
+                                                  checked_split);
+            if (!maximal.is_equation_order()) {
+                check_quadratic_dedekind_kummer_route(equation, f, p,
+                                                      checked_split);
+                ++checked_nonindex;
+            }
+        }
+    }
+    assert(checked_split > 0 && checked_nonindex > 0);
+    // decompose_prime_containing factors f through the same closed form, so
+    // its primes are decompose_prime's, in the same order.
+    assert(check_decompose_prime_containing_routes(
+                   {9, 1, 1}, true, {2, 3, 5, 7, 11, 13, 29, 37}, {}) == 0);
+    assert(check_decompose_prime_containing_routes(
+                   {-27, 3, 1}, false, {2, 3, 5, 7, 13, 17, 23, 43}, {3}) ==
+           0);
     return 0;
 }
 
@@ -4852,6 +5024,8 @@ int main() {
     assert(test_prime_ideal_inverse_declines_outside_contract() == 0);
     assert(test_quadratic_closed_form_factor_matches_flint() == 0);
     assert(test_quadratic_decompose_prime_closed_form_matches_flint_primes() ==
+           0);
+    assert(test_quadratic_dedekind_kummer_closed_form_matches_flint_primes() ==
            0);
     return 0;
 }

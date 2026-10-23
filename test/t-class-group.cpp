@@ -8090,11 +8090,14 @@ int test_relation_saturation_kernel_basis_reuse_and_invalidation() {
 
 // Forcing the fallbacks of the certified first LLL phase, including the
 // saturation kernel basis, leaves a proven computation unchanged.
-// Q(sqrt(100000001)), x^2 - x - 25000000: its relation kernel takes the
+// Q(sqrt(100000021)), x^2 - x - 25000005: the presentation is below the
+// size crossover and the kernel entries are in the first phase's range, so
+// by default the kernel is read from the left transform and goes to the
 // certified first phase (see
-// test_relation_saturation_kernel_basis_first_phase); the presentation is
-// below the size crossover, so by default the kernel is read from the left
-// transform.  With the first phase failing, or its certificate failing, on
+// test_relation_saturation_kernel_basis_first_phase).  On the earlier
+// fixture x^2 - x - 25000000 the kernel entries exceed that range since the
+// factors of a quadratic defining polynomial modulo p come in canonical
+// order.  With the first phase failing, or its certificate failing, on
 // every run at every call site (CertifiedLllTestSeams), with the transform
 // route forced, and with the extension route forced (certified, or with its
 // checks or its certificate failing; SaturationKernelTestSeams),
@@ -8106,7 +8109,7 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     using silex::detail::SaturationKernelTestFailure;
     using silex::detail::TestHookAccess;
     enum class Route { automatic, transform, extension };
-    silex::NumberField field = shifted_quadratic_field(-1, -25000000);
+    silex::NumberField field = shifted_quadratic_field(-1, -25000005);
     silex::Order equation_order = silex::test::equation_order(field);
     silex::Order maximal_order(field);
     assert(maximal_order.maximal_order(equation_order));

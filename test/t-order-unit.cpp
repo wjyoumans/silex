@@ -13552,6 +13552,7 @@ int test_grh_validation_skips_unit_rebuild_from_unchanged_class_context() {
 struct DeferredSaturationEvents {
     slong deferred = 0;
     slong bounded_passes = 0;
+    slong runs_before_acceptance = 0;
 };
 
 void deferred_saturation_callback(void* user,
@@ -13569,6 +13570,12 @@ void deferred_saturation_callback(void* user,
                     "unit_group.validation_class_relation_saturation."
                     "deferred_to_extension") == 0) {
         ++events->deferred;
+    }
+    if (event == silex::ProfileEvent::event &&
+        std::strcmp(label,
+                    "unit_group.validation_class_relation_saturation."
+                    "deferred_run_before_acceptance") == 0) {
+        ++events->runs_before_acceptance;
     }
     if (event == silex::ProfileEvent::begin_scope &&
         std::strcmp(label,
@@ -13620,12 +13627,19 @@ int test_grh_validation_defers_bounded_saturation_to_extension() {
 // A bounded pass deferred behind relation extension still runs when the
 // same validation reaches index one with no relation appended since the
 // deferral, as it ran there before the deferral, so its status and
-// ell-records stay with the accepted pair.  For x^2 - x - 25000001 (corpus
-// row real_quadratic_d100000005, h = 212 = 2^2 * 53) the pass is deferred
-// at an index bound of 3 and unit refinement then gives index one; the pass
-// appends nothing and leaves one `unavailable` record per prime of h.
+// ell-records stay with the accepted pair.  For x^2 - x - 2500000003
+// (D = 10000000013 = 18041 * 554293, h = 2) the pass is deferred and
+// validation then reaches index one with the relations unchanged; the
+// deferred pass is the only bounded pass, runs before acceptance, appends
+// nothing and leaves one `unavailable` record per prime of h.
+// Independent oracle (GP 2.17.4):
+//   K = bnfinit(x^2 - x - 2500000003, 1);
+//   bnfcertify(K) -> 1; K.no -> 2; K.clgp.cyc -> [2].
+// The earlier fixture x^2 - x - 25000001 (real_quadratic_d100000005) no
+// longer defers since the factors of a quadratic defining polynomial modulo
+// p come in canonical order.
 int test_grh_validation_runs_deferred_saturation_before_acceptance() {
-    const std::vector<slong> quadratic = {-25000001, -1, 1};
+    const std::vector<slong> quadratic = {-2500000003, -1, 1};
     silex::DiagnosticsContext diagnostics;
     silex::diagnostics_context_init(diagnostics);
     DeferredSaturationEvents events;
@@ -13641,13 +13655,14 @@ int test_grh_validation_runs_deferred_saturation_before_acceptance() {
     assert(run.ok && run.audit.final_result_published);
     assert(run.audit.class_group_certification ==
            silex::CertificationMode::grh);
-    assert(sflint::fmpz_equal_si(run.class_order, 212));
+    assert(sflint::fmpz_equal_si(run.class_order, 2));
     assert(run.relation_saturation_status ==
            silex::ProofState::unavailable);
-    assert(run.relation_saturation_record_count == 2);
+    assert(run.relation_saturation_record_count == 1);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     assert(events.deferred >= 1);
-    assert(events.bounded_passes >= 1);
+    assert(events.runs_before_acceptance == 1);
+    assert(events.bounded_passes == 1);
 #endif
     return 0;
 }

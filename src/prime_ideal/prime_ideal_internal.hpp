@@ -52,24 +52,33 @@ bool residue_variable_numerator(flint::FmpzPoly& numerator,
                                 const PrimeIdeal& prime,
                                 const Element& element) noexcept;
 
-// Closed-form factorization of the monic quadratic `minimal_polynomial`
-// x^2 + b x + c modulo a prime p that fits a word (Cohen, GTM 138,
-// Proposition 5.1.4 for the splitting type; Algorithm 1.5.1 for the square
-// root, via FLINT's n_sqrtmod).  For odd p, with D = b^2 - 4c mod p:
-// D = 0 gives (x - r)^2 with r = -b/2; a nonresidue D gives the irreducible
-// polynomial itself; a nonzero square D = s^2 gives x - r1 and x - r2 with
-// r = (-b +- s)/2.  For p = 2 the roots are read off f(0) and f(1).
-// Canonical order: a split prime's two linear factors are listed by
-// increasing root r1 < r2 in [0, p).  `out` is overwritten with monic
-// factors and exponents in the layout of fmpz_mod_poly_factor (whose order
-// for split primes is not specified).  Returns false, leaving `out`
-// unspecified, when p is not a word, the polynomial is not monic of degree 2,
-// or the computed square root does not check; callers then factor with
-// fmpz_mod_poly_factor.  p must be prime; that is not checked here.
-bool quadratic_minimal_polynomial_factor_word(
+// Closed-form factorization of a monic quadratic x^2 + b x + c modulo a
+// prime p that fits a word (Cohen, GTM 138, Proposition 5.1.4 for the
+// splitting type; Algorithm 1.5.1 for the square root, via FLINT's
+// n_sqrtmod).  `reduced` is the polynomial modulo p = the modulus of
+// `context`.  For odd p, with D = b^2 - 4c mod p: D = 0 gives (x - r)^2 with
+// r = -b/2; a nonresidue D gives the irreducible polynomial itself; a nonzero
+// square D = s^2 gives x - r1 and x - r2 with r = (-b +- s)/2.  For p = 2 the
+// roots are read off f(0) and f(1).  Canonical order: a split prime's two
+// linear factors are listed by increasing root r1 < r2 in [0, p).  `out` is
+// overwritten with monic factors and exponents in the layout of
+// fmpz_mod_poly_factor (whose order for split primes is not specified).
+// Returns false, leaving `out` unspecified, when p is not a word, the
+// polynomial is not monic of degree 2, or the computed square root does not
+// check.  p must be prime; that is not checked here.
+bool monic_quadratic_factor_word(flint::FmpzModPolyFactor& out,
+                                 flint::FmpzModPolyConstRef reduced,
+                                 const flint::FmpzModCtx& context) noexcept;
+
+// The factorization of `reduced` modulo the prime modulus of `context`:
+// monic_quadratic_factor_word when it applies, FLINT's fmpz_mod_poly_factor
+// otherwise.  Every route of decompose_prime that factors a quadratic
+// modulo p (omega's minimal polynomial, or a monic quadratic defining
+// polynomial on the Dedekind-Kummer routes) factors through it, so a split
+// prime's two primes come in the same canonical order on each route.
+void factor_with_quadratic_closed_form(
         flint::FmpzModPolyFactor& out,
-        flint::FmpzPolyConstRef minimal_polynomial,
-        flint::FmpzConstRef p,
+        flint::FmpzModPolyConstRef reduced,
         const flint::FmpzModCtx& context) noexcept;
 
 class MaximalQuadraticPrimeAccess {
@@ -104,17 +113,19 @@ enum class DecomposePrimeRoute {
     degree_one,
     // A maximal quadratic-backend order with basis [1, omega]: the factors
     // of the minimal polynomial of omega modulo p (closed form for word-size
-    // p, see quadratic_minimal_polynomial_factor_word).
+    // p, see monic_quadratic_factor_word).
     quadratic_integral_generator,
     // max_residue_degree == 1, an equation or maximal order, and the
     // defining polynomial f squarefree modulo p: the roots of f modulo p.
     squarefree_roots,
     // A maximal non-equation order with p prime to [O : Z[theta]]: the
-    // factors of f modulo p (Dedekind-Kummer).
+    // factors of f modulo p (Dedekind-Kummer; closed form for a quadratic
+    // f and word-size p, see factor_with_quadratic_closed_form).
     nonindex_factor,
     // A maximal non-equation order with p dividing [O : Z[theta]].
     index_divisor,
-    // The equation order: the factors of f modulo p (Dedekind-Kummer).
+    // The equation order: the factors of f modulo p (Dedekind-Kummer;
+    // closed form for a quadratic f and word-size p).
     equation_factor,
 };
 
