@@ -149,6 +149,23 @@ Changed
   measured.  See ``Lat::lll_reduce`` in
   :doc:`../reference/algorithms_and_sources`.
 
+- The ``proven`` finish workspace no longer keeps an HNF of its relations.
+  Its only use was the check that the number of nonzero HNF rows equals the
+  class group's relation rank; a sync that appends relations now checks
+  ``fmpz_mat_rank`` of all stored relations against that rank instead, and
+  fails, leaving the workspace unchanged, in the same cases.  Published
+  outputs are identical on the ``proven`` corpus and fixture rows (177 rows
+  that finish within 120 s on both builds, and
+  ``multiquadratic_m23_m31_m47`` with a 900 s cap; seven large cyclotomic
+  rows timed out on both builds).  Callgrind instruction counts (busy
+  machine, ``proven``): ``real_quadratic_d10000000005`` unchanged on the
+  current route (the workspace is not used there), ``simplest_quartic_t10``
+  0.4% more (the rank check costs more than the small incremental HNF it
+  replaces on that row).  With the workspace enabled on the relation route
+  (not part of this change), ``real_quadratic_d10000000005`` takes 30.4%
+  fewer than now, where the HNF made it 6.7% more.  No timing has been
+  measured.
+
 - The ``proven`` finish workspace no longer keeps the transform of its
   relation HNF.  A sync that appends relations computes only the HNF of the
   old HNF rows followed by the new relations, which by uniqueness of the HNF
