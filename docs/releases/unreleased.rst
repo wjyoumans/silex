@@ -194,6 +194,23 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` 8.7% fewer (2.267e9 to 2.070e9); control
   ``cyclotomic_real_64_deg16`` unchanged.
 
+- The split-prime norm evaluation of the small-LLL relation candidates
+  (defining polynomials of degree 16 and more) reuses per-row values.  Each
+  candidate is a row ``b`` of the reduced ideal basis, or a sum or
+  difference of two rows, and evaluation at a root ``r`` of the defining
+  polynomial modulo a split prime is linear, so the values ``b(r) mod p``
+  are computed once per ideal, row and split prime, as the candidates first
+  need them, and a candidate's value at ``r`` is their sum or difference.
+  The bound, the split primes used and the CRT are unchanged, so every norm
+  is the one computed before; a candidate whose coefficients do not match
+  its described rows is evaluated directly.  In ``grh`` mode, outputs are
+  identical on the 184 corpus and fixture rows that finish within 120 s
+  (``cyclotomic_real_163_deg81`` timed out on both builds).  Busy-machine
+  callgrind instruction counts, ``grh`` mode: ``cyclotomic_41_phi40`` 9.7%
+  fewer (5.312e10 to 4.796e10); ``cyclotomic_32_phi16``, whose split-prime
+  cost is mostly the prime search, 0.1% fewer.  No timing has been
+  measured.
+
 - The split-prime resultant search of class-group relation search
   (defining polynomials of degree 16 and more) skips a candidate prime ``p``
   whose Jacobi symbol ``(disc(f) / p)`` is not +1, where ``disc(f)`` is the
