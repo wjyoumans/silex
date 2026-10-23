@@ -2,14 +2,19 @@
 
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_poly.hpp>
+#include <silex/flint/nmod_poly.hpp>
+#include <silex/flint/nmod_poly_factor.hpp>
 
 #include <flint/arf.h>
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
 #include <flint/fmpz_poly.h>
+#include <flint/nmod_poly.h>
+#include <flint/ulong_extras.h>
 
 #include <cstddef>
 #include <cstdio>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -456,6 +461,153 @@ int test_t2_bound_for_prime_cyclotomic() {
                    : 1;
 }
 
+// The split-prime search without any screen: walks the primes from 2^27
+// with the evaluator's stopping rule (at most 64 split primes; stop once
+// 4 deg(f) (found + 1) primes have been tested) and keeps p when f mod p
+// is a product of deg(f) distinct monic linear factors, read from the
+// roots with multiplicities rather than from x^p mod f.
+struct ReferenceSearch {
+    std::vector<ulong> split_primes;
+    slong tested_primes = 0;
+    ulong last_tested_prime = 0;
+};
+
+void reference_split_prime_search(ReferenceSearch& out,
+                                  const sflint::FmpzPoly& field) noexcept {
+    const slong degree = fmpz_poly_degree(field.raw());
+    out.split_primes.clear();
+    out.tested_primes = 0;
+    out.last_tested_prime = UWORD(1) << 27;
+    for (;;) {
+        const auto found = static_cast<slong>(out.split_primes.size());
+        if (found >= 64 || out.tested_primes >= 4 * degree * (found + 1)) {
+            return;
+        }
+        const ulong p = n_nextprime(out.last_tested_prime, 1);
+        if (p >= (UWORD(1) << 28)) {
+            return;
+        }
+        out.last_tested_prime = p;
+        ++out.tested_primes;
+        sflint::NmodPoly reduced(p);
+        fmpz_poly_get_nmod_poly(reduced.raw(), field.raw());
+        sflint::NmodPolyFactor roots;
+        nmod_poly_roots(roots.raw(), reduced.raw(), 1);
+        bool distinct = roots.raw()->num == degree;
+        for (slong i = 0; distinct && i < roots.raw()->num; ++i) {
+            distinct = roots.raw()->exp[i] == 1;
+        }
+        if (distinct) {
+            out.split_primes.push_back(p);
+        }
+    }
+}
+
+// Runs the evaluator's search to the end with one candidate whose bound
+// needs more than the 64 split primes kept, then compares the primes
+// found, their order and the number of primes tested with the reference.
+int compare_split_prime_search(const sflint::FmpzPoly& field) noexcept {
+    relation_search::SplitPrimeResultant evaluator;
+    evaluator.reset(field.raw());
+    if (!evaluator.enabled) {
+        return 1;
+    }
+    sflint::FmpzPoly coordinate;
+    ulong state = 709;
+    set_random_polynomial(coordinate, state, fmpz_poly_degree(field.raw()),
+                          4096);
+    sflint::Fmpz actual;
+    bool handled = true;
+    evaluator.resultant(handled, actual.raw(), coordinate.raw());
+    if (handled || !evaluator.search_exhausted) {
+        return 1;
+    }
+    ReferenceSearch reference;
+    reference_split_prime_search(reference, field);
+    if (reference.split_primes.empty() ||
+        evaluator.moduli.size() != reference.split_primes.size() ||
+        evaluator.tested_primes != reference.tested_primes ||
+        evaluator.last_tested_prime != reference.last_tested_prime) {
+        std::fprintf(stderr,
+                     "split-prime search differs: found %zu vs %zu, "
+                     "tested %ld vs %ld\n",
+                     evaluator.moduli.size(), reference.split_primes.size(),
+                     static_cast<long>(evaluator.tested_primes),
+                     static_cast<long>(reference.tested_primes));
+        return 1;
+    }
+    for (std::size_t i = 0; i < reference.split_primes.size(); ++i) {
+        if (evaluator.moduli[i].n != reference.split_primes[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The discriminant screen in the split-prime search skips only primes
+// that cannot split f into distinct linear factors, so the search finds
+// the same primes in the same order after the same number of tested
+// primes.  The fields cover a non-square discriminant (Phi_17 and the
+// degree-17 real abelian field), a square one (Phi_32 = x^16 + 1, discriminant
+// 2^64), and a first tested prime q = 2^27 + 29 dividing the discriminant:
+// x (x - q) (x - 1) ... (x - 14) splits over Q (square discriminant) and
+// x (x - q) Phi_17 does not (non-square), and modulo q both have the double
+// root 0.
+int test_screened_search_matches_unscreened_search() {
+    const ulong q = n_nextprime(UWORD(1) << 27, 1);
+    if (q != (UWORD(1) << 27) + 29) {
+        return 1;
+    }
+    sflint::FmpzPoly field;
+    set_prime_cyclotomic(field, 17);
+    if (compare_split_prime_search(field) != 0) {
+        return 1;
+    }
+    set_real_abelian_degree_17(field);
+    if (compare_split_prime_search(field) != 0) {
+        return 1;
+    }
+    fmpz_poly_zero(field.raw());
+    fmpz_poly_set_coeff_si(field.raw(), 0, 1);
+    fmpz_poly_set_coeff_si(field.raw(), 16, 1);
+    if (compare_split_prime_search(field) != 0) {
+        return 1;
+    }
+
+    // x (x - q), then x (x - q) (x - 1) ... (x - 14).
+    fmpz_poly_zero(field.raw());
+    fmpz_poly_set_coeff_si(field.raw(), 1, -static_cast<slong>(q));
+    fmpz_poly_set_coeff_si(field.raw(), 2, 1);
+    sflint::FmpzPoly linear;
+    fmpz_poly_set_coeff_si(linear.raw(), 1, 1);
+    sflint::FmpzPoly split_field;
+    fmpz_poly_set(split_field.raw(), field.raw());
+    for (slong a = 1; a <= 14; ++a) {
+        fmpz_poly_set_coeff_si(linear.raw(), 0, -a);
+        fmpz_poly_mul(split_field.raw(), split_field.raw(), linear.raw());
+    }
+    sflint::FmpzPoly cyclotomic;
+    set_prime_cyclotomic(cyclotomic, 17);
+    fmpz_poly_mul(field.raw(), field.raw(), cyclotomic.raw());
+    sflint::Fmpz discriminant;
+    for (const sflint::FmpzPoly* f : {&split_field, &field}) {
+        fmpz_poly_discriminant(discriminant.raw(), f->raw());
+        if (fmpz_fdiv_ui(discriminant.raw(), q) != 0 ||
+            compare_split_prime_search(*f) != 0) {
+            return 1;
+        }
+    }
+    // The fully split field finds its 64 primes among the first 65 primes
+    // tested: every prime except q splits it.
+    ReferenceSearch reference;
+    reference_split_prime_search(reference, split_field);
+    return reference.split_primes.size() == 64 &&
+                           reference.tested_primes == 65 &&
+                           reference.split_primes.front() != q
+                   ? 0
+                   : 1;
+}
+
 }  // namespace
 
 // The closed-form degree-2 resultant equals fmpz_poly_resultant on random
@@ -556,6 +708,7 @@ int test_degree_two_resultant_matches_flint() {
 
 int main() {
     return test_cyclotomic_matches_resultant() != 0 ||
+                   test_screened_search_matches_unscreened_search() != 0 ||
                    test_real_abelian_matches_resultant() != 0 ||
                    test_constant_and_zero_polynomials() != 0 ||
                    test_disabled_and_exhausted_cases() != 0 ||

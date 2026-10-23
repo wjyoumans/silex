@@ -346,6 +346,7 @@ void SplitPrimeResultant::reset(
     tested_primes = 0;
     last_prime_count = 0;
     t2_bound_state = T2BoundState::not_computed;
+    discriminant_computed = false;
     moduli.clear();
     root_powers.clear();
     residues.clear();
@@ -389,7 +390,34 @@ bool SplitPrimeResultant::add_next_split_prime() noexcept {
         ++tested_primes;
 
         // f splits into distinct linear factors modulo p exactly when
-        // f divides x^p - x in F_p[x]; deg(f) >= 2 here, so x mod f = x.
+        // f divides x^p - x = prod_{a in F_p} (x - a) in F_p[x] (Fermat).  The
+        // roots a_1, ..., a_n of f mod p are then distinct elements of F_p and
+        // disc(f) mod p = prod_{i<j} (a_i - a_j)^2 is a nonzero square, so
+        // the Jacobi symbol (disc(f) / p) is +1.  Here disc(f) is the
+        // discriminant of the monic integer polynomial f itself (FLINT's
+        // fmpz_poly_discriminant: (-1)^(n(n-1)/2) Res(f, f') / lc(f) =
+        // lc(f)^(2n-2) prod_{i<j} (alpha_i - alpha_j)^2 over the roots
+        // alpha_i of f), not the field discriminant; it is a polynomial in
+        // the coefficients, so for monic f its reduction mod p is the
+        // discriminant of f mod p.  Every odd prime p with
+        // (disc(f) / p) = -1, or with p | disc(f) (symbol 0: f mod p has a
+        // repeated root, whatever the reason, ramification or an index
+        // divisor), therefore fails the test below, and skipping it leaves
+        // the split primes found and their order unchanged.  The prime
+        // still counts in tested_primes, so the search stops where it did
+        // without the screen.  The screen only saves work when disc(f) is
+        // not a square: then about half of the tested primes have symbol
+        // -1.  The tested primes are odd, as the Jacobi symbol requires.
+        if (!discriminant_computed) {
+            fmpz_poly_discriminant(discriminant.raw(),
+                                   field_polynomial.raw());
+            discriminant_computed = true;
+        }
+        if (n_jacobi_unsigned(fmpz_fdiv_ui(discriminant.raw(), p), p) != 1) {
+            continue;
+        }
+
+        // deg(f) >= 2 here, so x mod f = x.
         flint::NmodPoly reduced(p);
         flint::NmodPoly reversed_inverse(p);
         flint::NmodPoly frobenius(p);

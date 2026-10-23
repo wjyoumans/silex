@@ -75,6 +75,11 @@ struct SplitPrimeResultant {
     flint::Fmpz coordinate_norm_squared;
     flint::Fmpz modulus;
     flint::Fmpz crt_scratch;
+    // disc(f), computed when the split-prime search first runs after a
+    // reset with a new f; it screens the primes tested (see
+    // add_next_split_prime).
+    flint::Fmpz discriminant;
+    bool discriminant_computed = false;
 
     // Enables the evaluator for f when deg(f) is large enough for the
     // search to pay off; otherwise leaves it disabled.  A reset with the
