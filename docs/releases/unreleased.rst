@@ -1757,6 +1757,19 @@ Changed
   ``ell = 2``, the computation takes about 28% less time (release build on
   a busy machine, eleven interleaved runs each).
 
+- ``ResidueFieldQuotientLog::set_ell`` screens each candidate of its
+  generator scan through the norm to ``F_p`` when ``ell`` divides ``p - 1``:
+  ``N(x)^((p - 1)/ell) = x^((p^f - 1)/ell)``, a Legendre symbol of the norm
+  for ``ell = 2``, so candidates that cannot generate the order-``ell``
+  quotient are skipped without two powers in ``F_(p^f)``.  The scan order,
+  the selected generator and the quotient generator are unchanged; instance
+  output and the stored generators are identical on the 184 ``grh``
+  class/unit corpus rows that finish within 120 s.  On
+  ``cyclotomic_19_phi18`` in ``grh`` mode the instruction count falls by
+  4.7% (callgrind, 1,647M to 1,570M; ``set_ell`` itself 94M to 17M);
+  ``cyclotomic_52_phi24`` falls by 0.7% and a control row without these
+  calls is unchanged.  No wall-time measurement has been made.
+
 - Unit extraction for ``grh`` class/unit computations tests each candidate
   unit for independence incrementally, from the Gram matrix and inverse of the
   units already kept (Schur complement identity), instead of rebuilding the

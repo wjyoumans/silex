@@ -2490,6 +2490,22 @@ over to ``F_p``).  This is a cost choice only: it
 replaces a power in ``F_q`` by a resultant and a power in ``F_p``, and
 returns the same logarithm.  Other ``ell`` keep the power in ``F_q``.
 
+``ResidueFieldQuotientLog::set_ell`` stores as generator the ``ell``-free
+power ``g = x^c`` (``c`` the ``ell``-free part of ``q - 1``) of the first
+candidate ``x`` in its fixed scan with ``g^(ell^(v - 1)) != 1``, where
+``ell^v`` exactly divides ``q - 1``, and stores that power as the quotient
+generator; it is ``x^((q - 1)/ell)``.  When ``ell | p - 1`` each candidate is
+first screened by the same identity as above:
+``N(x)^((p - 1)/ell) = x^((q - 1)/ell)``, with ``N(x) = Res(m, a)``, so a
+candidate whose norm gives ``1`` is skipped without the two powers in
+``F_q``.  For ``ell = 2`` the screen is the Legendre symbol of the norm
+(FLINT ``fmpz_jacobi``), which is the PARI ``FpXQ_issquare`` route cited
+above; for odd ``ell`` it is a power in ``F_p``.  The scan visits the same
+candidates in the same order and stops at the same one, whose powers in
+``F_q`` are still taken, so the stored generator and quotient generator are
+unchanged.  This is a cost choice only.  Other ``ell`` scan without the
+screen.
+
 When ``ell`` divides the torsion order, the candidates include the torsion
 generator ``zeta``, as in Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Saturate.jl``: ``compute_candidates_for_saturate``
