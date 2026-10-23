@@ -13043,11 +13043,6 @@ int test_group_wide_form_failure_move_clear() {
     return 0;
 }
 
-// reduce_stored_relation_units on stored units whose unit-basis transform
-// overflows slong: u1 = v1 v2^M w2^(-M/2) = v1 with M = 2^62 + 2 and
-// u2 = v1^3 v2^2.  Reduction combines u2 with a multiple of u1 whose merged
-// exponents exceed slong, so the group keeps the wide form and its free
-// generators are the rebuilt units.
 // The FLINT fallback of the stored-unit LLL returns fmpz_lll's reduced
 // rows and transform on every route of the certified first phase: on
 // scaled-log-like rows (r rows, r + 1 columns, 20 to 120 bits, some skewed by
@@ -13111,6 +13106,11 @@ int test_reduce_unit_log_rows_with_flint_matches_fmpz_lll() {
     return 0;
 }
 
+// reduce_stored_relation_units on stored units whose unit-basis transform
+// overflows slong: u1 = v1 v2^M w2^(-M/2) = v1 with M = 2^62 + 2 and
+// u2 = v1^3 v2^2.  Reduction combines u2 with a multiple of u1 whose merged
+// exponents exceed slong, so the group keeps the wide form and its free
+// generators are the rebuilt units.
 int test_reduce_stored_units_keeps_wide_form() {
     WideTransformCase c(true);
     silex::EmbeddingContext embeddings(c.field);
