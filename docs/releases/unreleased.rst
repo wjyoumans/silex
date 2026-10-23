@@ -341,6 +341,25 @@ Changed
   ``imaginary_quadratic_d10000000799`` unchanged.  No timing has been
   measured.
 
+- The extension route of the ``proven`` relation-saturation kernel basis
+  (multi-row kernels over presentations with more than 32 generators) first
+  takes the rows of FLINT's double-precision LLL phase
+  (``fmpz_lll_d_with_removal_knapsack``) on ``[c*A | I_n]``, without
+  FLINT's final reducedness check of the whole reduced matrix, and accepts
+  them under the same checks as before: the exact kernel checks and the
+  certificate ``fmpz_mat_is_reduced`` on the kernel rows.  When the phase or
+  a check fails, ``fmpz_lll`` runs on the unchanged input as before.  Where
+  FLINT's check would have rejected the phase but the certificate holds, the
+  saturation kernel and image rows are another certified basis of the same
+  lattices, so the proof's auxiliary data can differ as for a change of
+  route; soundness and labels do not depend on it.  Published outputs and
+  proof records are identical on the ``proven`` corpus (178 rows compared,
+  five of them on this route, ``multiquadratic_m23_m31_m47`` included;
+  seven large cyclotomic rows timed out at 120 s on both builds).  Callgrind
+  instruction counts (busy machine): ``real_quadratic_d10000000005`` 26.3%
+  fewer (4.99G to 3.67G), control ``imaginary_quadratic_d10000000799``
+  unchanged.  No timing has been measured.
+
 - ``decompose_prime`` rebuilds the index-divisor primes it keeps in the
   order's shared data without re-running the ideal closure test on each
   stored Hermite normal form: every stored matrix is one the library already

@@ -849,7 +849,9 @@ in the reducer paragraph below, the basis claim relies on FLINT's guarantee
 that ``fmpz_lll`` applies only unimodular row operations; Silex adds no
 determinant check.  The relation-saturation kernel keeps FLINT's final
 reducedness check on its fallback routes; on its extension route the kernel
-rows are accepted only when ``fmpz_mat_is_reduced`` certifies them.  The unit
+rows are accepted only when ``fmpz_mat_is_reduced`` certifies them, and that
+route first tries the phase described next without FLINT's check (see the
+relation-saturation kernel basis below).  The unit
 witnesses and the analytic finish's unit logs (its count of independent units
 and its regulator product) take a variant without that check: for entries of at most 250 bits, FLINT's ULLL
 truncation threshold, it runs ``fmpz_lll_d_with_removal_knapsack``, the
@@ -2245,11 +2247,22 @@ kernel before forming the witness.  If the basis that yields the unit
 candidates is already built, it is reused.  Otherwise a kernel with at least
 two rows over a presentation with more than 32 generators takes the
 extension route first: the reduction of ``[c*A | I]`` for the
-presentation's relation matrix ``A`` by the small-kernel helper of the
+presentation's relation matrix ``A`` as for the small-kernel helper of the
 ``proven`` analytic finish above, with the same two exact checks, accepted
 only when ``fmpz_mat_is_reduced`` certifies the kernel rows with FLINT's
-default parameters.  Its kernel rows are the basis, and the remaining rows
-of the reduced matrix are kept as image rows.  For these presentations this
+default parameters.  The route relies on that certificate, not on FLINT's
+final reducedness check of the whole reduced matrix, so it first takes the
+rows of the double-precision phase of the finish's variant
+(``fmpz_lll_d_with_removal_knapsack`` for entries of at most 250 bits)
+without that check; when the phase is not run or returns ``-1``, or its
+rows fail a check or the certificate, it reduces the unchanged input with
+``fmpz_lll`` under the same checks and certificate.  Where FLINT's check
+would accept the phase output, ``fmpz_lll`` returns that same output, so
+the kernel and image rows are those of ``fmpz_lll``; otherwise they can be
+another certified LLL-reduced basis of the same kernel lattice, with the
+consequences for the proof record described below for a change of route.
+Its kernel rows are the basis, and the remaining rows of the reduced matrix
+are kept as image rows.  For these presentations this
 replaces the earlier route, which read the kernel from the left transform
 of the presentation's Hermite normal form; the HNF transform behind that
 left transform dominated the ``proven`` running time on real quadratic
