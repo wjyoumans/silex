@@ -443,10 +443,6 @@ bool class_group_finish_torsion(
         const flint::Fmpz*& torsion_order,
         const Element*& torsion_generator,
         const ClassGroupContext& context) noexcept;
-bool class_group_relation_rows(
-        flint::FmpzMatRef out,
-        const ClassGroupContext& context,
-        slong first_relation) noexcept;
 // Brings the workspace to the context's relations.  A sync that changes the
 // relations fails, leaving the workspace unchanged, unless fmpz_mat_rank of
 // all stored relations is the context's relation rank (which can be a

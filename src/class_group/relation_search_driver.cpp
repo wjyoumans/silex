@@ -38,28 +38,6 @@ namespace detail {
 
 class ClassGroupFinishAccess {
 public:
-    static bool relation_rows(flint::FmpzMatRef out,
-                              const ClassGroupContext& context,
-                              slong first_relation) noexcept {
-        if (first_relation < 0 ||
-            first_relation > context.relations_.length() ||
-            flint::fmpz_mat_nrows(out) !=
-                    context.relations_.length() - first_relation ||
-            flint::fmpz_mat_ncols(out) != context.relations_.ncols()) {
-            return false;
-        }
-        for (slong row = 0; row < flint::fmpz_mat_nrows(out); ++row) {
-            flint::FmpzMatWindow target(
-                    out, row, 0, row + 1,
-                    flint::fmpz_mat_ncols(out));
-            if (!context.relations_.row(target.ref(),
-                                        first_relation + row)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     static HnfFinishWorkspace* finish_workspace(
             ClassGroupContext& context) noexcept {
         return context.private_storage_ == nullptr
@@ -120,13 +98,6 @@ bool class_group_finish_torsion(
         const ClassGroupContext& context) noexcept {
     return ClassGroupFinishAccess::finish_torsion(
             torsion_order, torsion_generator, context);
-}
-
-bool class_group_relation_rows(
-        flint::FmpzMatRef out,
-        const ClassGroupContext& context,
-        slong first_relation) noexcept {
-    return ClassGroupFinishAccess::relation_rows(out, context, first_relation);
 }
 
 }  // namespace detail
