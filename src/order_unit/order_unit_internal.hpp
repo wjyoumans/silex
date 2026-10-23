@@ -833,8 +833,8 @@ bool hnf_regulator_multiple_from_basis(
         slong degree,
         slong precision) noexcept;
 // The kernel rows that hnf_unit_log_matrix takes, with or without a finish
-// workspace (a workspace caches the same rows per sync; it does not use the
-// unreduced zero-row part of its HNF transform).
+// workspace (a workspace caches the same rows per sync; it keeps
+// no HNF transform).
 enum class HnfUnitLogKernel : unsigned char {
     // hnf_unit_witness_coefficients: the rows the unit witnesses are
     // composed from, for logs that are combined with those witnesses.
