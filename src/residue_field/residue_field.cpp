@@ -928,12 +928,53 @@ bool ResidueFieldQuotientLog::set_ell(
     // quotient of the residue-field unit group: it raises a random element to
     // the ell-free cofactor and rejects it if the result dies modulo ell.  The
     // deterministic scan here is the same test over a fixed candidate order.
+    //
+    // When ell | p - 1 a candidate x is first screened through the norm N
+    // from F_q to F_p, as in apply: N(x) = x^((q - 1)/(p - 1)), so
+    //     N(x)^((p - 1)/ell) = x^((q - 1)/ell) = test,
+    // the last equality because ell_free_cofactor * quotient_exponent =
+    // (q - 1)/ell.  A candidate whose norm passes the F_p test therefore has
+    // test = 1 and is skipped without its two powers in F_q; the scan visits
+    // the same candidates in the same order and stops at the same first k.
+    // For ell = 2 (p is odd here, since 2 | q - 1) this is the Legendre
+    // symbol of the norm, the upstream system's square test in F_q, with
+    // N(x) = Res(m, a) for x = a(theta) and the monic modulus m; sources are
+    // listed in docs/reference/algorithms_and_sources.rst.  The candidate that
+    // passes the screen still takes both powers: they are the stored
+    // generator and quotient generator, and the test != 1 check is kept.
+    flint::Fmpz p_minus_one;
+    flint::Fmpz norm_cofactor;
+    flint::Fmpz norm;
+    fmpz_sub_ui(p_minus_one.raw(), parent_.p_.raw(), 1);
+    const bool norm_screen =
+            fmpz_divisible(p_minus_one.raw(), ell_in.raw()) != 0;
+    const bool ell_is_two = fmpz_equal_ui(ell_in.raw(), 2) != 0;
+    if (norm_screen) {
+        fmpz_divexact(norm_cofactor.raw(), p_minus_one.raw(), ell_in.raw());
+    }
     bool found = false;
     for (fmpz_one(k.raw()); fmpz_cmp(k.raw(), q.raw()) < 0;
          fmpz_add_ui(k.raw(), k.raw(), 1)) {
         if (!set_residue_field_element_from_index(
-                    candidate, parent_, flint::FmpzConstRef(k)) ||
-            !primary_part.pow_fmpz(
+                    candidate, parent_, flint::FmpzConstRef(k))) {
+            return false;
+        }
+        if (norm_screen) {
+            fmpz_mod_poly_resultant(norm.raw(), parent_.modulus_.raw(),
+                                    candidate.rep_.raw(), parent_.ctx_.raw());
+            if (ell_is_two) {
+                if (fmpz_jacobi(norm.raw(), parent_.p_.raw()) == 1) {
+                    continue;
+                }
+            } else {
+                fmpz_powm(norm.raw(), norm.raw(), norm_cofactor.raw(),
+                          parent_.p_.raw());
+                if (fmpz_is_one(norm.raw()) != 0) {
+                    continue;
+                }
+            }
+        }
+        if (!primary_part.pow_fmpz(
                     candidate, flint::FmpzConstRef(ell_free_cofactor)) ||
             !test.pow_fmpz(primary_part,
                            flint::FmpzConstRef(quotient_exponent))) {

@@ -1484,6 +1484,169 @@ int test_quotient_log_norm_path_matches_powmod() {
     return 0;
 }
 
+struct ScanCounts {
+    slong screened_fields = 0;    // ell | p - 1: the norm screen applies
+    slong unscreened_fields = 0;  // ell does not divide p - 1
+    slong skipped_candidates = 0;  // candidates before the generator
+};
+
+// set_ell's candidate scan without the norm screen: for k = 1, 2, ... the
+// element with base-p digits of k as coefficients, raised to the ell-free
+// part of q - 1 and then to ell^(v - 1); the first with a nontrivial result
+// gives the generator and quotient generator.  set_ell must store the same
+// two elements.
+void check_set_ell_matches_unscreened_scan(
+        const silex::ResidueField& residue_field, const sflint::Fmpz& ell,
+        ScanCounts& counts) noexcept {
+    const slong degree = residue_field.degree();
+    sflint::Fmpz p;
+    sflint::Fmpz q;
+    sflint::Fmpz order;
+    sflint::Fmpz ell_free;
+    sflint::Fmpz primary_order;
+    sflint::Fmpz quotient_exponent;
+    sflint::Fmpz p_minus_one;
+    assert(residue_field.characteristic(sflint::FmpzRef(p)));
+    assert(residue_field.cardinality(sflint::FmpzRef(q)));
+    fmpz_sub_ui(order.raw(), q.raw(), 1);
+    assert(fmpz_remove(ell_free.raw(), order.raw(), ell.raw()) > 0);
+    fmpz_divexact(primary_order.raw(), order.raw(), ell_free.raw());
+    fmpz_divexact(quotient_exponent.raw(), primary_order.raw(), ell.raw());
+    fmpz_sub_ui(p_minus_one.raw(), p.raw(), 1);
+
+    silex::ResidueFieldElement candidate(residue_field);
+    silex::ResidueFieldElement primary(residue_field);
+    silex::ResidueFieldElement test(residue_field);
+    silex::ResidueFieldElement one(residue_field);
+    assert(one.one());
+    sflint::FmpzPoly polynomial;
+    sflint::Fmpz k;
+    sflint::Fmpz t;
+    sflint::Fmpz digit;
+    bool found = false;
+    for (fmpz_one(k.raw()); fmpz_cmp(k.raw(), q.raw()) < 0;
+         fmpz_add_ui(k.raw(), k.raw(), 1)) {
+        fmpz_set(t.raw(), k.raw());
+        fmpz_poly_zero(polynomial.raw());
+        for (slong i = 0; i < degree; ++i) {
+            fmpz_fdiv_qr(t.raw(), digit.raw(), t.raw(), p.raw());
+            fmpz_poly_set_coeff_fmpz(polynomial.raw(), i, digit.raw());
+        }
+        assert(candidate.set_polynomial(sflint::FmpzPolyConstRef(polynomial)));
+        assert(primary.pow_fmpz(candidate, sflint::FmpzConstRef(ell_free)));
+        assert(test.pow_fmpz(primary,
+                             sflint::FmpzConstRef(quotient_exponent)));
+        if (!test.equal(one)) {
+            found = true;
+            break;
+        }
+        ++counts.skipped_candidates;
+    }
+    assert(found);
+
+    silex::ResidueFieldQuotientLog cache(residue_field);
+    assert(cache.set_ell(sflint::FmpzConstRef(ell)));
+    silex::ResidueFieldElement generator(residue_field);
+    silex::ResidueFieldElement quotient_generator(residue_field);
+    assert(cache.generator(generator));
+    assert(cache.quotient_generator(quotient_generator));
+    assert(generator.equal(primary));
+    assert(quotient_generator.equal(test));
+    if (fmpz_divisible(p_minus_one.raw(), ell.raw()) != 0) {
+        ++counts.screened_fields;
+    } else {
+        ++counts.unscreened_fields;
+    }
+}
+
+int test_set_ell_screen_matches_unscreened_scan() {
+    struct Case {
+        std::vector<slong> coefficients;  // defining polynomial, low to high
+        slong p;
+        std::vector<slong> ells;
+    };
+    // Residue degrees 1 to 6.  ell | p - 1 takes the norm screen (ell = 2
+    // through the Legendre symbol, odd ell through a power in F_p); the other
+    // ell scan unscreened.  Q(sqrt 5) at p = 3, 7, 13 and ell = 2 makes every
+    // constant a square, so the screen skips all p - 1 of them.
+    const std::vector<Case> cases = {
+            {{0, 1}, 5, {2}},                          // Q, q = 5
+            {{0, 1}, 31, {2, 3, 5}},                   // q = 31
+            {{-5, 0, 1}, 11, {2, 5}},                  // split, q = 11
+            {{-5, 0, 1}, 3, {2}},                      // Q(sqrt 5), q = 9
+            {{-5, 0, 1}, 7, {2, 3}},                   // q = 49
+            {{-5, 0, 1}, 13, {2, 3, 7}},               // q = 169
+            {{-2, 0, 0, 1}, 7, {2, 3, 19}},            // q = 343
+            {{1, 1, 1, 1, 1, 1, 1}, 2, {7}},           // Q(zeta_7), q = 8
+            {{1, 1, 1, 1, 1, 1, 1}, 13, {2, 3, 7}},    // q = 169
+            {{1, 1, 1, 1, 1, 1, 1}, 11, {2, 5, 7, 19}},  // q = 1331
+            {{1, 1, 1, 1, 1, 1, 1}, 3, {2, 7, 13}},    // q = 729
+            {{1, 1, 1, 1, 1, 1, 1}, 5, {2, 3, 7}},     // q = 15625
+    };
+
+    ScanCounts counts;
+    for (const Case& c : cases) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < c.coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           c.coefficients[i]);
+        }
+        silex::NumberField field;
+        silex::Order order = order_by_polynomial(field, polynomial);
+        sflint::Fmpz p;
+        fmpz_set_si(p, c.p);
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+        assert(primes.size() >= 1);
+        silex::ResidueField residue_field;
+        assert(residue_field.set_prime(*primes.at(0)));
+        for (slong ell_value : c.ells) {
+            sflint::Fmpz ell;
+            fmpz_set_si(ell, ell_value);
+            check_set_ell_matches_unscreened_scan(residue_field, ell, counts);
+        }
+    }
+
+    // A multiword characteristic p = 2^89 - 1 at degree one (Q) and degree
+    // two (inert in Q(i)), with ell = 2 and ell = 3 dividing p - 1.  Not
+    // ell = 2 at degree two: every constant is a square there, so the scan
+    // would pass all p constants first.
+    {
+        sflint::Fmpz p;
+        fmpz_one(p.raw());
+        fmpz_mul_2exp(p.raw(), p.raw(), 89);
+        fmpz_sub_ui(p.raw(), p.raw(), 1);
+        for (slong field_degree = 1; field_degree <= 2; ++field_degree) {
+            sflint::FmpqPoly polynomial;
+            sflint::fmpq_poly_set_coeff_si(polynomial, field_degree, 1);
+            if (field_degree == 2) {
+                sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+            }
+            silex::NumberField field;
+            silex::Order order = order_by_polynomial(field, polynomial);
+            silex::PrimeIdealList primes;
+            assert(silex::decompose_prime(primes, order,
+                                          sflint::FmpzConstRef(p)));
+            assert(primes.size() == 1);
+            silex::ResidueField residue_field;
+            assert(residue_field.set_prime(*primes.at(0)));
+            assert(residue_field.degree() == field_degree);
+            for (slong ell_value = field_degree == 1 ? 2 : 3; ell_value <= 3;
+                 ++ell_value) {
+                sflint::Fmpz ell;
+                fmpz_set_si(ell, ell_value);
+                check_set_ell_matches_unscreened_scan(residue_field, ell,
+                                                      counts);
+            }
+        }
+    }
+
+    assert(counts.screened_fields > 0);
+    assert(counts.unscreened_fields > 0);
+    assert(counts.skipped_candidates > 0);
+    return 0;
+}
+
 int main() {
     assert(test_degree_one() == 0);
     assert(test_field_element_keeps_parent_alive() == 0);
@@ -1495,6 +1658,7 @@ int main() {
     assert(test_multiplicative_quadratic() == 0);
     assert(test_quotient_logs_mod_three() == 0);
     assert(test_quotient_log_norm_path_matches_powmod() == 0);
+    assert(test_set_ell_screen_matches_unscreened_scan() == 0);
     assert(test_generic_nonpower_basis_set_element() == 0);
     assert(test_set_element_homomorphism_on_index_maximal_order() == 0);
     assert(test_set_factored_element_matches_factorwise_product() == 0);
