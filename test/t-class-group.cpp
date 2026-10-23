@@ -8069,6 +8069,178 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     return 0;
 }
 
+// Both call orders of relation_kernel_unit and the relation-saturation
+// proof on a presentation above the size crossover
+// (kSaturationKernelTransformMaxGenerators).  Q(sqrt(100000005)),
+// x^2 - x - 25000001, h = 212 = 2^2 * 53, computed `proven`.  Publishing
+// the same relations again drops the cached kernel bases, so each order
+// starts from none.  With the saturation proof first, the kernel basis its
+// beta rows are size-reduced against comes from the extension route and
+// the LLL-reduced basis of relation_kernel_unit stays unbuilt; with
+// relation_kernel_unit first, that LLL-reduced basis is built and the
+// saturation basis is a copy of it.  The two bases are LLL-reduced bases
+// of the same kernel lattice, relation_kernel_unit returns the same units
+// in both orders, and the proofs at ell = 2 and 53 verify in both with the
+// same rank and target rank.  Only the auxiliary primes the proofs use may
+// differ (the documented call-order dependence of the saturation proof
+// records); the test does not fix them.
+int test_relation_saturation_call_orders_above_crossover() {
+    using silex::detail::TestHookAccess;
+    silex::NumberField field = shifted_quadratic_field(-1, -25000001);
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order maximal_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    sflint::Fmpz factor_base_bound;
+    assert(silex::factor_base_class_group_bound(
+            sflint::FmpzRef(factor_base_bound), maximal_order));
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::proven;
+    silex::ClassGroupContext context;
+    silex::OrderUnitGroup units;
+    assert(units.compute_with_class_group(
+            context, maximal_order, sflint::FmpzConstRef(factor_base_bound),
+            options, 128));
+    assert_proven_class_group_certification(context);
+    assert(units.certification_status() == silex::CertificationMode::proven);
+    sflint::Fmpz value;
+    assert(context.order(sflint::FmpzRef(value)));
+    assert(sflint::fmpz_equal_si(value, 212));
+
+    silex::FiniteAbelianGroup presentation;
+    assert(context.presentation(presentation));
+    assert(presentation.generator_count() >
+           silex::detail::kSaturationKernelTransformMaxGenerators);
+    const slong relation_count = context.relation_count();
+    const slong kernel_rows = context.relation_kernel_unit_count();
+    assert(kernel_rows > 1);
+    sflint::FmpzMat raw(context.invariant_count(), relation_count);
+    assert(presentation.invariant_generator_relation_matrix(
+            sflint::FmpzMatRef(raw)));
+
+    // The ell-local proof reads dlog columns only at degree-one primes
+    // above p = 1 mod ell.  For ell = 53 (target rank 2: one beta row and
+    // the fundamental unit) these are p = 107, 743, 1061, ...  Here 743 is
+    // inert and the two columns at the primes above 107 do not reach rank
+    // 2, so the bound must include 1061 (bounds 127 and 1000 leave the
+    // ell = 53 record unavailable).
+    sflint::Fmpz aux_bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(aux_bound), 1100);
+    const slong ells[] = {2, 53};
+    struct OrderResult {
+        sflint::FmpzMat basis{0, 0};
+        std::vector<silex::FactoredElement> kernel_units;
+        slong ranks[2] = {-1, -1};
+        slong target_ranks[2] = {-1, -1};
+        slong local_primes[2] = {-1, -1};
+    };
+    auto republish = [&]() {
+        assert(context.publish_presentation());
+        silex::FiniteAbelianGroup again;
+        assert(context.presentation(again));
+        sflint::FmpzMat again_raw(context.invariant_count(), relation_count);
+        assert(again.invariant_generator_relation_matrix(
+                sflint::FmpzMatRef(again_raw)));
+        assert(::fmpz_mat_equal(again_raw.raw(), raw.raw()));
+        assert(context.relation_kernel_unit_count() == kernel_rows);
+    };
+    auto read_kernel_units = [&](OrderResult& result) {
+        for (slong i = 0; i < kernel_rows; ++i) {
+            result.kernel_units.emplace_back(field);
+            assert(context.relation_kernel_unit(result.kernel_units.back(),
+                                                i));
+        }
+    };
+    auto prove = [&](OrderResult& result) {
+        for (int e = 0; e < 2; ++e) {
+            sflint::Fmpz ell;
+            sflint::fmpz_set_si(sflint::FmpzRef(ell), ells[e]);
+            assert(context.try_prove_relation_saturation_with_units(
+                    units, sflint::FmpzConstRef(ell),
+                    sflint::FmpzConstRef(aux_bound)));
+            silex::ProofState status = silex::ProofState::not_checked;
+            assert(CertificationAccess::relation_saturation_proof_record(
+                    context, sflint::FmpzConstRef(ell), status,
+                    result.ranks[e], result.target_ranks[e],
+                    result.local_primes[e]));
+            assert(status == silex::ProofState::verified);
+            assert(result.local_primes[e] > 0);
+        }
+        assert(context.relation_saturation_status() ==
+               silex::ProofState::verified);
+    };
+
+    // Saturation first: the extension route builds the saturation basis,
+    // and relation_kernel_unit's basis stays unbuilt until it is called.
+    OrderResult saturation_first;
+    republish();
+    {
+        const slong kept = TestHookAccess::saturation_kernel_extensions_kept();
+        bool lll_basis_built = true;
+        assert(silex::detail::relation_saturation_kernel_basis(
+                saturation_first.basis, lll_basis_built, context));
+        assert(!lll_basis_built);
+        assert(TestHookAccess::saturation_kernel_extensions_kept() ==
+               kept + 1);
+        prove(saturation_first);
+        read_kernel_units(saturation_first);
+    }
+
+    // relation_kernel_unit first: the saturation basis is a copy of its
+    // LLL-reduced basis, and the extension route does not run.
+    OrderResult kernel_unit_first;
+    republish();
+    {
+        read_kernel_units(kernel_unit_first);
+        const slong kept = TestHookAccess::saturation_kernel_extensions_kept();
+        bool lll_basis_built = false;
+        assert(silex::detail::relation_saturation_kernel_basis(
+                kernel_unit_first.basis, lll_basis_built, context));
+        assert(lll_basis_built);
+        prove(kernel_unit_first);
+        assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
+    }
+
+    // Both bases are LLL-reduced bases of the same kernel lattice.
+    sflint::FmpzLll lll;
+    for (const OrderResult* result : {&saturation_first, &kernel_unit_first}) {
+        assert(::fmpz_mat_nrows(result->basis.raw()) == kernel_rows &&
+               ::fmpz_mat_ncols(result->basis.raw()) == relation_count);
+        assert(::fmpz_mat_is_reduced(result->basis.raw(), lll.raw()->delta,
+                                     lll.raw()->eta));
+    }
+    sflint::FmpzMat first_hnf(kernel_rows, relation_count);
+    sflint::FmpzMat second_hnf(kernel_rows, relation_count);
+    ::fmpz_mat_hnf(first_hnf.raw(), saturation_first.basis.raw());
+    ::fmpz_mat_hnf(second_hnf.raw(), kernel_unit_first.basis.raw());
+    assert(::fmpz_mat_equal(first_hnf.raw(), second_hnf.raw()));
+
+    // relation_kernel_unit does not depend on the order.
+    for (std::size_t i = 0; i < static_cast<std::size_t>(kernel_rows); ++i) {
+        const silex::FactoredElement& left = saturation_first.kernel_units[i];
+        const silex::FactoredElement& right =
+                kernel_unit_first.kernel_units[i];
+        assert(left.length() == right.length());
+        for (slong f = 0; f < left.length(); ++f) {
+            slong left_exponent = 0;
+            slong right_exponent = 0;
+            assert(left.exponent(left_exponent, f));
+            assert(right.exponent(right_exponent, f));
+            assert(left_exponent == right_exponent);
+            assert(left.factor(f) != nullptr && right.factor(f) != nullptr);
+            assert(left.factor(f)->equal(*right.factor(f)));
+        }
+    }
+
+    // The proofs agree in rank and target rank.
+    for (int e = 0; e < 2; ++e) {
+        assert(saturation_first.ranks[e] == kernel_unit_first.ranks[e]);
+        assert(saturation_first.target_ranks[e] ==
+               kernel_unit_first.target_ranks[e]);
+    }
+    return 0;
+}
+
 // The relation-saturation beta rows are size-reduced against an
 // LLL-reduced relation-kernel basis.  Q(sqrt(100000005)), x^2 - x - 25000001:
 // h = 212 with invariants [106, 2], w = 2, unit rank 1, regulator
@@ -8476,6 +8648,7 @@ int main() {
     test_low_bound_generation_check_does_not_promote();
     test_relation_saturation_size_reduce_row();
     test_relation_saturation_beta_rows_size_reduced();
+    test_relation_saturation_call_orders_above_crossover();
     test_relation_saturation_kernel_basis_first_phase();
     test_relation_saturation_kernel_basis_fallbacks();
     test_relation_saturation_kernel_basis_extension_route();
