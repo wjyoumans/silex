@@ -19,12 +19,60 @@
 #include "test_support.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <cassert>
 #include <cstdint>
 #include <vector>
 
 namespace {
 namespace sflint = silex::flint;
+
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+// Counts the profile events of the unit-candidate code by label.  A profiling
+// build records which route reduce_unit_candidate_kernel and
+// solve_unit_candidate_system took, so a test can pin the route itself.
+struct RouteCounter {
+    long kernel_certified = 0;
+    long kernel_fallback = 0;
+    long dixon_stabilized = 0;
+    long dixon_final = 0;
+};
+
+void route_callback(void* user, silex::DiagnosticsModule,
+                    silex::ProfileEvent event, const char*,
+                    const char* label) noexcept {
+    if (event != silex::ProfileEvent::event || label == nullptr) {
+        return;
+    }
+    RouteCounter& c = *static_cast<RouteCounter*>(user);
+    if (std::strcmp(label, "class_group.unit_candidate_witnesses."
+                           "kernel_lll_certified") == 0) {
+        ++c.kernel_certified;
+    } else if (std::strcmp(label, "class_group.unit_candidate_witnesses."
+                                  "kernel_lll_fallback") == 0) {
+        ++c.kernel_fallback;
+    } else if (std::strcmp(label, "class_group.solve_unit_candidate_system."
+                                  "stabilized") == 0) {
+        ++c.dixon_stabilized;
+    } else if (std::strcmp(label, "class_group.solve_unit_candidate_system."
+                                  "final_reconstruction") == 0) {
+        ++c.dixon_final;
+    }
+}
+
+struct RouteProbe {
+    silex::DiagnosticsContext context;
+    RouteCounter counter;
+    RouteProbe() {
+        silex::diagnostics_context_init(context);
+        silex::diagnostics_set_profiling(
+                context, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::class_group),
+                route_callback, &counter);
+    }
+};
+#endif
 
 silex::NumberField degree_one_field() noexcept {
     sflint::FmpqPoly polynomial;
@@ -2030,7 +2078,14 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
         sflint::FmpzMat expected_transform(2, 2);
         fmpz_lll(expected.raw(), expected_transform.raw(), lll.raw());
         assert(::fmpz_mat_equal(pass_basis.raw(), expected.raw()) == 0);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        RouteProbe guard_probe;
+        silex::detail::reduce_unit_candidate_kernel(basis,
+                                                    &guard_probe.context);
+        assert(guard_probe.counter.kernel_certified == 0);
+#else
         silex::detail::reduce_unit_candidate_kernel(basis, nullptr);
+#endif
         assert(::fmpz_mat_equal(basis.raw(), expected.raw()) != 0);
     }
 
@@ -2040,6 +2095,9 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
     slong fallback_seen = 0;
     slong fast_path_seen = 0;
     slong above_cutoff_seen = 0;
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    slong certified_events_seen = 0;
+#endif
     for (slong iter = 0; iter < 3000; ++iter) {
         const slong rows = 2 + static_cast<slong>(n_randint(state, 9));
         const slong cols = rows + static_cast<slong>(n_randint(state, 8));
@@ -2075,7 +2133,12 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
 
         sflint::FmpzMat actual(rows, cols);
         ::fmpz_mat_set(actual.raw(), input.raw());
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        RouteProbe probe;
+        silex::detail::reduce_unit_candidate_kernel(actual, &probe.context);
+#else
         silex::detail::reduce_unit_candidate_kernel(actual, nullptr);
+#endif
         assert(::fmpz_mat_equal(actual.raw(), expected.raw()) != 0);
 
         // The same with each failure injected into the certified first
@@ -2109,6 +2172,13 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
                 const slong input_bits = ::fmpz_mat_max_bits(input.raw());
                 if ((input_bits < 0 ? -input_bits : input_bits) <= 250) {
                     ++fast_path_seen;
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+                    // The kernel itself accepted the first phase: a mutant
+                    // that never takes the fast path has no such event.
+                    assert(probe.counter.kernel_certified == 1);
+                    assert(probe.counter.kernel_fallback == 0);
+                    ++certified_events_seen;
+#endif
                     // The shared helper certifies this phase output with
                     // fmpz_mat_is_reduced above the 16-bit cutoff.
                     const slong pass_bits =
@@ -2131,6 +2201,9 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
     assert(fallback_seen > 0);
     assert(fast_path_seen > 0);
     assert(above_cutoff_seen > 0);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(certified_events_seen == fast_path_seen);
+#endif
     return 0;
 }
 
@@ -2141,7 +2214,8 @@ int test_unit_candidate_kernel_lll_matches_fmpz_lll() {
 // inverse, and reports a singular basis without caching it.
 bool unit_candidate_system_matches_flint(
         silex::detail::RelationUnitCandidateBatchState& state,
-        const sflint::FmpzMat& basis, const sflint::FmpzMat& rhs) {
+        const sflint::FmpzMat& basis, const sflint::FmpzMat& rhs,
+        const silex::DiagnosticsContext* diagnostics = nullptr) {
     const slong n = ::fmpz_mat_nrows(basis.raw());
     const slong cols = ::fmpz_mat_ncols(rhs.raw());
     sflint::FmpzMat expected(n, cols);
@@ -2154,7 +2228,7 @@ bool unit_candidate_system_matches_flint(
     sflint::Fmpz actual_den;
     if (!silex::detail::solve_unit_candidate_system(
                 actual, actual_den, state, sflint::FmpzMatConstRef(basis),
-                sflint::FmpzMatConstRef(rhs))) {
+                sflint::FmpzMatConstRef(rhs), diagnostics)) {
         return false;
     }
     return ::fmpz_mat_equal(actual.raw(), expected.raw()) != 0 &&
@@ -2179,6 +2253,9 @@ int test_unit_candidate_system_dixon_cache() {
 
     // Random nonsingular systems of several sizes; entry sizes up to 80 bits
     // make the lifting run past the first stabilization checks.
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    slong stabilized_seen = 0;
+#endif
     const slong sizes[] = {1, 2, 6, 20, 40};
     const flint_bitcnt_t bits[] = {4, 20, 80};
     for (const slong n : sizes) {
@@ -2191,7 +2268,17 @@ int test_unit_candidate_system_dixon_cache() {
             assert(state.dixon_prime == 0);
             sflint::FmpzMat rhs(n, 3);
             fill_random(rhs, random, b);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+            RouteProbe probe;
+            assert(unit_candidate_system_matches_flint(state, basis, rhs,
+                                                       &probe.context));
+            assert(probe.counter.dixon_stabilized +
+                           probe.counter.dixon_final ==
+                   1);
+            stabilized_seen += probe.counter.dixon_stabilized;
+#else
             assert(unit_candidate_system_matches_flint(state, basis, rhs));
+#endif
             const ulong prime = state.dixon_prime;
             const ulong* const inverse_entries =
                     state.dixon_inverse.raw()->entries;
@@ -2221,6 +2308,11 @@ int test_unit_candidate_system_dixon_cache() {
         }
     }
 
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // Ordinary systems are solved by a stabilization check inside the loop.
+    assert(stabilized_seen > 0);
+#endif
+
     // The final reconstruction past the modulus bound.  For the 1 x 1
     // system a x = 1 with a = 2^300 + 1, fmpz_mat_solve_bound gives
     // D >= |a| and N = D, so the bound is 2 D^2 >= 2 a^2.  Rational
@@ -2241,7 +2333,17 @@ int test_unit_candidate_system_dixon_cache() {
         ::fmpz_one(::fmpz_mat_entry(rhs.raw(), 0, 0));
         ::fmpz_set_si(::fmpz_mat_entry(rhs.raw(), 0, 1), -1);
         silex::detail::RelationUnitCandidateBatchState state;
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        // The profiling build records the path: the solution comes from
+        // the reconstruction after the loop, not from a stabilization check.
+        RouteProbe probe;
+        assert(unit_candidate_system_matches_flint(state, basis, rhs,
+                                                   &probe.context));
+        assert(probe.counter.dixon_final == 1);
+        assert(probe.counter.dixon_stabilized == 0);
+#else
         assert(unit_candidate_system_matches_flint(state, basis, rhs));
+#endif
     }
 
     // A corrupted cached inverse is a detected failure.  With one entry of
@@ -2277,9 +2379,19 @@ int test_unit_candidate_system_dixon_cache() {
                                  ::n_addmod(entry, k, prime));
             sflint::FmpzMat solution(n, cols);
             sflint::Fmpz den;
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+            RouteProbe probe;
+            assert(!silex::detail::solve_unit_candidate_system(
+                    solution, den, state, sflint::FmpzMatConstRef(basis),
+                    sflint::FmpzMatConstRef(rhs), &probe.context));
+            // The failure comes from the checked final reconstruction.
+            assert(probe.counter.dixon_final == 1);
+            assert(probe.counter.dixon_stabilized == 0);
+#else
             assert(!silex::detail::solve_unit_candidate_system(
                     solution, den, state, sflint::FmpzMatConstRef(basis),
                     sflint::FmpzMatConstRef(rhs)));
+#endif
             assert(state.dixon_prime == prime);
         }
         ::nmod_mat_set(state.dixon_inverse.raw(), good.raw());

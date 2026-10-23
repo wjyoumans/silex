@@ -427,7 +427,9 @@ bool solve_unit_candidate_system(flint::FmpzMat& solution,
                                  flint::Fmpz& denominator,
                                  RelationUnitCandidateBatchState& state,
                                  flint::FmpzMatConstRef basis,
-                                 flint::FmpzMatConstRef rhs) noexcept;
+                                 flint::FmpzMatConstRef rhs,
+                                 const DiagnosticsContext* diagnostics =
+                                         nullptr) noexcept;
 bool unit_candidate_witnesses(std::vector<FactoredElement>& out,
                                     RelationUnitCandidateBatchState& state,
                                     const ClassGroupContext& context,

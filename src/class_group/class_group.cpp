@@ -9695,12 +9695,17 @@ void reduce_unit_candidate_kernel(
     flint::FmpzLll lll;
     flint::FmpzMat transform(flint::fmpz_mat_nrows(rows),
                              flint::fmpz_mat_nrows(rows));
-    if (lat::detail::certified_fmpz_lll(rows.raw(), transform.raw(),
-                                        flint::FmpzLllConstRef(lll)) ==
-        lat::detail::CertifiedLllRoute::fallback) {
+    const lat::detail::CertifiedLllRoute route =
+            lat::detail::certified_fmpz_lll(rows.raw(), transform.raw(),
+                                            flint::FmpzLllConstRef(lll));
+    if (route == lat::detail::CertifiedLllRoute::fallback) {
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.unit_candidate_witnesses.kernel_lll_fallback");
+    } else if (route == lat::detail::CertifiedLllRoute::certified) {
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.unit_candidate_witnesses.kernel_lll_certified");
     }
 }
 
@@ -9767,7 +9772,10 @@ bool solve_unit_candidate_system(flint::FmpzMat& solution,
                                  flint::Fmpz& denominator,
                                  RelationUnitCandidateBatchState& state,
                                  flint::FmpzMatConstRef basis,
-                                 flint::FmpzMatConstRef rhs) noexcept {
+                                 flint::FmpzMatConstRef rhs,
+                                 const DiagnosticsContext* diagnostics)
+        noexcept {
+    (void)diagnostics;
     const slong n = flint::fmpz_mat_nrows(basis);
     const slong cols = flint::fmpz_mat_ncols(rhs);
     flint::Fmpz numerator_bound;
@@ -9837,6 +9845,10 @@ bool solve_unit_candidate_system(flint::FmpzMat& solution,
                                                  power.raw()) != 0 &&
                 unit_candidate_solution_checks(solution, denominator,
                                                rational, basis, rhs)) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.solve_unit_candidate_system."
+                        "stabilized");
                 return true;
             }
         }
@@ -9849,6 +9861,9 @@ bool solve_unit_candidate_system(flint::FmpzMat& solution,
         ::fmpz_mat_scalar_divexact_ui(residual.raw(), residual.raw(), prime);
     }
 
+    SILEX_PROFILE_EVENT(
+            diagnostics, DiagnosticsModule::class_group,
+            "class_group.solve_unit_candidate_system.final_reconstruction");
     return ::fmpq_mat_set_fmpz_mat_mod_fmpz(rational.raw(), lifted.raw(),
                                             power.raw()) != 0 &&
            unit_candidate_solution_checks(solution, denominator, rational,
@@ -9956,7 +9971,8 @@ bool unit_candidate_witnesses(std::vector<FactoredElement>& out,
     if (!solve_unit_candidate_system(
                 solution_transpose, denominator, state,
                 flint::FmpzMatConstRef(basis_transpose),
-                flint::FmpzMatConstRef(extra_transpose)) ||
+                flint::FmpzMatConstRef(extra_transpose),
+                context.diagnostics()) ||
         flint::fmpz_is_zero(flint::FmpzConstRef(denominator))) {
         return false;
     }
