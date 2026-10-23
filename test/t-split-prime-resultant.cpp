@@ -4,6 +4,8 @@
 #include <silex/flint/fmpz_poly.hpp>
 
 #include <flint/arf.h>
+#include <flint/fmpq.h>
+#include <flint/fmpq_poly.h>
 #include <flint/fmpz_poly.h>
 
 #include <cstddef>
@@ -456,6 +458,102 @@ int test_t2_bound_for_prime_cyclotomic() {
 
 }  // namespace
 
+// The closed-form degree-2 resultant equals fmpz_poly_resultant on random
+// f of degree 2 (monic and non-monic, either sign of the leading
+// coefficient) and g of length 0, 1 or 2, and, for g / d with an integer
+// denominator d, Res(f, g) / d^2 equals fmpq_poly_resultant(f, g / d).
+int test_degree_two_resultant_matches_flint() {
+    ulong state = 2026;
+    sflint::FmpzPoly field;
+    sflint::FmpzPoly coordinate;
+    sflint::Fmpz expected;
+    sflint::Fmpz actual;
+    sflint::Fmpz den;
+    fmpq_poly_t rational_field;
+    fmpq_poly_t rational_coordinate;
+    fmpq_t rational_expected;
+    fmpq_t rational_actual;
+    fmpq_poly_init(rational_field);
+    fmpq_poly_init(rational_coordinate);
+    fmpq_init(rational_expected);
+    fmpq_init(rational_actual);
+    int failures = 0;
+    for (slong k = 0; k < 4000 && failures == 0; ++k) {
+        const flint_bitcnt_t field_bits =
+                static_cast<flint_bitcnt_t>(next_random(state) % 161);
+        set_random_polynomial(field, state, 3, field_bits);
+        if (k % 4 == 0) {
+            fmpz_poly_set_coeff_si(field.raw(), 2, 1);
+        }
+        const slong length = static_cast<slong>(next_random(state) % 3);
+        const flint_bitcnt_t bits =
+                static_cast<flint_bitcnt_t>(next_random(state) % 161);
+        set_random_polynomial(coordinate, state, length, bits);
+        fmpz_poly_resultant(expected.raw(), field.raw(), coordinate.raw());
+        bool handled = false;
+        relation_search::degree_two_resultant(handled, actual.raw(),
+                                              field.raw(), coordinate.raw());
+        if (!handled || !fmpz_equal(expected.raw(), actual.raw())) {
+            std::fprintf(stderr,
+                         "degree-2 resultant mismatch: candidate %ld\n",
+                         static_cast<long>(k));
+            ++failures;
+            break;
+        }
+
+        fmpz_set_ui(den.raw(), 1 + (next_random(state) & UWORD(0xffffffffff)));
+        fmpq_poly_set_fmpz_poly(rational_field, field.raw());
+        fmpq_poly_set_fmpz_poly(rational_coordinate, coordinate.raw());
+        fmpq_poly_scalar_div_fmpz(rational_coordinate, rational_coordinate,
+                                  den.raw());
+        fmpq_poly_resultant(rational_expected, rational_field,
+                            rational_coordinate);
+        fmpz_mul(den.raw(), den.raw(), den.raw());
+        fmpq_set_fmpz_frac(rational_actual, actual.raw(), den.raw());
+        if (!fmpq_equal(rational_expected, rational_actual)) {
+            std::fprintf(stderr,
+                         "degree-2 resultant denominator mismatch: "
+                         "candidate %ld\n",
+                         static_cast<long>(k));
+            ++failures;
+        }
+    }
+    fmpq_clear(rational_actual);
+    fmpq_clear(rational_expected);
+    fmpq_poly_clear(rational_coordinate);
+    fmpq_poly_clear(rational_field);
+    if (failures != 0) {
+        return 1;
+    }
+
+    // Res(-3x^2 + 5x + 7, 2) = 4, not lc(f) * 4.
+    fmpz_poly_zero(field.raw());
+    fmpz_poly_set_coeff_si(field.raw(), 0, 7);
+    fmpz_poly_set_coeff_si(field.raw(), 1, 5);
+    fmpz_poly_set_coeff_si(field.raw(), 2, -3);
+    fmpz_poly_set_si(coordinate.raw(), 2);
+    bool handled = false;
+    relation_search::degree_two_resultant(handled, actual.raw(), field.raw(),
+                                          coordinate.raw());
+    if (!handled || !fmpz_equal_si(actual.raw(), 4)) {
+        return 1;
+    }
+
+    // Other degrees are left to the caller and leave out unchanged.
+    fmpz_set_si(actual.raw(), 99);
+    fmpz_poly_set_coeff_si(coordinate.raw(), 2, 1);
+    relation_search::degree_two_resultant(handled, actual.raw(), field.raw(),
+                                          coordinate.raw());
+    if (handled || !fmpz_equal_si(actual.raw(), 99)) {
+        return 1;
+    }
+    fmpz_poly_set_si(coordinate.raw(), 2);
+    fmpz_poly_set_coeff_si(field.raw(), 3, 1);
+    relation_search::degree_two_resultant(handled, actual.raw(), field.raw(),
+                                          coordinate.raw());
+    return handled || !fmpz_equal_si(actual.raw(), 99) ? 1 : 0;
+}
+
 int main() {
     return test_cyclotomic_matches_resultant() != 0 ||
                    test_real_abelian_matches_resultant() != 0 ||
@@ -464,7 +562,8 @@ int main() {
                    test_reset_keeps_split_primes_for_same_field() != 0 ||
                    test_t2_bound_matches_resultant_on_tight_candidates() !=
                            0 ||
-                   test_t2_bound_for_prime_cyclotomic() != 0
+                   test_t2_bound_for_prime_cyclotomic() != 0 ||
+                   test_degree_two_resultant_matches_flint() != 0
             ? 1
             : 0;
 }

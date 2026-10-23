@@ -128,6 +128,20 @@ Added
 Changed
 -------
 
+- In quadratic fields, the coordinate-norm prefilter of class-group relation
+  search computes the norm of a candidate ``a + b theta`` as the closed-form
+  resultant ``a^2 - f1 a b + f0 b^2`` of the monic defining polynomial
+  ``x^2 + f1 x + f0`` instead of calling FLINT's ``fmpz_poly_resultant``.
+  The formula is the determinant of the 3 x 3 Sylvester matrix that defines
+  the resultant, and the norm is this resultant (Cohen, GTM 138,
+  Proposition 4.3.4).  The value is the same integer, so the prefilter's
+  decisions and published results are unchanged: ``proven`` outputs are
+  identical on every degree-2 row of the corpus and test fixture (26 rows
+  compared).  Busy-machine callgrind instruction counts, ``proven`` mode:
+  ``imaginary_quadratic_d100000031`` 11.8% fewer (4.70e8 to 4.15e8),
+  ``real_quadratic_d100000001`` 0.1% fewer, control
+  ``simplest_quartic_t10`` unchanged.
+
 - ``FiniteAbelianGroup`` takes the Smith form of its Hermite normal form
   basis after splitting off the unit pivots (Cohen, Algorithm 5.5.2, steps
   10 and 12): the rows of the pivots with diagonal entry 1 are cleared by

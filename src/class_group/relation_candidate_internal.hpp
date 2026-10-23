@@ -91,6 +91,19 @@ private:
     bool add_next_split_prime() noexcept;
 };
 
+// Sets out = Res(f, g), the value fmpz_poly_resultant(out, f, g) returns,
+// and handled = true when deg f = 2 and g has length at most 2; otherwise
+// handled = false and out is unchanged.  out must not alias a coefficient
+// of f or g.  The value is the determinant of the 3 x 3 Sylvester matrix
+// of f = f2 x^2 + f1 x + f0 and g = g1 x + g0, which defines the
+// resultant: f2 g0^2 - f1 g0 g1 + f0 g1^2; a constant g gives g0^2 (the
+// 2 x 2 Sylvester matrix g0 I).  For monic f this is the norm of g(theta),
+// theta a root of f (Cohen, GTM 138, Proposition 4.3.4).
+void degree_two_resultant(bool& handled,
+                          fmpz_t out,
+                          const fmpz_poly_struct* f,
+                          const fmpz_poly_struct* g) noexcept;
+
 struct NormPrefilter {
     flint::Fmpz rational_prime_product;
     flint::Fmpz large_prime_norm_bound;

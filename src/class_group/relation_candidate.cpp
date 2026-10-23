@@ -442,6 +442,37 @@ bool SplitPrimeResultant::add_next_split_prime() noexcept {
     return false;
 }
 
+void degree_two_resultant(bool& handled,
+                          fmpz_t out,
+                          const fmpz_poly_struct* f,
+                          const fmpz_poly_struct* g) noexcept {
+    handled = false;
+    if (f == nullptr || g == nullptr || f->length != 3 || g->length > 2) {
+        return;
+    }
+    handled = true;
+    if (g->length == 0) {
+        fmpz_zero(out);
+        return;
+    }
+    const fmpz* g0 = g->coeffs;
+    if (g->length == 1) {
+        fmpz_mul(out, g0, g0);
+        return;
+    }
+    const fmpz* g1 = g->coeffs + 1;
+    const fmpz* f0 = f->coeffs;
+    const fmpz* f1 = f->coeffs + 1;
+    const fmpz* f2 = f->coeffs + 2;
+    // g0 (f2 g0 - f1 g1) + (f0 g1) g1.
+    flint::Fmpz t;
+    fmpz_mul(t.raw(), f2, g0);
+    fmpz_submul(t.raw(), f1, g1);
+    fmpz_mul(out, t.raw(), g0);
+    fmpz_mul(t.raw(), f0, g1);
+    fmpz_addmul(out, t.raw(), g1);
+}
+
 void SplitPrimeResultant::resultant(
         bool& handled,
         fmpz_t out,
@@ -809,12 +840,19 @@ bool norm_prefilter_accepts_integral_equation_coordinates(
                 "class_group.coordinate_candidate_prefilter.coordinate_norm");
         integral_coordinates_to_polynomial(prefilter->coordinate_polynomial,
                                            coordinates);
-        bool split_prime_handled = false;
-        prefilter->split_prime_resultant.resultant(
-                split_prime_handled,
-                prefilter->norm_resultant_scratch.raw(),
-                prefilter->coordinate_polynomial.raw());
-        if (!split_prime_handled) {
+        // Quadratic fields: the closed-form Sylvester determinant.
+        bool resultant_handled = false;
+        degree_two_resultant(resultant_handled,
+                             prefilter->norm_resultant_scratch.raw(),
+                             prefilter->field_polynomial.raw(),
+                             prefilter->coordinate_polynomial.raw());
+        if (!resultant_handled) {
+            prefilter->split_prime_resultant.resultant(
+                    resultant_handled,
+                    prefilter->norm_resultant_scratch.raw(),
+                    prefilter->coordinate_polynomial.raw());
+        }
+        if (!resultant_handled) {
             fmpz_poly_resultant(prefilter->norm_resultant_scratch.raw(),
                                 prefilter->field_polynomial.raw(),
                                 prefilter->coordinate_polynomial.raw());
