@@ -574,6 +574,29 @@ int test_screened_search_matches_unscreened_search() {
         return 1;
     }
 
+    // A negative discriminant: (x^2 + x + 2) (x - 1) ... (x - 14) has one
+    // complex pair (r2 = 1), and disc(x^2 + x + 2) = -7 is a square modulo
+    // primes of both residues modulo 4, so a sign mistake in the screen
+    // would skip primes that split it.
+    {
+        sflint::FmpzPoly negative;
+        fmpz_poly_set_coeff_si(negative.raw(), 0, 2);
+        fmpz_poly_set_coeff_si(negative.raw(), 1, 1);
+        fmpz_poly_set_coeff_si(negative.raw(), 2, 1);
+        sflint::FmpzPoly factor;
+        fmpz_poly_set_coeff_si(factor.raw(), 1, 1);
+        for (slong a = 1; a <= 14; ++a) {
+            fmpz_poly_set_coeff_si(factor.raw(), 0, -a);
+            fmpz_poly_mul(negative.raw(), negative.raw(), factor.raw());
+        }
+        sflint::Fmpz disc;
+        fmpz_poly_discriminant(disc.raw(), negative.raw());
+        if (fmpz_sgn(disc.raw()) >= 0 ||
+            compare_split_prime_search(negative) != 0) {
+            return 1;
+        }
+    }
+
     // x (x - q), then x (x - q) (x - 1) ... (x - 14).
     fmpz_poly_zero(field.raw());
     fmpz_poly_set_coeff_si(field.raw(), 1, -static_cast<slong>(q));

@@ -133,7 +133,7 @@ Added
 Changed
 -------
 
-- The ``grh`` split-prime resultant search of class-group relation search
+- The split-prime resultant search of class-group relation search
   (defining polynomials of degree 16 and more) skips a candidate prime ``p``
   whose Jacobi symbol ``(disc(f) / p)`` is not +1, where ``disc(f)`` is the
   discriminant of the defining polynomial, before the ``x^p mod f`` test.
@@ -141,12 +141,12 @@ Changed
   nonzero square discriminant modulo ``p``, so the skipped primes would have
   failed that test.  They still count towards the search limit, so the
   split primes found, their order and the point where the search stops are
-  unchanged.  ``grh`` outputs are identical on the 30 corpus and fixture
+  unchanged.  In ``grh`` mode, outputs are identical on the 30 corpus and fixture
   rows of degree 16 and more that finish within 900 s
   (``cyclotomic_real_163_deg81`` timed out on both builds).  Busy-machine
   callgrind instruction counts, ``grh`` mode: ``cyclotomic_real_37_deg18``
   2.6% fewer (2.256e9 to 2.197e9); ``cyclotomic_64_phi32``, whose
-  discriminant ``2^80`` is a square, 0.0015% more.
+  discriminant ``2^160`` is a square, 0.0015% more.
 
 - In quadratic fields, the coordinate-norm prefilter of class-group relation
   search computes the norm of a candidate ``a + b theta`` as the closed-form
