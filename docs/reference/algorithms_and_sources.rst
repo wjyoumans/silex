@@ -706,6 +706,25 @@ the integral generator ``omega`` of PARI ``quadgen``/``quadpoly``, whose
 generator in use is chosen by one shared predicate when a prime is built and
 stored in the prime, so it cannot drift from the stored residue polynomial.
 
+On that quadratic integral-generator route (``decompose_prime`` and the
+single prime per split ``p`` that the maximal imaginary quadratic relation
+base retains), a
+rational prime ``p`` that fits a word is decomposed in closed form instead of
+by FLINT ``fmpz_mod_poly_factor``.  For the minimal polynomial
+``x^2 + b x + c`` of ``omega`` and odd ``p``, the residue of
+``b^2 - 4c`` modulo ``p`` gives the splitting type (Cohen, GTM 138,
+Proposition 5.1.4): zero gives the ramified factor ``(x - r)^2`` with
+``r = -b/2``, a nonresidue gives the inert prime, and a nonzero square
+``s^2`` gives the split factors ``x - r`` with ``r = (-b +- s)/2``.  The
+square root is FLINT ``n_sqrtmod`` (Tonelli--Shanks, Cohen, GTM 138,
+Algorithm 1.5.1), and every root is checked by squaring; a failed check
+falls back to ``fmpz_mod_poly_factor``.  For ``p = 2`` the roots are read
+off ``f(0)`` and ``f(1)``.  Larger ``p`` keep ``fmpz_mod_poly_factor``.
+The two primes above a split ``p`` are listed in increasing order of the
+root ``r`` in ``[0, p)``, which fixes their factor-base order and the
+retained prime; FLINT's order of split factors is not a function
+of the roots, so it is not reproduced.
+
 Valuations at primes of a maximal order that have no Kummer quotient map
 (index divisors) use, when the bound is at least two, the element lies in
 the prime, the norm shortcut does not apply, the rational prime fits in a
