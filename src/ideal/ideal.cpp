@@ -12,6 +12,7 @@
 #include <silex/flint/fmpz_mod_mat.hpp>
 #include <silex/lat.hpp>
 
+#include "../order/order_internal.hpp"
 #include "hnf_membership_internal.hpp"
 #include "ideal_access_internal.hpp"
 #include "prime_inverse_internal.hpp"
@@ -132,11 +133,13 @@ bool order_element_multiplication_matrix(
         !element_parent->has_same_data(order) ||
         !fmpz_mat_shape(out, n, n)) return false;
     flint::FmpzMat element_coords(1, n);
-    flint::FmpzMat multiplication_table(n * n, n);
+    // A view of the order's cached table; `order` is not reassigned below.
+    const flint::FmpzMat* multiplication_table =
+            detail::OrderAccess::multiplication_table(order);
     if (!element.get_coordinates(flint::FmpzMatRef(element_coords)) ||
-        !order.multiplication_table(flint::FmpzMatRef(multiplication_table))) return false;
+        multiplication_table == nullptr) return false;
     multiplication_from_coordinates(out, flint::FmpzMatConstRef(element_coords),
-                                    flint::FmpzMatConstRef(multiplication_table));
+                                    flint::FmpzMatConstRef(*multiplication_table));
     return true;
 }
 
@@ -1365,8 +1368,11 @@ bool extract_two_generator(flint::FmpzMat& coordinates,
     // unbounded loop, exhaustion returns to the exact basis-product algorithm.
     const slong n = order.degree();
     flint::FmpzMat row(1, n), matrix(n, n), rows(2 * n, n);
-    flint::FmpzMat table(n * n, n);
-    if (!order.multiplication_table(flint::FmpzMatRef(table))) return false;
+    // A view of the order's cached table; `order` is not reassigned below.
+    const flint::FmpzMat* table_view =
+            detail::OrderAccess::multiplication_table(order);
+    if (table_view == nullptr) return false;
+    const flint::FmpzMat& table = *table_view;
     std::vector<flint::FmpzMat> basis_rows;
     std::vector<flint::FmpzMat> basis_matrices;
     // Source: base4.c ok_elt takes ZM_hnfmodid(M_beta, a), the HNF modulo the
@@ -1858,10 +1864,13 @@ bool prime_ideal_inverse_num_den(Ideal& numerator,
     }
 
     Order order(*parent);
-    flint::FmpzMat table(n * n, n);
-    if (!order.multiplication_table(flint::FmpzMatRef(table))) {
+    // A view of the order's cached table; `order` is not reassigned below.
+    const flint::FmpzMat* table_view =
+            detail::OrderAccess::multiplication_table(order);
+    if (table_view == nullptr) {
         return false;
     }
+    const flint::FmpzMat& table = *table_view;
 
     // Rows of `kernel` span the current kernel in O/pO (order coordinates).
     flint::FmpzModCtx context(p.raw());

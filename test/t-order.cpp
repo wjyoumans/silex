@@ -1255,6 +1255,59 @@ int test_cached_equation_order_index() {
     return 0;
 }
 
+// The noninstalled view of the cached multiplication table: the same entries
+// the public copy returns, the same storage on a later call and through a
+// handle sharing the order data, a separate table for a deep copy, and no
+// table for an order without a basis.
+int test_cached_multiplication_table_view() {
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 2);
+    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::Order suborder(field);
+    sflint::FmpqMat basis(2, 2);
+    mat_entry_si(basis, 0, 0, 1);
+    mat_entry_si(basis, 1, 1, 2);
+    assert(suborder.set_basis(sflint::FmpqMatConstRef(basis)));
+
+    // View first (fills the cache), then the public copy.
+    const sflint::FmpzMat* view =
+            silex::detail::OrderAccess::multiplication_table(suborder);
+    assert(view != nullptr);
+    assert(fmpz_mat_nrows(view->raw()) == 4 && fmpz_mat_ncols(view->raw()) == 2);
+    assert(fmpz_mat_entry_is_si(*view, 3, 0, 8));
+    sflint::FmpzMat table(4, 2);
+    assert(suborder.multiplication_table(sflint::FmpzMatRef(table)));
+    assert(fmpz_mat_equal(table.raw(), view->raw()) != 0);
+    assert(silex::detail::OrderAccess::multiplication_table(suborder) == view);
+
+    silex::Order shared = suborder;
+    assert(silex::detail::OrderAccess::multiplication_table(shared) == view);
+
+    silex::Order copied;
+    assert(copied.set(suborder));
+    const sflint::FmpzMat* copied_view =
+            silex::detail::OrderAccess::multiplication_table(copied);
+    assert(copied_view != nullptr && copied_view != view);
+    assert(fmpz_mat_equal(copied_view->raw(), view->raw()) != 0);
+
+    // Public copy first, then the view, on a fresh order.
+    silex::Order equation = silex::test::equation_order(field);
+    assert(equation.multiplication_table(sflint::FmpzMatRef(table)));
+    const sflint::FmpzMat* equation_view =
+            silex::detail::OrderAccess::multiplication_table(equation);
+    assert(equation_view != nullptr);
+    assert(fmpz_mat_equal(table.raw(), equation_view->raw()) != 0);
+    assert(fmpz_mat_entry_is_si(*equation_view, 3, 0, 2));
+
+    silex::Order undefined;
+    assert(silex::detail::OrderAccess::multiplication_table(undefined) ==
+           nullptr);
+    silex::Order no_basis(field);
+    assert(silex::detail::OrderAccess::multiplication_table(no_basis) ==
+           nullptr);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1277,5 +1330,6 @@ int main() {
     assert(test_conductor_and_contraction_failures() == 0);
     assert(test_cached_equation_order_index() == 0);
     assert(test_maximal_order_table_matches_basis_products() == 0);
+    assert(test_cached_multiplication_table_view() == 0);
     return 0;
 }

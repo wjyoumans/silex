@@ -88,6 +88,18 @@ public:
     // data (set_basis and the factories build fresh data).
     static const flint::FmpqMat* basis(const Order& order) noexcept;
 
+    // The order's multiplication table as stored in its shared data, read
+    // without the copy Order::multiplication_table makes: row i * n + j holds
+    // the order coordinates of w_i * w_j for the basis w_0, ..., w_{n-1}.
+    // Fills the cache on first use, as Order::multiplication_table does.
+    // Returns null when `order` is undefined or has no basis, or the table
+    // cannot be built; nothing is cached then.  The pointer stays valid while
+    // the order data lives: once filled, the table of an order data is never
+    // written again (set_basis, Order::set and the factories build fresh
+    // data).  Callers keep a handle on that data, and must not reassign it
+    // through set, set_basis, define, swap or clear, while they read the view.
+    static const flint::FmpzMat* multiplication_table(Order& order) noexcept;
+
     // Whether the order's basis is exactly the identity matrix
     // (fmpq_mat_is_one: diagonal entries 1 with denominator 1, all other
     // entries 0), so order coordinates are power-basis coefficients.  The

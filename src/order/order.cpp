@@ -1075,20 +1075,13 @@ bool Order::multiplication_table(flint::FmpzMatRef out) noexcept {
         return false;
     }
 
-    if (!data_->has_mul_table_) {
-        flint::FmpzMat table(data_->degree_ * data_->degree_, data_->degree_);
-        if (!multiplication_table_from_basis(table, data_->basis_.raw(),
-                                             data_->basis_inv_.raw(),
-                                             data_->parent_.raw_flint_field(),
-                                             data_->degree_)) {
-            return false;
-        }
-
-        fmpz_mat_set(data_->mul_table_.raw(), table.raw());
-        data_->has_mul_table_ = true;
+    const flint::FmpzMat* table =
+            detail::OrderAccess::multiplication_table(*this);
+    if (table == nullptr) {
+        return false;
     }
 
-    fmpz_mat_set(out.raw(), data_->mul_table_.raw());
+    fmpz_mat_set(out.raw(), table->raw());
     return true;
 }
 
@@ -1437,6 +1430,28 @@ const flint::FmpqMat* OrderAccess::basis(const Order& order) noexcept {
         return nullptr;
     }
     return &order.data_->basis_;
+}
+
+const flint::FmpzMat* OrderAccess::multiplication_table(Order& order) noexcept {
+    if (!order.is_defined() || !order.data_->has_basis_) {
+        return nullptr;
+    }
+
+    OrderData& data = *order.data_;
+    if (!data.has_mul_table_) {
+        flint::FmpzMat table(data.degree_ * data.degree_, data.degree_);
+        if (!multiplication_table_from_basis(table, data.basis_.raw(),
+                                             data.basis_inv_.raw(),
+                                             data.parent_.raw_flint_field(),
+                                             data.degree_)) {
+            return nullptr;
+        }
+
+        fmpz_mat_set(data.mul_table_.raw(), table.raw());
+        data.has_mul_table_ = true;
+    }
+
+    return &data.mul_table_;
 }
 
 bool OrderAccess::basis_is_identity(const Order& order) noexcept {

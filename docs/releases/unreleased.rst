@@ -274,6 +274,17 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` 3.0% fewer, ``multiquadratic_m3_m5_m7``
   2.7% fewer, control ``cyclotomic_real_37_deg18`` unchanged).
 
+- Ideal arithmetic that forms the multiplication matrix of an order element
+  (principal and two-element ideals, two-element search and ideal products,
+  and the inverse of a prime ideal) reads the order's memoised
+  multiplication table in place instead of copying its n^3 entries on every
+  call.
+  ``Order::multiplication_table`` still returns a copy and is unchanged.
+  Published outputs are identical on the ``grh`` corpus; only the work
+  changes (busy-machine callgrind instruction counts, ``grh``:
+  ``cyclotomic_64_phi32`` 2.9% fewer, ``cyclotomic_real_37_deg18`` 0.9%
+  fewer).
+
 - The ``proven`` analytic finish no longer reduces its relation kernel from
   scratch at every finish check.  The finish workspace keeps the
   double-precision LLL phase output of its last finish kernel and, after
