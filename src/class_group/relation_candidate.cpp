@@ -16,6 +16,7 @@
 #include <flint/acb.h>
 #include <flint/arb_fmpz_poly.h>
 #include <flint/arb_mat.h>
+#include <flint/fmpz_mat.h>
 #include <flint/fmpz_vec.h>
 #include <flint/mag.h>
 #include <flint/ulong_extras.h>
@@ -350,6 +351,10 @@ void SplitPrimeResultant::reset(
     moduli.clear();
     root_powers.clear();
     residues.clear();
+    // The row values belong to the split primes just dropped.
+    for (std::vector<ulong>& values : row_values) {
+        values.clear();
+    }
     if (monic_field_polynomial == nullptr) {
         return;
     }
@@ -501,14 +506,153 @@ void degree_two_resultant(bool& handled,
     fmpz_addmul(out, t.raw(), g1);
 }
 
+namespace {
+
+// a(r) mod p = sum_j r^j a_j for the powers r^j of one root and the
+// residues a_j mod p, j < length.  Each product is below 2^56 (p < 2^28),
+// so a chunk of kSplitPrimeDotChunk of them fits in one word.
+ulong split_prime_root_evaluation(const ulong* powers,
+                                  const ulong* residues,
+                                  std::size_t length,
+                                  nmod_t mod) noexcept {
+    ulong evaluation = 0;
+    for (std::size_t start = 0; start < length;
+         start += static_cast<std::size_t>(kSplitPrimeDotChunk)) {
+        std::size_t end =
+                start + static_cast<std::size_t>(kSplitPrimeDotChunk);
+        if (end > length) {
+            end = length;
+        }
+        ulong accumulator = 0;
+        for (std::size_t j = start; j < end; ++j) {
+            accumulator += powers[j] * residues[j];
+        }
+        evaluation = nmod_add(evaluation,
+                              n_mod2_preinv(accumulator, mod.n, mod.ninv),
+                              mod);
+    }
+    return evaluation;
+}
+
+}  // namespace
+
+void SplitPrimeResultant::bind_row_basis(
+        const fmpz_mat_struct* basis) noexcept {
+    row_basis = basis;
+    const std::size_t rows =
+            basis == nullptr ? 0
+                             : static_cast<std::size_t>(fmpz_mat_nrows(basis));
+    if (row_values.size() < rows) {
+        row_values.resize(rows);
+    }
+    for (std::vector<ulong>& values : row_values) {
+        values.clear();
+    }
+    row_value_fills = 0;
+    clear_row_combination();
+}
+
+void SplitPrimeResultant::set_row_combination(slong left,
+                                              slong right,
+                                              slong sign) noexcept {
+    row_candidate_set = true;
+    row_candidate_left = left;
+    row_candidate_right = right;
+    row_candidate_sign = sign;
+}
+
+void SplitPrimeResultant::clear_row_combination() noexcept {
+    row_candidate_set = false;
+    row_candidate_left = -1;
+    row_candidate_right = -1;
+    row_candidate_sign = 0;
+}
+
+bool SplitPrimeResultant::row_combination_matches(
+        const fmpz_poly_struct* coordinate_polynomial) noexcept {
+    if (!row_candidate_set || row_basis == nullptr ||
+        fmpz_mat_ncols(row_basis) != degree) {
+        return false;
+    }
+    const slong rows = fmpz_mat_nrows(row_basis);
+    const slong left = row_candidate_left;
+    const slong right = row_candidate_right;
+    if (left < 0 || left >= rows ||
+        static_cast<std::size_t>(rows) > row_values.size() ||
+        (right >= 0 && (right >= rows || (row_candidate_sign != 1 &&
+                                          row_candidate_sign != -1)))) {
+        return false;
+    }
+    // The polynomial is the described combination, coefficient by
+    // coefficient, so the row values evaluate exactly this polynomial.
+    for (slong j = 0; j < degree; ++j) {
+        const fmpz* expected = fmpz_mat_entry(row_basis, left, j);
+        if (right >= 0) {
+            if (row_candidate_sign > 0) {
+                fmpz_add(row_scratch.raw(), expected,
+                         fmpz_mat_entry(row_basis, right, j));
+            } else {
+                fmpz_sub(row_scratch.raw(), expected,
+                         fmpz_mat_entry(row_basis, right, j));
+            }
+            expected = row_scratch.raw();
+        }
+        if (j < coordinate_polynomial->length) {
+            if (fmpz_equal(expected, coordinate_polynomial->coeffs + j) ==
+                0) {
+                return false;
+            }
+        } else if (fmpz_is_zero(expected) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+const ulong* SplitPrimeResultant::row_values_at(
+        slong row,
+        std::size_t prime_index) noexcept {
+    const auto n = static_cast<std::size_t>(degree);
+    std::vector<ulong>& values = row_values[static_cast<std::size_t>(row)];
+    // Primes are filled in order; a call reaches prime k only after it
+    // has used primes 0, ..., k - 1.
+    while (values.size() < (prime_index + 1) * n) {
+        const std::size_t prime = values.size() / n;
+        const nmod_t mod = moduli[prime];
+        for (std::size_t j = 0; j < n; ++j) {
+            residues[j] = fmpz_fdiv_ui(
+                    fmpz_mat_entry(row_basis, row, static_cast<slong>(j)),
+                    mod.n);
+        }
+        const ulong* powers = root_powers.data() + prime * n * n;
+        const std::size_t base = values.size();
+        values.resize(base + n);
+        for (std::size_t i = 0; i < n; ++i) {
+            values[base + i] = split_prime_root_evaluation(
+                    powers + i * n, residues.data(), n, mod);
+        }
+        ++row_value_fills;
+    }
+    return values.data() + prime_index * n;
+}
+
 void SplitPrimeResultant::resultant(
         bool& handled,
         fmpz_t out,
         const fmpz_poly_struct* coordinate_polynomial) noexcept {
     handled = false;
+    // The row description applies to this call only.
+    const bool row_described = row_candidate_set;
+    const slong row_left = row_candidate_left;
+    const slong row_right = row_candidate_right;
+    const slong row_sign = row_candidate_sign;
     if (!enabled || coordinate_polynomial == nullptr) {
+        clear_row_combination();
         return;
     }
+    const bool use_rows =
+            row_described && row_combination_matches(coordinate_polynomial);
+    clear_row_combination();
     const slong length = coordinate_polynomial->length;
     if (length <= 0 || length > degree) {
         return;
@@ -560,34 +704,48 @@ void SplitPrimeResultant::resultant(
             return;
         }
         const nmod_t mod = moduli[used];
-        const ulong* powers = root_powers.data() + used * n * n;
-        for (std::size_t j = 0; j < used_length; ++j) {
-            residues[j] = fmpz_fdiv_ui(
-                    coordinate_polynomial->coeffs + static_cast<slong>(j),
-                    mod.n);
-        }
 
         // Res(f, a) = prod_i a(r_i) mod p for monic f = prod_i (x - r_i).
         ulong value = 1;
-        for (std::size_t i = 0; i < n && value != 0; ++i) {
-            const ulong* row = powers + i * n;
-            ulong evaluation = 0;
-            for (std::size_t start = 0; start < used_length;
-                 start += static_cast<std::size_t>(kSplitPrimeDotChunk)) {
-                std::size_t end =
-                        start + static_cast<std::size_t>(kSplitPrimeDotChunk);
-                if (end > used_length) {
-                    end = used_length;
-                }
-                ulong accumulator = 0;
-                for (std::size_t j = start; j < end; ++j) {
-                    accumulator += row[j] * residues[j];
-                }
-                evaluation = nmod_add(
-                        evaluation,
-                        n_mod2_preinv(accumulator, mod.n, mod.ninv), mod);
+        if (use_rows) {
+            row_values_at(row_left, used);
+            if (row_right >= 0) {
+                row_values_at(row_right, used);
             }
-            value = nmod_mul(value, evaluation, mod);
+            const ulong* left_values =
+                    row_values[static_cast<std::size_t>(row_left)].data() +
+                    used * n;
+            const ulong* right_values =
+                    row_right < 0
+                            ? nullptr
+                            : row_values[static_cast<std::size_t>(row_right)]
+                                              .data() +
+                                      used * n;
+            for (std::size_t i = 0; i < n && value != 0; ++i) {
+                ulong evaluation = left_values[i];
+                if (right_values != nullptr) {
+                    evaluation = row_sign > 0
+                                         ? nmod_add(evaluation,
+                                                    right_values[i], mod)
+                                         : nmod_sub(evaluation,
+                                                    right_values[i], mod);
+                }
+                value = nmod_mul(value, evaluation, mod);
+            }
+        } else {
+            const ulong* powers = root_powers.data() + used * n * n;
+            for (std::size_t j = 0; j < used_length; ++j) {
+                residues[j] = fmpz_fdiv_ui(
+                        coordinate_polynomial->coeffs + static_cast<slong>(j),
+                        mod.n);
+            }
+            for (std::size_t i = 0; i < n && value != 0; ++i) {
+                value = nmod_mul(value,
+                                 split_prime_root_evaluation(
+                                         powers + i * n, residues.data(),
+                                         used_length, mod),
+                                 mod);
+            }
         }
 
         if (used == 0) {
@@ -604,6 +762,7 @@ void SplitPrimeResultant::resultant(
         ++used;
     }
     last_prime_count = static_cast<slong>(used);
+    last_used_row_values = use_rows;
     handled = true;
 }
 

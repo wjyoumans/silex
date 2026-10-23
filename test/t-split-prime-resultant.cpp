@@ -1,6 +1,7 @@
 #include "class_group/relation_candidate_internal.hpp"
 
 #include <silex/flint/fmpz.hpp>
+#include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/fmpz_poly.hpp>
 #include <silex/flint/nmod_poly.hpp>
 #include <silex/flint/nmod_poly_factor.hpp>
@@ -8,6 +9,7 @@
 #include <flint/arf.h>
 #include <flint/fmpq.h>
 #include <flint/fmpq_poly.h>
+#include <flint/fmpz_mat.h>
 #include <flint/fmpz_poly.h>
 #include <flint/nmod_poly.h>
 #include <flint/ulong_extras.h>
@@ -729,6 +731,184 @@ int test_degree_two_resultant_matches_flint() {
     return handled || !fmpz_equal_si(actual.raw(), 99) ? 1 : 0;
 }
 
+// Sets out to row left of basis, or to row left + sign * row right.
+void set_row_combination_polynomial(sflint::FmpzPoly& out,
+                                    const sflint::FmpzMat& basis,
+                                    slong left,
+                                    slong right,
+                                    slong sign) noexcept {
+    fmpz_poly_zero(out.raw());
+    sflint::Fmpz coefficient;
+    for (slong j = 0; j < fmpz_mat_ncols(basis.raw()); ++j) {
+        fmpz_set(coefficient.raw(), fmpz_mat_entry(basis.raw(), left, j));
+        if (right >= 0 && sign > 0) {
+            fmpz_add(coefficient.raw(), coefficient.raw(),
+                     fmpz_mat_entry(basis.raw(), right, j));
+        } else if (right >= 0) {
+            fmpz_sub(coefficient.raw(), coefficient.raw(),
+                     fmpz_mat_entry(basis.raw(), right, j));
+        }
+        fmpz_poly_set_coeff_fmpz(out.raw(), j, coefficient.raw());
+    }
+}
+
+// Rows and sums and differences of two rows of a basis, in the small-LLL
+// candidate order: the per-row values give the value of the direct
+// evaluation and of fmpz_poly_resultant, with the same split primes.  The
+// values are filled lazily, once per (row, prime): a row first reached by
+// a candidate needing few primes is extended when a later candidate needs
+// more, and is reused, not refilled, by every candidate covered by the
+// primes already filled.  A description that does not match the
+// polynomial, or one with no basis bound, is not used, and a description
+// applies to one call only.
+int test_row_combinations_match_direct() {
+    for (const slong m : {17, 41}) {
+        sflint::FmpzPoly field;
+        set_prime_cyclotomic(field, m);
+        const slong n = m - 1;
+        relation_search::SplitPrimeResultant cached;
+        relation_search::SplitPrimeResultant direct;
+        cached.reset(field.raw());
+        direct.reset(field.raw());
+        if (!cached.enabled || !direct.enabled) {
+            return 1;
+        }
+
+        // Small rows first, then rows whose bounds need more primes.
+        constexpr slong rows = 6;
+        constexpr flint_bitcnt_t row_bits[rows] = {2, 3, 3, 10, 16, 24};
+        sflint::FmpzMat basis(rows, n);
+        sflint::FmpzPoly row;
+        ulong state = static_cast<ulong>(m) * 7;
+        for (slong r = 0; r < rows; ++r) {
+            set_random_polynomial(row, state, n, row_bits[r]);
+            for (slong j = 0; j < n; ++j) {
+                fmpz_poly_get_coeff_fmpz(fmpz_mat_entry(basis.raw(), r, j),
+                                         row.raw(), j);
+            }
+        }
+
+        cached.bind_row_basis(basis.raw());
+        std::vector<slong> filled(static_cast<std::size_t>(rows), 0);
+        slong expected_fills = 0;
+        slong reused = 0;
+        slong extended = 0;
+        slong handled_count = 0;
+        sflint::FmpzPoly candidate;
+        sflint::Fmpz expected;
+        sflint::Fmpz via_rows;
+        sflint::Fmpz via_direct;
+        const auto check = [&](slong left, slong right, slong sign) -> bool {
+            set_row_combination_polynomial(candidate, basis, left, right,
+                                           sign);
+            fmpz_poly_resultant(expected.raw(), field.raw(),
+                                candidate.raw());
+            bool rows_handled = false;
+            bool direct_handled = false;
+            cached.set_row_combination(left, right, sign);
+            cached.resultant(rows_handled, via_rows.raw(), candidate.raw());
+            direct.resultant(direct_handled, via_direct.raw(),
+                             candidate.raw());
+            if (fmpz_poly_is_zero(candidate.raw()) != 0) {
+                // b_l - b_l: neither path handles the zero polynomial.
+                return !rows_handled && !direct_handled &&
+                       cached.row_value_fills == expected_fills;
+            }
+            if (!rows_handled || !direct_handled ||
+                !cached.last_used_row_values ||
+                cached.last_prime_count != direct.last_prime_count ||
+                !fmpz_equal(via_rows.raw(), expected.raw()) ||
+                !fmpz_equal(via_direct.raw(), expected.raw())) {
+                std::fprintf(stderr,
+                             "row-combination resultant mismatch: degree "
+                             "%ld, rows %ld %ld sign %ld\n",
+                             static_cast<long>(n), static_cast<long>(left),
+                             static_cast<long>(right),
+                             static_cast<long>(sign));
+                return false;
+            }
+            ++handled_count;
+            const slong primes = cached.last_prime_count;
+            // b_l + b_l reaches one row.
+            for (const slong r : {left, right == left ? -1 : right}) {
+                if (r < 0) {
+                    continue;
+                }
+                slong& done = filled[static_cast<std::size_t>(r)];
+                if (done >= primes) {
+                    ++reused;
+                } else {
+                    if (done > 0) {
+                        ++extended;
+                    }
+                    expected_fills += primes - done;
+                    done = primes;
+                }
+            }
+            return cached.row_value_fills == expected_fills;
+        };
+
+        for (slong left = 0; left < rows; ++left) {
+            if (!check(left, -1, 0)) {
+                return 1;
+            }
+        }
+        for (const slong sign : {1, -1}) {
+            for (slong left = 0; left < rows; ++left) {
+                for (slong right = left; right < rows; ++right) {
+                    if (!check(left, right, sign)) {
+                        return 1;
+                    }
+                }
+            }
+        }
+        if (handled_count != rows + rows * rows || reused <= 0 ||
+            extended <= 0) {
+            std::fprintf(stderr,
+                         "row-combination coverage: degree %ld, handled "
+                         "%ld, reused %ld, extended %ld\n",
+                         static_cast<long>(n),
+                         static_cast<long>(handled_count),
+                         static_cast<long>(reused),
+                         static_cast<long>(extended));
+            return 1;
+        }
+
+        // A description that does not match the polynomial is not used.
+        set_row_combination_polynomial(candidate, basis, 0, 1, -1);
+        fmpz_poly_resultant(expected.raw(), field.raw(), candidate.raw());
+        bool handled = false;
+        cached.set_row_combination(0, 1, 1);
+        cached.resultant(handled, via_rows.raw(), candidate.raw());
+        if (!handled || cached.last_used_row_values ||
+            !fmpz_equal(via_rows.raw(), expected.raw()) ||
+            cached.row_value_fills != expected_fills) {
+            return 1;
+        }
+        // A matching description applies to the next call only.
+        cached.set_row_combination(0, 1, -1);
+        cached.resultant(handled, via_rows.raw(), candidate.raw());
+        if (!handled || !cached.last_used_row_values) {
+            return 1;
+        }
+        cached.resultant(handled, via_rows.raw(), candidate.raw());
+        if (!handled || cached.last_used_row_values ||
+            !fmpz_equal(via_rows.raw(), expected.raw())) {
+            return 1;
+        }
+        // With no basis bound the values are not used.
+        cached.bind_row_basis(nullptr);
+        cached.set_row_combination(0, 1, -1);
+        cached.resultant(handled, via_rows.raw(), candidate.raw());
+        if (!handled || cached.last_used_row_values ||
+            !fmpz_equal(via_rows.raw(), expected.raw()) ||
+            cached.row_value_fills != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int main() {
     return test_cyclotomic_matches_resultant() != 0 ||
                    test_screened_search_matches_unscreened_search() != 0 ||
@@ -739,7 +919,8 @@ int main() {
                    test_t2_bound_matches_resultant_on_tight_candidates() !=
                            0 ||
                    test_t2_bound_for_prime_cyclotomic() != 0 ||
-                   test_degree_two_resultant_matches_flint() != 0
+                   test_degree_two_resultant_matches_flint() != 0 ||
+                   test_row_combinations_match_direct() != 0
             ? 1
             : 0;
 }

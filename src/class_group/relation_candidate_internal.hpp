@@ -81,6 +81,29 @@ struct SplitPrimeResultant {
     flint::Fmpz discriminant;
     bool discriminant_computed = false;
 
+    // Row-combination evaluation.  Every small-LLL candidate is a row
+    // b_l, or b_l + b_r or b_l - b_r, of one reduced ideal basis whose
+    // rows are coordinate polynomials.  Evaluation at a root is linear, so
+    // a(r_i) = b_l(r_i) +- b_r(r_i) (mod p), and the per-row values
+    // b(r_i) mod p, filled lazily for each (row, split prime) pair the
+    // candidates reach, replace the per-candidate reduction and evaluation.
+    // The product over the roots, the bound and the CRT are unchanged, so
+    // the value is the one the direct evaluation gives.  The basis is
+    // borrowed and must outlive the binding (see bind_row_basis).
+    const fmpz_mat_struct* row_basis = nullptr;
+    // row_values[row] holds deg(f) values per split prime, for the primes
+    // moduli[0], ..., in order; its size / deg(f) primes are filled.
+    std::vector<std::vector<ulong>> row_values;
+    flint::Fmpz row_scratch;
+    bool row_candidate_set = false;
+    slong row_candidate_left = -1;
+    slong row_candidate_right = -1;
+    slong row_candidate_sign = 0;
+    // Test-only diagnostics: (row, prime) value fills since the last
+    // bind_row_basis, and whether the last handled call used row values.
+    slong row_value_fills = 0;
+    bool last_used_row_values = false;
+
     // Enables the evaluator for f when deg(f) is large enough for the
     // search to pay off; otherwise leaves it disabled.  A reset with the
     // same f while enabled keeps the split primes found so far.
@@ -92,8 +115,23 @@ struct SplitPrimeResultant {
                    fmpz_t out,
                    const fmpz_poly_struct* coordinate_polynomial) noexcept;
 
+    // Binds the row basis of the next candidates (nullptr unbinds) and
+    // drops the row values of the previous basis.
+    void bind_row_basis(const fmpz_mat_struct* basis) noexcept;
+
+    // Describes the next resultant call's coordinate polynomial as row
+    // left of the bound basis (right < 0), or as row left plus sign
+    // (+1 or -1) times row right.  The description is used by that call
+    // only.  A call whose polynomial does not match it, or with no basis
+    // bound, evaluates directly, so the value never depends on it.
+    void set_row_combination(slong left, slong right, slong sign) noexcept;
+    void clear_row_combination() noexcept;
+
 private:
     bool add_next_split_prime() noexcept;
+    bool row_combination_matches(
+            const fmpz_poly_struct* coordinate_polynomial) noexcept;
+    const ulong* row_values_at(slong row, std::size_t prime_index) noexcept;
 };
 
 // Sets out = Res(f, g), the value fmpz_poly_resultant(out, f, g) returns,

@@ -143,32 +143,34 @@ bool set_small_lll_combination(flint::FmpzMat& out,
     return true;
 }
 
-bool set_small_lll_next_candidate(
-        flint::FmpzMat& out,
-        slong& count_after_next,
-        const IdealLatticeLllData& context,
-        const std::vector<slong>& selected) noexcept {
+namespace {
+
+// The basis rows of candidate number index (0-based) in the reference
+// small-LLL order: the selected rows first, then the sums and then the
+// differences of pairs.  right_row < 0 marks a single row.
+bool small_lll_candidate_rows(slong& left_row,
+                              slong& right_row,
+                              slong& sign,
+                              slong index,
+                              const std::vector<slong>& selected) noexcept {
     const slong selected_count = static_cast<slong>(selected.size());
-    if (selected_count <= 0) {
+    if (selected_count <= 0 || index < 0) {
         return false;
     }
 
-    if (count_after_next < selected_count) {
-        if (!copy_ideal_basis_row_coordinates(
-                    out, flint::FmpzMatConstRef(context.basis),
-                    selected[static_cast<std::size_t>(count_after_next)])) {
-            return false;
-        }
-        ++count_after_next;
+    if (index < selected_count) {
+        left_row = selected[static_cast<std::size_t>(index)];
+        right_row = -1;
+        sign = 0;
         return true;
     }
 
-    if (count_after_next > selected_count * selected_count) {
+    if (index > selected_count * selected_count) {
         return false;
     }
 
-    slong c = count_after_next - selected_count;
-    slong sign = 1;
+    slong c = index - selected_count;
+    sign = 1;
     if (c > selected_count * (selected_count - 1) / 2) {
         c -= selected_count * (selected_count - 1) / 2;
         sign = -1;
@@ -184,11 +186,34 @@ bool set_small_lll_next_candidate(
         right < 0 || right >= selected_count) {
         return false;
     }
+    left_row = selected[static_cast<std::size_t>(left - 1)];
+    right_row = selected[static_cast<std::size_t>(right)];
+    return true;
+}
 
-    if (!set_small_lll_combination(
-                out, flint::FmpzMatConstRef(context.basis),
-                selected[static_cast<std::size_t>(left - 1)],
-                selected[static_cast<std::size_t>(right)], sign)) {
+}  // namespace
+
+bool set_small_lll_next_candidate(
+        flint::FmpzMat& out,
+        slong& count_after_next,
+        const IdealLatticeLllData& context,
+        const std::vector<slong>& selected) noexcept {
+    slong left_row = -1;
+    slong right_row = -1;
+    slong sign = 0;
+    if (!small_lll_candidate_rows(left_row, right_row, sign,
+                                  count_after_next, selected)) {
+        return false;
+    }
+
+    if (right_row < 0) {
+        if (!copy_ideal_basis_row_coordinates(
+                    out, flint::FmpzMatConstRef(context.basis), left_row)) {
+            return false;
+        }
+    } else if (!set_small_lll_combination(
+                       out, flint::FmpzMatConstRef(context.basis), left_row,
+                       right_row, sign)) {
         return false;
     }
     ++count_after_next;
@@ -485,6 +510,33 @@ bool collect_order_small_lll_relations(
     slong good_relations = 0;
     const slong processed_limit =
             static_cast<slong>(selected.size() * selected.size());
+    // The candidates are rows and sums or differences of two rows of
+    // t2_context.basis, so the split-prime norm evaluation can reuse
+    // per-row values (SplitPrimeResultant::bind_row_basis).  The binding
+    // ends with this ideal's loop, before t2_context goes away.
+    SplitPrimeResultant* split_prime_resultant =
+            norm_prefilter != nullptr
+                    ? &norm_prefilter->split_prime_resultant
+                    : nullptr;
+    struct RowBasisBinding {
+        SplitPrimeResultant* evaluator;
+        RowBasisBinding(SplitPrimeResultant* bound,
+                        const fmpz_mat_struct* basis) noexcept
+            : evaluator(bound) {
+            if (evaluator != nullptr) {
+                evaluator->bind_row_basis(basis);
+            }
+        }
+        RowBasisBinding(const RowBasisBinding&) = delete;
+        RowBasisBinding& operator=(const RowBasisBinding&) = delete;
+        ~RowBasisBinding() {
+            if (evaluator != nullptr) {
+                evaluator->bind_row_basis(nullptr);
+            }
+        }
+    };
+    const RowBasisBinding row_basis_binding(split_prime_resultant,
+                                            t2_context.basis.raw());
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                         "class_group.small_lll.candidate_loop");
     while (set_small_lll_next_candidate(coordinates, count,
@@ -522,6 +574,15 @@ bool collect_order_small_lll_relations(
                         arm_generator_relation_row_capture(context,
                                                            &captured_row);
             }
+            slong left_row = -1;
+            slong right_row = -1;
+            slong sign = 0;
+            if (split_prime_resultant != nullptr &&
+                small_lll_candidate_rows(left_row, right_row, sign,
+                                         count - 1, selected)) {
+                split_prime_resultant->set_row_combination(left_row,
+                                                           right_row, sign);
+            }
             const bool tried = try_coordinate_candidate(
                     context, order, coordinates, norm_prefilter,
                     source,
@@ -530,6 +591,9 @@ bool collect_order_small_lll_relations(
                     candidates_tried, accepted_relations,
                     options.requested_certification, goal_reached,
                     partial_throttle_exit);
+            if (split_prime_resultant != nullptr) {
+                split_prime_resultant->clear_row_combination();
+            }
             const bool captured =
                     use_orbit &&
                     ClassGroupRelationSearchAccess::
