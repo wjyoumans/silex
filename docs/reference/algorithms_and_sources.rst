@@ -1349,7 +1349,8 @@ otherwise kept, since the positive form would need about 63 bits.  This
 applies to any row with an inverse, at any prime where ``lambda`` is
 available (non-split squarefree primes included), once some exponent in the
 batch exceeds ``p - 1``; it affects cost only.  Batches with no exponent above ``FLINT_BITS`` bits
-scan only under the cost rule below, and nothing is reduced for them.  The residues are the same elements of ``R``, so no
+scan only under the cost rule below, and their exponents are reduced only
+where some magnitude exceeds ``p - 1``.  The residues are the same elements of ``R``, so no
 reconstructed unit changes.  For ``cyclotomic_41_phi40`` 11 primes are
 skipped, ``lambda`` has 64 bits, and the exponent bits fall from 373k to
 179k; for the degree-32 real subfield of the 136th cyclotomic field, 40

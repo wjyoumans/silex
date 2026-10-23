@@ -519,7 +519,7 @@ Changed
   with it the evaluation-form power products, now also applies when the
   exponents are short, whenever the modeled cost of the power products exceeds
   the cost of the search for such a prime.  Reconstructed units and published
-  outputs are unchanged (all 185 ``grh`` corpus rows dump-identical).
+  outputs are unchanged (184 of 185 ``grh`` corpus rows dump-identical; the ``cyclotomic_real_163_deg81`` row times out in both builds).
   Callgrind instruction counts (Ir, not wall time; busy machine) fall by
   7.42% on ``cyclotomic_64_phi32``, 7.24% on ``cyclotomic_real_37_deg18``,
   8.16% on ``cyclotomic_51_phi32``, 7.77% on ``cyclotomic_real_64_deg16``,

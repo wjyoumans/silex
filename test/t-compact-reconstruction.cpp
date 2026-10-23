@@ -2437,9 +2437,9 @@ int test_wide_reconstruction_short_exponent_split_preference() {
             fmpz* first = fmpz_mat_entry(wide.exponents.raw(), row, 0);
             fmpz* second = fmpz_mat_entry(wide.exponents.raw(), row, 1);
             if (costly != 0) {
-                fmpz_one_2exp(first, 62);
+                fmpz_one_2exp(first, FLINT_BITS - 2);
                 fmpz_add_ui(first, first, 1);
-                fmpz_one_2exp(second, 61);
+                fmpz_one_2exp(second, FLINT_BITS - 3);
                 fmpz_neg(second, second);
             } else {
                 fmpz_set_ui(first, 3);
