@@ -1882,6 +1882,103 @@ int test_recursive_split_matches_enumeration_ramified() {
             {81, 0, -72, 0, 55, 0, -8, 0, 1}, 3, 4);
 }
 
+// x^3 - c p^k with p > 2^64: the maximal order is not the equation order
+// and p divides the index, so the index-divisor routes decompose p with the
+// multiplication table modulo p held as fmpz residues (p does not fit a
+// word).
+silex::Order maximal_order_of_pure_cubic(silex::NumberField& field,
+                                         slong c,
+                                         const sflint::Fmpz& p,
+                                         ulong k) noexcept {
+    sflint::Fmpz constant;
+    fmpz_pow_ui(constant.raw(), p.raw(), k);
+    fmpz_mul_si(constant.raw(), constant.raw(), -c);
+    sflint::FmpqPoly polynomial;
+    fmpq_poly_set_coeff_fmpz(polynomial.raw(), 0, constant.raw());
+    fmpq_poly_set_coeff_si(polynomial.raw(), 3, 1);
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!maximal.is_equation_order());
+    return maximal;
+}
+
+// p = 18446744073709551667 > 2^64 is 1 mod 3 and 2 is a cube mod p, so p
+// splits into three degree-one primes of Q(cbrt(2)), here given by
+// x^3 - 2 p^3 (theta = p cbrt(2)).  The recursive etale split (Frobenius
+// kernel and splitting products modulo p) must give, as a set, the primes
+// decompose_prime finds through the monogenic generator cbrt(2).
+int test_index_divisor_recursive_split_multiword_prime() {
+    sflint::Fmpz p;
+    fmpz_set_str(p.raw(), "18446744073709551667", 10);
+    assert(fmpz_abs_fits_ui(p.raw()) == 0);
+    silex::NumberField field;
+    const silex::Order maximal = maximal_order_of_pure_cubic(field, 2, p, 3);
+
+    std::vector<silex::Ideal> split;
+    assert(silex::detail::TestHookAccess::index_divisor_prime_ideals(
+            split, maximal, sflint::FmpzConstRef(p), true));
+    assert(split.size() == 3);
+
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 3);
+    assert(count_with_ef(primes, 1, 1) == 3);
+    assert(check_norms(primes));
+    for (const silex::Ideal& ideal : split) {
+        slong matches = 0;
+        for (slong i = 0; i < primes.size(); ++i) {
+            silex::Ideal prime_ideal(maximal);
+            assert(primes.at(i)->get_ideal(prime_ideal));
+            matches += prime_ideal.equal(ideal) ? 1 : 0;
+        }
+        assert(matches == 1);
+    }
+    return 0;
+}
+
+// x^3 - 3 p^4 with the same p: theta = p cbrt(3 p), and p is totally
+// ramified in Q(cbrt(3 p)).  The ramified index-divisor route computes the
+// p-radical as the kernel of x -> x^p modulo p; the prime it builds must
+// be the one decompose_prime publishes (e = 3, f = 1, norm p), with cube
+// p O.
+int test_index_divisor_ramified_multiword_prime() {
+    sflint::Fmpz p;
+    fmpz_set_str(p.raw(), "18446744073709551667", 10);
+    silex::NumberField field;
+    const silex::Order maximal = maximal_order_of_pure_cubic(field, 3, p, 4);
+
+    std::vector<silex::Ideal> radical;
+    assert(silex::detail::TestHookAccess::index_divisor_prime_ideals(
+            radical, maximal, sflint::FmpzConstRef(p), false));
+    assert(radical.size() == 1);
+
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, maximal, sflint::FmpzConstRef(p)));
+    assert(primes.size() == 1);
+    assert(count_with_ef(primes, 3, 1) == 1);
+    assert(check_norms(primes));
+    sflint::Fmpz norm;
+    assert(primes.at(0)->norm(sflint::FmpzRef(norm)));
+    assert(sflint::fmpz_equal(norm, p));
+
+    silex::Ideal prime_ideal(maximal);
+    assert(primes.at(0)->get_ideal(prime_ideal));
+    assert(prime_ideal.equal(radical[0]));
+    silex::Ideal cube(maximal);
+    silex::Ideal square(maximal);
+    assert(square.multiply(radical[0], radical[0]));
+    assert(cube.multiply(square, radical[0]));
+    sflint::FmpzMat p_hnf(3, 3);
+    for (slong i = 0; i < 3; ++i) {
+        fmpz_set(fmpz_mat_entry(p_hnf.raw(), i, i), p.raw());
+    }
+    silex::Ideal p_ideal(maximal);
+    assert(p_ideal.set_hnf(sflint::FmpzMatConstRef(p_hnf)));
+    assert(cube.equal(p_ideal));
+    return 0;
+}
+
 int test_valuation_degree_one() {
     sflint::FmpqPoly polynomial;
     poly_x(polynomial);
@@ -4429,6 +4526,8 @@ int main() {
     assert(test_index_divisor_separating_element_order() == 0);
     assert(test_recursive_split_matches_enumeration_unramified() == 0);
     assert(test_recursive_split_matches_enumeration_ramified() == 0);
+    assert(test_index_divisor_recursive_split_multiword_prime() == 0);
+    assert(test_index_divisor_ramified_multiword_prime() == 0);
     assert(test_valuation_degree_one() == 0);
     assert(test_valuation_order_element_split_repeated() == 0);
     assert(test_valuation_order_element_ramified_unique_prime_norm() == 0);

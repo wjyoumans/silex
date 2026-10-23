@@ -25,6 +25,7 @@
 #include <flint/fmpz_mod_poly.h>
 #include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
+#include <flint/nmod.h>
 #include <flint/nmod_mat.h>
 
 #include <algorithm>
@@ -1216,17 +1217,126 @@ void fmpz_vec_scalar_addmul_mod(flint::FmpzVec& out,
     }
 }
 
+// The multiplication table of O reduced modulo p once, for products in
+// O/pO.  Row i * n + j holds the coordinates of b_i * b_j modulo p.  When p
+// fits a word the entries are word residues (`words`, row-major, with
+// `mod`); otherwise they are fmpz residues in [0, p) (`entries`).
+struct ModMulTable {
+    slong degree = 0;
+    bool word = false;
+    nmod_t mod{};
+    std::vector<ulong> words;
+    flint::FmpzMat entries{0, 0};
+};
+
+bool reduce_multiplication_table(ModMulTable& out,
+                                 const flint::FmpzMat& table,
+                                 const flint::FmpzModCtx& ctx) noexcept {
+    const slong n = fmpz_mat_ncols(table.raw());
+    if (n <= 0 || fmpz_mat_nrows(table.raw()) != n * n) {
+        return false;
+    }
+
+    const fmpz* modulus = fmpz_mod_ctx_modulus(ctx.raw());
+    out.degree = n;
+    out.word = fmpz_abs_fits_ui(modulus) != 0;
+    if (out.word) {
+        nmod_init(&out.mod, fmpz_get_ui(modulus));
+        out.words.assign(static_cast<std::size_t>(n * n * n), 0);
+        for (slong row = 0; row < n * n; ++row) {
+            for (slong k = 0; k < n; ++k) {
+                out.words[static_cast<std::size_t>(row * n + k)] =
+                        fmpz_fdiv_ui(fmpz_mat_entry(table.raw(), row, k),
+                                     out.mod.n);
+            }
+        }
+        out.entries = flint::FmpzMat(0, 0);
+        return true;
+    }
+
+    flint::FmpzMat reduced(n * n, n);
+    for (slong row = 0; row < n * n; ++row) {
+        for (slong k = 0; k < n; ++k) {
+            fmpz_mod_set_fmpz(fmpz_mat_entry(reduced.raw(), row, k),
+                              fmpz_mat_entry(table.raw(), row, k),
+                              ctx.raw());
+        }
+    }
+    out.entries = std::move(reduced);
+    out.words.clear();
+    return true;
+}
+
+// The order's multiplication table (read in place from the order data, see
+// OrderAccess::multiplication_table) reduced modulo the modulus of `ctx`.
+bool reduced_order_multiplication_table(ModMulTable& out,
+                                        const Order& order,
+                                        const flint::FmpzModCtx& ctx) noexcept {
+    Order table_order = order;
+    const flint::FmpzMat* table =
+            detail::OrderAccess::multiplication_table(table_order);
+    return table != nullptr &&
+           fmpz_mat_ncols(table->raw()) == order.degree() &&
+           reduce_multiplication_table(out, *table, ctx);
+}
+
+// out = left * right in O/pO, for coordinate vectors with entries in
+// [0, p).  Each output coordinate sum_{i,j} left_i right_j T_{ij,k} is
+// accumulated unreduced and reduced once, so it is the same residue in
+// [0, p) as a sum reduced after every term.  `out` may alias either input.
 void order_coords_mul_mod(flint::FmpzVec& out,
                           const flint::FmpzVec& left,
                           const flint::FmpzVec& right,
-                          const flint::FmpzMat& multiplication_table,
+                          const ModMulTable& multiplication_table,
                           const flint::FmpzModCtx& ctx) noexcept {
     const slong n = out.length();
+
+    if (multiplication_table.word) {
+        const nmod_t mod = multiplication_table.mod;
+        // left and right residues, then three-word accumulators per output
+        // coordinate (low, middle, high).
+        std::vector<ulong> scratch(static_cast<std::size_t>(5 * n), 0);
+        ulong* const a = scratch.data();
+        ulong* const b = a + n;
+        ulong* const acc = b + n;
+        for (slong i = 0; i < n; ++i) {
+            a[i] = fmpz_fdiv_ui(left.data() + i, mod.n);
+            b[i] = fmpz_fdiv_ui(right.data() + i, mod.n);
+        }
+        const ulong* const table = multiplication_table.words.data();
+        for (slong i = 0; i < n; ++i) {
+            if (a[i] == 0) {
+                continue;
+            }
+            for (slong j = 0; j < n; ++j) {
+                if (b[j] == 0) {
+                    continue;
+                }
+                const ulong ab = nmod_mul(a[i], b[j], mod);
+                const ulong* const row = table + (i * n + j) * n;
+                for (slong k = 0; k < n; ++k) {
+                    ulong hi = 0;
+                    ulong lo = 0;
+                    umul_ppmm(hi, lo, ab, row[k]);
+                    ulong* const sum = acc + 3 * k;
+                    add_sssaaaaaa(sum[2], sum[1], sum[0], sum[2], sum[1],
+                                  sum[0], UWORD(0), hi, lo);
+                }
+            }
+        }
+        for (slong k = 0; k < n; ++k) {
+            const ulong* const sum = acc + 3 * k;
+            ulong top = 0;
+            ulong value = 0;
+            NMOD_RED(top, sum[2], mod);
+            NMOD_RED3(value, top, sum[1], sum[0], mod);
+            fmpz_set_ui(out.data() + k, value);
+        }
+        return;
+    }
+
     flint::FmpzVec result(n);
     flint::Fmpz ab;
-    flint::Fmpz coeff;
-    flint::Fmpz term;
-
     for (slong i = 0; i < n; ++i) {
         if (fmpz_is_zero(left.data() + i) != 0) {
             continue;
@@ -1239,17 +1349,14 @@ void order_coords_mul_mod(flint::FmpzVec& out,
             fmpz_mod_mul(ab.raw(), left.data() + i, right.data() + j,
                          ctx.raw());
             for (slong k = 0; k < n; ++k) {
-                fmpz_mod_set_fmpz(
-                        coeff.raw(),
-                        fmpz_mat_entry(multiplication_table.raw(), i * n + j,
-                                       k),
-                        ctx.raw());
-                fmpz_mod_mul(term.raw(), ab.raw(), coeff.raw(), ctx.raw());
-                fmpz_add(result.data() + k, result.data() + k, term.raw());
-                fmpz_mod_set_fmpz(result.data() + k, result.data() + k,
-                                  ctx.raw());
+                fmpz_addmul(result.data() + k, ab.raw(),
+                            fmpz_mat_entry(multiplication_table.entries.raw(),
+                                           i * n + j, k));
             }
         }
+    }
+    for (slong k = 0; k < n; ++k) {
+        fmpz_mod_set_fmpz(result.data() + k, result.data() + k, ctx.raw());
     }
 
     fmpz_vec_set(out, result);
@@ -1259,7 +1366,7 @@ void order_coords_pow_mod(flint::FmpzVec& out,
                           const flint::FmpzVec& base,
                           flint::FmpzConstRef exponent,
                           const flint::FmpzVec& one,
-                          const flint::FmpzMat& multiplication_table,
+                          const ModMulTable& multiplication_table,
                           const flint::FmpzModCtx& ctx) noexcept {
     const slong n = out.length();
     flint::FmpzVec acc(n);
@@ -1288,7 +1395,7 @@ void algebra_poly_eval_mod(flint::FmpzVec& out,
                            const fmpz_mod_poly_t polynomial,
                            const flint::FmpzVec& element,
                            const flint::FmpzVec& one,
-                           const flint::FmpzMat& multiplication_table,
+                           const ModMulTable& multiplication_table,
                            const flint::FmpzModCtx& ctx) noexcept {
     const slong n = out.length();
     flint::FmpzVec result(n);
@@ -1313,7 +1420,7 @@ void algebra_poly_eval_mod(flint::FmpzVec& out,
 
 bool fixed_frobenius_kernel(flint::FmpzModMat& out,
                             slong& nullity,
-                            const flint::FmpzMat& multiplication_table,
+                            const ModMulTable& multiplication_table,
                             const flint::FmpzVec& one,
                             flint::FmpzConstRef p,
                             const flint::FmpzModCtx& ctx) noexcept {
@@ -1344,7 +1451,7 @@ bool fixed_frobenius_kernel(flint::FmpzModMat& out,
 
 bool pradical_frobenius_kernel(flint::FmpzModMat& out,
                                slong& nullity,
-                               const flint::FmpzMat& multiplication_table,
+                               const ModMulTable& multiplication_table,
                                const flint::FmpzVec& one,
                                flint::FmpzConstRef p,
                                const flint::FmpzModCtx& ctx) noexcept {
@@ -1418,7 +1525,7 @@ bool set_kernel_combination(flint::FmpzVec& out,
 
 bool multiplication_matrix_mod(flint::FmpzModMat& out,
                                const flint::FmpzVec& element,
-                               const flint::FmpzMat& multiplication_table,
+                               const ModMulTable& multiplication_table,
                                const flint::FmpzModCtx& ctx) noexcept {
     const slong n = element.length();
     flint::FmpzVec basis(n);
@@ -1443,7 +1550,7 @@ bool find_separating_fixed_element(
         flint::FmpzModPoly& out_minpoly,
         const flint::FmpzModMat& kernel,
         slong nullity,
-        const flint::FmpzMat& multiplication_table,
+        const ModMulTable& multiplication_table,
         flint::FmpzConstRef p,
         const flint::FmpzModCtx& ctx) noexcept {
     // Source trace: reference `AlgAss/Decompose.jl:_dec_com_finite` chooses a
@@ -1552,7 +1659,7 @@ bool component_basis_from_idempotent(
         flint::FmpzMat& out,
         slong& dimension,
         const flint::FmpzVec& idempotent,
-        const flint::FmpzMat& multiplication_table,
+        const ModMulTable& multiplication_table,
         const flint::FmpzModCtx& ctx) noexcept {
     const slong n = idempotent.length();
     flint::FmpzModMat products(n, n, ctx);
@@ -1592,7 +1699,7 @@ bool components_from_fixed_idempotents(
         std::vector<FiniteAlgebraComponent>& out,
         const flint::FmpzModMat& kernel,
         slong nullity,
-        const flint::FmpzMat& multiplication_table,
+        const ModMulTable& multiplication_table,
         flint::FmpzConstRef p,
         const flint::FmpzModCtx& ctx) noexcept {
     // Source trace: reference `AlgAss/Decompose.jl:_dec_com_finite` decomposes
@@ -1740,7 +1847,7 @@ bool components_from_recursive_split(
         const flint::FmpzModMat& kernel,
         slong nullity,
         const flint::FmpzVec& one,
-        const flint::FmpzMat& multiplication_table,
+        const ModMulTable& multiplication_table,
         const flint::FmpzModCtx& ctx) noexcept {
     // Source trace: reference 2.17.3 `src/basemath/base2.c:primedec_aux`
     // (lines 2316-2350), after Cohen GTM 138 Algorithm 6.2.9 (splitting of
@@ -1944,7 +2051,7 @@ bool components_from_fixed_subspace(
         const flint::FmpzModMat& kernel,
         slong nullity,
         const flint::FmpzVec& one,
-        const flint::FmpzMat& multiplication_table,
+        const ModMulTable& multiplication_table,
         flint::FmpzConstRef p,
         const flint::FmpzModCtx& ctx,
         FixedSplit split,
@@ -2235,7 +2342,7 @@ void quotient_coords_from_lift(flint::FmpzVec& out,
 
 bool quotient_algebra_table(flint::FmpzMat& quotient_table,
                             flint::FmpzVec& quotient_one,
-                            const flint::FmpzMat& multiplication_table,
+                            const ModMulTable& multiplication_table,
                             const flint::FmpzVec& one,
                             const flint::FmpzModMat& basis,
                             const flint::FmpzModMat& inverse_basis,
@@ -2392,18 +2499,17 @@ bool ramification_index_from_containment(slong& out,
 
 // The quotient O/pO of an unramified index-divisor prime, as the bounded and
 // recursive passes of unramified_maximal_index_divisor_prime_data share it:
-// the multiplication table, the coordinates of 1 modulo p, and the kernel of
-// x -> x^p - x with its dimension (the number of primes above p).
+// the multiplication table modulo p, the coordinates of 1 modulo p, and the
+// kernel of x -> x^p - x with its dimension (the number of primes above p).
 struct UnramifiedFixedKernel {
     UnramifiedFixedKernel(flint::FmpzConstRef p, slong n) noexcept
         : ctx(p.raw()),
-          multiplication_table(n * n, n),
           one_mod(n),
           kernel(n, n, ctx) {
     }
 
     flint::FmpzModCtx ctx;
-    flint::FmpzMat multiplication_table;
+    ModMulTable multiplication_table;
     flint::FmpzVec one_mod;
     flint::FmpzModMat kernel;
     slong nullity = 0;
@@ -2430,7 +2536,8 @@ bool unramified_fixed_kernel(UnramifiedFixedKernel& out,
                              const Order& order,
                              flint::FmpzConstRef p) noexcept {
     flint::FmpzVec one(order.degree());
-    if (!build_multiplication_table(out.multiplication_table, order) ||
+    if (!reduced_order_multiplication_table(out.multiplication_table, order,
+                                            out.ctx) ||
         !order_one_coords(one, order)) {
         return false;
     }
@@ -2535,10 +2642,11 @@ bool ramified_maximal_index_divisor_prime_data(
     const slong n = order.degree();
     flint::FmpzModCtx ctx(p.raw());
 
-    flint::FmpzMat multiplication_table(n * n, n);
+    ModMulTable multiplication_table;
     flint::FmpzVec one(n);
     flint::FmpzVec one_mod(n);
-    if (!build_multiplication_table(multiplication_table, order) ||
+    if (!reduced_order_multiplication_table(multiplication_table, order,
+                                            ctx) ||
         !order_one_coords(one, order)) {
         return false;
     }
@@ -2563,13 +2671,16 @@ bool ramified_maximal_index_divisor_prime_data(
         return false;
     }
 
-    flint::FmpzMat quotient_multiplication_table(
-            residue_degree * residue_degree, residue_degree);
+    flint::FmpzMat quotient_table(residue_degree * residue_degree,
+                                  residue_degree);
     flint::FmpzVec quotient_one(residue_degree);
-    if (!quotient_algebra_table(quotient_multiplication_table, quotient_one,
+    ModMulTable quotient_multiplication_table;
+    if (!quotient_algebra_table(quotient_table, quotient_one,
                                 multiplication_table, one_mod,
                                 quotient_basis, inverse_basis,
-                                radical_nullity, ctx)) {
+                                radical_nullity, ctx) ||
+        !reduce_multiplication_table(quotient_multiplication_table,
+                                     quotient_table, ctx)) {
         return false;
     }
 
