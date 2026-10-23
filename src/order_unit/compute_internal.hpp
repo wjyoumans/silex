@@ -633,6 +633,12 @@ bool class_unit_validation_estimate(
         const Order& order,
         slong precision,
         bool accept_grh_generation) noexcept;
+// |R| / index_bound (|R| for an index bound of one), the expected regulator
+// of class_unit_validation_estimate once the index bound is known.
+bool validation_expected_regulator(flint::Arb& expected_regulator,
+                                   const OrderUnitGroup& units,
+                                   const flint::Fmpz& index_bound,
+                                   slong precision) noexcept;
 bool class_unit_bf_validation_estimate(
         flint::Fmpz& index_bound,
         flint::Arb& expected_regulator,

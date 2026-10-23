@@ -3664,20 +3664,34 @@ void validation_stop_after_improvement(
             // while the coarse value can still recognize index one.  When
             // the coarse test shows index one, the estimate below takes it
             // (index bound one, expected = R) and the stop fires as the
-            // reference's does at index one.
-            if (accept_grh_generation &&
-                grh_validation_index_one_test(units, class_group,
-                                              analytic_cache, order,
-                                              precision) ==
-                        GrhIndexOneTest::not_index_one) {
+            // reference's does at index one.  That estimate is set here
+            // from the test's outcome, so the coarse comparison is not
+            // repeated by class_unit_validation_estimate.
+            const GrhIndexOneTest coarse =
+                    accept_grh_generation
+                    ? grh_validation_index_one_test(units, class_group,
+                                                    analytic_cache, order,
+                                                    precision)
+                    : GrhIndexOneTest::unavailable;
+            if (coarse == GrhIndexOneTest::not_index_one) {
                 return;
             }
-            extraction_state.has_expected_regulator =
-                    class_unit_validation_estimate(
-                            extraction_state.validation_index_bound,
-                            extraction_state.expected_regulator, units,
-                            class_group, analytic_cache, order, precision,
-                            accept_grh_generation);
+            if (coarse == GrhIndexOneTest::index_one) {
+                flint::fmpz_one(flint::FmpzRef(
+                        extraction_state.validation_index_bound));
+                extraction_state.has_expected_regulator =
+                        validation_expected_regulator(
+                                extraction_state.expected_regulator, units,
+                                extraction_state.validation_index_bound,
+                                precision);
+            } else {
+                extraction_state.has_expected_regulator =
+                        class_unit_validation_estimate(
+                                extraction_state.validation_index_bound,
+                                extraction_state.expected_regulator, units,
+                                class_group, analytic_cache, order,
+                                precision, accept_grh_generation);
+            }
         }
     }
     if (extraction_state.has_expected_regulator &&

@@ -411,7 +411,14 @@ bool class_unit_validation_estimate(
         flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) < 0) {
         return false;
     }
+    return validation_expected_regulator(expected_regulator, units,
+                                         index_bound, precision);
+}
 
+bool validation_expected_regulator(flint::Arb& expected_regulator,
+                                   const OrderUnitGroup& units,
+                                   const flint::Fmpz& index_bound,
+                                   slong precision) noexcept {
     flint::Arb regulator;
     if (!units.regulator(flint::ArbRef(regulator)) ||
         !flint::arb_is_finite(regulator)) {
