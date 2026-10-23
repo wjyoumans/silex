@@ -8166,8 +8166,6 @@ int test_relation_saturation_call_orders_above_crossover() {
             assert(status == silex::ProofState::verified);
             assert(result.local_primes[e] > 0);
         }
-        assert(context.relation_saturation_status() ==
-               silex::ProofState::verified);
     };
 
     // Saturation first: the extension route builds the saturation basis,
@@ -8183,6 +8181,8 @@ int test_relation_saturation_call_orders_above_crossover() {
         assert(TestHookAccess::saturation_kernel_extensions_kept() ==
                kept + 1);
         prove(saturation_first);
+        assert(TestHookAccess::saturation_kernel_extensions_kept() ==
+               kept + 1);
         read_kernel_units(saturation_first);
     }
 

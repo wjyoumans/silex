@@ -2245,8 +2245,8 @@ int test_unit_candidate_system_dixon_cache() {
     }
 
     // A corrupted cached inverse is a detected failure.  With one entry of
-    // the cached inverse changed, the first lifted digit is wrong, so no
-    // stabilization check passes and the lifting runs to the final
+    // the cached inverse changed, a wrong digit makes every
+    // reconstruction fail the exact check, and the lifting runs to the final
     // reconstruction past the modulus bound.  FLINT returns that
     // reconstruction unchecked, and for a 1 x 1 system it often succeeds
     // with a wrong value; here it is checked exactly, so every corrupted
