@@ -350,9 +350,10 @@ Changed
   certificate ``fmpz_mat_is_reduced`` on the kernel rows.  When the phase or
   a check fails, ``fmpz_lll`` runs on the unchanged input as before.  Where
   FLINT's check would have rejected the phase but the certificate holds, the
-  saturation kernel and image rows are another certified basis of the same
-  lattices, so the proof's auxiliary data can differ as for a change of
-  route; soundness and labels do not depend on it.  Published outputs and
+  saturation kernel rows are another certified LLL-reduced basis of the
+  kernel, and the image rows give another basis of the row lattice of the
+  relation matrix, each derived beta row being checked exactly, so the
+  proof's auxiliary data can differ as for a change of route; soundness and labels do not depend on it.  Published outputs and
   proof records are identical on the ``proven`` corpus (178 rows compared,
   five of them on this route, ``multiquadratic_m23_m31_m47`` included;
   seven large cyclotomic rows timed out at 120 s on both builds).  Callgrind

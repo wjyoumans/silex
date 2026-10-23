@@ -1869,6 +1869,33 @@ int test_saturation_extension_kernel_rows_without_reducedness() {
                                   sflint::FmpzMatConstRef(fixture.phase)));
     assert(same_row_lattice(sflint::FmpzMatConstRef(rows),
                             sflint::FmpzMatConstRef(fixture.full)));
+    {
+        // The image rows (identity parts v of the rows with nonzero relation
+        // part) give the basis v * A of the row lattice of A.
+        const slong n = sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(relations));
+        const slong g = sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(relations));
+        const slong image_count = n - sflint::fmpz_mat_nrows(
+                sflint::FmpzMatConstRef(rows));
+        sflint::FmpzMat v(n, n);  // zero rows beyond image_count
+        slong found = 0;
+        for (slong i = 0; i < n; ++i) {
+            if (zero_relation_part(sflint::FmpzMatConstRef(extension), i, g)) {
+                continue;
+            }
+            assert(found < image_count);
+            for (slong j = 0; j < n; ++j) {
+                sflint::fmpz_set(sflint::fmpz_mat_entry(sflint::FmpzMatRef(v), found, j),
+                           sflint::fmpz_mat_entry(
+                                   sflint::FmpzMatConstRef(extension), i, g + j));
+            }
+            ++found;
+        }
+        assert(found == image_count);
+        sflint::FmpzMat image_basis(n, g);
+        ::fmpz_mat_mul(image_basis.raw(), v.raw(), relations.raw());
+        assert(same_row_lattice(sflint::FmpzMatConstRef(image_basis),
+                                sflint::FmpzMatConstRef(relations)));
+    }
 
     // Failures in the phase attempt only: fmpz_lll's rows.  In every
     // attempt: the route fails.

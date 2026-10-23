@@ -2258,8 +2258,11 @@ without that check; when the phase is not run or returns ``-1``, or its
 rows fail a check or the certificate, it reduces the unchanged input with
 ``fmpz_lll`` under the same checks and certificate.  Where FLINT's check
 would accept the phase output, ``fmpz_lll`` returns that same output, so
-the kernel and image rows are those of ``fmpz_lll``; otherwise they can be
-another certified LLL-reduced basis of the same kernel lattice, with the
+the kernel and image rows are those of ``fmpz_lll``; otherwise the kernel
+rows can be another certified LLL-reduced basis of the same kernel lattice,
+and the image rows another basis of the row lattice of the relation matrix
+(without a certificate of their own; each beta row derived from them is
+checked exactly), with the
 consequences for the proof record described below for a change of route.
 Its kernel rows are the basis, and the remaining rows of the reduced matrix
 are kept as image rows.  For these presentations this
