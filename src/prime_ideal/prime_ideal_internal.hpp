@@ -3,6 +3,8 @@
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_poly.hpp>
+#include <silex/flint/fmpz_mod_poly_factor.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/prime_ideal.hpp>
 
 #include <vector>
@@ -50,6 +52,26 @@ bool residue_variable_numerator(flint::FmpzPoly& numerator,
                                 const PrimeIdeal& prime,
                                 const Element& element) noexcept;
 
+// Closed-form factorization of the monic quadratic `minimal_polynomial`
+// x^2 + b x + c modulo a prime p that fits a word (Cohen, GTM 138,
+// Proposition 5.1.4 for the splitting type; Algorithm 1.5.1 for the square
+// root, via FLINT's n_sqrtmod).  For odd p, with D = b^2 - 4c mod p:
+// D = 0 gives (x - r)^2 with r = -b/2; a nonresidue D gives the irreducible
+// polynomial itself; a nonzero square D = s^2 gives x - r1 and x - r2 with
+// r = (-b +- s)/2.  For p = 2 the roots are read off f(0) and f(1).
+// Canonical order: a split prime's two linear factors are listed by
+// increasing root r1 < r2 in [0, p).  `out` is overwritten with monic
+// factors and exponents in the layout of fmpz_mod_poly_factor (whose order
+// for split primes is not specified).  Returns false, leaving `out`
+// unspecified, when p is not a word, the polynomial is not monic of degree 2,
+// or the computed square root does not check; callers then factor with
+// fmpz_mod_poly_factor.  p must be prime; that is not checked here.
+bool quadratic_minimal_polynomial_factor_word(
+        flint::FmpzModPolyFactor& out,
+        flint::FmpzPolyConstRef minimal_polynomial,
+        flint::FmpzConstRef p,
+        const flint::FmpzModCtx& context) noexcept;
+
 class MaximalQuadraticPrimeAccess {
 public:
     static bool set_from_integral_generator_factor(
@@ -81,7 +103,8 @@ enum class DecomposePrimeRoute {
     // A degree-one order: (p) itself.
     degree_one,
     // A maximal quadratic-backend order with basis [1, omega]: the factors
-    // of the minimal polynomial of omega modulo p.
+    // of the minimal polynomial of omega modulo p (closed form for word-size
+    // p, see quadratic_minimal_polynomial_factor_word).
     quadratic_integral_generator,
     // max_residue_degree == 1, an equation or maximal order, and the
     // defining polynomial f squarefree modulo p: the roots of f modulo p.

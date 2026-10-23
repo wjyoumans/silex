@@ -483,7 +483,7 @@ def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
     # that would add a cause, so the detail holds only the cap:
     # - x^3 - 6x^2 - 9x - 1 (the relation-production prepass): one relation,
     #   or one candidate;
-    # - x^2 - 146 (the relation-search driver): eight relations;
+    # - x^2 - 146 (the relation-search driver): seven relations;
     # - x^2 + 23 (the imaginary-quadratic backend): one relation, or one
     #   candidate;
     # - x^4 - 10x^2 + 1 with twelve relations: the relation search stops
@@ -492,7 +492,7 @@ def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
     for coeffs, flag, value, cap in (
         ("-1,-9,-6,1", "--max-relations", "1", "max_relations"),
         ("-1,-9,-6,1", "--max-candidates", "1", "max_candidates"),
-        ("-146,0,1", "--max-relations", "8", "max_relations"),
+        ("-146,0,1", "--max-relations", "7", "max_relations"),
         ("23,0,1", "--max-relations", "1", "max_relations"),
         ("23,0,1", "--max-candidates", "1", "max_candidates"),
         ("1,0,-10,0,1", "--max-relations", "12", "max_relations"),

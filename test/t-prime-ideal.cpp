@@ -1,9 +1,14 @@
 #include <flint/fmpq_poly.h>
+#include <flint/fmpz_mod_poly.h>
+#include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
 #include <flint/ulong_extras.h>
 
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/fmpz_mod_ctx.hpp>
+#include <silex/flint/fmpz_mod_poly.hpp>
+#include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/nmod_mat.hpp>
 #include <silex/factored_element.hpp>
@@ -4421,6 +4426,275 @@ int test_prime_ideal_inverse_declines_outside_contract() {
     return 0;
 }
 
+// Minimal polynomial of the integral generator omega of Q(sqrt(d)) for
+// squarefree d: x^2 - x - (d - 1)/4 when d = 1 mod 4, else x^2 - d.
+void omega_minimal_polynomial(sflint::FmpzPoly& out,
+                              const sflint::Fmpz& radicand) noexcept {
+    sflint::Fmpz constant;
+    fmpz_poly_zero(out.raw());
+    fmpz_poly_set_coeff_si(out.raw(), 2, 1);
+    if (fmpz_fdiv_ui(radicand.raw(), 4) == 1) {
+        fmpz_poly_set_coeff_si(out.raw(), 1, -1);
+        fmpz_sub_ui(constant.raw(), radicand.raw(), 1);
+        fmpz_divexact_ui(constant.raw(), constant.raw(), 4);
+        fmpz_neg(constant.raw(), constant.raw());
+    } else {
+        fmpz_neg(constant.raw(), radicand.raw());
+    }
+    fmpz_poly_set_coeff_fmpz(out.raw(), 0, constant.raw());
+}
+
+// Same factors with the same exponents, in any order.
+bool same_factor_set(const sflint::FmpzModPolyFactor& a,
+                     const sflint::FmpzModPolyFactor& b,
+                     const sflint::FmpzModCtx& ctx) noexcept {
+    if (a.raw()->num != b.raw()->num) {
+        return false;
+    }
+    for (slong i = 0; i < a.raw()->num; ++i) {
+        bool found = false;
+        for (slong j = 0; j < b.raw()->num; ++j) {
+            if (fmpz_mod_poly_equal(a.raw()->poly + i, b.raw()->poly + j,
+                                    ctx.raw()) != 0 &&
+                a.raw()->exp[i] == b.raw()->exp[j]) {
+                found = true;
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The root r of a linear factor x - r, in [0, p).
+void linear_factor_root(sflint::Fmpz& root, const fmpz_mod_poly_struct* factor,
+                        const sflint::FmpzModCtx& ctx) noexcept {
+    fmpz_mod_poly_get_coeff_fmpz(root.raw(), factor, 0, ctx.raw());
+    fmpz_mod_neg(root.raw(), root.raw(), ctx.raw());
+}
+
+struct ClosedFormTally {
+    slong split = 0;
+    slong ramified = 0;
+    slong inert = 0;
+};
+
+void check_quadratic_closed_form_factor(const sflint::Fmpz& radicand,
+                                        const sflint::Fmpz& p,
+                                        ClosedFormTally& tally) noexcept {
+    sflint::FmpzPoly minimal_polynomial;
+    omega_minimal_polynomial(minimal_polynomial, radicand);
+    sflint::FmpzModCtx ctx(p.raw());
+    sflint::FmpzModPoly reduced(ctx);
+    sflint::FmpzModPolyFactor closed(ctx);
+    sflint::FmpzModPolyFactor generic(ctx);
+    fmpz_mod_poly_set_fmpz_poly(reduced.raw(), minimal_polynomial.raw(),
+                                ctx.raw());
+    fmpz_mod_poly_factor(generic.raw(), reduced.raw(), ctx.raw());
+    assert(silex::detail::quadratic_minimal_polynomial_factor_word(
+            closed, sflint::FmpzPolyConstRef(minimal_polynomial),
+            sflint::FmpzConstRef(p), ctx));
+    assert(same_factor_set(closed, generic, ctx));
+    const slong num = closed.raw()->num;
+    if (num == 2) {
+        // Canonical order: increasing root.
+        sflint::Fmpz r0;
+        sflint::Fmpz r1;
+        linear_factor_root(r0, closed.raw()->poly + 0, ctx);
+        linear_factor_root(r1, closed.raw()->poly + 1, ctx);
+        assert(fmpz_cmp(r0.raw(), r1.raw()) < 0);
+        ++tally.split;
+    } else if (closed.raw()->exp[0] == 2) {
+        ++tally.ramified;
+    } else {
+        assert(fmpz_mod_poly_degree(closed.raw()->poly, ctx.raw()) == 2);
+        ++tally.inert;
+    }
+}
+
+int test_quadratic_closed_form_factor_matches_flint() {
+    // The closed-form factorization of omega's minimal polynomial gives the
+    // factors of fmpz_mod_poly_factor (as sets) with split factors by
+    // increasing root, for p = 2, small odd p, p dividing d, and word-size
+    // p near 2^63 and 2^64.
+    const slong small_radicands[] = {-1, -2, -3, -5, -7, -15, -23, -47,
+                                     2, 3, 5, 6, 7, 13, 17, 21, 33, 105,
+                                     -100000000000319, 10000000005};
+    std::vector<sflint::Fmpz> radicands;
+    for (const slong d : small_radicands) {
+        radicands.emplace_back();
+        fmpz_set_si(radicands.back().raw(), d);
+    }
+    // Radicands that are themselves large primes, so p = |d| is ramified.
+    const ulong mersenne61 = (UWORD(1) << 61) - 1;
+    const ulong below_2_64 = UWORD(0xFFFFFFFFFFFFFFC5);  // 2^64 - 59, prime
+    for (const ulong q : {mersenne61, below_2_64}) {
+        radicands.emplace_back();
+        fmpz_set_ui(radicands.back().raw(), q);
+        radicands.emplace_back();
+        fmpz_set_ui(radicands.back().raw(), q);
+        fmpz_neg(radicands.back().raw(), radicands.back().raw());
+    }
+
+    std::vector<ulong> primes;
+    for (ulong q = 2; q < 2000; q = n_nextprime(q, 1)) {
+        primes.push_back(q);
+    }
+    ulong q = UWORD(1) << 62;
+    for (int i = 0; i < 24; ++i) {
+        q = n_nextprime(q, 1);
+        primes.push_back(q);
+    }
+    q = UWORD(1) << 63;
+    for (int i = 0; i < 24; ++i) {
+        q = n_nextprime(q, 1);
+        primes.push_back(q);
+    }
+    q = below_2_64 - 4000;
+    while (q < below_2_64) {
+        q = n_nextprime(q, 1);
+        primes.push_back(q);
+    }
+    primes.push_back(mersenne61);
+    assert(n_is_prime(mersenne61) != 0 && n_is_prime(below_2_64) != 0);
+
+    ClosedFormTally large_tally;
+    ClosedFormTally tally;
+    for (const sflint::Fmpz& radicand : radicands) {
+        for (const ulong prime : primes) {
+            sflint::Fmpz p;
+            fmpz_set_ui(p.raw(), prime);
+            check_quadratic_closed_form_factor(
+                    radicand, p, prime > (UWORD(1) << 62) ? large_tally : tally);
+        }
+    }
+    assert(tally.split > 0 && tally.ramified > 0 && tally.inert > 0);
+    assert(large_tally.split > 0 && large_tally.ramified > 0 &&
+           large_tally.inert > 0);
+
+    // A prime beyond a word is left to the generic factorization.
+    sflint::Fmpz radicand;
+    sflint::Fmpz p;
+    fmpz_set_si(radicand.raw(), -5);
+    fmpz_set_ui(p.raw(), UWORD(1));
+    fmpz_mul_2exp(p.raw(), p.raw(), 64);
+    fmpz_nextprime(p.raw(), p.raw(), 1);
+    sflint::FmpzPoly minimal_polynomial;
+    omega_minimal_polynomial(minimal_polynomial, radicand);
+    sflint::FmpzModCtx ctx(p.raw());
+    sflint::FmpzModPolyFactor closed(ctx);
+    assert(!silex::detail::quadratic_minimal_polynomial_factor_word(
+            closed, sflint::FmpzPolyConstRef(minimal_polynomial),
+            sflint::FmpzConstRef(p), ctx));
+    return 0;
+}
+
+int test_quadratic_decompose_prime_closed_form_matches_flint_primes() {
+    // On maximal quadratic-backend orders, decompose_prime and
+    // set_first_degree_one_prime build the same prime ideals (HNF, residue
+    // polynomial, Kummer generator) as the ideals built from FLINT's
+    // factors, as sets; split primes come by increasing root of omega and
+    // set_first_degree_one_prime keeps the first.  Includes p beyond a word,
+    // which keeps the generic factorization.
+    using Access = silex::detail::MaximalQuadraticPrimeAccess;
+    using Kind = silex::detail::RetainedQuadraticPrimeKind;
+    const slong radicands[] = {-1, -2, -5, -23, 5, 13, 6, -100000000000319};
+    std::vector<sflint::Fmpz> primes;
+    for (ulong q = 2; q < 260; q = n_nextprime(q, 1)) {
+        primes.emplace_back();
+        fmpz_set_ui(primes.back().raw(), q);
+    }
+    for (const ulong start : {UWORD(1) << 63, UWORD(0xFFFFFFFFFFFFF000)}) {
+        ulong q = start;
+        for (int i = 0; i < 6; ++i) {
+            q = n_nextprime(q, 1);
+            primes.emplace_back();
+            fmpz_set_ui(primes.back().raw(), q);
+        }
+    }
+    {
+        sflint::Fmpz q;
+        fmpz_one(q.raw());
+        fmpz_mul_2exp(q.raw(), q.raw(), 64);
+        for (int i = 0; i < 4; ++i) {
+            fmpz_nextprime(q.raw(), q.raw(), 1);
+            primes.emplace_back();
+            fmpz_set(primes.back().raw(), q.raw());
+        }
+    }
+
+    slong checked_split = 0;
+    for (const slong d : radicands) {
+        silex::NumberField field = silex::test::quadratic_field(d);
+        assert(field.backend_kind() ==
+               silex::NumberFieldBackendKind::quadratic);
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        silex::Element omega(field);
+        sflint::Fmpz radicand;
+        fmpz_set_si(radicand.raw(), d);
+        if (fmpz_fdiv_ui(radicand.raw(), 4) == 1) {
+            element_alpha_over(omega, 1, 1, 2);
+        } else {
+            assert(omega.gen());
+        }
+        sflint::FmpzPoly minimal_polynomial;
+        omega_minimal_polynomial(minimal_polynomial, radicand);
+
+        for (const sflint::Fmpz& p : primes) {
+            silex::PrimeIdealList list;
+            assert(silex::decompose_prime(list, maximal,
+                                          sflint::FmpzConstRef(p)));
+            sflint::FmpzModCtx ctx(p.raw());
+            sflint::FmpzModPoly reduced(ctx);
+            sflint::FmpzModPolyFactor generic(ctx);
+            fmpz_mod_poly_set_fmpz_poly(reduced.raw(),
+                                        minimal_polynomial.raw(), ctx.raw());
+            fmpz_mod_poly_factor(generic.raw(), reduced.raw(), ctx.raw());
+            assert(list.size() == generic.raw()->num);
+            for (slong j = 0; j < generic.raw()->num; ++j) {
+                silex::PrimeIdeal reference(maximal);
+                assert(Access::set_from_integral_generator_factor(
+                        reference, maximal, sflint::FmpzConstRef(p),
+                        sflint::FmpzModPolyConstRef(generic.raw()->poly + j),
+                        generic.raw()->exp[j], omega, ctx));
+                slong matches = 0;
+                for (slong i = 0; i < list.size(); ++i) {
+                    matches += same_prime_data(reference, *list.at(i),
+                                               maximal) ? 1 : 0;
+                }
+                assert(matches == 1);
+            }
+
+            silex::PrimeIdeal retained(maximal);
+            Kind kind = Kind::split;
+            assert(Access::set_first_degree_one_prime(
+                    retained, kind, maximal, sflint::FmpzConstRef(p),
+                    nullptr));
+            if (list.size() == 1 && list.at(0)->residue_degree() == 2) {
+                assert(kind == Kind::inert);
+                continue;
+            }
+            assert(kind == (list.size() == 2 ? Kind::split : Kind::ramified));
+            assert(same_prime_data(retained, *list.at(0), maximal));
+            if (list.size() == 2 && fmpz_abs_fits_ui(p.raw()) != 0) {
+                sflint::Fmpz root0;
+                sflint::Fmpz root1;
+                assert(degree_one_root_from_residue_polynomial(
+                        root0, *list.at(0)));
+                assert(degree_one_root_from_residue_polynomial(
+                        root1, *list.at(1)));
+                assert(fmpz_cmp(root0.raw(), root1.raw()) < 0);
+                ++checked_split;
+            }
+        }
+    }
+    assert(checked_split > 0);
+    return 0;
+}
+
 }  // namespace
 
 // PrimeIdealAccess::same_prime_ideal, the same-prime test shared by the
@@ -4576,5 +4850,8 @@ int main() {
     assert(test_alpha_convention_kept_after_marking_maximal() == 0);
     assert(test_prime_ideal_inverse_matches_invert() == 0);
     assert(test_prime_ideal_inverse_declines_outside_contract() == 0);
+    assert(test_quadratic_closed_form_factor_matches_flint() == 0);
+    assert(test_quadratic_decompose_prime_closed_form_matches_flint_primes() ==
+           0);
     return 0;
 }

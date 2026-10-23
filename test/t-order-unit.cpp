@@ -13432,14 +13432,14 @@ TransactionRun run_transaction(
 // compute_with_class_group records the last validation outcome of a failed
 // attempt only when validation ran (outcome other than not_run).  No public
 // input leaves compute_ok true with the summary at not_run, so the seam
-// clears the summary after the failed attempt.  Q(sqrt 146) in proven mode
-// with max_relations 9 fails after validation ends in no_progress; the
+// clears the summary after the failed attempt.  Q(sqrt 94) in proven mode
+// with max_relations 7 fails after validation ends in no_progress; the
 // relation cap stopped the search, so the reason is the budget one and the
 // outcome is kept next to the cap.
 int test_compute_failure_records_validation_outcome_only_when_it_ran() {
-    const std::vector<slong> sqrt146 = {-146, 0, 1};
+    const std::vector<slong> sqrt94 = {-94, 0, 1};
     const TransactionRun natural = run_transaction(
-            sqrt146, silex::CertificationMode::proven, 5000, 9);
+            sqrt94, silex::CertificationMode::proven, 5000, 7);
     assert(!natural.ok);
     assert(std::strcmp(natural.audit.failure_reason,
                        "relation_search_budget_exhausted") == 0);
@@ -13451,7 +13451,7 @@ int test_compute_failure_records_validation_outcome_only_when_it_ran() {
 
     silex::detail::TestHookAccess::set_forget_validation_summary(true);
     const TransactionRun forgotten = run_transaction(
-            sqrt146, silex::CertificationMode::proven, 5000, 9);
+            sqrt94, silex::CertificationMode::proven, 5000, 7);
     silex::detail::TestHookAccess::set_forget_validation_summary(false);
     assert(!forgotten.ok);
     assert(std::strcmp(forgotten.audit.failure_reason,
@@ -13461,7 +13461,7 @@ int test_compute_failure_records_validation_outcome_only_when_it_ran() {
 
     // The seam is off again: the run repeats the natural result.
     const TransactionRun again = run_transaction(
-            sqrt146, silex::CertificationMode::proven, 5000, 9);
+            sqrt94, silex::CertificationMode::proven, 5000, 7);
     assert(!again.ok && again.audit.last_validation_outcome != nullptr);
     return 0;
 }

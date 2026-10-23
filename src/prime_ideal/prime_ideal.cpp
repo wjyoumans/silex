@@ -27,6 +27,7 @@
 #include <flint/fmpz_poly.h>
 #include <flint/nmod.h>
 #include <flint/nmod_mat.h>
+#include <flint/ulong_extras.h>
 
 #include <algorithm>
 #include <new>
@@ -4088,6 +4089,121 @@ bool residue_variable_numerator(flint::FmpzPoly& numerator,
                                    flint::FmpzConstRef(p), element);
 }
 
+bool quadratic_minimal_polynomial_factor_word(
+        flint::FmpzModPolyFactor& out,
+        flint::FmpzPolyConstRef minimal_polynomial,
+        flint::FmpzConstRef p,
+        const flint::FmpzModCtx& context) noexcept {
+    // Cohen, GTM 138, Proposition 5.1.4: with D the discriminant of the
+    // minimal polynomial of omega, p is ramified when p | D, split when D is
+    // a nonzero square modulo p and inert otherwise; a root r of x^2 + b x + c
+    // modulo p gives the factor x - r and the prime p Z + (omega - r) Z.
+    // The square root is FLINT's n_sqrtmod (Tonelli-Shanks, Algorithm
+    // 1.5.1), checked by squaring before it is used.
+    const fmpz_poly_struct* f = minimal_polynomial.raw();
+    if (out.context() != context.raw() || context.raw() == nullptr ||
+        fmpz_poly_degree(f) != 2 || fmpz_is_one(f->coeffs + 2) == 0 ||
+        fmpz_sgn(p.raw()) <= 0 || fmpz_abs_fits_ui(p.raw()) == 0 ||
+        fmpz_equal(p.raw(), fmpz_mod_ctx_modulus(context.raw())) == 0) {
+        return false;
+    }
+    const ulong prime = fmpz_get_ui(p.raw());
+    if (prime < 2) {
+        return false;
+    }
+    const ulong b = fmpz_fdiv_ui(f->coeffs + 1, prime);
+    const ulong c = fmpz_fdiv_ui(f->coeffs + 0, prime);
+
+    enum class Splitting { inert, ramified, split };
+    Splitting splitting = Splitting::inert;
+    ulong roots[2] = {0, 0};
+    if (prime == 2) {
+        // f(0) = c and f(1) = 1 + b + c modulo 2.  b = 0 gives
+        // x^2 + c = (x + c)^2; b = 1 gives x(x + 1) for c = 0 and the
+        // irreducible x^2 + x + 1 for c = 1.
+        if (b == 0) {
+            splitting = Splitting::ramified;
+            roots[0] = c;
+        } else if (c == 0) {
+            splitting = Splitting::split;
+            roots[0] = 0;
+            roots[1] = 1;
+        }
+    } else {
+        nmod_t mod;
+        nmod_init(&mod, prime);
+        const ulong discriminant =
+                nmod_sub(nmod_mul(b, b, mod),
+                         nmod_mul(UWORD(4) % prime, c, mod), mod);
+        // p is an odd prime below 2^64 - 1, so p + 1 does not overflow.
+        const ulong half = (prime + 1) / 2;
+        const ulong minus_b = nmod_neg(b, mod);
+        if (discriminant == 0) {
+            splitting = Splitting::ramified;
+            roots[0] = nmod_mul(minus_b, half, mod);
+        } else if (n_jacobi_unsigned(discriminant, prime) == 1) {
+            const ulong s = n_sqrtmod(discriminant, prime);
+            if (s == 0 || nmod_mul(s, s, mod) != discriminant) {
+                return false;
+            }
+            splitting = Splitting::split;
+            roots[0] = nmod_mul(nmod_add(minus_b, s, mod), half, mod);
+            roots[1] = nmod_mul(nmod_sub(minus_b, s, mod), half, mod);
+            if (roots[1] < roots[0]) {
+                std::swap(roots[0], roots[1]);
+            }
+        }
+    }
+
+    out.raw()->num = 0;
+    flint::FmpzModPoly factor(context);
+    if (!factor.is_initialized()) {
+        return false;
+    }
+    if (splitting == Splitting::inert) {
+        fmpz_mod_poly_set_fmpz_poly(factor.raw(), f, context.raw());
+        fmpz_mod_poly_factor_insert(out.raw(), factor.raw(), 1,
+                                    context.raw());
+        return true;
+    }
+    const slong root_count = splitting == Splitting::split ? 2 : 1;
+    const slong exponent = splitting == Splitting::ramified ? 2 : 1;
+    flint::Fmpz coefficient;
+    for (slong i = 0; i < root_count; ++i) {
+        // x - r with -r represented in [0, p).
+        fmpz_mod_poly_zero(factor.raw(), context.raw());
+        fmpz_mod_poly_set_coeff_ui(factor.raw(), 1, 1, context.raw());
+        fmpz_set_ui(coefficient.raw(), roots[i]);
+        fmpz_mod_neg(coefficient.raw(), coefficient.raw(), context.raw());
+        fmpz_mod_poly_set_coeff_fmpz(factor.raw(), 0, coefficient.raw(),
+                                     context.raw());
+        fmpz_mod_poly_factor_insert(out.raw(), factor.raw(), exponent,
+                                    context.raw());
+    }
+    return true;
+}
+
+namespace {
+
+// The factors of omega's minimal polynomial modulo the prime p: the closed
+// form for word-size p, and FLINT's generic factorization of `reduced` (the
+// same polynomial reduced modulo p) otherwise.
+void factor_quadratic_minimal_polynomial(
+        flint::FmpzModPolyFactor& out,
+        const flint::FmpzModPoly& reduced,
+        const flint::FmpzPoly& minimal_polynomial,
+        flint::FmpzConstRef p,
+        const flint::FmpzModCtx& context) noexcept {
+    if (quadratic_minimal_polynomial_factor_word(
+                out, flint::FmpzPolyConstRef(minimal_polynomial.raw()), p,
+                context)) {
+        return;
+    }
+    fmpz_mod_poly_factor(out.raw(), reduced.raw(), context.raw());
+}
+
+}  // namespace
+
 bool MaximalQuadraticPrimeAccess::set_from_integral_generator_factor(
         PrimeIdeal& out,
         const Order& order,
@@ -4182,7 +4298,8 @@ bool MaximalQuadraticPrimeAccess::set_first_degree_one_prime(
                 "prime_ideal.maximal_quadratic.factor");
         fmpz_mod_poly_set_fmpz_poly(reduced.raw(), minimal_polynomial.raw(),
                                     context.raw());
-        fmpz_mod_poly_factor(factorization.raw(), reduced.raw(), context.raw());
+        factor_quadratic_minimal_polynomial(factorization, reduced,
+                                            minimal_polynomial, p, context);
     }
 
     const slong count = factorization.raw()->num;
@@ -4836,7 +4953,9 @@ bool decompose_prime(PrimeIdealList& out,
     if (route == detail::DecomposePrimeRoute::quadratic_integral_generator) {
         // reference `quadgen`/`quadpoly` use the integral generator omega and its
         // minimal polynomial.  Factoring in that generator keeps the stored
-        // residue polynomial aligned with this order's natural basis.
+        // residue polynomial aligned with this order's natural basis.  For
+        // word-size p the factors come from the closed form, a split prime's
+        // two primes listed by increasing root of omega modulo p.
         Element omega(*order.parent());
         flint::FmpzPoly minimal_polynomial;
         if (!set_quadratic_integral_generator(
@@ -4851,9 +4970,9 @@ bool decompose_prime(PrimeIdealList& out,
         flint::FmpzModPolyFactor quadratic_factorization(ctx);
         fmpz_mod_poly_set_fmpz_poly(
                 reduced_quadratic.raw(), minimal_polynomial.raw(), ctx.raw());
-        fmpz_mod_poly_factor(quadratic_factorization.raw(),
-                reduced_quadratic.raw(),
-                ctx.raw());
+        detail::factor_quadratic_minimal_polynomial(
+                quadratic_factorization, reduced_quadratic,
+                minimal_polynomial, p, ctx);
 
         const slong factor_count = quadratic_factorization.raw()->num;
         if (factor_count <= 0 || !candidates.reserve(factor_count)) {
