@@ -241,7 +241,6 @@ struct RelationFinishState {
 
 struct HnfFinishWorkspace {
     flint::FmpzMat hnf{0, 0};
-    flint::FmpzMat relation_transform{0, 0};
     flint::ArbMat relation_logs{0, 0};
     flint::ArbMat unit_logs{0, 0};
     // Kernel rows of the processed relations, kept until the next sync
@@ -280,7 +279,6 @@ struct HnfFinishWorkspace {
 
     void clear() noexcept {
         hnf = flint::FmpzMat(0, 0);
-        relation_transform = flint::FmpzMat(0, 0);
         relation_logs = flint::ArbMat(0, 0);
         unit_logs = flint::ArbMat(0, 0);
         finish_kernel = flint::FmpzMat(0, 0);

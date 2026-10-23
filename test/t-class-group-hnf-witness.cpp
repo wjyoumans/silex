@@ -140,27 +140,20 @@ void assert_finish_workspace_exact(
     assert(workspace.relation_rank == context.relation_rank());
 
     sflint::FmpzMat stored(relation_count, generator_count);
-    sflint::FmpzMat transformed(relation_count, generator_count);
     sflint::FmpzMat expected_hnf(relation_count, generator_count);
     assert(context.relations(sflint::FmpzMatRef(stored)));
-    sflint::fmpz_mat_mul(
-            sflint::FmpzMatRef(transformed),
-            sflint::FmpzMatConstRef(workspace.relation_transform),
-            sflint::FmpzMatConstRef(stored));
-    assert(sflint::fmpz_mat_equal(
-            sflint::FmpzMatConstRef(transformed),
-            sflint::FmpzMatConstRef(workspace.hnf)));
 
+    // The workspace HNF, built incrementally across syncs, is the HNF of
+    // all stored relations; its nonzero rows are exactly the first
+    // relation_rank rows.
     ::fmpz_mat_hnf(expected_hnf.raw(), stored.raw());
     assert(sflint::fmpz_mat_equal(
             sflint::FmpzMatConstRef(expected_hnf),
             sflint::FmpzMatConstRef(workspace.hnf)));
-
-    sflint::Fmpz determinant;
-    sflint::fmpz_mat_det(
-            sflint::FmpzRef(determinant),
-            sflint::FmpzMatConstRef(workspace.relation_transform));
-    assert(sflint::fmpz_is_pm1(determinant));
+    for (slong row = 0; row < relation_count; ++row) {
+        assert((::fmpz_mat_is_zero_row(workspace.hnf.raw(), row) != 0) ==
+               (row >= workspace.relation_rank));
+    }
 
     sflint::FmpzMat dependency_coefficients(0, 0);
     assert(silex::detail::hnf_finish_workspace_witness_coefficients(
@@ -607,16 +600,40 @@ int test_incremental_finish_workspace_lifecycle() {
     }
     assert_finish_workspace_exact(context, *workspace);
 
-    sflint::FmpzMat transform_before(
-            context.relation_count(), context.relation_count());
-    sflint::fmpz_mat_set(
-            sflint::FmpzMatRef(transform_before),
-            sflint::FmpzMatConstRef(workspace->relation_transform));
+    // A sync with no new relations leaves the HNF, the counts and the
+    // cached kernels unchanged.
+    assert(workspace->finish_kernel_valid && workspace->witness_kernel_valid);
+    sflint::FmpzMat hnf_before(
+            context.relation_count(), context.generator_count());
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(hnf_before),
+                         sflint::FmpzMatConstRef(workspace->hnf));
+    sflint::FmpzMat finish_before(
+            sflint::fmpz_mat_nrows(workspace->finish_kernel),
+            sflint::fmpz_mat_ncols(workspace->finish_kernel));
+    sflint::FmpzMat witness_before(
+            sflint::fmpz_mat_nrows(workspace->witness_kernel),
+            sflint::fmpz_mat_ncols(workspace->witness_kernel));
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(finish_before),
+                         sflint::FmpzMatConstRef(workspace->finish_kernel));
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(witness_before),
+                         sflint::FmpzMatConstRef(workspace->witness_kernel));
+    const slong processed_before = workspace->processed_relation_count;
+    const slong rank_before = workspace->relation_rank;
     assert(silex::detail::sync_hnf_finish_workspace(
             *workspace, context));
+    assert(workspace->exact_valid);
+    assert(workspace->processed_relation_count == processed_before);
+    assert(workspace->relation_rank == rank_before);
     assert(sflint::fmpz_mat_equal(
-            sflint::FmpzMatConstRef(transform_before),
-            sflint::FmpzMatConstRef(workspace->relation_transform)));
+            sflint::FmpzMatConstRef(hnf_before),
+            sflint::FmpzMatConstRef(workspace->hnf)));
+    assert(workspace->finish_kernel_valid && workspace->witness_kernel_valid);
+    assert(sflint::fmpz_mat_equal(
+            sflint::FmpzMatConstRef(finish_before),
+            sflint::FmpzMatConstRef(workspace->finish_kernel)));
+    assert(sflint::fmpz_mat_equal(
+            sflint::FmpzMatConstRef(witness_before),
+            sflint::FmpzMatConstRef(workspace->witness_kernel)));
 
     const slong processed = workspace->processed_relation_count;
     silex::ClassGroupContext moved(std::move(context));
@@ -650,7 +667,8 @@ int test_incremental_finish_workspace_lifecycle() {
     assert(!workspace->exact_valid);
     assert(workspace->processed_relation_count == 0);
     assert(sflint::fmpz_mat_nrows(workspace->hnf) == 0);
-    assert(sflint::fmpz_mat_nrows(workspace->relation_transform) == 0);
+    assert(sflint::fmpz_mat_nrows(workspace->finish_kernel) == 0);
+    assert(!workspace->finish_kernel_valid && !workspace->witness_kernel_valid);
     return 0;
 }
 

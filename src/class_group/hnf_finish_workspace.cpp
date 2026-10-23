@@ -46,18 +46,19 @@ bool hnf_finish_workspace_shape_matches(
                    workspace.processed_relation_count &&
            flint::fmpz_mat_ncols(workspace.hnf) ==
                    workspace.generator_count &&
-           flint::fmpz_mat_nrows(workspace.relation_transform) ==
-                   workspace.processed_relation_count &&
-           flint::fmpz_mat_ncols(workspace.relation_transform) ==
-                   workspace.processed_relation_count &&
            fmpz_mat_trimmed_nonzero_rows(
                    flint::FmpzMatConstRef(workspace.hnf)) ==
                    workspace.relation_rank;
 }
 
+// The HNF of the old relations followed by new_relations, from the HNF of
+// the update matrix: the old HNF's nonzero rows, which span the old
+// relations' row lattice, followed by the new relations.  That matrix spans
+// the row lattice of all the relations, so its HNF, padded with zero rows,
+// is theirs by uniqueness of the HNF of a row lattice (Cohen, Theorem
+// 2.4.3).
 bool append_hnf_finish_workspace(
         flint::FmpzMat& hnf_out,
-        flint::FmpzMat& transform_out,
         slong& rank_out,
         const HnfFinishWorkspace& workspace,
         flint::FmpzMatConstRef new_relations,
@@ -97,77 +98,23 @@ bool append_hnf_finish_workspace(
     }
 
     flint::FmpzMat update_hnf(update_rows, generator_count);
-    flint::FmpzMat update_transform(update_rows, update_rows);
-    ::fmpz_mat_hnf_transform(update_hnf.raw(), update_transform.raw(),
-                             update_input.raw());
+    ::fmpz_mat_hnf(update_hnf.raw(), update_input.raw());
     const slong new_rank = fmpz_mat_trimmed_nonzero_rows(
             flint::FmpzMatConstRef(update_hnf));
     if (new_rank < 0 || new_rank != expected_rank) {
         return false;
     }
 
-    flint::FmpzMat bridge(update_rows, relation_count);
-    for (slong row = 0; row < old_rank; ++row) {
-        for (slong col = 0; col < old_relations; ++col) {
-            flint::fmpz_set(
-                    flint::fmpz_mat_entry(
-                            flint::FmpzMatRef(bridge), row, col),
-                    flint::fmpz_mat_entry(
-                            flint::FmpzMatConstRef(
-                                    workspace.relation_transform),
-                            row, col));
-        }
-    }
-    for (slong row = 0; row < new_relation_count; ++row) {
-        flint::fmpz_one(flint::fmpz_mat_entry(
-                flint::FmpzMatRef(bridge), old_rank + row,
-                old_relations + row));
-    }
-
-    flint::FmpzMat composed(update_rows, relation_count);
-    flint::fmpz_mat_mul(flint::FmpzMatRef(composed),
-                        flint::FmpzMatConstRef(update_transform),
-                        flint::FmpzMatConstRef(bridge));
-
     flint::FmpzMat candidate_hnf(relation_count, generator_count);
-    flint::FmpzMat candidate_transform(relation_count, relation_count);
     for (slong row = 0; row < new_rank; ++row) {
         if (!fmpz_mat_copy_row(
                     flint::FmpzMatRef(candidate_hnf), row,
-                    flint::FmpzMatConstRef(update_hnf), row) ||
-            !fmpz_mat_copy_row(
-                    flint::FmpzMatRef(candidate_transform), row,
-                    flint::FmpzMatConstRef(composed), row)) {
+                    flint::FmpzMatConstRef(update_hnf), row)) {
             return false;
         }
-    }
-
-    slong output_row = new_rank;
-    for (slong row = old_rank; row < old_relations; ++row, ++output_row) {
-        for (slong col = 0; col < old_relations; ++col) {
-            flint::fmpz_set(
-                    flint::fmpz_mat_entry(
-                            flint::FmpzMatRef(candidate_transform),
-                            output_row, col),
-                    flint::fmpz_mat_entry(
-                            flint::FmpzMatConstRef(
-                                    workspace.relation_transform),
-                            row, col));
-        }
-    }
-    for (slong row = new_rank; row < update_rows; ++row, ++output_row) {
-        if (!fmpz_mat_copy_row(
-                    flint::FmpzMatRef(candidate_transform), output_row,
-                    flint::FmpzMatConstRef(composed), row)) {
-            return false;
-        }
-    }
-    if (output_row != relation_count) {
-        return false;
     }
 
     hnf_out = std::move(candidate_hnf);
-    transform_out = std::move(candidate_transform);
     rank_out = new_rank;
     return true;
 }
@@ -320,7 +267,6 @@ bool sync_hnf_finish_workspace(
     }
 
     flint::FmpzMat candidate_hnf(0, 0);
-    flint::FmpzMat candidate_transform(0, 0);
     slong candidate_rank = -1;
     const bool incremental = workspace.exact_valid;
     if (incremental) {
@@ -333,7 +279,7 @@ bool sync_hnf_finish_workspace(
             return false;
         }
         if (!append_hnf_finish_workspace(
-                    candidate_hnf, candidate_transform, candidate_rank,
+                    candidate_hnf, candidate_rank,
                     workspace, flint::FmpzMatConstRef(new_relations),
                     context.relation_rank())) {
             return false;
@@ -344,11 +290,7 @@ bool sync_hnf_finish_workspace(
             return false;
         }
         candidate_hnf = flint::FmpzMat(relation_count, generator_count);
-        candidate_transform = flint::FmpzMat(relation_count,
-                                              relation_count);
-        ::fmpz_mat_hnf_transform(candidate_hnf.raw(),
-                                 candidate_transform.raw(),
-                                 relations.raw());
+        ::fmpz_mat_hnf(candidate_hnf.raw(), relations.raw());
         candidate_rank = fmpz_mat_trimmed_nonzero_rows(
                 flint::FmpzMatConstRef(candidate_hnf));
         if (candidate_rank < 0 ||
@@ -358,7 +300,6 @@ bool sync_hnf_finish_workspace(
     }
 
     workspace.hnf = std::move(candidate_hnf);
-    workspace.relation_transform = std::move(candidate_transform);
     workspace.generator_count = generator_count;
     workspace.processed_relation_count = relation_count;
     workspace.relation_rank = candidate_rank;

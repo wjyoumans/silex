@@ -877,12 +877,16 @@ passed in must be the exact rank of ``A``; the full-lattice claim depends on
 it.  The finish checks that the relation rank it passes equals
 ``fmpz_mat_rank`` of ``A``, the number of nonzero rows of its HNF.  The
 two routes return different bases of the same kernel lattice.  A finish
-workspace, which keeps the HNF and its transform across relation batches,
-takes its unit rows from these same bases (the witness rows for the witness
-extraction, the finish variant for the analytic finish), computed at most
-once per sync; it never takes them from the zero-row part of its own HNF
-transform, which is an exact but unreduced kernel basis whose entries can
-have tens of thousands of bits and which no finish precision can use.  For
+workspace keeps the HNF of the relations across relation batches: a sync
+that appends relations takes the HNF of the old HNF's nonzero rows followed
+by the new relations, which span the same row lattice as all the relations,
+so by uniqueness of the row HNF it is their HNF; its nonzero row count is
+the exact rank.  The workspace keeps no HNF transform.  It takes its unit
+rows from the bases above (the witness rows for the witness extraction, the
+finish variant for the analytic finish), computed at most once per sync,
+never from the zero-row part of an HNF transform, which is an exact but
+unreduced kernel basis whose entries can have tens of thousands of bits and
+which no finish precision can use.  For
 the finish rows the workspace keeps the phase output of its last finish
 kernel, ``U * [c*A_m | I_m]`` for the first ``m`` relations and a
 unimodular ``U``.  After a sync appends relations, the phase input is that

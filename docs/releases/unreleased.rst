@@ -133,6 +133,22 @@ Added
 Changed
 -------
 
+- The ``proven`` finish workspace no longer keeps the transform of its
+  relation HNF.  A sync that appends relations computes only the HNF of the
+  old HNF rows followed by the new relations, which by uniqueness of the HNF
+  is the HNF of all relations; the transform, whose entries reached tens of
+  thousands of bits and was multiplied out on every append, was not read by
+  the class group, unit, regulator, saturation or certification code.
+  Published outputs are identical on the corpus and fixture rows that
+  finish within 120 s on both builds (``proven`` 176 rows, ``grh`` 184
+  rows) and on ``cyclotomic_72_phi24`` and ``multiquadratic_m23_m31_m47``
+  in ``proven`` mode with a 900 s cap; seven large cyclotomic rows in
+  ``proven`` and ``cyclotomic_real_163_deg81`` in ``grh`` timed out on both
+  builds.
+  Callgrind instruction counts (busy machine, ``proven``):
+  ``simplest_quartic_t10`` 3.0% fewer, ``pure_x6_minus_2`` 1.9% fewer,
+  ``multiquadratic_m23_m31`` 0.2% fewer.  No timing has been measured.
+
 - The split-prime resultant search of class-group relation search
   (defining polynomials of degree 16 and more) skips a candidate prime ``p``
   whose Jacobi symbol ``(disc(f) / p)`` is not +1, where ``disc(f)`` is the
