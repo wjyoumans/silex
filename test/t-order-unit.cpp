@@ -37,6 +37,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -13783,9 +13784,26 @@ int test_grh_validation_stop_retries_coarse_index_one() {
                    units, class_group, analytic_cache, order, 128) ==
            GrhIndexOneTest::index_one);
 
+    // The stop test sets the estimate from the coarse outcome, so the
+    // coarse comparison runs once, not again inside the estimate.
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ScopeCounter coarse_runs;
+    coarse_runs.label = "unit_group.validation_analytic_index_bound."
+                        "ensure_index_one_product";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::unit_group),
+            scope_begin_callback, &coarse_runs);
+    units.set_diagnostics(&diagnostics);
     silex::detail::validation_stop_after_improvement(
             stop, state, units, class_group, analytic_cache, order, 128, 0,
             true);
+    units.set_diagnostics(nullptr);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(coarse_runs.count == 1);
+#endif
     assert(stop);
     assert(state.has_expected_regulator);
     assert(sflint::fmpz_is_one(
@@ -13804,6 +13822,56 @@ int test_grh_validation_stop_retries_coarse_index_one() {
                    sflint::FmpzConstRef(default_state.validation_index_bound),
                    4) >= 0);
     assert(!default_cache.ensure_index_one(order, 128));
+    return 0;
+}
+
+// On Q(zeta_32), x^16 + 1, the first full-rank unit set of a grh
+// transaction does not show index one under the coarse test, and the
+// search reaches the full unit group before any default-route hR is
+// computed.  The coarse index-one value then accepts, and the published
+// Belabas-Friedman record is that value's audit (Theorem 7 cutoff and work
+// precision), not the default route's.
+int test_grh_coarse_stop_records_coarse_bf_audit() {
+    sflint::FmpzPoly polynomial;
+    sflint::fmpz_poly_set_coeff_si(polynomial, 0, 1);
+    sflint::fmpz_poly_set_coeff_si(polynomial, 16, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    assert(audit.final_result_published);
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    assert(class_group.zeta_bf_proof_status() == silex::ProofState::verified);
+
+    silex::detail::AnalyticClassRegulatorCache coarse;
+    assert(coarse.ensure_index_one(order, 128));
+    const silex::detail::ZetaBfRouteAudit* coarse_audit =
+            coarse.value_bf_audit();
+    assert(coarse_audit != nullptr);
+    const std::optional<silex::ClassGroupZetaBfProofRecord> record =
+            class_group.zeta_bf_proof_record();
+    assert(record.has_value());
+    assert(record->cutoff == coarse_audit->cutoff);
+    assert(record->requested_precision == coarse_audit->requested_precision);
+    assert(record->work_precision == coarse_audit->work_precision);
     return 0;
 }
 
@@ -13920,6 +13988,7 @@ int main() {
     test_local_saturation_proof_keeps_degree_ten_lift_limit();
     test_lll_relation_slice_rejects_small_extension_target();
     test_grh_validation_stop_retries_coarse_index_one();
+    test_grh_coarse_stop_records_coarse_bf_audit();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
     test_grh_validation_saturation_deferred_until_extension_stalls();

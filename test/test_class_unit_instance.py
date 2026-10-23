@@ -640,6 +640,9 @@ def main() -> int:
                 "analytic_class_regulator_status", "zeta_bf_proof_status"
             ):
                 assert proven_instance["class_group"][component] == "not_checked"
+            assert proven_instance["class_group"][
+                "zeta_bf_proof_record"
+            ] is None
         if row["id"] == "real_quadratic_210_proven":
             # The canonical Dirichlet index-one gate certifies this pair
             # without an ell-local saturation or BF proof attempt; index
@@ -891,6 +894,15 @@ def main() -> int:
         assert analytic_instance["class_group"][
             "zeta_bf_proof_status"
         ] == "verified"
+        # The audit data behind the verified status is in the output.
+        bf_record = analytic_instance["class_group"]["zeta_bf_proof_record"]
+        assert set(bf_record) == {
+            "cutoff", "max_cutoff", "requested_precision", "work_precision",
+            "error_bound",
+        }
+        assert bf_record["cutoff"] > 0
+        assert bf_record["work_precision"] > 0
+        assert bf_record["error_bound"].startswith("[")
         # The audit's outcome is visible on its own: it ran and succeeded,
         # distinct from "not requested" or "requested but skipped/failed".
         assert analytic_instance["zeta_bf_audit"] == {

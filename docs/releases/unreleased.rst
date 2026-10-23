@@ -52,6 +52,11 @@ Added
   ``kor1_generation`` (the spelling of the detail log: no hypothesis on the
   different is needed), and is null for every other basis.  Additive; the
   format is unchanged.
+- ``silex-class-unit-instance`` adds ``zeta_bf_proof_record`` to its
+  ``class_group`` JSON object: the ``cutoff``, ``max_cutoff``,
+  ``requested_precision``, ``work_precision`` and ``error_bound`` of
+  ``zeta_bf_proof_record()``, or null when no record is stored.  Additive;
+  the format is unchanged.
 - ``silex-class-unit-instance`` raises its default ``max_candidates`` for
   degree 3 and up from 5000 to ``max(5000, n^2 + 64)``, so degrees above 70
   are no longer stopped before the small-LLL phase finishes its ``n^2``
@@ -1094,9 +1099,15 @@ Changed
   improvement, and the default ``hR`` is computed by its next consumer.  On the
   twelve-field callgrind set, instruction counts fall by 15.4% (``32_phi16``),
   15.8% (``27_phi18``), 14.6% (``real_23_deg11``) and 8.0% (``real_64_deg16``),
-  and no field rises by more than 0.03%.  Published outputs (class group,
-  units, regulator, proof records) were identical on the 184 completed fields
-  of the ``grh`` corpus.
+  and no field rises by more than 0.03%.  On the 184 completed fields of the
+  ``grh`` corpus the class group, units, regulator, certification labels and
+  proof statuses were identical.  The published Belabas-Friedman record
+  changes on the fields where the stop is now deferred: acceptance there goes
+  through the coarse index-one value (an existing ``grh`` check) instead of
+  the default ``hR``, so ``zeta_bf_proof_record()`` holds the coarse
+  evaluation's cutoff, working precision and error bound (``32_phi16``:
+  cutoff 2286 at 64 bits instead of 20007 at 192 bits), while
+  ``zeta_bf_proof_status()`` still reads ``verified``.
 
 - A ``grh`` paired class/unit transaction that is accepted by the analytic
   index-one test now records that check on the published class group.

@@ -2026,6 +2026,33 @@ int main(int argc, char** argv) {
     write_json_string(std::cout,
                       proof_state_name(class_group.zeta_bf_proof_status()));
     std::cout << ",\n";
+    // The Belabas-Friedman audit data behind zeta_bf_proof_status (null
+    // when none is recorded), so a dump compare sees a change of the
+    // evaluation that accepted, not only of its status.
+    std::cout << "    \"zeta_bf_proof_record\": ";
+    {
+        const std::optional<silex::ClassGroupZetaBfProofRecord> record =
+                class_group.zeta_bf_proof_record();
+        if (record.has_value()) {
+            std::cout << "{\"cutoff\": "
+                      << static_cast<unsigned long long>(record->cutoff)
+                      << ", \"max_cutoff\": "
+                      << static_cast<unsigned long long>(record->max_cutoff)
+                      << ", \"requested_precision\": "
+                      << static_cast<long long>(record->requested_precision)
+                      << ", \"work_precision\": "
+                      << static_cast<long long>(record->work_precision)
+                      << ", \"error_bound\": ";
+            char* error_bound =
+                    ::arb_get_str(record->error_bound.raw(), 20, 0);
+            write_json_string(std::cout, error_bound);
+            ::flint_free(error_bound);
+            std::cout << "}";
+        } else {
+            std::cout << "null";
+        }
+    }
+    std::cout << ",\n";
     std::cout << "    \"unit_proof_status\": ";
     write_json_string(std::cout,
                       proof_state_name(class_group.unit_proof_status()));
