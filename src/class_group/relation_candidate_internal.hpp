@@ -100,7 +100,8 @@ struct SplitPrimeResultant {
     slong row_candidate_right = -1;
     slong row_candidate_sign = 0;
     // Test-only diagnostics: (row, prime) value fills since the last
-    // bind_row_basis, and whether the last handled call used row values.
+    // bind_row_basis, and whether the last call was handled with row
+    // values (false after an unhandled call).
     slong row_value_fills = 0;
     bool last_used_row_values = false;
 

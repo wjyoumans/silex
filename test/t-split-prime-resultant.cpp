@@ -909,6 +909,133 @@ int test_row_combinations_match_direct() {
     return 0;
 }
 
+// Row values are dropped when they stop describing the bound rows: a
+// rebind to a different basis refills the rows from the new entries, and
+// a reset to a different f (deg g = deg f, so the description still
+// fits) while a basis is bound refills them for the new roots.  Stale
+// values from either would give a wrong norm with a matching description.
+// An unhandled call also clears last_used_row_values.
+int test_row_values_invalidated() {
+    constexpr slong m = 17;
+    constexpr slong n = m - 1;
+    constexpr slong rows = 4;
+    sflint::FmpzPoly field;
+    set_prime_cyclotomic(field, m);
+    relation_search::SplitPrimeResultant cached;
+    cached.reset(field.raw());
+    if (!cached.enabled) {
+        return 1;
+    }
+
+    // Two bases whose rows differ in every row.
+    ulong state = 12345;
+    sflint::FmpzMat first(rows, n);
+    sflint::FmpzMat second(rows, n);
+    sflint::FmpzPoly row;
+    for (sflint::FmpzMat* basis : {&first, &second}) {
+        for (slong r = 0; r < rows; ++r) {
+            set_random_polynomial(row, state, n, 8);
+            for (slong j = 0; j < n; ++j) {
+                fmpz_poly_get_coeff_fmpz(
+                        fmpz_mat_entry(basis->raw(), r, j), row.raw(), j);
+            }
+        }
+    }
+    for (slong r = 0; r < rows; ++r) {
+        bool differs = false;
+        for (slong j = 0; j < n && !differs; ++j) {
+            differs = fmpz_equal(fmpz_mat_entry(first.raw(), r, j),
+                                 fmpz_mat_entry(second.raw(), r, j)) == 0;
+        }
+        if (!differs) {
+            return 1;
+        }
+    }
+
+    sflint::FmpzPoly candidate;
+    sflint::Fmpz expected;
+    sflint::Fmpz actual;
+    // Every row and row sum of basis, from row values, against
+    // fmpz_poly_resultant(f, .); each row is filled once per prime.
+    const auto check_basis = [&](const sflint::FmpzPoly& f,
+                                 const sflint::FmpzMat& basis,
+                                 slong fills_before) -> bool {
+        std::vector<slong> filled(static_cast<std::size_t>(rows), 0);
+        slong expected_fills = fills_before;
+        for (slong left = 0; left < rows; ++left) {
+            // Row left alone, then row left plus the row before it.
+            for (const slong right : {slong{-1}, left - 1}) {
+                set_row_combination_polynomial(candidate, basis, left,
+                                               right, 1);
+                fmpz_poly_resultant(expected.raw(), f.raw(),
+                                    candidate.raw());
+                bool handled = false;
+                cached.set_row_combination(left, right, 1);
+                cached.resultant(handled, actual.raw(), candidate.raw());
+                if (!handled || !cached.last_used_row_values ||
+                    !fmpz_equal(actual.raw(), expected.raw())) {
+                    std::fprintf(stderr,
+                                 "stale row values: rows %ld %ld\n",
+                                 static_cast<long>(left),
+                                 static_cast<long>(right));
+                    return false;
+                }
+                const slong primes = cached.last_prime_count;
+                for (const slong r : {left, right}) {
+                    if (r < 0) {
+                        continue;
+                    }
+                    slong& done = filled[static_cast<std::size_t>(r)];
+                    if (done < primes) {
+                        expected_fills += primes - done;
+                        done = primes;
+                    }
+                }
+                if (cached.row_value_fills != expected_fills) {
+                    std::fprintf(stderr,
+                                 "row value fills %ld, expected %ld\n",
+                                 static_cast<long>(cached.row_value_fills),
+                                 static_cast<long>(expected_fills));
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+
+    cached.bind_row_basis(first.raw());
+    if (!check_basis(field, first, 0)) {
+        return 1;
+    }
+    // An unhandled call (the zero polynomial) does not report row values.
+    fmpz_poly_zero(candidate.raw());
+    bool handled = true;
+    cached.resultant(handled, actual.raw(), candidate.raw());
+    if (handled || cached.last_used_row_values) {
+        return 1;
+    }
+
+    // Rebinding a different basis restarts the fills.
+    cached.bind_row_basis(second.raw());
+    if (cached.row_value_fills != 0 || !check_basis(field, second, 0)) {
+        return 1;
+    }
+
+    // Reset to g(x) = f(x + 1) with the basis still bound: the same split
+    // primes, in the same order, with shifted roots.
+    sflint::FmpzPoly shifted;
+    sflint::Fmpz one;
+    fmpz_one(one.raw());
+    fmpz_poly_taylor_shift(shifted.raw(), field.raw(), one.raw());
+    cached.reset(shifted.raw());
+    if (!cached.enabled ||
+        !check_basis(shifted, second, cached.row_value_fills)) {
+        return 1;
+    }
+    cached.bind_row_basis(nullptr);
+    return 0;
+}
+
 int main() {
     return test_cyclotomic_matches_resultant() != 0 ||
                    test_screened_search_matches_unscreened_search() != 0 ||
@@ -920,7 +1047,8 @@ int main() {
                            0 ||
                    test_t2_bound_for_prime_cyclotomic() != 0 ||
                    test_degree_two_resultant_matches_flint() != 0 ||
-                   test_row_combinations_match_direct() != 0
+                   test_row_combinations_match_direct() != 0 ||
+                   test_row_values_invalidated() != 0
             ? 1
             : 0;
 }

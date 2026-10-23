@@ -641,6 +641,7 @@ void SplitPrimeResultant::resultant(
         fmpz_t out,
         const fmpz_poly_struct* coordinate_polynomial) noexcept {
     handled = false;
+    last_used_row_values = false;
     // The row description applies to this call only.
     const bool row_described = row_candidate_set;
     const slong row_left = row_candidate_left;
