@@ -3373,9 +3373,8 @@ int test_direct_route_escalation_caps_and_counters() {
 bool class_unit_honesty_call_counts(slong& direct_none,
                                     slong& direct_bounded,
                                     slong& lattice_total,
-                                    const std::vector<slong>& coefficients,
+                                    const FieldSetup& setup,
                                     ulong bound) noexcept {
-    FieldSetup setup = maximal_order_setup(coefficients);
     if (!setup.maximal_order.is_defined()) {
         return false;
     }
@@ -3401,6 +3400,16 @@ bool class_unit_honesty_call_counts(slong& direct_none,
             Hook::factor_base_honesty_call_count(false, E::none) +
             Hook::factor_base_honesty_call_count(false, E::bounded);
     return true;
+}
+
+bool class_unit_honesty_call_counts(slong& direct_none,
+                                    slong& direct_bounded,
+                                    slong& lattice_total,
+                                    const std::vector<slong>& coefficients,
+                                    ulong bound) noexcept {
+    return class_unit_honesty_call_counts(
+            direct_none, direct_bounded, lattice_total,
+            maximal_order_setup(coefficients), bound);
 }
 
 // The T2 witness enumeration's norm prefilter against the direct order-element
@@ -3772,7 +3781,79 @@ int test_routes_pass_intended_escalation_mode() {
     return 0;
 }
 
+// The imaginary quadratic backend's honesty route (the only production
+// caller of the lattice search): a `proven` class group of the maximal order of Q(sqrt(-4027))
+// computed from a compact base below the generation bound runs one lattice
+// scan with the stage-0 caps, and no T2 scan.
+int test_quadratic_backend_runs_honesty_route() {
+    using Hook = silex::detail::TestHookAccess;
+    slong direct_none = 0;
+    slong direct_bounded = 0;
+    slong lattice = 0;
+    FieldSetup setup;
+    setup.field = silex::test::quadratic_field(-4027);
+    setup.maximal_order = silex::Order(setup.field);
+    if (!setup.maximal_order.maximal_order(
+                silex::test::equation_order(setup.field))) {
+        return 1;
+    }
+    // Default plan: the base reaches the generation bound, so no honesty
+    // scan runs at all.
+    if (!class_unit_honesty_call_counts(direct_none, direct_bounded, lattice,
+                                        setup, 3) ||
+        direct_none + direct_bounded + lattice != 0) {
+        return 2;
+    }
+    // Compact base without the certificate switch: one lattice scan with the
+    // stage-0 caps, and no T2 scan.
+    Hook::set_quadratic_structure_certificate_column_limit(1);
+    Hook::set_quadratic_compact_base_without_certificate(true);
+    const bool ok = class_unit_honesty_call_counts(
+            direct_none, direct_bounded, lattice, setup, 3);
+    Hook::set_quadratic_compact_base_without_certificate(false);
+    Hook::set_quadratic_structure_certificate_column_limit(0);
+    return ok && lattice == 1 && direct_none == 0 && direct_bounded == 0
+            ? 0
+            : 3;
+}
+
+// Lowering the T2 element-step cap makes a direct witness enumeration stop at
+// the cap: the hit counter is zero at the default cap and positive when the
+// cap is one.
+int test_element_step_cap_hits_observed() {
+    using Hook = silex::detail::TestHookAccess;
+    FieldSetup setup = maximal_order_setup({-15, 0, 0, 1});
+    if (!setup.maximal_order.is_defined()) {
+        return 1;
+    }
+    sflint::Fmpz active, required;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active), 2);
+    sflint::fmpz_set_ui(sflint::FmpzRef(required), 30);
+    silex::FactorBase base(setup.maximal_order);
+    if (!base.build_relation_completion_base(sflint::FmpzConstRef(active))) {
+        return 2;
+    }
+    slong hits[2] = {0, 0};
+    for (int i = 0; i < 2; ++i) {
+        Hook::set_factor_base_honesty_element_step_cap(i == 0 ? 0 : 1);
+        Hook::factor_base_honesty_element_step_cap_hits_reset();
+        bool honest = false;
+        const bool ok = search::factor_base_honesty_check(
+                honest, base, sflint::FmpzConstRef(active),
+                sflint::FmpzConstRef(required), nullptr, UWORD(42), true, 128,
+                search::FactorBaseWitnessEscalation::none, nullptr);
+        hits[i] = Hook::factor_base_honesty_element_step_cap_hits();
+        Hook::set_factor_base_honesty_element_step_cap(0);
+        if (!ok) {
+            return 3;
+        }
+    }
+    return hits[0] == 0 && hits[1] > 0 ? 0 : 4;
+}
+
 int main() {
+    assert(test_quadratic_backend_runs_honesty_route() == 0);
+    assert(test_element_step_cap_hits_observed() == 0);
     assert(test_scalar_noncontiguous_blocks() == 0);
     assert(test_scalar_witness_reference_cases() == 0);
     assert(test_selected_witness_edge_cases() == 0);

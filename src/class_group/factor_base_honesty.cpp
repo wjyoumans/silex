@@ -46,6 +46,9 @@ FactorBaseWitnessSearchEffort factor_base_witness_search_effort(
         slong stage) noexcept {
     FactorBaseWitnessSearchEffort effort;
     effort.stage = stage;
+    if (const slong cap = FactorBaseHonestyStepCapSeams::limit(); cap > 0) {
+        effort.element_steps = cap;
+    }
     for (slong i = 0; i < stage; ++i) {
         effort.radius *= 2;
         effort.max_twists *= 2;
@@ -623,6 +626,7 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
 
     if (enumeration.element_step_limit_reached()) {
         ++exhaustion.element_step_cap_hits;
+        FactorBaseHonestyStepCapSeams::record_hit();
     }
     return RequiredPrimeWitnessSearchResult::exhausted;
 }

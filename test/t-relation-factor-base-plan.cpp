@@ -1,5 +1,6 @@
 #include "class_group/relation_factor_base_plan_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 #include "zeta/zeta_internal.hpp"
 
@@ -391,10 +392,16 @@ int test_discriminant_minus_three_exact_plan() {
 // the imaginary quadratic floor 20, the same values as before the doubling
 // was capped.
 int test_discriminant_minus_three_analytic_bound_cap() {
+    using Hook = silex::detail::TestHookAccess;
     FieldSetup setup = imaginary_quadratic_minus_three();
     silex::detail::RelationFactorBasePlan generic_plan;
+    Hook::analytic_bound_cap_counts_reset();
+    // The generic search takes its early return once and the quadratic
+    // search is not run.
     if (!silex::detail::relation_search::build_relation_factor_base_plan(
                 generic_plan, setup.maximal_order, nullptr) ||
+        Hook::analytic_bound_cap_count(false) != 1 ||
+        Hook::analytic_bound_cap_count(true) != 0 ||
         !generic_plan.valid ||
         !sflint::fmpz_equal_si(
                 sflint::FmpzConstRef(generic_plan.working_bound), 7)) {
@@ -414,6 +421,8 @@ int test_discriminant_minus_three_analytic_bound_cap() {
                            build_maximal_imaginary_quadratic_factor_base_plan(
                                    quadratic_plan, setup.maximal_order,
                                    nullptr) &&
+                           Hook::analytic_bound_cap_count(false) == 1 &&
+                           Hook::analytic_bound_cap_count(true) == 1 &&
                            quadratic_plan.valid &&
                            sflint::fmpz_equal_si(
                                    sflint::FmpzConstRef(

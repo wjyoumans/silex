@@ -89,10 +89,38 @@ public:
     static slong column_limit() noexcept {
         return column_limit_.load(std::memory_order_relaxed);
     }
+    // Test-only: when set, a plan that keeps its compact base because the
+    // base up to the generation bound exceeds the column limit does not
+    // record the structure-certificate switch, so the quadratic backend runs
+    // its factor-base honesty route on the compact base (a route no plan
+    // reaches in production, where a compact base always carries the
+    // switch).  Off by default.
+    static bool compact_base_without_certificate() noexcept {
+        return compact_base_without_certificate_.load(
+                std::memory_order_relaxed);
+    }
 
 private:
     friend class TestHookAccess;
     inline static std::atomic<slong> column_limit_{0};
+    inline static std::atomic<bool> compact_base_without_certificate_{false};
+};
+
+// Test-only counters of the analytic-bound searches that stop doubling at the
+// cap floor(4 log(|D|)^2) (the early return of compute_analytic_bound and
+// compute_quadratic_analytic_bound), so a test can observe that the early
+// return is taken.  Only detail::TestHookAccess reads or resets them;
+// production code increments them with relaxed atomics and no decision
+// reads them.
+class AnalyticBoundCapSeams {
+public:
+    static void record(bool quadratic) noexcept {
+        counts_[quadratic ? 1 : 0].fetch_add(1, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<slong> counts_[2]{};
 };
 
 }  // namespace silex::detail

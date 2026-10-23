@@ -188,6 +188,17 @@ public:
                 columns > 0 ? columns : 0, std::memory_order_relaxed);
     }
 
+    // With the column limit lowered, keeps the compact base without the
+    // structure-certificate switch (see QuadraticStructureCertificateTestSeams::
+    // compact_base_without_certificate), so the quadratic backend runs its
+    // factor-base honesty route.  False restores the default.
+    static void set_quadratic_compact_base_without_certificate(
+            bool enabled) noexcept {
+        QuadraticStructureCertificateTestSeams::
+                compact_base_without_certificate_.store(
+                        enabled, std::memory_order_relaxed);
+    }
+
     // Labels a set unit group proven without any check.  Tests use it to
     // build a proven-labelled group whose later rejection must come from the
     // class-group gate itself.  Does nothing for an unset group.
@@ -566,6 +577,36 @@ public:
             relation_search::FactorBaseWitnessEscalation escalation) noexcept {
         return relation_search::FactorBaseHonestyCallCounts::count(
                 direct_required_prime_witness, escalation);
+    }
+
+    // Test-only T2 element-step cap of the factor-base honesty search (see
+    // relation_search::FactorBaseHonestyStepCapSeams): a positive `steps`
+    // replaces the stage-0 cap, zero restores the default; the hit counter
+    // counts enumerations that stopped at the cap.
+    static void set_factor_base_honesty_element_step_cap(
+            slong steps) noexcept {
+        relation_search::FactorBaseHonestyStepCapSeams::limit_.store(
+                steps > 0 ? steps : 0, std::memory_order_relaxed);
+    }
+    static void factor_base_honesty_element_step_cap_hits_reset() noexcept {
+        relation_search::FactorBaseHonestyStepCapSeams::hits_.store(
+                0, std::memory_order_relaxed);
+    }
+    static slong factor_base_honesty_element_step_cap_hits() noexcept {
+        return relation_search::FactorBaseHonestyStepCapSeams::hits_.load(
+                std::memory_order_relaxed);
+    }
+
+    // Counts of analytic-bound searches that stopped at the cap (see
+    // AnalyticBoundCapSeams).
+    static void analytic_bound_cap_counts_reset() noexcept {
+        for (auto& c : AnalyticBoundCapSeams::counts_) {
+            c.store(0, std::memory_order_relaxed);
+        }
+    }
+    static slong analytic_bound_cap_count(bool quadratic) noexcept {
+        return AnalyticBoundCapSeams::counts_[quadratic ? 1 : 0].load(
+                std::memory_order_relaxed);
     }
 
     // Relation-kernel log-matrix word rescaling (see

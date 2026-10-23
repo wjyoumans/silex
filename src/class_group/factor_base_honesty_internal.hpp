@@ -93,6 +93,28 @@ private:
     inline static std::atomic<slong> counts_[2][2]{};
 };
 
+// Test-only seam for the T2 element-step cap of the honesty witness search: a
+// positive `limit` replaces kMaxElementSteps as the stage-0 cap (it still
+// doubles per escalation stage), so a test can make an enumeration stop at
+// the cap; `hits` counts the enumerations that stopped there
+// (RequiredPrimeWitnessExhaustion::element_step_cap_hits).  Zero limit means
+// off.  Only detail::TestHookAccess sets or reads them; production code
+// reads the limit and increments the counter with relaxed atomics.
+class FactorBaseHonestyStepCapSeams {
+public:
+    static slong limit() noexcept {
+        return limit_.load(std::memory_order_relaxed);
+    }
+    static void record_hit() noexcept {
+        hits_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+private:
+    friend class detail::TestHookAccess;
+    inline static std::atomic<slong> limit_{0};
+    inline static std::atomic<slong> hits_{0};
+};
+
 // Under bounded escalation, when a required prime has no witness at the
 // stage-0 caps, the witness search effort for that prime (lattice radius,
 // twists, random tries, and the T2 factor-attempt and element-step caps)

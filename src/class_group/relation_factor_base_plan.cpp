@@ -532,6 +532,7 @@ bool compute_analytic_bound(flint::Fmpz& out,
         // unchanged.
         if (high >= max_bound &&
             prime_degree_cache_covers(prime_cache, high)) {
+            AnalyticBoundCapSeams::record(false);
             flint::fmpz_set_si(flint::FmpzRef(out), max_bound);
             return true;
         }
@@ -598,6 +599,7 @@ bool compute_quadratic_analytic_bound(
         // to max_bound.
         if (high >= max_bound &&
             prime_degree_cache_covers(prime_cache, high)) {
+            AnalyticBoundCapSeams::record(true);
             flint::fmpz_set_si(flint::FmpzRef(out), max_bound);
             return true;
         }
@@ -1105,7 +1107,9 @@ bool specialize_maximal_imaginary_quadratic_factor_base_plan(
                 // keep the compact base and certify the class group by its
                 // structure (ClassGroupGenerationBasis::
                 // structure_certificate).
-                plan.imaginary_quadratic_structure_certificate = true;
+                plan.imaginary_quadratic_structure_certificate =
+                        !QuadraticStructureCertificateTestSeams::
+                                compact_base_without_certificate();
             } else {
                 plan.working_bound.swap(generation_bound);
             }
