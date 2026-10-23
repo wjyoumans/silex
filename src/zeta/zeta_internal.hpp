@@ -310,7 +310,8 @@ enum class QuadraticAfeStepFault : unsigned char {
 };
 
 // Test controls and counters of the Taylor stepping of the incomplete gamma
-// values Gamma(a, z) in `quadratic_dirichlet_l1`.  The counters are indexed
+// values Gamma(a, z) in `quadratic_dirichlet_l1`, and of its tail-bound
+// skip.  The counters are indexed
 // by shift = 2a: the sums use a = 1/2 and a = 0 for real D, a = 1 and
 // a = 1/2 for imaginary D.
 struct QuadraticAfeStepAudit {
@@ -332,6 +333,14 @@ struct QuadraticAfeStepAudit {
     ulong rejected_radius[3] = {0, 0, 0};
     ulong rejected_step[3] = {0, 0, 0};
     ulong rejected_truncation[3] = {0, 0, 0};
+    // False evaluates the tail bound at every index of a sum, as the
+    // evaluation did before the tail-bound skip; true skips the indices that
+    // a lower bound of the tail bound certifies to come before the stop.
+    bool tail_skip = true;
+    // The index at which each sum stopped (its first index with a tail bound
+    // below the tolerance), and the number of tail bounds it evaluated.
+    ulong stop_index[3] = {0, 0, 0};
+    ulong tail_bounds[3] = {0, 0, 0};
 };
 
 // L(1, chi_D) for a fundamental discriminant D with |D| >= 3 fitting a

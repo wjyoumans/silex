@@ -362,6 +362,86 @@ void quadratic_afe_tail_bound(mag_struct* res,
     }
 }
 
+// A lower bound for the quantity that `quadratic_afe_tail_bound` bounds from
+// above when it is finite: for n >= 1,
+//   F(n) = e^{-pi n^2 / q} n^{parity - 2} (1 + q / pi) 2^sprime
+//          (q / pi)^{1 - sprime},
+// with every step rounded the other way (pi and q rounded up or down so that
+// each factor is a lower bound).
+void quadratic_afe_tail_bound_lower(mag_struct* res,
+                                    slong sprime,
+                                    ulong n,
+                                    ulong q,
+                                    int parity) noexcept {
+    MagValue z;
+    MagValue t;
+    MagValue u;
+
+    // z >= pi n^2 / q, so e^{-z} <= e^{-pi n^2 / q}.
+    mag_const_pi(z.raw());
+    mag_mul_ui(z.raw(), z.raw(), n);
+    mag_mul_ui(z.raw(), z.raw(), n);
+    mag_set_ui_lower(t.raw(), q);
+    mag_div(z.raw(), z.raw(), t.raw());
+    mag_expinv_lower(res, z.raw());
+
+    mag_set_ui(t.raw(), n);
+    mag_div_lower(res, res, t.raw());
+    if (parity == 0) {
+        mag_div_lower(res, res, t.raw());
+    }
+
+    // u <= q / pi.
+    mag_set_ui_lower(u.raw(), q);
+    mag_const_pi(t.raw());
+    mag_div_lower(u.raw(), u.raw(), t.raw());
+    mag_add_ui_lower(t.raw(), u.raw(), 1);
+    mag_mul_lower(res, res, t.raw());
+
+    if (sprime > 0) {
+        mag_mul_2exp_si(res, res, sprime);
+    } else {
+        mag_mul_lower(res, res, u.raw());
+    }
+}
+
+// The largest index m found with F(m) >= abs_tol certified by
+// `quadratic_afe_tail_bound_lower` (0 when none is found), searched from
+// the estimate `n_end` of the stop index.  F is decreasing in n, so
+// F(n) >= abs_tol for every n <= m.  Only the certificate at the returned
+// index matters, not the search, which needs no monotonicity of the rounded
+// bounds.
+ulong quadratic_afe_tail_skip(slong sprime,
+                              ulong q,
+                              int parity,
+                              const mag_struct* abs_tol,
+                              double n_end) noexcept {
+    MagValue f;
+    const auto certified = [&](ulong m) noexcept {
+        quadratic_afe_tail_bound_lower(f.raw(), sprime, m, q, parity);
+        return mag_cmp(f.raw(), abs_tol) >= 0;
+    };
+    ulong lo = 0;
+    ulong hi = n_end >= 1.0 && n_end < 9.0e15 ? static_cast<ulong>(n_end)
+                                               : UWORD(1);
+    while (certified(hi)) {
+        lo = hi;
+        if (hi > UWORD_MAX / 4) {
+            return lo;
+        }
+        hi *= 2;
+    }
+    while (hi - lo > 1) {
+        const ulong mid = lo + (hi - lo) / 2;
+        if (certified(mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
 // Upper incomplete gamma Gamma(shift / 2, z) for shift in {0, 1, 2}.
 void quadratic_afe_gamma_upper(flint::Arb& out,
                                ulong shift,
@@ -1065,7 +1145,13 @@ bool quadratic_afe_start_block(QuadraticAfeGammaStepper& stepper,
 // FLINT `acb_dirichlet_fmpq_sum_afe` at s in {0, 1} for a real character:
 //   sum_{n >= 1} chi(n) Gamma((s + parity) / 2, pi n^2 / q) / n^s,
 // truncated at the first n whose tail bound is below `abs_tol`, which is then
-// added to the radius.  The gamma values come from the Taylor stepping above
+// added to the radius.  FLINT evaluates the tail bound at every n; here the
+// indices n <= m of `quadratic_afe_tail_skip` are not checked.  The stop is
+// the same: the rounded bound of `quadratic_afe_tail_bound` is infinite or at
+// least the exact F(n) of `quadratic_afe_tail_bound_lower` (each step rounds
+// up), F is a product of e^{-pi n^2 / q}, n^{parity - 2} and positive
+// constants, so it decreases in n, and so for n <= m the rounded bound is at
+// least F(n) >= F(m) >= abs_tol: those n are not below the tolerance.  The gamma values come from the Taylor stepping above
 // where it applies, and directly from the closed forms otherwise; once no
 // block can start any more, the loop is FLINT's term loop again.  `audit`,
 // when given, can turn stepping off and counts the blocks and stepped values.
@@ -1104,13 +1190,27 @@ void quadratic_afe_sum(flint::Arb& res,
         stepper.disable();
     }
 
+    const ulong skip_through =
+            audit != nullptr && !audit->tail_skip
+                    ? 0
+                    : quadratic_afe_tail_skip(sprime, q, parity, abs_tol,
+                                              n_end);
+
     ::arb_zero(res.raw());
 
     for (ulong n = 1;; ++n) {
-        quadratic_afe_tail_bound(err.raw(), sprime, n, q, parity);
-        if (mag_cmp(err.raw(), abs_tol) < 0) {
-            ::arb_add_error_mag(res.raw(), err.raw());
-            return;
+        if (n > skip_through) {
+            quadratic_afe_tail_bound(err.raw(), sprime, n, q, parity);
+            if (audit != nullptr) {
+                ++audit->tail_bounds[shift];
+            }
+            if (mag_cmp(err.raw(), abs_tol) < 0) {
+                ::arb_add_error_mag(res.raw(), err.raw());
+                if (audit != nullptr) {
+                    audit->stop_index[shift] = n;
+                }
+                return;
+            }
         }
 
         const int chi = detail::quadratic_character(discriminant, n);

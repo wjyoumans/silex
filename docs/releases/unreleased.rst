@@ -148,6 +148,17 @@ Changed
   2.6% fewer (2.256e9 to 2.197e9); ``cyclotomic_64_phi32``, whose
   discriminant ``2^160`` is a square, 0.0015% more.
 
+- The quadratic ``L(1, chi_D)`` evaluation (the approximate functional
+  equation used by the analytic class number and the proven class-unit
+  computation of quadratic fields) no longer evaluates FLINT's tail bound
+  ``acb_dirichlet_afe_tail_bound`` at every index of its two sums.  Before
+  each sum it certifies, with the same bound rounded downward, an index
+  below which the tail bound cannot fall under the tolerance (the bound
+  decreases with the index), and evaluates the upward-rounded bound only
+  after it.  Each sum stops at the same index as before and the enclosures
+  are identical.  The user-mode instruction count of the proven
+  ``imaginary_quadratic_d100000000000319`` benchmark row drops by about 14%.
+
 - In quadratic fields, the coordinate-norm prefilter of class-group relation
   search computes the norm of a candidate ``a + b theta`` as the closed-form
   resultant ``a^2 - f1 a b + f0 b^2`` of the monic defining polynomial

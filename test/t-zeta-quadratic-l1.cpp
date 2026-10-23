@@ -1070,6 +1070,61 @@ void check_stepping_before_after(bool slow) {
 
 }  // namespace
 
+// The tail-bound skip leaves both sums unchanged: with it (the default) and
+// with the tail bound evaluated at every index, each sum stops at the same
+// index and the enclosures are equal, midpoint and radius.  With the skip,
+// only the few indices next to the stop evaluate the tail bound.
+void check_tail_skip_matches_every_index(slong d, slong log2_tolerance) {
+    sflint::Fmpz discriminant;
+    sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+    sflint::Arb skipped;
+    sflint::Arb every;
+    silex::detail::QuadraticAfeStepAudit on;
+    silex::detail::QuadraticAfeStepAudit off;
+    off.tail_skip = false;
+    if (log2_tolerance == 0) {
+        assert(silex::detail::quadratic_dirichlet_l1(
+                sflint::ArbRef(skipped), sflint::FmpzConstRef(discriminant),
+                128, &on));
+        assert(silex::detail::quadratic_dirichlet_l1(
+                sflint::ArbRef(every), sflint::FmpzConstRef(discriminant),
+                128, &off));
+    } else {
+        const slong precision = -log2_tolerance + 24;
+        assert(silex::detail::quadratic_dirichlet_l1_with_tolerance(
+                sflint::ArbRef(skipped), sflint::FmpzConstRef(discriminant),
+                log2_tolerance, precision, &on));
+        assert(silex::detail::quadratic_dirichlet_l1_with_tolerance(
+                sflint::ArbRef(every), sflint::FmpzConstRef(discriminant),
+                log2_tolerance, precision, &off));
+    }
+    assert(::arb_equal(skipped.raw(), every.raw()) != 0);
+    const ulong unused = d < 0 ? 0 : 2;
+    for (ulong shift = 0; shift < 3; ++shift) {
+        assert(on.stop_index[shift] == off.stop_index[shift]);
+        if (shift == unused) {
+            assert(off.stop_index[shift] == 0);
+            assert(on.tail_bounds[shift] == 0);
+            assert(off.tail_bounds[shift] == 0);
+            continue;
+        }
+        assert(off.stop_index[shift] >= 1);
+        assert(off.tail_bounds[shift] == off.stop_index[shift]);
+        assert(on.tail_bounds[shift] >= 1);
+        assert(on.tail_bounds[shift] <= 8);
+    }
+}
+
+void check_tail_skip() {
+    for (const slong d : {-3L, -4L, 5L, 8L, -23L, 1009L, -1019L, -100003L,
+                          100049L, -99999971L}) {
+        check_tail_skip_matches_every_index(d, 0);
+        for (const slong log2_tolerance : {-2L, -20L, -49L}) {
+            check_tail_skip_matches_every_index(d, log2_tolerance);
+        }
+    }
+}
+
 int main() {
     for (const slong d : {5L, 8L, 12L, 13L, -3L, -4L, -7L, -8L, -23L, -47L,
                           1009L, -1019L, 4012L, -2008L}) {
@@ -1086,6 +1141,7 @@ int main() {
     check_l1_start_fails_closed();
     check_step_blocks_need_fewer_terms();
     check_stepping_before_after(slow_tests_enabled());
+    check_tail_skip();
 
     sflint::Arb imaginary_l1;
     check_large_imaginary_discriminant(imaginary_l1, -10000000019, 39809);
