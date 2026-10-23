@@ -1402,6 +1402,190 @@ int test_append_keeps_index_refining_dependent_rows() {
     return 0;
 }
 
+// The one-pass nonprincipal scan in build_nonprincipal_indices must agree
+// with the per-prime factor_base_prime_is_principal calls, including whether
+// the build fails.
+void assert_nonprincipal_matches_per_prime(silex::ClassGroupContext& context,
+                                           const silex::FactorBase& base) {
+    std::vector<slong> one_pass{WORD(-7)};
+    const bool one_pass_ok =
+            silex::detail::relation_search::build_nonprincipal_indices(
+                    one_pass, context, base);
+
+    std::vector<slong> per_prime;
+    bool per_prime_ok = true;
+    for (slong i = 0; i < base.length(); ++i) {
+        bool principal = false;
+        if (!context.factor_base_prime_is_principal(principal, i)) {
+            per_prime_ok = false;
+            break;
+        }
+        if (!principal) {
+            per_prime.push_back(i);
+        }
+    }
+
+    assert(one_pass_ok == per_prime_ok);
+    if (one_pass_ok) {
+        assert(one_pass == per_prime);
+    }
+}
+
+// Appends the generator as a search relation (dependent rows kept, as the
+// relation search does) when it factors over the factor base, then compares
+// the nonprincipal scans.
+void append_and_compare_nonprincipal(silex::ClassGroupContext& context,
+                                     const silex::Element& alpha,
+                                     slong& appended) {
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Relation relation(*base);
+    if (!relation.set_generator(alpha)) {
+        return;
+    }
+    const slong before = context.relation_count();
+    bool skipped = true;
+    assert(silex::detail::ClassGroupRelationSearchAccess::
+                   append_search_relation(skipped, context, relation));
+    if (!skipped) {
+        assert(context.relation_count() == before + 1);
+        ++appended;
+    }
+    assert_nonprincipal_matches_per_prime(context, *context.factor_base());
+}
+
+void compare_nonprincipal_on_field(const silex::NumberField& field,
+                                   slong bound_si,
+                                   slong max_a,
+                                   slong max_b) {
+    silex::Order order;
+    order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, bound_si));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(context.generator_count() > 0);
+    assert_nonprincipal_matches_per_prime(context, *context.factor_base());
+
+    slong appended = 0;
+    silex::Element alpha(field);
+    sflint::FmpqPoly polynomial;
+    for (slong b = 0; b <= max_b; ++b) {
+        for (slong a = -max_a; a <= max_a; ++a) {
+            if (a == 0 && b == 0) {
+                continue;
+            }
+            sflint::fmpq_poly_zero(polynomial);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 1, b);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 0, a);
+            assert(alpha.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+            append_and_compare_nonprincipal(context, alpha, appended);
+        }
+    }
+    // Inverses give -1 entries.
+    for (slong a = 2; a <= max_a; ++a) {
+        assert(alpha.set_si_over_si(1, a));
+        append_and_compare_nonprincipal(context, alpha, appended);
+    }
+    assert(appended > 0);
+
+    // The incremental (default dependent-row policy) relation store.
+    silex::ClassGroupContext incremental(order);
+    assert(incremental.build_factor_base(sflint::FmpzConstRef(bound)));
+    for (slong a = 2; a <= max_a; ++a) {
+        assert(alpha.set_si(a));
+        (void)incremental.try_append_generator_relation(alpha);
+        assert_nonprincipal_matches_per_prime(incremental,
+                                              *incremental.factor_base());
+    }
+
+    // A base shorter than the generator count scans only its prefix.
+    silex::ClassGroupContext smaller(order);
+    sflint::Fmpz small_bound;
+    assert(set_fmpz_si(small_bound, 3));
+    assert(smaller.build_factor_base(sflint::FmpzConstRef(small_bound)));
+    if (smaller.generator_count() < context.generator_count()) {
+        assert_nonprincipal_matches_per_prime(context,
+                                              *smaller.factor_base());
+        // A base longer than the generator count fails in both scans.
+        assert_nonprincipal_matches_per_prime(smaller,
+                                              *context.factor_base());
+        std::vector<slong> out;
+        assert(!silex::detail::relation_search::build_nonprincipal_indices(
+                out, smaller, *context.factor_base()));
+    }
+}
+
+int test_nonprincipal_indices_one_pass_matches_per_prime() {
+    // Q with hand-picked rows: entry 2 (4), entries -1 (1/2, 1/3), entry 1
+    // (-2) and a row with two nonzero entries (6).
+    {
+        silex::NumberField field = degree_one_field();
+        silex::Order order;
+        order = silex::test::equation_order(field);
+        silex::ClassGroupContext context(order);
+        sflint::Fmpz bound;
+        assert(set_fmpz_si(bound, 5));
+        assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+        assert(context.generator_count() == 3);
+        silex::Element alpha(field);
+        slong appended = 0;
+
+        std::vector<slong> nonprincipal;
+        assert(silex::detail::relation_search::build_nonprincipal_indices(
+                nonprincipal, context, *context.factor_base()));
+        assert((nonprincipal == std::vector<slong>{0, 1, 2}));
+
+        assert(alpha.set_si(4));
+        append_and_compare_nonprincipal(context, alpha, appended);
+        assert(context.relation_count() == 1);
+        assert(silex::detail::relation_search::build_nonprincipal_indices(
+                nonprincipal, context, *context.factor_base()));
+        assert((nonprincipal == std::vector<slong>{0, 1, 2}));
+
+        assert(alpha.set_si(6));
+        append_and_compare_nonprincipal(context, alpha, appended);
+        assert(context.relation_count() == 2);
+        assert(silex::detail::relation_search::build_nonprincipal_indices(
+                nonprincipal, context, *context.factor_base()));
+        assert((nonprincipal == std::vector<slong>{0, 1, 2}));
+
+        assert(alpha.set_si_over_si(1, 3));
+        append_and_compare_nonprincipal(context, alpha, appended);
+        assert(silex::detail::relation_search::build_nonprincipal_indices(
+                nonprincipal, context, *context.factor_base()));
+        assert((nonprincipal == std::vector<slong>{0, 2}));
+
+        assert(alpha.set_si(-2));
+        append_and_compare_nonprincipal(context, alpha, appended);
+        assert(alpha.set_si_over_si(1, 2));
+        append_and_compare_nonprincipal(context, alpha, appended);
+        assert(silex::detail::relation_search::build_nonprincipal_indices(
+                nonprincipal, context, *context.factor_base()));
+        assert((nonprincipal == std::vector<slong>{2}));
+        assert(appended >= 5);
+
+        // An empty base succeeds without consulting the context; a context
+        // without a factor base fails like the per-prime calls.
+        silex::FactorBase empty;
+        nonprincipal.assign(2, WORD(5));
+        assert(silex::detail::relation_search::build_nonprincipal_indices(
+                nonprincipal, context, empty));
+        assert(nonprincipal.empty());
+        silex::ClassGroupContext no_base(order);
+        assert_nonprincipal_matches_per_prime(no_base, *context.factor_base());
+        assert(!silex::detail::relation_search::build_nonprincipal_indices(
+                nonprincipal, no_base, *context.factor_base()));
+    }
+
+    compare_nonprincipal_on_field(quadratic_field(-5), 30, 8, 2);
+    compare_nonprincipal_on_field(quadratic_field(10), 30, 8, 2);
+    compare_nonprincipal_on_field(shifted_quadratic_field(-1, 5), 30, 8, 2);
+    compare_nonprincipal_on_field(cubic_field(0, -2), 20, 6, 1);
+    return 0;
+}
+
 int test_factor_base_prime_search_masks() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -8620,6 +8804,7 @@ int main() {
     test_publish_matches_relation_lattice_after_mixed_appends();
     test_append_keeps_index_refining_dependent_rows();
     test_factor_base_prime_search_masks();
+    test_nonprincipal_indices_one_pass_matches_per_prime();
     test_compute_candidate_coordinate_search();
     test_compute_candidate_skips_principal_prime_lattice_search();
     test_compute_candidate_ideal_lattice_search();

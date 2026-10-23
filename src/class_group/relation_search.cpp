@@ -736,11 +736,80 @@ ulong relation_search_phase_seed(const ClassGroupContext& context,
     return seed;
 }
 
+// One pass over the stored relation rows computing the predicate of
+// ClassGroupContext::factor_base_prime_is_principal for every factor-base
+// column at once: column j is flagged when some row has exactly one nonzero
+// entry, in column j, equal to +1 or -1.  Returns false, leaving the flags
+// unspecified, in every case where some per-prime call could fail (no factor
+// base, a base longer than the context's generator count, or an unreadable
+// row); the caller then repeats the per-prime calls so that failures behave
+// exactly as before.
+static bool principal_column_flags_one_pass(std::vector<char>& principal,
+                                            const ClassGroupContext& context,
+                                            slong length) noexcept {
+    const slong columns = context.generator_count();
+    if (!context.has_factor_base() || length > columns) {
+        return false;
+    }
+
+    principal.assign(static_cast<std::size_t>(columns), 0);
+    const RelationMatrix& relations =
+            ClassGroupRelationSearchAccess::relations(context);
+    flint::FmpzMat row(1, columns);
+    for (slong i = 0; i < context.relation_count(); ++i) {
+        if (!relations.row(flint::FmpzMatRef(row), i)) {
+            return false;
+        }
+
+        slong nonzero_col = -1;
+        slong nonzero_count = 0;
+        for (slong j = 0; j < columns; ++j) {
+            flint::FmpzConstRef entry =
+                    flint::fmpz_mat_entry(flint::FmpzMatConstRef(row), 0, j);
+            if (flint::fmpz_is_zero(entry)) {
+                continue;
+            }
+            nonzero_col = j;
+            ++nonzero_count;
+            if (nonzero_count > 1) {
+                break;
+            }
+        }
+        if (nonzero_count != 1) {
+            continue;
+        }
+
+        flint::FmpzConstRef entry =
+                flint::fmpz_mat_entry(flint::FmpzMatConstRef(row),
+                                      0, nonzero_col);
+        if (flint::fmpz_equal_si(entry, 1) ||
+            flint::fmpz_equal_si(entry, -1)) {
+            principal[static_cast<std::size_t>(nonzero_col)] = 1;
+        }
+    }
+    return true;
+}
+
 bool build_nonprincipal_indices(std::vector<slong>& nonprincipal,
                                 ClassGroupContext& context,
                                 const FactorBase& base) noexcept {
     nonprincipal.clear();
     nonprincipal.reserve(static_cast<std::size_t>(base.length()));
+    if (base.length() <= 0) {
+        return true;
+    }
+
+    std::vector<char> principal;
+    if (principal_column_flags_one_pass(principal, context, base.length())) {
+        for (slong i = 0; i < base.length(); ++i) {
+            if (principal[static_cast<std::size_t>(i)] == 0) {
+                nonprincipal.push_back(i);
+            }
+        }
+        return true;
+    }
+
+    // Failure path: the per-prime calls, unchanged.
     for (slong i = 0; i < base.length(); ++i) {
         bool is_principal = false;
         if (!context.factor_base_prime_is_principal(is_principal, i)) {
