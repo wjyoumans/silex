@@ -1087,6 +1087,17 @@ Changed
   now be accepted under GRH when the coarse value shows index one.  See "Class groups and order units" in
   :doc:`../reference/algorithms_and_sources`.
 
+- The unit search of a ``grh`` paired class/unit transaction no longer
+  computes the default-route ``hR`` just to set its stopping estimate at the
+  first full-rank unit set when the coarse index-one test does not yet show
+  index one there; the stop test retries the coarse test at the next
+  improvement, and the default ``hR`` is computed by its next consumer.  On the
+  twelve-field callgrind set, instruction counts fall by 15.4% (``32_phi16``),
+  15.8% (``27_phi18``), 14.6% (``real_23_deg11``) and 8.0% (``real_64_deg16``),
+  and no field rises by more than 0.03%.  Published outputs (class group,
+  units, regulator, proof records) were identical on the 184 completed fields
+  of the ``grh`` corpus.
+
 - A ``grh`` paired class/unit transaction that is accepted by the analytic
   index-one test now records that check on the published class group.
   ``analytic_class_regulator_status()`` reads ``verified``, and
