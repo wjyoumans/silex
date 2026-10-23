@@ -22,6 +22,7 @@
 #include <cstring>
 #include <cassert>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1765,6 +1766,184 @@ int test_finish_relation_kernel_basis_without_reducedness() {
     return 0;
 }
 
+// A rank-2 4 x 2 relation matrix (found by a random search over FLINT
+// 3.6.0) on which FLINT's double-precision phase returns rows that pass
+// both exact kernel checks and whose kernel rows fmpz_mat_is_reduced
+// certifies, but that fmpz_lll_is_reduced(B, fl, 120) rejects, so fmpz_lll
+// goes on past the phase and returns another reduced matrix.
+sflint::FmpzMat reducedness_reject_certified_relations() noexcept {
+    sflint::FmpzMat relations(4, 2);
+    const char* const entries[4][2] = {
+            {"0", "0"},
+            {"12964122", "12964122"},
+            {"216221", "216221"},
+            {"221136919209197233", "-292275063842117"}};
+    for (slong i = 0; i < 4; ++i) {
+        for (slong j = 0; j < 2; ++j) {
+            assert(::fmpz_set_str(sflint::fmpz_mat_entry(
+                                          sflint::FmpzMatRef(relations), i,
+                                          j)
+                                          .raw(),
+                                  entries[i][j], 10) == 0);
+        }
+    }
+    return relations;
+}
+
+// The reduced [c * relations | I_n] of fmpz_lll's double-precision phase,
+// of fmpz_lll, and their checked kernel rows, for a fixture of rank `rank`;
+// `phase_accepted` is FLINT's fmpz_lll_is_reduced(phase, fl, 120) and
+// `phase_certified` the certificate fmpz_mat_is_reduced of the phase rows.
+struct SaturationExtensionFixture {
+    sflint::FmpzMat phase{0, 0};
+    sflint::FmpzMat phase_rows{0, 0};
+    sflint::FmpzMat reduced{0, 0};
+    sflint::FmpzMat full{0, 0};
+    bool phase_accepted = false;
+    bool phase_certified = false;
+};
+
+SaturationExtensionFixture saturation_extension_fixture(
+        const sflint::FmpzMat& relations, slong rank) {
+    SaturationExtensionFixture fixture;
+    sflint::FmpzLll lll;
+    assert(silex::detail::relation_kernel_extension_input(
+            fixture.phase, sflint::FmpzMatConstRef(relations)));
+    assert(::fmpz_mat_max_bits(fixture.phase.raw()) <= 250);
+    assert(::fmpz_lll_d_with_removal_knapsack(fixture.phase.raw(), nullptr,
+                                              nullptr, lll.raw()) != -1);
+    fixture.phase_accepted =
+            ::fmpz_lll_is_reduced(fixture.phase.raw(), lll.raw(), 120) != 0;
+    assert(silex::detail::checked_relation_kernel_rows(
+            fixture.phase_rows, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(fixture.phase), rank));
+    fixture.phase_certified =
+            ::fmpz_mat_is_reduced(fixture.phase_rows.raw(),
+                                  lll.raw()->delta, lll.raw()->eta) != 0;
+    assert(silex::detail::lll_relation_kernel_extension(
+            fixture.reduced, sflint::FmpzMatConstRef(relations)));
+    assert(silex::detail::checked_relation_kernel_rows(
+            fixture.full, sflint::FmpzMatConstRef(relations),
+            sflint::FmpzMatConstRef(fixture.reduced), rank));
+    assert(::fmpz_mat_is_reduced(fixture.full.raw(), lll.raw()->delta,
+                                 lll.raw()->eta) != 0);
+    return fixture;
+}
+
+// The extension route of the relation-saturation kernel
+// (saturation_extension_kernel_rows).  Where FLINT's reducedness check
+// would reject the double-precision phase but the certificate
+// fmpz_mat_is_reduced holds for its kernel rows
+// (reducedness_reject_certified_relations), it keeps the phase rows: a
+// certified basis of the same kernel lattice as fmpz_lll's rows, from
+// another reduced matrix.  Where the certificate fails too
+// (reducedness_reject_relations), and where FLINT's check accepts the
+// phase, the rows and the reduced matrix are fmpz_lll's.  Failures injected
+// into the phase attempt (phase_rows, phase_certificate) give fmpz_lll's
+// rows; failures injected into every attempt (first_phase, certificate)
+// fail the route.
+int test_saturation_extension_kernel_rows_without_reducedness() {
+    using silex::detail::RelationKernelBasisRoute;
+    using silex::detail::SaturationKernelTestFailure;
+    using silex::detail::TestHookAccess;
+    sflint::FmpzMat rows(0, 0);
+    sflint::FmpzMat extension(0, 0);
+    RelationKernelBasisRoute route = RelationKernelBasisRoute::hnf_transform;
+
+    // FLINT's check rejects the phase, the certificate holds: the phase.
+    const sflint::FmpzMat relations = reducedness_reject_certified_relations();
+    const slong rank = 2;
+    assert(::fmpz_mat_rank(relations.raw()) == rank);
+    const SaturationExtensionFixture fixture =
+            saturation_extension_fixture(relations, rank);
+    assert(!fixture.phase_accepted && fixture.phase_certified);
+    assert(!sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(fixture.reduced),
+                                   sflint::FmpzMatConstRef(fixture.phase)));
+    assert(silex::detail::saturation_extension_kernel_rows(
+            rows, extension, &route, sflint::FmpzMatConstRef(relations),
+            rank));
+    assert(route == RelationKernelBasisRoute::lll_double_extended);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(rows),
+                                  sflint::FmpzMatConstRef(fixture.phase_rows)));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(extension),
+                                  sflint::FmpzMatConstRef(fixture.phase)));
+    assert(same_row_lattice(sflint::FmpzMatConstRef(rows),
+                            sflint::FmpzMatConstRef(fixture.full)));
+
+    // Failures in the phase attempt only: fmpz_lll's rows.  In every
+    // attempt: the route fails.
+    for (const SaturationKernelTestFailure failure :
+         {SaturationKernelTestFailure::phase_rows,
+          SaturationKernelTestFailure::phase_certificate,
+          SaturationKernelTestFailure::first_phase,
+          SaturationKernelTestFailure::certificate}) {
+        const bool phase_only =
+                failure == SaturationKernelTestFailure::phase_rows ||
+                failure == SaturationKernelTestFailure::phase_certificate;
+        const slong injected_before =
+                TestHookAccess::saturation_kernel_failures_injected();
+        TestHookAccess::set_saturation_kernel_failure(failure);
+        sflint::FmpzMat out(0, 0);
+        sflint::FmpzMat out_extension(0, 0);
+        RelationKernelBasisRoute taken =
+                RelationKernelBasisRoute::lll_double_extended;
+        const bool ok = silex::detail::saturation_extension_kernel_rows(
+                out, out_extension, &taken,
+                sflint::FmpzMatConstRef(relations), rank);
+        TestHookAccess::set_saturation_kernel_failure(
+                SaturationKernelTestFailure::none);
+        assert(TestHookAccess::saturation_kernel_failures_injected() ==
+               injected_before + 1);
+        assert(ok == phase_only);
+        if (phase_only) {
+            assert(taken == RelationKernelBasisRoute::lll_extended);
+            assert(sflint::fmpz_mat_equal(
+                    sflint::FmpzMatConstRef(out),
+                    sflint::FmpzMatConstRef(fixture.full)));
+            assert(sflint::fmpz_mat_equal(
+                    sflint::FmpzMatConstRef(out_extension),
+                    sflint::FmpzMatConstRef(fixture.reduced)));
+        }
+    }
+
+    // FLINT's check rejects the phase and the certificate fails: fmpz_lll.
+    // Where FLINT's check accepts the phase (the relations 8, 4, 2 of one
+    // generator): fmpz_lll's rows and matrix through the phase.
+    sflint::FmpzMat small(3, 1);
+    for (slong i = 0; i < 3; ++i) {
+        sflint::fmpz_set_si(
+                sflint::fmpz_mat_entry(sflint::FmpzMatRef(small), i, 0),
+                slong{8} >> i);
+    }
+    for (const bool rejected : {true, false}) {
+        const sflint::FmpzMat other =
+                rejected ? reducedness_reject_relations() : std::move(small);
+        const SaturationExtensionFixture expected =
+                saturation_extension_fixture(other, 1);
+        assert(expected.phase_accepted == !rejected);
+        assert(expected.phase_certified == !rejected);
+        route = RelationKernelBasisRoute::hnf_transform;
+        assert(silex::detail::saturation_extension_kernel_rows(
+                rows, extension, &route, sflint::FmpzMatConstRef(other), 1));
+        assert(route == (rejected
+                                 ? RelationKernelBasisRoute::lll_extended
+                                 : RelationKernelBasisRoute::
+                                           lll_double_extended));
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(rows),
+                                      sflint::FmpzMatConstRef(expected.full)));
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(extension),
+                sflint::FmpzMatConstRef(expected.reduced)));
+        if (!rejected) {
+            // An inconsistent rank is a failure.
+            assert(!silex::detail::saturation_extension_kernel_rows(
+                    rows, extension, nullptr, sflint::FmpzMatConstRef(other),
+                    4));
+        }
+    }
+    return 0;
+}
+
 // The HNF finish unit logs are the logs of the units composed from the
 // witness coefficient rows, row by row.
 int test_unit_logs_share_witness_rows() {
@@ -2446,6 +2625,7 @@ int main() {
     assert(test_relation_kernel_basis_checks_and_fallback() == 0);
     assert(test_finish_relation_kernel_basis_fast_path_and_fallback() == 0);
     assert(test_finish_relation_kernel_basis_without_reducedness() == 0);
+    assert(test_saturation_extension_kernel_rows_without_reducedness() == 0);
     assert(test_unit_logs_share_witness_rows() == 0);
     assert(test_unit_candidate_kernel_lll_matches_fmpz_lll() == 0);
     assert(test_unit_candidate_system_dixon_cache() == 0);

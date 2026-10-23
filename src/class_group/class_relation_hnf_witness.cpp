@@ -1,4 +1,5 @@
 #include "class_group_internal.hpp"
+#include "relation_saturation_internal.hpp"
 
 #include <utility>
 
@@ -172,6 +173,71 @@ bool verify_stored_relation_generator(
 // return -1 and fmpz_lll_is_reduced(B, fl, 120) accepts it
 // (wrapper_with_removal_knapsack.c).
 constexpr slong flint_ulll_truncation_bits = 250;
+
+// The first phase of fmpz_lll, fmpz_lll_d_with_removal_knapsack, on
+// `extension` in place, with `status` set to its return value.  It changes
+// the rows only by row moves and by adding integer multiples of one row to
+// another (lll_d.c, lll_check_babai.c), so the identity part of a reduced
+// [c * relations | I_n] records a unimodular transform, which is all that
+// checked_relation_kernel_rows needs.  FLINT's final reducedness check
+// (fmpz_lll_is_reduced) is not run.  False, with `extension` unchanged,
+// when its entries exceed flint_ulll_truncation_bits.
+bool relation_kernel_first_phase(flint::FmpzMat& extension,
+                                 int& status) noexcept {
+    const slong bits = ::fmpz_mat_max_bits(extension.raw());
+    if (bits < -flint_ulll_truncation_bits ||
+        bits > flint_ulll_truncation_bits) {
+        return false;
+    }
+    flint::FmpzLll lll;
+    status = ::fmpz_lll_d_with_removal_knapsack(extension.raw(), nullptr,
+                                                nullptr, lll.raw());
+    return true;
+}
+
+// One attempt of saturation_extension_kernel_rows on the reduced
+// `extension`: checked_relation_kernel_rows, then the certificate
+// fmpz_mat_is_reduced with FLINT's default parameters.  `fallback` names
+// the fmpz_lll attempt; the SaturationKernelTestSeams failures are applied
+// here (see SaturationKernelTestFailure) and counted once per call of
+// saturation_extension_kernel_rows.
+bool saturation_extension_attempt(flint::FmpzMat& rows,
+                                  flint::FmpzMat& extension,
+                                  flint::FmpzMatConstRef relations,
+                                  slong rank,
+                                  bool fallback) noexcept {
+    const SaturationKernelTestFailure failure =
+            SaturationKernelTestSeams::failure();
+    const bool every_attempt =
+            failure == SaturationKernelTestFailure::first_phase ||
+            failure == SaturationKernelTestFailure::certificate;
+    const bool phase_attempt =
+            failure == SaturationKernelTestFailure::phase_rows ||
+            failure == SaturationKernelTestFailure::phase_certificate;
+    const bool inject = every_attempt || (phase_attempt && !fallback);
+    if (inject && (fallback ? every_attempt : phase_attempt)) {
+        SaturationKernelTestSeams::note_injected();
+    }
+    if (inject && (failure == SaturationKernelTestFailure::first_phase ||
+                   failure == SaturationKernelTestFailure::phase_rows)) {
+        // Test-only: the zeroed extension has n rows with a zero relation
+        // part, so the row-count check fails (rank >= 1).
+        flint::fmpz_mat_zero(flint::FmpzMatRef(extension));
+    }
+    if (!checked_relation_kernel_rows(rows, relations,
+                                      flint::FmpzMatConstRef(extension),
+                                      rank)) {
+        return false;
+    }
+    if (inject && (failure == SaturationKernelTestFailure::certificate ||
+                   failure == SaturationKernelTestFailure::phase_certificate)) {
+        // Test-only: fmpz_mat_is_reduced does not certify the zeroed rows.
+        flint::fmpz_mat_zero(flint::FmpzMatRef(rows));
+    }
+    flint::FmpzLll lll;
+    return ::fmpz_mat_is_reduced(rows.raw(), lll.raw()->delta,
+                                 lll.raw()->eta) != 0;
+}
 
 }  // namespace
 
@@ -352,22 +418,13 @@ bool relation_kernel_phase_rows(flint::FmpzMat& out,
                                 flint::FmpzMat& extension,
                                 flint::FmpzMatConstRef relations,
                                 slong rank) noexcept {
-    const slong bits = ::fmpz_mat_max_bits(extension.raw());
-    if (bits < -flint_ulll_truncation_bits ||
-        bits > flint_ulll_truncation_bits) {
+    // The first phase of fmpz_lll; see relation_kernel_first_phase.  The
+    // kernel claim rests on the two exact checks, not on the rows being
+    // LLL-reduced.
+    int status = -1;
+    if (!relation_kernel_first_phase(extension, status)) {
         return false;
     }
-
-    // The first phase of fmpz_lll (see flint_ulll_truncation_bits).  It
-    // changes the rows only by row moves and by adding integer multiples of
-    // one row to another (lll_d.c, lll_check_babai.c), so the identity part
-    // records a unimodular transform, which is all that
-    // checked_relation_kernel_rows needs.  FLINT's final reducedness check
-    // is not run: the kernel claim rests on the two exact checks, not on
-    // the rows being LLL-reduced.
-    flint::FmpzLll lll;
-    int status = ::fmpz_lll_d_with_removal_knapsack(extension.raw(), nullptr,
-                                                    nullptr, lll.raw());
     const FinishKernelTestFailure failure = FinishKernelTestSeams::failure();
     if (failure != FinishKernelTestFailure::none) {
         // Test-only; see FinishKernelTestSeams.
@@ -384,6 +441,48 @@ bool relation_kernel_phase_rows(flint::FmpzMat& out,
            checked_relation_kernel_rows(out, relations,
                                         flint::FmpzMatConstRef(extension),
                                         rank);
+}
+
+bool saturation_extension_kernel_rows(flint::FmpzMat& rows,
+                                      flint::FmpzMat& extension,
+                                      RelationKernelBasisRoute* route,
+                                      flint::FmpzMatConstRef relations,
+                                      slong rank) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    flint::FmpzMat input(0, 0);
+    if (rank < 0 || rank > n ||
+        !relation_kernel_extension_input(input, relations)) {
+        return false;
+    }
+
+    // The phase runs on a copy: the fallback needs the unchanged input.
+    flint::FmpzMat reduced(n, flint::fmpz_mat_ncols(
+                                      flint::FmpzMatConstRef(input)));
+    flint::fmpz_mat_set(flint::FmpzMatRef(reduced),
+                        flint::FmpzMatConstRef(input));
+    int status = -1;
+    if (relation_kernel_first_phase(reduced, status) && status != -1 &&
+        saturation_extension_attempt(rows, reduced, relations, rank,
+                                     false)) {
+        extension = std::move(reduced);
+        if (route != nullptr) {
+            *route = RelationKernelBasisRoute::lll_double_extended;
+        }
+        return true;
+    }
+
+    // Fallback: fmpz_lll on the unchanged input, which repeats the
+    // deterministic phase above before its own later stages.
+    flint::FmpzLll lll;
+    ::fmpz_lll(input.raw(), nullptr, lll.raw());
+    if (!saturation_extension_attempt(rows, input, relations, rank, true)) {
+        return false;
+    }
+    extension = std::move(input);
+    if (route != nullptr) {
+        *route = RelationKernelBasisRoute::lll_extended;
+    }
+    return true;
 }
 
 bool finish_relation_kernel_basis(flint::FmpzMat& out,

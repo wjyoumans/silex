@@ -5785,14 +5785,16 @@ public:
         return storage;
     }
 
-    // The extension route of saturation_relation_kernel: the shared
-    // small-kernel helper reduces [c * relations | I_n] for the
-    // presentation's n x g relation matrix by fmpz_lll and keeps the
-    // identity parts of the rows whose relation part is zero, accepted only
-    // when exactly kernel_rows such rows exist and each satisfies
-    // v * relations == 0 (checked_relation_kernel_rows,
-    // class_group_internal.hpp).  The rows are then accepted only when
+    // The extension route of saturation_relation_kernel:
+    // saturation_extension_kernel_rows (class_group_internal.hpp) reduces
+    // [c * relations | I_n] for the presentation's n x g relation matrix
+    // and keeps the identity parts of the rows whose relation part is zero,
+    // accepted only when exactly kernel_rows such rows exist, each
+    // satisfies v * relations == 0 (checked_relation_kernel_rows), and
     // fmpz_mat_is_reduced certifies them with FLINT's default parameters.
+    // It tries the rows of fmpz_lll's double-precision first phase, without
+    // FLINT's own final reducedness check of the whole reduced matrix, and
+    // falls back to fmpz_lll's rows.
     // On that success only, sets out to those rows and image to the
     // identity parts of the other n - kernel_rows rows, in their reduced
     // order, and returns true; the caller then falls back to the route
@@ -5813,33 +5815,10 @@ public:
             return false;
         }
         flint::FmpzMat extension(0, 0);
-        if (!lll_relation_kernel_extension(
-                    extension, flint::FmpzMatConstRef(relations))) {
-            return false;
-        }
-        const SaturationKernelTestFailure failure =
-                SaturationKernelTestSeams::failure();
-        if (failure == SaturationKernelTestFailure::first_phase) {
-            // Test-only failure injection: the zeroed extension has n rows
-            // with a zero relation part, so the row-count check fails.
-            flint::fmpz_mat_zero(flint::FmpzMatRef(extension));
-            SaturationKernelTestSeams::note_injected();
-        }
         flint::FmpzMat rows(0, 0);
-        if (!checked_relation_kernel_rows(
-                    rows, flint::FmpzMatConstRef(relations),
-                    flint::FmpzMatConstRef(extension), n - kernel_rows)) {
-            return false;
-        }
-        if (failure == SaturationKernelTestFailure::certificate) {
-            // Test-only failure injection: fmpz_mat_is_reduced does not
-            // certify the zeroed rows.
-            flint::fmpz_mat_zero(flint::FmpzMatRef(rows));
-            SaturationKernelTestSeams::note_injected();
-        }
-        flint::FmpzLll lll;
-        if (!::fmpz_mat_is_reduced(rows.raw(), lll.raw()->delta,
-                                   lll.raw()->eta)) {
+        if (!saturation_extension_kernel_rows(
+                    rows, extension, nullptr,
+                    flint::FmpzMatConstRef(relations), n - kernel_rows)) {
             return false;
         }
         // checked_relation_kernel_rows found exactly kernel_rows rows with
@@ -5885,10 +5864,11 @@ public:
     // vector.  `image` is the g x n matrix of extension_saturation_kernel:
     // the identity parts of the rows of the reduced [c * A | I] with a
     // nonzero relation part.  The rows of that reduced matrix are U * [c * A
-    // | I] for a unimodular U (fmpz_lll applies only unimodular row
-    // operations), so the rows of U * A span the row lattice of A; the
-    // n - g rows with zero relation part contribute nothing, so the g rows
-    // of B = image * A span that rank-g lattice and are a basis of it.
+    // | I] for a unimodular U (fmpz_lll and its first phase apply only
+    // unimodular row operations), so the rows of U * A span the row lattice
+    // of A; the n - g rows with zero relation part contribute nothing, so
+    // the g rows of B = image * A span that rank-g lattice and are a basis
+    // of it.
     // (The analogous construction is Havas, Majewski and Matthews,
     // Experimental Mathematics 7 (1998), section 6: for their Algorithm 4
     // on an input G, with P G = H in Hermite normal form and P = [Q; R],

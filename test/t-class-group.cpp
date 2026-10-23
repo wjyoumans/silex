@@ -7692,8 +7692,9 @@ int test_relation_saturation_kernel_basis_fallbacks() {
 // the exact kernel, is certified LLL-reduced, and leaves the LLL-reduced
 // basis of relation_kernel_unit unbuilt.  When its row checks or its
 // certificate fail, or when it is skipped (force_transform_route), the
-// kernel is read from the left transform.  A kernel of one row (the
-// relations 256, 16) never takes the route.
+// kernel is read from the left transform; when they fail only for the
+// route's double-precision phase attempt, the route keeps fmpz_lll's rows.
+// A kernel of one row (the relations 256, 16) never takes the route.
 int test_relation_saturation_kernel_basis_extension_route() {
     using silex::detail::SaturationKernelTestFailure;
     using silex::detail::TestHookAccess;
@@ -7778,6 +7779,30 @@ int test_relation_saturation_kernel_basis_extension_route() {
         assert(context.publish_presentation());
         relation_saturation_test_kernel_basis_with_failure(context, failure);
         assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
+    }
+
+    // A failure in the route's double-precision phase attempt only: the
+    // route keeps fmpz_lll's rows, here the same basis as the phase's.
+    for (const SaturationKernelTestFailure failure :
+         {SaturationKernelTestFailure::phase_rows,
+          SaturationKernelTestFailure::phase_certificate}) {
+        assert(context.publish_presentation());
+        const slong injected_before =
+                TestHookAccess::saturation_kernel_failures_injected();
+        TestHookAccess::set_saturation_kernel_failure(failure);
+        sflint::FmpzMat fallback(0, 0);
+        lll_basis_built = true;
+        const bool built = silex::detail::relation_saturation_kernel_basis(
+                fallback, lll_basis_built, context);
+        TestHookAccess::set_saturation_kernel_failure(
+                SaturationKernelTestFailure::none);
+        assert(built && !lll_basis_built);
+        assert(TestHookAccess::saturation_kernel_failures_injected() ==
+               injected_before + 1);
+        assert(TestHookAccess::saturation_kernel_extensions_kept() ==
+               kept + 1);
+        kept = TestHookAccess::saturation_kernel_extensions_kept();
+        assert(::fmpz_mat_equal(fallback.raw(), basis.raw()));
     }
 
     // Skipped (force_transform_route overrides force_extension_route): the

@@ -483,8 +483,9 @@ bool hnf_finish_workspace_witness_coefficients(
 enum class RelationKernelBasisRoute : unsigned char {
     lll_extended,
     hnf_transform,
-    // finish_relation_kernel_basis only: the checked rows of FLINT's
-    // double-precision LLL phase, without FLINT's final reducedness check.
+    // finish_relation_kernel_basis and saturation_extension_kernel_rows
+    // only: the checked rows of FLINT's double-precision LLL phase, without
+    // FLINT's final reducedness check.
     lll_double_extended,
 };
 
@@ -587,9 +588,29 @@ bool relation_kernel_phase_rows(flint::FmpzMat& out,
                                 flint::FmpzMat& extension,
                                 flint::FmpzMatConstRef relations,
                                 slong rank) noexcept;
+// The extension route of the relation-saturation kernel.  For rank >= 0
+// the exact rank of `relations` (n x g), it sets `rows` to the
+// checked_relation_kernel_rows of a reduced [c * relations | I_n] that
+// fmpz_mat_is_reduced also certifies with FLINT's default parameters, and
+// `extension` to that reduced matrix; `route`, when not null, to
+// lll_double_extended for the rows of fmpz_lll's first phase
+// (fmpz_lll_d_with_removal_knapsack, entries of at most FLINT's 250-bit
+// ULLL truncation threshold) and lll_extended for fmpz_lll's rows.  The
+// phase rows are tried first, without FLINT's final reducedness check of
+// the whole reduced matrix (fmpz_lll_is_reduced); when the phase is not
+// run, returns -1, or its rows fail a check or the certificate, fmpz_lll
+// runs on the unchanged input.  So where FLINT's check would accept the
+// phase output, the result is fmpz_lll's; otherwise it can be another
+// certified basis of the same kernel lattice.  False when fmpz_lll's rows
+// also fail.  SaturationKernelTestSeams (relation_saturation_internal.hpp)
+// can inject failures.
+bool saturation_extension_kernel_rows(flint::FmpzMat& rows,
+                                      flint::FmpzMat& extension,
+                                      RelationKernelBasisRoute* route,
+                                      flint::FmpzMatConstRef relations,
+                                      slong rank) noexcept;
 // The kernel basis of the HNF unit rows (through
-// hnf_unit_witness_coefficients and hnf_unit_finish_coefficients); the
-// saturation kernel keeps lll_relation_kernel_extension.  It is
+// hnf_unit_witness_coefficients and hnf_unit_finish_coefficients).  It is
 // relation_kernel_phase_rows on [c * relations | I_n] when that succeeds,
 // and otherwise, for an empty kernel, and for entries above the threshold,
 // relation_kernel_basis on the unchanged input.  When FLINT's check would

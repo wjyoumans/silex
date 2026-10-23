@@ -273,13 +273,19 @@ class TestHookAccess;
 // A failure that only detail::TestHookAccess (test/test_hook_access.hpp)
 // can inject into the extension route of the relation-saturation kernel
 // basis (ClassGroupRelationAccess::saturation_relation_kernel); the
-// certified first phase has CertifiedLllTestSeams
-// (lat/certified_lll_internal.hpp).  The route's output is zeroed after the
+// certified first phase of the left-transform route has
+// CertifiedLllTestSeams (lat/certified_lll_internal.hpp).  The route's output is zeroed after the
 // reduction runs, so the fallback is exercised after the reduction has
-// changed the matrix.  first_phase: the reduced extension is zeroed, so its
-// kernel-row count check fails.  certificate: fmpz_mat_is_reduced runs on
-// the zeroed basis, which it does not certify.  beta_solve: the kernel
-// route is untouched, and the lattice basis that
+// changed the matrix.  The route (saturation_extension_kernel_rows,
+// class_group_internal.hpp) tries the rows of fmpz_lll's double-precision
+// first phase, then those of fmpz_lll.  first_phase: each reduced extension
+// is zeroed, so its kernel-row count check fails and the route fails (the
+// name predates the phase attempt).  certificate: fmpz_mat_is_reduced runs
+// on the zeroed basis of each attempt, which it does not certify, so the
+// route fails.  phase_rows and phase_certificate: as first_phase and
+// certificate for the phase attempt only, so the route keeps fmpz_lll's
+// rows.  Each counts one injection per run of the route.  beta_solve: the
+// kernel route is untouched, and the lattice basis that
 // ClassGroupRelationAccess::solved_invariant_generator_relation_rows solves
 // against is zeroed, so the solve fails and the beta coefficients are read
 // from the left transform.
@@ -287,6 +293,8 @@ enum class SaturationKernelTestFailure {
     none,
     first_phase,
     certificate,
+    phase_rows,
+    phase_certificate,
     beta_solve
 };
 
