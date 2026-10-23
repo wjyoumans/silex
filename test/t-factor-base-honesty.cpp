@@ -3781,10 +3781,10 @@ int test_routes_pass_intended_escalation_mode() {
     return 0;
 }
 
-// The imaginary quadratic backend's honesty route (the only production
-// caller of the lattice search): a `proven` class group of the maximal order of Q(sqrt(-4027))
-// computed from a compact base below the generation bound runs one lattice
-// scan with the stage-0 caps, and no T2 scan.
+// The imaginary quadratic backend's honesty route: a `proven` class group of
+// the maximal order of Q(sqrt(-4027)) computed from a compact base below the
+// generation bound runs one lattice scan with the stage-0 caps, and no T2
+// scan.
 int test_quadratic_backend_runs_honesty_route() {
     using Hook = silex::detail::TestHookAccess;
     slong direct_none = 0;
