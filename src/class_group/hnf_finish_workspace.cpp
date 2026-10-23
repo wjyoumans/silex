@@ -6,117 +6,12 @@ namespace silex::detail {
 
 namespace {
 
-slong fmpz_mat_trimmed_nonzero_rows(flint::FmpzMatConstRef matrix) noexcept {
-    slong rows = flint::fmpz_mat_nrows(matrix);
-    while (rows > 0 &&
-           ::fmpz_mat_is_zero_row(matrix.raw(), rows - 1) != 0) {
-        --rows;
-    }
-    for (slong i = 0; i < rows; ++i) {
-        if (::fmpz_mat_is_zero_row(matrix.raw(), i) != 0) {
-            return -1;
-        }
-    }
-    return rows;
-}
-
-bool fmpz_mat_copy_row(flint::FmpzMatRef out,
-                       slong out_row,
-                       flint::FmpzMatConstRef in,
-                       slong in_row) noexcept {
-    if (out_row < 0 || out_row >= flint::fmpz_mat_nrows(out) ||
-        in_row < 0 || in_row >= flint::fmpz_mat_nrows(in) ||
-        flint::fmpz_mat_ncols(out) != flint::fmpz_mat_ncols(in)) {
-        return false;
-    }
-    for (slong j = 0; j < flint::fmpz_mat_ncols(in); ++j) {
-        flint::fmpz_set(flint::fmpz_mat_entry(out, out_row, j),
-                        flint::fmpz_mat_entry(in, in_row, j));
-    }
-    return true;
-}
-
 bool hnf_finish_workspace_shape_matches(
         const HnfFinishWorkspace& workspace) noexcept {
     return workspace.exact_valid && workspace.generator_count > 0 &&
            workspace.processed_relation_count >= workspace.relation_rank &&
            workspace.relation_rank >= 0 &&
-           workspace.relation_rank <= workspace.generator_count &&
-           flint::fmpz_mat_nrows(workspace.hnf) ==
-                   workspace.processed_relation_count &&
-           flint::fmpz_mat_ncols(workspace.hnf) ==
-                   workspace.generator_count &&
-           fmpz_mat_trimmed_nonzero_rows(
-                   flint::FmpzMatConstRef(workspace.hnf)) ==
-                   workspace.relation_rank;
-}
-
-// The HNF of the old relations followed by new_relations, from the HNF of
-// the update matrix: the old HNF's nonzero rows, which span the old
-// relations' row lattice, followed by the new relations.  That matrix spans
-// the row lattice of all the relations, so its HNF, padded with zero rows,
-// is theirs by uniqueness of the HNF of a row lattice (Cohen, Theorem
-// 2.4.3).
-bool append_hnf_finish_workspace(
-        flint::FmpzMat& hnf_out,
-        slong& rank_out,
-        const HnfFinishWorkspace& workspace,
-        flint::FmpzMatConstRef new_relations,
-        slong expected_rank) noexcept {
-    const slong old_relations = workspace.processed_relation_count;
-    const slong old_rank = workspace.relation_rank;
-    const slong new_relation_count =
-            flint::fmpz_mat_nrows(new_relations);
-    const slong generator_count = flint::fmpz_mat_ncols(new_relations);
-    if (!hnf_finish_workspace_shape_matches(workspace) ||
-        generator_count != workspace.generator_count ||
-        new_relation_count <= 0 || expected_rank < old_rank ||
-        expected_rank > generator_count) {
-        return false;
-    }
-
-    if (old_relations > WORD_MAX - new_relation_count ||
-        old_rank > WORD_MAX - new_relation_count) {
-        return false;
-    }
-    const slong relation_count = old_relations + new_relation_count;
-    const slong update_rows = old_rank + new_relation_count;
-    flint::FmpzMat update_input(update_rows, generator_count);
-    for (slong row = 0; row < old_rank; ++row) {
-        if (!fmpz_mat_copy_row(
-                    flint::FmpzMatRef(update_input), row,
-                    flint::FmpzMatConstRef(workspace.hnf), row)) {
-            return false;
-        }
-    }
-    for (slong row = 0; row < new_relation_count; ++row) {
-        if (!fmpz_mat_copy_row(
-                    flint::FmpzMatRef(update_input), old_rank + row,
-                    new_relations, row)) {
-            return false;
-        }
-    }
-
-    flint::FmpzMat update_hnf(update_rows, generator_count);
-    ::fmpz_mat_hnf(update_hnf.raw(), update_input.raw());
-    const slong new_rank = fmpz_mat_trimmed_nonzero_rows(
-            flint::FmpzMatConstRef(update_hnf));
-    if (new_rank < 0 || new_rank != expected_rank) {
-        return false;
-    }
-
-    flint::FmpzMat candidate_hnf(relation_count, generator_count);
-    for (slong row = 0; row < new_rank; ++row) {
-        if (!fmpz_mat_copy_row(
-                    flint::FmpzMatRef(candidate_hnf), row,
-                    flint::FmpzMatConstRef(update_hnf), row)) {
-            return false;
-        }
-    }
-
-    hnf_out = std::move(candidate_hnf);
-    rank_out = new_rank;
-    return true;
+           workspace.relation_rank <= workspace.generator_count;
 }
 
 // The n x (g + n) input of the finish kernel's reduction.  Without a usable
@@ -266,43 +161,24 @@ bool sync_hnf_finish_workspace(
         }
     }
 
-    flint::FmpzMat candidate_hnf(0, 0);
-    slong candidate_rank = -1;
-    const bool incremental = workspace.exact_valid;
-    if (incremental) {
-        flint::FmpzMat new_relations(
-                relation_count - workspace.processed_relation_count,
-                generator_count);
-        if (!class_group_relation_rows(
-                    flint::FmpzMatRef(new_relations), context,
-                    workspace.processed_relation_count)) {
-            return false;
-        }
-        if (!append_hnf_finish_workspace(
-                    candidate_hnf, candidate_rank,
-                    workspace, flint::FmpzMatConstRef(new_relations),
-                    context.relation_rank())) {
-            return false;
-        }
-    } else {
-        flint::FmpzMat relations(relation_count, generator_count);
-        if (!context.relations(flint::FmpzMatRef(relations))) {
-            return false;
-        }
-        candidate_hnf = flint::FmpzMat(relation_count, generator_count);
-        ::fmpz_mat_hnf(candidate_hnf.raw(), relations.raw());
-        candidate_rank = fmpz_mat_trimmed_nonzero_rows(
-                flint::FmpzMatConstRef(candidate_hnf));
-        if (candidate_rank < 0 ||
-            candidate_rank != context.relation_rank()) {
-            return false;
-        }
+    // The exact rank check: the rank of the stored relations must be the
+    // context's relation rank, which can be a modular rank or stale when
+    // the context's exact row module has not been synced.  fmpz_mat_rank
+    // is the number of nonzero rows of the HNF of the relations (unimodular
+    // row operations keep the rank, and the nonzero rows of an echelon form
+    // are independent), so this is the check the workspace HNF made before,
+    // without the HNF.  On failure the workspace is left unchanged.  A sync
+    // with no new relations keeps the rank checked here.
+    flint::FmpzMat relations(relation_count, generator_count);
+    if (!context.relations(flint::FmpzMatRef(relations)) ||
+        ::fmpz_mat_rank(relations.raw()) != context.relation_rank()) {
+        return false;
     }
 
-    workspace.hnf = std::move(candidate_hnf);
+    const bool incremental = workspace.exact_valid;
     workspace.generator_count = generator_count;
     workspace.processed_relation_count = relation_count;
-    workspace.relation_rank = candidate_rank;
+    workspace.relation_rank = context.relation_rank();
     workspace.exact_valid = true;
     workspace.unit_logs = flint::ArbMat(0, 0);
     workspace.unit_log_precision = 0;

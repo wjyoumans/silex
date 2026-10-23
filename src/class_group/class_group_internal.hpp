@@ -447,6 +447,10 @@ bool class_group_relation_rows(
         flint::FmpzMatRef out,
         const ClassGroupContext& context,
         slong first_relation) noexcept;
+// Brings the workspace to the context's relations.  A sync that changes the
+// relations fails, leaving the workspace unchanged, unless fmpz_mat_rank of
+// all stored relations is the context's relation rank (which can be a
+// modular or stale rank); the workspace then records that rank.
 bool sync_hnf_finish_workspace(
         HnfFinishWorkspace& workspace,
         const ClassGroupContext& context) noexcept;

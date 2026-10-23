@@ -239,8 +239,11 @@ struct RelationFinishState {
     slong target_relation_kernel_units = 0;
 };
 
+// The finish workspace of the processed relations.  It keeps no HNF: a
+// sync that changes the relations checks that fmpz_mat_rank of all stored
+// relations is the context's relation rank and records it as relation_rank
+// (sync_hnf_finish_workspace).
 struct HnfFinishWorkspace {
-    flint::FmpzMat hnf{0, 0};
     flint::ArbMat relation_logs{0, 0};
     flint::ArbMat unit_logs{0, 0};
     // Kernel rows of the processed relations, kept until the next sync
@@ -278,7 +281,6 @@ struct HnfFinishWorkspace {
     bool finish_extension_valid = false;
 
     void clear() noexcept {
-        hnf = flint::FmpzMat(0, 0);
         relation_logs = flint::ArbMat(0, 0);
         unit_logs = flint::ArbMat(0, 0);
         finish_kernel = flint::FmpzMat(0, 0);

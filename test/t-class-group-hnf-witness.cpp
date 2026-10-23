@@ -140,20 +140,11 @@ void assert_finish_workspace_exact(
     assert(workspace.relation_rank == context.relation_rank());
 
     sflint::FmpzMat stored(relation_count, generator_count);
-    sflint::FmpzMat expected_hnf(relation_count, generator_count);
     assert(context.relations(sflint::FmpzMatRef(stored)));
 
-    // The workspace HNF, built incrementally across syncs, is the HNF of
-    // all stored relations; its nonzero rows are exactly the first
-    // relation_rank rows.
-    ::fmpz_mat_hnf(expected_hnf.raw(), stored.raw());
-    assert(sflint::fmpz_mat_equal(
-            sflint::FmpzMatConstRef(expected_hnf),
-            sflint::FmpzMatConstRef(workspace.hnf)));
-    for (slong row = 0; row < relation_count; ++row) {
-        assert((::fmpz_mat_is_zero_row(workspace.hnf.raw(), row) != 0) ==
-               (row >= workspace.relation_rank));
-    }
+    // The workspace keeps no HNF; the rank it reports, checked across
+    // syncs, is the exact rank of all stored relations.
+    assert(::fmpz_mat_rank(stored.raw()) == workspace.relation_rank);
 
     sflint::FmpzMat dependency_coefficients(0, 0);
     assert(silex::detail::hnf_finish_workspace_witness_coefficients(
@@ -600,13 +591,9 @@ int test_incremental_finish_workspace_lifecycle() {
     }
     assert_finish_workspace_exact(context, *workspace);
 
-    // A sync with no new relations leaves the HNF, the counts and the
-    // cached kernels unchanged.
+    // A sync with no new relations leaves the counts and the cached kernels
+    // unchanged.
     assert(workspace->finish_kernel_valid && workspace->witness_kernel_valid);
-    sflint::FmpzMat hnf_before(
-            context.relation_count(), context.generator_count());
-    sflint::fmpz_mat_set(sflint::FmpzMatRef(hnf_before),
-                         sflint::FmpzMatConstRef(workspace->hnf));
     sflint::FmpzMat finish_before(
             sflint::fmpz_mat_nrows(workspace->finish_kernel),
             sflint::fmpz_mat_ncols(workspace->finish_kernel));
@@ -624,9 +611,6 @@ int test_incremental_finish_workspace_lifecycle() {
     assert(workspace->exact_valid);
     assert(workspace->processed_relation_count == processed_before);
     assert(workspace->relation_rank == rank_before);
-    assert(sflint::fmpz_mat_equal(
-            sflint::FmpzMatConstRef(hnf_before),
-            sflint::FmpzMatConstRef(workspace->hnf)));
     assert(workspace->finish_kernel_valid && workspace->witness_kernel_valid);
     assert(sflint::fmpz_mat_equal(
             sflint::FmpzMatConstRef(finish_before),
@@ -666,7 +650,6 @@ int test_incremental_finish_workspace_lifecycle() {
     assert(workspace != nullptr);
     assert(!workspace->exact_valid);
     assert(workspace->processed_relation_count == 0);
-    assert(sflint::fmpz_mat_nrows(workspace->hnf) == 0);
     assert(sflint::fmpz_mat_nrows(workspace->finish_kernel) == 0);
     assert(!workspace->finish_kernel_valid && !workspace->witness_kernel_valid);
     return 0;
