@@ -410,6 +410,74 @@ void check_root_orientation_guard(slong index_base) noexcept {
     }
 }
 
+// A split prime p whose prime form is ambiguous (a == c, so qfb_inverse
+// returns it unchanged) and a one-prime base holding either prime above p.
+// A negative exponent multiplies by the conjugate prime over p; that ideal
+// must be the other prime above p in both orientations of the stored prime:
+// the two routes agree, and the exponents +1 and -1 give different ideals.
+void check_ambiguous_form_conjugate(slong radicand, slong prime,
+                                    slong index_base) noexcept {
+    sflint::Fmpz value;
+    sflint::fmpz_set_si(sflint::FmpzRef(value), radicand);
+    const silex::NumberField field =
+            silex::NumberField::quadratic(sflint::FmpzConstRef(value));
+    sflint::fmpz_one(sflint::FmpzRef(value));
+    const silex::Order order = silex::Order::quadratic_order(
+            field, sflint::FmpzConstRef(value));
+    sflint::Fmpz discriminant;
+    sflint::Fmpz p;
+    sflint::fmpz_set_si(sflint::FmpzRef(p), prime);
+    silex::PrimeIdealList primes;
+    if (!order.is_defined() || !order.is_maximal() ||
+        !order.discriminant(sflint::FmpzRef(discriminant)) ||
+        !silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)) ||
+        primes.size() != 2) {
+        check(false, "split decomposition failed", index_base);
+        return;
+    }
+    sflint::Qfb form;
+    sflint::qfb_prime_form(sflint::QfbRef(form),
+                           sflint::FmpzConstRef(discriminant),
+                           sflint::FmpzConstRef(p));
+    check(fmpz_equal(sflint::qfb_a(sflint::QfbConstRef(form)).raw(),
+                     sflint::qfb_c(sflint::QfbConstRef(form)).raw()) != 0,
+          "prime form is not ambiguous", index_base);
+    for (slong i = 0; i < primes.size(); ++i) {
+        Fixture fixture{field, order, silex::FactorBase(order)};
+        if (!detail::TestHookAccess::append_prime(fixture.base,
+                                                  *primes.at(i))) {
+            check(false, "single-prime base construction failed",
+                  index_base + 1 + i);
+            continue;
+        }
+        sflint::FmpzMat hnf[2] = {sflint::FmpzMat(2, 2),
+                                  sflint::FmpzMat(2, 2)};
+        const slong exponents[] = {1, -1};
+        bool ok = true;
+        for (slong k = 0; k < 2; ++k) {
+            sflint::FmpzMat row(1, 1);
+            sflint::Fmpz norm;
+            sflint::Fmpz denominator;
+            fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), exponents[k]);
+            ok = ok && detail::maximal_imaginary_quadratic_row_hnf(
+                               hnf[k], norm, denominator, fixture.order,
+                               fixture.base, sflint::FmpzMatConstRef(row),
+                               detail::QuadraticRowHnfRoute::ideal_product);
+        }
+        check(ok, "ideal-product route failed", index_base + 1 + i);
+        if (ok) {
+            check(fmpz_mat_equal(hnf[0].raw(), hnf[1].raw()) == 0,
+                  "conjugate prime equals the stored prime",
+                  index_base + 1 + i);
+        }
+        for (const slong exponent : {-1, -2, 3, -7}) {
+            sflint::FmpzMat row(1, 1);
+            fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), exponent);
+            routes_agree(fixture, row, index_base + 1 + i);
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -456,6 +524,10 @@ int main() {
     check_fallback_generator(-31, 150, false, 3, UWORD(0x710e), 18000);
     check_fallback_generator(-105, 150, false, 2, UWORD(0x710f), 19000);
     check_root_orientation_guard(20000);
+    // Ambiguous prime forms of split primes: (11, 8, 11) for D = -420 and
+    // (17, 1, 17) for D = -1155.
+    check_ambiguous_form_conjugate(-105, 11, 21000);
+    check_ambiguous_form_conjugate(-1155, 17, 22000);
 
     if (failures != 0) {
         std::fprintf(stderr, "%d failure(s)\n", failures);

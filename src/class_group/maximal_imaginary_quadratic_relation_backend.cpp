@@ -774,13 +774,17 @@ bool identify_quadratic_form_primes(
             entry.factor_base_orientation = -1;
         }
         if (!entry.ramified && length == 1) {
+            // The conjugate prime corresponds to the opposite form
+            // (a, -b, c).  Build it by negating b: qfb_inverse returns an
+            // ambiguous form (a == c) unchanged, which would rebuild the
+            // stored prime instead of its conjugate.
             flint::Qfb inverse;
+            flint::qfb_set(flint::QfbRef(inverse),
+                           flint::QfbConstRef(entry.form));
             if (entry.factor_base_orientation > 0) {
-                flint::qfb_inverse(flint::QfbRef(inverse),
-                                   flint::QfbConstRef(entry.form));
-            } else {
-                flint::qfb_set(flint::QfbRef(inverse),
-                               flint::QfbConstRef(entry.form));
+                flint::fmpz_neg(
+                        flint::FmpzRef(flint::QfbRef(inverse).raw()->b),
+                        flint::qfb_b(flint::QfbConstRef(inverse)));
             }
             bool conjugate_ideal_ok = false;
             {
