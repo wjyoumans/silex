@@ -153,25 +153,23 @@ Changed
   Its only use was the check that the number of nonzero HNF rows equals the
   class group's relation rank; a sync that appends relations now checks
   ``fmpz_mat_rank`` of all stored relations against that rank instead, and
-  fails, leaving the workspace unchanged, in the same cases.  Published
-  outputs are identical on the ``proven`` corpus and fixture rows (177 rows
-  that finish within 120 s on both builds, and
-  ``multiquadratic_m23_m31_m47`` with a 900 s cap; seven large cyclotomic
-  rows timed out on both builds).  Callgrind instruction counts (busy
-  machine, ``proven``): ``real_quadratic_d10000000005`` unchanged on the
-  current route (the workspace is not used there), ``simplest_quartic_t10``
-  0.4% more (the rank check costs more than the small incremental HNF it
-  replaces on that row).  With the workspace enabled on the relation route
-  (not part of this change), ``real_quadratic_d10000000005`` takes 30.4%
-  fewer than now, where the HNF made it 6.7% more.  No timing has been
-  measured.
+  fails, leaving the workspace unchanged, in the same cases.  The
+  workspace's finish kernel no longer repeats that rank check: it runs
+  only after a sync on the same context, and the stored relations are
+  append-only, with the workspace cleared when they are, so the check was
+  made on the same relations.  Published outputs are identical on the
+  ``proven`` corpus and fixture rows (177 rows that finish within 120 s on
+  both builds, and ``multiquadratic_m23_m31_m47`` with a 900 s cap; seven
+  large cyclotomic rows timed out on both builds).  Callgrind instruction
+  counts (busy machine, ``proven``): ``simplest_quartic_t10`` and
+  ``real_quadratic_d10000000005`` unchanged (both under 0.1% fewer).  No
+  timing has been measured.
 
 - The ``proven`` finish workspace no longer keeps the transform of its
-  relation HNF.  A sync that appends relations computes only the HNF of the
-  old HNF rows followed by the new relations, which by uniqueness of the HNF
-  is the HNF of all relations; the transform, whose entries reached tens of
-  thousands of bits and was multiplied out on every append, was not read by
-  the class group, unit, regulator, saturation or certification code.
+  relation HNF (and, with the change above, no HNF at all).  The transform,
+  whose entries reached tens of thousands of bits and was multiplied out on
+  every append, was not read by the class group, unit, regulator,
+  saturation or certification code.
   Published outputs are identical on the corpus and fixture rows that
   finish within 120 s on both builds (``proven`` 176 rows, ``grh`` 184
   rows) and on ``cyclotomic_72_phi24`` and ``multiquadratic_m23_m31_m47``

@@ -879,11 +879,13 @@ passed in must be the exact rank of ``A``; the full-lattice claim depends on
 it.  The finish checks that the relation rank it passes equals
 ``fmpz_mat_rank`` of ``A``, the number of nonzero rows of its HNF.  The
 two routes return different bases of the same kernel lattice.  A finish
-workspace keeps the HNF of the relations across relation batches: a sync
-that appends relations takes the HNF of the old HNF's nonzero rows followed
-by the new relations, which span the same row lattice as all the relations,
-so by uniqueness of the row HNF it is their HNF; its nonzero row count is
-the exact rank.  The workspace keeps no HNF transform.  It takes its unit
+workspace keeps no HNF of the relations and no HNF transform.  A sync that
+appends relations checks that ``fmpz_mat_rank`` of all stored relations
+equals the relation rank, and fails, leaving the workspace unchanged,
+otherwise; a sync that appends none keeps the rank checked by the earlier
+sync.  The workspace's finish kernel does not repeat the check: it runs
+only after a sync on the same context, and the stored relations are
+append-only, with the workspace cleared when they are.  It takes its unit
 rows from the bases above (the witness rows for the witness extraction, the
 finish variant for the analytic finish), computed at most once per sync,
 never from the zero-row part of an HNF transform, which is an exact but

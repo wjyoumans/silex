@@ -106,11 +106,20 @@ bool hnf_finish_workspace_finish_rows(flint::FmpzMat& out,
     const slong rank = workspace.relation_rank;
     if (rank >= 0 && rank < n) {
         flint::FmpzMat relations(n, workspace.generator_count);
-        // The rank check of hnf_unit_finish_coefficients: the exact rank
-        // of the stored relations must be the context's relation rank,
-        // which checked_relation_kernel_rows takes as its precondition.
-        if (!context.relations(flint::FmpzMatRef(relations)) ||
-            ::fmpz_mat_rank(relations.raw()) != rank) {
+        // checked_relation_kernel_rows takes as its precondition that the
+        // exact rank of the stored relations is the context's relation rank
+        // (the rank check of hnf_unit_finish_coefficients).  That check is
+        // not repeated here.  The only caller, hnf_finish_workspace_kernel,
+        // has synced the workspace on this same context, and a sync accepts
+        // a workspace only after checking fmpz_mat_rank of the stored
+        // relations against the context's relation rank, either in this
+        // call or, when it appended no relations, in the earlier sync that
+        // set processed_relation_count and relation_rank.  The stored
+        // relations are append-only (the context changes them only by
+        // appending, clearing or swapping, and clearing also clears the
+        // workspace, which a swap moves with the context), so rows
+        // 0..n-1 are the rows that check accepted.
+        if (!context.relations(flint::FmpzMatRef(relations))) {
             return false;
         }
         bool extended = false;
