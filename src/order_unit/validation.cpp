@@ -188,6 +188,17 @@ std::string log_arb_mid_rad(flint::ArbConstRef value) noexcept {
 }
 #endif
 
+bool validation_integer_index_prerequisites(
+        const ClassGroupContext& class_group,
+        bool accept_grh_generation) noexcept {
+    return ClassGroupCertificationAccess::
+                   factor_base_generation_checked_to_required_bound(
+                           class_group) ||
+           (accept_grh_generation &&
+            ClassGroupCertificationAccess::
+                    grh_factor_base_generation_covered(class_group));
+}
+
 bool validation_index_bound_from_product(
         flint::Fmpz& index_bound,
         const OrderUnitGroup& units,
@@ -225,15 +236,9 @@ bool validation_index_bound_from_product(
     }
 #endif
 
-    const bool unconditional_generation =
-            ClassGroupCertificationAccess::
-                    factor_base_generation_checked_to_required_bound(
-                            class_group);
     const bool integer_index_prerequisites =
-            unconditional_generation ||
-            (accept_grh_generation &&
-             ClassGroupCertificationAccess::
-                     grh_factor_base_generation_covered(class_group));
+            validation_integer_index_prerequisites(class_group,
+                                                   accept_grh_generation);
     // In this validation context the quotient is an integer class/unit
     // index only once the factor base generates the class group: proved
     // to the proven generation requirement (the Minkowski-type bound, or
@@ -263,7 +268,74 @@ bool validation_index_bound_from_product(
            flint::fmpz_cmp_ui(flint::FmpzConstRef(index_bound), 1) > 0;
 }
 
+enum class CoarseIndexOneOutcome {
+    no_value,
+    index_one,
+    index_above_one,
+    no_index_bound,
+};
+
+// The grh coarse index-one test of analytic_index_bound_for_validation on
+// its own: the Belabas-Friedman hR accurate enough to recognize index one
+// (ensure_index_one), compared with the candidate h R.  It never computes
+// the default hR.
+CoarseIndexOneOutcome coarse_index_one_outcome(
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong precision) noexcept {
+    bool have_index_one_value = false;
+    {
+        SILEX_PROFILE_SCOPE(
+                units.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.validation_analytic_index_bound."
+                "ensure_index_one_product");
+        have_index_one_value = analytic_cache.ensure_index_one(
+                order, precision, units.diagnostics(),
+                class_group.factor_base());
+    }
+    if (!have_index_one_value) {
+        return CoarseIndexOneOutcome::no_value;
+    }
+    flint::Fmpz coarse_index_bound;
+    if (!validation_index_bound_from_product(
+                coarse_index_bound, units, class_group,
+                analytic_cache.value(), precision, true)) {
+        return CoarseIndexOneOutcome::no_index_bound;
+    }
+    return flint::fmpz_is_one(flint::FmpzConstRef(coarse_index_bound))
+            ? CoarseIndexOneOutcome::index_one
+            : CoarseIndexOneOutcome::index_above_one;
+}
+
 }  // namespace
+
+GrhIndexOneTest grh_validation_index_one_test(
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong precision) noexcept {
+    SILEX_PROFILE_SCOPE(units.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.grh_validation_index_one_test");
+    switch (coarse_index_one_outcome(units, class_group, analytic_cache,
+                                     order, precision)) {
+    case CoarseIndexOneOutcome::index_one:
+        return GrhIndexOneTest::index_one;
+    case CoarseIndexOneOutcome::index_above_one:
+        // Without the generation prerequisites the quotient is not an
+        // integer index, and the coarse value never shows index one
+        // (validation_index_bound_from_product).
+        return validation_integer_index_prerequisites(class_group, true)
+                ? GrhIndexOneTest::not_index_one
+                : GrhIndexOneTest::unavailable;
+    case CoarseIndexOneOutcome::no_value:
+    case CoarseIndexOneOutcome::no_index_bound:
+        break;
+    }
+    return GrhIndexOneTest::unavailable;
+}
 
 bool analytic_index_bound_for_validation(
         flint::Fmpz& index_bound,
@@ -282,27 +354,13 @@ bool analytic_index_bound_for_validation(
     // from the default hR, so every index bound above one, and every
     // failure, comes from the same value as before.
     if (accept_grh_generation) {
-        bool have_index_one_value = false;
-        {
-            SILEX_PROFILE_SCOPE(
-                    units.diagnostics(), DiagnosticsModule::unit_group,
-                    "unit_group.validation_analytic_index_bound."
-                    "ensure_index_one_product");
-            have_index_one_value = analytic_cache.ensure_index_one(
-                    order, precision, units.diagnostics(),
-                    class_group.factor_base());
+        const CoarseIndexOneOutcome coarse = coarse_index_one_outcome(
+                units, class_group, analytic_cache, order, precision);
+        if (coarse == CoarseIndexOneOutcome::index_one) {
+            flint::fmpz_one(flint::FmpzRef(index_bound));
+            return true;
         }
-        if (have_index_one_value) {
-            flint::Fmpz coarse_index_bound;
-            if (validation_index_bound_from_product(
-                        coarse_index_bound, units, class_group,
-                        analytic_cache.value(), precision,
-                        accept_grh_generation) &&
-                flint::fmpz_is_one(
-                        flint::FmpzConstRef(coarse_index_bound))) {
-                flint::fmpz_one(flint::FmpzRef(index_bound));
-                return true;
-            }
+        if (coarse != CoarseIndexOneOutcome::no_value) {
             SILEX_PROFILE_EVENT(
                     units.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.validation_analytic_index_bound."

@@ -648,6 +648,36 @@ bool expected_regulator_stop(
         const OrderUnitGroup& units,
         const flint::Arb& expected_regulator,
         slong precision) noexcept;
+// The grh coarse index-one test alone (the first step of the analytic
+// index-one test in validation.cpp), which never computes the default hR.
+// `not_index_one` means the coarse value is available, the factor base
+// generation prerequisites for an integer index hold, and the candidate
+// does not show index one; `unavailable` covers everything else (no coarse
+// value, or no index bound from it), where the default hR decides.
+enum class GrhIndexOneTest {
+    unavailable,
+    index_one,
+    not_index_one,
+};
+GrhIndexOneTest grh_validation_index_one_test(
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong precision) noexcept;
+// The unit search's stop test after an improvement of a full-rank unit
+// group (compute.cpp).  It takes the expected regulator once and keeps it
+// in `extraction_state`; see the definition for the grh coarse retry.
+void validation_stop_after_improvement(
+        bool& stop,
+        RelationUnitExtractionState& extraction_state,
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong precision,
+        ulong validation_bf_max_cutoff,
+        bool accept_grh_generation) noexcept;
 bool validation_target_bump(slong& bump,
                             const ValidateRefineSummary& summary,
                             slong rank,

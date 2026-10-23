@@ -13703,6 +13703,110 @@ int test_grh_relation_refill_grows_on_repeated_validation() {
     return 0;
 }
 
+// A grh unit search stops on the coarse index-one test alone (reference
+// `_unit_group_find_units`, FindUnits.jl:194-198, stops once the
+// class/unit index is one).  On the real cubic field x^3 - x^2 - 2x + 1
+// (h = 1, unit rank 2), the squares of the fundamental units give a
+// full-rank subgroup of index 4: the stop test leaves the expected regulator
+// unset and does not compute the default hR, so the coarse value is still
+// the cached one.  The full unit group then stops the search with index
+// bound one.  Without a grh request the default hR gives the estimate at
+// once, with an index bound of at least 4.
+int test_grh_validation_stop_retries_coarse_index_one() {
+    static constexpr slong coefficients[] = {1, -2, -1, 1};
+    sflint::FmpzPoly polynomial;
+    for (slong i = 0; i < 4; ++i) {
+        sflint::fmpz_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    assert(audit.final_result_published);
+    assert(units.free_rank() == 2);
+    sflint::Fmpz class_order;
+    assert(class_group.order(sflint::FmpzRef(class_order)));
+    assert(sflint::fmpz_is_one(sflint::FmpzConstRef(class_order)));
+
+    silex::EmbeddingContext embeddings(field);
+    std::vector<silex::FactoredElement> squares;
+    for (slong i = 0; i < 2; ++i) {
+        silex::FactoredElement generator(field);
+        assert(units.free_generator(generator, i));
+        silex::FactoredElement square(field);
+        for (slong j = 0; j < generator.length(); ++j) {
+            slong exponent = 0;
+            assert(generator.exponent(exponent, j));
+            assert(generator.factor(j) != nullptr);
+            assert(square.push(*generator.factor(j), 2 * exponent));
+        }
+        squares.push_back(std::move(square));
+    }
+    silex::OrderUnitGroup sublattice(order);
+    assert(sublattice.set_units(
+            order, silex::FactoredElementSpan(squares.data(), squares.size()),
+            embeddings, 128));
+    assert(sublattice.free_rank() == 2);
+
+    using silex::detail::GrhIndexOneTest;
+    silex::detail::AnalyticClassRegulatorCache analytic_cache;
+    silex::detail::RelationUnitExtractionState state;
+    bool stop = true;
+    silex::detail::validation_stop_after_improvement(
+            stop, state, sublattice, class_group, analytic_cache, order, 128,
+            0, true);
+    assert(!stop);
+    assert(!state.has_expected_regulator);
+    // ensure_index_one() declines once the default hR is cached at this
+    // precision, so this shows the stop test did not compute it.
+    assert(analytic_cache.ensure_index_one(order, 128));
+    assert(silex::detail::grh_validation_index_one_test(
+                   sublattice, class_group, analytic_cache, order, 128) ==
+           GrhIndexOneTest::not_index_one);
+    assert(silex::detail::grh_validation_index_one_test(
+                   units, class_group, analytic_cache, order, 128) ==
+           GrhIndexOneTest::index_one);
+
+    silex::detail::validation_stop_after_improvement(
+            stop, state, units, class_group, analytic_cache, order, 128, 0,
+            true);
+    assert(stop);
+    assert(state.has_expected_regulator);
+    assert(sflint::fmpz_is_one(
+            sflint::FmpzConstRef(state.validation_index_bound)));
+    assert(analytic_cache.ensure_index_one(order, 128));
+
+    silex::detail::AnalyticClassRegulatorCache default_cache;
+    silex::detail::RelationUnitExtractionState default_state;
+    stop = true;
+    silex::detail::validation_stop_after_improvement(
+            stop, default_state, sublattice, class_group, default_cache, order,
+            128, 0, false);
+    assert(!stop);
+    assert(default_state.has_expected_regulator);
+    assert(sflint::fmpz_cmp_ui(
+                   sflint::FmpzConstRef(default_state.validation_index_bound),
+                   4) >= 0);
+    assert(!default_cache.ensure_index_one(order, 128));
+    return 0;
+}
+
 // The LLL relation slice rejects an extension relation target below 2, as
 // extend_tentative_relations_ does.  With a target of 0 the slice would
 // collect no relation; on Q(sqrt -2) (h = 1) it would still report success.
@@ -13815,6 +13919,7 @@ int main() {
     test_grh_saturation_square_tests_keep_degree_ten_lift_limit();
     test_local_saturation_proof_keeps_degree_ten_lift_limit();
     test_lll_relation_slice_rejects_small_extension_target();
+    test_grh_validation_stop_retries_coarse_index_one();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
     test_grh_validation_saturation_deferred_until_extension_stalls();

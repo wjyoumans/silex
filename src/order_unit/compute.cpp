@@ -3653,6 +3653,25 @@ void validation_stop_after_improvement(
                             validation_bf_max_cutoff, precision,
                             units.diagnostics(), accept_grh_generation);
         } else {
+            // reference `_unit_group_find_units` (FindUnits.jl:194-198)
+            // takes the expected regulator once, at the first full-rank
+            // improvement, as R_first / index_first, and stops once R <
+            // 2 * expected, that is once the class/unit index of the
+            // current group is one.  A grh request first tries the coarse
+            // index-one test alone: when it does not show index one, the
+            // estimate stays unset and the same test is retried after the
+            // next improvement, so the default hR is not computed here
+            // while the coarse value can still recognize index one.  When
+            // the coarse test shows index one, the estimate below takes it
+            // (index bound one, expected = R) and the stop fires as the
+            // reference's does at index one.
+            if (accept_grh_generation &&
+                grh_validation_index_one_test(units, class_group,
+                                              analytic_cache, order,
+                                              precision) ==
+                        GrhIndexOneTest::not_index_one) {
+                return;
+            }
             extraction_state.has_expected_regulator =
                     class_unit_validation_estimate(
                             extraction_state.validation_index_bound,
