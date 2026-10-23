@@ -1908,10 +1908,11 @@ silex::Order maximal_order_of_pure_cubic(silex::NumberField& field,
 // x^3 - 2 p^3 (theta = p cbrt(2)).  The recursive etale split (Frobenius
 // kernel and splitting products modulo p) must give, as a set, the primes
 // decompose_prime finds through the monogenic generator cbrt(2).
-int test_index_divisor_recursive_split_multiword_prime() {
+int check_index_divisor_recursive_split_cubic(const char* prime_text,
+                                              bool fits_word) {
     sflint::Fmpz p;
-    fmpz_set_str(p.raw(), "18446744073709551667", 10);
-    assert(fmpz_abs_fits_ui(p.raw()) == 0);
+    fmpz_set_str(p.raw(), prime_text, 10);
+    assert((fmpz_abs_fits_ui(p.raw()) != 0) == fits_word);
     silex::NumberField field;
     const silex::Order maximal = maximal_order_of_pure_cubic(field, 2, p, 3);
 
@@ -1935,6 +1936,19 @@ int test_index_divisor_recursive_split_multiword_prime() {
         assert(matches == 1);
     }
     return 0;
+}
+
+int test_index_divisor_recursive_split_multiword_prime() {
+    return check_index_divisor_recursive_split_cubic("18446744073709551667",
+                                                     false);
+}
+
+// Same with p = 18446744073709551337, 2^63 < p < 2^64: p fits one word with
+// nmod norm 0, so the word path of order_coords_mul_mod runs on a
+// full-word modulus.
+int test_index_divisor_recursive_split_full_word_prime() {
+    return check_index_divisor_recursive_split_cubic("18446744073709551337",
+                                                     true);
 }
 
 // x^3 - 3 p^4 with the same p: theta = p cbrt(3 p), and p is totally
@@ -4527,6 +4541,7 @@ int main() {
     assert(test_recursive_split_matches_enumeration_unramified() == 0);
     assert(test_recursive_split_matches_enumeration_ramified() == 0);
     assert(test_index_divisor_recursive_split_multiword_prime() == 0);
+    assert(test_index_divisor_recursive_split_full_word_prime() == 0);
     assert(test_index_divisor_ramified_multiword_prime() == 0);
     assert(test_valuation_degree_one() == 0);
     assert(test_valuation_order_element_split_repeated() == 0);
