@@ -1348,8 +1348,8 @@ sliding-window cost model finds that cheaper; a small negative exponent is
 otherwise kept, since the positive form would need about 63 bits.  This
 applies to any row with an inverse, at any prime where ``lambda`` is
 available (non-split squarefree primes included), once some exponent in the
-batch exceeds ``p - 1``; it affects cost only.  Rows with no exponent above ``FLINT_BITS`` bits use the
-PARI primes and no scan.  The residues are the same elements of ``R``, so no
+batch exceeds ``p - 1``; it affects cost only.  Batches with no exponent above ``FLINT_BITS`` bits
+scan only under the cost rule below, and nothing is reduced for them.  The residues are the same elements of ``R``, so no
 reconstructed unit changes.  For ``cyclotomic_41_phi40`` 11 primes are
 skipped, ``lambda`` has 64 bits, and the exponent bits fall from 373k to
 179k; for the degree-32 real subfield of the 136th cyclotomic field, 40
@@ -1371,6 +1371,30 @@ rejected.  Interpolation is folded into the change to order coordinates: a
 row of values times the inverse of that matrix is the row of order
 coordinates.  The residues are the same, so no reconstructed unit changes.
 Primes not found to split by the scan use the power basis.
+
+The same scan also runs for a batch whose exponents all have at most
+``FLINT_BITS`` bits when a cost model favors it, which PARI does not do.  The
+model counts the multiplications modulo ``f`` of the power-basis products at
+one prime: the sliding-window model already used to choose the window widths
+(table cost and windows) plus up to ``b - 1`` squarings for an output whose
+longest exponent has ``b`` bits (Moller, "Algorithms for
+multi-exponentiation", Section 3.1).  A split test is one exponentiation
+``x^p`` modulo ``f``, at most ``FLINT_BITS - 1`` squarings by left-to-right
+binary exponentiation (Menezes, van Oorschot and Vanstone, *Handbook of
+Applied Cryptography*, Algorithm 14.79), and is charged ``FLINT_BITS``
+multiplications.  If a candidate splits with probability ``delta``, a scan
+of at most ``L`` candidates succeeds with probability
+``P = 1 - (1 - delta)^L`` after ``P / delta`` tests on average, and a split
+prime saves about the modeled count ``M``, so the expected gain
+``P (M - FLINT_BITS / delta)`` is not negative exactly when
+``M >= FLINT_BITS / delta``.  Silex scans when
+``M >= degree * FLINT_BITS``, which is that break-even point for
+``delta = 1 / degree``, the Chebotarev density of the completely split primes
+of a Galois field.  This threshold is a Silex cost rule, not a sourced
+constant.  For a field that is not Galois ``delta`` is smaller, and the scan
+can cost up to ``4 * degree`` split tests without finding
+a prime.  The model leaves out the root finding and change of basis at a
+split prime and the inverses modulo ``f`` at other primes.
 
 Reducing relation units modulo the unit group follows Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:reduce_mod_units``: round the Arb

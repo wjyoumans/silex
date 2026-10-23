@@ -1098,6 +1098,78 @@ bool defining_polynomial_splits(const flint::FmpqPoly& defining_polynomial,
            splits_into_distinct_linear_factors(modulus);
 }
 
+// Modeled ring multiplications of the power-basis products at one prime: the
+// window model of sliding_window_width summed over the tables
+// (ExponentRowBits::modeled_cost) plus the squarings of the interleaved
+// evaluation, which Moller ("Algorithms for multi-exponentiation",
+// Section 3.1) puts at up to b - 1 for an output whose longest exponent has
+// b bits.
+double modeled_power_product_multiplications(
+        const std::vector<PreparedFactor>& factors,
+        std::size_t output_count) noexcept {
+    std::vector<flint_bitcnt_t> output_bits(output_count, 0);
+    double multiplications = 0.0;
+    for (const PreparedFactor& factor : factors) {
+        ExponentRowBits row;
+        for (std::size_t column = 0;
+             column < output_count && column < factor.exponents.size();
+             ++column) {
+            const flint::Fmpz& exponent = factor.exponents[column];
+            row.add(exponent);
+            output_bits[column] = std::max<flint_bitcnt_t>(
+                    output_bits[column], fmpz_bits(exponent.raw()));
+        }
+        multiplications += row.modeled_cost();
+    }
+    for (const flint_bitcnt_t bits : output_bits) {
+        if (bits > 1) {
+            multiplications += static_cast<double>(bits - 1);
+        }
+    }
+    return multiplications;
+}
+
+// Whether the CRT primes of a batch are searched for split primes, at which
+// the products are computed in evaluation form (build_split_prime_residues):
+// a ring multiplication there is degree products in F_p instead of one
+// multiplication modulo the defining polynomial.
+//
+// Long exponents.  When some exponent has more than FLINT_BITS bits, it
+// exceeds p - 1 for every word-size prime p, and at a split prime the unit
+// group exponent of the residue ring is p - 1, so modular_power_products
+// reduces every exponent below p and may drop the inverse tables.
+//
+// Short exponents.  The search is preferred when the modeled power-basis
+// multiplications M at one prime (modeled_power_product_multiplications)
+// reach degree * FLINT_BITS.  A split test (splits_into_distinct_linear_
+// factors) is one exponentiation x^p modulo the defining polynomial;
+// left-to-right binary exponentiation (Menezes, van Oorschot and Vanstone,
+// Handbook of Applied Cryptography, Algorithm 14.79) takes at most
+// FLINT_BITS - 1 squarings for p < 2^FLINT_BITS, the multiplications by x
+// being shifts, so a test is charged FLINT_BITS multiplications.  If a
+// candidate splits with probability delta, a scan of at most L candidates
+// finds a split prime with probability P = 1 - (1 - delta)^L after P / delta
+// tests on average, and a split prime saves about M, so the expected gain
+// P (M - FLINT_BITS / delta) is not negative exactly when
+// M >= FLINT_BITS / delta, whatever L is.  The threshold takes
+// delta = 1 / degree, the Chebotarev density of the completely split primes
+// of a Galois field; for any other field delta is smaller and the search
+// can cost up to split_prime_scan_limit tests without finding a prime.  The
+// model leaves out the root finding and change of basis at a split prime
+// and the inverses modulo the defining polynomial at other primes.
+bool prefers_split_primes(const std::vector<PreparedFactor>& factors,
+                          std::size_t output_count, slong degree) noexcept {
+    for (const PreparedFactor& factor : factors) {
+        for (const flint::Fmpz& exponent : factor.exponents) {
+            if (fmpz_bits(exponent.raw()) > FLINT_BITS) {
+                return true;
+            }
+        }
+    }
+    return modeled_power_product_multiplications(factors, output_count) >=
+           static_cast<double>(degree) * static_cast<double>(FLINT_BITS);
+}
+
 bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
                           std::vector<Element>& out, const Order& order,
                           std::vector<PreparedFactor>& factors,
@@ -1130,31 +1202,21 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
     fmpz_one(modulus.raw());
     flint::FmpzMat reconstructed(static_cast<slong>(output_count), degree);
 
-    // Split-prime preference.  When some exponent has more than FLINT_BITS
-    // bits, it exceeds p - 1 for every word-size prime p, and at a prime
-    // where the reduced defining polynomial splits into distinct linear
-    // factors the unit group exponent of the residue ring is p - 1, so
-    // modular_power_products reduces every exponent below p and may drop the
-    // inverse tables.  Every prime gives the same reconstruction, so the
-    // choice changes only the cost.  Up to split_prime_scan_limit candidates
-    // are tested for each prime the CRT needs: by the Chebotarev density
-    // theorem the completely split primes have density 1 / [L : Q] for the
-    // Galois closure L of the field, which is 1 / degree for a Galois field,
-    // so the limit of 4 * degree candidates finds one with probability
+    // Split-prime preference (prefers_split_primes).  Every prime gives the
+    // same reconstruction, so the choice changes only the cost.  Up to
+    // split_prime_scan_limit candidates are tested for each prime the CRT
+    // needs: by the Chebotarev density theorem the completely split primes
+    // have density 1 / [L : Q] for the Galois closure L of the field, which
+    // is 1 / degree for a Galois field, so the limit of 4 * degree
+    // candidates finds one with probability
     // 1 - (1 - 1 / degree)^(4 degree) > 1 - e^-4 there.  When the limit is
     // reached, that candidate is tried as before and the preference ends.
     // A prime found to split here is also passed to build_prime_residues as
     // split, which then computes the products in evaluation form; every other
-    // prime, including every prime of a batch without such an exponent, uses
+    // prime, including every prime of a batch without the preference, uses
     // the power basis.
-    bool prefer_split_primes = false;
-    for (const PreparedFactor& factor : factors) {
-        for (const flint::Fmpz& exponent : factor.exponents) {
-            if (fmpz_bits(exponent.raw()) > FLINT_BITS) {
-                prefer_split_primes = true;
-            }
-        }
-    }
+    bool prefer_split_primes =
+            prefers_split_primes(factors, output_count, degree);
     const std::size_t split_prime_scan_limit =
             4 * static_cast<std::size_t>(degree);
     std::size_t split_prime_scan = 0;

@@ -2394,6 +2394,93 @@ int test_wide_reconstruction_prefers_split_primes() {
     return 0;
 }
 
+// Short exponents: the split-prime preference follows the cost model of
+// prefers_split_primes.  Q(zeta_5) (degree 4, threshold 4 * FLINT_BITS
+// modeled multiplications) with the bases u = 1 + zeta and u^2.  The cheap
+// batch has outputs u^3 (u^2)^-1 = u and its inverse: a few modeled
+// multiplications, so the next prime is used though it is not 1 mod 5.  The
+// costly batch has 8 outputs u^(2^62 + 1) (u^2)^(-2^61) = u and their
+// inverses: every exponent has at most 63 bits, but the window tables and
+// about 62 squarings per output exceed the threshold, so the primes that are
+// not 1 mod 5 are passed over.  The outputs are the same either way.
+int test_wide_reconstruction_short_exponent_split_preference() {
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 4; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::Element zeta(field);
+    silex::Element unit(field);
+    assert(zeta.gen());
+    assert(unit.add_si(zeta, 1));
+
+    ulong start = UWORD(1) << (FLINT_BITS - 1);
+    while (n_nextprime(start, 1) % 5 == 1) {
+        start = n_nextprime(start, 1);
+    }
+
+    for (int costly = 0; costly < 2; ++costly) {
+        const slong outputs = costly != 0 ? 8 : 2;
+        silex::detail::WideFactoredUnits wide;
+        wide.bases.emplace_back(field);
+        wide.bases.emplace_back(field);
+        assert(wide.bases[0].add_si(zeta, 1));
+        assert(wide.bases[1].multiply(unit, unit));
+        wide.exponents = sflint::FmpzMat(outputs, 2);
+        std::vector<silex::FactoredElement> plain;
+        for (slong row = 0; row < outputs; ++row) {
+            fmpz* first = fmpz_mat_entry(wide.exponents.raw(), row, 0);
+            fmpz* second = fmpz_mat_entry(wide.exponents.raw(), row, 1);
+            if (costly != 0) {
+                fmpz_one_2exp(first, 62);
+                fmpz_add_ui(first, first, 1);
+                fmpz_one_2exp(second, 61);
+                fmpz_neg(second, second);
+            } else {
+                fmpz_set_ui(first, 3);
+                fmpz_set_si(second, -1);
+            }
+            assert(fmpz_bits(first) <= FLINT_BITS);
+            const bool inverse = row % 2 == 1;
+            if (inverse) {
+                fmpz_neg(first, first);
+                fmpz_neg(second, second);
+            }
+            plain.emplace_back(field);
+            assert(plain.back().push(unit, inverse ? -1 : 1));
+        }
+        std::vector<silex::Element> expected;
+        sflint::Fmpz bound;
+        exact_outputs_and_bound(expected, bound, maximal, plain);
+
+        silex::detail::BoundedCompactReconstructionOptions options;
+        options.prime_search_start = start;
+        silex::detail::BoundedCompactReconstructionReport report;
+        std::vector<silex::Element> actual;
+        assert(silex::detail::bounded_compact_reconstruct(
+                report, actual, maximal, wide, sflint::FmpzConstRef(bound),
+                options));
+        assert(report.status ==
+               silex::detail::BoundedCompactReconstructionStatus::success);
+        assert(report.primes_used == 1 && report.prime_trials == 1);
+        assert_exact_crt_crossing(report, sflint::FmpzConstRef(bound));
+        assert_equal_outputs(actual, expected);
+        if (costly != 0) {
+            assert(report.nonsplit_prime_skips >= 1);
+            assert(report.last_prime % 5 == 1);
+        } else {
+            assert(report.nonsplit_prime_skips == 0);
+            assert(report.last_prime == n_nextprime(start, 1));
+        }
+    }
+    return 0;
+}
+
 // The evaluation-form route at split primes rejects the same primes as the
 // power-basis route.  Q(zeta_5) with the bases u = 1 + zeta and u^2 of
 // test_wide_reconstruction_prefers_split_primes, the integer q and the
@@ -2719,6 +2806,7 @@ int main() {
     assert(test_modular_power_products_evaluated_match_polynomial() == 0);
     assert(test_modular_power_products_fallback_uses_inverse() == 0);
     assert(test_wide_reconstruction_prefers_split_primes() == 0);
+    assert(test_wide_reconstruction_short_exponent_split_preference() == 0);
     assert(test_wide_reconstruction_split_prime_rejections() == 0);
     assert(test_wide_reconstruction_split_prime_uses_inverse() == 0);
     assert(test_wide_reconstruction_split_prime_matches_power_basis() == 0);

@@ -41,7 +41,8 @@ struct BoundedCompactReconstructionReport {
     std::size_t denominator_prime_rejections = 0;
     std::size_t noninvertible_prime_rejections = 0;
     // Candidates passed over by the split-prime preference of a batch with
-    // an exponent above the word size; they are not counted in prime_trials.
+    // an exponent above the word size or with enough modeled power-product
+    // multiplications; they are not counted in prime_trials.
     std::size_t nonsplit_prime_skips = 0;
     flint_bitcnt_t modulus_bits = 0;
     ulong last_prime = 0;
@@ -60,9 +61,10 @@ const char* bounded_compact_reconstruction_status_name(
 // internal checkpoint deliberately does not produce the bound.  The CRT
 // primes are taken in increasing order from options.prime_search_start, as
 // in reference init_modular_big, except that a batch with an exponent of
-// more than FLINT_BITS bits passes over a bounded number of primes at which
-// the reduced defining polynomial does not split into distinct linear
-// factors (counted in nonsplit_prime_skips).  Any set of usable primes whose
+// more than FLINT_BITS bits, or whose modeled power-product multiplications
+// at one prime reach degree * FLINT_BITS, passes over a bounded number of
+// primes at which the reduced defining polynomial does not split into
+// distinct linear factors (counted in nonsplit_prime_skips).  Any set of usable primes whose
 // product exceeds twice the bound gives the same result.  Skipped primes are
 // never used, so with a non-default prime_search_start close to
 // UWORD_MAX_PRIME the preference could turn a success into prime_exhausted;

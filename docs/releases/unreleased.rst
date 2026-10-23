@@ -515,6 +515,19 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` is unchanged.  See
   :doc:`../reference/algorithms_and_sources`.
 
+- The preference for CRT primes at which the defining polynomial splits, and
+  with it the evaluation-form power products, now also applies when the
+  exponents are short, whenever the modeled cost of the power products exceeds
+  the cost of the search for such a prime.  Reconstructed units and published
+  outputs are unchanged (all 185 ``grh`` corpus rows dump-identical).
+  Callgrind instruction counts (Ir, not wall time; busy machine) fall by
+  7.42% on ``cyclotomic_64_phi32``, 7.24% on ``cyclotomic_real_37_deg18``,
+  8.16% on ``cyclotomic_51_phi32``, 7.77% on ``cyclotomic_real_64_deg16``,
+  7.22% on ``cyclotomic_real_41_deg20``, 5.32% on
+  ``cyclotomic_real_29_deg14`` and 3.74% on ``cyclotomic_37_phi36``; no row
+  changes by more than 1% in the other direction (``cyclotomic_real_31_deg15``
+  +0.21%).
+
 - ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
   and the unit-candidate and relation-saturation kernel bases of the
   class-group computation share one certified first LLL phase.  Its exact
