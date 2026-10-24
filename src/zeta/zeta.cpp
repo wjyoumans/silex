@@ -2,6 +2,7 @@
 
 #include "zeta_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
+#include "../unit/unit_internal.hpp"
 
 #include <flint/flint.h>
 
@@ -2281,6 +2282,8 @@ bool bf_init_residue_degree_context(
         fmpq_poly_get_coeff_fmpz(coeff.raw(), next.defining_polynomial, i);
         next.defining_coefficients.push_back(std::move(coeff));
     }
+    next.cyclotomic_index =
+            detail::cyclotomic_defining_polynomial_index(*field);
     if (!order.discriminant(flint::FmpzRef(next.order_discriminant))) {
         return false;
     }
@@ -2373,6 +2376,21 @@ bool bf_linear_factor_count_batch_lookup(slong& out,
 // the defining-polynomial route applies to `p`.  `cache`, when given, holds
 // the counts already computed for this order (ZetaBfResidueDegreeCache);
 // `batch`, when given, the counts of a batched pass over the primes.
+//
+// When the defining polynomial is exactly the cyclotomic polynomial Phi_n
+// (context.cyclotomic_index = n), the count has a closed form.  For a prime
+// p not dividing n, Phi_n modulo p is a product of phi(n)/k distinct monic
+// irreducible factors of degree k, the order of p modulo n (Lidl and
+// Niederreiter, Finite Fields, 2nd ed., 1997, Theorem 2.47(ii); in field
+// terms, p splits in Q(zeta_n) into phi(n)/k primes of residue degree k,
+// Washington, Introduction to Cyclotomic Fields, 2nd ed., 1997, Theorem
+// 2.13).  So deg gcd(Phi_n, x^p - x) is phi(n), the degree, when
+// p = 1 mod n, and 0 otherwise.  This is a fact about the polynomial
+// modulo p alone, independent of the order.
+// Primes dividing n keep the nmod path.  The discriminant check skips most
+// of them, but not p = 2 for n = 2 mod 4, where 2 is unramified
+// (Phi_n(x) = Phi_{n/2}(-x)).  The cache is read and written as for any
+// other count.
 bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
         slong& out,
         const BfResidueDegreeContext& context,
@@ -2387,6 +2405,12 @@ bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
         return true;
     }
     if (bf_linear_factor_count_batch_lookup(out, batch, p)) {
+        bf_linear_factor_count_cache_store(cache, p, out);
+        return true;
+    }
+    const ulong cyclotomic = context.cyclotomic_index;
+    if (cyclotomic != 0 && cyclotomic % p != 0) {
+        out = p % cyclotomic == 1 % cyclotomic ? context.defining_degree : 0;
         bf_linear_factor_count_cache_store(cache, p, out);
         return true;
     }
@@ -2442,7 +2466,8 @@ bool bf_residue_degree_cache_covers(
 // defining-polynomial route covers and `cache` does not, for
 // bf_linear_residue_degree_count_from_defining_polynomial_ui.  The count is
 // the per-prime quantity deg gcd(f, x^p - x); primes or degrees outside the
-// word kernel are left to the per-prime path.
+// word kernel are left to the per-prime path.  A cyclotomic defining
+// polynomial gets no batch: the per-prime path counts it in closed form.
 void bf_fill_linear_factor_count_batch(
         BfLinearFactorCountBatch& out,
         const BfResidueDegreeContext& context,
@@ -2459,7 +2484,7 @@ void bf_fill_linear_factor_count_batch(
         degree > kBfWordLinearFactorMaxDegree ||
         context.defining_coefficients.size() !=
                 static_cast<std::size_t>(degree + 1) ||
-        first >= end) {
+        context.cyclotomic_index != 0 || first >= end) {
         return;
     }
 
@@ -5058,6 +5083,7 @@ bool ZetaBfTestEntry::linear_factor_counts(
 
     BfResidueDegreeContext context;
     bf_init_residue_degree_context(context, order);
+    context.cyclotomic_index = 0;
     BfLinearFactorCountBatch batch;
     bf_fill_linear_factor_count_batch(batch, context, first, end, nullptr,
                                       nullptr);
@@ -5076,6 +5102,65 @@ bool ZetaBfTestEntry::linear_factor_counts(
         primes.push_back(p);
         batch_counts.push_back(batch_count);
         per_prime_counts.push_back(per_prime_count);
+    }
+    return true;
+}
+
+bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
+        ulong& cyclotomic_index,
+        std::vector<ulong>& primes,
+        std::vector<slong>& counts,
+        std::vector<slong>& word_counts,
+        std::vector<slong>& nmod_counts,
+        const Order& order,
+        ulong first,
+        ulong end) noexcept {
+    cyclotomic_index = 0;
+    primes.clear();
+    counts.clear();
+    word_counts.clear();
+    nmod_counts.clear();
+    if (!order.has_basis() || !order.is_maximal()) {
+        return false;
+    }
+
+    BfResidueDegreeContext context;
+    BfResidueDegreeContext reference;
+    if (!bf_init_residue_degree_context(context, order) ||
+        !bf_init_residue_degree_context(reference, order)) {
+        return false;
+    }
+    cyclotomic_index = context.cyclotomic_index;
+    reference.cyclotomic_index = 0;
+    BfLinearFactorCountBatch batch;
+    bf_fill_linear_factor_count_batch(batch, context, first, end, nullptr,
+                                      nullptr);
+    BfLinearFactorCountBatch word_batch;
+    bf_fill_linear_factor_count_batch(word_batch, reference, first, end,
+                                      nullptr, nullptr);
+    for (ulong p = first <= 2 ? UWORD(2) : n_nextprime(first - 1, 1);
+         p < end; p = n_nextprime(p, 1)) {
+        slong count = -1;
+        if (!bf_linear_residue_degree_count_from_defining_polynomial_ui(
+                    count, context, p, nullptr, nullptr, &batch)) {
+            count = -1;
+        }
+        slong word_count = -1;
+        if (!bf_residue_degree_context_uses_defining_polynomial(reference,
+                                                                p) ||
+            !bf_linear_factor_count_batch_lookup(word_count, &word_batch,
+                                                 p)) {
+            word_count = -1;
+        }
+        slong nmod_count = -1;
+        if (!bf_linear_residue_degree_count_from_defining_polynomial_ui(
+                    nmod_count, reference, p, nullptr, nullptr)) {
+            nmod_count = -1;
+        }
+        primes.push_back(p);
+        counts.push_back(count);
+        word_counts.push_back(word_count);
+        nmod_counts.push_back(nmod_count);
     }
     return true;
 }

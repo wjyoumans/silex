@@ -10,6 +10,7 @@
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/zeta.hpp>
@@ -21,6 +22,7 @@
 #include <optional>
 #include <vector>
 
+#include <flint/fmpz_poly.h>
 #include <flint/ulong_extras.h>
 
 namespace {
@@ -1277,6 +1279,125 @@ bool check_linear_factor_batches() noexcept {
            check_linear_factor_batch(non_monic_setup, false);
 }
 
+// The cyclotomic closed form of the BF linear factor counts: for the field
+// defined by f, on the primes of [first, end), the count the prime loop uses
+// equals the nmod path's count without the closed form (both -1 on the
+// primes the defining-polynomial route skips) and the word kernel's batched
+// count wherever that applies.  When `n` is nonzero, f is Phi_n, the context
+// detects index n, and every counted prime p not dividing n has count phi(n)
+// when p = 1 mod n and 0 otherwise (Lidl and Niederreiter, Finite Fields,
+// Theorem 2.47(ii)); a prime dividing n is skipped unless it is 2 with
+// n = 2 mod 4.  `split` and `compared` count the primes with count phi(n)
+// and those where the word kernel applied.
+bool check_cyclotomic_linear_factor_range(const silex::Order& order,
+                                          ulong n,
+                                          ulong first,
+                                          ulong end,
+                                          slong& split,
+                                          slong& compared) noexcept {
+    ulong index = 0;
+    std::vector<ulong> primes;
+    std::vector<slong> counts;
+    std::vector<slong> word_counts;
+    std::vector<slong> nmod_counts;
+    if (!silex::detail::TestHookAccess::
+                zeta_bf_cyclotomic_linear_factor_counts(
+                        index, primes, counts, word_counts, nmod_counts,
+                        order, first, end) ||
+        index != n || primes.empty()) {
+        return false;
+    }
+    const slong degree = order.degree();
+    for (std::size_t i = 0; i < primes.size(); ++i) {
+        const ulong p = primes[i];
+        const slong count = counts[i];
+        if (count != nmod_counts[i] ||
+            (word_counts[i] >= 0 && word_counts[i] != count)) {
+            return false;
+        }
+        if (word_counts[i] >= 0) {
+            ++compared;
+        }
+        if (count == degree) {
+            ++split;
+        }
+        if (n == 0) {
+            continue;
+        }
+        if (n % p == 0) {
+            if (count >= 0 && !(p == 2 && n % 4 == 2)) {
+                return false;
+            }
+            continue;
+        }
+        if (count != (p % n == 1 % n ? degree : 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool check_cyclotomic_linear_factor_field(const FieldSetup& setup,
+                                          ulong n) noexcept {
+    // Small primes, where every p dividing n occurs, and primes just above
+    // 2^30, the word kernel's largest prime limit, where only the nmod path
+    // and the closed form apply.
+    slong split = 0;
+    slong compared = 0;
+    slong large_split = 0;
+    slong large_compared = 0;
+    if (!check_cyclotomic_linear_factor_range(setup.maximal_order, n, 2, 3000,
+                                              split, compared) ||
+        !check_cyclotomic_linear_factor_range(
+                setup.maximal_order, n, UWORD(1) << 30,
+                (UWORD(1) << 30) + 6000, large_split, large_compared) ||
+        split == 0 || large_split == 0 || large_compared != 0) {
+        return false;
+    }
+    return setup.maximal_order.degree() > 20 || compared > 300;
+}
+
+bool check_cyclotomic_linear_factor_counts() noexcept {
+    // phi(n) >= sqrt(n / 2), so every n with phi(n) <= 40 is at most 3200;
+    // there are 81 of them, the largest 150.
+    slong checked = 0;
+    for (ulong n = 1; n <= 2 * 40 * 40; ++n) {
+        const ulong phi = n_euler_phi(n);
+        if (phi > 40) {
+            continue;
+        }
+        sflint::FmpzPoly cyclotomic;
+        fmpz_poly_cyclotomic(cyclotomic.raw(), n);
+        std::vector<slong> coefficients;
+        for (ulong i = 0; i < phi; ++i) {
+            coefficients.push_back(fmpz_poly_get_coeff_si(
+                    cyclotomic.raw(), static_cast<slong>(i)));
+        }
+        if (!check_cyclotomic_linear_factor_field(
+                    setup_from_coefficients(coefficients.data(),
+                                            static_cast<slong>(phi)),
+                    n)) {
+            return false;
+        }
+        ++checked;
+    }
+
+    // Controls that are not exactly cyclotomic: x^4 - 7, and the translate
+    // Phi_5(x + 1) = x^4 + 5x^3 + 10x^2 + 10x + 5 of the same field as Phi_5.
+    const slong pure_x4[] = {-7, 0, 0, 0};
+    const slong translate[] = {5, 10, 10, 5};
+    slong split = 0;
+    slong compared = 0;
+    return checked == 81 &&
+           check_cyclotomic_linear_factor_range(
+                   setup_from_coefficients(pure_x4, 4).maximal_order, 0, 2,
+                   3000, split, compared) &&
+           check_cyclotomic_linear_factor_range(
+                   setup_from_coefficients(translate, 4).maximal_order, 0, 2,
+                   3000, split, compared) &&
+           compared > 600;
+}
+
 // The linear-factor counts stored in the residue-degree cache are the
 // number of degree-one primes above p (checked against decompose_prime),
 // a later Belabas-Friedman evaluation consumes them (a wrong count changes
@@ -1430,6 +1551,7 @@ int main() {
                    !check_linear_factor_count_cache(
                            setup_from_coefficients(d12_coefficients, 12)) ||
                    !check_linear_factor_batches() ||
+                   !check_cyclotomic_linear_factor_counts() ||
                    !check_word_kernel_squarings()
             ? 1
             : 0;

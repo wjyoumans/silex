@@ -18,11 +18,15 @@ namespace silex::detail {
 // What the Belabas-Friedman evaluation knows about reading residue degrees
 // of a maximal order from its field's defining polynomial: the reduced
 // coefficients, the order discriminant, and, for an order other than the
-// equation order, its index over the equation order.
+// equation order, its index over the equation order.  `cyclotomic_index`
+// is n when the defining polynomial is exactly the cyclotomic polynomial
+// Phi_n (detail::cyclotomic_defining_polynomial_index, detected once when
+// the context is set up), and 0 otherwise.
 struct BfResidueDegreeContext {
     const fmpq_poly_struct* defining_polynomial = nullptr;
     std::vector<flint::Fmpz> defining_coefficients;
     slong defining_degree = -1;
+    ulong cyclotomic_index = 0;
     flint::Fmpz order_discriminant;
     flint::Fmpz equation_index;
     const FactorBase* residue_degree_base = nullptr;
@@ -174,8 +178,10 @@ class TestHookAccess;
 // `primes` receives p, `batch_counts` the number of linear factors of the
 // defining polynomial of `order` modulo p from the batched word pass, and
 // `per_prime_counts` the same number from the per-prime nmod path; each is
-// -1 where that path does not apply to p.  Returns false when `order` is not
-// a maximal order with a basis.
+// -1 where that path does not apply to p.  Both paths run with the cyclotomic
+// closed form turned off, so a cyclotomic defining polynomial still exercises
+// the word kernel and the nmod path.  Returns false when `order` is not a
+// maximal order with a basis.
 class ZetaBfTestEntry {
     friend class TestHookAccess;
     static bool linear_factor_counts(std::vector<ulong>& primes,
@@ -184,6 +190,25 @@ class ZetaBfTestEntry {
                                      const Order& order,
                                      ulong first,
                                      ulong end) noexcept;
+    // The linear factor counts the Belabas-Friedman prime loop uses, with
+    // the cyclotomic closed form, against the word kernel and the nmod path
+    // without it.  `cyclotomic_index` receives the context's Phi_n index (0
+    // when the defining polynomial is not exactly a cyclotomic polynomial).
+    // For each prime p in [first, end), in increasing order, `primes`
+    // receives p, `counts` the count of the loop's path (batch, then
+    // per-prime), `word_counts` the word kernel's batched count and
+    // `nmod_counts` the per-prime nmod count, each -1 where that path does
+    // not apply to p.  Returns false when `order` is not a maximal order
+    // with a basis.
+    static bool cyclotomic_linear_factor_counts(
+            ulong& cyclotomic_index,
+            std::vector<ulong>& primes,
+            std::vector<slong>& counts,
+            std::vector<slong>& word_counts,
+            std::vector<slong>& nmod_counts,
+            const Order& order,
+            ulong first,
+            ulong end) noexcept;
     // The word kernel's unreduced square of x^k mod f, with symmetric
     // squaring in `symmetric` and the full i, j loop in `full`, for
     // `power` of 2 to 20 entries, each at most the kernel's prime limit for
