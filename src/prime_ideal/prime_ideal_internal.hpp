@@ -75,7 +75,8 @@ bool monic_quadratic_factor_word(flint::FmpzModPolyFactor& out,
 // otherwise.  Every route of decompose_prime that factors a quadratic
 // modulo p (omega's minimal polynomial, or a monic quadratic defining
 // polynomial on the Dedekind-Kummer routes) factors through it, so a split
-// prime's two primes come in the same canonical order on each route.
+// word-size prime's two primes come in the same canonical order on each
+// route; larger primes keep FLINT's order.
 void factor_with_quadratic_closed_form(
         flint::FmpzModPolyFactor& out,
         flint::FmpzModPolyConstRef reduced,

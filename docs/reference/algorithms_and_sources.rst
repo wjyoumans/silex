@@ -720,8 +720,8 @@ square root is FLINT ``n_sqrtmod`` (Tonelli--Shanks, Cohen, GTM 138,
 Algorithm 1.5.1), and every root is checked by squaring; a failed check
 falls back to ``fmpz_mod_poly_factor``.  For ``p = 2`` the roots are read
 off ``f(0)`` and ``f(1)``.  Larger ``p`` keep ``fmpz_mod_poly_factor``.
-The two primes above a split ``p`` are listed in increasing order of the
-root ``r`` in ``[0, p)``, which fixes their factor-base order and the
+For word-size ``p``, the two primes above a split ``p`` are listed in
+increasing order of the root ``r`` in ``[0, p)``, which fixes their factor-base order and the
 retained prime; FLINT's order of split factors is not a function
 of the roots, so it is not reproduced.
 
@@ -733,12 +733,12 @@ and ``equation_factor`` routes of ``decompose_prime`` and the matching
 by the Dedekind--Kummer theorem (Cohen, GTM 138, Theorem 4.8.13 for primes
 not dividing the index, and the equation-order construction above).  The
 splitting type is read from ``b^2 - 4c`` modulo ``p`` as in Proposition 5.1.4,
-the square root is ``n_sqrtmod`` (Algorithm 1.5.1), every root is verified by
-substitution into ``f`` (for ``p = 2`` the roots are read off ``f(0)``
-and ``f(1)``), and any failed check or a prime that does not fit a word
-falls back to ``fmpz_mod_poly_factor``.  Split factors
-are listed in increasing order of the root in ``[0, p)``, the same canonical
-order as on the integral-generator route.  The ``squarefree_roots`` route
+the square root is ``n_sqrtmod`` (Algorithm 1.5.1) and is checked by
+squaring (for ``p = 2`` the roots are read off ``f(0)`` and ``f(1)``), and any failed check or a prime that does not fit a word
+falls back to ``fmpz_mod_poly_factor``.  For word-size ``p``, split
+factors are listed in increasing order of the root in ``[0, p)``, the same
+canonical order as on the integral-generator route; larger ``p`` keep
+FLINT's order.  The ``squarefree_roots`` route
 and the factorization of index-divisor minimal polynomials keep FLINT's own
 order.
 
