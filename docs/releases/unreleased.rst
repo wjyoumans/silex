@@ -337,6 +337,22 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` 5.8% fewer (2.049e9 to 1.931e9), all of
   it in ``maximal_order``.  No timing has been measured.
 
+- Local class-relation saturation does less repeated work per pass.
+  ``ResidueField`` carries a content identity, as ``FactorBase`` does:
+  ``set_prime`` issues a fresh one and ``set`` copies it, so
+  ``ResidueField::equal`` answers ``true`` for the same field or an
+  unchanged copy without comparing the prime ideals' HNF matrices; fields
+  set separately from equal primes still use the full comparison, and
+  undefined fields still compare unequal.  The saturation passes also keep
+  their relation buffer across passes while its factor base equals the
+  context base, instead of copying the factor base into a new relation on
+  every pass.  Published results are unchanged: ``grh`` outputs are
+  identical on the 45 cyclotomic corpus rows that finish within 180 s
+  (``cyclotomic_real_163_deg81`` timed out on both builds).  Busy-machine
+  callgrind instruction counts for the whole ``silex-class-unit-instance``
+  process, ``grh`` mode: ``cyclotomic_19_phi18`` 3.8% fewer (1.353e9 to
+  1.302e9).  No timing has been measured.
+
 - The split-prime norm evaluation of the small-LLL relation candidates
   (defining polynomials of degree 16 and more) reuses per-row values.  Each
   candidate is a row ``b`` of the reduced ideal basis, or a sum or
