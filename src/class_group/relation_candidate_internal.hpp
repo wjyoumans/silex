@@ -81,6 +81,26 @@ struct SplitPrimeResultant {
     flint::Fmpz discriminant;
     bool discriminant_computed = false;
 
+    // Closed form of the split test for a cyclotomic f, recognized when the
+    // split-prime search first runs after a reset with a new f (see
+    // add_next_split_prime): f = Phi_n splits into distinct linear factors
+    // modulo a prime p not dividing n exactly when p = 1 mod n, and the
+    // real-subfield polynomial psi_n (the minimal polynomial of
+    // 2 cos(2 pi / n)) exactly when p = +-1 mod n.
+    enum class SplitClosedForm {
+        not_checked,
+        none,
+        cyclotomic,
+        real_cyclotomic
+    };
+    SplitClosedForm split_closed_form = SplitClosedForm::not_checked;
+    ulong split_closed_form_index = 0;
+    // Test-only diagnostic: split primes whose roots came from the closed
+    // form since the last reset with a new f.
+    slong closed_form_split_primes = 0;
+    // Scratch: the coefficients of f modulo the current split prime.
+    std::vector<ulong> reduced_coefficients;
+
     // Row-combination evaluation.  Every small-LLL candidate is a row
     // b_l, or b_l + b_r or b_l - b_r, of one reduced ideal basis whose
     // rows are coordinate polynomials.  Evaluation at a root is linear, so
@@ -130,6 +150,7 @@ struct SplitPrimeResultant {
 
 private:
     bool add_next_split_prime() noexcept;
+    bool add_closed_form_roots(nmod_t mod) noexcept;
     bool row_combination_matches(
             const fmpz_poly_struct* coordinate_polynomial) noexcept;
     const ulong* row_values_at(slong row, std::size_t prime_index) noexcept;

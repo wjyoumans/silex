@@ -14,6 +14,7 @@
 #include <flint/nmod_poly.h>
 #include <flint/ulong_extras.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <vector>
@@ -470,6 +471,8 @@ int test_t2_bound_for_prime_cyclotomic() {
 // roots with multiplicities rather than from x^p mod f.
 struct ReferenceSearch {
     std::vector<ulong> split_primes;
+    // The roots modulo each split prime, sorted.
+    std::vector<std::vector<ulong>> roots;
     slong tested_primes = 0;
     ulong last_tested_prime = 0;
 };
@@ -478,6 +481,7 @@ void reference_split_prime_search(ReferenceSearch& out,
                                   const sflint::FmpzPoly& field) noexcept {
     const slong degree = fmpz_poly_degree(field.raw());
     out.split_primes.clear();
+    out.roots.clear();
     out.tested_primes = 0;
     out.last_tested_prime = UWORD(1) << 27;
     for (;;) {
@@ -501,15 +505,26 @@ void reference_split_prime_search(ReferenceSearch& out,
         }
         if (distinct) {
             out.split_primes.push_back(p);
+            std::vector<ulong> found_roots;
+            for (slong i = 0; i < roots.raw()->num; ++i) {
+                const nmod_poly_struct* factor = roots.raw()->p + i;
+                found_roots.push_back(
+                        nmod_neg(nmod_poly_get_coeff_ui(factor, 0),
+                                 factor->mod));
+            }
+            std::sort(found_roots.begin(), found_roots.end());
+            out.roots.push_back(found_roots);
         }
     }
 }
 
 // Runs the evaluator's search to the end with one candidate whose bound
 // needs more than the 64 split primes kept, then compares the primes
-// found, their order and the number of primes tested with the reference.
-int compare_split_prime_search(const sflint::FmpzPoly& field) noexcept {
-    relation_search::SplitPrimeResultant evaluator;
+// found, their order, the number of primes tested and the set of roots
+// modulo each prime (r_i = root_powers[i n + 1]) with the reference.
+int compare_split_prime_search(
+        relation_search::SplitPrimeResultant& evaluator,
+        const sflint::FmpzPoly& field) noexcept {
     evaluator.reset(field.raw());
     if (!evaluator.enabled) {
         return 1;
@@ -538,12 +553,31 @@ int compare_split_prime_search(const sflint::FmpzPoly& field) noexcept {
                      static_cast<long>(reference.tested_primes));
         return 1;
     }
+    const auto n = static_cast<std::size_t>(evaluator.degree);
+    if (evaluator.root_powers.size() != reference.split_primes.size() * n * n) {
+        return 1;
+    }
     for (std::size_t i = 0; i < reference.split_primes.size(); ++i) {
         if (evaluator.moduli[i].n != reference.split_primes[i]) {
             return 1;
         }
+        std::vector<ulong> roots(n);
+        for (std::size_t j = 0; j < n; ++j) {
+            roots[j] = evaluator.root_powers[(i * n + j) * n + 1];
+        }
+        std::sort(roots.begin(), roots.end());
+        if (roots != reference.roots[i]) {
+            std::fprintf(stderr, "split-prime roots differ at prime %lu\n",
+                         static_cast<unsigned long>(reference.split_primes[i]));
+            return 1;
+        }
     }
     return 0;
+}
+
+int compare_split_prime_search(const sflint::FmpzPoly& field) noexcept {
+    relation_search::SplitPrimeResultant evaluator;
+    return compare_split_prime_search(evaluator, field);
 }
 
 // The discriminant screen in the split-prime search skips only primes
@@ -631,6 +665,89 @@ int test_screened_search_matches_unscreened_search() {
                            reference.split_primes.front() != q
                    ? 0
                    : 1;
+}
+
+// The closed-form split test for Phi_n (p = 1 mod n) and psi_n, the
+// minimal polynomial of 2 cos(2 pi / n) (p = +-1 mod n), against the
+// generic search: the same split primes in the same order, the same
+// number of primes tested, the same root sets, and resultant values equal
+// to fmpz_poly_resultant.  The fields cover prime, prime-power, odd
+// composite and n = 2 mod 4 indices: Phi_17, Phi_19, Phi_32 = x^16 + 1,
+// Phi_34, Phi_60, psi_37 (the cyclotomic_real_37_deg18 polynomial), psi_51,
+// psi_64 and psi_120.  The degree-17 subfield of Q(zeta_103) and
+// Phi_17(x + 1) take the generic test.
+int test_closed_form_split_primes_match_reference() {
+    using ClosedForm = relation_search::SplitPrimeResultant::SplitClosedForm;
+    struct Case {
+        bool real;
+        ulong n;
+    };
+    const Case cases[] = {{false, 17}, {false, 19}, {false, 32},
+                          {false, 34}, {false, 60}, {true, 37},
+                          {true, 51},  {true, 64},  {true, 120}};
+    for (const Case& c : cases) {
+        sflint::FmpzPoly field;
+        if (c.real) {
+            fmpz_poly_cos_minpoly(field.raw(), c.n);
+        } else {
+            fmpz_poly_cyclotomic(field.raw(), c.n);
+        }
+        relation_search::SplitPrimeResultant evaluator;
+        const int search_differs = compare_split_prime_search(evaluator, field);
+        if (search_differs != 0 ||
+            evaluator.split_closed_form !=
+                    (c.real ? ClosedForm::real_cyclotomic
+                            : ClosedForm::cyclotomic) ||
+            evaluator.split_closed_form_index != c.n ||
+            evaluator.closed_form_split_primes !=
+                    static_cast<slong>(evaluator.moduli.size())) {
+            std::fprintf(stderr, "closed form differs for %s_%lu\n",
+                         c.real ? "psi" : "Phi",
+                         static_cast<unsigned long>(c.n));
+            return 1;
+        }
+        relation_search::SplitPrimeResultant values;
+        values.reset(field.raw());
+        if (compare_with_resultant(values, field, 211 + c.n, 40, 64) <= 0 ||
+            values.closed_form_split_primes == 0) {
+            return 1;
+        }
+    }
+    // cyclotomic_real_37_deg18 is psi_37.
+    {
+        constexpr slong coefficients[] = {-1,  9,    45,  -120, -330,
+                                          462, 924,  -792, -1287, 715,
+                                          1001, -364, -455, 105,  120,
+                                          -16, -17,  1,    1};
+        sflint::FmpzPoly row;
+        slong i = 0;
+        for (const slong coefficient : coefficients) {
+            fmpz_poly_set_coeff_si(row.raw(), i, coefficient);
+            ++i;
+        }
+        sflint::FmpzPoly psi;
+        fmpz_poly_cos_minpoly(psi.raw(), 37);
+        if (fmpz_poly_equal(row.raw(), psi.raw()) == 0) {
+            return 1;
+        }
+    }
+    sflint::FmpzPoly field;
+    set_real_abelian_degree_17(field);
+    sflint::FmpzPoly translated;
+    set_prime_cyclotomic(translated, 17);
+    sflint::FmpzPoly shift;
+    fmpz_poly_set_coeff_si(shift.raw(), 0, 1);
+    fmpz_poly_set_coeff_si(shift.raw(), 1, 1);
+    fmpz_poly_compose(translated.raw(), translated.raw(), shift.raw());
+    for (const sflint::FmpzPoly* f : {&field, &translated}) {
+        relation_search::SplitPrimeResultant evaluator;
+        if (compare_split_prime_search(evaluator, *f) != 0 ||
+            evaluator.split_closed_form != ClosedForm::none ||
+            evaluator.closed_form_split_primes != 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 }  // namespace
@@ -1039,6 +1156,7 @@ int test_row_values_invalidated() {
 int main() {
     return test_cyclotomic_matches_resultant() != 0 ||
                    test_screened_search_matches_unscreened_search() != 0 ||
+                   test_closed_form_split_primes_match_reference() != 0 ||
                    test_real_abelian_matches_resultant() != 0 ||
                    test_constant_and_zero_polynomials() != 0 ||
                    test_disabled_and_exhausted_cases() != 0 ||

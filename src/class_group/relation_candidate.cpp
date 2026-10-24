@@ -7,6 +7,7 @@
 #include "relation_candidate_internal.hpp"
 #include "relation_search_internal.hpp"
 #include "../relation/relation_internal.hpp"
+#include "../unit/unit_internal.hpp"
 
 #include <silex/flint/acb_vec.hpp>
 #include <silex/flint/arb.hpp>
@@ -21,6 +22,7 @@
 #include <flint/mag.h>
 #include <flint/ulong_extras.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <utility>
@@ -328,6 +330,47 @@ bool t2_resultant_half_bits(flint_bitcnt_t& out,
     return ok;
 }
 
+// Not from a source, and revisable: the bases a tried for a primitive n-th
+// root before a closed-form split prime falls back to the generic test.
+// Each try succeeds with probability about phi(n) / (2n) or more, and a
+// fallback finds the same split prime, so the cap affects speed only.
+constexpr ulong kClosedFormRootAttempts = 64;
+
+// f(x) mod p by Horner's rule on the reduced coefficients c_0, ..., c_n.
+ulong evaluate_reduced(const std::vector<ulong>& coefficients,
+                       ulong x,
+                       nmod_t mod) noexcept {
+    ulong value = 0;
+    for (std::size_t i = coefficients.size(); i > 0; --i) {
+        value = nmod_add(nmod_mul(value, x, mod), coefficients[i - 1], mod);
+    }
+    return value;
+}
+
+// V_e(a) mod p for the Lucas sequence V_0 = 2, V_1 = a,
+// V_(k+1) = a V_k - V_(k-1) (P = a, Q = 1), so V_k = alpha^k + alpha^-k
+// for a root alpha of x^2 - a x + 1, by the binary ladder on
+// (V_k, V_(k+1)) with V_2k = V_k^2 - 2 and V_(2k+1) = V_k V_(k+1) - a
+// (Crandall and Pomerance, Prime Numbers: A Computational Perspective,
+// 2nd ed., 2005, Section 3.6.1).  e >= 1 and p odd.
+ulong lucas_v(ulong a, ulong e, nmod_t mod) noexcept {
+    const ulong two = nmod_set_ui(2, mod);
+    ulong low = two;
+    ulong high = a;
+    for (slong bit = static_cast<slong>(FLINT_BIT_COUNT(e)) - 1; bit >= 0;
+         --bit) {
+        const ulong cross = nmod_sub(nmod_mul(low, high, mod), a, mod);
+        if (((e >> bit) & 1) != 0) {
+            low = cross;
+            high = nmod_sub(nmod_mul(high, high, mod), two, mod);
+        } else {
+            high = cross;
+            low = nmod_sub(nmod_mul(low, low, mod), two, mod);
+        }
+    }
+    return low;
+}
+
 }  // namespace
 
 void SplitPrimeResultant::reset(
@@ -348,6 +391,9 @@ void SplitPrimeResultant::reset(
     last_prime_count = 0;
     t2_bound_state = T2BoundState::not_computed;
     discriminant_computed = false;
+    split_closed_form = SplitClosedForm::not_checked;
+    split_closed_form_index = 0;
+    closed_form_split_primes = 0;
     moduli.clear();
     root_powers.clear();
     residues.clear();
@@ -393,6 +439,57 @@ bool SplitPrimeResultant::add_next_split_prime() noexcept {
         }
         last_tested_prime = p;
         ++tested_primes;
+
+        // Closed form for f = Phi_n or f = psi_n, n < 2^27 <= p, so p does
+        // not divide n.  Modulo such p, the roots of Phi_n are the elements
+        // of exact order n (Lidl and Niederreiter, Finite Fields, 2nd ed.,
+        // 1997, Theorem 2.47), which all lie in F_p exactly when
+        // n | p - 1, so f splits into distinct linear factors exactly when
+        // p = 1 mod n (Washington, Introduction to Cyclotomic Fields, 2nd
+        // ed., 1997, Theorem 2.13).  Since x^d psi_n(x + 1/x) = Phi_n(x),
+        // d = phi(n) / 2, the roots of psi_n are zeta^k + zeta^-k for zeta
+        // of exact order n and k coprime to n, 0 < k < n / 2, distinct for
+        // n >= 3.  zeta + zeta^-1 lies in F_p exactly when zeta^p is zeta
+        // or zeta^-1, that is when n | p - 1 or n | p + 1, so psi_n splits
+        // exactly when p = +-1 mod n.  Other primes fail the generic test
+        // below, so skipping them leaves the split primes found, their
+        // order and tested_primes unchanged.  The roots are built from a
+        // primitive root of unity and checked exactly; if that fails, the
+        // generic test decides the prime.
+        if (split_closed_form == SplitClosedForm::not_checked) {
+            split_closed_form = SplitClosedForm::none;
+            const ulong cyclotomic =
+                    fmpz_poly_is_cyclotomic(field_polynomial.raw());
+            const ulong real_cyclotomic =
+                    cyclotomic != 0
+                            ? 0
+                            : detail::real_cyclotomic_polynomial_index(
+                                      field_polynomial.raw());
+            if (cyclotomic != 0 && cyclotomic < kSplitPrimeSearchStart) {
+                split_closed_form = SplitClosedForm::cyclotomic;
+                split_closed_form_index = cyclotomic;
+            } else if (real_cyclotomic != 0 &&
+                       real_cyclotomic < kSplitPrimeSearchStart) {
+                split_closed_form = SplitClosedForm::real_cyclotomic;
+                split_closed_form_index = real_cyclotomic;
+            }
+        }
+        if (split_closed_form == SplitClosedForm::cyclotomic ||
+            split_closed_form == SplitClosedForm::real_cyclotomic) {
+            const ulong residue = p % split_closed_form_index;
+            if (residue != 1 &&
+                (split_closed_form != SplitClosedForm::real_cyclotomic ||
+                 residue != split_closed_form_index - 1)) {
+                continue;
+            }
+            nmod_t mod;
+            nmod_init(&mod, p);
+            if (add_closed_form_roots(mod)) {
+                moduli.push_back(mod);
+                ++closed_form_split_primes;
+                return true;
+            }
+        }
 
         // f splits into distinct linear factors modulo p exactly when
         // f divides x^p - x = prod_{a in F_p} (x - a) in F_p[x] (Fermat).  The
@@ -473,6 +570,108 @@ bool SplitPrimeResultant::add_next_split_prime() noexcept {
         return true;
     }
     return false;
+}
+
+bool SplitPrimeResultant::add_closed_form_roots(nmod_t mod) noexcept {
+    const ulong p = mod.n;
+    const ulong index = split_closed_form_index;
+    const bool real = split_closed_form == SplitClosedForm::real_cyclotomic;
+    const auto n = static_cast<std::size_t>(degree);
+    reduced_coefficients.resize(n + 1);
+    for (std::size_t i = 0; i <= n; ++i) {
+        reduced_coefficients[i] = fmpz_fdiv_ui(
+                field_polynomial.raw()->coeffs + static_cast<slong>(i), p);
+    }
+
+    // A first root.  When n | p - 1, zeta = a^((p - 1) / n) has exact order
+    // n exactly when Phi_n(zeta) = 0, or, for psi_n, when
+    // psi_n(zeta + zeta^-1) = 0 (the roots zeta^k + zeta^-k determine
+    // zeta^(+-k)).  When n | p + 1 (psi_n only), alpha = (a + sqrt(a^2 - 4)) / 2
+    // lies in F_(p^2) with alpha^(p+1) = 1 when a^2 - 4 is not a square, and
+    // y = V_e(a) = beta + beta^-1 with beta = alpha^e, e = (p + 1) / n, is a
+    // root of psi_n when beta has exact order n.  Every candidate is
+    // checked exactly against f, which also rejects the bases a where
+    // these conditions fail.
+    const bool minus_one = (p - 1) % index != 0;
+    const ulong exponent = minus_one ? (p + 1) / index : (p - 1) / index;
+    ulong first = 0;
+    bool found = false;
+    // a = 2 gives alpha = 1, so the n | p + 1 search starts at a = 3.
+    const ulong first_base = minus_one ? 3 : 2;
+    for (ulong a = first_base; a < first_base + kClosedFormRootAttempts &&
+                               !found;
+         ++a) {
+        ulong candidate = 0;
+        if (minus_one) {
+            candidate = lucas_v(a, exponent, mod);
+        } else {
+            candidate = nmod_pow_ui(a, exponent, mod);
+            if (real) {
+                candidate = nmod_add(candidate, nmod_inv(candidate, mod),
+                                     mod);
+            }
+        }
+        if (evaluate_reduced(reduced_coefficients, candidate, mod) == 0) {
+            first = candidate;
+            found = true;
+        }
+    }
+    if (!found) {
+        return false;
+    }
+
+    // The roots in increasing k coprime to n: zeta^k, 0 < k < n, for
+    // Phi_n, and V_k(y) = beta^k + beta^-k, 0 < k < n / 2, for psi_n
+    // (V_0 = 2, V_1 = y, V_(k+1) = y V_k - V_(k-1)).  Each is checked to be
+    // a root of f, and the n roots to be distinct, so f = prod (x - r_i)
+    // modulo p.
+    const std::size_t base = root_powers.size();
+    root_powers.resize(base + n * n);
+    std::size_t count = 0;
+    bool ok = true;
+    ulong previous = nmod_set_ui(2, mod);
+    ulong current = real ? first : 1;
+    const ulong limit = real ? (index + 1) / 2 : index;
+    for (ulong k = 1; k < limit && ok; ++k) {
+        if (real) {
+            if (k > 1) {
+                const ulong next = nmod_sub(nmod_mul(first, current, mod),
+                                            previous, mod);
+                previous = current;
+                current = next;
+            }
+        } else {
+            current = nmod_mul(current, first, mod);
+        }
+        if (n_gcd(k, index) != 1) {
+            continue;
+        }
+        if (count >= n ||
+            evaluate_reduced(reduced_coefficients, current, mod) != 0) {
+            ok = false;
+            break;
+        }
+        ulong power = 1;
+        for (std::size_t j = 0; j < n; ++j) {
+            root_powers[base + count * n + j] = power;
+            power = nmod_mul(power, current, mod);
+        }
+        ++count;
+    }
+    if (ok && count == n) {
+        // root_powers[base + i n + 1] is r_i (n >= 2).
+        std::vector<ulong> roots(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            roots[i] = root_powers[base + i * n + 1];
+        }
+        std::sort(roots.begin(), roots.end());
+        ok = std::adjacent_find(roots.begin(), roots.end()) == roots.end();
+    }
+    if (!ok || count != n) {
+        root_powers.resize(base);
+        return false;
+    }
+    return true;
 }
 
 void degree_two_resultant(bool& handled,
