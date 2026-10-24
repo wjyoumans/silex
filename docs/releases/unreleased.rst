@@ -459,8 +459,8 @@ Changed
   each sum.  The symbol is computed at ``n = 1`` and at the primes only; the
   Kronecker symbol is completely multiplicative in ``n``, so every other value
   is the product of two earlier ones, and every value is the same as before.
-  The table takes two bits per index and at most 16 MiB (about 9.4 MiB at
-  ``|D| = 1e14``); past that size the symbol is computed directly.  Enclosures
+  The table takes two bits per index and allocates at most about 16 MiB;
+  past that size the symbol is computed directly.  Enclosures
   are identical, and the proven outputs of the six imaginary-quadratic corpus
   rows are unchanged.  Busy-machine callgrind instruction counts for the whole
   ``silex-class-unit-instance`` process, ``proven`` mode:

@@ -325,12 +325,15 @@ int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept;
 // filled on demand by a segmented sieve and kept, so that both sums of the
 // approximate functional equation read them from one table.  The Kronecker
 // symbol (D / n) is completely multiplicative in n > 0 (Cohen, "A Course in
-// Computational Algebraic Number Theory", GTM 138, Section 1.4.2), so a
+// Computational Algebraic Number Theory", GTM 138, Section 1.4.2:
+// Definition 1.4.8 of the symbol and Theorem 1.4.9(2)), so a
 // composite n with smallest prime factor p has chi(n) = chi(p) chi(n / p);
 // `quadratic_character` is called only for n = 1 and the primes n, and the
-// table returns exactly its values.  A value is two bits, so the table holds
-// at most max_entries / 4 bytes (16 MiB by default) plus one segment of
-// scratch; past max_entries, `value` calls `quadratic_character` directly.
+// table returns exactly its values.  A value is two bits, so the table
+// allocates at most max_entries / 4 + 1 bytes (about 16 MiB by default;
+// while it grows, a reallocation briefly holds the previous buffer too) plus
+// one segment of scratch; past max_entries, `value` calls
+// `quadratic_character` directly.
 // `discriminant` must outlive the table.
 class QuadraticCharacterTable {
 public:
@@ -346,9 +349,9 @@ public:
     QuadraticCharacterTable& operator=(const QuadraticCharacterTable&) =
             delete;
 
-    // (D / n) for n >= 1.
+    // (D / n); n = 0 is not stored and takes the symbol directly.
     int value(ulong n) noexcept {
-        if (n <= filled_) {
+        if (n - 1 < filled_) {
             return stored(n);
         }
         return value_slow(n);
@@ -357,6 +360,11 @@ public:
     // Values held: chi(n) is stored for 1 <= n <= filled().
     ulong filled() const noexcept {
         return filled_;
+    }
+
+    // Bytes allocated for the stored values.
+    ulong allocated_bytes() const noexcept {
+        return packed_.capacity();
     }
 
     // Calls of `quadratic_character` made by the table.

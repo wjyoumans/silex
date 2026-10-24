@@ -158,6 +158,7 @@ void check_character_table(const sflint::Fmpz& discriminant, ulong last,
         assert(table.value(n) == kronecker(discriminant, n));
     }
     assert(table.filled() <= max_entries);
+    assert(table.allocated_bytes() <= max_entries / 4 + 1);
     assert(table.filled() >= (last < max_entries ? last : max_entries));
     ulong expected_calls = 1;
     for (ulong n = 2; n <= table.filled(); ++n) {
@@ -217,6 +218,17 @@ void check_character_tables(bool slow) {
         for (ulong n = 1; n <= table.filled(); n += 7) {
             assert(table.value(n) == kronecker(discriminant, n));
         }
+    }
+    // n = 0, read first and after a fill: (D / 0) is 1 for D = 1 and -1
+    // and 0 otherwise.
+    for (const slong d : {1L, -1L, -7L, 12L}) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+        silex::detail::QuadraticCharacterTable table{
+                sflint::FmpzConstRef(discriminant)};
+        assert(table.value(0) == kronecker(discriminant, 0));
+        assert(table.value(10) == kronecker(discriminant, 10));
+        assert(table.value(0) == kronecker(discriminant, 0));
     }
     if (slow) {
         sflint::Fmpz discriminant;

@@ -5224,7 +5224,16 @@ int QuadraticCharacterTable::value_slow(ulong n) noexcept {
 void QuadraticCharacterTable::extend() noexcept {
     const ulong lo = filled_ + 1;
     const ulong hi = lo - 1 + FLINT_MIN(segment_length_, max_entries_ - filled_);
-    packed_.resize(hi / 4 + 1, 0);
+    // Grow geometrically but never past the bytes max_entries values take,
+    // so the allocation stays within the documented bound.
+    const std::size_t needed = static_cast<std::size_t>(hi / 4 + 1);
+    if (needed > packed_.capacity()) {
+        const std::size_t cap =
+                static_cast<std::size_t>(max_entries_ / 4 + 1);
+        packed_.reserve(FLINT_MIN(FLINT_MAX(2 * packed_.capacity(), needed),
+                                  cap));
+    }
+    packed_.resize(needed, 0);
 
     const ulong root = n_sqrt(hi);
     for (ulong c = small_primes_through_ + 1; c <= root; ++c) {
