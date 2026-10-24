@@ -323,6 +323,23 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` 8.7% fewer (2.267e9 to 2.070e9); control
   ``cyclotomic_real_64_deg16`` unchanged.
 
+- The two-element ideal product (``Ideal::multiply`` through a two-element
+  presentation of one factor) forms ``H M``, the other factor's HNF times the
+  multiplication matrix of the generator, by adding rows of ``M`` for the
+  nonzero entries of ``H`` only, instead of a dense ``fmpz_mat_mul``.  An
+  ideal HNF is upper triangular and every column with a unit pivot is zero
+  above it, so in the ``grh`` cyclotomic rows about 9% of ``H`` is nonzero
+  (32 x 32 and 40 x 40, entries up to 124 bits).  The product is the same
+  integer matrix, so ideal products and class/unit results are unchanged:
+  the ``grh`` instance output agrees on ``cyclotomic_64_phi32``,
+  ``cyclotomic_41_phi40``, ``cyclotomic_real_37_deg18``,
+  ``cyclotomic_real_64_deg16``, ``multiquadratic_m3_m5_m7``,
+  ``duodecic_x12_minus_x_minus_1_proven`` and ``random_d8_h4_s49_proven``.
+  Busy-machine callgrind instruction counts for the whole
+  ``silex-class-unit-instance`` process, ``grh`` mode: ``cyclotomic_64_phi32``
+  5.0% fewer (1.332e10 to 1.265e10), ``cyclotomic_41_phi40`` 3.8% fewer
+  (4.693e10 to 4.515e10).  No timing has been measured.
+
 - ``Order::p_radical`` on an order that is not an equation order, as
   ``maximal_order`` calls it while it enlarges an order, reduces the order's
   multiplication table modulo ``p`` once per call instead of reducing each
