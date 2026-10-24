@@ -402,6 +402,32 @@ Changed
   2.6% fewer (2.256e9 to 2.197e9); ``cyclotomic_64_phi32``, whose
   discriminant ``2^160`` is a square, 0.0015% more.
 
+- The split-prime resultant search of class-group relation search
+  (defining polynomials of degree 16 and more) decides the split primes in
+  closed form when the defining polynomial is exactly a cyclotomic
+  polynomial ``Phi_n`` or exactly ``psi_n``, the minimal polynomial of
+  ``2 cos(2 pi / n)`` that defines the real subfield of ``Q(zeta_n)``
+  (recognized once per polynomial by exact comparison with FLINT's
+  ``fmpz_poly_cyclotomic`` and ``fmpz_poly_cos_minpoly``).  For ``p`` not
+  dividing ``n``, ``Phi_n`` splits into distinct linear factors modulo ``p``
+  exactly when ``p = 1 mod n`` and ``psi_n`` exactly when ``p = +-1 mod n``
+  (Lidl and Niederreiter, *Finite Fields*, Theorem 2.47; Washington,
+  *Introduction to Cyclotomic Fields*, Theorem 2.13), and the roots are the
+  powers ``zeta^k`` of a primitive ``n``-th root of unity, or the sums
+  ``zeta^k + zeta^-k``, which replaces the discriminant screen, the
+  ``x^p mod f`` test and the root finding.  Every root is checked exactly
+  against ``f`` and the roots are checked to be distinct; a prime where
+  that fails takes the generic test.  The split primes found, their order
+  and the point where the search stops are unchanged, and only the order of
+  the roots modulo each prime differs, so every resultant is the one
+  computed before.  In ``grh`` mode, outputs are identical on the 46
+  cyclotomic and real-cyclotomic corpus rows that finish within 600 s, 26
+  of them of degree 16 and more (``cyclotomic_real_163_deg81`` timed out
+  on both builds).  Callgrind instruction counts, ``grh`` mode:
+  ``cyclotomic_real_37_deg18`` 5.6% fewer (1.971e9 to 1.861e9),
+  ``cyclotomic_19_phi18`` 3.6% fewer (1.364e9 to 1.315e9).  No timing has
+  been measured.
+
 - The quadratic ``L(1, chi_D)`` evaluation (the approximate functional
   equation used by the analytic class number and the proven class-unit
   computation of quadratic fields) no longer evaluates FLINT's tail bound
