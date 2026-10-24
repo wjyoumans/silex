@@ -2260,6 +2260,24 @@ Changed
   Under callgrind the ``grh`` class/unit computation ran 5.4% fewer
   instructions for ``cyclotomic_32_phi16`` and 4.7% fewer for
   ``cyclotomic_real_64_deg16``.  No timing has been measured.
+- The proven saturation scan finds the degree-one prime roots of the defining
+  polynomial modulo each prime ``q`` below ``2^64`` with word-size arithmetic
+  (a squarefree check, then a splitting step on ``gcd(x^((q-1)/2) -/+ 1, f)``
+  as in the first step of Rabin's root finder), also for maximal orders that
+  are not the equation order.  The second ``fmpz_mod_poly_roots`` pass, which
+  only restored the order of the prime decomposition, is dropped.  Every root
+  is checked against the polynomial modulo ``q``; a failed check declines the
+  prime as before.  Published ``proven`` outputs are identical on the rows
+  compared (``random_d9_h4_s8``, ``random_d10_h2_s21``, ``pure_x12_plus_7``).
+  The columns of the saturation relation matrix now come in a different
+  order, and where the scan stops on the stability threshold without
+  certifying, the published ``local_primes`` count of ``unit_proof_record``
+  can change (for example 7 to 6 on a test case).  Both are proof-record
+  bookkeeping; the certifying condition is unchanged.  Under callgrind
+  (``proven``) the instruction count fell 10.27% for ``random_d9_h4_s8``,
+  14.21% for ``random_d10_h2_s21`` and 0.69% for ``pure_x12_plus_7``.  No
+  timing has been measured.
+
 
 - The ``grh`` unit extraction reuses the embedded logarithms of repeated
   factor lists.  ``compact_log_matrix``, the scaled log matrices, the
