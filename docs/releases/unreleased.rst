@@ -181,6 +181,58 @@ Changed
   ``real_quadratic_d10000000005`` unchanged (both under 0.1% fewer).  No
   timing has been measured.
 
+- Quadratic fields decompose a split rational prime in closed form: for a
+  monic quadratic defining polynomial ``x^2 + b x + c`` and a prime that
+  fits a word, the splitting type comes from ``b^2 - 4c`` modulo ``p`` and
+  the roots from ``n_sqrtmod``, each root verified by substitution, instead
+  of ``fmpz_mod_poly_factor`` (Cohen, GTM 138, Proposition 5.1.4, Theorem
+  4.8.13, Algorithm 1.5.1).  This covers the maximal quadratic integral
+  generator route and the Dedekind--Kummer routes.  The two primes above a
+  split ``p`` are now always listed in increasing order of the root in
+  ``[0, p)`` on every quadratic route (the ``squarefree_roots`` route and
+  index-divisor factoring keep FLINT's order), so the factor-base order and
+  the retained prime above ``p`` can differ from earlier builds.  Class
+  group, unit rank and torsion, regulator and certification statuses are
+  unchanged on every corpus and fixture row that finishes within 120 s on
+  both builds; the relation and generator records differ on these rows
+  (equally valid, from a different relation sequence).  ``proven``, changed:
+  ``real_quadratic_10007_grh``, ``real_quadratic_31333_grh``,
+  ``real_quadratic_d1000000000009``, ``real_quadratic_d10000000005``,
+  ``real_quadratic_d100000001``, ``real_quadratic_d100000005`` (171 rows
+  identical).  ``grh``, changed: ``cyclotomic_3_phi2``,
+  ``imaginary_quadratic_100003_grh``, ``imaginary_quadratic_14_proven``,
+  ``imaginary_quadratic_185_grh``, ``imaginary_quadratic_46_grh``,
+  ``imaginary_quadratic_d100000000000319``,
+  ``imaginary_quadratic_d1000000000271``,
+  ``imaginary_quadratic_d10000000799``, ``imaginary_quadratic_d100000031``,
+  ``real_quadratic_100003_grh``, ``real_quadratic_10007_grh``,
+  ``real_quadratic_210_proven``, ``real_quadratic_31333_grh``,
+  ``real_quadratic_5_proven``, ``real_quadratic_d100000000000009``,
+  ``real_quadratic_d1000000000009``, ``real_quadratic_d10000000005``,
+  ``real_quadratic_d100000001``, ``real_quadratic_d100000005``,
+  ``real_quadratic_disc416012_proven`` (164 rows identical).  The record
+  field ``class_group.relation_saturation_status`` changes only on three
+  ``grh`` rows, because the relation sequence differs:
+  ``real_quadratic_d1000000000009`` and ``real_quadratic_d10000000005`` from
+  ``not_checked`` to ``unavailable``, and ``real_quadratic_d100000005`` from
+  ``unavailable`` to ``not_checked``.  Several large cyclotomic rows timed
+  out on both builds and were not compared.  Callgrind instruction counts
+  (``proven``): ``real_quadratic_d10000000005`` 62.3% fewer
+  (3.672G to 1.384G, partly from the different relation sequence),
+  ``imaginary_quadratic_d100000000000319`` 5.0% fewer (443.4G to 421.0G,
+  against the main build at the time), control
+  ``cyclotomic_real_q10_c11_deg10`` unchanged (7.472G).  No timing has been
+  measured.
+- The maximal imaginary quadratic relation backend builds the conjugate of
+  an ambiguous prime form (``a == c``) by negating ``b``.  ``qfb_inverse``
+  returns such a form unchanged, so a negative exponent had used ``P`` in
+  place of its conjugate ``P'``; results stay correct (this was an internal
+  fallback route), and a regression test covers ``D = -420`` with ``p = 11``
+  and ``D = -1155`` with ``p = 17``.
+- Tests were re-baselined for the new relation sequence: the deferred
+  before-acceptance order-unit test now uses ``x^2 - x - 2500000003`` and
+  the certified-LLL fallback class-group test uses ``x^2 - x - 25000005``.
+
 - The ``proven`` finish workspace no longer keeps the transform of its
   relation HNF (and, with the change above, no HNF at all).  The transform,
   whose entries reached tens of thousands of bits and was multiplied out on

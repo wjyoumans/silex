@@ -725,6 +725,23 @@ root ``r`` in ``[0, p)``, which fixes their factor-base order and the
 retained prime; FLINT's order of split factors is not a function
 of the roots, so it is not reproduced.
 
+The same closed form serves the Dedekind--Kummer routes of a monic
+quadratic defining polynomial ``f = x^2 + b x + c`` (the ``nonindex_factor``
+and ``equation_factor`` routes of ``decompose_prime`` and the matching
+``decompose_prime_containing`` routes).  Since ``f`` is already reduced modulo
+``p``, the factorization of ``f`` in ``F_p[x]`` gives the primes above ``p``
+by the Dedekind--Kummer theorem (Cohen, GTM 138, Theorem 4.8.13 for primes
+not dividing the index, and the equation-order construction above).  The
+splitting type is read from ``b^2 - 4c`` modulo ``p`` as in Proposition 5.1.4,
+the square root is ``n_sqrtmod`` (Algorithm 1.5.1), every root is verified by
+substitution into ``f`` (for ``p = 2`` the roots are read off ``f(0)``
+and ``f(1)``), and any failed check or a prime that does not fit a word
+falls back to ``fmpz_mod_poly_factor``.  Split factors
+are listed in increasing order of the root in ``[0, p)``, the same canonical
+order as on the integral-generator route.  The ``squarefree_roots`` route
+and the factorization of index-divisor minimal polynomials keep FLINT's own
+order.
+
 Valuations at primes of a maximal order that have no Kummer quotient map
 (index divisors) use, when the bound is at least two, the element lies in
 the prime, the norm shortcut does not apply, the rational prime fits in a
