@@ -1398,12 +1398,14 @@ bool order_index_divisor(bool& out,
 // the defining polynomial: the helper uses the integer numerator of f, which
 // keeps its content, so the product is c^(2n-1) * lc(F) * disc(F) for the
 // content c.  Keeping the content is deliberate: a prime q dividing it would
-// make the numerator vanish modulo q, and the root search rejects the zero
-// polynomial.  Used when the polynomial is not monic integral, where
-// order_index_divisor does not apply.  For a prime q not dividing it, theta is
-// q-integral and Z_(q)[theta] is q-maximal (its discriminant is disc(F) up to
-// a q-unit), so by Dedekind-Kummer the simple roots r of F modulo q are the
-// degree-one primes (q, theta - r) of O_K.
+// make the numerator vanish modulo q, and the root search
+// (degree_one_roots_for_auxiliary_prime, which reads the roots of this
+// numerator) rejects a numerator that loses degree modulo q.  Used when the
+// polynomial is not monic integral, where order_index_divisor does not apply.
+// For a prime q not dividing it, theta is q-integral and Z_(q)[theta] is
+// q-maximal (its discriminant is disc(F) up to a q-unit), so by
+// Dedekind-Kummer the simple roots r of F modulo q are the degree-one primes
+// (q, theta - r) of O_K.
 bool defining_polynomial_bad_prime_product(flint::Fmpz& out,
                                            const NumberField& field) noexcept {
     const nf_struct* raw_field = field.raw_flint_field();
@@ -1472,15 +1474,27 @@ bool degree_one_roots_for_auxiliary_prime(
     flint::FmpzModCtx ctx(q.raw());
     flint::FmpzModPoly reduced(ctx);
     flint::FmpzModPolyFactor roots(ctx);
-    if (!reduced.is_initialized() ||
-        !fmpq_poly_set_fmpz_mod_poly_if_integral(
-                reduced, field->raw_flint_field()->pol, ctx)) {
+    if (!reduced.is_initialized()) {
         return false;
     }
 
-    // The caller follows reference's saturation scan and has already rejected
-    // index and discriminant primes, so the defining polynomial is squarefree
-    // modulo q on this fast path.
+    // The roots are read from the integer numerator N of f (N = f when f is
+    // integral), so f need not have integer coefficients: theta is a root of
+    // N.  The caller follows reference's saturation scan and has already
+    // rejected index and discriminant primes, and, when f is not monic
+    // integral, every q dividing lc(N) * disc(N)
+    // (defining_polynomial_bad_prime_product).  So N keeps its degree and is
+    // squarefree modulo q on this fast path, and its roots are the degree-one
+    // primes (q, theta - r).  A q dividing lc(N) fails closed.
+    const fmpq_poly_struct* polynomial = field->raw_flint_field()->pol;
+    const slong degree = fmpq_poly_degree(polynomial);
+    flint::FmpzPoly numerator;
+    fmpq_poly_get_numerator(numerator.raw(), polynomial);
+    ::fmpz_mod_poly_set_fmpz_poly(reduced.raw(), numerator.raw(), ctx.raw());
+    if (degree < 1 ||
+        fmpz_mod_poly_degree(reduced.raw(), ctx.raw()) != degree) {
+        return false;
+    }
     fmpz_mod_poly_roots(roots.raw(), reduced.raw(), 0, ctx.raw());
     out.reserve(static_cast<std::size_t>(roots.raw()->num));
     for (slong i = 0; i < roots.raw()->num; ++i) {

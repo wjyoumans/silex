@@ -4178,6 +4178,83 @@ int test_saturation_candidates_skip_content_prime_of_nonmonic_polynomial() {
     return 0;
 }
 
+// A defining polynomial with non-integral coefficients, f = 2 (x^2 - 21) / 3:
+// its integer numerator 2 x^2 - 42 keeps the content 2 and theta^2 = 21, as for
+// the integral presentation x^2 - 21.  The search reads the degree-one primes
+// from the roots of the numerator, so it gives the same auxiliary primes,
+// degree-one primes and candidate space as the integral presentation instead
+// of failing.
+int test_saturation_candidates_accept_nonintegral_polynomial() {
+    sflint::Fmpz q0;
+    fmpz_one(q0.raw());
+    fmpz_mul_2exp(q0.raw(), q0.raw(), 60);
+    sflint::fmpz_nextprime(sflint::FmpzRef(q0), sflint::FmpzConstRef(q0));
+
+    auto search_from_q0 = [&](sflint::FmpqPolyConstRef polynomial,
+                              sflint::FmpzMat& candidates,
+                              silex::detail::SaturationCandidateSearchResult&
+                                      search) noexcept {
+        silex::NumberField field =
+                silex::test::field_by_polynomial(polynomial);
+        // Maximal order Z[(1 + theta) / 2], theta^2 = 21.
+        sflint::FmpqMat basis(2, 2);
+        fmpq_mat_zero(basis.raw());
+        fmpq_set_si(fmpq_mat_entry(basis.raw(), 0, 0), 1, 1);
+        fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 0), 1, 2);
+        fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 1), 1, 2);
+        silex::Order input = silex::Order::from_basis(
+                field, sflint::FmpqMatConstRef(basis));
+        assert(input.is_defined());
+        silex::Order order(field);
+        assert(order.maximal_order(input));
+        assert(order.is_maximal());
+
+        // 21 = theta^2 is a square; -1 and 7 are not.
+        std::vector<silex::FactoredElement> relations;
+        for (slong v : {21, -1, 7}) {
+            silex::Element value(field);
+            assert(value.set_si(v));
+            silex::FactoredElement relation(field);
+            assert(relation.one());
+            assert(relation.push(value, 1));
+            relations.push_back(std::move(relation));
+        }
+        slong auxiliary_prime_count = 0;
+        return silex::detail::saturation_candidates_from_relations_from_prime(
+                candidates, auxiliary_prime_count, relations, order, 2, 100.0,
+                sflint::FmpzConstRef(q0), 8, &search);
+    };
+
+    sflint::FmpqPoly integral;
+    sflint::fmpq_poly_zero(integral);
+    fmpq_poly_set_coeff_si(integral.raw(), 0, -21);
+    fmpq_poly_set_coeff_si(integral.raw(), 2, 1);
+    sflint::FmpqPoly nonintegral;
+    fmpq_poly_scalar_mul_si(nonintegral.raw(), integral.raw(), 2);
+    fmpq_poly_scalar_div_si(nonintegral.raw(), nonintegral.raw(), 3);
+    assert(!fmpz_is_one(nonintegral.raw()->den));
+
+    sflint::FmpzMat expected(0, 0);
+    silex::detail::SaturationCandidateSearchResult expected_search;
+    assert(search_from_q0(sflint::FmpqPolyConstRef(integral), expected,
+                          expected_search));
+    assert(expected_search.auxiliary_prime_count == 8);
+    assert(expected_search.degree_one_prime_count > 0);
+
+    sflint::FmpzMat candidates(0, 0);
+    silex::detail::SaturationCandidateSearchResult search;
+    assert(search_from_q0(sflint::FmpqPolyConstRef(nonintegral), candidates,
+                          search));
+    assert(search.auxiliary_prime_count ==
+           expected_search.auxiliary_prime_count);
+    assert(search.degree_one_prime_count ==
+           expected_search.degree_one_prime_count);
+    assert(search.quotient_log_row_count ==
+           expected_search.quotient_log_row_count);
+    assert(sflint::fmpz_mat_equal(candidates, expected));
+    return 0;
+}
+
 // Index-bounded saturation (the internal class/unit validation pass) clears
 // the primes of a bound on h_cand / h.  Clearing them proves saturation only
 // when the bound holds unconditionally; with a GRH-conditional bound the
@@ -8845,6 +8922,7 @@ int main() {
     test_degree_one_quotient_log_row_word_size_matches_general();
     test_saturation_candidates_skip_bad_prime_of_nonmonic_polynomial();
     test_saturation_candidates_skip_content_prime_of_nonmonic_polynomial();
+    test_saturation_candidates_accept_nonintegral_polynomial();
     test_relation_saturation_index_bounded_status_needs_unconditional_bound();
     test_validation_exact_index_saturation_status_follows_generation();
     test_exact_order_certification_failure_restores_generation_check();
