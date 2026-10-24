@@ -164,6 +164,22 @@ Changed
   ``grh`` mode: ``cyclotomic_32_phi16`` 6.5% fewer, ``cyclotomic_41_phi40``
   0.8%).  See "Roots of unity" in :doc:`../reference/algorithms_and_sources`.
 
+- The Belabas-Friedman prime loop counts the degree-one primes above ``p``
+  in closed form when the defining polynomial is exactly a cyclotomic
+  polynomial ``Phi_n`` (recognized once per evaluation, with the same exact
+  comparison as the roots-of-unity bound): for ``p`` not dividing ``n``,
+  ``Phi_n`` has ``phi(n)`` roots modulo ``p`` when ``p = 1 mod n`` and none
+  otherwise (Lidl and Niederreiter, *Finite Fields*, Theorem 2.47;
+  Washington, *Introduction to Cyclotomic Fields*, Theorem 2.13).  Primes
+  dividing ``n`` and all other polynomials keep the root count modulo ``p``.
+  The counts are the same, so the zeta values and published results are
+  unchanged: ``grh`` and ``proven`` outputs, proof records and unit
+  generators are identical on every cyclotomic row of the corpus that
+  finishes (46 ``grh`` and 41 ``proven`` rows compared).  Callgrind
+  instruction counts, ``grh`` mode: ``cyclotomic_19_phi18`` 9.9% fewer
+  (1.508e9 to 1.360e9), ``cyclotomic_32_phi16`` 4.7% fewer (5.687e8 to
+  5.417e8).  No timing has been measured.
+
 - The FLINT route of the stored-unit reduction (the LLL of the scaled unit
   log rows, run when a unit group's stored units are reduced) takes the
   shared certified first LLL phase, which replaces FLINT's multiprecision
