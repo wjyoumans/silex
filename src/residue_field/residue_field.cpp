@@ -14,10 +14,21 @@
 #include <flint/nmod.h>
 #include <flint/ulong_extras.h>
 
+#include <atomic>
+#include <cstdint>
 #include <utility>
 
 namespace silex {
 namespace {
+
+// Source of ResidueField content identities.  One counter for every field
+// keeps an identity from being reused by a later, different field; zero is
+// never issued.
+std::atomic<std::uint64_t> next_residue_field_identity{1};
+
+std::uint64_t fresh_residue_field_identity() noexcept {
+    return next_residue_field_identity.fetch_add(1, std::memory_order_relaxed);
+}
 
 bool reduce_polynomial(flint::FmpzModPoly& out,
                        flint::FmpzPolyConstRef polynomial,
@@ -163,6 +174,7 @@ void ResidueField::swap(ResidueField& other) noexcept {
     ctx_.swap(other.ctx_);
     modulus_.swap(other.modulus_);
     std::swap(defined_, other.defined_);
+    std::swap(identity_, other.identity_);
 }
 
 void ResidueField::clear() noexcept {
@@ -193,6 +205,8 @@ bool ResidueField::set(const ResidueField& other) noexcept {
     fmpz_mod_poly_set(next.modulus_.raw(), other.modulus_.raw(),
                       next.ctx_.raw());
     next.defined_ = true;
+    // An unchanged copy keeps the source's identity.
+    next.identity_ = other.identity_;
     swap(next);
     return true;
 }
@@ -227,6 +241,7 @@ bool ResidueField::set_prime(const PrimeIdeal& prime) noexcept {
     }
 
     next.defined_ = true;
+    next.identity_ = fresh_residue_field_identity();
     swap(next);
     return true;
 }
@@ -301,7 +316,15 @@ std::optional<flint::FmpzPoly> ResidueField::modulus() const noexcept {
 }
 
 bool ResidueField::equal(const ResidueField& other) const noexcept {
-    return is_defined() && other.is_defined() && prime_.equal(other.prime_);
+    if (!is_defined() || !other.is_defined()) {
+        return false;
+    }
+    // The same object, or an unchanged copy of the same field (a shared
+    // nonzero identity), holds the same prime; skip its HNF comparison.
+    if (this == &other || identity_ == other.identity_) {
+        return true;
+    }
+    return prime_.equal(other.prime_);
 }
 
 bool ResidueField::multiplicative_generator(

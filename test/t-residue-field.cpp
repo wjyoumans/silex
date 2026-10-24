@@ -1189,6 +1189,97 @@ int test_set_factored_element_matches_factorwise_product() {
 // characteristic, cardinality and modulus, outlives the source, and serves as
 // a parent for elements equal to the source's. Undefined sources clear the
 // target, and set_prime still rejects an unsupported prime afterwards.
+// ResidueField::equal answers from the content identity for the same object
+// and for unchanged copies, and from the prime comparison otherwise: fields
+// set separately from one prime still compare equal, and fields of distinct
+// primes, re-set copies and undefined fields do not.
+int test_equal_identity_shortcut() {
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 5);
+
+    silex::NumberField field;
+    silex::Order order;
+    order = order_by_polynomial(field, polynomial);
+
+    sflint::Fmpz p;
+    fmpz_set_si(p, 11);
+    silex::PrimeIdealList primes11;
+    assert(silex::decompose_prime(primes11, order, sflint::FmpzConstRef(p)));
+    assert(primes11.size() == 2);
+    fmpz_set_si(p, 3);
+    silex::PrimeIdealList primes3;
+    assert(silex::decompose_prime(primes3, order, sflint::FmpzConstRef(p)));
+    assert(primes3.size() == 1);
+
+    // The same object.
+    silex::ResidueField a;
+    assert(a.set_prime(*primes11.at(0)));
+    assert(a.equal(a));
+
+    // An unchanged copy, directly and as an element or quotient-log parent.
+    silex::ResidueField copy;
+    assert(copy.set(a));
+    assert(copy.equal(a));
+    assert(a.equal(copy));
+    silex::ResidueFieldElement element(a);
+    assert(element.parent() != nullptr);
+    assert(element.parent()->equal(a));
+    assert(a.equal(*element.parent()));
+    silex::ResidueFieldQuotientLog log(a);
+    assert(log.parent() != nullptr);
+    assert(log.parent()->equal(*element.parent()));
+
+    // Distinct but equal: set separately from the same prime, or from an
+    // equal copy of it, so the identities differ.
+    silex::ResidueField again;
+    assert(again.set_prime(*primes11.at(0)));
+    assert(again.equal(a));
+    assert(a.equal(again));
+    assert(again.equal(copy));
+    silex::PrimeIdeal prime_copy(order);
+    assert(prime_copy.set(*primes11.at(0)));
+    silex::ResidueField from_prime_copy(prime_copy);
+    assert(from_prime_copy.equal(a));
+
+    // A moved field keeps its identity; the moved-from field is undefined.
+    silex::ResidueField moved(std::move(again));
+    assert(moved.equal(a));
+    assert(!again.is_defined());
+    assert(!again.equal(a));
+    assert(!a.equal(again));
+
+    // Unequal: the conjugate prime over the same p (same degree and
+    // characteristic), and a prime over another p.
+    silex::ResidueField conjugate;
+    assert(conjugate.set_prime(*primes11.at(1)));
+    assert(conjugate.degree() == a.degree());
+    assert(!conjugate.equal(a));
+    assert(!a.equal(conjugate));
+    silex::ResidueField other_p;
+    assert(other_p.set_prime(*primes3.at(0)));
+    assert(!other_p.equal(a));
+    assert(!a.equal(other_p));
+
+    // A copy re-set to another prime no longer matches its old source.
+    assert(copy.set_prime(*primes11.at(1)));
+    assert(!copy.equal(a));
+    assert(copy.equal(conjugate));
+    assert(copy.set(a));
+    assert(copy.equal(a));
+
+    // Undefined fields are never equal, even to each other or themselves.
+    silex::ResidueField empty;
+    silex::ResidueField empty2;
+    assert(!empty.equal(empty));
+    assert(!empty.equal(empty2));
+    assert(!empty.equal(a));
+    assert(!a.equal(empty));
+    copy.clear();
+    assert(!copy.equal(a));
+    assert(!copy.equal(empty));
+    return 0;
+}
+
 int test_copy_keeps_validated_field() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 5);
@@ -1654,6 +1745,7 @@ int main() {
     assert(test_quadratic() == 0);
     assert(test_failure_preserves_output() == 0);
     assert(test_copy_keeps_validated_field() == 0);
+    assert(test_equal_identity_shortcut() == 0);
     assert(test_multiplicative_degree_one() == 0);
     assert(test_multiplicative_quadratic() == 0);
     assert(test_quotient_logs_mod_three() == 0);

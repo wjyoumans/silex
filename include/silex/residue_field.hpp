@@ -11,6 +11,7 @@
 #include <silex/order_element.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <cstdint>
 #include <optional>
 
 namespace silex {
@@ -58,6 +59,11 @@ private:
     flint::FmpzModCtx ctx_;
     flint::FmpzModPoly modulus_;
     bool defined_ = false;
+    // Content identity: nonzero once defined, a fresh value from set_prime()
+    // and copied by set().  A field is only replaced as a whole, so two
+    // fields with the same nonzero identity hold equal contents and equal()
+    // can answer without comparing the primes.
+    std::uint64_t identity_ = 0;
 
     friend class ResidueFieldElement;
     friend class ResidueFieldQuotientLog;
