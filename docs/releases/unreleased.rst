@@ -149,6 +149,20 @@ Changed
   (3.671e9 to 3.302e9), ``simplest_quartic_t10`` 1.5% fewer (1.311e9 to
   1.292e9).  No timing has been measured.
 
+- The number ``w`` of roots of unity of a field whose monic integral
+  defining polynomial is exactly a cyclotomic polynomial ``Phi_n`` is
+  bounded directly by ``w = lcm(2, n)``, as in Hecke's ``_torsion_units_gen``
+  for cyclotomic fields, instead of by the good-prime loop with its
+  factorizations modulo many primes.  ``Phi_n`` is recognized with FLINT's
+  ``fmpz_poly_is_cyclotomic`` (exact coefficient comparison); translates
+  ``Phi_n(+-x + c)`` with ``c != 0`` and all other polynomials keep the loop.
+  The bound is ``w`` itself, and ``w`` is still published only after a root of
+  that exact order is certified.  Published results are unchanged on every
+  cyclotomic row of the corpus that finishes (47 ``grh`` and 42 ``proven``
+  rows compared); only the work changes (callgrind instruction counts,
+  ``grh`` mode: ``cyclotomic_32_phi16`` 6.5% fewer, ``cyclotomic_41_phi40``
+  0.8%).  See "Roots of unity" in :doc:`../reference/algorithms_and_sources`.
+
 - The FLINT route of the stored-unit reduction (the LLL of the scaled unit
   log rows, run when a unit group's stored units are reduced) takes the
   shared certified first LLL phase, which replaces FLINT's multiprecision

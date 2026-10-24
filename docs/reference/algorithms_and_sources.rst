@@ -384,6 +384,19 @@ branch of PARI/GP 2.17.3 ``src/basemath/nffactor.c:nfrootsof1``:
       ``K`` has all its roots in ``K``, and their reductions are all the
       residue roots.
 
+When ``T`` is exactly a cyclotomic polynomial ``Phi_m``, Silex skips steps
+1 and 2 and takes the bound ``w = lcm(2, m)``, as Hecke v0.38.6
+``TorsionUnits.jl:_torsion_units_gen`` (lines 416-423) returns ``f`` for even
+``f`` and ``2f`` for odd ``f`` on the cyclotomic field ``Q(zeta_f)``.  Hecke
+reads a field attribute; Silex recognizes ``Phi_m`` with FLINT's
+``fmpz_poly_is_cyclotomic``, which compares ``T`` coefficient for coefficient
+with ``Phi_m`` for each ``m`` with ``phi(m) = n``.  The bound is ``w``
+itself: ``K`` contains ``+-zeta_m``, so ``lcm(2, m) | w``, and
+``Q(zeta_w)`` is a subfield of ``K``, so ``phi(w) <= phi(m)``, which no strict
+multiple of the even number ``lcm(2, m)`` satisfies.  Translates
+``Phi_m(+-y + c)`` with ``c != 0`` and every other ``T`` take steps 1 and 2.
+Step 3 or 4 then certifies the root as before.
+
 Silex publishes ``w`` only when it certifies a root of unity whose exact
 order is the reduced bound.  The certificate is ``z^w = 1`` and
 ``z^(w/l) != 1`` for every prime ``l | w``.  With the upper bound, this
@@ -404,7 +417,10 @@ where degrees 16 and 18 use step 4b for 2- and 3-power roots.  It checks
 non-monic presentations with ``w = 2``, a non-monic cyclotomic translate,
 and non-monic presentations with ``w = 10``, 12, 18, 32 and 50.  It checks
 the Hensel search on its own, and fail-closed behavior against bounds that
-are too large or not multiples of the proven bound.
+are too large or not multiples of the proven bound.  For every ``m`` with
+``phi(m) <= 40`` it checks that the cyclotomic shortcut and steps 1 and 2
+give the same bound ``lcm(2, m)`` on ``Phi_m``, and that translates keep the
+bound of steps 1 and 2.
 Earlier versions used only ``sqrt(-1)`` and ``sqrt(-3)`` without comparing
 the result to the bound, and returned ``w = 6`` for ``Q(zeta_9)``, where the
 true value is 18.
