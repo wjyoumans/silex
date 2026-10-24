@@ -1345,6 +1345,33 @@ bool ideal_minimum(flint::Fmpz& minimum, flint::FmpzMatConstRef coordinates,
     return true;
 }
 
+void zero_skipping_mul(flint::FmpzMatRef out, flint::FmpzMatConstRef left,
+                       flint::FmpzMatConstRef right) noexcept {
+    // Not a source algorithm: the classical row-by-row product, omitting the
+    // terms whose left factor is zero.  Each output row is accumulated as
+    // sum_j left[i, j] right[j, *] over the nonzero left[i, j] only, so the
+    // result is the integer product fmpz_mat_mul returns.
+    const slong rows = fmpz_mat_nrows(left.raw());
+    const slong inner = fmpz_mat_ncols(left.raw());
+    const slong columns = fmpz_mat_ncols(right.raw());
+    assert(fmpz_mat_nrows(right.raw()) == inner);
+    assert(fmpz_mat_nrows(out.raw()) == rows && fmpz_mat_ncols(out.raw()) == columns);
+    for (slong i = 0; i < rows; ++i) {
+        fmpz* target = fmpz_mat_entry(out.raw(), i, 0);
+        _fmpz_vec_zero(target, columns);
+        for (slong j = 0; j < inner; ++j) {
+            const fmpz* coefficient = fmpz_mat_entry(left.raw(), i, j);
+            if (fmpz_is_zero(coefficient)) continue;
+            const fmpz* source = fmpz_mat_entry(right.raw(), j, 0);
+            if (fmpz_is_one(coefficient)) {
+                _fmpz_vec_add(target, target, source, columns);
+            } else {
+                _fmpz_vec_scalar_addmul_fmpz(target, source, columns, coefficient);
+            }
+        }
+    }
+}
+
 namespace {
 
 void two_generator_rows(flint::FmpzMat& rows, flint::FmpzMatConstRef h,
@@ -1354,7 +1381,7 @@ void two_generator_rows(flint::FmpzMat& rows, flint::FmpzMatConstRef h,
     flint::FmpzMatWindow scalar_rows(rows, 0, 0, n, n);
     flint::FmpzMatWindow element_rows(rows, n, 0, 2 * n, n);
     fmpz_mat_scalar_mul_fmpz(scalar_rows.raw(), h.raw(), scalar.raw());
-    fmpz_mat_mul(element_rows.raw(), h.raw(), multiplication.raw());
+    zero_skipping_mul(flint::FmpzMatRef(element_rows.raw()), h, multiplication);
 }
 
 bool extract_two_generator(flint::FmpzMat& coordinates,

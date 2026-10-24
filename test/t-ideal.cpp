@@ -3626,6 +3626,113 @@ int test_triangular_basis_contains_matches_hnf_reference() {
     return 0;
 }
 
+// zero_skipping_mul is the H M product of the two-generator ideal product; it
+// must return exactly what fmpz_mat_mul does.  The cases are random ideal-style
+// HNFs (unit pivots give zero columns above them), HNFs with zero rows or
+// columns, 1 x 1 and empty shapes, rectangular factors and dense signed left
+// factors, with multiword entries on both sides.
+void check_zero_skipping_mul(const sflint::FmpzMat& left, const sflint::FmpzMat& right,
+                             flint_rand_t state) noexcept {
+    const slong rows = fmpz_mat_nrows(left.raw());
+    const slong columns = fmpz_mat_ncols(right.raw());
+    sflint::FmpzMat expected(rows, columns), product(rows, columns);
+    fmpz_mat_mul(expected.raw(), left.raw(), right.raw());
+    // The output is overwritten, not accumulated into.
+    fmpz_mat_randtest(product.raw(), state, 80);
+    silex::detail::zero_skipping_mul(sflint::FmpzMatRef(product),
+                                     sflint::FmpzMatConstRef(left),
+                                     sflint::FmpzMatConstRef(right));
+    assert(fmpz_mat_equal(product.raw(), expected.raw()));
+    // The ideal product writes into the lower window of a 2n-row matrix.
+    sflint::FmpzMat stacked(2 * rows, columns);
+    fmpz_mat_randtest(stacked.raw(), state, 40);
+    sflint::FmpzMat top(rows, columns);
+    for (slong i = 0; i < rows; ++i)
+        for (slong j = 0; j < columns; ++j)
+            fmpz_set(fmpz_mat_entry(top.raw(), i, j), fmpz_mat_entry(stacked.raw(), i, j));
+    {
+        sflint::FmpzMatWindow lower(stacked, rows, 0, 2 * rows, columns);
+        silex::detail::zero_skipping_mul(sflint::FmpzMatRef(lower.raw()),
+                                         sflint::FmpzMatConstRef(left),
+                                         sflint::FmpzMatConstRef(right));
+    }
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < columns; ++j) {
+            assert(fmpz_equal(fmpz_mat_entry(stacked.raw(), i, j),
+                              fmpz_mat_entry(top.raw(), i, j)));
+            assert(fmpz_equal(fmpz_mat_entry(stacked.raw(), rows + i, j),
+                              fmpz_mat_entry(expected.raw(), i, j)));
+        }
+    }
+}
+
+int test_zero_skipping_mul_matches_fmpz_mat_mul() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    flint_rand_set_seed(state, 0x5a45524fUL, 0x534b4950UL);
+    slong hnf = 0, unit_pivots = 0, zero_rows = 0, zero_columns = 0, one_by_one = 0;
+    slong multiword = 0, dense = 0;
+    for (slong trial = 0; trial < 600; ++trial) {
+        const slong n = trial < 20 ? 1 : 1 + static_cast<slong>(n_randint(state, 24));
+        const slong form = trial % 4;  // 0, 1 HNF; 2 HNF with zero rows/columns; 3 dense
+        const flint_bitcnt_t bits = 1 + static_cast<flint_bitcnt_t>(n_randint(state, 130));
+        sflint::FmpzMat h(n, n);
+        if (form == 3) {
+            fmpz_mat_randtest(h.raw(), state, bits);
+            ++dense;
+        } else {
+            for (slong j = 0; j < n; ++j) {
+                fmpz* d = fmpz_mat_entry(h.raw(), j, j);
+                if (n_randint(state, 2) == 0) {
+                    fmpz_one(d);
+                    ++unit_pivots;
+                } else {
+                    fmpz_randbits(d, state, bits);
+                    fmpz_abs(d, d);
+                    if (fmpz_cmp_ui(d, 2) < 0) fmpz_set_ui(d, 2);
+                }
+                for (slong i = 0; i < j; ++i) {
+                    fmpz_randm(fmpz_mat_entry(h.raw(), i, j), state, d);
+                }
+            }
+            assert(fmpz_mat_is_in_hnf(h.raw()));
+            ++hnf;
+            if (form == 2) {
+                const slong k = static_cast<slong>(n_randint(state, static_cast<ulong>(n)));
+                if (trial % 8 == 2) {
+                    for (slong j = 0; j < n; ++j) fmpz_zero(fmpz_mat_entry(h.raw(), k, j));
+                    ++zero_rows;
+                } else {
+                    for (slong i = 0; i < n; ++i) fmpz_zero(fmpz_mat_entry(h.raw(), i, k));
+                    ++zero_columns;
+                }
+            }
+        }
+        if (n == 1) ++one_by_one;
+        if (fmpz_mat_max_bits(h.raw()) > FLINT_BITS - 2 ||
+            fmpz_mat_max_bits(h.raw()) < -(FLINT_BITS - 2)) ++multiword;
+        // Square, as in the ideal product, and one rectangular right factor.
+        sflint::FmpzMat m(n, n);
+        fmpz_mat_randtest(m.raw(), state, 1 + n_randint(state, 100));
+        check_zero_skipping_mul(h, m, state);
+        const slong columns = static_cast<slong>(n_randint(state, 5));
+        sflint::FmpzMat wide(n, columns);
+        fmpz_mat_randtest(wide.raw(), state, 1 + n_randint(state, 70));
+        check_zero_skipping_mul(h, wide, state);
+    }
+    // All-zero and empty shapes.
+    for (slong n : {0, 1, 3}) {
+        sflint::FmpzMat zero(n, n), m(n, n);
+        fmpz_mat_randtest(m.raw(), state, 20);
+        check_zero_skipping_mul(zero, m, state);
+        check_zero_skipping_mul(m, zero, state);
+    }
+    flint_rand_clear(state);
+    assert(hnf >= 400 && unit_pivots >= 1000 && zero_rows >= 50 && zero_columns >= 50 &&
+           one_by_one >= 20 && multiword >= 100 && dense >= 100);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--dump-product-fixtures")
         return dump_product_fixtures();
@@ -3637,6 +3744,7 @@ int main(int argc, char** argv) {
     assert(test_general_product_hnf_matches_plain_hnf() == 0);
     assert(test_two_generator_search_matches_plain_hnf() == 0);
     assert(test_ideal_minimum_forward_substitution_matches_solve() == 0);
+    assert(test_zero_skipping_mul_matches_fmpz_mat_mul() == 0);
     for (slong degree : {2, 3, 4, 6, 8, 12}) {
         for (slong kind = 0; kind < 5; ++kind) {
             silex::Order order;

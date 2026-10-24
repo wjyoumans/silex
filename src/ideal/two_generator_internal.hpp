@@ -29,6 +29,14 @@ bool ideal_minimum_generic(flint::Fmpz& minimum,
                            flint::FmpzMatConstRef coordinates,
                            flint::FmpzMatConstRef h) noexcept;
 
+// out = left * right, the product fmpz_mat_mul returns, computed by
+// accumulating right's rows over the nonzero entries of left only.  The ideal
+// product forms H M with H an ideal HNF, which in large-degree fields is
+// mostly zero, so this costs (nonzeros of H) * n multiply-adds instead of a
+// dense n^3 product.  Shapes must agree; out must not alias left or right.
+void zero_skipping_mul(flint::FmpzMatRef out, flint::FmpzMatConstRef left,
+                       flint::FmpzMatConstRef right) noexcept;
+
 // On failure, scalar and element remain unchanged. Search exhaustion is not a
 // claim that the ideal has no two-generator presentation.
 bool ideal_two_generator(flint::FmpzRef scalar, OrderElement& element,
