@@ -1530,6 +1530,194 @@ int test_factored_log_memo_after_failed_factor_log() {
     return 0;
 }
 
+// The unit-extraction log matrices take the factored log memo: the rows of
+// compact_log_matrix, compact_independent, compact_regulator_adaptive,
+// reduce_stored_relation_units and the incremental unit context.  A memo
+// hit returns the matrix a fresh call computes; after a cached factor log is
+// upgraded (a new embedding-cache version) the memo recomputes instead of
+// returning the older rows, which a fresh call no longer computes.  In the
+// real cyclotomic quartic x^4 - x^3 - 4x^2 + 4x + 1 (unit rank 3) theta,
+// theta - 1 and theta + 2 are independent units.
+int test_unit_log_matrices_through_factored_log_memo() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, -4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order order = silex::test::equation_order(field);
+    silex::Element theta(field);
+    silex::Element theta_minus_one(field);
+    silex::Element theta_plus_two(field);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    assert(theta_plus_two.add_si(theta, 2));
+
+    std::vector<silex::FactoredElement> units;
+    units.emplace_back(field);
+    assert(units.back().push(theta, 1));
+    assert(units.back().push(theta_minus_one, 2));
+    units.emplace_back(field);
+    assert(units.back().push(theta_minus_one, 1));
+    units.emplace_back(field);
+    assert(units.back().push(theta_plus_two, 3));
+    assert(units.back().push(theta, -1));
+    const silex::FactoredElementSpan span(units.data(), units.size());
+    const slong rank = 3;
+    const slong places = 4;
+    const slong precision = 64;
+
+    const auto mats_identical = [](const sflint::ArbMat& left,
+                                   const sflint::ArbMat& right) {
+        for (slong i = 0; i < arb_mat_nrows(left.raw()); ++i) {
+            for (slong j = 0; j < arb_mat_ncols(left.raw()); ++j) {
+                if (!arb_equal(arb_mat_entry(left.raw(), i, j),
+                               arb_mat_entry(right.raw(), i, j))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+
+    {
+        silex::EmbeddingContext embeddings(field);
+        // A direct call creates the embedding cache, so the memo has a
+        // version to store under.
+        sflint::ArbMat fresh(rank, places);
+        assert(silex::detail::compact_log_matrix(fresh, embeddings, span,
+                                                 precision));
+        silex::detail::FactoredLogMemo memo;
+        sflint::ArbMat stored(rank, places);
+        assert(silex::detail::compact_log_matrix(stored, embeddings, span,
+                                                 precision, &memo));
+        assert(memo.stores == rank && memo.hits == 0);
+        sflint::ArbMat hit(rank, places);
+        assert(silex::detail::compact_log_matrix(hit, embeddings, span,
+                                                 precision, &memo));
+        assert(memo.hits == rank);
+        assert(mats_identical(stored, fresh));
+        assert(mats_identical(hit, fresh));
+
+        // The independence and regulator checks read the same rows.
+        bool independent = false;
+        bool memo_independent = false;
+        assert(silex::detail::compact_independent(independent, embeddings,
+                                                  span, precision));
+        assert(silex::detail::compact_independent(
+                memo_independent, embeddings, span, precision, nullptr,
+                &memo));
+        assert(independent && memo_independent);
+        sflint::Arb regulator;
+        sflint::Arb memo_regulator;
+        // A tolerance met at `precision`: a doubling would upgrade the
+        // cached factor logs, and the memo would then recompute.
+        assert(silex::detail::compact_regulator_adaptive(
+                sflint::ArbRef(regulator), embeddings, span, precision, 8));
+        const slong hits_before = memo.hits;
+        assert(silex::detail::compact_regulator_adaptive(
+                sflint::ArbRef(memo_regulator), embeddings, span, precision,
+                8, nullptr, &memo));
+        assert(memo.hits > hits_before);
+        assert(arb_equal(regulator.raw(), memo_regulator.raw()));
+
+        // Upgrading the cached log of theta changes the version.  A fresh
+        // call now reads the upgraded log, so the stored rows are not
+        // returned again.
+        sflint::ArbVec theta_logs(places);
+        assert(silex::logarithmic_embedding(
+                sflint::ArbVecRef(theta_logs), embeddings, theta,
+                silex::LogEmbeddingMode::product, 4096));
+        const slong hits_after_upgrade = memo.hits;
+        sflint::ArbMat recomputed(rank, places);
+        assert(silex::detail::compact_log_matrix(recomputed, embeddings, span,
+                                                 precision, &memo));
+        assert(memo.hits == hits_after_upgrade);
+        sflint::ArbMat upgraded(rank, places);
+        assert(silex::detail::compact_log_matrix(upgraded, embeddings, span,
+                                                 precision));
+        assert(mats_identical(recomputed, upgraded));
+        assert(!mats_identical(upgraded, fresh));
+    }
+
+    // reduce_stored_relation_units with a memo, against the same history
+    // without one: the same reduced group, with memo hits along the way.
+    std::vector<silex::FactoredElement> reference;
+    sflint::Arb reference_regulator;
+    bool reference_changed = false;
+    for (const bool with_memo : {false, true}) {
+        silex::EmbeddingContext embeddings(field);
+        silex::detail::FactoredLogMemo memo;
+        silex::detail::FactoredLogMemo* const used =
+                with_memo ? &memo : nullptr;
+        silex::OrderUnitGroup group(order);
+        assert(silex::detail::order_unit_group_set_units_internal(
+                group, order, span, embeddings, 256, true, nullptr, nullptr,
+                used));
+        bool changed = false;
+        assert(silex::detail::reduce_stored_relation_units(
+                changed, group, embeddings, 256, used));
+        std::vector<silex::FactoredElement> generators;
+        for (slong i = 0; i < rank; ++i) {
+            generators.emplace_back(field);
+            assert(group.free_generator(generators.back(), i));
+        }
+        sflint::Arb regulator;
+        assert(group.regulator(sflint::ArbRef(regulator)));
+        if (!with_memo) {
+            reference = std::move(generators);
+            arb_set(reference_regulator.raw(), regulator.raw());
+            reference_changed = changed;
+        } else {
+            assert(memo.hits > 0);
+            assert(changed == reference_changed);
+            assert(same_factor_lists(generators, reference));
+            assert(arb_equal(regulator.raw(), reference_regulator.raw()));
+        }
+    }
+
+    // The incremental unit context reads its rows through log_memo and
+    // keeps the same units.
+    {
+        silex::EmbeddingContext plain_embeddings(field);
+        silex::EmbeddingContext memo_embeddings(field);
+        silex::detail::FactoredLogMemo memo;
+        sflint::ArbMat warm(rank, places);
+        assert(silex::detail::compact_log_matrix(warm, plain_embeddings, span,
+                                                 precision));
+        assert(silex::detail::compact_log_matrix(warm, memo_embeddings, span,
+                                                 precision));
+        assert(silex::detail::compact_log_matrix(warm, memo_embeddings, span,
+                                                 precision, &memo));
+        silex::detail::IncrementalUnitContext plain;
+        silex::detail::IncrementalUnitContext memoized;
+        assert(plain.define(field, rank));
+        assert(memoized.define(field, rank));
+        memoized.log_memo = &memo;
+        const slong hits_before = memo.hits;
+        for (const silex::FactoredElement& unit : units) {
+            bool plain_changed = false;
+            bool memo_changed = false;
+            assert(plain.add_independent_unit(plain_changed, unit,
+                                              plain_embeddings, precision,
+                                              nullptr));
+            assert(memoized.add_independent_unit(memo_changed, unit,
+                                                 memo_embeddings, precision,
+                                                 nullptr));
+            assert(plain_changed && memo_changed);
+        }
+        assert(memo.hits > hits_before);
+        assert(plain.full_rank && memoized.full_rank);
+        assert(same_factor_lists(plain.units, memoized.units));
+        assert(plain.incremental_decisions == memoized.incremental_decisions);
+        assert(plain.fallback_decisions == memoized.fallback_decisions);
+    }
+    return 0;
+}
+
 // The factored log memo finds each distinct factor through its screen hash
 // and a bucket table.  Distinct factors with equal hashes stay distinct, an
 // equal factor is found again at the end of a long probe chain, and growing
@@ -14083,6 +14271,7 @@ int main() {
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_origin_pair_cache();
     test_factored_log_memo_after_failed_factor_log();
+    test_unit_log_matrices_through_factored_log_memo();
     test_factored_log_memo_factor_lookup();
     test_factored_element_factor_tags();
     test_round_arb_approx_width_check();

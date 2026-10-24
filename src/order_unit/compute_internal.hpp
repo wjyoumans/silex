@@ -922,6 +922,12 @@ struct IncrementalUnitContext {
     slong fallback_decisions = 0;
     slong relation_decisions = 0;
 
+    // Not owned; null for none.  When set, the log rows of the incremental
+    // test and of its compact_independent fallback go through this memo
+    // (see FactoredLogMemo), which only returns rows a fresh call would
+    // compute, so the decisions are unchanged.
+    FactoredLogMemo* log_memo = nullptr;
+
     bool define(const NumberField& parent, slong rank) noexcept;
     // Appends `candidate` to `units` when it is independent of them and
     // sets `changed`.  An undecided or failed independence test leaves

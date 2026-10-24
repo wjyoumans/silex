@@ -70,15 +70,19 @@ namespace {
 
 // Encloses the product-mode log embedding of `unit` at `precision`, the row
 // compact_log_matrix computes for it.  Like compact_log_matrix it passes no
-// diagnostics context.
+// diagnostics context, and reuses only rows of `memo` (when non-null) that a
+// fresh call would compute.
 bool incremental_log_row(flint::ArbVec& out,
                          const FactoredElement& unit,
                          EmbeddingContext& embeddings,
                          slong places,
-                         slong precision) noexcept {
+                         slong precision,
+                         FactoredLogMemo* memo) noexcept {
     flint::ArbVec row(places);
-    if (!unit.logarithmic_embedding(flint::ArbVecRef(row), embeddings,
-                                    LogEmbeddingMode::product, precision)) {
+    if (!memoized_factored_log_embedding(flint::ArbVecRef(row), memo, unit,
+                                         embeddings,
+                                         LogEmbeddingMode::product,
+                                         precision)) {
         return false;
     }
     out = std::move(row);
@@ -130,7 +134,8 @@ bool incremental_prepare(IncrementalLogState& state,
     while (static_cast<slong>(state.rows.size()) < kept) {
         flint::ArbVec row(0);
         if (!incremental_log_row(row, context.units[state.rows.size()],
-                                 embeddings, places, precision)) {
+                                 embeddings, places, precision,
+                                 context.log_memo)) {
             return false;
         }
         state.rows.push_back(std::move(row));
@@ -385,7 +390,7 @@ bool incremental_independence_at(bool& independent,
     const slong kept = static_cast<slong>(context.units.size()) - 1;
     if (!incremental_prepare(state, context, kept, embeddings, places) ||
         !incremental_log_row(row, context.units.back(), embeddings, places,
-                             precision)) {
+                             precision, context.log_memo)) {
         return false;
     }
 
@@ -787,7 +792,7 @@ bool IncrementalUnitContext::add_independent_unit(
         if (!compact_independent(independent, embeddings,
                                  FactoredElementSpan(units.data(),
                                                      units.size()),
-                                 precision, diagnostics)) {
+                                 precision, diagnostics, log_memo)) {
             independent = false;
         }
     }
@@ -1512,7 +1517,8 @@ bool unit_log_cutoff_matrix(
         const std::vector<FactoredElement>& units,
         EmbeddingContext& embeddings,
         slong precision,
-        const DiagnosticsContext* diagnostics) noexcept {
+        const DiagnosticsContext* diagnostics,
+        FactoredLogMemo* memo) noexcept {
     const slong rank = static_cast<slong>(units.size());
     slong places = 0;
     if (rank <= 0 || precision <= 0 ||
@@ -1527,8 +1533,9 @@ bool unit_log_cutoff_matrix(
     // normalized by _conj_arb_log_matrix_normalise_cutoff.
     flint::ArbVec logs(places);
     for (slong i = 0; i < rank; ++i) {
-        if (!units[static_cast<std::size_t>(i)].logarithmic_embedding(
-                    flint::ArbVecRef(logs), embeddings,
+        if (!memoized_factored_log_embedding(
+                    flint::ArbVecRef(logs), memo,
+                    units[static_cast<std::size_t>(i)], embeddings,
                     LogEmbeddingMode::product, precision, diagnostics)) {
             return false;
         }
@@ -1973,7 +1980,7 @@ bool reduction_coordinates(flint::FmpzMat& out,
                     "unit_group.reduce_mod_units.fallback_unit_log_matrix");
             if (!unit_log_cutoff_matrix(
                         unit_logs, units, embeddings, precision,
-                        diagnostics)) {
+                        diagnostics, memo)) {
                 return false;
             }
         }
@@ -2287,7 +2294,8 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
 bool scaled_log_matrix(flint::FmpzMat& out,
                              const std::vector<FactoredElement>& units,
                              EmbeddingContext& embeddings,
-                             slong& precision) noexcept {
+                             slong& precision,
+                             FactoredLogMemo* memo) noexcept {
     if (precision <= 0 || units.empty() ||
         embeddings.parent() == nullptr) {
         return false;
@@ -2304,8 +2312,9 @@ bool scaled_log_matrix(flint::FmpzMat& out,
         bool too_low = false;
         for (slong i = 0; i < static_cast<slong>(units.size()); ++i) {
             flint::ArbVec logs(places);
-            if (!units[static_cast<std::size_t>(i)].logarithmic_embedding(
-                        flint::ArbVecRef(logs), embeddings,
+            if (!memoized_factored_log_embedding(
+                        flint::ArbVecRef(logs), memo,
+                        units[static_cast<std::size_t>(i)], embeddings,
                         LogEmbeddingMode::product, precision)) {
                 return false;
             }
@@ -2840,7 +2849,8 @@ bool reduce_stored_units_vector(bool& changed,
                                       const Order& order,
                                       EmbeddingContext& embeddings,
                                       slong precision,
-                                      const DiagnosticsContext* diagnostics)
+                                      const DiagnosticsContext* diagnostics,
+                                      FactoredLogMemo* memo)
         noexcept {
     changed = false;
     has_wide = false;
@@ -2864,7 +2874,7 @@ bool reduce_stored_units_vector(bool& changed,
             SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                                 "unit_group.compute_with_relation_class_group.unit_extraction.scaled_log_matrix");
             scaled_ok = scaled_log_matrix(scaled, units, embeddings,
-                                          work_precision);
+                                          work_precision, memo);
         }
         if (!scaled_ok) {
             return false;
@@ -2946,7 +2956,8 @@ bool reduce_stored_units_vector(bool& changed,
 bool reduce_stored_relation_units(bool& changed,
                                OrderUnitGroup& group,
                                EmbeddingContext& embeddings,
-                               slong precision) noexcept {
+                               slong precision,
+                               FactoredLogMemo* memo) noexcept {
     changed = false;
     if (!group.is_set() || group.free_rank() <= 0) {
         return true;
@@ -2963,7 +2974,7 @@ bool reduce_stored_relation_units(bool& changed,
     if (!copy_unit_generators(units, group) ||
         !reduce_stored_units_vector(changed, units, wide, has_wide, *order,
                                     embeddings, precision,
-                                    group.diagnostics())) {
+                                    group.diagnostics(), memo)) {
         return false;
     }
     if (!changed) {
@@ -2979,7 +2990,7 @@ bool reduce_stored_relation_units(bool& changed,
             !OrderUnitGroupAccess::set_units_with_wide_form(
                     reduced, *order,
                     FactoredElementSpan(units.data(), units.size()), wide,
-                    embeddings, precision)) {
+                    embeddings, precision, memo)) {
             return false;
         }
         group.swap(reduced);
@@ -2999,7 +3010,7 @@ bool reduce_stored_relation_units(bool& changed,
                 // reference assigns `U.units = reduce(U.units, p)` directly.  The
                 // reduction is a unit-basis transform of already stored units,
                 // so keep public validation out of this internal path.
-                precision, true, &torsion_order, &torsion_generator)) {
+                precision, true, &torsion_order, &torsion_generator, memo)) {
         return false;
     }
     group.swap(reduced);
@@ -3171,7 +3182,7 @@ bool reduce_mod_units_cutoff_inverse(
                     "unit_group.reduce_mod_units.unit_log_matrix");
             if (!unit_log_cutoff_matrix(
                         unit_logs, *units, embeddings, work_precision,
-                        diagnostics)) {
+                        diagnostics, &extraction_state.factored_log_memo)) {
                 if (!extraction_state
                              .reduce_mod_units_log_generators_expanded) {
                     return false;
@@ -3187,7 +3198,7 @@ bool reduce_mod_units_cutoff_inverse(
                 if (!copy_unit_generators(*units, group) ||
                     !unit_log_cutoff_matrix(
                             unit_logs, *units, embeddings, work_precision,
-                            diagnostics)) {
+                            diagnostics, &extraction_state.factored_log_memo)) {
                     units->clear();
                     return false;
                 }
@@ -3383,7 +3394,7 @@ bool conj_log_cutoff_inverse(const flint::ArbMat*& out,
             logs_ok = compact_log_matrix(
                     logs, embeddings,
                     FactoredElementSpan(units.data(), units.size()),
-                    work_precision);
+                    work_precision, &extraction_state.factored_log_memo);
         }
         if (!logs_ok) {
             return false;
@@ -3609,7 +3620,7 @@ bool add_dependent_unit(bool& changed,
                     adjoin_verified_dependent_relation(
                             changed, refined, group, root,
                             flint::FmpzMatConstRef(relation), 0, embeddings,
-                            precision);
+                            precision, &extraction_state.factored_log_memo);
     }
     if (!adjoin_ok) {
         changed = false;
@@ -3629,7 +3640,7 @@ bool add_dependent_unit(bool& changed,
                     "unit_group.add_dependent_unit.reduce_stored_units");
             reduce_ok = reduce_stored_relation_units(
                     stored_units_reduced, group, embeddings,
-                    relation_precision);
+                    relation_precision, &extraction_state.factored_log_memo);
         }
         if (!reduce_ok) {
             changed = false;
@@ -4175,7 +4186,8 @@ bool improve_full_rank_class_relation_units(
         bool stored_units_reduced = false;
         if (!reduce_stored_relation_units(
                     stored_units_reduced, out, embeddings,
-                    extraction_state.torsion_precision)) {
+                    extraction_state.torsion_precision,
+                    &extraction_state.factored_log_memo)) {
             return false;
         }
         if (stored_units_reduced) {
@@ -4265,6 +4277,7 @@ bool set_class_relation_units(bool& ready,
     if (!partial_units.define(*field, rank)) {
         return false;
     }
+    partial_units.log_memo = &extraction_state.factored_log_memo;
     slong add = outer_add;
     slong new_add = 0;
     slong not_larger = 0;
@@ -4404,10 +4417,12 @@ bool set_class_relation_units(bool& ready,
                             // reference trusts relation-kernel candidates here
                             // after `add_unit!` has accepted independence; its
                             // `_isunit` check is only an assertion.
-                            embeddings, precision, true) ||
+                            embeddings, precision, true, nullptr, nullptr,
+                            &extraction_state.factored_log_memo) ||
                     !reduce_stored_relation_units(
                             stored_units_reduced, full_rank_units, embeddings,
-                            extraction_state.torsion_precision)) {
+                            extraction_state.torsion_precision,
+                            &extraction_state.factored_log_memo)) {
                     return false;
                 }
                 if (stored_units_reduced) {
@@ -4496,7 +4511,8 @@ bool set_class_relation_units(bool& ready,
             bool stored_units_reduced = false;
             if (!reduce_stored_relation_units(
                         stored_units_reduced, out, embeddings,
-                        extraction_state.torsion_precision)) {
+                        extraction_state.torsion_precision,
+                        &extraction_state.factored_log_memo)) {
                 return false;
             }
             if (stored_units_reduced) {

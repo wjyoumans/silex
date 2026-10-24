@@ -2196,7 +2196,8 @@ bool adjoin_verified_dependent_relation(bool& changed,
                                         flint::FmpzMatConstRef rel,
                                         slong row,
                                         EmbeddingContext& embeddings,
-                                        slong precision) noexcept {
+                                        slong precision,
+                                        FactoredLogMemo* memo) noexcept {
     SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.dependent_relation_adjoin");
     const Order* order = group.parent();
@@ -2264,7 +2265,8 @@ bool adjoin_verified_dependent_relation(bool& changed,
     return order_unit_group_set_units_internal(
             out, *order,
             FactoredElementSpan(generators.data(), generators.size()),
-            embeddings, precision, true, &torsion_order, &torsion_generator);
+            embeddings, precision, true, &torsion_order, &torsion_generator,
+            memo);
 }
 
 bool dependent_relation_rank_zero(bool& recovered,

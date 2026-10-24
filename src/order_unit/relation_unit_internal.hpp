@@ -240,10 +240,14 @@ bool add_dependent_unit(bool& changed,
                               EmbeddingContext& embeddings,
                               RelationUnitExtractionState& extraction_state,
                               slong precision) noexcept;
+// LLL-reduces the stored units of `group` (see compute.cpp).  A non-null
+// `memo` is passed to the log embeddings of the reduction and of set_units;
+// it does not change the result.
 bool reduce_stored_relation_units(bool& changed,
                                OrderUnitGroup& group,
                                EmbeddingContext& embeddings,
-                               slong precision) noexcept;
+                               slong precision,
+                               FactoredLogMemo* memo = nullptr) noexcept;
 // FLINT fallback of the stored-unit LLL: sets `reduced` and `transform`
 // (sized like `scaled` and square) to what fmpz_lll(scaled, identity)
 // returns in FLINT's default context, through the shared certified first

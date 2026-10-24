@@ -67,7 +67,8 @@ bool compact_places(slong& places, EmbeddingContext& embeddings) noexcept {
 bool compact_log_matrix(flint::ArbMat& out,
                         EmbeddingContext& embeddings,
                         FactoredElementSpan generators,
-                        slong precision) noexcept {
+                        slong precision,
+                        FactoredLogMemo* memo) noexcept {
     if (precision <= 0) {
         return false;
     }
@@ -82,8 +83,8 @@ bool compact_log_matrix(flint::ArbMat& out,
 
     flint::ArbVec row(places);
     for (std::size_t i = 0; i < generators.size(); ++i) {
-        if (!generators[i].logarithmic_embedding(
-                    flint::ArbVecRef(row), embeddings,
+        if (!memoized_factored_log_embedding(
+                    flint::ArbVecRef(row), memo, generators[i], embeddings,
                     LogEmbeddingMode::product, precision)) {
             return false;
         }
@@ -236,7 +237,8 @@ bool compact_independent(bool& independent,
                          EmbeddingContext& embeddings,
                          FactoredElementSpan generators,
                          slong precision,
-                         const DiagnosticsContext* diagnostics) noexcept {
+                         const DiagnosticsContext* diagnostics,
+                         FactoredLogMemo* memo) noexcept {
     if (generators.empty()) {
         independent = true;
         return true;
@@ -256,7 +258,7 @@ bool compact_independent(bool& independent,
         flint::ArbMat logs(len, places);
         bool decided = false;
         if (!compact_log_matrix(logs, embeddings, generators,
-                                work_precision) ||
+                                work_precision, memo) ||
             !compact_independence_from_log_matrix(
                     decided, independent, logs, len, places, sig.degree(),
                     work_precision)) {
@@ -444,7 +446,8 @@ bool compact_regulator_adaptive(flint::ArbRef out,
                                 FactoredElementSpan generators,
                                 slong start_precision,
                                 slong abs_tolerance,
-                                const DiagnosticsContext* diagnostics) noexcept {
+                                const DiagnosticsContext* diagnostics,
+                                FactoredLogMemo* memo) noexcept {
     if (start_precision <= 0 || abs_tolerance <= 0) {
         return false;
     }
@@ -465,7 +468,8 @@ bool compact_regulator_adaptive(flint::ArbRef out,
     for (;;) {
         flint::ArbMat logs(len, places);
         flint::Arb regulator;
-        if (!compact_log_matrix(logs, embeddings, generators, precision)) {
+        if (!compact_log_matrix(logs, embeddings, generators, precision,
+                                memo)) {
             return false;
         }
         if (compact_regulator_from_log_matrix(
@@ -1181,7 +1185,8 @@ bool OrderUnitGroupAccess::set_units(
         slong precision,
         bool trusted,
         const flint::Fmpz* cached_torsion_order,
-        const OrderElement* cached_torsion_generator) noexcept {
+        const OrderElement* cached_torsion_generator,
+        FactoredLogMemo* memo) noexcept {
     SILEX_PROFILE_SCOPE(out.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.set_units_internal");
     if (!order.is_defined() || order.parent() == nullptr || !order.has_basis() ||
@@ -1289,7 +1294,7 @@ bool OrderUnitGroupAccess::set_units(
                     independent, embeddings,
                     FactoredElementSpan(copied_generators.data(),
                                         copied_generators.size()),
-                    precision, out.diagnostics()) ||
+                    precision, out.diagnostics(), memo) ||
             !independent) {
             SILEX_LOG(out.diagnostics(), DiagnosticsModule::unit_group,
                       LogLevel::detail,
@@ -1304,7 +1309,8 @@ bool OrderUnitGroupAccess::set_units(
                     flint::ArbRef(candidate.regulator_), embeddings,
                     FactoredElementSpan(copied_generators.data(),
                                         copied_generators.size()),
-                    precision, kRegulatorAbsTolerance, out.diagnostics())) {
+                    precision, kRegulatorAbsTolerance, out.diagnostics(),
+                    memo)) {
             SILEX_LOG(out.diagnostics(), DiagnosticsModule::unit_group,
                       LogLevel::detail,
                       "set_units failed while computing regulator");
@@ -1326,7 +1332,8 @@ bool OrderUnitGroupAccess::set_units_with_wide_form(
         FactoredElementSpan rebuilt,
         WideFactoredUnits& wide,
         EmbeddingContext& embeddings,
-        slong precision) noexcept {
+        slong precision,
+        FactoredLogMemo* memo) noexcept {
     if (flint::fmpz_mat_nrows(wide.exponents) !=
                 static_cast<slong>(rebuilt.size()) ||
         flint::fmpz_mat_ncols(wide.exponents) !=
@@ -1337,7 +1344,7 @@ bool OrderUnitGroupAccess::set_units_with_wide_form(
     OrderUnitGroup candidate;
     candidate.set_diagnostics(out.diagnostics());
     if (!set_units(candidate, order, rebuilt, embeddings, precision, true,
-                   nullptr, nullptr)) {
+                   nullptr, nullptr, memo)) {
         return false;
     }
     candidate.wide_free_generators_.reset(new (std::nothrow)

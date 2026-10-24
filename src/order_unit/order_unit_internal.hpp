@@ -20,6 +20,7 @@ class Signature;
 namespace detail {
 
 struct CompactFieldModulusCache;
+struct FactoredLogMemo;
 struct HnfFinishWorkspace;
 struct HnfUnitPivotProbe;
 struct CompactRelationUnitGroupStorage;
@@ -157,6 +158,8 @@ bool compute_power(Element& out,
 // recomputation; it is accepted only when cached_torsion_is_valid holds.
 // The installed group always publishes unknown certification; proven
 // publication re-derives torsion (see order_unit_torsion_is_computed).
+// A non-null `memo` is passed to the log embeddings of the independence
+// and regulator checks; it never changes the installed group.
 class OrderUnitGroupAccess {
 public:
     static bool set_units(
@@ -167,7 +170,8 @@ public:
             slong precision,
             bool trusted,
             const flint::Fmpz* cached_torsion_order,
-            const OrderElement* cached_torsion_generator) noexcept;
+            const OrderElement* cached_torsion_generator,
+            FactoredLogMemo* memo = nullptr) noexcept;
 
     // set_units for a trusted unit-basis transform whose result needs
     // exponents wider than slong.  `rebuilt[i]` is the word-size unit equal
@@ -180,7 +184,8 @@ public:
             FactoredElementSpan rebuilt,
             WideFactoredUnits& wide,
             EmbeddingContext& embeddings,
-            slong precision) noexcept;
+            slong precision,
+            FactoredLogMemo* memo = nullptr) noexcept;
 
     // The stored wide form of the free generators, or null when they are
     // stored with word-size exponents only.
@@ -244,10 +249,11 @@ inline bool order_unit_group_set_units_internal(
         slong precision,
         bool trusted,
         const flint::Fmpz* cached_torsion_order = nullptr,
-        const OrderElement* cached_torsion_generator = nullptr) noexcept {
+        const OrderElement* cached_torsion_generator = nullptr,
+        FactoredLogMemo* memo = nullptr) noexcept {
     return OrderUnitGroupAccess::set_units(
             out, order, generators, embeddings, precision, trusted,
-            cached_torsion_order, cached_torsion_generator);
+            cached_torsion_order, cached_torsion_generator, memo);
 }
 
 // True when `generator` lies in `order` and has multiplicative order exactly
@@ -274,10 +280,14 @@ bool cached_torsion_is_valid(const Order& order,
 // was supplied rather than computed.
 bool order_unit_torsion_is_computed(const OrderUnitGroup& units) noexcept;
 bool compact_places(slong& places, EmbeddingContext& embeddings) noexcept;
+// Row i is the product-mode log embedding of generators[i] at `precision`.
+// A non-null `memo` (see FactoredLogMemo) only reuses rows a fresh call
+// would compute; the matrix and the failures are those of a null `memo`.
 bool compact_log_matrix(flint::ArbMat& out,
                         EmbeddingContext& embeddings,
                         FactoredElementSpan generators,
-                        slong precision) noexcept;
+                        slong precision,
+                        FactoredLogMemo* memo = nullptr) noexcept;
 bool compact_regulator_from_log_matrix(flint::ArbRef out,
                                        const flint::ArbMat& logs,
                                        slong len,
@@ -327,19 +337,21 @@ bool compact_independence_from_gram_determinant(
         slong places,
         slong degree,
         slong precision) noexcept;
+// `memo` is passed to compact_log_matrix and does not change the result.
 bool compact_independent(bool& independent,
                          EmbeddingContext& embeddings,
                          FactoredElementSpan generators,
                          slong precision,
-                         const DiagnosticsContext* diagnostics =
-                                 nullptr) noexcept;
+                         const DiagnosticsContext* diagnostics = nullptr,
+                         FactoredLogMemo* memo = nullptr) noexcept;
 bool compact_regulator_adaptive(flint::ArbRef out,
                                 EmbeddingContext& embeddings,
                                 FactoredElementSpan generators,
                                 slong start_precision,
                                 slong abs_tolerance,
                                 const DiagnosticsContext* diagnostics =
-                                        nullptr) noexcept;
+                                        nullptr,
+                                FactoredLogMemo* memo = nullptr) noexcept;
 bool compact_independent_from_log_matrix(bool& independent,
                                          const flint::ArbMat& logs,
                                          slong len,
@@ -737,6 +749,7 @@ bool saturation_proof_prime_known_rank_one_torsion_nonzero(
 bool copy_selected_primes(PrimeIdealList& out,
                           const Order& order,
                           const std::vector<PrimeIdeal>& selected) noexcept;
+// `memo` is passed to set_units and does not change the result.
 bool adjoin_verified_dependent_relation(bool& changed,
                                         OrderUnitGroup& out,
                                         const OrderUnitGroup& group,
@@ -744,7 +757,9 @@ bool adjoin_verified_dependent_relation(bool& changed,
                                         flint::FmpzMatConstRef rel,
                                         slong row,
                                         EmbeddingContext& embeddings,
-                                        slong precision) noexcept;
+                                        slong precision,
+                                        FactoredLogMemo* memo =
+                                                nullptr) noexcept;
 bool dependent_relation_bounded_min_denominator(
         bool& recovered,
         FactoredElement& root,
