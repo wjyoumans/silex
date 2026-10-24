@@ -146,6 +146,88 @@ void check_large_character(const sflint::Fmpz& discriminant, ulong q) {
     assert(chi(q) == 0);
 }
 
+// The sieved table of chi(n) = (D / n) shared by the two AFE sums returns
+// fmpz_kronecker(D, n) at every n = 1, ..., last read in order (n sharing
+// factors with D included), and calls the symbol only at n = 1, at the
+// primes it holds, and at each n read past `max_entries`.
+void check_character_table(const sflint::Fmpz& discriminant, ulong last,
+                           ulong max_entries, ulong segment_length) {
+    silex::detail::QuadraticCharacterTable table(
+            sflint::FmpzConstRef(discriminant), max_entries, segment_length);
+    for (ulong n = 1; n <= last; ++n) {
+        assert(table.value(n) == kronecker(discriminant, n));
+    }
+    assert(table.filled() <= max_entries);
+    assert(table.filled() >= (last < max_entries ? last : max_entries));
+    ulong expected_calls = 1;
+    for (ulong n = 2; n <= table.filled(); ++n) {
+        expected_calls += n_is_prime(n) != 0 ? 1 : 0;
+    }
+    if (last > max_entries) {
+        expected_calls += last - max_entries;
+    }
+    assert(table.symbol_calls() == expected_calls);
+}
+
+// The largest index either AFE sum of `quadratic_dirichlet_l1` reads.
+ulong afe_range(const sflint::Fmpz& discriminant, slong precision) {
+    silex::detail::QuadraticAfeStepAudit audit;
+    sflint::Arb value;
+    assert(silex::detail::quadratic_dirichlet_l1(
+            sflint::ArbRef(value), sflint::FmpzConstRef(discriminant),
+            precision, &audit));
+    ulong range = 0;
+    for (const ulong stop : audit.stop_index) {
+        range = stop > range ? stop : range;
+    }
+    assert(range > 0);
+    return range;
+}
+
+void check_character_tables(bool slow) {
+    // Small segments of odd length and a small cap, so that segment
+    // boundaries, segments past the first prime squares and the fallback
+    // past the cap are all read; D = 1 and D = 0 mod 4 of both signs.
+    for (const slong d : {5L, 8L, 12L, 13L, -3L, -4L, -7L, -8L, -23L, -56L,
+                          1009L, -1019L, 4012L, -2008L, -100000031L}) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+        check_character_table(discriminant, 1500, 1000, 97);
+        check_character_table(discriminant, 300, 1000, 1);
+    }
+    // Default segments and cap over the whole range the AFE sums read.
+    for (const slong d : {-100000031L, -10000000799L, -10000000004L,
+                          1000000021L, 4000000012L}) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+        const ulong range = afe_range(discriminant, 64);
+        check_character_table(
+                discriminant, range,
+                silex::detail::QuadraticCharacterTable::default_max_entries,
+                silex::detail::QuadraticCharacterTable::default_segment_length);
+    }
+    // Reads out of order: a jump ahead fills every value below it.
+    {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), -100000000000319L);
+        silex::detail::QuadraticCharacterTable table{
+                sflint::FmpzConstRef(discriminant)};
+        assert(table.value(200003) == kronecker(discriminant, 200003));
+        assert(table.filled() >= 200003);
+        for (ulong n = 1; n <= table.filled(); n += 7) {
+            assert(table.value(n) == kronecker(discriminant, n));
+        }
+    }
+    if (slow) {
+        sflint::Fmpz discriminant;
+        sflint::fmpz_set_si(sflint::FmpzRef(discriminant), -1000000000039L);
+        check_character_table(
+                discriminant, afe_range(discriminant, 64),
+                silex::detail::QuadraticCharacterTable::default_max_entries,
+                silex::detail::QuadraticCharacterTable::default_segment_length);
+    }
+}
+
 // Both sums of the evaluation for D used Taylor stepping of their
 // incomplete gamma values Gamma(a, z): a = 1 and a = 1/2 for imaginary D,
 // a = 1/2 and a = 0 for real D (counters indexed by shift = 2a).
@@ -1133,6 +1215,7 @@ int main() {
     check_against_flint_dirichlet(-100003, 128);
     check_against_flint_dirichlet(100049, 192);
 
+    check_character_tables(slow_tests_enabled());
     check_failure_paths();
     check_route_size_cap();
     check_gamma_stepping_against_hypgeom();

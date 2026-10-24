@@ -321,6 +321,71 @@ bool class_regulator_product_estimate_with_diagnostics(
 // character modulo |D|.
 int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept;
 
+// The values chi(n) = (D / n) of `quadratic_character` for n = 1, 2, ...,
+// filled on demand by a segmented sieve and kept, so that both sums of the
+// approximate functional equation read them from one table.  The Kronecker
+// symbol (D / n) is completely multiplicative in n > 0 (Cohen, "A Course in
+// Computational Algebraic Number Theory", GTM 138, Section 1.4.2), so a
+// composite n with smallest prime factor p has chi(n) = chi(p) chi(n / p);
+// `quadratic_character` is called only for n = 1 and the primes n, and the
+// table returns exactly its values.  A value is two bits, so the table holds
+// at most max_entries / 4 bytes (16 MiB by default) plus one segment of
+// scratch; past max_entries, `value` calls `quadratic_character` directly.
+// `discriminant` must outlive the table.
+class QuadraticCharacterTable {
+public:
+    static constexpr ulong default_max_entries = ulong(1) << 26;
+    static constexpr ulong default_segment_length = ulong(1) << 16;
+
+    explicit QuadraticCharacterTable(
+            flint::FmpzConstRef discriminant,
+            ulong max_entries = default_max_entries,
+            ulong segment_length = default_segment_length) noexcept;
+
+    QuadraticCharacterTable(const QuadraticCharacterTable&) = delete;
+    QuadraticCharacterTable& operator=(const QuadraticCharacterTable&) =
+            delete;
+
+    // (D / n) for n >= 1.
+    int value(ulong n) noexcept {
+        if (n <= filled_) {
+            return stored(n);
+        }
+        return value_slow(n);
+    }
+
+    // Values held: chi(n) is stored for 1 <= n <= filled().
+    ulong filled() const noexcept {
+        return filled_;
+    }
+
+    // Calls of `quadratic_character` made by the table.
+    ulong symbol_calls() const noexcept {
+        return symbol_calls_;
+    }
+
+private:
+    int stored(ulong n) const noexcept {
+        const unsigned code =
+                (static_cast<unsigned>(packed_[n >> 2]) >> ((n & 3) * 2)) & 3u;
+        return code == 2 ? -1 : static_cast<int>(code);
+    }
+
+    void store(ulong n, int chi) noexcept;
+    int value_slow(ulong n) noexcept;
+    void extend() noexcept;
+
+    flint::FmpzConstRef discriminant_;
+    ulong max_entries_;
+    ulong segment_length_;
+    ulong filled_ = 0;
+    ulong symbol_calls_ = 0;
+    std::vector<unsigned char> packed_;
+    std::vector<ulong> small_primes_;
+    ulong small_primes_through_ = 1;
+    std::vector<ulong> factor_;
+};
+
 // A fault forced on the blocks the stepper of `quadratic_dirichlet_l1`
 // plans, after planning and before the block starts, so that the start must
 // reject the block (for tests of its fail-closed paths): the Cauchy radius

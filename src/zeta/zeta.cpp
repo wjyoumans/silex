@@ -260,8 +260,10 @@ bool fmpq_poly_is_monic_integral(const fmpq_poly_t polynomial) noexcept {
 // Intentional deviations from FLINT:
 // - chi(n) is the Kronecker symbol `fmpz_kronecker(D, n)` instead of a
 //   discrete logarithm in the Dirichlet group (`acb_dirichlet_chi`), so the
-//   cost is O(sqrt(q prec)) symbol and special-function evaluations and no
-//   Dirichlet group is built;
+//   cost is O(sqrt(q prec)) special-function evaluations and no Dirichlet
+//   group is built; the symbol is evaluated at n = 1 and the primes only, and
+//   the other values come from its complete multiplicativity
+//   (`detail::QuadraticCharacterTable`, one table for both sums);
 // - W(chi) = 1 is used directly (see below) instead of the root number
 //   computed from the character;
 // - the incomplete gamma values use the closed forms below, evaluated with
@@ -1146,7 +1148,8 @@ bool quadratic_afe_start_block(QuadraticAfeGammaStepper& stepper,
 // FLINT `acb_dirichlet_fmpq_sum_afe` at s in {0, 1} for a real character:
 //   sum_{n >= 1} chi(n) Gamma((s + parity) / 2, pi n^2 / q) / n^s,
 // truncated at the first n whose tail bound is below `abs_tol`, which is then
-// added to the radius.  FLINT evaluates the tail bound at every n; here the
+// added to the radius, with chi(n) read from `characters` (the sieved values
+// of `quadratic_character`, shared by the two sums).  FLINT evaluates the tail bound at every n; here the
 // indices n <= m of `quadratic_afe_tail_skip` are not checked.  The stop is
 // the same: the rounded bound of `quadratic_afe_tail_bound` is infinite or at
 // least the exact F(n) of `quadratic_afe_tail_bound_lower` (each step rounds
@@ -1157,7 +1160,7 @@ bool quadratic_afe_start_block(QuadraticAfeGammaStepper& stepper,
 // block can start any more, the loop is FLINT's term loop again.  `audit`,
 // when given, can turn stepping off and counts the blocks and stepped values.
 void quadratic_afe_sum(flint::Arb& res,
-                       flint::FmpzConstRef discriminant,
+                       detail::QuadraticCharacterTable& characters,
                        ulong q,
                        int parity,
                        ulong s,
@@ -1214,7 +1217,7 @@ void quadratic_afe_sum(flint::Arb& res,
             }
         }
 
-        const int chi = detail::quadratic_character(discriminant, n);
+        const int chi = characters.value(n);
         // A term with chi(n) = 0 is still visited while a block may start at
         // it or cover it; once stepping is off it is skipped before any
         // setup.
@@ -1349,9 +1352,11 @@ void quadratic_l1_afe_sums(flint::Arb& out,
     flint::Arb s1;
     flint::Arb s2;
     flint::Arb t;
-    quadratic_afe_sum(s1, discriminant, q, parity, 1, tol1.raw(), prec1,
+    // One table of chi(n) serves both sums.
+    detail::QuadraticCharacterTable characters(discriminant);
+    quadratic_afe_sum(s1, characters, q, parity, 1, tol1.raw(), prec1,
                       audit);
-    quadratic_afe_sum(s2, discriminant, q, parity, 0, tol2.raw(), prec2,
+    quadratic_afe_sum(s2, characters, q, parity, 0, tol2.raw(), prec2,
                       audit);
 
     // S1 + (pi / q)^(1/2) S2, divided by Gamma((1 + parity) / 2).
@@ -5184,6 +5189,76 @@ int quadratic_character(flint::FmpzConstRef discriminant, ulong n) noexcept {
     flint::Fmpz zn;
     flint::fmpz_set_ui(flint::FmpzRef(zn), n);
     return flint::fmpz_kronecker(discriminant, flint::FmpzConstRef(zn));
+}
+
+QuadraticCharacterTable::QuadraticCharacterTable(
+        flint::FmpzConstRef discriminant,
+        ulong max_entries,
+        ulong segment_length) noexcept
+    : discriminant_(discriminant),
+      max_entries_(FLINT_MIN(max_entries, UWORD_MAX - 4)),
+      segment_length_(FLINT_MAX(segment_length, ulong(1))) {
+}
+
+void QuadraticCharacterTable::store(ulong n, int chi) noexcept {
+    const unsigned code = chi < 0 ? 2u : static_cast<unsigned>(chi);
+    packed_[n >> 2] = static_cast<unsigned char>(
+            packed_[n >> 2] | (code << ((n & 3) * 2)));
+}
+
+int QuadraticCharacterTable::value_slow(ulong n) noexcept {
+    if (n == 0 || n > max_entries_) {
+        ++symbol_calls_;
+        return quadratic_character(discriminant_, n);
+    }
+    while (filled_ < n) {
+        extend();
+    }
+    return stored(n);
+}
+
+// One segment lo..hi after the values already held: the smallest prime
+// factor p <= sqrt(m) of each composite m there is marked by the primes up
+// to sqrt(hi), and chi(m) = chi(p) chi(m / p) reads two values below m.
+// An unmarked m (1 or a prime) takes the symbol itself.
+void QuadraticCharacterTable::extend() noexcept {
+    const ulong lo = filled_ + 1;
+    const ulong hi = lo - 1 + FLINT_MIN(segment_length_, max_entries_ - filled_);
+    packed_.resize(hi / 4 + 1, 0);
+
+    const ulong root = n_sqrt(hi);
+    for (ulong c = small_primes_through_ + 1; c <= root; ++c) {
+        if (n_is_prime(c) != 0) {
+            small_primes_.push_back(c);
+        }
+    }
+    small_primes_through_ = FLINT_MAX(small_primes_through_, root);
+
+    factor_.assign(hi - lo + 1, 0);
+    for (const ulong p : small_primes_) {
+        if (p > root) {
+            break;
+        }
+        ulong m = FLINT_MAX(p * p, ((lo + p - 1) / p) * p);
+        for (; m <= hi; m += p) {
+            if (factor_[m - lo] == 0) {
+                factor_[m - lo] = p;
+            }
+        }
+    }
+
+    for (ulong m = lo; m <= hi; ++m) {
+        const ulong p = factor_[m - lo];
+        int chi;
+        if (p == 0) {
+            ++symbol_calls_;
+            chi = quadratic_character(discriminant_, m);
+        } else {
+            chi = stored(p) * stored(m / p);
+        }
+        store(m, chi);
+    }
+    filled_ = hi;
 }
 
 bool quadratic_dirichlet_l1(flint::ArbRef out,
