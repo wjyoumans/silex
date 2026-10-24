@@ -133,8 +133,9 @@ Added
 Changed
 -------
 
-- Each random-relation round of the ``proven`` relation search finds the
-  factor-base primes that no stored relation already shows to be principal
+- Wherever the relation search finds the factor-base primes that no stored
+  relation already shows to be principal (the random-relation rounds and the
+  ideal-lattice relation collection), it now does so
   in one pass over the stored relations, instead of one pass per prime.  A
   prime counts as principal, as before, when some relation row has a single
   nonzero entry, in its column, equal to 1 or -1; when a pass could fail,
