@@ -4952,9 +4952,116 @@ int test_same_prime_ideal_compares_ideals() {
     return 0;
 }
 
+// The word-size primitive-root search returns the smallest primitive root
+// found by the fmpz search, and quotient_log_mod_prime_setup (word route for
+// p below 2^64) gives the cofactor and quotient generator built from it.
+// Covers every prime below 3000 and the primes next to 2^32, 2^63 and 2^64.
+int test_primitive_root_word_size_matches_fmpz() {
+    const auto previous_prime = [](ulong n) noexcept {
+        do {
+            --n;
+        } while (n_is_prime(n) == 0);
+        return n;
+    };
+    std::vector<ulong> primes;
+    for (ulong p = 2; p < 3000; p = n_nextprime(p, 1)) {
+        primes.push_back(p);
+    }
+    for (const ulong centre : {UWORD(1) << 32, UWORD(1) << 63}) {
+        ulong below = centre;
+        ulong above = centre;
+        for (int k = 0; k < 6; ++k) {
+            below = previous_prime(below);
+            above = n_nextprime(above, 1);
+            primes.push_back(below);
+            primes.push_back(above);
+        }
+    }
+    ulong top = UWORD_MAX;
+    for (int k = 0; k < 6; ++k) {
+        top = previous_prime(top);
+        primes.push_back(top);
+    }
+
+    for (const ulong p : primes) {
+        sflint::Fmpz p_fmpz;
+        sflint::Fmpz expected;
+        sflint::fmpz_set_ui(sflint::FmpzRef(p_fmpz), p);
+        assert(silex::detail::primitive_root_mod_prime(
+                expected, sflint::FmpzConstRef(p_fmpz)));
+        assert(sflint::fmpz_abs_fits_ui(sflint::FmpzConstRef(expected)));
+        const ulong root = silex::detail::primitive_root_mod_prime_ui(p);
+        assert(root == sflint::fmpz_get_ui(sflint::FmpzConstRef(expected)));
+
+        n_factor_t factors;
+        n_factor_init(&factors);
+        if (p > 2) {
+            n_factor(&factors, p - 1, 1);
+        }
+        for (int i = 0; i < factors.num; ++i) {
+            sflint::Fmpz ell;
+            sflint::Fmpz cofactor;
+            sflint::Fmpz quotient_generator;
+            sflint::Fmpz expected_cofactor;
+            sflint::Fmpz expected_generator;
+            sflint::fmpz_set_ui(sflint::FmpzRef(ell), factors.p[i]);
+            sflint::fmpz_set_ui(sflint::FmpzRef(expected_cofactor),
+                                (p - 1) / factors.p[i]);
+            fmpz_powm(expected_generator.raw(), expected.raw(),
+                      expected_cofactor.raw(), p_fmpz.raw());
+            assert(silex::detail::quotient_log_mod_prime_setup(
+                    cofactor, quotient_generator,
+                    sflint::FmpzConstRef(p_fmpz), sflint::FmpzConstRef(ell)));
+            assert(fmpz_equal(cofactor.raw(), expected_cofactor.raw()) != 0);
+            assert(fmpz_equal(quotient_generator.raw(),
+                              expected_generator.raw()) != 0);
+        }
+    }
+
+    // A prime ell that does not divide p - 1, or lies above the word size,
+    // is refused as before.
+    sflint::Fmpz cofactor;
+    sflint::Fmpz quotient_generator;
+    sflint::Fmpz p_fmpz;
+    sflint::Fmpz ell;
+    sflint::fmpz_set_ui(sflint::FmpzRef(p_fmpz), 13);
+    sflint::fmpz_set_ui(sflint::FmpzRef(ell), 5);
+    assert(!silex::detail::quotient_log_mod_prime_setup(
+            cofactor, quotient_generator, sflint::FmpzConstRef(p_fmpz),
+            sflint::FmpzConstRef(ell)));
+    fmpz_set_ui(ell.raw(), UWORD_MAX);
+    fmpz_nextprime(ell.raw(), ell.raw(), 1);
+    assert(!silex::detail::quotient_log_mod_prime_setup(
+            cofactor, quotient_generator, sflint::FmpzConstRef(p_fmpz),
+            sflint::FmpzConstRef(ell)));
+
+    // Above the word size the fmpz route still answers: p is the next prime
+    // after 2^64 - 1 and ell = 2 divides p - 1.
+    fmpz_set_ui(p_fmpz.raw(), UWORD_MAX);
+    fmpz_nextprime(p_fmpz.raw(), p_fmpz.raw(), 1);
+    sflint::fmpz_set_ui(sflint::FmpzRef(ell), 2);
+    sflint::Fmpz generator;
+    assert(silex::detail::primitive_root_mod_prime(
+            generator, sflint::FmpzConstRef(p_fmpz)));
+    assert(silex::detail::quotient_log_mod_prime_setup(
+            cofactor, quotient_generator, sflint::FmpzConstRef(p_fmpz),
+            sflint::FmpzConstRef(ell)));
+    sflint::Fmpz expected_cofactor;
+    sflint::Fmpz expected_generator;
+    fmpz_sub_ui(expected_cofactor.raw(), p_fmpz.raw(), 1);
+    fmpz_fdiv_q_2exp(expected_cofactor.raw(), expected_cofactor.raw(), 1);
+    fmpz_powm(expected_generator.raw(), generator.raw(),
+              expected_cofactor.raw(), p_fmpz.raw());
+    assert(fmpz_equal(cofactor.raw(), expected_cofactor.raw()) != 0);
+    assert(fmpz_equal(quotient_generator.raw(), expected_generator.raw()) !=
+           0);
+    return 0;
+}
+
 int main() {
     assert(test_degree_one() == 0);
     assert(test_same_prime_ideal_compares_ideals() == 0);
+    assert(test_primitive_root_word_size_matches_fmpz() == 0);
     assert(test_degree_one_prime_from_root_matches_decomposition() == 0);
     assert(test_degree_one_prime_from_root_rejects_non_roots() == 0);
     assert(test_degree_one_prime_from_root_rejects_index_prime() == 0);

@@ -189,6 +189,8 @@ bool multiplicative_order_mod_prime(flint::Fmpz& out,
     return true;
 }
 
+}  // namespace
+
 bool primitive_root_mod_prime(flint::Fmpz& out,
                               flint::FmpzConstRef p) noexcept {
     if (!flint::fmpz_is_prime(p)) {
@@ -213,7 +215,41 @@ bool primitive_root_mod_prime(flint::Fmpz& out,
     return false;
 }
 
-}  // namespace
+ulong primitive_root_mod_prime_ui(ulong p) noexcept {
+    // Same smallest primitive root as primitive_root_mod_prime: candidate c
+    // has order p - 1 exactly when c^((p - 1) / q) != 1 for every prime q
+    // dividing p - 1, so p - 1 is factored once instead of once per
+    // candidate (the test of FLINT ulong_extras/primitive_root_prime.c,
+    // n_primitive_root_prime_prefactor, run from the smallest candidate).
+    // For p = 2 the group is trivial and the answer is 1.
+    if (p < 2) {
+        return 0;
+    }
+    if (p == 2) {
+        return 1;
+    }
+
+    const ulong group_order = p - 1;
+    n_factor_t factors;
+    n_factor_init(&factors);
+    n_factor(&factors, group_order, 1);
+    const ulong p_inverse = n_preinvert_limb(p);
+    for (ulong candidate = 2; candidate < p; ++candidate) {
+        bool generates = true;
+        for (int i = 0; i < factors.num; ++i) {
+            if (n_powmod2_ui_preinv(candidate, group_order / factors.p[i], p,
+                                    p_inverse) == 1) {
+                generates = false;
+                break;
+            }
+        }
+        if (generates) {
+            return candidate;
+        }
+    }
+
+    return 0;
+}
 
 bool degree_one_prime_root_mod_p(flint::Fmpz& root,
                                  flint::Fmpz& p,
@@ -305,6 +341,30 @@ bool quotient_log_mod_prime_setup(flint::Fmpz& cofactor,
                                   flint::FmpzConstRef ell) noexcept {
     if (!flint::fmpz_is_prime(p) || !flint::fmpz_is_prime(ell)) {
         return false;
+    }
+
+    if (flint::fmpz_abs_fits_ui(p)) {
+        // Word-size route, with the results of the fmpz route below.  A prime
+        // ell above the word size cannot divide p - 1.
+        const ulong p_ui = flint::fmpz_get_ui(p);
+        const ulong group_order_ui = p_ui - 1;
+        if (!flint::fmpz_abs_fits_ui(ell)) {
+            return false;
+        }
+        const ulong ell_ui = flint::fmpz_get_ui(ell);
+        if (group_order_ui % ell_ui != 0) {
+            return false;
+        }
+        const ulong generator_ui = primitive_root_mod_prime_ui(p_ui);
+        if (generator_ui == 0) {
+            return false;
+        }
+        const ulong cofactor_ui = group_order_ui / ell_ui;
+        const ulong quotient_generator_ui = n_powmod2_ui_preinv(
+                generator_ui, cofactor_ui, p_ui, n_preinvert_limb(p_ui));
+        ::fmpz_set_ui(cofactor.raw(), cofactor_ui);
+        ::fmpz_set_ui(quotient_generator.raw(), quotient_generator_ui);
+        return quotient_generator_ui != 1;
     }
 
     flint::Fmpz group_order;

@@ -21,6 +21,14 @@ bool evaluate_fmpq_poly_at_degree_one_prime(
         flint::FmpqPolyConstRef polynomial,
         flint::FmpzConstRef root,
         flint::FmpzConstRef p) noexcept;
+// Smallest primitive root modulo the prime p, in fmpz arithmetic for any p.
+// Returns false when p is not prime.
+bool primitive_root_mod_prime(flint::Fmpz& out,
+                              flint::FmpzConstRef p) noexcept;
+// The same smallest primitive root for a prime p below the word size,
+// factoring p - 1 once.  The caller guarantees that p is prime; returns 0
+// only for p < 2.
+ulong primitive_root_mod_prime_ui(ulong p) noexcept;
 bool quotient_log_mod_prime_setup(flint::Fmpz& cofactor,
                                   flint::Fmpz& quotient_generator,
                                   flint::FmpzConstRef p,

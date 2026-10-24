@@ -2279,6 +2279,19 @@ Changed
   (``proven``) the instruction count fell 10.27% for ``random_d9_h4_s8``,
   14.21% for ``random_d10_h2_s21`` and 0.69% for ``pure_x12_plus_7``.  No
   timing has been measured.
+- The proven saturation columns find the primitive root modulo a prime ``p``
+  below ``2^64`` in word-size arithmetic: ``p - 1`` is factored once and a
+  candidate ``c`` is tested by ``c^((p-1)/q) != 1`` for each prime ``q``
+  dividing ``p - 1``, instead of factoring ``p - 1`` again and running an
+  fmpz order computation for every candidate.  The root is the same smallest
+  primitive root as before (a test compares both searches on every prime
+  below 3000 and on primes next to ``2^32``, ``2^63`` and ``2^64``), so the
+  quotient generators and the columns are unchanged.  Published ``proven``
+  outputs are identical on ``random_d9_h4_s8``, ``random_d10_h2_s21``,
+  ``pure_x12_plus_7`` and seven small fields.  Under callgrind (``proven``,
+  Release) the instruction count fell 5.41% for ``random_d9_h4_s8``, 4.62%
+  for ``random_d10_h2_s21`` and 1.88% for ``pure_x12_plus_7``.  No timing has
+  been measured.
 
 
 - The ``grh`` unit extraction reuses the embedded logarithms of repeated
