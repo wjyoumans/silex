@@ -2254,7 +2254,8 @@ Fixed
   manifests, are unaffected.  The search also no longer fails (closed) when
   the polynomial has non-integral coefficients: it reads the degree-one
   primes from the roots of ``F``, of which ``theta`` is a root, under the same
-  rejection rule, and gives the candidates of the integral presentation.
+  rejection rule, and uses the same rows as the integral presentation for each
+  auxiliary prime not dividing ``content(F) * lc(F) * disc(F)``.
 
 - A ``grh`` class/unit computation now improves its candidate units when the
   a priori unit index bound ``R / R_low`` does not fit in a machine word, as

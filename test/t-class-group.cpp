@@ -4190,18 +4190,22 @@ int test_saturation_candidates_accept_nonintegral_polynomial() {
     fmpz_mul_2exp(q0.raw(), q0.raw(), 60);
     sflint::fmpz_nextprime(sflint::FmpzRef(q0), sflint::FmpzConstRef(q0));
 
-    auto search_from_q0 = [&](sflint::FmpqPolyConstRef polynomial,
+    // theta_scale is 1 for theta^2 = 21 and 3 for theta^2 = 7/3 (so that
+    // 3 theta = sqrt(21)); the same maximal order Z[(1 + sqrt(21)) / 2].
+    auto search_from = [&](sflint::FmpqPolyConstRef polynomial,
+                              slong theta_scale,
+                              sflint::FmpzConstRef start,
                               sflint::FmpzMat& candidates,
                               silex::detail::SaturationCandidateSearchResult&
                                       search) noexcept {
         silex::NumberField field =
                 silex::test::field_by_polynomial(polynomial);
-        // Maximal order Z[(1 + theta) / 2], theta^2 = 21.
+        // Maximal order Z[(1 + sqrt(21)) / 2].
         sflint::FmpqMat basis(2, 2);
         fmpq_mat_zero(basis.raw());
         fmpq_set_si(fmpq_mat_entry(basis.raw(), 0, 0), 1, 1);
         fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 0), 1, 2);
-        fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 1), 1, 2);
+        fmpq_set_si(fmpq_mat_entry(basis.raw(), 1, 1), theta_scale, 2);
         silex::Order input = silex::Order::from_basis(
                 field, sflint::FmpqMatConstRef(basis));
         assert(input.is_defined());
@@ -4209,7 +4213,7 @@ int test_saturation_candidates_accept_nonintegral_polynomial() {
         assert(order.maximal_order(input));
         assert(order.is_maximal());
 
-        // 21 = theta^2 is a square; -1 and 7 are not.
+        // 21 = sqrt(21)^2 is a square; -1 and 7 are not.
         std::vector<silex::FactoredElement> relations;
         for (slong v : {21, -1, 7}) {
             silex::Element value(field);
@@ -4222,7 +4226,14 @@ int test_saturation_candidates_accept_nonintegral_polynomial() {
         slong auxiliary_prime_count = 0;
         return silex::detail::saturation_candidates_from_relations_from_prime(
                 candidates, auxiliary_prime_count, relations, order, 2, 100.0,
-                sflint::FmpzConstRef(q0), 8, &search);
+                start, 8, &search);
+    };
+    auto search_from_q0 = [&](sflint::FmpqPolyConstRef polynomial,
+                              sflint::FmpzMat& candidates,
+                              silex::detail::SaturationCandidateSearchResult&
+                                      search) noexcept {
+        return search_from(polynomial, 1, sflint::FmpzConstRef(q0),
+                           candidates, search);
     };
 
     sflint::FmpqPoly integral;
@@ -4252,6 +4263,67 @@ int test_saturation_candidates_accept_nonintegral_polynomial() {
     assert(search.quotient_log_row_count ==
            expected_search.quotient_log_row_count);
     assert(sflint::fmpz_mat_equal(candidates, expected));
+
+    // The content prime 5 of the numerator of 5 (x^2 - 21) / 7 is skipped
+    // when the search starts there (5 is neither an index divisor nor a
+    // divisor of disc(O) = 21, and splits in Q(sqrt(21))).  It gives the
+    // candidates of the integral presentation started at the next prime 11
+    // (7 divides the discriminant in both).
+    sflint::Fmpz five;
+    sflint::Fmpz eleven;
+    fmpz_set_si(five.raw(), 5);
+    fmpz_set_si(eleven.raw(), 11);
+    sflint::FmpqPoly content_fraction;
+    fmpq_poly_scalar_mul_si(content_fraction.raw(), integral.raw(), 5);
+    fmpq_poly_scalar_div_si(content_fraction.raw(), content_fraction.raw(), 7);
+    assert(!fmpz_is_one(content_fraction.raw()->den));
+    sflint::FmpzMat content_expected(0, 0);
+    silex::detail::SaturationCandidateSearchResult content_expected_search;
+    assert(search_from(sflint::FmpqPolyConstRef(integral), 1,
+                       sflint::FmpzConstRef(eleven), content_expected,
+                       content_expected_search));
+    assert(content_expected_search.auxiliary_prime_count == 8);
+    assert(content_expected_search.degree_one_prime_count > 0);
+    sflint::FmpzMat content_candidates(0, 0);
+    silex::detail::SaturationCandidateSearchResult content_search;
+    assert(search_from(sflint::FmpqPolyConstRef(content_fraction), 1,
+                       sflint::FmpzConstRef(five), content_candidates,
+                       content_search));
+    assert(content_search.auxiliary_prime_count == 8);
+    assert(content_search.degree_one_prime_count ==
+           content_expected_search.degree_one_prime_count);
+    assert(content_search.quotient_log_row_count ==
+           content_expected_search.quotient_log_row_count);
+    assert(sflint::fmpz_mat_equal(content_candidates, content_expected));
+
+    // A non-monic primitive part with a denominator, (3 x^2 - 7) / 5 against
+    // 3 x^2 - 7: theta^2 = 7/3, so sqrt(21) = 3 theta, the same field.
+    sflint::FmpqPoly primitive;
+    sflint::fmpq_poly_zero(primitive);
+    fmpq_poly_set_coeff_si(primitive.raw(), 0, -7);
+    fmpq_poly_set_coeff_si(primitive.raw(), 2, 3);
+    sflint::FmpqPoly primitive_fraction;
+    fmpq_poly_scalar_div_si(primitive_fraction.raw(), primitive.raw(), 5);
+    assert(!fmpz_is_one(primitive_fraction.raw()->den));
+    sflint::FmpzMat primitive_expected(0, 0);
+    silex::detail::SaturationCandidateSearchResult primitive_expected_search;
+    assert(search_from(sflint::FmpqPolyConstRef(primitive), 3,
+                       sflint::FmpzConstRef(q0), primitive_expected,
+                       primitive_expected_search));
+    assert(primitive_expected_search.auxiliary_prime_count == 8);
+    assert(primitive_expected_search.degree_one_prime_count > 0);
+    sflint::FmpzMat primitive_candidates(0, 0);
+    silex::detail::SaturationCandidateSearchResult primitive_search;
+    assert(search_from(sflint::FmpqPolyConstRef(primitive_fraction), 3,
+                       sflint::FmpzConstRef(q0), primitive_candidates,
+                       primitive_search));
+    assert(primitive_search.auxiliary_prime_count == 8);
+    assert(primitive_search.degree_one_prime_count ==
+           primitive_expected_search.degree_one_prime_count);
+    assert(primitive_search.quotient_log_row_count ==
+           primitive_expected_search.quotient_log_row_count);
+    assert(sflint::fmpz_mat_equal(primitive_candidates,
+                                  primitive_expected));
     return 0;
 }
 
