@@ -323,6 +323,20 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` 8.7% fewer (2.267e9 to 2.070e9); control
   ``cyclotomic_real_64_deg16`` unchanged.
 
+- ``Order::p_radical`` on an order that is not an equation order, as
+  ``maximal_order`` calls it while it enlarges an order, reduces the order's
+  multiplication table modulo ``p`` once per call instead of reducing each
+  table entry for every term of every product in ``O/pO``.  For ``p`` that
+  fits a word the Frobenius powers use word arithmetic with one reduction per
+  output coordinate; larger ``p`` keep ``fmpz`` residues, also with one
+  reduction per coordinate.  Every product is the same residue as before, so
+  p-radicals and maximal orders are unchanged: the maximal-order bases,
+  discriminants and the p-radicals at the discriminant's primes agree on all
+  170 distinct corpus fields.  Busy-machine callgrind instruction counts for
+  the whole ``silex-class-unit-instance`` process, ``grh`` mode:
+  ``cyclotomic_real_q10_c11_deg10`` 5.8% fewer (2.049e9 to 1.931e9), all of
+  it in ``maximal_order``.  No timing has been measured.
+
 - The split-prime norm evaluation of the small-LLL relation candidates
   (defining polynomials of degree 16 and more) reuses per-row values.  Each
   candidate is a row ``b`` of the reduced ideal basis, or a sum or
