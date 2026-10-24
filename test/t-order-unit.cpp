@@ -10394,9 +10394,10 @@ int test_stable_proof_scan_stops_building_columns_at_full_rank() {
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
         // Every column built is appended or unavailable: none is built
         // after the column that ends its scan.  Building all 12 columns
-        // over each q examined (29 to 31 of them, by the column order and the
-        // vanishing root) would build 12 per q.
-        assert(events.decompositions > 0);
+        // over each q examined (30 with no vanishing root, 29 with
+        // vanishing index 2 or 9, as measured; the count follows FLINT's root
+        // order) would build 12 per q.
+        assert(events.decompositions == (vanishing_index < 0 ? 30 : 29));
         assert(events.full_rank == proved.unit_proof_record_count());
         assert(events.built == events.appended + events.unavailable);
         assert(events.built < 12 * events.decompositions);
