@@ -133,6 +133,21 @@ Added
 Changed
 -------
 
+- Each random-relation round of the ``proven`` relation search finds the
+  factor-base primes that no stored relation already shows to be principal
+  in one pass over the stored relations, instead of one pass per prime.  A
+  prime counts as principal, as before, when some relation row has a single
+  nonzero entry, in its column, equal to 1 or -1; when a pass could fail,
+  the per-prime check runs instead, so failures are unchanged.  The primes
+  found, and so the relation search and published results, are the same:
+  ``proven`` outputs and proof records are identical on the 178 corpus and
+  fixture rows that finish within 120 s on both builds
+  (``multiquadratic_m23_m31_m47`` with a 900 s cap; seven large cyclotomic
+  rows timed out on both builds).  Callgrind instruction counts (busy
+  machine, ``proven``): ``real_quadratic_d10000000005`` 10.0% fewer
+  (3.671e9 to 3.302e9), ``simplest_quartic_t10`` 1.5% fewer (1.311e9 to
+  1.292e9).  No timing has been measured.
+
 - The FLINT route of the stored-unit reduction (the LLL of the scaled unit
   log rows, run when a unit group's stored units are reduced) takes the
   shared certified first LLL phase, which replaces FLINT's multiprecision
