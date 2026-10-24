@@ -679,6 +679,103 @@ int test_roots_of_unity_nonmonic_presentations() {
     return 0;
 }
 
+silex::NumberField fmpz_poly_field(const sflint::FmpzPoly& integral) noexcept {
+    sflint::FmpqPoly polynomial;
+    fmpq_poly_set_fmpz_poly(polynomial.raw(), integral.raw());
+    return silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+}
+
+// The cyclotomic shortcut of the proven root bound against the good-prime
+// loop it skips: for every n with phi(n) <= 40, odd and even, the field
+// defined by Phi_n is detected with index n, the shortcut and the loop give
+// the same bound lcm(2, n), and searching against the loop's bound publishes
+// the same w as the public functions.  Translates Phi_n(x + c) with c != 0
+// (for phi(n) <= 12), scalar multiples and other polynomials are not
+// detected and keep the loop's bound.
+int test_roots_of_unity_cyclotomic_shortcut() {
+    slong checked = 0;
+    for (ulong n = 1; n <= 2 * 40 * 40; ++n) {
+        const ulong phi = n_euler_phi(n);
+        if (phi > 40) {
+            continue;
+        }
+        ++checked;
+        const ulong w = n % 2 == 0 ? n : 2 * n;
+        sflint::FmpzPoly cyclotomic;
+        fmpz_poly_cyclotomic(cyclotomic.raw(), n);
+        silex::NumberField field = fmpz_poly_field(cyclotomic);
+        assert(silex::detail::cyclotomic_defining_polynomial_index(field) ==
+               n);
+
+        ulong shortcut = 0;
+        ulong loop = 0;
+        assert(silex::detail::proven_root_of_unity_bound(shortcut, field,
+                                                         true));
+        assert(silex::detail::proven_root_of_unity_bound(loop, field, false));
+        assert(shortcut == w);
+        assert(loop == shortcut);
+
+        assert_roots_of_unity(field, w);
+        sflint::Fmpz order;
+        silex::Element generator(field);
+        assert(silex::detail::roots_of_unity_for_bound(
+                sflint::FmpzRef(order), generator, field, loop));
+        assert(fmpz_equal_ui(order.raw(), w) != 0);
+        assert(has_exact_order(generator, w));
+
+        // The translates cost two more good-prime loops each, so they are
+        // checked up to degree 12.
+        if (phi < 2 || phi > 12) {
+            continue;
+        }
+        // Phi_n(x + 1) and Phi_n(x - 2) define the same field.  They are not
+        // cyclotomic, except Phi_6(x + 1) = Phi_3, and take the good-prime
+        // loop, whose bound the shortcut leaves unchanged.
+        for (slong c : {slong{1}, slong{-2}}) {
+            sflint::FmpzPoly translate;
+            sflint::FmpzPoly shift;
+            fmpz_poly_set_coeff_si(shift.raw(), 1, 1);
+            fmpz_poly_set_coeff_si(shift.raw(), 0, c);
+            fmpz_poly_compose(translate.raw(), cyclotomic.raw(), shift.raw());
+            silex::NumberField translated = fmpz_poly_field(translate);
+            assert(silex::detail::cyclotomic_defining_polynomial_index(
+                           translated) == (n == 6 && c == 1 ? 3 : 0));
+            assert(silex::detail::proven_root_of_unity_bound(
+                    shortcut, translated, true));
+            assert(silex::detail::proven_root_of_unity_bound(
+                    loop, translated, false));
+            assert(shortcut == loop);
+        }
+    }
+    // phi(n) <= 40 holds for exactly 81 n, the largest 150;
+    // phi(n) >= sqrt(n / 2) bounds the range searched above.
+    assert(checked == 81);
+
+    // 3 Phi_7 is not Phi_7, so the field detector rejects it; its monic
+    // integral model is Phi_7, so the bound is still w = 14.
+    sflint::FmpzPoly tripled;
+    fmpz_poly_cyclotomic(tripled.raw(), 7);
+    fmpz_poly_scalar_mul_si(tripled.raw(), tripled.raw(), 3);
+    silex::NumberField tripled_field = fmpz_poly_field(tripled);
+    assert(silex::detail::cyclotomic_defining_polynomial_index(
+                   tripled_field) == 0);
+    ulong bound = 0;
+    assert(silex::detail::proven_root_of_unity_bound(bound, tripled_field,
+                                                     true));
+    assert(bound == 14);
+
+    const slong zeta9[] = {57, -36, 36, 9, 6, 0, 1};
+    assert(silex::detail::cyclotomic_defining_polynomial_index(
+                   integer_polynomial_field(zeta9, 7)) == 0);
+    const silex::NumberField undefined;
+    assert(silex::detail::cyclotomic_defining_polynomial_index(undefined) ==
+           0);
+    assert(!silex::detail::proven_root_of_unity_bound(bound, undefined,
+                                                      true));
+    return 0;
+}
+
 // Q(zeta_40) as T = charpoly(Mod(x + 3*x^2 + x^3, polcyclo(40))) in GP 2.17.4
 // (the "40_3" presentation), with w = 40 from nfrootsof1.  The good-prime
 // gcd stays at 120 for more than n + 20 = 36 consecutive good primes, where
@@ -1503,6 +1600,7 @@ int main() {
     test_cyclotomic_root_hensel();
     test_roots_of_unity_fail_closed_against_bound();
     test_roots_of_unity_phi_reset();
+    test_roots_of_unity_cyclotomic_shortcut();
     test_roots_of_unity_public_fail_closed();
     test_roots_of_unity_memo();
     test_lower_regulator_bound();

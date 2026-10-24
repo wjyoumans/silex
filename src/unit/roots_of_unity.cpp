@@ -111,6 +111,14 @@ bool primitive_sixth_root(Element& generator,
     return generator.scalar_div_si(numerator, 2);
 }
 
+// The index n when `polynomial` equals the cyclotomic polynomial Phi_n
+// coefficient for coefficient, and 0 otherwise.  FLINT's
+// fmpz_poly_is_cyclotomic screens degree, constant term and palindromy, then
+// compares the polynomial with fmpz_poly_cyclotomic(n) for each n with
+// phi(n) equal to the degree.
+ulong cyclotomic_polynomial_index(const flint::FmpzPoly& polynomial) noexcept {
+    return fmpz_poly_is_cyclotomic(polynomial.raw());
+}
 
 ulong factor_residue_degree_gcd(const flint::FmpzPoly& polynomial,
                                 ulong p) noexcept {
@@ -468,8 +476,8 @@ bool prime_power_root_of_unity(Element& out,
 // a proven multiple of w for the field defined by the monic integral
 // `polynomial`.  False when the discriminant vanishes or the good-prime
 // search reaches its resource limit.
-bool proven_root_bound(ulong& bound,
-                       const flint::FmpzPoly& polynomial) noexcept {
+bool good_prime_reduced_root_bound(ulong& bound,
+                                   const flint::FmpzPoly& polynomial) noexcept {
     flint::Fmpz discriminant;
     fmpz_poly_discriminant(discriminant.raw(), polynomial.raw());
     if (fmpz_is_zero(discriminant.raw()) != 0) {
@@ -486,6 +494,40 @@ bool proven_root_bound(ulong& bound,
     }
     bound = good_prime_bound;
     return true;
+}
+
+// w of Q(zeta_n) when the monic integral `polynomial` is exactly Phi_n:
+// n for even n and 2n for odd n.
+//
+// Source trace: reference v0.38.6
+// `TorsionUnits.jl:_torsion_units_gen` (lines 416-423), which returns f for
+// even f and 2f for odd f when K is the cyclotomic field Q(zeta_f).  Silex
+// recognizes Phi_n by exact equality (`cyclotomic_polynomial_index`) instead
+// of a field attribute.  Proof that w = m := lcm(2, n): K contains
+// +-zeta_n, so m | w, and Q(zeta_w) is a subfield of K, so
+// phi(w) <= [K : Q] = phi(n) = phi(m).  With w = m t,
+// phi(w) >= phi(m) phi(t), and phi(t) = 1 only for t = 1, 2; t = 2 with m even
+// gives phi(w) = 2 phi(m).  So t = 1.  The bound is therefore w itself, a
+// proven multiple of w as the callers require, and the published w is still
+// certified by exact order in search_roots_for_bound.
+bool cyclotomic_root_bound(ulong& bound,
+                           const flint::FmpzPoly& polynomial) noexcept {
+    const ulong n = cyclotomic_polynomial_index(polynomial);
+    if (n == 0) {
+        return false;
+    }
+    bound = n % 2 == 0 ? n : 2 * n;
+    return true;
+}
+
+// A proven multiple of w for the field defined by the monic integral
+// `polynomial`: w itself when `polynomial` is a cyclotomic polynomial, and
+// otherwise the reduced good-prime bound.  Translates Phi_n(+-y + c) with
+// c != 0 and every other presentation take the good-prime loop.
+bool proven_root_bound(ulong& bound,
+                       const flint::FmpzPoly& polynomial) noexcept {
+    return cyclotomic_root_bound(bound, polynomial) ||
+           good_prime_reduced_root_bound(bound, polynomial);
 }
 
 // True when the field's defining polynomial is monic with integer
@@ -804,6 +846,30 @@ bool root_of_unity_generator(Element& generator,
 
 
 namespace detail {
+
+ulong cyclotomic_defining_polynomial_index(const NumberField& field) noexcept {
+    const nf_struct* raw = field.is_defined() ? field.raw_flint_field()
+                                              : nullptr;
+    if (raw == nullptr || fmpz_is_one(fmpq_poly_denref(raw->pol)) == 0) {
+        return 0;
+    }
+    return _fmpz_poly_is_cyclotomic(fmpq_poly_numref(raw->pol),
+                                    fmpq_poly_length(raw->pol));
+}
+
+bool proven_root_of_unity_bound(ulong& bound,
+                                const NumberField& field,
+                                bool use_cyclotomic_shortcut) noexcept {
+    flint::FmpzPoly polynomial;
+    flint::Fmpz scale;
+    if (!field.is_defined() ||
+        !monic_integral_defining_poly(polynomial, scale, field)) {
+        return false;
+    }
+    return use_cyclotomic_shortcut
+            ? proven_root_bound(bound, polynomial)
+            : good_prime_reduced_root_bound(bound, polynomial);
+}
 
 RootsOfUnityCacheCounters roots_of_unity_cache_counters() noexcept {
     return roots_of_unity_counters_tls;

@@ -23,6 +23,22 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
                               const NumberField& field,
                               ulong bound) noexcept;
 
+// The index n when the defining polynomial of `field` is exactly the
+// cyclotomic polynomial Phi_n (integral, with Phi_n's coefficients), and 0
+// otherwise, including for translates Phi_n(+-x + c) with c != 0, scalar
+// multiples and undefined fields.  Candidates are the n with phi(n) equal to
+// the degree, compared with FLINT's fmpz_poly_cyclotomic.
+ulong cyclotomic_defining_polynomial_index(const NumberField& field) noexcept;
+
+// The proven multiple of w that roots_of_unity searches against, for the
+// monic integral model of the defining polynomial of `field`, exposed for
+// tests.  With use_cyclotomic_shortcut, a cyclotomic model polynomial Phi_n
+// gives w = lcm(2, n) directly; without it the reduced good-prime bound is
+// always computed.  False when the bound is not computed.
+bool proven_root_of_unity_bound(ulong& bound,
+                                const NumberField& field,
+                                bool use_cyclotomic_shortcut) noexcept;
+
 // Per-thread counts of the roots-of-unity memo in
 // src/unit/roots_of_unity.cpp, which stores w and a generator per defining
 // polynomial and backend.  Diagnostic only: the memo never changes a
