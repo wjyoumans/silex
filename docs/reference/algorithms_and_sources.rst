@@ -411,9 +411,11 @@ prime ``2`` is unramified in ``Q(zeta_n)`` yet divides ``n``, and the closed
 form is not applied there (``n = 2`` would give ``0``, but ``x + 1`` has a
 root modulo ``2``).  The counts equal the modulo-``p`` counts, so no value or
 proof input changes.
-The split-prime search uses the same criterion for ``Phi_n`` and for its
-real-subfield polynomial ``psi_n``: with ``p`` not dividing ``n``, it accepts
-``p`` when ``p = +-1 mod n`` and confirms it with an exact root check modulo
+The split-prime search applies a closed-form criterion for ``Phi_n`` and
+for its real-subfield polynomial ``psi_n``: with ``p`` not dividing ``n``,
+``Phi_n`` splits into distinct linear factors modulo ``p`` exactly when
+``p = 1 mod n``, and ``psi_n`` does so exactly when ``p = +-1 mod n``.  The
+search accepts such ``p`` and confirms it with an exact root check modulo
 ``p``.
 
 Silex publishes ``w`` only when it certifies a root of unity whose exact
