@@ -1,5 +1,7 @@
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_mod_ctx.hpp>
+#include <silex/flint/fmpz_vec.hpp>
 #include <silex/ideal.hpp>
 #include <silex/order.hpp>
 #include <silex/order_element.hpp>
@@ -10,6 +12,9 @@
 #include <flint/fmpq_mat.h>
 #include <flint/fmpz.h>
 #include <flint/fmpz_mat.h>
+#include <flint/fmpz_mod.h>
+#include <flint/fmpz_vec.h>
+#include <flint/flint.h>
 
 #include <cassert>
 #include <utility>
@@ -1308,6 +1313,231 @@ int test_cached_multiplication_table_view() {
     return 0;
 }
 
+
+// Reference power in O/pO: the product reduces every table entry and every
+// partial sum modulo p, as Order::p_radical did before its products moved to
+// a table reduced once.  Same right-to-left binary powering.
+void reference_coords_pow_mod(sflint::FmpzVec& out,
+                              const sflint::FmpzVec& base,
+                              const fmpz_t exponent,
+                              const sflint::FmpzVec& one,
+                              const sflint::FmpzMat& table,
+                              const sflint::FmpzModCtx& ctx) noexcept {
+    const slong n = out.length();
+    sflint::FmpzVec acc(n);
+    sflint::FmpzVec b(n);
+    sflint::FmpzVec product(n);
+    sflint::Fmpz e;
+    sflint::Fmpz ab;
+    sflint::Fmpz coeff;
+    sflint::Fmpz term;
+    _fmpz_vec_set(acc.data(), one.data(), n);
+    _fmpz_vec_set(b.data(), base.data(), n);
+    fmpz_set(e.raw(), exponent);
+    auto mul = [&](sflint::FmpzVec& c, const sflint::FmpzVec& x,
+                   const sflint::FmpzVec& y) {
+        _fmpz_vec_zero(product.data(), n);
+        for (slong i = 0; i < n; ++i) {
+            for (slong j = 0; j < n; ++j) {
+                fmpz_mod_mul(ab.raw(), x.data() + i, y.data() + j, ctx.raw());
+                for (slong k = 0; k < n; ++k) {
+                    fmpz_mod_set_fmpz(coeff.raw(),
+                                      fmpz_mat_entry(table.raw(), i * n + j, k),
+                                      ctx.raw());
+                    fmpz_mod_mul(term.raw(), ab.raw(), coeff.raw(), ctx.raw());
+                    fmpz_mod_add(product.data() + k, product.data() + k,
+                                 term.raw(), ctx.raw());
+                }
+            }
+        }
+        _fmpz_vec_set(c.data(), product.data(), n);
+    };
+    while (fmpz_is_zero(e.raw()) == 0) {
+        if (fmpz_is_odd(e.raw()) != 0) {
+            mul(acc, acc, b);
+        }
+        fmpz_fdiv_q_2exp(e.raw(), e.raw(), 1);
+        if (fmpz_is_zero(e.raw()) == 0) {
+            mul(b, b, b);
+        }
+    }
+    _fmpz_vec_set(out.data(), acc.data(), n);
+}
+
+// Checks the word and fmpz product paths of the p_radical power against the
+// reference for one modulus, on the given table and random bases with some
+// zero coordinates.
+void check_coords_pow_paths(const sflint::FmpzMat& table,
+                            const sflint::FmpzVec& one_coords,
+                            const fmpz_t p,
+                            flint_rand_t state) noexcept {
+    const slong n = fmpz_mat_ncols(table.raw());
+    sflint::FmpzModCtx ctx(p);
+    sflint::FmpzVec one(n);
+    sflint::FmpzVec base(n);
+    sflint::FmpzVec word_out(n);
+    sflint::FmpzVec fmpz_out(n);
+    sflint::FmpzVec expected(n);
+    for (slong i = 0; i < n; ++i) {
+        fmpz_mod(one.data() + i, one_coords.data() + i, p);
+    }
+
+    sflint::Fmpz exponents[5];
+    fmpz_zero(exponents[0].raw());
+    fmpz_one(exponents[1].raw());
+    fmpz_set_ui(exponents[2].raw(), 2);
+    // The p_radical exponent: the least power of p above n.
+    fmpz_set(exponents[3].raw(), p);
+    while (fmpz_cmp_si(exponents[3].raw(), n) <= 0) {
+        fmpz_mul(exponents[3].raw(), exponents[3].raw(), p);
+    }
+    fmpz_one(exponents[4].raw());
+    fmpz_mul_2exp(exponents[4].raw(), exponents[4].raw(), 70);
+    fmpz_add_ui(exponents[4].raw(), exponents[4].raw(), 12345);
+
+    for (int trial = 0; trial < 6; ++trial) {
+        for (slong i = 0; i < n; ++i) {
+            if (trial > 0 && n_randint(state, 4) == 0) {
+                fmpz_zero(base.data() + i);
+            } else if (trial == 0) {
+                fmpz_sub_ui(base.data() + i, p, 1);
+            } else {
+                fmpz_randm(base.data() + i, state, p);
+            }
+        }
+        for (const sflint::Fmpz& e : exponents) {
+            reference_coords_pow_mod(expected, base, e.raw(), one, table, ctx);
+            assert(silex::detail::order_coords_pow_mod_p(
+                    word_out, base, sflint::FmpzConstRef(e), one, table,
+                    sflint::FmpzConstRef(p), true));
+            assert(silex::detail::order_coords_pow_mod_p(
+                    fmpz_out, base, sflint::FmpzConstRef(e), one, table,
+                    sflint::FmpzConstRef(p), false));
+            assert(_fmpz_vec_equal(word_out.data(), expected.data(), n) != 0);
+            assert(_fmpz_vec_equal(fmpz_out.data(), expected.data(), n) != 0);
+        }
+    }
+}
+
+int test_p_radical_power_word_and_fmpz_paths() {
+    flint_rand_t state;
+    flint_rand_init(state);
+
+    // Dedekind's x^3 - x^2 - 2x - 8: a non-equation maximal order, whose
+    // multiplication table p_radical uses.
+    sflint::FmpqPoly dedekind_poly;
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 0, -8);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 1, -2);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 2, -1);
+    sflint::fmpq_poly_set_coeff_si(dedekind_poly, 3, 1);
+    silex::NumberField field = field_by_polynomial(dedekind_poly);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(silex::test::equation_order(field)));
+    assert(!maximal.is_equation_order());
+    sflint::FmpzMat order_table(9, 3);
+    assert(maximal.multiplication_table(sflint::FmpzMatRef(order_table)));
+    sflint::FmpzVec order_one(3);
+    {
+        sflint::FmpqMat basis(3, 3);
+        sflint::FmpqMat inverse(3, 3);
+        assert(maximal.get_basis(sflint::FmpqMatRef(basis)));
+        assert(fmpq_mat_inv(inverse.raw(), basis.raw()) != 0);
+        // 1 is the first row of the inverse basis (power-basis vector e_0).
+        for (slong j = 0; j < 3; ++j) {
+            assert(fmpz_is_one(fmpq_mat_entry_den(inverse.raw(), 0, j)) != 0);
+            fmpz_set(order_one.data() + j,
+                     fmpq_mat_entry_num(inverse.raw(), 0, j));
+        }
+    }
+
+    // A synthetic 4 x 4 table with signed entries of up to 200 bits, so the
+    // table reduction and the unreduced accumulation both see entries far
+    // outside [0, p).
+    const slong n = 4;
+    sflint::FmpzMat wide_table(n * n, n);
+    for (slong row = 0; row < n * n; ++row) {
+        for (slong k = 0; k < n; ++k) {
+            fmpz_randtest(fmpz_mat_entry(wide_table.raw(), row, k), state,
+                          200);
+        }
+    }
+    sflint::FmpzVec wide_one(n);
+    for (slong i = 0; i < n; ++i) {
+        fmpz_randtest(wide_one.data() + i, state, 80);
+    }
+
+    sflint::Fmpz p;
+    const ulong small_primes[] = {2, 3, 5, 101, 503};
+    for (ulong small : small_primes) {
+        fmpz_set_ui(p.raw(), small);
+        check_coords_pow_paths(order_table, order_one, p.raw(), state);
+        check_coords_pow_paths(wide_table, wide_one, p.raw(), state);
+    }
+    // 2^61 - 1, below a full word; 2^64 - 59, the largest prime below 2^64
+    // (nmod norm 0); and the least prime above 2^64, where the word request
+    // falls back to fmpz residues.
+    fmpz_one(p.raw());
+    fmpz_mul_2exp(p.raw(), p.raw(), 61);
+    fmpz_sub_ui(p.raw(), p.raw(), 1);
+    check_coords_pow_paths(order_table, order_one, p.raw(), state);
+    check_coords_pow_paths(wide_table, wide_one, p.raw(), state);
+    fmpz_set_ui(p.raw(), UWORD_MAX);
+    fmpz_sub_ui(p.raw(), p.raw(), 58);
+    assert(fmpz_is_prime(p.raw()) == 1);
+    check_coords_pow_paths(order_table, order_one, p.raw(), state);
+    check_coords_pow_paths(wide_table, wide_one, p.raw(), state);
+    fmpz_set_ui(p.raw(), UWORD_MAX);
+    fmpz_nextprime(p.raw(), p.raw(), 1);
+    assert(fmpz_abs_fits_ui(p.raw()) == 0);
+    check_coords_pow_paths(order_table, order_one, p.raw(), state);
+    check_coords_pow_paths(wide_table, wide_one, p.raw(), state);
+
+    // Rejected inputs leave the output unchanged.
+    sflint::FmpzVec out(3);
+    sflint::FmpzVec base(3);
+    fmpz_set_ui(out.data(), 7);
+    fmpz_set_ui(p.raw(), 5);
+    sflint::Fmpz e;
+    fmpz_set_ui(e.raw(), 3);
+    fmpz_set_ui(base.data(), 5);
+    assert(!silex::detail::order_coords_pow_mod_p(
+            out, base, sflint::FmpzConstRef(e), order_one, order_table,
+            sflint::FmpzConstRef(p), true));
+    fmpz_zero(base.data());
+    fmpz_set_si(e.raw(), -1);
+    assert(!silex::detail::order_coords_pow_mod_p(
+            out, base, sflint::FmpzConstRef(e), order_one, order_table,
+            sflint::FmpzConstRef(p), true));
+    fmpz_set_ui(e.raw(), 3);
+    assert(!silex::detail::order_coords_pow_mod_p(
+            out, base, sflint::FmpzConstRef(e), order_one, wide_table,
+            sflint::FmpzConstRef(p), true));
+    assert(fmpz_equal_ui(out.data(), 7) != 0);
+
+    // p_radical of the non-equation order at word-size and multiword
+    // primes: 503 ramifies (503 = P^2 Q, radical PQ of norm 503^2), and the
+    // primes near 2^64 are unramified (radical pO, norm p^3).
+    silex::Ideal radical(maximal);
+    sflint::Fmpz norm;
+    sflint::Fmpz expected_norm;
+    fmpz_set_ui(p.raw(), 503);
+    assert(maximal.p_radical(radical, sflint::FmpzConstRef(p)));
+    assert(radical.norm(sflint::FmpzRef(norm)));
+    assert(fmpz_equal_ui(norm.raw(), 503 * 503) != 0);
+    fmpz_set_ui(p.raw(), UWORD_MAX);
+    fmpz_sub_ui(p.raw(), p.raw(), 58);
+    for (int round = 0; round < 2; ++round) {
+        assert(maximal.p_radical(radical, sflint::FmpzConstRef(p)));
+        assert(radical.norm(sflint::FmpzRef(norm)));
+        fmpz_pow_ui(expected_norm.raw(), p.raw(), 3);
+        assert(fmpz_equal(norm.raw(), expected_norm.raw()) != 0);
+        fmpz_set_ui(p.raw(), UWORD_MAX);
+        fmpz_nextprime(p.raw(), p.raw(), 1);
+    }
+
+    flint_rand_clear(state);
+    return 0;
+}
 }  // namespace
 
 int main() {
@@ -1331,5 +1561,6 @@ int main() {
     assert(test_cached_equation_order_index() == 0);
     assert(test_maximal_order_table_matches_basis_products() == 0);
     assert(test_cached_multiplication_table_view() == 0);
+    assert(test_p_radical_power_word_and_fmpz_paths() == 0);
     return 0;
 }

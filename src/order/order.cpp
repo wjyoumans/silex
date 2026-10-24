@@ -10,6 +10,7 @@
 #include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
 #include <flint/nf_elem.h>
+#include <flint/nmod.h>
 
 #include <silex/archimedean.hpp>
 #include <silex/diagnostics.hpp>
@@ -335,70 +336,182 @@ void mod_vec_set(flint::FmpzVec& dest,
     }
 }
 
-void mod_vec_mul(flint::FmpzVec& c,
-                 const flint::FmpzVec& a,
-                 const flint::FmpzVec& b,
-                 const flint::FmpzMat& mul_table,
-                 const flint::FmpzModCtx& ctx) noexcept {
+// The multiplication table of an order reduced modulo p once, for products
+// in O/pO.  Row i * n + j holds the coordinates of w_i * w_j modulo p.  When
+// p fits a word (and `allow_word`), the entries are word residues (`words`,
+// row-major, with `mod`); otherwise they are fmpz residues in [0, p)
+// (`entries`).
+struct ModMulTable {
+    slong degree = 0;
+    bool word = false;
+    nmod_t mod{};
+    std::vector<ulong> words;
+    flint::FmpzMat entries{0, 0};
+};
+
+bool reduce_multiplication_table(ModMulTable& out,
+                                 const flint::FmpzMat& table,
+                                 const flint::FmpzModCtx& ctx,
+                                 bool allow_word) noexcept {
+    const slong n = fmpz_mat_ncols(table.raw());
+    if (n <= 0 || fmpz_mat_nrows(table.raw()) != n * n) {
+        return false;
+    }
+
+    const fmpz* modulus = fmpz_mod_ctx_modulus(ctx.raw());
+    out.degree = n;
+    out.word = allow_word && fmpz_abs_fits_ui(modulus) != 0;
+    if (out.word) {
+        nmod_init(&out.mod, fmpz_get_ui(modulus));
+        out.words.assign(static_cast<std::size_t>(n * n * n), 0);
+        for (slong row = 0; row < n * n; ++row) {
+            for (slong k = 0; k < n; ++k) {
+                out.words[static_cast<std::size_t>(row * n + k)] =
+                        fmpz_fdiv_ui(fmpz_mat_entry(table.raw(), row, k),
+                                     out.mod.n);
+            }
+        }
+        out.entries = flint::FmpzMat(0, 0);
+        return true;
+    }
+
+    flint::FmpzMat reduced(n * n, n);
+    for (slong row = 0; row < n * n; ++row) {
+        for (slong k = 0; k < n; ++k) {
+            fmpz_mod_set_fmpz(fmpz_mat_entry(reduced.raw(), row, k),
+                              fmpz_mat_entry(table.raw(), row, k), ctx.raw());
+        }
+    }
+    out.entries = std::move(reduced);
+    out.words.clear();
+    return true;
+}
+
+// out = a * b in O/pO on word residues.  Each output coordinate
+// sum_{i,j} a_i b_j T_{ij,k} is accumulated unreduced in three words (low,
+// middle, high) and reduced once, so it is the same residue in [0, p) as a
+// sum reduced after every term.  `acc` holds 3 * n words of scratch; `out`
+// may alias `a` or `b`.
+void word_coords_mul(ulong* out,
+                     const ulong* a,
+                     const ulong* b,
+                     const ModMulTable& table,
+                     ulong* acc) noexcept {
+    const slong n = table.degree;
+    const nmod_t mod = table.mod;
+    const ulong* const entries = table.words.data();
+    for (slong k = 0; k < 3 * n; ++k) {
+        acc[k] = 0;
+    }
+    for (slong i = 0; i < n; ++i) {
+        if (a[i] == 0) {
+            continue;
+        }
+        for (slong j = 0; j < n; ++j) {
+            if (b[j] == 0) {
+                continue;
+            }
+            const ulong ab = nmod_mul(a[i], b[j], mod);
+            const ulong* const row = entries + (i * n + j) * n;
+            for (slong k = 0; k < n; ++k) {
+                ulong hi = 0;
+                ulong lo = 0;
+                umul_ppmm(hi, lo, ab, row[k]);
+                ulong* const sum = acc + 3 * k;
+                add_sssaaaaaa(sum[2], sum[1], sum[0], sum[2], sum[1], sum[0],
+                              UWORD(0), hi, lo);
+            }
+        }
+    }
+    for (slong k = 0; k < n; ++k) {
+        const ulong* const sum = acc + 3 * k;
+        ulong top = 0;
+        ulong value = 0;
+        NMOD_RED(top, sum[2], mod);
+        NMOD_RED3(value, top, sum[1], sum[0], mod);
+        out[k] = value;
+    }
+}
+
+// c = a * b in O/pO on fmpz residues in [0, p), accumulated unreduced with
+// one reduction per output coordinate.  `c` may alias `a` or `b`.
+void fmpz_coords_mul(flint::FmpzVec& c,
+                     const flint::FmpzVec& a,
+                     const flint::FmpzVec& b,
+                     const ModMulTable& table,
+                     const flint::FmpzModCtx& ctx) noexcept {
     const slong n = c.length();
     flint::FmpzVec out(n);
     flint::Fmpz ab;
-    flint::Fmpz coeff;
-    flint::Fmpz term;
 
     for (slong i = 0; i < n; ++i) {
         if (fmpz_is_zero(a.data() + i) != 0) {
             continue;
         }
-
         for (slong j = 0; j < n; ++j) {
             if (fmpz_is_zero(b.data() + j) != 0) {
                 continue;
             }
-
             fmpz_mod_mul(ab.raw(), a.data() + i, b.data() + j, ctx.raw());
-
             for (slong k = 0; k < n; ++k) {
-                fmpz_mod_set_fmpz(coeff.raw(),
-                                  fmpz_mat_entry(mul_table.raw(), i * n + j, k),
-                                  ctx.raw());
-                fmpz_mod_mul(term.raw(), ab.raw(), coeff.raw(), ctx.raw());
-                fmpz_add(out.data() + k, out.data() + k, term.raw());
-                fmpz_mod_set_fmpz(out.data() + k, out.data() + k, ctx.raw());
+                fmpz_addmul(out.data() + k, ab.raw(),
+                            fmpz_mat_entry(table.entries.raw(), i * n + j, k));
             }
         }
     }
-
-    mod_vec_set(c, out);
+    for (slong k = 0; k < n; ++k) {
+        fmpz_mod_set_fmpz(c.data() + k, out.data() + k, ctx.raw());
+    }
 }
 
+// res = base^exponent in O/pO by right-to-left binary powering, for
+// coordinate vectors `base` and `one` with entries in [0, p).  Every entry
+// of `res` is the canonical residue in [0, p).
 void mod_vec_pow_fmpz(flint::FmpzVec& res,
                       const flint::FmpzVec& base,
                       flint::FmpzConstRef exponent,
                       const flint::FmpzVec& one,
-                      const flint::FmpzMat& mul_table,
+                      const ModMulTable& table,
                       const flint::FmpzModCtx& ctx) noexcept {
     const slong n = res.length();
-    flint::FmpzVec acc(n);
-    flint::FmpzVec b(n);
-    flint::Fmpz e;
+    const flint_bitcnt_t bits = fmpz_bits(exponent.raw());
 
-    fmpz_set(e.raw(), exponent.raw());
-    mod_vec_set(acc, one);
-    mod_vec_set(b, base);
-
-    while (fmpz_is_zero(e.raw()) == 0) {
-        if (fmpz_is_odd(e.raw()) != 0) {
-            mod_vec_mul(acc, acc, b, mul_table, ctx);
+    if (table.word) {
+        // acc, b, then 3 * n words of product scratch.
+        std::vector<ulong> scratch(static_cast<std::size_t>(5 * n), 0);
+        ulong* const acc = scratch.data();
+        ulong* const b = acc + n;
+        ulong* const product = b + n;
+        for (slong i = 0; i < n; ++i) {
+            acc[i] = fmpz_fdiv_ui(one.data() + i, table.mod.n);
+            b[i] = fmpz_fdiv_ui(base.data() + i, table.mod.n);
         }
-
-        fmpz_fdiv_q_2exp(e.raw(), e.raw(), 1);
-
-        if (fmpz_is_zero(e.raw()) == 0) {
-            mod_vec_mul(b, b, b, mul_table, ctx);
+        for (flint_bitcnt_t bit = 0; bit < bits; ++bit) {
+            if (fmpz_tstbit(exponent.raw(), bit) != 0) {
+                word_coords_mul(acc, acc, b, table, product);
+            }
+            if (bit + 1 < bits) {
+                word_coords_mul(b, b, b, table, product);
+            }
         }
+        for (slong i = 0; i < n; ++i) {
+            fmpz_set_ui(res.data() + i, acc[i]);
+        }
+        return;
     }
 
+    flint::FmpzVec acc(n);
+    flint::FmpzVec b(n);
+    mod_vec_set(acc, one);
+    mod_vec_set(b, base);
+    for (flint_bitcnt_t bit = 0; bit < bits; ++bit) {
+        if (fmpz_tstbit(exponent.raw(), bit) != 0) {
+            fmpz_coords_mul(acc, acc, b, table, ctx);
+        }
+        if (bit + 1 < bits) {
+            fmpz_coords_mul(b, b, b, table, ctx);
+        }
+    }
     mod_vec_set(res, acc);
 }
 
@@ -477,6 +590,40 @@ void quadratic_basis(flint::FmpqMatRef out,
 }
 
 }  // namespace
+
+namespace detail {
+
+bool order_coords_pow_mod_p(flint::FmpzVec& out,
+                            const flint::FmpzVec& base,
+                            flint::FmpzConstRef exponent,
+                            const flint::FmpzVec& one,
+                            const flint::FmpzMat& multiplication_table,
+                            flint::FmpzConstRef p,
+                            bool allow_word) noexcept {
+    const slong n = fmpz_mat_ncols(multiplication_table.raw());
+    if (fmpz_cmp_ui(p.raw(), 1) <= 0 || fmpz_sgn(exponent.raw()) < 0 ||
+        out.length() != n || base.length() != n || one.length() != n) {
+        return false;
+    }
+    for (slong i = 0; i < n; ++i) {
+        if (fmpz_sgn(base.data() + i) < 0 || fmpz_sgn(one.data() + i) < 0 ||
+            fmpz_cmp(base.data() + i, p.raw()) >= 0 ||
+            fmpz_cmp(one.data() + i, p.raw()) >= 0) {
+            return false;
+        }
+    }
+
+    flint::FmpzModCtx ctx(p.raw());
+    ModMulTable table;
+    if (!reduce_multiplication_table(table, multiplication_table, ctx,
+                                     allow_word)) {
+        return false;
+    }
+    mod_vec_pow_fmpz(out, base, exponent, one, table, ctx);
+    return true;
+}
+
+}  // namespace detail
 
 namespace {
 
@@ -1103,6 +1250,7 @@ bool Order::p_radical(Ideal& out, flint::FmpzConstRef prime) const noexcept {
         flint::FmpzModMat phi(n, n, ctx);
         flint::FmpzModMat kernel(n, n, ctx);
         flint::FmpzMat mul_table(n * n, n);
+        ModMulTable reduced_table;
         flint::FmpzMat rows(n, n);
         flint::Fmpz q;
         flint::Fmpz entry;
@@ -1115,7 +1263,9 @@ bool Order::p_radical(Ideal& out, flint::FmpzConstRef prime) const noexcept {
             !multiplication_table_from_basis(mul_table, data_->basis_.raw(),
                                              data_->basis_inv_.raw(),
                                              data_->parent_.raw_flint_field(),
-                                             n)) {
+                                             n) ||
+            !reduce_multiplication_table(reduced_table, mul_table, ctx,
+                                         true)) {
             return false;
         }
 
@@ -1128,7 +1278,7 @@ bool Order::p_radical(Ideal& out, flint::FmpzConstRef prime) const noexcept {
             _fmpz_vec_zero(base.data(), n);
             fmpz_one(base.data() + j);
             mod_vec_pow_fmpz(image, base, flint::FmpzConstRef(q), one,
-                             mul_table, ctx);
+                             reduced_table, ctx);
 
             for (slong i = 0; i < n; ++i) {
                 fmpz_set(fmpz_mod_mat_entry(phi.raw(), i, j), image.data() + i);

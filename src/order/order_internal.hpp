@@ -3,6 +3,7 @@
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/fmpz_vec.hpp>
 #include <silex/order.hpp>
 
 #include <vector>
@@ -44,6 +45,24 @@ bool order_conductor(Ideal& out,
 bool ideal_contract(Ideal& out,
                     const Ideal& ideal,
                     const Order& suborder) noexcept;
+
+// base^exponent in O/pO, as Order::p_radical computes the images of the
+// Frobenius power x -> x^q on the basis of a non-equation order.  Vectors
+// are coordinates in the order basis with entries in [0, p);
+// `multiplication_table` is an order multiplication table (row i * n + j
+// holds the coordinates of w_i * w_j) and `one` the coordinates of 1.  With
+// `allow_word` set and p below 2^64, products run on word residues;
+// otherwise on fmpz residues.  Both give the canonical residues in [0, p).
+// Fails, leaving `out` unchanged, on mismatched lengths, a table that is not
+// n^2 x n, p < 2, a negative exponent, or entries outside [0, p).  Test
+// seam: tests compare the two product paths through it.
+bool order_coords_pow_mod_p(flint::FmpzVec& out,
+                            const flint::FmpzVec& base,
+                            flint::FmpzConstRef exponent,
+                            const flint::FmpzVec& one,
+                            const flint::FmpzMat& multiplication_table,
+                            flint::FmpzConstRef p,
+                            bool allow_word) noexcept;
 
 inline bool order_has_parented_basis(const Order& order) noexcept {
     return order.is_defined() && order.has_basis() && order.parent() != nullptr;
