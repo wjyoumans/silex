@@ -453,6 +453,20 @@ Changed
   are identical.  The user-mode instruction count of the proven
   ``imaginary_quadratic_d100000000000319`` benchmark row drops by about 14%.
 
+- The quadratic ``L(1, chi_D)`` evaluation reads the character values
+  ``chi_D(n) = (D / n)`` of its two sums from one table filled by a
+  segmented sieve, instead of computing a Kronecker symbol for every index of
+  each sum.  The symbol is computed at ``n = 1`` and at the primes only; the
+  Kronecker symbol is completely multiplicative in ``n``, so every other value
+  is the product of two earlier ones, and every value is the same as before.
+  The table takes two bits per index and at most 16 MiB (about 9.4 MiB at
+  ``|D| = 1e14``); past that size the symbol is computed directly.  Enclosures
+  are identical, and the proven outputs of the six imaginary-quadratic corpus
+  rows are unchanged.  Busy-machine callgrind instruction counts for the whole
+  ``silex-class-unit-instance`` process, ``proven`` mode:
+  ``imaginary_quadratic_d100000000000319`` 13.1% fewer (4.242e11 to
+  3.684e11).  No timing has been measured.
+
 - In quadratic fields, the coordinate-norm prefilter of class-group relation
   search computes the norm of a candidate ``a + b theta`` as the closed-form
   resultant ``a^2 - f1 a b + f0 b^2`` of the monic defining polynomial
