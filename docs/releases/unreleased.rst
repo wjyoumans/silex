@@ -2263,7 +2263,8 @@ Changed
 
 - The ``grh`` unit extraction reuses the embedded logarithms of repeated
   factor lists.  ``compact_log_matrix``, the scaled log matrices, the
-  incremental unit-row logarithms and the unit-group updates that follow a
+  incremental unit-row logarithms, the log matrix of the reduce-mod-units
+  cutoff and the unit-group updates that follow a
   verified dependent relation now go through the factored log memo that the
   relation extraction already held, instead of re-embedding each factor.  A
   memo entry is used only while the embedding cache version is unchanged, so
