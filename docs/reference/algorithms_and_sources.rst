@@ -399,6 +399,19 @@ multiple of the even number ``lcm(2, m)`` satisfies.  Translates
 other ``T`` take steps 1 and 2.
 Step 3 or 4 then certifies the root as before.
 
+The same recognition gives the Belabas--Friedman prime loop its count of
+degree-one primes above ``p`` in closed form.  For ``T = Phi_n`` and ``p``
+not dividing ``n``, ``Phi_n`` factors modulo ``p`` into ``phi(n)/d``
+distinct irreducibles of degree ``d``, the order of ``p`` modulo ``n``
+(Lidl and Niederreiter, *Finite Fields*, Theorem 2.47(ii); Washington,
+*Introduction to Cyclotomic Fields*, Theorem 2.13).  The count is therefore
+``phi(n)`` when ``p = 1 mod n`` and ``0`` otherwise.  Primes dividing ``n``
+keep the root count modulo ``p``: for ``p = 2`` and ``n = 2 mod 4`` the
+prime ``2`` is unramified in ``Q(zeta_n)`` yet divides ``n``, and the closed
+form is not applied there (``n = 2`` would give ``0``, but ``x + 1`` has a
+root modulo ``2``).  The counts equal the modulo-``p`` counts, so no value or
+proof input changes.
+
 Silex publishes ``w`` only when it certifies a root of unity whose exact
 order is the reduced bound.  The certificate is ``z^w = 1`` and
 ``z^(w/l) != 1`` for every prime ``l | w``.  With the upper bound, this

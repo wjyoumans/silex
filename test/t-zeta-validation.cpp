@@ -1524,6 +1524,8 @@ int main() {
     const FieldSetup quartic = quartic_blocker();
     const slong simplest_cubic_a6[] = {-1, -9, -6};
     const slong d12_coefficients[] = {1, 0, -2, 0, 2, 1, 1, 1, 2, -1, 0, -1};
+    const slong phi19_coefficients[] = {1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                        1, 1, 1, 1, 1, 1, 1, 1, 1};
     const slong x2_minus_210[] = {-210, 0};
     const slong x3_plus_x_plus_200[] = {200, 1, 0};
 
@@ -1550,6 +1552,8 @@ int main() {
                            setup_from_coefficients(x3_plus_x_plus_200, 3)) ||
                    !check_linear_factor_count_cache(
                            setup_from_coefficients(d12_coefficients, 12)) ||
+                   !check_linear_factor_count_cache(
+                           setup_from_coefficients(phi19_coefficients, 18)) ||
                    !check_linear_factor_batches() ||
                    !check_cyclotomic_linear_factor_counts() ||
                    !check_word_kernel_squarings()
