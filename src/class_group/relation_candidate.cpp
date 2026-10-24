@@ -442,12 +442,12 @@ bool SplitPrimeResultant::add_next_split_prime() noexcept {
 
         // Closed form for f = Phi_n or f = psi_n, n < 2^27 <= p, so p does
         // not divide n.  Modulo such p, the roots of Phi_n are the elements
-        // of exact order n (Lidl and Niederreiter, Finite Fields, 2nd ed.,
-        // 1997, Theorem 2.47), which all lie in F_p exactly when
-        // n | p - 1, so f splits into distinct linear factors exactly when
-        // p = 1 mod n (Washington, Introduction to Cyclotomic Fields, 2nd
-        // ed., 1997, Theorem 2.13).  Since x^d psi_n(x + 1/x) = Phi_n(x),
-        // d = phi(n) / 2, the roots of psi_n are zeta^k + zeta^-k for zeta
+        // of exact order n (the definition of the cyclotomic polynomial
+        // Q_n), which all lie in F_p exactly when n | p - 1, so f splits
+        // into distinct linear factors exactly when p = 1 mod n (Lidl and Niederreiter, Finite Fields, 2nd ed.,
+        // 1997, Theorem 2.47(ii); Washington, Introduction to Cyclotomic
+        // Fields, 2nd ed., 1997, Theorem 2.13).  Since
+        // x^d psi_n(x + 1/x) = Phi_n(x), d = phi(n) / 2, the roots of psi_n are zeta^k + zeta^-k for zeta
         // of exact order n and k coprime to n, 0 < k < n / 2, distinct for
         // n >= 3.  zeta + zeta^-1 lies in F_p exactly when zeta^p is zeta
         // or zeta^-1, that is when n | p - 1 or n | p + 1, so psi_n splits
