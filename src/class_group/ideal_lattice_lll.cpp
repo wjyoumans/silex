@@ -1041,6 +1041,43 @@ lat::detail::CertifiedLllRoute ideal_lattice_rounded_embedding_integer_lll(
     return ideal_lattice_certified_lll(embedded, transform, config);
 }
 
+bool ideal_lattice_symmetric_congruence_product(
+        flint::FmpzMat& out,
+        flint::FmpzMatConstRef basis,
+        flint::FmpzMatConstRef gram) noexcept {
+    const slong rows = flint::fmpz_mat_nrows(basis);
+    const slong cols = flint::fmpz_mat_ncols(basis);
+    if (rows < 0 || cols < 0 || flint::fmpz_mat_nrows(gram) != cols ||
+        flint::fmpz_mat_ncols(gram) != cols ||
+        flint::fmpz_mat_nrows(out) != rows ||
+        flint::fmpz_mat_ncols(out) != rows) {
+        return false;
+    }
+    if (rows == 0) {
+        return true;
+    }
+    if (cols == 0) {
+        flint::fmpz_mat_zero(flint::FmpzMatRef(out));
+        return true;
+    }
+    flint::FmpzMat basis_gram(rows, cols);
+    flint::fmpz_mat_mul(flint::FmpzMatRef(basis_gram), basis, gram);
+    const fmpz_mat_struct* b = basis.raw();
+    const fmpz_mat_struct* c = basis_gram.raw();
+    fmpz_mat_struct* o = out.raw();
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = i; j < rows; ++j) {
+            ::_fmpz_vec_dot(::fmpz_mat_entry(o, i, j),
+                            ::fmpz_mat_entry(b, i, 0),
+                            ::fmpz_mat_entry(c, j, 0), cols);
+        }
+        for (slong j = 0; j < i; ++j) {
+            ::fmpz_set(::fmpz_mat_entry(o, i, j), ::fmpz_mat_entry(o, j, i));
+        }
+    }
+    return true;
+}
+
 // The reference 2.17.3 buch2.c:2461-2462 (Fincke_Pohst_ideal):
 //   u = ZM_lll(ZM_mul(G0, I), 0.99, LLL_IM); ideal = ZM_mul(I, u);
 // one integer LLL of the ideal basis in the rounded embedding.  The
@@ -1099,15 +1136,14 @@ static IdealLatticeReductionStatus ideal_lattice_rounded_embedding_lll_reduce(
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.ideal_lattice_reduction.rounded_embedding.gram");
-        flint::FmpzMat reduced_basis_transpose(degree, degree);
-        flint::fmpz_mat_transpose(flint::FmpzMatRef(reduced_basis_transpose),
-                                  flint::FmpzMatConstRef(reduced_basis));
-        flint::fmpz_mat_mul(flint::FmpzMatRef(check),
-                            flint::FmpzMatConstRef(cache.order_gram),
-                            flint::FmpzMatConstRef(reduced_basis_transpose));
-        flint::fmpz_mat_mul(flint::FmpzMatRef(reduced_gram),
-                            flint::FmpzMatConstRef(reduced_basis),
-                            flint::FmpzMatConstRef(check));
+        // The cached order Gram is symmetric (fmpz_mat_gram, an entrywise
+        // truncation and a diagonal shift), so the exact product
+        // B * (G * B^T) is symmetric and its upper triangle determines it.
+        if (!ideal_lattice_symmetric_congruence_product(
+                    reduced_gram, flint::FmpzMatConstRef(reduced_basis),
+                    flint::FmpzMatConstRef(cache.order_gram))) {
+            return IdealLatticeReductionStatus::failed;
+        }
         flint::fmpz_mat_scalar_tdiv_q_2exp(
                 flint::FmpzMatRef(reduced_gram),
                 flint::FmpzMatConstRef(reduced_gram),

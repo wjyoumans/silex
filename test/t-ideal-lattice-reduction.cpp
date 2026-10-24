@@ -537,6 +537,178 @@ bool same_lll_data(
                               sflint::FmpzConstRef(right.gram_denominator));
 }
 
+// Deterministic signed entries of at most `bits` bits (linear congruential).
+void fill_test_matrix(sflint::FmpzMat& matrix, ulong& state, slong bits) {
+    const slong rows = sflint::fmpz_mat_nrows(matrix);
+    const slong cols = sflint::fmpz_mat_ncols(matrix);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < cols; ++j) {
+            fmpz* entry = ::fmpz_mat_entry(matrix.raw(), i, j);
+            ::fmpz_zero(entry);
+            for (slong done = 0; done < bits; done += 16) {
+                state = state * UWORD(6364136223846793005) +
+                        UWORD(1442695040888963407);
+                ::fmpz_mul_2exp(entry, entry, 16);
+                ::fmpz_add_ui(entry, entry, (state >> 40) & UWORD(0xffff));
+            }
+            if (bits > 0 && bits % 16 != 0) {
+                ::fmpz_fdiv_q_2exp(entry, entry,
+                                   static_cast<ulong>(16 - bits % 16));
+            }
+            if (((state >> 33) & 1) != 0) {
+                ::fmpz_neg(entry, entry);
+            }
+        }
+    }
+}
+
+// The product basis * (gram * basis^T) as the rounded-embedding build
+// formed it before the symmetric product.
+void full_congruence_product(sflint::FmpzMat& out,
+                             const sflint::FmpzMat& basis,
+                             const sflint::FmpzMat& gram) {
+    sflint::FmpzMat transpose(sflint::fmpz_mat_ncols(basis),
+                              sflint::fmpz_mat_nrows(basis));
+    sflint::fmpz_mat_transpose(sflint::FmpzMatRef(transpose),
+                               sflint::FmpzMatConstRef(basis));
+    sflint::FmpzMat right(sflint::fmpz_mat_ncols(basis),
+                          sflint::fmpz_mat_nrows(basis));
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(right),
+                         sflint::FmpzMatConstRef(gram),
+                         sflint::FmpzMatConstRef(transpose));
+    sflint::fmpz_mat_mul(sflint::FmpzMatRef(out),
+                         sflint::FmpzMatConstRef(basis),
+                         sflint::FmpzMatConstRef(right));
+}
+
+bool symmetric_product_matches_full(const sflint::FmpzMat& basis,
+                                    const sflint::FmpzMat& gram) {
+    namespace rs = silex::detail::relation_search;
+    const slong rows = sflint::fmpz_mat_nrows(basis);
+    sflint::FmpzMat expected(rows, rows);
+    full_congruence_product(expected, basis, gram);
+    sflint::FmpzMat actual(rows, rows);
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j < rows; ++j) {
+            ::fmpz_set_si(::fmpz_mat_entry(actual.raw(), i, j), 7);
+        }
+    }
+    return rs::ideal_lattice_symmetric_congruence_product(
+                   actual, sflint::FmpzMatConstRef(basis),
+                   sflint::FmpzMatConstRef(gram)) &&
+           sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(actual),
+                                  sflint::FmpzMatConstRef(expected));
+}
+
+// A symmetric gram shaped like the cached order Gram: A A^T, truncated by
+// 2^shift, plus the dimension on the diagonal.
+void symmetric_test_gram(sflint::FmpzMat& gram, ulong& state, slong bits) {
+    const slong n = sflint::fmpz_mat_nrows(gram);
+    sflint::FmpzMat rows(n, n);
+    fill_test_matrix(rows, state, bits);
+    sflint::fmpz_mat_gram(sflint::FmpzMatRef(gram),
+                          sflint::FmpzMatConstRef(rows));
+    sflint::fmpz_mat_scalar_tdiv_q_2exp(sflint::FmpzMatRef(gram),
+                                        sflint::FmpzMatConstRef(gram),
+                                        static_cast<ulong>(bits / 2));
+    for (slong i = 0; i < n; ++i) {
+        ::fmpz_add_ui(::fmpz_mat_entry(gram.raw(), i, i),
+                      ::fmpz_mat_entry(gram.raw(), i, i),
+                      static_cast<ulong>(n));
+    }
+}
+
+int test_symmetric_congruence_product_matches_full_product() {
+    namespace rs = silex::detail::relation_search;
+    ulong state = UWORD(728);
+
+    // 1x1.
+    {
+        sflint::FmpzMat basis(1, 1);
+        sflint::FmpzMat gram(1, 1);
+        fill_test_matrix(basis, state, 6);
+        symmetric_test_gram(gram, state, 100);
+        assert(symmetric_product_matches_full(basis, gram));
+    }
+
+    // Square bases with the entry sizes of the grh rounded-embedding
+    // build (basis rows of a few bits, order Gram of about 200 bits), at
+    // the dimensions where FLINT switches product kernels.
+    for (const slong n : {2, 3, 8, 16, 32, 40}) {
+        for (const slong gram_bits : {20, 206, 420}) {
+            sflint::FmpzMat basis(n, n);
+            sflint::FmpzMat gram(n, n);
+            fill_test_matrix(basis, state, 6);
+            symmetric_test_gram(gram, state, gram_bits);
+            assert(symmetric_product_matches_full(basis, gram));
+            fill_test_matrix(basis, state, 90);
+            assert(symmetric_product_matches_full(basis, gram));
+        }
+    }
+
+    // Rank-deficient bases: a repeated row, a zero row, and the zero
+    // matrix.
+    {
+        constexpr slong n = 12;
+        sflint::FmpzMat basis(n, n);
+        sflint::FmpzMat gram(n, n);
+        fill_test_matrix(basis, state, 8);
+        symmetric_test_gram(gram, state, 206);
+        for (slong j = 0; j < n; ++j) {
+            ::fmpz_set(::fmpz_mat_entry(basis.raw(), 5, j),
+                       ::fmpz_mat_entry(basis.raw(), 2, j));
+            ::fmpz_zero(::fmpz_mat_entry(basis.raw(), 9, j));
+        }
+        assert(symmetric_product_matches_full(basis, gram));
+        sflint::fmpz_mat_zero(sflint::FmpzMatRef(basis));
+        assert(symmetric_product_matches_full(basis, gram));
+    }
+
+    // Rectangular bases (rows != columns) and the empty cases.
+    {
+        sflint::FmpzMat wide(3, 7);
+        sflint::FmpzMat wide_gram(7, 7);
+        fill_test_matrix(wide, state, 10);
+        symmetric_test_gram(wide_gram, state, 64);
+        assert(symmetric_product_matches_full(wide, wide_gram));
+        sflint::FmpzMat tall(7, 3);
+        sflint::FmpzMat tall_gram(3, 3);
+        fill_test_matrix(tall, state, 10);
+        symmetric_test_gram(tall_gram, state, 64);
+        assert(symmetric_product_matches_full(tall, tall_gram));
+        sflint::FmpzMat no_rows(0, 4);
+        sflint::FmpzMat four_gram(4, 4);
+        symmetric_test_gram(four_gram, state, 30);
+        assert(symmetric_product_matches_full(no_rows, four_gram));
+        sflint::FmpzMat no_cols(3, 0);
+        sflint::FmpzMat empty_gram(0, 0);
+        assert(symmetric_product_matches_full(no_cols, empty_gram));
+    }
+
+    // Shape mismatches are rejected without writing the output.
+    {
+        sflint::FmpzMat basis(4, 4);
+        sflint::FmpzMat gram(4, 4);
+        fill_test_matrix(basis, state, 6);
+        symmetric_test_gram(gram, state, 30);
+        sflint::FmpzMat wrong_out(3, 4);
+        sflint::fmpz_mat_one(sflint::FmpzMatRef(wrong_out));
+        assert(!rs::ideal_lattice_symmetric_congruence_product(
+                wrong_out, sflint::FmpzMatConstRef(basis),
+                sflint::FmpzMatConstRef(gram)));
+        sflint::FmpzMat one(3, 4);
+        sflint::fmpz_mat_one(sflint::FmpzMatRef(one));
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(wrong_out),
+                                      sflint::FmpzMatConstRef(one)));
+        sflint::FmpzMat out(4, 4);
+        sflint::FmpzMat wrong_gram(3, 3);
+        assert(!rs::ideal_lattice_symmetric_congruence_product(
+                out, sflint::FmpzMatConstRef(basis),
+                sflint::FmpzMatConstRef(wrong_gram)));
+    }
+    return 0;
+}
+
 int test_rounded_embedding_lll_contracts() {
     namespace rs = silex::detail::relation_search;
     FieldSetup setup = cubic_x3_minus_2();
@@ -2134,6 +2306,8 @@ int test_t2_enumeration_certified_lll_matches_fmpz_lll() {
 
 int main() {
     assert(test_ideal_lattice_result_contracts() == 0);
+    assert(test_symmetric_congruence_product_matches_full_product() ==
+           0);
     assert(test_rounded_embedding_lll_contracts() == 0);
     assert(test_rounded_embedding_route_check_for_badly_rounded_order() == 0);
     assert(test_rounded_embedding_route_check_boundary() == 0);

@@ -41,6 +41,17 @@ struct IdealLatticeRoundedEmbeddingCache {
     bool use_two_lll_route = false;
 };
 
+// Sets `out` to basis * gram * basis^T for a symmetric `gram`, computing
+// basis * gram with one matrix product and only the upper triangle of the
+// symmetric result by dot products, then mirroring it.  Exact, so equal
+// entry for entry to basis * (gram * basis^T) when gram is symmetric.
+// Returns false on a shape mismatch (out must be rows(basis) square, gram
+// cols(basis) square).
+bool ideal_lattice_symmetric_congruence_product(
+        flint::FmpzMat& out,
+        flint::FmpzMatConstRef basis,
+        flint::FmpzMatConstRef gram) noexcept;
+
 bool copy_ideal_basis_row_coordinates(flint::FmpzMat& out,
                                       flint::FmpzMatConstRef basis,
                                       slong row) noexcept;
