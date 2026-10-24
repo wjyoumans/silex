@@ -1512,6 +1512,11 @@ int test_p_radical_power_word_and_fmpz_paths() {
     assert(!silex::detail::order_coords_pow_mod_p(
             out, base, sflint::FmpzConstRef(e), order_one, wide_table,
             sflint::FmpzConstRef(p), true));
+    // Matching vector lengths (3) but a table of the wrong row count.
+    sflint::FmpzMat short_table(6, 3);
+    assert(!silex::detail::order_coords_pow_mod_p(
+            out, base, sflint::FmpzConstRef(e), order_one, short_table,
+            sflint::FmpzConstRef(p), true));
     assert(fmpz_equal_ui(out.data(), 7) != 0);
 
     // p_radical of the non-equation order at word-size and multiword
