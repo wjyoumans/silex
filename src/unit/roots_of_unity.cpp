@@ -522,8 +522,9 @@ bool cyclotomic_root_bound(ulong& bound,
 
 // A proven multiple of w for the field defined by the monic integral
 // `polynomial`: w itself when `polynomial` is a cyclotomic polynomial, and
-// otherwise the reduced good-prime bound.  Translates Phi_n(+-y + c) with
-// c != 0 and every other presentation take the good-prime loop.
+// otherwise the reduced good-prime bound.  Translates Phi_n(+-y + c) that are
+// not themselves a cyclotomic polynomial (Phi_6(y+1) = Phi_3 is) and every
+// other presentation take the good-prime loop.
 bool proven_root_bound(ulong& bound,
                        const flint::FmpzPoly& polynomial) noexcept {
     return cyclotomic_root_bound(bound, polynomial) ||
@@ -682,9 +683,10 @@ bool compute_roots_of_unity_uncached(flint::FmpzRef order,
     }
 
     // Source trace: reference 2.17.3 src/basemath/nffactor.c `nfrootsof1`
-    // (polynomial branch) and reference `_torsion_units_gen`: a proven good-prime
-    // multiple of w, reduced by degree and ramification, then a search for a
-    // root of unity of that order.
+    // (polynomial branch) and reference `_torsion_units_gen`: a proven multiple of
+    // w (w itself when the model is a cyclotomic polynomial, otherwise a
+    // good-prime multiple reduced by degree and ramification), then a search
+    // for a root of unity of that order.
     flint::FmpzPoly polynomial;
     flint::Fmpz scale;
     if (!monic_integral_defining_poly(polynomial, scale, field)) {
@@ -894,7 +896,8 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
     }
 
     // Guard the precondition: `bound` must be a multiple of the proven
-    // reduced good-prime bound, hence of w.  Without it a proper divisor of w
+    // root bound (w itself on a cyclotomic model, else the reduced good-prime
+    // bound), hence of w.  Without it a proper divisor of w
     // (bound 6 for Q(zeta_9)) would pass the exact-order check and be
     // published as w.
     ulong proven = 0;

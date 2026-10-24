@@ -389,12 +389,14 @@ When ``T`` is exactly a cyclotomic polynomial ``Phi_m``, Silex skips steps
 ``TorsionUnits.jl:_torsion_units_gen`` (lines 416-423) returns ``f`` for even
 ``f`` and ``2f`` for odd ``f`` on the cyclotomic field ``Q(zeta_f)``.  Hecke
 reads a field attribute; Silex recognizes ``Phi_m`` with FLINT's
-``fmpz_poly_is_cyclotomic``, which compares ``T`` coefficient for coefficient
-with ``Phi_m`` for each ``m`` with ``phi(m) = n``.  The bound is ``w``
+``fmpz_poly_is_cyclotomic``, which, after a constant-term and palindrome screen, compares ``T``
+coefficient for coefficient with ``Phi_m`` for each ``m`` with
+``phi(m) = n``.  The bound is ``w``
 itself: ``K`` contains ``+-zeta_m``, so ``lcm(2, m) | w``, and
 ``Q(zeta_w)`` is a subfield of ``K``, so ``phi(w) <= phi(m)``, which no strict
 multiple of the even number ``lcm(2, m)`` satisfies.  Translates
-``Phi_m(+-y + c)`` with ``c != 0`` and every other ``T`` take steps 1 and 2.
+``Phi_m(+-y + c)`` that are not themselves a cyclotomic polynomial and every
+other ``T`` take steps 1 and 2.
 Step 3 or 4 then certifies the root as before.
 
 Silex publishes ``w`` only when it certifies a root of unity whose exact

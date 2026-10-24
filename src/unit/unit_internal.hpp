@@ -25,8 +25,10 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
 
 // The index n when the defining polynomial of `field` is exactly the
 // cyclotomic polynomial Phi_n (integral, with Phi_n's coefficients), and 0
-// otherwise, including for translates Phi_n(+-x + c) with c != 0, scalar
-// multiples and undefined fields.  Candidates are the n with phi(n) equal to
+// otherwise, including for translates Phi_n(+-x + c) that are not themselves a
+// cyclotomic polynomial, scalar multiples and undefined fields.  It reads the
+// raw defining polynomial, not the monic integral model that the root bound
+// uses, so it returns 0 for 3*Phi_7 where the root bound still gets 14.  Candidates are the n with phi(n) equal to
 // the degree, compared with FLINT's fmpz_poly_cyclotomic.
 ulong cyclotomic_defining_polynomial_index(const NumberField& field) noexcept;
 

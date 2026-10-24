@@ -155,7 +155,8 @@ Changed
   for cyclotomic fields, instead of by the good-prime loop with its
   factorizations modulo many primes.  ``Phi_n`` is recognized with FLINT's
   ``fmpz_poly_is_cyclotomic`` (exact coefficient comparison); translates
-  ``Phi_n(+-x + c)`` with ``c != 0`` and all other polynomials keep the loop.
+  ``Phi_n(+-x + c)`` that are not themselves cyclotomic and all other
+  polynomials keep the loop.
   The bound is ``w`` itself, and ``w`` is still published only after a root of
   that exact order is certified.  Published results are unchanged on every
   cyclotomic row of the corpus that finishes (47 ``grh`` and 42 ``proven``
