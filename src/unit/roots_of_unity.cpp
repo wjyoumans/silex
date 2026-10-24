@@ -859,6 +859,54 @@ ulong cyclotomic_defining_polynomial_index(const NumberField& field) noexcept {
                                     fmpq_poly_length(raw->pol));
 }
 
+ulong real_cyclotomic_polynomial_index(
+        const fmpz_poly_struct* polynomial) noexcept {
+    if (polynomial == nullptr || fmpz_poly_degree(polynomial) < 2 ||
+        fmpz_is_one(fmpz_poly_lead(polynomial)) == 0) {
+        return 0;
+    }
+    // Horner in y = x + 1/x: h_d = c_d and h_i = h_(i+1) (x^2 + 1) +
+    // c_i x^(d - i), so h_0 = sum_i c_i (x^2 + 1)^i x^(d - i), which is
+    // x^d psi(x + 1/x).
+    const slong degree = fmpz_poly_degree(polynomial);
+    flint::FmpzPoly substituted;
+    flint::FmpzPoly shifted;
+    fmpz_poly_set_fmpz(substituted.raw(), fmpz_poly_lead(polynomial));
+    for (slong i = degree - 1; i >= 0; --i) {
+        fmpz_poly_shift_left(shifted.raw(), substituted.raw(), 2);
+        fmpz_poly_add(substituted.raw(), substituted.raw(), shifted.raw());
+        flint::Fmpz coefficient;
+        fmpz_poly_get_coeff_fmpz(coefficient.raw(), polynomial, i);
+        if (fmpz_is_zero(coefficient.raw()) == 0) {
+            flint::Fmpz sum;
+            fmpz_poly_get_coeff_fmpz(sum.raw(), substituted.raw(),
+                                     degree - i);
+            fmpz_add(sum.raw(), sum.raw(), coefficient.raw());
+            fmpz_poly_set_coeff_fmpz(substituted.raw(), degree - i,
+                                     sum.raw());
+        }
+    }
+    const ulong n = fmpz_poly_is_cyclotomic(substituted.raw());
+    if (n < 3) {
+        return 0;
+    }
+    flint::FmpzPoly real_cyclotomic;
+    fmpz_poly_cos_minpoly(real_cyclotomic.raw(), n);
+    return fmpz_poly_equal(real_cyclotomic.raw(), polynomial) != 0 ? n : 0;
+}
+
+ulong real_cyclotomic_defining_polynomial_index(
+        const NumberField& field) noexcept {
+    const nf_struct* raw = field.is_defined() ? field.raw_flint_field()
+                                              : nullptr;
+    if (raw == nullptr || fmpz_is_one(fmpq_poly_denref(raw->pol)) == 0) {
+        return 0;
+    }
+    flint::FmpzPoly numerator;
+    fmpq_poly_get_numerator(numerator.raw(), raw->pol);
+    return real_cyclotomic_polynomial_index(numerator.raw());
+}
+
 bool proven_root_of_unity_bound(ulong& bound,
                                 const NumberField& field,
                                 bool use_cyclotomic_shortcut) noexcept {

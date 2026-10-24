@@ -776,6 +776,73 @@ int test_roots_of_unity_cyclotomic_shortcut() {
     return 0;
 }
 
+// The real-subfield detector against FLINT's fmpz_poly_cos_minpoly: for
+// every n >= 3 with 2 <= phi(n) / 2 <= 20, psi_n is detected with index n,
+// as a polynomial and as the defining polynomial of a field.  Translates
+// psi_n(x + c), c = 1, -2, are rejected, except psi_10(x + 1) = psi_5
+// (2 cos(pi / 5) - 1 = 2 cos(2 pi / 5)).  The scalar multiple 2 psi_n,
+// Phi_n itself, the degree-17 subfield of Q(zeta_103), degree one
+// (psi_3 = Phi_2), constants and null input are rejected.
+int test_real_cyclotomic_polynomial_index() {
+    slong checked = 0;
+    for (ulong n = 3; n <= 2 * 40 * 40; ++n) {
+        const ulong phi = n_euler_phi(n);
+        if (phi < 4 || phi > 40) {
+            continue;
+        }
+        ++checked;
+        sflint::FmpzPoly psi;
+        fmpz_poly_cos_minpoly(psi.raw(), n);
+        assert(fmpz_poly_degree(psi.raw()) == static_cast<slong>(phi / 2));
+        assert(silex::detail::real_cyclotomic_polynomial_index(psi.raw()) ==
+               n);
+        assert(silex::detail::real_cyclotomic_defining_polynomial_index(
+                       fmpz_poly_field(psi)) == n);
+        assert(silex::detail::cyclotomic_defining_polynomial_index(
+                       fmpz_poly_field(psi)) == 0);
+
+        sflint::FmpzPoly other;
+        for (slong c : {slong{1}, slong{-2}}) {
+            sflint::FmpzPoly shift;
+            fmpz_poly_set_coeff_si(shift.raw(), 1, 1);
+            fmpz_poly_set_coeff_si(shift.raw(), 0, c);
+            fmpz_poly_compose(other.raw(), psi.raw(), shift.raw());
+            assert(silex::detail::real_cyclotomic_polynomial_index(
+                           other.raw()) == (n == 10 && c == 1 ? 5 : 0));
+        }
+        fmpz_poly_scalar_mul_si(other.raw(), psi.raw(), 2);
+        assert(silex::detail::real_cyclotomic_polynomial_index(other.raw()) ==
+               0);
+        assert(silex::detail::real_cyclotomic_defining_polynomial_index(
+                       fmpz_poly_field(other)) == 0);
+        fmpz_poly_cyclotomic(other.raw(), n);
+        assert(silex::detail::real_cyclotomic_polynomial_index(other.raw()) ==
+               0);
+    }
+    // 4 <= phi(n) <= 40 holds for exactly 76 n: the 81 with phi(n) <= 40
+    // less n = 1, 2, 3, 4, 6; phi(n) >= sqrt(n / 2) bounds the range
+    // searched.
+    assert(checked == 76);
+
+    const slong real_103_degree_17[] = {
+            2837,   25763,  75722, 58507, -102976, -198615,
+            -50288, 107759, 74838, -11031, -23311, -3653,
+            2579,   763,    -105,  -48,   1,       1};
+    assert(silex::detail::real_cyclotomic_defining_polynomial_index(
+                   integer_polynomial_field(real_103_degree_17, 18)) == 0);
+    sflint::FmpzPoly small;
+    fmpz_poly_cos_minpoly(small.raw(), 3);
+    assert(fmpz_poly_degree(small.raw()) == 1);
+    assert(silex::detail::real_cyclotomic_polynomial_index(small.raw()) == 0);
+    fmpz_poly_set_si(small.raw(), 1);
+    assert(silex::detail::real_cyclotomic_polynomial_index(small.raw()) == 0);
+    assert(silex::detail::real_cyclotomic_polynomial_index(nullptr) == 0);
+    const silex::NumberField undefined;
+    assert(silex::detail::real_cyclotomic_defining_polynomial_index(
+                   undefined) == 0);
+    return 0;
+}
+
 // Q(zeta_40) as T = charpoly(Mod(x + 3*x^2 + x^3, polcyclo(40))) in GP 2.17.4
 // (the "40_3" presentation), with w = 40 from nfrootsof1.  The good-prime
 // gcd stays at 120 for more than n + 20 = 36 consecutive good primes, where
@@ -1601,6 +1668,7 @@ int main() {
     test_roots_of_unity_fail_closed_against_bound();
     test_roots_of_unity_phi_reset();
     test_roots_of_unity_cyclotomic_shortcut();
+    test_real_cyclotomic_polynomial_index();
     test_roots_of_unity_public_fail_closed();
     test_roots_of_unity_memo();
     test_lower_regulator_bound();

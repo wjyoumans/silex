@@ -3,6 +3,8 @@
 #include <silex/flint/arb.hpp>
 #include <silex/flint/fmpz.hpp>
 
+#include <flint/fmpz_poly.h>
+
 namespace silex {
 class Element;
 class NumberField;
@@ -31,6 +33,24 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
 // uses, so it returns 0 for 3*Phi_7 where the root bound still gets 14.  Candidates are the n with phi(n) equal to
 // the degree, compared with FLINT's fmpz_poly_cyclotomic.
 ulong cyclotomic_defining_polynomial_index(const NumberField& field) noexcept;
+
+// The index n >= 3 when `polynomial` is exactly psi_n, the minimal
+// polynomial of 2 cos(2 pi / n) over Q (FLINT fmpz_poly_cos_minpoly), which
+// defines the maximal real subfield Q(zeta_n + zeta_n^-1) of Q(zeta_n) and
+// has degree phi(n) / 2; 0 otherwise, including for translates, scalar
+// multiples and null or constant input.  The candidate n is read from
+// x^d psi(x + 1/x), d = deg(psi), which is Phi_n exactly when psi = psi_n
+// (its roots are then the zeta^(+-k), k coprime to n), and confirmed by an
+// exact comparison with fmpz_poly_cos_minpoly(n).  Degree one is never
+// matched (psi_3 = x + 1 and psi_6 = x - 1 are also Phi_2 and Phi_1).
+ulong real_cyclotomic_polynomial_index(
+        const fmpz_poly_struct* polynomial) noexcept;
+
+// real_cyclotomic_polynomial_index of the raw defining polynomial of
+// `field` when it is integral, and 0 otherwise, read like
+// cyclotomic_defining_polynomial_index (no monic integral model is taken).
+ulong real_cyclotomic_defining_polynomial_index(
+        const NumberField& field) noexcept;
 
 // The proven multiple of w that roots_of_unity searches against, for the
 // monic integral model of the defining polynomial of `field`, exposed for
