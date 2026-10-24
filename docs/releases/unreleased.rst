@@ -370,6 +370,20 @@ Changed
   process, ``grh`` mode: ``cyclotomic_19_phi18`` 3.8% fewer (1.353e9 to
   1.302e9).  No timing has been measured.
 
+- The ``grh`` rounded-embedding ideal-basis reduction forms the scaled T2
+  Gram ``B * G * B^T`` of the reduced basis ``B`` from the symmetric cached
+  order Gram ``G`` with one matrix product ``B * G`` and dot products for the
+  upper triangle only, mirrored to the lower one, instead of two full
+  products.  The integer result is the same entry for entry, so reduced
+  bases, relations and class/unit results are unchanged; the
+  ``silex-class-unit-instance`` output, timing fields aside, is identical on
+  ``cyclotomic_64_phi32``, ``cyclotomic_41_phi40``,
+  ``hexadecic_x16_minus_x_minus_1_proven`` and
+  ``random_d12_h2_s16_proven``.  Busy-machine callgrind instruction counts
+  for the whole process, ``grh`` mode: ``cyclotomic_64_phi32`` 2.3% fewer
+  (1.3318e10 to 1.3011e10), ``cyclotomic_41_phi40`` 1.5% fewer (4.6926e10
+  to 4.6206e10).  No timing has been measured.
+
 - The split-prime norm evaluation of the small-LLL relation candidates
   (defining polynomials of degree 16 and more) reuses per-row values.  Each
   candidate is a row ``b`` of the reduced ideal basis, or a sum or
