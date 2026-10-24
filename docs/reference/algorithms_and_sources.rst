@@ -2692,9 +2692,11 @@ Hecke ``compute_candidates_for_saturate`` takes
 for ``q`` not dividing ``lc(F) * disc(F)``, ``theta`` is ``q``-integral and
 ``Z_(q)[theta]`` is ``q``-maximal, so the Dedekind-Kummer theorem applies.
 Skipping an auxiliary prime only leaves the candidate space larger.  Monic
-integral polynomials are unaffected.  When ``f`` has non-integral
-coefficients the search fails (closed), because the roots of ``f`` modulo
-``q`` cannot be read.
+integral polynomials are unaffected.  The roots are those of ``F`` modulo
+``q``, so ``f`` need not have integer coefficients: ``theta`` is a root of
+``F``, and for ``q`` not dividing ``lc(F) * disc(F)`` the content of ``F`` is a
+unit modulo ``q``, so ``F`` modulo ``q`` keeps its degree and has the roots of
+the primitive part of ``F``.
 
 Unit candidates from the relation kernel are formed from an LLL-reduced
 basis of the saturated kernel, following Hecke.jl ``find_candidates``
