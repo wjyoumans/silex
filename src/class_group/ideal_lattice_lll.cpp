@@ -1047,7 +1047,7 @@ bool ideal_lattice_symmetric_congruence_product(
         flint::FmpzMatConstRef gram) noexcept {
     const slong rows = flint::fmpz_mat_nrows(basis);
     const slong cols = flint::fmpz_mat_ncols(basis);
-    if (rows < 0 || cols < 0 || flint::fmpz_mat_nrows(gram) != cols ||
+    if (flint::fmpz_mat_nrows(gram) != cols ||
         flint::fmpz_mat_ncols(gram) != cols ||
         flint::fmpz_mat_nrows(out) != rows ||
         flint::fmpz_mat_ncols(out) != rows) {
