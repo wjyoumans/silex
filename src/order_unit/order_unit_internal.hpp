@@ -516,13 +516,17 @@ bool kernel_rows_torsion_column(bool& has_torsion_column,
 // The proof columns that the stable residue-character proof scan of
 // prove_index_bound (saturation.cpp) appends for the rational prime q, one
 // per degree-one prime of the group's order over q at which a column is
-// available, in decompose_prime(order, q, 1) order.  Where the roots of the
-// defining polynomial modulo q give the degree-one primes (equation orders,
-// and maximal orders whose reduction is squarefree), each column is
-// saturation_proof_prime_column_at_degree_one_root at the root, or
-// saturation_proof_prime_column at the decompose_prime prime when the direct
-// evaluation declines; otherwise every column is saturation_proof_prime_column
-// at the decompose_prime primes.  The two builders take quotient logarithms
+// available.  Where the roots of the defining polynomial modulo q give the
+// degree-one primes (equation orders, and maximal orders whose reduction is
+// squarefree), the columns follow the roots in the order the word-size or
+// fmpz root finder lists them, which need not be decompose_prime's, and
+// each column is saturation_proof_prime_column_at_degree_one_root at the
+// root, or saturation_proof_prime_column at the decompose_prime prime over
+// that root when the direct evaluation declines; otherwise every column is
+// saturation_proof_prime_column at the decompose_prime(order, q, 1) primes,
+// in that order.  The column order changes neither the proof condition (an
+// empty kernel) nor the kernel of the proof matrix once all columns of q are
+// appended.  The two builders take quotient logarithms
 // against generators of the order-ell subgroup of (O/P)^x that may differ,
 // so the columns of one prime agree up to a unit factor modulo ell, which
 // leaves the kernel of the proof matrix unchanged.  Off the root path,
@@ -534,12 +538,24 @@ bool kernel_rows_torsion_column(bool& has_torsion_column,
 // itself walks the same columns one at a time (saturation.cpp,
 // visit_stable_proof_prime_columns) and stops building them at the column
 // that ends it; this function builds them all.  It has no library caller and
-// serves only tests, as a seam that pins the column order; production code
+// serves only tests, as a seam that exposes the columns; production code
 // must use the lazy walk, not this eager form.
 bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
                                 const OrderUnitGroup& group,
                                 flint::FmpzConstRef q,
                                 flint::FmpzConstRef ell) noexcept;
+// The roots r modulo the rational prime q of the defining polynomial of the
+// order's field, one for each degree-one prime (q, theta - r), as the stable
+// residue-character proof scan of prove_index_bound (saturation.cpp) takes
+// them, in its order.  Returns false, with `roots` empty, where the scan
+// does not take the roots: q not prime, an order that is neither the
+// equation order nor maximal, a defining polynomial that is not monic
+// integral, or, for a maximal order that is not the equation order, a
+// reduction modulo q that is not squarefree.  It serves only tests, as a
+// seam for the root finder.
+bool degree_one_roots_mod_q_for_test(std::vector<flint::Fmpz>& roots,
+                                     const Order& order,
+                                     flint::FmpzConstRef q) noexcept;
 class TestHookAccess;
 
 // Test-only overrides for the stable residue-character proof scan of

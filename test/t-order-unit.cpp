@@ -9595,18 +9595,49 @@ sflint::FmpzMat append_proof_column_for_test(const sflint::FmpzMat& matrix,
     return out;
 }
 
+// For each column of `columns`, the index of a distinct entry of `directs`
+// equal to it, taken from the entries with available[i] set.  Asserts that
+// every column has one and that every available entry is used: the columns
+// are the available direct columns in some order.  Equal direct columns are
+// interchangeable, so the first unused match is taken.
+std::vector<std::size_t> match_columns_to_direct_columns(
+        const std::vector<sflint::FmpzMat>& columns,
+        const std::vector<sflint::FmpzMat>& directs,
+        const std::vector<bool>& available) {
+    std::vector<bool> used(directs.size(), false);
+    std::vector<std::size_t> match;
+    for (const sflint::FmpzMat& column : columns) {
+        std::size_t found = directs.size();
+        for (std::size_t i = 0; i < directs.size() && found == directs.size();
+             ++i) {
+            if (available[i] && !used[i] &&
+                fmpz_mat_equal(directs[i].raw(), column.raw()) != 0) {
+                found = i;
+            }
+        }
+        assert(found < directs.size());
+        used[found] = true;
+        match.push_back(found);
+    }
+    for (std::size_t i = 0; i < directs.size(); ++i) {
+        assert(used[i] == available[i]);
+    }
+    return match;
+}
+
 // The stable proof scan's columns at q (stable_proof_prime_columns) against
 // the residue-field route the scan used before, saturation_proof_prime_column
 // at each prime of decompose_prime(order, q, 1): one column per degree-one
-// prime, in the same order, each the direct root evaluation at that prime.
+// prime, each the direct root evaluation at that prime, in the order the
+// root finder lists the roots, which need not be decompose_prime's.
 // The direct route takes logarithms against the ell-th power of the least
 // primitive root mod q, the residue-field route against the first residue
 // k = 1, 2, ... with k^((q - 1) / ell) != 1, so a column is the
 // residue-field column times a unit modulo ell (equal for ell = 2), and the
-// proof kernel after every column, which drives the scan, is the same.
-// Q(zeta_13): q = 1 mod 13 splits completely, so every q below has 12 roots,
-// and the equation order takes the word-size root route, whose root order
-// the scan restores to decompose_prime's.
+// proof kernel after every column, which drives the scan, is the same when
+// the residue-field columns are taken in the scan's order.  Q(zeta_13):
+// q = 1 mod 13 splits completely, so every q below has 12 roots, and both
+// orders take the word-size root route.
 int test_stable_proof_prime_columns_match_residue_field_route() {
     silex::NumberField field = cyclotomic13_field();
     silex::Order equation = silex::test::equation_order(field);
@@ -9685,21 +9716,15 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
             assert(static_cast<slong>(columns.size()) == primes.size());
 
             const slong rows = sflint::fmpz_mat_nrows(columns[0]);
-            sflint::FmpzMat scan_matrix(rows, 0);
-            sflint::FmpzMat field_matrix(rows, 0);
+            std::vector<sflint::FmpzMat> directs;
+            std::vector<sflint::FmpzMat> expecteds;
             for (slong i = 0; i < primes.size(); ++i) {
                 const silex::PrimeIdeal* prime = primes.at(i);
                 assert(prime != nullptr);
                 sflint::FmpzMat expected(0, 0);
                 assert(silex::detail::saturation_proof_prime_column(
                         expected, group, *prime, sflint::FmpzConstRef(ell)));
-                const sflint::FmpzMat& column =
-                        columns[static_cast<std::size_t>(i)];
-                assert(sflint::fmpz_mat_nrows(expected) == rows);
-                assert(sflint::fmpz_mat_nrows(column) == rows);
-                assert(sflint::fmpz_mat_ncols(column) == 1);
-
-                // The column is the direct evaluation at this prime's root.
+                // The direct evaluation at this prime's root.
                 sflint::Fmpz root;
                 assert(degree_one_residue_root(root, *prime));
                 sflint::FmpzMat direct(0, 0);
@@ -9707,7 +9732,23 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
                         direct, group, sflint::FmpzConstRef(q),
                         sflint::FmpzConstRef(root),
                         sflint::FmpzConstRef(ell)));
-                assert(fmpz_mat_equal(direct.raw(), column.raw()) != 0);
+                directs.push_back(std::move(direct));
+                expecteds.push_back(std::move(expected));
+            }
+            // Each column is the direct evaluation at one prime's root.
+            const std::vector<std::size_t> match =
+                    match_columns_to_direct_columns(
+                            columns, directs,
+                            std::vector<bool>(directs.size(), true));
+
+            sflint::FmpzMat scan_matrix(rows, 0);
+            sflint::FmpzMat field_matrix(rows, 0);
+            for (std::size_t j = 0; j < columns.size(); ++j) {
+                const sflint::FmpzMat& expected = expecteds[match[j]];
+                const sflint::FmpzMat& column = columns[j];
+                assert(sflint::fmpz_mat_nrows(expected) == rows);
+                assert(sflint::fmpz_mat_nrows(column) == rows);
+                assert(sflint::fmpz_mat_ncols(column) == 1);
 
                 // column = t * expected mod ell, entry by entry, where the
                 // residue-field generator is the t-th power of the direct
@@ -9752,7 +9793,8 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
 // of decompose_prime(order, q, 1), as
 // test_stable_proof_prime_columns_match_residue_field_route does, but
 // without computing the scale factor beforehand.  Where the direct root
-// evaluation succeeds, the scan's next column is that evaluation and equals
+// evaluation succeeds, the scan has that evaluation as a column (in the
+// root finder's order, matched by value), and it equals
 // t times the residue-field column modulo ell, for one unit t per q (both
 // builders' quotient generators depend only on q).  Where it declines, the
 // scan falls back to the residue-field route at that prime; on the root
@@ -9781,10 +9823,9 @@ void check_stable_proof_prime_columns_at_q(slong& scaled,
 
     slong rows = 0;
     assert(silex::detail::dlog_proof_rank(rows, group, ell_ref));
-    ulong factor = 0;
-    std::size_t next = 0;
-    sflint::FmpzMat scan_matrix(rows, 0);
-    sflint::FmpzMat field_matrix(rows, 0);
+    std::vector<sflint::FmpzMat> directs;
+    std::vector<sflint::FmpzMat> expecteds;
+    std::vector<bool> available;
     for (slong i = 0; i < prime_count; ++i) {
         const silex::PrimeIdeal* prime = primes.at(i);
         assert(prime != nullptr);
@@ -9792,21 +9833,34 @@ void check_stable_proof_prime_columns_at_q(slong& scaled,
         assert(degree_one_residue_root(root, *prime));
         sflint::FmpzMat direct(0, 0);
         sflint::FmpzMat expected(0, 0);
-        if (!silex::detail::saturation_proof_prime_column_at_degree_one_root(
-                    direct, group, q, sflint::FmpzConstRef(root), ell_ref)) {
+        const bool has_direct =
+                silex::detail::saturation_proof_prime_column_at_degree_one_root(
+                        direct, group, q, sflint::FmpzConstRef(root),
+                        ell_ref);
+        if (!has_direct) {
             assert(!silex::detail::saturation_proof_prime_column(
                     expected, group, *prime, ell_ref));
             ++declined;
-            continue;
+        } else {
+            assert(silex::detail::saturation_proof_prime_column(
+                    expected, group, *prime, ell_ref));
         }
-        assert(silex::detail::saturation_proof_prime_column(expected, group,
-                                                            *prime, ell_ref));
-        assert(next < columns.size());
-        const sflint::FmpzMat& column = columns[next++];
+        directs.push_back(std::move(direct));
+        expecteds.push_back(std::move(expected));
+        available.push_back(has_direct);
+    }
+    const std::vector<std::size_t> match =
+            match_columns_to_direct_columns(columns, directs, available);
+
+    ulong factor = 0;
+    sflint::FmpzMat scan_matrix(rows, 0);
+    sflint::FmpzMat field_matrix(rows, 0);
+    for (std::size_t j = 0; j < columns.size(); ++j) {
+        const sflint::FmpzMat& expected = expecteds[match[j]];
+        const sflint::FmpzMat& column = columns[j];
         assert(sflint::fmpz_mat_nrows(expected) == rows);
         assert(sflint::fmpz_mat_nrows(column) == rows);
         assert(sflint::fmpz_mat_ncols(column) == 1);
-        assert(fmpz_mat_equal(direct.raw(), column.raw()) != 0);
         for (slong r = 0; r < rows; ++r) {
             const ulong b = fmpz_fdiv_ui(fmpz_mat_entry(expected.raw(), r, 0),
                                          ell_ui);
@@ -9834,7 +9888,6 @@ void check_stable_proof_prime_columns_at_q(slong& scaled,
                                                       field_matrix, ell_ref));
         assert(fmpz_mat_equal(scan_kernel.raw(), field_kernel.raw()) != 0);
     }
-    assert(next == columns.size());
 }
 
 // The stable proof scan's columns on the routes that
@@ -9847,8 +9900,8 @@ void check_stable_proof_prime_columns_at_q(slong& scaled,
 //   (zeta - r)^-1, which vanish at the root r of one prime over q = 79 and
 //   at no other root.  The direct evaluation declines at r only; the
 //   fallback finds the prime over r, whose residue-field column declines as
-//   well, so the scan has the columns of the other 11 primes, in order, as
-//   the residue-field route alone has.
+//   well, so the scan has the columns of the other 11 primes, in the root
+//   finder's order, as the residue-field route alone has.
 // - The fmpz route of saturation_proof_prime_column_at_degree_one_root, for
 //   q = 18446744073709555657 > 2^64, q = 1 mod 3 * 13.
 // - The maximal-order root route, for the maximal order Z[theta / 2] of
@@ -9986,6 +10039,153 @@ int test_stable_proof_prime_columns_fallback_and_wide_routes() {
     return 0;
 }
 
+// The root finder of the stable proof scan (degree_one_roots_mod_q_for_test)
+// against the roots found by trying every residue: for each prime q below
+// 600 it returns the distinct roots of the defining polynomial f modulo q,
+// each in [0, q) and each a root.  For equation orders it takes every q;
+// for the maximal order Z[theta / 2] of theta^3 + 2 theta^2 - 8 theta - 8,
+// which is not the equation order, it declines exactly where f mod q is not
+// squarefree (q = 2, which divides the index, and the q dividing disc(f)).
+// - theta^3 - theta - 15 (disc(f) = -6071 = -13 * 467): q = 3 and q = 5
+//   divide the constant coefficient, so 0 is a root there, and the
+//   reductions at 13 and 467 are not squarefree.
+// - Phi_13: q = 1 mod 13 gives 12 roots, which the word-size route splits
+//   into two parts of degree above one.
+// - The fmpz route, for theta^3 - theta - 15 and the first prime above
+//   2^64: every root it returns is a root.
+int test_degree_one_roots_mod_q_root_finder() {
+    struct Case {
+        std::vector<slong> coefficients;
+        bool maximal;
+    };
+    const Case cases[] = {
+            {{-15, -1, 0, 1}, false},
+            {{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, false},
+            {{-8, -8, 2, 1}, true},
+    };
+    slong zero_roots = 0;
+    slong declined = 0;
+    slong large_splits = 0;
+    for (const Case& item : cases) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < item.coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           item.coefficients[i]);
+        }
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order equation = silex::test::equation_order(field);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        const silex::Order& order = item.maximal ? maximal : equation;
+        assert(order.is_equation_order() != item.maximal);
+
+        for (ulong q = 2; q < 600; q = n_nextprime(q, 1)) {
+            sflint::Fmpz q_value;
+            fmpz_set_ui(q_value.raw(), q);
+            nmod_t mod;
+            nmod_init(&mod, q);
+            auto value_at = [&](ulong x) {
+                ulong value = 0;
+                for (std::size_t i = item.coefficients.size(); i-- > 0;) {
+                    const slong c = item.coefficients[i];
+                    const ulong c_mod = c < 0
+                            ? nmod_neg(static_cast<ulong>(-c) % q, mod)
+                            : static_cast<ulong>(c) % q;
+                    value = nmod_add(nmod_mul(value, x, mod), c_mod, mod);
+                }
+                return value;
+            };
+            std::vector<ulong> expected;
+            slong repeated = 0;
+            for (ulong x = 0; x < q; ++x) {
+                if (value_at(x) == 0) {
+                    expected.push_back(x);
+                    // x is a repeated root when f'(x) = 0 too.
+                    ulong derivative = 0;
+                    for (std::size_t i = item.coefficients.size(); i-- > 1;) {
+                        const slong c = item.coefficients[i] *
+                                        static_cast<slong>(i);
+                        const ulong c_mod = c < 0
+                                ? nmod_neg(static_cast<ulong>(-c) % q, mod)
+                                : static_cast<ulong>(c) % q;
+                        derivative = nmod_add(nmod_mul(derivative, x, mod),
+                                              c_mod, mod);
+                    }
+                    if (derivative == 0) {
+                        ++repeated;
+                    }
+                }
+            }
+
+            std::vector<sflint::Fmpz> roots;
+            const bool found = silex::detail::degree_one_roots_mod_q_for_test(
+                    roots, order, sflint::FmpzConstRef(q_value));
+            std::vector<ulong> got;
+            for (const sflint::Fmpz& root : roots) {
+                assert(fmpz_sgn(root.raw()) >= 0);
+                assert(fmpz_cmp_ui(root.raw(), q) < 0);
+                got.push_back(fmpz_get_ui(root.raw()));
+                assert(value_at(got.back()) == 0);
+            }
+            std::sort(got.begin(), got.end());
+            assert(std::adjacent_find(got.begin(), got.end()) == got.end());
+            if (!found) {
+                // f mod q is not squarefree: a repeated root of a cubic
+                // over the closure of F_q lies in F_q.
+                assert(item.maximal && roots.empty());
+                assert(repeated > 0);
+                ++declined;
+                continue;
+            }
+            assert(!item.maximal || repeated == 0);
+            assert(got == expected);
+            if (!expected.empty() && expected.front() == 0 && q > 2) {
+                ++zero_roots;
+            }
+            if (expected.size() >= 6) {
+                ++large_splits;
+            }
+        }
+    }
+    assert(zero_roots == 2);
+    assert(declined > 0);
+    assert(large_splits > 0);
+
+    // The fmpz route: q > 2^64.
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, -15);
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order equation = silex::test::equation_order(field);
+        sflint::Fmpz q;
+        fmpz_set_ui(q.raw(), 1);
+        fmpz_mul_2exp(q.raw(), q.raw(), 64);
+        slong with_roots = 0;
+        for (slong k = 0; k < 8; ++k) {
+            fmpz_nextprime(q.raw(), q.raw(), 1);
+            std::vector<sflint::Fmpz> roots;
+            assert(silex::detail::degree_one_roots_mod_q_for_test(
+                    roots, equation, sflint::FmpzConstRef(q)));
+            for (const sflint::Fmpz& root : roots) {
+                sflint::Fmpz value;
+                fmpz_pow_ui(value.raw(), root.raw(), 3);
+                fmpz_sub(value.raw(), value.raw(), root.raw());
+                fmpz_sub_ui(value.raw(), value.raw(), 15);
+                assert(fmpz_divisible(value.raw(), q.raw()) != 0);
+            }
+            if (!roots.empty()) {
+                ++with_roots;
+            }
+        }
+        assert(with_roots > 0);
+    }
+    return 0;
+}
+
 // For an odd prime ell, as set_cyclotomic13_u2_power17_group, but the first
 // `powered` generators u_a (a = 2, ..., powered + 1) are replaced by
 // -u_a^ell = (-u_a)^ell, stored as the factors u_a^ell and (-1)^1: a
@@ -10082,9 +10282,12 @@ void stable_scan_column_callback(void* user,
 // and certifies full rank after the first 6 of its 12 primes.  As in
 // test_stable_proof_prime_columns_fallback_and_wide_routes, u_2 may be
 // stored as (u_2 (zeta - r))^1 (zeta - r)^-1, so that the column at the
-// prime over q = 53 with root r is unavailable.  With r the root of the
-// third prime (index 2) the ell = 13 scan leaves that column out and needs
-// a seventh; with r the root of the tenth prime (index 9), past full rank,
+// prime over q = 53 with root r is unavailable.  The scan takes the primes
+// over q in the order its root finder lists their roots
+// (degree_one_roots_mod_q_for_test); in that order any 6 of the first 7
+// columns have full rank.  With r the third root (index 2) the ell = 13
+// scan leaves that column out and certifies with the columns of the other
+// 6 of the first 7 primes; with r the tenth root (index 9), past full rank,
 // it never reaches that prime, and its proof uses the same 6 primes as
 // without the vanishing factor.  Builds with profiling enabled also check
 // that every column built is appended or unavailable, so no scan builds a
@@ -10095,10 +10298,10 @@ int test_stable_proof_scan_stops_building_columns_at_full_rank() {
     silex::Order equation = silex::test::equation_order(field);
     sflint::Fmpz q;
     assert(set_fmpz_si(q, 53));
-    silex::PrimeIdealList primes;
-    assert(silex::decompose_prime(primes, equation, sflint::FmpzConstRef(q),
-                                  1));
-    assert(primes.size() == 12);
+    std::vector<sflint::Fmpz> roots;
+    assert(silex::detail::degree_one_roots_mod_q_for_test(
+            roots, equation, sflint::FmpzConstRef(q)));
+    assert(roots.size() == 12);
 
     const slong vanishing_indices[] = {-1, 2, 9};
     for (slong vanishing_index : vanishing_indices) {
@@ -10112,10 +10315,8 @@ int test_stable_proof_scan_stops_building_columns_at_full_rank() {
             assert(unit.set_fmpq_poly(sflint::FmpqPolyConstRef(unit_poly)));
             generators.emplace_back(field);
             if (a == 2 && vanishing_index >= 0) {
-                sflint::Fmpz root;
-                assert(primes.at(vanishing_index) != nullptr &&
-                       degree_one_residue_root(root,
-                                               *primes.at(vanishing_index)));
+                const sflint::Fmpz& root =
+                        roots[static_cast<std::size_t>(vanishing_index)];
                 sflint::FmpqPoly linear;
                 sflint::fmpq_poly_set_coeff_si(linear, 1, 1);
                 sflint::Fmpq constant;
@@ -10141,6 +10342,16 @@ int test_stable_proof_scan_stops_building_columns_at_full_rank() {
                                                           generators.size()),
                                embeddings, 256));
         assert(group.free_rank() == 5);
+        {
+            // The column at the vanishing root is the only one left out.
+            sflint::Fmpz ell13;
+            assert(set_fmpz_si(ell13, 13));
+            std::vector<sflint::FmpzMat> columns;
+            assert(silex::detail::stable_proof_prime_columns(
+                    columns, group, sflint::FmpzConstRef(q),
+                    sflint::FmpzConstRef(ell13)));
+            assert(columns.size() == (vanishing_index < 0 ? 12U : 11U));
+        }
 
         silex::DiagnosticsContext diagnostics;
         silex::diagnostics_context_init(diagnostics);
@@ -10179,7 +10390,7 @@ int test_stable_proof_scan_stops_building_columns_at_full_rank() {
                 ell13_local_primes = local_primes;
             }
         }
-        assert(ell13_local_primes == (vanishing_index == 2 ? 7 : 6));
+        assert(ell13_local_primes == 6);
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
         // Every column built is appended or unavailable: none is built
         // after the column that ends its scan.  Building all 12 columns
@@ -14358,6 +14569,7 @@ int main() {
     test_prove_index_bound_cyclotomic13_undecided_root();
     test_stable_proof_prime_columns_match_residue_field_route();
     test_stable_proof_prime_columns_fallback_and_wide_routes();
+    test_degree_one_roots_mod_q_root_finder();
     test_stable_proof_scan_stops_building_columns_at_full_rank();
     test_kernel_row_root_three_way_result();
     test_compact_unit_power_root_three_way_result();

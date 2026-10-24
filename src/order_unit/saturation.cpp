@@ -204,19 +204,58 @@ bool degree_one_root_from_nmod_poly(flint::Fmpz& root,
     return true;
 }
 
+// Appends the roots of the linear factors in `factorization`.
+void push_nmod_linear_factor_roots(std::vector<flint::Fmpz>& roots,
+                                   const NmodPolyFactor& factorization)
+        noexcept {
+    roots.reserve(roots.size() +
+                  static_cast<std::size_t>(factorization.raw()->num));
+    for (slong i = 0; i < factorization.raw()->num; ++i) {
+        flint::Fmpz root;
+        if (degree_one_root_from_nmod_poly(root, factorization.raw()->p + i)) {
+            roots.push_back(std::move(root));
+        }
+    }
+}
+
+// Whether every value in `roots` is a root of `polynomial`.
+bool nmod_poly_vanishes_at_roots(const NmodPoly& polynomial,
+                                 const std::vector<flint::Fmpz>& roots)
+        noexcept {
+    for (const flint::Fmpz& root : roots) {
+        if (nmod_poly_evaluate_nmod(
+                    polynomial.raw(),
+                    flint::fmpz_get_ui(flint::FmpzConstRef(root))) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The distinct roots of the monic integral `polynomial` modulo the
+// word-size prime q, in no particular order.  For odd q this is the first
+// step of Rabin's root finding, as FLINT's nmod_poly_roots
+// (nmod_poly_factor/roots.c, _nmod_poly_push_roots) takes it: after the
+// root 0, which occurs exactly when q divides the constant coefficient,
+// write f = x^k g with g(0) != 0 and h = x^((q - 1) / 2) mod g.  The roots
+// r of g have r^((q - 1) / 2) = 1 or -1, so they are the roots of
+// gcd(h - 1, g) and of gcd(h + 1, g), each a squarefree product of linear
+// factors (it divides x^((q - 1) / 2) -+ 1); a factor of degree one gives
+// its root directly and a larger one goes to nmod_poly_roots.  Every root
+// found is checked to vanish on the reduction before it is returned.  With
+// `require_squarefree`, returns false, with `roots` empty, when the
+// reduction is not squarefree; also returns false, with `roots` empty, if a
+// root fails the check.
 bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
                                  const fmpq_poly_struct* polynomial,
                                  ulong q,
+                                 bool require_squarefree,
                                  const DiagnosticsContext* diagnostics)
         noexcept {
     SILEX_PROFILE_SCOPE(
             diagnostics, DiagnosticsModule::unit_group,
             "unit_group.stable_scan.degree_one_roots_nmod");
     NmodPoly reduced(q);
-    NmodPoly x_poly(q);
-    NmodPoly reduced_reverse(q);
-    NmodPoly reduced_preinverse(q);
-    NmodPoly degree_one_part(q);
     NmodPolyFactor factorization;
 
     {
@@ -225,50 +264,84 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
                 "unit_group.stable_scan.degree_one_roots_nmod_reduce_poly");
         fmpq_poly_get_integral_nmod_poly(reduced, polynomial, q);
     }
-
-    {
+    if (require_squarefree) {
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::unit_group,
-                "unit_group.stable_scan.degree_one_roots_nmod_frobenius_gcd");
-        nmod_poly_set_coeff_ui(x_poly.raw(), 1, 1);
-        nmod_poly_reverse(reduced_reverse.raw(), reduced.raw(),
-                          reduced.raw()->length);
-        nmod_poly_inv_series_newton(reduced_preinverse.raw(),
-                                    reduced_reverse.raw(),
-                                    reduced_reverse.raw()->length);
-        nmod_poly_powmod_x_ui_preinv(degree_one_part.raw(), q, reduced.raw(),
-                                     reduced_preinverse.raw());
-        nmod_poly_sub(degree_one_part.raw(), degree_one_part.raw(),
-                      x_poly.raw());
-        nmod_poly_gcd(degree_one_part.raw(), degree_one_part.raw(),
-                      reduced.raw());
-    }
-
-    const slong degree_one_degree = nmod_poly_degree(degree_one_part.raw());
-    if (degree_one_degree < 1) {
-        return true;
-    }
-    if (degree_one_degree == 1) {
-        flint::Fmpz root;
-        if (degree_one_root_from_nmod_poly(root, degree_one_part.raw())) {
-            roots.push_back(std::move(root));
+                "unit_group.stable_scan.degree_one_roots_squarefree");
+        if (nmod_poly_is_squarefree(reduced.raw()) == 0) {
+            return false;
         }
-        return true;
     }
 
-    {
+    if (q == 2) {
         SILEX_PROFILE_SCOPE(
                 diagnostics, DiagnosticsModule::unit_group,
                 "unit_group.stable_scan.degree_one_roots_nmod_factor");
-        nmod_poly_roots(factorization.raw(), degree_one_part.raw(), 0);
+        nmod_poly_roots(factorization.raw(), reduced.raw(), 0);
+        push_nmod_linear_factor_roots(roots, factorization);
+    } else {
+        NmodPoly nonzero_part(q);
+        NmodPoly reverse(q);
+        NmodPoly preinverse(q);
+        NmodPoly half_power(q);
+        NmodPoly shifted(q);
+        NmodPoly residue_part(q);
+        NmodPoly nonresidue_part(q);
+
+        slong zero_order = 0;
+        while (zero_order < reduced.raw()->length &&
+               nmod_poly_get_coeff_ui(reduced.raw(), zero_order) == 0) {
+            ++zero_order;
+        }
+        if (zero_order > 0) {
+            roots.emplace_back();
+        }
+        nmod_poly_shift_right(nonzero_part.raw(), reduced.raw(), zero_order);
+
+        if (nmod_poly_degree(nonzero_part.raw()) >= 1) {
+            {
+                SILEX_PROFILE_SCOPE(
+                        diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan."
+                        "degree_one_roots_nmod_frobenius_gcd");
+                nmod_poly_reverse(reverse.raw(), nonzero_part.raw(),
+                                  nonzero_part.raw()->length);
+                nmod_poly_inv_series_newton(preinverse.raw(), reverse.raw(),
+                                            reverse.raw()->length);
+                nmod_poly_powmod_x_ui_preinv(half_power.raw(), (q - 1) / 2,
+                                             nonzero_part.raw(),
+                                             preinverse.raw());
+                nmod_poly_sub_ui(shifted.raw(), half_power.raw(), 1);
+                nmod_poly_gcd(residue_part.raw(), shifted.raw(),
+                              nonzero_part.raw());
+                nmod_poly_add_ui(shifted.raw(), half_power.raw(), 1);
+                nmod_poly_gcd(nonresidue_part.raw(), shifted.raw(),
+                              nonzero_part.raw());
+            }
+
+            const NmodPoly* parts[] = {&residue_part, &nonresidue_part};
+            for (const NmodPoly* part : parts) {
+                const slong degree = nmod_poly_degree(part->raw());
+                if (degree == 1) {
+                    flint::Fmpz root;
+                    if (degree_one_root_from_nmod_poly(root, part->raw())) {
+                        roots.push_back(std::move(root));
+                    }
+                } else if (degree > 1) {
+                    SILEX_PROFILE_SCOPE(
+                            diagnostics, DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan."
+                            "degree_one_roots_nmod_factor");
+                    nmod_poly_roots(factorization.raw(), part->raw(), 0);
+                    push_nmod_linear_factor_roots(roots, factorization);
+                }
+            }
+        }
     }
 
-    roots.reserve(static_cast<std::size_t>(factorization.raw()->num));
-    for (slong i = 0; i < factorization.raw()->num; ++i) {
-        flint::Fmpz root;
-        if (degree_one_root_from_nmod_poly(root, factorization.raw()->p + i)) {
-            roots.push_back(std::move(root));
-        }
+    if (!nmod_poly_vanishes_at_roots(reduced, roots)) {
+        roots.clear();
+        return false;
     }
     return true;
 }
@@ -291,10 +364,16 @@ bool degree_one_roots_mod_q(std::vector<flint::Fmpz>& roots,
         return false;
     }
 
-    if (order.is_equation_order() && flint::fmpz_abs_fits_ui(q)) {
+    // For equation orders, the caller has already skipped rational primes
+    // dividing the order discriminant, so the reduced defining polynomial is
+    // squarefree at this point.  Maximal orders that are not the equation
+    // order keep the squarefree guard, since q may still divide the index
+    // [O : Z[theta]].
+    if (flint::fmpz_abs_fits_ui(q)) {
         const ulong q_ui = flint::fmpz_get_ui(q);
         if (q_ui > 1) {
             return degree_one_roots_mod_q_nmod(roots, raw_field->pol, q_ui,
+                                               !order.is_equation_order(),
                                                diagnostics);
         }
     }
@@ -313,10 +392,6 @@ bool degree_one_roots_mod_q(std::vector<flint::Fmpz>& roots,
         fmpq_poly_get_integral_fmpz_mod_poly(reduced, raw_field->pol, ctx);
     }
     {
-        // For equation orders, the caller has already skipped rational primes
-        // dividing the order discriminant, so the reduced defining polynomial
-        // is squarefree at this point.  Keep the guard for maximal orders whose
-        // defining polynomial may still have index divisors.
         if (!order.is_equation_order()) {
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::unit_group,
@@ -344,64 +419,24 @@ bool degree_one_roots_mod_q(std::vector<flint::Fmpz>& roots,
     return true;
 }
 
-// The roots r of degree_one_roots_mod_q, listed in the order in which
-// decompose_prime(order, q, 1) lists the degree-one primes (q, theta - r):
-// its degree-one branch for equation and maximal orders with a squarefree
-// reduction (prime_ideal.cpp, the `max_residue_degree == 1` branch) takes
-// fmpz_mod_poly_roots of the reduced defining polynomial, so the roots are
-// taken from the same call here.  The word-size route of
-// degree_one_roots_mod_q finds the roots of gcd(x^q - x, f mod q) instead,
-// in another order; it is kept as the cheap test for q with fewer than two
-// degree-one roots, where the order cannot differ.  Returns false, so the
-// caller decomposes q itself, when degree_one_roots_mod_q declines and for
-// maximal quadratic orders, whose decomposition factors the minimal
-// polynomial of the integral generator omega instead.
-bool degree_one_roots_in_decomposition_order(
-        std::vector<flint::Fmpz>& roots,
-        const Order& order,
-        flint::FmpzConstRef q,
-        const DiagnosticsContext* diagnostics) noexcept {
+// The roots r of degree_one_roots_mod_q, one for each degree-one prime
+// (q, theta - r) of the order over q, in the order degree_one_roots_mod_q
+// lists them.  Returns false, so the caller decomposes q itself, when
+// degree_one_roots_mod_q declines and, where q has at least two degree-one
+// primes, for maximal quadratic orders, whose decomposition factors the
+// minimal polynomial of the integral generator omega instead.
+bool stable_scan_degree_one_roots(std::vector<flint::Fmpz>& roots,
+                                  const Order& order,
+                                  flint::FmpzConstRef q,
+                                  const DiagnosticsContext* diagnostics)
+        noexcept {
     if (!degree_one_roots_mod_q(roots, order, q, diagnostics)) {
         return false;
     }
-    if (roots.size() < 2) {
-        return true;
-    }
-    if (detail::residue_polynomial_uses_quadratic_integral_generator(order)) {
+    if (roots.size() >= 2 &&
+        detail::residue_polynomial_uses_quadratic_integral_generator(order)) {
         return false;
     }
-    if (!order.is_equation_order() || !flint::fmpz_abs_fits_ui(q)) {
-        // degree_one_roots_mod_q already took fmpz_mod_poly_roots of the
-        // reduced defining polynomial.
-        return true;
-    }
-
-    SILEX_PROFILE_SCOPE(
-            diagnostics, DiagnosticsModule::unit_group,
-            "unit_group.stable_scan.degree_one_roots_decomposition_order");
-    const nf_struct* raw_field = order.parent()->raw_flint_field();
-    flint::FmpzModCtx ctx(q.raw());
-    flint::FmpzModPoly reduced(ctx);
-    flint::FmpzModPolyFactor factorization(ctx);
-    if (!reduced.is_initialized()) {
-        return false;
-    }
-    fmpq_poly_get_integral_fmpz_mod_poly(reduced, raw_field->pol, ctx);
-    fmpz_mod_poly_roots(factorization.raw(), reduced.raw(), 0, ctx.raw());
-
-    std::vector<flint::Fmpz> ordered;
-    ordered.reserve(roots.size());
-    for (slong i = 0; i < factorization.raw()->num; ++i) {
-        flint::Fmpz root;
-        if (degree_one_root_from_mod_poly(
-                    root, factorization.raw()->poly + i, q, ctx)) {
-            ordered.push_back(std::move(root));
-        }
-    }
-    if (ordered.size() != roots.size()) {
-        return false;
-    }
-    roots = std::move(ordered);
     return true;
 }
 
@@ -427,8 +462,8 @@ bool visit_stable_proof_prime_columns(const OrderUnitGroup& group,
 
     PrimeIdealList local;
     std::vector<flint::Fmpz> roots;
-    if (degree_one_roots_in_decomposition_order(roots, *order, q,
-                                                group.diagnostics())) {
+    if (stable_scan_degree_one_roots(roots, *order, q,
+                                     group.diagnostics())) {
         if (roots.empty()) {
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
@@ -853,8 +888,8 @@ bool select_stable_proof_primes(
                                          ? max_aux_primes_override
                                          : kStableProofMaxAuxPrimes;
     slong examined_primes = 0;
-    // The proof columns at the degree-one primes over q, in decompose_prime
-    // order (see detail::stable_proof_prime_columns), each appended to the
+    // The proof columns at the degree-one primes over q, in the order of
+    // detail::stable_proof_prime_columns, each appended to the
     // proof matrix as soon as it is built.  The walk over the primes above q
     // stops at the column that ends the scan (full rank, the stability
     // threshold, or a failure), so the columns of the remaining primes over
@@ -1527,6 +1562,12 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
         return true;
     };
     return visit_stable_proof_prime_columns(group, q, ell, collect);
+}
+
+bool degree_one_roots_mod_q_for_test(std::vector<flint::Fmpz>& roots,
+                                     const Order& order,
+                                     flint::FmpzConstRef q) noexcept {
+    return degree_one_roots_mod_q(roots, order, q, nullptr);
 }
 
 }  // namespace detail
