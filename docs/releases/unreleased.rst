@@ -2261,6 +2261,19 @@ Changed
   instructions for ``cyclotomic_32_phi16`` and 4.7% fewer for
   ``cyclotomic_real_64_deg16``.  No timing has been measured.
 
+- The ``grh`` unit extraction reuses the embedded logarithms of repeated
+  factor lists.  ``compact_log_matrix``, the scaled log matrices, the
+  incremental unit-row logarithms and the unit-group updates that follow a
+  verified dependent relation now go through the factored log memo that the
+  relation extraction already held, instead of re-embedding each factor.  A
+  memo entry is used only while the embedding cache version is unchanged, so
+  every result is the value a fresh call would give: published ``grh`` outputs
+  are identical on 13 of 13 compared corpus rows (timing fields stripped).
+  Callgrind instruction counts for the whole ``silex-class-unit-instance``
+  process, ``grh`` mode: ``cyclotomic_real_31_deg15`` 3.5% fewer (9.89e8 to
+  9.55e8), ``cyclotomic_real_37_deg18`` 1.6% fewer (1.972e9 to 1.941e9).  No
+  timing has been measured.
+
 Fixed
 -----
 
