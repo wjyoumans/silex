@@ -1185,10 +1185,6 @@ int test_set_factored_element_matches_factorwise_product() {
 
 }  // namespace
 
-// ResidueField::set copies a validated field: the copy keeps the prime,
-// characteristic, cardinality and modulus, outlives the source, and serves as
-// a parent for elements equal to the source's. Undefined sources clear the
-// target, and set_prime still rejects an unsupported prime afterwards.
 // ResidueField::equal answers from the content identity for the same object
 // and for unchanged copies, and from the prime comparison otherwise: fields
 // set separately from one prime still compare equal, and fields of distinct
@@ -1280,6 +1276,10 @@ int test_equal_identity_shortcut() {
     return 0;
 }
 
+// ResidueField::set copies a validated field: the copy keeps the prime,
+// characteristic, cardinality and modulus, outlives the source, and serves as
+// a parent for elements equal to the source's. Undefined sources clear the
+// target, and set_prime still rejects an unsupported prime afterwards.
 int test_copy_keeps_validated_field() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 5);
