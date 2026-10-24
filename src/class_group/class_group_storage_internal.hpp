@@ -477,6 +477,13 @@ struct ClassGroupContextStorage {
     std::vector<RelationSaturationProofRecord>
             relation_saturation_proof_records;
     LocalSaturationDlogCache local_saturation_dlog_cache;
+    // Relation buffer of the local saturation passes (saturate_local_once_
+    // and saturate_local_once_with_units_), kept across passes so its factor
+    // base copy and storage are not rebuilt on every pass.  Each pass reuses
+    // it only while its factor base equals the context base and redefines
+    // it otherwise; every candidate row overwrites its generator and
+    // exponents before the relation is read, so no value carries over.
+    Relation saturation_relation_scratch;
     // LLL-reduced basis of the relation kernel of the published
     // presentation, read by ClassGroupContext::relation_kernel_unit.
     // Rebuilt on first use after the presentation changes; every write of
@@ -582,6 +589,7 @@ struct ClassGroupContextStorage {
         relation_saturation_records.clear();
         relation_saturation_proof_records.clear();
         local_saturation_dlog_cache.clear();
+        saturation_relation_scratch.clear();
         invalidate_reduced_relation_kernel();
     }
 };

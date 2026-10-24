@@ -3159,6 +3159,25 @@ detail::LocalSaturationDlogEntry* local_saturation_dlog_entry(
     return &cache.entries.back();
 }
 
+// The relation buffer of one local saturation pass: `kept` (the context's
+// buffer kept across passes, when it has private storage) or else `local`.
+// The kept buffer is reused only while its factor base equals `base`
+// (FactorBase::equal, which answers from the shared identity of an unchanged
+// copy); otherwise it is redefined on `base`, as a fresh Relation(base)
+// would be, and left undefined if that fails.
+Relation& saturation_relation_buffer(Relation* kept,
+                                     Relation& local,
+                                     const FactorBase& base) noexcept {
+    Relation& relation = kept != nullptr ? *kept : local;
+    if (!relation.is_defined() || relation.factor_base() == nullptr ||
+        !relation.factor_base()->equal(base)) {
+        if (!relation.define(base)) {
+            relation.clear();
+        }
+    }
+    return relation;
+}
+
 detail::LocalSaturationDlogEntry::State local_saturation_element_log(
         detail::LocalSaturationDlogEntry& entry,
         const detail::LocalSaturationDlogCache& cache,
@@ -13976,10 +13995,16 @@ bool ClassGroupContext::saturate_local_once_(
         return false;
     }
 
-    // One relation buffer per kernel: its factor base is compared with the
-    // context base once here instead of once per kernel row.  A mismatch (or
-    // an undefined relation) still fails every nondivisible row.
-    Relation relation(*base);
+    // One relation buffer per kernel, kept across passes in the private
+    // storage: its factor base is compared with the context base once here
+    // instead of once per kernel row.  A mismatch (or an undefined relation)
+    // still fails every nondivisible row.
+    Relation local_relation;
+    Relation& relation = saturation_relation_buffer(
+            ensure_private_storage_()
+                    ? &private_storage_->saturation_relation_scratch
+                    : nullptr,
+            local_relation, *base);
     const bool relation_base_verified =
             relation.is_defined() &&
             detail::saturation_kernel_relation_base_matches(relation, *this);
@@ -14318,7 +14343,12 @@ bool ClassGroupContext::saturate_local_once_with_units_(
 
     flint::FmpzMat relation_rows(0, 0);
     bool have_relation_rows = false;
-    Relation relation(*base);
+    Relation local_relation;
+    Relation& relation = saturation_relation_buffer(
+            ensure_private_storage_()
+                    ? &private_storage_->saturation_relation_scratch
+                    : nullptr,
+            local_relation, *base);
     if (!relation.is_defined()) {
         return false;
     }
