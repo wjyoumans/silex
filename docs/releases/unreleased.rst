@@ -135,8 +135,9 @@ Changed
 
 - Ideal membership for a triangular (Hermite) basis and the coordinate
   divisibility valuation of prime ideals now run word-size screens first:
-  membership reduces modulo the basis determinant (HNF modulo D, Cohen,
-  GTM 138, Algorithm 2.4.8) and the valuation screen reduces the multiplier
+  membership reduces modulo the basis determinant (the precondition of the
+  HNF modulo D, Cohen, GTM 138, Section 2.4.2, remark before Algorithm
+  2.4.6) and the valuation screen reduces the multiplier
   matrix modulo p.  Results are unchanged.  On ``q10_c11_deg10`` the timed
   region of ``grh`` drops by 2.93% Ir (callgrind, busy machine) with
   identical outputs; ``cyclotomic_39_phi24`` outputs are identical and its

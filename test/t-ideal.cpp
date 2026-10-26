@@ -3646,6 +3646,45 @@ int test_triangular_basis_contains_matches_hnf_reference() {
             }
         }
     }
+    // Fixed 2 x 2 bases with d = |det B| on each side of the word limit:
+    // d = (2^32 - 1)(2^32 + 1) = 2^64 - 1 takes the word-size screen and
+    // d = 2^32 2^32 = 2^64 takes the exact loop.  Each has a member (an
+    // integer combination of the rows, with a multiword coefficient) and a
+    // non-member (the same row with one entry shifted by 1).
+    for (int above = 0; above < 2; ++above) {
+        sflint::FmpzMat basis(2, 2);
+        fmpz_set_ui(fmpz_mat_entry(basis.raw(), 0, 0),
+                    above ? 4294967296UL : 4294967295UL);
+        fmpz_set_ui(fmpz_mat_entry(basis.raw(), 1, 1),
+                    above ? 4294967296UL : 4294967297UL);
+        fmpz_set_si(fmpz_mat_entry(basis.raw(), 0, 1), 123456789);
+        sflint::FmpzMat row(1, 2);
+        sflint::Fmpz c0;
+        sflint::Fmpz c1;
+        fmpz_set_si(c0.raw(), 7);
+        fmpz_mul_2exp(c0.raw(), c0.raw(), 90);
+        fmpz_set_si(c1.raw(), -5);
+        for (slong j = 0; j < 2; ++j) {
+            fmpz_addmul(fmpz_mat_entry(row.raw(), 0, j),
+                        fmpz_mat_entry(basis.raw(), 0, j), c0.raw());
+            fmpz_addmul(fmpz_mat_entry(row.raw(), 0, j),
+                        fmpz_mat_entry(basis.raw(), 1, j), c1.raw());
+        }
+        for (int member = 1; member >= 0; --member) {
+            if (!member) {
+                fmpz_add_ui(fmpz_mat_entry(row.raw(), 0, 1),
+                            fmpz_mat_entry(row.raw(), 0, 1), 1);
+            }
+            assert(reference_hnf_contains(basis, row) == (member != 0));
+            sflint::FmpzMat residual(1, 2);
+            fmpz_mat_set(residual.raw(), row.raw());
+            if (silex::detail::triangular_basis_contains(
+                        basis.raw(), fmpz_mat_row(residual.raw(), 0)) !=
+                (member != 0)) {
+                return 1;
+            }
+        }
+    }
     assert(members > 0 && nonmembers > 0);
     return 0;
 }

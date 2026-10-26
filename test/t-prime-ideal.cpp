@@ -1908,6 +1908,63 @@ silex::Order maximal_order_of_pure_cubic(silex::NumberField& field,
     return maximal;
 }
 
+// Valuations at each prime of a cubic order, for elements e_i + e_j and
+// p (e_i + e_j) (so valuations 0 and positive both occur): the public
+// valuation and the anti-uniformizer route (word-size mod-p screen when p
+// fits a word) must agree with power containment.
+void check_cubic_valuations(const silex::PrimeIdealList& primes,
+                            const silex::Order& maximal,
+                            const sflint::Fmpz& p) noexcept {
+    {
+        slong positive = 0;
+        for (slong k = 0; k < primes.size(); ++k) {
+            for (slong i = 0; i < 3; ++i) {
+                for (slong j = 0; j < 3; ++j) {
+                    for (slong kind = 0; kind < 2; ++kind) {
+                        sflint::FmpzMat coordinates(1, 3);
+                        fmpz_set_ui(fmpz_mat_entry(coordinates.raw(), 0, i), 1);
+                        if (kind == 0) {
+                            fmpz_add_ui(fmpz_mat_entry(coordinates.raw(), 0, j),
+                                        fmpz_mat_entry(coordinates.raw(), 0, j),
+                                        1);
+                        } else {
+                            fmpz_add_ui(fmpz_mat_entry(coordinates.raw(), 0, j),
+                                        fmpz_mat_entry(coordinates.raw(), 0, j),
+                                        1);
+                            fmpz_mat_scalar_mul_fmpz(coordinates.raw(),
+                                                     coordinates.raw(),
+                                                     p.raw());
+                        }
+                        silex::OrderElement element(maximal);
+                        assert(element.set_coordinates(
+                                sflint::FmpzMatConstRef(coordinates)));
+                        if (element.equal_si(0)) {
+                            continue;
+                        }
+                        slong expected = -1;
+                        slong value = -1;
+                        slong public_value = -1;
+                        assert(silex::detail::TestHookAccess::
+                                       valuation_by_power_containment(
+                                               expected, *primes.at(k),
+                                               element, 40));
+                        assert(primes.at(k)->valuation(public_value, element));
+                        assert(public_value == expected);
+                        if (silex::detail::TestHookAccess::
+                                    anti_uniformizer_valuation(
+                                            value, *primes.at(k), element,
+                                            40)) {
+                            assert(value == expected);
+                        }
+                        positive += expected > 0 ? 1 : 0;
+                    }
+                }
+            }
+        }
+        assert(positive > 0);
+    }
+}
+
 // p = 18446744073709551667 > 2^64 is 1 mod 3 and 2 is a cube mod p, so p
 // splits into three degree-one primes of Q(cbrt(2)), here given by
 // x^3 - 2 p^3 (theta = p cbrt(2)).  The recursive etale split (Frobenius
@@ -1931,6 +1988,7 @@ int check_index_divisor_recursive_split_cubic(const char* prime_text,
     assert(primes.size() == 3);
     assert(count_with_ef(primes, 1, 1) == 3);
     assert(check_norms(primes));
+    check_cubic_valuations(primes, maximal, p);
     for (const silex::Ideal& ideal : split) {
         slong matches = 0;
         for (slong i = 0; i < primes.size(); ++i) {
@@ -1939,6 +1997,43 @@ int check_index_divisor_recursive_split_cubic(const char* prime_text,
             matches += prime_ideal.equal(ideal) ? 1 : 0;
         }
         assert(matches == 1);
+    }
+    // Q(cbrt(2)) = Q[x]/(x^3 - 2) with p > 2^64: unramified equation order
+    // (Hensel route), compared with power containment.
+    {
+        silex::NumberField monogenic_field;
+        sflint::FmpqPoly polynomial;
+        fmpq_poly_set_coeff_si(polynomial.raw(), 0, -2);
+        fmpq_poly_set_coeff_si(polynomial.raw(), 3, 1);
+        silex::Order equation =
+                order_by_polynomial(monogenic_field, polynomial);
+        silex::Order monogenic_maximal(monogenic_field);
+        assert(monogenic_maximal.maximal_order(equation));
+        silex::PrimeIdealList monogenic_primes;
+        assert(silex::decompose_prime(monogenic_primes, monogenic_maximal,
+                                      sflint::FmpzConstRef(p)));
+        assert(monogenic_primes.size() == 3);
+        check_cubic_valuations(monogenic_primes, monogenic_maximal, p);
+    }
+    // x^3 - x^2 + p: p = P1^2 P2 with a residue polynomial on each prime,
+    // in an equation order with e > 1, so the valuation does not take the
+    // unramified Hensel route and the Kummer coordinate-divisibility loop
+    // runs with p > 2^64.
+    {
+        silex::NumberField ramified_field;
+        sflint::FmpqPoly polynomial;
+        fmpq_poly_set_coeff_si(polynomial.raw(), 3, 1);
+        fmpq_poly_set_coeff_si(polynomial.raw(), 2, -1);
+        fmpq_poly_set_coeff_fmpz(polynomial.raw(), 0, p.raw());
+        silex::Order equation =
+                order_by_polynomial(ramified_field, polynomial);
+        silex::Order ramified_maximal(ramified_field);
+        assert(ramified_maximal.maximal_order(equation));
+        silex::PrimeIdealList ramified_primes;
+        assert(silex::decompose_prime(ramified_primes, ramified_maximal,
+                                      sflint::FmpzConstRef(p)));
+        assert(ramified_primes.size() == 2);
+        check_cubic_valuations(ramified_primes, ramified_maximal, p);
     }
     return 0;
 }

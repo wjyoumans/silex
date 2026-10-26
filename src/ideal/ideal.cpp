@@ -78,7 +78,8 @@ bool triangular_pivots_word(ulong& determinant,
 // The forward substitution of `triangular_basis_contains` on residues modulo
 // d = |det B| > 1.  Since adj(B) B = det(B) I, d Z^n lies in the row lattice
 // L of B (the precondition of the HNF modulo D, Cohen, GTM 138,
-// Section 2.4.3, Algorithm 2.4.8), so v and v mod d have the same membership.
+// Section 2.4.2, the remark before Algorithm 2.4.6, which is also the
+// precondition of Algorithm 2.4.8), so v and v mod d have the same membership.
 // Each step subtracts an integer multiple of row j, which keeps membership,
 // and clears column j modulo d.  Divisibility of the residue r_j by
 // b_j = |B_jj| is well defined modulo d because b_j divides d; when it fails,
