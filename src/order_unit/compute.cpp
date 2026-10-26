@@ -2166,11 +2166,137 @@ bool push_merged_unit_factors(FactoredElement& out,
     return true;
 }
 
+// Row `row` of apply_unit_reduction when a scaled generator exponent does
+// not fit an slong: stores in `out` (empty on entry) input * prod_j
+// g_j^(-c_j), c_j = coefficients[row, j], with equal factors merged as in
+// push_merged_unit_factors (one entry per distinct factor, in order of first
+// occurrence over the input's factors and then those of g_0, g_1, ...,
+// holding that first occurrence and the sum of the exponents of its equal
+// entries; a factor whose exponents cancel is left out, so an empty `out`
+// is the value 1).  The scaled exponents and their sums are fmpz, as the
+// reference forms this product with exponents of any size (Clgp/Map.jl
+// reduce_mod_units multiplies FacElem values, whose exponents are
+// ZZRingElem; Misc/FactoredElem.jl).  Sets `fits` false, with `out`
+// unchanged, when a merged exponent does not fit an slong: a
+// FactoredElement cannot hold that value.  The caller has checked that every
+// -c_j fits an slong.  False when a generator or factor cannot be loaded or
+// stored, or the bucket count would overflow.
+bool push_wide_reduced_unit_factors(FactoredElement& out,
+                                    bool& fits,
+                                    const FactoredElement& input,
+                                    std::vector<FactoredElement>& generators,
+                                    std::vector<bool>& generator_loaded,
+                                    const OrderUnitGroup& group,
+                                    const flint::FmpzMat& coefficients,
+                                    slong row) noexcept {
+    fits = false;
+    std::vector<PendingUnitFactor> pending;
+    std::vector<flint::Fmpz> exponents;
+    const std::size_t input_length = input.factors().size();
+    for (std::size_t k = 0; k < input_length; ++k) {
+        pending.push_back(PendingUnitFactor{&input, k, 0, 0, 0});
+        exponents.emplace_back();
+        ::fmpz_set_si(exponents.back().raw(), input.factors()[k].exponent);
+    }
+    const slong rank = static_cast<slong>(generators.size());
+    for (slong j = 0; j < rank; ++j) {
+        const flint::FmpzConstRef coefficient =
+                flint::fmpz_mat_entry(coefficients, row, j);
+        if (flint::fmpz_is_zero(coefficient)) {
+            continue;
+        }
+        const std::size_t index = static_cast<std::size_t>(j);
+        if (!generator_loaded[index]) {
+            if (!group.free_generator(generators[index], j)) {
+                return false;
+            }
+            generator_loaded[index] = true;
+        }
+        const FactoredElement& generator = generators[index];
+        const auto generator_entries = generator.factors();
+        for (std::size_t k = 0; k < generator_entries.size(); ++k) {
+            if (generator_entries[k].exponent == 0) {
+                continue;
+            }
+            pending.push_back(PendingUnitFactor{&generator, k, 0, 0, 0});
+            exponents.emplace_back();
+            ::fmpz_mul_si(exponents.back().raw(), coefficient.raw(),
+                        generator_entries[k].exponent);
+            ::fmpz_neg(exponents.back().raw(), exponents.back().raw());
+        }
+    }
+
+    const std::size_t count = pending.size();
+    std::size_t buckets = 1;
+    while (buckets < 2 * count) {
+        if (buckets > std::numeric_limits<std::size_t>::max() / 4) {
+            return false;
+        }
+        buckets *= 2;
+    }
+    constexpr std::size_t empty = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> table(buckets, empty);
+    std::vector<std::size_t> first;
+    std::vector<flint::Fmpz> sums;
+    for (std::size_t i = 0; i < count; ++i) {
+        PendingUnitFactor& entry = pending[i];
+        entry.hash = FactoredElementAccess::factor_hash(*entry.source,
+                                                        entry.index);
+        entry.origin = FactoredElementAccess::factor_origin(*entry.source,
+                                                            entry.index);
+        std::size_t slot =
+                static_cast<std::size_t>(entry.hash) & (buckets - 1);
+        for (;;) {
+            const std::size_t distinct = table[slot];
+            if (distinct == empty) {
+                table[slot] = first.size();
+                first.push_back(i);
+                sums.emplace_back();
+                ::fmpz_set(sums.back().raw(), exponents[i].raw());
+                break;
+            }
+            const PendingUnitFactor& held = pending[first[distinct]];
+            if (held.hash == entry.hash &&
+                (held.origin == entry.origin ||
+                 held.source->factors()[held.index].factor.equal(
+                         entry.source->factors()[entry.index].factor))) {
+                ::fmpz_add(sums[distinct].raw(), sums[distinct].raw(),
+                         exponents[i].raw());
+                break;
+            }
+            slot = (slot + 1) & (buckets - 1);
+        }
+    }
+
+    for (const flint::Fmpz& sum : sums) {
+        if (::fmpz_fits_si(sum.raw()) == 0) {
+            return true;
+        }
+    }
+    for (std::size_t d = 0; d < first.size(); ++d) {
+        if (::fmpz_is_zero(sums[d].raw()) != 0) {
+            continue;
+        }
+        const PendingUnitFactor& entry = pending[first[d]];
+        const slong exponent = ::fmpz_get_si(sums[d].raw());
+        if (!FactoredElementAccess::push_factor(out, *entry.source,
+                                                entry.index, exponent)) {
+            return false;
+        }
+    }
+    fits = true;
+    return true;
+}
+
 }  // namespace
 
 bool apply_unit_reduction(std::vector<FactoredElement>& values,
-                                const OrderUnitGroup& group,
-                                const flint::FmpzMat& coefficients) noexcept {
+                          const OrderUnitGroup& group,
+                          const flint::FmpzMat& coefficients,
+                          bool* unchanged) noexcept {
+    if (unchanged != nullptr) {
+        *unchanged = false;
+    }
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     const slong len = static_cast<slong>(values.size());
@@ -2193,10 +2319,19 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
     // first occurrence is ours), and its log embedding takes the same
     // terms.  A row with c_i = 0 keeps value_i's list.  When the merge does
     // not apply (an exponent sum past slong, or everything cancels), the
-    // concatenated list is stored.  The exits are those of the concatenating
-    // path: false when a scaled exponent overflows slong (pow_si) or a copy
-    // fails, and true with `values` unchanged when -c_ij does not fit an
-    // slong.  Each generator is copied once, on first use.
+    // concatenated list is stored.  When a scaled exponent c_ij * e does not
+    // fit an slong, where the concatenating path (pow_si) fails, the row is
+    // the same merged product formed with fmpz exponents
+    // (push_wide_reduced_unit_factors), as the reference's exponents have
+    // any size.
+    //
+    // A reduced value that a FactoredElement cannot hold (-c_ij, or a
+    // merged exponent, past slong) returns true with `values` unchanged and
+    // *unchanged set.  Intentional deviation: the reference's exponents have
+    // any size, so it always stores the reduced values; here each value
+    // keeps its own factorization, which is the same unit, only not reduced
+    // modulo the group.  False when a generator or factor cannot be copied
+    // or stored.  Each generator is copied once, on first use.
     std::vector<FactoredElement> generators;
     generators.reserve(static_cast<std::size_t>(rank));
     for (slong j = 0; j < rank; ++j) {
@@ -2216,7 +2351,8 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
             pending.push_back(PendingUnitFactor{
                     &input, k, input.factors()[k].exponent, 0, 0});
         }
-        for (slong j = 0; j < rank; ++j) {
+        bool wide = false;
+        for (slong j = 0; !wide && j < rank; ++j) {
             const flint::FmpzConstRef coefficient =
                     flint::fmpz_mat_entry(coefficients, i, j);
             if (flint::fmpz_is_zero(coefficient)) {
@@ -2226,6 +2362,9 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
             flint::Fmpz exponent;
             flint::fmpz_neg(flint::FmpzRef(exponent), coefficient);
             if (!flint::fmpz_fits_si(flint::FmpzConstRef(exponent))) {
+                if (unchanged != nullptr) {
+                    *unchanged = true;
+                }
                 return true;
             }
 
@@ -2245,7 +2384,8 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
                                 flint::FmpzConstRef(scaled),
                                 flint::FmpzConstRef(exponent));
                 if (!flint::fmpz_fits_si(flint::FmpzConstRef(scaled))) {
-                    return false;
+                    wide = true;
+                    break;
                 }
                 const slong factor_exponent =
                         flint::fmpz_get_si(flint::FmpzConstRef(scaled));
@@ -2258,6 +2398,30 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
 
         reduced.emplace_back(*field);
         FactoredElement& value = reduced.back();
+        if (wide) {
+            // A scaled exponent past slong: the rest of row i keeps the
+            // -c_ij exit above, then the row is formed with fmpz exponents.
+            bool fits = true;
+            for (slong j = 0; fits && j < rank; ++j) {
+                flint::Fmpz exponent;
+                flint::fmpz_neg(flint::FmpzRef(exponent),
+                                flint::fmpz_mat_entry(coefficients, i, j));
+                fits = flint::fmpz_fits_si(flint::FmpzConstRef(exponent));
+            }
+            if (fits &&
+                !push_wide_reduced_unit_factors(value, fits, input,
+                                                generators, generator_loaded,
+                                                group, coefficients, i)) {
+                return false;
+            }
+            if (!fits) {
+                if (unchanged != nullptr) {
+                    *unchanged = true;
+                }
+                return true;
+            }
+            continue;
+        }
         if (pending.size() == input_length) {
             // No generator factor: value_i unchanged (its list is shared).
             if (!value.set(input)) {
@@ -3286,16 +3450,20 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
                 return true;
             }
             bool applied = false;
+            bool unchanged = false;
             {
                 SILEX_PROFILE_SCOPE(
                         group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.reduce_relation_units_modulo.apply_unit_reduction");
-                applied = apply_unit_reduction(values, group, coefficients);
+                applied = apply_unit_reduction(values, group, coefficients,
+                                               &unchanged);
             }
             if (!applied) {
                 return false;
             }
-            if (exact) {
+            // Values left unchanged would give the same coefficients again
+            // at this precision, so the reduction stops with them.
+            if (exact || unchanged) {
                 return true;
             }
             // Intentional deviation: approximate coefficients are applied

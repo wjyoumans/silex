@@ -937,9 +937,11 @@ int test_reduce_mod_units_half_integer_tie() {
 // copy the generator, raise it to -c_j, multiply and copy back.  This
 // concatenates factor lists and merges nothing.  The test below pins
 // apply_unit_reduction to this list with equal factors merged
-// (merge_equal_factors), and to its two exits: false when a scaled factor
-// exponent overflows slong (as pow_si reports), and true with the values
-// unchanged when -c_j itself does not fit an slong.
+// (merge_equal_factors).  This path fails when a scaled factor exponent
+// overflows slong (as pow_si reports), and returns true with the values
+// unchanged when -c_j itself does not fit an slong; apply_unit_reduction
+// returns true with the values unchanged in both cases when the merged
+// exponents do not fit either (see test_apply_unit_reduction_wide_merge).
 bool reference_apply_unit_reduction(
         std::vector<silex::FactoredElement>& values,
         const silex::OrderUnitGroup& group,
@@ -1057,7 +1059,8 @@ std::vector<silex::FactoredElement> copy_factored_values(
 // after merge_equal_factors, which has the same factored log embedding,
 // bit for bit.  When the merge does not apply (every exponent cancels, or
 // an exponent sum overflows slong) it stores that path's list unmerged.  It
-// keeps that path's failure and early-exit behaviour.
+// keeps that path's early exit, and leaves the values unchanged where that
+// path fails on an overflow.
 int test_apply_unit_reduction_factor_list() {
     silex::NumberField cubic = cubic_field(-3, 1);
     silex::Order order;
@@ -1202,7 +1205,8 @@ int test_apply_unit_reduction_factor_list() {
     assert(same_factor_lists(actual, concatenated));
     assert(actual[0].length() == 1 + g0.length());
 
-    // A scaled exponent past slong fails, as pow_si does, with the values
+    // Scaled exponents past slong whose merged exponent in row 1 is past
+    // slong too: pow_si fails, and apply_unit_reduction leaves the values
     // unchanged even though row 0 was already reduced.
     sflint::FmpzMat overflow(3, 2);
     set_zmat_entry_si(overflow, 0, 0, 1);
@@ -1211,7 +1215,10 @@ int test_apply_unit_reduction_factor_list() {
     actual = copy_factored_values(values);
     expected = copy_factored_values(values);
     assert(!reference_apply_unit_reduction(expected, group, overflow));
-    assert(!silex::detail::apply_unit_reduction(actual, group, overflow));
+    bool unchanged = false;
+    assert(silex::detail::apply_unit_reduction(actual, group, overflow,
+                                               &unchanged));
+    assert(unchanged);
     assert(same_factor_lists(actual, values));
     assert(same_factor_lists(expected, values));
 
@@ -1223,7 +1230,10 @@ int test_apply_unit_reduction_factor_list() {
     actual = copy_factored_values(values);
     expected = copy_factored_values(values);
     assert(reference_apply_unit_reduction(expected, group, unfit));
-    assert(silex::detail::apply_unit_reduction(actual, group, unfit));
+    unchanged = false;
+    assert(silex::detail::apply_unit_reduction(actual, group, unfit,
+                                               &unchanged));
+    assert(unchanged);
     assert(same_factor_lists(actual, values));
     assert(same_factor_lists(expected, values));
 
@@ -1232,6 +1242,121 @@ int test_apply_unit_reduction_factor_list() {
     actual = copy_factored_values(values);
     assert(!silex::detail::apply_unit_reduction(actual, group, wrong));
     assert(same_factor_lists(actual, values));
+    return 0;
+}
+
+// A scaled generator exponent past slong is not a failure when the merged
+// exponents of the reduced value fit: apply_unit_reduction then stores the
+// exact product value * g^(-c) with equal factors merged, as reference
+// reduce_mod_units does with integer exponents of any size (Clgp/Map.jl,
+// FacElem).  When a merged exponent itself does not fit an slong it leaves
+// the values unchanged and says so.
+int test_apply_unit_reduction_wide_merge() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    // g_0 = theta^3 theta^-2 (the value theta, with a repeated factor whose
+    // exponents have opposite signs) and g_1 = theta - 1.
+    silex::FactoredElement generators[] = {
+            silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+    assert(generators[0].push(theta, 3));
+    assert(generators[0].push(theta, -2));
+    assert(generators[1].push(theta_minus_one, 1));
+    silex::EmbeddingContext embeddings(cubic);
+    silex::OrderUnitGroup group;
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 64));
+    assert(group.free_rank() == 2);
+    silex::FactoredElement g0(cubic);
+    silex::FactoredElement g1(cubic);
+    assert(group.free_generator(g0, 0));
+    assert(group.free_generator(g1, 1));
+    assert(g0.length() == 2 && g1.length() == 1);
+    assert(g0.factors()[0].factor.equal(theta) &&
+           g0.factors()[0].exponent == 3);
+    assert(g0.factors()[1].factor.equal(theta) &&
+           g0.factors()[1].exponent == -2);
+    assert(g1.factors()[0].factor.equal(theta_minus_one) &&
+           g1.factors()[0].exponent == 1);
+
+    // theta^(2^62 + 1) (theta - 1)^4 * g_0^(-2^62) * g_1^(-1): the scaled
+    // exponents -3 * 2^62 and 2 * 2^62 do not fit an slong, their sum with
+    // 2^62 + 1 is 1, and the reduced value is theta (theta - 1)^3.
+    const slong big = WORD(1) << 62;
+    std::vector<silex::FactoredElement> values;
+    values.emplace_back(cubic);
+    assert(values[0].push(theta, big + 1));
+    assert(values[0].push(theta_minus_one, 4));
+    values.emplace_back(cubic);
+    assert(values[1].push(theta_minus_one, 2));
+    sflint::FmpzMat coefficients(2, 2);
+    set_zmat_entry_si(coefficients, 0, 0, big);
+    set_zmat_entry_si(coefficients, 0, 1, 1);
+    set_zmat_entry_si(coefficients, 1, 1, -1);
+    std::vector<silex::FactoredElement> actual = copy_factored_values(values);
+    bool unchanged = true;
+    assert(silex::detail::apply_unit_reduction(actual, group, coefficients,
+                                               &unchanged));
+    assert(!unchanged);
+    assert(actual.size() == 2);
+    {
+        const auto fs = actual[0].factors();
+        assert(actual[0].length() == 2);
+        assert(fs[0].factor.equal(theta) && fs[0].exponent == 1);
+        assert(fs[1].factor.equal(theta_minus_one) && fs[1].exponent == 3);
+        silex::Element value(cubic);
+        silex::Element expected_value(cubic);
+        silex::Element cube(cubic);
+        assert(actual[0].evaluate(value));
+        assert(cube.multiply(theta_minus_one, theta_minus_one));
+        assert(cube.multiply(cube, theta_minus_one));
+        assert(expected_value.multiply(theta, cube));
+        assert(value.equal(expected_value));
+    }
+    // Row 1 is reduced as before: (theta - 1)^2 * g_1 = (theta - 1)^3.
+    {
+        silex::Element value(cubic);
+        silex::Element expected_value(cubic);
+        assert(actual[1].evaluate(value));
+        assert(expected_value.multiply(theta_minus_one, theta_minus_one));
+        assert(expected_value.multiply(expected_value, theta_minus_one));
+        assert(value.equal(expected_value));
+    }
+
+    // Every exponent cancels: theta^(2^62) * g_0^(-2^62) is the value 1.
+    std::vector<silex::FactoredElement> cancel_values;
+    cancel_values.emplace_back(cubic);
+    assert(cancel_values[0].push(theta, big));
+    sflint::FmpzMat cancel(1, 2);
+    set_zmat_entry_si(cancel, 0, 0, big);
+    actual = copy_factored_values(cancel_values);
+    assert(silex::detail::apply_unit_reduction(actual, group, cancel));
+    {
+        silex::Element value(cubic);
+        assert(actual[0].evaluate(value));
+        assert(value.equal_si(1));
+    }
+
+    // The merged exponent of theta, -2^62 - (2^62 + 1), does not fit: the
+    // values are left unchanged, here with a reducible row before it.
+    std::vector<silex::FactoredElement> wide_values;
+    wide_values.emplace_back(cubic);
+    assert(wide_values[0].push(theta_minus_one, 2));
+    wide_values.emplace_back(cubic);
+    assert(wide_values[1].push(theta, -big));
+    sflint::FmpzMat wide(2, 2);
+    set_zmat_entry_si(wide, 0, 1, 1);
+    set_zmat_entry_si(wide, 1, 0, big + 1);
+    actual = copy_factored_values(wide_values);
+    unchanged = false;
+    assert(silex::detail::apply_unit_reduction(actual, group, wide,
+                                               &unchanged));
+    assert(unchanged);
+    assert(same_factor_lists(actual, wide_values));
     return 0;
 }
 
@@ -15434,6 +15559,7 @@ int main() {
     test_incremental_unit_context_cap_fallback();
     test_reduce_mod_units_half_integer_tie();
     test_apply_unit_reduction_factor_list();
+    test_apply_unit_reduction_wide_merge();
     test_reduce_mod_units_half_integer_tie_stop_rule();
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_origin_pair_cache();

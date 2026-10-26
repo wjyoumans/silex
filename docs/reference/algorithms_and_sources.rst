@@ -1589,6 +1589,18 @@ generator's whole list again.  When an exponent sum does not fit ``slong``,
 or every exponent cancels, the concatenated product is stored instead, as
 before.  The merge applies only to this reduction; ``FactoredElement``
 arithmetic still does not merge factors.
+When a scaled exponent ``-c_j * e`` of some generator factor does not fit
+``slong``, the same merged product is formed with ``fmpz`` exponents, as
+Hecke's ``ZZRingElem`` exponents allow, and stored when every merged
+exponent fits ``slong``.
+
+**Deviation** (word-size exponents): when a merged exponent, or some
+``-c_j``, does not fit ``slong``, a ``FactoredElement`` cannot hold the
+reduced value.  Silex then leaves every value of the call unchanged and ends
+the reduction, where Hecke stores the reduced ``FacElem``.  Each output is
+then its input times the empty product of generators, so, as above,
+correctness does not depend on it; only the representatives kept differ.
+Such an overflow previously failed the class/unit computation.
 
 The approximate rounding itself ports Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:round_approx(ZZMatrix, ArbMatrix)``.  Its

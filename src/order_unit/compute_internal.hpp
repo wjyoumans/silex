@@ -1032,9 +1032,12 @@ bool try_validate_refine_extra_pass(slong& extra_passes_done,
 // Defined in compute.cpp; declared here for tests that pin their behaviour.
 bool round_arb_approx_fmpz(flint::FmpzRef out, const arb_struct* value,
                            slong precision) noexcept;
+// Sets *unchanged (when given) true when it returns true with `values`
+// unchanged because a reduced value does not fit word-size exponents.
 bool apply_unit_reduction(std::vector<FactoredElement>& values,
                           const OrderUnitGroup& group,
-                          const flint::FmpzMat& coefficients) noexcept;
+                          const flint::FmpzMat& coefficients,
+                          bool* unchanged = nullptr) noexcept;
 bool unknown_saturation_at_two(
         bool& validated,
         bool& presentation_rebuilt,

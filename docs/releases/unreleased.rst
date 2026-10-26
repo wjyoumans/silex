@@ -2631,6 +2631,17 @@ Changed
 Fixed
 -----
 
+- Reducing relation-kernel unit candidates modulo the current unit group no
+  longer fails when a scaled exponent of a stored generator overflows a
+  machine word.  The reduced value is formed with arbitrary-size exponents
+  and stored when its merged exponents fit; when they do not, the candidate
+  keeps its own factorization (the same unit, unreduced) instead of failing.
+  Some ``grh`` runs on large cyclotomic real fields, for example
+  ``cyclotomic_real_136_deg32`` under an alternative internal random
+  sequence, previously ended in ``class_unit_computation_failed`` this way;
+  they now publish the correct class group and regulator.  Published
+  ``grh`` class/unit corpus output is unchanged.
+
 - The ``proven`` analytic finish and the unit witness extraction no longer
   take their unit rows from the zero-row part of the finish workspace's HNF
   transform, an exact but unreduced kernel basis whose entries can have tens
