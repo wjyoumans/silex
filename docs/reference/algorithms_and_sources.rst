@@ -938,6 +938,19 @@ record.  ``test/t-class-group.cpp`` and ``test/t-order-unit.cpp`` are the
 focused regression surfaces.  Cross-engine campaign orchestration is outside
 this repository's scope.
 
+For ``grh`` requests on an exact cyclotomic presentation (the defining
+polynomial is ``Phi_m``), the cyclotomic units of the field are added to the
+unit context before relation search, so the search needs relations only for
+the remaining rank.  PARI 2.17.3 ``src/basemath/buch2.c`` does the same:
+``add_cyclotomic_units`` (lines 3626-3636, called at line 3873) seeds them,
+the comment above ``nfcyclotomicunits`` (lines 3583-3587) states which units
+are produced, and the relation count needed after seeding is the logic at
+lines 4047-4061.  Silex reimplements the construction in
+``src/unit/cyclotomic_units.cpp`` from that comment, checks that every seed
+has norm ``+-1`` exactly, and leaves ``proven`` requests without seeds.  The
+seeds only add units; the published class group and regulator still pass the
+same analytic validation.
+
 Every Smith form of a finite abelian presentation (``FiniteAbelianGroup``,
 including the class group presentation published from the relation HNF
 checkpoint) is taken from the HNF basis after its unit pivots are split off.

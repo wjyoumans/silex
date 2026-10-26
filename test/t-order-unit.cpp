@@ -8785,6 +8785,7 @@ int test_grh_cyclotomic_seed_units() {
         silex::OrderUnitGroup units;
         class_group.set_diagnostics(&diagnostics);
         units.set_diagnostics(&diagnostics);
+        options.diagnostics = &diagnostics;
         assert(units.compute_with_class_group(class_group, order,
                                               sflint::FmpzConstRef(bound),
                                               options, 128));

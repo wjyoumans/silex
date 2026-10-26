@@ -133,6 +133,17 @@ Added
 Changed
 -------
 
+- A ``grh`` class group and unit computation on a field given by the exact
+  cyclotomic polynomial ``Phi_m`` now seeds the cyclotomic units into the
+  unit context before relation search, as PARI 2.17.3 ``buch2.c``
+  (``add_cyclotomic_units``) does; every seed is checked to have norm
+  ``+-1``.  Class groups, regulators, and certification labels are unchanged
+  on all 46 cyclotomic corpus rows.  Whole-process callgrind Ir of ``grh``
+  drops by 11.3% on ``cyclotomic_37_phi36``, 11.2% on ``cyclotomic_41_phi40``,
+  12.3% on ``cyclotomic_64_phi32``, 17.5% on ``cyclotomic_27_phi18``, and
+  4.8% on ``cyclotomic_19_phi18`` (busy machine).  ``proven`` requests and
+  other presentations are unchanged.
+
 - Ideal membership for a triangular (Hermite) basis and the coordinate
   divisibility valuation of prime ideals now run word-size screens first:
   membership reduces modulo the basis determinant (the precondition of the
