@@ -595,6 +595,184 @@ int test_sum_intersection_index() {
     return 0;
 }
 
+// Reference intersection through the Smith form route Lat::intersection used
+// before it switched to one HNF transform: the right SNF transform columns
+// past the rank span the integer kernel of [L^T | -R^T].
+bool smith_intersection_reference(silex::flint::FmpzMat& out,
+                                  const silex::lat::Lat& left,
+                                  const silex::lat::Lat& right) {
+    using silex::flint::FmpzMat;
+    const slong n = left.ambient_dim();
+    silex::lat::Lat left_hnf(n);
+    silex::lat::Lat right_hnf(n);
+    if (!left.hnf(left_hnf) || !right.hnf(right_hnf)) {
+        return false;
+    }
+    const slong r = left_hnf.nrows();
+    const slong s = right_hnf.nrows();
+    if (r == 0 || s == 0) {
+        out = FmpzMat(0, n);
+        return true;
+    }
+    FmpzMat columns(n, r + s);
+    FmpzMat snf(n, r + s);
+    FmpzMat transform(r + s, r + s);
+    for (slong i = 0; i < r; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(columns.raw(), j, i),
+                     fmpz_mat_entry(left_hnf.raw_basis(), i, j));
+        }
+    }
+    for (slong i = 0; i < s; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz_neg(fmpz_mat_entry(columns.raw(), j, r + i),
+                     fmpz_mat_entry(right_hnf.raw_basis(), i, j));
+        }
+    }
+    fmpz_mat_snf_transform(snf.raw(), nullptr, transform.raw(), columns.raw());
+    slong rank = 0;
+    while (rank < n && rank < r + s &&
+           !fmpz_is_zero(fmpz_mat_entry(snf.raw(), rank, rank))) {
+        ++rank;
+    }
+    const slong nullity = r + s - rank;
+    FmpzMat basis(nullity, n);
+    for (slong k = 0; k < nullity; ++k) {
+        for (slong i = 0; i < r; ++i) {
+            for (slong j = 0; j < n; ++j) {
+                fmpz_addmul(fmpz_mat_entry(basis.raw(), k, j),
+                            fmpz_mat_entry(transform.raw(), i, rank + k),
+                            fmpz_mat_entry(left_hnf.raw_basis(), i, j));
+            }
+        }
+    }
+    silex::lat::Lat tmp(n);
+    if (!tmp.set_basis(basis) || !tmp.hnf(tmp)) {
+        return false;
+    }
+    out = tmp.basis();
+    return true;
+}
+
+// Lat::intersection must return exactly the HNF the Smith form route gave,
+// on random lattices and on rank-deficient, full-rank, equal, nested,
+// disjoint and zero cases, including the aliased call.
+int check_intersection_matches_smith(const silex::lat::Lat& left,
+                                     const silex::lat::Lat& right) {
+    silex::flint::FmpzMat expected(0, 0);
+    if (!smith_intersection_reference(expected, left, right)) {
+        return 1;
+    }
+    silex::lat::Lat result(left.ambient_dim());
+    if (!left.intersection(result, right) ||
+        fmpz_mat_nrows(result.raw_basis()) != fmpz_mat_nrows(expected.raw()) ||
+        fmpz_mat_ncols(result.raw_basis()) != fmpz_mat_ncols(expected.raw()) ||
+        !fmpz_mat_equal(result.raw_basis(), expected.raw())) {
+        return 1;
+    }
+    silex::lat::Lat aliased(left.ambient_dim());
+    if (!aliased.set_basis(left.basis_ref()) ||
+        !aliased.intersection(aliased, right) ||
+        fmpz_mat_nrows(aliased.raw_basis()) != fmpz_mat_nrows(expected.raw()) ||
+        !fmpz_mat_equal(aliased.raw_basis(), expected.raw())) {
+        return 1;
+    }
+    return 0;
+}
+
+int test_intersection_matches_smith_route() {
+    using silex::flint::FmpzMat;
+    flint_rand_t state;
+    flint_rand_init(state);
+    int failed = 0;
+    slong nonzero_results = 0;
+    slong zero_results = 0;
+    for (slong iter = 0; iter < 400 && failed == 0; ++iter) {
+        const slong n = 1 + static_cast<slong>(n_randint(state, 6));
+        const slong kind = static_cast<slong>(n_randint(state, 6));
+        const slong r = static_cast<slong>(n_randint(state, n + 3));
+        FmpzMat left_basis(r, n);
+        fmpz_mat_randtest(left_basis.raw(), state, 1 + n_randint(state, 12));
+        silex::lat::Lat left(n);
+        silex::lat::Lat right(n);
+        if (!left.set_basis(left_basis)) {
+            failed = 1;
+            break;
+        }
+        if (kind == 0) {
+            // Random, usually rank-deficient when s < n.
+            const slong s = static_cast<slong>(n_randint(state, n + 3));
+            FmpzMat right_basis(s, n);
+            fmpz_mat_randtest(right_basis.raw(), state,
+                              1 + n_randint(state, 12));
+            failed = !right.set_basis(right_basis);
+        } else if (kind == 1) {
+            // Full rank: a nonsingular diagonal-dominant random basis.
+            FmpzMat right_basis(n, n);
+            fmpz_mat_randtest(right_basis.raw(), state, 6);
+            for (slong i = 0; i < n; ++i) {
+                fmpz_add_ui(fmpz_mat_entry(right_basis.raw(), i, i),
+                            fmpz_mat_entry(right_basis.raw(), i, i), 1);
+                fmpz_mul_ui(fmpz_mat_entry(right_basis.raw(), i, i),
+                            fmpz_mat_entry(right_basis.raw(), i, i), 1000);
+                fmpz_add_ui(fmpz_mat_entry(right_basis.raw(), i, i),
+                            fmpz_mat_entry(right_basis.raw(), i, i), 1);
+            }
+            failed = !right.set_basis(right_basis);
+        } else if (kind == 2) {
+            // Equal lattices, given by different bases.
+            FmpzMat mixed(r, n);
+            fmpz_mat_set(mixed.raw(), left_basis.raw());
+            if (r > 1) {
+                fmpz_mat_t row_op;
+                fmpz_mat_init(row_op, r, r);
+                fmpz_mat_one(row_op);
+                fmpz_set_si(fmpz_mat_entry(row_op, 0, r - 1),
+                            static_cast<slong>(n_randint(state, 7)) - 3);
+                fmpz_mat_mul(mixed.raw(), row_op, left_basis.raw());
+                fmpz_mat_clear(row_op);
+            }
+            failed = !right.set_basis(mixed);
+        } else if (kind == 3) {
+            // Nested: an integer combination of the left rows.
+            const slong s = static_cast<slong>(n_randint(state, r + 2));
+            FmpzMat combination(s, r);
+            fmpz_mat_randtest(combination.raw(), state, 4);
+            FmpzMat right_basis(s, n);
+            if (r > 0) {
+                fmpz_mat_mul(right_basis.raw(), combination.raw(),
+                             left_basis.raw());
+            }
+            failed = !right.set_basis(right_basis);
+        } else if (kind == 4) {
+            // Zero lattice: no rows, or only zero rows.
+            FmpzMat right_basis(static_cast<slong>(n_randint(state, 3)), n);
+            failed = !right.set_basis(right_basis);
+        } else {
+            // A scaled copy of the left lattice, which it contains.
+            FmpzMat right_basis(r, n);
+            fmpz_mat_scalar_mul_si(right_basis.raw(), left_basis.raw(),
+                                   2 + static_cast<slong>(n_randint(state, 5)));
+            failed = !right.set_basis(right_basis);
+        }
+        if (failed != 0) {
+            break;
+        }
+        failed = check_intersection_matches_smith(left, right) != 0 ||
+                 check_intersection_matches_smith(right, left) != 0;
+        silex::lat::Lat result(n);
+        if (failed == 0 && left.intersection(result, right)) {
+            if (result.nrows() > 0) {
+                ++nonzero_results;
+            } else {
+                ++zero_results;
+            }
+        }
+    }
+    flint_rand_clear(state);
+    return (failed == 0 && nonzero_results > 100 && zero_results > 10) ? 0 : 1;
+}
+
 int test_saturate() {
     silex::lat::Lat lattice(2);
     silex::lat::Lat saturated(2);
@@ -2040,6 +2218,7 @@ int main() {
                    test_contains() != 0 ||
                    test_contains_matches_hnf_reference() != 0 ||
                    test_sum_intersection_index() != 0 ||
+                   test_intersection_matches_smith_route() != 0 ||
                    test_saturate() != 0 || test_lll_reduce() != 0 ||
                    test_lll_basis_only_contract() != 0 ||
                    test_lll_certifier_boundaries() != 0 ||

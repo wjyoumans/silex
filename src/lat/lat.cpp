@@ -804,28 +804,37 @@ bool Lat::intersection(Lat& out, const Lat& other) const noexcept {
         return true;
     }
 
-    flint::FmpzMat columns(n, r + s);
-    flint::FmpzMat snf(n, r + s);
-    flint::FmpzMat right_transform(r + s, r + s);
+    // The intersection is read off the integer left kernel of the stacked
+    // matrix M = [L; -R] (rows of the two HNF bases): x M = 0 exactly when
+    // sum_i x_i L_i = sum_j x_{r+j} R_j, and since the rows of L are
+    // independent, x -> sum_i x_i L_i maps that kernel onto the intersection.
+    // A unimodular U with U M = H in HNF gives a Z-basis of the kernel in the
+    // rows of U facing the zero rows of H (Cohen, A Course in Computational
+    // Algebraic Number Theory, GTM 138, Proposition 2.4.9, which states it
+    // for columns).  Any Z-basis of the kernel spans the same
+    // lattice, so the HNF taken below is unchanged from the earlier Smith
+    // form route.
+    flint::FmpzMat stacked(r + s, n);
+    flint::FmpzMat echelon(r + s, n);
+    flint::FmpzMat transform(r + s, r + s);
 
-    // Matrix-entry loops here build the SNF input and recover the intersection basis.
+    // Matrix-entry loops here build the stacked rows and recover the intersection basis.
     for (slong i = 0; i < r; ++i) {
         for (slong j = 0; j < n; ++j) {
-            fmpz_set(fmpz_mat_entry(columns.raw(), j, i),
+            fmpz_set(fmpz_mat_entry(stacked.raw(), i, j),
                     fmpz_mat_entry(left_hnf.basis_.raw(), i, j));
         }
     }
     for (slong i = 0; i < s; ++i) {
         for (slong j = 0; j < n; ++j) {
-            fmpz_neg(fmpz_mat_entry(columns.raw(), j, r + i),
+            fmpz_neg(fmpz_mat_entry(stacked.raw(), r + i, j),
                     fmpz_mat_entry(right_hnf.basis_.raw(), i, j));
         }
     }
 
-    fmpz_mat_snf_transform(snf.raw(), nullptr, right_transform.raw(), columns.raw());
+    ::fmpz_mat_hnf_transform(echelon.raw(), transform.raw(), stacked.raw());
     slong rank = 0;
-    while (rank < n && rank < r + s &&
-            !flint::fmpz_is_zero(flint::fmpz_mat_entry(snf, rank, rank))) {
+    while (rank < r + s && !fmpz_mat_is_zero_row(echelon.raw(), rank)) {
         ++rank;
     }
 
@@ -835,7 +844,7 @@ bool Lat::intersection(Lat& out, const Lat& other) const noexcept {
         for (slong i = 0; i < r; ++i) {
             for (slong j = 0; j < n; ++j) {
                 fmpz_addmul(fmpz_mat_entry(intersection_basis.raw(), k, j),
-                        fmpz_mat_entry(right_transform.raw(), i, rank + k),
+                        fmpz_mat_entry(transform.raw(), rank + k, i),
                         fmpz_mat_entry(left_hnf.basis_.raw(), i, j));
             }
         }

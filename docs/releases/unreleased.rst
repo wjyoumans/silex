@@ -387,6 +387,24 @@ Changed
   ``cyclotomic_real_q10_c11_deg10`` 5.8% fewer (2.049e9 to 1.931e9), all of
   it in ``maximal_order``.  No timing has been measured.
 
+- ``Lat::intersection`` finds the integer kernel of the stacked bases
+  ``[L; -R]`` with one HNF transform (the transform rows facing the zero rows
+  of the HNF; Cohen, GTM 138, Proposition 2.4.9) instead of a Smith normal
+  form with transforms.  Any Z-basis of the kernel gives the same
+  intersection lattice and its HNF is taken as before, so intersections,
+  colon ideals and maximal orders are unchanged: a test compares the result
+  with the Smith form route on random, rank-deficient, full-rank, equal,
+  nested and zero lattices, and the ``grh`` and ``proven`` instance output
+  agrees on ``multiquadratic_m3_m5_m7``, ``cyclotomic_real_q10_c11_deg10``,
+  ``multiquadratic_m23_m31_m47``, ``multiquadratic_p5_m7_m11``,
+  ``lmfdb_8_8_73116160000_2``, ``pure_x8_minus_5``,
+  ``random_d6_h8_s64_proven`` and ``simplest_cubic_a12``.  Callgrind
+  instruction counts for the whole ``silex-class-unit-instance`` process,
+  ``grh`` mode: ``multiquadratic_m3_m5_m7`` 22.0% fewer (9.593e8 to
+  7.485e8), ``cyclotomic_real_q10_c11_deg10`` 14.5% fewer (1.871e9 to
+  1.601e9), all of it in ``maximal_order``, which the instance runs before
+  its timed class/unit region.  No timing has been measured.
+
 - Local class-relation saturation does less repeated work per pass.
   ``ResidueField`` carries a content identity, as ``FactorBase`` does:
   ``set_prime`` issues a fresh one and ``set`` copies it, so
