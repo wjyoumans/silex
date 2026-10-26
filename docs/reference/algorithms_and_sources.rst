@@ -3143,6 +3143,22 @@ ends a one-round stall.  The relation cap ``max_relations`` still bounds
 every refill.
 Proven and unknown requests keep the 2-relation refill.
 
+The ``grh`` pivot relation search combines the two sources.  It keeps
+Hecke's pivot set, random-walk ideal R and pivot power P^rand_exp
+(``Main_LLL.jl:class_group_new_relations_via_lll``, lines 156-161, which
+call ``random_get`` inside the pivot loop and multiply by
+``c.FB.ideals[p]^rand_exp``).  On fields of degree 30 or more it takes from
+PARI 2.17.3 ``src/basemath/buch2.c:rnd_rel`` (lines 2648-2672) only the rule
+of one random ideal per pass: the first pivot of a pass draws R and the
+later pivots of that pass reuse it.  PARI itself draws R as a
+``get_random_ideal`` product over ``subFB`` and multiplies by P to the first
+power, which Silex does not adopt.  Below degree 30 each pivot draws its own
+R, as in Hecke.  The degree-30 threshold is Silex's own, set by measurement
+on the ``grh`` release corpus: applying the reuse at every degree slowed the
+quadratic rows (busy machine, geomean 1.2x to 1.4x, single rows to 4.6x), and
+a degree-5 gate still left 25 rows more than 10% slower, while the gain was
+consistent only on the degree-32 and degree-40 cyclotomic rows.
+
 A ``grh`` computation does not run the bounded ``ell = 2`` class-relation
 saturation before the first relation-extension slice.  Hecke v0.38.6
 ``Clgp.jl:_class_unit_group`` (lines 248-258) saturates at 2 only when

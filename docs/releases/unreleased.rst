@@ -153,8 +153,10 @@ Changed
   one random ideal R per pass over the pivots and multiplies that R by each
   pivot's prime power, as PARI's ``rnd_rel`` (``buch2.c``) keeps one random
   ideal for every prime of a pass, instead of drawing a new R for every
-  pivot.  Fields of degree below 30 run exactly as before (outputs identical
-  on all 166 ``grh`` corpus rows of degree below 30).  On the larger fields
+  pivot.  The degree-30 threshold is Silex's own, set by measurement (PARI
+  and Hecke have no such threshold).  Fields of degree below 30 run exactly
+  as before (outputs identical on all 166 ``grh`` corpus rows of degree
+  below 30).  On the larger fields
   the relation sequence changes, so the record fields
   ``class_group.relation_count``, ``relation_kernel_unit_count``,
   ``skipped_dependent_relation_count`` and ``relation_sources``, and the

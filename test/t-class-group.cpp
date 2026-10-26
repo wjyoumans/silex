@@ -3855,6 +3855,10 @@ struct PivotRandomIdealCounter {
     long draws_this_pass = 0;
     long passes_with_two_draws = 0;
     long pivot_searches = 0;
+    // Published class group of the computation: invariants, and order (-1
+    // when no presentation is published).
+    std::vector<long> invariants;
+    long class_order = -1;
 };
 
 void pivot_random_ideal_callback(void* user,
@@ -3910,24 +3914,38 @@ PivotRandomIdealCounter grh_pivot_random_ideal_counts(
     assert(silex::detail::compute_class_unit_transaction(
             units, computed, maximal, sflint::FmpzConstRef(bound), options,
             128, audit));
+    if (computed.has_presentation()) {
+        for (slong i = 0; i < computed.invariant_count(); ++i) {
+            const std::optional<sflint::Fmpz> invariant = computed.invariant(i);
+            assert(invariant.has_value() && sflint::fmpz_fits_si(*invariant));
+            counter.invariants.push_back(sflint::fmpz_get_si(*invariant));
+        }
+        const std::optional<sflint::Fmpz> order = computed.order();
+        assert(order.has_value() && sflint::fmpz_fits_si(*order));
+        counter.class_order = sflint::fmpz_get_si(*order);
+    }
     return counter;
 }
 
 // Below degree 30 the pivot relation search draws a new random-walk ideal
 // for every pivot it searches (reference
-// `class_group_new_relations_via_lll`).
+// `class_group_new_relations_via_lll`).  x^3 - 2x - 5 (discriminant -643)
+// has class group Z/2 (LMFDB number field 3.1.643.1).
 int test_pivot_search_draws_ideal_per_pivot_cubic() {
     const PivotRandomIdealCounter counter =
             grh_pivot_random_ideal_counts(cubic_field(-2, -5));
     assert(counter.pivot_searches > 0);
     assert(counter.draws == counter.pivot_searches);
+    assert(counter.class_order == 2);
+    assert(counter.invariants == std::vector<long>{2});
     return 0;
 }
 
 // From degree 30 on, one random-walk ideal R serves a whole pass over the
 // pivots and is multiplied by each pivot's prime power, as the reference
 // buch2.c:rnd_rel draws R once for every prime of L_jid.  Q(zeta_64),
-// degree 32.
+// degree 32, has class group Z/17 (Washington, Introduction to Cyclotomic
+// Fields, class number tables).
 int test_pivot_search_draws_one_ideal_per_pass_degree_32() {
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
@@ -3940,6 +3958,8 @@ int test_pivot_search_draws_one_ideal_per_pass_degree_32() {
     assert(counter.passes_with_two_draws == 0);
     assert(counter.draws <= counter.passes);
     assert(counter.pivot_searches > counter.draws);
+    assert(counter.class_order == 17);
+    assert(counter.invariants == std::vector<long>{17});
     return 0;
 }
 #endif

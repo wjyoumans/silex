@@ -1340,14 +1340,18 @@ bool collect_pivot_lll_ideal(
     }
 
     PrimeIdeal prime(order);
-    Ideal random_ideal(order);
     Ideal pivot_power(order);
     Ideal pivot_factor(order);
     Ideal pivot_product(order);
     Ideal search_ideal(order);
-    if (!prime.is_defined() || !random_ideal.is_defined() ||
-        !pivot_power.is_defined() || !pivot_factor.is_defined() ||
-        !pivot_product.is_defined() || !search_ideal.is_defined()) {
+    if (!prime.is_defined() || !pivot_power.is_defined() ||
+        !pivot_factor.is_defined() || !pivot_product.is_defined() ||
+        !search_ideal.is_defined()) {
+        return false;
+    }
+    // The per-pivot random ideal is only needed when no pass ideal is given.
+    Ideal random_ideal;
+    if (pass_random_ideal == nullptr && !random_ideal.define(order)) {
         return false;
     }
 
