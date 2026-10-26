@@ -814,6 +814,20 @@ FLINT's order.  The ``squarefree_roots`` route
 and the factorization of index-divisor minimal polynomials keep FLINT's own
 order.
 
+Every other factorization of these routes (degree above two, and the
+minimal polynomial of a monogenic generator at an index divisor) has the
+result of FLINT ``fmpz_mod_poly_factor``, factors and order included.
+Where that function takes its Cantor--Zassenhaus route
+(``5 * bits(p) + deg f <= 75``, so ``p < 2^15``), Silex runs the same loop
+as ``fmpz_mod_poly_factor_cantor_zassenhaus``, the distinct-degree
+factorization of Cohen, GTM 138, Algorithm 3.4.3: step ``i`` takes
+``h = x^(p^i) mod v`` and ``g = gcd(h - x, v)``, the product of the
+irreducible factors of degree ``i``.  The Frobenius powers, gcds and
+divisions are ``nmod_poly`` word arithmetic; each ``g`` is the same monic
+polynomial in either arithmetic and is split by FLINT
+``fmpz_mod_poly_factor_equal_deg`` exactly as there.  Other primes call
+``fmpz_mod_poly_factor``.
+
 Valuations at primes of a maximal order that have no Kummer quotient map
 (index divisors) use, when the bound is at least two, the element lies in
 the prime, the norm shortcut does not apply, the rational prime fits in a

@@ -15,6 +15,8 @@
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/flint/fmpz_vec.hpp>
 #include <silex/flint/nmod_mat.hpp>
+#include <silex/flint/nmod_poly.hpp>
+#include <silex/flint/nmod_poly_factor.hpp>
 #include <silex/lat.hpp>
 
 #include <flint/fmpq.h>
@@ -27,6 +29,8 @@
 #include <flint/fmpz_poly.h>
 #include <flint/nmod.h>
 #include <flint/nmod_mat.h>
+#include <flint/nmod_poly.h>
+#include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
 
 #include <algorithm>
@@ -4178,6 +4182,72 @@ bool monic_quadratic_factor_word(flint::FmpzModPolyFactor& out,
     return true;
 }
 
+void factor_mod_prime(flint::FmpzModPolyFactor& out,
+                      flint::FmpzModPolyConstRef reduced,
+                      const flint::FmpzModCtx& context) noexcept {
+    // FLINT's fmpz_mod_poly_factor (fmpz_mod_poly_factor/factor.c) runs
+    // Cantor-Zassenhaus when 5 * bits(p) + deg f <= 75 and Kaltofen-Shoup
+    // otherwise.  On the Cantor-Zassenhaus side p < 2^15 is a word, and the
+    // loop below is fmpz_mod_poly_factor_cantor_zassenhaus
+    // (fmpz_mod_poly_factor/factor_cantor_zassenhaus.c) with the Frobenius
+    // powers, gcds and divisions in word arithmetic: the distinct-degree
+    // factorization of Cohen, GTM 138, Algorithm 3.4.3.  Step i takes
+    // h = x^(p^i) mod v and g = gcd(h - x, v), the monic product of the
+    // irreducible factors of degree i of v, which is the same polynomial in
+    // either arithmetic.  g is split by FLINT's own
+    // fmpz_mod_poly_factor_equal_deg, as there, and each factor's exponent
+    // is the multiplicity fmpz_mod_poly_remove would give; the cofactor left
+    // when v has degree below 2 (i + 1) is irreducible.  So the factors,
+    // exponents and their order are those of fmpz_mod_poly_factor.  Every
+    // other case is fmpz_mod_poly_factor itself.
+    const fmpz* modulus = fmpz_mod_ctx_modulus(context.raw());
+    const slong degree = fmpz_mod_poly_degree(reduced.raw(), context.raw());
+    flint::FmpzModPoly block(context);
+    if (degree < 2 ||
+        5 * fmpz_bits(modulus) + static_cast<ulong>(degree) > 75 ||
+        !fmpz_abs_fits_ui(modulus) || !block.is_initialized()) {
+        fmpz_mod_poly_factor(out.raw(), reduced.raw(), context.raw());
+        return;
+    }
+    const ulong p = fmpz_get_ui(modulus);
+    flint::NmodPoly v(p);
+    flint::NmodPoly h(p);
+    flint::NmodPoly g(p);
+    flint::NmodPoly x(p);
+    flint::NmodPoly factor(p);
+    flint::FmpzModPolyFactor split(context);
+    fmpz_mod_poly_get_nmod_poly(v.raw(), reduced.raw());
+    nmod_poly_make_monic(v.raw(), v.raw());
+    nmod_poly_set_coeff_ui(h.raw(), 1, 1);
+    nmod_poly_set_coeff_ui(x.raw(), 1, 1);
+    out.raw()->num = 0;
+    slong i = 0;
+    do {
+        ++i;
+        nmod_poly_powmod_ui_binexp(h.raw(), h.raw(), p, v.raw());
+        nmod_poly_sub(g.raw(), h.raw(), x.raw());
+        nmod_poly_gcd(g.raw(), g.raw(), v.raw());
+        if (g.raw()->length != 1) {
+            nmod_poly_make_monic(g.raw(), g.raw());
+            fmpz_mod_poly_set_nmod_poly(block.raw(), g.raw());
+            fmpz_mod_poly_factor_equal_deg(split.raw(), block.raw(), i,
+                                           context.raw());
+            for (slong j = 0; j < split.raw()->num; ++j) {
+                fmpz_mod_poly_get_nmod_poly(factor.raw(),
+                                            split.raw()->poly + j);
+                const slong exponent =
+                        nmod_poly_remove(v.raw(), factor.raw());
+                fmpz_mod_poly_factor_insert(out.raw(), split.raw()->poly + j,
+                                            exponent, context.raw());
+            }
+        }
+    } while (v.raw()->length >= 2 * i + 3);
+    if (v.raw()->length > 1) {
+        fmpz_mod_poly_set_nmod_poly(block.raw(), v.raw());
+        fmpz_mod_poly_factor_insert(out.raw(), block.raw(), 1, context.raw());
+    }
+}
+
 void factor_with_quadratic_closed_form(
         flint::FmpzModPolyFactor& out,
         flint::FmpzModPolyConstRef reduced,
@@ -4185,7 +4255,7 @@ void factor_with_quadratic_closed_form(
     if (monic_quadratic_factor_word(out, reduced, context)) {
         return;
     }
-    fmpz_mod_poly_factor(out.raw(), reduced.raw(), context.raw());
+    factor_mod_prime(out, reduced, context);
 }
 
 bool MaximalQuadraticPrimeAccess::set_from_integral_generator_factor(
@@ -5177,7 +5247,8 @@ bool decompose_prime(PrimeIdealList& out,
                     diagnostics, DiagnosticsModule::prime_ideal,
                     "prime_ideal.decompose_prime.monogenic_factor_polynomial");
             fmpz_mod_poly_set_fmpz_poly(reduced.raw(), chi.raw(), ctx.raw());
-            fmpz_mod_poly_factor(factorization.raw(), reduced.raw(), ctx.raw());
+            detail::factor_mod_prime(factorization,
+                                     flint::FmpzModPolyConstRef(reduced), ctx);
         }
         if (factorization.raw()->num <= 0) {
             return false;

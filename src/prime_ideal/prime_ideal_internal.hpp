@@ -70,8 +70,18 @@ bool monic_quadratic_factor_word(flint::FmpzModPolyFactor& out,
                                  flint::FmpzModPolyConstRef reduced,
                                  const flint::FmpzModCtx& context) noexcept;
 
+// fmpz_mod_poly_factor(out, reduced, context), computed with word-size
+// Frobenius powers, gcds and divisions where FLINT would take its
+// Cantor-Zassenhaus route (5 * bits(p) + deg <= 75, so p < 2^15); the
+// equal-degree splitting stays FLINT's fmpz_mod_poly_factor_equal_deg.  The
+// factors, exponents and their order are those of fmpz_mod_poly_factor (see
+// the definition).  p must be prime; that is not checked here.
+void factor_mod_prime(flint::FmpzModPolyFactor& out,
+                      flint::FmpzModPolyConstRef reduced,
+                      const flint::FmpzModCtx& context) noexcept;
+
 // The factorization of `reduced` modulo the prime modulus of `context`:
-// monic_quadratic_factor_word when it applies, FLINT's fmpz_mod_poly_factor
+// monic_quadratic_factor_word when it applies, factor_mod_prime
 // otherwise.  Every route of decompose_prime that factors a quadratic
 // modulo p (omega's minimal polynomial, or a monic quadratic defining
 // polynomial on the Dedekind-Kummer routes) factors through it, so a split

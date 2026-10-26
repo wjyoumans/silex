@@ -147,6 +147,23 @@ Changed
   ``cyclotomic_real_64_deg16`` 0.58% fewer (9.368e8 to 9.314e8).  No timing
   has been measured.
 
+- ``decompose_prime`` factors the defining polynomial (or the minimal
+  polynomial of a monogenic generator) modulo a small prime with word-size
+  arithmetic.  Where FLINT's ``fmpz_mod_poly_factor`` takes its
+  Cantor--Zassenhaus route (``5 * bits(p) + deg <= 75``, so ``p < 2^15``),
+  Silex runs the same distinct-degree loop (Cohen, GTM 138, Algorithm
+  3.4.3; FLINT ``fmpz_mod_poly_factor_cantor_zassenhaus``) with
+  ``nmod_poly`` Frobenius powers, gcds and divisions, and splits each
+  equal-degree block with FLINT's own ``fmpz_mod_poly_factor_equal_deg``.
+  The factors, exponents and their order are those of
+  ``fmpz_mod_poly_factor``, so the primes and their order are unchanged:
+  ``proven`` outputs are identical on the 178 corpus and fixture rows that
+  finish within 120 s, and ``grh`` outputs on 184 (the rest time out on
+  both builds), and on ``random_d10_h2_s21``.  Callgrind instruction counts for the whole process,
+  ``proven`` mode: ``random_d10_h2_s21`` 2.95% fewer (3.5325e9 to
+  3.4284e9), ``pure_x12_plus_7`` 0.45% fewer (1.0709e10 to 1.0662e10).  No
+  timing has been measured.
+
 - The split-prime norm evaluation of class-group relation candidates
   (defining polynomials of degree 16 and more) combines the residues modulo
   its split primes with a mixed-radix conversion in word-size arithmetic,

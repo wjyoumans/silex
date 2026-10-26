@@ -4621,6 +4621,93 @@ int test_quadratic_closed_form_factor_matches_flint() {
     return 0;
 }
 
+// factor_mod_prime against fmpz_mod_poly_factor itself: the same factors and
+// exponents in the same order.  decompose_prime publishes primes in factor
+// order and the relation search depends on that order, so a reordering is a
+// behavior change even when the factor set agrees.
+void check_factor_mod_prime_matches_flint(
+        const sflint::FmpzModPoly& f,
+        const sflint::FmpzModCtx& ctx) noexcept {
+    sflint::FmpzModPolyFactor word(ctx);
+    sflint::FmpzModPolyFactor generic(ctx);
+    fmpz_mod_poly_factor(generic.raw(), f.raw(), ctx.raw());
+    // A stale entry must be overwritten.
+    fmpz_mod_poly_factor_insert(word.raw(), f.raw(), 3, ctx.raw());
+    silex::detail::factor_mod_prime(word, sflint::FmpzModPolyConstRef(f), ctx);
+    assert(word.raw()->num == generic.raw()->num);
+    for (slong i = 0; i < generic.raw()->num; ++i) {
+        assert(word.raw()->exp[i] == generic.raw()->exp[i]);
+        assert(fmpz_mod_poly_equal(word.raw()->poly + i,
+                                   generic.raw()->poly + i, ctx.raw()));
+    }
+}
+
+int test_factor_mod_prime_matches_flint_order() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    // Primes on FLINT's Cantor-Zassenhaus side (5 * bits + deg <= 75) for
+    // small degrees, including p < 10 where the root finder enumerates,
+    // and primes on the Kaltofen-Shoup side, including multi-limb ones.
+    const char* primes[] = {"2", "3", "5", "7", "11", "13", "101", "2039",
+                            "4093", "8191", "32749", "1099511627791",
+                            "1267650600228229401496703205653"};
+    for (const char* prime : primes) {
+        sflint::Fmpz p;
+        assert(fmpz_set_str(p.raw(), prime, 10) == 0);
+        sflint::FmpzModCtx ctx(p.raw());
+        sflint::FmpzModPoly f(ctx);
+        sflint::FmpzModPoly a(ctx);
+        sflint::FmpzModPoly b(ctx);
+        for (slong trial = 0; trial < 60; ++trial) {
+            const slong shape = trial % 4;
+            if (shape == 0) {
+                // Random, usually squarefree, not necessarily monic.
+                fmpz_mod_poly_randtest_not_zero(
+                        f.raw(), state, 3 + n_randint(state, 12), ctx.raw());
+            } else if (shape == 1) {
+                // A product of linear factors: many degree-one splits.
+                fmpz_mod_poly_one(f.raw(), ctx.raw());
+                const slong count = 2 + n_randint(state, 9);
+                for (slong k = 0; k < count; ++k) {
+                    fmpz_mod_poly_randtest_monic(a.raw(), state, 2,
+                                                 ctx.raw());
+                    fmpz_mod_poly_mul(f.raw(), f.raw(), a.raw(), ctx.raw());
+                }
+            } else if (shape == 2) {
+                // Repeated factors: a^2 b^3 times a random cofactor.
+                fmpz_mod_poly_randtest_monic(a.raw(), state,
+                                             2 + n_randint(state, 3),
+                                             ctx.raw());
+                fmpz_mod_poly_randtest_monic(b.raw(), state,
+                                             2 + n_randint(state, 2),
+                                             ctx.raw());
+                fmpz_mod_poly_pow(f.raw(), a.raw(), 2, ctx.raw());
+                fmpz_mod_poly_pow(a.raw(), b.raw(), 3, ctx.raw());
+                fmpz_mod_poly_mul(f.raw(), f.raw(), a.raw(), ctx.raw());
+                fmpz_mod_poly_randtest_monic(a.raw(), state,
+                                             1 + n_randint(state, 4),
+                                             ctx.raw());
+                fmpz_mod_poly_mul(f.raw(), f.raw(), a.raw(), ctx.raw());
+            } else {
+                // Several factors of one degree: equal-degree splitting.
+                fmpz_mod_poly_one(f.raw(), ctx.raw());
+                const slong d = 2 + n_randint(state, 2);
+                for (slong k = 0; k < 3; ++k) {
+                    fmpz_mod_poly_randtest_irreducible(a.raw(), state, d + 1,
+                                                       ctx.raw());
+                    fmpz_mod_poly_mul(f.raw(), f.raw(), a.raw(), ctx.raw());
+                }
+            }
+            if (fmpz_mod_poly_degree(f.raw(), ctx.raw()) < 1) {
+                continue;
+            }
+            check_factor_mod_prime_matches_flint(f, ctx);
+        }
+    }
+    flint_rand_clear(state);
+    return 0;
+}
+
 int test_quadratic_decompose_prime_closed_form_matches_flint_primes() {
     // On maximal quadratic-backend orders, decompose_prime and
     // set_first_degree_one_prime build the same prime ideals (HNF, residue
@@ -5130,6 +5217,7 @@ int main() {
     assert(test_prime_ideal_inverse_matches_invert() == 0);
     assert(test_prime_ideal_inverse_declines_outside_contract() == 0);
     assert(test_quadratic_closed_form_factor_matches_flint() == 0);
+    assert(test_factor_mod_prime_matches_flint_order() == 0);
     assert(test_quadratic_decompose_prime_closed_form_matches_flint_primes() ==
            0);
     assert(test_quadratic_dedekind_kummer_closed_form_matches_flint_primes() ==
