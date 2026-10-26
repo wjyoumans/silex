@@ -42,7 +42,8 @@ struct BfResidueDegreeContext {
 
 // The residue degrees of the prime ideals of a maximal order above a
 // rational prime p, read from the distinct-degree factorisation of the
-// field's defining polynomial modulo p (Dedekind-Kummer), without
+// field's defining polynomial modulo p (Dedekind-Kummer), or from its
+// closed form when that polynomial is exactly Phi_n or psi_n, without
 // decomposing p.  It is the route the Belabas-Friedman evaluation takes
 // (bf_residue_degrees_from_defining_polynomial_ui in zeta.cpp), under the
 // same gate: the defining polynomial is monic integral, and p divides
@@ -216,6 +217,23 @@ class ZetaBfTestEntry {
             std::vector<slong>& counts,
             std::vector<slong>& word_counts,
             std::vector<slong>& nmod_counts,
+            const Order& order,
+            ulong first,
+            ulong end) noexcept;
+    // The residue degrees the defining-polynomial route gives, with the
+    // cyclotomic closed forms, against the nmod distinct-degree path
+    // without them.  `cyclotomic_index` and `real_cyclotomic_index` are as
+    // for cyclotomic_linear_factor_counts.  For each prime p in
+    // [first, end), in increasing order, `primes` receives p, `degrees` the
+    // route's degrees and `nmod_degrees` the nmod path's, each empty where
+    // the route does not apply to p.  Returns false when `order` is not a
+    // maximal order with a basis.
+    static bool cyclotomic_residue_degrees(
+            ulong& cyclotomic_index,
+            ulong& real_cyclotomic_index,
+            std::vector<ulong>& primes,
+            std::vector<std::vector<slong>>& degrees,
+            std::vector<std::vector<slong>>& nmod_degrees,
             const Order& order,
             ulong first,
             ulong end) noexcept;

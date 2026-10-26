@@ -2337,6 +2337,66 @@ bool bf_residue_degree_context_uses_defining_polynomial(
            fmpz_fdiv_ui(context.equation_index.raw(), p) != 0;
 }
 
+// The degrees of the irreducible factors of the defining polynomial modulo
+// a prime `p` not dividing n, when it is exactly Phi_n
+// (context.cyclotomic_index = n) or exactly psi_n
+// (context.real_cyclotomic_index = n), in closed form.  Returns false, and
+// leaves `out` alone, when neither index applies or p divides n; those
+// primes keep the nmod path.
+//
+// Phi_n modulo p is a product of phi(n)/f distinct monic irreducible
+// factors of degree f, the order of p modulo n (Lidl and Niederreiter,
+// Finite Fields, 2nd ed., 1997, Theorem 2.47(ii)).
+//
+// psi_n, n >= 3, of degree d = phi(n) / 2: as for the linear count in
+// bf_linear_residue_degree_count_from_defining_polynomial_ui, the roots of
+// psi_n modulo p are the d distinct elements a_k = zeta^k + zeta^-k of an
+// extension of F_p, for zeta of exact order n and k in (Z/n)^* up to sign,
+// so psi_n is squarefree modulo p.  Frobenius sends a_k to
+// a_k^p = zeta^(pk) + zeta^(-pk) = a_(pk).  The irreducible factors of a
+// squarefree polynomial over F_p correspond to the Frobenius orbits on its
+// roots, each of degree its orbit's length.  The orbit of a_k is the a_(p^j k);
+// its length is the least f >= 1 with p^f k = +-k mod n, that is with
+// p^f = +-1 mod n since k is invertible modulo n.  This f, the order of p in
+// (Z/n)^* / {+-1}, does not depend on k, so psi_n modulo p is a product of
+// d/f irreducible factors of degree f.  The case f = 1 is the linear count's
+// p = +-1 mod n.
+//
+// Every factor has the same degree, so the list equals the distinct-degree
+// factorisation's.  The loop bound is only a guard: f divides the order
+// of (Z/n)^*, phi(n), for Phi_n, and that of (Z/n)^* / {+-1}, d, for psi_n,
+// so f is at most the degree.
+bool bf_cyclotomic_residue_degrees_ui(std::vector<slong>& out,
+                                      const BfResidueDegreeContext& context,
+                                      ulong p) noexcept {
+    const bool real = context.cyclotomic_index == 0;
+    const ulong n = real ? context.real_cyclotomic_index
+                         : context.cyclotomic_index;
+    const slong degree = context.defining_degree;
+    if (n == 0 || p < 2 || n % p == 0 || degree <= 0) {
+        return false;
+    }
+
+    const ulong residue = p % n;
+    const ulong one = UWORD(1) % n;
+    const ulong minus_one = n - 1;
+    const ulong n_inverse = n_preinvert_limb(n);
+    ulong power = residue;
+    slong f = 1;
+    while (power != one && !(real && power == minus_one)) {
+        if (f >= degree) {
+            return false;
+        }
+        power = n_mulmod2_preinv(power, residue, n, n_inverse);
+        ++f;
+    }
+    if (degree % f != 0) {
+        return false;
+    }
+    out.assign(static_cast<std::size_t>(degree / f), f);
+    return true;
+}
+
 bool bf_residue_degrees_from_defining_polynomial_ui(
         std::vector<slong>& out,
         const BfResidueDegreeContext& context,
@@ -2346,6 +2406,9 @@ bool bf_residue_degrees_from_defining_polynomial_ui(
         const DiagnosticsContext* diagnostics) noexcept {
     if (!bf_residue_degree_context_uses_defining_polynomial(context, p)) {
         return false;
+    }
+    if (bf_cyclotomic_residue_degrees_ui(out, context, p)) {
+        return true;
     }
 
     return bf_residue_degrees_from_equation_order_nmod(
@@ -5206,6 +5269,56 @@ bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
         counts.push_back(count);
         word_counts.push_back(word_count);
         nmod_counts.push_back(nmod_count);
+    }
+    return true;
+}
+
+bool ZetaBfTestEntry::cyclotomic_residue_degrees(
+        ulong& cyclotomic_index,
+        ulong& real_cyclotomic_index,
+        std::vector<ulong>& primes,
+        std::vector<std::vector<slong>>& degrees,
+        std::vector<std::vector<slong>>& nmod_degrees,
+        const Order& order,
+        ulong first,
+        ulong end) noexcept {
+    cyclotomic_index = 0;
+    real_cyclotomic_index = 0;
+    primes.clear();
+    degrees.clear();
+    nmod_degrees.clear();
+    if (!order.has_basis() || !order.is_maximal()) {
+        return false;
+    }
+
+    BfResidueDegreeContext context;
+    BfResidueDegreeContext reference;
+    if (!bf_init_residue_degree_context(context, order) ||
+        !bf_init_residue_degree_context(reference, order)) {
+        return false;
+    }
+    cyclotomic_index = context.cyclotomic_index;
+    real_cyclotomic_index = context.real_cyclotomic_index;
+    reference.cyclotomic_index = 0;
+    reference.real_cyclotomic_index = 0;
+    std::vector<slong> degree_scratch(static_cast<std::size_t>(
+            FLINT_MAX(order.degree(), WORD(1))));
+    for (ulong p = first <= 2 ? UWORD(2) : n_nextprime(first - 1, 1);
+         p < end; p = n_nextprime(p, 1)) {
+        std::vector<slong> closed_form;
+        if (!bf_residue_degrees_from_defining_polynomial_ui(
+                    closed_form, context, order, degree_scratch, p,
+                    nullptr)) {
+            closed_form.clear();
+        }
+        std::vector<slong> nmod;
+        if (!bf_residue_degrees_from_defining_polynomial_ui(
+                    nmod, reference, order, degree_scratch, p, nullptr)) {
+            nmod.clear();
+        }
+        primes.push_back(p);
+        degrees.push_back(std::move(closed_form));
+        nmod_degrees.push_back(std::move(nmod));
     }
     return true;
 }

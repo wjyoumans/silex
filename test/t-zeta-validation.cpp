@@ -1471,6 +1471,136 @@ bool check_cyclotomic_linear_factor_counts() noexcept {
            compared > 900;
 }
 
+// The cyclotomic closed forms of the residue degrees: for the field
+// defined by f, on the primes of [2, end), the degrees of the
+// defining-polynomial route equal the nmod distinct-degree path's without
+// the closed forms (both empty where the route skips p).  When `n` is
+// nonzero, f is Phi_n, the context detects index n, and every prime p not
+// dividing n gets phi(n)/f degrees f, f the least f >= 1 with
+// p^f = 1 mod n (Lidl and Niederreiter, Finite Fields, Theorem 2.47(ii)).
+// When `real_n` is nonzero, f is psi_n for n = real_n, the context detects
+// that real index, and every prime p not dividing n gets d/f degrees f,
+// d = phi(n)/2 and f the least f >= 1 with p^f = +-1 mod n.  `partial`
+// counts the primes not dividing the index with 1 < f < degree, and
+// `inert` those with f = degree.
+bool check_cyclotomic_residue_degree_field(const silex::Order& order,
+                                           ulong n,
+                                           ulong real_n,
+                                           ulong end,
+                                           slong& partial,
+                                           slong& inert) noexcept {
+    ulong index = 0;
+    ulong real_index = 0;
+    std::vector<ulong> primes;
+    std::vector<std::vector<slong>> degrees;
+    std::vector<std::vector<slong>> nmod_degrees;
+    if (!silex::detail::TestHookAccess::zeta_bf_cyclotomic_residue_degrees(
+                index, real_index, primes, degrees, nmod_degrees, order, 2,
+                end) ||
+        index != n || real_index != real_n || primes.empty()) {
+        return false;
+    }
+    const slong degree = order.degree();
+    const ulong closed_form_index = n != 0 ? n : real_n;
+    for (std::size_t i = 0; i < primes.size(); ++i) {
+        const ulong p = primes[i];
+        if (degrees[i] != nmod_degrees[i]) {
+            return false;
+        }
+        if (closed_form_index == 0 || closed_form_index % p == 0) {
+            continue;
+        }
+        slong f = 1;
+        for (; f <= degree; ++f) {
+            const ulong power = n_powmod2(p % closed_form_index,
+                                          static_cast<ulong>(f),
+                                          closed_form_index);
+            if (power == 1 % closed_form_index ||
+                (real_n != 0 && power == real_n - 1)) {
+                break;
+            }
+        }
+        if (f > degree || degree % f != 0 ||
+            degrees[i] != std::vector<slong>(
+                                  static_cast<std::size_t>(degree / f), f)) {
+            return false;
+        }
+        if (f == degree && degree > 1) {
+            ++inert;
+        } else if (f > 1) {
+            ++partial;
+        }
+    }
+    return true;
+}
+
+bool check_cyclotomic_residue_degrees() noexcept {
+    // Every n with phi(n) <= 40, as in check_cyclotomic_linear_factor_counts,
+    // for Phi_n and, when phi(n) >= 4, psi_n.
+    slong checked = 0;
+    slong real_checked = 0;
+    slong partial = 0;
+    slong inert = 0;
+    slong real_partial = 0;
+    slong real_inert = 0;
+    constexpr ulong kEnd = 1000;
+    for (ulong n = 1; n <= 2 * 40 * 40; ++n) {
+        const ulong phi = n_euler_phi(n);
+        if (phi > 40) {
+            continue;
+        }
+        sflint::FmpzPoly cyclotomic;
+        fmpz_poly_cyclotomic(cyclotomic.raw(), n);
+        std::vector<slong> coefficients;
+        for (ulong i = 0; i < phi; ++i) {
+            coefficients.push_back(fmpz_poly_get_coeff_si(
+                    cyclotomic.raw(), static_cast<slong>(i)));
+        }
+        if (!check_cyclotomic_residue_degree_field(
+                    setup_from_coefficients(coefficients.data(),
+                                            static_cast<slong>(phi))
+                            .maximal_order,
+                    n, 0, kEnd, partial, inert)) {
+            return false;
+        }
+        ++checked;
+        if (phi < 4) {
+            continue;
+        }
+        sflint::FmpzPoly real_cyclotomic;
+        fmpz_poly_cos_minpoly(real_cyclotomic.raw(), n);
+        const slong real_degree = fmpz_poly_degree(real_cyclotomic.raw());
+        std::vector<slong> real_coefficients;
+        for (slong i = 0; i < real_degree; ++i) {
+            real_coefficients.push_back(
+                    fmpz_poly_get_coeff_si(real_cyclotomic.raw(), i));
+        }
+        if (!check_cyclotomic_residue_degree_field(
+                    setup_from_coefficients(real_coefficients.data(),
+                                            real_degree)
+                            .maximal_order,
+                    0, n, kEnd, real_partial, real_inert)) {
+            return false;
+        }
+        ++real_checked;
+    }
+
+    // The cyclotomic_real_64_deg16 corpus row's coefficients, which are
+    // psi_64, and the control x^4 - 7, which is not exactly cyclotomic.
+    const slong real_64[] = {2,    0, -64, 0, 336, 0, -672, 0,
+                             660,  0, -352, 0, 104, 0, -16, 0};
+    const slong pure_x4[] = {-7, 0, 0, 0};
+    slong unused = 0;
+    return checked == 81 && real_checked == 76 && partial > 1000 &&
+           inert > 1000 && real_partial > 1000 && real_inert > 1000 &&
+           check_cyclotomic_residue_degree_field(
+                   setup_from_coefficients(real_64, 16).maximal_order, 0, 64,
+                   kEnd, unused, unused) &&
+           check_cyclotomic_residue_degree_field(
+                   setup_from_coefficients(pure_x4, 4).maximal_order, 0, 0,
+                   kEnd, unused, unused);
+}
+
 // The linear-factor counts stored in the residue-degree cache are the
 // number of degree-one primes above p (checked against decompose_prime),
 // a later Belabas-Friedman evaluation consumes them (a wrong count changes
@@ -1629,6 +1759,7 @@ int main() {
                            setup_from_coefficients(phi19_coefficients, 18)) ||
                    !check_linear_factor_batches() ||
                    !check_cyclotomic_linear_factor_counts() ||
+                   !check_cyclotomic_residue_degrees() ||
                    !check_word_kernel_squarings()
             ? 1
             : 0;

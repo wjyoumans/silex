@@ -477,6 +477,22 @@ public:
                 counts, word_counts, nmod_counts, order, first, end);
     }
 
+    // The cyclotomic closed forms of the residue degrees against the nmod
+    // path (see ZetaBfTestEntry).
+    static bool zeta_bf_cyclotomic_residue_degrees(
+            ulong& cyclotomic_index,
+            ulong& real_cyclotomic_index,
+            std::vector<ulong>& primes,
+            std::vector<std::vector<slong>>& degrees,
+            std::vector<std::vector<slong>>& nmod_degrees,
+            const Order& order,
+            ulong first,
+            ulong end) noexcept {
+        return ZetaBfTestEntry::cyclotomic_residue_degrees(
+                cyclotomic_index, real_cyclotomic_index, primes, degrees,
+                nmod_degrees, order, first, end);
+    }
+
     // The word kernel's two squarings and Frobenius powers (see
     // ZetaBfTestEntry).
     static bool zeta_bf_word_square(std::vector<ulong>& symmetric,
