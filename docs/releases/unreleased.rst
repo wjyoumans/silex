@@ -196,6 +196,23 @@ Changed
   (1.508e9 to 1.360e9), ``cyclotomic_32_phi16`` 4.7% fewer (5.687e8 to
   5.417e8).  No timing has been measured.
 
+- The same Belabas-Friedman count is taken in closed form when the defining
+  polynomial is exactly ``psi_n``, the minimal polynomial of
+  ``2 cos(2 pi / n)`` that defines the real subfield of ``Q(zeta_n)``
+  (recognized once per evaluation by exact comparison with FLINT's
+  ``fmpz_poly_cos_minpoly``, the detector the split-prime resultant search
+  uses): for ``p`` not dividing ``n``, the roots of ``psi_n`` modulo ``p``
+  are the distinct sums ``zeta^k + zeta^-k``, so ``psi_n`` has
+  ``phi(n) / 2`` roots when ``p = +-1 mod n`` and none otherwise (derived
+  from the ``Phi_n`` case above).  Primes dividing ``n`` and all other
+  polynomials keep the root count modulo ``p``.  The counts are the same,
+  so zeta values and published results are unchanged: ``grh`` and
+  ``proven`` outputs are identical on the ``cyclotomic_real`` rows of
+  degree 11 to 20 and the three smaller corpus rows that are exactly
+  ``psi_n``, and in ``grh`` mode on ``cyclotomic_real_136_deg32``.
+  Callgrind instruction counts, ``grh`` mode: ``cyclotomic_real_37_deg18``
+  8.8% fewer (1.769e9 to 1.614e9).  No timing has been measured.
+
 - The FLINT route of the stored-unit reduction (the LLL of the scaled unit
   log rows, run when a unit group's stored units are reduced) takes the
   shared certified first LLL phase, which replaces FLINT's multiprecision
