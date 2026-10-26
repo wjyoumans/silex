@@ -1081,7 +1081,8 @@ Changed
   and 0.97% on ``cyclotomic_real_41_deg20``; the ``Phi_n`` rows measured
   (``cyclotomic_19_phi18``, ``cyclotomic_27_phi18``, ``cyclotomic_64_phi32``,
   ``cyclotomic_41_phi40``) do not run the test and are unchanged, and
-  ``cyclotomic_37_phi36`` measured 0.03% more.
+  ``cyclotomic_37_phi36`` is unchanged (+8 Ir on fresh base and branch
+  builds; an earlier +0.03% was a memory-layout artifact in ``memcpy``).
 
 - ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
   and the unit-candidate and relation-saturation kernel bases of the

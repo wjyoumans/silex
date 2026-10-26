@@ -929,9 +929,9 @@ CyclotomicDefiningPolynomial cyclotomic_defining_polynomial(
 //
 // For psi_n, n >= 3, of degree d = phi(n) / 2: x^d psi_n(x + 1/x) = Phi_n(x),
 // so for p not dividing n the phi(n) roots of Phi_n modulo p, the elements
-// zeta of exact order n in an algebraic closure of F_p (the definition of the
-// cyclotomic polynomial Q_n and Phi_n = Q_n over F_p, Lidl and Niederreiter,
-// Theorem 2.47(ii)), give roots zeta + zeta^-1 of psi_n.  These are d
+// zeta of exact order n in an algebraic closure of F_p (the cyclotomic
+// polynomial Q_n over F_p and its reduction Phi_n = Q_n, Lidl and Niederreiter,
+// Section 2.4; its factorization is Theorem 2.47(ii)), give roots zeta + zeta^-1 of psi_n.  These are d
 // distinct values, because zeta^a + zeta^-a = zeta^b + zeta^-b means
 // (zeta^a - zeta^b)(1 - zeta^-(a + b)) = 0, that is zeta^b = zeta^(+-a), and
 // zeta != zeta^-1 for n >= 3; so psi_n modulo p is their product and is

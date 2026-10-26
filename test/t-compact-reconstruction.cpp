@@ -2401,8 +2401,9 @@ int test_wide_reconstruction_prefers_split_primes() {
 // closed form leaves to the test of the reduction.  The root t is a unit
 // (psi_7(0) = -1).  Bases t and t^2 with the wide exponents of
 // test_wide_reconstruction_prefers_split_primes give t and t^-1.  Starting
-// above 2^63 at a prime that is not +-1 mod 7, and starting at 7, every
-// prime used is +-1 mod 7 and the outputs are exact.
+// above 2^63 at a prime that is not +-1 mod 7, and starting at 7, the last
+// prime used is +-1 mod 7 and the outputs are exact.  The test does not
+// assert that every prime used is +-1 mod 7.
 int test_wide_reconstruction_real_cyclotomic_split_primes() {
     sflint::FmpqPoly polynomial;
     const slong coefficients[] = {-1, -2, 1, 1};
