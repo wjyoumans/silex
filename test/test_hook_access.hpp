@@ -717,6 +717,38 @@ public:
         return WordQuotientLogsTestEntry::logs(logs, resolved, images, zeta,
                                                p, ell);
     }
+
+    // Marks the finish workspace's exact state invalid while leaving its
+    // kept finish extension in place, so the next sync rebuilds the exact
+    // state with an extension still kept.  Skips the invariant that only
+    // clear() drops exact_valid, and it drops the extension too.
+    static void invalidate_finish_exact_state(
+            HnfFinishWorkspace& workspace) noexcept {
+        workspace.exact_valid = false;
+    }
+
+    // Adds one to the first entry of each of the first `rows` rows of the
+    // workspace's kept finish extension, so its relation part no longer
+    // matches the stored relations.  Skips the invariant that only the
+    // finish phase writes the extension.
+    static void perturb_finish_extension(HnfFinishWorkspace& workspace,
+                                         slong rows) noexcept {
+        for (slong i = 0; i < rows; ++i) {
+            fmpz* entry = flint::fmpz_mat_entry(
+                                  flint::FmpzMatRef(workspace.finish_extension),
+                                  i, 0)
+                                  .raw();
+            ::fmpz_add_ui(entry, entry, 1);
+        }
+    }
+
+    // Sets the context's relation rank to `rank` without syncing its row
+    // module, as a stale or modular rank would be.  Skips the invariant
+    // that the rank is the row module's rank.
+    static void set_context_relation_rank(ClassGroupContext& context,
+                                          slong rank) noexcept {
+        context.relation_rank_ = rank;
+    }
 };
 
 }  // namespace silex::detail

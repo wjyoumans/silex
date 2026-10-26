@@ -38,6 +38,7 @@ class ClassGroupRelationAccess;
 class ClassGroupFinishAccess;
 class ClassGroupRelationSearchAccess;
 class ClassUnitTransactionAccess;
+class TestHookAccess;
 }  // namespace detail
 
 struct ClassGroupFactorBaseGenerationRecord {
@@ -481,6 +482,7 @@ private:
     friend class detail::ClassGroupFinishAccess;
     friend class detail::ClassGroupRelationSearchAccess;
     friend class detail::ClassUnitTransactionAccess;
+    friend class detail::TestHookAccess;
 
     enum class RelationAppendOutcome {
         none,

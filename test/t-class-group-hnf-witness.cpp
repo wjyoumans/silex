@@ -703,6 +703,65 @@ void append_kept_integer_relation(silex::ClassGroupContext& context,
     assert(context.relation_count() == before + 1);
 }
 
+// A sync that changes the relations fails, leaving the workspace unchanged,
+// when fmpz_mat_rank of the stored relations differs from the context's
+// relation rank (a stale or modular rank); the seam sets that rank.
+int test_finish_workspace_sync_rank_mismatch() {
+    silex::NumberField field = degree_one_field();
+    silex::Order order = silex::test::equation_order(field);
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    sflint::fmpz_set_si(sflint::FmpzRef(bound), 3);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    auto* workspace = silex::detail::class_group_finish_workspace(context);
+    assert(workspace != nullptr);
+
+    // Powers of 2 only: the relations have rank 1 of 2 generators.
+    for (const slong value : {256, 16, 4}) {
+        append_kept_integer_relation(context, field, value);
+    }
+    const slong rank = context.relation_rank();
+    assert(rank == 1 && context.generator_count() == 2);
+
+    // Fresh workspace, rank too small.
+    silex::detail::TestHookAccess::set_context_relation_rank(context, 0);
+    assert(!silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(!workspace->exact_valid);
+    assert(workspace->processed_relation_count == 0);
+    assert(workspace->relation_rank == 0);
+    assert(workspace->generator_count == 0);
+
+    // Fresh workspace, rank too large.
+    silex::detail::TestHookAccess::set_context_relation_rank(context, 2);
+    assert(!silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(!workspace->exact_valid);
+    assert(workspace->processed_relation_count == 0);
+
+    // The true rank syncs.
+    silex::detail::TestHookAccess::set_context_relation_rank(context, rank);
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(workspace->exact_valid && workspace->relation_rank == 1);
+    assert(workspace->processed_relation_count == 3);
+
+    // A relation of 3 raises the exact rank to 2; the seam leaves the
+    // context at the stale rank 1.  The sync fails and the workspace keeps
+    // its state.
+    append_kept_integer_relation(context, field, 9);
+    assert(context.relation_count() == 4);
+    assert(context.relation_rank() == 2);
+    silex::detail::TestHookAccess::set_context_relation_rank(context, 1);
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context) ==
+           false);
+    assert(workspace->exact_valid);
+    assert(workspace->processed_relation_count == 3);
+    assert(workspace->relation_rank == 1);
+    silex::detail::TestHookAccess::set_context_relation_rank(context, 2);
+    assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
+    assert(workspace->processed_relation_count == 4);
+    assert(workspace->relation_rank == 2);
+    return 0;
+}
+
 sflint::FmpzMat copy_fmpz_mat(const sflint::FmpzMat& in) noexcept {
     sflint::FmpzMat out(sflint::fmpz_mat_nrows(in),
                         sflint::fmpz_mat_ncols(in));
@@ -864,13 +923,7 @@ int test_finish_workspace_kernel_extends_cached_reduction() {
     const slong kept = workspace->finish_extension_relation_count;
     assert(workspace->finish_extension_valid &&
            kept == context.relation_count() - 1);
-    for (slong i = 0; i < kept; ++i) {
-        fmpz* entry = sflint::fmpz_mat_entry(
-                              sflint::FmpzMatRef(workspace->finish_extension),
-                              i, 0)
-                              .raw();
-        ::fmpz_add_ui(entry, entry, 1);
-    }
+    silex::detail::TestHookAccess::perturb_finish_extension(*workspace, kept);
     {
         sflint::FmpzMat rows(0, 0);
         sflint::FmpzMat reduced(0, 0);
@@ -883,10 +936,10 @@ int test_finish_workspace_kernel_extends_cached_reduction() {
 
     // A sync that rebuilds the exact state from the relations drops the
     // extension.  Only clear() drops the exact state through the API, and
-    // it drops the extension too, so the test clears exact_valid alone to
-    // reach the rebuild with an extension still kept.
+    // it drops the extension too, so the test hook clears exact_valid alone
+    // to reach the rebuild with an extension still kept.
     assert(workspace->finish_extension_valid);
-    workspace->exact_valid = false;
+    silex::detail::TestHookAccess::invalidate_finish_exact_state(*workspace);
     assert(silex::detail::sync_hnf_finish_workspace(*workspace, context));
     assert(workspace->exact_valid);
     assert(!workspace->finish_extension_valid);
@@ -2771,6 +2824,7 @@ int main() {
     assert(test_rank_deficient_failure_is_transactional() == 0);
     assert(test_incremental_finish_workspace_lifecycle() == 0);
     assert(test_finish_workspace_requires_factor_base() == 0);
+    assert(test_finish_workspace_sync_rank_mismatch() == 0);
     assert(test_finish_workspace_kernel_extends_cached_reduction() == 0);
     assert(test_finish_workspace_empty_kernel_drops_extension() == 0);
     assert(test_finish_workspace_phase_seam() == 0);
