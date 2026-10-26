@@ -288,14 +288,21 @@ class TestHookAccess;
 // kernel route is untouched, and the lattice basis that
 // ClassGroupRelationAccess::solved_invariant_generator_relation_rows solves
 // against is zeroed, so the solve fails and the beta coefficients are read
-// from the left transform.
+// from the left transform.  subset_index: the row-subset attempt of the
+// extension route (see kSaturationKernelSubsetExtraRows) runs, and its
+// lattice-index check is then treated as failed, so the route falls back to
+// the full relation matrix.  The first_phase, certificate, phase_rows and
+// phase_certificate failures apply to every run of
+// saturation_extension_kernel_rows, so the row-subset attempt, when it runs,
+// counts one injection of its own.
 enum class SaturationKernelTestFailure {
     none,
     first_phase,
     certificate,
     phase_rows,
     phase_certificate,
-    beta_solve
+    beta_solve,
+    subset_index
 };
 
 // The size crossover of ClassGroupRelationAccess::saturation_relation_kernel.
@@ -313,6 +320,41 @@ enum class SaturationKernelTestFailure {
 // generators: 3.8 s against 0.11 s).  Both routes return a kernel basis,
 // so the cutoff changes the cost only.
 inline constexpr slong kSaturationKernelTransformMaxGenerators = 32;
+
+// The number t of extra rows of the row-subset attempt of the extension
+// route of ClassGroupRelationAccess::saturation_relation_kernel.  For a
+// presentation with n relations of rank g (the generator count) and
+// n > g + t, the route first reduces only g + t of the n rows: g rows
+// independent modulo a word-size prime (the pivot rows of the transposed
+// matrix's row echelon form, so the first independent rows in order) and
+// the first t other rows.  Its kernel vectors, padded with zeros, are
+// relation-kernel vectors, and its image rows are kept only when they span
+// the full row lattice (index check against the presentation's order);
+// otherwise the route reduces all n rows as before.  A cost choice, not
+// from a source: the attempt reduces a (g + t) x (2g + t) matrix in place
+// of an n x (g + n) one, and correctness does not depend on t, since every
+// failure falls back.
+//
+// The attempt has a size crossover of its own, the one above: it runs only
+// on the extension-first route, for presentations with more than
+// kSaturationKernelTransformMaxGenerators generators (or with
+// force_extension_route), where the image rows are kept and the beta rows
+// are solved from them.  At or below the crossover the extension route
+// runs only for kernel entries beyond the certified first phase's range,
+// without its image rows, and reduces all n rows as before the attempt
+// existed.  The reason is not cost alone: the beta rows there come from
+// the left transform, and a basis supported on the subset size-reduces
+// only the subset's coordinates.  On real_quadratic_d100000001 (23
+// generators, 41 relations, 738-bit transform rows) the subset basis left
+// the beta rows too large to build (push_relation_witnesses failed), the
+// first class/unit attempt failed and a retry published 34 relations in
+// place of 41 at +26% instructions.  Measured by callgrind instructions,
+// main against the attempt above the crossover (proven corpus, no timing
+// claim): real_quadratic_d100000005 (37 generators) 343.1M to 326.4M,
+// real_quadratic_d10000000005 (64) 1.384G to 1.314G, and
+// real_quadratic_d1000000000009 21.11G to 14.97G; real_quadratic_d100000001
+// is unchanged (232.5M).
+inline constexpr slong kSaturationKernelSubsetExtraRows = 8;
 
 // Read by saturation_relation_kernel each time it builds a basis.  Off by
 // default and never set by production code.  Relaxed atomics so a reader
@@ -352,6 +394,12 @@ public:
     static void note_beta_solved() noexcept {
         beta_solved_.fetch_add(1, std::memory_order_relaxed);
     }
+    // Counts each extension-route basis that saturation_relation_kernel
+    // kept from the row-subset attempt (also counted by
+    // note_extension_kept).
+    static void note_subset_kept() noexcept {
+        subset_kept_.fetch_add(1, std::memory_order_relaxed);
+    }
 
 private:
     friend class TestHookAccess;
@@ -362,6 +410,7 @@ private:
     inline static std::atomic<slong> injected_{0};
     inline static std::atomic<slong> extension_kept_{0};
     inline static std::atomic<slong> beta_solved_{0};
+    inline static std::atomic<slong> subset_kept_{0};
 };
 
 // The relation coefficients of the ell-local relation-saturation beta

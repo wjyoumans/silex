@@ -18,6 +18,7 @@
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <cassert>
@@ -2633,6 +2634,137 @@ int test_unit_candidate_system_dixon_cache() {
 
 }  // namespace
 
+// saturation_subset_extension_kernel_rows on small matrices of rank g = 2
+// with `extra` = 2 (or 3).  The start is the pivot rows modulo p (the first
+// two independent rows) and the next `extra` rows.  When their lattice
+// L(A_S) is all of L(A) (here Z^2, order 1) the padded kernel rows and image
+// rows are kept; otherwise the first row outside L(A_S) is added, for at
+// most `extra` rows and while S stays smaller than A.  Kept rows are
+// relation-kernel vectors of A, zero outside S, of rank s - 2, certified
+// LLL-reduced, and image * A spans L(A).  Every failure leaves the outputs
+// unchanged.
+int test_saturation_subset_extension_kernel_rows() {
+    using silex::detail::SaturationKernelTestFailure;
+    using silex::detail::TestHookAccess;
+    struct Case {
+        std::vector<std::array<slong, 2>> rows;
+        slong order;
+        slong extra;
+        SaturationKernelTestFailure failure;
+        bool kept;
+        slong kernel_rows;
+        std::vector<slong> zero_columns;
+    };
+    const Case cases[] = {
+            // The start spans Z^2.
+            {{{1, 0}, {0, 1}, {1, 1}, {2, 1}, {1, 2}, {3, 1}},
+             1, 2, SaturationKernelTestFailure::none, true, 2, {4, 5}},
+            // The start spans 2Z x Z; row 4 is added.
+            {{{2, 0}, {0, 1}, {0, 2}, {0, 3}, {1, 0}, {5, 7}},
+             1, 2, SaturationKernelTestFailure::none, true, 3, {5}},
+            // The start spans 4Z x Z; rows 5 and 6 are added.
+            {{{8, 0}, {0, 1}, {0, 2}, {0, 3}, {4, 0}, {2, 0}, {1, 0}, {0, 5},
+              {0, 7}},
+             1, 3, SaturationKernelTestFailure::none, true, 5, {7, 8}},
+            // As above with extra = 2: three rows would be added.
+            {{{8, 0}, {0, 1}, {0, 2}, {0, 3}, {4, 0}, {2, 0}, {1, 0}, {0, 5},
+              {0, 7}},
+             1, 2, SaturationKernelTestFailure::none, false, 0, {}},
+            // Adding row 4 would take every row.
+            {{{2, 0}, {0, 1}, {0, 2}, {0, 3}, {1, 0}},
+             1, 2, SaturationKernelTestFailure::none, false, 0, {}},
+            // A wrong order is never matched: every other row is in L(A_S).
+            {{{1, 0}, {0, 1}, {1, 1}, {2, 1}, {1, 2}, {3, 1}},
+             2, 2, SaturationKernelTestFailure::none, false, 0, {}},
+            // The injected index failure.
+            {{{1, 0}, {0, 1}, {1, 1}, {2, 1}, {1, 2}, {3, 1}},
+             1, 2, SaturationKernelTestFailure::subset_index, false, 0, {}},
+            // Rank 1: no two independent rows.
+            {{{1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}},
+             1, 2, SaturationKernelTestFailure::none, false, 0, {}},
+            // n = g + extra: no smaller subset.
+            {{{1, 0}, {0, 1}, {1, 1}, {2, 1}},
+             1, 2, SaturationKernelTestFailure::none, false, 0, {}},
+    };
+    for (const Case& c : cases) {
+        const slong n = static_cast<slong>(c.rows.size());
+        sflint::FmpzMat relations(n, 2);
+        for (slong i = 0; i < n; ++i) {
+            for (slong j = 0; j < 2; ++j) {
+                sflint::fmpz_set_si(
+                        sflint::fmpz_mat_entry(sflint::FmpzMatRef(relations),
+                                               i, j),
+                        c.rows[static_cast<std::size_t>(i)]
+                              [static_cast<std::size_t>(j)]);
+            }
+        }
+        sflint::Fmpz order;
+        sflint::fmpz_set_si(sflint::FmpzRef(order), c.order);
+        sflint::FmpzMat rows(1, 1);
+        sflint::FmpzMat image(1, 1);
+        const slong injected =
+                TestHookAccess::saturation_kernel_failures_injected();
+        TestHookAccess::set_saturation_kernel_failure(c.failure);
+        const bool kept = silex::detail::saturation_subset_extension_kernel_rows(
+                rows, image, sflint::FmpzMatConstRef(relations),
+                sflint::FmpzConstRef(order), c.extra);
+        TestHookAccess::set_saturation_kernel_failure(
+                SaturationKernelTestFailure::none);
+        assert(kept == c.kept);
+        assert(TestHookAccess::saturation_kernel_failures_injected() ==
+               injected +
+                       (c.failure == SaturationKernelTestFailure::none ? 0
+                                                                       : 1));
+        if (!kept) {
+            assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(rows)) == 1 &&
+                   sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(rows)) == 1 &&
+                   sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(image)) == 1 &&
+                   sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(image)) == 1);
+            continue;
+        }
+        assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(rows)) ==
+                       c.kernel_rows &&
+               sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(rows)) == n);
+        sflint::FmpzMat product(c.kernel_rows, 2);
+        ::fmpz_mat_mul(product.raw(), rows.raw(), relations.raw());
+        assert(::fmpz_mat_is_zero(product.raw()));
+        assert(::fmpz_mat_rank(rows.raw()) == c.kernel_rows);
+        sflint::FmpzLll lll;
+        assert(::fmpz_mat_is_reduced(rows.raw(), lll.raw()->delta,
+                                     lll.raw()->eta));
+        for (const slong column : c.zero_columns) {
+            for (slong r = 0; r < c.kernel_rows; ++r) {
+                assert(sflint::fmpz_is_zero(sflint::fmpz_mat_entry(
+                        sflint::FmpzMatConstRef(rows), r, column)));
+            }
+        }
+        assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(image)) == 2 &&
+               sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(image)) == n);
+        for (const slong column : c.zero_columns) {
+            for (slong r = 0; r < 2; ++r) {
+                assert(sflint::fmpz_is_zero(sflint::fmpz_mat_entry(
+                        sflint::FmpzMatConstRef(image), r, column)));
+            }
+        }
+        // image * A spans L(A): its HNF is the nonzero part of A's.
+        sflint::FmpzMat basis(n, 2);  // zero rows beyond the first two
+        sflint::FmpzMat image_basis(2, 2);
+        ::fmpz_mat_mul(image_basis.raw(), image.raw(), relations.raw());
+        for (slong r = 0; r < 2; ++r) {
+            for (slong j = 0; j < 2; ++j) {
+                sflint::fmpz_set(
+                        sflint::fmpz_mat_entry(sflint::FmpzMatRef(basis), r,
+                                               j),
+                        sflint::fmpz_mat_entry(
+                                sflint::FmpzMatConstRef(image_basis), r, j));
+            }
+        }
+        assert(same_row_lattice(sflint::FmpzMatConstRef(basis),
+                                sflint::FmpzMatConstRef(relations)));
+    }
+    return 0;
+}
+
 int main() {
     assert(test_witnessed_hnf_basis() == 0);
     assert(test_zero_row_unit_consumer_shares_transform() == 0);
@@ -2654,6 +2786,7 @@ int main() {
     assert(test_finish_relation_kernel_basis_fast_path_and_fallback() == 0);
     assert(test_finish_relation_kernel_basis_without_reducedness() == 0);
     assert(test_saturation_extension_kernel_rows_without_reducedness() == 0);
+    assert(test_saturation_subset_extension_kernel_rows() == 0);
     assert(test_unit_logs_share_witness_rows() == 0);
     assert(test_unit_candidate_kernel_lll_matches_fmpz_lll() == 0);
     assert(test_unit_candidate_system_dixon_cache() == 0);

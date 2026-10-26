@@ -609,6 +609,28 @@ bool saturation_extension_kernel_rows(flint::FmpzMat& rows,
                                       RelationKernelBasisRoute* route,
                                       flint::FmpzMatConstRef relations,
                                       slong rank) noexcept;
+// The row-subset form of saturation_extension_kernel_rows, for an n x g
+// `relations` matrix A of rank g whose row lattice L(A) has index `order`
+// in Z^g, and n > g + extra.  It starts from s = g + extra rows S of A: the
+// first g rows in order independent modulo a word-size prime and the first
+// `extra` other rows.  It runs saturation_extension_kernel_rows on A_S with
+// rank g and pads the results with zeros outside S: `rows` gets the s - g
+// kernel rows (relation-kernel vectors of A, LLL-reduced and certified as
+// that routine certifies them, spanning the kernel of A_S) and `image` the
+// g identity parts of the reduced rows with a nonzero relation part, so
+// image * A is a basis of L(A_S).  Kept only when |det(image * A)| equals
+// `order`, that is L(A_S) = L(A).  Otherwise the first row of A outside
+// L(A_S) is added to S and the attempt repeats, for at most `extra` added
+// rows and while S stays smaller than A.  False, with `rows` and `image`
+// unchanged, when no such S is found or a check fails; the caller then
+// reduces all of A.  SaturationKernelTestSeams can make the index check
+// fail (SaturationKernelTestFailure::subset_index).
+bool saturation_subset_extension_kernel_rows(
+        flint::FmpzMat& rows,
+        flint::FmpzMat& image,
+        flint::FmpzMatConstRef relations,
+        flint::FmpzConstRef order,
+        slong extra) noexcept;
 // The kernel basis of the HNF unit rows (through
 // hnf_unit_witness_coefficients and hnf_unit_finish_coefficients).  It is
 // relation_kernel_phase_rows on [c * relations | I_n] when that succeeds,

@@ -5818,6 +5818,58 @@ public:
         return storage;
     }
 
+    // The row-subset attempt of extension_saturation_kernel:
+    // saturation_subset_extension_kernel_rows (class_group_internal.hpp) on
+    // the presentation's n x g relation matrix A and order, with
+    // t = kSaturationKernelSubsetExtraRows extra rows, for a presentation of
+    // rank g with n > g + t.  It reduces [c * A_S | I_s] for a subset S of
+    // s >= g + t rows in place of [c * A | I_n].
+    //
+    // Why its output is sound wherever the full route's is.  Each kernel
+    // row it returns is the zero padding of a row v_S that passed
+    // checked_relation_kernel_rows, so v_S * A_S == 0 exactly and the
+    // padded row v has v * A == 0: it is a relation-kernel vector.
+    // relation_saturation_beta_coefficients changes the beta rows only by
+    // integer combinations of these rows, and its soundness condition (a
+    // change by any relation-kernel vector multiplies beta_i by a unit, see
+    // that routine) holds for every relation-kernel vector, not only for a
+    // basis of the kernel.  The rows span the kernel of A_S, a sublattice
+    // of the relation kernel, so the beta rows are less reduced, but the
+    // identity (beta_i) = g_i^{d_i} and the rank modulo ell at a given set
+    // of auxiliary primes are unchanged.  The image rows are kept only when
+    // they span the full row lattice L(A) (the index check of that
+    // routine), so every target row d_i * (V^-1)_i lies in their span, and
+    // solved_invariant_generator_relation_rows still checks c * A ==
+    // d_i * (V^-1)_i exactly for every row it returns.
+    //
+    // When the subset is not enough (no g rows independent modulo the
+    // routine's prime, a failed row check or certificate on A_S, or L(A_S)
+    // still a proper sublattice of L(A) after its added rows), it returns
+    // false before anything is kept, and the caller reduces all n rows.
+    static bool subset_extension_saturation_kernel(
+            flint::FmpzMat& out,
+            flint::FmpzMat& image,
+            const ClassGroupContext& context,
+            slong kernel_rows) noexcept {
+        const slong n = context.quotient_.relation_count();
+        const slong g = context.quotient_.generator_count();
+        const slong extra = kSaturationKernelSubsetExtraRows;
+        if (g <= 0 || n - kernel_rows != g || g + extra >= n) {
+            return false;
+        }
+        flint::FmpzMat relations(n, g);
+        flint::Fmpz order;
+        if (!context.quotient_.relations(flint::FmpzMatRef(relations)) ||
+            !context.quotient_.order(flint::FmpzRef(order)) ||
+            !saturation_subset_extension_kernel_rows(
+                    out, image, flint::FmpzMatConstRef(relations),
+                    flint::FmpzConstRef(order), extra)) {
+            return false;
+        }
+        SaturationKernelTestSeams::note_subset_kept();
+        return true;
+    }
+
     // The extension route of saturation_relation_kernel:
     // saturation_extension_kernel_rows (class_group_internal.hpp) reduces
     // [c * relations | I_n] for the presentation's n x g relation matrix
@@ -5834,14 +5886,32 @@ public:
     // through the left transform.  The image rows carry no certificate of
     // their own: solved_invariant_generator_relation_rows checks every row
     // it derives from them exactly.
+    // With try_subset set and n > g + kSaturationKernelSubsetExtraRows the
+    // route first takes the row-subset attempt
+    // (subset_extension_saturation_kernel): on its success, out holds t
+    // rows, not kernel_rows: the padded basis of the kernel of g + t of the
+    // relations, a sublattice of the relation kernel whose vectors are all
+    // relation-kernel vectors, and image the padded image rows of that
+    // attempt, which span the full row lattice.  On its failure the route
+    // reduces all n rows as described above.  The caller sets try_subset
+    // only when it keeps the image rows (see saturation_relation_kernel):
+    // a sublattice basis size-reduces only the coordinates of the subset,
+    // so beta rows read from the left transform keep their other
+    // coordinates unreduced.
     static bool extension_saturation_kernel(flint::FmpzMat& out,
                                             flint::FmpzMat& image,
                                             const ClassGroupContext& context,
-                                            slong kernel_rows) noexcept {
+                                            slong kernel_rows,
+                                            bool try_subset) noexcept {
         const slong n = context.quotient_.relation_count();
         const slong g = context.quotient_.generator_count();
         if (kernel_rows <= 1 || kernel_rows > n) {
             return false;
+        }
+        if (try_subset &&
+            subset_extension_saturation_kernel(out, image, context,
+                                               kernel_rows)) {
+            return true;
         }
         flint::FmpzMat relations(n, g);
         if (!context.quotient_.relations(flint::FmpzMatRef(relations))) {
@@ -6006,8 +6076,8 @@ public:
         return true;
     }
 
-    // A basis of the relation kernel for the relation-saturation beta size
-    // reduction only, cached in the private storage until the presentation
+    // A basis of relation-kernel vectors for the relation-saturation beta
+    // size reduction only, cached in the private storage until the presentation
     // changes.  Returns the storage holding it, or nullptr on failure.
     //
     // The basis is LLL-reduced (FLINT default parameters) in every case.  If
@@ -6031,13 +6101,18 @@ public:
     // docs/reference/algorithms_and_sources.rst).  For at least two rows
     // with larger entries, where fmpz_lll of the kernel itself can take
     // minutes, the basis comes from extension_saturation_kernel unless that
-    // route already ran, without its image rows.  When the phase is not
-    // certified or not eligible, or the extension route fails a check or
-    // its certificate, the LLL-reduced basis is built by fmpz_lll and
-    // copied.  A certified phase is the basis fmpz_lll returns; the
-    // extension route's checked rows are a kernel basis (see
-    // checked_relation_kernel_rows), so every route returns a basis of the
-    // kernel.  Tests choose the first route of a multi-row kernel with
+    // route already ran, without its image rows and without its row-subset
+    // attempt.  When the phase is not certified or not eligible, or the
+    // extension route fails a check or its certificate, the LLL-reduced
+    // basis is built by fmpz_lll and copied.  A certified phase is the
+    // basis fmpz_lll returns; the extension route's checked rows are a
+    // kernel basis (see checked_relation_kernel_rows), so every route
+    // returns a basis of the kernel, except the extension-first route's
+    // row-subset attempt (kSaturationKernelSubsetExtraRows), whose rows
+    // span a sublattice of it.  That attempt runs only where the image rows
+    // are kept, so the beta rows are solved from image rows supported on
+    // the subset; beta rows read from the left transform are size-reduced
+    // against a basis of the whole kernel.  Tests choose the first route of a multi-row kernel with
     // SaturationKernelTestSeams::force_transform_route and
     // force_extension_route, force the first-phase fallback through
     // CertifiedLllTestSeams (lat/certified_lll_internal.hpp), and force the
@@ -6063,7 +6138,7 @@ public:
                 flint::FmpzMat basis(0, 0);
                 flint::FmpzMat image(0, 0);
                 if (extension_saturation_kernel(basis, image, context,
-                                                kernel_rows)) {
+                                                kernel_rows, true)) {
                     SaturationKernelTestSeams::note_extension_kept();
                     storage->saturation_relation_kernel = std::move(basis);
                     storage->saturation_relation_image_transform =
@@ -6093,7 +6168,7 @@ public:
                 flint::FmpzMat image(0, 0);
                 if (!extension_first &&
                     extension_saturation_kernel(basis, image, context,
-                                                kernel_rows)) {
+                                                kernel_rows, false)) {
                     SaturationKernelTestSeams::note_extension_kept();
                     storage->saturation_relation_kernel = std::move(basis);
                     storage->saturation_relation_kernel_valid = true;

@@ -7696,7 +7696,11 @@ int test_relation_saturation_size_reduce_row() {
 // comes, for entries of at most 250 bits, from FLINT's double-precision
 // first phase when that phase is certified, which also leaves that basis
 // unbuilt; `expect_first_phase` asserts that route.  Otherwise it is a copy
-// of that LLL-reduced basis, which is then built.
+// of that LLL-reduced basis, which is then built.  When the extension
+// route kept the basis from its row-subset attempt
+// (kSaturationKernelSubsetExtraRows), the basis has fewer rows: they are
+// relation-kernel vectors of full rank, LLL-reduced, spanning a sublattice
+// of the kernel, and `kernel` is replaced by them all the same.
 void relation_saturation_test_kernel_basis(
         sflint::FmpzMat& kernel,
         const silex::ClassGroupContext& context,
@@ -7707,8 +7711,47 @@ void relation_saturation_test_kernel_basis(
     const bool eligible = rows > 1 && raw_bits >= -250 && raw_bits <= 250;
     sflint::FmpzMat basis(0, 0);
     bool lll_basis_built = false;
+    const slong subsets =
+            silex::detail::TestHookAccess::saturation_kernel_subsets_kept();
     assert(silex::detail::relation_saturation_kernel_basis(
             basis, lll_basis_built, context));
+    if (silex::detail::TestHookAccess::saturation_kernel_subsets_kept() !=
+        subsets) {
+        const slong subset_rows =
+                sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis));
+        assert(!expect_first_phase && !lll_basis_built);
+        assert(subset_rows >= silex::detail::kSaturationKernelSubsetExtraRows &&
+               subset_rows < rows &&
+               sflint::fmpz_mat_ncols(sflint::FmpzMatConstRef(basis)) == cols);
+        assert(::fmpz_mat_rank(basis.raw()) == subset_rows);
+        // Each row is in the kernel: stacked on the kernel basis it adds
+        // no rank.
+        sflint::FmpzMat stack(rows + subset_rows, cols);
+        for (slong r = 0; r < rows + subset_rows; ++r) {
+            for (slong j = 0; j < cols; ++j) {
+                sflint::fmpz_set(
+                        sflint::fmpz_mat_entry(sflint::FmpzMatRef(stack), r,
+                                               j),
+                        r < rows ? sflint::fmpz_mat_entry(
+                                           sflint::FmpzMatConstRef(kernel), r,
+                                           j)
+                                 : sflint::fmpz_mat_entry(
+                                           sflint::FmpzMatConstRef(basis),
+                                           r - rows, j));
+            }
+        }
+        assert(::fmpz_mat_rank(stack.raw()) == rows);
+        sflint::FmpzLll lll;
+        assert(::fmpz_mat_is_reduced(basis.raw(), lll.raw()->delta,
+                                     lll.raw()->eta));
+        sflint::FmpzMat again(0, 0);
+        bool built_again = true;
+        assert(silex::detail::relation_saturation_kernel_basis(
+                again, built_again, context));
+        assert(::fmpz_mat_equal(again.raw(), basis.raw()) && !built_again);
+        kernel = std::move(basis);
+        return;
+    }
     assert(eligible || rows > 1 || lll_basis_built);
     assert(!expect_first_phase || (eligible && !lll_basis_built));
     assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(basis)) == rows &&
@@ -8291,6 +8334,8 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
         TestHookAccess::set_certified_lll_failure(failure);
         TestHookAccess::set_saturation_kernel_failure(extension_failure);
         const slong beta_solved = TestHookAccess::saturation_beta_rows_solved();
+        const slong subsets_kept =
+                TestHookAccess::saturation_kernel_subsets_kept();
         TestHookAccess::set_saturation_kernel_force_transform(
                 route == Route::transform);
         TestHookAccess::set_saturation_kernel_force_extension(
@@ -8328,15 +8373,23 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
                 extensions_kept;
         const slong solved =
                 TestHookAccess::saturation_beta_rows_solved() - beta_solved;
+        // A failed index check of the row-subset attempt
+        // (subset_index) only sends the route to all the rows, so the
+        // route still keeps its basis, and no subset basis is kept.
+        const bool route_failure =
+                extension_failure != SaturationKernelTestFailure::none &&
+                extension_failure != SaturationKernelTestFailure::subset_index;
         const bool extension_expected =
                 route == Route::extension &&
-                failure == CertifiedLllTestFailure::none &&
-                extension_failure == SaturationKernelTestFailure::none;
+                failure == CertifiedLllTestFailure::none && !route_failure;
         if (extension_expected) {
             assert(extensions > 0 && solved > 0);
-        } else if (route != Route::extension ||
-                   extension_failure != SaturationKernelTestFailure::none) {
+        } else if (route != Route::extension || route_failure) {
             assert(extensions == 0 && solved == 0);
+        }
+        if (extension_failure == SaturationKernelTestFailure::subset_index) {
+            assert(TestHookAccess::saturation_kernel_subsets_kept() ==
+                   subsets_kept);
         }
         assert_proven_class_group_certification(context);
         assert(units.certification_status() ==
@@ -8400,6 +8453,8 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
              SaturationKernelTestFailure::first_phase, Route::extension},
             {CertifiedLllTestFailure::none,
              SaturationKernelTestFailure::certificate, Route::extension},
+            {CertifiedLllTestFailure::none,
+             SaturationKernelTestFailure::subset_index, Route::extension},
     };
     for (const Case& c : cases) {
         const ProvenResult result =
@@ -8430,17 +8485,94 @@ int test_relation_saturation_kernel_fallbacks_keep_proven_result() {
     return 0;
 }
 
+// The row-subset attempt of the saturation kernel's extension route
+// (kSaturationKernelSubsetExtraRows) runs only on the extension-first
+// route, above the size crossover kSaturationKernelTransformMaxGenerators,
+// where the beta rows are solved from its image rows.  Both fields are
+// computed `proven` with the default routes.
+//
+// Below the crossover: Q(sqrt(100000001)), x^2 - x - 25000000, h = 720,
+// 23 generators.  Its kernel entries exceed the 250 bits of the certified
+// first phase, so the kernel basis comes from the extension route without
+// its image rows, and the beta rows are read from the left transform.  The
+// route reduces all the rows: the basis has one row per relation-kernel
+// unit and no subset basis is kept.  (A subset basis there would leave the
+// left transform's coordinates outside the subset unreduced, and the beta
+// rows would fail to build.)
+//
+// Above it: Q(sqrt(100000005)), x^2 - x - 25000001, h = 212, more than
+// 32 generators: the subset attempt keeps its basis.
+int test_relation_saturation_subset_attempt_crossover() {
+    using silex::detail::TestHookAccess;
+    struct Case {
+        slong c0;
+        slong class_order;
+        bool above;
+    };
+    const Case cases[] = {{-25000000, 720, false}, {-25000001, 212, true}};
+    for (const Case& c : cases) {
+        silex::NumberField field = shifted_quadratic_field(-1, c.c0);
+        silex::Order equation_order = silex::test::equation_order(field);
+        silex::Order maximal_order(field);
+        assert(maximal_order.maximal_order(equation_order));
+        sflint::Fmpz factor_base_bound;
+        assert(silex::factor_base_class_group_bound(
+                sflint::FmpzRef(factor_base_bound), maximal_order));
+        silex::ClassGroupComputeOptions options;
+        options.zeta_bf_max_cutoff = 20000;
+        options.requested_certification = silex::CertificationMode::proven;
+        silex::ClassGroupContext context;
+        silex::OrderUnitGroup units;
+        const slong extensions =
+                TestHookAccess::saturation_kernel_extensions_kept();
+        const slong subsets = TestHookAccess::saturation_kernel_subsets_kept();
+        assert(units.compute_with_class_group(
+                context, maximal_order,
+                sflint::FmpzConstRef(factor_base_bound), options, 128));
+        assert_proven_class_group_certification(context);
+        assert(units.certification_status() ==
+               silex::CertificationMode::proven);
+        sflint::Fmpz value;
+        assert(context.order(sflint::FmpzRef(value)));
+        assert(sflint::fmpz_equal_si(value, c.class_order));
+        silex::FiniteAbelianGroup presentation;
+        assert(context.presentation(presentation));
+        assert((presentation.generator_count() >
+                silex::detail::kSaturationKernelTransformMaxGenerators) ==
+               c.above);
+        assert(TestHookAccess::saturation_kernel_extensions_kept() >
+               extensions);
+        const slong subsets_kept =
+                TestHookAccess::saturation_kernel_subsets_kept() - subsets;
+        sflint::FmpzMat basis(0, 0);
+        bool lll_basis_built = true;
+        assert(silex::detail::relation_saturation_kernel_basis(
+                basis, lll_basis_built, context));
+        const slong kernel_rows = context.relation_kernel_unit_count();
+        if (c.above) {
+            assert(subsets_kept > 0);
+            assert(::fmpz_mat_nrows(basis.raw()) < kernel_rows);
+        } else {
+            assert(subsets_kept == 0);
+            assert(::fmpz_mat_nrows(basis.raw()) == kernel_rows);
+        }
+    }
+    return 0;
+}
+
 // Both call orders of relation_kernel_unit and the relation-saturation
 // proof on a presentation above the size crossover
 // (kSaturationKernelTransformMaxGenerators).  Q(sqrt(100000005)),
 // x^2 - x - 25000001, h = 212 = 2^2 * 53, computed `proven`.  Publishing
 // the same relations again drops the cached kernel bases, so each order
 // starts from none.  With the saturation proof first, the kernel basis its
-// beta rows are size-reduced against comes from the extension route and
-// the LLL-reduced basis of relation_kernel_unit stays unbuilt; with
+// beta rows are size-reduced against comes from the extension route's
+// row-subset attempt (kSaturationKernelSubsetExtraRows) and the
+// LLL-reduced basis of relation_kernel_unit stays unbuilt; with
 // relation_kernel_unit first, that LLL-reduced basis is built and the
-// saturation basis is a copy of it.  The two bases are LLL-reduced bases
-// of the same kernel lattice, relation_kernel_unit returns the same units
+// saturation basis is a copy of it.  The two bases are LLL-reduced, the
+// first spans a sublattice of the kernel lattice the second spans,
+// relation_kernel_unit returns the same units
 // in both orders, and the proofs at ell = 2 and 53 verify in both with the
 // same rank and target rank.  Only the auxiliary primes the proofs use may
 // differ (the documented call-order dependence of the saturation proof
@@ -8535,12 +8667,15 @@ int test_relation_saturation_call_orders_above_crossover() {
     republish();
     {
         const slong kept = TestHookAccess::saturation_kernel_extensions_kept();
+        const slong subsets = TestHookAccess::saturation_kernel_subsets_kept();
         bool lll_basis_built = true;
         assert(silex::detail::relation_saturation_kernel_basis(
                 saturation_first.basis, lll_basis_built, context));
         assert(!lll_basis_built);
         assert(TestHookAccess::saturation_kernel_extensions_kept() ==
                kept + 1);
+        assert(TestHookAccess::saturation_kernel_subsets_kept() ==
+               subsets + 1);
         prove(saturation_first);
         assert(TestHookAccess::saturation_kernel_extensions_kept() ==
                kept + 1);
@@ -8562,19 +8697,55 @@ int test_relation_saturation_call_orders_above_crossover() {
         assert(TestHookAccess::saturation_kernel_extensions_kept() == kept);
     }
 
-    // Both bases are LLL-reduced bases of the same kernel lattice.
+    // Both bases are LLL-reduced; the second is a basis of the kernel and
+    // the first spans a sublattice of it.
     sflint::FmpzLll lll;
+    const slong subset_rows =
+            ::fmpz_mat_nrows(saturation_first.basis.raw());
+    assert(subset_rows >= silex::detail::kSaturationKernelSubsetExtraRows &&
+           subset_rows < kernel_rows &&
+           ::fmpz_mat_ncols(saturation_first.basis.raw()) == relation_count);
+    assert(::fmpz_mat_rank(saturation_first.basis.raw()) == subset_rows);
+    assert(::fmpz_mat_nrows(kernel_unit_first.basis.raw()) == kernel_rows &&
+           ::fmpz_mat_ncols(kernel_unit_first.basis.raw()) == relation_count);
     for (const OrderResult* result : {&saturation_first, &kernel_unit_first}) {
-        assert(::fmpz_mat_nrows(result->basis.raw()) == kernel_rows &&
-               ::fmpz_mat_ncols(result->basis.raw()) == relation_count);
         assert(::fmpz_mat_is_reduced(result->basis.raw(), lll.raw()->delta,
                                      lll.raw()->eta));
     }
-    sflint::FmpzMat first_hnf(kernel_rows, relation_count);
+    sflint::FmpzMat stacked(kernel_rows + subset_rows, relation_count);
+    for (slong r = 0; r < kernel_rows + subset_rows; ++r) {
+        for (slong j = 0; j < relation_count; ++j) {
+            sflint::fmpz_set(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatRef(stacked), r, j),
+                    r < kernel_rows
+                            ? sflint::fmpz_mat_entry(
+                                      sflint::FmpzMatConstRef(
+                                              kernel_unit_first.basis),
+                                      r, j)
+                            : sflint::fmpz_mat_entry(
+                                      sflint::FmpzMatConstRef(
+                                              saturation_first.basis),
+                                      r - kernel_rows, j));
+        }
+    }
+    sflint::FmpzMat stacked_hnf(kernel_rows + subset_rows, relation_count);
     sflint::FmpzMat second_hnf(kernel_rows, relation_count);
-    ::fmpz_mat_hnf(first_hnf.raw(), saturation_first.basis.raw());
+    ::fmpz_mat_hnf(stacked_hnf.raw(), stacked.raw());
     ::fmpz_mat_hnf(second_hnf.raw(), kernel_unit_first.basis.raw());
-    assert(::fmpz_mat_equal(first_hnf.raw(), second_hnf.raw()));
+    // The stack's HNF is the kernel's HNF followed by zero rows.
+    const sflint::Fmpz zero;
+    for (slong r = 0; r < kernel_rows + subset_rows; ++r) {
+        for (slong j = 0; j < relation_count; ++j) {
+            assert(sflint::fmpz_equal(
+                    sflint::fmpz_mat_entry(sflint::FmpzMatConstRef(stacked_hnf),
+                                           r, j),
+                    r < kernel_rows
+                            ? sflint::fmpz_mat_entry(
+                                      sflint::FmpzMatConstRef(second_hnf), r,
+                                      j)
+                            : sflint::FmpzConstRef(zero)));
+        }
+    }
 
     // relation_kernel_unit does not depend on the order.
     for (std::size_t i = 0; i < static_cast<std::size_t>(kernel_rows); ++i) {
@@ -8603,12 +8774,13 @@ int test_relation_saturation_call_orders_above_crossover() {
 }
 
 // The relation-saturation beta rows are size-reduced against an
-// LLL-reduced relation-kernel basis.  Q(sqrt(100000005)), x^2 - x - 25000001:
-// h = 212 with invariants [106, 2], w = 2, unit rank 1, regulator
-// 18.19753721763815524762... (certified independently).  Each
+// LLL-reduced basis of relation-kernel vectors.  Q(sqrt(100000005)),
+// x^2 - x - 25000001: h = 212 with invariants [106, 2], w = 2, unit rank 1,
+// regulator 18.19753721763815524762... (certified independently).  Each
 // reduced coefficient row differs from the presentation's row for
-// g_i^{d_i} by a relation-kernel vector and is size-reduced against the
-// reduced kernel; the raw rows of this presentation are not.  A reduced
+// g_i^{d_i} by a relation-kernel vector and is size-reduced against that
+// basis, here from the row-subset attempt of the extension route (a
+// sublattice of the kernel); the raw rows of this presentation are not.  A reduced
 // beta_i therefore differs from the raw one by a unit, so at the same
 // auxiliary primes the raw and reduced ell-th-power characters give the
 // same rank modulo ell: for ell = 2 with the torsion row and for ell = 53
@@ -8665,11 +8837,25 @@ int test_relation_saturation_beta_rows_size_reduced() {
         assert(exact_kernel.has_value());
         kernel = std::move(*exact_kernel);
     }
+    const slong exact_rows =
+            sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(kernel));
+    assert(exact_rows > 1);
+    sflint::FmpzMat exact(exact_rows, relation_count);
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(exact),
+                         sflint::FmpzMatConstRef(kernel));
+    // Size reduction below is checked against the basis the beta rows use.
+    // The presentation is above the size crossover with more than
+    // 1 + kSaturationKernelSubsetExtraRows relations over its rank, so that
+    // basis came from the extension route's row-subset attempt: relation-
+    // kernel vectors spanning a sublattice of the kernel.
+    const slong subsets =
+            silex::detail::TestHookAccess::saturation_kernel_subsets_kept();
+    relation_saturation_test_kernel_basis(kernel, context, false);
+    assert(silex::detail::TestHookAccess::saturation_kernel_subsets_kept() ==
+           subsets + 1);
     const slong kernel_rows =
             sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(kernel));
-    assert(kernel_rows > 1);
-    // Size reduction below is checked against the basis the beta rows use.
-    relation_saturation_test_kernel_basis(kernel, context, false);
+    assert(kernel_rows < exact_rows);
     bool raw_size_reduced = true;
 
     std::vector<silex::Element> generators;
@@ -8745,18 +8931,18 @@ int test_relation_saturation_beta_rows_size_reduced() {
             for (slong b = 0; b < sflint::fmpz_mat_nrows(
                                           sflint::FmpzMatConstRef(coefficients));
                  ++b) {
-                sflint::FmpzMat stack(kernel_rows + 1, relation_count);
+                sflint::FmpzMat stack(exact_rows + 1, relation_count);
                 for (slong j = 0; j < relation_count; ++j) {
-                    for (slong r = 0; r < kernel_rows; ++r) {
+                    for (slong r = 0; r < exact_rows; ++r) {
                         sflint::fmpz_set(
                                 sflint::fmpz_mat_entry(
                                         sflint::FmpzMatRef(stack), r, j),
                                 sflint::fmpz_mat_entry(
-                                        sflint::FmpzMatConstRef(kernel), r,
+                                        sflint::FmpzMatConstRef(exact), r,
                                         j));
                     }
                     fmpz_sub(sflint::fmpz_mat_entry(sflint::FmpzMatRef(stack),
-                                                    kernel_rows, j)
+                                                    exact_rows, j)
                                      .raw(),
                              sflint::fmpz_mat_entry(
                                      sflint::FmpzMatConstRef(coefficients), b,
@@ -8767,7 +8953,7 @@ int test_relation_saturation_beta_rows_size_reduced() {
                                      b, j)
                                      .raw());
                 }
-                assert(fmpz_mat_rank(stack.raw()) == kernel_rows);
+                assert(fmpz_mat_rank(stack.raw()) == exact_rows);
             }
         }
         {
@@ -8778,15 +8964,25 @@ int test_relation_saturation_beta_rows_size_reduced() {
         assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(coefficients)) ==
                beta_count);
         for (slong b = 0; b < beta_count; ++b) {
-            sflint::FmpzMat difference(kernel_rows + 1, relation_count);
+            // difference stacks the exact kernel basis, the other two the
+            // basis the beta rows were size-reduced against.
+            sflint::FmpzMat difference(exact_rows + 1, relation_count);
             sflint::FmpzMat raw_stack(kernel_rows + 1, relation_count);
             sflint::FmpzMat reduced_stack(kernel_rows + 1, relation_count);
+            for (slong r = 0; r < exact_rows; ++r) {
+                for (slong j = 0; j < relation_count; ++j) {
+                    sflint::fmpz_set(
+                            sflint::fmpz_mat_entry(
+                                    sflint::FmpzMatRef(difference), r, j),
+                            sflint::fmpz_mat_entry(
+                                    sflint::FmpzMatConstRef(exact), r, j));
+                }
+            }
             for (slong r = 0; r < kernel_rows; ++r) {
                 for (slong j = 0; j < relation_count; ++j) {
                     const sflint::FmpzConstRef entry = sflint::fmpz_mat_entry(
                             sflint::FmpzMatConstRef(kernel), r, j);
-                    for (sflint::FmpzMat* stack :
-                         {&difference, &raw_stack, &reduced_stack}) {
+                    for (sflint::FmpzMat* stack : {&raw_stack, &reduced_stack}) {
                         sflint::fmpz_set(sflint::fmpz_mat_entry(
                                                  sflint::FmpzMatRef(*stack),
                                                  r, j),
@@ -8811,11 +9007,11 @@ int test_relation_saturation_beta_rows_size_reduced() {
                                  reduced_entry);
                 fmpz_sub(sflint::fmpz_mat_entry(
                                  sflint::FmpzMatRef(difference),
-                                 kernel_rows, j)
+                                 exact_rows, j)
                                  .raw(),
                          raw_entry.raw(), reduced_entry.raw());
             }
-            assert(fmpz_mat_rank(difference.raw()) == kernel_rows);
+            assert(fmpz_mat_rank(difference.raw()) == exact_rows);
             sflint::FmpzMat d(0, 0);
             sflint::FmpzMat lambda(0, 0);
             assert(silex::detail::integral_gram_schmidt(
@@ -9012,6 +9208,7 @@ int main() {
     test_relation_saturation_size_reduce_row();
     test_relation_saturation_beta_rows_size_reduced();
     test_relation_saturation_call_orders_above_crossover();
+    test_relation_saturation_subset_attempt_crossover();
     test_relation_saturation_kernel_basis_first_phase();
     test_relation_saturation_kernel_basis_fallbacks();
     test_relation_saturation_kernel_basis_extension_route();

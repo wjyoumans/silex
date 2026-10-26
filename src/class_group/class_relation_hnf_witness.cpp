@@ -1,11 +1,18 @@
 #include "class_group_internal.hpp"
 #include "relation_saturation_internal.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <utility>
+#include <vector>
 
 #include <flint/fmpz_lll.h>
+#include <flint/fmpz_mat.h>
+#include <flint/nmod_mat.h>
+#include <flint/ulong_extras.h>
 
 #include <silex/flint/fmpz_lll.hpp>
+#include <silex/flint/nmod_mat.hpp>
 
 namespace silex::detail {
 
@@ -483,6 +490,228 @@ bool saturation_extension_kernel_rows(flint::FmpzMat& rows,
         *route = RelationKernelBasisRoute::lll_extended;
     }
     return true;
+}
+
+namespace {
+
+// The starting rows of saturation_subset_extension_kernel_rows, in
+// increasing order: the g pivot rows of the n x g `relations` modulo a
+// word-size prime p, that is the pivot columns of the reduced row echelon
+// form of the transposed matrix modulo p (nmod_mat_rref), so the first rows
+// in order that are independent modulo p, followed in index order by the
+// first `extra` other rows.  Rows independent modulo p are independent over
+// Q.  False when the rank modulo p is below g (p divides an invariant, or
+// the rank is below g) or fewer than `extra` other rows exist.  Only a
+// choice of rows: nothing relies on it beyond the exact checks of the
+// caller.
+bool saturation_kernel_row_subset(std::vector<slong>& out,
+                                  flint::FmpzMatConstRef relations,
+                                  slong extra) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    const slong g = flint::fmpz_mat_ncols(relations);
+    if (g <= 0 || extra < 0 || g + extra > n) {
+        return false;
+    }
+    const ulong p = n_nextprime(UWORD(1) << (FLINT_BITS - 2), 1);
+    flint::NmodMat transposed(g, n, p);
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < g; ++j) {
+            nmod_mat_entry(transposed.raw(), j, i) = ::fmpz_get_nmod(
+                    flint::fmpz_mat_entry(relations, i, j).raw(),
+                    transposed.raw()->mod);
+        }
+    }
+    if (::nmod_mat_rref(transposed.raw()) != g) {
+        return false;
+    }
+    std::vector<char> chosen(static_cast<std::size_t>(n), 0);
+    slong column = 0;
+    for (slong r = 0; r < g; ++r) {
+        while (column < n &&
+               nmod_mat_entry(transposed.raw(), r, column) == 0) {
+            ++column;
+        }
+        if (column == n) {
+            return false;
+        }
+        chosen[static_cast<std::size_t>(column)] = 1;
+        ++column;
+    }
+    slong added = 0;
+    for (slong i = 0; i < n && added < extra; ++i) {
+        if (chosen[static_cast<std::size_t>(i)] == 0) {
+            chosen[static_cast<std::size_t>(i)] = 1;
+            ++added;
+        }
+    }
+    if (added != extra) {
+        return false;
+    }
+    std::vector<slong> rows;
+    rows.reserve(static_cast<std::size_t>(g + extra));
+    for (slong i = 0; i < n; ++i) {
+        if (chosen[static_cast<std::size_t>(i)] != 0) {
+            rows.push_back(i);
+        }
+    }
+    out.swap(rows);
+    return true;
+}
+
+}  // namespace
+
+bool saturation_subset_extension_kernel_rows(
+        flint::FmpzMat& rows,
+        flint::FmpzMat& image,
+        flint::FmpzMatConstRef relations,
+        flint::FmpzConstRef order,
+        slong extra) noexcept {
+    const slong n = flint::fmpz_mat_nrows(relations);
+    const slong g = flint::fmpz_mat_ncols(relations);
+    if (g <= 0 || extra < 1 || g + extra >= n ||
+        flint::fmpz_sgn(order) <= 0) {
+        return false;
+    }
+    std::vector<slong> subset;
+    if (!saturation_kernel_row_subset(subset, relations, extra)) {
+        return false;
+    }
+    for (slong added = 0;; ++added) {
+        const slong s = static_cast<slong>(subset.size());
+        flint::FmpzMat sub(s, g);
+        for (slong r = 0; r < s; ++r) {
+            for (slong j = 0; j < g; ++j) {
+                flint::fmpz_set(
+                        flint::fmpz_mat_entry(flint::FmpzMatRef(sub), r, j),
+                        flint::fmpz_mat_entry(
+                                relations, subset[static_cast<std::size_t>(r)],
+                                j));
+            }
+        }
+        flint::FmpzMat extension(0, 0);
+        flint::FmpzMat sub_rows(0, 0);
+        if (!saturation_extension_kernel_rows(sub_rows, extension, nullptr,
+                                              flint::FmpzMatConstRef(sub),
+                                              g)) {
+            return false;
+        }
+        // Pad the s - g kernel rows and the g image rows (the identity parts
+        // of the reduced rows with a nonzero relation part) to the n rows of
+        // `relations`.
+        const flint::FmpzMatConstRef reduced(extension);
+        flint::FmpzMat kernel(s - g, n);
+        for (slong r = 0; r < s - g; ++r) {
+            for (slong c = 0; c < s; ++c) {
+                flint::fmpz_set(
+                        flint::fmpz_mat_entry(
+                                flint::FmpzMatRef(kernel), r,
+                                subset[static_cast<std::size_t>(c)]),
+                        flint::fmpz_mat_entry(
+                                flint::FmpzMatConstRef(sub_rows), r, c));
+            }
+        }
+        flint::FmpzMat image_rows(g, n);
+        slong found = 0;
+        for (slong i = 0; i < s; ++i) {
+            bool zero_relation_part = true;
+            for (slong j = 0; j < g && zero_relation_part; ++j) {
+                zero_relation_part =
+                        flint::fmpz_is_zero(flint::fmpz_mat_entry(reduced, i, j));
+            }
+            if (zero_relation_part) {
+                continue;
+            }
+            if (found == g) {
+                return false;
+            }
+            for (slong c = 0; c < s; ++c) {
+                flint::fmpz_set(
+                        flint::fmpz_mat_entry(
+                                flint::FmpzMatRef(image_rows), found,
+                                subset[static_cast<std::size_t>(c)]),
+                        flint::fmpz_mat_entry(reduced, i, g + c));
+            }
+            ++found;
+        }
+        if (found != g) {
+            return false;
+        }
+        // The index check.  The image rows are U * A_S for a unimodular U
+        // (the reduction applies only unimodular row operations), so
+        // basis = image * A is a basis of L(A_S), which lies in L(A); the
+        // two are equal exactly when |det(basis)| = [Z^g : L(A)] = order.
+        flint::FmpzMat basis(g, g);
+        flint::fmpz_mat_mul(flint::FmpzMatRef(basis),
+                            flint::FmpzMatConstRef(image_rows), relations);
+        flint::Fmpz det;
+        ::fmpz_mat_det(det.raw(), basis.raw());
+        ::fmpz_abs(det.raw(), det.raw());
+        if (SaturationKernelTestSeams::failure() ==
+            SaturationKernelTestFailure::subset_index) {
+            // Test-only: treat the index check as failed.
+            SaturationKernelTestSeams::note_injected();
+            return false;
+        }
+        if (flint::fmpz_equal(flint::FmpzConstRef(det), order)) {
+            rows = std::move(kernel);
+            image = std::move(image_rows);
+            return true;
+        }
+        if (added == extra || s + 1 >= n) {
+            return false;
+        }
+        // The first row of A outside L(A_S): a_i lies in L(A_S) exactly when
+        // the rational solution x of x * basis = a_i is integral.  Adding it
+        // enlarges L(A_S), so the index [L(A) : L(A_S)] drops by a factor of
+        // at least 2.
+        std::vector<slong> others;
+        others.reserve(static_cast<std::size_t>(n - s));
+        for (slong i = 0, k = 0; i < n; ++i) {
+            if (k < s && subset[static_cast<std::size_t>(k)] == i) {
+                ++k;
+            } else {
+                others.push_back(i);
+            }
+        }
+        const slong m = static_cast<slong>(others.size());
+        flint::FmpzMat basis_t(g, g);
+        ::fmpz_mat_transpose(basis_t.raw(), basis.raw());
+        flint::FmpzMat others_t(g, m);
+        for (slong c = 0; c < m; ++c) {
+            for (slong j = 0; j < g; ++j) {
+                flint::fmpz_set(
+                        flint::fmpz_mat_entry(flint::FmpzMatRef(others_t), j,
+                                              c),
+                        flint::fmpz_mat_entry(
+                                relations, others[static_cast<std::size_t>(c)],
+                                j));
+            }
+        }
+        flint::FmpzMat solution_t(g, m);
+        flint::Fmpz den;
+        if (::fmpz_mat_solve(solution_t.raw(), den.raw(), basis_t.raw(),
+                             others_t.raw()) == 0 ||
+            flint::fmpz_is_zero(flint::FmpzConstRef(den))) {
+            return false;
+        }
+        slong outside = -1;
+        for (slong c = 0; c < m && outside < 0; ++c) {
+            for (slong j = 0; j < g; ++j) {
+                if (!flint::fmpz_divisible(
+                            flint::fmpz_mat_entry(
+                                    flint::FmpzMatConstRef(solution_t), j, c),
+                            flint::FmpzConstRef(den))) {
+                    outside = others[static_cast<std::size_t>(c)];
+                    break;
+                }
+            }
+        }
+        if (outside < 0) {
+            return false;
+        }
+        subset.insert(std::upper_bound(subset.begin(), subset.end(), outside),
+                      outside);
+    }
 }
 
 bool finish_relation_kernel_basis(flint::FmpzMat& out,

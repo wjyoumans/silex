@@ -2344,6 +2344,38 @@ Changed
   for ``random_d10_h2_s21`` and 1.88% for ``pure_x12_plus_7``.  No timing has
   been measured.
 
+- The ``proven`` relation-saturation proof builds the relation-kernel vectors
+  its beta rows are size-reduced against from a subset of the relations when
+  the presentation has more than 32 generators (the existing size crossover
+  of the saturation kernel, above which the beta rows are solved from the
+  kernel route's image rows).  It reduces ``g + 8`` of the ``n`` relations,
+  for ``g`` the generator count: ``g`` rows independent modulo a word-size
+  prime and 8 more, adding up to 8 further rows while the image rows do not
+  span the full relation lattice (checked against the class order).  Every
+  kept vector is checked to be in the relation kernel and the image rows are
+  kept only when their index check passes; any failure reduces all ``n``
+  rows as before.  At or below 32 generators the full-kernel route is
+  unchanged: there the beta rows come from the left transform, which a basis
+  supported on the subset would not reduce.  Published ``proven`` outputs are
+  identical on the 13 rows compared (real quadratic ``d100000001``,
+  ``d100000005``, ``d10000000005``, ``d1000000000009``; imaginary quadratic
+  ``d100000031``, ``d10000000799``, ``d1000000000271``,
+  ``d100000000000319``; ``cyclotomic_real_31_deg15``,
+  ``cyclotomic_real_37_deg18``; ``random_d10_h2_s21``, ``random_d10_h4_s27``,
+  ``random_d10_h2_s34``).  The beta rows now differ by other units, so the
+  auxiliary primes a saturation proof record uses (its ``local_primes``
+  count) can change where the subset route runs: on
+  ``real_quadratic_d1000000000009`` 6 to 5 at ``ell = 2``, on
+  ``real_quadratic_d10000000005`` 5 to 9 at ``ell = 2`` and 5 to 10 at
+  ``ell = 3``, and on ``real_quadratic_d100000005`` 10 to 8 at ``ell = 2``
+  and 2 to 3 at ``ell = 53``.  Ranks and target ranks are unchanged; in
+  principle a record could also stop within a different auxiliary-prime
+  bound.  Under callgrind (``proven``) the instruction count fell 29.08% for
+  ``real_quadratic_d1000000000009``, 5.04% for
+  ``real_quadratic_d10000000005`` and 4.86% for
+  ``real_quadratic_d100000005``; ``real_quadratic_d100000001`` is unchanged.
+  No timing has been measured.
+
 
 - The ``grh`` unit extraction reuses the embedded logarithms of repeated
   factor lists.  ``compact_log_matrix``, the scaled log matrices, the

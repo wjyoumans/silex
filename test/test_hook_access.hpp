@@ -399,6 +399,13 @@ public:
                 std::memory_order_relaxed);
     }
 
+    // The number of extension-route saturation kernel bases kept from the
+    // row-subset attempt since the process started.
+    static slong saturation_kernel_subsets_kept() noexcept {
+        return SaturationKernelTestSeams::subset_kept_.load(
+                std::memory_order_relaxed);
+    }
+
     // While set, pure_power_hensel_root returns "unsupported" in degree 10
     // and higher, as before the lift ran there, so Element::is_power leaves
     // a non-rational true power (exponent >= 2) undecided in such a field.
