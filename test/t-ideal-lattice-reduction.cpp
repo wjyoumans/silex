@@ -976,6 +976,35 @@ int test_two_lll_order_gram_reuse_matches_recomputation() {
     assert(cache.two_lll_order_grams.front().precision ==
            2 * kReductionPrecision);
 
+    // An order other than the cache's order is computed again and stores no
+    // entry.
+    {
+        FieldSetup cubic = cubic_x3_minus_2();
+        const slong cubic_precision = kReductionPrecision;
+        const slong cubic_embedding_precision = cubic_precision + kGuardBits;
+        const std::size_t entries_before = cache.two_lll_order_grams.size();
+        const slong front_precision =
+                cache.two_lll_order_grams.front().precision;
+        sflint::FmpzMat other_expected(0, 0);
+        sflint::FmpzMat other_cached(0, 0);
+        assert(rs::ideal_lattice_two_lll_order_gram(
+                other_expected, cubic.maximal_order,
+                cubic_embedding_precision, cubic_precision, nullptr));
+        assert(rs::ideal_lattice_two_lll_order_gram(
+                other_cached, cubic.maximal_order, cubic_embedding_precision,
+                cubic_precision, &cache));
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(other_cached),
+                sflint::FmpzMatConstRef(other_expected)));
+        assert(cache.two_lll_order_grams.size() == entries_before);
+        // The cache is full, so a stored entry would evict the oldest one.
+        assert(cache.two_lll_order_grams.front().precision ==
+               front_precision);
+        assert(sflint::arb_mat_nrows_value(
+                       cache.two_lll_order_grams.back().source_rows) ==
+               degree);
+    }
+
     // The route itself, with and without the cache.
     for (const slong index : {WORD(0), WORD(1)}) {
         silex::Ideal prime(order);
