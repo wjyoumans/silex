@@ -1263,7 +1263,7 @@ Changed
   first.  The search reads the terms in order and never looks past the term
   where it stops, so the reconstructed rationals and every published output
   are unchanged.  The bound is a few bits in practice, so the search stops
-  within three terms while the full expansion ran to more than a hundred.
+  within three terms while the full expansion ran up to more than a hundred terms.
 
 - Unit extraction's memo of factored logarithmic embeddings finds each stored
   factor through a hash of its coefficients and a hash table, instead of

@@ -3131,6 +3131,10 @@ int test_best_denominator_lazy_matches_full_cfrac() {
         if (lazy_ok) {
             assert(::fmpq_is_canonical(lazy.raw()) != 0);
             assert(sflint::fmpq_equal(lazy, full));
+        } else {
+            sflint::Fmpq sentinel;
+            ::fmpq_set_si(sentinel.raw(), 12345, 7);
+            assert(sflint::fmpq_equal(lazy, sentinel));
         }
         ++compared;
     };

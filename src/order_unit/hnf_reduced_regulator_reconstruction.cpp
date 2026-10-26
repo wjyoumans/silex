@@ -92,8 +92,8 @@ bool fmpq_set_best_denominator_bounded(
         return false;
     }
 
-    // A zero denominator is the infinite value, for which fmpq_get_cfrac
-    // generates no terms.
+    // Reject a zero denominator (the infinite value) and a negative
+    // denominator (a non-canonical fraction).
     if (flint::fmpz_sgn(flint::fmpq_den_ref(value)) <= 0) {
         return false;
     }
