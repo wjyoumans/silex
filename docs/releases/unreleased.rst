@@ -169,6 +169,10 @@ Changed
   process, ``grh`` mode: ``cyclotomic_64_phi32`` 25.4% fewer (1.1583e10 to
   8.644e9) and ``cyclotomic_41_phi40`` 26.1% fewer (4.0423e10 to 2.9868e10).
   No controlled timing has been measured.
+  The relation path for fields of degree 30 or more changed, so path-dependent
+  results (relation counts, ``relation_saturation_status``,
+  ``regulator_radius``, and which non-default walk seeds reach the existing
+  overflow failure in the unit reduction) can differ from earlier versions.
 
 - The embedding rows of an ideal basis (and of the LLL-reduced basis in the
   T2 enumeration setup of the ``proven`` factor-base honesty check) are now
