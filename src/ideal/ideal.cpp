@@ -4,6 +4,8 @@
 #include <flint/fmpq_poly.h>
 #include <flint/fmpz_mat.h>
 #include <flint/fmpz_vec.h>
+#include <flint/nmod.h>
+#include <flint/ulong_extras.h>
 
 #include <silex/diagnostics.hpp>
 #include <silex/flint/fmpq_mat.hpp>
@@ -43,6 +45,89 @@ bool is_full_rank_upper_triangular(const fmpz_mat_t basis) noexcept {
     return true;
 }
 
+namespace {
+
+// The pivots B_jj of the triangular B, stored as their two's-complement words
+// in pivots[0, n), and d = |det B| = prod_j |B_jj| in `determinant`, when
+// every pivot is a single signed word and d fits in a word.
+bool triangular_pivots_word(ulong& determinant,
+                            ulong* pivots,
+                            const fmpz_mat_t basis) noexcept {
+    const slong n = fmpz_mat_ncols(basis);
+    ulong product = 1;
+    for (slong j = 0; j < n; ++j) {
+        const fmpz* pivot = fmpz_mat_entry(basis, j, j);
+        if (fmpz_fits_si(pivot) == 0) {
+            return false;
+        }
+        const slong value = fmpz_get_si(pivot);
+        if (value == WORD_MIN) {
+            return false;
+        }
+        const ulong magnitude =
+                static_cast<ulong>(value < 0 ? -value : value);
+        if (n_mul_checked(&product, product, magnitude) != 0) {
+            return false;
+        }
+        pivots[j] = static_cast<ulong>(value);
+    }
+    determinant = product;
+    return true;
+}
+
+// The forward substitution of `triangular_basis_contains` on residues modulo
+// d = |det B| > 1.  Since adj(B) B = det(B) I, d Z^n lies in the row lattice
+// L of B (the precondition of the HNF modulo D, Cohen, GTM 138,
+// Section 2.4.3, Algorithm 2.4.8), so v and v mod d have the same membership.
+// Each step subtracts an integer multiple of row j, which keeps membership,
+// and clears column j modulo d.  Divisibility of the residue r_j by
+// b_j = |B_jj| is well defined modulo d because b_j divides d; when it fails,
+// lifting the residual to an integer vector that is zero in columns < j shows
+// that the exact substitution would stop at column j as well.  When every
+// column clears, the residual lies in d Z^n, hence in L.  `residue` has n
+// entries of scratch space.
+bool triangular_basis_contains_mod_det(const fmpz_mat_t basis,
+                                       const fmpz* vector,
+                                       ulong determinant,
+                                       const ulong* pivots,
+                                       ulong* residue) noexcept {
+    const slong n = fmpz_mat_ncols(basis);
+    nmod_t mod{};
+    nmod_init(&mod, determinant);
+    for (slong l = 0; l < n; ++l) {
+        residue[l] = fmpz_fdiv_ui(vector + l, determinant);
+    }
+    for (slong j = 0; j < n; ++j) {
+        const ulong r = residue[j];
+        if (r == 0) {
+            continue;
+        }
+        const slong pivot = static_cast<slong>(pivots[j]);
+        const ulong b = static_cast<ulong>(pivot < 0 ? -pivot : pivot);
+        if (r % b != 0) {
+            return false;
+        }
+        // x_j = r_j / B_jj as a residue modulo d.
+        ulong quotient = r / b;
+        if (pivot < 0) {
+            quotient = nmod_neg(quotient, mod);
+        }
+        for (slong l = j + 1; l < n; ++l) {
+            const fmpz* entry = fmpz_mat_entry(basis, j, l);
+            if (fmpz_is_zero(entry) != 0) {
+                continue;
+            }
+            residue[l] = nmod_sub(
+                    residue[l],
+                    nmod_mul(quotient, fmpz_fdiv_ui(entry, determinant), mod),
+                    mod);
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 // B is invertible, so v lies in the row lattice of B iff the unique rational
 // solution x of x B = v is integral.  Because B is upper triangular, column j
 // of x B = v reads v_j = sum_{i <= j} x_i B_ij, so x_0, x_1, ... are
@@ -50,9 +135,23 @@ bool is_full_rank_upper_triangular(const fmpz_mat_t basis) noexcept {
 // lattice iff every such division is exact.  This is the coordinate test of
 // reference `NumFieldOrd/NfOrd/Ideal/Ideal.jl:containment_by_matrices` (x in I
 // iff coordinates(x) * basis_mat_inv(I) is integral), evaluated by forward
-// substitution instead of a stored inverse.
+// substitution instead of a stored inverse.  When |det B| fits in a word the
+// same substitution runs on residues modulo |det B| (see
+// `triangular_basis_contains_mod_det`); the answer is the same.
 bool triangular_basis_contains(const fmpz_mat_t basis, fmpz* vector) noexcept {
     const slong n = fmpz_mat_ncols(basis);
+    {
+        // pivots in [0, n), residues in [n, 2 n).
+        std::vector<ulong> scratch(static_cast<std::size_t>(2 * n));
+        ulong determinant = 0;
+        if (triangular_pivots_word(determinant, scratch.data(), basis)) {
+            // A unimodular B spans all of Z^n.
+            return determinant == 1 ||
+                   triangular_basis_contains_mod_det(
+                           basis, vector, determinant, scratch.data(),
+                           scratch.data() + n);
+        }
+    }
     flint::Fmpz quotient;
     for (slong j = 0; j < n; ++j) {
         if (fmpz_is_zero(vector + j) != 0) {

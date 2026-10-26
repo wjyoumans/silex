@@ -31,6 +31,7 @@
 #include <flint/nmod_mat.h>
 #include <flint/nmod_poly.h>
 #include <flint/nmod_poly_factor.h>
+#include <flint/nmod_vec.h>
 #include <flint/ulong_extras.h>
 
 #include <algorithm>
@@ -814,11 +815,41 @@ bool quotient_multiplier_matrix(flint::FmpzMat& out,
            order_multiplier_matrix_from_coordinates(out, order, multiplier);
 }
 
+// True when p is an integer >= 2 that fits in a word, the modulus of the
+// word-size divisibility screen in `valuation_by_coordinate_divisibility`.
+bool coordinate_screen_modulus(ulong& out, flint::FmpzConstRef p) noexcept {
+    if (fmpz_sgn(p.raw()) <= 0 || fmpz_abs_fits_ui(p.raw()) == 0 ||
+        fmpz_cmp_ui(p.raw(), 2) < 0) {
+        return false;
+    }
+    out = fmpz_get_ui(p.raw());
+    return true;
+}
+
+// The n x n multiplier matrix M modulo the word p, transposed so that column
+// j of x M is the contiguous range [j n, (j + 1) n).
+void multiplier_matrix_mod_word(std::vector<ulong>& out,
+                                flint::FmpzMatConstRef multiplier_matrix,
+                                ulong p) noexcept {
+    const slong n = fmpz_mat_ncols(multiplier_matrix.raw());
+    out.assign(static_cast<std::size_t>(n * n), 0);
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            out[static_cast<std::size_t>(j * n + i)] = fmpz_fdiv_ui(
+                    fmpz_mat_entry(multiplier_matrix.raw(), i, j), p);
+        }
+    }
+}
+
+// `multiplier_mod_p`, when not null, is `multiplier_matrix_mod_word` of
+// `multiplier_matrix` and p; otherwise it is computed here when p fits in a
+// word.
 bool valuation_by_coordinate_divisibility(
         slong& out,
         const Order& order,
         const OrderElement& element,
         flint::FmpzMatConstRef multiplier_matrix,
+        const ulong* multiplier_mod_p,
         flint::FmpzConstRef p,
         slong bound,
         const DiagnosticsContext* diagnostics) noexcept {
@@ -826,6 +857,12 @@ bool valuation_by_coordinate_divisibility(
     // repeat `x = (tau * x) / p` while every order coordinate of `tau * x`
     // is divisible by p.  The cached map is reference's T/u map expressed in the
     // active equation or maximal-order basis.
+    //
+    // When p fits in a word, each step first evaluates tau * x modulo p, from
+    // x mod p and M mod p (reduction modulo p is a ring map Z -> Z/pZ, so
+    // every coordinate of x M is divisible by p iff (x mod p)(M mod p) = 0).
+    // The step that ends the loop then costs one word-size product, and the
+    // exact product is formed only when it is divided by p.
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
                         "prime_ideal.valuation_coordinate_divisibility");
     if (bound < 0 ||
@@ -849,16 +886,47 @@ bool valuation_by_coordinate_divisibility(
         return false;
     }
 
+    ulong p_word = 0;
+    const bool screen = coordinate_screen_modulus(p_word, p);
+    nmod_t mod{};
+    dot_params_t dot_params{};
+    std::vector<ulong> local_mod_p;
+    std::vector<ulong> residue;
+    if (screen) {
+        nmod_init(&mod, p_word);
+        dot_params = _nmod_vec_dot_params(static_cast<ulong>(n), mod);
+        if (multiplier_mod_p == nullptr) {
+            multiplier_matrix_mod_word(local_mod_p, multiplier_matrix, p_word);
+            multiplier_mod_p = local_mod_p.data();
+        }
+        residue.resize(static_cast<std::size_t>(n));
+    }
+
     slong value = 0;
     while (value < bound) {
+        if (screen) {
+            for (slong i = 0; i < n; ++i) {
+                residue[static_cast<std::size_t>(i)] = fmpz_fdiv_ui(
+                        fmpz_mat_entry(current.raw(), 0, i), p_word);
+            }
+            for (slong j = 0; j < n; ++j) {
+                if (_nmod_vec_dot(residue.data(), multiplier_mod_p + j * n, n,
+                                  mod, dot_params) != 0) {
+                    out = value;
+                    return true;
+                }
+            }
+        }
         flint::fmpz_mat_mul(flint::FmpzMatRef(product),
                             flint::FmpzMatConstRef(current),
                             multiplier_matrix);
-        for (slong j = 0; j < n; ++j) {
-            if (fmpz_divisible(fmpz_mat_entry(product.raw(), 0, j),
-                               p.raw()) == 0) {
-                out = value;
-                return true;
+        if (!screen) {
+            for (slong j = 0; j < n; ++j) {
+                if (fmpz_divisible(fmpz_mat_entry(product.raw(), 0, j),
+                                   p.raw()) == 0) {
+                    out = value;
+                    return true;
+                }
             }
         }
         fmpz_mat_scalar_divexact_fmpz(current.raw(), product.raw(), p.raw());
@@ -2898,7 +2966,24 @@ struct PrimeIdeal::CoordinateValuationCache {
     explicit CoordinateValuationCache(slong degree) noexcept
         : multiplier_matrix(degree, degree) {}
 
+    // Call once `multiplier_matrix` is final.
+    void set_multiplier_mod_p(flint::FmpzConstRef p) noexcept {
+        ulong p_word = 0;
+        if (coordinate_screen_modulus(p_word, p)) {
+            multiplier_matrix_mod_word(
+                    multiplier_mod_p,
+                    flint::FmpzMatConstRef(multiplier_matrix), p_word);
+        }
+    }
+
+    const ulong* multiplier_mod_p_or_null() const noexcept {
+        return multiplier_mod_p.empty() ? nullptr : multiplier_mod_p.data();
+    }
+
     flint::FmpzMat multiplier_matrix;
+    // `multiplier_matrix_mod_word` of `multiplier_matrix`; empty when p does
+    // not fit in a word.
+    std::vector<ulong> multiplier_mod_p;
     // True when the map is the anti-uniformizer from the HNF of P rather
     // than the Kummer quotient map T/u.
     bool from_anti_uniformizer = false;
@@ -3075,6 +3160,7 @@ PrimeIdeal::coordinate_valuation_matrix_cached() const noexcept {
         return nullptr;
     }
 
+    next->set_multiplier_mod_p(flint::FmpzConstRef(p_));
     coordinate_valuation_cache_ = std::move(next);
     return &coordinate_valuation_cache_->multiplier_matrix;
 }
@@ -3596,6 +3682,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
         valuation_by_coordinate_divisibility(
                 out, parent_, element,
                 flint::FmpzMatConstRef(*multiplier),
+                coordinate_valuation_cache_->multiplier_mod_p_or_null(),
                 flint::FmpzConstRef(p_), bound, diagnostics)) {
         SILEX_PRIME_IDEAL_PROFILE_EVENT(
                 diagnostics,
@@ -3645,6 +3732,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
                         next->multiplier_matrix, parent_, ideal_,
                         flint::FmpzConstRef(p_))) {
                 next->from_anti_uniformizer = true;
+                next->set_multiplier_mod_p(flint::FmpzConstRef(p_));
                 coordinate_valuation_cache_ = std::move(next);
                 multiplier = &coordinate_valuation_cache_->multiplier_matrix;
             }
@@ -3653,6 +3741,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
             valuation_by_coordinate_divisibility(
                     out, parent_, element,
                     flint::FmpzMatConstRef(*multiplier),
+                    coordinate_valuation_cache_->multiplier_mod_p_or_null(),
                     flint::FmpzConstRef(p_), bound, diagnostics)) {
             SILEX_PRIME_IDEAL_PROFILE_EVENT(
                     diagnostics,
@@ -4428,7 +4517,7 @@ bool PrimeIdealAccess::anti_uniformizer_valuation(
                    flint::FmpzConstRef(prime.p_)) &&
            valuation_by_coordinate_divisibility(
                    out, prime.parent_, element,
-                   flint::FmpzMatConstRef(multiplier),
+                   flint::FmpzMatConstRef(multiplier), nullptr,
                    flint::FmpzConstRef(prime.p_), bound, nullptr);
 }
 

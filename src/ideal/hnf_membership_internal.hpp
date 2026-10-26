@@ -9,8 +9,9 @@ namespace silex::detail {
 bool is_full_rank_upper_triangular(const fmpz_mat_t basis) noexcept;
 
 // Exact membership of `vector` (length n) in the row lattice of the n x n
-// basis B, which must pass `is_full_rank_upper_triangular`.  `vector` is used
-// as the residual and is overwritten.
+// basis B, which must pass `is_full_rank_upper_triangular`.  `vector` may be
+// used as the residual and overwritten.  When |det B| fits in a word the test
+// runs on residues modulo |det B| and leaves `vector` unchanged.
 bool triangular_basis_contains(const fmpz_mat_t basis, fmpz* vector) noexcept;
 
 }  // namespace silex::detail

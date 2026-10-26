@@ -2703,6 +2703,26 @@ int test_valuation_anti_uniformizer_matches_containment() {
                         elements.push_back(std::move(mixed));
                     }
                 }
+                // Scaling by c = p 2^70 + 1, a unit at P, keeps the
+                // valuation and gives multiword coordinates for the
+                // word-size divisibility screen to reduce.
+                {
+                    sflint::Fmpz c;
+                    fmpz_mul_2exp(c.raw(), p.raw(), 70);
+                    fmpz_add_ui(c.raw(), c.raw(), 1);
+                    const std::size_t unscaled = elements.size();
+                    for (std::size_t i = 0; i < unscaled; i += 4) {
+                        sflint::FmpzMat coordinates(1, n);
+                        assert(elements[i].get_coordinates(
+                                sflint::FmpzMatRef(coordinates)));
+                        fmpz_mat_scalar_mul_fmpz(coordinates.raw(),
+                                                 coordinates.raw(), c.raw());
+                        silex::OrderElement scaled(maximal);
+                        assert(scaled.set_coordinates(
+                                sflint::FmpzMatConstRef(coordinates)));
+                        elements.push_back(std::move(scaled));
+                    }
+                }
 
                 for (const silex::OrderElement& element : elements) {
                     if (element.equal_si(0)) {

@@ -3542,7 +3542,9 @@ int test_contains_failure_returns() {
 // The triangular solve behind Ideal::contains, on bases no ideal stores:
 // square upper triangular matrices with negative or large diagonal entries
 // and unreduced entries above the diagonal, compared with the HNF-comparison
-// rule.  Lower triangular, singular and non-square matrices fail the shape
+// rule.  Determinants that fit in a word (the route modulo |det B|) and that
+// do not (the exact route) both occur, with single-word and multiword
+// vectors.  Lower triangular, singular and non-square matrices fail the shape
 // check, so Ideal::contains keeps the lattice test for them.
 int test_triangular_basis_contains_matches_hnf_reference() {
     sflint::FmpzMat lower(2, 2);
@@ -3580,6 +3582,14 @@ int test_triangular_basis_contains_matches_hnf_reference() {
                 fmpz_mul_2exp(fmpz_mat_entry(basis.raw(), 0, 0),
                               fmpz_mat_entry(basis.raw(), 0, 0), 80);
             }
+            // |det B| near the word size: two pivots scaled by 2^31 give a
+            // determinant that fits in a word for some bases and not others.
+            if (trial % 6 == 4 && n >= 2) {
+                fmpz_mul_2exp(fmpz_mat_entry(basis.raw(), 0, 0),
+                              fmpz_mat_entry(basis.raw(), 0, 0), 31);
+                fmpz_mul_2exp(fmpz_mat_entry(basis.raw(), n - 1, n - 1),
+                              fmpz_mat_entry(basis.raw(), n - 1, n - 1), 31);
+            }
             assert(silex::detail::is_full_rank_upper_triangular(basis.raw()));
 
             sflint::FmpzMat row(1, n);
@@ -3592,6 +3602,12 @@ int test_triangular_basis_contains_matches_hnf_reference() {
                     // entry on every fourth sample.
                     for (slong i = 0; i < n; ++i) {
                         fmpz_set_si(c.raw(), rng.next(-5, 5));
+                        // Multiword coefficients exercise the reduction
+                        // modulo |det B|.
+                        if (sample >= 4) {
+                            fmpz_mul_2exp(c.raw(), c.raw(), 90);
+                            fmpz_add_si(c.raw(), c.raw(), rng.next(-5, 5));
+                        }
                         for (slong j = 0; j < n; ++j) {
                             fmpz_addmul(fmpz_mat_entry(row.raw(), 0, j),
                                         fmpz_mat_entry(basis.raw(), i, j),
@@ -3609,6 +3625,14 @@ int test_triangular_basis_contains_matches_hnf_reference() {
                     for (slong j = 0; j < n; ++j) {
                         fmpz_set_si(fmpz_mat_entry(row.raw(), 0, j),
                                     rng.next(-60, 60));
+                        if (sample >= 4) {
+                            fmpz_mul_2exp(fmpz_mat_entry(row.raw(), 0, j),
+                                          fmpz_mat_entry(row.raw(), 0, j),
+                                          70);
+                            fmpz_add_si(fmpz_mat_entry(row.raw(), 0, j),
+                                        fmpz_mat_entry(row.raw(), 0, j),
+                                        rng.next(-60, 60));
+                        }
                     }
                 }
                 fmpz_mat_set(residual.raw(), row.raw());
