@@ -9799,10 +9799,11 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
 // quotient-log setup and the generators' factors reduced mod q) across calls,
 // gives the column and the success of the overload without a state at every
 // root, whatever roots the state saw before.  One state is shared by every
-// call below: the roots run over all of [0, q) (most are not roots of the
+// call for one group: the roots run over all of [0, q) (most are not roots of the
 // defining polynomial, and the evaluation fails where a factor vanishes),
 // upwards and then downwards, plus q + 3, outside the word route's reduced
-// range; q, ell and the group change between runs, so the state is rebuilt.
+// range; q and ell change between runs, so the state is rebuilt, and each
+// group has its own state.
 // Q(zeta_13) has torsion order 26, so ell = 2 and 13 add the torsion row.
 int test_degree_one_root_column_state_matches_stateless() {
     silex::NumberField field = cyclotomic13_field();
@@ -9811,7 +9812,6 @@ int test_degree_one_root_column_state_matches_stateless() {
             silex::test::equation_order(field));
     const silex::Order* orders[] = {&equation, &maximal};
     const slong cases[][2] = {{2, 53}, {3, 79}, {13, 79}, {5, 131}};
-    silex::detail::DegreeOneRootColumnState state;
     slong available = 0;
     slong declined = 0;
     for (const silex::Order* order : orders) {
@@ -9819,6 +9819,9 @@ int test_degree_one_root_column_state_matches_stateless() {
         silex::OrderUnitGroup group(*order);
         assert(set_cyclotomic13_u2_power17_group(group, *order, field,
                                                  embeddings));
+        // A new state for each group: the state identifies its group by
+        // address, which the next iteration's group may reuse.
+        silex::detail::DegreeOneRootColumnState state;
         for (const auto& item : cases) {
             sflint::Fmpz ell;
             sflint::Fmpz q;
