@@ -8,6 +8,7 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_lll.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/fmpz_vec.hpp>
 #include <silex/flint/nmod_poly.hpp>
 #include <silex/flint/nmod_poly_factor.hpp>
 #include <silex/ideal.hpp>
@@ -3020,6 +3021,221 @@ int test_best_denominator_convergents_are_canonical() {
         static_cast<void>(best(mixed, bound));
         static_cast<void>(best(negative_mixed, bound));
     }
+    return 0;
+}
+
+// The full-expansion form of the bounded best-denominator search that the
+// lazy Euclidean expansion replaced: every partial quotient comes from one
+// fmpq_get_cfrac call before the convergent walk. The lazy search must agree
+// with it on the success flag and the stored rational.
+bool reference_best_denominator_full_cfrac(sflint::Fmpq& out,
+                                           const sflint::Fmpq& value,
+                                           const sflint::Fmpz& max_denominator) {
+    if (sflint::fmpz_sgn(sflint::FmpzConstRef(max_denominator)) <= 0) {
+        return false;
+    }
+    const slong cf_bound = ::fmpq_cfrac_bound(value.raw());
+    if (cf_bound <= 0) {
+        return false;
+    }
+    sflint::FmpzVec coefficients(cf_bound);
+    sflint::Fmpq remainder;
+    const slong len = ::fmpq_get_cfrac(coefficients.data(), remainder.raw(),
+                                       value.raw(), cf_bound);
+    assert(len <= 0 || ::fmpq_is_zero(remainder.raw()) != 0);
+    if (len <= 0) {
+        return false;
+    }
+
+    sflint::Fmpz p_prev2;
+    sflint::Fmpz p_prev1;
+    sflint::Fmpz q_prev2;
+    sflint::Fmpz q_prev1;
+    ::fmpz_one(p_prev1.raw());
+    ::fmpz_one(q_prev2.raw());
+    bool have = false;
+    for (slong i = 0; i < len; ++i) {
+        const fmpz* a = coefficients.data() + i;
+        if (i > 0 && ::fmpz_cmp(a, max_denominator.raw()) > 0) {
+            sflint::Fmpz remaining;
+            sflint::Fmpz t;
+            ::fmpz_sub(remaining.raw(), max_denominator.raw(), q_prev2.raw());
+            if (::fmpz_sgn(remaining.raw()) > 0) {
+                ::fmpz_fdiv_q(t.raw(), remaining.raw(), q_prev1.raw());
+                if (::fmpz_sgn(t.raw()) > 0) {
+                    sflint::Fmpz semi_p;
+                    sflint::Fmpz semi_q;
+                    ::fmpz_mul(semi_p.raw(), t.raw(), p_prev1.raw());
+                    ::fmpz_add(semi_p.raw(), semi_p.raw(), p_prev2.raw());
+                    ::fmpz_mul(semi_q.raw(), t.raw(), q_prev1.raw());
+                    ::fmpz_add(semi_q.raw(), semi_q.raw(), q_prev2.raw());
+                    sflint::Fmpq semi;
+                    ::fmpq_set_fmpz_frac(semi.raw(), semi_p.raw(),
+                                         semi_q.raw());
+                    sflint::Fmpq semi_error;
+                    sflint::Fmpq out_error;
+                    ::fmpq_sub(semi_error.raw(), semi.raw(), value.raw());
+                    ::fmpq_abs(semi_error.raw(), semi_error.raw());
+                    ::fmpq_sub(out_error.raw(), out.raw(), value.raw());
+                    ::fmpq_abs(out_error.raw(), out_error.raw());
+                    if (!have ||
+                        ::fmpq_cmp(semi_error.raw(), out_error.raw()) < 0) {
+                        ::fmpq_set(out.raw(), semi.raw());
+                        have = true;
+                    }
+                }
+            }
+            break;
+        }
+        sflint::Fmpz p;
+        sflint::Fmpz q;
+        ::fmpz_mul(p.raw(), a, p_prev1.raw());
+        ::fmpz_add(p.raw(), p.raw(), p_prev2.raw());
+        ::fmpz_mul(q.raw(), a, q_prev1.raw());
+        ::fmpz_add(q.raw(), q.raw(), q_prev2.raw());
+        if (::fmpz_cmp(q.raw(), max_denominator.raw()) > 0) {
+            break;
+        }
+        ::fmpq_set_fmpz_frac(out.raw(), p.raw(), q.raw());
+        have = true;
+        p_prev2.swap(p_prev1);
+        p_prev1.swap(p);
+        q_prev2.swap(q_prev1);
+        q_prev1.swap(q);
+    }
+    return have;
+}
+
+// Differential test of the lazily expanded best-denominator search against
+// the full fmpq_get_cfrac expansion. It covers exact rationals whose
+// expansion ends before the bound, bounds equal to a convergent or
+// semiconvergent denominator and one off either side, negative values,
+// integers, zero, nonpositive bounds, and high-precision values close to a
+// small rational, the shape the proven finish passes.
+int test_best_denominator_lazy_matches_full_cfrac() {
+    slong compared = 0;
+    auto check = [&compared](const sflint::Fmpq& value,
+                             const sflint::Fmpz& bound) {
+        assert(::fmpq_is_canonical(value.raw()) != 0);
+        sflint::Fmpq lazy;
+        sflint::Fmpq full;
+        ::fmpq_set_si(lazy.raw(), 12345, 7);
+        ::fmpq_set_si(full.raw(), 12345, 7);
+        const bool lazy_ok =
+                silex::detail::TestHookAccess::fmpq_best_denominator_bounded(
+                        lazy, sflint::FmpqConstRef(value),
+                        sflint::FmpzConstRef(bound));
+        const bool full_ok =
+                reference_best_denominator_full_cfrac(full, value, bound);
+        assert(lazy_ok == full_ok);
+        if (lazy_ok) {
+            assert(::fmpq_is_canonical(lazy.raw()) != 0);
+            assert(sflint::fmpq_equal(lazy, full));
+        }
+        ++compared;
+    };
+    auto check_si = [&check](const sflint::Fmpq& value, slong bound_si) {
+        sflint::Fmpz bound;
+        ::fmpz_set_si(bound.raw(), bound_si);
+        check(value, bound);
+    };
+    // Bounds at every convergent and semiconvergent denominator of `value`,
+    // and one below and above each.
+    auto check_denominator_bounds = [&check](const sflint::Fmpq& value) {
+        const slong cf_bound = ::fmpq_cfrac_bound(value.raw());
+        sflint::FmpzVec coefficients(cf_bound);
+        sflint::Fmpq remainder;
+        const slong len = ::fmpq_get_cfrac(coefficients.data(),
+                                           remainder.raw(), value.raw(),
+                                           cf_bound);
+        sflint::Fmpz q_prev2;
+        sflint::Fmpz q_prev1;
+        ::fmpz_one(q_prev2.raw());
+        for (slong i = 0; i < len; ++i) {
+            const fmpz* a = coefficients.data() + i;
+            for (slong t = 1; t <= 3; ++t) {
+                // Semiconvergent denominators t q_{i-1} + q_{i-2} and the
+                // convergent denominator a_i q_{i-1} + q_{i-2}.
+                sflint::Fmpz q;
+                ::fmpz_mul_si(q.raw(), q_prev1.raw(), t);
+                ::fmpz_add(q.raw(), q.raw(), q_prev2.raw());
+                if (::fmpz_cmp_si(a, t) < 0) {
+                    break;
+                }
+                for (slong delta = -1; delta <= 1; ++delta) {
+                    sflint::Fmpz bound;
+                    ::fmpz_add_si(bound.raw(), q.raw(), delta);
+                    check(value, bound);
+                }
+            }
+            sflint::Fmpz q;
+            ::fmpz_mul(q.raw(), a, q_prev1.raw());
+            ::fmpz_add(q.raw(), q.raw(), q_prev2.raw());
+            for (slong delta = -1; delta <= 1; ++delta) {
+                sflint::Fmpz bound;
+                ::fmpz_add_si(bound.raw(), q.raw(), delta);
+                check(value, bound);
+            }
+            q_prev2.swap(q_prev1);
+            q_prev1.swap(q);
+        }
+    };
+
+    // Every small exact rational, both signs, with every small bound
+    // (including bounds equal to the denominator, where the value itself is
+    // the answer, and nonpositive bounds, which fail).
+    for (slong den = 1; den <= 30; ++den) {
+        for (slong num = -70; num <= 70; ++num) {
+            sflint::Fmpq value;
+            ::fmpq_set_si(value.raw(), num, static_cast<ulong>(den));
+            for (slong bound = -1; bound <= 35; ++bound) {
+                check_si(value, bound);
+            }
+            check_denominator_bounds(value);
+        }
+    }
+
+    flint_rand_t state;
+    flint_rand_init(state);
+    for (slong trial = 0; trial < 400; ++trial) {
+        // Random rationals of up to 400 bits, both signs.
+        sflint::Fmpq value;
+        sflint::Fmpz num;
+        sflint::Fmpz den;
+        ::fmpz_randtest(num.raw(), state,
+                        static_cast<flint_bitcnt_t>(1 + trial % 400));
+        ::fmpz_randtest_not_zero(den.raw(), state,
+                                 static_cast<flint_bitcnt_t>(1 + (7 * trial) % 400));
+        ::fmpq_set_fmpz_frac(value.raw(), num.raw(), den.raw());
+        check_denominator_bounds(value);
+        for (flint_bitcnt_t bits = 0; bits <= 400; bits += 23) {
+            sflint::Fmpz bound;
+            ::fmpz_randtest_unsigned(bound.raw(), state, bits);
+            ::fmpz_add_ui(bound.raw(), bound.raw(), 1);
+            check(value, bound);
+        }
+
+        // A small rational a/b moved by an error near 2^-160, like a unit
+        // coordinate midpoint in the proven finish, with small bounds.
+        sflint::Fmpq near;
+        ::fmpq_set_si(near.raw(), static_cast<slong>(n_randint(state, 201)) - 100,
+                      1 + n_randint(state, 12));
+        sflint::Fmpq error;
+        sflint::Fmpz error_num;
+        ::fmpz_randtest(error_num.raw(), state, 20);
+        sflint::Fmpz error_den;
+        ::fmpz_one(error_den.raw());
+        ::fmpz_mul_2exp(error_den.raw(), error_den.raw(),
+                        150 + n_randint(state, 180));
+        ::fmpq_set_fmpz_frac(error.raw(), error_num.raw(), error_den.raw());
+        ::fmpq_add(near.raw(), near.raw(), error.raw());
+        check_denominator_bounds(near);
+        for (slong bound = 1; bound <= 40; ++bound) {
+            check_si(near, bound);
+        }
+    }
+    flint_rand_clear(state);
+    assert(compared > 100000);
     return 0;
 }
 
@@ -14997,6 +15213,7 @@ int main() {
     test_relation_kernel_rescale_log_matrix_word_rounding();
     test_reduced_regulator_reconstruction_correction();
     test_best_denominator_convergents_are_canonical();
+    test_best_denominator_lazy_matches_full_cfrac();
     test_hnf_regulator_multiple_certification_correction();
     test_regulator_pivot_exponent_policy();
     test_regulator_pivot_arb_ambiguity_and_invalidity();

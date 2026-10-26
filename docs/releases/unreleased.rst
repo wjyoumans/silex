@@ -1257,6 +1257,14 @@ Changed
   unchanged.  At high working precision (up to 40960 bits) that gcd was most
   of the finish time on large real quadratic fields.
 
+- The same reconstruction now generates the continued-fraction terms of each
+  coordinate one at a time and stops at the first term that exceeds the
+  denominator bound, instead of expanding the full high-precision midpoint
+  first.  The search reads the terms in order and never looks past the term
+  where it stops, so the reconstructed rationals and every published output
+  are unchanged.  The bound is a few bits in practice, so the search stops
+  within three terms while the full expansion ran to more than a hundred.
+
 - Unit extraction's memo of factored logarithmic embeddings finds each stored
   factor through a hash of its coefficients and a hash table, instead of
   copying the factor to a rational polynomial and comparing against every

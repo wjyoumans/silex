@@ -9,7 +9,6 @@
 
 #include <silex/flint/arf.hpp>
 #include <silex/flint/fmpq.hpp>
-#include <silex/flint/fmpz_vec.hpp>
 
 namespace silex::detail {
 
@@ -69,6 +68,22 @@ void fmpq_set_coprime_fraction(flint::Fmpq& out,
 //   combination equal to +-1 forces gcd(numerator, denominator) = 1.
 // This is the standard determinant identity of continued fractions (Hardy
 // and Wright, An Introduction to the Theory of Numbers, Chapter X).
+//
+// The partial quotients are generated one at a time by the Euclidean
+// recurrence of FLINT's reference fmpq_get_cfrac_naive (src/fmpq/get_cfrac.c):
+// with (n, d) = (num(value), den(value)), a_i = floor(n / d) and
+// (n, d) <- (d, n - a_i d), stopping when d = 0. For a canonical value (d > 0,
+// as every caller passes) this is the shorter of the two expansions of a
+// rational, the convention fmpq_get_cfrac documents, so it yields the same
+// terms a_0, ..., a_{len-1} as the full fmpq_get_cfrac call this replaces.
+// The loop body at index i reads only a_i and the convergent state left by
+// indices below i, and every exit after reading a_i is final. So the result
+// depends only on the terms up to the exit index, and producing them lazily
+// returns the same `out` and the same success flag as expanding all len
+// terms first, while skipping every term after the exit. In the proven
+// finish the bound is a few bits and the exit typically comes within three
+// terms, while the full expansion of a high-precision midpoint can run to
+// more than a hundred terms.
 bool fmpq_set_best_denominator_bounded(
         flint::Fmpq& out,
         flint::FmpqConstRef value,
@@ -77,19 +92,17 @@ bool fmpq_set_best_denominator_bounded(
         return false;
     }
 
-    const slong cf_bound = fmpq_cfrac_bound(value.raw());
-    if (cf_bound <= 0) {
+    // A zero denominator is the infinite value, for which fmpq_get_cfrac
+    // generates no terms.
+    if (flint::fmpz_sgn(flint::fmpq_den_ref(value)) <= 0) {
         return false;
     }
 
-    flint::FmpzVec coefficients(cf_bound);
-    flint::Fmpq remainder;
-    const slong len =
-            fmpq_get_cfrac(coefficients.data(), remainder.raw(),
-                           value.raw(), cf_bound);
-    if (len <= 0) {
-        return false;
-    }
+    flint::Fmpz numerator;
+    flint::Fmpz denominator;
+    flint::Fmpz coefficient;
+    ::fmpz_set(numerator.raw(), fmpq_numref(value.raw()));
+    ::fmpz_set(denominator.raw(), fmpq_denref(value.raw()));
 
     flint::Fmpz p_prev2;
     flint::Fmpz p_prev1;
@@ -101,11 +114,14 @@ bool fmpq_set_best_denominator_bounded(
     flint::fmpz_zero(flint::FmpzRef(q_prev1));
 
     bool have = false;
-    for (slong i = 0; i < len; ++i) {
+    for (slong i = 0; flint::fmpz_sgn(flint::FmpzConstRef(denominator)) != 0;
+         ++i) {
+        ::fmpz_fdiv_qr(coefficient.raw(), numerator.raw(), numerator.raw(),
+                       denominator.raw());
+        numerator.swap(denominator);
         if (i > 0 &&
-            flint::fmpz_cmp(
-                    flint::FmpzConstRef(coefficients.data() + i),
-                    max_denominator) > 0) {
+            flint::fmpz_cmp(flint::FmpzConstRef(coefficient),
+                            max_denominator) > 0) {
             flint::Fmpz remaining;
             flint::Fmpz t;
             flint::fmpz_sub(flint::FmpzRef(remaining),
@@ -139,9 +155,9 @@ bool fmpq_set_best_denominator_bounded(
 
         flint::Fmpz p;
         flint::Fmpz q;
-        fmpz_mul(p.raw(), coefficients.data() + i, p_prev1.raw());
+        fmpz_mul(p.raw(), coefficient.raw(), p_prev1.raw());
         fmpz_add(p.raw(), p.raw(), p_prev2.raw());
-        fmpz_mul(q.raw(), coefficients.data() + i, q_prev1.raw());
+        fmpz_mul(q.raw(), coefficient.raw(), q_prev1.raw());
         fmpz_add(q.raw(), q.raw(), q_prev2.raw());
 
         if (flint::fmpz_cmp(flint::FmpzConstRef(q),
