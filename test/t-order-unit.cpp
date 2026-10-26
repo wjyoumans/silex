@@ -10201,7 +10201,9 @@ int test_degree_one_roots_mod_q_root_finder() {
 // 20), and the three largest below the limit, where g also takes the
 // largest residues q - 1; the kernel covers exactly degrees 2 to 20, q below
 // the limit and e >= 1, and declines degree 1, degrees 21 and 22, e = 0 and
-// the first primes at or above the limit.  Those go to FLINT in the scan:
+// the first primes at or above the limit, and any g that is not monic.
+// Those go to FLINT in the scan, which takes the word route exactly below
+// the limit (asserted through its profile event where profiling is built):
 // for x^3 - x - 15 (limit 2^30), and x^12 + 7 and Phi_13 (limit 2^29), the
 // roots degree_one_roots_mod_q_for_test returns for primes on both sides of
 // the limit, including q = 1 mod 13 where Phi_13 splits completely, are
@@ -10261,6 +10263,15 @@ int test_word_x_power_mod_matches_flint() {
                 // g; the inverse is still needed to the length of g.
                 nmod_poly_inv_series_newton(preinverse.raw(), reverse.raw(),
                                             modulus.raw()->length);
+                // The kernel reads g as monic: with leading coefficient 2
+                // the dispatch declines.
+                if (q > 2) {
+                    std::vector<ulong> scaled = g;
+                    scaled[static_cast<std::size_t>(degree)] = 2;
+                    std::array<ulong, 22> word{};
+                    assert(!silex::detail::word_x_power_mod_dispatch(
+                            word.data(), scaled.data(), degree, q, q));
+                }
                 const ulong exponents[] = {(q - 1) / 2, q, n_randtest(state),
                                            UWORD_MAX, 0};
                 for (ulong exponent : exponents) {
@@ -10305,6 +10316,15 @@ int test_word_x_power_mod_matches_flint() {
             {{7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, UWORD(1) << 29, 1},
             {{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, UWORD(1) << 29, 13},
     };
+    // The word route is taken exactly for the primes below the limit.
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "unit_group.stable_scan.degree_one_roots_nmod_word_power";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
     slong full_splits = 0;
     for (const Case& item : cases) {
         sflint::FmpqPoly polynomial;
@@ -10351,8 +10371,15 @@ int test_word_x_power_mod_matches_flint() {
             sflint::Fmpz q_value;
             fmpz_set_ui(q_value.raw(), q);
             std::vector<sflint::Fmpz> roots;
+            const slong word_routes = counter.count;
             assert(silex::detail::degree_one_roots_mod_q_for_test(
-                    roots, equation, sflint::FmpzConstRef(q_value)));
+                    roots, equation, sflint::FmpzConstRef(q_value),
+                    &diagnostics));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+            assert(counter.count - word_routes == (q < item.limit ? 1 : 0));
+#else
+            (void)word_routes;
+#endif
             std::vector<ulong> got;
             for (const sflint::Fmpz& root : roots) {
                 assert(fmpz_sgn(root.raw()) >= 0);

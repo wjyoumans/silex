@@ -246,8 +246,10 @@ bool nmod_poly_vanishes_at_roots(const NmodPoly& polynomial,
 // factors (it divides x^((q - 1) / 2) -+ 1); a factor of degree one gives
 // its root directly and a larger one goes to nmod_poly_roots.  h comes
 // from the word-size kernel word_x_power_mod
-// (residue_field/word_frobenius_internal.hpp) for deg g from 2 to 20 and q
-// below 2^30 (deg g <= 8) or 2^29, and from FLINT's
+// (residue_field/word_frobenius_internal.hpp) for monic g (as here: the
+// defining polynomial is monic integral and shifting out x^k keeps the
+// leading coefficient 1) with deg g from 2 to 20 and q below 2^30
+// (deg g <= 8) or 2^29, and from FLINT's
 // nmod_poly_powmod_x_ui_preinv otherwise; x^((q - 1) / 2) mod g is unique,
 // so both give the same h.  Every root found is checked to vanish on the
 // reduction before it is returned.  With
@@ -323,6 +325,10 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
                 if (detail::word_x_power_mod_dispatch(
                             word_power.data(), nonzero_part.raw()->coeffs,
                             nonzero_degree, (q - 1) / 2, q)) {
+                    SILEX_PROFILE_EVENT(
+                            diagnostics, DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan."
+                            "degree_one_roots_nmod_word_power");
                     nmod_poly_fit_length(half_power.raw(), nonzero_degree);
                     for (slong i = 0; i < nonzero_degree; ++i) {
                         half_power.raw()->coeffs[i] =
@@ -1596,8 +1602,10 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
 
 bool degree_one_roots_mod_q_for_test(std::vector<flint::Fmpz>& roots,
                                      const Order& order,
-                                     flint::FmpzConstRef q) noexcept {
-    return degree_one_roots_mod_q(roots, order, q, nullptr);
+                                     flint::FmpzConstRef q,
+                                     const DiagnosticsContext* diagnostics)
+        noexcept {
+    return degree_one_roots_mod_q(roots, order, q, diagnostics);
 }
 
 }  // namespace detail

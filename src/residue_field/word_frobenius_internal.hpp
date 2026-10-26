@@ -201,18 +201,20 @@ bool word_x_power_mod_from(ulong* power,
     }
 }
 
-// `power` (`degree` entries) receives x^exponent mod f for the monic `f`
-// with the `degree` + 1 coefficients reduced modulo the prime p, when the
+// `power` (`degree` entries) receives x^exponent mod f, for `f` with the
+// `degree` + 1 coefficients reduced modulo the prime p, when the
 // word kernel covers the case: 2 <= degree <= kWordFrobeniusMaxDegree,
-// p < word_frobenius_prime_limit(degree) and exponent >= 1.  Returns false,
-// leaving `power` unchanged, otherwise.
+// p < word_frobenius_prime_limit(degree), exponent >= 1 and f[degree] == 1.
+// Returns false, leaving `power` unchanged, otherwise: the kernel reads f as
+// monic and never looks at f[degree], so a non-monic f is declined.
 inline bool word_x_power_mod_dispatch(ulong* power,
                                       const ulong* f,
                                       slong degree,
                                       ulong exponent,
                                       ulong p) noexcept {
     if (degree < 2 || degree > kWordFrobeniusMaxDegree || exponent == 0 ||
-        p < 2 || p >= word_frobenius_prime_limit(degree)) {
+        p < 2 || p >= word_frobenius_prime_limit(degree) ||
+        f[degree] != 1) {
         return false;
     }
     return word_x_power_mod_from<2>(power, f, degree, exponent,

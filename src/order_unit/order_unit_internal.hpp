@@ -552,10 +552,12 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
 // equation order nor maximal, a defining polynomial that is not monic
 // integral, or, for a maximal order that is not the equation order, a
 // reduction modulo q that is not squarefree.  It serves only tests, as a
-// seam for the root finder.
-bool degree_one_roots_mod_q_for_test(std::vector<flint::Fmpz>& roots,
-                                     const Order& order,
-                                     flint::FmpzConstRef q) noexcept;
+// seam for the root finder; `diagnostics` receives its profile events.
+bool degree_one_roots_mod_q_for_test(
+        std::vector<flint::Fmpz>& roots,
+        const Order& order,
+        flint::FmpzConstRef q,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept;
 class TestHookAccess;
 
 // Test-only overrides for the stable residue-character proof scan of
