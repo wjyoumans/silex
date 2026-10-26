@@ -141,7 +141,9 @@ Changed
   on all 46 cyclotomic corpus rows.  Whole-process callgrind Ir of ``grh``
   drops by 11.3% on ``cyclotomic_37_phi36``, 11.2% on ``cyclotomic_41_phi40``,
   12.3% on ``cyclotomic_64_phi32``, 17.5% on ``cyclotomic_27_phi18``, and
-  4.8% on ``cyclotomic_19_phi18`` (busy machine).  ``proven`` requests and
+  4.8% on ``cyclotomic_19_phi18`` (busy machine); the one slower row is
+  ``cyclotomic_7_phi6``, 0.71% more Ir (140,219,379 to 141,210,090).
+  ``proven`` requests and
   other presentations are unchanged.
 
 - Ideal membership for a triangular (Hermite) basis and the coordinate

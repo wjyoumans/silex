@@ -8756,9 +8756,11 @@ int test_add_dependent_unit_precision_cap() {
 // cyclotomic units (source add_cyclotomic_units, buch2.c), which reach the
 // unit rank 4 before any relation-kernel unit; the same field given by
 // Phi_11(x + 1) takes no seeds.  Both publish h = 1, the regulator of
-// Q(zeta_11) and grh labels through the unchanged analytic index test.
+// Q(zeta_11) and grh labels through the unchanged analytic index test.  A
+// proven request on Phi_11 takes no seeds.
 int test_grh_cyclotomic_seed_units() {
-    auto run = [](const silex::NumberField& field, slong expected_events) {
+    auto run = [](const silex::NumberField& field, slong expected_events,
+                  silex::CertificationMode mode = silex::CertificationMode::grh) {
         silex::Order order = silex::test::verified_maximal_order(
                 silex::test::equation_order(field));
         assert(order.is_maximal());
@@ -8769,7 +8771,7 @@ int test_grh_cyclotomic_seed_units() {
         options.max_candidates = 5000;
         options.max_relations = 1000;
         options.zeta_bf_max_cutoff = 20000;
-        options.requested_certification = silex::CertificationMode::grh;
+        options.requested_certification = mode;
 
         silex::DiagnosticsContext diagnostics;
         silex::diagnostics_context_init(diagnostics);
@@ -8791,10 +8793,8 @@ int test_grh_cyclotomic_seed_units() {
                                               options, 128));
         class_group.set_diagnostics(nullptr);
         units.set_diagnostics(nullptr);
-        assert(class_group.certification_status() ==
-               silex::CertificationMode::grh);
-        assert(units.certification_status() ==
-               silex::CertificationMode::grh);
+        assert(class_group.certification_status() == mode);
+        assert(units.certification_status() == mode);
         sflint::Fmpz h;
         assert(class_group.order(sflint::FmpzRef(h)));
         assert(sflint::fmpz_equal_si(h, 1));
@@ -8830,6 +8830,12 @@ int test_grh_cyclotomic_seed_units() {
     run(silex::test::field_by_polynomial(
                 sflint::FmpqPolyConstRef(polynomial)),
         0);
+
+    // A proven request takes no seeds, even on the exact Phi_11.
+    fmpq_poly_set_fmpz_poly(polynomial.raw(), cyclotomic.raw());
+    run(silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial)),
+        0, silex::CertificationMode::proven);
     return 0;
 }
 

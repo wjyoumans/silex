@@ -940,8 +940,9 @@ this repository's scope.
 
 For ``grh`` requests on an exact cyclotomic presentation (the defining
 polynomial is ``Phi_m``), the cyclotomic units of the field are added to the
-unit context before relation search, so the search needs relations only for
-the remaining rank.  PARI 2.17.3 ``src/basemath/buch2.c`` does the same:
+unit context before relation search, so they count toward the kernel units
+the class/unit loop waits for before unit extraction; the relation search
+itself is unchanged.  PARI 2.17.3 ``src/basemath/buch2.c`` does the same:
 ``add_cyclotomic_units`` (lines 3626-3636, called at line 3873) seeds them,
 the comment above ``nfcyclotomicunits`` (lines 3583-3587) states which units
 are produced, and the relation count needed after seeding is the logic at

@@ -796,7 +796,7 @@ silex::Element integer_polynomial_element(
 // prime power (n = m, or m / 2 when m = 2 mod 4) the list has the unit rank
 // phi(m) / 2 - 1 of elements; every element is integral of norm +-1.
 // Spot values: 1 + x on Phi_5; 1 - x on Phi_10 (z = -x, n = 5);
-// 1 + x + x^2 on Phi_8; on Phi_15 the source lists 1 + Z (Z = x^3) and
+// 1 + x + x^2 on Phi_8; on Phi_15 the source routine with z = x lists 1 + Z (Z = x^3) and
 // x^a - 1 for a = 1, 2, 4 (four elements, unit rank 3); on Phi_12 x - 1
 // and x^5 - 1 (unit rank 1).  On Phi_37 the 17 units have the regulator
 // of Q(zeta_37), 3171872728760.2220131327666 (source bnfinit),
