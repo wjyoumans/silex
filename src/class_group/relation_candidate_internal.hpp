@@ -167,9 +167,13 @@ private:
     const ulong* row_values_at(slong row, std::size_t prime_index) noexcept;
 };
 
-// Garner's mixed-radix CRT over distinct odd primes m_k = moduli[k].n
-// below 2^28 (Knuth, TAOCP Vol. 2, 3rd ed., Section 4.3.2, the
-// mixed-radix conversion, after Garner 1959).  Sets
+// Mixed-radix CRT over distinct odd primes m_k = moduli[k].n below 2^28:
+// a variant of Garner's mixed-radix conversion (Garner 1959; Knuth, TAOCP
+// Vol. 2, 3rd ed., Section 4.3.2).  That conversion uses the pairwise
+// inverses m_i^(-1) mod m_j in a nested recurrence; this one stores a
+// single inverse (m_0 ... m_(k - 1))^(-1) mod m_k per modulus and forms
+// the prefix as a dot product with the weights, giving the same digits.
+// Sets
 // weights[j] = m_0 ... m_(j - 1) mod m_index for j < index (index words)
 // and returns (m_0 ... m_(index - 1))^(-1) mod m_index (1 for index 0).
 ulong split_prime_crt_row(ulong* weights,

@@ -135,10 +135,12 @@ Changed
 
 - The split-prime norm evaluation of class-group relation candidates
   (defining polynomials of degree 16 and more) combines the residues modulo
-  its split primes with Garner's mixed-radix conversion in word-size
-  arithmetic (Knuth, TAOCP Vol. 2, Section 4.3.2), instead of one
-  ``fmpz_CRT_ui`` per prime per candidate.  The per-prime constants are
-  computed once per set of split primes.  The result is the same symmetric
+  its split primes with a mixed-radix conversion in word-size arithmetic,
+  instead of one ``fmpz_CRT_ui`` per prime per candidate.  It is a variant
+  of Garner's conversion (Knuth, TAOCP Vol. 2, Section 4.3.2): each prime
+  gets one inverse, of the product of the earlier primes, in place of
+  Garner's pairwise inverses.  These per-prime constants are computed once
+  per set of split primes.  The result is the same symmetric
   residue modulo the same product of primes, so every norm, and every
   published result, is unchanged: ``grh`` outputs are identical on the 26
   cyclotomic and real cyclotomic corpus rows of degree 16 and more that

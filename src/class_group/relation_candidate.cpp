@@ -692,6 +692,15 @@ ulong split_prime_crt_row(ulong* weights,
     return n_invmod(product, mod.n);
 }
 
+// split_prime_crt keeps its digit sums and two-digit products in one word:
+// every modulus is below kSplitPrimeSearchEnd <= 2^28 and there are at
+// most kMaxSplitPrimes <= 64 of them, so each term is below 2^56 and each
+// sum of at most 63 terms is below 2^62.
+static_assert(kSplitPrimeSearchEnd <= (UWORD(1) << 28),
+              "split_prime_crt word-size bounds need split primes < 2^28");
+static_assert(kMaxSplitPrimes <= 64,
+              "split_prime_crt word-size bounds need at most 64 split primes");
+
 void split_prime_crt(fmpz_t out,
                      fmpz_t scratch,
                      ulong* digits,
