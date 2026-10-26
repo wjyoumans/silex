@@ -5888,11 +5888,11 @@ public:
     // it derives from them exactly.
     // With try_subset set and n > g + kSaturationKernelSubsetExtraRows the
     // route first takes the row-subset attempt
-    // (subset_extension_saturation_kernel): on its success, out holds t
-    // rows, not kernel_rows: the padded basis of the kernel of g + t of the
-    // relations, a sublattice of the relation kernel whose vectors are all
-    // relation-kernel vectors, and image the padded image rows of that
-    // attempt, which span the full row lattice.  On its failure the route
+    // (subset_extension_saturation_kernel): on its success, out holds
+    // s - g rows (t plus any added rows), not kernel_rows: the padded basis
+    // of the kernel of A_S, a sublattice of the relation kernel whose
+    // vectors are all relation-kernel vectors, and image the padded image
+    // rows of that attempt, which span the full row lattice.  On its failure the route
     // reduces all n rows as described above.  The caller sets try_subset
     // only when it keeps the image rows (see saturation_relation_kernel):
     // a sublattice basis size-reduces only the coordinates of the subset,
@@ -5971,7 +5971,11 @@ public:
     // unimodular row operations), so the rows of U * A span the row lattice
     // of A; the n - g rows with zero relation part contribute nothing, so
     // the g rows of B = image * A span that rank-g lattice and are a basis
-    // of it.
+    // of it.  For the image rows of the row-subset attempt
+    // (subset_extension_saturation_kernel) this argument gives only a basis
+    // of L(A_S), the row lattice of the subset; they span L(A) because that
+    // attempt keeps them only when its index check holds (see the comment
+    // before subset_extension_saturation_kernel).
     // (The analogous construction is Havas, Majewski and Matthews,
     // Experimental Mathematics 7 (1998), section 6: for their Algorithm 4
     // on an input G, with P G = H in Hermite normal form and P = [Q; R],
@@ -10859,6 +10863,12 @@ bool relation_saturation_beta_coefficients(
             row_index[b] = static_cast<slong>(b);
         }
     } else {
+        // Unreachable outside the beta_solve test seam when the stored image
+        // rows come from the row-subset attempt: that attempt keeps them only
+        // when |det(image * A)| = order != 0, so B = image * A is a
+        // nonsingular basis of L(A), the targets d_i * (V^-1)_i lie in L(A),
+        // and the solve has an exact integral solution.  No full-kernel
+        // rebuild is needed here.
         flint::FmpzMat all(context.invariant_count(), relation_count);
         if (!ClassGroupRelationAccess::invariant_generator_relation_matrix(
                     flint::FmpzMatRef(all), context)) {

@@ -8908,8 +8908,11 @@ int test_relation_saturation_beta_rows_size_reduced() {
                solved_before + 1);
         {
             // With the solve failing, the rows are read from the left
-            // transform instead; size reduction against the same kernel
-            // basis maps both rows of a coset to the same vector.
+            // transform instead.  The kernel basis here comes from the
+            // row-subset attempt, a basis of the kernel of A_S only, so two
+            // representatives of the same coset of the relation kernel need
+            // not reduce to the same vector; only their difference is
+            // checked.
             silex::detail::TestHookAccess::set_saturation_kernel_failure(
                     silex::detail::SaturationKernelTestFailure::beta_solve);
             sflint::FmpzMat transform_rows(0, 0);

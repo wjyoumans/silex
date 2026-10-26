@@ -2327,7 +2327,8 @@ reduced in ``t-silex-class-unit-matrix``, the raw coefficients are at most
 ones at most 12 bits (2 to 12 bits for those rows).  Larger presentations
 were not measured.
 Silex size-reduces ``c_i`` against an LLL-reduced basis of the relation
-kernel before forming the witness.  If the basis that yields the unit
+kernel, or of a sublattice of it on the row-subset attempt described below,
+before forming the witness.  If the basis that yields the unit
 candidates is already built, it is reused.  Otherwise a kernel with at least
 two rows over a presentation with more than 32 generators takes the
 extension route first: the reduction of ``[c*A | I]`` for the
@@ -2375,7 +2376,8 @@ already ran (without keeping its image rows, so the beta coefficients come
 from the left transform), and from ``fmpz_lll`` when that route fails.  The
 reducer's row operations are unimodular and the checked rows of
 ``[c*A | I]`` are a kernel basis, so the result is a basis of the kernel on
-every route.  With FLINT's default routing a certified first phase is
+every route except the row-subset attempt described below, whose result is a
+basis of a sublattice of the kernel.  With FLINT's default routing a certified first phase is
 exactly the basis ``fmpz_lll`` returns for that kernel (``fmpz_lll`` keeps
 it when ``fmpz_lll_is_reduced`` holds), but the extension route returns an
 LLL-reduced basis of the same lattice that need not equal it.
@@ -2386,8 +2388,8 @@ rows as ``U [c*A | I]`` with ``U`` unimodular and ``image`` the
 identity parts of the rows with nonzero ``A`` part; then ``B = image * A``
 is a basis of the row lattice of ``A``.  The argument is elementary.  The
 rows of ``U A`` span the row lattice of ``A`` because ``U`` is unimodular.
-Silex accepts the route only when exactly ``n - g`` reduced rows have zero
-``A`` part, so the other ``g`` rows, whose ``A`` parts are the rows of
+When all ``n`` rows are reduced, Silex accepts the route only when exactly
+``n - g`` reduced rows have zero ``A`` part, so the other ``g`` rows, whose ``A`` parts are the rows of
 ``B``, span that lattice, which has rank ``g``; hence they are independent
 and ``B`` is a basis.  If ``x A = 0``, write ``x = y U`` with ``y``
 integral; then ``x A`` is the combination of the rows of ``B`` with the
@@ -2445,6 +2447,46 @@ in the local system together with ``ell``-th powers.  With proven units,
 changes by a unimodular row operation modulo ``ell``, and the rank modulo
 ``ell`` is unchanged.  Silex therefore applies the reduction only after the
 units are proven, and refuses it otherwise.
+
+On the extension-first route (more than 32 generators), when the
+presentation has ``n > g + t`` relations of rank ``g`` with ``t = 8``, Silex
+first reduces only a subset ``S`` of ``g + t`` rows of ``A``: the ``g`` pivot
+rows modulo a word-size prime (the first rows in order independent modulo
+that prime) and the first ``t`` other rows.  It reduces ``[c*A_S | I]`` as
+above, with the same checks and certificate, and pads the kernel and image
+rows with zeros outside ``S``.  Each padded kernel row ``v`` satisfies
+``v A = 0`` exactly, since its restriction passed the exact check
+``v_S A_S = 0``, so it is a relation-kernel vector; the rows are a basis of
+the kernel of ``A_S``, a sublattice of the relation kernel.  The image rows
+are kept only when ``|det(image * A)|`` equals the order of the
+presentation, that is the product of its Smith invariants, which is the
+index of the row lattice ``L(A)`` in ``Z^g`` because ``A`` has rank ``g``.
+Since ``image`` is integral, ``image * A`` lies in ``L(A)``; a full-rank
+sublattice with the same index is the whole lattice, so ``image * A`` is a
+basis of ``L(A)``.  This check does not rely on the unimodularity of FLINT's
+reduction.  Otherwise the first row of ``A`` outside ``L(A_S)`` is added to
+``S`` and the attempt repeats, for at most ``t`` added rows and while ``S``
+stays smaller than ``A``; when no such ``S`` is found or a check fails,
+Silex reduces all ``n`` rows as above.  With the subset image kept, the
+targets ``d_i (V^-1)_i`` lie in ``L(A)`` and ``image * A`` is a nonsingular
+basis of it, so the solve for the beta coefficients has an exact integral
+solution; the fallback to the presentation's row is reached only through a
+test seam.  The beta rows are then size-reduced against the basis of a
+sublattice of the kernel.  The soundness argument above needs only that
+``c_i`` changes by integer combinations of relation-kernel vectors, not a
+basis of the whole kernel, so it still holds; the reduction is only weaker.
+For a fixed set of usable auxiliary primes the rank modulo ``ell`` does not
+depend on the representative ``beta_i``, but which primes are usable and
+the size of the witnesses can change, as for a change of route above, and a
+failure fails closed.  The attempt is limited to presentations above the
+32-generator crossover, where the image rows are kept and the beta rows are
+solved from them.  At or below it, the beta rows come from the left
+transform, and a basis supported on ``S`` size-reduces only the coordinates
+in ``S``: on ``real_quadratic_d100000001`` (23 generators) the subset basis
+left the beta rows too large to build, the first attempt failed, and a
+retry published 34 relations in place of 41.  The value ``t = 8`` is a cost
+choice, not from a source; correctness does not depend on it, since every
+failure falls back.
 
 The order-unit saturation proofs build degree-one primes ``(q, theta - r)``
 from roots ``r`` of the defining polynomial ``f`` modulo ``q`` with an
