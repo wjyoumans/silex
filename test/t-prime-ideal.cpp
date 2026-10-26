@@ -3877,6 +3877,31 @@ int test_factored_value_nmod_matches_fmpz_route() {
                             ++failures;
                         }
                         ++checked;
+
+                        // The same evaluation from the factors reduced
+                        // mod p once, reused for every root, and from a
+                        // reduction made for this root alone.
+                        silex::detail::FactoredElementNmodReduction fresh;
+                        fresh.reduce(element, p);
+                        ulong fresh_value = 0;
+                        assert(fresh.value_at_degree_one_root(fresh_value,
+                                                              root) == ok);
+                        for (ulong other = 0; other < p; ++other) {
+                            ulong other_expected = 0;
+                            ulong other_value = 0;
+                            const bool other_ok = silex::detail::
+                                    factored_value_at_degree_one_root_nmod(
+                                            other_expected, element, p,
+                                            other);
+                            assert(fresh.value_at_degree_one_root(
+                                           other_value, other) == other_ok);
+                            if (other_ok) {
+                                assert(other_value == other_expected);
+                            }
+                        }
+                        if (ok) {
+                            assert(fresh_value == value);
+                        }
                     }
                 }
             }
@@ -3884,6 +3909,31 @@ int test_factored_value_nmod_matches_fmpz_route() {
     }
     // Both outcomes are exercised.
     assert(failures > 0 && failures < checked);
+    return 0;
+}
+
+// A reduction of an undefined FactoredElement, of an element mod p < 2, or
+// never made fails at every root, as factored_value_at_degree_one_root_nmod
+// does for those inputs.
+int test_factored_value_nmod_reduction_undefined() {
+    silex::FactoredElement undefined;
+    silex::detail::FactoredElementNmodReduction reduction;
+    ulong value = 0;
+    assert(!reduction.value_at_degree_one_root(value, 0));
+    reduction.reduce(undefined, 7);
+    assert(!silex::detail::factored_value_at_degree_one_root_nmod(
+            value, undefined, 7, 1));
+    assert(!reduction.value_at_degree_one_root(value, 1));
+
+    silex::NumberField field = silex::test::quadratic_field(-7);
+    silex::FactoredElement one(field);
+    assert(one.one());
+    reduction.reduce(one, 7);
+    assert(reduction.value_at_degree_one_root(value, 3) && value == 1);
+    reduction.reduce(one, 1);
+    assert(!silex::detail::factored_value_at_degree_one_root_nmod(value, one,
+                                                                  1, 0));
+    assert(!reduction.value_at_degree_one_root(value, 0));
     return 0;
 }
 
@@ -3928,6 +3978,9 @@ int test_factored_value_nmod_matches_fmpz_route_large() {
     const ulong p = fmpz_get_ui(p_fmpz.raw());
     const ulong roots[] = {0UL, 1UL, 2UL, 123456789UL, p / 2, p - 2, p - 1};
     const slong exponent_data[3][3] = {{1, 1, 1}, {2, -1, 3}, {-3, 2, -1}};
+    silex::FactoredElement factored_other(field);
+    assert(factored_other.push(factors[1], 4));
+    silex::detail::FactoredElementNmodReduction reused;
     slong checked = 0;
     for (const ulong root : roots) {
         sflint::Fmpz root_fmpz;
@@ -3949,6 +4002,16 @@ int test_factored_value_nmod_matches_fmpz_route_large() {
             assert(ok == expected_ok);
             if (ok) {
                 assert(fmpz_cmp_ui(expected.raw(), value) == 0);
+            }
+            // The factors reduced mod p once give the same, also when the
+            // reduction object is reused after reducing another element
+            // mod another prime.
+            reused.reduce(factored_other, 13);
+            reused.reduce(element, p);
+            ulong reduced_value = 0;
+            assert(reused.value_at_degree_one_root(reduced_value, root) == ok);
+            if (ok) {
+                assert(reduced_value == value);
             }
             ++checked;
         }
@@ -5251,6 +5314,7 @@ int main() {
     assert(test_degree_one_root_follows_recorded_convention() == 0);
     assert(test_factored_value_nmod_matches_fmpz_route() == 0);
     assert(test_factored_value_nmod_matches_fmpz_route_large() == 0);
+    assert(test_factored_value_nmod_reduction_undefined() == 0);
     assert(test_alpha_convention_kept_after_marking_maximal() == 0);
     assert(test_prime_ideal_inverse_matches_invert() == 0);
     assert(test_prime_ideal_inverse_declines_outside_contract() == 0);

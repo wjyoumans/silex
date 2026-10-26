@@ -716,6 +716,37 @@ bool saturation_proof_prime_column_at_degree_one_root(
         flint::FmpzConstRef p,
         flint::FmpzConstRef root,
         flint::FmpzConstRef ell) noexcept;
+// The parts of saturation_proof_prime_column_at_degree_one_root that do not
+// depend on the root, kept for its calls at several roots modulo the same p
+// (the degree-one primes over one rational prime): the proof rank, the
+// quotient-log setup (cofactor and order-ell generator), and, for the word
+// route, the free generators with their factors reduced mod p and the
+// torsion generator.  The overload taking a state builds them at its first
+// call and rebuilds them when a call names another group, p or ell, so every
+// column, and every failure, is that of the overload without a state.  The
+// group must not change while a state built from it is in use.
+class DegreeOneRootColumnState {
+public:
+    struct Data;
+
+    DegreeOneRootColumnState() noexcept;
+    ~DegreeOneRootColumnState() noexcept;
+
+    DegreeOneRootColumnState(const DegreeOneRootColumnState&) = delete;
+    DegreeOneRootColumnState& operator=(const DegreeOneRootColumnState&) =
+            delete;
+
+    // Built by saturation_proof_prime_column_at_degree_one_root; null
+    // until its first call.
+    std::unique_ptr<Data> data;
+};
+bool saturation_proof_prime_column_at_degree_one_root(
+        flint::FmpzMat& out,
+        const OrderUnitGroup& group,
+        flint::FmpzConstRef p,
+        flint::FmpzConstRef root,
+        flint::FmpzConstRef ell,
+        DegreeOneRootColumnState& state) noexcept;
 bool dlog_kernel_from_matrix(flint::FmpzMat& out,
                              const flint::FmpzMat& matrix,
                              flint::FmpzConstRef ell) noexcept;

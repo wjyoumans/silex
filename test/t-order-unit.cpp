@@ -9794,6 +9794,74 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
     return 0;
 }
 
+// saturation_proof_prime_column_at_degree_one_root with a
+// DegreeOneRootColumnState, which keeps the root-independent work (the
+// quotient-log setup and the generators' factors reduced mod q) across calls,
+// gives the column and the success of the overload without a state at every
+// root, whatever roots the state saw before.  One state is shared by every
+// call below: the roots run over all of [0, q) (most are not roots of the
+// defining polynomial, and the evaluation fails where a factor vanishes),
+// upwards and then downwards, plus q + 3, outside the word route's reduced
+// range; q, ell and the group change between runs, so the state is rebuilt.
+// Q(zeta_13) has torsion order 26, so ell = 2 and 13 add the torsion row.
+int test_degree_one_root_column_state_matches_stateless() {
+    silex::NumberField field = cyclotomic13_field();
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    const silex::Order* orders[] = {&equation, &maximal};
+    const slong cases[][2] = {{2, 53}, {3, 79}, {13, 79}, {5, 131}};
+    silex::detail::DegreeOneRootColumnState state;
+    slong available = 0;
+    slong declined = 0;
+    for (const silex::Order* order : orders) {
+        silex::EmbeddingContext embeddings(field);
+        silex::OrderUnitGroup group(*order);
+        assert(set_cyclotomic13_u2_power17_group(group, *order, field,
+                                                 embeddings));
+        for (const auto& item : cases) {
+            sflint::Fmpz ell;
+            sflint::Fmpz q;
+            assert(set_fmpz_si(ell, item[0]));
+            assert(set_fmpz_si(q, item[1]));
+            std::vector<slong> roots;
+            for (slong r = 0; r < item[1]; ++r) {
+                roots.push_back(r);
+            }
+            for (slong r = item[1] - 1; r >= 0; --r) {
+                roots.push_back(r);
+            }
+            roots.push_back(item[1] + 3);
+            for (const slong r : roots) {
+                sflint::Fmpz root;
+                assert(set_fmpz_si(root, r));
+                sflint::FmpzMat expected(0, 0);
+                sflint::FmpzMat column(0, 0);
+                const bool expected_ok =
+                        silex::detail::saturation_proof_prime_column_at_degree_one_root(
+                                expected, group, sflint::FmpzConstRef(q),
+                                sflint::FmpzConstRef(root),
+                                sflint::FmpzConstRef(ell));
+                const bool ok =
+                        silex::detail::saturation_proof_prime_column_at_degree_one_root(
+                                column, group, sflint::FmpzConstRef(q),
+                                sflint::FmpzConstRef(root),
+                                sflint::FmpzConstRef(ell), state);
+                assert(ok == expected_ok);
+                if (ok) {
+                    assert(fmpz_mat_equal(column.raw(), expected.raw()) != 0);
+                    ++available;
+                } else {
+                    ++declined;
+                }
+            }
+        }
+    }
+    // Both outcomes are exercised.
+    assert(available > 0 && declined > 0);
+    return 0;
+}
+
 // Checks the stable proof scan's columns at q (stable_proof_prime_columns)
 // against saturation_proof_prime_column at each of the `prime_count` primes
 // of decompose_prime(order, q, 1), as
@@ -14995,6 +15063,7 @@ int main() {
     test_prove_index_bound_quartic70640();
     test_prove_index_bound_cyclotomic13_undecided_root();
     test_stable_proof_prime_columns_match_residue_field_route();
+    test_degree_one_root_column_state_matches_stateless();
     test_stable_proof_prime_columns_fallback_and_wide_routes();
     test_degree_one_roots_mod_q_root_finder();
     test_word_x_power_mod_matches_flint();

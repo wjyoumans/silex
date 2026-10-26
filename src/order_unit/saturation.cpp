@@ -525,6 +525,13 @@ bool visit_stable_proof_prime_columns(const OrderUnitGroup& group,
                 group.diagnostics(), DiagnosticsModule::unit_group,
                 "unit_group.stable_scan.degree_one_decomposition");
         bool decomposed = false;
+        // The roots share q, so with two or more roots the columns share
+        // the work that does not depend on the root (the quotient-log setup
+        // and the generators' factors reduced mod q) through one state.  A
+        // single root takes the overload without a state, which reduces the
+        // factors in place instead of storing the reductions.  Both
+        // overloads give the same column and the same failures.
+        detail::DegreeOneRootColumnState column_state;
         for (const flint::Fmpz& root : roots) {
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
@@ -533,9 +540,16 @@ bool visit_stable_proof_prime_columns(const OrderUnitGroup& group,
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.stable_scan.dlog_column_test");
             flint::FmpzMat proof_column(proof_rank, 1);
-            if (detail::saturation_proof_prime_column_at_degree_one_root(
-                        proof_column, group, q, flint::FmpzConstRef(root),
-                        ell)) {
+            const bool available =
+                    roots.size() >= 2
+                            ? detail::saturation_proof_prime_column_at_degree_one_root(
+                                      proof_column, group, q,
+                                      flint::FmpzConstRef(root), ell,
+                                      column_state)
+                            : detail::saturation_proof_prime_column_at_degree_one_root(
+                                      proof_column, group, q,
+                                      flint::FmpzConstRef(root), ell);
+            if (available) {
                 SILEX_PROFILE_EVENT(
                         group.diagnostics(), DiagnosticsModule::unit_group,
                         "unit_group.stable_scan.direct_dlog_column_available");

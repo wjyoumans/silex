@@ -1649,6 +1649,91 @@ bool saturation_proof_prime_column_direct_degree_one(
 
 namespace {
 
+// The word-size parameters of degree_one_root_column_word: p, root, ell,
+// the cofactor (p - 1) / ell and zeta = quotient_generator mod p.
+struct DegreeOneRootWordParameters {
+    ulong p = 0;
+    ulong root = 0;
+    ulong ell = 0;
+    ulong cofactor = 0;
+    ulong zeta = 0;
+};
+
+// Whether the word route of degree_one_root_column_word applies, and its
+// parameters when it does.
+bool degree_one_root_word_parameters(DegreeOneRootWordParameters& out,
+                                     const OrderUnitGroup& group,
+                                     slong rows,
+                                     flint::FmpzConstRef p,
+                                     flint::FmpzConstRef root,
+                                     flint::FmpzConstRef ell,
+                                     flint::FmpzConstRef cofactor,
+                                     flint::FmpzConstRef quotient_generator)
+        noexcept {
+    if (!flint::fmpz_abs_fits_ui(p) ||
+        !flint::fmpz_abs_fits_ui(root) || !flint::fmpz_abs_fits_ui(ell) ||
+        !flint::fmpz_abs_fits_ui(cofactor) ||
+        !flint::fmpz_abs_fits_ui(quotient_generator) ||
+        flint::fmpz_sgn(p) <= 0 || flint::fmpz_sgn(root) < 0 ||
+        flint::fmpz_sgn(ell) <= 0) {
+        return false;
+    }
+    out.p = flint::fmpz_get_ui(p);
+    out.root = flint::fmpz_get_ui(root);
+    out.ell = flint::fmpz_get_ui(ell);
+    out.cofactor = flint::fmpz_get_ui(cofactor);
+    out.zeta = flint::fmpz_get_ui(quotient_generator) % out.p;
+    return out.p >= 2 && out.ell >= 2 && out.root < out.p && out.zeta != 0 &&
+           rows >= group.free_rank();
+}
+
+// The quotient logs of `values` (the residues of the column's entries) into
+// `candidate`, resolved together by word_quotient_log_resolve, with
+// quotient_log_mod_prime_apply for an entry left unresolved.
+bool degree_one_root_column_word_logs(
+        flint::FmpzMat& candidate,
+        const OrderUnitGroup& group,
+        const std::vector<ulong>& values,
+        const DegreeOneRootWordParameters& word,
+        flint::FmpzConstRef p,
+        flint::FmpzConstRef ell,
+        flint::FmpzConstRef cofactor,
+        flint::FmpzConstRef quotient_generator) noexcept {
+    const ulong p_inverse = n_preinvert_limb(word.p);
+    std::vector<WordQuotientLogTarget> pending;
+    pending.reserve(values.size());
+    for (std::size_t j = 0; j < values.size(); ++j) {
+        if (values[j] == 0) {
+            return false;
+        }
+        WordQuotientLogTarget target;
+        target.image =
+                n_powmod2_ui_preinv(values[j], word.cofactor, word.p,
+                                    p_inverse);
+        target.row = static_cast<slong>(j);
+        pending.push_back(target);
+    }
+
+    std::vector<bool> resolved(values.size(), false);
+    word_quotient_log_resolve(candidate, resolved, std::move(pending),
+                              word.zeta, word.p, word.ell,
+                              group.diagnostics());
+    flint::Fmpz value;
+    for (std::size_t j = 0; j < values.size(); ++j) {
+        if (resolved[j]) {
+            continue;
+        }
+        flint::fmpz_set_ui(flint::FmpzRef(value), values[j]);
+        if (!quotient_log_mod_prime_apply(
+                    flint::fmpz_mat_entry(candidate, static_cast<slong>(j), 0),
+                    flint::FmpzConstRef(value), cofactor, quotient_generator,
+                    p, ell)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // saturation_proof_prime_column_at_degree_one_root in word arithmetic, for
 // p, root and ell below the word size: the free generators are evaluated by
 // factored_value_at_degree_one_root_nmod, which fails exactly where
@@ -1671,37 +1756,23 @@ bool degree_one_root_column_word(flint::FmpzMat& candidate,
         noexcept {
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (field == nullptr || !flint::fmpz_abs_fits_ui(p) ||
-        !flint::fmpz_abs_fits_ui(root) || !flint::fmpz_abs_fits_ui(ell) ||
-        !flint::fmpz_abs_fits_ui(cofactor) ||
-        !flint::fmpz_abs_fits_ui(quotient_generator) ||
-        flint::fmpz_sgn(p) <= 0 || flint::fmpz_sgn(root) < 0 ||
-        flint::fmpz_sgn(ell) <= 0) {
-        return false;
-    }
-    const ulong p_ui = flint::fmpz_get_ui(p);
-    const ulong root_ui = flint::fmpz_get_ui(root);
-    const ulong ell_ui = flint::fmpz_get_ui(ell);
-    const ulong cofactor_ui = flint::fmpz_get_ui(cofactor);
-    const ulong zeta = flint::fmpz_get_ui(quotient_generator) % p_ui;
     const slong rank = group.free_rank();
     const slong rows = flint::fmpz_mat_nrows(candidate);
-    if (p_ui < 2 || ell_ui < 2 || root_ui >= p_ui || zeta == 0 ||
-        rows < rank) {
+    DegreeOneRootWordParameters word;
+    if (field == nullptr ||
+        !degree_one_root_word_parameters(word, group, rows, p, root, ell,
+                                         cofactor, quotient_generator)) {
         return false;
     }
 
-    const ulong p_inverse = n_preinvert_limb(p_ui);
-    std::vector<WordQuotientLogTarget> pending;
-    pending.reserve(static_cast<std::size_t>(rows));
     std::vector<ulong> values;
     values.reserve(static_cast<std::size_t>(rows));
     for (slong i = 0; i < rank; ++i) {
         FactoredElement generator(*field);
         ulong value = 0;
         if (!group.free_generator(generator, i) ||
-            !factored_value_at_degree_one_root_nmod(value, generator, p_ui,
-                                                    root_ui)) {
+            !factored_value_at_degree_one_root_nmod(value, generator, word.p,
+                                                    word.root)) {
             return false;
         }
         values.push_back(value);
@@ -1716,30 +1787,46 @@ bool degree_one_root_column_word(flint::FmpzMat& candidate,
             return false;
         }
         values.push_back(flint::fmpz_fdiv_ui(flint::FmpzConstRef(value),
-                                             p_ui));
+                                             word.p));
     }
-    for (std::size_t j = 0; j < values.size(); ++j) {
-        if (values[j] == 0) {
+    return degree_one_root_column_word_logs(candidate, group, values, word, p,
+                                            ell, cofactor, quotient_generator);
+}
+
+// The fmpz route of saturation_proof_prime_column_at_degree_one_root.
+bool degree_one_root_column_fmpz(flint::FmpzMat& candidate,
+                                 const OrderUnitGroup& group,
+                                 slong proof_rank,
+                                 flint::FmpzConstRef p,
+                                 flint::FmpzConstRef root,
+                                 flint::FmpzConstRef ell,
+                                 flint::FmpzConstRef cofactor,
+                                 flint::FmpzConstRef quotient_generator)
+        noexcept {
+    const Order* order = group.parent();
+    const NumberField* field = order == nullptr ? nullptr : order->parent();
+    const slong rank = group.free_rank();
+    flint::Fmpz value;
+    for (slong i = 0; i < rank; ++i) {
+        FactoredElement generator(*field);
+        if (!group.free_generator(generator, i) ||
+            !factored_value_at_degree_one_root(value, generator, p, root) ||
+            !quotient_log_mod_prime_apply(
+                    flint::fmpz_mat_entry(candidate, i, 0),
+                    flint::FmpzConstRef(value), cofactor, quotient_generator,
+                    p, ell)) {
             return false;
         }
-        WordQuotientLogTarget target;
-        target.image =
-                n_powmod2_ui_preinv(values[j], cofactor_ui, p_ui, p_inverse);
-        target.row = static_cast<slong>(j);
-        pending.push_back(target);
     }
 
-    std::vector<bool> resolved(values.size(), false);
-    word_quotient_log_resolve(candidate, resolved, std::move(pending), zeta,
-                              p_ui, ell_ui, group.diagnostics());
-    flint::Fmpz value;
-    for (std::size_t j = 0; j < values.size(); ++j) {
-        if (resolved[j]) {
-            continue;
-        }
-        flint::fmpz_set_ui(flint::FmpzRef(value), values[j]);
-        if (!quotient_log_mod_prime_apply(
-                    flint::fmpz_mat_entry(candidate, static_cast<slong>(j), 0),
+    if (proof_rank > rank) {
+        OrderElement torsion(*order);
+        Element torsion_value(*field);
+        if (!group.torsion_generator(torsion) ||
+            !torsion.get_element(torsion_value) ||
+            !element_value_at_degree_one_root(value, torsion_value, p, root) ||
+            !quotient_log_mod_prime_apply(
+                    flint::fmpz_mat_entry(candidate, rank, 0),
                     flint::FmpzConstRef(value), cofactor, quotient_generator,
                     p, ell)) {
             return false;
@@ -1760,7 +1847,6 @@ bool saturation_proof_prime_column_at_degree_one_root(
                         "unit_group.proof_degree_one_root_column");
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
-    const slong rank = group.free_rank();
     slong proof_rank = 0;
     flint::Fmpz cofactor;
     flint::Fmpz quotient_generator;
@@ -1771,39 +1857,185 @@ bool saturation_proof_prime_column_at_degree_one_root(
     }
 
     flint::FmpzMat candidate(proof_rank, 1);
-    flint::Fmpz value;
-    if (degree_one_root_column_word(candidate, group, p, root, ell,
-                                    flint::FmpzConstRef(cofactor),
-                                    flint::FmpzConstRef(quotient_generator))) {
-        out = std::move(candidate);
-        return true;
-    }
-    for (slong i = 0; i < rank; ++i) {
-        FactoredElement generator(*field);
-        if (!group.free_generator(generator, i) ||
-            !factored_value_at_degree_one_root(value, generator, p, root) ||
-            !quotient_log_mod_prime_apply(
-                    flint::fmpz_mat_entry(candidate, i, 0),
-                    flint::FmpzConstRef(value), flint::FmpzConstRef(cofactor),
-                    flint::FmpzConstRef(quotient_generator),
-                    p, ell)) {
-            return false;
-        }
+    if (!degree_one_root_column_word(candidate, group, p, root, ell,
+                                     flint::FmpzConstRef(cofactor),
+                                     flint::FmpzConstRef(quotient_generator)) &&
+        !degree_one_root_column_fmpz(candidate, group, proof_rank, p, root,
+                                     ell, flint::FmpzConstRef(cofactor),
+                                     flint::FmpzConstRef(quotient_generator))) {
+        return false;
     }
 
-    if (proof_rank > rank) {
-        OrderElement torsion(*order);
-        Element torsion_value(*field);
-        if (!group.torsion_generator(torsion) ||
-            !torsion.get_element(torsion_value) ||
-            !element_value_at_degree_one_root(value, torsion_value, p, root) ||
-            !quotient_log_mod_prime_apply(
-                    flint::fmpz_mat_entry(candidate, rank, 0),
-                    flint::FmpzConstRef(value), flint::FmpzConstRef(cofactor),
-                    flint::FmpzConstRef(quotient_generator),
-                    p, ell)) {
+    out = std::move(candidate);
+    return true;
+}
+
+struct DegreeOneRootColumnState::Data {
+    // The arguments the state was built for.
+    const OrderUnitGroup* group = nullptr;
+    flint::Fmpz p;
+    flint::Fmpz ell;
+
+    // The checks and quotient-log setup that open every column.
+    bool setup = false;
+    slong proof_rank = 0;
+    flint::Fmpz cofactor;
+    flint::Fmpz quotient_generator;
+
+    // The word-route entries, built at the first word-route column:
+    // `word_entries` is false when one cannot be formed at any root.
+    bool word_built = false;
+    bool word_entries = false;
+    std::vector<FactoredElement> generators;
+    std::vector<FactoredElementNmodReduction> reductions;
+    Element torsion_value;
+};
+
+DegreeOneRootColumnState::DegreeOneRootColumnState() noexcept = default;
+DegreeOneRootColumnState::~DegreeOneRootColumnState() noexcept = default;
+
+namespace {
+
+// The root-independent part of degree_one_root_column_word: the free
+// generators, each with its factors reduced mod p, and the value of the
+// torsion generator when the column has a torsion row.  Returns false where
+// degree_one_root_column_word fails for a root-independent reason.
+bool build_degree_one_root_word_entries(DegreeOneRootColumnState::Data& state,
+                                        const OrderUnitGroup& group,
+                                        slong rows,
+                                        ulong p) noexcept {
+    const Order* order = group.parent();
+    const NumberField* field = order == nullptr ? nullptr : order->parent();
+    const slong rank = group.free_rank();
+    if (field == nullptr) {
+        return false;
+    }
+
+    // The reductions borrow the generators, so `generators` is filled before
+    // any reduction and never reallocated afterwards.
+    state.generators.reserve(static_cast<std::size_t>(rank));
+    for (slong i = 0; i < rank; ++i) {
+        state.generators.emplace_back(*field);
+        if (!group.free_generator(state.generators.back(), i)) {
             return false;
         }
+    }
+    state.reductions.resize(state.generators.size());
+    for (std::size_t i = 0; i < state.generators.size(); ++i) {
+        state.reductions[i].reduce(state.generators[i], p);
+    }
+    if (rows > rank) {
+        OrderElement torsion(*order);
+        Element torsion_value(*field);
+        if (rows != rank + 1 || !group.torsion_generator(torsion) ||
+            !torsion.get_element(torsion_value)) {
+            return false;
+        }
+        state.torsion_value = std::move(torsion_value);
+    }
+    return true;
+}
+
+// degree_one_root_column_word with the root-independent entries read from
+// `state`: the free generator values come from their reductions mod p,
+// which give the residues factored_value_at_degree_one_root_nmod gives.
+bool degree_one_root_column_word(flint::FmpzMat& candidate,
+                                 const OrderUnitGroup& group,
+                                 flint::FmpzConstRef p,
+                                 flint::FmpzConstRef root,
+                                 flint::FmpzConstRef ell,
+                                 DegreeOneRootColumnState::Data& state)
+        noexcept {
+    const flint::FmpzConstRef cofactor(state.cofactor);
+    const flint::FmpzConstRef quotient_generator(state.quotient_generator);
+    const slong rank = group.free_rank();
+    const slong rows = flint::fmpz_mat_nrows(candidate);
+    DegreeOneRootWordParameters word;
+    if (group.parent() == nullptr || group.parent()->parent() == nullptr ||
+        !degree_one_root_word_parameters(word, group, rows, p, root, ell,
+                                         cofactor, quotient_generator)) {
+        return false;
+    }
+    if (!state.word_built) {
+        state.word_built = true;
+        state.word_entries =
+                build_degree_one_root_word_entries(state, group, rows, word.p);
+    }
+    if (!state.word_entries) {
+        return false;
+    }
+
+    std::vector<ulong> values;
+    values.reserve(static_cast<std::size_t>(rows));
+    for (slong i = 0; i < rank; ++i) {
+        ulong value = 0;
+        if (!state.reductions[static_cast<std::size_t>(i)]
+                     .value_at_degree_one_root(value, word.root)) {
+            return false;
+        }
+        values.push_back(value);
+    }
+    if (rows > rank) {
+        flint::Fmpz value;
+        if (!element_value_at_degree_one_root(value, state.torsion_value, p,
+                                              root)) {
+            return false;
+        }
+        values.push_back(flint::fmpz_fdiv_ui(flint::FmpzConstRef(value),
+                                             word.p));
+    }
+    return degree_one_root_column_word_logs(candidate, group, values, word, p,
+                                            ell, cofactor, quotient_generator);
+}
+
+}  // namespace
+
+bool saturation_proof_prime_column_at_degree_one_root(
+        flint::FmpzMat& out,
+        const OrderUnitGroup& group,
+        flint::FmpzConstRef p,
+        flint::FmpzConstRef root,
+        flint::FmpzConstRef ell,
+        DegreeOneRootColumnState& state) noexcept {
+    SILEX_PROFILE_SCOPE(group.diagnostics(), DiagnosticsModule::unit_group,
+                        "unit_group.proof_degree_one_root_column");
+    DegreeOneRootColumnState::Data* data = state.data.get();
+    if (data == nullptr || data->group != &group ||
+        !flint::fmpz_equal(flint::FmpzConstRef(data->p), p) ||
+        !flint::fmpz_equal(flint::FmpzConstRef(data->ell), ell)) {
+        // The checks and setup of the overload without a state, which depend
+        // on the group, p and ell only.
+        std::unique_ptr<DegreeOneRootColumnState::Data> built(
+                new (std::nothrow) DegreeOneRootColumnState::Data());
+        if (built == nullptr) {
+            return false;
+        }
+        built->group = &group;
+        flint::fmpz_set(flint::FmpzRef(built->p), p);
+        flint::fmpz_set(flint::FmpzRef(built->ell), ell);
+        const Order* order = group.parent();
+        const NumberField* field =
+                order == nullptr ? nullptr : order->parent();
+        built->setup =
+                group.is_set() && field != nullptr &&
+                dlog_proof_rank(built->proof_rank, group, ell) &&
+                quotient_log_mod_prime_setup(built->cofactor,
+                                             built->quotient_generator, p,
+                                             ell);
+        state.data = std::move(built);
+        data = state.data.get();
+    }
+    if (!data->setup) {
+        return false;
+    }
+
+    flint::FmpzMat candidate(data->proof_rank, 1);
+    if (!degree_one_root_column_word(candidate, group, p, root, ell, *data) &&
+        !degree_one_root_column_fmpz(
+                candidate, group, data->proof_rank, p, root, ell,
+                flint::FmpzConstRef(data->cofactor),
+                flint::FmpzConstRef(data->quotient_generator))) {
+        return false;
     }
 
     out = std::move(candidate);

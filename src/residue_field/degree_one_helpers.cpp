@@ -2,6 +2,7 @@
 
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
+#include <cstddef>
 #include <limits>
 #include <utility>
 
@@ -94,11 +95,37 @@ bool pow_mod_abs_slong_ui(ulong& out,
     return true;
 }
 
-// The stored form of `value` in `field` is the integer polynomial num(x) over
-// the positive integer den that nf_elem_get_fmpq_poly copies out: one
-// coefficient for NF_LINEAR, two for NF_QUADRATIC, and the fmpq_poly
-// otherwise.  Sets `numerator` = num(root) mod p and `denominator` = den mod
-// p, reading the coefficients in place.  `root` must be reduced mod p.
+// The stored form of `value` in `field`: the integer polynomial num(x) over
+// the positive integer den that nf_elem_get_fmpq_poly copies out, read in
+// place.  It has one coefficient for NF_LINEAR, two for NF_QUADRATIC, and
+// those of the fmpq_poly otherwise.
+struct StoredForm {
+    const fmpz* coefficients = nullptr;
+    const fmpz* denominator = nullptr;
+    slong length = 0;
+};
+
+StoredForm stored_form(const nf_elem_struct* value,
+                       const nf_struct* field) noexcept {
+    StoredForm form;
+    if ((field->flag & NF_LINEAR) != 0) {
+        form.coefficients = LNF_ELEM_NUMREF(value);
+        form.denominator = LNF_ELEM_DENREF(value);
+        form.length = 1;
+    } else if ((field->flag & NF_QUADRATIC) != 0) {
+        form.coefficients = QNF_ELEM_NUMREF(value);
+        form.denominator = QNF_ELEM_DENREF(value);
+        form.length = 2;
+    } else {
+        form.coefficients = NF_ELEM_NUMREF(value);
+        form.denominator = NF_ELEM_DENREF(value);
+        form.length = NF_ELEM(value)->length;
+    }
+    return form;
+}
+
+// Sets `numerator` = num(root) mod p and `denominator` = den mod p for the
+// stored form num(x) / den of `value`.  `root` must be reduced mod p.
 // Horner's rule on the reduced coefficients gives the residue that
 // nmod_poly_evaluate_nmod gives on their reduction.
 void stored_form_value_mod_p(ulong& numerator,
@@ -107,30 +134,29 @@ void stored_form_value_mod_p(ulong& numerator,
                              const nf_struct* field,
                              ulong root,
                              nmod_t mod) noexcept {
-    const fmpz* coefficients = nullptr;
-    const fmpz* stored_denominator = nullptr;
-    slong length = 0;
-    if ((field->flag & NF_LINEAR) != 0) {
-        coefficients = LNF_ELEM_NUMREF(value);
-        stored_denominator = LNF_ELEM_DENREF(value);
-        length = 1;
-    } else if ((field->flag & NF_QUADRATIC) != 0) {
-        coefficients = QNF_ELEM_NUMREF(value);
-        stored_denominator = QNF_ELEM_DENREF(value);
-        length = 2;
-    } else {
-        coefficients = NF_ELEM_NUMREF(value);
-        stored_denominator = NF_ELEM_DENREF(value);
-        length = NF_ELEM(value)->length;
-    }
-
+    const StoredForm form = stored_form(value, field);
     ulong accumulator = 0;
-    for (slong i = length - 1; i >= 0; --i) {
+    for (slong i = form.length - 1; i >= 0; --i) {
         accumulator = nmod_add(nmod_mul(accumulator, root, mod),
-                               ::fmpz_get_nmod(coefficients + i, mod), mod);
+                               ::fmpz_get_nmod(form.coefficients + i, mod),
+                               mod);
     }
     numerator = accumulator;
-    denominator = ::fmpz_get_nmod(stored_denominator, mod);
+    denominator = ::fmpz_get_nmod(form.denominator, mod);
+}
+
+// Horner's rule, as in stored_form_value_mod_p, on coefficients already
+// reduced mod p, lowest degree first.
+ulong reduced_coefficients_value(const ulong* coefficients,
+                                 std::size_t length,
+                                 ulong root,
+                                 nmod_t mod) noexcept {
+    ulong accumulator = 0;
+    for (std::size_t i = length; i > 0; --i) {
+        accumulator = nmod_add(nmod_mul(accumulator, root, mod),
+                               coefficients[i - 1], mod);
+    }
+    return accumulator;
 }
 
 // The factor's value at `root` from its canonical fmpq_poly, inverting each
@@ -456,6 +482,61 @@ bool factored_value_at_degree_one_root(flint::Fmpz& out,
     return ::fmpz_is_zero(out.raw()) == 0;
 }
 
+namespace {
+
+// Multiplies base^exponent, for the factor value base = numerator /
+// denominator, into the product numerator_product / denominator_product.
+// Fails when the numerator is zero or the exponent cannot be negated.
+bool multiply_factor_power_nmod(ulong& numerator_product,
+                                ulong& denominator_product,
+                                ulong numerator,
+                                ulong denominator,
+                                slong exponent,
+                                ulong p,
+                                ulong p_inverse,
+                                nmod_t mod) noexcept {
+    if (numerator == 0) {
+        return false;
+    }
+
+    ulong numerator_power = 1;
+    ulong denominator_power = 1;
+    if (!pow_mod_abs_slong_ui(numerator_power, numerator, exponent, p,
+                              p_inverse) ||
+        !pow_mod_abs_slong_ui(denominator_power, denominator, exponent, p,
+                              p_inverse)) {
+        return false;
+    }
+    if (exponent < 0) {
+        std::swap(numerator_power, denominator_power);
+    }
+    numerator_product = nmod_mul(numerator_product, numerator_power, mod);
+    denominator_product = nmod_mul(denominator_product, denominator_power, mod);
+    return true;
+}
+
+// out = numerator_product / denominator_product.  For prime p every power
+// multiplied in is a unit, so the inverse exists; a composite p (outside the
+// contract) whose denominator is not a unit fails here instead of in
+// n_invmod.
+bool finish_factored_value_nmod(ulong& out,
+                                ulong numerator_product,
+                                ulong denominator_product,
+                                ulong p,
+                                nmod_t mod) noexcept {
+    ulong denominator_inverse = 0;
+    if (denominator_product == 0 ||
+        n_gcdinv(&denominator_inverse, denominator_product, p) != 1) {
+        return false;
+    }
+    const ulong product =
+            nmod_mul(numerator_product, denominator_inverse, mod);
+    out = product;
+    return product != 0;
+}
+
+}  // namespace
+
 bool factored_value_at_degree_one_root_nmod(ulong& out,
                                            const FactoredElement& element,
                                            ulong p,
@@ -499,38 +580,111 @@ bool factored_value_at_degree_one_root_nmod(ulong& out,
                                           mod)) {
             return false;
         }
-        if (numerator == 0) {
+        if (!multiply_factor_power_nmod(numerator_product,
+                                        denominator_product, numerator,
+                                        denominator, entry.exponent, p,
+                                        p_inverse, mod)) {
             return false;
         }
-
-        ulong numerator_power = 1;
-        ulong denominator_power = 1;
-        if (!pow_mod_abs_slong_ui(numerator_power, numerator, entry.exponent,
-                                  p, p_inverse) ||
-            !pow_mod_abs_slong_ui(denominator_power, denominator,
-                                  entry.exponent, p, p_inverse)) {
-            return false;
-        }
-        if (entry.exponent < 0) {
-            std::swap(numerator_power, denominator_power);
-        }
-        numerator_product = nmod_mul(numerator_product, numerator_power, mod);
-        denominator_product =
-                nmod_mul(denominator_product, denominator_power, mod);
     }
 
-    // For prime p every power above is a unit, so the inverse exists; a
-    // composite p (outside the contract) whose denominator is not a unit
-    // fails here instead of in n_invmod.
-    ulong denominator_inverse = 0;
-    if (denominator_product == 0 ||
-        n_gcdinv(&denominator_inverse, denominator_product, p) != 1) {
+    return finish_factored_value_nmod(out, numerator_product,
+                                      denominator_product, p, mod);
+}
+
+void FactoredElementNmodReduction::reduce(const FactoredElement& element,
+                                          ulong p) noexcept {
+    element_ = &element;
+    p_ = p;
+    defined_ = false;
+    factors_.clear();
+    coefficients_.clear();
+    if (!element.is_defined() || p < 2) {
+        return;
+    }
+    const NumberField* parent = element.parent();
+    const nf_struct* field =
+            parent == nullptr ? nullptr : parent->raw_flint_field();
+    if (field == nullptr) {
+        return;
+    }
+
+    nmod_init(&mod_, p);
+    p_inverse_ = n_preinvert_limb(p);
+    // The residues that stored_form_value_mod_p reads: den mod p and,
+    // unless it is zero (the fallback route then evaluates the factor at
+    // each root), every coefficient of num(x) mod p.  The first pass sizes
+    // coefficients_ for the second, which writes the residues.
+    const FactorSpan<Element> factors = element.factors();
+    factors_.reserve(factors.size());
+    std::size_t total_length = 0;
+    for (std::size_t k = 0; k < factors.size(); ++k) {
+        const auto& entry = factors[k];
+        if (entry.exponent == 0) {
+            continue;
+        }
+        const StoredForm form =
+                stored_form(entry.factor.raw_flint_element(), field);
+        Factor reduced;
+        reduced.exponent = entry.exponent;
+        reduced.index = k;
+        reduced.denominator = ::fmpz_get_nmod(form.denominator, mod_);
+        reduced.offset = total_length;
+        reduced.length = reduced.denominator == 0
+                                 ? 0
+                                 : static_cast<std::size_t>(form.length);
+        total_length += reduced.length;
+        factors_.push_back(reduced);
+    }
+    coefficients_.resize(total_length);
+    ulong* coefficients = coefficients_.data();
+    for (const Factor& reduced : factors_) {
+        const StoredForm form = stored_form(
+                factors[reduced.index].factor.raw_flint_element(), field);
+        for (std::size_t i = 0; i < reduced.length; ++i) {
+            coefficients[reduced.offset + i] =
+                    ::fmpz_get_nmod(form.coefficients + i, mod_);
+        }
+    }
+    defined_ = true;
+}
+
+bool FactoredElementNmodReduction::value_at_degree_one_root(
+        ulong& out,
+        ulong root) const noexcept {
+    if (!defined_ || element_ == nullptr) {
         return false;
     }
-    const ulong product =
-            nmod_mul(numerator_product, denominator_inverse, mod);
-    out = product;
-    return product != 0;
+
+    // The steps of factored_value_at_degree_one_root_nmod, factor by factor,
+    // with the reductions mod p read from reduce().
+    const ulong reduced_root = root % p_;
+    const FactorSpan<Element> factors = element_->factors();
+    ulong numerator_product = 1;
+    ulong denominator_product = 1;
+    for (const Factor& factor : factors_) {
+        ulong numerator = 0;
+        ulong denominator = factor.denominator;
+        if (denominator != 0) {
+            numerator = reduced_coefficients_value(
+                    coefficients_.data() + factor.offset, factor.length,
+                    reduced_root, mod_);
+        } else if (!fmpq_poly_value_at_root_nmod(
+                           numerator, denominator,
+                           factors[factor.index].factor, p_, reduced_root,
+                           mod_)) {
+            return false;
+        }
+        if (!multiply_factor_power_nmod(numerator_product,
+                                        denominator_product, numerator,
+                                        denominator, factor.exponent, p_,
+                                        p_inverse_, mod_)) {
+            return false;
+        }
+    }
+
+    return finish_factored_value_nmod(out, numerator_product,
+                                      denominator_product, p_, mod_);
 }
 
 bool element_value_at_degree_one_root(flint::Fmpz& out,
