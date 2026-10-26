@@ -1335,6 +1335,8 @@ int test_apply_unit_reduction_wide_merge() {
     set_zmat_entry_si(cancel, 0, 0, big);
     actual = copy_factored_values(cancel_values);
     assert(silex::detail::apply_unit_reduction(actual, group, cancel));
+    // The wide path stores the empty product.
+    assert(actual[0].length() == 0);
     {
         silex::Element value(cubic);
         assert(actual[0].evaluate(value));
@@ -1357,6 +1359,46 @@ int test_apply_unit_reduction_wide_merge() {
                                                &unchanged));
     assert(unchanged);
     assert(same_factor_lists(actual, wide_values));
+    return 0;
+}
+
+// A coefficient -c_ij past slong stops the reduce-mod-units loop with
+// inexact coefficients.  theta^(3 * 2^62) (theta - 1)^(3 * 2^62), stored as
+// three factors of each base, has coordinates (3 * 2^62, 3 * 2^62) in the
+// units theta and theta - 1 of the cyclic cubic x^3 - 3x + 1.  At the
+// starting precision those coordinates are wide balls, so the rounding is
+// approximate, and apply_unit_reduction leaves the value unchanged.  The
+// loop used to retry the same coefficients at the same precision without
+// end; it now returns the value unreduced.
+int test_reduce_mod_units_unfit_coefficient_stops() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    silex::FactoredElement generators[] = {
+            silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+    assert(generators[0].set_element(theta));
+    assert(generators[1].set_element(theta_minus_one));
+    silex::EmbeddingContext embeddings(cubic);
+    silex::OrderUnitGroup group;
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 64));
+    assert(group.free_rank() == 2);
+
+    const slong big = WORD(1) << 62;
+    std::vector<silex::FactoredElement> values;
+    values.emplace_back(cubic);
+    for (int k = 0; k < 3; ++k) {
+        assert(values[0].push(theta, big));
+        assert(values[0].push(theta_minus_one, big));
+    }
+    std::vector<silex::FactoredElement> expected = copy_factored_values(values);
+    assert(silex::detail::reduce_relation_units_modulo(
+            values, group, embeddings, 32));
+    assert(same_factor_lists(values, expected));
     return 0;
 }
 
@@ -15560,6 +15602,7 @@ int main() {
     test_reduce_mod_units_half_integer_tie();
     test_apply_unit_reduction_factor_list();
     test_apply_unit_reduction_wide_merge();
+    test_reduce_mod_units_unfit_coefficient_stops();
     test_reduce_mod_units_half_integer_tie_stop_rule();
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_origin_pair_cache();

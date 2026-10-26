@@ -2177,10 +2177,10 @@ bool push_merged_unit_factors(FactoredElement& out,
 // reference forms this product with exponents of any size (Clgp/Map.jl
 // reduce_mod_units multiplies FacElem values, whose exponents are
 // ZZRingElem; Misc/FactoredElem.jl).  Sets `fits` false, with `out`
-// unchanged, when a merged exponent does not fit an slong: a
-// FactoredElement cannot hold that value.  The caller has checked that every
-// -c_j fits an slong.  False when a generator or factor cannot be loaded or
-// stored, or the bucket count would overflow.
+// unchanged, when a merged exponent does not fit an slong (a
+// FactoredElement cannot hold that value) or the bucket count would
+// overflow.  The caller has checked that every -c_j fits an slong.  False
+// when a generator or factor cannot be loaded or stored.
 bool push_wide_reduced_unit_factors(FactoredElement& out,
                                     bool& fits,
                                     const FactoredElement& input,
@@ -2230,7 +2230,7 @@ bool push_wide_reduced_unit_factors(FactoredElement& out,
     std::size_t buckets = 1;
     while (buckets < 2 * count) {
         if (buckets > std::numeric_limits<std::size_t>::max() / 4) {
-            return false;
+            return true;
         }
         buckets *= 2;
     }
@@ -2325,8 +2325,9 @@ bool apply_unit_reduction(std::vector<FactoredElement>& values,
     // (push_wide_reduced_unit_factors), as the reference's exponents have
     // any size.
     //
-    // A reduced value that a FactoredElement cannot hold (-c_ij, or a
-    // merged exponent, past slong) returns true with `values` unchanged and
+    // When some -c_ij is past slong, Silex does not form the reduced
+    // product, and a merged exponent past slong cannot be held in a
+    // FactoredElement; either returns true with `values` unchanged and
     // *unchanged set.  Intentional deviation: the reference's exponents have
     // any size, so it always stores the reduced values; here each value
     // keeps its own factorization, which is the same unit, only not reduced

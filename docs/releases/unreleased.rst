@@ -2634,8 +2634,9 @@ Fixed
 - Reducing relation-kernel unit candidates modulo the current unit group no
   longer fails when a scaled exponent of a stored generator overflows a
   machine word.  The reduced value is formed with arbitrary-size exponents
-  and stored when its merged exponents fit; when they do not, the candidate
-  keeps its own factorization (the same unit, unreduced) instead of failing.
+  and stored when its merged exponents fit; when they do not, the candidates
+  keep their own factorizations (the same units, unreduced) instead of
+  failing.
   Some ``grh`` runs on large cyclotomic real fields, for example
   ``cyclotomic_real_136_deg32`` under an alternative internal random
   sequence, previously ended in ``class_unit_computation_failed`` this way;

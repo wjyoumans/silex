@@ -1592,15 +1592,20 @@ arithmetic still does not merge factors.
 When a scaled exponent ``-c_j * e`` of some generator factor does not fit
 ``slong``, the same merged product is formed with ``fmpz`` exponents, as
 Hecke's ``ZZRingElem`` exponents allow, and stored when every merged
-exponent fits ``slong``.
+exponent fits ``slong``.  On this path a full cancellation stores the
+empty product (the value 1), because the concatenated list cannot be held.
 
-**Deviation** (word-size exponents): when a merged exponent, or some
-``-c_j``, does not fit ``slong``, a ``FactoredElement`` cannot hold the
+**Deviation** (word-size exponents): when some ``-c_j`` does not fit
+``slong``, Silex does not form the reduced product, and when a merged
+exponent does not fit ``slong``, a ``FactoredElement`` cannot hold the
 reduced value.  Silex then leaves every value of the call unchanged and ends
 the reduction, where Hecke stores the reduced ``FacElem``.  Each output is
 then its input times the empty product of generators, so, as above,
 correctness does not depend on it; only the representatives kept differ.
-Such an overflow previously failed the class/unit computation.
+A scaled exponent past ``slong`` previously failed the class/unit
+computation.  A ``-c_j`` past ``slong`` previously left the values
+unchanged with exact coefficients, and with inexact coefficients retried the
+same coefficients at the same precision without end.
 
 The approximate rounding itself ports Hecke v0.38.6
 ``src/NumFieldOrd/NfOrd/Clgp/Map.jl:round_approx(ZZMatrix, ArbMatrix)``.  Its
