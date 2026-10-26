@@ -3945,12 +3945,19 @@ int test_pivot_search_draws_ideal_per_pivot_cubic() {
 // pivots and is multiplied by each pivot's prime power, as the reference
 // buch2.c:rnd_rel draws R once for every prime of L_jid.  Q(zeta_64),
 // degree 32, has class group Z/17 (Washington, Introduction to Cyclotomic
-// Fields, class number tables).
+// Fields, class number tables).  It is defined here by
+// Phi_64(x + 1) = (x + 1)^32 + 1, which is not exactly Phi_64, so the grh
+// search adds no cyclotomic Galois images (relation_candidate.cpp); those
+// would end the pivot search before a pass searches several pivots.
 int test_pivot_search_draws_one_ideal_per_pass_degree_32() {
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 32, 1);
-    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    slong binomial = 1;
+    for (slong k = 0; k <= 32; ++k) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, k,
+                                       k == 0 ? binomial + 1 : binomial);
+        binomial = binomial * (32 - k) / (k + 1);
+    }
     const PivotRandomIdealCounter counter = grh_pivot_random_ideal_counts(
             silex::test::field_by_polynomial(
                     sflint::FmpqPolyConstRef(polynomial)));

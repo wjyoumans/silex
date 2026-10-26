@@ -164,6 +164,28 @@ Changed
   ``proven`` requests and
   other presentations are unchanged.
 
+- On ``grh`` class group and unit computations for fields of degree 30 or
+  more given by the exact cyclotomic polynomial ``Phi_m``, the relation
+  search also tries the Galois images ``sigma_k(alpha)`` of its relations
+  (``sigma_k(x) = x^k``) when the factor base is Galois-stable, keeping
+  them by the rule of PARI 2.17.3 ``buch2.c`` (``add_rel``, ``add_rel_i``).
+  Each image is formed exactly and factored like a searched candidate.  The
+  degree-30 crossover is Silex's own, set by measurement and shared with
+  the one-random-ideal-per-pass rule (PARI adds images at every degree);
+  fields of degree below 30, other fields and ``proven`` requests run
+  exactly as before (identical records on all 41 cyclotomic corpus rows of
+  degree below 30, whole-process callgrind Ir within 0.05%).  Class groups,
+  regulators and certification labels are unchanged on all 46 cyclotomic
+  corpus rows that finish (``cyclotomic_real_163_deg81`` timed out on both
+  builds).  Whole-process callgrind Ir of ``grh`` drops by 47% on
+  ``cyclotomic_51_phi32``, 70% on ``cyclotomic_64_phi32``, 48% on
+  ``cyclotomic_37_phi36`` and 81.5% on ``cyclotomic_41_phi40``; paired
+  timing on a busy machine (median of 9) gives 0.51x, 0.28x, 0.47x and
+  0.16x.  On these fields the relation sequence changes, so the relations
+  found, the class-group generators, and record fields such as
+  ``class_group.relation_count`` and ``unit_group.regulator_radius`` can
+  differ from earlier versions.
+
 - Ideal membership for a triangular (Hermite) basis and the coordinate
   divisibility valuation of prime ideals now run word-size screens first:
   membership reduces modulo the basis determinant (the precondition of the

@@ -248,6 +248,10 @@ bool reduced_basis_first_row_is_scalar_rational(
 bool element_is_scalar_rational(bool& scalar,
                                 const Element& element) noexcept;
 
+// `galois_image` marks a candidate that is a cyclotomic Galois image of a
+// stored relation (relation_candidate.cpp, the Galois-image step): it gets
+// no images of its own, and on the generator path it runs no goal
+// publication, which the step does once for the whole batch.
 bool try_coordinate_candidate_den(
         ClassGroupContext& context,
         const Order& order,
@@ -270,7 +274,8 @@ bool try_coordinate_candidate_den(
         bool* factor_attempt_limit_reached = nullptr,
         Relation* admission_scratch = nullptr,
         OrderCoordinateElementConversion* coordinate_conversion = nullptr,
-        bool admission_scratch_base_verified = false) noexcept;
+        bool admission_scratch_base_verified = false,
+        bool galois_image = false) noexcept;
 
 bool try_coordinate_candidate(
         ClassGroupContext& context,

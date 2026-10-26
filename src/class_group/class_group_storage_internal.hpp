@@ -12,6 +12,7 @@
 
 #include "ideal_lattice_lll_internal.hpp"
 #include "../abelian_group/abelian_group_internal.hpp"
+#include "cyclotomic_galois_images_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 #include "relation_search_budget_internal.hpp"
 #include "../factor_base/generation_different_route_internal.hpp"
@@ -21,6 +22,15 @@
 #include <vector>
 
 namespace silex::detail {
+
+// Smallest field degree at which the relation search uses its large-field
+// rules: one random-walk ideal serves every pivot of a pass
+// (lll_relation_search.cpp, collect_pivot_lll_ideal), and a grh search on a
+// field defined by exactly Phi_n adds the Galois images of its relations
+// (relation_candidate.cpp, the Galois-image step).  Below it the search
+// draws one ideal per pivot and adds no images.  The crossover is measured,
+// not sourced (see docs/reference/algorithms_and_sources.rst).
+inline constexpr slong kLargeFieldRelationSearchMinDegree = 30;
 
 struct FactorBaseHonestyFailure;
 
@@ -533,6 +543,23 @@ struct ClassGroupContextStorage {
     // from here.  Keyed only on the basis, of which S and V are a function,
     // so it stays valid across appends, factor-base rebuilds and clear().
     FiniteAbelianGroupSmithCache published_smith_form;
+    // Cyclotomic automorphism data for Galois images of relations, built
+    // on first use for the order the relation search runs on
+    // (relation_candidate.cpp, the Galois-image step).
+    CyclotomicGaloisImages cyclotomic_galois_images;
+    // Galois-image relations stored in the relation matrix of this context
+    // (relation_candidate.cpp, the Galois-image step), and those of them
+    // stored without raising the modular rank (kernel images).  Images are
+    // left out of the relation cap max_relations, and kernel images out of
+    // the kernel-unit target.  A factor-base rebuild starts a fresh
+    // context, so the counts always refer to the stored relations.
+    slong galois_image_relations = 0;
+    slong galois_image_kernel_relations = 0;
+    // Smallest field degree at which the Galois-image step runs.  Only
+    // internal tests change it (ClassGroupRelationSearchAccess::
+    // set_galois_image_min_degree), to exercise the step on small fields;
+    // clear() keeps it.
+    slong galois_image_min_degree = kLargeFieldRelationSearchMinDegree;
 
     void invalidate_reduced_relation_kernel() noexcept {
         reduced_relation_kernel = flint::FmpzMat(0, 0);
@@ -591,6 +618,9 @@ struct ClassGroupContextStorage {
         local_saturation_dlog_cache.clear();
         saturation_relation_scratch.clear();
         invalidate_reduced_relation_kernel();
+        cyclotomic_galois_images.clear();
+        galois_image_relations = 0;
+        galois_image_kernel_relations = 0;
     }
 };
 
@@ -866,6 +896,101 @@ public:
                     ClassGroupRelationSource::Supplied) noexcept {
         return context.try_append_generator_relation_with_norm_(
                 partial_throttle_exit, generator, norm, source);
+    }
+
+    // Rank of the modular relation module (reference ModuleCtx Mp).
+    static slong relation_module_rank(
+            const ClassGroupContext& context) noexcept {
+        return context.relation_module_.rank();
+    }
+
+    using DependentRelationPolicy =
+            ClassGroupContext::DependentRelationPolicy;
+
+    // While alive, generator relations are appended under `policy`
+    // (DependentRelationPolicy); the previous policy is restored on
+    // destruction.
+    class GeneratorRelationPolicyScope {
+    public:
+        GeneratorRelationPolicyScope(
+                ClassGroupContext& context,
+                DependentRelationPolicy policy) noexcept
+            : context_(context),
+              previous_(context.generator_relation_policy_) {
+            context_.generator_relation_policy_ = policy;
+        }
+        ~GeneratorRelationPolicyScope() noexcept {
+            context_.generator_relation_policy_ = previous_;
+        }
+        GeneratorRelationPolicyScope(
+                const GeneratorRelationPolicyScope&) = delete;
+        GeneratorRelationPolicyScope& operator=(
+                const GeneratorRelationPolicyScope&) = delete;
+
+    private:
+        ClassGroupContext& context_;
+        DependentRelationPolicy previous_;
+    };
+
+    // Galois-image relations stored in `context`, and those stored without
+    // raising the modular rank; see ClassGroupContextStorage.
+    static slong galois_image_relations(
+            const ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? 0
+                : context.private_storage_->galois_image_relations;
+    }
+
+    static slong galois_image_kernel_relations(
+            const ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? 0
+                : context.private_storage_->galois_image_kernel_relations;
+    }
+
+    static void note_galois_image_relation(ClassGroupContext& context,
+                                           bool kernel) noexcept {
+        if (context.private_storage_ != nullptr) {
+            ++context.private_storage_->galois_image_relations;
+            if (kernel) {
+                ++context.private_storage_->galois_image_kernel_relations;
+            }
+        }
+    }
+
+    // Stored relations counted toward the relation cap max_relations: all
+    // stored relations except Galois images.
+    static slong capped_relation_count(
+            const ClassGroupContext& context) noexcept {
+        const slong count = context.relation_count();
+        const slong images = galois_image_relations(context);
+        return count > images ? count - images : 0;
+    }
+
+    // Smallest field degree at which the Galois-image step runs; see
+    // ClassGroupContextStorage::galois_image_min_degree.
+    static slong galois_image_min_degree(
+            const ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? kLargeFieldRelationSearchMinDegree
+                : context.private_storage_->galois_image_min_degree;
+    }
+
+    // Internal tests only: runs the Galois-image step from `degree` on.
+    static bool set_galois_image_min_degree(ClassGroupContext& context,
+                                            slong degree) noexcept {
+        if (!context.ensure_private_storage_()) {
+            return false;
+        }
+        context.private_storage_->galois_image_min_degree = degree;
+        return true;
+    }
+
+    static CyclotomicGaloisImages* cyclotomic_galois_images(
+            ClassGroupContext& context) noexcept {
+        return context.ensure_private_storage_()
+                ? &context.private_storage_->cyclotomic_galois_images
+                : nullptr;
     }
 
     static ReducedIdealLatticeCache* native_post_finite_reduced_lattices(

@@ -13,6 +13,32 @@
 namespace silex {
 namespace detail::relation_search {
 
+namespace {
+
+slong without_galois_image_kernel_relations(
+        const ClassGroupContext& context,
+        slong kernel_count) noexcept {
+    const slong images = detail::ClassGroupRelationSearchAccess::
+            galois_image_kernel_relations(context);
+    return kernel_count > images ? kernel_count - images : 0;
+}
+
+}  // namespace
+
+slong target_relation_kernel_unit_count(
+        const ClassGroupContext& context) noexcept {
+    return without_galois_image_kernel_relations(
+            context, context.relation_kernel_unit_count());
+}
+
+slong target_relation_kernel_row_count(
+        const ClassGroupContext& context) noexcept {
+    return without_galois_image_kernel_relations(
+            context,
+            detail::ClassGroupRelationSearchAccess::relation_kernel_row_count(
+                    context));
+}
+
 bool publish_and_check_compute_goal(ClassGroupContext& context,
                                     slong target_relation_kernel_units,
                                     CertificationMode requested_certification)
@@ -46,7 +72,7 @@ bool publish_and_check_compute_goal(ClassGroupContext& context,
             return context.try_certify_quadratic(requested_certification);
         }
 
-        return context.relation_kernel_unit_count() >=
+        return target_relation_kernel_unit_count(context) >=
                 target_relation_kernel_units;
     }
     // Both source baselines keep the full-rank relation module current while
@@ -63,9 +89,8 @@ bool publish_and_check_compute_goal(ClassGroupContext& context,
     if (!synced) {
         return false;
     }
-    if (detail::ClassGroupRelationSearchAccess::relation_kernel_row_count(
-                context) <
-                target_relation_kernel_units) {
+    if (target_relation_kernel_row_count(context) <
+        target_relation_kernel_units) {
         return false;
     }
     {

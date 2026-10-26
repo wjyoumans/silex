@@ -36,8 +36,10 @@ constexpr ulong kLllRoutePhase = UWORD(8);
 
 // Smallest field degree at which one random-walk ideal R serves every pivot
 // of a pass (see collect_pivot_lll_ideal).  Below it each pivot draws its
-// own R, as before.
-constexpr slong kPassRandomIdealMinDegree = 30;
+// own R, as before.  It is the shared large-field crossover, which also
+// starts the cyclotomic Galois-image step.
+constexpr slong kPassRandomIdealMinDegree =
+        detail::kLargeFieldRelationSearchMinDegree;
 
 bool small_lll_selection_bound(flint::Fmpz& out,
                                      const Ideal& ideal,
@@ -1564,9 +1566,16 @@ bool ClassGroupContext::run_lll_relation_route_(
     IdealLatticeRoundedEmbeddingCache& lll_cache =
             route_storage.lll_rounded_embedding_cache;
     slong candidates_tried = 0;
-    slong accepted_relations = relation_count();
+    // Galois-image relations are left out of the relation cap and kernel
+    // images out of the kernel-unit target (relation_candidate.cpp, the
+    // Galois-image step); off the cyclotomic image route these are the
+    // plain counts.
+    slong accepted_relations =
+            detail::ClassGroupRelationSearchAccess::capped_relation_count(
+                    *this);
     bool goal_reached = !extension_only && has_presentation() &&
-            relation_kernel_unit_count() >= options.target_relation_kernel_units;
+            target_relation_kernel_unit_count(*this) >=
+                    options.target_relation_kernel_units;
     bool partial_throttle_exit = false;
     bool search_ok = true;
     if (!extension_only && !goal_reached) {
@@ -1889,9 +1898,11 @@ bool ClassGroupContext::run_lll_relation_route_(
     }
 
     if (search_ok) {
-        accepted_relations = relation_count();
+        accepted_relations =
+                detail::ClassGroupRelationSearchAccess::capped_relation_count(
+                        *this);
         if (!extension_only && !goal_reached && has_presentation() &&
-            relation_kernel_unit_count() >=
+            target_relation_kernel_unit_count(*this) >=
                     options.target_relation_kernel_units) {
             goal_reached = true;
         }
@@ -2052,9 +2063,10 @@ bool ClassGroupContext::extend_tentative_relations_(
         !detail::valid_certification_request(options.requested_certification)) {
         return false;
     }
-    // The relation cap counts every relation of the context, so once it is
-    // reached no slice may run.
-    if (relation_count() >= options.max_relations) {
+    // The relation cap counts every relation of the context except
+    // Galois images, so once it is reached no slice may run.
+    if (detail::ClassGroupRelationSearchAccess::capped_relation_count(
+                *this) >= options.max_relations) {
         if (ensure_private_storage_()) {
             private_storage_->lll_route_budget_cap =
                     detail::RelationSearchBudgetCap::max_relations;
@@ -2091,9 +2103,10 @@ bool ClassGroupContext::extend_lll_relation_slice_(
         !detail::valid_certification_request(options.requested_certification)) {
         return false;
     }
-    // The relation cap counts every relation of the context, so once it is
-    // reached no slice may run.
-    if (relation_count() >= options.max_relations) {
+    // The relation cap counts every relation of the context except
+    // Galois images, so once it is reached no slice may run.
+    if (detail::ClassGroupRelationSearchAccess::capped_relation_count(
+                *this) >= options.max_relations) {
         detail::note_relation_search_budget_cap(
                 class_unit_transaction_context_,
                 detail::RelationSearchBudgetCap::max_relations);

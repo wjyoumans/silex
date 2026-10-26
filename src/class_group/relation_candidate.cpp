@@ -3,6 +3,7 @@
 #include <silex/order_element.hpp>
 #include <silex/relation.hpp>
 
+#include "class_group_certification_internal.hpp"
 #include "relation_admission_cache_internal.hpp"
 #include "relation_candidate_internal.hpp"
 #include "relation_search_internal.hpp"
@@ -1460,6 +1461,207 @@ bool reduced_basis_first_row_is_scalar_rational(
            element_is_scalar_rational(scalar, element);
 }
 
+namespace {
+
+// Modular rank state of the relation module for the Galois-image step.
+// With an admission cache (the port of the reference relation cache) it is
+// the cache's own `missing` and `relation_surplus` (the reference
+// cache->missing and cache->relsup, buch2.c add_rel_i, lines 2284-2376);
+// otherwise it is the rank of the generator relation module (reference
+// ModuleCtx Mp) against the factor-base length.
+struct ModularRankState {
+    slong rank = 0;
+    slong missing = 0;
+    slong relation_surplus = 0;
+};
+
+ModularRankState modular_rank_state(
+        const ClassGroupContext& context,
+        const detail::RelationAdmissionCache* admission_cache) noexcept {
+    ModularRankState state;
+    if (admission_cache != nullptr) {
+        state.missing = admission_cache->missing;
+        state.relation_surplus = admission_cache->relation_surplus;
+        return state;
+    }
+    state.rank =
+            detail::ClassGroupRelationSearchAccess::relation_module_rank(
+                    context);
+    const slong generators = context.generator_count();
+    state.missing = state.rank < generators ? generators - state.rank : 0;
+    return state;
+}
+
+// True when a stored relation raised the modular rank between `before` and
+// `after`.
+bool modular_rank_raised(const ModularRankState& before,
+                         const ModularRankState& after) noexcept {
+    return after.missing < before.missing || after.rank > before.rank;
+}
+
+// Reference add_rel_i returns k > 0 for a stored relation that raised the
+// modular rank, for every stored relation once the rank is full
+// (cache->missing == 0, buch2.c:2350), and for a dependent relation stored
+// under the surplus allowance (cache->relsup > 0, lines 2357-2361); a
+// dependent relation stored only because it came from rnd_rel returns 0.
+// Reference add_rel (lines 2380-2410) tries the images of exactly those
+// relations.
+bool relation_gets_galois_images(const ModularRankState& before,
+                                 const ModularRankState& after) noexcept {
+    return before.missing == 0 || modular_rank_raised(before, after) ||
+           after.relation_surplus < before.relation_surplus;
+}
+
+// Tries sigma_k(alpha) for every automorphism sigma_k of a field defined by
+// exactly Phi_n, where alpha (order coordinates `coordinates` / den) has just
+// given a relation for which reference add_rel_i returned k > 0 (see
+// relation_gets_galois_images).  Each image goes through
+// try_coordinate_candidate_den, so it is factored and admitted exactly like
+// a searched candidate; it uses its own candidate counter and no
+// factor-attempt budget, so images do not consume the search budget.  Each
+// image is kept as reference add_rel_i keeps a relation with m = NULL
+// (buch2.c:2350-2351): before full modular rank only when it raises the
+// rank (the admission cache also applies its surplus allowance; the
+// generator path has none and skips dependent rows), and at full rank
+// whenever it is not already known (already_known, line 2294).
+//
+// On the generator path the images form one batch: an image runs no
+// presentation publication or row-module checkpoint of its own (the caller
+// publishes once after the batch), and images are left out of the relation
+// cap max_relations.  Every stored image is counted in
+// ClassGroupContextStorage::galois_image_relations, and an image stored
+// without raising the rank also in galois_image_kernel_relations, which the
+// relation-search goals leave out of the kernel-unit target.  The admission
+// cache path (the port of the reference relation cache) keeps the
+// reference behaviour: each image counts toward the cache's relation target
+// and the loop stops when that target is met.
+//
+// Does nothing unless the field is exactly Phi_n (degree at least 4) and
+// every rational-prime block of the factor base is complete, which makes
+// the base Galois-stable.
+bool add_cyclotomic_galois_image_relations(
+        ClassGroupContext& context,
+        const Order& order,
+        flint::FmpzMatConstRef coordinates,
+        flint::FmpzConstRef den,
+        NormPrefilter* norm_prefilter,
+        ClassGroupRelationSource source,
+        slong target_relation_kernel_units,
+        slong max_candidates,
+        slong max_relations,
+        slong& accepted_relations,
+        CertificationMode requested_certification,
+        bool& goal_reached,
+        detail::RelationAdmissionCache* admission_cache,
+        Relation* admission_scratch,
+        OrderCoordinateElementConversion* coordinate_conversion,
+        bool admission_scratch_base_verified) noexcept {
+    const DiagnosticsContext* diagnostics = context.diagnostics();
+    detail::CyclotomicGaloisImages* images =
+            detail::ClassGroupRelationSearchAccess::cyclotomic_galois_images(
+                    context);
+    if (images == nullptr) {
+        return false;
+    }
+    if (!images->initialized ||
+        !same_order_parent(&images->order, &order)) {
+        if (!detail::prepare_cyclotomic_galois_images(*images, order)) {
+            // An exact construction step failed: add no images and keep
+            // the ordinary search path.
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail,
+                      "cyclotomic Galois image setup failed");
+            images->clear();
+            images->order = order;
+            images->initialized = true;
+            return true;
+        }
+    }
+    if (!images->available) {
+        return true;
+    }
+
+    const FactorBase* base = context.factor_base();
+    bool stable = false;
+    if (base == nullptr ||
+        !detail::factor_base_rational_prime_blocks_complete(stable,
+                                                            *base)) {
+        return false;
+    }
+    if (!stable) {
+        return true;
+    }
+
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.galois_image_relations");
+    using Access = detail::ClassGroupRelationSearchAccess;
+    const bool batch = admission_cache == nullptr;
+    // On the generator path images are left out of the relation cap: they
+    // run against a local count with no cap, and set no goal.
+    slong image_accepted_relations = 0;
+    bool image_goal_reached = false;
+    const slong image_count =
+            static_cast<slong>(images->image_matrices.size());
+    flint::FmpzMat image(0, 0);
+    for (slong i = 0; i < image_count; ++i) {
+        if (!batch &&
+            (goal_reached || accepted_relations >= max_relations)) {
+            break;
+        }
+        if (!detail::cyclotomic_galois_image_coordinates(
+                    image, *images, i, coordinates)) {
+            return false;
+        }
+        const slong relations_before = context.relation_count();
+        const ModularRankState rank_before =
+                modular_rank_state(context, admission_cache);
+        slong image_candidates = 0;
+        bool image_partial_throttle = false;
+        ++images->image_candidates;
+        SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.galois_image_candidate");
+        // The admission cache admits the image as a non-random relation,
+        // which is reference add_rel_i with m = NULL.  The generator path
+        // skips dependent rows before full rank and keeps every new row at
+        // full rank.
+        const Access::GeneratorRelationPolicyScope image_policy(
+                context,
+                rank_before.missing > 0
+                        ? Access::DependentRelationPolicy::skip
+                        : Access::DependentRelationPolicy::keep_nonduplicate);
+        if (!try_coordinate_candidate_den(
+                    context, order, image, den, norm_prefilter, source,
+                    target_relation_kernel_units, max_candidates,
+                    batch ? WORD_MAX : max_relations, image_candidates,
+                    batch ? image_accepted_relations : accepted_relations,
+                    requested_certification,
+                    batch ? image_goal_reached : goal_reached,
+                    image_partial_throttle, admission_cache,
+                    false, nullptr, 0, nullptr,
+                    admission_scratch, coordinate_conversion,
+                    admission_scratch_base_verified, true)) {
+            return false;
+        }
+        if (context.relation_count() > relations_before) {
+            ++images->image_relations;
+            SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::class_group,
+                                "class_group.galois_image_relation");
+            const bool kernel = !modular_rank_raised(
+                    rank_before,
+                    modular_rank_state(context, admission_cache));
+            if (kernel) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.galois_image_kernel_relation");
+            }
+            Access::note_galois_image_relation(context, kernel);
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 bool try_coordinate_candidate_den(ClassGroupContext& context,
                                   const Order& order,
                                   flint::FmpzMat& coordinates,
@@ -1482,7 +1684,8 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                                   Relation* admission_scratch,
                                   OrderCoordinateElementConversion*
                                           coordinate_conversion,
-                                  bool admission_scratch_base_verified)
+                                  bool admission_scratch_base_verified,
+                                  bool galois_image)
         noexcept {
     const DiagnosticsContext* diagnostics = context.diagnostics();
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
@@ -1624,6 +1827,21 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                         "class_group.candidate_relation");
     bool candidate_partial_throttle = false;
     bool relation_appended = false;
+    // Galois images (the step below) run only on grh requests and only
+    // from the large-field crossover on, so below it a candidate costs one
+    // degree test more than without the step.  The modular rank state
+    // before this candidate is needed only then.
+    const bool galois_image_route = !galois_image &&
+            order.degree() >= detail::ClassGroupRelationSearchAccess::
+                                      galois_image_min_degree(context) &&
+            (requested_certification == CertificationMode::grh ||
+             (requested_certification == CertificationMode::unknown &&
+              detail::ClassGroupCertificationAccess::
+                      grh_factor_base_generation_covered(context)));
+    ModularRankState rank_before;
+    if (galois_image_route) {
+        rank_before = modular_rank_state(context, admission_cache);
+    }
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.coordinate_candidate_try_relation");
@@ -1753,16 +1971,55 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
         }
     }
 
-    if (relation_appended) {
+    // The admission-cache goal is the cache's relation target, which every
+    // stored relation, image or not, counts toward (reference cache->last).
+    if (relation_appended && admission_cache != nullptr) {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.coordinate_candidate_publish");
-        if (admission_cache != nullptr) {
-            goal_reached = context.relation_count() >= max_relations;
-        } else {
-            goal_reached = publish_and_check_compute_goal(
-                    context, target_relation_kernel_units,
-                    requested_certification);
-        }
+        goal_reached = context.relation_count() >= max_relations;
+    }
+    // Galois images of a new relation, following reference buch2.c:add_rel
+    // (2.17.3, lines 2380-2410): every stored relation for which add_rel_i
+    // returns k > 0 gets the images under all non-trivial automorphisms,
+    // and each image is kept by the rule of add_rel_i with m = NULL; see
+    // relation_gets_galois_images and add_cyclotomic_galois_image_relations.
+    // A relation whose generator is a rational integer gets none (the
+    // reference tests typ(m) != t_INT; scalar candidates never reach here).
+    // Reference Rel_add.jl:97-131 (v0.38.6) adds images only before full
+    // rank; the reference relation cache is followed here instead.  Images
+    // are added only for fields defined by exactly Phi_n with a factor base
+    // stable under Gal(K/Q), and only for grh requests: a grh relation
+    // request, or the relation search of a grh class/unit transaction.
+    // That search runs with an unknown requested certification on a base
+    // that carries the GRH generation record, which only a grh class/unit
+    // request writes (record_grh_factor_base_generation).  Proven requests
+    // never add images.  Images are added only on fields of degree at least
+    // kLargeFieldRelationSearchMinDegree (galois_image_route above): below
+    // it they cost more relation work than they save.  See
+    // cyclotomic_galois_images_internal.hpp for the sources and the
+    // stability condition.
+    if (relation_appended && galois_image_route && !goal_reached &&
+        relation_gets_galois_images(
+                rank_before, modular_rank_state(context, admission_cache)) &&
+        !add_cyclotomic_galois_image_relations(
+                context, order, flint::FmpzMatConstRef(coordinates), den,
+                norm_prefilter, source, target_relation_kernel_units,
+                max_candidates, max_relations, accepted_relations,
+                requested_certification, goal_reached, admission_cache,
+                admission_scratch, coordinate_conversion,
+                admission_scratch_base_verified)) {
+        return false;
+    }
+    // The generator-path goal is checked once per searched relation, after
+    // its Galois images (if any) are stored, so an image batch costs one
+    // presentation publication or row-module checkpoint, not one per
+    // image.  An image itself publishes nothing.
+    if (relation_appended && admission_cache == nullptr && !galois_image) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.coordinate_candidate_publish");
+        goal_reached = publish_and_check_compute_goal(
+                context, target_relation_kernel_units,
+                requested_certification);
     }
     if (admission_cache == nullptr && candidate_partial_throttle &&
         !goal_reached) {

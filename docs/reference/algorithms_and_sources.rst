@@ -952,6 +952,30 @@ has norm ``+-1`` exactly, and leaves ``proven`` requests without seeds.  The
 seeds only add units; the published class group and regulator still pass the
 same analytic validation.
 
+On the same ``grh`` requests, for fields of degree 30 or more, when every
+rational prime of the factor base has all of its prime ideals in the base
+(so the base is stable under the Galois group), the relation search also
+tries the Galois images of its
+relations, as PARI 2.17.3 ``buch2.c`` ``add_rel`` (lines 2380-2410) does:
+every stored relation for which ``add_rel_i`` (lines 2284-2376) returns
+``k > 0`` gets its images ``sigma_k(alpha)``, ``sigma_k(x) = x^k`` for ``k``
+prime to ``m`` (Washington, *Introduction to Cyclotomic Fields*, 2nd ed.,
+Theorem 2.5), and each image is kept by the rule of ``add_rel_i`` with
+``m = NULL``: before full modular rank only when it raises the rank, and at
+full rank whenever it is not already known (line 2294).  Silex forms each
+image element exactly and factors it like a searched candidate, rather than
+permuting exponent vectors.  The bookkeeping is Silex's own: the images of a
+relation are stored as one batch with a single presentation update, they do
+not count toward ``max_relations``, and images that do not raise the rank do
+not count toward the kernel-unit target.  The degree-30 crossover is also
+Silex's own (PARI adds images at every degree): it is the crossover of the
+one-random-ideal-per-pass rule of the pivot relation search, and on the
+cyclotomic corpus images cut the relation work of every row of degree 30 or
+more but add up to 92% more on some rows of degree 12 to 24, where the
+images stored after full rank outweigh the searched relations they save.
+The code and the sources are in
+``src/class_group/cyclotomic_galois_images_internal.hpp``.
+
 Every Smith form of a finite abelian presentation (``FiniteAbelianGroup``,
 including the class group presentation published from the relation HNF
 checkpoint) is taken from the HNF basis after its unit pivots are split off.

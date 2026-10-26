@@ -214,6 +214,7 @@ add_library(silex
     src/class_group/random_product_relation_search.cpp
     src/class_group/relation_search_driver.cpp
     src/class_group/small_norm_relation_search.cpp
+    src/class_group/cyclotomic_galois_images.cpp
     src/class_group/relation_candidate.cpp
     src/class_group/relation_search.cpp
     src/factored_element/compact_reconstruction.cpp
@@ -722,6 +723,17 @@ if(SILEX_BUILD_TESTS)
     add_test(NAME silex-relation-admission-cache
         COMMAND t-silex-relation-admission-cache)
     list(APPEND SILEX_TEST_NAMES silex-relation-admission-cache)
+
+    add_executable(t-silex-cyclotomic-galois-images
+        test/t-cyclotomic-galois-images.cpp)
+    target_link_libraries(t-silex-cyclotomic-galois-images
+        PRIVATE Silex::silex)
+    target_include_directories(t-silex-cyclotomic-galois-images PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-cyclotomic-galois-images)
+    add_test(NAME silex-cyclotomic-galois-images
+        COMMAND t-silex-cyclotomic-galois-images)
+    list(APPEND SILEX_TEST_NAMES silex-cyclotomic-galois-images)
 
     add_executable(t-silex-relation-factor-base-rebuild
         test/t-relation-factor-base-rebuild.cpp)

@@ -51,6 +51,17 @@ void build_small_lll_torsion_orbit(SmallLllTorsionOrbit& out,
                                    const NormPrefilter* norm_prefilter)
         noexcept;
 
+// Relation-kernel dimension counted toward a kernel-unit target: the
+// kernel dimension (relation_kernel_unit_count, or the deferred
+// relation-kernel row count) less the Galois-image relations stored without
+// raising the modular rank.  Kernel images are left out of the target by
+// design (see relation_candidate.cpp, the Galois-image step); off the
+// cyclotomic image route both equal the plain counts.
+slong target_relation_kernel_unit_count(
+        const ClassGroupContext& context) noexcept;
+slong target_relation_kernel_row_count(
+        const ClassGroupContext& context) noexcept;
+
 bool publish_and_check_compute_goal(
         ClassGroupContext& context,
         slong target_relation_kernel_units,
