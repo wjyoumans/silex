@@ -4704,6 +4704,44 @@ int test_factor_mod_prime_matches_flint_order() {
             check_factor_mod_prime_matches_flint(f, ctx);
         }
     }
+    // Fixed cases at the dispatch boundary 5 * bits(p) + deg == 75 (word
+    // loop) versus 76 (FLINT): p = 8191 has 13 bits, boundary degrees 10
+    // and 11; p = 16381 has 14 bits, boundary degrees 5 and 6, and all
+    // degrees 2 to 6 are covered.
+    struct BoundaryCase {
+        const char* prime;
+        slong first;
+        slong last;
+    };
+    const BoundaryCase boundary[] = {{"8191", 10, 11}, {"16381", 2, 6}};
+    for (const BoundaryCase& c : boundary) {
+        sflint::Fmpz p;
+        assert(fmpz_set_str(p.raw(), c.prime, 10) == 0);
+        sflint::FmpzModCtx ctx(p.raw());
+        sflint::FmpzModPoly f(ctx);
+        sflint::FmpzModPoly a(ctx);
+        for (slong d = c.first; d <= c.last; ++d) {
+            for (slong trial = 0; trial < 20; ++trial) {
+                // Exact degree d: a random monic polynomial.
+                fmpz_mod_poly_randtest_monic(f.raw(), state, d + 1,
+                                             ctx.raw());
+                assert(fmpz_mod_poly_degree(f.raw(), ctx.raw()) == d);
+                check_factor_mod_prime_matches_flint(f, ctx);
+                // Exact degree d: a squared linear factor times a random
+                // cofactor of degree d - 2.
+                if (d >= 4) {
+                    fmpz_mod_poly_randtest_monic(a.raw(), state, 2,
+                                                 ctx.raw());
+                    fmpz_mod_poly_pow(f.raw(), a.raw(), 2, ctx.raw());
+                    fmpz_mod_poly_randtest_monic(a.raw(), state, d - 1,
+                                                 ctx.raw());
+                    fmpz_mod_poly_mul(f.raw(), f.raw(), a.raw(), ctx.raw());
+                    assert(fmpz_mod_poly_degree(f.raw(), ctx.raw()) == d);
+                    check_factor_mod_prime_matches_flint(f, ctx);
+                }
+            }
+        }
+    }
     flint_rand_clear(state);
     return 0;
 }

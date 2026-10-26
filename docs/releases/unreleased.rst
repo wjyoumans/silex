@@ -150,7 +150,7 @@ Changed
 - ``decompose_prime`` factors the defining polynomial (or the minimal
   polynomial of a monogenic generator) modulo a small prime with word-size
   arithmetic.  Where FLINT's ``fmpz_mod_poly_factor`` takes its
-  Cantor--Zassenhaus route (``5 * bits(p) + deg <= 75``, so ``p < 2^15``),
+  Cantor--Zassenhaus route (``5 * bits(p) + deg <= 75``, so ``p < 2^14``),
   Silex runs the same distinct-degree loop (Cohen, GTM 138, Algorithm
   3.4.3; FLINT ``fmpz_mod_poly_factor_cantor_zassenhaus``) with
   ``nmod_poly`` Frobenius powers, gcds and divisions, and splits each

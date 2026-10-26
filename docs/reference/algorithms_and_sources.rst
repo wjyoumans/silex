@@ -818,11 +818,13 @@ Every other factorization of these routes (degree above two, and the
 minimal polynomial of a monogenic generator at an index divisor) has the
 result of FLINT ``fmpz_mod_poly_factor``, factors and order included.
 Where that function takes its Cantor--Zassenhaus route
-(``5 * bits(p) + deg f <= 75``, so ``p < 2^15``), Silex runs the same loop
+(``5 * bits(p) + deg f <= 75``, so ``p < 2^14``), Silex runs the same loop
 as ``fmpz_mod_poly_factor_cantor_zassenhaus``, the distinct-degree
 factorization of Cohen, GTM 138, Algorithm 3.4.3: step ``i`` takes
 ``h = x^(p^i) mod v`` and ``g = gcd(h - x, v)``, the product of the
-irreducible factors of degree ``i``.  The Frobenius powers, gcds and
+distinct irreducible factors of degree ``i``.  Cohen assumes ``v``
+squarefree; the multiplicities of a non-squarefree ``v`` come from removing
+each ``g`` to its full multiplicity, which is FLINT's extension, not Cohen's.  The Frobenius powers, gcds and
 divisions are ``nmod_poly`` word arithmetic; each ``g`` is the same monic
 polynomial in either arithmetic and is split by FLINT
 ``fmpz_mod_poly_factor_equal_deg`` exactly as there.  Other primes call

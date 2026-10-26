@@ -4187,14 +4187,16 @@ void factor_mod_prime(flint::FmpzModPolyFactor& out,
                       const flint::FmpzModCtx& context) noexcept {
     // FLINT's fmpz_mod_poly_factor (fmpz_mod_poly_factor/factor.c) runs
     // Cantor-Zassenhaus when 5 * bits(p) + deg f <= 75 and Kaltofen-Shoup
-    // otherwise.  On the Cantor-Zassenhaus side p < 2^15 is a word, and the
+    // otherwise.  On the Cantor-Zassenhaus side (degree >= 2) p < 2^14 is a word, and the
     // loop below is fmpz_mod_poly_factor_cantor_zassenhaus
     // (fmpz_mod_poly_factor/factor_cantor_zassenhaus.c) with the Frobenius
     // powers, gcds and divisions in word arithmetic: the distinct-degree
     // factorization of Cohen, GTM 138, Algorithm 3.4.3.  Step i takes
     // h = x^(p^i) mod v and g = gcd(h - x, v), the monic product of the
-    // irreducible factors of degree i of v, which is the same polynomial in
-    // either arithmetic.  g is split by FLINT's own
+    // distinct irreducible factors of degree i of v, which is the same
+    // polynomial in either arithmetic.  Cohen assumes v squarefree; the
+    // multiplicities here come from the removal step below, which is FLINT's
+    // extension to non-squarefree v, not from Cohen.  g is split by FLINT's own
     // fmpz_mod_poly_factor_equal_deg, as there, and each factor's exponent
     // is the multiplicity fmpz_mod_poly_remove would give; the cofactor left
     // when v has degree below 2 (i + 1) is irreducible.  So the factors,

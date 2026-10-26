@@ -72,7 +72,7 @@ bool monic_quadratic_factor_word(flint::FmpzModPolyFactor& out,
 
 // fmpz_mod_poly_factor(out, reduced, context), computed with word-size
 // Frobenius powers, gcds and divisions where FLINT would take its
-// Cantor-Zassenhaus route (5 * bits(p) + deg <= 75, so p < 2^15); the
+// Cantor-Zassenhaus route (5 * bits(p) + deg <= 75, so p < 2^14); the
 // equal-degree splitting stays FLINT's fmpz_mod_poly_factor_equal_deg.  The
 // factors, exponents and their order are those of fmpz_mod_poly_factor (see
 // the definition).  p must be prime; that is not checked here.
