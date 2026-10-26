@@ -2355,7 +2355,9 @@ bool bf_residue_degree_context_uses_defining_polynomial(
 // so psi_n is squarefree modulo p.  Frobenius sends a_k to
 // a_k^p = zeta^(pk) + zeta^(-pk) = a_(pk).  The irreducible factors of a
 // squarefree polynomial over F_p correspond to the Frobenius orbits on its
-// roots, each of degree its orbit's length.  The orbit of a_k is the a_(p^j k);
+// roots, each of degree its orbit's length (Lidl and Niederreiter, Theorem
+// 2.14: the roots of an irreducible polynomial of degree m over F_q are
+// alpha, alpha^q, ..., alpha^(q^(m-1)), all distinct).  The orbit of a_k is the a_(p^j k);
 // its length is the least f >= 1 with p^f k = +-k mod n, that is with
 // p^f = +-1 mod n since k is invertible modulo n.  This f, the order of p in
 // (Z/n)^* / {+-1}, does not depend on k, so psi_n modulo p is a product of

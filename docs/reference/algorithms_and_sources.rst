@@ -427,7 +427,9 @@ Niederreiter, Theorem 2.47(ii)).  For ``T = psi_n``, ``n >= 3``, of degree
 up to sign, so ``psi_n`` is squarefree modulo ``p``; Frobenius sends
 ``a_k`` to ``a_k^p = a_(pk)``; the irreducible factors over ``F_p`` of a
 squarefree polynomial correspond to the Frobenius orbits on its roots, each
-of degree the orbit's length; and the orbit of ``a_k`` has length the least
+of degree the orbit's length (Lidl and Niederreiter, Theorem 2.14: the
+roots of an irreducible polynomial of degree ``m`` over ``F_q`` are
+``alpha, alpha^q, ..., alpha^(q^(m-1))``, all distinct); and the orbit of ``a_k`` has length the least
 ``f`` with ``p^f k = +-k mod n``, that is with ``p^f = +-1 mod n`` because
 ``k`` is invertible, the same ``f`` for every ``k``.  The case ``f = 1`` is
 the linear count above.  Primes dividing ``n`` keep the factorisation.
