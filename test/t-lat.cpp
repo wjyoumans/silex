@@ -2050,10 +2050,12 @@ int test_integer_gram_rejects_non_positive_definite() {
 // fmpz_mat_is_reduced_gram hold.  [[12, 4], [4, 9]] at delta = 0.75 has
 // mu = 1/3 and Lovasz equality (r_11 = 23/3 = (delta - 1/9) 12): the
 // balls cannot prove it, and the exact test accepts it.  [[12, 4], [4, 8]]
-// breaks the Lovasz test and the non positive definite matrices of the
-// test above are not accepted.  On random fmpz_lll outputs of 2 to 40 rows
-// (4 to 120 bits) the screen must decide, and on unreduced or perturbed
-// matrices it must never accept what the exact test rejects.
+// breaks the Lovasz test, [[4, 3], [3, 4]] breaks only the size condition,
+// and the non positive definite matrices of the test above are not
+// accepted.  On random fmpz_lll outputs of 2 to 40 rows (4 to 120 bits) the
+// screen must decide.  On unreduced or perturbed matrices soundness is
+// checked against FLINT's fmpz_mat_is_reduced_gram (integer_gram_is_lll_reduced
+// calls the screen itself, so it is no independent check there).
 int test_gram_interval_screen_is_sufficient() {
     using namespace silex::lat::detail;
     using silex::flint::FmpzMat;
@@ -2075,6 +2077,13 @@ int test_gram_interval_screen_is_sufficient() {
         const FmpzMat broken = gram2(12, 4, 8);
         if (gram_interval_screen_proves_lll_reduced(broken, 0.75, 0.51) ||
             integer_gram_is_lll_reduced(broken, 0.75, 0.51)) {
+            return 1;
+        }
+        // mu = 3/4 > eta while the Lovasz test holds (1.75 >= 1.71): only
+        // the size condition fails.
+        const FmpzMat oversize = gram2(4, 3, 4);
+        if (gram_interval_screen_proves_lll_reduced(oversize, 0.99, 0.51) ||
+            integer_gram_is_lll_reduced(oversize, 0.99, 0.51)) {
             return 1;
         }
         const FmpzMat reduced = gram2(4, 1, 4);
@@ -2130,8 +2139,8 @@ int test_gram_interval_screen_is_sufficient() {
         const bool screen =
                 gram_interval_screen_proves_lll_reduced(gram, 0.99, 0.51);
         const bool exact = integer_gram_is_lll_reduced(gram, 0.99, 0.51);
-        if (screen && (!exact ||
-                       fmpz_mat_is_reduced_gram(gram.raw(), 0.99, 0.51) == 0)) {
+        if (screen &&
+            fmpz_mat_is_reduced_gram(gram.raw(), 0.99, 0.51) == 0) {
             flint_rand_clear(state);
             return 1;
         }
