@@ -2514,6 +2514,36 @@ Changed
   4.99% for ``random_d9_h4_s8``, 3.98% for ``random_d10_h2_s21`` and 4.24%
   for ``pure_x12_plus_7``.  No timing has been measured.
 
+- For such a binomial and ``q`` not dividing ``n``, the root scan now finds
+  the roots themselves in closed form instead of splitting with
+  ``nmod_poly_roots``.  With ``d = gcd(n, q-1)``, ``g`` has a root exactly
+  when ``(-c)^((q-1)/d) = 1``, and then exactly ``d`` roots ``x0 zeta^i``:
+  ``x0 = y^v`` for a ``d``-th root ``y`` of ``-c`` (Adleman-Manders-Miller,
+  with a Pohlig-Hellman logarithm in the subgroup of order the ``d``-smooth
+  part of ``q - 1``) and ``v (n/d) = 1 mod (q-1)/d``, and ``zeta`` a
+  primitive ``d``-th root of unity from the smallest primitive root.  Each
+  root is still checked by evaluation.  ``q = 2``, ``q`` dividing ``n``,
+  ``c = 0``, ``q`` above the word size, non-binomial reductions and any
+  failed step keep the previous route.
+- The scan's degree-one roots are now listed in ascending order on every
+  route (closed form, the ``nmod_poly_roots`` split and the
+  ``fmpz_mod_poly_roots`` route above the word size).  Before, the order
+  came from FLINT's seeded random splitting, which no closed form can
+  reproduce and which a FLINT upgrade could change.  The order decides which
+  degree-one primes, and so which proof columns, the stable scan uses, so
+  the ``local_primes`` count of ``unit_proof_record`` changes once.  The
+  saturation proof is valid for any root order: certification labels,
+  record statuses and every other published field are unchanged.  On the
+  ``proven`` corpus, published outputs are identical on all 177 rows that
+  finish in 90 seconds (8 finish on neither build), and the proof-record
+  dumps differ only in ``local_primes``, on 75 rows (among them
+  ``pure_x12_plus_7``, ``pure_x4_minus_2``, ``pure_x5_minus_2``,
+  ``pure_x6_minus_3``, ``pure_x6_minus_5``, ``pure_x7_minus_2``,
+  ``pure_x8_minus_2``, ``pure_x10_plus_5``, ``cyclotomic_16_phi8``,
+  ``cyclotomic_32_phi16``, ``random_d9_h4_s8`` and ``random_d10_h2_s21``).
+  Under callgrind (``proven``, Release) the instruction count fell 5.68% for
+  ``pure_x12_plus_7``.  No timing has been measured.
+
 - The ``proven`` relation-saturation proof builds the relation-kernel vectors
   its beta rows are size-reduced against from a subset of the relations when
   the presentation has more than 32 generators (the existing size crossover

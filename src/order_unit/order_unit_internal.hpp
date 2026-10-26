@@ -557,10 +557,27 @@ bool binomial_x_power_mod(ulong* power,
                           slong degree,
                           ulong exponent,
                           ulong modulus) noexcept;
+// The roots in F_q of the monic binomial g = x^degree + f[0] modulo the odd
+// prime q (coefficients f[0..degree] reduced, f[degree] = 1,
+// f[1..degree-1] = 0, f[0] != 0, q not dividing degree), in closed form:
+// with d = gcd(degree, q - 1), g has a root exactly when
+// (-f[0])^((q - 1) / d) = 1, and then exactly d of them, x0 zeta^i for one
+// root x0 (from a d-th root of -f[0] by the Adleman-Manders-Miller method,
+// saturation.cpp) and zeta = gamma^((q - 1) / d) for the smallest primitive
+// root gamma.  The roots are written to `roots` in that order.  Returns
+// false, with `roots` empty, when g or q is outside those conditions or a
+// step fails, so the caller takes the generic route; the caller guarantees
+// that q is prime.  The stable proof scan's root finder takes the roots of
+// a binomial reduction this way and checks each one by evaluation.
+bool binomial_roots_mod_prime(std::vector<ulong>& roots,
+                              const ulong* f,
+                              slong degree,
+                              ulong q) noexcept;
 // The roots r modulo the rational prime q of the defining polynomial of the
 // order's field, one for each degree-one prime (q, theta - r), as the stable
 // residue-character proof scan of prove_index_bound (saturation.cpp) takes
-// them, in its order.  Returns false, with `roots` empty, where the scan
+// them, in ascending order (on every route, so the order does not depend on
+// FLINT's randomized root splitting).  Returns false, with `roots` empty, where the scan
 // does not take the roots: q not prime, an order that is neither the
 // equation order nor maximal, a defining polynomial that is not monic
 // integral, or, for a maximal order that is not the equation order, a

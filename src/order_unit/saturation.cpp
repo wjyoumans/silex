@@ -7,6 +7,7 @@
 #include "../residue_field/residue_field_internal.hpp"
 #include "../residue_field/word_frobenius_internal.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdio>
@@ -235,17 +236,56 @@ bool nmod_poly_vanishes_at_roots(const NmodPoly& polynomial,
     return true;
 }
 
+// Sorts `roots`, residues in [0, q), ascending: the canonical order of
+// degree_one_roots_mod_q on every route, independent of the order in which
+// FLINT's randomized root splitting or the closed form lists them.
+void sort_roots_ascending(std::vector<flint::Fmpz>& roots) noexcept {
+    std::sort(roots.begin(), roots.end(),
+              [](const flint::Fmpz& left, const flint::Fmpz& right) noexcept {
+                  return flint::fmpz_cmp(flint::FmpzConstRef(left),
+                                         flint::FmpzConstRef(right)) < 0;
+              });
+}
+
+// For a binomial g = x^n + c (the reduction with its zero roots shifted
+// out) and an odd prime q not dividing n, appends the roots of g in closed
+// form (detail::binomial_roots_mod_prime) and returns true; returns false,
+// appending nothing, for any other g or q or if the closed form fails, so
+// the caller takes the generic route.
+bool push_binomial_roots(std::vector<flint::Fmpz>& roots,
+                         const NmodPoly& g,
+                         ulong q,
+                         const DiagnosticsContext* diagnostics) noexcept {
+    std::vector<ulong> binomial_roots;
+    if (!detail::binomial_roots_mod_prime(binomial_roots, g.raw()->coeffs,
+                                          nmod_poly_degree(g.raw()), q)) {
+        return false;
+    }
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.stable_scan."
+                        "degree_one_roots_nmod_binomial_roots");
+    roots.reserve(roots.size() + binomial_roots.size());
+    for (ulong root : binomial_roots) {
+        roots.emplace_back();
+        flint::fmpz_set_ui(flint::FmpzRef(roots.back()), root);
+    }
+    return true;
+}
+
 // The distinct roots of the monic integral `polynomial` modulo the
-// word-size prime q, in no particular order.  For odd q this is the first
-// step of Rabin's root finding, as FLINT's nmod_poly_roots
-// (nmod_poly_factor/roots.c, _nmod_poly_push_roots) takes it: after the
-// root 0, which occurs exactly when q divides the constant coefficient,
-// write f = x^k g with g(0) != 0 and h = x^((q - 1) / 2) mod g.  The roots
+// word-size prime q, in ascending order.  For odd q, after the root 0, which
+// occurs exactly when q divides the constant coefficient, write f = x^k g
+// with g(0) != 0.  For a binomial g = x^n + c with q not dividing n, the
+// roots of g come in closed form (push_binomial_roots).  Otherwise this is
+// the first step of Rabin's root finding, as FLINT's nmod_poly_roots
+// (nmod_poly_factor/roots.c, _nmod_poly_push_roots) takes it: write
+// h = x^((q - 1) / 2) mod g.  The roots
 // r of g have r^((q - 1) / 2) = 1 or -1, so they are the roots of
 // gcd(h - 1, g) and of gcd(h + 1, g), each a squarefree product of linear
 // factors (it divides x^((q - 1) / 2) -+ 1); a factor of degree one gives
 // its root directly and a larger one goes to nmod_poly_roots.  For a
-// binomial g = x^n + c, h is the single term (-c)^k x^j with
+// binomial g = x^n + c that the closed form declines (q | n, or a failed
+// step), h is the single term (-c)^k x^j with
 // (q - 1) / 2 = k n + j, 0 <= j < n, since x^n = -c mod g
 // (detail::binomial_x_power_mod).  Otherwise h comes
 // from the word-size kernel word_x_power_mod
@@ -311,7 +351,8 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
         }
         nmod_poly_shift_right(nonzero_part.raw(), reduced.raw(), zero_order);
 
-        if (nmod_poly_degree(nonzero_part.raw()) >= 1) {
+        if (nmod_poly_degree(nonzero_part.raw()) >= 1 &&
+            !push_binomial_roots(roots, nonzero_part, q, diagnostics)) {
             {
                 SILEX_PROFILE_SCOPE(
                         diagnostics, DiagnosticsModule::unit_group,
@@ -394,6 +435,7 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
         roots.clear();
         return false;
     }
+    sort_roots_ascending(roots);
     return true;
 }
 
@@ -467,6 +509,7 @@ bool degree_one_roots_mod_q(std::vector<flint::Fmpz>& roots,
             roots.push_back(std::move(root));
         }
     }
+    sort_roots_ascending(roots);
     return true;
 }
 
@@ -1650,6 +1693,145 @@ bool binomial_x_power_mod(ulong* power,
     }
     power[exponent % udegree] = nmod_pow_ui(nmod_neg(f[0], mod),
                                             exponent / udegree, mod);
+    return true;
+}
+
+namespace {
+
+// A y with y^d = a in F_q^*, for an odd prime q, d >= 2 dividing m = q - 1,
+// and a with a^(m / d) = 1, after Adleman, Manders and Miller ("On taking
+// roots in finite fields", FOCS 1977) with the correction term found by
+// Pohlig and Hellman's prime-power discrete logarithm (IEEE Trans. Inform.
+// Theory 24 (1978), 106-110); see also Bach and Shallit, Algorithmic Number
+// Theory, vol. 1, chapter 7.  Write m = dp * t with dp the part of m made of
+// the primes dividing d, so gcd(d, t) = 1, and let u = d^-1 mod t.  Then
+// x1 = a^u has x1^d = a b with b = a^(d u - 1) in the cyclic subgroup H of
+// order dp, generated by h = gamma^t for the primitive root gamma.  Its
+// logarithm e (b = h^e) is found modulo each prime power r^s || dp digit by
+// digit and combined by the Chinese remainder theorem; as a is a d-th power,
+// d | e, and y = x1 h^(-e / d).  Returns false if a step fails (y^d = a is
+// checked at the end), so the caller falls back to the generic route.
+bool word_power_residue_root(ulong& y,
+                             ulong a,
+                             ulong d,
+                             ulong gamma,
+                             nmod_t mod) noexcept {
+    const ulong m = mod.n - 1;
+    ulong t = m;
+    for (ulong common = n_gcd(t, d); common > 1; common = n_gcd(t, d)) {
+        t /= common;
+    }
+    const ulong dp = m / t;
+    const ulong u = t == 1 ? 0 : n_invmod(d % t, t);
+    const ulong x1 = nmod_pow_ui(a, u, mod);
+    const ulong b = nmod_mul(nmod_pow_ui(x1, d, mod), nmod_inv(a, mod), mod);
+    const ulong h = nmod_pow_ui(gamma, t, mod);
+
+    n_factor_t primes;
+    n_factor_init(&primes);
+    n_factor(&primes, d, 1);
+    ulong e = 0;
+    ulong e_modulus = 1;
+    for (int i = 0; i < primes.num; ++i) {
+        const ulong r = primes.p[i];
+        ulong prime_power = 1;
+        int s = 0;
+        for (ulong rest = dp; rest % r == 0; rest /= r) {
+            prime_power *= r;
+            ++s;
+        }
+        const ulong cofactor = dp / prime_power;
+        const ulong h_r = nmod_pow_ui(h, cofactor, mod);
+        const ulong h_r_inverse = nmod_inv(h_r, mod);
+        const ulong b_r = nmod_pow_ui(b, cofactor, mod);
+        const ulong zeta_r = nmod_pow_ui(h_r, prime_power / r, mod);
+        ulong e_r = 0;
+        ulong digit_weight = 1;
+        ulong top_power = prime_power / r;
+        for (int k = 0; k < s; ++k) {
+            const ulong w = nmod_pow_ui(
+                    nmod_mul(b_r, nmod_pow_ui(h_r_inverse, e_r, mod), mod),
+                    top_power, mod);
+            ulong digit = 0;
+            ulong zeta_power = 1;
+            while (digit < r && zeta_power != w) {
+                zeta_power = nmod_mul(zeta_power, zeta_r, mod);
+                ++digit;
+            }
+            if (digit == r) {
+                return false;
+            }
+            e_r += digit * digit_weight;
+            digit_weight *= r;
+            top_power /= r;
+        }
+        // e = e mod e_modulus and e = e_r mod prime_power.
+        const ulong difference = n_submod(e_r, e % prime_power, prime_power);
+        const ulong lift = n_mulmod2(
+                difference, n_invmod(e_modulus % prime_power, prime_power),
+                prime_power);
+        e += e_modulus * lift;
+        e_modulus *= prime_power;
+    }
+    if (e % d != 0) {
+        return false;
+    }
+    const ulong c = nmod_pow_ui(h, (dp - e / d) % dp, mod);
+    y = nmod_mul(x1, c, mod);
+    return nmod_pow_ui(y, d, mod) == a;
+}
+
+}  // namespace
+
+bool binomial_roots_mod_prime(std::vector<ulong>& roots,
+                              const ulong* f,
+                              slong degree,
+                              ulong q) noexcept {
+    roots.clear();
+    if (degree < 1 || q < 3 || q % 2 == 0 || f[degree] != 1 || f[0] == 0 ||
+        static_cast<ulong>(degree) % q == 0) {
+        return false;
+    }
+    for (slong i = 1; i < degree; ++i) {
+        if (f[i] != 0) {
+            return false;
+        }
+    }
+    nmod_t mod;
+    nmod_init(&mod, q);
+    const ulong n = static_cast<ulong>(degree);
+    const ulong m = q - 1;
+    const ulong a = nmod_neg(f[0], mod);
+    const ulong d = n_gcd(n, m);
+    if (d > 1 && nmod_pow_ui(a, m / d, mod) != 1) {
+        return true;
+    }
+
+    ulong gamma = 0;
+    ulong y = a;
+    if (d > 1) {
+        gamma = primitive_root_mod_prime_ui(q);
+        if (gamma == 0 || !word_power_residue_root(y, a, d, gamma, mod)) {
+            return false;
+        }
+    }
+    // x0 = y^v with v (n / d) = 1 mod (m / d) has x0^n = a^(v n / d) = a,
+    // as a has order dividing m / d.
+    const ulong reduced_modulus = m / d;
+    const ulong v = reduced_modulus == 1
+            ? 0
+            : n_invmod((n / d) % reduced_modulus, reduced_modulus);
+    const ulong x0 = nmod_pow_ui(y, v, mod);
+    if (nmod_pow_ui(x0, n, mod) != a) {
+        return false;
+    }
+    const ulong zeta = d > 1 ? nmod_pow_ui(gamma, m / d, mod) : 1;
+    roots.reserve(static_cast<std::size_t>(d));
+    ulong root = x0;
+    for (ulong i = 0; i < d; ++i) {
+        roots.push_back(root);
+        root = nmod_mul(root, zeta, mod);
+    }
     return true;
 }
 
