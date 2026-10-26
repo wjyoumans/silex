@@ -887,6 +887,7 @@ int test_evaluate_all_root_powers_match_product_tree() {
                        ((degree <= 64 && !first_call) ? 1 : 0));
 #else
                 (void)hits_before;
+                (void)first_call;
 #endif
                 first_call = false;
 
