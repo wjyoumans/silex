@@ -114,6 +114,66 @@ void integer_matrix_to_arb(sflint::ArbMat& out,
     }
 }
 
+// The arb_addmul_fmpz loop that multiply_integer_arb_matrices used before it
+// summed each entry with arb_dot_fmpz; kept here as a reference enclosure.
+void addmul_loop_product(sflint::ArbMat& out,
+                         const sflint::FmpzMat& left,
+                         const sflint::ArbMat& right,
+                         slong precision) noexcept {
+    for (slong row = 0; row < sflint::arb_mat_nrows_value(out); ++row) {
+        for (slong column = 0; column < sflint::arb_mat_ncols_value(out);
+             ++column) {
+            arb_struct* entry = arb_mat_entry(out.raw(), row, column);
+            ::arb_zero(entry);
+            for (slong k = 0; k < sflint::fmpz_mat_ncols(left); ++k) {
+                ::arb_addmul_fmpz(entry, arb_mat_entry(right.raw(), k, column),
+                                  ::fmpz_mat_entry(left.raw(), row, k),
+                                  precision);
+            }
+        }
+    }
+}
+
+// right[k][c] = pi * (k + 1) / (c + 2) + sqrt(k + c + 2) at `precision`, or,
+// when `dyadic`, the exact value (2k + 1) * 2^(c - 40) + k.
+void set_test_right_matrix(sflint::ArbMat& right, bool dyadic,
+                           slong precision) noexcept {
+    sflint::Arb pi;
+    sflint::Arb term;
+    ::arb_const_pi(pi.raw(), precision);
+    for (slong k = 0; k < sflint::arb_mat_nrows_value(right); ++k) {
+        for (slong c = 0; c < sflint::arb_mat_ncols_value(right); ++c) {
+            arb_struct* entry = arb_mat_entry(right.raw(), k, c);
+            if (dyadic) {
+                ::arb_set_si(entry, 2 * k + 1);
+                ::arb_mul_2exp_si(entry, entry, c - 40);
+                ::arb_add_si(entry, entry, k, ARF_PREC_EXACT);
+                continue;
+            }
+            ::arb_mul_si(entry, pi.raw(), k + 1, precision);
+            ::arb_div_si(entry, entry, c + 2, precision);
+            ::arb_sqrt_ui(term.raw(), static_cast<ulong>(k + c + 2),
+                          precision);
+            ::arb_add(entry, entry, term.raw(), precision);
+        }
+    }
+}
+
+// Entries of mixed sign, with some beyond one limb.
+void set_test_left_matrix(sflint::FmpzMat& left) noexcept {
+    for (slong row = 0; row < sflint::fmpz_mat_nrows(left); ++row) {
+        for (slong k = 0; k < sflint::fmpz_mat_ncols(left); ++k) {
+            fmpz* entry = ::fmpz_mat_entry(left.raw(), row, k);
+            ::fmpz_set_si(entry, (row + 1) * (k % 3 == 0 ? -1 : 1) +
+                                         3 * k - 2 * row);
+            if ((row + k) % 4 == 1) {
+                ::fmpz_mul_2exp(entry, entry, 70);
+                ::fmpz_add_ui(entry, entry, 12345);
+            }
+        }
+    }
+}
+
 void assert_product_matches_flint(
         const sflint::ArbMat& product,
         const sflint::FmpzMat& left,
@@ -302,11 +362,68 @@ int test_invalid_inputs_preserve_outputs_and_cache() {
     return 0;
 }
 
+// The product's balls contain the exact products: right is computed at a low
+// precision (or exactly), and the reference product of the same exact values
+// at 2048 bits is a ball, around the exact product, inside each entry.  The
+// old arb_addmul_fmpz loop's enclosure contains the same reference.
+int test_product_contains_exact_values() {
+    constexpr slong kLowPrecision = 64;
+    constexpr slong kReferencePrecision = 2048;
+    const slong shapes[][3] = {{4, 5, 3}, {3, 1, 2}, {2, 0, 3}, {6, 6, 6}};
+    for (const auto& shape : shapes) {
+        for (const bool dyadic : {false, true}) {
+            const slong rows = shape[0];
+            const slong middle = shape[1];
+            const slong cols = shape[2];
+            sflint::FmpzMat left(rows, middle);
+            set_test_left_matrix(left);
+            sflint::ArbMat right(middle, cols);
+            sflint::ArbMat right_reference(middle, cols);
+            set_test_right_matrix(right, dyadic, kLowPrecision);
+            set_test_right_matrix(right_reference, dyadic,
+                                  kReferencePrecision);
+
+            sflint::ArbMat product(rows, cols);
+            set_arb_sentinels(product, 7);
+            assert(silex::detail::multiply_integer_arb_matrices(
+                    product, sflint::FmpzMatConstRef(left), right,
+                    kLowPrecision));
+            sflint::ArbMat old_product(rows, cols);
+            addmul_loop_product(old_product, left, right, kLowPrecision);
+            sflint::ArbMat reference(rows, cols);
+            addmul_loop_product(reference, left, right_reference,
+                                kReferencePrecision);
+
+            for (slong row = 0; row < rows; ++row) {
+                for (slong column = 0; column < cols; ++column) {
+                    const arb_struct* exact =
+                            arb_mat_entry(reference.raw(), row, column);
+                    if (dyadic) {
+                        assert(::arb_is_exact(exact) != 0);
+                    }
+                    assert(::arb_contains(
+                                   arb_mat_entry(product.raw(), row, column),
+                                   exact) != 0);
+                    assert(::arb_contains(arb_mat_entry(old_product.raw(),
+                                                        row, column),
+                                          exact) != 0);
+                    if (middle == 0) {
+                        assert(::arb_is_zero(arb_mat_entry(
+                                       product.raw(), row, column)) != 0);
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     assert(test_owner_lifetime_reuse_and_matrix_product() == 0);
     assert(test_precision_and_order_misses() == 0);
     assert(test_invalid_inputs_preserve_outputs_and_cache() == 0);
+    assert(test_product_contains_exact_values() == 0);
     return 0;
 }

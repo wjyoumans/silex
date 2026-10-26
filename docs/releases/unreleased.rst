@@ -133,6 +133,18 @@ Added
 Changed
 -------
 
+- The embedding rows of an ideal basis (and of the LLL-reduced basis in the
+  T2 enumeration setup of the ``proven`` factor-base honesty check) are now
+  computed with one ``arb_dot_fmpz`` per entry, a row of the integer matrix
+  against a column of the order's embedding rows, instead of a loop of
+  ``arb_addmul_fmpz`` steps.  The entries stay rigorous Arb enclosures of the
+  exact products, but their midpoints and radii can differ from the previous
+  ones by rounding noise.  Published results were identical on the tested
+  ``proven`` corpus rows (178 rows compared; 7 more timed out at 120 s on
+  both builds) and on three ``grh`` rows.  Callgrind instruction counts of
+  the ``proven`` computation fell by 2.17% for ``random_d10_h2_s21``, 2.09%
+  for ``random_d9_h4_s8`` and 3.15% for the field defined by ``x^12 + 7``.
+
 - The logarithmic-embedding cache of an ``EmbeddingContext`` finds a stored
   element through a hash index instead of comparing the element with every
   entry.  The hash is the factored-element screen hash of the stored

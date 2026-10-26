@@ -17,19 +17,39 @@ bool multiply_integer_arb_matrices(flint::ArbMat& out,
         return false;
     }
 
-    for (slong row = 0; row < rows; ++row) {
-        for (slong column = 0; column < cols; ++column) {
-            flint::ArbRef out_entry =
-                    flint::arb_mat_entry_ref(out, row, column);
-            flint::arb_zero(out_entry);
-            for (slong k = 0; k < middle; ++k) {
-                flint::arb_addmul_fmpz(
-                        out_entry,
-                        flint::arb_mat_entry_ref(
-                                flint::ArbMatConstRef(right), k, column),
-                        flint::fmpz_mat_entry(left, row, k),
-                        precision);
+    if (rows == 0 || cols == 0) {
+        return true;
+    }
+    if (middle == 0) {
+        for (slong row = 0; row < rows; ++row) {
+            for (slong column = 0; column < cols; ++column) {
+                flint::arb_zero(flint::arb_mat_entry_ref(out, row, column));
             }
+        }
+        return true;
+    }
+
+    // Each entry is one arb_dot_fmpz of a row of `left` (contiguous) with a
+    // column of `right`, read with the row stride of `right` (an Arb matrix
+    // stores its rows at a uniform stride).  Like every Arb operation,
+    // arb_dot_fmpz returns a ball that contains the exact sum
+    // sum_k left[row][k] * x_k for every choice of x_k in the balls
+    // right[k][column], so the product stays a rigorous enclosure.  Its
+    // midpoint comes from FLINT's dot-product accumulation with one final
+    // rounding rather than from a sum of rounded arb_addmul_fmpz steps, so an
+    // entry can differ from that sum by rounding noise.
+    const arb_struct* right_first = arb_mat_entry(right.raw(), 0, 0);
+    const slong right_step =
+            middle > 1 ? static_cast<slong>(
+                                 arb_mat_entry(right.raw(), 1, 0) - right_first)
+                       : 1;
+    for (slong row = 0; row < rows; ++row) {
+        const fmpz* left_row = flint::fmpz_mat_entry(left, row, 0).raw();
+        for (slong column = 0; column < cols; ++column) {
+            ::arb_dot_fmpz(
+                    flint::arb_mat_entry_ref(out, row, column).raw(), nullptr,
+                    0, right_first + column, right_step, left_row, 1, middle,
+                    precision);
         }
     }
     return true;
