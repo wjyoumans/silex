@@ -91,6 +91,7 @@ private:
     Signature sig_;
     flint::AcbVec roots_{0};
     flint::AcbPolyEvaluationTree evaluation_tree_;
+    flint::AcbPointPowerTable root_power_table_;
     slong prec_ = 0;
     bool roots_are_set_ = false;
     // Opaque implementation cache keeps STL storage out of this public header.

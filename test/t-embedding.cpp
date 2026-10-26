@@ -787,6 +787,112 @@ int test_full_isolation_retries_ambiguous_match() {
 
 }  // namespace
 
+// evaluate_all through the root-power table agrees with FLINT's product-tree
+// multipoint evaluation at the same roots, encloses the exact trace and norm,
+// and is exactly real at real places.  A request below the precision of an
+// existing table reuses it.  The degree-65 field takes the product tree.
+int test_evaluate_all_root_powers_match_product_tree() {
+    const slong quadratic[] = {-2, 0, 1};
+    const slong cubic[] = {-2, 0, 0, 1};
+    const slong quintic[] = {-1, -1, 0, 0, 0, 1};
+    const slong cyclotomic_7[] = {1, 1, 1, 1, 1, 1, 1};
+    const slong real_64[] = {2, 0, -64, 0, 336, 0, -672, 0, 660,
+                             0, -352, 0, 104, 0, -16, 0, 1};
+    struct Case {
+        const slong* coefficients;
+        slong degree;
+    };
+    // coefficients == nullptr: x^degree - x - 1.
+    const Case cases[] = {{quadratic, 2}, {cubic, 3}, {quintic, 5},
+                          {cyclotomic_7, 6}, {real_64, 16}, {nullptr, 65}};
+    for (const Case& field_case : cases) {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_zero(polynomial);
+        if (field_case.coefficients != nullptr) {
+            for (slong j = 0; j <= field_case.degree; ++j) {
+                sflint::fmpq_poly_set_coeff_si(
+                        polynomial, j, field_case.coefficients[j]);
+            }
+        } else {
+            sflint::fmpq_poly_set_coeff_si(polynomial, field_case.degree, 1);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+            sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+        }
+        silex::NumberField field = field_by_polynomial(polynomial);
+        const slong degree = field_case.degree;
+        silex::EmbeddingContext embeddings(field);
+        const slong r1 = embeddings.signature().r1();
+
+        // (sum_j (3j - 5) theta^j) / 7, and the integral element with
+        // numerator coefficients 2^40 + j.
+        sflint::FmpqPoly rational;
+        sflint::FmpqPoly integral;
+        sflint::fmpq_poly_zero(rational);
+        sflint::fmpq_poly_zero(integral);
+        for (slong j = 0; j < degree; ++j) {
+            sflint::fmpq_poly_set_coeff_si(rational, j, 3 * j - 5);
+            sflint::fmpq_poly_set_coeff_si(integral, j,
+                                           (slong(1) << 40) + j);
+        }
+        ::fmpq_poly_scalar_div_si(rational.raw(), rational.raw(), 7);
+        silex::Element elements[2] = {silex::Element(field),
+                                      silex::Element(field)};
+        assert(elements[0].set_fmpq_poly(sflint::FmpqPolyConstRef(rational)));
+        assert(elements[1].set_fmpq_poly(sflint::FmpqPolyConstRef(integral)));
+
+        const slong precisions[] = {256, 64, 128};
+        for (const slong precision : precisions) {
+            for (const silex::Element& element : elements) {
+                sflint::AcbVec values(degree);
+                assert(embeddings.evaluate_all(sflint::AcbVecRef(values),
+                                               element, precision));
+
+                sflint::AcbVec roots(degree);
+                for (slong i = 0; i < degree; ++i) {
+                    assert(embeddings.get_root(
+                            sflint::AcbRef(roots.data() + i), i));
+                }
+                sflint::FmpqPoly coefficients;
+                assert(element.get_fmpq_poly(
+                        sflint::FmpqPolyRef(coefficients)));
+                sflint::AcbPoly complex_coefficients;
+                ::acb_poly_set_fmpq_poly(complex_coefficients.raw(),
+                                         coefficients.raw(), precision);
+                sflint::AcbPolyEvaluationTree tree;
+                sflint::AcbVec tree_values(degree);
+                assert(tree.build(roots.data(), degree, precision));
+                assert(tree.evaluate(
+                        tree_values.data(),
+                        sflint::AcbPolyConstRef(complex_coefficients),
+                        precision));
+
+                sflint::Acb sum;
+                sflint::Acb product;
+                ::acb_one(product.raw());
+                for (slong i = 0; i < degree; ++i) {
+                    assert(::acb_is_finite(values.data() + i));
+                    assert(::acb_overlaps(values.data() + i,
+                                          tree_values.data() + i));
+                    if (degree <= 64 && i < r1) {
+                        assert(::arb_is_zero(acb_imagref(values.data() + i)));
+                    }
+                    ::acb_add(sum.raw(), sum.raw(), values.data() + i,
+                              precision);
+                    ::acb_mul(product.raw(), product.raw(), values.data() + i,
+                              precision);
+                }
+                sflint::Fmpq trace;
+                sflint::Fmpq norm;
+                assert(element.trace(sflint::FmpqRef(trace)));
+                assert(element.norm(sflint::FmpqRef(norm)));
+                assert(sflint::acb_contains_fmpq(sum, trace));
+                assert(sflint::acb_contains_fmpq(product, norm));
+            }
+        }
+    }
+    return 0;
+}
+
 int main() {
     assert(test_degree_one() == 0);
     assert(test_quadratic_real() == 0);
@@ -802,5 +908,6 @@ int main() {
     assert(test_refine_from_previous_roots_single_attempt() == 0);
     assert(test_refine_precision_cap() == 0);
     assert(test_full_isolation_retries_ambiguous_match() == 0);
+    assert(test_evaluate_all_root_powers_match_product_tree() == 0);
     return 0;
 }

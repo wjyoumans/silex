@@ -986,6 +986,63 @@ int test_acb_poly() {
         return 1;
     }
 
+    // Root-power table: (1 + 2x) / 3 at the points 2 and i.
+    silex::flint::AcbVec power_points(2);
+    acb_set_si(power_points.data() + 0, 2);
+    acb_onei(power_points.data() + 1);
+    fmpq_poly_t rational;
+    fmpq_poly_init(rational);
+    fmpq_poly_set_coeff_si(rational, 0, 1);
+    fmpq_poly_set_coeff_si(rational, 1, 2);
+    fmpq_poly_scalar_div_si(rational, rational, 3);
+    silex::flint::AcbPointPowerTable table;
+    fmpq_t five_thirds;
+    fmpq_t one_third;
+    fmpq_t two_thirds;
+    fmpq_init(five_thirds);
+    fmpq_init(one_third);
+    fmpq_init(two_thirds);
+    fmpq_set_si(five_thirds, 5, 3);
+    fmpq_set_si(one_third, 1, 3);
+    fmpq_set_si(two_thirds, 2, 3);
+    const bool table_ok =
+            !table.covers(2, 64) &&
+            !table.evaluate(values.data(), rational, 64) &&
+            table.build(power_points.data(), 2, 128) &&
+            table.covers(2, 128) && table.covers(2, 64) &&
+            !table.covers(2, 129) && !table.covers(3, 64) &&
+            table.length() == 2 && table.precision() == 128 &&
+            table.evaluate(values.data(), rational, 64) &&
+            arb_contains_fmpq(acb_realref(values.data() + 0),
+                              five_thirds) != 0 &&
+            arb_is_zero(acb_imagref(values.data() + 0)) != 0 &&
+            arb_contains_fmpq(acb_realref(values.data() + 1),
+                              one_third) != 0 &&
+            arb_contains_fmpq(acb_imagref(values.data() + 1),
+                              two_thirds) != 0 &&
+            !table.evaluate(values.data(), rational, 256) &&
+            !table.build(nullptr, 2, 64) && table.covers(2, 128);
+    fmpq_clear(five_thirds);
+    fmpq_clear(one_third);
+    fmpq_clear(two_thirds);
+    fmpq_poly_set_coeff_si(rational, 2, 1);
+    const bool too_long_rejected =
+            !table.evaluate(values.data(), rational, 64);
+    fmpq_poly_clear(rational);
+    if (!table_ok || !too_long_rejected) {
+        return 1;
+    }
+
+    silex::flint::AcbPointPowerTable other_table;
+    swap(table, other_table);
+    if (table.covers(2, 64) || !other_table.covers(2, 128)) {
+        return 1;
+    }
+    other_table.clear();
+    if (other_table.covers(2, 64) || other_table.length() != 0) {
+        return 1;
+    }
+
     return 0;
 }
 

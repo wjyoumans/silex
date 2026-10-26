@@ -2410,6 +2410,24 @@ Changed
   9.55e8), ``cyclotomic_real_37_deg18`` 1.6% fewer (1.972e9 to 1.941e9).  No
   timing has been measured.
 
+- ``EmbeddingContext::evaluate_all`` evaluates an element at every root as one
+  dot product of its exact numerator coefficients with a stored row of root
+  powers, divided by the denominator, for fields of degree at most 64,
+  instead of FLINT's product-tree multipoint evaluation of the rounded
+  coefficients.  The power table is built once per root set and reused for
+  any request at or below its precision; at a real root the value has an
+  exactly zero imaginary part.  Fields of larger degree keep the product
+  tree.  The values are rigorous enclosures of the same numbers, but their
+  midpoints and radii differ, so derived enclosures can differ: on the class/unit corpus (169 ``grh`` and 159
+  ``proven`` rows compared, timing fields stripped) published outputs are
+  identical except ``regulator_radius`` on 28 ``grh`` and 3 ``proven`` rows
+  (ratios 0.95 to 1.28).  Callgrind instruction counts for the whole
+  ``silex-class-unit-instance`` process, ``grh`` mode:
+  ``cyclotomic_real_64_deg16`` 6.4% fewer (1.080e9 to 1.011e9),
+  ``q10_c11_deg10`` 1.0% fewer (1.871e9 to 1.852e9),
+  ``cyclotomic_23_phi22`` 7.7% fewer, ``cyclotomic_41_phi40`` 3.5% fewer.  No
+  timing has been measured.
+
 Fixed
 -----
 

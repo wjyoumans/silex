@@ -183,6 +183,11 @@ constexpr slong refine_guard_bits = 32;
 // the starting working precision, before falling back to full isolation.
 constexpr slong refine_work_precision_factor = 8;
 
+// Largest degree evaluated through a table of root powers instead of FLINT's
+// product-tree multipoint evaluation.  A tuning constant, not a correctness
+// condition: both give rigorous enclosures.
+constexpr slong root_power_table_max_degree = 64;
+
 }  // namespace
 
 namespace detail {
@@ -466,6 +471,7 @@ void EmbeddingContext::swap(EmbeddingContext& other) noexcept {
     std::swap(sig_, other.sig_);
     roots_.swap(other.roots_);
     evaluation_tree_.swap(other.evaluation_tree_);
+    root_power_table_.swap(other.root_power_table_);
     std::swap(prec_, other.prec_);
     std::swap(roots_are_set_, other.roots_are_set_);
     std::swap(log_embedding_cache_, other.log_embedding_cache_);
@@ -476,6 +482,7 @@ void EmbeddingContext::clear() noexcept {
     log_embedding_cache_ = nullptr;
     roots_ = flint::AcbVec(0);
     evaluation_tree_.clear();
+    root_power_table_.clear();
     parent_.clear();
     degree_ = 0;
     sig_ = Signature();
@@ -609,6 +616,7 @@ bool EmbeddingContext::refine(
 
     roots_.set_from(flint::AcbVecConstRef(next_roots));
     evaluation_tree_.clear();
+    root_power_table_.clear();
     prec_ = precision;
     roots_are_set_ = true;
     return true;
@@ -669,8 +677,35 @@ bool EmbeddingContext::evaluate_all(flint::AcbVecRef out,
         }
     }
 
-    flint::AcbPoly complex_polynomial;
     flint::AcbVec values(degree_);
+    if (degree_ <= root_power_table_max_degree &&
+        polynomial.raw()->length <= degree_) {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
+                            "element.embedding.evaluate_all_root_powers");
+        // One dot product per root against its stored powers.  A table built
+        // at a higher precision also serves this request.
+        if (!root_power_table_.covers(degree_, precision)) {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.embedding.evaluate_all_root_powers_build");
+            if (!root_power_table_.build(roots_.data(), degree_,
+                                         precision)) {
+                return false;
+            }
+        } else {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::element,
+                    "element.embedding.evaluate_all_root_powers_hit");
+        }
+        if (!root_power_table_.evaluate(values.data(), polynomial.raw(),
+                                        precision)) {
+            return false;
+        }
+        out.set_from(flint::AcbVecConstRef(values));
+        return true;
+    }
+
+    flint::AcbPoly complex_polynomial;
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "element.embedding.evaluate_all_evaluate_vec");

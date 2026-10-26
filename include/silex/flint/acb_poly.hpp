@@ -1,6 +1,10 @@
 #pragma once
 
 #include <flint/acb_poly.h>
+#include <flint/arb.h>
+#include <flint/fmpq_poly.h>
+
+#include <silex/flint/acb_vec.hpp>
 
 #include <utility>
 
@@ -141,10 +145,115 @@ private:
     slong precision_ = 0;
 };
 
+// Rows of point powers 1, x_i, ..., x_i^(length - 1) for each of `length`
+// points, for evaluating a rational polynomial of length at most `length` at
+// every point as one dot product per point.  Each output is
+// (sum_j num_j * x_i^j) / den from the exact numerator coefficients; a point
+// with an exactly zero imaginary part gives an exactly real value.  A table
+// built at precision P also serves requests at any lower precision.
+class AcbPointPowerTable {
+public:
+    AcbPointPowerTable() noexcept = default;
+
+    void swap(AcbPointPowerTable& other) noexcept {
+        powers_.swap(other.powers_);
+        std::swap(length_, other.length_);
+        std::swap(precision_, other.precision_);
+    }
+
+    void clear() noexcept {
+        AcbVec empty(0);
+        powers_.swap(empty);
+        length_ = 0;
+        precision_ = 0;
+    }
+
+    bool build(acb_srcptr points,
+               slong length,
+               slong precision) noexcept {
+        if (points == nullptr || length <= 0 || precision <= 0) {
+            return false;
+        }
+        AcbVec candidate(length * length);
+        if (candidate.length() != length * length) {
+            return false;
+        }
+        for (slong i = 0; i < length; ++i) {
+            _acb_vec_set_powers(candidate.data() + i * length, points + i,
+                                length, precision);
+        }
+        powers_.swap(candidate);
+        length_ = length;
+        precision_ = precision;
+        return true;
+    }
+
+    bool covers(slong length, slong precision) const noexcept {
+        return length_ > 0 && length_ == length && precision > 0 &&
+               precision <= precision_;
+    }
+
+    bool evaluate(acb_ptr out,
+                  const fmpq_poly_struct* polynomial,
+                  slong precision) const noexcept {
+        if (out == nullptr || polynomial == nullptr || length_ <= 0 ||
+            precision <= 0 || precision > precision_ ||
+            polynomial->length > length_) {
+            return false;
+        }
+        const slong terms = polynomial->length;
+        const bool integral = fmpz_is_one(polynomial->den) != 0;
+        for (slong i = 0; i < length_; ++i) {
+            acb_srcptr row = powers_.data() + i * length_;
+            acb_ptr value = out + i;
+            if (terms == 0) {
+                acb_zero(value);
+                continue;
+            }
+            // acb_struct is (real, imag), so a stride of two walks the real
+            // or the imaginary parts of the row, as FLINT's acb_dot_fmpz.
+            arb_dot_fmpz(acb_realref(value), nullptr, 0,
+                         acb_realref(row), 2, polynomial->coeffs, 1, terms,
+                         precision);
+            const bool real_point = terms == 1 ||
+                                    arb_is_zero(acb_imagref(row + 1)) != 0;
+            if (real_point) {
+                arb_zero(acb_imagref(value));
+            } else {
+                arb_dot_fmpz(acb_imagref(value), nullptr, 0,
+                             acb_imagref(row), 2, polynomial->coeffs, 1,
+                             terms, precision);
+            }
+            if (!integral) {
+                arb_div_fmpz(acb_realref(value), acb_realref(value),
+                             polynomial->den, precision);
+                if (!real_point) {
+                    arb_div_fmpz(acb_imagref(value), acb_imagref(value),
+                                 polynomial->den, precision);
+                }
+            }
+        }
+        return true;
+    }
+
+    slong length() const noexcept { return length_; }
+    slong precision() const noexcept { return precision_; }
+
+private:
+    AcbVec powers_{0};
+    slong length_ = 0;
+    slong precision_ = 0;
+};
+
 inline void swap(AcbPoly& left, AcbPoly& right) noexcept { left.swap(right); }
 
 inline void swap(AcbPolyEvaluationTree& left,
                  AcbPolyEvaluationTree& right) noexcept {
+    left.swap(right);
+}
+
+inline void swap(AcbPointPowerTable& left,
+                 AcbPointPowerTable& right) noexcept {
     left.swap(right);
 }
 
