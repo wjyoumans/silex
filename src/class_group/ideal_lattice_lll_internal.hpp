@@ -1,8 +1,11 @@
 #pragma once
 
 #include <silex/class_group.hpp>
+#include <silex/flint/arb_mat.hpp>
 
 #include "../lat/certified_lll_internal.hpp"
+
+#include <vector>
 
 namespace silex::detail {
 
@@ -18,6 +21,16 @@ struct IdealLatticeLllData {
     flint::Fmpz gram_denominator;
 };
 
+// One entry of the two-LLL order data (ideal_lattice_two_lll_order_gram):
+// the order's Minkowski rows at `embedding_precision` and the scaled order
+// T2 Gram numerator formed from them at `precision`.
+struct IdealLatticeTwoLllOrderGram {
+    slong embedding_precision = 0;
+    slong precision = 0;
+    flint::ArbMat source_rows{0, 0};
+    flint::FmpzMat order_gram{0, 0};
+};
+
 // Per-order data for the reference-style per-ideal reduction of
 // build_ideal_lattice_rounded_embedding_lll_data: the integer-rounded
 // Minkowski embedding rows of the order basis (reference nf_get_roundG) and
@@ -29,6 +42,8 @@ struct IdealLatticeLllData {
 // order was compared with the two-LLL basis of the same ideal, and
 // `use_two_lll_route` that the comparison failed, so every further ideal of
 // the order is reduced by build_ideal_lattice_lll_data.
+// `two_lll_order_grams` holds the order data of that two-LLL route (see
+// IdealLatticeTwoLllOrderGram), cleared with the rest when the order changes.
 struct IdealLatticeRoundedEmbeddingCache {
     Order order;
     bool has_order = false;
@@ -39,6 +54,7 @@ struct IdealLatticeRoundedEmbeddingCache {
     flint::FmpzMat order_gram{0, 0};
     bool route_checked = false;
     bool use_two_lll_route = false;
+    std::vector<IdealLatticeTwoLllOrderGram> two_lll_order_grams;
 };
 
 // Sets `out` to basis * gram * basis^T for a symmetric `gram`, computing
@@ -56,9 +72,37 @@ bool copy_ideal_basis_row_coordinates(flint::FmpzMat& out,
                                       flint::FmpzMatConstRef basis,
                                       slong row) noexcept;
 
-bool build_ideal_lattice_lll_data(IdealLatticeLllData& out,
-                                  const Ideal& ideal,
-                                  slong precision) noexcept;
+// The two-LLL route (reference NfOrd/LLL.jl:_lll).  With a non-null `cache`
+// whose order is the ideal's, the order T2 Gram numerator of each attempt is
+// taken from `cache->two_lll_order_grams` instead of being recomputed; see
+// ideal_lattice_two_lll_order_gram.  The result is the same with or without
+// a cache.
+bool build_ideal_lattice_lll_data(
+        IdealLatticeLllData& out,
+        const Ideal& ideal,
+        slong precision,
+        IdealLatticeRoundedEmbeddingCache* cache = nullptr) noexcept;
+
+// The order data of one two-LLL attempt at (embedding_precision, precision):
+// the order's Minkowski rows from detail::order_minkowski_embedding_rows at
+// `embedding_precision`, multiplied by the identity basis at that precision,
+// and the scaled order T2 Gram numerator of those rows at scale and
+// precision `precision`.  That Gram is a function of the order rows and the
+// two precisions, so an entry of `cache->two_lll_order_grams` whose
+// precisions match and whose `source_rows` equal the order's current rows
+// as balls (midpoint and radius) holds exactly the Gram a recomputation
+// gives, and is returned; otherwise the Gram is computed and, on success,
+// stored (at most kIdealLatticeTwoLllOrderGramEntries entries, the oldest
+// replaced first).  A null `cache`, or one for another order, recomputes.
+// Returns false when the rows cannot be formed or do not round at
+// `precision`; exposed for tests.
+inline constexpr slong kIdealLatticeTwoLllOrderGramEntries = 4;
+bool ideal_lattice_two_lll_order_gram(
+        flint::FmpzMat& out,
+        const Order& order,
+        slong embedding_precision,
+        slong precision,
+        IdealLatticeRoundedEmbeddingCache* cache) noexcept;
 
 // The two LLLs of the two-LLL route (ideal_lattice_gram_lll_reduce and its
 // weighted form), each through lat::detail::certified_fmpz_lll, whose

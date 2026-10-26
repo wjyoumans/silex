@@ -544,7 +544,9 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                               const Order& order,
                               slong embedding_precision,
                               slong precision,
-                              slong& embedding_shortfall_bits) noexcept;
+                              slong& embedding_shortfall_bits,
+                              IdealLatticeRoundedEmbeddingCache* cache =
+                                      nullptr) noexcept;
 
 static IdealLatticeReductionStatus
 weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
@@ -710,6 +712,118 @@ weighted_ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
     return IdealLatticeReductionStatus::success;
 }
 
+// The order part of ideal_lattice_gram_lll_reduce: the identity-basis
+// Minkowski rows of the order at `embedding_precision`
+// (detail::build_ideal_minkowski_embedding_rows, which multiplies the rows
+// of detail::order_minkowski_embedding_rows by the basis) and their scaled
+// T2 Gram numerator at `precision`.  The Gram depends only on the order rows
+// and the two precisions, so a cached entry whose precisions match and whose
+// source rows equal the current order rows as balls holds exactly the Gram
+// recomputed here; the order rows are still fetched every time, since the
+// order may have replaced them by rows of higher precision.
+static IdealLatticeReductionStatus ideal_lattice_two_lll_order_gram_status(
+        flint::FmpzMat& order_gram,
+        const Order& order,
+        slong embedding_precision,
+        slong precision,
+        slong& embedding_shortfall_bits,
+        IdealLatticeRoundedEmbeddingCache* cache) noexcept {
+    const slong degree = order.degree();
+    flint::FmpzMat order_basis(degree, degree);
+    flint::ArbMat order_embedding_rows(degree, degree);
+    flint::fmpz_mat_one(flint::FmpzMatRef(order_basis));
+    if (cache == nullptr || !cache->has_order ||
+        !cache->order.has_same_data(order)) {
+        if (!detail::build_ideal_minkowski_embedding_rows(
+                    order_embedding_rows,
+                    flint::FmpzMatConstRef(order_basis), order,
+                    embedding_precision)) {
+            return IdealLatticeReductionStatus::retry_precision;
+        }
+        if (!ideal_lattice_scaled_minkowski_gram_numerator(
+                    order_gram, order_embedding_rows, precision, precision)) {
+            return ideal_lattice_rounding_retry_status(
+                    embedding_shortfall_bits, order_embedding_rows,
+                    precision, precision);
+        }
+        return IdealLatticeReductionStatus::success;
+    }
+
+    // The same steps as build_ideal_minkowski_embedding_rows without a
+    // Minkowski cache: the order rows, then the basis product.
+    flint::ArbMat source_rows(degree, degree);
+    if (order.parent() == nullptr || embedding_precision <= 0 ||
+        !detail::order_minkowski_embedding_rows(
+                flint::ArbMatRef(source_rows), order, embedding_precision)) {
+        return IdealLatticeReductionStatus::retry_precision;
+    }
+    for (const IdealLatticeTwoLllOrderGram& entry :
+         cache->two_lll_order_grams) {
+        if (entry.embedding_precision == embedding_precision &&
+            entry.precision == precision &&
+            flint::arb_mat_nrows_value(entry.source_rows) == degree &&
+            flint::arb_mat_ncols_value(entry.source_rows) == degree &&
+            flint::fmpz_mat_nrows(entry.order_gram) == degree &&
+            flint::fmpz_mat_ncols(entry.order_gram) == degree &&
+            ::arb_mat_equal(entry.source_rows.raw(), source_rows.raw()) !=
+                    0) {
+            flint::fmpz_mat_set(flint::FmpzMatRef(order_gram),
+                                flint::FmpzMatConstRef(entry.order_gram));
+            return IdealLatticeReductionStatus::success;
+        }
+    }
+
+    if (!detail::multiply_integer_arb_matrices(
+                order_embedding_rows, flint::FmpzMatConstRef(order_basis),
+                source_rows, embedding_precision)) {
+        return IdealLatticeReductionStatus::retry_precision;
+    }
+    if (!ideal_lattice_scaled_minkowski_gram_numerator(
+                order_gram, order_embedding_rows, precision, precision)) {
+        return ideal_lattice_rounding_retry_status(
+                embedding_shortfall_bits, order_embedding_rows, precision,
+                precision);
+    }
+
+    IdealLatticeTwoLllOrderGram entry;
+    entry.embedding_precision = embedding_precision;
+    entry.precision = precision;
+    entry.source_rows = std::move(source_rows);
+    entry.order_gram = flint::FmpzMat(degree, degree);
+    flint::fmpz_mat_set(flint::FmpzMatRef(entry.order_gram),
+                        flint::FmpzMatConstRef(order_gram));
+    std::vector<IdealLatticeTwoLllOrderGram>& entries =
+            cache->two_lll_order_grams;
+    if (static_cast<slong>(entries.size()) >=
+        kIdealLatticeTwoLllOrderGramEntries) {
+        entries.erase(entries.begin());
+    }
+    entries.push_back(std::move(entry));
+    return IdealLatticeReductionStatus::success;
+}
+
+bool ideal_lattice_two_lll_order_gram(
+        flint::FmpzMat& out,
+        const Order& order,
+        slong embedding_precision,
+        slong precision,
+        IdealLatticeRoundedEmbeddingCache* cache) noexcept {
+    const slong degree = order.degree();
+    if (degree <= 0 || precision <= 0 || embedding_precision <= 0) {
+        return false;
+    }
+    flint::FmpzMat order_gram(degree, degree);
+    slong embedding_shortfall_bits = 0;
+    if (ideal_lattice_two_lll_order_gram_status(
+                order_gram, order, embedding_precision, precision,
+                embedding_shortfall_bits,
+                cache) != IdealLatticeReductionStatus::success) {
+        return false;
+    }
+    out = std::move(order_gram);
+    return true;
+}
+
 static IdealLatticeReductionStatus
 ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                               flint::FmpzMat& transform,
@@ -719,7 +833,8 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
                               const Order& order,
                               slong embedding_precision,
                               slong precision,
-                              slong& embedding_shortfall_bits) noexcept {
+                              slong& embedding_shortfall_bits,
+                              IdealLatticeRoundedEmbeddingCache* cache) noexcept {
     const slong degree = flint::fmpz_mat_nrows(basis);
     if (precision <= 0 || degree != flint::fmpz_mat_ncols(basis) ||
         embedding_precision <= 0 || order.degree() != degree ||
@@ -749,24 +864,16 @@ ideal_lattice_gram_lll_reduce(flint::FmpzMat& reduced_basis,
     }
 
     const slong lll_denominator_bits = precision / 2;
-    flint::FmpzMat order_basis(degree, degree);
-    flint::ArbMat order_embedding_rows(degree, degree);
     flint::FmpzMat order_gram(degree, degree);
     flint::FmpzMat original_gram(degree, degree);
     flint::FmpzMat pre_reduced_basis_transpose(degree, degree);
     flint::FmpzMat tmp_gram(degree, degree);
-    flint::fmpz_mat_one(flint::FmpzMatRef(order_basis));
-    if (!detail::build_ideal_minkowski_embedding_rows(
-                order_embedding_rows,
-                flint::FmpzMatConstRef(order_basis), order,
-                embedding_precision)) {
-        return IdealLatticeReductionStatus::retry_precision;
-    }
-    if (!ideal_lattice_scaled_minkowski_gram_numerator(
-                order_gram, order_embedding_rows, precision, precision)) {
-        return ideal_lattice_rounding_retry_status(
-                embedding_shortfall_bits, order_embedding_rows, precision,
-                precision);
+    const IdealLatticeReductionStatus order_status =
+            ideal_lattice_two_lll_order_gram_status(
+                    order_gram, order, embedding_precision, precision,
+                    embedding_shortfall_bits, cache);
+    if (order_status != IdealLatticeReductionStatus::success) {
+        return order_status;
     }
     flint::fmpz_mat_transpose(
             flint::FmpzMatRef(pre_reduced_basis_transpose),
@@ -842,7 +949,8 @@ bool copy_ideal_basis_row_coordinates(flint::FmpzMat& out,
 bool build_ideal_lattice_lll_data(
         IdealLatticeLllData& out,
         const Ideal& ideal,
-        slong precision) noexcept {
+        slong precision,
+        IdealLatticeRoundedEmbeddingCache* cache) noexcept {
     const Order* order = ideal.parent();
     if (order == nullptr || !ideal.has_hnf() || precision <= 0) {
         return false;
@@ -875,7 +983,7 @@ bool build_ideal_lattice_lll_data(
                 ideal_lattice_gram_lll_reduce(
                         basis, transform, scaled_gram, original_basis, ideal,
                         *order, schedule.embedding_precision(),
-                        active_precision, embedding_shortfall_bits);
+                        active_precision, embedding_shortfall_bits, cache);
         if (reduction_status == IdealLatticeReductionStatus::retry_precision ||
             reduction_status ==
                     IdealLatticeReductionStatus::retry_embedding_precision) {
@@ -970,6 +1078,7 @@ static bool ideal_lattice_fill_rounded_embedding_cache(
         cache.order_gram = flint::FmpzMat(0, 0);
         cache.route_checked = false;
         cache.use_two_lll_route = false;
+        cache.two_lll_order_grams.clear();
     }
     if (cache.has_rounded_rows &&
         cache.order_gram_requested_precision == precision) {
@@ -1253,7 +1362,7 @@ bool build_ideal_lattice_rounded_embedding_lll_data(
                 diagnostics, DiagnosticsModule::class_group,
                 "class_group.ideal_lattice_reduction.rounded_embedding."
                 "two_lll_order");
-        return build_ideal_lattice_lll_data(out, ideal, precision);
+        return build_ideal_lattice_lll_data(out, ideal, precision, &cache);
     }
 
     if (ideal_lattice_fill_rounded_embedding_cache(cache, *order,
@@ -1276,7 +1385,7 @@ bool build_ideal_lattice_rounded_embedding_lll_data(
                         "rounded_embedding.route_check");
                 IdealLatticeLllData two_lll_data;
                 if (build_ideal_lattice_lll_data(two_lll_data, ideal,
-                                                 precision)) {
+                                                 precision, &cache)) {
                     cache.route_checked = true;
                     if (!ideal_lattice_rounded_embedding_basis_matches_two_lll(
                                 flint::FmpzMatConstRef(scaled_gram),
@@ -1306,7 +1415,7 @@ bool build_ideal_lattice_rounded_embedding_lll_data(
     SILEX_PROFILE_SCOPE(
             diagnostics, DiagnosticsModule::class_group,
             "class_group.ideal_lattice_reduction.rounded_embedding.fallback");
-    return build_ideal_lattice_lll_data(out, ideal, precision);
+    return build_ideal_lattice_lll_data(out, ideal, precision, &cache);
 }
 
 bool build_weighted_ideal_lattice_reduction(

@@ -176,6 +176,21 @@ Changed
   3.4284e9), ``pure_x12_plus_7`` 0.45% fewer (1.0709e10 to 1.0662e10).  No
   timing has been measured.
 
+- The grh two-LLL ideal-lattice route (the reference ``_lll`` route, used
+  when the one-LLL basis of an ideal fails the T2 checks or its order fails
+  the route check) no longer recomputes the order's scaled T2 Gram numerator
+  for each ideal.  The rounded-embedding cache of the order keeps, per embedding precision and precision, the
+  order's Minkowski rows and the Gram computed from them, and reuses that
+  Gram only while the order's current rows are equal to the kept rows as
+  balls (midpoint and radius), so it is exactly the Gram a recomputation
+  gives and the certified LLL inputs are unchanged.  ``grh`` outputs are
+  identical on the 184 corpus and fixture rows that finish within 300 s
+  (``cyclotomic_real_163_deg81`` timed out on both builds).  Callgrind
+  instruction counts for the whole process, ``grh`` mode:
+  ``cyclotomic_real_37_deg18`` 5.88% fewer (1.4688e9 to 1.3824e9),
+  ``multiquadratic_m3_m5_m7`` 1.85% fewer (7.443e8 to 7.305e8).  No timing
+  has been measured.
+
 - The split-prime norm evaluation of class-group relation candidates
   (defining polynomials of degree 16 and more) combines the residues modulo
   its split primes with a mixed-radix conversion in word-size arithmetic,

@@ -886,6 +886,113 @@ int test_rounded_embedding_route_check_for_badly_rounded_order() {
     return 0;
 }
 
+// The two-LLL route reuses the order T2 Gram numerator of an attempt from
+// the rounded-embedding cache.  At each (embedding precision, precision)
+// pair its schedule uses from kReductionPrecision on the real subfield of
+// Q(zeta_136), the cached Gram equals the recomputed one, and the cached
+// source rows equal the order rows.  After the order replaces its rows by
+// rows of higher precision, the entry is not reused: the Gram is computed
+// again from the new rows, again equal to the recomputation.  Both ideals
+// reduce to the same data with and without the cache.
+int test_two_lll_order_gram_reuse_matches_recomputation() {
+    namespace rs = silex::detail::relation_search;
+    FieldSetup setup = real_cyclotomic_136();
+    const silex::Order& order = setup.maximal_order;
+    const slong degree = order.degree();
+    assert(degree == 32);
+    constexpr slong kGuardBits = 64;
+
+    rs::IdealLatticeRoundedEmbeddingCache cache;
+    cache.order = order;
+    cache.has_order = true;
+    const std::array<slong, 3> precisions = {kReductionPrecision,
+                                             2 * kReductionPrecision,
+                                             4 * kReductionPrecision};
+    for (const slong precision : precisions) {
+        const slong embedding_precision = precision + kGuardBits;
+        sflint::FmpzMat expected(0, 0);
+        sflint::FmpzMat first(0, 0);
+        sflint::FmpzMat second(0, 0);
+        assert(rs::ideal_lattice_two_lll_order_gram(
+                expected, order, embedding_precision, precision, nullptr));
+        const std::size_t entries_before = cache.two_lll_order_grams.size();
+        assert(rs::ideal_lattice_two_lll_order_gram(
+                first, order, embedding_precision, precision, &cache));
+        assert(cache.two_lll_order_grams.size() == entries_before + 1);
+        assert(rs::ideal_lattice_two_lll_order_gram(
+                second, order, embedding_precision, precision, &cache));
+        assert(cache.two_lll_order_grams.size() == entries_before + 1);
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(first),
+                                      sflint::FmpzMatConstRef(expected)));
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(second),
+                                      sflint::FmpzMatConstRef(expected)));
+
+        const rs::IdealLatticeTwoLllOrderGram& entry =
+                cache.two_lll_order_grams.back();
+        assert(entry.embedding_precision == embedding_precision &&
+               entry.precision == precision);
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(entry.order_gram),
+                sflint::FmpzMatConstRef(expected)));
+        sflint::ArbMat order_rows(degree, degree);
+        assert(silex::detail::order_minkowski_embedding_rows(
+                sflint::ArbMatRef(order_rows), order, embedding_precision));
+        assert(::arb_mat_equal(entry.source_rows.raw(), order_rows.raw()) !=
+               0);
+    }
+    assert(cache.two_lll_order_grams.size() == precisions.size());
+
+    // Rows of higher precision replace the order's cached rows; the first
+    // pair is computed again from them.
+    sflint::ArbMat high_rows(degree, degree);
+    assert(silex::detail::order_minkowski_embedding_rows(
+            sflint::ArbMatRef(high_rows), order, 16 * kReductionPrecision));
+    const slong embedding_precision = kReductionPrecision + kGuardBits;
+    sflint::FmpzMat expected(0, 0);
+    sflint::FmpzMat cached(0, 0);
+    assert(rs::ideal_lattice_two_lll_order_gram(
+            expected, order, embedding_precision, kReductionPrecision,
+            nullptr));
+    assert(rs::ideal_lattice_two_lll_order_gram(
+            cached, order, embedding_precision, kReductionPrecision, &cache));
+    assert(cache.two_lll_order_grams.size() == precisions.size() + 1);
+    assert(::arb_mat_equal(
+                   cache.two_lll_order_grams.front().source_rows.raw(),
+                   cache.two_lll_order_grams.back().source_rows.raw()) == 0);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(cached),
+                                  sflint::FmpzMatConstRef(expected)));
+    assert(rs::ideal_lattice_two_lll_order_gram(
+            cached, order, embedding_precision, kReductionPrecision, &cache));
+    assert(cache.two_lll_order_grams.size() == precisions.size() + 1);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(cached),
+                                  sflint::FmpzMatConstRef(expected)));
+
+    // A further pair replaces the oldest entry.
+    assert(rs::ideal_lattice_two_lll_order_gram(
+            cached, order, 8 * kReductionPrecision + kGuardBits,
+            8 * kReductionPrecision, &cache));
+    assert(static_cast<slong>(cache.two_lll_order_grams.size()) ==
+           rs::kIdealLatticeTwoLllOrderGramEntries);
+    assert(cache.two_lll_order_grams.front().precision ==
+           2 * kReductionPrecision);
+
+    // The route itself, with and without the cache.
+    for (const slong index : {WORD(0), WORD(1)}) {
+        silex::Ideal prime(order);
+        assert(prime.is_defined());
+        assert(degree_one_prime_ideal_above(prime, order, UWORD(137), index));
+        rs::IdealLatticeLllData with_cache;
+        rs::IdealLatticeLllData without_cache;
+        assert(rs::build_ideal_lattice_lll_data(with_cache, prime,
+                                                kReductionPrecision, &cache));
+        assert(rs::build_ideal_lattice_lll_data(without_cache, prime,
+                                                kReductionPrecision));
+        assert(rounded_embedding_data_has_contract(with_cache, prime));
+        assert(same_lll_data(with_cache, without_cache));
+    }
+    return 0;
+}
+
 // Counts the route checks of the rounded-embedding reduction and the ideals
 // reduced by the two-LLL route of a switched order.
 struct RouteCheckCounter {
@@ -2311,6 +2418,7 @@ int main() {
     assert(test_rounded_embedding_lll_contracts() == 0);
     assert(test_rounded_embedding_route_check_for_badly_rounded_order() == 0);
     assert(test_rounded_embedding_route_check_boundary() == 0);
+    assert(test_two_lll_order_gram_reuse_matches_recomputation() == 0);
     assert(test_rounded_embedding_route_check_once_per_context() == 0);
     assert(test_rounded_embedding_certified_lll_matches_fmpz_lll() == 0);
     assert(test_two_lll_certified_lll_matches_fmpz_lll() == 0);
