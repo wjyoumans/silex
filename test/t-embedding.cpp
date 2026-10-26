@@ -117,6 +117,7 @@ struct RefineProfileCounters {
     slong full_roots_fallback = 0;
     slong no_signature = 0;
     slong events = 0;
+    slong root_powers_hit = 0;
 };
 
 void refine_profile_callback(void* user,
@@ -129,6 +130,11 @@ void refine_profile_callback(void* user,
     ++counters->events;
     if (label == nullptr) {
         return;
+    }
+    if (event == silex::ProfileEvent::event &&
+        std::strcmp(label,
+                    "element.embedding.evaluate_all_root_powers_hit") == 0) {
+        ++counters->root_powers_hit;
     }
     if (event == silex::ProfileEvent::begin_scope &&
         std::strcmp(label,
@@ -790,7 +796,9 @@ int test_full_isolation_retries_ambiguous_match() {
 // evaluate_all through the root-power table agrees with FLINT's product-tree
 // multipoint evaluation at the same roots, encloses the exact trace and norm,
 // and is exactly real at real places.  A request below the precision of an
-// existing table reuses it.  The degree-65 field takes the product tree.
+// existing table reuses it (checked under profiling).  Degree 64 is the
+// largest degree with a table; the degree-65 field takes the product tree.
+// The elements include zero and a rational constant.
 int test_evaluate_all_root_powers_match_product_tree() {
     const slong quadratic[] = {-2, 0, 1};
     const slong cubic[] = {-2, 0, 0, 1};
@@ -804,7 +812,8 @@ int test_evaluate_all_root_powers_match_product_tree() {
     };
     // coefficients == nullptr: x^degree - x - 1.
     const Case cases[] = {{quadratic, 2}, {cubic, 3}, {quintic, 5},
-                          {cyclotomic_7, 6}, {real_64, 16}, {nullptr, 65}};
+                          {cyclotomic_7, 6}, {real_64, 16}, {nullptr, 64},
+                          {nullptr, 65}};
     for (const Case& field_case : cases) {
         sflint::FmpqPoly polynomial;
         sflint::fmpq_poly_zero(polynomial);
@@ -835,17 +844,45 @@ int test_evaluate_all_root_powers_match_product_tree() {
                                            (slong(1) << 40) + j);
         }
         ::fmpq_poly_scalar_div_si(rational.raw(), rational.raw(), 7);
-        silex::Element elements[2] = {silex::Element(field),
+        sflint::FmpqPoly constant;
+        sflint::fmpq_poly_set_coeff_si(constant, 0, 3);
+        ::fmpq_poly_scalar_div_si(constant.raw(), constant.raw(), 7);
+        silex::Element elements[4] = {silex::Element(field),
+                                      silex::Element(field),
+                                      silex::Element(field),
                                       silex::Element(field)};
         assert(elements[0].set_fmpq_poly(sflint::FmpqPolyConstRef(rational)));
         assert(elements[1].set_fmpq_poly(sflint::FmpqPolyConstRef(integral)));
+        assert(elements[2].set_fmpq_poly(sflint::FmpqPolyConstRef(constant)));
+        assert(elements[3].zero());
+
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        RefineProfileCounters counters;
+        silex::diagnostics_set_profiling(
+                diagnostics, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::element),
+                refine_profile_callback, &counters);
+        bool first_call = true;
 
         const slong precisions[] = {256, 64, 128};
         for (const slong precision : precisions) {
             for (const silex::Element& element : elements) {
                 sflint::AcbVec values(degree);
+                const slong hits_before = counters.root_powers_hit;
                 assert(embeddings.evaluate_all(sflint::AcbVecRef(values),
-                                               element, precision));
+                                               element, precision,
+                                               &diagnostics));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+                // Only the first call builds the table; every later call,
+                // including those at lower precision, reuses it.
+                assert(counters.root_powers_hit - hits_before ==
+                       ((degree <= 64 && !first_call) ? 1 : 0));
+#else
+                (void)hits_before;
+#endif
+                first_call = false;
 
                 sflint::AcbVec roots(degree);
                 for (slong i = 0; i < degree; ++i) {

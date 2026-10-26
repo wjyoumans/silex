@@ -711,6 +711,17 @@ Silex deviates from the source in five intentional ways:
   working precision would overflow, for a non-squarefree polynomial, or for
   invalid input.
 
+``EmbeddingContext::evaluate_all`` evaluates an element at every root by one
+of two routes.  For fields of degree at most 64 it takes one dot product of
+the element's exact numerator coefficients with a stored row of root powers,
+divided by the denominator.  The rows come from FLINT ``_acb_vec_set_powers``
+and the dot product is FLINT ``arb_dot_fmpz``; the enclosure is rigorous
+because each power and each exact integer coefficient is enclosed.  A table
+built at some precision serves any request at or below that precision, since
+a more accurate enclosure of the same root powers is still a valid enclosure;
+a higher request rebuilds it, and any change of the roots discards it.  Larger
+degrees keep FLINT's product-tree multipoint evaluation.
+
 Local algebra and relations
 ---------------------------
 
