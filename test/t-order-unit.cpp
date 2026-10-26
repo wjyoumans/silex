@@ -10203,7 +10203,9 @@ int test_degree_one_roots_mod_q_root_finder() {
 // the limit and e >= 1, and declines degree 1, degrees 21 and 22, e = 0 and
 // the first primes at or above the limit, and any g that is not monic.
 // Those go to FLINT in the scan, which takes the word route exactly below
-// the limit (asserted through its profile event where profiling is built):
+// the limit (asserted through its profile event where profiling is built),
+// except for a binomial g, which takes the closed form of
+// test_binomial_x_power_mod_matches_flint on both sides of the limit:
 // for x^3 - x - 15 (limit 2^30), and x^12 + 7 and Phi_13 (limit 2^29), the
 // roots degree_one_roots_mod_q_for_test returns for primes on both sides of
 // the limit, including q = 1 mod 13 where Phi_13 splits completely, are
@@ -10310,13 +10312,16 @@ int test_word_x_power_mod_matches_flint() {
         std::vector<slong> coefficients;
         ulong limit;
         ulong split_modulus;
+        bool binomial;
     };
     const Case cases[] = {
-            {{-15, -1, 0, 1}, UWORD(1) << 30, 1},
-            {{7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, UWORD(1) << 29, 1},
-            {{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, UWORD(1) << 29, 13},
+            {{-15, -1, 0, 1}, UWORD(1) << 30, 1, false},
+            {{7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, UWORD(1) << 29, 1, true},
+            {{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, UWORD(1) << 29, 13,
+             false},
     };
-    // The word route is taken exactly for the primes below the limit.
+    // The word route is taken exactly for the primes below the limit, except
+    // for the binomial x^12 + 7, which takes the closed form instead.
     silex::DiagnosticsContext diagnostics;
     silex::diagnostics_context_init(diagnostics);
     TorsionEventCounter counter;
@@ -10376,7 +10381,8 @@ int test_word_x_power_mod_matches_flint() {
                     roots, equation, sflint::FmpzConstRef(q_value),
                     &diagnostics));
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
-            assert(counter.count - word_routes == (q < item.limit ? 1 : 0));
+            assert(counter.count - word_routes ==
+                   (q < item.limit && !item.binomial ? 1 : 0));
 #else
             (void)word_routes;
 #endif
@@ -10394,6 +10400,214 @@ int test_word_x_power_mod_matches_flint() {
         }
     }
     assert(full_splits > 0);
+    return 0;
+}
+
+// The closed form x^e mod (x^n + c) = (-c)^k x^j, e = k n + j with
+// 0 <= j < n (detail::binomial_x_power_mod), against FLINT's
+// nmod_poly_powmod_ui_binexp of x mod f: degrees 1 to 24; c = 0, 1, q - 1
+// and random; e = 0, 1, n - 1, n, (q - 1) / 2, q, random and 2^64 - 1;
+// primes q = 2, 3, 5, 7, 11, 13, random ones of 3 to 64 bits, the three
+// below and above the word kernel's limits 2^29 and 2^30, the three largest
+// below 2^64, and primes q = 1 mod n, so gcd(n, q - 1) ranges over 1 up to
+// n.  It declines degree 0, a nonzero middle coefficient and a leading
+// coefficient other than 1.  Then the scan's root finder
+// (degree_one_roots_mod_q_for_test) takes the closed form exactly where g
+// is a binomial of degree at least 1 and q is odd (asserted through its
+// profile event where profiling is built) and returns the roots of
+// nmod_poly_roots on the reduction, for x^n + a with n = 2, 3, 4, 5, 6, 7
+// and 12, on primes below 600 (including those dividing a or n), primes
+// q = 1 mod n near 2^29, 2^30 and 2^64, and random primes up to 2^64.  As
+// h = x^((q - 1) / 2) mod g is the same polynomial on every route, the
+// gcds and splits after it, and so the roots and their order, are the
+// same as on the word kernel and FLINT routes.
+int test_binomial_x_power_mod_matches_flint() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    slong compared = 0;
+    for (slong degree = 1; degree <= 24; ++degree) {
+        std::vector<ulong> primes = {2, 3, 5, 7, 11, 13};
+        for (int bits = 3; bits <= 64; bits += 5) {
+            primes.push_back(n_randprime(state, static_cast<ulong>(bits), 1));
+        }
+        for (ulong limit : {UWORD(1) << 29, UWORD(1) << 30}) {
+            ulong below = limit;
+            ulong above = limit - 1;
+            for (int i = 0; i < 3; ++i) {
+                below = previous_prime(below);
+                above = n_nextprime(above, 1);
+                primes.push_back(below);
+                primes.push_back(above);
+            }
+        }
+        ulong top = UWORD_MAX;
+        for (int i = 0; i < 3; ++i) {
+            top = previous_prime(top);
+            primes.push_back(top);
+        }
+        // Primes q = 1 mod degree, so that gcd(degree, q - 1) = degree.
+        for (int bits : {20, 40, 63}) {
+            ulong q = (UWORD(1) << bits) / static_cast<ulong>(degree) *
+                      static_cast<ulong>(degree) + 1;
+            while (n_is_prime(q) == 0) {
+                q += static_cast<ulong>(degree);
+            }
+            primes.push_back(q);
+        }
+        for (ulong q : primes) {
+            const ulong n = static_cast<ulong>(degree);
+            const ulong exponents[] = {0,
+                                       1,
+                                       n - 1,
+                                       n,
+                                       (q - 1) / 2,
+                                       q,
+                                       n_randtest(state),
+                                       UWORD_MAX};
+            const ulong constants[] = {0, 1, q - 1, n_randint(state, q),
+                                       n_randint(state, q)};
+            for (ulong c : constants) {
+                std::vector<ulong> f(static_cast<std::size_t>(degree + 1), 0);
+                f[0] = c;
+                f[static_cast<std::size_t>(degree)] = 1;
+                sflint::NmodPoly modulus(q);
+                for (slong i = 0; i <= degree; ++i) {
+                    nmod_poly_set_coeff_ui(modulus.raw(), i,
+                                           f[static_cast<std::size_t>(i)]);
+                }
+                sflint::NmodPoly x(q);
+                nmod_poly_set_coeff_ui(x.raw(), 1, 1);
+                nmod_poly_rem(x.raw(), x.raw(), modulus.raw());
+                for (ulong e : exponents) {
+                    std::vector<ulong> power(static_cast<std::size_t>(degree),
+                                             UWORD_MAX);
+                    assert(silex::detail::binomial_x_power_mod(
+                            power.data(), f.data(), degree, e, q));
+                    sflint::NmodPoly expected(q);
+                    nmod_poly_powmod_ui_binexp(expected.raw(), x.raw(), e,
+                                               modulus.raw());
+                    for (slong i = 0; i < degree; ++i) {
+                        assert(power[static_cast<std::size_t>(i)] ==
+                               nmod_poly_get_coeff_ui(expected.raw(), i));
+                    }
+                    ++compared;
+                }
+                // Not a monic binomial: declined.
+                std::vector<ulong> power(static_cast<std::size_t>(degree));
+                if (degree >= 2 && q > 2) {
+                    std::vector<ulong> middle = f;
+                    middle[static_cast<std::size_t>(
+                            1 + n_randint(state, n - 1))] =
+                            1 + n_randint(state, q - 1);
+                    assert(!silex::detail::binomial_x_power_mod(
+                            power.data(), middle.data(), degree, q, q));
+                }
+                std::vector<ulong> scaled = f;
+                scaled[static_cast<std::size_t>(degree)] = q - 1;
+                assert(q == 2 || !silex::detail::binomial_x_power_mod(
+                                         power.data(), scaled.data(), degree,
+                                         q, q));
+            }
+        }
+    }
+    {
+        const ulong constant[] = {5};
+        ulong power[1] = {0};
+        assert(!silex::detail::binomial_x_power_mod(power, constant, 0, 3,
+                                                    7));
+    }
+    assert(compared > 0);
+
+    // The scan's root finder on pure fields x^n + a.
+    struct Case {
+        slong degree;
+        slong constant;
+    };
+    const Case cases[] = {{2, 1},  {3, -2}, {4, -5},  {5, 3},
+                          {6, 2},  {7, -3}, {12, 7}};
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label =
+            "unit_group.stable_scan.degree_one_roots_nmod_binomial_power";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    slong full_splits = 0;
+    for (const Case& item : cases) {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, item.constant);
+        sflint::fmpq_poly_set_coeff_si(polynomial, item.degree, 1);
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order equation = silex::test::equation_order(field);
+        const ulong n = static_cast<ulong>(item.degree);
+        std::vector<ulong> primes;
+        for (ulong q = 2; q < 600; q = n_nextprime(q, 1)) {
+            primes.push_back(q);
+        }
+        for (ulong limit : {UWORD(1) << 29, UWORD(1) << 30, UWORD_MAX}) {
+            ulong below = limit;
+            slong found = 0;
+            while (found < 3) {
+                below = previous_prime(below);
+                if (below % n == 1 % n) {
+                    primes.push_back(below);
+                    ++found;
+                }
+            }
+        }
+        for (int i = 0; i < 20; ++i) {
+            primes.push_back(n_randprime(
+                    state, static_cast<ulong>(2 + n_randint(state, 63)), 1));
+        }
+        for (ulong q : primes) {
+            const ulong a_mod = item.constant < 0
+                    ? n_negmod(static_cast<ulong>(-item.constant) % q, q)
+                    : static_cast<ulong>(item.constant) % q;
+            sflint::NmodPoly reduced(q);
+            nmod_poly_set_coeff_ui(reduced.raw(), 0, a_mod);
+            nmod_poly_set_coeff_ui(reduced.raw(), item.degree, 1);
+            sflint::NmodPolyFactor factorization;
+            nmod_poly_roots(factorization.raw(), reduced.raw(), 0);
+            std::vector<ulong> expected;
+            for (slong i = 0; i < factorization.raw()->num; ++i) {
+                expected.push_back(n_negmod(
+                        nmod_poly_get_coeff_ui(factorization.raw()->p + i, 0),
+                        q));
+            }
+            std::sort(expected.begin(), expected.end());
+
+            sflint::Fmpz q_value;
+            fmpz_set_ui(q_value.raw(), q);
+            std::vector<sflint::Fmpz> roots;
+            const slong binomial_routes = counter.count;
+            assert(silex::detail::degree_one_roots_mod_q_for_test(
+                    roots, equation, sflint::FmpzConstRef(q_value),
+                    &diagnostics));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+            assert(counter.count - binomial_routes ==
+                   (q != 2 && a_mod != 0 ? 1 : 0));
+#else
+            (void)binomial_routes;
+#endif
+            std::vector<ulong> got;
+            for (const sflint::Fmpz& root : roots) {
+                assert(fmpz_sgn(root.raw()) >= 0);
+                assert(fmpz_cmp_ui(root.raw(), q) < 0);
+                got.push_back(fmpz_get_ui(root.raw()));
+            }
+            std::sort(got.begin(), got.end());
+            assert(std::adjacent_find(got.begin(), got.end()) == got.end());
+            assert(got == expected);
+            if (got.size() == n && n > 2) {
+                ++full_splits;
+            }
+        }
+    }
+    assert(full_splits > 0);
+    flint_rand_clear(state);
     return 0;
 }
 
@@ -14784,6 +14998,7 @@ int main() {
     test_stable_proof_prime_columns_fallback_and_wide_routes();
     test_degree_one_roots_mod_q_root_finder();
     test_word_x_power_mod_matches_flint();
+    test_binomial_x_power_mod_matches_flint();
     test_stable_proof_scan_stops_building_columns_at_full_rank();
     test_kernel_row_root_three_way_result();
     test_compact_unit_power_root_three_way_result();

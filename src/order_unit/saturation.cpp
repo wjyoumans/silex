@@ -244,15 +244,18 @@ bool nmod_poly_vanishes_at_roots(const NmodPoly& polynomial,
 // r of g have r^((q - 1) / 2) = 1 or -1, so they are the roots of
 // gcd(h - 1, g) and of gcd(h + 1, g), each a squarefree product of linear
 // factors (it divides x^((q - 1) / 2) -+ 1); a factor of degree one gives
-// its root directly and a larger one goes to nmod_poly_roots.  h comes
+// its root directly and a larger one goes to nmod_poly_roots.  For a
+// binomial g = x^n + c, h is the single term (-c)^k x^j with
+// (q - 1) / 2 = k n + j, 0 <= j < n, since x^n = -c mod g
+// (detail::binomial_x_power_mod).  Otherwise h comes
 // from the word-size kernel word_x_power_mod
 // (residue_field/word_frobenius_internal.hpp) for monic g (as here: the
 // defining polynomial is monic integral and shifting out x^k keeps the
 // leading coefficient 1) with deg g from 2 to 20 and q below 2^30
 // (deg g <= 8) or 2^29, and from FLINT's
 // nmod_poly_powmod_x_ui_preinv otherwise; x^((q - 1) / 2) mod g is unique,
-// so both give the same h.  Every root found is checked to vanish on the
-// reduction before it is returned.  With
+// so every route gives the same h.  Every root found is checked to vanish
+// on the reduction before it is returned.  With
 // `require_squarefree`, returns false, with `roots` empty, when the
 // reduction is not squarefree; also returns false, with `roots` empty, if a
 // root fails the check.
@@ -314,22 +317,34 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
                         diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.stable_scan."
                         "degree_one_roots_nmod_frobenius_gcd");
-                // h = x^((q - 1) / 2) mod g by the word kernel where it
-                // covers the degree and q (word_frobenius_internal.hpp),
-                // otherwise by FLINT; both give the same reduced h.
+                // h = x^((q - 1) / 2) mod g in closed form for a binomial
+                // g = x^n + c (detail::binomial_x_power_mod), by the word
+                // kernel where it covers the degree and q
+                // (word_frobenius_internal.hpp), otherwise by FLINT; x^e
+                // mod g is unique, so all three give the same reduced h.
                 const slong nonzero_degree =
                         nmod_poly_degree(nonzero_part.raw());
                 std::array<ulong, static_cast<std::size_t>(
                                           detail::kWordFrobeniusMaxDegree)>
                         word_power;
-                if (detail::word_x_power_mod_dispatch(
+                nmod_poly_fit_length(half_power.raw(), nonzero_degree);
+                if (detail::binomial_x_power_mod(
+                            half_power.raw()->coeffs,
+                            nonzero_part.raw()->coeffs, nonzero_degree,
+                            (q - 1) / 2, q)) {
+                    SILEX_PROFILE_EVENT(
+                            diagnostics, DiagnosticsModule::unit_group,
+                            "unit_group.stable_scan."
+                            "degree_one_roots_nmod_binomial_power");
+                    _nmod_poly_set_length(half_power.raw(), nonzero_degree);
+                    _nmod_poly_normalise(half_power.raw());
+                } else if (detail::word_x_power_mod_dispatch(
                             word_power.data(), nonzero_part.raw()->coeffs,
                             nonzero_degree, (q - 1) / 2, q)) {
                     SILEX_PROFILE_EVENT(
                             diagnostics, DiagnosticsModule::unit_group,
                             "unit_group.stable_scan."
                             "degree_one_roots_nmod_word_power");
-                    nmod_poly_fit_length(half_power.raw(), nonzero_degree);
                     for (slong i = 0; i < nonzero_degree; ++i) {
                         half_power.raw()->coeffs[i] =
                                 word_power[static_cast<std::size_t>(i)];
@@ -1598,6 +1613,30 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
         return true;
     };
     return visit_stable_proof_prime_columns(group, q, ell, collect);
+}
+
+bool binomial_x_power_mod(ulong* power,
+                          const ulong* f,
+                          slong degree,
+                          ulong exponent,
+                          ulong modulus) noexcept {
+    if (degree < 1 || modulus == 0 || f[degree] != 1) {
+        return false;
+    }
+    for (slong i = 1; i < degree; ++i) {
+        if (f[i] != 0) {
+            return false;
+        }
+    }
+    nmod_t mod;
+    nmod_init(&mod, modulus);
+    const ulong udegree = static_cast<ulong>(degree);
+    for (slong i = 0; i < degree; ++i) {
+        power[i] = 0;
+    }
+    power[exponent % udegree] = nmod_pow_ui(nmod_neg(f[0], mod),
+                                            exponent / udegree, mod);
+    return true;
 }
 
 bool degree_one_roots_mod_q_for_test(std::vector<flint::Fmpz>& roots,

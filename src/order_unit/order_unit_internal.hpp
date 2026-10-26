@@ -544,6 +544,19 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
                                 const OrderUnitGroup& group,
                                 flint::FmpzConstRef q,
                                 flint::FmpzConstRef ell) noexcept;
+// x^exponent mod f for a monic binomial f = x^degree + f[0] modulo the
+// word-size `modulus` (coefficients f[0..degree] reduced, f[degree] = 1,
+// f[1..degree-1] = 0, degree >= 1): as x^degree = -f[0] mod f, writing
+// exponent = k * degree + j with 0 <= j < degree gives the remainder
+// (-f[0])^k x^j, which is written to power[0..degree-1].  Returns false,
+// leaving `power` unset, when f is not such a binomial.  The stable proof
+// scan's root finder (saturation.cpp) takes its x^((q - 1) / 2) mod g this
+// way for binomial g; tests compare it with FLINT's powmod.
+bool binomial_x_power_mod(ulong* power,
+                          const ulong* f,
+                          slong degree,
+                          ulong exponent,
+                          ulong modulus) noexcept;
 // The roots r modulo the rational prime q of the defining polynomial of the
 // order's field, one for each degree-one prime (q, theta - r), as the stable
 // residue-character proof scan of prove_index_bound (saturation.cpp) takes

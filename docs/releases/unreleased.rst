@@ -2433,6 +2433,21 @@ Changed
   Under callgrind (``proven``) the instruction count fell 11.22% for
   ``random_d10_h2_s21``, 12.86% for ``random_d9_h4_s8`` and 7.82% for
   ``pure_x12_plus_7``.  No timing has been measured.
+- For a binomial ``g = x^n + c`` (pure fields such as ``x^12 + 7``), that
+  splitting step takes ``x^((q-1)/2) mod g`` in closed form as the single
+  term ``(-c)^k x^j``, where ``(q-1)/2 = k n + j`` and ``0 <= j < n``, since
+  ``x^n = -c`` modulo ``g``.  This replaces the word-size kernel or the FLINT
+  power for every ``q`` below ``2^64``.  The power is the same reduced
+  polynomial (a test compares it with FLINT for degrees 1 to 24, primes
+  from 2 up to the largest below ``2^64`` and primes ``q = 1 mod n``).  So
+  the roots, their order, the columns and the published results are
+  unchanged.  Published ``proven`` outputs are identical on
+  ``pure_x12_plus_7``, ``random_d9_h4_s8``, ``random_d10_h2_s21`` and the
+  other 175 ``proven`` corpus rows that finish (7 rows finish in 90 seconds
+  on neither build).  Under callgrind (``proven``) the instruction count
+  fell 6.92% for ``pure_x12_plus_7``.  It rose 0.01% or less for
+  ``random_d9_h4_s8`` and ``random_d10_h2_s21``, which are not binomials.
+  No timing has been measured.
 
 - The ``proven`` relation-saturation proof builds the relation-kernel vectors
   its beta rows are size-reduced against from a subset of the relations when
