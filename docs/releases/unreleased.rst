@@ -2491,6 +2491,20 @@ Changed
   fell 6.92% for ``pure_x12_plus_7``.  It rose 0.01% or less for
   ``random_d9_h4_s8`` and ``random_d10_h2_s21``, which are not binomials.
   No timing has been measured.
+- When ``q`` has two or more degree-one roots, the stable scan's columns
+  over ``q`` share the work that does not depend on the root: the
+  quotient-log setup (the smallest primitive root modulo ``q`` and the
+  generator of the order-``ell`` subgroup) and the reduction modulo ``q`` of
+  every coefficient and denominator of every unit factor are done once per
+  ``q`` instead of once per root.  Each column is then evaluated by the same
+  steps from the stored reductions, so it fails where it failed before and is
+  otherwise the same column (a test compares both on every residue modulo
+  small primes).  Published ``proven`` outputs are identical on
+  ``random_d9_h4_s8``, ``random_d10_h2_s21``, ``pure_x12_plus_7`` and the
+  other 172 ``proven`` corpus rows that finish (10 rows finish in 45 seconds
+  on neither build).  Under callgrind (``proven``) the instruction count fell
+  4.99% for ``random_d9_h4_s8``, 3.98% for ``random_d10_h2_s21`` and 4.24%
+  for ``pure_x12_plus_7``.  No timing has been measured.
 
 - The ``proven`` relation-saturation proof builds the relation-kernel vectors
   its beta rows are size-reduced against from a subset of the relations when
