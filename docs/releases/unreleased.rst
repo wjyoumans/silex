@@ -133,6 +133,24 @@ Added
 Changed
 -------
 
+- ``IdealFactorization::factor`` no longer multiplies the prime powers back
+  together and compares the product with the input in release builds.  It
+  now checks norm accounting instead: for every rational prime ``p`` dividing
+  ``N(I)``, the sum of ``f_P v_P`` over the primes ``P`` above ``p`` must
+  equal ``v_p(N(I))``, the test PARI 2.17.3 ``buch2.c`` (``can_factor``,
+  ``divide_p_id``) uses to accept a factorization.  Over a maximal order,
+  with exact valuations, this is equivalent to the product being the input.
+  The zero ideal is still rejected.  Builds with ``SILEX_ENABLE_DEBUG_CHECKS``
+  keep the full reconstruction as a self-check.  The public ``reconstruct()``
+  method and failure behavior are unchanged.  ``grh`` and ``proven`` outputs
+  and labels are identical on the 70 expected-success corpus rows of degree
+  at most 24.  Whole-process callgrind Ir of ``grh`` (busy machine) drops by
+  9.76% on ``nonadecic_x19_minus_x_minus_1_proven``, 10.8% on
+  ``undecic_x11_minus_x_minus_1_proven``, 9.82% on
+  ``tridecic_x13_minus_x_minus_1_proven``, and 7.21% on
+  ``septendecic_x17_minus_x_minus_1_proven``.  No row that calls ``factor()``
+  got slower, and rows that do not call it are unchanged.
+
 - A ``grh`` class group and unit computation on a field given by the exact
   cyclotomic polynomial ``Phi_m`` now seeds the cyclotomic units into the
   unit context before relation search, as PARI 2.17.3 ``buch2.c``

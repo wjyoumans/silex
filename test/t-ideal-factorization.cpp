@@ -1,8 +1,12 @@
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_factor.hpp>
 #include <silex/ideal_factorization.hpp>
 
+#include "ideal/ideal_access_internal.hpp"
 #include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "test_support.hpp"
+
+#include <flint/fmpz_factor.h>
 
 #include <cassert>
 #include <utility>
@@ -1086,6 +1090,168 @@ silex::IdealFactorization local_ideal_factorization() {
     return factorization;
 }
 
+// The norm accounting that IdealFactorization::factor checks in place of a
+// reconstruction (buch2.c:can_factor/divide_p_id): every factor has positive
+// exponent and lies over some p | N(I), and sum_{P | p} f_P v_P = v_p(N(I))
+// for every p | N(I).
+bool norm_accounting_holds(const silex::IdealFactorization& factorization,
+                           const silex::Ideal& ideal) noexcept {
+    const silex::Order* parent = factorization.parent();
+    sflint::Fmpz norm;
+    sflint::Fmpz p;
+    sflint::Fmpz factor_p;
+    if (parent == nullptr || !ideal.norm(sflint::FmpzRef(norm)) ||
+        fmpz_sgn(norm.raw()) <= 0) {
+        return false;
+    }
+    sflint::FmpzFactor norm_factorization;
+    fmpz_factor(norm_factorization.raw(), norm.raw());
+    silex::PrimeIdeal prime(*parent);
+    slong matched = 0;
+    for (slong i = 0; i < norm_factorization.raw()->num; ++i) {
+        fmpz_factor_get_fmpz(p.raw(), norm_factorization.raw(), i);
+        slong accounted = 0;
+        for (slong j = 0; j < factorization.length(); ++j) {
+            slong exponent = 0;
+            if (!factorization.prime(prime, j) ||
+                !factorization.exponent(exponent, j) || exponent <= 0 ||
+                !prime.rational_prime(sflint::FmpzRef(factor_p))) {
+                return false;
+            }
+            if (fmpz_equal(factor_p.raw(), p.raw()) != 0) {
+                accounted += prime.residue_degree() * exponent;
+                ++matched;
+            }
+        }
+        if (accounted != static_cast<slong>(norm_factorization.raw()->exp[i])) {
+            return false;
+        }
+    }
+    return matched == factorization.length();
+}
+
+int test_factor_norm_accounting() {
+    // Q(sqrt 2): 2 ramifies, 3 is inert (f = 2), 7 splits.
+    {
+        silex::NumberField field = quadratic_field(2);
+        silex::Order order = silex::test::equation_order(field);
+        assert(order.is_maximal());
+        silex::Ideal ideal(order);
+        silex::Ideal reconstructed(order);
+        silex::IdealFactorization factorization(order);
+        assert(set_rational_principal(ideal, 42));
+        assert(factorization.factor(ideal));
+        assert(factorization.length() == 4);
+        assert(count_prime(factorization, 2, 2, 1, 2) == 1);
+        assert(count_prime(factorization, 3, 1, 2, 1) == 1);
+        assert(count_prime(factorization, 7, 1, 1, 1) == 2);
+        assert(norm_accounting_holds(factorization, ideal));
+        assert(factorization.reconstruct(reconstructed));
+        assert(reconstructed.equal(ideal));
+    }
+
+    // Q(cbrt 2): 2 and 3 are totally ramified, 7 is inert (f = 3), and
+    // 5 = P P' and 41 = Q Q' with f(P) = f(Q) = 1, f(P') = f(Q') = 2.
+    const slong coefficients[] = {-2, 0, 0, 1};
+    silex::NumberField field = field_from_coefficients(coefficients, 4);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    assert(order.is_maximal());
+
+    // I = P^3 P' (14), built by ideal multiplication (no stored generator).
+    {
+        silex::PrimeIdeal degree_one(order);
+        silex::PrimeIdeal degree_two(order);
+        assert(primes_above_with_degree(&degree_one, 1, order, 5, 1) == 1);
+        assert(primes_above_with_degree(&degree_two, 1, order, 5, 2) == 1);
+        silex::Ideal p(order);
+        silex::Ideal p_prime(order);
+        silex::Ideal fourteen(order);
+        silex::Ideal left(order);
+        silex::Ideal right(order);
+        silex::Ideal ideal(order);
+        assert(degree_one.get_ideal(p));
+        assert(degree_two.get_ideal(p_prime));
+        assert(set_rational_principal(fourteen, 14));
+        assert(left.multiply(p, p));
+        assert(right.multiply(left, p));
+        assert(left.multiply(right, p_prime));
+        assert(ideal.multiply(left, fourteen));
+
+        silex::IdealFactorization factorization(order);
+        silex::Ideal reconstructed(order);
+        assert(factorization.factor(ideal));
+        assert(factorization.length() == 4);
+        assert(count_prime(factorization, 5, 1, 1, 3) == 1);
+        assert(count_prime(factorization, 5, 1, 2, 1) == 1);
+        assert(count_prime(factorization, 2, 3, 1, 3) == 1);
+        assert(count_prime(factorization, 7, 1, 3, 1) == 1);
+        assert(norm_accounting_holds(factorization, ideal));
+        assert(factorization.reconstruct(reconstructed));
+        assert(reconstructed.equal(ideal));
+    }
+
+    // I = (14 (5 - theta)), with its generator stored; N(5 - theta) = 3 * 41.
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_zero(polynomial);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, 70);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, -14);
+        silex::Element ambient(field);
+        silex::OrderElement generator(order);
+        silex::Ideal ideal(order);
+        assert(ambient.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+        assert(generator.set_element(ambient));
+        assert(ideal.set_principal(generator));
+
+        silex::IdealFactorization factorization(order);
+        silex::Ideal reconstructed(order);
+        assert(factorization.factor(ideal));
+        assert(factorization.length() == 4);
+        assert(count_prime(factorization, 2, 3, 1, 3) == 1);
+        assert(count_prime(factorization, 3, 3, 1, 1) == 1);
+        assert(count_prime(factorization, 7, 1, 3, 1) == 1);
+        assert(count_prime(factorization, 41, 1, 1, 1) == 1);
+        assert(norm_accounting_holds(factorization, ideal));
+        assert(factorization.reconstruct(reconstructed));
+        assert(reconstructed.equal(ideal));
+    }
+    return 0;
+}
+
+int test_factor_rejects_zero_ideal() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order = silex::test::equation_order(field);
+    assert(order.is_maximal());
+
+    // No public route stores the zero ideal.
+    silex::Ideal zero(order);
+    silex::OrderElement zero_generator(order);
+    sflint::FmpzMat zero_hnf(2, 2);
+    assert(zero_generator.set_si(0));
+    assert(!zero.set_principal(zero_generator));
+    assert(!zero.set_hnf(sflint::FmpzMatConstRef(zero_hnf)));
+
+    // The test-only hook stores it; factor() must reject it, leaving the
+    // previous output in place, although fmpz_factor(0) has no primes.
+    assert(silex::detail::IdealAccess::set_hnf_direct(
+            zero, sflint::FmpzMatConstRef(zero_hnf)));
+    sflint::Fmpz norm;
+    assert(zero.norm(sflint::FmpzRef(norm)));
+    assert(sflint::fmpz_is_zero(sflint::FmpzConstRef(norm)));
+
+    silex::Ideal good(order);
+    silex::IdealFactorization factorization(order);
+    assert(set_rational_principal(good, 7));
+    assert(factorization.factor(good));
+    assert(factorization.length() == 2);
+    assert(!factorization.factor(zero));
+    assert(factorization.length() == 2);
+    assert(count_prime(factorization, 7, 1, 1, 1) == 2);
+    return 0;
+}
+
 int test_keeps_parent_order_alive() {
     silex::IdealFactorization factorization = local_ideal_factorization();
     assert(factorization.is_defined());
@@ -1125,6 +1291,8 @@ int main() {
     assert(test_fractional_factor_over_base_quadratic() == 0);
     assert(test_fractional_factor_over_incomplete_block() == 0);
     assert(test_fractional_factor_over_base_cancelling_nonbase_primes() == 0);
+    assert(test_factor_norm_accounting() == 0);
+    assert(test_factor_rejects_zero_ideal() == 0);
     assert(test_keeps_parent_order_alive() == 0);
     return 0;
 }

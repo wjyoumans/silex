@@ -1089,20 +1089,50 @@ bool IdealFactorization::factor(const Ideal& ideal) noexcept {
     if (!candidate.is_defined() || !ideal.norm(flint::FmpzRef(norm))) {
         return false;
     }
+    // The zero ideal has no factorization.  Every public construction route
+    // stores a full-rank HNF, so this guards stored shapes only; without it
+    // the empty factor list of fmpz_factor(0) would pass the per-p check
+    // below vacuously.
+    if (fmpz_sgn(norm.raw()) <= 0) {
+        return false;
+    }
 
+    // Norm accounting replaces reconstructing prod P^v and comparing it with
+    // I (the comparison still runs in debug-check builds below).  The order
+    // is maximal, hence a Dedekind domain.  The P below run over every prime
+    // above every p | N(I), and each v is v_P(I) from PrimeIdeal::valuation
+    // (capped at v_p(N(I))/f_P), so I is contained in P^v.  Distinct P^v are pairwise comaximal, so I is contained in
+    // their intersection J = prod P^v.  The index is multiplicative,
+    // [O:I] = [O:J][J:I], and N(J) = prod p^(f_P v_P), so I = J exactly when
+    // sum_{P | p} f_P v_P = v_p(N(I)) for every p | N(I).  This is the
+    // complete norm accounting by which buch2.c:can_factor accepts a
+    // factorization: divide_p_id subtracts f_P v_P from k = v_p(N(I)) and
+    // succeeds when k reaches 0 (compare the norm cancellation cited in
+    // scalar_factor_over_base_with_required_prime_direct above).  The check
+    // catches a missing prime, a duplicated prime, and an understated
+    // valuation; an overstatement offset by an understatement over the same
+    // p with equal residue degrees is left to the debug-check reconstruct.
     fmpz_factor(norm_factorization.raw(), norm.raw());
     for (slong i = 0; i < norm_factorization.raw()->num; ++i) {
         fmpz_factor_get_fmpz(p.raw(), norm_factorization.raw(), i);
+        const ulong norm_exponent = norm_factorization.raw()->exp[i];
 
         PrimeIdealList decomposed;
         if (!decompose_prime(decomposed, *order, flint::FmpzConstRef(p))) {
             return false;
         }
 
+        slong accounted = 0;
         for (slong j = 0; j < decomposed.size(); ++j) {
             const PrimeIdeal* prime = decomposed.at(j);
             slong valuation = -1;
             if (prime == nullptr || !prime->valuation(valuation, ideal)) {
+                return false;
+            }
+            slong contribution = 0;
+            if (!checked_mul_nonneg(contribution, prime->residue_degree(),
+                                    valuation) ||
+                !checked_add(accounted, accounted, contribution)) {
                 return false;
             }
             if (valuation > 0 &&
@@ -1110,12 +1140,20 @@ bool IdealFactorization::factor(const Ideal& ideal) noexcept {
                 return false;
             }
         }
+        if (static_cast<ulong>(accounted) != norm_exponent) {
+            return false;
+        }
     }
 
-    Ideal reconstructed(*order);
-    if (!candidate.reconstruct(reconstructed) || !reconstructed.equal(ideal)) {
-        return false;
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    {
+        Ideal reconstructed(*order);
+        if (!candidate.reconstruct(reconstructed) ||
+            !reconstructed.equal(ideal)) {
+            return false;
+        }
     }
+#endif
 
     swap(candidate);
     return true;
