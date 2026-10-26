@@ -213,6 +213,25 @@ Changed
   Callgrind instruction counts, ``grh`` mode: ``cyclotomic_real_37_deg18``
   8.8% fewer (1.769e9 to 1.614e9).  No timing has been measured.
 
+- The residue degrees of a prime ``p`` read from the defining polynomial
+  (used for the small primes of the Belabas-Friedman Theorem 7 cutoff scan
+  and by factor-base construction to skip primes with no prime ideal of
+  norm within the bound) are taken in closed form for ``Phi_n`` and
+  ``psi_n`` instead of from the distinct-degree factorisation modulo
+  ``p``.  For ``p`` not dividing ``n``, ``Phi_n`` has
+  ``phi(n)/f`` irreducible factors of degree ``f``, the order of ``p``
+  modulo ``n`` (Lidl and Niederreiter, *Finite Fields*, Theorem 2.47), and
+  ``psi_n`` has ``(phi(n)/2)/f`` factors of degree ``f``, the least
+  ``f >= 1`` with ``p^f = +-1 mod n`` (derived from the ``Phi_n`` case; see
+  "Roots of unity" in :doc:`../reference/algorithms_and_sources`).  Primes
+  dividing ``n`` and all other polynomials keep the factorisation.  The
+  degrees are the same, so zeta values and published results are
+  unchanged: ``grh`` outputs are identical on ``cyclotomic_real_64_deg16``,
+  ``cyclotomic_real_37_deg18``, ``cyclotomic_19_phi18`` and
+  ``cyclotomic_23_phi22``.  Callgrind instruction counts, ``grh`` mode:
+  ``cyclotomic_real_64_deg16`` 4.2% fewer (1.0429e9 to 9.991e8).  No timing
+  has been measured.
+
 - The FLINT route of the stored-unit reduction (the LLL of the scaled unit
   log rows, run when a unit group's stored units are reduced) takes the
   shared certified first LLL phase, which replaces FLINT's multiprecision

@@ -414,6 +414,25 @@ root modulo ``2``).  For ``T = psi_n``, the minimal polynomial of
 ``0`` otherwise for ``p`` not dividing ``n``, and primes dividing ``n`` again
 keep the root count modulo ``p``.  The counts equal the modulo-``p`` counts,
 so no value or proof input changes.
+Where the loop needs the full decomposition type of ``p`` (small ``p``, and
+the residue degrees of the defining-polynomial route generally), it takes
+it in closed form as well, instead of the distinct-degree factorisation
+modulo ``p``.  For ``T = Phi_n`` and ``p`` not dividing ``n``, that is
+``phi(n)/f`` degrees ``f``, ``f`` the order of ``p`` modulo ``n`` (Lidl and
+Niederreiter, Theorem 2.47(ii)).  For ``T = psi_n``, ``n >= 3``, of degree
+``d = phi(n)/2``, and ``p`` not dividing ``n``, it is ``d/f`` degrees ``f``,
+``f`` the least ``f >= 1`` with ``p^f = +-1 mod n``, the order of ``p`` in
+``(Z/n)^*/{+-1}``.  Derivation: the roots of ``psi_n`` modulo ``p`` are the
+``d`` distinct sums ``a_k = zeta^k + zeta^-k`` above, ``k`` in ``(Z/n)^*``
+up to sign, so ``psi_n`` is squarefree modulo ``p``; Frobenius sends
+``a_k`` to ``a_k^p = a_(pk)``; the irreducible factors over ``F_p`` of a
+squarefree polynomial correspond to the Frobenius orbits on its roots, each
+of degree the orbit's length; and the orbit of ``a_k`` has length the least
+``f`` with ``p^f k = +-k mod n``, that is with ``p^f = +-1 mod n`` because
+``k`` is invertible, the same ``f`` for every ``k``.  The case ``f = 1`` is
+the linear count above.  Primes dividing ``n`` keep the factorisation.
+Every factor has the same degree, so the degree list is the one the
+factorisation gives.
 The split-prime search applies a closed-form criterion for ``Phi_n`` and
 for its real-subfield polynomial ``psi_n``: with ``p`` not dividing ``n``,
 ``Phi_n`` splits into distinct linear factors modulo ``p`` exactly when
