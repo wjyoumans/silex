@@ -1072,7 +1072,16 @@ Changed
   Theorem 2.13), instead of computing ``x^p`` modulo the polynomial.  Primes
   dividing ``n`` and all other polynomials keep that test.  The answer is
   the same at every prime, so the same CRT primes are chosen and every
-  reconstructed unit and published output is unchanged.
+  reconstructed unit and published output is unchanged (46 of 47 cyclotomic
+  and real-subfield ``grh`` corpus rows output-identical; the
+  ``cyclotomic_real_163_deg81`` row was not run to completion).  Callgrind
+  instruction counts (Ir, not wall time; busy machine) fall by 8.74% on
+  ``cyclotomic_real_31_deg15``, 2.72% on ``cyclotomic_real_29_deg14``,
+  2.33% on ``cyclotomic_real_37_deg18``, 1.11% on ``cyclotomic_real_64_deg16``
+  and 0.97% on ``cyclotomic_real_41_deg20``; the ``Phi_n`` rows measured
+  (``cyclotomic_19_phi18``, ``cyclotomic_27_phi18``, ``cyclotomic_64_phi32``,
+  ``cyclotomic_41_phi40``) do not run the test and are unchanged, and
+  ``cyclotomic_37_phi36`` measured 0.03% more.
 
 - ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
   and the unit-candidate and relation-saturation kernel bases of the
