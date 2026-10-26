@@ -1279,35 +1279,45 @@ bool check_linear_factor_batches() noexcept {
            check_linear_factor_batch(non_monic_setup, false);
 }
 
-// The cyclotomic closed form of the BF linear factor counts: for the field
+// The cyclotomic closed forms of the BF linear factor counts: for the field
 // defined by f, on the primes of [first, end), the count the prime loop uses
-// equals the nmod path's count without the closed form (both -1 on the
+// equals the nmod path's count without the closed forms (both -1 on the
 // primes the defining-polynomial route skips) and the word kernel's batched
 // count wherever that applies.  When `n` is nonzero, f is Phi_n, the context
 // detects index n, and every counted prime p not dividing n has count phi(n)
 // when p = 1 mod n and 0 otherwise (Lidl and Niederreiter, Finite Fields,
-// Theorem 2.47(ii)); a prime dividing n is skipped unless it is 2 with
-// n = 2 mod 4.  `split` and `compared` count the primes with count phi(n)
-// and those where the word kernel applied.
+// Theorem 2.47(ii)).  When `real_n` is nonzero, f is psi_n for n = real_n,
+// the minimal polynomial of 2 cos(2 pi / n), the context detects that real
+// index, and every counted prime p not dividing n has count phi(n) / 2 when
+// p = +-1 mod n and 0 otherwise.  In both cases a prime dividing the index
+// is skipped unless it is 2 with index 2 mod 4.  `split` and `compared`
+// count the primes with count the degree and those where the word kernel
+// applied; `plus_one` and `minus_one` the split primes p not dividing
+// real_n with p = 1 and p = -1 mod real_n.
 bool check_cyclotomic_linear_factor_range(const silex::Order& order,
                                           ulong n,
+                                          ulong real_n,
                                           ulong first,
                                           ulong end,
                                           slong& split,
-                                          slong& compared) noexcept {
+                                          slong& compared,
+                                          slong& plus_one,
+                                          slong& minus_one) noexcept {
     ulong index = 0;
+    ulong real_index = 0;
     std::vector<ulong> primes;
     std::vector<slong> counts;
     std::vector<slong> word_counts;
     std::vector<slong> nmod_counts;
     if (!silex::detail::TestHookAccess::
                 zeta_bf_cyclotomic_linear_factor_counts(
-                        index, primes, counts, word_counts, nmod_counts,
-                        order, first, end) ||
-        index != n || primes.empty()) {
+                        index, real_index, primes, counts, word_counts,
+                        nmod_counts, order, first, end) ||
+        index != n || real_index != real_n || primes.empty()) {
         return false;
     }
     const slong degree = order.degree();
+    const ulong closed_form_index = n != 0 ? n : real_n;
     for (std::size_t i = 0; i < primes.size(); ++i) {
         const ulong p = primes[i];
         const slong count = counts[i];
@@ -1321,37 +1331,51 @@ bool check_cyclotomic_linear_factor_range(const silex::Order& order,
         if (count == degree) {
             ++split;
         }
-        if (n == 0) {
+        if (closed_form_index == 0) {
             continue;
         }
-        if (n % p == 0) {
-            if (count >= 0 && !(p == 2 && n % 4 == 2)) {
+        if (closed_form_index % p == 0) {
+            if (count >= 0 &&
+                !(p == 2 && closed_form_index % 4 == 2)) {
                 return false;
             }
             continue;
         }
-        if (count != (p % n == 1 % n ? degree : 0)) {
+        const ulong residue = p % closed_form_index;
+        const bool splits =
+                n != 0 ? residue == 1 % n
+                       : residue == 1 || residue == real_n - 1;
+        if (count != (splits ? degree : 0)) {
             return false;
+        }
+        if (real_n != 0 && splits) {
+            ++(residue == 1 ? plus_one : minus_one);
         }
     }
     return true;
 }
 
 bool check_cyclotomic_linear_factor_field(const FieldSetup& setup,
-                                          ulong n) noexcept {
-    // Small primes, where every p dividing n occurs, and primes just above
-    // 2^30, the word kernel's largest prime limit, where only the nmod path
-    // and the closed form apply.
+                                          ulong n,
+                                          ulong real_n) noexcept {
+    // Small primes, where every p dividing the index occurs, and primes just
+    // above 2^30, the word kernel's largest prime limit, where only the nmod
+    // path and the closed form apply.
     slong split = 0;
     slong compared = 0;
     slong large_split = 0;
     slong large_compared = 0;
-    if (!check_cyclotomic_linear_factor_range(setup.maximal_order, n, 2, 3000,
-                                              split, compared) ||
+    slong plus_one = 0;
+    slong minus_one = 0;
+    if (!check_cyclotomic_linear_factor_range(setup.maximal_order, n, real_n,
+                                              2, 3000, split, compared,
+                                              plus_one, minus_one) ||
         !check_cyclotomic_linear_factor_range(
-                setup.maximal_order, n, UWORD(1) << 30,
-                (UWORD(1) << 30) + 6000, large_split, large_compared) ||
-        split == 0 || large_split == 0 || large_compared != 0) {
+                setup.maximal_order, n, real_n, UWORD(1) << 30,
+                (UWORD(1) << 30) + 6000, large_split, large_compared,
+                plus_one, minus_one) ||
+        split == 0 || large_split == 0 || large_compared != 0 ||
+        (real_n != 0 && (plus_one == 0 || minus_one == 0))) {
         return false;
     }
     return setup.maximal_order.degree() > 20 || compared > 300;
@@ -1359,8 +1383,10 @@ bool check_cyclotomic_linear_factor_field(const FieldSetup& setup,
 
 bool check_cyclotomic_linear_factor_counts() noexcept {
     // phi(n) >= sqrt(n / 2), so every n with phi(n) <= 40 is at most 3200;
-    // there are 81 of them, the largest 150.
+    // there are 81 of them, the largest 150.  The 76 with phi(n) >= 4 also
+    // give psi_n of degree phi(n) / 2 from 2 to 20.
     slong checked = 0;
+    slong real_checked = 0;
     for (ulong n = 1; n <= 2 * 40 * 40; ++n) {
         const ulong phi = n_euler_phi(n);
         if (phi > 40) {
@@ -1376,26 +1402,71 @@ bool check_cyclotomic_linear_factor_counts() noexcept {
         if (!check_cyclotomic_linear_factor_field(
                     setup_from_coefficients(coefficients.data(),
                                             static_cast<slong>(phi)),
-                    n)) {
+                    n, 0)) {
             return false;
         }
         ++checked;
+        if (phi < 4) {
+            continue;
+        }
+        sflint::FmpzPoly real_cyclotomic;
+        fmpz_poly_cos_minpoly(real_cyclotomic.raw(), n);
+        const slong real_degree = fmpz_poly_degree(real_cyclotomic.raw());
+        std::vector<slong> real_coefficients;
+        for (slong i = 0; i < real_degree; ++i) {
+            real_coefficients.push_back(
+                    fmpz_poly_get_coeff_si(real_cyclotomic.raw(), i));
+        }
+        if (!check_cyclotomic_linear_factor_field(
+                    setup_from_coefficients(real_coefficients.data(),
+                                            real_degree),
+                    0, n)) {
+            return false;
+        }
+        ++real_checked;
     }
 
-    // Controls that are not exactly cyclotomic: x^4 - 7, and the translate
-    // Phi_5(x + 1) = x^4 + 5x^3 + 10x^2 + 10x + 5 of the same field as Phi_5.
+    // The cyclotomic_real_37_deg18 corpus row's coefficients, which are
+    // psi_37, and controls that are not exactly cyclotomic: x^4 - 7, the
+    // translate Phi_5(x + 1) = x^4 + 5x^3 + 10x^2 + 10x + 5 of the same
+    // field as Phi_5, and the translate psi_13(x + 1) of the same field as
+    // psi_13.
+    const slong real_37[] = {-1,    9,     45,  -120, -330, 462,
+                             924,   -792,  -1287, 715, 1001, -364,
+                             -455,  105,   120, -16,  -17,  1};
     const slong pure_x4[] = {-7, 0, 0, 0};
     const slong translate[] = {5, 10, 10, 5};
+    sflint::FmpzPoly real_13;
+    sflint::FmpzPoly real_13_translate;
+    sflint::FmpzPoly x_plus_one;
+    fmpz_poly_cos_minpoly(real_13.raw(), 13);
+    fmpz_poly_set_coeff_si(x_plus_one.raw(), 0, 1);
+    fmpz_poly_set_coeff_si(x_plus_one.raw(), 1, 1);
+    fmpz_poly_compose(real_13_translate.raw(), real_13.raw(),
+                      x_plus_one.raw());
+    std::vector<slong> real_13_coefficients;
+    for (slong i = 0; i < 6; ++i) {
+        real_13_coefficients.push_back(
+                fmpz_poly_get_coeff_si(real_13_translate.raw(), i));
+    }
     slong split = 0;
     slong compared = 0;
-    return checked == 81 &&
+    slong plus_one = 0;
+    slong minus_one = 0;
+    return checked == 81 && real_checked == 76 &&
+           check_cyclotomic_linear_factor_field(
+                   setup_from_coefficients(real_37, 18), 0, 37) &&
            check_cyclotomic_linear_factor_range(
-                   setup_from_coefficients(pure_x4, 4).maximal_order, 0, 2,
-                   3000, split, compared) &&
+                   setup_from_coefficients(pure_x4, 4).maximal_order, 0, 0,
+                   2, 3000, split, compared, plus_one, minus_one) &&
            check_cyclotomic_linear_factor_range(
-                   setup_from_coefficients(translate, 4).maximal_order, 0, 2,
-                   3000, split, compared) &&
-           compared > 600;
+                   setup_from_coefficients(translate, 4).maximal_order, 0, 0,
+                   2, 3000, split, compared, plus_one, minus_one) &&
+           check_cyclotomic_linear_factor_range(
+                   setup_from_coefficients(real_13_coefficients.data(), 6)
+                           .maximal_order,
+                   0, 0, 2, 3000, split, compared, plus_one, minus_one) &&
+           compared > 900;
 }
 
 // The linear-factor counts stored in the residue-degree cache are the

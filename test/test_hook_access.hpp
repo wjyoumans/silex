@@ -452,10 +452,11 @@ public:
                 primes, batch_counts, per_prime_counts, order, first, end);
     }
 
-    // The cyclotomic closed form of those counts against the word kernel
+    // The cyclotomic closed forms of those counts against the word kernel
     // and the nmod path (see ZetaBfTestEntry).
     static bool zeta_bf_cyclotomic_linear_factor_counts(
             ulong& cyclotomic_index,
+            ulong& real_cyclotomic_index,
             std::vector<ulong>& primes,
             std::vector<slong>& counts,
             std::vector<slong>& word_counts,
@@ -464,8 +465,8 @@ public:
             ulong first,
             ulong end) noexcept {
         return ZetaBfTestEntry::cyclotomic_linear_factor_counts(
-                cyclotomic_index, primes, counts, word_counts, nmod_counts,
-                order, first, end);
+                cyclotomic_index, real_cyclotomic_index, primes, counts,
+                word_counts, nmod_counts, order, first, end);
     }
 
     // The word kernel's two squarings and Frobenius powers (see

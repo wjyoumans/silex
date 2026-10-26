@@ -2289,6 +2289,11 @@ bool bf_init_residue_degree_context(
     }
     next.cyclotomic_index =
             detail::cyclotomic_defining_polynomial_index(*field);
+    next.real_cyclotomic_index =
+            next.cyclotomic_index != 0
+                    ? 0
+                    : detail::real_cyclotomic_defining_polynomial_index(
+                              *field);
     if (!order.discriminant(flint::FmpzRef(next.order_discriminant))) {
         return false;
     }
@@ -2394,8 +2399,23 @@ bool bf_linear_factor_count_batch_lookup(slong& out,
 // modulo p alone, independent of the order.
 // Primes dividing n keep the nmod path.  The discriminant check skips most
 // of them, but not p = 2 for n = 2 mod 4, where 2 is unramified
-// (Phi_n(x) = Phi_{n/2}(-x)).  The cache is read and written as for any
-// other count.
+// (Phi_n(x) = Phi_{n/2}(-x)).
+//
+// When it is instead exactly psi_n, the minimal polynomial of
+// 2 cos(2 pi / n), n >= 3 (context.real_cyclotomic_index = n), the same
+// holds with p = +-1 mod n.  Since x^d psi_n(x + 1/x) = Phi_n(x),
+// d = phi(n) / 2, the roots of psi_n modulo a prime p not dividing n are
+// the zeta^k + zeta^-k for zeta of exact order n and k coprime to n,
+// 0 < k < n / 2, and they are distinct for n >= 3 (zeta^a + zeta^-a =
+// zeta^b + zeta^-b forces zeta^a = zeta^b or zeta^a = zeta^-b).  Frobenius
+// sends the root for k to the root for p k, so a root lies in F_p exactly
+// when p k = +-k mod n, that is when p = +-1 mod n, for every k at once;
+// the count is then d, the degree, and otherwise 0.  That the roots of
+// Phi_n modulo p are the elements of exact order n is the definition of
+// the cyclotomic polynomial Q_n (Lidl and Niederreiter, Section 2.4); the
+// derivation is the one SplitPrimeResultant::add_next_split_prime uses
+// for its split-prime closed form.  Primes dividing n keep the nmod path,
+// as for Phi_n.  The cache is read and written as for any other count.
 bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
         slong& out,
         const BfResidueDegreeContext& context,
@@ -2416,6 +2436,15 @@ bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
     const ulong cyclotomic = context.cyclotomic_index;
     if (cyclotomic != 0 && cyclotomic % p != 0) {
         out = p % cyclotomic == 1 % cyclotomic ? context.defining_degree : 0;
+        bf_linear_factor_count_cache_store(cache, p, out);
+        return true;
+    }
+    const ulong real_cyclotomic = context.real_cyclotomic_index;
+    if (real_cyclotomic != 0 && real_cyclotomic % p != 0) {
+        const ulong residue = p % real_cyclotomic;
+        out = residue == 1 || residue == real_cyclotomic - 1
+                      ? context.defining_degree
+                      : 0;
         bf_linear_factor_count_cache_store(cache, p, out);
         return true;
     }
@@ -2471,8 +2500,9 @@ bool bf_residue_degree_cache_covers(
 // defining-polynomial route covers and `cache` does not, for
 // bf_linear_residue_degree_count_from_defining_polynomial_ui.  The count is
 // the per-prime quantity deg gcd(f, x^p - x); primes or degrees outside the
-// word kernel are left to the per-prime path.  A cyclotomic defining
-// polynomial gets no batch: the per-prime path counts it in closed form.
+// word kernel are left to the per-prime path.  A cyclotomic or
+// real-subfield cyclotomic defining polynomial (Phi_n or psi_n) gets no
+// batch: the per-prime path counts it in closed form.
 void bf_fill_linear_factor_count_batch(
         BfLinearFactorCountBatch& out,
         const BfResidueDegreeContext& context,
@@ -2489,7 +2519,8 @@ void bf_fill_linear_factor_count_batch(
         degree > kBfWordLinearFactorMaxDegree ||
         context.defining_coefficients.size() !=
                 static_cast<std::size_t>(degree + 1) ||
-        context.cyclotomic_index != 0 || first >= end) {
+        context.cyclotomic_index != 0 ||
+        context.real_cyclotomic_index != 0 || first >= end) {
         return;
     }
 
@@ -5089,6 +5120,7 @@ bool ZetaBfTestEntry::linear_factor_counts(
     BfResidueDegreeContext context;
     bf_init_residue_degree_context(context, order);
     context.cyclotomic_index = 0;
+    context.real_cyclotomic_index = 0;
     BfLinearFactorCountBatch batch;
     bf_fill_linear_factor_count_batch(batch, context, first, end, nullptr,
                                       nullptr);
@@ -5113,6 +5145,7 @@ bool ZetaBfTestEntry::linear_factor_counts(
 
 bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
         ulong& cyclotomic_index,
+        ulong& real_cyclotomic_index,
         std::vector<ulong>& primes,
         std::vector<slong>& counts,
         std::vector<slong>& word_counts,
@@ -5121,6 +5154,7 @@ bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
         ulong first,
         ulong end) noexcept {
     cyclotomic_index = 0;
+    real_cyclotomic_index = 0;
     primes.clear();
     counts.clear();
     word_counts.clear();
@@ -5136,7 +5170,9 @@ bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
         return false;
     }
     cyclotomic_index = context.cyclotomic_index;
+    real_cyclotomic_index = context.real_cyclotomic_index;
     reference.cyclotomic_index = 0;
+    reference.real_cyclotomic_index = 0;
     BfLinearFactorCountBatch batch;
     bf_fill_linear_factor_count_batch(batch, context, first, end, nullptr,
                                       nullptr);

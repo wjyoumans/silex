@@ -21,12 +21,16 @@ namespace silex::detail {
 // equation order, its index over the equation order.  `cyclotomic_index`
 // is n when the defining polynomial is exactly the cyclotomic polynomial
 // Phi_n (detail::cyclotomic_defining_polynomial_index, detected once when
-// the context is set up), and 0 otherwise.
+// the context is set up), and 0 otherwise.  `real_cyclotomic_index` is n
+// when it is instead exactly psi_n, the minimal polynomial of
+// 2 cos(2 pi / n) that defines the maximal real subfield of Q(zeta_n)
+// (detail::real_cyclotomic_defining_polynomial_index), and 0 otherwise.
 struct BfResidueDegreeContext {
     const fmpq_poly_struct* defining_polynomial = nullptr;
     std::vector<flint::Fmpz> defining_coefficients;
     slong defining_degree = -1;
     ulong cyclotomic_index = 0;
+    ulong real_cyclotomic_index = 0;
     flint::Fmpz order_discriminant;
     flint::Fmpz equation_index;
     const FactorBase* residue_degree_base = nullptr;
@@ -191,9 +195,11 @@ class ZetaBfTestEntry {
                                      ulong first,
                                      ulong end) noexcept;
     // The linear factor counts the Belabas-Friedman prime loop uses, with
-    // the cyclotomic closed form, against the word kernel and the nmod path
-    // without it.  `cyclotomic_index` receives the context's Phi_n index (0
-    // when the defining polynomial is not exactly a cyclotomic polynomial).
+    // the cyclotomic closed forms, against the word kernel and the nmod path
+    // without them.  `cyclotomic_index` receives the context's Phi_n index
+    // (0 when the defining polynomial is not exactly a cyclotomic
+    // polynomial) and `real_cyclotomic_index` its psi_n index (0 when it is
+    // not exactly the real-subfield polynomial psi_n).
     // For each prime p in [first, end), in increasing order, `primes`
     // receives p, `counts` the count of the loop's path (batch, then
     // per-prime), `word_counts` the word kernel's batched count and
@@ -202,6 +208,7 @@ class ZetaBfTestEntry {
     // with a basis.
     static bool cyclotomic_linear_factor_counts(
             ulong& cyclotomic_index,
+            ulong& real_cyclotomic_index,
             std::vector<ulong>& primes,
             std::vector<slong>& counts,
             std::vector<slong>& word_counts,
