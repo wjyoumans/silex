@@ -34,6 +34,11 @@ namespace detail::relation_search {
 constexpr slong kSmallLllInitialPrecision = 200;
 constexpr ulong kLllRoutePhase = UWORD(8);
 
+// Smallest field degree at which one random-walk ideal R serves every pivot
+// of a pass (see collect_pivot_lll_ideal).  Below it each pivot draws its
+// own R, as before.
+constexpr slong kPassRandomIdealMinDegree = 30;
+
 bool small_lll_selection_bound(flint::Fmpz& out,
                                      const Ideal& ideal,
                                      const Order& order,
@@ -1293,6 +1298,17 @@ bool index_is_coprime_to_h(slong exponent,
     return std::gcd(static_cast<ulong>(exponent), reduced) == UWORD(1);
 }
 
+bool pivot_search_reuses_pass_random_ideal(slong degree) noexcept {
+    return degree >= kPassRandomIdealMinDegree;
+}
+
+// The random-walk ideal of one pass over the pivots, when the pass reuses
+// one (pivot_search_reuses_pass_random_ideal).
+struct PassRandomIdeal {
+    Ideal ideal;
+    bool drawn = false;
+};
+
 bool collect_pivot_lll_ideal(
         ClassGroupContext& context,
         const Order& order,
@@ -1300,6 +1316,7 @@ bool collect_pivot_lll_ideal(
         slong pivot_index,
         slong rand_exp,
         RandomIdealSearchEnvironment& random_env,
+        PassRandomIdeal* pass_random_ideal,
         NormPrefilter* norm_prefilter,
         slong target_relation_kernel_units,
         const ClassGroupRelationOptions& options,
@@ -1334,11 +1351,25 @@ bool collect_pivot_lll_ideal(
         return false;
     }
 
-    {
+    // pass_random_ideal set (degree >= kPassRandomIdealMinDegree): one
+    // random ideal R per pass over the pivots.  The first pivot of the pass
+    // that searches draws it and the later pivots of the pass reuse it, as
+    // the reference 2.17.3 buch2.c:rnd_rel (2648-2672) draws R once with
+    // get_random_ideal and then searches idealHNF_mul(nf, R, P) for every P
+    // of L_jid.  Otherwise each pivot draws a new R, as the reference
+    // `class_group_new_relations_via_lll` calls random_get inside its pivot
+    // loop.
+    Ideal& search_random_ideal = pass_random_ideal != nullptr
+            ? pass_random_ideal->ideal
+            : random_ideal;
+    if (pass_random_ideal == nullptr || !pass_random_ideal->drawn) {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.pivot_lll_ideal.random_next");
-        if (!random_env.next(random_ideal)) {
+        if (!random_env.next(search_random_ideal)) {
             return false;
+        }
+        if (pass_random_ideal != nullptr) {
+            pass_random_ideal->drawn = true;
         }
     }
     {
@@ -1354,7 +1385,7 @@ bool collect_pivot_lll_ideal(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.pivot_lll_ideal.multiply");
-        if (!search_ideal.multiply(random_ideal, pivot_power)) {
+        if (!search_ideal.multiply(search_random_ideal, pivot_power)) {
             return false;
         }
     }
@@ -1664,6 +1695,16 @@ bool ClassGroupContext::run_lll_relation_route_(
                 }
             }
 
+            // Storage for the random ideal of each pass over the pivots,
+            // defined only when the passes reuse one.
+            PassRandomIdeal pass_random_ideal_storage;
+            PassRandomIdeal* pass_random_ideal = nullptr;
+            if (pivot_search_reuses_pass_random_ideal(order.degree())) {
+                if (!pass_random_ideal_storage.ideal.define(order)) {
+                    return false;
+                }
+                pass_random_ideal = &pass_random_ideal_storage;
+            }
 
             auto route_budget_exhausted = [&]() noexcept {
               return (!extension_only && goal_reached) ||
@@ -1703,6 +1744,9 @@ bool ClassGroupContext::run_lll_relation_route_(
                     }
                   }
 
+                  if (pass_random_ideal != nullptr) {
+                    pass_random_ideal->drawn = false;
+                  }
                   for (slong pivot_index : pivot_order) {
                     if (route_budget_exhausted()) {
                       break;
@@ -1713,7 +1757,7 @@ bool ClassGroupContext::run_lll_relation_route_(
                           "class_group.route.collect_pivot");
                       if (!collect_pivot_lll_ideal(
                               *this, order, base_, pivot_index, rand_exp,
-                              random_env, &norm_prefilter,
+                              random_env, pass_random_ideal, &norm_prefilter,
                               source_loop_target_units, options,
                               candidates_tried, accepted_relations,
                               goal_reached, partial_throttle_exit,

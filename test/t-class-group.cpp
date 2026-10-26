@@ -12,6 +12,7 @@
 
 #include "class_group/class_group_certification_internal.hpp"
 #include "class_group/class_group_internal.hpp"
+#include "class_group/lll_relation_search_internal.hpp"
 #include "class_group/relation_candidate_internal.hpp"
 #include "class_group/relation_factor_base_plan_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
@@ -3847,7 +3848,113 @@ int test_relation_saturation_scan_skips_settled_rows() {
     assert(counter.settled > 0);
     return 0;
 }
+
+struct PivotRandomIdealCounter {
+    long passes = 0;
+    long draws = 0;
+    long draws_this_pass = 0;
+    long passes_with_two_draws = 0;
+    long pivot_searches = 0;
+};
+
+void pivot_random_ideal_callback(void* user,
+                                 silex::DiagnosticsModule,
+                                 silex::ProfileEvent event,
+                                 const char*,
+                                 const char* label) noexcept {
+    if (event != silex::ProfileEvent::begin_scope || label == nullptr) {
+        return;
+    }
+    auto* counter = static_cast<PivotRandomIdealCounter*>(user);
+    if (std::strcmp(label, "class_group.route.pivot_order") == 0) {
+        ++counter->passes;
+        counter->draws_this_pass = 0;
+    } else if (std::strcmp(label,
+                           "class_group.pivot_lll_ideal.random_next") == 0) {
+        ++counter->draws;
+        if (++counter->draws_this_pass == 2) {
+            ++counter->passes_with_two_draws;
+        }
+    } else if (std::strcmp(label, "class_group.pivot_lll_ideal.multiply") ==
+               0) {
+        ++counter->pivot_searches;
+    }
+}
+
+PivotRandomIdealCounter grh_pivot_random_ideal_counts(
+        const silex::NumberField& field) {
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                               maximal));
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 1000;
+    options.requested_certification = silex::CertificationMode::grh;
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    PivotRandomIdealCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            pivot_random_ideal_callback, &counter);
+    options.diagnostics = &diagnostics;
+
+    silex::ClassGroupContext computed;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, computed, maximal, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    return counter;
+}
+
+// Below degree 30 the pivot relation search draws a new random-walk ideal
+// for every pivot it searches (reference
+// `class_group_new_relations_via_lll`).
+int test_pivot_search_draws_ideal_per_pivot_cubic() {
+    const PivotRandomIdealCounter counter =
+            grh_pivot_random_ideal_counts(cubic_field(-2, -5));
+    assert(counter.pivot_searches > 0);
+    assert(counter.draws == counter.pivot_searches);
+    return 0;
+}
+
+// From degree 30 on, one random-walk ideal R serves a whole pass over the
+// pivots and is multiplied by each pivot's prime power, as the reference
+// buch2.c:rnd_rel draws R once for every prime of L_jid.  Q(zeta_64),
+// degree 32.
+int test_pivot_search_draws_one_ideal_per_pass_degree_32() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 32, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    const PivotRandomIdealCounter counter = grh_pivot_random_ideal_counts(
+            silex::test::field_by_polynomial(
+                    sflint::FmpqPolyConstRef(polynomial)));
+    assert(counter.draws > 0);
+    assert(counter.passes_with_two_draws == 0);
+    assert(counter.draws <= counter.passes);
+    assert(counter.pivot_searches > counter.draws);
+    return 0;
+}
 #endif
+
+// The pivot relation search reuses one random ideal per pass exactly from
+// degree 30 on.
+int test_pivot_search_pass_random_ideal_degree_gate() {
+    using silex::detail::relation_search::pivot_search_reuses_pass_random_ideal;
+    assert(!pivot_search_reuses_pass_random_ideal(1));
+    assert(!pivot_search_reuses_pass_random_ideal(2));
+    assert(!pivot_search_reuses_pass_random_ideal(29));
+    assert(pivot_search_reuses_pass_random_ideal(30));
+    assert(pivot_search_reuses_pass_random_ideal(40));
+    return 0;
+}
 
 // On the Q(sqrt(-23)) candidate above (h_cand = 6, h = 3) the relations are
 // already 3-saturated, so at ell = 3 (no torsion column: w = 2) no nonzero
@@ -9185,7 +9292,10 @@ int main() {
     test_relation_saturation_round_settled_rows();
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
     test_relation_saturation_scan_skips_settled_rows();
+    test_pivot_search_draws_ideal_per_pivot_cubic();
+    test_pivot_search_draws_one_ideal_per_pass_degree_32();
 #endif
+    test_pivot_search_pass_random_ideal_degree_gate();
     test_relation_saturation_index_bound_with_units_degree_one();
     test_relation_saturation_index_bound_checks_nondivisor_primes();
     test_relation_saturation_candidate_filter_minus_23();

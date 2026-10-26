@@ -16,6 +16,11 @@ bool set_small_lll_next_candidate(
         const IdealLatticeLllData& context,
         const std::vector<slong>& selected) noexcept;
 
+// True when the pivot LLL relation search on a field of this degree draws
+// one random-walk ideal per pass over the pivots and reuses it for every
+// pivot of the pass; false when each pivot draws its own.
+bool pivot_search_reuses_pass_random_ideal(slong degree) noexcept;
+
 bool build_random_factor_base_product(
         Ideal& out,
         flint::FmpzMatRef factor_base_row,

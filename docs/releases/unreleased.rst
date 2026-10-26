@@ -149,6 +149,27 @@ Changed
   ``cyclotomic_41_phi40`` 4.42% fewer (4.0555e10 to 3.8761e10).  No timing
   has been measured.
 
+- On fields of degree 30 or more, the ``grh`` pivot relation search draws
+  one random ideal R per pass over the pivots and multiplies that R by each
+  pivot's prime power, as PARI's ``rnd_rel`` (``buch2.c``) keeps one random
+  ideal for every prime of a pass, instead of drawing a new R for every
+  pivot.  Fields of degree below 30 run exactly as before (outputs identical
+  on all 166 ``grh`` corpus rows of degree below 30).  On the larger fields
+  the relation sequence changes, so the record fields
+  ``class_group.relation_count``, ``relation_kernel_unit_count``,
+  ``skipped_dependent_relation_count`` and ``relation_sources``, and the
+  rigorous ``unit_group.regulator_radius``, differ; class groups, units,
+  regulators and certification labels are unchanged on
+  ``cyclotomic_37_phi36``, ``cyclotomic_41_phi40``, ``cyclotomic_51_phi32``,
+  ``cyclotomic_64_phi32`` and ``cyclotomic_real_136_deg32``.  As for any
+  change to the random relation path, ``relation_saturation_status`` depends
+  on the random sequence: with other walk seeds it moved from
+  ``not_checked`` to ``unavailable`` on two of 84 seeds of
+  ``cyclotomic_real_136_deg32``.  Callgrind instruction counts for the whole
+  process, ``grh`` mode: ``cyclotomic_64_phi32`` 25.4% fewer (1.1583e10 to
+  8.644e9) and ``cyclotomic_41_phi40`` 26.1% fewer (4.0423e10 to 2.9868e10).
+  No controlled timing has been measured.
+
 - The embedding rows of an ideal basis (and of the LLL-reduced basis in the
   T2 enumeration setup of the ``proven`` factor-base honesty check) are now
   computed with one ``arb_dot_fmpz`` per entry, a row of the integer matrix
