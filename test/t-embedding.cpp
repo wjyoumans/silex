@@ -1,12 +1,16 @@
+#include <silex/archimedean.hpp>
 #include <silex/diagnostics.hpp>
+#include <silex/element.hpp>
 #include <silex/embedding.hpp>
 #include <silex/flint/acb.hpp>
 #include <silex/flint/arb.hpp>
+#include <silex/flint/arb_vec.hpp>
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/number_field.hpp>
 
 #include "embedding/embedding_internal.hpp"
+#include "factored_element/factor_screen_hash_internal.hpp"
 #include "test_support.hpp"
 
 #include <flint/acb.h>
@@ -16,8 +20,10 @@
 #include <flint/fmpq_poly.h>
 
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 namespace sflint = silex::flint;
 
@@ -930,6 +936,92 @@ int test_evaluate_all_root_powers_match_product_tree() {
     return 0;
 }
 
+// The log embedding cache finds an entry through the element's screen hash
+// and confirms it with Element::equal.  Distinct elements with one hash keep
+// their own entries, an equal element built another way finds its entry,
+// and the mode still separates entries.  A hit is visible because a lookup
+// at a lower precision returns the stored higher-precision values.
+int test_log_embedding_cache_hash_collisions() {
+    sflint::FmpqPoly polynomial;
+    poly_x3_minus(polynomial, 2);
+    silex::NumberField field = field_by_polynomial(polynomial);
+    assert(field.is_defined());
+    const nf_struct* flint_field = field.raw_flint_field();
+    silex::EmbeddingContext embeddings(field);
+    silex::Element theta(field);
+    assert(theta.gen());
+
+    // The screen hash reduces each coefficient mod p = 4294967291, so
+    // theta + 1 + j p all hash alike.
+    const slong p = 4294967291;
+    const slong count = 5;
+    const slong high = 256;
+    const slong low = 64;
+    std::vector<silex::Element> colliding;
+    std::vector<sflint::ArbVec> stored;
+    for (slong j = 0; j < count; ++j) {
+        silex::Element value(field);
+        assert(value.add_si(theta, 1 + j * p));
+        sflint::ArbVec logs(2);
+        assert(silex::logarithmic_embedding(sflint::ArbVecRef(logs),
+                                            embeddings, value,
+                                            silex::LogEmbeddingMode::plain,
+                                            high));
+        colliding.push_back(std::move(value));
+        stored.push_back(std::move(logs));
+    }
+    const std::uint64_t hash =
+            silex::detail::factor_screen_hash(colliding[0], flint_field);
+    for (slong j = 1; j < count; ++j) {
+        assert(silex::detail::factor_screen_hash(colliding[j], flint_field) ==
+               hash);
+        assert(!colliding[j].equal(colliding[0]));
+        assert(!arb_equal(stored[j].data() + 0, stored[0].data() + 0));
+    }
+
+    // A fresh computation at the low precision differs from the stored
+    // values, so equality below shows a cache hit.
+    {
+        silex::EmbeddingContext fresh(field);
+        sflint::ArbVec logs(2);
+        assert(silex::logarithmic_embedding(sflint::ArbVecRef(logs), fresh,
+                                            colliding[0],
+                                            silex::LogEmbeddingMode::plain,
+                                            low));
+        assert(!arb_equal(logs.data() + 0, stored[0].data() + 0));
+    }
+
+    // Look the elements up in reverse order, each rebuilt as theta plus a
+    // separately built constant.
+    for (slong j = count - 1; j >= 0; --j) {
+        silex::Element constant(field);
+        assert(constant.set_si(1 + j * p));
+        silex::Element rebuilt(field);
+        assert(rebuilt.add(theta, constant));
+        assert(rebuilt.equal(colliding[j]));
+        sflint::ArbVec logs(2);
+        assert(silex::logarithmic_embedding(sflint::ArbVecRef(logs),
+                                            embeddings, rebuilt,
+                                            silex::LogEmbeddingMode::plain,
+                                            low));
+        for (slong i = 0; i < 2; ++i) {
+            assert(arb_equal(logs.data() + i, stored[j].data() + i));
+        }
+
+        // Product mode has no entry yet: it is computed at the low
+        // precision, and the complex place doubles.
+        assert(silex::logarithmic_embedding(sflint::ArbVecRef(logs),
+                                            embeddings, rebuilt,
+                                            silex::LogEmbeddingMode::product,
+                                            low));
+        assert(!arb_equal(logs.data() + 1, stored[j].data() + 1));
+        sflint::Arb doubled;
+        arb_mul_2exp_si(doubled.raw(), stored[j].data() + 1, 1);
+        assert(arb_overlaps(logs.data() + 1, doubled.raw()));
+    }
+    return 0;
+}
+
 int main() {
     assert(test_degree_one() == 0);
     assert(test_quadratic_real() == 0);
@@ -946,5 +1038,6 @@ int main() {
     assert(test_refine_precision_cap() == 0);
     assert(test_full_isolation_retries_ambiguous_match() == 0);
     assert(test_evaluate_all_root_powers_match_product_tree() == 0);
+    assert(test_log_embedding_cache_hash_collisions() == 0);
     return 0;
 }

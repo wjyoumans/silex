@@ -10,9 +10,11 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_poly.hpp>
 
+#include "../factored_element/factor_screen_hash_internal.hpp"
 #include "embedding_internal.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <new>
 #include <utility>
@@ -374,8 +376,15 @@ public:
         if (precision <= 0 || out.length() < 0) {
             return false;
         }
-        for (const Entry& entry : entries_) {
-            if (entry.mode == static_cast<int>(mode) &&
+        const std::uint64_t hash = element_hash(element);
+        const std::size_t mask = table_.size() - 1;
+        for (std::size_t slot = first_slot(hash); slot != no_slot &&
+                                                  table_[slot] != no_slot;
+             slot = (slot + 1) & mask) {
+            const std::size_t i = table_[slot];
+            const Entry& entry = entries_[i];
+            if (hashes_[i] == hash &&
+                entry.mode == static_cast<int>(mode) &&
                 entry.precision >= precision &&
                 entry.values.length() == out.length() &&
                 entry.element.equal(element)) {
@@ -397,8 +406,15 @@ public:
         if (precision <= 0 || values.length() < 0) {
             return false;
         }
-        for (Entry& entry : entries_) {
-            if (entry.mode == static_cast<int>(mode) &&
+        const std::uint64_t hash = element_hash(element);
+        const std::size_t mask = table_.size() - 1;
+        for (std::size_t slot = first_slot(hash); slot != no_slot &&
+                                                  table_[slot] != no_slot;
+             slot = (slot + 1) & mask) {
+            const std::size_t i = table_[slot];
+            Entry& entry = entries_[i];
+            if (hashes_[i] == hash &&
+                entry.mode == static_cast<int>(mode) &&
                 entry.element.equal(element)) {
                 if (updated_existing != nullptr) {
                     *updated_existing = true;
@@ -421,7 +437,12 @@ public:
         Entry& entry = entries_.back();
         entry.mode = static_cast<int>(mode);
         entry.precision = precision;
-        if (!entry.element.set(element) || !entry.values.set_from(values)) {
+        const bool element_set = entry.element.set(element);
+        // The hash of the element the entry actually holds, so the index
+        // stays exact even when the copy failed.
+        hashes_.push_back(element_set ? hash : element_hash(entry.element));
+        index_last_entry();
+        if (!element_set || !entry.values.set_from(values)) {
             version_ = fresh_log_cache_version();
             return false;
         }
@@ -429,6 +450,49 @@ public:
     }
 
 private:
+    static constexpr std::size_t no_slot = SIZE_MAX;
+
+    // The slot where the probe for `hash` starts, or no_slot while the
+    // table is empty.
+    std::size_t first_slot(std::uint64_t hash) const noexcept {
+        return table_.empty() ? no_slot
+                              : static_cast<std::size_t>(hash) &
+                                        (table_.size() - 1);
+    }
+
+    // Puts entry `index` in the first free slot of its probe sequence.
+    void place(std::size_t index) noexcept {
+        const std::size_t mask = table_.size() - 1;
+        std::size_t slot = first_slot(hashes_[index]);
+        while (table_[slot] != no_slot) {
+            slot = (slot + 1) & mask;
+        }
+        table_[slot] = index;
+    }
+
+    // Adds the last entry to the table, first doubling the table and
+    // placing every entry again in index order when it would be more than
+    // half full.
+    void index_last_entry() noexcept {
+        if (2 * entries_.size() > table_.size()) {
+            table_.assign(table_.empty() ? 16 : 2 * table_.size(), no_slot);
+            for (std::size_t i = 0; i + 1 < entries_.size(); ++i) {
+                place(i);
+            }
+        }
+        place(entries_.size() - 1);
+    }
+
+    // Screen hash of an element; 0 for an undefined one, which
+    // Element::equal never matches.
+    static std::uint64_t element_hash(const Element& element) noexcept {
+        const NumberField* parent = element.parent();
+        return parent == nullptr
+                       ? 0
+                       : detail::factor_screen_hash(
+                                 element, parent->raw_flint_field());
+    }
+
     struct Entry {
         Entry(const NumberField& parent, slong places) noexcept
             : element(parent),
@@ -441,7 +505,21 @@ private:
         slong precision = 0;
     };
 
+    // Entries in insertion order.  hashes_[i] is detail::factor_screen_hash
+    // of entries_[i].element.  Element::equal compares stored forms (FLINT
+    // nf_elem_equal), and equal stored forms hash equally, so an entry
+    // with another hash cannot match; a hash match is still confirmed with
+    // Element::equal.
+    //
+    // table_ is an open-addressing index of entries_ by hash, with linear
+    // probing over a power-of-two number of slots kept at most half full;
+    // no_slot marks a free slot.  Entries are placed in index order and
+    // never removed, so the probe for a hash meets the entries with that
+    // hash in insertion order, and a lookup returns the same entry as a
+    // scan of entries_ in order.
     std::vector<Entry> entries_;
+    std::vector<std::uint64_t> hashes_;
+    std::vector<std::size_t> table_;
     std::uint64_t version_ = fresh_log_cache_version();
 };
 

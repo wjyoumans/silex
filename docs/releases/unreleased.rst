@@ -133,6 +133,20 @@ Added
 Changed
 -------
 
+- The logarithmic-embedding cache of an ``EmbeddingContext`` finds a stored
+  element through a hash index instead of comparing the element with every
+  entry.  The hash is the factored-element screen hash of the stored
+  coefficients, and every hash match is still confirmed with
+  ``Element::equal``, which compares stored forms; entries with one hash
+  are tried in insertion order, so a lookup returns the same entry as the
+  former scan and every published result is unchanged: ``grh`` outputs are
+  identical on ``cyclotomic_real_q10_c11_deg10`` and
+  ``cyclotomic_real_64_deg16``.  Callgrind instruction counts for the whole
+  process, ``grh`` mode: ``cyclotomic_real_q10_c11_deg10`` 1.03% fewer
+  (1.5818e9 to 1.5655e9; the class/unit transaction 1.29% fewer) and
+  ``cyclotomic_real_64_deg16`` 0.58% fewer (9.368e8 to 9.314e8).  No timing
+  has been measured.
+
 - The split-prime norm evaluation of class-group relation candidates
   (defining polynomials of degree 16 and more) combines the residues modulo
   its split primes with a mixed-radix conversion in word-size arithmetic,
