@@ -8,6 +8,8 @@
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_lll.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/nmod_poly.hpp>
+#include <silex/flint/nmod_poly_factor.hpp>
 #include <silex/ideal.hpp>
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_field.hpp>
@@ -25,13 +27,17 @@
 #include "order_unit/class_unit_transaction_internal.hpp"
 #include "order_unit/compute_internal.hpp"
 #include "order_unit/precision_cap_internal.hpp"
+#include "residue_field/word_frobenius_internal.hpp"
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <flint/fmpq_poly.h>
+#include <flint/nmod_poly.h>
+#include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -10186,6 +10192,184 @@ int test_degree_one_roots_mod_q_root_finder() {
     return 0;
 }
 
+// The word kernel of the stable scan's Rabin split
+// (word_x_power_mod_dispatch, residue_field/word_frobenius_internal.hpp)
+// against FLINT's nmod_poly_powmod_x_ui_preinv: x^e mod g for random monic
+// g of degree 1 to 22 over F_q and e = (q - 1) / 2, q, random e and
+// 2^64 - 1.  The primes are small ones, random ones below the kernel's
+// prime limit for the degree (2^30 up to degree 8, 2^29 for degrees 9 to
+// 20), and the three largest below the limit, where g also takes the
+// largest residues q - 1; the kernel covers exactly degrees 2 to 20, q below
+// the limit and e >= 1, and declines degree 1, degrees 21 and 22, e = 0 and
+// the first primes at or above the limit.  Those go to FLINT in the scan:
+// for x^3 - x - 15 (limit 2^30), and x^12 + 7 and Phi_13 (limit 2^29), the
+// roots degree_one_roots_mod_q_for_test returns for primes on both sides of
+// the limit, including q = 1 mod 13 where Phi_13 splits completely, are
+// those of nmod_poly_roots on the reduction.
+// The largest prime below n, for n > 2.
+ulong previous_prime(ulong n) noexcept {
+    do {
+        --n;
+    } while (n_is_prime(n) == 0);
+    return n;
+}
+
+int test_word_x_power_mod_matches_flint() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    slong compared = 0;
+    slong declined = 0;
+    for (slong degree = 1; degree <= 22; ++degree) {
+        const ulong limit =
+                silex::detail::word_frobenius_prime_limit(degree);
+        std::vector<ulong> primes = {2, 3, 5, 7, 11, 13, 1000003};
+        const int limit_bits = static_cast<int>(FLINT_BIT_COUNT(limit - 1));
+        for (int bits = 3; bits <= limit_bits; bits += 3) {
+            primes.push_back(n_randprime(state, static_cast<ulong>(bits), 1));
+        }
+        ulong below = limit;
+        ulong above = limit - 1;
+        std::vector<ulong> edge;
+        for (int i = 0; i < 3; ++i) {
+            below = previous_prime(below);
+            above = n_nextprime(above, 1);
+            primes.push_back(below);
+            edge.push_back(below);
+            primes.push_back(above);
+        }
+        for (ulong q : primes) {
+            const bool near_limit =
+                    std::find(edge.begin(), edge.end(), q) != edge.end();
+            for (int trial = 0; trial < 4; ++trial) {
+                std::vector<ulong> g(static_cast<std::size_t>(degree + 1));
+                for (slong i = 0; i < degree; ++i) {
+                    g[static_cast<std::size_t>(i)] =
+                            near_limit && trial == 0 ? q - 1
+                                                     : n_randint(state, q);
+                }
+                g[static_cast<std::size_t>(degree)] = 1;
+                sflint::NmodPoly modulus(q);
+                for (slong i = 0; i <= degree; ++i) {
+                    nmod_poly_set_coeff_ui(modulus.raw(), i,
+                                           g[static_cast<std::size_t>(i)]);
+                }
+                sflint::NmodPoly reverse(q);
+                sflint::NmodPoly preinverse(q);
+                nmod_poly_reverse(reverse.raw(), modulus.raw(),
+                                  modulus.raw()->length);
+                // g(0) may vanish here, so the reverse can be shorter than
+                // g; the inverse is still needed to the length of g.
+                nmod_poly_inv_series_newton(preinverse.raw(), reverse.raw(),
+                                            modulus.raw()->length);
+                const ulong exponents[] = {(q - 1) / 2, q, n_randtest(state),
+                                           UWORD_MAX, 0};
+                for (ulong exponent : exponents) {
+                    std::array<ulong, 22> word{};
+                    const bool covered = degree >= 2 && degree <= 20 &&
+                                         q < limit && exponent != 0;
+                    const bool taken =
+                            silex::detail::word_x_power_mod_dispatch(
+                                    word.data(), g.data(), degree, exponent,
+                                    q);
+                    assert(taken == covered);
+                    if (!taken) {
+                        ++declined;
+                        continue;
+                    }
+                    sflint::NmodPoly expected(q);
+                    nmod_poly_powmod_x_ui_preinv(expected.raw(), exponent,
+                                                 modulus.raw(),
+                                                 preinverse.raw());
+                    for (slong i = 0; i < degree; ++i) {
+                        assert(word[static_cast<std::size_t>(i)] ==
+                               nmod_poly_get_coeff_ui(expected.raw(), i));
+                    }
+                    ++compared;
+                }
+            }
+        }
+    }
+    flint_rand_clear(state);
+    assert(compared > 0);
+    assert(declined > 0);
+
+    // The FLINT fallback beyond the limit, and the word route below it,
+    // through the scan's root finder.
+    struct Case {
+        std::vector<slong> coefficients;
+        ulong limit;
+        ulong split_modulus;
+    };
+    const Case cases[] = {
+            {{-15, -1, 0, 1}, UWORD(1) << 30, 1},
+            {{7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, UWORD(1) << 29, 1},
+            {{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, UWORD(1) << 29, 13},
+    };
+    slong full_splits = 0;
+    for (const Case& item : cases) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < item.coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           item.coefficients[i]);
+        }
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order equation = silex::test::equation_order(field);
+        std::vector<ulong> primes;
+        ulong below = item.limit;
+        ulong above = item.limit - 1;
+        while (primes.size() < 8) {
+            below = previous_prime(below);
+            above = n_nextprime(above, 1);
+            if (below % item.split_modulus == 1 % item.split_modulus) {
+                primes.push_back(below);
+            }
+            if (above % item.split_modulus == 1 % item.split_modulus) {
+                primes.push_back(above);
+            }
+        }
+        for (ulong q : primes) {
+            sflint::NmodPoly reduced(q);
+            for (std::size_t i = 0; i < item.coefficients.size(); ++i) {
+                const slong c = item.coefficients[i];
+                const ulong c_mod = c < 0
+                        ? n_negmod(static_cast<ulong>(-c) % q, q)
+                        : static_cast<ulong>(c) % q;
+                nmod_poly_set_coeff_ui(reduced.raw(), static_cast<slong>(i),
+                                       c_mod);
+            }
+            sflint::NmodPolyFactor factorization;
+            nmod_poly_roots(factorization.raw(), reduced.raw(), 0);
+            std::vector<ulong> expected;
+            for (slong i = 0; i < factorization.raw()->num; ++i) {
+                expected.push_back(n_negmod(
+                        nmod_poly_get_coeff_ui(factorization.raw()->p + i, 0),
+                        q));
+            }
+            std::sort(expected.begin(), expected.end());
+
+            sflint::Fmpz q_value;
+            fmpz_set_ui(q_value.raw(), q);
+            std::vector<sflint::Fmpz> roots;
+            assert(silex::detail::degree_one_roots_mod_q_for_test(
+                    roots, equation, sflint::FmpzConstRef(q_value)));
+            std::vector<ulong> got;
+            for (const sflint::Fmpz& root : roots) {
+                assert(fmpz_sgn(root.raw()) >= 0);
+                assert(fmpz_cmp_ui(root.raw(), q) < 0);
+                got.push_back(fmpz_get_ui(root.raw()));
+            }
+            std::sort(got.begin(), got.end());
+            assert(got == expected);
+            if (got.size() + 1 == item.coefficients.size()) {
+                ++full_splits;
+            }
+        }
+    }
+    assert(full_splits > 0);
+    return 0;
+}
+
 // For an odd prime ell, as set_cyclotomic13_u2_power17_group, but the first
 // `powered` generators u_a (a = 2, ..., powered + 1) are replaced by
 // -u_a^ell = (-u_a)^ell, stored as the factors u_a^ell and (-1)^1: a
@@ -14572,6 +14756,7 @@ int main() {
     test_stable_proof_prime_columns_match_residue_field_route();
     test_stable_proof_prime_columns_fallback_and_wide_routes();
     test_degree_one_roots_mod_q_root_finder();
+    test_word_x_power_mod_matches_flint();
     test_stable_proof_scan_stops_building_columns_at_full_rank();
     test_kernel_row_root_three_way_result();
     test_compact_unit_power_root_three_way_result();

@@ -979,8 +979,9 @@ bool same_grh_default_product(
 
 // The word kernel's prime limit for a defining polynomial of `degree`:
 // 2^30 up to degree 8 and 2^29 for degrees 9 to 20, where the lazy
-// reductions of the kernel stay below 2^64 (src/zeta/zeta.cpp,
-// bf_word_linear_factor_prime_limit); 0 above degree 20, which the word
+// reductions of the kernel stay below 2^64
+// (src/residue_field/word_frobenius_internal.hpp,
+// word_frobenius_prime_limit); 0 above degree 20, which the word
 // kernel does not cover.
 ulong word_linear_factor_prime_limit(slong degree) noexcept {
     if (degree > 20) {

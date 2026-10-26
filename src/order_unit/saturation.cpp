@@ -5,7 +5,10 @@
 #include "../element/element_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
 #include "../residue_field/residue_field_internal.hpp"
+#include "../residue_field/word_frobenius_internal.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdio>
 #include <limits>
 #include <utility>
@@ -241,8 +244,13 @@ bool nmod_poly_vanishes_at_roots(const NmodPoly& polynomial,
 // r of g have r^((q - 1) / 2) = 1 or -1, so they are the roots of
 // gcd(h - 1, g) and of gcd(h + 1, g), each a squarefree product of linear
 // factors (it divides x^((q - 1) / 2) -+ 1); a factor of degree one gives
-// its root directly and a larger one goes to nmod_poly_roots.  Every root
-// found is checked to vanish on the reduction before it is returned.  With
+// its root directly and a larger one goes to nmod_poly_roots.  h comes
+// from the word-size kernel word_x_power_mod
+// (residue_field/word_frobenius_internal.hpp) for deg g from 2 to 20 and q
+// below 2^30 (deg g <= 8) or 2^29, and from FLINT's
+// nmod_poly_powmod_x_ui_preinv otherwise; x^((q - 1) / 2) mod g is unique,
+// so both give the same h.  Every root found is checked to vanish on the
+// reduction before it is returned.  With
 // `require_squarefree`, returns false, with `roots` empty, when the
 // reduction is not squarefree; also returns false, with `roots` empty, if a
 // root fails the check.
@@ -304,13 +312,35 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
                         diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.stable_scan."
                         "degree_one_roots_nmod_frobenius_gcd");
-                nmod_poly_reverse(reverse.raw(), nonzero_part.raw(),
-                                  nonzero_part.raw()->length);
-                nmod_poly_inv_series_newton(preinverse.raw(), reverse.raw(),
-                                            reverse.raw()->length);
-                nmod_poly_powmod_x_ui_preinv(half_power.raw(), (q - 1) / 2,
-                                             nonzero_part.raw(),
-                                             preinverse.raw());
+                // h = x^((q - 1) / 2) mod g by the word kernel where it
+                // covers the degree and q (word_frobenius_internal.hpp),
+                // otherwise by FLINT; both give the same reduced h.
+                const slong nonzero_degree =
+                        nmod_poly_degree(nonzero_part.raw());
+                std::array<ulong, static_cast<std::size_t>(
+                                          detail::kWordFrobeniusMaxDegree)>
+                        word_power;
+                if (detail::word_x_power_mod_dispatch(
+                            word_power.data(), nonzero_part.raw()->coeffs,
+                            nonzero_degree, (q - 1) / 2, q)) {
+                    nmod_poly_fit_length(half_power.raw(), nonzero_degree);
+                    for (slong i = 0; i < nonzero_degree; ++i) {
+                        half_power.raw()->coeffs[i] =
+                                word_power[static_cast<std::size_t>(i)];
+                    }
+                    _nmod_poly_set_length(half_power.raw(), nonzero_degree);
+                    _nmod_poly_normalise(half_power.raw());
+                } else {
+                    nmod_poly_reverse(reverse.raw(), nonzero_part.raw(),
+                                      nonzero_part.raw()->length);
+                    nmod_poly_inv_series_newton(preinverse.raw(),
+                                                reverse.raw(),
+                                                reverse.raw()->length);
+                    nmod_poly_powmod_x_ui_preinv(half_power.raw(),
+                                                 (q - 1) / 2,
+                                                 nonzero_part.raw(),
+                                                 preinverse.raw());
+                }
                 nmod_poly_sub_ui(shifted.raw(), half_power.raw(), 1);
                 nmod_poly_gcd(residue_part.raw(), shifted.raw(),
                               nonzero_part.raw());

@@ -2376,6 +2376,19 @@ Changed
   Release) the instruction count fell 5.41% for ``random_d9_h4_s8``, 4.62%
   for ``random_d10_h2_s21`` and 1.88% for ``pure_x12_plus_7``.  No timing has
   been measured.
+- The splitting step of that root scan computes ``x^((q-1)/2) mod g`` with
+  the word-size kernel of the Belabas-Friedman root counts, now shared and
+  taking any exponent, instead of FLINT's ``nmod_poly_powmod_x_ui_preinv``,
+  for ``g`` of degree 2 to 20 and ``q`` below ``2^30`` (degree up to 8) or
+  ``2^29``; other cases keep the FLINT route.  The power is the same reduced
+  polynomial (a test compares both on random ``g`` and ``q`` up to the
+  bounds), so the roots, the columns and published results are unchanged.
+  Published ``proven`` outputs are identical on ``random_d9_h4_s8``,
+  ``random_d10_h2_s21``, ``pure_x12_plus_7`` and the other 174 ``proven``
+  corpus rows that finish (8 rows finish in 90 seconds on neither build).
+  Under callgrind (``proven``) the instruction count fell 11.22% for
+  ``random_d10_h2_s21``, 12.86% for ``random_d9_h4_s8`` and 7.82% for
+  ``pure_x12_plus_7``.  No timing has been measured.
 
 - The ``proven`` relation-saturation proof builds the relation-kernel vectors
   its beta rows are size-reduced against from a subset of the relations when
