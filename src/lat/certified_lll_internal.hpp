@@ -119,6 +119,25 @@ bool integer_gram_is_lll_reduced(flint::FmpzMatConstRef gram,
                                  double delta,
                                  double eta) noexcept;
 
+// Working precision, in bits, of gram_interval_screen_proves_lll_reduced.
+// Any precision is sound; it only sets how often the screen decides.  On
+// the phase outputs of the grh pivot LLL (cyclotomic fields of degree 32 to
+// 40) every size condition had an absolute slack of at least 0.005 and
+// every Lovasz condition a relative slack of at least 0.005, and the screen
+// decided every call at 53, 64 and 128 bits.
+inline constexpr slong gram_interval_screen_precision = 64;
+
+// Sufficient test for integer_gram_is_lll_reduced(gram, delta, eta): true
+// only when ball arithmetic proves every condition that test checks, so
+// true implies that test is true.  False means undecided (or not reduced);
+// integer_gram_is_lll_reduced then runs its exact recurrence.  False for
+// fewer than two rows, a non square matrix, or a delta or eta that is not
+// a finite positive double.  It reads only the lower triangle and the
+// diagonal.
+bool gram_interval_screen_proves_lll_reduced(flint::FmpzMatConstRef gram,
+                                             double delta,
+                                             double eta) noexcept;
+
 // Exact test of FLINT's fmpz_mat_is_reduced(basis, delta, eta) for a basis
 // of at least two rows; false for fewer rows.  Equality with FLINT holds
 // for FLINT's parameter range eta^2 < delta; if delta <= eta^2 FLINT can

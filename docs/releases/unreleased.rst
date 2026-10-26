@@ -133,6 +133,22 @@ Added
 Changed
 -------
 
+- The exact LLL-reducedness test behind the certified first LLL phase (the
+  integral Gram-Schmidt recurrence on the Gram matrix) first runs the same
+  Gram-Schmidt recurrence in FLINT ball arithmetic at 64 bits, following the
+  Cholesky factorization of the Gram matrix (Nguyen and Stehle, SIAM J.
+  Comput. 39 (2009), Section 3.2, Figure 4).  It accepts only when the balls
+  prove every positivity, size and Lovasz condition the exact test checks;
+  otherwise the exact recurrence runs.  The test's result is therefore
+  unchanged on every input, and so are the certified LLL outputs.  ``grh``
+  outputs are identical on the 184 corpus and fixture rows that finish
+  within 300 s (``cyclotomic_real_163_deg81`` timed out on both builds).
+  Callgrind instruction counts for the whole process, ``grh`` mode:
+  ``cyclotomic_64_phi32`` 4.69% fewer (1.1659e10 to 1.1111e10),
+  ``cyclotomic_37_phi36`` 4.91% fewer (1.5118e10 to 1.4376e10),
+  ``cyclotomic_41_phi40`` 4.42% fewer (4.0555e10 to 3.8761e10).  No timing
+  has been measured.
+
 - The embedding rows of an ideal basis (and of the LLL-reduced basis in the
   T2 enumeration setup of the ``proven`` factor-base honesty check) are now
   computed with one ``arb_dot_fmpz`` per entry, a row of the integer matrix

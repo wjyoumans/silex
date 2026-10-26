@@ -1,7 +1,12 @@
 #include "certified_lll_internal.hpp"
 
+#include <silex/flint/arb.hpp>
+#include <silex/flint/arb_mat.hpp>
+#include <silex/flint/arb_vec.hpp>
 #include <silex/flint/fmpz.hpp>
 
+#include <flint/arb.h>
+#include <flint/arb_mat.h>
 #include <flint/fmpz_lll.h>
 #include <flint/fmpz_mat.h>
 #include <flint/fmpz_vec.h>
@@ -41,6 +46,101 @@ bool double_as_dyadic(flint::Fmpz& mantissa,
 
 }  // namespace
 
+bool gram_interval_screen_proves_lll_reduced(flint::FmpzMatConstRef gram_matrix,
+                                             double delta,
+                                             double eta) noexcept {
+    // Why true implies integer_gram_is_lll_reduced(gram, delta, eta):
+    //
+    // For a Gram matrix G of linearly independent b_0, ..., b_{n-1}, the
+    // Gram-Schmidt data follow from G alone (the Cholesky factorization of
+    // the Gram matrix: Nguyen and Stehle, "An LLL algorithm with quadratic
+    // complexity", SIAM J. Comput. 39 (2009), Section 3.2, Figure 4, the
+    // Cholesky factorization algorithm, whose s_i^(i) is the sum below
+    // with j = i): with r_ij = <b_i, b*_j>,
+    //   r_ij = G_ij - sum_{k<j} mu_jk r_ik   (j <= i),
+    //   mu_ij = r_ij / r_jj                  (j < i),
+    //   |b*_i|^2 = r_ii.
+    // In the notation of integer_gram_is_lll_reduced, r_ii = d_{i+1} / d_i
+    // and mu_ij = lambda_ij / d_{j+1}; this holds row by row as long as the
+    // earlier leading minors are positive, which the loop below has proved
+    // by then.  Its three conditions are therefore, for every row i:
+    //   (a) r_ii > 0                     (d_{i+1} > 0),
+    //   (b) |mu_ij| <= eta for j < i      (|lambda_ij| <= eta d_{j+1}),
+    //   (c) r_ii - (delta - mu_{i,i-1}^2) r_{i-1,i-1} >= 0 for i >= 1
+    //       (the Lovasz test, divided by d_i d_{i-1} > 0).
+    //
+    // The loop evaluates the same recurrence in FLINT's ball arithmetic.
+    // Every arb operation returns a ball containing the exact result for
+    // every choice of exact values in its input balls (arb_set_round_fmpz,
+    // arb_dot, arb_div, arb_sqr, arb_sub, arb_mul, arb_add; arb_set_d is
+    // exact for a finite double, so delta and eta are the exact rationals
+    // of the doubles, as in the exact test).  By induction over the
+    // recurrence each ball contains its exact quantity, because every
+    // divisor r_jj was proved positive (a) before any later row divides
+    // by it.  arb_is_positive, arb_le and arb_is_nonnegative hold only
+    // when the predicate holds for every point of the balls, so for the
+    // exact quantities.  If a leading minor is not positive, the first such
+    // row has exact r_ii <= 0 in its ball and (a) fails.  Hence a true
+    // return proves (a), (b) and (c) for every row, which is exactly what
+    // integer_gram_is_lll_reduced checks; any undecided ball returns false
+    // and leaves the decision to the exact recurrence.  Like the exact
+    // test, the loop reads only the lower triangle and the diagonal.
+    const slong rows = flint::fmpz_mat_nrows(gram_matrix);
+    if (rows < 2 || flint::fmpz_mat_ncols(gram_matrix) != rows ||
+        !std::isfinite(delta) || !(delta > 0.0) || !std::isfinite(eta) ||
+        !(eta > 0.0)) {
+        return false;
+    }
+    constexpr slong prec = gram_interval_screen_precision;
+    const fmpz_mat_struct* gram = gram_matrix.raw();
+    // Strict lower triangle: mu_ij; diagonal: r_ii = |b*_i|^2.
+    flint::ArbMat mu(rows, rows);
+    // r_ij of the current row i.
+    flint::ArbVec r(rows);
+    flint::Arb entry;
+    flint::Arb bound;
+    flint::Arb delta_ball;
+    flint::Arb eta_ball;
+    ::arb_set_d(delta_ball.raw(), delta);
+    ::arb_set_d(eta_ball.raw(), eta);
+    arb_mat_struct* m = mu.raw();
+    arb_ptr row_r = r.data();
+    for (slong i = 0; i < rows; ++i) {
+        for (slong j = 0; j <= i; ++j) {
+            ::arb_set_round_fmpz(entry.raw(), ::fmpz_mat_entry(gram, i, j),
+                                 prec);
+            // r_ij = G_ij - sum_{k<j} mu_jk r_ik.
+            ::arb_dot(row_r + j, entry.raw(), 1, arb_mat_entry(m, j, 0), 1,
+                      row_r, 1, j, prec);
+            if (j < i) {
+                arb_ptr mu_ij = arb_mat_entry(m, i, j);
+                ::arb_div(mu_ij, row_r + j, arb_mat_entry(m, j, j), prec);
+                ::arb_abs(bound.raw(), mu_ij);
+                if (!::arb_le(bound.raw(), eta_ball.raw())) {  // (b)
+                    return false;
+                }
+            }
+        }
+        arb_ptr r_ii = arb_mat_entry(m, i, i);
+        ::arb_set(r_ii, row_r + i);
+        if (!::arb_is_positive(r_ii)) {  // (a)
+            return false;
+        }
+        if (i >= 1) {
+            // (mu_{i,i-1}^2 - delta) r_{i-1,i-1} + r_ii >= 0.
+            ::arb_sqr(bound.raw(), arb_mat_entry(m, i, i - 1), prec);
+            ::arb_sub(bound.raw(), bound.raw(), delta_ball.raw(), prec);
+            ::arb_mul(bound.raw(), bound.raw(),
+                      arb_mat_entry(m, i - 1, i - 1), prec);
+            ::arb_add(bound.raw(), bound.raw(), r_ii, prec);
+            if (!::arb_is_nonnegative(bound.raw())) {  // (c)
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool integer_gram_is_lll_reduced(flint::FmpzMatConstRef gram_matrix,
                                  double delta,
                                  double eta) noexcept {
@@ -72,6 +172,12 @@ bool integer_gram_is_lll_reduced(flint::FmpzMatConstRef gram_matrix,
     if (!double_as_dyadic(eta_mantissa, eta_shift, eta) ||
         !double_as_dyadic(delta_mantissa, delta_shift, delta)) {
         return false;
+    }
+    // A sufficient test in ball arithmetic, much cheaper than the exact
+    // recurrence below; it returns true only when it proves the conditions
+    // this test checks, so the result is unchanged either way.
+    if (gram_interval_screen_proves_lll_reduced(gram_matrix, delta, eta)) {
+        return true;
     }
 
     const fmpz_mat_struct* gram = gram_matrix.raw();

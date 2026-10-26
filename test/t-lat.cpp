@@ -2045,6 +2045,107 @@ int test_integer_gram_rejects_non_positive_definite() {
     }
     return 0;
 }
+// gram_interval_screen_proves_lll_reduced is a sufficient test: wherever
+// it holds, integer_gram_is_lll_reduced and FLINT's exact
+// fmpz_mat_is_reduced_gram hold.  [[12, 4], [4, 9]] at delta = 0.75 has
+// mu = 1/3 and Lovasz equality (r_11 = 23/3 = (delta - 1/9) 12): the
+// balls cannot prove it, and the exact test accepts it.  [[12, 4], [4, 8]]
+// breaks the Lovasz test and the non positive definite matrices of the
+// test above are not accepted.  On random fmpz_lll outputs of 2 to 40 rows
+// (4 to 120 bits) the screen must decide, and on unreduced or perturbed
+// matrices it must never accept what the exact test rejects.
+int test_gram_interval_screen_is_sufficient() {
+    using namespace silex::lat::detail;
+    using silex::flint::FmpzMat;
+    auto gram2 = [](slong a, slong b, slong c) {
+        FmpzMat gram(2, 2);
+        fmpz_set_si(fmpz_mat_entry(gram.raw(), 0, 0), a);
+        fmpz_set_si(fmpz_mat_entry(gram.raw(), 1, 0), b);
+        fmpz_set_si(fmpz_mat_entry(gram.raw(), 0, 1), b);
+        fmpz_set_si(fmpz_mat_entry(gram.raw(), 1, 1), c);
+        return gram;
+    };
+    {
+        const FmpzMat equality = gram2(12, 4, 9);
+        if (gram_interval_screen_proves_lll_reduced(equality, 0.75, 0.51) ||
+            !integer_gram_is_lll_reduced(equality, 0.75, 0.51) ||
+            fmpz_mat_is_reduced_gram(equality.raw(), 0.75, 0.51) == 0) {
+            return 1;
+        }
+        const FmpzMat broken = gram2(12, 4, 8);
+        if (gram_interval_screen_proves_lll_reduced(broken, 0.75, 0.51) ||
+            integer_gram_is_lll_reduced(broken, 0.75, 0.51)) {
+            return 1;
+        }
+        const FmpzMat reduced = gram2(4, 1, 4);
+        if (!gram_interval_screen_proves_lll_reduced(reduced, 0.99, 0.51) ||
+            !integer_gram_is_lll_reduced(reduced, 0.99, 0.51)) {
+            return 1;
+        }
+        const slong non_definite[][3] = {
+                {1, 0, 0}, {1, 0, -1}, {0, 0, 1}, {-1, 0, 1}, {4, 2, 1}};
+        for (const auto& c : non_definite) {
+            if (gram_interval_screen_proves_lll_reduced(gram2(c[0], c[1], c[2]),
+                                                        0.25, 0.51)) {
+                return 1;
+            }
+        }
+        FmpzMat single(1, 1);
+        fmpz_one(fmpz_mat_entry(single.raw(), 0, 0));
+        FmpzMat wide(2, 3);
+        if (gram_interval_screen_proves_lll_reduced(single, 0.99, 0.51) ||
+            gram_interval_screen_proves_lll_reduced(wide, 0.99, 0.51)) {
+            return 1;
+        }
+    }
+    silex::flint::FmpzLll basis_config;
+    flint_rand_t state;
+    flint_rand_init(state);
+    const flint_bitcnt_t bit_choices[] = {4, 20, 60, 120};
+    slong decided = 0;
+    slong rejected = 0;
+    for (slong iter = 0; iter < 200; ++iter) {
+        const slong rows = 2 + static_cast<slong>(n_randint(state, 39));
+        const slong cols = rows + static_cast<slong>(n_randint(state, 4));
+        FmpzMat basis(rows, cols);
+        do {
+            fmpz_mat_randtest(basis.raw(), state, bit_choices[iter % 4]);
+        } while (fmpz_mat_rank(basis.raw()) < rows);
+        const bool lll = iter % 3 != 0;
+        if (lll) {
+            fmpz_lll(basis.raw(), nullptr, basis_config.raw());
+            if (iter % 3 == 2) {
+                // Perturb one entry of the reduced basis by +-1.
+                fmpz* entry = fmpz_mat_entry(
+                        basis.raw(),
+                        static_cast<slong>(
+                                n_randint(state, static_cast<ulong>(rows))),
+                        static_cast<slong>(
+                                n_randint(state, static_cast<ulong>(cols))));
+                fmpz_add_si(entry, entry, n_randint(state, 2) == 0 ? -1 : 1);
+            }
+        }
+        FmpzMat gram(rows, rows);
+        fmpz_mat_gram(gram.raw(), basis.raw());
+        const bool screen =
+                gram_interval_screen_proves_lll_reduced(gram, 0.99, 0.51);
+        const bool exact = integer_gram_is_lll_reduced(gram, 0.99, 0.51);
+        if (screen && (!exact ||
+                       fmpz_mat_is_reduced_gram(gram.raw(), 0.99, 0.51) == 0)) {
+            flint_rand_clear(state);
+            return 1;
+        }
+        if (lll && iter % 3 == 1 && !screen) {
+            flint_rand_clear(state);
+            return 1;
+        }
+        decided += screen ? 1 : 0;
+        rejected += exact ? 0 : 1;
+    }
+    flint_rand_clear(state);
+    return decided > 0 && rejected > 0 ? 0 : 1;
+}
+
 // certified_fmpz_lll on GRAM input (the Gram matrices B B^T of random
 // full-rank bases of 4 to 200 bits, 2 to 34 rows) against plain fmpz_lll,
 // with a null and an identity transform and every injected failure.  The
@@ -2226,6 +2327,7 @@ int main() {
                    test_lll_certified_routes() != 0 ||
                    test_certified_fmpz_lll_matches_fmpz_lll() != 0 ||
                    test_integer_gram_rejects_non_positive_definite() != 0 ||
+                   test_gram_interval_screen_is_sufficient() != 0 ||
                    test_certified_fmpz_lll_gram_matches_fmpz_lll() != 0 ||
                    test_fplll_row_transform_boundary() != 0 ||
                    test_fplll_column_image_transform_boundary() != 0 ||
