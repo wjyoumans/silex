@@ -1153,6 +1153,168 @@ int test_row_values_invalidated() {
     return 0;
 }
 
+// The fmpz_CRT_ui accumulation split_prime_crt replaced: the symmetric
+// residue modulo m_0, then fmpz_CRT_ui(..., sign = 1) per further prime.
+void reference_crt(sflint::Fmpz& out,
+                   const std::vector<ulong>& residues,
+                   const std::vector<nmod_t>& moduli,
+                   std::size_t count) noexcept {
+    sflint::Fmpz modulus;
+    sflint::Fmpz scratch;
+    fmpz_set_ui(out.raw(), residues[0]);
+    if (residues[0] > moduli[0].n / 2) {
+        fmpz_sub_ui(out.raw(), out.raw(), moduli[0].n);
+    }
+    fmpz_set_ui(modulus.raw(), moduli[0].n);
+    for (std::size_t k = 1; k < count; ++k) {
+        fmpz_CRT_ui(scratch.raw(), out.raw(), modulus.raw(), residues[k],
+                    moduli[k].n, 1);
+        fmpz_swap(out.raw(), scratch.raw());
+        fmpz_mul_ui(modulus.raw(), modulus.raw(), moduli[k].n);
+    }
+}
+
+// Compares split_prime_crt with the fmpz_CRT_ui accumulation for every
+// prefix of moduli; when target is given, its residues are used and the
+// value must also equal it.  Returns false on a mismatch.
+bool crt_matches_reference(const std::vector<nmod_t>& moduli,
+                           std::vector<ulong>& residues,
+                           const fmpz* target,
+                           const char* label) noexcept {
+    std::vector<ulong> inverses(moduli.size());
+    std::vector<ulong> weights(moduli.size() * (moduli.size() - 1) / 2);
+    std::vector<ulong> digits(moduli.size());
+    for (std::size_t k = 0; k < moduli.size(); ++k) {
+        inverses[k] = relation_search::split_prime_crt_row(
+                weights.data() + k * (k - 1) / 2, moduli.data(), k);
+    }
+    sflint::Fmpz modulus;
+    sflint::Fmpz scratch;
+    sflint::Fmpz actual;
+    sflint::Fmpz expected;
+    fmpz_one(modulus.raw());
+    for (std::size_t count = 1; count <= moduli.size(); ++count) {
+        fmpz_mul_ui(modulus.raw(), modulus.raw(), moduli[count - 1].n);
+        if (target != nullptr) {
+            residues[count - 1] = fmpz_fdiv_ui(target, moduli[count - 1].n);
+        }
+        relation_search::split_prime_crt(actual.raw(), scratch.raw(),
+                                         digits.data(), residues.data(),
+                                         moduli.data(), weights.data(),
+                                         inverses.data(), count,
+                                         modulus.raw());
+        reference_crt(expected, residues, moduli, count);
+        if (!fmpz_equal(actual.raw(), expected.raw())) {
+            std::fprintf(stderr, "split-prime CRT mismatch: %s, %zu primes\n",
+                         label, count);
+            return false;
+        }
+    }
+    if (target != nullptr && !fmpz_equal(actual.raw(), target)) {
+        std::fprintf(stderr, "split-prime CRT value mismatch: %s\n", label);
+        return false;
+    }
+    return true;
+}
+
+int test_split_prime_crt_matches_fmpz_crt() {
+    // 64 primes (kMaxSplitPrimes) from the split-prime range [2^27, 2^28):
+    // the largest ones below 2^28 first, then ascending from 2^27, so the
+    // digits of earlier primes exceed later moduli.
+    std::vector<nmod_t> moduli;
+    ulong prime = UWORD(1) << 28;
+    for (int i = 0; i < 32; ++i) {
+        do {
+            --prime;
+        } while (n_is_prime(prime) == 0);
+        nmod_t mod;
+        nmod_init(&mod, prime);
+        moduli.push_back(mod);
+    }
+    prime = UWORD(1) << 27;
+    for (int i = 0; i < 32; ++i) {
+        prime = n_nextprime(prime, 1);
+        nmod_t mod;
+        nmod_init(&mod, prime);
+        moduli.push_back(mod);
+    }
+    const std::size_t count = moduli.size();
+    std::vector<ulong> residues(count);
+
+    // Constant residues: 0, 1 and m_k - 1 (the integers 0, 1 and -1).
+    for (const int pattern : {0, 1, 2}) {
+        for (std::size_t k = 0; k < count; ++k) {
+            residues[k] = pattern == 0   ? 0
+                          : pattern == 1 ? 1
+                                         : moduli[k].n - 1;
+        }
+        if (!crt_matches_reference(moduli, residues, nullptr, "constant")) {
+            return 1;
+        }
+    }
+    // Uniform random residues, including the extremes 0 and m_k - 1.
+    ulong state = 0x5eed;
+    for (int trial = 0; trial < 64; ++trial) {
+        for (std::size_t k = 0; k < count; ++k) {
+            const ulong pick = next_random(state);
+            residues[k] = (pick & 15) == 0   ? 0
+                          : (pick & 15) == 1 ? moduli[k].n - 1
+                                             : pick % moduli[k].n;
+        }
+        if (!crt_matches_reference(moduli, residues, nullptr, "random")) {
+            return 1;
+        }
+    }
+    // Integers at the edges of the symmetric range of the full product M:
+    // +-(M - 1)/2 and +-((M - 1)/2 - 1), so each prefix also sees values
+    // far outside its own range; and small and random signed integers.
+    sflint::Fmpz full;
+    fmpz_one(full.raw());
+    for (const nmod_t& mod : moduli) {
+        fmpz_mul_ui(full.raw(), full.raw(), mod.n);
+    }
+    sflint::Fmpz half;
+    fmpz_sub_ui(half.raw(), full.raw(), 1);
+    fmpz_fdiv_q_2exp(half.raw(), half.raw(), 1);
+    sflint::Fmpz target;
+    for (const slong offset : {0, -1}) {
+        for (const int sign : {1, -1}) {
+            fmpz_add_si(target.raw(), half.raw(), offset);
+            if (sign < 0) {
+                fmpz_neg(target.raw(), target.raw());
+            }
+            if (!crt_matches_reference(moduli, residues, target.raw(),
+                                       "range edge")) {
+                return 1;
+            }
+        }
+    }
+    for (const slong small : {0, 1, -1, 2, -2, 134217757, -134217757}) {
+        fmpz_set_si(target.raw(), small);
+        if (!crt_matches_reference(moduli, residues, target.raw(), "small")) {
+            return 1;
+        }
+    }
+    for (int trial = 0; trial < 32; ++trial) {
+        fmpz_zero(target.raw());
+        const ulong words = 1 + next_random(state) % 27;
+        for (ulong w = 0; w < words; ++w) {
+            fmpz_mul_2exp(target.raw(), target.raw(), 64);
+            fmpz_add_ui(target.raw(), target.raw(), next_random(state));
+        }
+        fmpz_fdiv_r_2exp(target.raw(), target.raw(),
+                         next_random(state) % 1700);
+        if ((next_random(state) & 1) != 0) {
+            fmpz_neg(target.raw(), target.raw());
+        }
+        if (!crt_matches_reference(moduli, residues, target.raw(),
+                                   "random integer")) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int main() {
     return test_cyclotomic_matches_resultant() != 0 ||
                    test_screened_search_matches_unscreened_search() != 0 ||
@@ -1166,7 +1328,8 @@ int main() {
                    test_t2_bound_for_prime_cyclotomic() != 0 ||
                    test_degree_two_resultant_matches_flint() != 0 ||
                    test_row_combinations_match_direct() != 0 ||
-                   test_row_values_invalidated() != 0
+                   test_row_values_invalidated() != 0 ||
+                   test_split_prime_crt_matches_fmpz_crt() != 0
             ? 1
             : 0;
 }

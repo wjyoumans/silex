@@ -395,6 +395,9 @@ void SplitPrimeResultant::reset(
     split_closed_form_index = 0;
     closed_form_split_primes = 0;
     moduli.clear();
+    crt_prefix_moduli.clear();
+    crt_weights.clear();
+    crt_inverses.clear();
     root_powers.clear();
     residues.clear();
     // The row values belong to the split primes just dropped.
@@ -674,6 +677,67 @@ bool SplitPrimeResultant::add_closed_form_roots(nmod_t mod) noexcept {
     return true;
 }
 
+ulong split_prime_crt_row(ulong* weights,
+                          const nmod_t* moduli,
+                          std::size_t index) noexcept {
+    const nmod_t mod = moduli[index];
+    ulong product = 1;
+    for (std::size_t j = 0; j < index; ++j) {
+        weights[j] = product;
+        ulong reduced = 0;
+        NMOD_RED(reduced, moduli[j].n, mod);
+        product = nmod_mul(product, reduced, mod);
+    }
+    // The moduli are distinct primes, so the product is invertible.
+    return n_invmod(product, mod.n);
+}
+
+void split_prime_crt(fmpz_t out,
+                     fmpz_t scratch,
+                     ulong* digits,
+                     const ulong* residues,
+                     const nmod_t* moduli,
+                     const ulong* weights,
+                     const ulong* inverses,
+                     std::size_t count,
+                     const fmpz_t modulus) noexcept {
+    for (std::size_t k = 0; k < count; ++k) {
+        const nmod_t mod = moduli[k];
+        // d_0 + d_1 m_0 + ... + d_(k - 1) m_0 ... m_(k - 2) mod m_k as a
+        // dot product with the weights.  Each term is below 2^56 and
+        // k < 64, so the sum is below 2^62 and one reduction suffices.
+        const ulong* row = weights + k * (k - 1) / 2;
+        ulong sum = 0;
+        for (std::size_t j = 0; j < k; ++j) {
+            sum += digits[j] * row[j];
+        }
+        ulong prefix = 0;
+        NMOD_RED(prefix, sum, mod);
+        digits[k] = nmod_mul(nmod_sub(residues[k], prefix, mod),
+                             inverses[k], mod);
+    }
+    // x = d_0 + m_0 (d_1 + m_1 (d_2 + ...)), so 0 <= x < M, taken two
+    // digits per step: d_j + m_j d_(j + 1) and m_j m_(j + 1) are below
+    // 2^56.
+    std::size_t top = count - 1;
+    fmpz_set_ui(out, digits[top]);
+    while (top >= 2) {
+        const ulong low = moduli[top - 2].n;
+        fmpz_mul_ui(out, out, low * moduli[top - 1].n);
+        fmpz_add_ui(out, out, digits[top - 2] + low * digits[top - 1]);
+        top -= 2;
+    }
+    if (top == 1) {
+        fmpz_mul_ui(out, out, moduli[0].n);
+        fmpz_add_ui(out, out, digits[0]);
+    }
+    // M is odd, so x > M/2 exactly when |x - M| < x.
+    fmpz_sub(scratch, out, modulus);
+    if (fmpz_cmpabs(scratch, out) < 0) {
+        fmpz_swap(out, scratch);
+    }
+}
+
 void degree_two_resultant(bool& handled,
                           fmpz_t out,
                           const fmpz_poly_struct* f,
@@ -896,10 +960,14 @@ void SplitPrimeResultant::resultant(
 
     const auto n = static_cast<std::size_t>(degree);
     const auto used_length = static_cast<std::size_t>(length);
-    fmpz_one(modulus.raw());
+    if (crt_prefix_moduli.empty()) {
+        crt_prefix_moduli.reserve(kMaxSplitPrimes + 1);
+        crt_prefix_moduli.emplace_back();
+        fmpz_one(crt_prefix_moduli.back().raw());
+    }
     fmpz_zero(out);
     std::size_t used = 0;
-    while (fmpz_bits(modulus.raw()) < modulus_bits) {
+    while (fmpz_bits(crt_prefix_moduli[used].raw()) < modulus_bits) {
         if (used == moduli.size() && !add_next_split_prime()) {
             return;
         }
@@ -948,19 +1016,26 @@ void SplitPrimeResultant::resultant(
             }
         }
 
-        if (used == 0) {
-            fmpz_set_ui(out, value);
-            if (value > mod.n / 2) {
-                fmpz_sub_ui(out, out, mod.n);
-            }
-        } else {
-            fmpz_CRT_ui(crt_scratch.raw(), out, modulus.raw(), value, mod.n,
-                        1);
-            fmpz_swap(out, crt_scratch.raw());
+        if (crt_residues.size() == used) {
+            crt_residues.push_back(0);
+            crt_digits.push_back(0);
         }
-        fmpz_mul_ui(modulus.raw(), modulus.raw(), mod.n);
+        crt_residues[used] = value;
+        if (crt_inverses.size() == used) {
+            crt_weights.resize(used * (used + 1) / 2);
+            crt_inverses.push_back(split_prime_crt_row(
+                    crt_weights.data() + used * (used - 1) / 2,
+                    moduli.data(), used));
+            crt_prefix_moduli.emplace_back();
+            fmpz_mul_ui(crt_prefix_moduli.back().raw(),
+                        crt_prefix_moduli[used].raw(), mod.n);
+        }
         ++used;
     }
+    split_prime_crt(out, crt_scratch.raw(), crt_digits.data(),
+                    crt_residues.data(), moduli.data(), crt_weights.data(),
+                    crt_inverses.data(), used,
+                    crt_prefix_moduli[used].raw());
     last_prime_count = static_cast<slong>(used);
     last_used_row_values = use_rows;
     handled = true;

@@ -133,6 +133,20 @@ Added
 Changed
 -------
 
+- The split-prime norm evaluation of class-group relation candidates
+  (defining polynomials of degree 16 and more) combines the residues modulo
+  its split primes with Garner's mixed-radix conversion in word-size
+  arithmetic (Knuth, TAOCP Vol. 2, Section 4.3.2), instead of one
+  ``fmpz_CRT_ui`` per prime per candidate.  The per-prime constants are
+  computed once per set of split primes.  The result is the same symmetric
+  residue modulo the same product of primes, so every norm, and every
+  published result, is unchanged: ``grh`` outputs are identical on the 26
+  cyclotomic and real cyclotomic corpus rows of degree 16 and more that
+  finish within 400 s (``cyclotomic_real_163_deg81`` timed out on both
+  builds).  Callgrind instruction counts for the whole process, ``grh``
+  mode: ``cyclotomic_41_phi40`` 1.16% fewer (4.4003e10 to 4.3491e10).  No
+  timing has been measured.
+
 - Wherever the relation search finds the factor-base primes that no stored
   relation already shows to be principal (the random-relation rounds and the
   ideal-lattice relation collection), it now does so

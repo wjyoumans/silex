@@ -73,8 +73,19 @@ struct SplitPrimeResultant {
     std::vector<ulong> root_powers;
     std::vector<ulong> residues;
     flint::Fmpz coordinate_norm_squared;
-    flint::Fmpz modulus;
     flint::Fmpz crt_scratch;
+    // CRT tables for the split primes m_k = moduli[k].n, extended as a
+    // call first reaches prime k (see split_prime_crt_row):
+    // crt_prefix_moduli[k] = m_0 ... m_(k - 1) (crt_prefix_moduli[0] = 1),
+    // row k of crt_weights, at offset k (k - 1) / 2, holds
+    // m_0 ... m_(j - 1) mod m_k for j < k, and
+    // crt_inverses[k] = (m_0 ... m_(k - 1))^(-1) mod m_k.
+    std::vector<flint::Fmpz> crt_prefix_moduli;
+    std::vector<ulong> crt_weights;
+    std::vector<ulong> crt_inverses;
+    // Scratch: one call's residues and their mixed-radix digits.
+    std::vector<ulong> crt_residues;
+    std::vector<ulong> crt_digits;
     // disc(f), computed when the split-prime search first runs after a
     // reset with a new f; it screens the primes tested (see
     // add_next_split_prime).
@@ -155,6 +166,36 @@ private:
             const fmpz_poly_struct* coordinate_polynomial) noexcept;
     const ulong* row_values_at(slong row, std::size_t prime_index) noexcept;
 };
+
+// Garner's mixed-radix CRT over distinct odd primes m_k = moduli[k].n
+// below 2^28 (Knuth, TAOCP Vol. 2, 3rd ed., Section 4.3.2, the
+// mixed-radix conversion, after Garner 1959).  Sets
+// weights[j] = m_0 ... m_(j - 1) mod m_index for j < index (index words)
+// and returns (m_0 ... m_(index - 1))^(-1) mod m_index (1 for index 0).
+ulong split_prime_crt_row(ulong* weights,
+                          const nmod_t* moduli,
+                          std::size_t index) noexcept;
+
+// Sets out to the integer x with x = residues[k] mod m_k for k < count
+// (count >= 1, residues reduced) and -M/2 < x < M/2, where M is modulus,
+// the product of the m_k: the value the fmpz_CRT_ui(..., sign = 1)
+// accumulation gives, since M is odd and that representative is unique.
+// The mixed-radix digits d_k, 0 <= d_k < m_k, with
+// x = d_0 + d_1 m_0 + ... + d_(count - 1) m_0 ... m_(count - 2) (mod M),
+// are d_k = (residues[k] - (d_0 + ... + d_(k - 1) m_0 ... m_(k - 2)))
+// inverses[k] mod m_k; weights holds the rows k < count, at offset
+// k (k - 1) / 2, and inverses the values split_prime_crt_row gives.  The
+// digits are stored in digits (count words).  count must be at most 64.
+// out must not alias modulus or scratch.
+void split_prime_crt(fmpz_t out,
+                     fmpz_t scratch,
+                     ulong* digits,
+                     const ulong* residues,
+                     const nmod_t* moduli,
+                     const ulong* weights,
+                     const ulong* inverses,
+                     std::size_t count,
+                     const fmpz_t modulus) noexcept;
 
 // Sets out = Res(f, g), the value fmpz_poly_resultant(out, f, g) returns,
 // and handled = true when deg f = 2 and g has length at most 2; otherwise
