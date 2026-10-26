@@ -200,6 +200,8 @@ class ZetaBfTestEntry {
     // (0 when the defining polynomial is not exactly a cyclotomic
     // polynomial) and `real_cyclotomic_index` its psi_n index (0 when it is
     // not exactly the real-subfield polynomial psi_n).
+    // `batch_size` receives the number of primes the word-kernel batch
+    // covers for the defining polynomial (0 for Phi_n and psi_n).
     // For each prime p in [first, end), in increasing order, `primes`
     // receives p, `counts` the count of the loop's path (batch, then
     // per-prime), `word_counts` the word kernel's batched count and
@@ -209,6 +211,7 @@ class ZetaBfTestEntry {
     static bool cyclotomic_linear_factor_counts(
             ulong& cyclotomic_index,
             ulong& real_cyclotomic_index,
+            std::size_t& batch_size,
             std::vector<ulong>& primes,
             std::vector<slong>& counts,
             std::vector<slong>& word_counts,

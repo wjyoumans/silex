@@ -1305,15 +1305,17 @@ bool check_cyclotomic_linear_factor_range(const silex::Order& order,
                                           slong& minus_one) noexcept {
     ulong index = 0;
     ulong real_index = 0;
+    std::size_t batch_size = 0;
     std::vector<ulong> primes;
     std::vector<slong> counts;
     std::vector<slong> word_counts;
     std::vector<slong> nmod_counts;
     if (!silex::detail::TestHookAccess::
                 zeta_bf_cyclotomic_linear_factor_counts(
-                        index, real_index, primes, counts, word_counts,
-                        nmod_counts, order, first, end) ||
-        index != n || real_index != real_n || primes.empty()) {
+                        index, real_index, batch_size, primes, counts,
+                        word_counts, nmod_counts, order, first, end) ||
+        index != n || real_index != real_n || primes.empty() ||
+        ((n != 0 || real_n != 0) && batch_size != 0)) {
         return false;
     }
     const slong degree = order.degree();

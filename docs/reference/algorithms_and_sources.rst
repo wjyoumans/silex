@@ -409,8 +409,11 @@ distinct irreducibles of degree ``d``, the order of ``p`` modulo ``n``
 keep the root count modulo ``p``: for ``p = 2`` and ``n = 2 mod 4`` the
 prime ``2`` is unramified in ``Q(zeta_n)`` yet divides ``n``, and the closed
 form is not applied there (``n = 2`` would give ``0``, but ``x + 1`` has a
-root modulo ``2``).  The counts equal the modulo-``p`` counts, so no value or
-proof input changes.
+root modulo ``2``).  For ``T = psi_n``, the minimal polynomial of
+``2 cos(2 pi / n)``, the count is ``phi(n)/2`` when ``p = +-1 mod n`` and
+``0`` otherwise for ``p`` not dividing ``n``, and primes dividing ``n`` again
+keep the root count modulo ``p``.  The counts equal the modulo-``p`` counts,
+so no value or proof input changes.
 The split-prime search applies a closed-form criterion for ``Phi_n`` and
 for its real-subfield polynomial ``psi_n``: with ``p`` not dividing ``n``,
 ``Phi_n`` splits into distinct linear factors modulo ``p`` exactly when

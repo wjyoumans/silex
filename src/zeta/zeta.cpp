@@ -2412,7 +2412,8 @@ bool bf_linear_factor_count_batch_lookup(slong& out,
 // when p k = +-k mod n, that is when p = +-1 mod n, for every k at once;
 // the count is then d, the degree, and otherwise 0.  That the roots of
 // Phi_n modulo p are the elements of exact order n is the definition of
-// the cyclotomic polynomial Q_n (Lidl and Niederreiter, Section 2.4); the
+// the cyclotomic polynomial Q_n together with Phi_n reducing to Q_n over
+// F_p (Lidl and Niederreiter, Theorem 2.47(ii)); the
 // derivation is the one SplitPrimeResultant::add_next_split_prime uses
 // for its split-prime closed form.  Primes dividing n keep the nmod path,
 // as for Phi_n.  The cache is read and written as for any other count.
@@ -5146,6 +5147,7 @@ bool ZetaBfTestEntry::linear_factor_counts(
 bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
         ulong& cyclotomic_index,
         ulong& real_cyclotomic_index,
+        std::size_t& batch_size,
         std::vector<ulong>& primes,
         std::vector<slong>& counts,
         std::vector<slong>& word_counts,
@@ -5155,6 +5157,7 @@ bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
         ulong end) noexcept {
     cyclotomic_index = 0;
     real_cyclotomic_index = 0;
+    batch_size = 0;
     primes.clear();
     counts.clear();
     word_counts.clear();
@@ -5176,6 +5179,7 @@ bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
     BfLinearFactorCountBatch batch;
     bf_fill_linear_factor_count_batch(batch, context, first, end, nullptr,
                                       nullptr);
+    batch_size = batch.primes.size();
     BfLinearFactorCountBatch word_batch;
     bf_fill_linear_factor_count_batch(word_batch, reference, first, end,
                                       nullptr, nullptr);

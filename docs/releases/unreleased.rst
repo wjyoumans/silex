@@ -199,7 +199,7 @@ Changed
 - The same Belabas-Friedman count is taken in closed form when the defining
   polynomial is exactly ``psi_n``, the minimal polynomial of
   ``2 cos(2 pi / n)`` that defines the real subfield of ``Q(zeta_n)``
-  (recognized once per evaluation by exact comparison with FLINT's
+  (recognized once per Belabas-Friedman context by exact comparison with FLINT's
   ``fmpz_poly_cos_minpoly``, the detector the split-prime resultant search
   uses): for ``p`` not dividing ``n``, the roots of ``psi_n`` modulo ``p``
   are the distinct sums ``zeta^k + zeta^-k``, so ``psi_n`` has
