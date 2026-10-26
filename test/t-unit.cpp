@@ -9,6 +9,8 @@
 #include <flint/arb.h>
 #include <flint/fmpq_poly.h>
 #include <flint/fmpz_poly.h>
+#include <flint/nmod_poly.h>
+#include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
 
 #include <cassert>
@@ -973,6 +975,126 @@ int test_real_cyclotomic_polynomial_index() {
     return 0;
 }
 
+// Reference split test: `polynomial` modulo the prime p is a product of
+// distinct linear factors, read off its full factorization.
+bool reduction_splits_into_distinct_linear_factors(
+        const sflint::FmpzPoly& polynomial, ulong prime) noexcept {
+    nmod_poly_t reduced;
+    nmod_poly_init(reduced, prime);
+    fmpz_poly_get_nmod_poly(reduced, polynomial.raw());
+    nmod_poly_factor_t factors;
+    nmod_poly_factor_init(factors);
+    nmod_poly_factor(factors, reduced);
+    bool splits =
+            nmod_poly_degree(reduced) == fmpz_poly_degree(polynomial.raw());
+    slong total = 0;
+    for (slong i = 0; i < factors->num; ++i) {
+        splits = splits && factors->exp[i] == 1 &&
+                 nmod_poly_degree(factors->p + i) == 1;
+        total += factors->exp[i] * nmod_poly_degree(factors->p + i);
+    }
+    splits = splits && total == fmpz_poly_degree(polynomial.raw());
+    nmod_poly_factor_clear(factors);
+    nmod_poly_clear(reduced);
+    return splits;
+}
+
+// The closed-form split test of a recognized Phi_n or psi_n against the
+// factorization of its reduction: for every Phi_n with 2 <= phi(n) <= 24 and
+// psi_n with 2 <= phi(n) / 2 <= 24, at every prime below 300 and the first
+// 30 primes above 2^63, the closed form applies exactly when p does not
+// divide n and then agrees with the factorization (p = 1 mod n for Phi_n,
+// p = +-1 mod n for psi_n).  A translate of Phi_7, 2 psi_7, x^3 - 2 and an
+// undefined field are not recognized, and the closed form never applies.
+int test_cyclotomic_defining_polynomial_splits() {
+    std::vector<ulong> primes;
+    for (ulong p = 2; p < 300; p = n_nextprime(p, 1)) {
+        primes.push_back(p);
+    }
+    ulong large = UWORD(1) << (FLINT_BITS - 1);
+    for (int i = 0; i < 30; ++i) {
+        large = n_nextprime(large, 1);
+        primes.push_back(large);
+    }
+    slong cyclotomic_checked = 0;
+    slong real_checked = 0;
+    slong split_checked = 0;
+    for (ulong n = 3; n <= 2 * 48 * 48; ++n) {
+        const ulong phi = n_euler_phi(n);
+        for (const bool real : {false, true}) {
+            if (real ? phi < 4 || phi > 48 : phi < 2 || phi > 24) {
+                continue;
+            }
+            sflint::FmpzPoly polynomial;
+            if (real) {
+                fmpz_poly_cos_minpoly(polynomial.raw(), n);
+                ++real_checked;
+            } else {
+                fmpz_poly_cyclotomic(polynomial.raw(), n);
+                ++cyclotomic_checked;
+            }
+            const silex::detail::CyclotomicDefiningPolynomial recognized =
+                    silex::detail::cyclotomic_defining_polynomial(
+                            fmpz_poly_field(polynomial));
+            assert(recognized.cyclotomic_index == (real ? 0 : n));
+            assert(recognized.real_cyclotomic_index == (real ? n : 0));
+            for (const ulong p : primes) {
+                bool splits = false;
+                const bool closed =
+                        silex::detail::cyclotomic_defining_polynomial_splits(
+                                splits, recognized, p);
+                assert(closed == (n % p != 0));
+                if (!closed) {
+                    continue;
+                }
+                assert(splits == reduction_splits_into_distinct_linear_factors(
+                                         polynomial, p));
+                const ulong residue = p % n;
+                assert(splits == (residue == 1 ||
+                                  (real && residue == n - 1)));
+                split_checked += splits ? 1 : 0;
+            }
+        }
+    }
+    // 2 <= phi(n) <= 24 holds for 51 n >= 3 and 4 <= phi(n) <= 48 for 96;
+    // phi(n) >= sqrt(n / 2) bounds the range searched.
+    assert(cyclotomic_checked == 51 && real_checked == 96);
+    assert(split_checked > 0);
+
+    sflint::FmpzPoly phi7;
+    fmpz_poly_cyclotomic(phi7.raw(), 7);
+    sflint::FmpzPoly psi7;
+    fmpz_poly_cos_minpoly(psi7.raw(), 7);
+    sflint::FmpzPoly shift;
+    fmpz_poly_set_coeff_si(shift.raw(), 1, 1);
+    fmpz_poly_set_coeff_si(shift.raw(), 0, 1);
+    sflint::FmpzPoly translate;
+    fmpz_poly_compose(translate.raw(), phi7.raw(), shift.raw());
+    sflint::FmpzPoly multiple;
+    fmpz_poly_scalar_mul_si(multiple.raw(), psi7.raw(), 2);
+    sflint::FmpzPoly pure_cubic;
+    fmpz_poly_set_coeff_si(pure_cubic.raw(), 3, 1);
+    fmpz_poly_set_coeff_si(pure_cubic.raw(), 0, -2);
+    std::vector<silex::NumberField> unrecognized;
+    unrecognized.push_back(fmpz_poly_field(translate));
+    unrecognized.push_back(fmpz_poly_field(multiple));
+    unrecognized.push_back(fmpz_poly_field(pure_cubic));
+    unrecognized.emplace_back();
+    for (const silex::NumberField& field : unrecognized) {
+        const silex::detail::CyclotomicDefiningPolynomial recognized =
+                silex::detail::cyclotomic_defining_polynomial(field);
+        assert(recognized.cyclotomic_index == 0 &&
+               recognized.real_cyclotomic_index == 0);
+        for (const ulong p : primes) {
+            bool splits = true;
+            assert(!silex::detail::cyclotomic_defining_polynomial_splits(
+                    splits, recognized, p));
+            assert(splits);
+        }
+    }
+    return 0;
+}
+
 // Q(zeta_40) as T = charpoly(Mod(x + 3*x^2 + x^3, polcyclo(40))) in GP 2.17.4
 // (the "40_3" presentation), with w = 40 from nfrootsof1.  The good-prime
 // gcd stays at 120 for more than n + 20 = 36 consecutive good primes, where
@@ -1799,6 +1921,7 @@ int main() {
     test_roots_of_unity_phi_reset();
     test_roots_of_unity_cyclotomic_shortcut();
     test_real_cyclotomic_polynomial_index();
+    test_cyclotomic_defining_polynomial_splits();
     test_cyclotomic_field_units();
     test_roots_of_unity_public_fail_closed();
     test_roots_of_unity_memo();

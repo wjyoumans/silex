@@ -54,6 +54,30 @@ ulong real_cyclotomic_polynomial_index(
 ulong real_cyclotomic_defining_polynomial_index(
         const NumberField& field) noexcept;
 
+// The defining polynomial f of a field when it is recognized exactly as Phi_n
+// (cyclotomic_index = n, from cyclotomic_defining_polynomial_index) or else
+// as psi_n (real_cyclotomic_index = n, from
+// real_cyclotomic_defining_polynomial_index); both are 0 otherwise.
+struct CyclotomicDefiningPolynomial {
+    ulong cyclotomic_index = 0;
+    ulong real_cyclotomic_index = 0;
+};
+
+CyclotomicDefiningPolynomial cyclotomic_defining_polynomial(
+        const NumberField& field) noexcept;
+
+// Closed form of the test "f modulo the prime p is a product of distinct
+// linear factors" for a recognized f = Phi_n or psi_n and p not dividing n:
+// writes the answer to `splits` and returns true.  Returns false, leaving
+// `splits` unchanged, when f is not recognized or p divides n; the caller
+// then tests the reduction of f itself.  `prime` must be prime.  For p not
+// dividing n, Phi_n splits so exactly when p = 1 mod n and psi_n exactly
+// when p = +-1 mod n (see roots_of_unity.cpp for the sources).
+bool cyclotomic_defining_polynomial_splits(
+        bool& splits,
+        const CyclotomicDefiningPolynomial& polynomial,
+        ulong prime) noexcept;
+
 // The cyclotomic units of source nfcyclotomicunits (buch2.c) when the
 // defining polynomial of `field` is exactly Phi_m
 // (cyclotomic_defining_polynomial_index), and none otherwise, including

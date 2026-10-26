@@ -1,5 +1,6 @@
 #include "compact_reconstruction_internal.hpp"
 #include "wide_factored_internal.hpp"
+#include "../unit/unit_internal.hpp"
 
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
@@ -1088,9 +1089,20 @@ const char* bounded_compact_reconstruction_status_name(
 namespace {
 
 // The defining polynomial reduced modulo prime keeps its degree, is monic and
-// splits into distinct linear factors there.
-bool defining_polynomial_splits(const flint::FmpqPoly& defining_polynomial,
-                                slong degree, ulong prime) noexcept {
+// splits into distinct linear factors there.  When it is exactly Phi_n or
+// psi_n (`recognized`, from cyclotomic_defining_polynomial) and prime does
+// not divide n, the answer is the closed form of
+// cyclotomic_defining_polynomial_splits, which gives the same answer as the
+// test of the reduction below: Phi_n and psi_n are monic and integral, so
+// they reduce to a monic polynomial of the same degree for every prime.
+bool defining_polynomial_splits(
+        const CyclotomicDefiningPolynomial& recognized,
+        const flint::FmpqPoly& defining_polynomial, slong degree,
+        ulong prime) noexcept {
+    bool splits = false;
+    if (cyclotomic_defining_polynomial_splits(splits, recognized, prime)) {
+        return splits;
+    }
     flint::NmodPoly modulus(prime);
     return reduce_power_polynomial(modulus, defining_polynomial, degree,
                                    prime) &&
@@ -1215,8 +1227,14 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
     // split, which then computes the products in evaluation form; every other
     // prime, including every prime of a batch without the preference, uses
     // the power basis.
+    // The split test has a closed form when the defining polynomial is
+    // exactly Phi_n or psi_n; it is recognized once, only when the
+    // preference applies.
     bool prefer_split_primes =
             prefers_split_primes(factors, output_count, degree);
+    const CyclotomicDefiningPolynomial recognized =
+            prefer_split_primes ? cyclotomic_defining_polynomial(*field)
+                                : CyclotomicDefiningPolynomial{};
     const std::size_t split_prime_scan_limit =
             4 * static_cast<std::size_t>(degree);
     std::size_t split_prime_scan = 0;
@@ -1232,8 +1250,8 @@ bool reconstruct_prepared(BoundedCompactReconstructionReport& report,
         prime_cursor = prime;
         bool split = false;
         if (prefer_split_primes) {
-            if (defining_polynomial_splits(defining_polynomial, degree,
-                                           prime)) {
+            if (defining_polynomial_splits(recognized, defining_polynomial,
+                                           degree, prime)) {
                 split = true;
                 split_prime_scan = 0;
             } else if (++split_prime_scan < split_prime_scan_limit) {

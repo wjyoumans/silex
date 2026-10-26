@@ -1521,6 +1521,19 @@ row of values times the inverse of that matrix is the row of order
 coordinates.  The residues are the same, so no reconstructed unit changes.
 Primes not found to split by the scan use the power basis.
 
+When ``f`` is exactly ``Phi_n`` or exactly ``psi_n``, the minimal
+polynomial of ``2 cos(2 pi / n)`` (the exact detectors used for the
+Belabas-Friedman count above), the scan decides ``x^p = x`` modulo ``f`` in
+closed form for ``p`` not dividing ``n``: ``Phi_n`` modulo ``p`` is then a
+product of distinct irreducible factors of degree the order of ``p`` modulo
+``n`` (Lidl and Niederreiter, Theorem 2.47(ii); Washington, *Introduction to
+Cyclotomic Fields*, Theorem 2.13), so it splits exactly when
+``p = 1 mod n``, and ``psi_n``, whose roots modulo ``p`` are the distinct
+sums ``zeta^k + zeta^-k``, splits exactly when ``p = +-1 mod n``.  The
+answer is the same as the exponentiation's, so the same primes are chosen;
+primes dividing ``n`` and other polynomials use the exponentiation.  The
+cost model below still charges each split test as one exponentiation.
+
 The same scan also runs for a batch whose exponents all have at most
 ``FLINT_BITS`` bits when a cost model favors it, which PARI does not do.  The
 model counts the multiplications modulo ``f`` of the power-basis products at

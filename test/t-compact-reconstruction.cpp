@@ -2394,6 +2394,81 @@ int test_wide_reconstruction_prefers_split_primes() {
     return 0;
 }
 
+// Wide units of the real cubic field Q(zeta_7 + zeta_7^-1), defined by
+// psi_7 = x^3 + x^2 - 2x - 1, which splits into distinct linear factors
+// modulo a prime p != 7 exactly when p = +-1 mod 7 (the closed form of
+// cyclotomic_defining_polynomial_splits); modulo 7 it is (x - 2)^3, which the
+// closed form leaves to the test of the reduction.  The root t is a unit
+// (psi_7(0) = -1).  Bases t and t^2 with the wide exponents of
+// test_wide_reconstruction_prefers_split_primes give t and t^-1.  Starting
+// above 2^63 at a prime that is not +-1 mod 7, and starting at 7, every
+// prime used is +-1 mod 7 and the outputs are exact.
+int test_wide_reconstruction_real_cyclotomic_split_primes() {
+    sflint::FmpqPoly polynomial;
+    const slong coefficients[] = {-1, -2, 1, 1};
+    for (slong i = 0; i <= 3; ++i) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    silex::Element unit(field);
+    assert(unit.gen());
+    silex::detail::WideFactoredUnits wide;
+    wide.bases.emplace_back(field);
+    wide.bases.emplace_back(field);
+    assert(wide.bases[0].gen());
+    assert(wide.bases[1].multiply(unit, unit));
+    wide.exponents = sflint::FmpzMat(2, 2);
+    fmpz* e00 = fmpz_mat_entry(wide.exponents.raw(), 0, 0);
+    fmpz* e01 = fmpz_mat_entry(wide.exponents.raw(), 0, 1);
+    fmpz* e10 = fmpz_mat_entry(wide.exponents.raw(), 1, 0);
+    fmpz* e11 = fmpz_mat_entry(wide.exponents.raw(), 1, 1);
+    fmpz_one_2exp(e00, 71);
+    fmpz_add_ui(e00, e00, 1);
+    fmpz_one_2exp(e01, 70);
+    fmpz_neg(e01, e01);
+    fmpz_one_2exp(e10, 72);
+    fmpz_add_ui(e10, e10, 1);
+    fmpz_neg(e10, e10);
+    fmpz_one_2exp(e11, 71);
+
+    std::vector<silex::FactoredElement> plain;
+    plain.emplace_back(field);
+    plain.emplace_back(field);
+    assert(plain[0].push(unit, 1));
+    assert(plain[1].push(unit, -1));
+    std::vector<silex::Element> expected;
+    sflint::Fmpz bound;
+    exact_outputs_and_bound(expected, bound, maximal, plain);
+
+    ulong large_start = UWORD(1) << (FLINT_BITS - 1);
+    for (ulong next = n_nextprime(large_start, 1);
+         next % 7 == 1 || next % 7 == 6; next = n_nextprime(next, 1)) {
+        large_start = next;
+    }
+    for (const ulong start : {large_start, UWORD(6)}) {
+        silex::detail::BoundedCompactReconstructionOptions options;
+        options.prime_search_start = start;
+        silex::detail::BoundedCompactReconstructionReport report;
+        std::vector<silex::Element> actual;
+        assert(silex::detail::bounded_compact_reconstruct(
+                report, actual, maximal, wide, sflint::FmpzConstRef(bound),
+                options));
+        assert(report.status ==
+               silex::detail::BoundedCompactReconstructionStatus::success);
+        assert(report.nonsplit_prime_skips >= 1);
+        assert(report.last_prime % 7 == 1 || report.last_prime % 7 == 6);
+        assert(report.prime_trials == report.primes_used);
+        assert_exact_crt_crossing(report, sflint::FmpzConstRef(bound));
+        assert_equal_outputs(actual, expected);
+    }
+    return 0;
+}
+
 // Short exponents: the split-prime preference follows the cost model of
 // prefers_split_primes.  Q(zeta_5) (degree 4, threshold 4 * FLINT_BITS
 // modeled multiplications) with the bases u = 1 + zeta and u^2.  The cheap
@@ -2806,6 +2881,7 @@ int main() {
     assert(test_modular_power_products_evaluated_match_polynomial() == 0);
     assert(test_modular_power_products_fallback_uses_inverse() == 0);
     assert(test_wide_reconstruction_prefers_split_primes() == 0);
+    assert(test_wide_reconstruction_real_cyclotomic_split_primes() == 0);
     assert(test_wide_reconstruction_short_exponent_split_preference() == 0);
     assert(test_wide_reconstruction_split_prime_rejections() == 0);
     assert(test_wide_reconstruction_split_prime_uses_inverse() == 0);

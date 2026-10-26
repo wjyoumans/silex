@@ -907,6 +907,58 @@ ulong real_cyclotomic_defining_polynomial_index(
     return real_cyclotomic_polynomial_index(numerator.raw());
 }
 
+CyclotomicDefiningPolynomial cyclotomic_defining_polynomial(
+        const NumberField& field) noexcept {
+    CyclotomicDefiningPolynomial out;
+    out.cyclotomic_index = cyclotomic_defining_polynomial_index(field);
+    if (out.cyclotomic_index == 0) {
+        out.real_cyclotomic_index =
+                real_cyclotomic_defining_polynomial_index(field);
+    }
+    return out;
+}
+
+// For a prime p not dividing n, x^n - 1 is squarefree modulo p, so its
+// factor Phi_n is too, and Phi_n modulo p is a product of phi(n) / k
+// distinct monic irreducible factors of degree k, the order of p modulo n
+// (Lidl and Niederreiter, Finite Fields, 2nd ed., 1997, Theorem 2.47(ii); in
+// field terms, p splits in Q(zeta_n) into phi(n) / k primes of residue
+// degree k, Washington, Introduction to Cyclotomic Fields, 2nd ed., 1997,
+// Theorem 2.13).  The factors are linear exactly when k = 1, that is
+// p = 1 mod n.
+//
+// For psi_n, n >= 3, of degree d = phi(n) / 2: x^d psi_n(x + 1/x) = Phi_n(x),
+// so for p not dividing n the phi(n) roots of Phi_n modulo p, the elements
+// zeta of exact order n in an algebraic closure of F_p (the definition of the
+// cyclotomic polynomial Q_n and Phi_n = Q_n over F_p, Lidl and Niederreiter,
+// Theorem 2.47(ii)), give roots zeta + zeta^-1 of psi_n.  These are d
+// distinct values, because zeta^a + zeta^-a = zeta^b + zeta^-b means
+// (zeta^a - zeta^b)(1 - zeta^-(a + b)) = 0, that is zeta^b = zeta^(+-a), and
+// zeta != zeta^-1 for n >= 3; so psi_n modulo p is their product and is
+// squarefree.  Frobenius sends zeta + zeta^-1 to zeta^p + zeta^-p, which
+// equals it exactly when p = +-1 mod n, for every zeta at once.  So psi_n
+// modulo p splits into distinct linear factors exactly when p = +-1 mod n;
+// in field terms, p splits completely in the maximal real subfield of
+// Q(zeta_n), the fixed field of complex conjugation (-1 mod n), exactly
+// when its Frobenius p mod n lies in {+-1} (Washington, Theorem 2.13, with
+// the Galois correspondence).  The same derivation gives the
+// closed forms in zeta.cpp (bf_linear_residue_degree_count_from_defining_
+// polynomial_ui) and relation_candidate.cpp (add_next_split_prime).
+bool cyclotomic_defining_polynomial_splits(
+        bool& splits,
+        const CyclotomicDefiningPolynomial& polynomial,
+        ulong prime) noexcept {
+    const bool real = polynomial.cyclotomic_index == 0;
+    const ulong n = real ? polynomial.real_cyclotomic_index
+                         : polynomial.cyclotomic_index;
+    if (n == 0 || prime < 2 || n % prime == 0) {
+        return false;
+    }
+    const ulong residue = prime % n;
+    splits = real ? residue == 1 || residue == n - 1 : residue == 1 % n;
+    return true;
+}
+
 bool proven_root_of_unity_bound(ulong& bound,
                                 const NumberField& field,
                                 bool use_cyclotomic_shortcut) noexcept {

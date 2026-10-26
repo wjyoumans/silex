@@ -1061,6 +1061,19 @@ Changed
   changes by more than 1% in the other direction (``cyclotomic_real_31_deg15``
   +0.21%).
 
+- That preference tests whether the defining polynomial splits into distinct
+  linear factors modulo a candidate prime ``p`` in closed form when the
+  polynomial is exactly ``Phi_n`` or exactly ``psi_n``, the minimal polynomial
+  of ``2 cos(2 pi / n)`` (recognized once per reconstruction with the same
+  exact detectors the Belabas-Friedman count uses): for ``p`` not dividing
+  ``n``, ``Phi_n`` splits so exactly when ``p = 1 mod n`` and ``psi_n``
+  exactly when ``p = +-1 mod n`` (Lidl and Niederreiter, *Finite Fields*,
+  Theorem 2.47; Washington, *Introduction to Cyclotomic Fields*,
+  Theorem 2.13), instead of computing ``x^p`` modulo the polynomial.  Primes
+  dividing ``n`` and all other polynomials keep that test.  The answer is
+  the same at every prime, so the same CRT primes are chosen and every
+  reconstructed unit and published output is unchanged.
+
 - ``Lat::lll_reduce``, the rounded-embedding LLL of the LLL relation search,
   and the unit-candidate and relation-saturation kernel bases of the
   class-group computation share one certified first LLL phase.  Its exact
