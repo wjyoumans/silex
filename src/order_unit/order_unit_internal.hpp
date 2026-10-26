@@ -576,8 +576,8 @@ bool binomial_roots_mod_prime(std::vector<ulong>& roots,
 // The roots r modulo the rational prime q of the defining polynomial of the
 // order's field, one for each degree-one prime (q, theta - r), as the stable
 // residue-character proof scan of prove_index_bound (saturation.cpp) takes
-// them, in ascending order (on every route, so the order does not depend on
-// FLINT's randomized root splitting).  Returns false, with `roots` empty, where the scan
+// them, in its order (ascending for the roots of a binomial reduction found
+// in closed form).  Returns false, with `roots` empty, where the scan
 // does not take the roots: q not prime, an order that is neither the
 // equation order nor maximal, a defining polynomial that is not monic
 // integral, or, for a maximal order that is not the equation order, a

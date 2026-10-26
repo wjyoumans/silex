@@ -2525,24 +2525,27 @@ Changed
   root is still checked by evaluation.  ``q = 2``, ``q`` dividing ``n``,
   ``c = 0``, ``q`` above the word size, non-binomial reductions and any
   failed step keep the previous route.
-- The scan's degree-one roots are now listed in ascending order on every
-  route (closed form, the ``nmod_poly_roots`` split and the
-  ``fmpz_mod_poly_roots`` route above the word size).  Before, the order
-  came from FLINT's seeded random splitting, which no closed form can
-  reproduce and which a FLINT upgrade could change.  The order decides which
-  degree-one primes, and so which proof columns, the stable scan uses, so
-  the ``local_primes`` count of ``unit_proof_record`` changes once.  The
-  saturation proof is valid for any root order: certification labels,
-  record statuses and every other published field are unchanged.  On the
-  ``proven`` corpus, published outputs are identical on all 177 rows that
-  finish in 90 seconds (8 finish on neither build), and the proof-record
-  dumps differ only in ``local_primes``, on 75 rows (among them
-  ``pure_x12_plus_7``, ``pure_x4_minus_2``, ``pure_x5_minus_2``,
-  ``pure_x6_minus_3``, ``pure_x6_minus_5``, ``pure_x7_minus_2``,
-  ``pure_x8_minus_2``, ``pure_x10_plus_5``, ``cyclotomic_16_phi8``,
-  ``cyclotomic_32_phi16``, ``random_d9_h4_s8`` and ``random_d10_h2_s21``).
+- The roots found in closed form are listed in ascending order.  Before,
+  their order came from FLINT's seeded random splitting, which no closed
+  form reproduces.  Every other route (the ``nmod_poly_roots`` split,
+  ``q = 2`` and the ``fmpz_mod_poly_roots`` route above the word size) keeps
+  FLINT's order, so non-binomial fields are unaffected.  The order decides
+  which degree-one primes, and so which proof columns, the stable scan
+  uses, so for binomial defining polynomials the ``local_primes`` count of
+  ``unit_proof_record`` changes once.  The saturation proof is valid for any
+  root order: certification labels, record statuses and every other
+  published field are unchanged.  On the ``proven`` corpus, published
+  outputs are identical on all 178 rows that finish (7 finish on neither
+  build in 90 seconds), and the proof-record dumps differ only in
+  ``local_primes``, on 10 rows, all binomials: ``pure_x4_minus_2``,
+  ``pure_x5_minus_2``, ``pure_x6_minus_3``, ``pure_x6_minus_5``,
+  ``pure_x7_minus_2``, ``pure_x8_minus_2``, ``pure_x10_plus_5``,
+  ``pure_x12_plus_7``, ``cyclotomic_16_phi8`` and ``cyclotomic_32_phi16``.
   Under callgrind (``proven``, Release) the instruction count fell 5.68% for
-  ``pure_x12_plus_7``.  No timing has been measured.
+  ``pure_x12_plus_7`` and is unchanged (-0.004%) for
+  ``cyclotomic_27_phi18``, which is not a binomial; the binomial check is
+  made once per prime and shared by both closed forms.  No timing has been
+  measured.
 
 - The ``proven`` relation-saturation proof builds the relation-kernel vectors
   its beta rows are size-reduced against from a subset of the relations when

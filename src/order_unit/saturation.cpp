@@ -236,22 +236,27 @@ bool nmod_poly_vanishes_at_roots(const NmodPoly& polynomial,
     return true;
 }
 
-// Sorts `roots`, residues in [0, q), ascending: the canonical order of
-// degree_one_roots_mod_q on every route, independent of the order in which
-// FLINT's randomized root splitting or the closed form lists them.
-void sort_roots_ascending(std::vector<flint::Fmpz>& roots) noexcept {
-    std::sort(roots.begin(), roots.end(),
-              [](const flint::Fmpz& left, const flint::Fmpz& right) noexcept {
-                  return flint::fmpz_cmp(flint::FmpzConstRef(left),
-                                         flint::FmpzConstRef(right)) < 0;
-              });
+// Whether g = x^n + c, n >= 1: monic with no middle terms.  The root
+// finder checks this once and tries the closed forms only for binomials.
+bool nmod_poly_is_monic_binomial(const NmodPoly& g) noexcept {
+    const slong degree = nmod_poly_degree(g.raw());
+    const ulong* coeffs = g.raw()->coeffs;
+    if (degree < 1 || coeffs[degree] != 1) {
+        return false;
+    }
+    for (slong i = 1; i < degree; ++i) {
+        if (coeffs[i] != 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // For a binomial g = x^n + c (the reduction with its zero roots shifted
 // out) and an odd prime q not dividing n, appends the roots of g in closed
-// form (detail::binomial_roots_mod_prime) and returns true; returns false,
-// appending nothing, for any other g or q or if the closed form fails, so
-// the caller takes the generic route.
+// form (detail::binomial_roots_mod_prime), in ascending order, and returns
+// true; returns false, appending nothing, for any other g or q or if the
+// closed form fails, so the caller takes the generic route.
 bool push_binomial_roots(std::vector<flint::Fmpz>& roots,
                          const NmodPoly& g,
                          ulong q,
@@ -264,6 +269,9 @@ bool push_binomial_roots(std::vector<flint::Fmpz>& roots,
     SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.stable_scan."
                         "degree_one_roots_nmod_binomial_roots");
+    // A fixed order for the closed-form roots; the generic routes keep the
+    // order FLINT's root splitting gives.
+    std::sort(binomial_roots.begin(), binomial_roots.end());
     roots.reserve(roots.size() + binomial_roots.size());
     for (ulong root : binomial_roots) {
         roots.emplace_back();
@@ -273,14 +281,14 @@ bool push_binomial_roots(std::vector<flint::Fmpz>& roots,
 }
 
 // The distinct roots of the monic integral `polynomial` modulo the
-// word-size prime q, in ascending order.  For odd q, after the root 0, which
-// occurs exactly when q divides the constant coefficient, write f = x^k g
-// with g(0) != 0.  For a binomial g = x^n + c with q not dividing n, the
-// roots of g come in closed form (push_binomial_roots).  Otherwise this is
+// word-size prime q.  For odd q, after the root 0, which occurs exactly
+// when q divides the constant coefficient, write f = x^k g with g(0) != 0.
+// For a binomial g = x^n + c with q not dividing n, the roots of g come in
+// closed form, in ascending order (push_binomial_roots).  Otherwise this is
 // the first step of Rabin's root finding, as FLINT's nmod_poly_roots
-// (nmod_poly_factor/roots.c, _nmod_poly_push_roots) takes it: write
-// h = x^((q - 1) / 2) mod g.  The roots
-// r of g have r^((q - 1) / 2) = 1 or -1, so they are the roots of
+// (nmod_poly_factor/roots.c, _nmod_poly_push_roots) takes it, and the roots
+// come in the order it finds them: write h = x^((q - 1) / 2) mod g.  The
+// roots r of g have r^((q - 1) / 2) = 1 or -1, so they are the roots of
 // gcd(h - 1, g) and of gcd(h + 1, g), each a squarefree product of linear
 // factors (it divides x^((q - 1) / 2) -+ 1); a factor of degree one gives
 // its root directly and a larger one goes to nmod_poly_roots.  For a
@@ -351,8 +359,10 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
         }
         nmod_poly_shift_right(nonzero_part.raw(), reduced.raw(), zero_order);
 
+        const bool binomial = nmod_poly_is_monic_binomial(nonzero_part);
         if (nmod_poly_degree(nonzero_part.raw()) >= 1 &&
-            !push_binomial_roots(roots, nonzero_part, q, diagnostics)) {
+            !(binomial &&
+              push_binomial_roots(roots, nonzero_part, q, diagnostics))) {
             {
                 SILEX_PROFILE_SCOPE(
                         diagnostics, DiagnosticsModule::unit_group,
@@ -369,7 +379,8 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
                                           detail::kWordFrobeniusMaxDegree)>
                         word_power;
                 nmod_poly_fit_length(half_power.raw(), nonzero_degree);
-                if (detail::binomial_x_power_mod(
+                if (binomial &&
+                    detail::binomial_x_power_mod(
                             half_power.raw()->coeffs,
                             nonzero_part.raw()->coeffs, nonzero_degree,
                             (q - 1) / 2, q)) {
@@ -435,7 +446,6 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
         roots.clear();
         return false;
     }
-    sort_roots_ascending(roots);
     return true;
 }
 
@@ -509,7 +519,6 @@ bool degree_one_roots_mod_q(std::vector<flint::Fmpz>& roots,
             roots.push_back(std::move(root));
         }
     }
-    sort_roots_ascending(roots);
     return true;
 }
 

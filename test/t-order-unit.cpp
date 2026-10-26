@@ -10733,7 +10733,8 @@ void binomial_route_callback(void* user,
 // at least 1, q is odd and q does not divide n, and the closed-form power
 // where g is such a binomial and q is odd and divides n (both asserted
 // through their profile events where profiling is built), and returns the
-// roots of nmod_poly_roots on the reduction in ascending order, for
+// roots of nmod_poly_roots on the reduction, in ascending order where it
+// takes the closed-form roots, for
 // x^n + a with n = 2, 3, 4, 5, 6, 7 and 12, on primes below 600 (including
 // those dividing a or n), primes q = 1 mod n near 2^29, 2^30 and 2^64, and
 // random primes up to 2^64.
@@ -10901,10 +10902,10 @@ int test_binomial_x_power_mod_matches_flint() {
             assert(silex::detail::degree_one_roots_mod_q_for_test(
                     roots, equation, sflint::FmpzConstRef(q_value),
                     &diagnostics));
+            const bool binomial = q != 2 && a_mod != 0;
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
             // Closed-form roots for odd q not dividing n; the closed-form
             // power for odd q dividing n.
-            const bool binomial = q != 2 && a_mod != 0;
             assert(counter.roots - root_routes ==
                    (binomial && n % q != 0 ? 1 : 0));
             assert(counter.power - power_routes ==
@@ -10919,8 +10920,13 @@ int test_binomial_x_power_mod_matches_flint() {
                 assert(fmpz_cmp_ui(root.raw(), q) < 0);
                 got.push_back(fmpz_get_ui(root.raw()));
             }
-            // Listed in ascending order.
-            assert(std::is_sorted(got.begin(), got.end()));
+            // The closed-form roots come in ascending order; the generic
+            // route keeps FLINT's order.
+            if (binomial && n % q != 0) {
+                assert(std::is_sorted(got.begin(), got.end()));
+            } else {
+                std::sort(got.begin(), got.end());
+            }
             assert(std::adjacent_find(got.begin(), got.end()) == got.end());
             assert(got == expected);
             if (got.size() == n && n > 2) {
@@ -11063,7 +11069,7 @@ int test_binomial_roots_mod_prime_matches_flint() {
     declines({5, 0, 0, 6}, 7);              // not monic
 
     // Above the word size the scan's root finder keeps FLINT's
-    // fmpz_mod_poly_roots and lists the roots in ascending order too.
+    // fmpz_mod_poly_roots, and its order, for a binomial too.
     {
         sflint::FmpqPoly polynomial;
         sflint::fmpq_poly_set_coeff_si(polynomial, 0, 7);
@@ -11085,8 +11091,9 @@ int test_binomial_roots_mod_prime_matches_flint() {
                 fmpz_add_ui(value.raw(), value.raw(), 7);
                 fmpz_mod(value.raw(), value.raw(), q.raw());
                 assert(fmpz_is_zero(value.raw()));
-                assert(j == 0 || fmpz_cmp(roots[j - 1].raw(),
-                                          roots[j].raw()) < 0);
+                for (std::size_t k = 0; k < j; ++k) {
+                    assert(!fmpz_equal(roots[k].raw(), roots[j].raw()));
+                }
             }
             most_roots = std::max(most_roots, roots.size());
         }
@@ -11194,11 +11201,10 @@ void stable_scan_column_callback(void* user,
 // stored as (u_2 (zeta - r))^1 (zeta - r)^-1, so that the column at the
 // prime over q = 53 with root r is unavailable.  The scan takes the primes
 // over q in the order its root finder lists their roots
-// (degree_one_roots_mod_q_for_test), ascending; in that order the first 6
-// columns have full rank, and so do the first 7 without the fourth.  With r
-// the fourth root (index 3) the ell = 13 scan leaves that column out and
-// certifies with the columns of the other 6 of the first 7 primes; with r
-// the tenth root (index 9), past full rank,
+// (degree_one_roots_mod_q_for_test); in that order any 6 of the first 7
+// columns have full rank.  With r the third root (index 2) the ell = 13
+// scan leaves that column out and certifies with the columns of the other
+// 6 of the first 7 primes; with r the tenth root (index 9), past full rank,
 // it never reaches that prime, and its proof uses the same 6 primes as
 // without the vanishing factor.  Builds with profiling enabled also check
 // that every column built is appended or unavailable, so no scan builds a
@@ -11214,7 +11220,7 @@ int test_stable_proof_scan_stops_building_columns_at_full_rank() {
             roots, equation, sflint::FmpzConstRef(q)));
     assert(roots.size() == 12);
 
-    const slong vanishing_indices[] = {-1, 3, 9};
+    const slong vanishing_indices[] = {-1, 2, 9};
     for (slong vanishing_index : vanishing_indices) {
         std::vector<silex::FactoredElement> generators;
         for (slong a = 2; a <= 6; ++a) {
@@ -11305,10 +11311,10 @@ int test_stable_proof_scan_stops_building_columns_at_full_rank() {
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
         // Every column built is appended or unavailable: none is built
         // after the column that ends its scan.  Building all 12 columns
-        // over each q examined (30 with no vanishing root or vanishing
-        // index 3, 29 with vanishing index 9, as measured; the count follows
-        // the ascending root order) would build 12 per q.
-        assert(events.decompositions == (vanishing_index == 9 ? 29 : 30));
+        // over each q examined (30 with no vanishing root, 29 with
+        // vanishing index 2 or 9, as measured; the count follows FLINT's root
+        // order) would build 12 per q.
+        assert(events.decompositions == (vanishing_index < 0 ? 30 : 29));
         assert(events.full_rank == proved.unit_proof_record_count());
         assert(events.built == events.appended + events.unavailable);
         assert(events.built < 12 * events.decompositions);
