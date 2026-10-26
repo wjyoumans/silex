@@ -12,6 +12,8 @@
 #include <flint/ulong_extras.h>
 
 #include <cassert>
+#include <initializer_list>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -773,6 +775,134 @@ int test_roots_of_unity_cyclotomic_shortcut() {
            0);
     assert(!silex::detail::proven_root_of_unity_bound(bound, undefined,
                                                       true));
+    return 0;
+}
+
+silex::Element integer_polynomial_element(
+        const silex::NumberField& field,
+        std::initializer_list<slong> coefficients) noexcept {
+    sflint::FmpqPoly polynomial;
+    slong i = 0;
+    for (slong c : coefficients) {
+        fmpq_poly_set_coeff_si(polynomial.raw(), i++, c);
+    }
+    silex::Element out(field);
+    assert(out.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
+    return out;
+}
+
+// Source nfcyclotomicunits (buch2.c) for fields given by Phi_m.  Nothing for
+// w = lcm(2, m) <= 6 or a presentation that is not exactly Phi_m.  For n a
+// prime power (n = m, or m / 2 when m = 2 mod 4) the list has the unit rank
+// phi(m) / 2 - 1 of elements; every element is integral of norm +-1.
+// Spot values: 1 + x on Phi_5; 1 - x on Phi_10 (z = -x, n = 5);
+// 1 + x + x^2 on Phi_8; on Phi_15 the source lists 1 + Z (Z = x^3) and
+// x^a - 1 for a = 1, 2, 4 (four elements, unit rank 3); on Phi_12 x - 1
+// and x^5 - 1 (unit rank 1).  On Phi_37 the 17 units have the regulator
+// of Q(zeta_37), 3171872728760.2220131327666 (source bnfinit),
+// so they are independent with index h+ = 1.
+int test_cyclotomic_field_units() {
+    auto units_of = [](ulong m) {
+        sflint::FmpzPoly cyclotomic;
+        fmpz_poly_cyclotomic(cyclotomic.raw(), m);
+        silex::NumberField field = fmpz_poly_field(cyclotomic);
+        std::vector<silex::Element> units;
+        assert(silex::detail::cyclotomic_field_units(units, field));
+        for (const silex::Element& unit : units) {
+            sflint::Fmpq norm;
+            assert(unit.norm(sflint::FmpqRef(norm)));
+            assert(fmpz_is_one(fmpq_denref(norm.raw())) != 0);
+            assert(fmpz_is_pm1(fmpq_numref(norm.raw())) != 0);
+            sflint::FmpqPoly polynomial;
+            assert(unit.get_fmpq_poly(sflint::FmpqPolyRef(polynomial)));
+            assert(fmpz_is_one(fmpq_poly_denref(polynomial.raw())) != 0);
+        }
+        return std::make_pair(std::move(field), std::move(units));
+    };
+    for (ulong m = 1; m <= 2 * 40 * 40; ++m) {
+        const ulong phi = n_euler_phi(m);
+        if (phi > 40) {
+            continue;
+        }
+        auto [field, units] = units_of(m);
+        const ulong w = m % 2 == 0 ? m : 2 * m;
+        const ulong n = m % 4 == 2 ? m / 2 : m;
+        if (w <= 6) {
+            assert(units.empty());
+            continue;
+        }
+        n_factor_t factors;
+        n_factor_init(&factors);
+        n_factor(&factors, n, 1);
+        if (factors.num == 1) {
+            assert(units.size() == phi / 2 - 1);
+        } else {
+            assert(units.size() >= phi / 2 - 1);
+        }
+    }
+
+    auto expect_single = [&](ulong m, std::initializer_list<slong> coeffs) {
+        auto [field, units] = units_of(m);
+        assert(units.size() == 1);
+        silex::Element expected =
+                integer_polynomial_element(field, coeffs);
+        assert(units[0].equal(expected));
+    };
+    expect_single(5, {1, 1});
+    expect_single(10, {1, -1});
+    expect_single(8, {1, 1, 1});
+    {
+        auto [field, units] = units_of(15);
+        assert(units.size() == 4);
+        assert(units[0].equal(integer_polynomial_element(field, {1, 0, 0, 1})));
+        assert(units[1].equal(integer_polynomial_element(field, {-1, 1})));
+        assert(units[2].equal(integer_polynomial_element(field, {-1, 0, 1})));
+        assert(units[3].equal(
+                integer_polynomial_element(field, {-1, 0, 0, 0, 1})));
+    }
+    {
+        auto [field, units] = units_of(12);
+        assert(units.size() == 2);
+        assert(units[0].equal(integer_polynomial_element(field, {-1, 1})));
+        assert(units[1].equal(
+                integer_polynomial_element(field, {-1, 0, 0, 0, 0, 1})));
+    }
+    {
+        auto [field, units] = units_of(37);
+        assert(units.size() == 17);
+        silex::EmbeddingContext embeddings(field);
+        assert(embeddings.is_defined());
+        sflint::Arb regulator;
+        assert(silex::unit_regulator(
+                sflint::ArbRef(regulator), embeddings,
+                silex::ElementSpan(units.data(), units.size()), 256));
+        sflint::Arb expected;
+        assert(arb_set_str(expected.raw(),
+                           "3171872728760.2220131327666 +/- 1e-12",
+                           256) == 0);
+        assert(arb_overlaps(regulator.raw(), expected.raw()) != 0);
+        assert(arb_rel_accuracy_bits(regulator.raw()) > 64);
+    }
+
+    // Presentations other than Phi_m get no units.
+    sflint::FmpzPoly cyclotomic;
+    fmpz_poly_cyclotomic(cyclotomic.raw(), 7);
+    sflint::FmpzPoly shift;
+    fmpz_poly_set_coeff_si(shift.raw(), 1, 1);
+    fmpz_poly_set_coeff_si(shift.raw(), 0, 1);
+    sflint::FmpzPoly translate;
+    fmpz_poly_compose(translate.raw(), cyclotomic.raw(), shift.raw());
+    std::vector<silex::Element> none;
+    assert(silex::detail::cyclotomic_field_units(
+            none, fmpz_poly_field(translate)));
+    assert(none.empty());
+    fmpz_poly_scalar_mul_si(cyclotomic.raw(), cyclotomic.raw(), 3);
+    assert(silex::detail::cyclotomic_field_units(
+            none, fmpz_poly_field(cyclotomic)));
+    assert(none.empty());
+    const silex::NumberField undefined;
+    assert(silex::detail::cyclotomic_field_units(none, undefined));
+    assert(none.empty());
     return 0;
 }
 
@@ -1669,6 +1799,7 @@ int main() {
     test_roots_of_unity_phi_reset();
     test_roots_of_unity_cyclotomic_shortcut();
     test_real_cyclotomic_polynomial_index();
+    test_cyclotomic_field_units();
     test_roots_of_unity_public_fail_closed();
     test_roots_of_unity_memo();
     test_lower_regulator_bound();

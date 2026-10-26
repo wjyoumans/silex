@@ -260,6 +260,7 @@ add_library(silex
     src/status/status.cpp
     src/sunit/sunit.cpp
     src/sunit/sunit_class_context.cpp
+    src/unit/cyclotomic_units.cpp
     src/unit/roots_of_unity.cpp
     src/unit/unit.cpp
     src/version/version.cpp

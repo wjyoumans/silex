@@ -15,6 +15,7 @@
 #include "../lat/certified_lll_internal.hpp"
 #include "../lat/flatter_backend_internal.hpp"
 #include "../lat/fplll_backend_internal.hpp"
+#include "../unit/unit_internal.hpp"
 
 #include <flint/arb_mat.h>
 #include <flint/fmpq_mat.h>
@@ -4447,6 +4448,78 @@ bool set_class_relation_units(bool& ready,
         return false;
     }
     partial_units.log_memo = &extraction_state.factored_log_memo;
+
+    // Publishes the full-rank partial context as `out` and asks the
+    // validation whether to stop.
+    auto publish_full_rank = [&](bool& stop) noexcept {
+        stop = false;
+        OrderUnitGroup full_rank_units(order);
+        full_rank_units.set_diagnostics(out.diagnostics());
+        bool stored_units_reduced = false;
+        if (!full_rank_units.is_defined() ||
+            !order_unit_group_set_units_internal(
+                    full_rank_units, order,
+                    FactoredElementSpan(partial_units.units.data(),
+                                        partial_units.units.size()),
+                    // reference trusts relation-kernel candidates here
+                    // after `add_unit!` has accepted independence; its
+                    // `_isunit` check is only an assertion.  Seeded units
+                    // were checked to have norm +-1 when they were built.
+                    embeddings, precision, true, nullptr, nullptr,
+                    &extraction_state.factored_log_memo) ||
+            !reduce_stored_relation_units(
+                    stored_units_reduced, full_rank_units, embeddings,
+                    extraction_state.torsion_precision,
+                    &extraction_state.factored_log_memo)) {
+            return false;
+        }
+        if (stored_units_reduced) {
+            extraction_state.clear_dependent_unit_cache();
+        }
+        out.swap(full_rank_units);
+        {
+            SILEX_PROFILE_SCOPE(class_group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.set_class_relation_units.validation_stop_after_improvement");
+            validation_stop_after_improvement(
+                    stop, extraction_state, out, class_group,
+                    analytic_cache, order, precision,
+                    validation_bf_max_cutoff,
+                    accept_grh_generation);
+        }
+        return true;
+    };
+
+    // Seeded units (source Buchall_param adds its cyclotomic units before
+    // any relation, buch2.c:3873) enter the context first; the
+    // relation-kernel candidates below then complete or improve it.
+    if (!extraction_state.seed_units.empty()) {
+        SILEX_PROFILE_SCOPE(class_group.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.set_class_relation_units.seed_units");
+        for (const FactoredElement& seed : extraction_state.seed_units) {
+            if (partial_units.full_rank) {
+                break;
+            }
+            bool added = false;
+            if (!partial_units.add_independent_unit(
+                        added, seed, embeddings, precision,
+                        class_group.diagnostics())) {
+                return false;
+            }
+        }
+        if (partial_units.full_rank) {
+            SILEX_PROFILE_EVENT(class_group.diagnostics(), DiagnosticsModule::unit_group,
+                    "unit_group.set_class_relation_units.seed_units_full_rank");
+            bool stop = false;
+            if (!publish_full_rank(stop)) {
+                return false;
+            }
+            if (stop) {
+                ready = true;
+                return true;
+            }
+        }
+    }
+
     slong add = outer_add;
     slong new_add = 0;
     slong not_larger = 0;
@@ -4575,38 +4648,9 @@ bool set_class_relation_units(bool& ready,
             done[i] = 1;
             not_larger = 0;
             if (partial_units.full_rank) {
-                OrderUnitGroup full_rank_units(order);
-                full_rank_units.set_diagnostics(out.diagnostics());
-                bool stored_units_reduced = false;
-                if (!full_rank_units.is_defined() ||
-                    !order_unit_group_set_units_internal(
-                            full_rank_units, order,
-                            FactoredElementSpan(partial_units.units.data(),
-                                                partial_units.units.size()),
-                            // reference trusts relation-kernel candidates here
-                            // after `add_unit!` has accepted independence; its
-                            // `_isunit` check is only an assertion.
-                            embeddings, precision, true, nullptr, nullptr,
-                            &extraction_state.factored_log_memo) ||
-                    !reduce_stored_relation_units(
-                            stored_units_reduced, full_rank_units, embeddings,
-                            extraction_state.torsion_precision,
-                            &extraction_state.factored_log_memo)) {
-                    return false;
-                }
-                if (stored_units_reduced) {
-                    extraction_state.clear_dependent_unit_cache();
-                }
-                out.swap(full_rank_units);
                 bool stop = false;
-                {
-                    SILEX_PROFILE_SCOPE(class_group.diagnostics(), DiagnosticsModule::unit_group,
-                            "unit_group.set_class_relation_units.validation_stop_after_improvement");
-                    validation_stop_after_improvement(
-                            stop, extraction_state, out, class_group,
-                            analytic_cache, order, precision,
-                            validation_bf_max_cutoff,
-                            accept_grh_generation);
+                if (!publish_full_rank(stop)) {
+                    return false;
                 }
                 if (stop) {
                     finished = true;
@@ -4929,8 +4973,35 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         refresh_options.require_source_units =
                 transaction;
     }
-    bool do_units = rank == 0 ||
-            candidate_class_group.relation_kernel_unit_count() >= rank;
+    // A grh request on a field defined by Phi_m seeds the cyclotomic units
+    // (source add_cyclotomic_units, buch2.c:3626-3636, called at :3873 before
+    // any relation search), each checked to have norm +-1.  They count
+    // toward the kernel-unit need below as the source counts them in zc
+    // (buch2.c:4060).  A failed construction only leaves the seeds out.
+    if (options.requested_certification == CertificationMode::grh &&
+        rank > 0) {
+        std::vector<Element> cyclotomic_units;
+        if (detail::cyclotomic_field_units(cyclotomic_units,
+                                           *order.parent())) {
+            for (const Element& unit : cyclotomic_units) {
+                FactoredElement seed(*order.parent());
+                if (!seed.is_defined() || !seed.set_element(unit)) {
+                    relation_unit_state.seed_units.clear();
+                    break;
+                }
+                relation_unit_state.seed_units.push_back(std::move(seed));
+            }
+        }
+    }
+    const slong seed_unit_count =
+            static_cast<slong>(relation_unit_state.seed_units.size());
+    auto kernel_units_suffice = [&]() noexcept {
+        const slong kernel_units =
+                candidate_class_group.relation_kernel_unit_count();
+        return kernel_units >= rank ||
+               seed_unit_count >= rank - kernel_units;
+    };
+    bool do_units = rank == 0 || kernel_units_suffice();
     // Refill state across loop rounds (see the refill below).
     slong relation_refill_target = detail::kRelationRefillInitial;
     flint::Fmpz previous_refill_index_bound;
@@ -5276,8 +5347,7 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
         have_previous_refill_bound = true;
         previous_refill_class_unchanged = class_order_unchanged;
         if (class_order_unchanged) {
-            do_units =
-                    candidate_class_group.relation_kernel_unit_count() >= rank;
+            do_units = kernel_units_suffice();
         } else {
             if (unit_add > WORD_MAX - 2) {
                 return false;

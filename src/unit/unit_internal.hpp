@@ -5,6 +5,8 @@
 
 #include <flint/fmpz_poly.h>
 
+#include <vector>
+
 namespace silex {
 class Element;
 class NumberField;
@@ -51,6 +53,23 @@ ulong real_cyclotomic_polynomial_index(
 // cyclotomic_defining_polynomial_index (no monic integral model is taken).
 ulong real_cyclotomic_defining_polynomial_index(
         const NumberField& field) noexcept;
+
+// The cyclotomic units of source nfcyclotomicunits (buch2.c) when the
+// defining polynomial of `field` is exactly Phi_m
+// (cyclotomic_defining_polynomial_index), and none otherwise, including
+// for fields that merely contain a root of unity.  With w = lcm(2, m) and
+// z a primitive n-th root of unity, n = w or w / 2 so that n != 2 (mod 4)
+// (z = x, or z = -x when m = 2 (mod 4)): nothing when w <= 6; otherwise
+// (Z^a - 1) / (Z - 1) for each p^k || n, Z = z^(n / p^k),
+// 1 < a <= (p^k - 1) / 2, p not dividing a; and, when n is not a prime
+// power, z^a - 1 for 1 <= a < n / 2 with a = 1 or a not dividing n and
+// n / gcd(a, n) not a prime power.  When n is a prime power the source
+// states the list is independent, and it has phi(n) / 2 - 1 elements, the
+// unit rank; otherwise it may be dependent or longer than the unit rank.  Every element is
+// checked to have norm +-1 (each is integral by construction).  Returns
+// false, with `out` empty, when an operation or a norm check fails.
+bool cyclotomic_field_units(std::vector<Element>& out,
+                            const NumberField& field) noexcept;
 
 // The proven multiple of w that roots_of_unity searches against, for the
 // monic integral model of the defining polynomial of `field`, exposed for

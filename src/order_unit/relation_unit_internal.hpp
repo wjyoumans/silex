@@ -188,6 +188,13 @@ struct RelationUnitExtractionState {
     bool expand_reduce_mod_units_log_generators = false;
     bool reduce_mod_units_log_generator_expansion_attempted = false;
     bool reduce_mod_units_log_generators_expanded = false;
+    // Units known before any relation search, added to the unit context
+    // ahead of the relation-kernel candidates by set_class_relation_units
+    // and counted toward the kernel-unit need.  A grh request on a field
+    // defined by Phi_m sets them to the cyclotomic units
+    // (detail::cyclotomic_field_units, after source add_cyclotomic_units);
+    // empty otherwise.
+    std::vector<FactoredElement> seed_units;
 
     const Element* expanded_reduce_mod_units_log_generator(
             slong index,
