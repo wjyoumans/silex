@@ -10737,7 +10737,9 @@ void binomial_route_callback(void* user,
 // takes the closed-form roots, for
 // x^n + a with n = 2, 3, 4, 5, 6, 7 and 12, on primes below 600 (including
 // those dividing a or n), primes q = 1 mod n near 2^29, 2^30 and 2^64, and
-// random primes up to 2^64.
+// random primes up to 2^64; and it takes the closed-form roots for a field
+// that is not a binomial where its reduction is one (x^4 + 5x^2 + 14 at
+// q = 5) and not where it is not (at q = 11).
 int test_binomial_x_power_mod_matches_flint() {
     flint_rand_t state;
     flint_rand_init(state);
@@ -10935,6 +10937,41 @@ int test_binomial_x_power_mod_matches_flint() {
         }
     }
     assert(full_splits > 0);
+
+    // The route follows the reduction modulo q, not the defining polynomial:
+    // x^4 + 5x^2 + 14 is not a binomial, but modulo 5 it is x^4 + 4, whose
+    // roots 1, 2, 3, 4 come from the closed form in ascending order; modulo
+    // 11 it is x^4 + 5x^2 + 3, which keeps the generic route.
+    {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, 14);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 2, 5);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order equation = silex::test::equation_order(field);
+        for (ulong q : {UWORD(5), UWORD(11)}) {
+            sflint::Fmpz q_value;
+            fmpz_set_ui(q_value.raw(), q);
+            std::vector<sflint::Fmpz> roots;
+            const slong root_routes = counter.roots;
+            assert(silex::detail::degree_one_roots_mod_q_for_test(
+                    roots, equation, sflint::FmpzConstRef(q_value),
+                    &diagnostics));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+            assert(counter.roots - root_routes == (q == 5 ? 1 : 0));
+#else
+            (void)root_routes;
+#endif
+            if (q == 5) {
+                std::vector<ulong> got;
+                for (const sflint::Fmpz& root : roots) {
+                    got.push_back(fmpz_get_ui(root.raw()));
+                }
+                assert((got == std::vector<ulong>{1, 2, 3, 4}));
+            }
+        }
+    }
     flint_rand_clear(state);
     return 0;
 }

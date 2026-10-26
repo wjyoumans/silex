@@ -2529,15 +2529,21 @@ Changed
   their order came from FLINT's seeded random splitting, which no closed
   form reproduces.  Every other route (the ``nmod_poly_roots`` split,
   ``q = 2`` and the ``fmpz_mod_poly_roots`` route above the word size) keeps
-  FLINT's order, so non-binomial fields are unaffected.  The order decides
-  which degree-one primes, and so which proof columns, the stable scan
-  uses, so for binomial defining polynomials the ``local_primes`` count of
-  ``unit_proof_record`` changes once.  The saturation proof is valid for any
-  root order: certification labels, record statuses and every other
-  published field are unchanged.  On the ``proven`` corpus, published
-  outputs are identical on all 178 rows that finish (7 finish on neither
-  build in 90 seconds), and the proof-record dumps differ only in
-  ``local_primes``, on 10 rows, all binomials: ``pure_x4_minus_2``,
+  FLINT's order.  The route follows the reduction modulo ``q``, not the
+  defining polynomial: a field whose reduction modulo ``q``, after removing
+  ``x^k``, is a binomial (for example ``x^4 + 5x^2 + 7`` at ``q = 5``) gets
+  the ascending order at that ``q``, and a field whose reduction modulo
+  ``q`` is not a binomial keeps FLINT's order at that ``q``.  The order
+  decides which degree-one primes, and so which proof columns, the stable
+  scan uses.  The saturation proof is valid for any root order, but for
+  fields with binomial reductions these outputs may change: the
+  ``local_primes`` count of ``unit_proof_record``, the unit generators,
+  the list of ``OrderUnitGroup::select_saturation_primes`` (order and
+  count), the regulator enclosure and, in principle, a record status
+  through the stability threshold or the resource guards.  On the
+  ``proven`` corpus, published outputs are identical on all 178 rows that
+  finish (7 finish on neither build in 90 seconds), and the proof-record
+  dumps differ only in ``local_primes``, on 10 rows, all binomials: ``pure_x4_minus_2``,
   ``pure_x5_minus_2``, ``pure_x6_minus_3``, ``pure_x6_minus_5``,
   ``pure_x7_minus_2``, ``pure_x8_minus_2``, ``pure_x10_plus_5``,
   ``pure_x12_plus_7``, ``cyclotomic_16_phi8`` and ``cyclotomic_32_phi16``.
