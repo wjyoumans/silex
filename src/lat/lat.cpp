@@ -811,7 +811,8 @@ bool Lat::intersection(Lat& out, const Lat& other) const noexcept {
     // A unimodular U with U M = H in HNF gives a Z-basis of the kernel in the
     // rows of U facing the zero rows of H (Cohen, A Course in Computational
     // Algebraic Number Theory, GTM 138, Proposition 2.4.9, which states it
-    // for columns).  Any Z-basis of the kernel spans the same
+    // for columns); the step from the kernel to the intersection is Cohen's
+    // Algorithm 2.3.9 (Intersection of Subspaces) carried over to Z.  Any Z-basis of the kernel spans the same
     // lattice, so the HNF taken below is unchanged from the earlier Smith
     // form route.
     flint::FmpzMat stacked(r + s, n);

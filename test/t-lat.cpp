@@ -655,8 +655,9 @@ bool smith_intersection_reference(silex::flint::FmpzMat& out,
 }
 
 // Lat::intersection must return exactly the HNF the Smith form route gave,
-// on random lattices and on rank-deficient, full-rank, equal, nested,
-// disjoint and zero cases, including the aliased call.
+// on random lattices and on rank-deficient, full-rank, equal, nested and
+// zero cases (trivial intersections arise only from random kind 0),
+// including the aliased call.
 int check_intersection_matches_smith(const silex::lat::Lat& left,
                                      const silex::lat::Lat& right) {
     silex::flint::FmpzMat expected(0, 0);
