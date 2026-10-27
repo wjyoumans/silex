@@ -871,6 +871,25 @@ Changed
   instruction counts, ``grh`` mode: ``cyclotomic_32_phi16`` 2.0% fewer,
   ``cyclotomic_real_64_deg16`` 1.3% fewer.
 
+- The same word-size kernel, which also serves the Rabin root split of the
+  proven stable scan, reduces each square modulo a sparse defining
+  polynomial ``f`` by division with remainder from the top coefficient
+  down, one product per nonzero coefficient of ``f`` below the leading one,
+  instead of folding every coefficient through a dense table of
+  ``x^(d + k) mod f``.  It is used when ``f`` has at most ``d/2`` such
+  coefficients at degrees 8 to 18, any number at degrees 19 and 20, and
+  none (``f = x^d``) below degree 8, the crossover measured on every
+  degree 2 to 20; other polynomials keep the dense table.  The remainder is
+  unique and every coefficient is reduced modulo ``p``, so the counts, the
+  zeta intervals and published results are unchanged: the ``grh`` corpus
+  outputs, including the zeta Belabas-Friedman proof records, are identical
+  on every row that finishes (171 of 172 rows).  Callgrind instruction
+  counts, ``grh`` mode: ``nonadecic_x19_minus_x_minus_1_proven`` 8.2% fewer
+  (the kernel 53% fewer); ``hexadecic_x16_minus_x_minus_1_proven`` and
+  ``septendecic_x17_minus_x_minus_1_proven`` unchanged, since their root
+  counts run before the kernel's batch and go through FLINT;
+  ``cyclotomic_real_q10_c11_deg10``, a dense polynomial, 0.03% more.
+
 - Once the relation module's HNF checkpoint has full rank, refreshing it
   first reduces each relation added since modulo the checkpoint HNF and keeps
   the checkpoint when every one reduces to zero, instead of recomputing the

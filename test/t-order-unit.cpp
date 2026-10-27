@@ -11272,6 +11272,129 @@ int test_word_x_power_mod_matches_flint() {
     return 0;
 }
 
+// The two folds of the word kernel (WordFold,
+// residue_field/word_frobenius_internal.hpp) agree, and the automatic
+// choice agrees with both: x^e mod g by the dense table fold, the sparse
+// top-down division by g, and the automatic choice, for monic g of every
+// kernel degree 2 to 20 over F_q, with q = 2, 3, 5, 7, random primes up to
+// the kernel's prime limit for the degree and the three largest primes
+// below it, and e = 1, 2, (q - 1) / 2, q, a random e and 2^64 - 1.  The
+// shapes of g are the leading term only (x^d), x^d + c, the trinomial
+// x^d - x - 1 of the nonadecic rows, x^d + c x^(d - 1), random g with t
+// nonzero low coefficients for every t from 1 to d (on both sides of
+// word_sparse_fold_limit), and the full density g with every low
+// coefficient q - 1, which reaches the overflow bound of the sums.  The
+// dense fold is the one test_word_x_power_mod_matches_flint compares
+// against FLINT through the dispatch.
+template <slong Degree>
+void word_folds_agree(const std::vector<ulong>& g,
+                      ulong q,
+                      ulong exponent) {
+    namespace sd = silex::detail;
+    const sd::WordModulus modulus = sd::word_modulus(q);
+    std::array<ulong, static_cast<std::size_t>(Degree)> dense{};
+    std::array<ulong, static_cast<std::size_t>(Degree)> sparse{};
+    std::array<ulong, static_cast<std::size_t>(Degree)> sparse_full{};
+    std::array<ulong, static_cast<std::size_t>(Degree)> automatic{};
+    sd::word_x_power_mod<Degree, sd::WordSquare::symmetric,
+                         sd::WordFold::dense>(dense, g.data(), exponent,
+                                              modulus);
+    sd::word_x_power_mod<Degree, sd::WordSquare::symmetric,
+                         sd::WordFold::sparse>(sparse, g.data(), exponent,
+                                               modulus);
+    sd::word_x_power_mod<Degree, sd::WordSquare::full,
+                         sd::WordFold::sparse>(sparse_full, g.data(),
+                                               exponent, modulus);
+    sd::word_x_power_mod<Degree, sd::WordSquare::symmetric>(
+            automatic, g.data(), exponent, modulus);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(Degree); ++i) {
+        assert(dense[i] < q);
+        assert(sparse[i] == dense[i]);
+        assert(sparse_full[i] == dense[i]);
+        assert(automatic[i] == dense[i]);
+    }
+}
+
+template <slong Degree>
+slong test_word_x_power_mod_folds_agree_degree(flint_rand_t state) {
+    constexpr std::size_t kDegree = static_cast<std::size_t>(Degree);
+    const ulong limit = silex::detail::word_frobenius_prime_limit(Degree);
+    std::vector<ulong> primes = {2, 3, 5, 7};
+    const int limit_bits = static_cast<int>(FLINT_BIT_COUNT(limit - 1));
+    for (int bits = 4; bits <= limit_bits; bits += 5) {
+        primes.push_back(n_randprime(state, static_cast<ulong>(bits), 1));
+    }
+    ulong below = limit;
+    for (int i = 0; i < 3; ++i) {
+        below = previous_prime(below);
+        primes.push_back(below);
+    }
+    slong compared = 0;
+    for (ulong q : primes) {
+        std::vector<std::vector<ulong>> shapes;
+        std::vector<ulong> g(kDegree + 1, 0);
+        g[kDegree] = 1;
+        shapes.push_back(g);
+        g[0] = q - 1;
+        shapes.push_back(g);
+        g[1] = q - 1;
+        shapes.push_back(g);
+        g.assign(kDegree + 1, 0);
+        g[kDegree] = 1;
+        g[kDegree - 1] = 1 + n_randint(state, q - 1);
+        shapes.push_back(g);
+        for (std::size_t t = 1; t <= kDegree; ++t) {
+            std::vector<std::size_t> positions(kDegree);
+            for (std::size_t i = 0; i < kDegree; ++i) {
+                positions[i] = i;
+            }
+            for (std::size_t i = 0; i < t; ++i) {
+                std::swap(positions[i],
+                          positions[i + n_randint(state, kDegree - i)]);
+            }
+            g.assign(kDegree + 1, 0);
+            g[kDegree] = 1;
+            for (std::size_t i = 0; i < t; ++i) {
+                g[positions[i]] = 1 + n_randint(state, q - 1);
+            }
+            shapes.push_back(g);
+        }
+        g.assign(kDegree + 1, q - 1);
+        g[kDegree] = 1;
+        shapes.push_back(g);
+        for (const std::vector<ulong>& shape : shapes) {
+            const ulong exponents[] = {1, 2, (q - 1) / 2, q,
+                                       n_randtest_not_zero(state),
+                                       UWORD_MAX};
+            for (ulong exponent : exponents) {
+                if (exponent == 0) {
+                    continue;
+                }
+                word_folds_agree<Degree>(shape, q, exponent);
+                ++compared;
+            }
+        }
+    }
+    if constexpr (Degree < silex::detail::kWordFrobeniusMaxDegree) {
+        compared += test_word_x_power_mod_folds_agree_degree<Degree + 1>(
+                state);
+    }
+    return compared;
+}
+
+int test_word_x_power_mod_folds_agree() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    const slong compared = test_word_x_power_mod_folds_agree_degree<2>(state);
+    flint_rand_clear(state);
+    assert(compared > 0);
+    // The automatic choice takes each fold somewhere in the kernel's
+    // degrees, so both run in the zeta BF and stable scan routes.
+    assert(silex::detail::word_sparse_fold_limit(2) == 0);
+    assert(silex::detail::word_sparse_fold_limit(19) == 19);
+    return 0;
+}
+
 // Counts the stable scan's closed-form binomial routes by profile event.
 struct BinomialRouteEvents {
     slong power = 0;
@@ -16313,6 +16436,7 @@ int main() {
     test_stable_proof_prime_columns_fallback_and_wide_routes();
     test_degree_one_roots_mod_q_root_finder();
     test_word_x_power_mod_matches_flint();
+    test_word_x_power_mod_folds_agree();
     test_binomial_x_power_mod_matches_flint();
     test_binomial_roots_mod_prime_matches_flint();
     test_split_quadratic_roots_mod_prime_matches_flint();
