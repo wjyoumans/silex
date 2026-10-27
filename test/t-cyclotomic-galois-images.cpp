@@ -1,6 +1,7 @@
 #include <silex/class_group.hpp>
 #include <silex/element.hpp>
 #include <silex/factor_base.hpp>
+#include <silex/flint/arb.hpp>
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
@@ -338,6 +339,19 @@ int test_capped_image_gate() {
     assert(!selected(24, 299));
     assert(selected(24, 300));
     assert(selected(24, 636));
+
+    // The gate reads the bound the context's factor base was built from,
+    // and zero for a base set directly.
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    silex::Order order = maximal_order_of(field_from({1, 1, 1, 1, 1}));
+    silex::ClassGroupContext built{order};
+    fmpz_set_ui(bound.raw(), 30);
+    assert(built.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(fmpz_equal(Access::factor_base_build_bound(built).raw(),
+                      bound.raw()));
+    const Zeta5RelationSetup set_directly(true);
+    assert(fmpz_is_zero(
+            Access::factor_base_build_bound(set_directly.context).raw()));
     return 0;
 }
 
@@ -436,6 +450,18 @@ int test_capped_images_at_full_rank() {
     assert(setup.context.relation_count() == 11);
     assert(setup.images().image_candidates == 3);
     assert(Access::galois_image_capped_kernel_relations(setup.context) == 3);
+
+    // A new round moves the cap to 3 + 0 + 3 = 6, so the images of the next
+    // relation, a + 2b from pi sigma_2(pi)^2, are tried again.
+    Access::start_galois_image_round(setup.context, 0);
+    assert(Access::galois_image_round_kernel_limit(setup.context) == 3);
+    silex::Element sigma2_pi(setup.field);
+    assert(sigma2_pi.multiply(element_from(setup.field, {2, 0, 1}),
+                              element_from(setup.field, {2, 0, 1})));
+    assert(alpha.multiply(element_from(setup.field, {2, 1}), sigma2_pi));
+    setup.try_candidate(alpha, 100, goal_reached);
+    assert(setup.images().image_candidates == 6);
+    assert(Access::galois_image_capped_kernel_relations(setup.context) == 6);
 
     Access::start_galois_image_round(setup.context, -1);
     assert(Access::galois_image_round_kernel_limit(setup.context) == -1);
@@ -549,6 +575,7 @@ struct ClassUnitRun {
     slong class_order = 0;
     slong image_candidates = 0;
     slong image_relations = 0;
+    sflint::Arb regulator;
 };
 
 ClassUnitRun class_unit_run(const silex::Order& order,
@@ -574,6 +601,7 @@ ClassUnitRun class_unit_run(const silex::Order& order,
     assert(context.order(sflint::FmpzRef(class_order)));
     assert(sflint::fmpz_fits_si(class_order));
     run.class_order = sflint::fmpz_get_si(class_order);
+    assert(units.regulator(sflint::ArbRef(run.regulator)));
     const silex::detail::CyclotomicGaloisImages* images =
             silex::detail::ClassGroupRelationSearchAccess::
                     cyclotomic_galois_images(context);
@@ -587,6 +615,10 @@ ClassUnitRun class_unit_run(const silex::Order& order,
 // least the crossover; class group Z/17, Washington, Introduction to
 // Cyclotomic Fields, class number tables) and tries images under the capped
 // rule on Q(zeta_8) (degree 4, below it, admitted by the gate; h = 1).
+// The capped images leave the regulator unchanged: it overlaps that of a
+// proven run, which gets no images, and contains the known value
+// 2 log(1 + sqrt 2) = 1.76274717403908605... (PARI 2.17.3
+// bnfinit(x^4 + 1).reg).
 int test_class_unit_runs() {
     silex::Order small = maximal_order_of(field_from({1, 0, 0, 0, 1}));
     const ClassUnitRun below =
@@ -596,6 +628,20 @@ int test_class_unit_runs() {
     assert(below.class_order == 1);
     assert(below.image_candidates > 0);
     assert(below.image_candidates >= below.image_relations);
+    const ClassUnitRun no_images =
+            class_unit_run(small, silex::CertificationMode::proven);
+    assert(no_images.computed);
+    assert(no_images.class_order == 1);
+    assert(no_images.image_candidates == 0);
+    assert(arb_overlaps(below.regulator.raw(), no_images.regulator.raw()) !=
+           0);
+    sflint::Arb expected;
+    arb_sqrt_ui(expected.raw(), 2, 128);
+    arb_add_ui(expected.raw(), expected.raw(), 1, 128);
+    arb_log(expected.raw(), expected.raw(), 128);
+    arb_mul_2exp_si(expected.raw(), expected.raw(), 1);
+    assert(arb_overlaps(below.regulator.raw(), expected.raw()) != 0);
+    assert(arb_rel_accuracy_bits(below.regulator.raw()) > 32);
 
     silex::Order large = maximal_order_of(field_from(
             {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
