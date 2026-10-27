@@ -393,6 +393,39 @@ bool compact_regulator_adaptive(flint::ArbRef out,
                                 const DiagnosticsContext* diagnostics =
                                         nullptr,
                                 FactoredLogMemo* memo = nullptr) noexcept;
+// Working-precision schedule of compact_regulator_adaptive.  Below
+// kCompactRegulatorExtrapolationFloor bits a pass that misses the radius
+// target doubles the precision.  From that floor on, the first miss with a
+// finite regulator ball extrapolates instead: the ball radius shrinks by
+// about one bit per bit of working precision, so the next pass runs at
+// precision + shortfall + kCompactRegulatorExtrapolationMargin, where the
+// radius is below 2^shortfall times the target, when that is below twice the
+// precision.  If that pass also misses, the schedule returns to the doubling
+// it skipped (twice the precision before the extrapolation) and only doubles
+// afterwards.  The precisions it visits are therefore the doubling sequence
+// plus at most one extra pass, and it stops at the same precision cap.  The
+// schedule only picks precisions: every accepted regulator still meets the
+// radius target at the precision it was computed at.
+inline constexpr slong kCompactRegulatorExtrapolationFloor = 128;
+inline constexpr slong kCompactRegulatorExtrapolationMargin = 24;
+class CompactRegulatorPrecisionSchedule {
+public:
+    CompactRegulatorPrecisionSchedule(slong start_precision,
+                                      slong abs_tolerance) noexcept;
+    slong precision() const noexcept { return precision_; }
+    // Moves past a pass at precision() that missed the radius target;
+    // `regulator` is that pass's ball, or nullptr when it gave none.  Returns
+    // false, logging to `diagnostics`, when the precision cap stops the loop.
+    bool advance(const flint::Arb* regulator,
+                 const DiagnosticsContext* diagnostics) noexcept;
+
+private:
+    slong precision_;
+    slong cap_;
+    slong abs_tolerance_;
+    slong resume_precision_ = 0;
+    bool extrapolated_ = false;
+};
 bool compact_independent_from_log_matrix(bool& independent,
                                          const flint::ArbMat& logs,
                                          slong len,

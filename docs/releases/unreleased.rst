@@ -166,6 +166,22 @@ Changed
   and ``pure_x12_plus_7``.  Under callgrind (``proven``, profile-release)
   the instruction count of the class and unit computation fell 1.71% for
   ``random_d9_h4_s8`` and 1.31% for ``random_d10_h2_s21``.  No timing has been measured.
+- The compact regulator of a candidate unit group, which must reach a
+  ball radius below ``2^-64``, no longer doubles its working precision from
+  128 bits on the first miss.  The ball radius shrinks by about one bit per
+  bit of working precision, so the next pass runs at the precision plus the
+  missing bits plus a 24-bit margin when that is below twice the precision.
+  If that pass also misses, the loop returns to the doubling it skipped, so
+  it visits the doubling sequence plus at most one pass and stops at the
+  same precision cap.  Below 128 bits it still doubles.  ``grh`` outputs
+  are identical on the 156 corpus rows of degree 3 and higher that finish
+  in 15 s, except ``unit_group.regulator_radius`` (a different rigorous
+  enclosure, still below ``2^-64``) on ``cyclotomic_real_37_deg18``,
+  ``cyclotomic_real_64_deg16`` and ``cyclotomic_real_136_deg32``.  The timed
+  region Ir (callgrind) drops by 1.94% on ``cyclotomic_real_37_deg18``,
+  2.33% on ``cyclotomic_real_64_deg16`` and 0.47% on
+  ``cyclotomic_real_136_deg32``; ``cyclotomic_real_31_deg15`` is unchanged.
+
 - When ``decompose_prime`` splits a prime ``p`` dividing the index by
   enumerating the idempotents of the Frobenius-fixed subalgebra of ``O/pO``
   (or of ``O/(p, I_p)``), it now builds a component basis only for the

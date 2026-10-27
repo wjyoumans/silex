@@ -463,30 +463,78 @@ bool compact_regulator_adaptive(flint::ArbRef out,
         return false;
     }
 
-    slong precision = max_slong(start_precision, 32);
-    const slong cap = precision_doubling_cap(start_precision);
+    CompactRegulatorPrecisionSchedule schedule(start_precision,
+                                               abs_tolerance);
     for (;;) {
+        const slong precision = schedule.precision();
         flint::ArbMat logs(len, places);
         flint::Arb regulator;
         if (!compact_log_matrix(logs, embeddings, generators, precision,
                                 memo)) {
             return false;
         }
-        if (compact_regulator_from_log_matrix(
-                    flint::ArbRef(regulator), logs, len, places,
-                    precision) &&
-            arb_radius_lt_2exp(regulator, -abs_tolerance)) {
+        const bool have_regulator = compact_regulator_from_log_matrix(
+                flint::ArbRef(regulator), logs, len, places, precision);
+        if (have_regulator && arb_radius_lt_2exp(regulator, -abs_tolerance)) {
             arb_set(out.raw(), regulator.raw());
             return true;
         }
-
-        if (!precision_doubling_allowed(
-                    precision, cap, diagnostics,
-                    "compact regulator stopped at the precision cap")) {
+        if (!schedule.advance(have_regulator ? &regulator : nullptr,
+                              diagnostics)) {
             return false;
         }
-        precision *= 2;
     }
+}
+
+CompactRegulatorPrecisionSchedule::CompactRegulatorPrecisionSchedule(
+        slong start_precision,
+        slong abs_tolerance) noexcept
+    : precision_(max_slong(start_precision, 32)),
+      cap_(precision_doubling_cap(start_precision)),
+      abs_tolerance_(abs_tolerance) {}
+
+bool CompactRegulatorPrecisionSchedule::advance(
+        const flint::Arb* regulator,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (resume_precision_ != 0) {
+        // The extrapolated pass missed; the cap check before it already
+        // allowed this doubling.
+        precision_ = resume_precision_;
+        resume_precision_ = 0;
+        return true;
+    }
+    if (!precision_doubling_allowed(
+                precision_, cap_, diagnostics,
+                "compact regulator stopped at the precision cap")) {
+        return false;
+    }
+    if (!extrapolated_ && regulator != nullptr &&
+        precision_ >= kCompactRegulatorExtrapolationFloor &&
+        abs_tolerance_ > 0 && arb_is_finite(regulator->raw())) {
+        flint::Arf radius;
+        arf_set_mag(radius.raw(), arb_radref(regulator->raw()));
+        // radius < 2^exponent, and the miss means radius >= 2^-abs_tolerance,
+        // so the shortfall exponent + abs_tolerance is positive.  Both
+        // comparisons below are written so that they cannot overflow.
+        const slong exponent = ::arf_abs_bound_lt_2exp_si(radius.raw());
+        const bool shortfall_below_precision =
+                exponent > -abs_tolerance_ && exponent < precision_ &&
+                (exponent < 0 ? abs_tolerance_ + exponent < precision_
+                              : abs_tolerance_ < precision_ - exponent);
+        if (shortfall_below_precision) {
+            const slong shortfall = abs_tolerance_ + exponent;
+            const slong next = precision_ + shortfall +
+                               kCompactRegulatorExtrapolationMargin;
+            if (next < 2 * precision_) {
+                extrapolated_ = true;
+                resume_precision_ = 2 * precision_;
+                precision_ = next;
+                return true;
+            }
+        }
+    }
+    precision_ *= 2;
+    return true;
 }
 
 bool regulator_ubound_lt(const flint::Arb& left,

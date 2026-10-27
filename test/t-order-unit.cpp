@@ -1705,6 +1705,141 @@ int test_factored_log_memo_after_failed_factor_log() {
     return 0;
 }
 
+// compact_regulator_adaptive's precision schedule.  Below 128 bits a miss
+// doubles.  From 128 bits the first miss with a finite ball moves to
+// precision + shortfall + margin (24), where the ball radius is below
+// 2^shortfall times the 2^-tolerance target; a second miss returns to the
+// skipped doubling and doubles from there, so the loop terminates at the same
+// precision cap as plain doubling.  The real loop then meets its radius
+// target from 128 bits in the real cyclotomic quartic of the next test.
+int test_compact_regulator_precision_schedule() {
+    using silex::detail::CompactRegulatorPrecisionSchedule;
+    static_assert(silex::detail::kCompactRegulatorExtrapolationFloor == 128);
+    static_assert(silex::detail::kCompactRegulatorExtrapolationMargin == 24);
+    // A ball of radius exactly 2^radius_exp, so radius < 2^(radius_exp + 1).
+    const auto ball = [](sflint::Arb& out, slong radius_exp) {
+        arb_set_ui(out.raw(), 1);
+        mag_set_ui_2exp_si(arb_radref(out.raw()), 1, radius_exp);
+    };
+    sflint::Arb value;
+
+    // Radius 2^-57 at 128 bits for a 2^-64 target: shortfall 8, so 160.  A
+    // miss there returns to 256; later misses only double.
+    {
+        CompactRegulatorPrecisionSchedule schedule(128, 64);
+        assert(schedule.precision() == 128);
+        ball(value, -57);
+        assert(schedule.advance(&value, nullptr));
+        assert(schedule.precision() == 128 + 8 + 24);
+        assert(schedule.advance(&value, nullptr));
+        assert(schedule.precision() == 256);
+        assert(schedule.advance(&value, nullptr));
+        assert(schedule.precision() == 512);
+    }
+    // Below 128 bits the schedule doubles, then extrapolates at 128.
+    {
+        CompactRegulatorPrecisionSchedule schedule(16, 64);
+        assert(schedule.precision() == 32);
+        ball(value, -20);
+        assert(schedule.advance(&value, nullptr));
+        assert(schedule.precision() == 64);
+        assert(schedule.advance(&value, nullptr));
+        assert(schedule.precision() == 128);
+        ball(value, -57);
+        assert(schedule.advance(&value, nullptr));
+        assert(schedule.precision() == 160);
+    }
+    // No ball, a non-finite ball, or a step that would reach twice the
+    // precision: plain doubling.
+    {
+        CompactRegulatorPrecisionSchedule no_ball(128, 64);
+        assert(no_ball.advance(nullptr, nullptr));
+        assert(no_ball.precision() == 256);
+        CompactRegulatorPrecisionSchedule infinite(128, 64);
+        arb_indeterminate(value.raw());
+        assert(infinite.advance(&value, nullptr));
+        assert(infinite.precision() == 256);
+        // Shortfall 125: 128 + 125 + 24 >= 256.
+        CompactRegulatorPrecisionSchedule far(128, 64);
+        ball(value, 60);
+        assert(far.advance(&value, nullptr));
+        assert(far.precision() == 256);
+        // Shortfall 101 for a 2^-1000 target: 128 + 101 + 24.
+        CompactRegulatorPrecisionSchedule tight(128, 1000);
+        ball(value, -900);
+        assert(tight.advance(&value, nullptr));
+        assert(tight.precision() == 253);
+    }
+    // A radius that never shrinks: the extrapolated pass misses, and the
+    // schedule visits 128, 217, 256 and 512 before the 512-bit cap stops it,
+    // the doubling sequence 128, 256, 512 plus one pass.
+    {
+        PrecisionCapOverride cap(512);
+        CompactRegulatorPrecisionSchedule schedule(128, 64);
+        ball(value, 0);
+        std::vector<slong> visited{schedule.precision()};
+        while (schedule.advance(&value, nullptr)) {
+            visited.push_back(schedule.precision());
+            assert(visited.size() < 8);
+        }
+        assert((visited == std::vector<slong>{128, 128 + 65 + 24, 256, 512}));
+    }
+    // The cap is checked before any extrapolation, as before doubling.
+    {
+        PrecisionCapOverride cap(128);
+        CompactRegulatorPrecisionSchedule schedule(128, 64);
+        ball(value, -57);
+        assert(!schedule.advance(&value, nullptr));
+    }
+
+    // The loop itself, from 128 bits, on theta, theta - 1 and theta + 2 in
+    // x^4 - x^3 - 4x^2 + 4x + 1: every result meets its target and overlaps
+    // the result from 32 bits, and a 128-bit cap still stops a 2^-200 target.
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, -4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 4);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Element theta(field);
+    silex::Element theta_minus_one(field);
+    silex::Element theta_plus_two(field);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    assert(theta_plus_two.add_si(theta, 2));
+    std::vector<silex::FactoredElement> units;
+    units.emplace_back(field);
+    assert(units.back().push(theta, 1));
+    units.emplace_back(field);
+    assert(units.back().push(theta_minus_one, 1));
+    units.emplace_back(field);
+    assert(units.back().push(theta_plus_two, 1));
+    const silex::FactoredElementSpan span(units.data(), units.size());
+    silex::EmbeddingContext embeddings(field);
+    for (const slong tolerance : {slong(64), slong(150), slong(200)}) {
+        sflint::Arb from_128;
+        sflint::Arb from_32;
+        assert(silex::detail::compact_regulator_adaptive(
+                sflint::ArbRef(from_128), embeddings, span, 128, tolerance));
+        assert(silex::detail::compact_regulator_adaptive(
+                sflint::ArbRef(from_32), embeddings, span, 32, tolerance));
+        assert(mag_cmp_2exp_si(arb_radref(from_128.raw()), -tolerance) < 0);
+        assert(mag_cmp_2exp_si(arb_radref(from_32.raw()), -tolerance) < 0);
+        assert(arb_overlaps(from_128.raw(), from_32.raw()));
+        assert(arb_is_positive(from_128.raw()));
+    }
+    {
+        PrecisionCapOverride cap(128);
+        sflint::Arb regulator;
+        assert(!silex::detail::compact_regulator_adaptive(
+                sflint::ArbRef(regulator), embeddings, span, 128, 200));
+    }
+    return 0;
+}
+
 // The unit-extraction log matrices take the factored log memo: the rows of
 // compact_log_matrix, compact_independent, compact_regulator_adaptive,
 // reduce_stored_relation_units and the incremental unit context.  A memo
@@ -16048,6 +16183,7 @@ int main() {
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_origin_pair_cache();
     test_factored_log_memo_after_failed_factor_log();
+    test_compact_regulator_precision_schedule();
     test_unit_log_matrices_through_factored_log_memo();
     test_factored_log_memo_factor_lookup();
     test_factored_element_factor_tags();
