@@ -1210,9 +1210,10 @@ void check_tail_skip_matches_every_index(slong d, slong log2_tolerance) {
         assert(off.skip_index[shift] == 0);
         // Doubling plus bisection: about 2 log2(stop index) evaluations.
         assert(on.skip_evals[shift] >= 1);
-        assert(on.skip_evals[shift] <= 64);
+        assert(on.skip_evals[shift] <= 24);
         if (d == -99999971L) {
             assert(on.skip_index[shift] > 0);
+            assert(on.skip_index[shift] + 1 == off.stop_index[shift]);
             assert(on.skip_evals[shift] >= 2);
         }
     }
