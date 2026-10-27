@@ -163,6 +163,7 @@ private:
     std::vector<FactoredElement> coefficients_;
 
     friend class FactoredElement;
+    friend class detail::FactoredElementAccess;
 };
 
 inline void swap(CompactElement& left, CompactElement& right) noexcept {

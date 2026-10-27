@@ -605,27 +605,6 @@ struct FactoredElement::FactorList {
     std::vector<FactorPower<Element>> entries;
     // The tag of each entry, in the same order.
     std::vector<FactorTag> tags;
-
-    // compact.root_base_status(root, diagnostics) for
-    // detail::FactoredElementAccess::is_power_si: `unsupported` is
-    // `undecided`, `not_power` and `power` are `decided` with `is_power`
-    // set (and `root` written on `power`, as root_base_status does).
-    // CompactElement befriends FactoredElement, and a class nested in a
-    // friend shares that access ([class.friend]/2); the access class does
-    // not.
-    static detail::FactoredPowerResult compact_root_base(
-            bool& is_power,
-            FactoredElement& root,
-            const CompactElement& compact,
-            const DiagnosticsContext* diagnostics) noexcept {
-        const CompactElement::RootStatus status =
-                compact.root_base_status(root, diagnostics);
-        if (status == CompactElement::RootStatus::unsupported) {
-            return detail::FactoredPowerResult::undecided;
-        }
-        is_power = status == CompactElement::RootStatus::power;
-        return detail::FactoredPowerResult::decided;
-    }
 };
 
 FactoredElement::FactoredElement(const NumberField& parent) noexcept {
@@ -1311,13 +1290,14 @@ detail::FactoredPowerResult detail::FactoredElementAccess::is_power_si(
         }
         FactoredElement leftover_root(input.parent_);
         bool leftover_is_power = false;
-        const FactoredPowerResult status =
-                FactoredElement::FactorList::compact_root_base(
-                        leftover_is_power, leftover_root, compact,
-                        diagnostics);
-        if (status != FactoredPowerResult::decided) {
-            return status;
+        // CompactElement::root_base_status: `unsupported` is `undecided`,
+        // `not_power` and `power` are `decided` (root written on `power`).
+        const CompactElement::RootStatus status =
+                compact.root_base_status(leftover_root, diagnostics);
+        if (status == CompactElement::RootStatus::unsupported) {
+            return FactoredPowerResult::undecided;
         }
+        leftover_is_power = status == CompactElement::RootStatus::power;
         if (!leftover_is_power) {
             is_power = false;
             return FactoredPowerResult::decided;

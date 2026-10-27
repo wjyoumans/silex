@@ -116,6 +116,12 @@ public:
             const DiagnosticsContext* diagnostics,
             FactorOriginPairCache* pairs) noexcept;
 
+private:
+    friend class silex::FactoredElement;
+    friend FactoredPowerResult factored_element_is_power_si(
+            bool&, FactoredElement&, const FactoredElement&, slong,
+            FactoredRootStrategy, const DiagnosticsContext*) noexcept;
+
     // detail::factored_element_is_power_si (factored_power_internal.hpp),
     // here for FactoredElement's private storage.
     static FactoredPowerResult is_power_si(
@@ -125,9 +131,6 @@ public:
             slong exponent,
             FactoredRootStrategy strategy,
             const DiagnosticsContext* diagnostics) noexcept;
-
-private:
-    friend class silex::FactoredElement;
 
     // The checks and copy of FactoredElement::push, storing the copy with
     // `origin` and `hash`; origin 0 gives the factor a fresh origin, and
