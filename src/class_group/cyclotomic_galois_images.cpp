@@ -6,6 +6,7 @@
 #include <silex/hom.hpp>
 
 #include "../factor_base/factor_base_internal.hpp"
+#include "../unit/unit_internal.hpp"
 
 #include <flint/fmpz_poly.h>
 #include <flint/nf.h>
@@ -57,6 +58,11 @@ bool prepare_cyclotomic_galois_images(CyclotomicGaloisImages& out,
     if (!cyclotomic_field_index(n, *field)) {
         return false;
     }
+    bool real_subfield = false;
+    if (n == 0) {
+        n = real_cyclotomic_defining_polynomial_index(*field);
+        real_subfield = n != 0;
+    }
     if (n == 0 || field->degree() < 4) {
         out = std::move(next);
         return true;
@@ -66,22 +72,49 @@ bool prepare_cyclotomic_galois_images(CyclotomicGaloisImages& out,
     if (!generator.is_defined() || !generator.gen()) {
         return false;
     }
-    for (ulong k = 2; k < n; ++k) {
+    // On psi_n, the images are the Dickson polynomials D_k(x), from
+    // D_0 = 2, D_1 = x and D_(j+1) = x D_j - D_(j-1).
+    Element previous(*field);
+    Element current(*field);
+    if (real_subfield &&
+        (!previous.is_defined() || !current.is_defined() ||
+         !previous.set_si(2) || !current.set(generator))) {
+        return false;
+    }
+    for (ulong k = 2; real_subfield ? 2 * k < n : k < n; ++k) {
+        Element image(*field);
+        if (!image.is_defined()) {
+            return false;
+        }
+        if (real_subfield) {
+            // current = D_(k-1), previous = D_(k-2); image = D_k.
+            Element product(*field);
+            if (!product.is_defined() ||
+                !product.multiply(generator, current) ||
+                !image.subtract(product, previous) ||
+                !previous.set(current) || !current.set(image)) {
+                return false;
+            }
+        }
         if (n_gcd(k, n) != 1) {
             continue;
         }
-        // sigma_k(x) = x^k.  set_generator_image checks Phi_n(x^k) = 0 in K
-        // exactly, and image_matrix checks that sigma_k maps the order into
-        // itself with integral coordinates.
-        Element image(*field);
-        flint::Fmpz exponent;
-        fmpz_set_ui(exponent.raw(), k);
+        // Phi_n: sigma_k(x) = x^k.  psi_n: sigma_k(x) = D_k(x).
+        // set_generator_image checks f(image) = 0 in K exactly for the
+        // defining polynomial f, and image_matrix checks that sigma_k maps
+        // the order into itself with integral coordinates.
+        if (!real_subfield) {
+            flint::Fmpz exponent;
+            fmpz_set_ui(exponent.raw(), k);
+            if (!image.pow_fmpz(generator,
+                                flint::FmpzConstRef(exponent))) {
+                return false;
+            }
+        }
         FieldHom hom(*field, *field);
         OrderHom order_hom(next.order, next.order);
         flint::FmpzMat matrix(0, 0);
-        if (!image.is_defined() ||
-            !image.pow_fmpz(generator, flint::FmpzConstRef(exponent)) ||
-            !hom.is_defined() || !hom.set_generator_image(image) ||
+        if (!hom.is_defined() || !hom.set_generator_image(image) ||
             !order_hom.is_defined() ||
             !order_hom.set_field_homomorphism(hom) ||
             !order_hom.image_matrix(matrix)) {
@@ -91,6 +124,7 @@ bool prepare_cyclotomic_galois_images(CyclotomicGaloisImages& out,
         next.image_matrices.emplace_back(std::move(matrix));
     }
 
+    next.real_subfield = real_subfield;
     next.conductor = n;
     next.available = !next.image_matrices.empty();
     out = std::move(next);

@@ -983,15 +983,20 @@ than ``r``, seeds nothing.  The construction is not proof
 input: the seeds may have index above one in the unit group, and the
 published class group and regulator pass the same analytic validation.
 
-On the same ``grh`` requests, for fields of degree 30 or more, when every
-rational prime of the factor base has all of its prime ideals in the base
+On ``grh`` requests on a field given by exactly ``Phi_m`` or ``psi_n``, for
+fields of degree 30 or more, when every rational prime of the factor base has all of its prime ideals in the base
 (so the base is stable under the Galois group), the relation search also
 tries the Galois images of its
 relations, as PARI 2.17.3 ``buch2.c`` ``add_rel`` (lines 2380-2410) does:
 every stored relation for which ``add_rel_i`` (lines 2284-2376) returns
 ``k > 0`` gets its images ``sigma_k(alpha)``, ``sigma_k(x) = x^k`` for ``k``
 prime to ``m`` (Washington, *Introduction to Cyclotomic Fields*, 2nd ed.,
-Theorem 2.5), and each image is kept by the rule of ``add_rel_i`` with
+Theorem 2.5), and on ``psi_n``, where ``x = zeta_n + zeta_n^-1`` and the
+Galois group is ``(Z/nZ)^* / {+-1}``, ``sigma_k(x) = D_k(x)`` for
+``1 < k < n / 2`` prime to ``n``, with ``D_k`` the Dickson polynomial
+(``D_k(t + 1/t) = t^k + t^-k``; the restriction of the same ``sigma_k``).
+Each image of ``x`` is checked exactly to be a root of the defining
+polynomial, and each image matrix to be integral.  Each image is kept by the rule of ``add_rel_i`` with
 ``m = NULL``: before full modular rank only when it raises the rank, and at
 full rank whenever it is not already known (line 2294).  Silex forms each
 image element exactly and factors it like a searched candidate, rather than

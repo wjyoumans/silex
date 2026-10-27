@@ -234,6 +234,20 @@ Changed
   not a ``psi_n`` presentation, is unchanged.  See "Class groups and order
   units" in :doc:`../reference/algorithms_and_sources`.
 
+- The Galois-image step of the ``grh`` relation search (fields of degree 30
+  or more with a Galois-stable factor base) now also runs on fields given by
+  ``psi_n``: the images are ``sigma_k(x) = D_k(x)``, the Dickson
+  polynomials, for ``1 < k < n / 2`` prime to ``n``, each checked exactly
+  to be a root of ``psi_n`` with an integral image matrix.  Fields of
+  degree below 30 run exactly as before.  Class groups, regulators, unit
+  ranks and certification labels are unchanged on all 46 cyclotomic corpus
+  rows that finish.  Whole-process callgrind Ir of ``grh`` (busy machine) on
+  ``cyclotomic_real_136_deg32``, the one such row of degree 30 or more that
+  finishes, drops by a further 71.9% (77.0% with the unit seeding).  On
+  that field the relation sequence changes, so the relations found and
+  record fields such as ``relation_count`` (101 to 711) and
+  ``regulator_radius`` change.
+
 - On ``grh`` class group and unit computations for fields of degree 30 or
   more given by the exact cyclotomic polynomial ``Phi_m``, the relation
   search also tries the Galois images ``sigma_k(alpha)`` of its relations

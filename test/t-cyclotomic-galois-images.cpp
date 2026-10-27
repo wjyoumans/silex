@@ -69,6 +69,7 @@ int test_image_matrices() {
     assert(silex::detail::prepare_cyclotomic_galois_images(images, order));
     assert(images.initialized && images.available);
     assert(images.conductor == 8);
+    assert(!images.real_subfield);
     assert(images.exponents.size() == 3);
     assert(images.exponents[0] == 3 && images.exponents[1] == 5 &&
            images.exponents[2] == 7);
@@ -190,6 +191,58 @@ silex::Element element_from(const silex::NumberField& field,
     silex::Element element(field);
     assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(polynomial)));
     return element;
+}
+
+// On psi_11 = x^5 + x^4 - 4x^3 - 3x^2 + 3x + 1, the minimal polynomial of
+// x = 2 cos(2 pi / 11), Gal(K/Q) = (Z/11Z)^* / {+-1} acts by
+// sigma_k(x) = 2 cos(2 pi k / 11) = D_k(x), k = 2..5, with D_k the Dickson
+// polynomial (D_k(t + 1/t) = t^k + t^-k).  The images are checked against
+// D_2 = x^2 - 2, D_3 = x^3 - 3x, D_4 = x^4 - 4x^2 + 2, D_5 = x^5 - 5x^3 + 5x
+// written out.  psi_7 has degree 3 and gets no images.
+int test_real_subfield_images() {
+    silex::NumberField field = field_from({1, 3, -3, -4, 1, 1});
+    silex::Order order = maximal_order_of(field);
+    silex::detail::CyclotomicGaloisImages images;
+    assert(silex::detail::prepare_cyclotomic_galois_images(images, order));
+    assert(images.initialized && images.available);
+    assert(images.real_subfield);
+    assert(images.conductor == 11);
+    assert(images.exponents.size() == 4);
+    for (std::size_t i = 0; i < 4; ++i) {
+        assert(images.exponents[i] == i + 2);
+    }
+
+    silex::Element generator(field);
+    assert(generator.gen());
+    silex::OrderElement generator_order;
+    assert(generator_order.define(order));
+    assert(generator_order.set_element(generator));
+    sflint::FmpzMat x_row(1, order.degree());
+    assert(generator_order.get_coordinates(sflint::FmpzMatRef(x_row)));
+
+    const silex::Element expected[] = {
+            element_from(field, {-2, 0, 1}),
+            element_from(field, {0, -3, 0, 1}),
+            element_from(field, {2, 0, -4, 0, 1}),
+            element_from(field, {0, 5, 0, -5, 0, 1})};
+    for (std::size_t i = 0; i < 4; ++i) {
+        sflint::FmpzMat image(0, 0);
+        assert(silex::detail::cyclotomic_galois_image_coordinates(
+                image, images, static_cast<slong>(i),
+                sflint::FmpzMatConstRef(x_row)));
+        silex::OrderElement image_element;
+        assert(image_element.define(order));
+        assert(image_element.set_coordinates(sflint::FmpzMatConstRef(image)));
+        silex::Element image_value(field);
+        assert(image_element.get_element(image_value));
+        assert(image_value.equal(expected[i]));
+    }
+
+    silex::detail::CyclotomicGaloisImages none;
+    assert(silex::detail::prepare_cyclotomic_galois_images(
+            none, maximal_order_of(field_from({-1, -2, 1, 1}))));
+    assert(none.initialized && !none.available);
+    return 0;
 }
 
 // Q(zeta_5) with the factor base of prime-ideal norm at most 30: P5, the
@@ -448,6 +501,7 @@ int test_class_unit_runs() {
 
 int main() {
     if (test_detection() != 0 || test_image_matrices() != 0 ||
+        test_real_subfield_images() != 0 ||
         test_factor_base_stability() != 0 ||
         test_no_images_below_crossover_or_proven() != 0 ||
         test_images_before_full_rank() != 0 ||

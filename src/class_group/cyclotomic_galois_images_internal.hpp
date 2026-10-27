@@ -65,9 +65,14 @@ namespace silex::detail {
 // automorphism routine (buch2.c:automorphism_matrices, line 2724, through
 // galoisconj).  Silex has no general automorphism algorithm, so this route
 // covers only a field whose defining polynomial is exactly the cyclotomic
-// polynomial Phi_n.  Then K = Q(zeta_n) with zeta_n = x, and Gal(K/Q) is
-// (Z/nZ)^* acting by sigma_k(x) = x^k for k coprime to n (Washington,
-// Introduction to Cyclotomic Fields, 2nd ed., Theorem 2.5).
+// polynomial Phi_n, or exactly psi_n, the minimal polynomial of
+// 2 cos(2 pi / n).  On Phi_n, K = Q(zeta_n) with zeta_n = x, and Gal(K/Q)
+// is (Z/nZ)^* acting by sigma_k(x) = x^k for k coprime to n (Washington,
+// Introduction to Cyclotomic Fields, 2nd ed., Theorem 2.5).  On psi_n,
+// K = Q(zeta_n)^+ with x = zeta_n + zeta_n^-1, Gal(K/Q) is the quotient
+// (Z/nZ)^* / {+-1}, and the restriction of sigma_k maps x to
+// zeta_n^k + zeta_n^-k = D_k(x), the Dickson polynomial
+// (D_0 = 2, D_1 = x, D_(j+1) = x D_j - D_(j-1)), for 1 < k < n / 2.
 //
 // Silex does not permute exponent vectors as the references do.  It forms
 // the image element sigma_k(alpha) exactly (its order coordinates times the
@@ -93,6 +98,9 @@ struct CyclotomicGaloisImages {
     // is rebuilt when a different order is passed.
     bool initialized = false;
     bool available = false;
+    // True when the field is defined by psi_n (the maximal real subfield of
+    // Q(zeta_n)), false for Phi_n.
+    bool real_subfield = false;
     ulong conductor = 0;
     Order order;
     // image_matrices[i] is the integral matrix of sigma_{exponents[i]} on the
@@ -107,6 +115,7 @@ struct CyclotomicGaloisImages {
     void clear() noexcept {
         initialized = false;
         available = false;
+        real_subfield = false;
         conductor = 0;
         order.clear();
         exponents.clear();
@@ -123,14 +132,16 @@ struct CyclotomicGaloisImages {
 bool cyclotomic_field_index(ulong& n, const NumberField& field) noexcept;
 
 // Builds the automorphisms sigma_k : x -> x^k, k in [2, n) coprime to n, of a
-// field of degree at least 4 defined by exactly Phi_n, as exact FieldHom
-// generator images (FieldHom::set_generator_image checks Phi_n(x^k) = 0 in
-// K), and their integral image matrices on the basis of `order`
+// field of degree at least 4 defined by exactly Phi_n, or
+// sigma_k : x -> D_k(x), 2 <= k < n / 2 coprime to n, of one defined by
+// exactly psi_n (real_subfield), as exact FieldHom generator images
+// (FieldHom::set_generator_image checks f(image) = 0 in K for the defining
+// polynomial f), and their integral image matrices on the basis of `order`
 // (OrderHom::image_matrix, which checks integrality).  Leaves `available`
 // false for any other field.  Degree-two cyclotomic fields are imaginary
 // quadratic: their class-group route keeps one prime per split rational
 // prime (an unstable base), so they are excluded.  Fails only when an exact
-// construction step fails on a field that is exactly Phi_n.
+// construction step fails on a field that is exactly Phi_n or psi_n.
 bool prepare_cyclotomic_galois_images(CyclotomicGaloisImages& out,
                                       const Order& order) noexcept;
 
