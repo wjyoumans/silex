@@ -1376,8 +1376,8 @@ basis, and the Gram matrix built from it, are formed in doubles; the basis
 returned is always the exact ``transform * HNF``.  The multiplication uses the
 order's rows rather than the per-ideal rows because the cancellation then
 comes from the order basis, not from the size of the transform.  No proof
-input depends on these values.  The Gram matrix is read
-only through Arb midpoints converted to double, and every enumerated vector
+input depends on these values.  Only double values are read downstream, and
+every enumerated vector
 becomes an exact order element accepted only by the exact
 ``factor_base_principal_witness`` check.  Exhaustion of the enumeration is
 never read as a claim.  The route is therefore of the same kind as PARI's
@@ -1399,18 +1399,23 @@ below ``1e-12`` on most) and below every discrepancy measured on
 
 The setup falls back to the whole Arb route at the same precision when
 
-#. a value is not finite, or a transform entry exceeds ``2^53``;
+#. a value is not finite, or a reduced-basis entry (order coordinates)
+   exceeds ``2^53``;
 #. the double Gram-Schmidt pivot test fails;
 #. the product of the double Gram-Schmidt pivots differs from the exact ``d``
-   by more than ``2^-20`` in ``log2 d``, or ``d`` is not available; the setup
-   then goes to the Arb route at once, without trying other rounding scales
-   in double;
-#. the LLL bound test fails at every rounding scale, so no basis is accepted
-   (the scale loops run from the rounding-scale hint and then from the first
-   scale, as the Arb route does); or
+   by more than ``2^-20`` in ``log2 d``, or ``d`` is not available;
+#. the LLL bound test, on the Gram diagonal ``|b_i|^2``, fails at every
+   rounding scale, so no basis is accepted (the scale loops run from the
+   rounding-scale hint and then from the first scale, as the Arb route
+   does); or
 #. the enumeration of the double-row data ends exhausted without a witness.
    The ideal is then enumerated again from the Arb data, and the counts, the
    rounding-scale hint and the step-cap seam record only that Arb enumeration.
+
+Rules 1 to 3 test the double data rather than the basis, so on any of them
+the setup goes to the Arb route at once, without trying other rounding scales
+in double; a second double loop from the first scale could accept a basis
+from a coarser scale than the one the Arb route accepts at the hint.
 
 So every ideal for which the Arb setup gives a witness still gives one, and
 the route returns no ``failed`` outcome of its own.  Precision retries stay on
