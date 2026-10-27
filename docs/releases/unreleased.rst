@@ -227,9 +227,10 @@ Changed
   equation order, it now writes the ideal's Hermite normal form directly
   instead of reducing the ``2n x n`` two-generator matrix modulo ``p``: the
   rows ``e_j + c_j e_(n-1)`` with ``c_j = -r^(j-n+1) mod p`` and
-  ``p e_(n-1)``, or ``diag(p, 1, ..., 1)`` when ``r = 0``, which is the
-  reference ``basis_mat_prime_deg_1`` construction in Silex's upper
-  triangular convention.  It applies for every ramification index (for
+  ``p e_(n-1)``, or ``diag(p, 1, ..., 1)`` when ``r = 0``.  This is the
+  analogue of the reference ``basis_mat_prime_deg_1`` construction in
+  Silex's upper triangular convention, with the pivot in the last column and
+  entries ``-r^j / r^(n-1) mod p``.  It applies for every ramification index (for
   example ``e = 2``, ``f = 1``); factors of degree above one, other orders
   and any root the closed form cannot confirm take the previous route.  The stored
   matrix is the same, so prime ideals and ``grh`` outputs are unchanged (all

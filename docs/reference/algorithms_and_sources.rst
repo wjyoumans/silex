@@ -732,7 +732,11 @@ factorization over a base, and relation rows.  Hecke
 ``src/NumFieldOrd/NfOrd/Ideal/Prime.jl`` and ``ResidueField.jl`` and PARI's
 ``idealprimedec`` behavior are the external decomposition and residue-field
 anchors.  Dedekind--Kummer factor data is interpreted in the correct integral
-generator, not silently relabeled as polynomial-generator data.
+generator, not silently relabeled as polynomial-generator data.  On an equation
+order, a degree-one Dedekind--Kummer prime ``(p, theta - r)`` stores the
+closed-form HNF of ``pO + (theta - r)O``, traced to Hecke
+``Ideal.jl:basis_mat_prime_deg_1``; any input the closed form cannot confirm
+takes the generic two-generator route.
 
 When ``p`` divides the index of the maximal order, ``decompose_prime`` splits
 the etale algebra ``O/(p, I_p)``, where ``I_p`` is the ``p``-radical (equal

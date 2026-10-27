@@ -1805,9 +1805,11 @@ bool IdealAccess::set_known_linear_two_generator(
     // `src/NumFieldOrd/NfOrd/Ideal/Ideal.jl:basis_mat_prime_deg_1` (lines
     // 459-477) writes the basis matrix of a degree-one prime P directly: in
     // its lower-left convention row i is e_i - (w_i mod P) e_1, with the
-    // minimum p in the corner, because O / P = F_p.  This routine is the same
-    // construction in Silex's upper-right FLINT convention, for the basis
-    // w_i = theta^i of the equation order Z[theta] = Z[x] / (F).
+    // minimum p in the corner, because O / P = F_p.  This routine is the
+    // analogous construction in Silex's upper-right FLINT convention, for the
+    // basis w_i = theta^i of the equation order Z[theta] = Z[x] / (F): the
+    // pivot a sits in the last column, the other entries are -r^j / r^(n-1)
+    // mod a, and r = 0 (theta^(n-1) in the ideal) needs its own matrix.
     //
     // When F(r) = 0 mod a, f(theta) -> f(r) mod a is a well-defined surjective
     // ring map Z[theta] -> Z / a.  Its kernel is a O + (theta - r) O, since
@@ -1882,7 +1884,9 @@ bool IdealAccess::set_known_linear_two_generator(
 //     holds whatever beta is.
 //   - set_known_linear_two_generator_ideal(a, r): it checks F(r) = 0 mod a
 //     itself, so its closed form is the HNF of a O + (theta - r) O, the
-//     ideal set_known_two_generator_ideal(a, theta - r) stores.
+//     ideal set_known_two_generator_ideal(a, theta - r) stores.  It refuses
+//     every input it cannot confirm, so it does not rely on the class-group
+//     test named below, which does not call it.
 //   - multiply_integral_ideal_by_two_generator(I, a, beta): rows a H and
 //     H M_beta span a I + beta I = I (a O + beta O), an ideal whenever I is.
 //   - multiply_integral_ideal_by_element(I, x): the rows are x times the

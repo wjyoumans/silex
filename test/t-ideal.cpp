@@ -2475,6 +2475,22 @@ int test_known_linear_two_generator_matches_modular_hnf() {
     fmpz_neg(three.raw(), three.raw());
     assert(!silex::detail::set_known_linear_two_generator_ideal(
             equation_ideal, sflint::FmpzConstRef(three), sflint::FmpzConstRef(one)));
+
+    // Degree one, F = x - 3 (theta = 3): the HNF of 5 O + (theta - 3) O is
+    // [5], and the debug cross-check takes its n = 1 branch.
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -3);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, 1);
+    silex::Order line = silex::test::equation_order(field_by_polynomial(polynomial));
+    silex::Ideal line_ideal(line);
+    sflint::FmpzMat line_hnf(1, 1);
+    fmpz_set_ui(three.raw(), 3);
+    sflint::Fmpz five;
+    fmpz_set_ui(five.raw(), 5);
+    assert(silex::detail::set_known_linear_two_generator_ideal(
+                   line_ideal, sflint::FmpzConstRef(five), sflint::FmpzConstRef(three)) &&
+           line_ideal.get_hnf(sflint::FmpzMatRef(line_hnf)) &&
+           fmpz_equal_ui(fmpz_mat_entry(line_hnf.raw(), 0, 0), 5));
     return 0;
 }
 

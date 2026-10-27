@@ -103,11 +103,12 @@ accessor returns ``false`` when the quotient has an upper endpoint below
 one, since no positive integer then lies in the enclosure, instead of
 reporting an index.
 
-Four low-level ideal construction shortcuts live in the noninstalled
+Five low-level ideal construction shortcuts live in the noninstalled
 header ``src/ideal/ideal_access_internal.hpp``
 (``multiply_integral_ideal_by_two_generator``,
-``multiply_integral_ideal_by_element``, ``set_known_two_generator_ideal``, and
-``set_integral_ideal_known_hnf``).  All four accept caller-supplied
+``multiply_integral_ideal_by_element``, ``set_known_two_generator_ideal``,
+``set_known_linear_two_generator_ideal``, and
+``set_integral_ideal_known_hnf``).  All five accept caller-supplied
 generators or HNF data without re-deriving them.
 They set no certification label and are not proof gates; they are not part of
 the supported API.
