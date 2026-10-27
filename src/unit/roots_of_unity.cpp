@@ -3,18 +3,17 @@
 #include "../element/element_internal.hpp"
 
 #include <flint/fmpq_poly.h>
-#include <flint/fmpz_mod_poly.h>
-#include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
+#include <flint/nmod_poly.h>
+#include <flint/nmod_poly_factor.h>
 #include <flint/ulong_extras.h>
 
 #include <silex/flint/fmpq.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_factor.hpp>
-#include <silex/flint/fmpz_mod_ctx.hpp>
-#include <silex/flint/fmpz_mod_poly.hpp>
-#include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/flint/fmpz_poly.hpp>
+#include <silex/flint/nmod_poly.hpp>
+#include <silex/flint/nmod_poly_factor.hpp>
 #include <silex/signature.hpp>
 
 #include "unit_internal.hpp"
@@ -120,23 +119,37 @@ ulong cyclotomic_polynomial_index(const flint::FmpzPoly& polynomial) noexcept {
     return fmpz_poly_is_cyclotomic(polynomial.raw());
 }
 
-ulong factor_residue_degree_gcd(const flint::FmpzPoly& polynomial,
+// The gcd of the degrees of the irreducible factors of `polynomial` modulo
+// the prime p, or 0 when that reduction is constant or not squarefree.
+//
+// Source trace: reference 2.17.3 src/basemath/nffactor.c `guess_roots`
+// (lines 1999-2039) reduces T to a word-size Flx and reads the gcd from the
+// distinct-degree counts of `Flx_nbfact_by_degree` (FpX_factor.c, lines
+// 2329-2347), without splitting equal-degree factors.  Silex does the same
+// with FLINT's nmod_poly_factor_distinct_deg, whose d-th factor is the
+// product of the monic irreducible factors of degree d, so the degrees it
+// reports are exactly the distinct irreducible-factor degrees.  p is a word,
+// so no multiprecision modulus is needed.
+ulong factor_residue_degree_gcd(const fmpz_poly_struct* polynomial,
                                 ulong p) noexcept {
-    flint::FmpzModCtx ctx(p);
-    flint::FmpzModPoly reduced(ctx);
-    flint::FmpzModPolyFactor factorization(ctx);
-
-    fmpz_mod_poly_set_fmpz_poly(reduced.raw(), polynomial.raw(), ctx.raw());
-    if (fmpz_mod_poly_is_squarefree(reduced.raw(), ctx.raw()) == 0) {
+    flint::NmodPoly reduced(p);
+    fmpz_poly_get_nmod_poly(reduced.raw(), polynomial);
+    const slong degree = nmod_poly_degree(reduced.raw());
+    if (degree <= 0 || nmod_poly_is_squarefree(reduced.raw()) == 0) {
         return 0;
     }
-    fmpz_mod_poly_factor(factorization.raw(), reduced.raw(), ctx.raw());
+
+    // nmod_poly_factor_distinct_deg makes its own monic copy and writes one
+    // degree per nonconstant factor, at most `degree` of them.
+    flint::NmodPolyFactor factorization;
+    std::vector<slong> degrees(static_cast<std::size_t>(degree));
+    slong* degree_data = degrees.data();
+    nmod_poly_factor_distinct_deg(factorization.raw(), reduced.raw(),
+                                  &degree_data);
 
     ulong degree_gcd = 0;
     for (slong i = 0; i < factorization.raw()->num; ++i) {
-        const slong d =
-                fmpz_mod_poly_degree(factorization.raw()->poly + i,
-                                     ctx.raw());
+        const slong d = degrees[static_cast<std::size_t>(i)];
         if (d <= 0) {
             return 0;
         }
@@ -267,7 +280,7 @@ bool good_prime_root_bound(ulong& bound,
         if (fmpz_fdiv_ui(discriminant.raw(), p) == 0) {
             continue;
         }
-        const ulong degree_gcd = factor_residue_degree_gcd(polynomial, p);
+        const ulong degree_gcd = factor_residue_degree_gcd(polynomial.raw(), p);
         if (degree_gcd == 0) {
             continue;
         }
@@ -848,6 +861,14 @@ bool root_of_unity_generator(Element& generator,
 
 
 namespace detail {
+
+ulong residue_degree_gcd(const fmpz_poly_struct* polynomial,
+                         ulong p) noexcept {
+    if (polynomial == nullptr || p < 2) {
+        return 0;
+    }
+    return factor_residue_degree_gcd(polynomial, p);
+}
 
 ulong cyclotomic_defining_polynomial_index(const NumberField& field) noexcept {
     const nf_struct* raw = field.is_defined() ? field.raw_flint_field()

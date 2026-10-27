@@ -1,4 +1,7 @@
 #include <silex/flint/fmpq.hpp>
+#include <silex/flint/fmpz_mod_ctx.hpp>
+#include <silex/flint/fmpz_mod_poly.hpp>
+#include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/order.hpp>
 #include <silex/unit.hpp>
 
@@ -8,6 +11,8 @@
 
 #include <flint/arb.h>
 #include <flint/fmpq_poly.h>
+#include <flint/fmpz_mod_poly.h>
+#include <flint/fmpz_mod_poly_factor.h>
 #include <flint/fmpz_poly.h>
 #include <flint/nmod_poly.h>
 #include <flint/nmod_poly_factor.h>
@@ -2011,6 +2016,74 @@ int test_log_matrix_regulator_and_independence() {
     return 0;
 }
 
+// detail::residue_degree_gcd (the good-prime step of roots_of_unity, read
+// from nmod_poly_factor_distinct_deg) agrees with the gcd of the degrees of
+// the full fmpz_mod_poly_factor factorization, with 0 for a reduction that
+// is not squarefree, on every prime below 300 and on word-size primes near
+// 2^62 and 2^64.  Known values: x^4 + 1 is a product of two quadratics
+// mod 3 and splits mod 17; Phi_23 mod p is a product of factors of degree
+// ord_23(p), which is 11 for p = 2; x^2 + 1 = (x + 1)^2 mod 2.
+ulong generic_residue_degree_gcd(const sflint::FmpzPoly& polynomial,
+                                 ulong p) {
+    sflint::FmpzModCtx ctx(p);
+    sflint::FmpzModPoly reduced(ctx);
+    sflint::FmpzModPolyFactor factorization(ctx);
+    fmpz_mod_poly_set_fmpz_poly(reduced.raw(), polynomial.raw(), ctx.raw());
+    if (fmpz_mod_poly_degree(reduced.raw(), ctx.raw()) <= 0 ||
+        fmpz_mod_poly_is_squarefree(reduced.raw(), ctx.raw()) == 0) {
+        return 0;
+    }
+    fmpz_mod_poly_factor(factorization.raw(), reduced.raw(), ctx.raw());
+    ulong degree_gcd = 0;
+    for (slong i = 0; i < factorization.raw()->num; ++i) {
+        const slong d = fmpz_mod_poly_degree(factorization.raw()->poly + i,
+                                             ctx.raw());
+        assert(d > 0);
+        degree_gcd = n_gcd(degree_gcd, static_cast<ulong>(d));
+    }
+    return degree_gcd;
+}
+
+int test_residue_degree_gcd_matches_generic_factor() {
+    std::vector<sflint::FmpzPoly> polynomials(5);
+    const slong m3_m5_m7[] = {1201, 598, -524, -146, 69, 2, 4, -4, 1};
+    for (slong i = 0; i < 9; ++i) {
+        fmpz_poly_set_coeff_si(polynomials[0].raw(), i, m3_m5_m7[i]);
+    }
+    fmpz_poly_cyclotomic(polynomials[1].raw(), 23);
+    fmpz_poly_cyclotomic(polynomials[2].raw(), 8);
+    fmpz_poly_cos_minpoly(polynomials[3].raw(), 37);
+    fmpz_poly_set_coeff_si(polynomials[4].raw(), 0, 1);
+    fmpz_poly_set_coeff_si(polynomials[4].raw(), 2, 1);
+
+    std::vector<ulong> primes;
+    for (ulong p = 2; p < 300; p = n_nextprime(p, 1)) {
+        primes.push_back(p);
+    }
+    primes.push_back(n_nextprime(UWORD(1) << 62, 1));
+    primes.push_back(UWORD(18446744073709551557));  // largest 64-bit prime
+    assert(n_is_prime(primes.back()) != 0);
+
+    slong not_squarefree = 0;
+    for (const sflint::FmpzPoly& polynomial : polynomials) {
+        for (ulong p : primes) {
+            const ulong expected = generic_residue_degree_gcd(polynomial, p);
+            assert(silex::detail::residue_degree_gcd(polynomial.raw(), p) ==
+                   expected);
+            not_squarefree += expected == 0 ? 1 : 0;
+        }
+    }
+    assert(not_squarefree > 0);
+
+    assert(silex::detail::residue_degree_gcd(polynomials[2].raw(), 3) == 2);
+    assert(silex::detail::residue_degree_gcd(polynomials[2].raw(), 17) == 1);
+    assert(silex::detail::residue_degree_gcd(polynomials[1].raw(), 2) == 11);
+    assert(silex::detail::residue_degree_gcd(polynomials[4].raw(), 2) == 0);
+    assert(silex::detail::residue_degree_gcd(nullptr, 3) == 0);
+    assert(silex::detail::residue_degree_gcd(polynomials[0].raw(), 0) == 0);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -2027,6 +2100,7 @@ int main() {
     test_roots_of_unity_phi_reset();
     test_roots_of_unity_cyclotomic_shortcut();
     test_real_cyclotomic_polynomial_index();
+    test_residue_degree_gcd_matches_generic_factor();
     test_cyclotomic_defining_polynomial_splits();
     test_cyclotomic_field_units();
     test_real_cyclotomic_field_units();

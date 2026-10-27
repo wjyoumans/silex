@@ -133,6 +133,17 @@ Added
 Changed
 -------
 
+- The good-prime step of ``roots_of_unity`` reads the gcd of the residue
+  degrees above each prime from FLINT's word-size distinct-degree
+  factorization (``nmod_poly_factor_distinct_deg``), as PARI's ``guess_roots``
+  reads it from ``Flx_nbfact_by_degree``, instead of a full multiprecision
+  ``fmpz_mod_poly`` factorization.  The gcd is the same for every prime, so
+  ``w`` and its generator are unchanged; ``grh`` outputs, including ``w``,
+  are identical on 23 corpus rows.  Callgrind Ir per prime drops from about
+  478k to 74k, and the ``grh`` class-unit computation of
+  ``multiquadratic_m3_m5_m7`` (busy machine) drops by 3.22% (0.80% on
+  ``multiquadratic_m23_m31_m47``; ``cyclotomic_23_phi22`` is unchanged).
+
 - The stable scan's columns, when they reduce the distinct unit factors
   modulo ``q``, now reduce each stored coefficient and denominator inline
   when it is a word-size integer smaller in magnitude than ``q``, and they

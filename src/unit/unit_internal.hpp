@@ -28,6 +28,13 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
                               const NumberField& field,
                               ulong bound) noexcept;
 
+// The gcd of the degrees of the irreducible factors of `polynomial` modulo
+// the prime `p`, read from FLINT's distinct-degree factorization as in the
+// good-prime step of roots_of_unity; 0 when the reduction is constant or not
+// squarefree, when `polynomial` is null, or when p < 2.  Exposed for tests.
+ulong residue_degree_gcd(const fmpz_poly_struct* polynomial,
+                         ulong p) noexcept;
+
 // The index n when the defining polynomial of `field` is exactly the
 // cyclotomic polynomial Phi_n (integral, with Phi_n's coefficients), and 0
 // otherwise, including for translates Phi_n(+-x + c) that are not themselves a
