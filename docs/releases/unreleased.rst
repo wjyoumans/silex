@@ -241,6 +241,22 @@ Changed
   ``hexadecic_x16_minus_x_minus_1_proven`` and 3.58% on
   ``cyclotomic_32_phi16``.
 
+- The same closed form now covers factors of degree ``f > 1``: for a monic
+  factor ``g`` of the defining polynomial modulo ``p`` on an equation order,
+  ``decompose_prime`` writes the Hermite normal form of ``pO + g(theta)O``
+  directly.  With ``u = x^-1`` in ``F_p[x] / (g)``, the rows are
+  ``e_j - sum_k w_(j,k) e_(n-f+k)`` for ``j < n - f``, where
+  ``u^(n-f-j) = sum_k w_(j,k) x^k``, followed by ``p e_(n-f+k)`` for
+  ``k < f``.  It applies for every ramification index.  Inputs the closed
+  form cannot confirm (``g`` not dividing the polynomial modulo ``p``, or
+  ``g(0) = 0`` modulo ``p``) and other orders take the previous route.  The
+  stored matrix is the same, so ``grh`` outputs are unchanged: class group,
+  unit group and labels are identical on ``nonadecic_x19_minus_x_minus_1``
+  and ``hexadecic_x16_minus_x_minus_1``.  Callgrind Ir of the whole ``grh``
+  process (RelWithDebInfo with profiling, busy machine) drops by 6.60% on
+  ``x^19 - x - 1`` (867.34M to 810.08M) and by 2.46% on ``x^16 - x - 1``
+  (409.23M to 399.17M).
+
 - ``IdealFactorization::factor`` no longer multiplies the prime powers back
   together and compares the product with the input in release builds.  It
   now checks norm accounting instead: for every rational prime ``p`` dividing

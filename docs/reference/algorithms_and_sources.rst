@@ -735,8 +735,12 @@ anchors.  Dedekind--Kummer factor data is interpreted in the correct integral
 generator, not silently relabeled as polynomial-generator data.  On an equation
 order, a degree-one Dedekind--Kummer prime ``(p, theta - r)`` stores the
 closed-form HNF of ``pO + (theta - r)O``, traced to Hecke
-``Ideal.jl:basis_mat_prime_deg_1``; any input the closed form cannot confirm
-takes the generic two-generator route.
+``Ideal.jl:basis_mat_prime_deg_1``.  A Dedekind--Kummer prime
+``(p, g(theta))`` with a monic factor ``g`` of degree ``f > 1`` stores the
+analogous closed-form HNF of ``pO + g(theta)O``: ``Z[theta] / (p, g(theta))``
+is ``F_p[x] / (g)`` (Cohen, GTM 138, Theorem 4.8.13 and its proof), on which
+``x^(n-f), ..., x^(n-1)`` are a basis because ``x`` is a unit.  Any input
+either closed form cannot confirm takes the generic two-generator route.
 
 When ``p`` divides the index of the maximal order, ``decompose_prime`` splits
 the etale algebra ``O/(p, I_p)``, where ``I_p`` is the ``p``-radical (equal
