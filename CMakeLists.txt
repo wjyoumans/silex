@@ -843,6 +843,8 @@ if(SILEX_BUILD_TESTS)
 
     add_executable(t-silex-factored-element test/t-factored-element.cpp)
     target_link_libraries(t-silex-factored-element PRIVATE Silex::silex)
+    target_include_directories(t-silex-factored-element PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
     silex_apply_target_warnings(t-silex-factored-element)
     add_test(NAME silex-factored-element COMMAND t-silex-factored-element)
     list(APPEND SILEX_TEST_NAMES silex-factored-element)

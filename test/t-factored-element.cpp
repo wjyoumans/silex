@@ -9,6 +9,8 @@
 #include <silex/flint/fmpz_vec.hpp>
 #include <silex/number_field.hpp>
 
+#include "element/element_internal.hpp"
+#include "factored_element/factored_power_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
@@ -411,6 +413,130 @@ void check_definite_non_powers() noexcept {
     assert(input.is_power_si(is_power, root, 3,
                              silex::FactoredRootStrategy::reduced));
     assert(!is_power);
+}
+
+// detail::factored_element_is_power_si tells rejected arguments (`error`)
+// from a valid test that reached no answer (`undecided`); a `decided`
+// answer is a power with its root or a proved non-power.  The public
+// is_power_si answers exactly when the variant decides, with the same
+// outputs.  Over Q(zeta_25), degree 20, with exponent 3:
+// (1 + zeta)(1 + zeta)^2 is a cube whose leftover only the Hensel lift
+// roots, and 2^3 (1 + zeta) is a non-cube that the residue screen
+// disproves (both as in check_reduced_root_high_degree_screen).  Under a
+// SaturationLiftLimit covering every exponent the lift is unsupported in
+// this degree, so the cube is undecided while the residue disproof still
+// decides the non-cube.
+void check_three_way_power_result() noexcept {
+    using silex::detail::FactoredPowerResult;
+    using silex::detail::factored_element_is_power_si;
+
+    sflint::FmpqPoly polynomial;
+    for (slong i = 0; i <= 20; i += 5) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, i, 1);
+    }
+    const silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    const silex::NumberField other_field = degree_one_field();
+    silex::Element zeta(field);
+    silex::Element one_plus_zeta(field);
+    silex::Element two(field);
+    assert(zeta.gen());
+    assert(one_plus_zeta.set_si(1));
+    assert(one_plus_zeta.add(one_plus_zeta, zeta));
+    assert(two.set_si(2));
+
+    silex::FactoredElement cube(field);
+    assert(cube.push(one_plus_zeta, 1));
+    assert(cube.push(one_plus_zeta, 2));
+    silex::Element cube_value(field);
+    assert(cube.evaluate(cube_value));
+    silex::FactoredElement non_cube(field);
+    assert(non_cube.push(two, 3));
+    assert(non_cube.push(one_plus_zeta, 1));
+
+    const silex::FactoredRootStrategy strategies[] = {
+            silex::FactoredRootStrategy::reduced,
+            silex::FactoredRootStrategy::compact};
+    for (const silex::FactoredRootStrategy strategy : strategies) {
+        // A power, with an exact root.
+        bool is_power = false;
+        silex::FactoredElement root(field);
+        assert(factored_element_is_power_si(is_power, root, cube, 3,
+                                            strategy) ==
+               FactoredPowerResult::decided);
+        assert(is_power);
+        silex::FactoredElement check(field);
+        silex::Element check_value(field);
+        assert(check.pow_si(root, 3));
+        assert(check.evaluate(check_value));
+        assert(check_value.equal(cube_value));
+        bool public_power = false;
+        silex::FactoredElement public_root(field);
+        assert(cube.is_power_si(public_power, public_root, 3, strategy));
+        assert(public_power);
+
+        // A proved non-power.
+        is_power = true;
+        assert(factored_element_is_power_si(is_power, root, non_cube, 3,
+                                            strategy) ==
+               FactoredPowerResult::decided);
+        assert(!is_power);
+        public_power = true;
+        assert(non_cube.is_power_si(public_power, public_root, 3, strategy));
+        assert(!public_power);
+
+        // Undecided: valid arguments, no answer; the outputs are untouched.
+        {
+            silex::detail::SaturationLiftLimit limit(
+                    silex::detail::SaturationLiftExponents::all);
+            is_power = true;
+            silex::FactoredElement untouched(field);
+            assert(untouched.push(two, 1));
+            assert(factored_element_is_power_si(is_power, untouched, cube, 3,
+                                                strategy) ==
+                   FactoredPowerResult::undecided);
+            assert(is_power);
+            assert(untouched.length() == 1);
+            assert(!cube.is_power_si(public_power, public_root, 3, strategy));
+
+            // The residue disproof does not need the lift.
+            is_power = true;
+            assert(factored_element_is_power_si(is_power, root, non_cube, 3,
+                                                strategy) ==
+                   FactoredPowerResult::decided);
+            assert(!is_power);
+        }
+
+        // Errors: rejected arguments.
+        is_power = true;
+        assert(factored_element_is_power_si(is_power, root, cube, 0,
+                                            strategy) ==
+               FactoredPowerResult::error);
+        assert(factored_element_is_power_si(is_power, root, cube, -3,
+                                            strategy) ==
+               FactoredPowerResult::error);
+        silex::FactoredElement foreign_root(other_field);
+        assert(factored_element_is_power_si(is_power, foreign_root, cube, 3,
+                                            strategy) ==
+               FactoredPowerResult::error);
+        silex::FactoredElement undefined_input;
+        assert(factored_element_is_power_si(is_power, root, undefined_input,
+                                            3, strategy) ==
+               FactoredPowerResult::error);
+        silex::FactoredElement undefined_root;
+        assert(factored_element_is_power_si(is_power, undefined_root, cube, 3,
+                                            strategy) ==
+               FactoredPowerResult::error);
+        assert(is_power);
+        assert(!cube.is_power_si(public_power, public_root, 0, strategy));
+    }
+    bool is_power = true;
+    silex::FactoredElement root(field);
+    assert(factored_element_is_power_si(
+                   is_power, root, cube, 3,
+                   static_cast<silex::FactoredRootStrategy>(99)) ==
+           FactoredPowerResult::error);
+    assert(is_power);
 }
 
 }  // namespace
@@ -1125,6 +1251,7 @@ int main() {
     check_definite_non_powers();
     check_reduced_root_factored_norm();
     check_reduced_root_high_degree_screen();
+    check_three_way_power_result();
 
     silex::NumberField field = degree_one_field();
     silex::NumberField other_field = degree_one_field();

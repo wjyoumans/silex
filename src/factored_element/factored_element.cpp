@@ -3,6 +3,7 @@
 #include <silex/flint/fmpz_vec.hpp>
 #include "../element/element_internal.hpp"
 #include "factor_screen_hash_internal.hpp"
+#include "factored_power_internal.hpp"
 #include "../order_unit/precision_cap_internal.hpp"
 
 #include <flint/arb.h>
@@ -604,6 +605,27 @@ struct FactoredElement::FactorList {
     std::vector<FactorPower<Element>> entries;
     // The tag of each entry, in the same order.
     std::vector<FactorTag> tags;
+
+    // compact.root_base_status(root, diagnostics) for
+    // detail::FactoredElementAccess::is_power_si: `unsupported` is
+    // `undecided`, `not_power` and `power` are `decided` with `is_power`
+    // set (and `root` written on `power`, as root_base_status does).
+    // CompactElement befriends FactoredElement, and a class nested in a
+    // friend shares that access ([class.friend]/2); the access class does
+    // not.
+    static detail::FactoredPowerResult compact_root_base(
+            bool& is_power,
+            FactoredElement& root,
+            const CompactElement& compact,
+            const DiagnosticsContext* diagnostics) noexcept {
+        const CompactElement::RootStatus status =
+                compact.root_base_status(root, diagnostics);
+        if (status == CompactElement::RootStatus::unsupported) {
+            return detail::FactoredPowerResult::undecided;
+        }
+        is_power = status == CompactElement::RootStatus::power;
+        return detail::FactoredPowerResult::decided;
+    }
 };
 
 FactoredElement::FactoredElement(const NumberField& parent) noexcept {
@@ -1208,45 +1230,70 @@ bool FactoredElement::is_power_si(
         slong exponent,
         FactoredRootStrategy strategy,
         const DiagnosticsContext* diagnostics) const noexcept {
+    return detail::factored_element_is_power_si(
+                   is_power, root, *this, exponent, strategy,
+                   diagnostics) == detail::FactoredPowerResult::decided;
+}
+
+detail::FactoredPowerResult detail::factored_element_is_power_si(
+        bool& is_power,
+        FactoredElement& root,
+        const FactoredElement& input,
+        slong exponent,
+        FactoredRootStrategy strategy,
+        const DiagnosticsContext* diagnostics) noexcept {
+    return FactoredElementAccess::is_power_si(
+            is_power, root, input, exponent, strategy, diagnostics);
+}
+
+// Argument rejections are `error`; every later failure is `undecided`
+// (factored_power_internal.hpp).
+detail::FactoredPowerResult detail::FactoredElementAccess::is_power_si(
+        bool& is_power,
+        FactoredElement& root,
+        const FactoredElement& input,
+        slong exponent,
+        FactoredRootStrategy strategy,
+        const DiagnosticsContext* diagnostics) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                         "factored.is_power_si");
-    if (!is_defined() || !root.is_defined() || exponent <= 0 ||
-        !parent_.has_same_data(root.parent_)) {
+    if (!input.is_defined() || !root.is_defined() || exponent <= 0 ||
+        !input.parent_.has_same_data(root.parent_)) {
         SILEX_LOG(diagnostics, DiagnosticsModule::element, LogLevel::detail,
                   "factored power check rejected");
-        return false;
+        return FactoredPowerResult::error;
     }
 
     if (strategy == FactoredRootStrategy::automatic ||
         strategy == FactoredRootStrategy::reduced) {
         strategy = FactoredRootStrategy::reduced;
     } else if (strategy != FactoredRootStrategy::compact) {
-        return false;
+        return FactoredPowerResult::error;
     }
 
     if (exponent == 1) {
-        FactoredElement candidate(parent_);
-        if (!candidate.set(*this)) {
-            return false;
+        FactoredElement candidate(input.parent_);
+        if (!candidate.set(input)) {
+            return FactoredPowerResult::undecided;
         }
         is_power = true;
         root.swap(candidate);
-        return true;
+        return FactoredPowerResult::decided;
     }
 
     if (strategy == FactoredRootStrategy::compact) {
         SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
                             "factored.compact");
-        FactoredElement structural(parent_);
-        FactoredElement leftover(parent_);
+        FactoredElement structural(input.parent_);
+        FactoredElement leftover(input.parent_);
         // reference's factored-element is_power first removes the formal
         // exponent quotient and only constructs a compact presentation for
         // the residual factors.
         {
             SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                                 "factored.compact_split");
-            if (!split_formal_power(structural, leftover, *this, exponent)) {
-                return false;
+            if (!split_formal_power(structural, leftover, input, exponent)) {
+                return FactoredPowerResult::undecided;
             }
         }
         if (leftover.length() == 0) {
@@ -1255,59 +1302,65 @@ bool FactoredElement::is_power_si(
                     "factored.compact_structural_root");
             is_power = true;
             root.swap(structural);
-            return true;
+            return FactoredPowerResult::decided;
         }
 
-        CompactElement compact(parent_);
+        CompactElement compact(input.parent_);
         if (!compact.set_factored_element(leftover, exponent, diagnostics)) {
-            return false;
+            return FactoredPowerResult::undecided;
         }
-        FactoredElement leftover_root(parent_);
-        const CompactElement::RootStatus status =
-                compact.root_base_status(leftover_root, diagnostics);
-        if (status == CompactElement::RootStatus::unsupported) {
-            return false;
+        FactoredElement leftover_root(input.parent_);
+        bool leftover_is_power = false;
+        const FactoredPowerResult status =
+                FactoredElement::FactorList::compact_root_base(
+                        leftover_is_power, leftover_root, compact,
+                        diagnostics);
+        if (status != FactoredPowerResult::decided) {
+            return status;
         }
-        if (status == CompactElement::RootStatus::not_power) {
+        if (!leftover_is_power) {
             is_power = false;
-            return true;
+            return FactoredPowerResult::decided;
         }
 
-        FactoredElement candidate(parent_);
+        FactoredElement candidate(input.parent_);
         if (!candidate.multiply(structural, leftover_root)) {
-            return false;
+            return FactoredPowerResult::undecided;
         }
         is_power = true;
         root.swap(candidate);
-        return true;
+        return FactoredPowerResult::decided;
     }
 
     if (exponent == 2) {
         SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::element,
                             "factored.square_root");
-        return is_square(is_power, root, diagnostics);
+        // The arguments were checked above, so a failure is undecided.
+        return input.is_square(is_power, root, diagnostics)
+                       ? FactoredPowerResult::decided
+                       : FactoredPowerResult::undecided;
     }
 
-    FactoredElement structural(parent_);
-    FactoredElement leftover(parent_);
-    structural.reserve_factors(stored_factors().size());
-    leftover.reserve_factors(stored_factors().size());
+    FactoredElement structural(input.parent_);
+    FactoredElement leftover(input.parent_);
+    structural.reserve_factors(input.stored_factors().size());
+    leftover.reserve_factors(input.stored_factors().size());
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.reduced_split");
-        const auto entries = stored_factors();
+        const auto entries = input.stored_factors();
         for (std::size_t k = 0; k < entries.size(); ++k) {
             slong quotient = 0;
             slong remainder = 0;
             floor_divrem_positive_slong(
                     quotient, remainder, entries[k].exponent, exponent);
             if (quotient != 0 &&
-                !detail::FactoredElementAccess::push_factor(structural, *this, k, quotient)) {
-                return false;
+                !detail::FactoredElementAccess::push_factor(structural, input, k, quotient)) {
+                return FactoredPowerResult::undecided;
             }
             if (remainder != 0 &&
-                !detail::FactoredElementAccess::push_factor(leftover, *this, k, remainder)) {
-                return false;
+                !detail::FactoredElementAccess::push_factor(leftover, input, k, remainder)) {
+                return FactoredPowerResult::undecided;
             }
         }
     }
@@ -1316,7 +1369,7 @@ bool FactoredElement::is_power_si(
         structural.normalize();
         is_power = true;
         root.swap(structural);
-        return true;
+        return FactoredPowerResult::decided;
     }
 
     // Residue screen on the factored leftover.  Here exponent >= 3, and in
@@ -1337,15 +1390,15 @@ bool FactoredElement::is_power_si(
                             "factored.reduced_leftover_residue_screen");
         bool screened_power = true;
         if (detail::factored_power_residue_disproves(
-                    screened_power, parent_, leftover.stored_factors(),
+                    screened_power, input.parent_, leftover.stored_factors(),
                     exponent, diagnostics)) {
             is_power = false;
-            return true;
+            return FactoredPowerResult::decided;
         }
     }
 
-    Element leftover_value(parent_);
-    Element leftover_root(parent_);
+    Element leftover_value(input.parent_);
+    Element leftover_root(input.parent_);
     flint::Fmpz exponent_fmpz;
     fmpz_set_si(exponent_fmpz.raw(), exponent);
     bool factor_is_power = false;
@@ -1353,7 +1406,7 @@ bool FactoredElement::is_power_si(
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.reduced_leftover_evaluate");
         if (!leftover.evaluate(leftover_value)) {
-            return false;
+            return FactoredPowerResult::undecided;
         }
     }
     {
@@ -1366,29 +1419,29 @@ bool FactoredElement::is_power_si(
                                       leftover_value,
                                       flint::FmpzConstRef(exponent_fmpz),
                                       &norm_source, diagnostics)) {
-            return false;
+            return FactoredPowerResult::undecided;
         }
     }
 
     if (!factor_is_power) {
         is_power = false;
-        return true;
+        return FactoredPowerResult::decided;
     }
 
-    FactoredElement factor_root(parent_);
-    FactoredElement candidate(parent_);
+    FactoredElement factor_root(input.parent_);
+    FactoredElement candidate(input.parent_);
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::element,
                             "factored.reduced_combine_root");
         if (!factor_root.set_element(leftover_root) ||
             !candidate.multiply(structural, factor_root)) {
-            return false;
+            return FactoredPowerResult::undecided;
         }
     }
 
     is_power = true;
     root.swap(candidate);
-    return true;
+    return FactoredPowerResult::decided;
 }
 
 const Element* FactoredElement::factor(slong index) const noexcept {

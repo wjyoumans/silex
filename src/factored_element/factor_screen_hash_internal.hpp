@@ -3,6 +3,8 @@
 #include <silex/element.hpp>
 #include <silex/factored_element.hpp>
 
+#include "factored_power_internal.hpp"
+
 #include <flint/flint.h>
 #include <flint/nf.h>
 
@@ -113,6 +115,16 @@ public:
             slong precision,
             const DiagnosticsContext* diagnostics,
             FactorOriginPairCache* pairs) noexcept;
+
+    // detail::factored_element_is_power_si (factored_power_internal.hpp),
+    // here for FactoredElement's private storage.
+    static FactoredPowerResult is_power_si(
+            bool& is_power,
+            FactoredElement& root,
+            const FactoredElement& input,
+            slong exponent,
+            FactoredRootStrategy strategy,
+            const DiagnosticsContext* diagnostics) noexcept;
 
 private:
     friend class silex::FactoredElement;

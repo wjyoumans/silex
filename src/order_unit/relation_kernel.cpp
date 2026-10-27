@@ -4,6 +4,7 @@
 
 #include "../class_group/class_group_internal.hpp"
 #include "../element/element_internal.hpp"
+#include "../factored_element/factored_power_internal.hpp"
 #include "../order/order_internal.hpp"
 #include "../residue_field/residue_field_internal.hpp"
 
@@ -591,11 +592,16 @@ bool relation_power_root(bool& is_relation,
             if (compact_result == detail::CompactPowerRootResult::error) {
                 return false;
             }
+            // The factored test fails here on `error` and on `undecided`
+            // alike, as it did before the two were told apart: treating an
+            // undecided candidate as a non-power would move on to the
+            // reduced test below instead of failing.
             if (compact_result != detail::CompactPowerRootResult::decided &&
-                !candidate.is_power_si(
-                        is_power, root, exponent_si,
+                detail::factored_element_is_power_si(
+                        is_power, root, candidate, exponent_si,
                         FactoredRootStrategy::compact,
-                        group.diagnostics())) {
+                        group.diagnostics()) !=
+                        detail::FactoredPowerResult::decided) {
                 return false;
             }
         }
@@ -1076,9 +1082,21 @@ KernelRowRootResult kernel_row_root(
     if (compact_result == detail::CompactPowerRootResult::undecided) {
         SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.kernel_row_root_compact_unavailable");
-        if (!product.is_power_si(is_power, candidate, exponent,
-                                 FactoredRootStrategy::reduced,
-                                 group.diagnostics())) {
+        const detail::FactoredPowerResult fallback_result =
+                detail::factored_element_is_power_si(
+                        is_power, candidate, product, exponent,
+                        FactoredRootStrategy::reduced, group.diagnostics());
+        if (fallback_result == detail::FactoredPowerResult::error) {
+            // Rejected arguments, not an undecided root: a rescan would
+            // pass the same ones, so fail closed at once, as on a compact
+            // error.  The compact routine above accepted the same product,
+            // root and exponent, so valid callers do not reach this.
+            SILEX_PROFILE_EVENT(group.diagnostics(),
+                                DiagnosticsModule::unit_group,
+                                "unit_group.kernel_row_root_fallback_error");
+            return KernelRowRootResult::error;
+        }
+        if (fallback_result == detail::FactoredPowerResult::undecided) {
             SILEX_PROFILE_EVENT(group.diagnostics(),
                                 DiagnosticsModule::unit_group,
                                 "unit_group.kernel_row_root_unavailable");

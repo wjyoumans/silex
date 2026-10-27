@@ -672,7 +672,8 @@ private:
 // could decide whether the row product is an l-th power.  `error`: invalid
 // arguments, an unusable kernel width, a failure building the row product or
 // copying the root, or an error (not an undecided result) from
-// compact_unit_presentation_power_root; callers fail closed at once instead
+// compact_unit_presentation_power_root or from the factored fallback
+// (detail::factored_element_is_power_si); callers fail closed at once instead
 // of treating the row as undecided.  `deferred`: only with
 // KernelRowRootMode::defer_undecidable, the row was not tested (see below);
 // callers treat it like `undecided`.
