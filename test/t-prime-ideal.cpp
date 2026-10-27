@@ -4605,6 +4605,211 @@ int test_factored_value_nmod_matches_fmpz_route_large() {
     return 0;
 }
 
+// fmpz_get_nmod_fast, whose inline reduction covers word-size values of
+// magnitude below n, gives the residue ::fmpz_get_nmod gives for zero,
+// positive and negative values on both sides of n and of the word-size
+// limit COEFF_MAX, including multiword values, at moduli from 2 to just
+// below 2^64.
+int test_fmpz_get_nmod_fast_matches_flint() {
+    const ulong moduli[] = {2UL,
+                            3UL,
+                            7UL,
+                            1000003UL,
+                            (UWORD(1) << 61) - 1,
+                            static_cast<ulong>(COEFF_MAX),
+                            static_cast<ulong>(COEFF_MAX) + 1,
+                            UWORD(18446744073709551557),
+                            ~UWORD(0)};
+    slong checked = 0;
+    slong multiword = 0;
+    for (const ulong n : moduli) {
+        nmod_t mod;
+        nmod_init(&mod, n);
+        std::vector<sflint::Fmpz> values;
+        const auto push_ui = [&values](ulong magnitude, ulong offset,
+                                       bool add) {
+            for (const bool negative : {false, true}) {
+                sflint::Fmpz value;
+                fmpz_set_ui(value.raw(), magnitude);
+                if (add) {
+                    fmpz_add_ui(value.raw(), value.raw(), offset);
+                } else {
+                    fmpz_sub_ui(value.raw(), value.raw(), offset);
+                }
+                if (negative) {
+                    fmpz_neg(value.raw(), value.raw());
+                }
+                values.push_back(std::move(value));
+            }
+        };
+        for (const ulong small : {0UL, 1UL, 2UL, 5UL, 255UL}) {
+            push_ui(small, 0, true);
+        }
+        for (const ulong offset : {0UL, 1UL, 2UL}) {
+            push_ui(n, offset, true);
+            if (offset < n) {
+                push_ui(n, offset, false);
+            }
+            push_ui(static_cast<ulong>(COEFF_MAX), offset, true);
+            push_ui(static_cast<ulong>(COEFF_MAX), offset, false);
+            push_ui(~UWORD(0), offset, false);
+        }
+        sflint::Fmpz huge;
+        fmpz_set_str(huge.raw(), "-340282366920938463463374607431768211457",
+                     10);
+        values.push_back(std::move(huge));
+        sflint::Fmpz multiple;
+        fmpz_set_ui(multiple.raw(), n);
+        fmpz_mul_2exp(multiple.raw(), multiple.raw(), 80);
+        values.push_back(std::move(multiple));
+
+        for (const sflint::Fmpz& value : values) {
+            assert(silex::detail::fmpz_get_nmod_fast(value.raw(), mod) ==
+                   ::fmpz_get_nmod(value.raw(), mod));
+            if (COEFF_IS_MPZ(*value.raw())) {
+                ++multiword;
+            }
+            ++checked;
+        }
+    }
+    assert(multiword > 0 && multiword < checked);
+    return 0;
+}
+
+// pow_mod_abs_slong_ui, which returns a base below the modulus directly for
+// exponents 1 and -1, gives n_powmod2_ui_preinv(base, |exponent|) for every
+// base, including bases at or above the modulus, and for exponents 0, +-1,
+// other small values and the extremes; it fails only for the minimum slong.
+int test_pow_mod_abs_slong_ui_matches_flint() {
+    const ulong moduli[] = {2UL, 3UL, 13UL, 1000003UL, (UWORD(1) << 61) - 1,
+                            UWORD(18446744073709551557), ~UWORD(0)};
+    const slong exponents[] = {0,
+                               1,
+                               -1,
+                               2,
+                               -2,
+                               3,
+                               -17,
+                               WORD_MAX,
+                               -WORD_MAX,
+                               WORD_MIN};
+    for (const ulong n : moduli) {
+        const ulong n_inverse = n_preinvert_limb(n);
+        const ulong bases[] = {0UL,       1UL,       2UL,           n / 2,
+                               n - 1,     n,         n + 1 == 0 ? 7 : n + 1,
+                               2 * n + 3, ~UWORD(0), ~UWORD(0) - 1};
+        for (const ulong base : bases) {
+            for (const slong exponent : exponents) {
+                ulong value = 12345;
+                const bool ok = silex::detail::pow_mod_abs_slong_ui(
+                        value, base, exponent, n, n_inverse);
+                if (exponent == WORD_MIN) {
+                    assert(!ok);
+                    continue;
+                }
+                const ulong magnitude =
+                        exponent < 0 ? static_cast<ulong>(-exponent)
+                                     : static_cast<ulong>(exponent);
+                assert(ok);
+                assert(value == n_powmod2_ui_preinv(base, magnitude, n,
+                                                    n_inverse));
+            }
+        }
+    }
+    return 0;
+}
+
+// FactoredElementsNmodReduction reduces every stored coefficient and
+// denominator through fmpz_get_nmod_fast.  For factors whose stored values
+// lie on both sides of p and of the word-size limit, positive, negative,
+// zero and multiword, the reduced evaluation agrees with the fmpz route
+// factored_value_at_degree_one_root, success and residue alike, for
+// exponents 1, -1 and others.
+int test_factored_value_nmod_reduction_boundary_coefficients() {
+    sflint::FmpqPoly cubic;
+    poly_x3_minus(cubic, 2);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(cubic));
+    const slong exponents[] = {1, -1, 2, -3};
+    slong checked = 0;
+    slong failures = 0;
+    for (const ulong p : {3UL, 1000003UL, (UWORD(1) << 61) - 1,
+                          UWORD(18446744073709551557)}) {
+        sflint::Fmpz p_fmpz;
+        fmpz_set_ui(p_fmpz.raw(), p);
+        std::vector<sflint::Fmpz> values;
+        for (const slong offset : {0L, 1L, -1L}) {
+            for (const bool negative : {false, true}) {
+                sflint::Fmpz near_p;
+                fmpz_set_ui(near_p.raw(), p);
+                fmpz_add_si(near_p.raw(), near_p.raw(), offset);
+                sflint::Fmpz near_limit;
+                fmpz_set_si(near_limit.raw(), COEFF_MAX);
+                fmpz_add_si(near_limit.raw(), near_limit.raw(), offset);
+                if (negative) {
+                    fmpz_neg(near_p.raw(), near_p.raw());
+                    fmpz_neg(near_limit.raw(), near_limit.raw());
+                }
+                values.push_back(std::move(near_p));
+                values.push_back(std::move(near_limit));
+            }
+        }
+        for (const slong small : {0L, 1L, -1L, 2L, -5L}) {
+            sflint::Fmpz value;
+            fmpz_set_si(value.raw(), small);
+            values.push_back(std::move(value));
+        }
+        const std::size_t count = values.size();
+        const slong denominators[] = {1, 3, 7, COEFF_MAX};
+        silex::detail::FactoredElementsNmodReduction reduction;
+        for (std::size_t j = 0; j < count; ++j) {
+            sflint::FmpqPoly polynomial;
+            for (slong i = 0; i < 3; ++i) {
+                const sflint::Fmpz& coefficient =
+                        values[(j + 5 * static_cast<std::size_t>(i)) % count];
+                ::fmpq_poly_set_coeff_fmpz(polynomial.raw(), i,
+                                           coefficient.raw());
+            }
+            sflint::Fmpz denominator;
+            fmpz_set_si(denominator.raw(), denominators[j % 4]);
+            ::fmpq_poly_scalar_div_fmpz(polynomial.raw(), polynomial.raw(),
+                                        denominator.raw());
+            silex::Element factor(field);
+            assert(factor.set_fmpq_poly(
+                    sflint::FmpqPolyConstRef(polynomial)));
+            for (const slong exponent : exponents) {
+                silex::FactoredElement element(field);
+                assert(element.push(factor, exponent));
+                reduction.index(std::span<const silex::FactoredElement>(
+                        &element, 1));
+                reduction.reduce(p);
+                for (const ulong root : {0UL, 1UL, 2UL, p - 1, p / 3}) {
+                    sflint::Fmpz root_fmpz;
+                    fmpz_set_ui(root_fmpz.raw(), root);
+                    sflint::Fmpz expected;
+                    const bool expected_ok =
+                            silex::detail::factored_value_at_degree_one_root(
+                                    expected, element,
+                                    sflint::FmpzConstRef(p_fmpz),
+                                    sflint::FmpzConstRef(root_fmpz));
+                    ulong value = 0;
+                    assert(reduction.values_at_degree_one_root(
+                                   std::span<ulong>(&value, 1), root) ==
+                           expected_ok);
+                    if (expected_ok) {
+                        assert(fmpz_cmp_ui(expected.raw(), value) == 0);
+                    } else {
+                        ++failures;
+                    }
+                    ++checked;
+                }
+            }
+        }
+    }
+    assert(failures > 0 && failures < checked);
+    return 0;
+}
+
 // Reverse misuse direction: an alpha-convention prime keeps that convention
 // after its order is marked maximal, for reduce() and valuation (which
 // needs the maximal marking, so it is checked afterwards).  For d = 3
@@ -5984,6 +6189,9 @@ int main(int argc, char** argv) {
     assert(test_factored_value_nmod_matches_fmpz_route_large() == 0);
     assert(test_factored_values_nmod_shared_factors() == 0);
     assert(test_factored_value_nmod_reduction_undefined() == 0);
+    assert(test_fmpz_get_nmod_fast_matches_flint() == 0);
+    assert(test_pow_mod_abs_slong_ui_matches_flint() == 0);
+    assert(test_factored_value_nmod_reduction_boundary_coefficients() == 0);
     assert(test_alpha_convention_kept_after_marking_maximal() == 0);
     assert(test_prime_ideal_inverse_matches_invert() == 0);
     assert(test_prime_ideal_inverse_declines_outside_contract() == 0);

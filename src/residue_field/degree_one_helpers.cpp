@@ -20,6 +20,29 @@
 #include <silex/flint/fmpq.hpp>
 
 namespace silex::detail {
+
+bool pow_mod_abs_slong_ui(ulong& out,
+                          ulong base,
+                          slong exponent,
+                          ulong modulus,
+                          ulong modulus_inverse) noexcept {
+    // For |exponent| = 1 and base < modulus, n_powmod2_ui_preinv returns
+    // base unchanged; every other input takes it.
+    if ((exponent == 1 || exponent == -1) && base < modulus) {
+        out = base;
+        return true;
+    }
+    if (exponent < 0) {
+        if (exponent == std::numeric_limits<slong>::min()) {
+            return false;
+        }
+        exponent = -exponent;
+    }
+    out = n_powmod2_ui_preinv(base, static_cast<ulong>(exponent), modulus,
+                              modulus_inverse);
+    return true;
+}
+
 namespace {
 
 class NmodPoly {
@@ -81,21 +104,6 @@ bool pow_mod_abs_slong(flint::Fmpz& out,
     return true;
 }
 
-bool pow_mod_abs_slong_ui(ulong& out,
-                          ulong base,
-                          slong exponent,
-                          ulong modulus,
-                          ulong modulus_inverse) noexcept {
-    if (exponent < 0) {
-        if (exponent == std::numeric_limits<slong>::min()) {
-            return false;
-        }
-        exponent = -exponent;
-    }
-    out = n_powmod2_ui_preinv(base, static_cast<ulong>(exponent), modulus,
-                              modulus_inverse);
-    return true;
-}
 
 // The stored form of `value` in `field`: the integer polynomial num(x) over
 // the positive integer den that nf_elem_get_fmpq_poly copies out, read in
@@ -741,7 +749,7 @@ void FactoredElementsNmodReduction::reduce(ulong p) noexcept {
     for (Factor& factor : factors_) {
         const StoredForm form =
                 stored_form(factor.factor->raw_flint_element(), factor.field);
-        factor.denominator = ::fmpz_get_nmod(form.denominator, mod_);
+        factor.denominator = fmpz_get_nmod_fast(form.denominator, mod_);
         factor.offset = total_length;
         factor.length = factor.denominator == 0
                                 ? 0
@@ -755,7 +763,7 @@ void FactoredElementsNmodReduction::reduce(ulong p) noexcept {
                 stored_form(factor.factor->raw_flint_element(), factor.field);
         for (std::size_t i = 0; i < factor.length; ++i) {
             coefficients[factor.offset + i] =
-                    ::fmpz_get_nmod(form.coefficients + i, mod_);
+                    fmpz_get_nmod_fast(form.coefficients + i, mod_);
         }
     }
     reduced_ = true;

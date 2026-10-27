@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <flint/flint.h>
+#include <flint/fmpz.h>
 #include <flint/nf.h>
 #include <flint/nmod.h>
 
@@ -15,6 +16,34 @@
 #include <silex/prime_ideal.hpp>
 
 namespace silex::detail {
+
+// fmpz_get_nmod(value, mod), with the reduction done inline for a word-size
+// value whose magnitude is below mod.n.
+inline ulong fmpz_get_nmod_fast(const fmpz* value, nmod_t mod) noexcept {
+    // A word-size value of magnitude below n is its own residue, or n minus
+    // its magnitude when negative; zero stays zero.  Anything else takes
+    // fmpz_get_nmod, which gives that same residue in [0, n).
+    const fmpz word = *value;
+    if (!COEFF_IS_MPZ(word)) {
+        // |word| <= COEFF_MAX, so the negation cannot overflow.
+        const ulong magnitude = word < 0 ? static_cast<ulong>(-word)
+                                         : static_cast<ulong>(word);
+        if (magnitude < mod.n) {
+            return word < 0 && magnitude != 0 ? mod.n - magnitude : magnitude;
+        }
+    }
+    return ::fmpz_get_nmod(value, mod);
+}
+
+// out = base^|exponent| mod modulus, as n_powmod2_ui_preinv gives it, for
+// a modulus with precomputed inverse n_preinvert_limb(modulus).  Returns
+// false only when exponent is the minimum slong, whose magnitude is not an
+// slong.  |exponent| = 1 with base < modulus returns base directly.
+bool pow_mod_abs_slong_ui(ulong& out,
+                          ulong base,
+                          slong exponent,
+                          ulong modulus,
+                          ulong modulus_inverse) noexcept;
 
 // Returns the image of the NumberField defining generator, even when a direct
 // maximal-quadratic prime stores its residue polynomial in the integral omega

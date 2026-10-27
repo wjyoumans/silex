@@ -133,6 +133,17 @@ Added
 Changed
 -------
 
+- The stable scan's columns, when they reduce the distinct unit factors
+  modulo ``q``, now reduce each stored coefficient and denominator inline
+  when it is a word-size integer smaller in magnitude than ``q``, and they
+  skip the modular power for exponents ``1`` and ``-1`` when the base is
+  already reduced; every other input takes the same FLINT calls as before.  Residues and
+  results are unchanged: ``proven`` outputs (the full instance JSON without
+  timings) are identical on 13 corpus rows of degree 3 to 12.  Callgrind Ir
+  of the ``proven`` instance (busy machine) drops by 7.07% on
+  ``random_d9_h4_s8``, 4.58% on ``random_d10_h2_s21`` and 1.68% on
+  ``pure_x12_plus_7``.
+
 - The finite-ideal T2 enumeration setup (``proven`` factor-base honesty
   witnesses and ``grh`` relation search) no longer forms an Arb Cholesky
   factor of each reduced basis's Gram matrix.  Its LLL bound test takes the
