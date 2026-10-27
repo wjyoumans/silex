@@ -1518,6 +1518,18 @@ bool ClassGroupContext::run_lll_relation_route_(
 
     relation_kernel_units_target_ = options.target_relation_kernel_units;
     configure_partial_relations_(options);
+    // Relation rounds of the capped Galois-image rule (relation_candidate.cpp,
+    // the Galois-image step): the order small-LLL phase is one round, each
+    // pass of the outer loop below another; the guard ends the last.
+    struct GaloisImageRoundGuard {
+        ClassGroupContext& context;
+        ~GaloisImageRoundGuard() noexcept {
+            detail::ClassGroupRelationSearchAccess::start_galois_image_round(
+                    context, WORD(-1));
+        }
+    } galois_image_round_guard{*this};
+    detail::ClassGroupRelationSearchAccess::start_galois_image_round(
+            *this, extension_only ? options.extension_relation_target : 2);
     // reference's LLL route stops at `single_env` /
     // `class_group_new_relations_via_lll` source boundaries, not when the
     // native presentation target first becomes available.
@@ -1740,6 +1752,8 @@ bool ClassGroupContext::run_lll_relation_route_(
                                   "class_group.route.outer_loop");
               while (!route_budget_exhausted() && !source_loop_returned) {
                 const slong relation_start = relation_count();
+                detail::ClassGroupRelationSearchAccess::
+                        start_galois_image_round(*this, relation_target);
                 while (!route_budget_exhausted() &&
                        relation_count() - relation_start < relation_target &&
                        !source_loop_returned) {

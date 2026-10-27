@@ -28,9 +28,30 @@ namespace silex::detail {
 // (lll_relation_search.cpp, collect_pivot_lll_ideal), and a grh search on a
 // field defined by exactly Phi_n or psi_n adds the Galois images of its
 // relations (relation_candidate.cpp, the Galois-image step).  Below it the
-// search draws one ideal per pivot and adds no images.  The crossover is
-// measured, not sourced (see docs/reference/algorithms_and_sources.rst).
+// search draws one ideal per pivot, and only a field defined by exactly
+// Phi_n that passes capped_galois_images_selected adds images, under the
+// capped rule of that step.  The crossover is measured, not sourced (see
+// docs/reference/algorithms_and_sources.rst).
 inline constexpr slong kLargeFieldRelationSearchMinDegree = 30;
+
+// Below kLargeFieldRelationSearchMinDegree, a grh search on a field defined
+// by exactly Phi_n adds capped Galois images only when the field degree is
+// at most kCappedGaloisImageMaxDegree or the factor-base bound is at least
+// kCappedGaloisImageMinFactorBaseBound.  Both limits are Silex's own, set
+// by measurement, not sourced: on the corpus Phi_n rows below degree 30 the
+// images cost more relation work than they save on every degree 22 and 24
+// field with a factor-base bound below 300; two smaller rows that remain
+// slower (Q(zeta_7), Q(zeta_60)) are accepted.
+inline constexpr slong kCappedGaloisImageMaxDegree = 20;
+inline constexpr ulong kCappedGaloisImageMinFactorBaseBound = 300;
+
+inline bool capped_galois_images_selected(
+        slong degree,
+        flint::FmpzConstRef factor_base_bound) noexcept {
+    return degree <= kCappedGaloisImageMaxDegree ||
+           flint::fmpz_cmp_ui(factor_base_bound,
+                              kCappedGaloisImageMinFactorBaseBound) >= 0;
+}
 
 struct FactorBaseHonestyFailure;
 
@@ -549,15 +570,29 @@ struct ClassGroupContextStorage {
     CyclotomicGaloisImages cyclotomic_galois_images;
     // Galois-image relations stored in the relation matrix of this context
     // (relation_candidate.cpp, the Galois-image step), and those of them
-    // stored without raising the modular rank (kernel images).  On the
-    // routes that use capped_relation_count and the kernel-image count
-    // (the LLL route, the goal checks of relation_search.cpp), images are
-    // left out of the relation cap max_relations, and kernel images out of
-    // the kernel-unit target; other readers of the plain counts include
-    // them.  Images stored on the admission-cache path are counted too.  A factor-base rebuild starts a fresh
-    // context, so the counts always refer to the stored relations.
+    // stored without raising the modular rank (kernel images; those
+    // stored under the capped rule below galois_image_min_degree are in
+    // galois_image_capped_kernel_relations instead).  On the routes that
+    // use capped_relation_count and the kernel-image count (the LLL route,
+    // the goal checks of relation_search.cpp), images are left out of the
+    // relation cap max_relations, and the kernel images counted here out
+    // of the kernel-unit target; other readers of the plain counts include
+    // them.  Images stored on the admission-cache path are counted too.  A
+    // factor-base rebuild starts a fresh context, so the counts always
+    // refer to the stored relations.
     slong galois_image_relations = 0;
     slong galois_image_kernel_relations = 0;
+    // Kernel images stored under the capped rule of Phi_n fields below
+    // galois_image_min_degree (relation_candidate.cpp, the Galois-image
+    // step).  They count toward the kernel-unit target, so they are not in
+    // galois_image_kernel_relations; this count bounds how many are stored.
+    slong galois_image_capped_kernel_relations = 0;
+    // galois_image_capped_kernel_relations at the start of the running
+    // relation round plus the round's relation target (the LLL route sets
+    // it per round); a capped kernel image is stored only while the count
+    // is below this limit plus |G| - 1.  Negative when no round is running:
+    // no cap.
+    slong galois_image_round_kernel_limit = -1;
     // Smallest field degree at which the Galois-image step runs.  Only
     // internal tests change it (ClassGroupRelationSearchAccess::
     // set_galois_image_min_degree), to exercise the step on small fields;
@@ -624,6 +659,8 @@ struct ClassGroupContextStorage {
         cyclotomic_galois_images.clear();
         galois_image_relations = 0;
         galois_image_kernel_relations = 0;
+        galois_image_capped_kernel_relations = 0;
+        galois_image_round_kernel_limit = -1;
     }
 };
 
@@ -951,11 +988,48 @@ public:
                 : context.private_storage_->galois_image_kernel_relations;
     }
 
+    static slong galois_image_capped_kernel_relations(
+            const ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? 0
+                : context.private_storage_
+                          ->galois_image_capped_kernel_relations;
+    }
+
+    static slong galois_image_round_kernel_limit(
+            const ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? -1
+                : context.private_storage_->galois_image_round_kernel_limit;
+    }
+
+    // Starts a relation round with relation target `need` for the capped
+    // image rule; a negative `need` ends it (no cap).
+    static void start_galois_image_round(ClassGroupContext& context,
+                                         slong need) noexcept {
+        if (context.private_storage_ != nullptr) {
+            detail::ClassGroupContextStorage& storage =
+                    *context.private_storage_;
+            storage.galois_image_round_kernel_limit =
+                    need < 0 ? -1
+                             : storage.galois_image_capped_kernel_relations +
+                                       need;
+        }
+    }
+
+    // `capped`: the image was stored under the capped rule of Phi_n fields
+    // below galois_image_min_degree, where a kernel image counts toward the
+    // kernel-unit target and is counted in
+    // galois_image_capped_kernel_relations instead.
     static void note_galois_image_relation(ClassGroupContext& context,
-                                           bool kernel) noexcept {
+                                           bool kernel,
+                                           bool capped = false) noexcept {
         if (context.private_storage_ != nullptr) {
             ++context.private_storage_->galois_image_relations;
-            if (kernel) {
+            if (kernel && capped) {
+                ++context.private_storage_
+                          ->galois_image_capped_kernel_relations;
+            } else if (kernel) {
                 ++context.private_storage_->galois_image_kernel_relations;
             }
         }
@@ -968,6 +1042,13 @@ public:
         const slong count = context.relation_count();
         const slong images = galois_image_relations(context);
         return count > images ? count - images : 0;
+    }
+
+    // The bound of the current factor base (zero when the base was set
+    // directly rather than built from a bound).
+    static flint::FmpzConstRef factor_base_build_bound(
+            const ClassGroupContext& context) noexcept {
+        return flint::FmpzConstRef(context.factor_base_build_bound_);
     }
 
     // Smallest field degree at which the Galois-image step runs; see

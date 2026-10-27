@@ -984,7 +984,8 @@ input: the seeds may have index above one in the unit group, and the
 published class group and regulator pass the same analytic validation.
 
 On ``grh`` requests on a field given by exactly ``Phi_m`` or ``psi_n``, for
-fields of degree 30 or more, when every rational prime of the factor base has all of its prime ideals in the base
+fields of degree 30 or more (below 30, only on ``Phi_m`` fields admitted by
+the gate and under the cap described below), when every rational prime of the factor base has all of its prime ideals in the base
 (so the base is stable under the Galois group), the relation search also
 tries the Galois images of its
 relations, as PARI 2.17.3 ``buch2.c`` ``add_rel`` (lines 2380-2410) does:
@@ -1003,14 +1004,33 @@ image element exactly and factors it like a searched candidate, rather than
 permuting exponent vectors.  The bookkeeping is Silex's own: the images of a
 relation are stored as one batch with a single presentation update, on the
 routes that subtract them (the LLL route and the goal checks) they do
-not count toward ``max_relations``, and images that do not raise the rank do
-not count toward the kernel-unit target; images stored on the admission-cache
-path are counted the same way.  The degree-30 crossover is also
-Silex's own (PARI adds images at every degree): it is the crossover of the
-one-random-ideal-per-pass rule of the pivot relation search, and on the
-cyclotomic corpus images cut the relation work of every row of degree 30 or
-more but add up to 92% more on some rows of degree 12 to 24, where the
-images stored after full rank outweigh the searched relations they save.
+not count toward ``max_relations``, and, from degree 30 on, images that do
+not raise the rank do not count toward the kernel-unit target; images stored
+on the admission-cache path are counted the same way.  The degree-30
+crossover is also Silex's own (PARI adds images at every degree): it is the
+crossover of the one-random-ideal-per-pass rule of the pivot relation search,
+and on the cyclotomic corpus uncapped images cut the relation work of every
+row of degree 30 or more but add up to 92% more on some rows of degree 12 to
+24, where the images stored after full rank outweigh the searched relations
+they save.
+
+Below degree 30 the images run under two further rules of Silex's own, both
+set by measurement on the corpus ``Phi_m`` rows below degree 30 and neither
+taken from PARI or Hecke.  The gate: only a field given by exactly ``Phi_m``
+(not ``psi_n``) of degree at most 20, or with a factor-base bound of at least
+300, gets images; on the degree 22 and 24 fields with a smaller bound the
+image setup and image factoring cost more than the search they save.  The
+cap: within one relation round of the LLL route (the order small-LLL phase,
+and each pass of the outer loop), images stored at full modular rank stop
+once the round's relation target plus ``|G| - 1`` of them are stored, and
+these kernel images do count toward the kernel-unit target, unlike the
+degree-30 rule.  PARI's relation cache is not this tight: ``add_rel_i`` stops
+storing only when the cache is full (``buch2.c:2295``), its length starts at
+``10n + 50`` (``init_rel``, line 3564) and ``pre_allocate`` (lines 351-355)
+only grows it; ``cache.end = last + need`` (line 3899) is a stop target, not
+a storage cap.  Kernel vectors from images can give units of large index;
+acceptance still goes through the same analytic ``hR`` validation, so the
+cap bounds search work and cannot change a published result.
 The code and the sources are in
 ``src/class_group/cyclotomic_galois_images_internal.hpp``.
 

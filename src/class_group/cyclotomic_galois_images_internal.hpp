@@ -24,12 +24,21 @@ namespace silex::detail {
 // reports as a new generator, and keeps an image only when it is again
 // one, so it adds none after full rank.
 //
-// Silex adds images only on fields of degree at least
+// Silex adds images without a cap on fields of degree at least
 // kLargeFieldRelationSearchMinDegree (30, class_group_storage_internal.hpp),
-// the crossover of the one-random-ideal-per-pass rule.  That limit is
-// Silex's own, set by measurement (the references add images at every
-// degree): below it, images stored after full rank cost more relation work
-// than they save on several cyclotomic corpus rows.
+// the crossover of the one-random-ideal-per-pass rule.  Below it, only a
+// field defined by exactly Phi_n (not psi_n) adds images, only when
+// capped_galois_images_selected admits it (degree at most 20, or a
+// factor-base bound of at least 300), and only under a capped rule: within
+// one relation round of the LLL route, kernel images (images stored at full
+// modular rank) stop once the round's relation target plus |G| - 1 of them
+// are stored, and those kernel images count toward the kernel-unit target.
+// The crossover, the gate and the cap are Silex's own rules, set by
+// measurement (the references add images at every degree, and the
+// reference relation cache, buch2.c:2295 with pre_allocate, lines 351-355,
+// is never this tight): uncapped images stored after full rank cost more
+// relation work than they save on several cyclotomic corpus rows below
+// degree 30.
 //
 // Silex follows buch2.c here.  It tries the images of every stored
 // relation for which add_rel_i would return k > 0, and keeps an image by
@@ -40,9 +49,12 @@ namespace silex::detail {
 // not already known.  The bookkeeping on the generator path is Silex's
 // own, not the reference's: the images of one relation are stored as a
 // batch: they run no presentation publication of their
-// own, they are left out of the relation cap max_relations, and images
-// stored without raising the rank are left out of the kernel-unit target
-// (ClassGroupContextStorage::galois_image_kernel_relations).  The
+// own, they are left out of the relation cap max_relations, and, from
+// degree 30 on, images stored without raising the rank are left out of the
+// kernel-unit target (ClassGroupContextStorage::
+// galois_image_kernel_relations; under the capped rule below degree 30
+// they count toward it and are counted in
+// galois_image_capped_kernel_relations instead).  The
 // exclusion holds only where the caps and targets use
 // ClassGroupRelationSearchAccess::capped_relation_count and the kernel
 // counts that subtract the image counters (the LLL route and the goal

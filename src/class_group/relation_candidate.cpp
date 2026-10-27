@@ -1512,6 +1512,71 @@ bool relation_gets_galois_images(const ModularRankState& before,
            after.relation_surplus < before.relation_surplus;
 }
 
+// The cyclotomic automorphism data of `context` for `order`, built on first
+// use (prepare_cyclotomic_galois_images) and kept until the order changes.
+// When an exact construction step fails the data is left unavailable, so
+// the search adds no images and keeps its ordinary path.  Returns nullptr
+// only when the context storage is unavailable.
+detail::CyclotomicGaloisImages* prepared_cyclotomic_galois_images(
+        ClassGroupContext& context,
+        const Order& order) noexcept {
+    detail::CyclotomicGaloisImages* images =
+            detail::ClassGroupRelationSearchAccess::cyclotomic_galois_images(
+                    context);
+    if (images == nullptr) {
+        return nullptr;
+    }
+    if (!images->initialized ||
+        !same_order_parent(&images->order, &order)) {
+        if (!detail::prepare_cyclotomic_galois_images(*images, order)) {
+            SILEX_LOG(context.diagnostics(), DiagnosticsModule::class_group,
+                      LogLevel::detail,
+                      "cyclotomic Galois image setup failed");
+            images->clear();
+            images->order = order;
+            images->initialized = true;
+        }
+    }
+    return images;
+}
+
+// True when `order` is a field defined by exactly Phi_n (not psi_n) with
+// its automorphism data available, and the field degree and factor-base
+// bound pass detail::capped_galois_images_selected: the fields that get the
+// capped image rule below galois_image_min_degree.  The gate is tested
+// first, so a field it excludes builds no automorphism data.
+bool capped_cyclotomic_image_field(ClassGroupContext& context,
+                                   const Order& order) noexcept {
+    if (!detail::capped_galois_images_selected(
+                order.degree(),
+                detail::ClassGroupRelationSearchAccess::
+                        factor_base_build_bound(context))) {
+        return false;
+    }
+    detail::CyclotomicGaloisImages* images =
+            detail::ClassGroupRelationSearchAccess::cyclotomic_galois_images(
+                    context);
+    if (images == nullptr) {
+        return false;
+    }
+    if (!images->initialized ||
+        !same_order_parent(&images->order, &order)) {
+        // Below the crossover only Phi_n fields get images, so a field not
+        // defined by exactly Phi_n (psi_n included) is recorded as having
+        // none, without building its automorphism data.
+        ulong n = 0;
+        if (order.parent() == nullptr ||
+            !detail::cyclotomic_field_index(n, *order.parent()) || n == 0) {
+            images->clear();
+            images->order = order;
+            images->initialized = true;
+            return false;
+        }
+    }
+    images = prepared_cyclotomic_galois_images(context, order);
+    return images != nullptr && images->available && !images->real_subfield;
+}
+
 // Tries sigma_k(alpha) for every automorphism sigma_k of a field defined by
 // exactly Phi_n or psi_n, where alpha (order coordinates `coordinates` /
 // den) has just given a relation for which reference add_rel_i returned
@@ -1529,16 +1594,28 @@ bool relation_gets_galois_images(const ModularRankState& before,
 // presentation publication or row-module checkpoint of its own (the caller
 // publishes once after the batch), and images are left out of the relation
 // cap max_relations.  Every stored image is counted in
-// ClassGroupContextStorage::galois_image_relations, and an image stored
-// without raising the rank also in galois_image_kernel_relations, which the
-// relation-search goals leave out of the kernel-unit target (only on the
-// routes that read these counters; other readers of the plain counts
-// include images).  The admission cache path (the port of the reference
-// relation cache) keeps the reference behaviour: each image counts toward
-// the cache's relation target and the loop stops when that target is met.
-// Its images are also counted in galois_image_relations and
-// galois_image_kernel_relations, so the later cap and kernel-unit target
-// leave them out as well.
+// ClassGroupContextStorage::galois_image_relations.  From
+// galois_image_min_degree on, an image stored without raising the rank is
+// also counted in galois_image_kernel_relations, which the relation-search
+// goals leave out of the kernel-unit target (only on the routes that read
+// these counters; other readers of the plain counts include images).
+//
+// Below galois_image_min_degree the step runs only when `capped` is set: a
+// field defined by exactly Phi_n that passes
+// detail::capped_galois_images_selected.  There a kernel image does count
+// toward the kernel-unit target (it is counted in
+// galois_image_capped_kernel_relations instead), and within one relation
+// round kernel images stop once the round's relation target plus |G| - 1
+// of them are stored (the cap of galois_image_round_kernel_limit).  The
+// cap and the gate are Silex's own rules, set by measurement, not taken
+// from the references.
+//
+// The admission cache path (the port of the reference relation cache)
+// keeps the reference behaviour: each image counts toward the cache's
+// relation target and the loop stops when that target is met.  Its images
+// are counted in the same counters (under the capped rule, kernel images in
+// galois_image_capped_kernel_relations, and the round cap applies), so the
+// later cap and kernel-unit target treat them as on the generator path.
 //
 // Does nothing unless the field is exactly Phi_n or psi_n (degree at least
 // 4) and every rational-prime block of the factor base is complete, which
@@ -1559,27 +1636,13 @@ bool add_cyclotomic_galois_image_relations(
         detail::RelationAdmissionCache* admission_cache,
         Relation* admission_scratch,
         OrderCoordinateElementConversion* coordinate_conversion,
-        bool admission_scratch_base_verified) noexcept {
+        bool admission_scratch_base_verified,
+        bool capped) noexcept {
     const DiagnosticsContext* diagnostics = context.diagnostics();
     detail::CyclotomicGaloisImages* images =
-            detail::ClassGroupRelationSearchAccess::cyclotomic_galois_images(
-                    context);
+            prepared_cyclotomic_galois_images(context, order);
     if (images == nullptr) {
         return false;
-    }
-    if (!images->initialized ||
-        !same_order_parent(&images->order, &order)) {
-        if (!detail::prepare_cyclotomic_galois_images(*images, order)) {
-            // An exact construction step failed: add no images and keep
-            // the ordinary search path.
-            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                      LogLevel::detail,
-                      "cyclotomic Galois image setup failed");
-            images->clear();
-            images->order = order;
-            images->initialized = true;
-            return true;
-        }
     }
     if (!images->available) {
         return true;
@@ -1606,6 +1669,17 @@ bool add_cyclotomic_galois_image_relations(
     bool image_goal_reached = false;
     const slong image_count =
             static_cast<slong>(images->image_matrices.size());
+    // Capped rule: within one relation round, kernel images stop once
+    // need + |G| - 1 of them are stored, need being the round's relation
+    // target (ClassGroupContextStorage::galois_image_round_kernel_limit).
+    // This cap is Silex's own rule, set by measurement; the reference
+    // relation cache is never this tight.
+    const slong round_limit =
+            Access::galois_image_round_kernel_limit(context);
+    const slong kernel_image_cap =
+            round_limit < 0 || round_limit > WORD_MAX - image_count
+                    ? WORD_MAX
+                    : round_limit + image_count;
     flint::FmpzMat image(0, 0);
     for (slong i = 0; i < image_count; ++i) {
         if (!batch &&
@@ -1619,6 +1693,12 @@ bool add_cyclotomic_galois_image_relations(
         const slong relations_before = context.relation_count();
         const ModularRankState rank_before =
                 modular_rank_state(context, admission_cache);
+        // At full rank every remaining image would be a kernel image.
+        if (capped && rank_before.missing == 0 &&
+            Access::galois_image_capped_kernel_relations(context) >=
+                    kernel_image_cap) {
+            break;
+        }
         slong image_candidates = 0;
         bool image_partial_throttle = false;
         ++images->image_candidates;
@@ -1658,7 +1738,7 @@ bool add_cyclotomic_galois_image_relations(
                         diagnostics, DiagnosticsModule::class_group,
                         "class_group.galois_image_kernel_relation");
             }
-            Access::note_galois_image_relation(context, kernel);
+            Access::note_galois_image_relation(context, kernel, capped);
         }
     }
     return true;
@@ -1831,17 +1911,26 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                         "class_group.candidate_relation");
     bool candidate_partial_throttle = false;
     bool relation_appended = false;
-    // Galois images (the step below) run only on grh requests and only
-    // from the large-field crossover on, so below it a candidate costs one
-    // degree test more than without the step.  The modular rank state
-    // before this candidate is needed only then.
-    const bool galois_image_route = !galois_image &&
-            order.degree() >= detail::ClassGroupRelationSearchAccess::
-                                      galois_image_min_degree(context) &&
+    // Galois images (the step below) run only on grh requests: from the
+    // large-field crossover on, and below it only under the capped rule on
+    // a field defined by exactly Phi_n that passes
+    // detail::capped_galois_images_selected.  Elsewhere a grh candidate
+    // costs a degree test, the gate test and, on fields the gate admits, a
+    // lookup of the cached automorphism data more than without the step.
+    // The modular rank state before this candidate is needed only when the
+    // step runs.
+    const bool grh_image_request = !galois_image &&
             (requested_certification == CertificationMode::grh ||
              (requested_certification == CertificationMode::unknown &&
               detail::ClassGroupCertificationAccess::
                       grh_factor_base_generation_covered(context)));
+    const bool large_image_field = order.degree() >=
+            detail::ClassGroupRelationSearchAccess::galois_image_min_degree(
+                    context);
+    const bool capped_images = grh_image_request && !large_image_field &&
+            capped_cyclotomic_image_field(context, order);
+    const bool galois_image_route =
+            grh_image_request && (large_image_field || capped_images);
     ModularRankState rank_before;
     if (galois_image_route) {
         rank_before = modular_rank_state(context, admission_cache);
@@ -2011,7 +2100,7 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
                 max_candidates, max_relations, accepted_relations,
                 requested_certification, goal_reached, admission_cache,
                 admission_scratch, coordinate_conversion,
-                admission_scratch_base_verified)) {
+                admission_scratch_base_verified, capped_images)) {
         return false;
     }
     // The generator-path goal is checked once per searched relation, after

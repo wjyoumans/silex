@@ -248,10 +248,11 @@ int test_real_subfield_images() {
 // Q(zeta_5) with the factor base of prime-ideal norm at most 30: P5, the
 // inert prime 2 (norm 16) and the four primes above 11.  pi = 2 + zeta has
 // norm Phi_5(-2) = 11, and its conjugates 2 + zeta^k (k = 2, 3, 4) generate
-// the other three primes above 11.  The Galois-image step runs only from
-// degree kLargeFieldRelationSearchMinDegree on; unless `crossover` is set,
-// the setup lowers that degree for its context to 4 (an internal test seam)
-// so that the step runs on Q(zeta_5).
+// the other three primes above 11.  The uncapped Galois-image step runs
+// from degree kLargeFieldRelationSearchMinDegree on; unless `crossover` is
+// set, the setup lowers that degree for its context to 4 (an internal test
+// seam) so that the uncapped step runs on Q(zeta_5).  With `crossover` set,
+// Q(zeta_5) (degree 4) gets the capped rule below the crossover.
 struct Zeta5RelationSetup {
     silex::NumberField field = field_from({1, 1, 1, 1, 1});
     silex::Order order = maximal_order_of(field);
@@ -281,6 +282,15 @@ struct Zeta5RelationSetup {
         silex::Element alpha(field);
         assert(alpha.multiply(element_from(field, {2, 1}),
                               element_from(field, {2, 0, 1})));
+        try_candidate(alpha, target, goal_reached, requested);
+    }
+
+    // Tries `alpha` as try_pi_sigma2_pi does.
+    void try_candidate(const silex::Element& alpha,
+                       slong target,
+                       bool& goal_reached,
+                       silex::CertificationMode requested =
+                               silex::CertificationMode::grh) {
         silex::OrderElement alpha_order;
         assert(alpha_order.define(order));
         assert(alpha_order.set_element(alpha));
@@ -309,24 +319,126 @@ struct Zeta5RelationSetup {
     }
 };
 
-// Below degree kLargeFieldRelationSearchMinDegree (30) a grh candidate gets
-// no images: alpha alone is stored and no image is tried.  A proven
-// candidate gets none at any degree.
-int test_no_images_below_crossover_or_proven() {
+// Below degree kLargeFieldRelationSearchMinDegree (30) only fields defined
+// by exactly Phi_n of degree at most 20, or with a factor-base bound of at
+// least 300, get images (Silex's own measured gate).
+int test_capped_image_gate() {
     static_assert(silex::detail::kLargeFieldRelationSearchMinDegree == 30);
+    static_assert(silex::detail::kCappedGaloisImageMaxDegree == 20);
+    static_assert(silex::detail::kCappedGaloisImageMinFactorBaseBound == 300);
+    sflint::Fmpz bound;
+    const auto selected = [&bound](slong degree, ulong value) {
+        fmpz_set_ui(bound.raw(), value);
+        return silex::detail::capped_galois_images_selected(
+                degree, sflint::FmpzConstRef(bound));
+    };
+    assert(selected(4, 0));
+    assert(selected(20, 80));
+    assert(!selected(22, 115));
+    assert(!selected(24, 299));
+    assert(selected(24, 300));
+    assert(selected(24, 636));
+    return 0;
+}
+
+// Below the crossover a grh candidate on Q(zeta_5) (degree 4, admitted by
+// the gate) gets its images under the capped rule; before full rank the
+// cap does not apply, so a + b and two of its images are stored, as in
+// test_images_before_full_rank.  A proven candidate gets none at any
+// degree, and a field defined by psi_n below the crossover gets none and
+// builds no automorphism data.
+int test_images_below_crossover_or_proven() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
     Zeta5RelationSetup crossover(true);
-    assert(silex::detail::ClassGroupRelationSearchAccess::
-                   galois_image_min_degree(crossover.context) == 30);
+    assert(Access::galois_image_min_degree(crossover.context) == 30);
     bool goal_reached = false;
     crossover.try_pi_sigma2_pi(100, goal_reached);
-    assert(crossover.images().image_candidates == 0);
-    assert(crossover.context.relation_count() == 1);
+    assert(crossover.images().image_candidates == 3);
+    assert(crossover.images().image_relations == 2);
+    assert(crossover.context.relation_count() == 3);
+    assert(Access::galois_image_relations(crossover.context) == 2);
+    assert(Access::galois_image_kernel_relations(crossover.context) == 0);
+    assert(Access::galois_image_capped_kernel_relations(crossover.context) ==
+           0);
 
     Zeta5RelationSetup proven;
     proven.try_pi_sigma2_pi(100, goal_reached,
                             silex::CertificationMode::proven);
     assert(proven.images().image_candidates == 0);
     assert(proven.context.relation_count() == 1);
+
+    // psi_11, degree 5: every grh candidate checks the field once.
+    silex::NumberField real_field = field_from({1, 3, -3, -4, 1, 1});
+    silex::Order real_order = maximal_order_of(real_field);
+    silex::ClassGroupContext real_context{real_order};
+    sflint::Fmpz bound;
+    fmpz_set_ui(bound.raw(), 30);
+    silex::FactorBase base(real_order);
+    assert(base.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(bound)));
+    assert(real_context.set_factor_base(base));
+    silex::OrderElement candidate;
+    assert(candidate.define(real_order));
+    assert(candidate.set_element(element_from(real_field, {2, 1})));
+    sflint::FmpzMat coordinates(1, real_order.degree());
+    assert(candidate.get_coordinates(sflint::FmpzMatRef(coordinates)));
+    slong candidates_tried = 0;
+    slong accepted_relations = 0;
+    bool partial_throttle_exit = false;
+    assert(silex::detail::relation_search::try_coordinate_candidate(
+            real_context, real_order, coordinates, nullptr,
+            silex::ClassGroupRelationSource::Search, 100, 100, 100,
+            candidates_tried, accepted_relations,
+            silex::CertificationMode::grh, goal_reached,
+            partial_throttle_exit));
+    const silex::detail::CyclotomicGaloisImages* real_images =
+            Access::cyclotomic_galois_images(real_context);
+    assert(real_images != nullptr);
+    assert(real_images->initialized && !real_images->available);
+    assert(real_images->image_candidates == 0);
+    return 0;
+}
+
+// The capped rule at full rank: in a round of relation target 0 the kernel
+// images stop once 0 + |G| - 1 = 3 are stored, and they count toward the
+// kernel-unit target (galois_image_capped_kernel_relations, not
+// galois_image_kernel_relations).  The three images of a + b fill the cap,
+// so the next relation, 2a + b from pi^2 sigma_2(pi), gets no image tried.
+int test_capped_images_at_full_rank() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    Zeta5RelationSetup setup(true);
+    for (const silex::Element& generator :
+         {element_from(setup.field, {2}), element_from(setup.field, {1, -1}),
+          element_from(setup.field, {2, 1}),
+          element_from(setup.field, {2, 0, 1}),
+          element_from(setup.field, {2, 0, 0, 1}),
+          element_from(setup.field, {1, -1, -1, -1})}) {
+        assert(setup.context.try_append_generator_relation(generator));
+    }
+    assert(setup.context.relation_rank() == 6);
+    Access::start_galois_image_round(setup.context, 0);
+    assert(Access::galois_image_round_kernel_limit(setup.context) == 0);
+
+    bool goal_reached = false;
+    setup.try_pi_sigma2_pi(100, goal_reached);
+    assert(setup.images().image_candidates == 3);
+    assert(setup.images().image_relations == 3);
+    assert(setup.context.relation_count() == 10);
+    assert(Access::galois_image_relations(setup.context) == 3);
+    assert(Access::galois_image_kernel_relations(setup.context) == 0);
+    assert(Access::galois_image_capped_kernel_relations(setup.context) == 3);
+
+    silex::Element pi(setup.field);
+    silex::Element alpha(setup.field);
+    assert(pi.multiply(element_from(setup.field, {2, 1}),
+                       element_from(setup.field, {2, 1})));
+    assert(alpha.multiply(pi, element_from(setup.field, {2, 0, 1})));
+    setup.try_candidate(alpha, 100, goal_reached);
+    assert(setup.context.relation_count() == 11);
+    assert(setup.images().image_candidates == 3);
+    assert(Access::galois_image_capped_kernel_relations(setup.context) == 3);
+
+    Access::start_galois_image_round(setup.context, -1);
+    assert(Access::galois_image_round_kernel_limit(setup.context) == -1);
     return 0;
 }
 
@@ -473,8 +585,8 @@ ClassUnitRun class_unit_run(const silex::Order& order,
 
 // A grh class/unit run adds image relations on Q(zeta_64) (degree 32, at
 // least the crossover; class group Z/17, Washington, Introduction to
-// Cyclotomic Fields, class number tables) and none on Q(zeta_8) (degree 4,
-// below it, h = 1).
+// Cyclotomic Fields, class number tables) and tries images under the capped
+// rule on Q(zeta_8) (degree 4, below it, admitted by the gate; h = 1).
 int test_class_unit_runs() {
     silex::Order small = maximal_order_of(field_from({1, 0, 0, 0, 1}));
     const ClassUnitRun below =
@@ -482,7 +594,8 @@ int test_class_unit_runs() {
     assert(below.computed);
     assert(below.certification == silex::CertificationMode::grh);
     assert(below.class_order == 1);
-    assert(below.image_candidates == 0);
+    assert(below.image_candidates > 0);
+    assert(below.image_candidates >= below.image_relations);
 
     silex::Order large = maximal_order_of(field_from(
             {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -503,7 +616,9 @@ int main() {
     if (test_detection() != 0 || test_image_matrices() != 0 ||
         test_real_subfield_images() != 0 ||
         test_factor_base_stability() != 0 ||
-        test_no_images_below_crossover_or_proven() != 0 ||
+        test_capped_image_gate() != 0 ||
+        test_images_below_crossover_or_proven() != 0 ||
+        test_capped_images_at_full_rank() != 0 ||
         test_images_before_full_rank() != 0 ||
         test_images_at_full_rank() != 0 ||
         test_admission_cache_images() != 0 || test_class_unit_runs() != 0) {
