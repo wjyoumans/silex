@@ -617,8 +617,9 @@ ClassUnitRun class_unit_run(const silex::Order& order,
 // rule on Q(zeta_8) (degree 4, below it, admitted by the gate; h = 1).
 // The capped images leave the regulator unchanged: it overlaps that of a
 // proven run, which gets no images, and contains the known value
-// 2 log(1 + sqrt 2) = 1.76274717403908605... (PARI 2.17.3
-// bnfinit(x^4 + 1).reg).
+// 2 log(1 + sqrt 2) = 1.76274717403908605...: the unit index of Q(zeta_8)
+// over Q(sqrt 2) is 1 for the prime power 8 (Washington, Introduction to
+// Cyclotomic Fields, Corollary 4.13), so 1 + sqrt 2 is a fundamental unit.
 int test_class_unit_runs() {
     silex::Order small = maximal_order_of(field_from({1, 0, 0, 0, 1}));
     const ClassUnitRun below =
