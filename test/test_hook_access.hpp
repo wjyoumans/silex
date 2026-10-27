@@ -33,6 +33,7 @@
 #include "order_unit/precision_cap_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
 #include "relation/relation_internal.hpp"
+#include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "sunit/sunit_internal.hpp"
 #include "zeta/zeta_internal.hpp"
 #include <silex/factor_base.hpp>
@@ -43,6 +44,17 @@ namespace silex::detail {
 
 class TestHookAccess {
 public:
+    // Arms (delta != 0) or disarms (0) a one-shot perturbation: the next
+    // IdealFactorization::factor adds delta to the first valuation v_P it
+    // computes, so the norm accounting sum f_P v_P differs from v_p(N(I)).
+    // Skips the invariant that PrimeIdeal::valuation is exact.  The
+    // perturbation persists until a factor() call consumes it.
+    static void set_ideal_factorization_valuation_perturbation(
+            slong delta) noexcept {
+        IdealFactorizationTestSeams::valuation_perturbation_.store(
+                delta, std::memory_order_relaxed);
+    }
+
     // Arms (n > 0) or disarms (0) the S-unit composition overflow: the n-th
     // composition call of the next builds (counting S-class invariant
     // witnesses first, then S-unit generators) is replaced by a power whose

@@ -1129,6 +1129,9 @@ bool IdealFactorization::factor(const Ideal& ideal) noexcept {
             if (prime == nullptr || !prime->valuation(valuation, ideal)) {
                 return false;
             }
+            // Test-only fault injection; 0 unless TestHookAccess armed it.
+            valuation += detail::IdealFactorizationTestSeams::
+                    take_valuation_perturbation();
             slong contribution = 0;
             if (!checked_mul_nonneg(contribution, prime->residue_degree(),
                                     valuation) ||

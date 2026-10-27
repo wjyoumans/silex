@@ -4,6 +4,8 @@
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 
+#include <atomic>
+
 namespace silex {
 
 class FactorBase;
@@ -13,6 +15,26 @@ class PrimeIdeal;
 struct DiagnosticsContext;
 
 namespace detail {
+
+class TestHookAccess;
+
+// Fault-injection switch that only detail::TestHookAccess
+// (test/test_hook_access.hpp) can arm.  Off (0) by default and never set by
+// production code; one relaxed atomic exchange per rational prime in
+// IdealFactorization::factor.
+class IdealFactorizationTestSeams {
+public:
+    // Returns the armed amount and disarms; 0 when not armed.  factor() adds
+    // it to the first computed valuation v_P, so the accounted sum of f_P v_P
+    // over the primes above that p differs from v_p(N(I)).
+    static slong take_valuation_perturbation() noexcept {
+        return valuation_perturbation_.exchange(0, std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<slong> valuation_perturbation_{0};
+};
 
 enum class OneLargePrimeFactorStatus {
     no_candidate,

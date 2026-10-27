@@ -4,6 +4,7 @@
 
 #include "ideal/ideal_access_internal.hpp"
 #include "ideal_factorization/ideal_factorization_internal.hpp"
+#include "test_hook_access.hpp"
 #include "test_support.hpp"
 
 #include <flint/fmpz_factor.h>
@@ -1276,6 +1277,35 @@ int test_keeps_parent_order_alive() {
 
 }  // namespace
 
+int test_factor_rejects_norm_accounting_mismatch() {
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order = silex::test::equation_order(field);
+    assert(order.is_maximal());
+
+    silex::Ideal good(order);
+    silex::IdealFactorization factorization(order);
+    assert(set_rational_principal(good, 7));
+    assert(factorization.factor(good));
+    assert(factorization.length() == 2);
+
+    // Overstate one valuation: sum f_P v_P no longer equals v_p(N(I)), so
+    // factor() must reject and leave the previous output in place.  The
+    // norm accounting runs before the debug-check reconstruct, which
+    // therefore cannot mask this.
+    silex::detail::TestHookAccess::
+            set_ideal_factorization_valuation_perturbation(1);
+    silex::Ideal other(order);
+    assert(set_rational_principal(other, 3));
+    assert(!factorization.factor(other));
+    assert(factorization.length() == 2);
+    assert(count_prime(factorization, 7, 1, 1, 1) == 2);
+
+    // The perturbation was one-shot: the same call now succeeds.
+    assert(factorization.factor(other));
+    assert(factorization.length() == 1);
+    return 0;
+}
+
 int main() {
     assert(test_degree_one_factorization() == 0);
     assert(test_quadratic_factorization() == 0);
@@ -1293,6 +1323,7 @@ int main() {
     assert(test_fractional_factor_over_base_cancelling_nonbase_primes() == 0);
     assert(test_factor_norm_accounting() == 0);
     assert(test_factor_rejects_zero_ideal() == 0);
+    assert(test_factor_rejects_norm_accounting_mismatch() == 0);
     assert(test_keeps_parent_order_alive() == 0);
     return 0;
 }
