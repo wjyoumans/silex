@@ -12152,19 +12152,60 @@ bool ClassGroupContext::try_partial_relation_(
     bool have_partial_row = false;
     // A large prime known only by its rational prime q (residue degree 1,
     // valuation 1); see detail::OneLargePrimeFactorStatus::found_deferred.
-    // It is built only when a stored partial lies above the same q, the
-    // first point where its identity as an ideal is needed; the store, match
-    // and drop decisions are those of building it at once.
+    // It is built only when a comparison with a partial above the same q
+    // needs its identity as an ideal, and not even then when both primes
+    // have a root key (see the match scan); the store, match and drop
+    // decisions are those of building it at once.
     detail::OneLargePrimeDeferral deferral;
     bool have_deferred_large_prime = false;
+    // The root key of a deferred large prime (see detail::DeferredRootKey),
+    // kept after the prime is built.
+    flint::Fmpz deferred_root;
+    detail::DeferredRootKey deferred_root_state = detail::DeferredRootKey::none;
     if (!large_prime.is_defined()) {
         return false;
     }
+
+    // Computes an unknown root key from the order coordinates the deferred
+    // build would use.  A failure only leaves the key unavailable, so the
+    // prime is then compared by building it, as without the key.
+    auto compute_root_key = [&](detail::DeferredRootKey& state,
+                                flint::Fmpz& root,
+                                const fmpz_mat_struct* coordinates,
+                                const flint::Fmpz& rational_prime) noexcept {
+        if (state != detail::DeferredRootKey::unknown) {
+            return;
+        }
+        state = detail::DeferredRootKey::unavailable;
+        OrderElement order_generator(parent_);
+        bool found = false;
+        if (coordinates != nullptr && order_generator.is_defined() &&
+            order_generator.set_coordinates(
+                    flint::FmpzMatConstRef(coordinates)) &&
+            detail::PrimeIdealAccess::single_containing_linear_prime_root(
+                    found, flint::FmpzRef(root), order_generator,
+                    flint::FmpzConstRef(rational_prime)) &&
+            found) {
+            state = detail::DeferredRootKey::found;
+        }
+    };
+    auto compute_incoming_root_key = [&]() noexcept {
+        compute_root_key(deferred_root_state, deferred_root,
+                         known_integral_coordinates, deferral.rational_prime);
+    };
+    auto compute_stored_root_key =
+            [&](detail::PartialRelationEntry& stored) noexcept {
+        compute_root_key(stored.deferred_root_state, stored.deferred_root,
+                         stored.deferred_coordinates.raw(),
+                         stored.rational_prime);
+    };
 
     auto build_deferred_large_prime = [&]() noexcept -> bool {
         if (!have_deferred_large_prime) {
             return true;
         }
+        // The coordinates are not kept once the prime is built.
+        compute_incoming_root_key();
         OrderElement order_generator(parent_);
         if (known_integral_coordinates == nullptr ||
             !order_generator.is_defined() ||
@@ -12185,6 +12226,8 @@ bool ClassGroupContext::try_partial_relation_(
         if (!stored.has_deferred_prime) {
             return true;
         }
+        // The coordinates are freed once the prime is built.
+        compute_stored_root_key(stored);
         OrderElement order_generator(parent_);
         if (!order_generator.is_defined() ||
             !order_generator.set_coordinates(flint::FmpzMatConstRef(
@@ -12248,12 +12291,39 @@ bool ClassGroupContext::try_partial_relation_(
                      stored.has_deferred_prime) &&
                     ::fmpz_equal(stored.rational_prime.raw(),
                                  rational_large_prime.raw()) != 0) {
-                    if (!build_deferred_large_prime() ||
-                        !build_stored_large_prime(stored)) {
-                        return false;
+                    // Two large primes both first found deferred are
+                    // compared by their root keys when both have one:
+                    // equal roots exactly when the built primes are the
+                    // same ideal (see PrimeIdealAccess::
+                    // single_containing_linear_prime_root).  A key leaves
+                    // one prime P_r above q containing the element, so
+                    // P_r is the prime the deferred build returns, and
+                    // that build cannot fail for want of a prime: by the
+                    // deferral (remaining == 1 after the base valuations;
+                    // see order_element_factor_over_base_with_one_large_
+                    // prime) P_r lies outside the base with valuation 1.
+                    // Any other pair is built and compared as ideals.
+                    if (deferred_root_state != detail::DeferredRootKey::none &&
+                        stored.deferred_root_state !=
+                                detail::DeferredRootKey::none) {
+                        compute_incoming_root_key();
+                        compute_stored_root_key(stored);
                     }
-                    prime_match = detail::PrimeIdealAccess::same_prime_ideal(
-                            stored.prime, large_prime);
+                    if (deferred_root_state ==
+                                detail::DeferredRootKey::found &&
+                        stored.deferred_root_state ==
+                                detail::DeferredRootKey::found) {
+                        prime_match = ::fmpz_equal(
+                                stored.deferred_root.raw(),
+                                deferred_root.raw()) != 0;
+                    } else if (!build_deferred_large_prime() ||
+                               !build_stored_large_prime(stored)) {
+                        return false;
+                    } else {
+                        prime_match =
+                                detail::PrimeIdealAccess::same_prime_ideal(
+                                        stored.prime, large_prime);
+                    }
                 }
                 if (!residue_match && !prime_match) {
                     continue;
@@ -12399,6 +12469,8 @@ bool ClassGroupContext::try_partial_relation_(
                 entry.deferred_norm_valuation = deferral.norm_valuation;
                 entry.has_deferred_prime = true;
             }
+            ::fmpz_set(entry.deferred_root.raw(), deferred_root.raw());
+            entry.deferred_root_state = deferred_root_state;
             if (have_residue_key) {
                 ::fmpz_poly_set(entry.residue_key.raw(), residue_key.raw());
                 entry.has_residue_key = true;
@@ -12497,6 +12569,9 @@ bool ClassGroupContext::try_partial_relation_(
                     "class_group.partial_relation_retained_integral_found");
             have_large_prime = !deferred;
             have_deferred_large_prime = deferred;
+            if (deferred) {
+                deferred_root_state = detail::DeferredRootKey::unknown;
+            }
             have_partial_row = true;
             return match_or_store_large_prime();
         }

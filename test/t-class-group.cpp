@@ -2460,9 +2460,11 @@ int test_large_prime_match_compares_prime_ideals_cubic() {
 // On an order other than the equation order, a partial relation whose
 // leftover norm is a single rational prime q is stored with its large prime
 // deferred: q and the generator's coordinates, no prime ideal.  A later
-// partial above the same q builds both large primes and pairs with it as the
-// eager prime would.  x^3 - 12 is the field of the test above.
-int test_deferred_large_prime_match_cubic() {
+// partial above the same q pairs with it as the eager prime would: by the
+// two primes' root keys, or, with `force_build` (the stored key made
+// unavailable), by building both primes.  x^3 - 12 is the field of the test
+// above.
+int test_deferred_large_prime_match_cubic(bool force_build) {
     using SearchAccess = silex::detail::ClassGroupRelationSearchAccess;
     silex::NumberField field = cubic_field(0, -12);
     silex::Order equation_order;
@@ -2568,6 +2570,12 @@ int test_deferred_large_prime_match_cubic() {
     std::vector<silex::detail::PartialRelationEntry>* partials =
             SearchAccess::partial_relations(context);
     assert(partials != nullptr);
+    assert(partials->back().deferred_root_state ==
+           silex::detail::DeferredRootKey::unknown);
+    if (force_build) {
+        partials->back().deferred_root_state =
+                silex::detail::DeferredRootKey::unavailable;
+    }
     const std::size_t size_before = partials->size();
     const slong matches_before = context.relation_source_count(
             silex::ClassGroupRelationSource::LargePrimeMatch);
@@ -2588,9 +2596,11 @@ int test_deferred_large_prime_match_cubic() {
 
 // Two deferred partials above the same split rational prime q but over
 // different degree-one primes must not pair: the match compares the large
-// primes, not q alone.  x^3 - 12 is the field of the test above; 13 splits
-// in it.
-int test_deferred_large_prime_distinct_primes_cubic() {
+// primes, not q alone.  It compares their distinct root keys and builds
+// neither prime; with `force_build` (the stored key made unavailable) it
+// builds both and compares the ideals.  x^3 - 12 is the field of the test
+// above; 13 splits in it.
+int test_deferred_large_prime_distinct_primes_cubic(bool force_build) {
     using SearchAccess = silex::detail::ClassGroupRelationSearchAccess;
     silex::NumberField field = cubic_field(0, -12);
     silex::Order equation_order;
@@ -2684,10 +2694,16 @@ int test_deferred_large_prime_distinct_primes_cubic() {
         assert(!throttle);
     };
     append(first_coordinates);
-    const std::vector<silex::detail::PartialRelationEntry>* partials =
+    std::vector<silex::detail::PartialRelationEntry>* partials =
             SearchAccess::partial_relations(context);
     assert(partials != nullptr);
     assert(partials->size() == 1);
+    assert((*partials)[0].deferred_root_state ==
+           silex::detail::DeferredRootKey::unknown);
+    if (force_build) {
+        (*partials)[0].deferred_root_state =
+                silex::detail::DeferredRootKey::unavailable;
+    }
     const slong matches_before = context.relation_source_count(
             silex::ClassGroupRelationSource::LargePrimeMatch);
     const slong skipped_before = context.skipped_dependent_relation_count();
@@ -2699,6 +2715,29 @@ int test_deferred_large_prime_distinct_primes_cubic() {
                    silex::ClassGroupRelationSource::LargePrimeMatch) ==
            matches_before);
     assert(context.skipped_dependent_relation_count() == skipped_before);
+    const silex::detail::PartialRelationEntry& first = (*partials)[0];
+    const silex::detail::PartialRelationEntry& second = (*partials)[1];
+    if (force_build) {
+        // Both primes were built; the incoming one keeps the key computed
+        // before its build.
+        assert(!first.has_deferred_prime && first.prime.has_prime_data());
+        assert(!second.has_deferred_prime && second.prime.has_prime_data());
+        assert(first.deferred_root_state ==
+               silex::detail::DeferredRootKey::unavailable);
+        assert(second.deferred_root_state ==
+               silex::detail::DeferredRootKey::found);
+        assert(!silex::detail::PrimeIdealAccess::same_prime_ideal(
+                first.prime, second.prime));
+    } else {
+        assert(first.has_deferred_prime && !first.prime.has_prime_data());
+        assert(second.has_deferred_prime && !second.prime.has_prime_data());
+        assert(first.deferred_root_state ==
+               silex::detail::DeferredRootKey::found);
+        assert(second.deferred_root_state ==
+               silex::detail::DeferredRootKey::found);
+        assert(fmpz_equal(first.deferred_root.raw(),
+                          second.deferred_root.raw()) == 0);
+    }
     return 0;
 }
 
@@ -9303,8 +9342,10 @@ int main() {
     test_compute_candidate_random_product_relation_cubic();
     test_one_large_prime_match_cubic();
     test_large_prime_match_compares_prime_ideals_cubic();
-    test_deferred_large_prime_match_cubic();
-    test_deferred_large_prime_distinct_primes_cubic();
+    test_deferred_large_prime_match_cubic(false);
+    test_deferred_large_prime_match_cubic(true);
+    test_deferred_large_prime_distinct_primes_cubic(false);
+    test_deferred_large_prime_distinct_primes_cubic(true);
     test_direct_partial_row_exact_valuation_cubic();
     test_direct_partial_row_deduced_last_valuation();
     test_compute_candidate_post_finite_refinement_cubic();

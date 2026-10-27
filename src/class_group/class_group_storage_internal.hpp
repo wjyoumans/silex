@@ -66,6 +66,21 @@ inline bool capped_galois_images_selected(
 
 struct FactorBaseHonestyFailure;
 
+// The root key of a deferred large prime: the r of
+// PrimeIdealAccess::single_containing_linear_prime_root for the element at
+// its rational prime, which identifies the prime ideal without building it.
+enum class DeferredRootKey : unsigned char {
+    // The large prime is not a deferred one, so no root key applies.
+    none,
+    // Deferred, and the key is not computed yet.
+    unknown,
+    // The key is known.
+    found,
+    // That routine reports no key, or computing it failed; the prime is
+    // compared by building it.
+    unavailable,
+};
+
 struct PartialRelationEntry {
     explicit PartialRelationEntry(const Order& order) noexcept
         : prime(order),
@@ -75,8 +90,9 @@ struct PartialRelationEntry {
     // The large prime ideal, when built.  A deferred entry has none yet:
     // it records the order coordinates of `generator` and the norm
     // valuation at rational_prime, from which
-    // order_element_deferred_large_prime builds it on the first stored or
-    // incoming partial above the same rational prime.
+    // order_element_deferred_large_prime builds it when a comparison with a
+    // partial above the same rational prime needs the ideal (the root key
+    // below decides comparisons between two keyed deferred primes).
     PrimeIdeal prime;
     Element generator;
     flint::FmpzMat row{0, 0};
@@ -85,6 +101,10 @@ struct PartialRelationEntry {
     flint::FmpzPoly residue_key;
     flint::FmpzMat deferred_coordinates{0, 0};
     slong deferred_norm_valuation = 0;
+    // The root key of a large prime first found deferred, kept after the
+    // prime is built.
+    flint::Fmpz deferred_root;
+    DeferredRootKey deferred_root_state = DeferredRootKey::none;
     bool has_residue_key = false;
     bool has_row = false;
     bool has_deferred_prime = false;

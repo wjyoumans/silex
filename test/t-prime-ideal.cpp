@@ -1874,17 +1874,72 @@ bool same_prime_data(const silex::PrimeIdeal& a,
             fmpz_poly_equal(residue_a.raw(), residue_b.raw()) != 0);
 }
 
+// A root key of single_containing_linear_prime_root with the one prime
+// decompose_prime_containing built for its element.
+struct LinearPrimeRootKey {
+    sflint::Fmpz root;
+    silex::PrimeIdeal prime;
+};
+
+// single_containing_linear_prime_root on `element`, given the primes
+// decompose_prime_containing returned for it.  Off the Dedekind-Kummer
+// route it finds no key.  On it, a key leaves one containing prime, of
+// residue degree 1, containing theta - r; and a single containing prime of
+// residue degree and ramification index 1 always has a key (then
+// gcd(f, A) = g modulo p).  Found keys are appended to `keys`.
+void check_single_containing_linear_prime_root(
+        const silex::Order& order,
+        const std::vector<silex::PrimeIdeal>& containing,
+        const silex::OrderElement& element,
+        sflint::FmpzConstRef p,
+        bool filtered,
+        std::vector<LinearPrimeRootKey>& keys) {
+    bool found = true;
+    sflint::Fmpz root;
+    assert(PrimeIdealAccess::single_containing_linear_prime_root(
+            found, sflint::FmpzRef(root), element, p));
+    if (!filtered) {
+        assert(!found);
+        return;
+    }
+    if (containing.size() == 1 && containing[0].residue_degree() == 1 &&
+        containing[0].ramification_index() == 1) {
+        assert(found);
+    }
+    if (!found) {
+        return;
+    }
+    assert(containing.size() == 1);
+    assert(containing[0].residue_degree() == 1);
+    assert(fmpz_sgn(root.raw()) >= 0 && fmpz_cmp(root.raw(), p.raw()) < 0);
+    silex::Element shifted(*order.parent());
+    assert(shifted.gen());
+    assert(shifted.add_si(shifted, -fmpz_get_si(root.raw())));
+    silex::OrderElement shifted_element(order);
+    assert(shifted_element.set_element(shifted));
+    slong valuation = -1;
+    assert(containing[0].valuation(valuation, shifted_element));
+    assert(valuation >= 1);
+    keys.push_back(LinearPrimeRootKey{std::move(root),
+                                      silex::PrimeIdeal(order)});
+    assert(keys.back().prime.set(containing[0]));
+}
+
 // decompose_prime_containing on `element`: on a Dedekind-Kummer route
 // (`filtered`) exactly the primes of decompose_prime(.., p, 0) that contain
 // the element, in that order and built identically; otherwise all of them.
+// Its root key is checked too, and appended to `keys` when found.
 void check_decompose_prime_containing(const silex::Order& order,
                                       const silex::PrimeIdealList& all,
                                       const silex::OrderElement& element,
                                       sflint::FmpzConstRef p,
-                                      bool filtered) {
+                                      bool filtered,
+                                      std::vector<LinearPrimeRootKey>& keys) {
     std::vector<silex::PrimeIdeal> containing;
     assert(PrimeIdealAccess::decompose_prime_containing(containing, element,
                                                         p, nullptr));
+    check_single_containing_linear_prime_root(order, containing, element, p,
+                                              filtered, keys);
     std::size_t next = 0;
     for (slong i = 0; i < all.size(); ++i) {
         const silex::PrimeIdeal& prime = *all.at(i);
@@ -1903,12 +1958,17 @@ void check_decompose_prime_containing(const silex::Order& order,
 // Elements of the maximal order of the field of `low_to_high`: small
 // coordinate vectors, p, 1, and each prime's Kummer generator, which lies
 // in that prime.  `index_primes` divide [O : Z[theta]] and keep the whole
-// decomposition.
+// decomposition.  Root keys found are added to `found_keys` when given.
 int check_decompose_prime_containing_routes(
         const std::vector<slong>& low_to_high,
         bool maximal_is_equation_order,
         const std::vector<slong>& rational_primes,
-        const std::vector<slong>& index_primes) {
+        const std::vector<slong>& index_primes,
+        slong* found_keys = nullptr) {
+    slong ignored_keys = 0;
+    if (found_keys == nullptr) {
+        found_keys = &ignored_keys;
+    }
     sflint::FmpqPoly polynomial;
     poly_from_coefficients(polynomial, low_to_high);
     silex::NumberField field;
@@ -1958,10 +2018,20 @@ int check_decompose_prime_containing_routes(
                         sflint::FmpzMatConstRef(coordinates)));
             }
         }
+        // Equal root keys exactly when the built primes are the same ideal.
+        std::vector<LinearPrimeRootKey> keys;
         for (const silex::OrderElement& element : elements) {
             check_decompose_prime_containing(order, all, element, p_ref,
-                                             filtered);
+                                             filtered, keys);
         }
+        for (const LinearPrimeRootKey& left : keys) {
+            for (const LinearPrimeRootKey& right : keys) {
+                assert((fmpz_equal(left.root.raw(), right.root.raw()) != 0) ==
+                       PrimeIdealAccess::same_prime_ideal(left.prime,
+                                                          right.prime));
+            }
+        }
+        *found_keys += static_cast<slong>(keys.size());
 
     }
     return 0;
@@ -2135,12 +2205,21 @@ int test_decompose_prime_route() {
 // 43; x^3 - 2, whose maximal order is its equation order; the quadratic
 // integral-generator route of Q(sqrt(5)).
 int test_decompose_prime_containing() {
+    // The root keys of single_containing_linear_prime_root are checked on
+    // the same elements; keys are found on both fields' Dedekind-Kummer
+    // routes, and on no other route.
+    slong found_keys = 0;
     assert(check_decompose_prime_containing_routes(
                    {238831, -228566, -128567, 146666, -15113, -13352, 2746,
                     334, -97, -2, 1},
-                   false, {2, 3, 5, 11, 23, 43, 89, 101}, {43}) == 0);
+                   false, {2, 3, 5, 11, 23, 43, 89, 101}, {43},
+                   &found_keys) == 0);
+    assert(found_keys > 0);
+    found_keys = 0;
     assert(check_decompose_prime_containing_routes({-2, 0, 0, 1}, true,
-                                                   {2, 3, 5, 31}, {}) == 0);
+                                                   {2, 3, 5, 31}, {},
+                                                   &found_keys) == 0);
+    assert(found_keys > 0);
     assert(check_decompose_prime_containing_routes({-5, 0, 1}, false,
                                                    {2, 5, 11, 19}, {2, 5, 11,
                                                                     19}) ==

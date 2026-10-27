@@ -291,6 +291,28 @@ public:
             flint::FmpzConstRef p,
             const DiagnosticsContext* diagnostics) noexcept;
 
+    // A key for the prime ideal above p containing the nonzero element
+    // `element` of a maximal order, when there is only one and it has
+    // residue degree 1.  When decompose_prime_containing(.., element, p)
+    // takes its Dedekind-Kummer route and G = gcd(f, A) modulo p has degree
+    // 1 (element = A(theta) / d as there), sets `found` and writes to `root`
+    // the r in [0, p) with G = lead (x - r).  The factors g_i of f modulo p
+    // dividing A are the irreducible factors of G, so x - r is the only one:
+    // decompose_prime_containing then returns the single prime
+    // P_r = (p, theta - r), built from that factor, and it is the only prime
+    // above p containing `element`.  For two elements with roots r and s,
+    // P_r = P_s exactly when r = s: if r != s and P_r = P_s = P, then
+    // r - s = (theta - s) - (theta - r) lies in P meet Z = pZ, which two
+    // distinct residues in [0, p) do not allow.  So comparing roots decides
+    // what PrimeIdealAccess::same_prime_ideal decides on the two built
+    // primes.  Otherwise `found` is false (any other route, or G of another
+    // degree).  Returns false on failure.
+    static bool single_containing_linear_prime_root(
+            bool& found,
+            flint::FmpzRef root,
+            const OrderElement& element,
+            flint::FmpzConstRef p) noexcept;
+
     // `norm_vp` must be the exact p-adic valuation of the absolute norm of
     // `element`; the result is wrong otherwise.
     static bool prime_ideal_valuation_with_norm_vp(

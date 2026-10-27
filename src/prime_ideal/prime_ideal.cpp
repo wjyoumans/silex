@@ -4939,6 +4939,95 @@ DecomposePrimeRoute PrimeIdealAccess::decompose_prime_route_for_max_degree(
             });
 }
 
+namespace {
+
+// Whether decompose_prime_containing(.., element, p) takes its
+// Dedekind-Kummer route, writing element = A(theta) / d to `value` when it
+// does.  That route is taken for a maximal order on the routes of
+// decompose_prime(.., p, 0) that factor the defining polynomial f modulo p
+// and build (p, g_i(theta)) for each factor g_i, when p does not divide d.
+// p does not divide d when p is prime to the index, since
+// [O : Z[theta]] element lies in Z[theta]; the test keeps the whole
+// decomposition should that ever fail.  Returns false on failure.
+bool containing_prime_dedekind_kummer_value(
+        bool& applies,
+        flint::FmpqPoly& value,
+        const OrderElement& element,
+        flint::FmpzConstRef p) noexcept {
+    applies = false;
+    const Order* order = element.parent();
+    if (order == nullptr || order->parent() == nullptr) {
+        return false;
+    }
+    if (order->parent()->raw_flint_field() == nullptr) {
+        return true;
+    }
+    const DecomposePrimeRoute route = decompose_prime_route(*order, p);
+    if (!order->is_maximal() ||
+        (route != DecomposePrimeRoute::nonindex_factor &&
+         route != DecomposePrimeRoute::equation_factor)) {
+        return true;
+    }
+    Element ambient(*order->parent());
+    if (!ambient.is_defined() || !element.get_element(ambient) ||
+        !ambient.get_fmpq_poly(flint::FmpqPolyRef(value))) {
+        return false;
+    }
+    applies = fmpz_divisible(fmpq_poly_denref(value.raw()), p.raw()) == 0;
+    return true;
+}
+
+}  // namespace
+
+bool PrimeIdealAccess::single_containing_linear_prime_root(
+        bool& found,
+        flint::FmpzRef root,
+        const OrderElement& element,
+        flint::FmpzConstRef p) noexcept {
+    found = false;
+    bool dedekind_kummer_route = false;
+    flint::FmpqPoly value;
+    if (!containing_prime_dedekind_kummer_value(dedekind_kummer_route, value,
+                                                element, p)) {
+        return false;
+    }
+    if (!dedekind_kummer_route) {
+        return true;
+    }
+
+    // On this route the factors g_i of f modulo p dividing A modulo p are
+    // the irreducible factors of G = gcd(f, A) modulo p, and they index the
+    // primes decompose_prime_containing builds (see its comment).  G of
+    // degree 1 leaves the one factor G = x - r, of degree 1.
+    const nf_struct* raw_field = element.parent()->parent()->raw_flint_field();
+    flint::FmpzModCtx ctx(p.raw());
+    flint::FmpzModPoly reduced_field_polynomial(ctx);
+    flint::FmpzModPoly reduced_value(ctx);
+    flint::FmpzModPoly gcd(ctx);
+    fmpq_poly_get_fmpz_mod_poly(reduced_field_polynomial, raw_field->pol, ctx);
+    const fmpz* numerator = fmpq_poly_numref(value.raw());
+    for (slong i = 0; i < fmpq_poly_length(value.raw()); ++i) {
+        fmpz_mod_poly_set_coeff_fmpz(reduced_value.raw(), i, numerator + i,
+                                     ctx.raw());
+    }
+    fmpz_mod_poly_gcd(gcd.raw(), reduced_field_polynomial.raw(),
+                      reduced_value.raw(), ctx.raw());
+    if (fmpz_mod_poly_degree(gcd.raw(), ctx.raw()) != 1) {
+        return true;
+    }
+    flint::Fmpz lead;
+    fmpz_mod_poly_get_coeff_fmpz(lead.raw(), gcd.raw(), 1, ctx.raw());
+    fmpz_mod_poly_get_coeff_fmpz(root.raw(), gcd.raw(), 0, ctx.raw());
+    if (fmpz_invmod(lead.raw(), lead.raw(), p.raw()) == 0) {
+        return false;
+    }
+    fmpz_mul(root.raw(), root.raw(), lead.raw());
+    fmpz_neg(root.raw(), root.raw());
+    fmpz_mod(root.raw(), root.raw(), p.raw());
+    found = true;
+    return true;
+}
+
 bool PrimeIdealAccess::decompose_prime_containing(
         std::vector<PrimeIdeal>& out,
         const OrderElement& element,
@@ -4952,31 +5041,15 @@ bool PrimeIdealAccess::decompose_prime_containing(
     }
     const nf_struct* raw_field = order->parent()->raw_flint_field();
 
-    // The routes of decompose_prime(.., p, 0) that factor the defining
-    // polynomial f modulo p and build (p, g_i(theta)) for each factor g_i,
-    // for a maximal order.  Each other route gives the whole decomposition.
+    // Each route other than the Dedekind-Kummer one gives the whole
+    // decomposition.
     bool dedekind_kummer_route = false;
-    if (raw_field != nullptr) {
-        const DecomposePrimeRoute route = decompose_prime_route(*order, p);
-        dedekind_kummer_route =
-                order->is_maximal() &&
-                (route == DecomposePrimeRoute::nonindex_factor ||
-                 route == DecomposePrimeRoute::equation_factor);
-    }
-
     flint::FmpqPoly value;
-    if (dedekind_kummer_route) {
-        Element ambient(*order->parent());
-        if (!ambient.is_defined() || !element.get_element(ambient) ||
-            !ambient.get_fmpq_poly(flint::FmpqPolyRef(value))) {
-            return false;
-        }
+    if (!containing_prime_dedekind_kummer_value(dedekind_kummer_route, value,
+                                                element, p)) {
+        return false;
     }
-    // element = A(theta) / d.  p does not divide d when p is prime to the
-    // index, since [O : Z[theta]] element lies in Z[theta]; the test keeps
-    // the whole decomposition should that ever fail.
-    if (!dedekind_kummer_route ||
-        fmpz_divisible(fmpq_poly_denref(value.raw()), p.raw()) != 0) {
+    if (!dedekind_kummer_route) {
         PrimeIdealList primes;
         if (!decompose_prime(primes, *order, p, 0, diagnostics)) {
             return false;
