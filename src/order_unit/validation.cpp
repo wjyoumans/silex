@@ -709,37 +709,45 @@ bool saturate_candidate_class_relations_with_units(
     }
 
     // Extension before the first bounded pass (see
-    // RelationSaturationMemo::defer_until_extension_stalls).  A pass is
-    // deferred unless an extension slice has run since the last deferred
-    // pass without lowering the index bound below that pass's bound.
+    // RelationSaturationMemo::defer_until_extension_stalls).  While the
+    // deferral is pending every bounded pass is deferred; the pending pass
+    // runs only through run_deferred_class_relation_saturation, when an
+    // extension slice fails or appends nothing, or before acceptance on the
+    // relations of the last deferral.
+    //
+    // A stall alone (an extension slice that left the index bound at or
+    // above the deferred bound) does not run the pass: that slice appended
+    // relations, and a pass on them is deferred like the first one.  A stall
+    // test that also asked for no relation appended since the deferral could
+    // never hold, so there is none.  In compute_with_relation_class_group_,
+    // extension_rounds counts only slices that end with more relations than
+    // they started with; a slice that does not (a factor-base rebuild may
+    // drop replayed relations) runs the pending pass and ends the deferral;
+    // and outside extension slices the loop only appends relations to its
+    // candidate class group.  So a new round since the deferral implies a
+    // relation count above the one recorded at the deferral.
     if (memo != nullptr && !index_bound_is_exact &&
         memo->defer_until_extension_stalls && !memo->deferral_done) {
-        const bool new_round =
-                memo->extension_rounds != memo->deferred_extension_round;
-        const bool stalled = memo->deferred && new_round &&
-                flint::fmpz_cmp(index_bound,
-                                flint::FmpzConstRef(
-                                        memo->deferred_index_bound)) >= 0;
-        if (!stalled) {
-            if (!memo->deferred || new_round ||
-                flint::fmpz_cmp(index_bound,
-                                flint::FmpzConstRef(
-                                        memo->deferred_index_bound)) < 0) {
-                flint::fmpz_set(flint::FmpzRef(memo->deferred_index_bound),
-                                index_bound);
-            }
-            memo->deferred = true;
-            memo->deferred_extension_round = memo->extension_rounds;
-            memo->deferred_relation_count = class_group.relation_count();
-            ++memo->deferrals;
-            SILEX_PROFILE_EVENT(
-                    diagnostics, DiagnosticsModule::unit_group,
-                    "unit_group.validation_class_relation_saturation."
-                    "deferred_to_extension");
-            return true;
+        // The bound of the pending pass: the current one after an
+        // extension slice, else the smallest of the passes deferred since
+        // that slice.
+        if (!memo->deferred ||
+            memo->extension_rounds != memo->deferred_extension_round ||
+            flint::fmpz_cmp(index_bound,
+                            flint::FmpzConstRef(
+                                    memo->deferred_index_bound)) < 0) {
+            flint::fmpz_set(flint::FmpzRef(memo->deferred_index_bound),
+                            index_bound);
         }
-        memo->deferral_done = true;
-        memo->deferred = false;
+        memo->deferred = true;
+        memo->deferred_extension_round = memo->extension_rounds;
+        memo->deferred_relation_count = class_group.relation_count();
+        ++memo->deferrals;
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::unit_group,
+                "unit_group.validation_class_relation_saturation."
+                "deferred_to_extension");
+        return true;
     }
 
     flint::Fmpz aux_bound;

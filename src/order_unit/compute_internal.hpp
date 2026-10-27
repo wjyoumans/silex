@@ -737,17 +737,17 @@ struct RelationSaturationMemo {
     // search did not improve the index (`isone(improved)`); its first round
     // reports no improvement (FindUnits.jl line 278, `return 1, 0`) and
     // goes straight to new relations.  Here the bounded pass is likewise
-    // deferred to the next relation-extension slice while extension keeps
-    // lowering the analytic index bound.  It runs at the first pass after an
-    // extension slice that did not lower the bound below the bound of the
-    // deferred pass (a stall), when the extension itself fails, or before
-    // validation accepts index one on the relations of the deferred pass
+    // deferred to the next relation-extension slice, and stays deferred
+    // while extension slices append relations, whether or not they lower
+    // the analytic index bound.  It runs when an extension slice fails or
+    // appends nothing, or before validation accepts index one on the
+    // relations of the last deferred pass
     // (run_deferred_class_relation_saturation); from then on every pass runs
     // as without deferral.  The deferral only reorders the pass and the
-    // extension: it never skips a pass that a stall would need, and grh
-    // acceptance never rests on this saturation.
+    // extension: the pass still runs before the loop gives up for lack of
+    // relations, and grh acceptance never rests on this saturation.
     bool defer_until_extension_stalls = false;
-    // True once a stall, a failed extension or an acceptance has run the
+    // True once a failed or empty extension or an acceptance has run the
     // deferred pass.
     bool deferral_done = false;
     // True while a deferred pass has not been run.

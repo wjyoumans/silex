@@ -4948,8 +4948,9 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     // regulator stay put, a pass that found nothing is not run again (see
     // detail::RelationSaturationMemo).
     // The same memo defers that pass behind relation extension until an
-    // extension slice stalls (RelationSaturationMemo::
-    // defer_until_extension_stalls; reference Clgp.jl:248-258).
+    // extension slice fails or appends nothing, or validation accepts
+    // (RelationSaturationMemo::defer_until_extension_stalls; reference
+    // Clgp.jl:248-258).
     detail::RelationSaturationMemo relation_saturation_memo;
     if (options.requested_certification == CertificationMode::grh) {
         relation_saturation_memo.defer_until_extension_stalls = true;
@@ -5312,8 +5313,8 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
             return false;
         }
         // A bounded pass deferred behind this extension runs now, since
-        // the extension stalled; when it finds relations the loop goes on
-        // as after an extension slice.
+        // the extension failed or appended nothing; when it finds relations
+        // the loop goes on as after an extension slice.
         if (!extend_ok && !deferred_saturation_changed) {
             SILEX_LOG(active_diagnostics, DiagnosticsModule::unit_group,
                       LogLevel::detail,

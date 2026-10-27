@@ -4516,8 +4516,9 @@ int test_grh_validation_saturation_memo_invalidated_by_change() {
 // (RelationSaturationMemo::defer_until_extension_stalls).  In the
 // degree-one field with factor base {2} and the single relation (-4), h_cand
 // is 2 and a pass at ell = 2 appends the relation (2), so a pass that runs
-// is visible as a new relation.  The pass is deferred until an extension
-// slice leaves the index bound where the deferred pass saw it.
+// is visible as a new relation.  The pass stays deferred while extension
+// slices append relations, whether or not they lower the index bound, and
+// runs once a slice fails or appends nothing.
 int test_grh_validation_saturation_deferred_until_extension_stalls() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -4569,22 +4570,38 @@ int test_grh_validation_saturation_deferred_until_extension_stalls() {
     assert(context.relation_saturation_status() ==
            silex::ProofState::not_checked);
 
-    // An extension slice that lowered the bound: deferred again.
+    // An extension slice that lowered the bound: deferred again.  The memo
+    // sees an extension slice only through extension_rounds, which the
+    // class/unit loop advances only after a slice that appended relations.
     ++memo.extension_rounds;
     assert(pass(changed, context, 2, &memo));
     assert(!changed && context.relation_count() == 1 && memo.deferrals == 3);
     assert(sflint::fmpz_equal_si(memo.deferred_index_bound, 2));
 
-    // An extension slice that left the bound at 2 stalled: the pass runs,
-    // and so does every later pass.
+    // An extension slice that left the bound at or above 2: still deferred,
+    // with this pass's bound.  (Before, this stall ran the pass, and the
+    // count of deferrals stopped at 3.)
     ++memo.extension_rounds;
-    assert(pass(changed, context, 2, &memo));
-    assert(changed && context.relation_count() == 2);
-    assert(memo.deferral_done && !memo.deferred && memo.deferrals == 3);
+    assert(pass(changed, context, 3, &memo));
+    assert(!changed && context.relation_count() == 1 && memo.deferrals == 4);
+    assert(memo.deferred && !memo.deferral_done);
+    assert(sflint::fmpz_equal_si(memo.deferred_index_bound, 3));
+    assert(context.relation_saturation_status() ==
+           silex::ProofState::not_checked);
+
+    // An extension slice that appends nothing runs the pending pass, as
+    // compute_with_relation_class_group_ does, and ends the deferral: the
+    // pass appends (2), and every later pass runs as without deferral.
     bool ran = false;
     assert(silex::detail::run_deferred_class_relation_saturation(
             ran, context, units, options, memo));
+    assert(ran && context.relation_count() == 2);
+    assert(memo.deferral_done && !memo.deferred && memo.deferrals == 4);
+    assert(silex::detail::run_deferred_class_relation_saturation(
+            ran, context, units, options, memo));
     assert(!ran && context.relation_count() == 2);
+    assert(pass(changed, context, 2, &memo));
+    assert(memo.deferrals == 4);
 
     // Without the flag (the default, and every request but grh) nothing is
     // deferred.
@@ -15943,6 +15960,7 @@ struct DeferredSaturationEvents {
     slong deferred = 0;
     slong bounded_passes = 0;
     slong runs_before_acceptance = 0;
+    slong runs_after_failed_extension = 0;
 };
 
 void deferred_saturation_callback(void* user,
@@ -15966,6 +15984,12 @@ void deferred_saturation_callback(void* user,
                     "unit_group.validation_class_relation_saturation."
                     "deferred_run_before_acceptance") == 0) {
         ++events->runs_before_acceptance;
+    }
+    if (event == silex::ProfileEvent::event &&
+        std::strcmp(label,
+                    "unit_group.validation_class_relation_saturation."
+                    "deferred_run_after_failed_extension") == 0) {
+        ++events->runs_after_failed_extension;
     }
     if (event == silex::ProfileEvent::begin_scope &&
         std::strcmp(label,
@@ -16053,6 +16077,42 @@ int test_grh_validation_runs_deferred_saturation_before_acceptance() {
     assert(events.deferred >= 1);
     assert(events.runs_before_acceptance == 1);
     assert(events.bounded_passes == 1);
+#endif
+    return 0;
+}
+
+// The bounded pass deferred behind relation extension still runs when an
+// extension slice appends nothing.  The seam makes the first continuation
+// of the simplest cubic x^3 - 3x - 1 (corpus row simplest_cubic_a0, h = 1)
+// skip its extension; the pending pass runs at once, and its relation lets
+// the run succeed (see
+// test_grh_continuation_without_relation_progress_fails_closed).
+int test_grh_runs_deferred_saturation_when_extension_appends_nothing() {
+    const std::vector<slong> simplest = {-1, -3, 0, 1};
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    DeferredSaturationEvents events;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group) |
+                    silex::diagnostics_module_bit(
+                            silex::DiagnosticsModule::class_group),
+            deferred_saturation_callback, &events);
+    silex::detail::TestHookAccess::set_continuation_appends_nothing(true);
+    const TransactionRun run = run_transaction(
+            simplest, silex::CertificationMode::grh, 5000, 500,
+            &diagnostics);
+    silex::detail::TestHookAccess::set_continuation_appends_nothing(false);
+    assert(run.ok && run.audit.final_result_published);
+    assert(run.audit.class_group_certification ==
+           silex::CertificationMode::grh);
+    assert(sflint::fmpz_equal_si(run.class_order, 1));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(events.deferred >= 1);
+    assert(events.runs_after_failed_extension == 1);
+    assert(events.bounded_passes >= 1);
+#else
+    assert(events.runs_after_failed_extension == 0);
 #endif
     return 0;
 }
@@ -16396,7 +16456,10 @@ int test_lll_relation_slice_rejects_small_extension_target() {
 // square tests lift in every degree.  The degree-10 field
 // x^10 - 2x^9 + 3x^7 - x^6 + 4x^5 + 2x^4 - x + 3 (silex-bench corpus row
 // random_d10_h4_s27) reaches square tests of saturation with units that the
-// residue scan does not disprove, so its grh computation skips their lifts.
+// residue scan does not disprove, so the bounded validation pass on its grh
+// pair skips their lifts.  The grh class/unit loop defers that pass while
+// extension slices append relations, and on this row never runs it, so the
+// test runs the pass on the published pair itself.
 int test_grh_saturation_square_tests_keep_degree_ten_lift_limit() {
     static constexpr slong coefficients[] = {3, -1, 0, 0, 2, 4, -1, 3, 0,
                                              -2, 1};
@@ -16420,13 +16483,24 @@ int test_grh_saturation_square_tests_keep_degree_ten_lift_limit() {
     options.requested_certification = silex::CertificationMode::grh;
     silex::ClassGroupContext class_group;
     silex::OrderUnitGroup units;
-    const slong skipped_before = silex::detail::TestHookAccess::
-            saturation_lifts_skipped();
     assert(units.compute_with_class_group(class_group, order,
                                           sflint::FmpzConstRef(bound),
                                           options, 128));
     assert(class_group.certification_status() ==
            silex::CertificationMode::grh);
+    const slong skipped_before = silex::detail::TestHookAccess::
+            saturation_lifts_skipped();
+    {
+        // The bounded pass of grh validation at ell = 2, without the
+        // deferral memo.
+        options.max_relations = class_group.relation_count() + 500;
+        sflint::Fmpz index_bound;
+        sflint::fmpz_set_ui(sflint::FmpzRef(index_bound), 2);
+        bool changed = true;
+        assert(silex::detail::saturate_candidate_class_relations_with_units(
+                changed, class_group, units, options,
+                sflint::FmpzConstRef(index_bound), false));
+    }
     assert(silex::detail::TestHookAccess::saturation_lifts_skipped() >
            skipped_before);
     // Independent oracle (GP 2.17.4):
@@ -16449,6 +16523,7 @@ int main() {
     test_grh_validation_skips_unit_rebuild_from_unchanged_class_context();
     test_grh_validation_defers_bounded_saturation_to_extension();
     test_grh_validation_runs_deferred_saturation_before_acceptance();
+    test_grh_runs_deferred_saturation_when_extension_appends_nothing();
     test_compute_failure_records_validation_outcome_only_when_it_ran();
     test_grh_continuation_without_relation_progress_fails_closed();
     test_relation_refill_target_rule();
