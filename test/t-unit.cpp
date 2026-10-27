@@ -846,6 +846,30 @@ int test_cyclotomic_field_units() {
         } else {
             assert(units.size() >= phi / 2 - 1);
         }
+        {
+            // The logarithmic rank equals the unit rank phi / 2 - 1: grow
+            // a subset greedily, keeping a unit when the subset stays
+            // proved independent (units_independent), and it must reach the
+            // unit rank.
+            silex::EmbeddingContext embeddings(field);
+            assert(embeddings.is_defined());
+            std::vector<silex::Element> kept;
+            for (const silex::Element& unit : units) {
+                kept.emplace_back();
+                assert(kept.back().define(field));
+                assert(kept.back().set(unit));
+                bool independent = false;
+                // A failure is an unresolved Gram determinant (a ball
+                // around zero, as for a dependent unit): not proved.
+                const bool decided = silex::units_independent(
+                        independent, embeddings,
+                        silex::ElementSpan(kept.data(), kept.size()), 256);
+                if (!decided || !independent) {
+                    kept.pop_back();
+                }
+            }
+            assert(kept.size() == phi / 2 - 1);
+        }
     }
 
     auto expect_single = [&](ulong m, std::initializer_list<slong> coeffs) {
