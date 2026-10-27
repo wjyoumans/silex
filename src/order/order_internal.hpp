@@ -3,6 +3,7 @@
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/flint/fmpz_vec.hpp>
 #include <silex/order.hpp>
 
@@ -24,6 +25,16 @@ struct IndexDivisorPrimeRecord {
     slong ramification_index = 0;
     slong residue_degree = 0;
     bool has_principal_generator = false;
+};
+
+// The characteristic polynomial of one order basis element w_index (that of
+// multiplication by w_index on the order, monic in Z[x] of the order's
+// degree) and its discriminant, as stored by
+// OrderAccess::store_basis_element_charpoly.
+struct BasisElementCharpoly {
+    slong index = 0;
+    flint::FmpzPoly charpoly;
+    flint::Fmpz discriminant;
 };
 
 // Conductor {x in order : x * overorder is contained in order} of `order` in
@@ -164,6 +175,29 @@ public:
     // Records that the search above ran to completion on `order` and found
     // no generator.  Silent when `order` has no basis.
     static void set_monogenic_generator_absent(const Order& order) noexcept;
+
+    // The characteristic polynomial of the basis element w_index and its
+    // discriminant, as last stored for this order data by
+    // store_basis_element_charpoly, or null when none is stored for
+    // `index`.  Both depend only on the basis and its multiplication table,
+    // which never change for one order data.  Kept in the order's shared
+    // data in the same unsynchronized way as the equation order index; the
+    // pointer stays valid while the order data lives, since later stores
+    // never move it.  Order::set, set_basis and the factories start with
+    // nothing stored.
+    static const BasisElementCharpoly* basis_element_charpoly(
+            const Order& order,
+            slong index) noexcept;
+
+    // Stores `charpoly` and `discriminant` for w_index, unless an entry is
+    // already stored for `index`, and returns the stored entry.  Returns
+    // null, storing nothing, when `order` has no basis or `index` is not in
+    // [0, degree).
+    static const BasisElementCharpoly* store_basis_element_charpoly(
+            const Order& order,
+            slong index,
+            flint::FmpzPoly&& charpoly,
+            flint::Fmpz&& discriminant) noexcept;
 };
 
 }  // namespace silex::detail

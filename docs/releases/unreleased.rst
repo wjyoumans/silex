@@ -2321,6 +2321,24 @@ Changed
   searches for a separating element, which cannot exist.  Decompositions,
   prime order included, are unchanged.
 
+- When the Bach-Friedman sums of a ``grh`` class/unit computation need only
+  the residue degrees of an unramified prime ``p`` dividing the index, and
+  the decomposition is not kept, the degrees are read off the
+  characteristic polynomial ``chi`` of the order basis element ``w_0`` or
+  ``w_1`` whose discriminant is prime to ``p``, instead of splitting
+  ``O/pO``.  Then ``chi`` is squarefree modulo ``p``, ``p`` does not divide
+  ``[O : Z[w_i]]``, and the degrees are those of the factors of ``chi``
+  modulo ``p`` (Dedekind-Kummer, Cohen, GTM 138, Theorem 4.8.13).  They are
+  used only when all are equal, where they also fix the order
+  ``decompose_prime`` lists them in; other primes split ``O/pO`` as before.
+  Degrees, their order, and published results are unchanged (identical
+  ``grh`` outputs on 39 corpus rows with a nontrivial index, including
+  ``cyclotomic_real_q10_c11_deg10`` and ``multiquadratic_m23_m31_m47``).
+  Callgrind instruction counts of the timed transaction, ``grh``:
+  ``cyclotomic_real_q10_c11_deg10`` 3.6% fewer (1.005e9 to 0.969e9),
+  ``multiquadratic_m23_m31_m47`` unchanged (0.352e9).  No timing has been
+  measured.
+
 - The Bach-Friedman Euler factors of a ``grh`` class/unit computation read
   the residue degrees of a prime dividing the index from the decomposition
   the maximal order keeps, instead of rebuilding its prime ideals.  When the

@@ -774,6 +774,22 @@ monogenic generator already produced are unchanged, prime order included.
 Unlike PARI, Silex does not split off Dedekind--Kummer factors before the
 radical when ``p`` divides the index.
 
+The residue degrees alone of an unramified index divisor ``p`` (what the
+Bach-Friedman sums of a ``grh`` computation read, when they keep no
+decomposition) are taken without that split when an order basis element
+``w_i``, ``i = 0`` or ``1``, has characteristic polynomial ``chi`` with
+``p`` not dividing ``disc(chi)``.  Then ``chi`` is squarefree modulo ``p``,
+hence it is the minimal polynomial of ``w_i``; ``disc(chi) = [O : Z[w_i]]^2
+disc(O)`` (Cohen, GTM 138, Section 4.4.1), so ``p`` does not divide the
+index of ``Z[w_i]``, and by the Dedekind--Kummer theorem (Cohen, GTM 138,
+Theorem 4.8.13) the degrees are those of the irreducible factors of ``chi``
+modulo ``p`` (FLINT ``nmod_poly_factor_distinct_deg``).  The theorem does
+not give the order of the primes above, so the degrees are used only when
+they are all equal, where they fix the sequence the split would list.
+``chi`` and ``disc(chi)`` are computed once per order and kept on it.  The
+two candidates are a cost choice, not from a source; every other prime
+splits ``O/pO``.
+
 Residue reduction follows PARI 2.17.3 ``src/basemath/base2.c:modprinit``
 in the branch where ``p`` does not divide the index: an order element is
 mapped to its ``alpha``-polynomial through the order basis (PARI

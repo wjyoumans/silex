@@ -1721,9 +1721,13 @@ int test_ideal_build_failure_seam() {
 // search that finds a generator (the cubic below, where decompose_prime of
 // 17 takes the monogenic branch) records nothing.  Under profiling, each
 // call after 43 returns at the record (a recorded_absent event) instead of
-// searching again.
+// searching again.  With degrees_only, 43 and 1319 are typed from the
+// characteristic polynomial of the basis element w_0, whose discriminant is
+// prime to both, and never reach the search; 67 divides the discriminants
+// of w_0 and w_1, so it takes the split and runs the search.
 struct MonogenicRecordCounter {
     slong count = 0;
+    slong basis_element = 0;
 };
 
 void monogenic_record_callback(void* user,
@@ -1738,6 +1742,11 @@ void monogenic_record_callback(void* user,
                     "prime_ideal.find_monogenic_generator."
                     "recorded_absent") == 0) {
         ++counter->count;
+    }
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label, "prime_ideal.residue_degrees.basis_element") ==
+                0) {
+        ++counter->basis_element;
     }
 }
 
@@ -1774,6 +1783,9 @@ int test_monogenic_generator_failure_memo() {
                 silex::diagnostics_module_bit(
                         silex::DiagnosticsModule::prime_ideal),
                 monogenic_record_callback, &record_counter);
+        const bool degrees_only_miss =
+                miss == silex::detail::IndexDivisorMiss::degrees_only;
+        bool search_ran = false;
         for (const slong rational_prime : {43, 67, 1319}) {
             sflint::Fmpz p;
             assert(set_fmpz_si(p, rational_prime));
@@ -1782,8 +1794,10 @@ int test_monogenic_generator_failure_memo() {
             assert(silex::detail::decompose_prime_residue_degrees(
                     degrees, order, p_ref, miss, &diagnostics));
             assert(degrees == expected_degrees(rational_prime));
+            search_ran = search_ran || !degrees_only_miss ||
+                         rational_prime == 67;
             assert(silex::detail::OrderAccess::monogenic_generator_absent(
-                    order));
+                           order) == search_ran);
             const bool stored =
                     silex::detail::OrderAccess::index_divisor_decomposition(
                             order, p_ref) != nullptr;
@@ -1800,8 +1814,10 @@ int test_monogenic_generator_failure_memo() {
                                       0, &diagnostics));
         assert(published_residue_degrees(primes) == expected_degrees(9791));
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
-        // 67, 1319 and 9791 each returned at the record.
-        assert(record_counter.count == 3);
+        // 67, 1319 and 9791 each returned at the record; with degrees_only
+        // only 9791 reaches it, after 43 and 1319 took the basis element.
+        assert(record_counter.count == (degrees_only_miss ? 1 : 3));
+        assert(record_counter.basis_element == (degrees_only_miss ? 2 : 0));
 #endif
     }
 
@@ -1819,6 +1835,160 @@ int test_monogenic_generator_failure_memo() {
     assert(!silex::detail::OrderAccess::monogenic_generator_absent(
             cubic_order));
     return 0;
+}
+
+// detail::decompose_prime_residue_degrees with IndexDivisorMiss::degrees_only
+// reads the degrees of an unramified index divisor p off the characteristic
+// polynomial of the basis element w_0 or w_1 when its discriminant is prime
+// to p and the factors modulo p all have one degree; otherwise (factors of
+// mixed degrees, or no such element) it splits O/pO as before.  Either way it
+// must give decompose_prime's degrees in its order.  Every unramified index
+// divisor below `bound` is compared on one order, which keeps its
+// characteristic polynomials across primes as the zeta sums do; the route
+// each prime takes is pinned for the primes in `pinned` (under profiling).
+enum class BasisElementRoute : unsigned char { used, mixed, absent };
+
+struct BasisElementRouteCounter {
+    slong used = 0;
+    slong mixed = 0;
+    slong absent = 0;
+};
+
+void basis_element_route_callback(void* user,
+                                  silex::DiagnosticsModule,
+                                  silex::ProfileEvent event,
+                                  const char*,
+                                  const char* label) noexcept {
+    BasisElementRouteCounter* counter =
+            static_cast<BasisElementRouteCounter*>(user);
+    if (event != silex::ProfileEvent::event || label == nullptr) {
+        return;
+    }
+    if (std::strcmp(label, "prime_ideal.residue_degrees.basis_element") ==
+        0) {
+        ++counter->used;
+    } else if (std::strcmp(label,
+                           "prime_ideal.residue_degrees.basis_element."
+                           "mixed") == 0) {
+        ++counter->mixed;
+    } else if (std::strcmp(label,
+                           "prime_ideal.residue_degrees.basis_element."
+                           "absent") == 0) {
+        ++counter->absent;
+    }
+}
+
+int check_basis_element_residue_degrees(
+        const std::vector<slong>& low_to_high,
+        ulong bound,
+        const std::vector<std::pair<slong, BasisElementRoute>>& pinned,
+        slong min_compared) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+    silex::NumberField field;
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    silex::Order reference(field);
+    silex::Order order(field);
+    assert(reference.maximal_order(equation));
+    assert(order.maximal_order(equation));
+    sflint::Fmpz discriminant;
+    assert(reference.discriminant(sflint::FmpzRef(discriminant)));
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    BasisElementRouteCounter counter;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::prime_ideal),
+            basis_element_route_callback, &counter);
+
+    slong compared = 0;
+    slong pinned_seen = 0;
+    for (ulong q = 2; q < bound; q = n_nextprime(q, 1)) {
+        sflint::Fmpz p;
+        fmpz_set_ui(p.raw(), q);
+        const sflint::FmpzConstRef p_ref(p);
+        if (silex::detail::TestHookAccess::decompose_prime_route(
+                    reference, p_ref, 0) !=
+                    silex::detail::DecomposePrimeRoute::index_divisor ||
+            fmpz_divisible(discriminant.raw(), p.raw()) != 0) {
+            continue;
+        }
+        silex::PrimeIdealList expected_primes;
+        assert(silex::decompose_prime(expected_primes, reference, p_ref));
+        const std::vector<slong> expected =
+                published_residue_degrees(expected_primes);
+
+        counter = BasisElementRouteCounter{};
+        std::vector<slong> degrees;
+        assert(silex::detail::decompose_prime_residue_degrees(
+                degrees, order, p_ref,
+                silex::detail::IndexDivisorMiss::degrees_only,
+                &diagnostics));
+        assert(degrees == expected);
+        const std::vector<silex::detail::IndexDivisorPrimeRecord>* stored =
+                silex::detail::OrderAccess::index_divisor_decomposition(
+                        order, p_ref);
+        if (stored != nullptr) {
+            const std::vector<silex::detail::IndexDivisorPrimeRecord>*
+                    reference_records = silex::detail::OrderAccess::
+                            index_divisor_decomposition(reference, p_ref);
+            assert(reference_records != nullptr &&
+                   same_index_divisor_records(*stored, *reference_records));
+        }
+        ++compared;
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        assert(counter.used + counter.mixed + counter.absent == 1);
+        if (counter.used == 1) {
+            assert(stored == nullptr);
+        }
+        for (const auto& [pinned_prime, route] : pinned) {
+            if (static_cast<ulong>(pinned_prime) != q) {
+                continue;
+            }
+            ++pinned_seen;
+            assert(counter.used == (route == BasisElementRoute::used ? 1 : 0));
+            assert(counter.mixed ==
+                   (route == BasisElementRoute::mixed ? 1 : 0));
+            assert(counter.absent ==
+                   (route == BasisElementRoute::absent ? 1 : 0));
+        }
+#endif
+    }
+    assert(compared >= min_compared);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(pinned_seen == static_cast<slong>(pinned.size()));
+#else
+    (void)pinned;
+    (void)pinned_seen;
+#endif
+    return 0;
+}
+
+// The field of cyclotomic_real_q10_c11_deg10 is abelian, so every
+// unramified prime has residue degrees of one value; 1319, 9791 and 13729
+// are the index divisors its grh Bach-Friedman sums type degrees-only.  So
+// is Q(sqrt(-23), sqrt(-31), sqrt(-47)) (3 divides the discriminants of w_0
+// and w_1).  Q(alpha) with alpha^3 = alpha + 1 is not Galois, and
+// theta = 15 alpha (x^3 - 225 x - 3375) makes 3, inert, and 5 = P_1 P_2
+// with residue degrees 1 and 2, index divisors.
+int test_residue_degrees_basis_element_route() {
+    using R = BasisElementRoute;
+    assert(check_basis_element_residue_degrees(
+                   {238831, -228566, -128567, 146666, -15113, -13352, 2746,
+                    334, -97, -2, 1},
+                   14000,
+                   {{43, R::used}, {67, R::absent}, {1319, R::used},
+                    {9791, R::used}, {13729, R::used}},
+                   5) == 0);
+    assert(check_basis_element_residue_degrees(
+                   {38188288, 1822160, -1462612, -62792, 24143, 602, -220, -2,
+                    1},
+                   100, {{3, R::absent}, {11, R::used}, {79, R::used}},
+                   6) == 0);
+    return check_basis_element_residue_degrees(
+            {-3375, -225, 0, 1}, 100, {{3, R::used}, {5, R::mixed}}, 2);
 }
 
 // Bounded enumeration (2 and 3 in Q(sqrt(-23), sqrt(-31), sqrt(-47))), the
@@ -6226,6 +6396,7 @@ int main(int argc, char** argv) {
     assert(test_index_divisor_cache_inert_principal() == 0);
     assert(test_residue_degrees_cyclotomic_real_q10_c11() == 0);
     assert(test_monogenic_generator_failure_memo() == 0);
+    assert(test_residue_degrees_basis_element_route() == 0);
     assert(test_ideal_build_failure_seam() == 0);
     assert(test_residue_degrees_index_divisor_routes() == 0);
     assert(test_decompose_prime_route() == 0);

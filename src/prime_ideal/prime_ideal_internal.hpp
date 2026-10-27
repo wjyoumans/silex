@@ -173,8 +173,12 @@ enum class IndexDivisorMiss : unsigned char {
     // index-divisor cache, as decompose_prime does, so a later
     // decompose_prime or decompose_prime_residue_degrees of p reads it back.
     store_decomposition,
-    // Read only the residue degrees off the split, in the same order: no
-    // ideal is built and nothing is stored.  For a caller that keeps the
+    // Read only the residue degrees, in the same order: no ideal is built
+    // and nothing is stored.  When the characteristic polynomial of one of
+    // the first two order basis elements is squarefree modulo a word-size p
+    // and its factors there all have one degree f, the degrees are read off
+    // that factorization (Dedekind-Kummer) without forming O/pO; otherwise
+    // they are read off the split.  For a caller that keeps the
     // degrees of p itself and does not expect decompose_prime of p to
     // follow; a later decompose_prime of p computes the same decomposition
     // from scratch.
@@ -198,7 +202,8 @@ enum class IndexDivisorMiss : unsigned char {
 // With IndexDivisorMiss::degrees_only the result (its success, or the order
 // of the degrees) can differ from decompose_prime's only where building an
 // ideal of the split fails, since decompose_prime then moves on to its next
-// route.  That build (ideal_from_mod_rows, or pO for an inert p) fails only
+// route, or where the split itself would fail on an allocation and the
+// basis-element route above already gave the degrees.  That build (ideal_from_mod_rows, or pO for an inert p) fails only
 // when an allocation fails: the rows pO plus the kept components always span
 // a full-rank ideal of the order (see ideal_from_mod_rows).
 bool decompose_prime_residue_degrees(

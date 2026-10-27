@@ -81,6 +81,12 @@ struct OrderData {
     // generator search has failed on this basis (it depends only on the
     // basis, like the index above).
     mutable bool monogenic_generator_absent_ = false;
+    // Characteristic polynomials of basis elements with their
+    // discriminants, filled through OrderAccess::store_basis_element_charpoly
+    // (depend only on the basis, like the index above).  Each entry is boxed
+    // so a stored entry never moves.
+    mutable std::vector<std::unique_ptr<BasisElementCharpoly>>
+            basis_element_charpolys_;
     bool maximality_is_known_ = false;
     bool maximal_ = false;
     OrderSpecialization specialization_;
@@ -1650,6 +1656,42 @@ void OrderAccess::set_monogenic_generator_absent(const Order& order) noexcept {
     if (order.has_basis()) {
         order.data_->monogenic_generator_absent_ = true;
     }
+}
+
+const BasisElementCharpoly* OrderAccess::basis_element_charpoly(
+        const Order& order,
+        slong index) noexcept {
+    if (!order.has_basis()) {
+        return nullptr;
+    }
+    for (const auto& entry : order.data_->basis_element_charpolys_) {
+        if (entry->index == index) {
+            return entry.get();
+        }
+    }
+    return nullptr;
+}
+
+const BasisElementCharpoly* OrderAccess::store_basis_element_charpoly(
+        const Order& order,
+        slong index,
+        flint::FmpzPoly&& charpoly,
+        flint::Fmpz&& discriminant) noexcept {
+    if (!order.has_basis() || index < 0 || index >= order.degree()) {
+        return nullptr;
+    }
+    if (const BasisElementCharpoly* stored =
+                basis_element_charpoly(order, index);
+        stored != nullptr) {
+        return stored;
+    }
+    auto entry = std::make_unique<BasisElementCharpoly>();
+    entry->index = index;
+    entry->charpoly = std::move(charpoly);
+    fmpz_swap(entry->discriminant.raw(), discriminant.raw());
+    const BasisElementCharpoly* stored = entry.get();
+    order.data_->basis_element_charpolys_.push_back(std::move(entry));
+    return stored;
 }
 
 }  // namespace detail

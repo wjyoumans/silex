@@ -5692,6 +5692,122 @@ bool store_index_primes_and_get_degrees(
     return true;
 }
 
+// How many order basis elements, w_0 first, unramified_residue_degrees_
+// from_basis_element tries as the element beta below.  The gate measurement
+// that chose this route proposed one or two fixed elements per order; the
+// candidates are the first ones find_monogenic_generator tests.  Each costs
+// one characteristic polynomial and discriminant per order, kept on the
+// order.  A cost choice, not from a source: every prime the candidates do
+// not serve falls back.
+constexpr slong kBasisElementDegreeCandidates = 2;
+
+// The characteristic polynomial of the basis element w_index, with its
+// discriminant, from the order's cache, computing and storing it on first
+// use.  Multiplication by w_index on the order basis is the integer matrix
+// whose row i holds the coordinates of w_i * w_index; its characteristic
+// polynomial is monic in Z[x] of degree n.
+const BasisElementCharpoly* basis_element_charpoly(const Order& order,
+                                                   slong index) noexcept {
+    if (const BasisElementCharpoly* stored =
+                OrderAccess::basis_element_charpoly(order, index);
+        stored != nullptr) {
+        return stored;
+    }
+    const slong n = order.degree();
+    flint::FmpzMat multiplication_table(n * n, n);
+    if (!build_multiplication_table(multiplication_table, order)) {
+        return nullptr;
+    }
+    flint::FmpzMat multiplication_by_element(n, n);
+    for (slong i = 0; i < n; ++i) {
+        for (slong k = 0; k < n; ++k) {
+            fmpz_set(fmpz_mat_entry(multiplication_by_element.raw(), i, k),
+                     fmpz_mat_entry(multiplication_table.raw(), i * n + index,
+                                    k));
+        }
+    }
+    flint::FmpzPoly charpoly;
+    flint::Fmpz discriminant;
+    fmpz_mat_charpoly(charpoly.raw(), multiplication_by_element.raw());
+    fmpz_poly_discriminant(discriminant.raw(), charpoly.raw());
+    return OrderAccess::store_basis_element_charpoly(
+            order, index, std::move(charpoly), std::move(discriminant));
+}
+
+// The residue degrees of a word-size prime p not dividing the discriminant
+// of the maximal order `order`, read off the characteristic polynomial chi
+// of an order element beta, for a caller that needs them in the order
+// decompose_prime publishes them.  beta runs over the first
+// kBasisElementDegreeCandidates basis elements, and the first with p not
+// dividing disc(chi) is used.  Then chi is squarefree modulo p, hence
+// squarefree, so it is the minimal polynomial of beta and beta generates the
+// field; disc(chi) = [O : Z[beta]]^2 disc(O) (Cohen, GTM 138, Section
+// 4.4.1), so p does not divide [O : Z[beta]], and by the Dedekind-Kummer
+// theorem (Cohen, GTM 138, Theorem 4.8.13) the primes above p are
+// unramified with residue degrees the degrees of the irreducible factors of
+// chi modulo p, given by FLINT nmod_poly_factor_distinct_deg.  The theorem
+// gives the multiset of degrees, not decompose_prime's order of the primes,
+// so they are returned only when they are all equal, where the multiset
+// fixes the sequence; otherwise, or when no candidate has disc(chi) prime to
+// p, this returns false and leaves `out` unchanged.
+bool unramified_residue_degrees_from_basis_element(
+        std::vector<slong>& out,
+        const Order& order,
+        flint::FmpzConstRef p,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const slong n = order.degree();
+    if (n < 2 || fmpz_cmp_ui(p.raw(), 2) < 0 ||
+        fmpz_abs_fits_ui(p.raw()) == 0) {
+        return false;
+    }
+    const ulong modulus = fmpz_get_ui(p.raw());
+    const slong candidates = FLINT_MIN(kBasisElementDegreeCandidates, n);
+    for (slong index = 0; index < candidates; ++index) {
+        const BasisElementCharpoly* element =
+                basis_element_charpoly(order, index);
+        if (element == nullptr) {
+            return false;
+        }
+        if (fmpz_is_zero(element->discriminant.raw()) != 0 ||
+            fmpz_divisible(element->discriminant.raw(), p.raw()) != 0) {
+            continue;
+        }
+        if (fmpz_poly_degree(element->charpoly.raw()) != n ||
+            fmpz_is_one(fmpz_poly_lead(element->charpoly.raw())) == 0) {
+            return false;
+        }
+
+        flint::NmodPoly reduced(modulus);
+        fmpz_poly_get_nmod_poly(reduced.raw(), element->charpoly.raw());
+        flint::NmodPolyFactor factorization;
+        std::vector<slong> factor_degrees(static_cast<std::size_t>(n));
+        slong* factor_degree_data = factor_degrees.data();
+        nmod_poly_factor_distinct_deg(factorization.raw(), reduced.raw(),
+                                      &factor_degree_data);
+        // A squarefree polynomial of degree n with only factors of one
+        // degree f has exactly one distinct-degree part, of degree n.
+        if (factorization.raw()->num != 1) {
+            SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                    diagnostics,
+                    "prime_ideal.residue_degrees.basis_element.mixed");
+            return false;
+        }
+        const slong degree = factor_degrees[0];
+        if (degree <= 0 ||
+            nmod_poly_degree(factorization.raw()->p + 0) != n ||
+            n % degree != 0) {
+            return false;
+        }
+        SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                diagnostics, "prime_ideal.residue_degrees.basis_element");
+        out.assign(static_cast<std::size_t>(n / degree), degree);
+        return true;
+    }
+    SILEX_PRIME_IDEAL_PROFILE_EVENT(
+            diagnostics, "prime_ideal.residue_degrees.basis_element.absent");
+    return false;
+}
+
 }  // namespace
 
 bool decompose_prime_residue_degrees(std::vector<slong>& out,
@@ -5739,6 +5855,15 @@ bool decompose_prime_residue_degrees(std::vector<slong>& out,
     // the monogenic search succeeds, are delegated.
     if (!unramified_index_divisor_prime_applies(order, p)) {
         return residue_degrees_from_decompose_prime(out, order, p);
+    }
+    // With IndexDivisorMiss::degrees_only nothing is built or stored, so
+    // when the degrees are known without the quotient (all equal, read off
+    // an order element by Dedekind-Kummer) they are what the split below
+    // would give.
+    if (miss == IndexDivisorMiss::degrees_only &&
+        unramified_residue_degrees_from_basis_element(out, order, p,
+                                                      diagnostics)) {
+        return true;
     }
     UnramifiedFixedKernel fixed(p, order.degree());
     if (!unramified_fixed_kernel(fixed, order, p)) {
