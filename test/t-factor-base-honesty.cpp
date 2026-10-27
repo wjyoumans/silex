@@ -3859,12 +3859,14 @@ int test_element_step_cap_hits_observed() {
 // The T2 double-row setup (T2EnumerationGram::double_rows) against the Arb
 // setup on one ideal, both without an embedding cache so both start at the
 // first rounding scale.  When the double route keeps its data, its basis is
-// the Arb route's (the same LLL at the same accepted scale) and its Gram is
-// finite.
-// When it falls back, the data is the Arb route's.
+// the Arb route's (the same LLL at the same accepted scale), its Gram is
+// finite, and its LLL-bound test rejects a sheared basis whose Gram diagonal
+// is outside the product bound.  When it falls back, the data is the Arb route's.
 struct T2DoubleRowsCounts {
     slong accepted = 0;
     slong fallback = 0;
+    // Accepted ideals whose sheared basis the LLL-bound test rejects.
+    slong sheared = 0;
 };
 
 int check_t2_double_rows_ideal(const silex::Ideal& ideal,
@@ -3929,6 +3931,59 @@ int check_t2_double_rows_ideal(const silex::Ideal& ideal,
     for (const double entry : gram) {
         if (!std::isfinite(entry)) {
             return 6;
+        }
+    }
+
+    // One scale of the double route on the accepted basis gives the data
+    // the setup kept.
+    const double log2_determinant = search::t2_lattice_log2_determinant(ideal);
+    std::vector<double> data;
+    if (search::t2_double_rows_basis_data(
+                data, sflint::FmpzMatConstRef(double_data.basis),
+                order_rows_double, log2_determinant) !=
+                search::T2DoubleRowsBasis::accepted ||
+        data != double_data.quadratic_form_data) {
+        return 7;
+    }
+
+    // The sheared basis b_0, b_i + 16 b_0 (i >= 1) of the same lattice has
+    // the same first vector and the same Gram-Schmidt pivots, whose product
+    // is d.  When its Gram diagonal product exceeds 2^(n (n - 1) / 2) d, the
+    // product half of the LLL-bound test, which reads the Gram diagonal
+    // |b_i|^2 and not the pivots |b_i*|^2, must reject it.  On some ideals
+    // the shear's cancellation moves the double pivot product by more than
+    // the 2^-20 tolerance, and the data is rejected before that test.
+    sflint::FmpzMat sheared(n, n);
+    fmpz_mat_set(sheared.raw(), double_data.basis.raw());
+    for (slong i = 1; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            fmpz_addmul_ui(fmpz_mat_entry(sheared.raw(), i, j),
+                           fmpz_mat_entry(sheared.raw(), 0, j), 16);
+        }
+    }
+    std::vector<double> sheared_gram;
+    if (!search::reduced_basis_t2_gram_double(
+                sheared_gram, sflint::FmpzMatConstRef(sheared),
+                order_rows_double)) {
+        return 8;
+    }
+    double log2_diagonal_product = 0.0;
+    for (slong i = 0; i < n; ++i) {
+        log2_diagonal_product += std::log2(
+                sheared_gram[static_cast<std::size_t>(i * n + i)]);
+    }
+    const double nd = static_cast<double>(n);
+    if (log2_diagonal_product >
+        nd * (nd - 1.0) / 2.0 + log2_determinant + 1.0) {
+        const search::T2DoubleRowsBasis status =
+                search::t2_double_rows_basis_data(
+                        data, sflint::FmpzMatConstRef(sheared),
+                        order_rows_double, log2_determinant);
+        if (status == search::T2DoubleRowsBasis::outside_lll_bounds) {
+            ++counts.sheared;
+        } else if (status !=
+                   search::T2DoubleRowsBasis::determinant_mismatch) {
+            return 9;
         }
     }
     return 0;
@@ -4015,7 +4070,10 @@ int test_t2_double_rows_gram_matches_arb() {
                 l8) != 0) {
         return 3;
     }
-    return d9.accepted > 0 && l8.accepted > 0 ? 0 : 4;
+    return d9.accepted > 0 && l8.accepted > 0 && d9.sheared > 0 &&
+                   l8.sheared > 0
+           ? 0
+           : 4;
 }
 
 // Corpus field multiquadratic_m23_m31_m47, Q(sqrt(-23), sqrt(-31),

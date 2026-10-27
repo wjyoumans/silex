@@ -147,4 +147,30 @@ bool reduced_basis_t2_gram_double(std::vector<double>& gram,
                                   flint::FmpzMatConstRef reduced_basis,
                                   const std::vector<double>& order_rows) noexcept;
 
+// One rounding scale of the T2EnumerationGram::double_rows setup on the
+// reduced basis `basis` (order coordinates): the double Gram
+// (reduced_basis_t2_gram_double), its Gram-Schmidt quadratic-form data in
+// quadratic_form_data, the check of the pivot product against
+// log2_determinant = log2 d, and the LLL-bound test of the reference ideal
+// LLL on the Gram diagonal |b_i|^2.  The first failing step is returned;
+// quadratic_form_data is meaningful only for `accepted` and
+// `outside_lll_bounds`.
+enum class T2DoubleRowsBasis {
+    accepted,
+    unavailable,
+    pivot_failed,
+    determinant_mismatch,
+    outside_lll_bounds,
+};
+
+T2DoubleRowsBasis t2_double_rows_basis_data(
+        std::vector<double>& quadratic_form_data,
+        flint::FmpzMatConstRef basis,
+        const std::vector<double>& order_rows,
+        double log2_determinant) noexcept;
+
+// log2 d, d = |disc(O)| N(I)^2 = det(Gram) of the T2 Gram matrix of any basis
+// of `ideal`, as the LLL-bound test takes it; NaN when it cannot be read.
+double t2_lattice_log2_determinant(const Ideal& ideal) noexcept;
+
 }  // namespace silex::detail::relation_search
