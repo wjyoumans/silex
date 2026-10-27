@@ -3130,7 +3130,8 @@ bool OrderUnitGroup::prove_local_saturated_(
         EmbeddingContext& embeddings,
         slong precision,
         LocalSaturationProofMode mode,
-        detail::CompactFieldModulusCache* field_modulus_cache) noexcept {
+        detail::CompactFieldModulusCache* field_modulus_cache,
+        slong field_unit_rank) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.prove_local_saturated");
     // The kernel-row root tests of this proof (detail::kernel_row_root, its
@@ -3157,8 +3158,9 @@ bool OrderUnitGroup::prove_local_saturated_(
         return false;
     }
 
-    slong rank = -1;
-    if (!unit_rank(rank, *field) || group.free_rank() != rank) {
+    slong rank = field_unit_rank;
+    if ((rank < 0 && !unit_rank(rank, *field)) ||
+        group.free_rank() != rank) {
         return false;
     }
 
@@ -3457,7 +3459,8 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
         EmbeddingContext& embeddings,
         slong precision,
         slong stable_proof_record_prefix_len,
-        detail::CompactFieldModulusCache* field_modulus_cache) noexcept {
+        detail::CompactFieldModulusCache* field_modulus_cache,
+        slong field_unit_rank) noexcept {
     SILEX_PROFILE_SCOPE(
             diagnostics_, DiagnosticsModule::unit_group,
             "unit_group.prove_local_saturated_stable_in_place");
@@ -3478,8 +3481,9 @@ bool OrderUnitGroup::prove_local_saturated_stable_in_place_(
         return false;
     }
 
-    slong rank = -1;
-    if (!unit_rank(rank, *field) || group.free_rank() != rank) {
+    slong rank = field_unit_rank;
+    if ((rank < 0 && !unit_rank(rank, *field)) ||
+        group.free_rank() != rank) {
         return false;
     }
 
@@ -3591,6 +3595,10 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
         return false;
     }
 
+    // `rank` is unit_rank of the field, checked above; every pass below runs
+    // on a group of the same order, so they reuse it instead of recomputing
+    // the signature, and each still checks its group's free rank against it.
+    //
     // One field-modulus cache for every ell-local pass and restart below.
     // Its entries depend only on the field, the prime and the threshold,
     // never on the unit group or order, so roots adjoined between passes
@@ -3661,14 +3669,15 @@ bool OrderUnitGroup::prove_index_bound(ProofState& status,
                         pass_status, pass_changed, working,
                         flint::FmpzConstRef(ell), aux_target_len, aux_bound,
                         embeddings, precision,
-                        stable_proof_record_prefix_len, &field_modulus_cache);
+                        stable_proof_record_prefix_len, &field_modulus_cache,
+                        rank);
             } else {
                 pass_ok = pass_result.prove_local_saturated_(
                         pass_status, pass_changed, working,
                         flint::FmpzConstRef(ell), aux_target_len, aux_bound,
                         embeddings, precision,
                         LocalSaturationProofMode::index_bound_pass,
-                        &field_modulus_cache);
+                        &field_modulus_cache, rank);
             }
             if (!pass_ok) {
                 return publish(working, ProofState::unavailable, any_changed);

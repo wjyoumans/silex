@@ -2617,6 +2617,15 @@ Changed
   (``proven``) the instruction count fell 11.44% for ``random_d9_h4_s8``,
   9.04% for ``random_d10_h2_s21`` and 4.90% for ``pure_x12_plus_7``.  No
   timing has been measured.
+- ``OrderUnitGroup::prove_index_bound`` now computes the field's unit rank
+  once and passes it to each of its ell-local passes, which used to compute
+  the field signature again for every ``ell``.  Each pass still requires the
+  free rank of its group to equal that rank, so the checks that certify the
+  result are unchanged.  Published ``proven`` outputs and proof records are
+  identical on ``random_d9_h4_s8``, ``random_d10_h2_s21`` and 10 other
+  ``proven`` corpus rows.  Under callgrind (``proven``) the instruction
+  count fell 2.76% for ``random_d9_h4_s8`` and 2.53% for
+  ``random_d10_h2_s21``.  No timing has been measured.
 
 - For such a binomial and ``q`` not dividing ``n``, the root scan now finds
   the roots themselves in closed form instead of splitting with

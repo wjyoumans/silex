@@ -211,6 +211,46 @@ public:
                                                field_modulus_cache);
     }
 
+    // OrderUnitGroup::prove_local_saturated_ (standalone mode) and
+    // prove_local_saturated_stable_in_place_ with a caller-supplied
+    // `field_unit_rank`, as prove_index_bound passes it, for tests that the
+    // supplied rank is still checked against the group's free rank.
+    static bool prove_local_saturated_with_rank(
+            OrderUnitGroup& out,
+            ProofState& status,
+            bool& changed,
+            const OrderUnitGroup& group,
+            flint::FmpzConstRef ell,
+            slong aux_target_len,
+            flint::FmpzConstRef aux_bound,
+            EmbeddingContext& embeddings,
+            slong precision,
+            slong field_unit_rank) noexcept {
+        return out.prove_local_saturated_(
+                status, changed, group, ell, aux_target_len, aux_bound,
+                embeddings, precision,
+                OrderUnitGroup::LocalSaturationProofMode::standalone, nullptr,
+                field_unit_rank);
+    }
+    // As in prove_index_bound, `owner` runs the proof and `group` receives
+    // it in place.
+    static bool prove_local_saturated_stable_in_place_with_rank(
+            OrderUnitGroup& owner,
+            ProofState& status,
+            bool& changed,
+            OrderUnitGroup& group,
+            flint::FmpzConstRef ell,
+            slong aux_target_len,
+            flint::FmpzConstRef aux_bound,
+            EmbeddingContext& embeddings,
+            slong precision,
+            slong field_unit_rank) noexcept {
+        return owner.prove_local_saturated_stable_in_place_(
+                status, changed, group, ell, aux_target_len, aux_bound,
+                embeddings, precision, group.unit_proof_record_count_,
+                nullptr, field_unit_rank);
+    }
+
     // The bodies of OrderUnitGroup::saturate_index_bounded and
     // saturate_index_bounded_adaptive.  After the argument checks, and
     // before any work, `check_torsion` requires order_unit_torsion_is_computed

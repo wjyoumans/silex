@@ -364,10 +364,14 @@ private:
             EmbeddingContext& embeddings,
             slong precision,
             LocalSaturationProofMode mode,
-            detail::CompactFieldModulusCache* field_modulus_cache =
-                    nullptr) noexcept;
+            detail::CompactFieldModulusCache* field_modulus_cache = nullptr,
+            slong field_unit_rank = -1) noexcept;
     // `field_modulus_cache`, when not null, is a caller-owned cache shared
     // across saturation calls on the same field; null uses a call-local one.
+    // `field_unit_rank`, when nonnegative, is unit_rank of the group's field,
+    // already computed by the caller (prove_index_bound computes it once for
+    // all its passes); a negative value computes it here.  Either way the
+    // group's free rank must equal it.
     bool saturate_local_with_kernel_(
             bool& changed,
             const OrderUnitGroup& group,
@@ -387,8 +391,8 @@ private:
             EmbeddingContext& embeddings,
             slong precision,
             slong stable_proof_record_prefix_len,
-            detail::CompactFieldModulusCache* field_modulus_cache =
-                    nullptr) noexcept;
+            detail::CompactFieldModulusCache* field_modulus_cache = nullptr,
+            slong field_unit_rank = -1) noexcept;
     bool compute_with_relation_class_group_(
             ClassGroupContext& class_group,
             const Order& order,

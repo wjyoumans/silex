@@ -7298,6 +7298,109 @@ int test_prove_local_saturated_real_quadratic() {
     return 0;
 }
 
+// prove_index_bound computes the unit rank once and passes it to each
+// ell-local pass.  A supplied rank gives the result of a computed one, and
+// a supplied rank that differs from the group's free rank fails closed.
+int test_prove_local_saturated_supplied_unit_rank() {
+    using OrderUnitGroupAccess = silex::detail::OrderUnitGroupAccess;
+    silex::NumberField field = quadratic_field(2);
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::EmbeddingContext embeddings(field);
+
+    silex::Element epsilon(field);
+    assert(set_real_quadratic_unit(epsilon));
+    silex::FactoredElement primitive(field);
+    assert(primitive.set_element(epsilon));
+    silex::FactoredElement primitive_generators[] = {std::move(primitive)};
+    silex::OrderUnitGroup group(order);
+    assert(group.set_units(order,
+                           silex::FactoredElementSpan(primitive_generators,
+                                                      1),
+                           embeddings, 128));
+    assert(group.free_rank() == 1);
+
+    sflint::Fmpz ell;
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(ell, 2));
+    assert(set_fmpz_si(bound, 31));
+
+    // Standalone ell-local proof: supplied rank 1 matches the computed one.
+    for (const slong supplied : {slong(-1), slong(1)}) {
+        silex::OrderUnitGroup proved(order);
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(OrderUnitGroupAccess::prove_local_saturated_with_rank(
+                proved, status, changed, group, sflint::FmpzConstRef(ell), 2,
+                sflint::FmpzConstRef(bound), embeddings, 128, supplied));
+        assert(status == silex::ProofState::verified);
+        assert(!changed);
+        assert(check_first_free_generator(proved, epsilon));
+        assert(check_unit_proof_record(proved, 0, 2,
+                                       silex::ProofState::verified, 31, -1,
+                                       false));
+    }
+    for (const slong supplied : {slong(0), slong(2)}) {
+        silex::OrderUnitGroup proved(order);
+        silex::ProofState status = silex::ProofState::verified;
+        bool changed = true;
+        assert(!OrderUnitGroupAccess::prove_local_saturated_with_rank(
+                proved, status, changed, group, sflint::FmpzConstRef(ell), 2,
+                sflint::FmpzConstRef(bound), embeddings, 128, supplied));
+        assert(status == silex::ProofState::verified);
+        assert(changed);
+        assert(!proved.is_set());
+    }
+
+    // In-place stable proof: the same split.
+    silex::ProofState computed_status = silex::ProofState::not_checked;
+    bool computed_changed = true;
+    slong computed_records = -1;
+    for (const slong supplied : {slong(-1), slong(1)}) {
+        silex::OrderUnitGroup owner(order);
+        silex::OrderUnitGroup working(order);
+        assert(working.set(group));
+        silex::ProofState status = silex::ProofState::not_checked;
+        bool changed = true;
+        assert(OrderUnitGroupAccess::
+                       prove_local_saturated_stable_in_place_with_rank(
+                               owner, status, changed, working,
+                               sflint::FmpzConstRef(ell), 2,
+                               sflint::FmpzConstRef(bound), embeddings, 128,
+                               supplied));
+        assert(check_first_free_generator(working, epsilon));
+        if (supplied < 0) {
+            computed_status = status;
+            computed_changed = changed;
+            computed_records = working.unit_proof_record_count();
+        } else {
+            assert(status == computed_status);
+            assert(changed == computed_changed);
+            assert(working.unit_proof_record_count() == computed_records);
+        }
+    }
+    for (const slong supplied : {slong(0), slong(2)}) {
+        silex::OrderUnitGroup owner(order);
+        silex::OrderUnitGroup working(order);
+        assert(working.set(group));
+        const slong records = working.unit_proof_record_count();
+        silex::ProofState status = silex::ProofState::verified;
+        bool changed = true;
+        assert(!OrderUnitGroupAccess::
+                        prove_local_saturated_stable_in_place_with_rank(
+                                owner, status, changed, working,
+                                sflint::FmpzConstRef(ell), 2,
+                                sflint::FmpzConstRef(bound), embeddings, 128,
+                                supplied));
+        assert(status == silex::ProofState::verified);
+        assert(changed);
+        assert(working.unit_proof_record_count() == records);
+        assert(check_first_free_generator(working, epsilon));
+    }
+
+    return 0;
+}
+
 int test_regulator_index_bound() {
     silex::NumberField degree_one = degree_one_field();
     silex::Order degree_one_order;
@@ -15945,6 +16048,7 @@ int main() {
     test_select_saturation_proof_primes();
     test_unit_proof_records();
     test_prove_local_saturated_real_quadratic();
+    test_prove_local_saturated_supplied_unit_rank();
     test_regulator_index_bound();
     test_class_regulator_index_bound();
     test_class_regulator_index_bound_interval_boundary();
