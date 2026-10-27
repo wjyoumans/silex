@@ -10,7 +10,9 @@ namespace silex::detail {
 // Result of factored_element_is_power_si.
 //
 // `decided`: the test answered; `is_power` says whether `input` is an
-// exponent-th power in its field, and on `true` `root` holds a root.
+// exponent-th power in its field, and on `true` `root` holds a root.  A
+// non-power answer is a residue disproof, CompactElement's `not_power`, or
+// Element::is_power's decided answer, and is only as strong as that source.
 //
 // `error`: the arguments were rejected (an undefined input or root, a root
 // in another field, an exponent below one, or an unknown strategy).  The

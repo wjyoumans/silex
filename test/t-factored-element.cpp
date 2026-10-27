@@ -507,7 +507,9 @@ void check_three_way_power_result() noexcept {
             assert(!is_power);
         }
 
-        // Errors: rejected arguments.
+        // Errors: rejected arguments; the outputs are untouched.
+        assert(root.push(two, 1));
+        const auto root_length = root.length();
         is_power = true;
         assert(factored_element_is_power_si(is_power, root, cube, 0,
                                             strategy) ==
@@ -528,15 +530,18 @@ void check_three_way_power_result() noexcept {
                                             strategy) ==
                FactoredPowerResult::error);
         assert(is_power);
+        assert(root.length() == root_length);
         assert(!cube.is_power_si(public_power, public_root, 0, strategy));
     }
     bool is_power = true;
     silex::FactoredElement root(field);
+    assert(root.push(two, 1));
     assert(factored_element_is_power_si(
                    is_power, root, cube, 3,
                    static_cast<silex::FactoredRootStrategy>(99)) ==
            FactoredPowerResult::error);
     assert(is_power);
+    assert(root.length() == 1);
 }
 
 }  // namespace
