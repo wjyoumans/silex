@@ -1374,22 +1374,37 @@ The integer rounding and the LLL are unchanged.  Only the product of the
 reduced basis (order coordinates) with the cached double rows of the order
 basis, and the Gram matrix built from it, are formed in doubles; the basis
 returned is always the exact ``transform * HNF``.  The multiplication uses the
-order's rows rather than the per-ideal rows because the cancellation is then
-bounded by the conditioning of the order basis, not by the size of the
-transform.  No proof input depends on these values.  The Gram matrix is read
+order's rows rather than the per-ideal rows because the cancellation then
+comes from the order basis, not from the size of the transform.  No proof
+input depends on these values.  The Gram matrix is read
 only through Arb midpoints converted to double, and every enumerated vector
 becomes an exact order element accepted only by the exact
 ``factor_base_principal_witness`` check.  Exhaustion of the enumeration is
 never read as a claim.  The route is therefore of the same kind as PARI's
 ``Fincke_Pohst_ideal``, which runs ``gaussred_from_QR`` in ordinary
 floating-point reals at the field precision.  The design is that of the
-internal proposal for this change; no error threshold is added, because the
-route uses only the checks that already exist.
+internal proposal for this change, with one numerical check added after it:
+when the order basis has large rows and the reduced basis large coordinates,
+the double rows cancel to entries far smaller than their terms and keep
+rounding errors comparable to those entries.  Such a Gram matrix can be
+positive definite and pass the pivot and LLL bound tests while not being the
+T2 form of the lattice; on ``multiquadratic_m23_m31_m47`` it made the
+enumeration visit about twelve times as many candidates.  The setup therefore
+compares the product of the double Gram-Schmidt pivots with the exact
+``d = |disc(O)| N(I)^2`` that the LLL bound test already takes (rule 3 below).
+The tolerance, ``2^-20`` in ``log2 d``, lies far above the discrepancy that
+rounding alone leaves (below ``3e-8`` on the proven corpus rows measured, and
+below ``1e-12`` on most) and below every discrepancy measured on
+``multiquadratic_m23_m31_m47`` (above ``1e-6``, mostly above one bit).
 
 The setup falls back to the whole Arb route at the same precision when
 
 #. a value is not finite, or a transform entry exceeds ``2^53``;
 #. the double Gram-Schmidt pivot test fails;
+#. the product of the double Gram-Schmidt pivots differs from the exact ``d``
+   by more than ``2^-20`` in ``log2 d``, or ``d`` is not available; the setup
+   then goes to the Arb route at once, without trying other rounding scales
+   in double;
 #. the LLL bound test fails at every rounding scale, so no basis is accepted
    (the scale loops run from the rounding-scale hint and then from the first
    scale, as the Arb route does); or
@@ -1402,18 +1417,20 @@ the route returns no ``failed`` outcome of its own.  Precision retries stay on
 the Arb path.  The fallback reuses the LLL reductions the double-row loops
 already made at that precision (the reduction is a deterministic function of
 the minimum rounding scale), so it does not repeat them.  On some fields the
-route falls back always; the corpus field ``cyclotomic_real_q10_c11_deg10`` is
-one, because its maximal-order basis gives reduced bases with coordinates
-above ``2^53`` and ill-conditioned double rows.  The double Gram differs from
-the Arb midpoints at the level of the order basis's cancellation (1.24 times
-``n 2^-50`` on one twisted ideal of ``random_d9_h4_s8``), so the selected
+route falls back always: the corpus field ``cyclotomic_real_q10_c11_deg10``,
+because its maximal-order basis gives reduced bases with coordinates above
+``2^53`` and ill-conditioned double rows, and ``multiquadratic_m23_m31_m47``,
+by rule 3, so that it enumerates the same candidates as the Arb route.  Where
+the double data is accepted, the double Gram differs from the Arb midpoints at
+the level of the order basis's cancellation (1.24 times ``n 2^-50`` on one
+twisted ideal of ``random_d9_h4_s8``), so the selected
 basis, the order of candidates, ties, the accepted scale and the scale hint can
 differ from the Arb route's on some ideals; this is the same category as the
 start-precision change above.  The diagnostics profile labels of the route are
 ``class_group.finite_enumeration_setup.double_rows_gram``,
 ``double_rows_unavailable``, ``double_rows_pivot_failed``,
-``double_rows_outside_lll_bounds``, ``double_rows_arb_fallback``,
-``lll_reduction_reused``, and
+``double_rows_determinant_mismatch``, ``double_rows_outside_lll_bounds``,
+``double_rows_arb_fallback``, ``lll_reduction_reused``, and
 ``class_group.honesty_enumerate_witness.double_rows_arb_retry``.
 
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
