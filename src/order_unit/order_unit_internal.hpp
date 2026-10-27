@@ -736,9 +736,11 @@ class TestHookAccess;
 // load per kernel_row_root call that reaches the compact routine.
 class KernelRowRootTestSeams {
 public:
-    // True while armed: kernel_row_root treats the compact result as
-    // undecided and the factored fallback as rejecting its arguments, which
-    // valid input never does (the compact routine accepted the same ones).
+    // True while armed: kernel_row_root takes the factored fallback whenever
+    // the compact routine did not report an error, whether its result was
+    // decided or undecided, and the fallback then rejects its arguments,
+    // which valid input never does (the compact routine accepted the same
+    // ones).
     static bool fallback_error() noexcept {
         return fallback_error_.load(std::memory_order_relaxed);
     }
