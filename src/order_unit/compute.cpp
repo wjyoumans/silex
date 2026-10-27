@@ -4975,14 +4975,26 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     }
     // A grh request on a field defined by Phi_m seeds the cyclotomic units
     // (source add_cyclotomic_units, buch2.c:3626-3636, called at :3873 before
-    // any relation search), each checked to have norm +-1.  They count
-    // toward the kernel-unit need below as the source counts them in zc
-    // (buch2.c:4060).  A failed construction only leaves the seeds out.
+    // any relation search), each checked exactly to be integral with norm
+    // +-1.  They count toward the kernel-unit need below as the source
+    // counts them in zc (buch2.c:4060).  A field defined by psi_n, the
+    // maximal real subfield of Q(zeta_n), seeds exactly rank independent
+    // real cyclotomic units, checked the same way
+    // (detail::real_cyclotomic_field_units); the source seeds nothing there
+    // (nfcyclotomicunits returns no units when w <= 6, buch2.c:3594), so this
+    // is Silex's own.  A failed construction only leaves the seeds out.
     if (options.requested_certification == CertificationMode::grh &&
         rank > 0) {
         std::vector<Element> cyclotomic_units;
-        if (detail::cyclotomic_field_units(cyclotomic_units,
-                                           *order.parent())) {
+        bool constructed = detail::cyclotomic_field_units(cyclotomic_units,
+                                                          *order.parent());
+        if (constructed && cyclotomic_units.empty() &&
+            detail::real_cyclotomic_defining_polynomial_index(
+                    *order.parent()) != 0) {
+            constructed = detail::real_cyclotomic_field_units(
+                    cyclotomic_units, *order.parent(), embeddings);
+        }
+        if (constructed) {
             for (const Element& unit : cyclotomic_units) {
                 FactoredElement seed(*order.parent());
                 if (!seed.is_defined() || !seed.set_element(unit)) {

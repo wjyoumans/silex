@@ -908,6 +908,112 @@ int test_cyclotomic_field_units() {
     return 0;
 }
 
+// Real cyclotomic units on fields defined by psi_n (FLINT
+// fmpz_poly_cos_minpoly), the maximal real subfield of Q(zeta_n): for every
+// n with 2 <= phi(n) / 2 <= 16, prime, prime power, composite and
+// n = 2 (mod 4), the list has exactly the unit rank phi(n) / 2 - 1 of
+// elements, each integral with norm +-1, and they are independent.  Spot
+// values: on psi_5 the single unit is S_1 = x (primitive root 2).  Their
+// regulator is [E : C] times the regulator R of the field, both from source
+// bnfinit (2.17.4) (GRH, floating point; the index is h+ by Washington,
+// Theorem 8.2, for prime powers): index 1 on n = 23, 64, 27, 40 and 60, and
+// index 2 on n = 136, where h = 2.  Other presentations get no units.
+int test_real_cyclotomic_field_units() {
+    auto units_of = [](ulong n) {
+        sflint::FmpzPoly psi;
+        fmpz_poly_cos_minpoly(psi.raw(), n);
+        silex::NumberField field = fmpz_poly_field(psi);
+        silex::EmbeddingContext embeddings(field);
+        assert(embeddings.is_defined());
+        std::vector<silex::Element> units;
+        assert(silex::detail::real_cyclotomic_field_units(units, field,
+                                                          embeddings));
+        assert(static_cast<slong>(units.size()) == field.degree() - 1);
+        for (const silex::Element& unit : units) {
+            sflint::Fmpq norm;
+            assert(unit.norm(sflint::FmpqRef(norm)));
+            assert(fmpz_is_one(fmpq_denref(norm.raw())) != 0);
+            assert(fmpz_is_pm1(fmpq_numref(norm.raw())) != 0);
+            sflint::FmpqPoly polynomial;
+            assert(unit.get_fmpq_poly(sflint::FmpqPolyRef(polynomial)));
+            assert(fmpz_is_one(fmpq_poly_denref(polynomial.raw())) != 0);
+        }
+        bool independent = false;
+        assert(silex::units_independent(
+                independent, embeddings,
+                silex::ElementSpan(units.data(), units.size()), 256));
+        assert(independent);
+        return std::make_pair(std::move(field), std::move(units));
+    };
+    for (ulong n = 5; n <= 2 * 32 * 32; ++n) {
+        const ulong half = n_euler_phi(n) / 2;
+        if (half < 2 || half > 16) {
+            continue;
+        }
+        (void)units_of(n);
+    }
+    {
+        auto [field, units] = units_of(5);
+        assert(units.size() == 1);
+        assert(units[0].equal(integer_polynomial_element(field, {0, 1})));
+    }
+    auto expect_regulator = [&](ulong n, slong index, const char* value) {
+        auto [field, units] = units_of(n);
+        silex::EmbeddingContext embeddings(field);
+        assert(embeddings.is_defined());
+        sflint::Arb regulator;
+        assert(silex::unit_regulator(
+                sflint::ArbRef(regulator), embeddings,
+                silex::ElementSpan(units.data(), units.size()), 256));
+        sflint::Arb expected;
+        assert(arb_set_str(expected.raw(), value, 256) == 0);
+        arb_mul_si(expected.raw(), expected.raw(), index, 256);
+        assert(arb_overlaps(regulator.raw(), expected.raw()) != 0);
+        assert(arb_rel_accuracy_bits(regulator.raw()) > 64);
+    };
+    expect_regulator(23, 1, "1014.31330505915029672341729365 +/- 1e-25");
+    expect_regulator(64, 1, "6446247.11283769692823868907206 +/- 1e-22");
+    expect_regulator(27, 1, "159.898566188718523146462453227 +/- 1e-26");
+    expect_regulator(40, 1, "55.5791824785411922813882844234 +/- 1e-26");
+    expect_regulator(60, 1, "24.3884064257728401088678272739 +/- 1e-26");
+    expect_regulator(136, 2,
+                     "471833271145334348.314660854377780580 +/- 1e-15");
+
+    // Presentations other than psi_n get no units.
+    std::vector<silex::Element> none;
+    {
+        sflint::FmpzPoly psi;
+        fmpz_poly_cos_minpoly(psi.raw(), 7);
+        sflint::FmpzPoly shift;
+        fmpz_poly_set_coeff_si(shift.raw(), 1, 1);
+        fmpz_poly_set_coeff_si(shift.raw(), 0, 1);
+        sflint::FmpzPoly translate;
+        fmpz_poly_compose(translate.raw(), psi.raw(), shift.raw());
+        silex::NumberField field = fmpz_poly_field(translate);
+        silex::EmbeddingContext embeddings(field);
+        assert(silex::detail::real_cyclotomic_field_units(none, field,
+                                                          embeddings));
+        assert(none.empty());
+    }
+    {
+        sflint::FmpzPoly cyclotomic;
+        fmpz_poly_cyclotomic(cyclotomic.raw(), 7);
+        silex::NumberField field = fmpz_poly_field(cyclotomic);
+        silex::EmbeddingContext embeddings(field);
+        assert(silex::detail::real_cyclotomic_field_units(none, field,
+                                                          embeddings));
+        assert(none.empty());
+    }
+    {
+        const silex::NumberField undefined;
+        silex::EmbeddingContext embeddings;
+        assert(silex::detail::real_cyclotomic_field_units(none, undefined,
+                                                          embeddings));
+        assert(none.empty());
+    }
+    return 0;
+}
+
 // The real-subfield detector against FLINT's fmpz_poly_cos_minpoly: for
 // every n >= 3 with 2 <= phi(n) / 2 <= 20, psi_n is detected with index n,
 // as a polynomial and as the defining polynomial of a field.  Translates
@@ -1923,6 +2029,7 @@ int main() {
     test_real_cyclotomic_polynomial_index();
     test_cyclotomic_defining_polynomial_splits();
     test_cyclotomic_field_units();
+    test_real_cyclotomic_field_units();
     test_roots_of_unity_public_fail_closed();
     test_roots_of_unity_memo();
     test_lower_regulator_bound();

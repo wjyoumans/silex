@@ -192,8 +192,10 @@ struct RelationUnitExtractionState {
     // ahead of the relation-kernel candidates by set_class_relation_units
     // and counted toward the kernel-unit need.  A grh request on a field
     // defined by Phi_m sets them to the cyclotomic units
-    // (detail::cyclotomic_field_units, after source add_cyclotomic_units);
-    // empty otherwise.
+    // (detail::cyclotomic_field_units, after source add_cyclotomic_units),
+    // and one on a field defined by psi_n to rank independent real
+    // cyclotomic units (detail::real_cyclotomic_field_units); empty
+    // otherwise.
     std::vector<FactoredElement> seed_units;
 
     const Element* expanded_reduce_mod_units_log_generator(

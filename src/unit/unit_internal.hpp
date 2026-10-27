@@ -9,6 +9,7 @@
 
 namespace silex {
 class Element;
+class EmbeddingContext;
 class NumberField;
 }  // namespace silex
 
@@ -90,10 +91,33 @@ bool cyclotomic_defining_polynomial_splits(
 // n / gcd(a, n) not a prime power.  When n is a prime power the source
 // states the list is independent, and it has phi(n) / 2 - 1 elements, the
 // unit rank; otherwise it may be dependent or longer than the unit rank.  Every element is
-// checked to have norm +-1 (each is integral by construction).  Returns
-// false, with `out` empty, when an operation or a norm check fails.
+// checked exactly to be integral (integer coordinates in the power basis)
+// with norm +-1.  Returns false, with `out` empty, when an operation or one
+// of these checks fails.
 bool cyclotomic_field_units(std::vector<Element>& out,
                             const NumberField& field) noexcept;
+
+// Cyclotomic units of the maximal real cyclotomic subfield
+// Q(zeta_n)^+ when the defining polynomial of `field` is exactly psi_n
+// (real_cyclotomic_defining_polynomial_index), and none otherwise.  With
+// y = x, or y = -x and n replaced by n / 2 when n = 2 (mod 4): for n
+// prime, the reference's prime-conductor routine (eta = S_(g-1)(y), g a
+// primitive root, and its images sigma_a(eta), 2 <= a < n / 2 - 1); for n a
+// prime power, the reference's prime-power routine after Washington,
+// Lemma 8.1 (xi_a for 1 < a < n / 2 prime to n); for other n, the integer kernel, LLL-reduced, of the norm
+// exponents at the primes dividing n of real elements of the group generated
+// by +-zeta_n and the 1 - zeta_n^a (see cyclotomic_units.cpp).  Every
+// candidate is checked exactly to be integral with norm +-1, and the list
+// keeps, in order, the candidates proved independent of the earlier kept
+// ones by the test of units_independent (positive Gram determinant of the
+// logarithmic embeddings, at 128 bits, then 512) until it has the unit rank
+// deg - 1.  On success `out` holds exactly deg - 1 independent units.
+// Returns false, with `out` empty, when an operation or an exact check
+// fails or fewer than deg - 1 independent units are proved.
+// `embeddings` must be a context for `field`.
+bool real_cyclotomic_field_units(std::vector<Element>& out,
+                                 const NumberField& field,
+                                 EmbeddingContext& embeddings) noexcept;
 
 // The proven multiple of w that roots_of_unity searches against, for the
 // monic integral model of the defining polynomial of `field`, exposed for
