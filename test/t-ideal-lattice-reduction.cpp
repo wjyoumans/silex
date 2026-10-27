@@ -442,6 +442,31 @@ int test_ideal_lattice_result_contracts() {
     assert(finite_data.quadratic_form_data[0] == 37.0);
     assert(finite_data.quadratic_form_data[1] == 41.0);
     assert(finite_data.initial_bound_value == 43.0);
+
+    // A start precision outside (0, kT2EnumerationMaxPrecision] fails
+    // before any setup and leaves the output as it was; the bounds
+    // themselves are valid starts.
+    namespace rs = silex::detail::relation_search;
+    for (const slong invalid_precision :
+         {slong{0}, slong{-1}, rs::kT2EnumerationMaxPrecision + 1}) {
+        assert(!rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                finite_data, prime_ideal, nullptr, nullptr,
+                rs::kMaxFactorAttempts, invalid_precision));
+        assert(sflint::fmpz_mat_nrows(finite_data.basis) == 1);
+        assert(finite_data.quadratic_form_data.size() == 2);
+        assert(finite_data.initial_bound_value == 43.0);
+    }
+    for (const slong valid_precision :
+         {rs::kT2EnumerationProofInitialPrecision,
+          rs::kT2EnumerationMaxPrecision}) {
+        rs::FiniteIdealT2EnumerationData data;
+        assert(rs::build_finite_ideal_t2_enumeration_data_with_retry(
+                data, prime_ideal, nullptr, nullptr, rs::kMaxFactorAttempts,
+                valid_precision));
+        assert(sflint::fmpz_mat_nrows(data.basis) == degree);
+        assert(data.quadratic_form_data.size() ==
+               static_cast<std::size_t>(degree * degree));
+    }
     return 0;
 }
 
@@ -1688,8 +1713,9 @@ bool t2_enumeration_data_is_reduced_ideal_basis(
 // leaves an LLL transform whose rounding error dominates the reduced
 // vectors: for a prime above 89 the double Gram-Schmidt of the resulting
 // Gram matrix has a nonpositive last pivot at every working precision.  The
-// T2 enumeration data must build for every prime above 89.
-int test_skewed_basis_t2_enumeration_data_builds() {
+// T2 enumeration data must build for every prime above 89, from both the
+// relation-search and the proof start precisions.
+int test_skewed_basis_t2_enumeration_data_builds(slong initial_precision) {
     constexpr std::array<slong, 11> coefficients = {
             238831, -228566, -128567, 146666, -15113, -13352,
             2746,   334,     -97,     -2,     1};
@@ -1724,7 +1750,10 @@ int test_skewed_basis_t2_enumeration_data_builds() {
         silex::detail::relation_search::FiniteIdealT2EnumerationData data;
         assert(silex::detail::relation_search::
                        build_finite_ideal_t2_enumeration_data_with_retry(
-                               data, prime_ideal, nullptr, nullptr));
+                               data, prime_ideal, nullptr, nullptr,
+                               silex::detail::relation_search::
+                                       kMaxFactorAttempts,
+                               initial_precision));
         assert(t2_enumeration_data_is_reduced_ideal_basis(prime_ideal, order,
                                                           data));
     }
@@ -1735,8 +1764,8 @@ int test_skewed_basis_t2_enumeration_data_builds() {
 // 8.8.82944000000.1).  For prime ideals above 5, 11 and 13 the basis reduced
 // from the first full-rank rounding has quadratic-form data but misses the
 // LLL bounds; the T2 enumeration data must then come from a basis that meets
-// them.
-int test_octic_t2_enumeration_data_meets_lll_bounds() {
+// them, from both the relation-search and the proof start precisions.
+int test_octic_t2_enumeration_data_meets_lll_bounds(slong initial_precision) {
     constexpr std::array<slong, 9> coefficients = {25, 0, -100, 0, 95,
                                                    0,  -20, 0,  1};
 
@@ -1770,7 +1799,10 @@ int test_octic_t2_enumeration_data_meets_lll_bounds() {
             silex::detail::relation_search::FiniteIdealT2EnumerationData data;
             assert(silex::detail::relation_search::
                            build_finite_ideal_t2_enumeration_data_with_retry(
-                                   data, prime_ideal, nullptr, nullptr));
+                                   data, prime_ideal, nullptr, nullptr,
+                                   silex::detail::relation_search::
+                                           kMaxFactorAttempts,
+                                   initial_precision));
             assert(t2_enumeration_data_is_reduced_ideal_basis(prime_ideal,
                                                               order, data));
         }
@@ -1848,8 +1880,9 @@ bool t2_enumeration_data_is_basis_gram(
 
 // x^5 - 3x + 1 has signature (3, 1), so the Minkowski rows mix real and
 // complex places.  The quadratic form of each T2 enumeration context must be
-// the full symmetric Gram matrix of its reduced basis.
-int test_t2_enumeration_quadratic_form_is_basis_gram() {
+// the full symmetric Gram matrix of its reduced basis, from both the
+// relation-search and the proof start precisions.
+int test_t2_enumeration_quadratic_form_is_basis_gram(slong initial_precision) {
     constexpr std::array<slong, 6> coefficients = {1, -3, 0, 0, 0, 1};
 
     sflint::FmpqPoly polynomial;
@@ -1882,7 +1915,10 @@ int test_t2_enumeration_quadratic_form_is_basis_gram() {
             silex::detail::relation_search::FiniteIdealT2EnumerationData data;
             assert(silex::detail::relation_search::
                            build_finite_ideal_t2_enumeration_data_with_retry(
-                                   data, prime_ideal, nullptr, nullptr));
+                                   data, prime_ideal, nullptr, nullptr,
+                                   silex::detail::relation_search::
+                                           kMaxFactorAttempts,
+                                   initial_precision));
             assert(t2_enumeration_data_is_basis_gram(order, data));
             ++checked;
         }
@@ -2457,9 +2493,17 @@ int main() {
     assert(test_deterministic_failures_preserve_outputs() == 0);
     assert(test_large_power_basis_embeddings_round_at_first_precision() ==
            0);
-    assert(test_skewed_basis_t2_enumeration_data_builds() == 0);
-    assert(test_octic_t2_enumeration_data_meets_lll_bounds() == 0);
-    assert(test_t2_enumeration_quadratic_form_is_basis_gram() == 0);
+    namespace rs = silex::detail::relation_search;
+    for (const slong initial_precision :
+         {rs::kT2EnumerationRelationSearchInitialPrecision,
+          rs::kT2EnumerationProofInitialPrecision}) {
+        assert(test_skewed_basis_t2_enumeration_data_builds(
+                       initial_precision) == 0);
+        assert(test_octic_t2_enumeration_data_meets_lll_bounds(
+                       initial_precision) == 0);
+        assert(test_t2_enumeration_quadratic_form_is_basis_gram(
+                       initial_precision) == 0);
+    }
     assert(test_t2_enumeration_rounding_scale_hint() == 0);
     return 0;
 }

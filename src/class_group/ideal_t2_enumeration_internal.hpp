@@ -21,6 +21,17 @@ inline constexpr slong kMaxFactorAttempts = 500;
 inline constexpr slong kMaxElementSteps =
         4 * kMaxFactorAttempts * kMaxFactorAttempts;
 
+// Starting working precisions (bits) of one T2 enumeration setup, retried at
+// ceil(1.2 * precision) up to kT2EnumerationMaxPrecision.  The source starts
+// its relation search at 200 bits and its unconditional class-group proof at
+// 100, each with that retry (see "Class groups and order units" in
+// docs/reference/algorithms_and_sources.rst).  The factor-base honesty witness
+// search uses the proof value; every witness it finds is verified exactly, so
+// the precision only orders the candidates.
+inline constexpr slong kT2EnumerationRelationSearchInitialPrecision = 200;
+inline constexpr slong kT2EnumerationProofInitialPrecision = 100;
+inline constexpr slong kT2EnumerationMaxPrecision = 1000;
+
 struct FiniteIdealT2EnumerationData {
     flint::FmpzMat basis{0, 0};
     std::vector<double> quadratic_form_data;
@@ -69,7 +80,9 @@ bool build_finite_ideal_t2_enumeration_data_with_retry(
         FiniteIdealT2EnumerationData& out, const Ideal& ideal,
         const DiagnosticsContext* diagnostics,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
-        slong target_factor_attempts = kMaxFactorAttempts) noexcept;
+        slong target_factor_attempts = kMaxFactorAttempts,
+        slong initial_precision =
+                kT2EnumerationRelationSearchInitialPrecision) noexcept;
 
 double arb_midpoint_double(flint::ArbConstRef value) noexcept;
 

@@ -16,8 +16,6 @@
 namespace silex {
 namespace detail::relation_search {
 
-constexpr slong kT2EnumerationInitialPrecision = 200;
-constexpr slong kT2EnumerationMaxPrecision = 1000;
 constexpr slong kIdealLatticeRoundingGuardBits = 64;
 // First scale (in bits) at which the embedding rows are rounded for LLL; the
 // scale doubles until the rounded rows have full rank, as the source rounds
@@ -980,9 +978,16 @@ bool build_finite_ideal_t2_enumeration_data_with_retry(
         const Ideal& ideal,
         const DiagnosticsContext* diagnostics,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
-        slong target_factor_attempts)
+        slong target_factor_attempts,
+        slong initial_precision)
         noexcept {
-    for (slong precision = kT2EnumerationInitialPrecision;
+    if (initial_precision <= 0 ||
+        initial_precision > kT2EnumerationMaxPrecision) {
+        SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                  LogLevel::detail, "T2 context initial precision invalid");
+        return false;
+    }
+    for (slong precision = initial_precision;
          precision <= kT2EnumerationMaxPrecision;) {
         if (build_finite_ideal_t2_enumeration_data_at_precision(
                     out, ideal, precision, diagnostics, embedding_cache,

@@ -506,9 +506,13 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.honesty_t2_enumeration_data");
+        // The proof route starts at the source's class-group proof
+        // precision (kT2EnumerationProofInitialPrecision); relation search
+        // keeps its own start.
         if (!build_finite_ideal_t2_enumeration_data_with_retry(
                     t2_context, ideal, diagnostics, embedding_cache,
-                    effort.factor_attempts)) {
+                    effort.factor_attempts,
+                    kT2EnumerationProofInitialPrecision)) {
             return RequiredPrimeWitnessSearchResult::failed;
         }
     }

@@ -1295,6 +1295,22 @@ rows and transform and calls ``fmpz_lll``; rows above 250 bits call
 ``fmpz_lll`` returns, for the three reasons given there, so the reduced
 basis, its quadratic-form data and the bound are unchanged.
 
+The working precision of this setup (the embedding rows carry 64 further
+guard bits) starts where Hecke v0.38.6 starts the matching route and, when
+no basis is accepted, retries at ``ceil(1.2 * prec)`` up to 1000 bits, as
+``src/NumFieldOrd/NfOrd/Clgp/Rel_enum.jl:class_group_small_real_elements_relation_start``
+does on ``LowPrecisionLLL`` and ``LowPrecisionCholesky``.  Relation search
+starts at that function's default of 200 bits.  The factor-base honesty
+witness search starts at 100 bits, the value Hecke's unconditional proof
+passes in (``Clgp/Proof.jl:class_group_proof`` and
+``_class_group_proof_one_primedeal``, ``prec = 100``).  Because the rounding
+scales stop at half the working precision, the honesty search reaches
+scales up to 64 at its first precision rather than 128.  The precision only
+selects the reduced basis and so the order of the enumerated candidates:
+every witness passes the exact norm-accounting check described with the
+honesty scan below, so a lower start cannot accept a false witness.
+Witness and bookkeeping counts can differ from a 200-bit start.
+
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
 ``Unit/Relation.jl:_find_rational_relation!``.  Silex computes the

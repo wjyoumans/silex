@@ -133,6 +133,20 @@ Added
 Changed
 -------
 
+- The T2 witness search of the ``proven`` factor-base honesty check starts
+  its per-ideal basis setup (LLL, Gram matrix and Cholesky factor) at 100
+  bits instead of 200, the start precision of Hecke's unconditional
+  class-group proof; it keeps the retry at 1.2 times the precision up to
+  1000 bits.  ``grh`` relation search keeps its 200-bit start.  Every witness
+  is still verified exactly, so the precision only orders the candidates.
+  ``proven`` outputs are identical on the 165 corpus rows that finish within
+  120 s on both builds (classes, regulators, labels and the full instance
+  JSON without timings); ``cyclotomic_real_q10_c11_deg10`` needs two more
+  precision retries (206 basis setups instead of 204).  Callgrind Ir of the
+  ``proven`` instance (busy machine) drops by 4.86% on ``random_d9_h4_s8``,
+  4.88% on ``random_d10_h2_s21``, 5.32% on ``pure_x12_plus_7`` and 1.81% on
+  ``cyclotomic_real_q10_c11_deg10``.
+
 - ``decompose_prime`` records on the order when its search for a monogenic
   generator (an element whose powers form a basis of the order) has tested
   every candidate and found none, and skips the search for later primes of
