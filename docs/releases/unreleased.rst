@@ -133,6 +133,24 @@ Added
 Changed
 -------
 
+- The exact class number ``h(D)`` of an imaginary quadratic maximal order
+  with ``|D| < 2^44`` (the ``proven`` route, and the ``grh`` route below
+  ``2^34``) counts the reduced forms of the fundamental discriminant ``D``
+  without building them: a sum over ``a <= sqrt(|D| / 3)`` of half the number
+  of square roots of ``D`` modulo ``4a``, from FLINT ``n_sqrtmod_primepow``
+  per prime power, with the reduced-form test applied to the roots from
+  ``n_sqrtmodn`` only when ``4a^2 >= |D|`` (Cohen, GTM 138, Proposition
+  5.3.3, Lemma 5.3.4, Theorem 1.3.9).  A non-fundamental ``D`` keeps the
+  listing of FLINT ``qfb_reduced_forms``.  Class numbers and labels are
+  unchanged: the count equals the listing on every fundamental
+  ``|D| <= 2e5``, and ``proven`` and ``grh`` outputs (the full instance JSON
+  without timings) are identical on the 8 imaginary-quadratic corpus rows.
+  Memory falls from the stored forms to about 5 bytes per ``a``.  Callgrind
+  Ir of the class-unit computation of
+  ``imaginary_quadratic_d10000000799`` drops by 17.6% (``proven``) and 78.4%
+  (``grh``).  See "Class groups and order units" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The good-prime step of ``roots_of_unity`` reads the gcd of the residue
   degrees above each prime from FLINT's word-size distinct-degree
   factorization (``nmod_poly_factor_distinct_deg``), as PARI's ``guess_roots``

@@ -7,8 +7,8 @@ number from one of two routes, chosen by the bit length of the discriminant
 ``src/class_group/class_group.cpp``, value 35):
 
 - ``|D| < 2^34``: the exact class number, counted from the reduced forms of
-  discriminant ``D`` (FLINT ``qfb_reduced_forms``), whose time and memory grow
-  like ``sqrt(|D|)``.  The completeness basis is ``exact_class_number``.
+  discriminant ``D``, in time growing like ``sqrt(|D|)``.  The completeness
+  basis is ``exact_class_number``.
 - ``|D| >= 2^34``: the GRH relation lattice and the analytic index-one test,
   which never lists forms.  The completeness basis is ``belabas_friedman``.
 
@@ -19,6 +19,25 @@ requests use has its own cutoff, unchanged at ``2^44``
 is counted from the reduced forms, and from ``2^44`` on it comes from the class
 number formula with a rigorous ``L(1, chi_D)`` enclosure (see "Class groups
 and order units" in :doc:`../reference/algorithms_and_sources`).
+
+Counting instead of listing
+---------------------------
+
+Both cutoffs were measured when the reduced forms were listed by FLINT
+``qfb_reduced_forms``, whose time and memory grow like ``sqrt(|D|)`` (about
+1.4 GB at ``|D| = 1e14``).  For a fundamental ``D``, which is every
+discriminant of a maximal order and so every discriminant these routes see,
+Silex now counts the reduced forms without building them (the source chain is
+in "Class groups and order units" in
+:doc:`../reference/algorithms_and_sources`); a non-fundamental ``D`` keeps the
+listing.  The count needs about 5 bytes per ``a <= sqrt(|D| / 3)``, about
+12 MB just below ``2^44``, so the memory reason for the ``2^44`` cutoff no
+longer applies, and it is faster: on ``imaginary_quadratic_d10000000799``
+(``|D|`` about ``2^33.2``) callgrind counts 298.9M instructions for ``h(D)``
+by listing and 39.3M by counting.  The time comparisons below, against the
+class number formula and against the GRH relation lattice, were taken with
+the listing.  Both cutoffs stand unchanged until they are re-measured with
+the count.
 
 The 2^44 cutoff was set by a first measurement (a busy machine; the lattice
 route's index-one test then used a different ``hR`` below ``2^44``) and was

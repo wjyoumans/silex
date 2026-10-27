@@ -204,6 +204,7 @@ add_library(silex
     src/class_group/relation_production.cpp
     src/class_group/maximal_imaginary_quadratic_relation_backend.cpp
     src/class_group/quadratic_form_reduction.cpp
+    src/class_group/reduced_form_count.cpp
     src/class_group/native_relation_search.cpp
     src/class_group/relation_admission_cache.cpp
     src/class_group/relation_completion_scheduler.cpp
@@ -680,6 +681,17 @@ if(SILEX_BUILD_TESTS)
     add_test(NAME silex-quadratic-form-reduction
         COMMAND t-silex-quadratic-form-reduction)
     list(APPEND SILEX_TEST_NAMES silex-quadratic-form-reduction)
+
+    add_executable(t-silex-reduced-form-count
+        test/t-reduced-form-count.cpp)
+    target_link_libraries(t-silex-reduced-form-count
+        PRIVATE Silex::silex)
+    target_include_directories(t-silex-reduced-form-count PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    silex_apply_target_warnings(t-silex-reduced-form-count)
+    add_test(NAME silex-reduced-form-count
+        COMMAND t-silex-reduced-form-count)
+    list(APPEND SILEX_TEST_NAMES silex-reduced-form-count)
 
     add_executable(t-silex-quadratic-row-hnf
         test/t-quadratic-row-hnf.cpp)

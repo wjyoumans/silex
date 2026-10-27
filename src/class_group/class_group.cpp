@@ -35,6 +35,7 @@
 #include "relation_saturation_internal.hpp"
 #include "relation_factor_base_plan_internal.hpp"
 #include "relation_module_limits_internal.hpp"
+#include "reduced_form_count_internal.hpp"
 #include "ideal_lattice_reduction_internal.hpp"
 #include "../element/element_internal.hpp"
 #include "../ideal_factorization/ideal_factorization_internal.hpp"
@@ -75,15 +76,20 @@ namespace {
 
 // Largest bit length of |D| at which the exact class number h(D) of an
 // imaginary quadratic maximal order is counted from the reduced forms of
-// discriminant D (FLINT qfb_reduced_forms, time and memory growing like
-// sqrt|D|): |D| < 2^44.  This cutoff governs the proven route, that is the
-// imaginary_quadratic_class_number switch.  At and above 2^44 the listing is
-// not used there: h(D) comes from Dirichlet's class number formula with a
-// rigorous L(1, chi_D) enclosure
+// discriminant D: |D| < 2^44.  For fundamental D the reduced forms are
+// counted without being built
+// (imaginary_quadratic_fundamental_reduced_form_count, time growing like
+// sqrt|D| and memory about 5 bytes per a <= sqrt(|D| / 3)); otherwise FLINT
+// qfb_reduced_forms lists them (time and memory growing like sqrt|D|).  This
+// cutoff governs the proven route, that is the
+// imaginary_quadratic_class_number switch.  At and above 2^44 the reduced
+// forms are not counted there: h(D) comes from Dirichlet's class number
+// formula with a rigorous L(1, chi_D) enclosure
 // (imaginary_quadratic_class_number_analytic below).  Below 2^44 the
-// listing is faster than that formula: measured per decade over |D| from 1e7
-// to 1e14 in docs/development/class_number_route_cutoff.rst.  A grh
-// class/unit request has its own, lower cutoff, defined below.
+// listing was faster than that formula: measured per decade over |D| from
+// 1e7 to 1e14 in docs/development/class_number_route_cutoff.rst, before the
+// count replaced the listing for fundamental D; the cutoff is unchanged.  A
+// grh class/unit request has its own, lower cutoff, defined below.
 constexpr ulong imaginary_quadratic_listing_max_abs_discriminant_bits = 44;
 
 // Accuracy of the first step of the analytic class number ladder below:
@@ -242,6 +248,22 @@ bool imaginary_quadratic_class_number(flint::FmpzRef out,
     if (::fmpz_bits(discriminant.raw()) >
         imaginary_quadratic_listing_max_abs_discriminant_bits) {
         return imaginary_quadratic_class_number_analytic(out, discriminant);
+    }
+
+    // For fundamental D, h(D) is the number of reduced forms, counted without
+    // building them; reduced_form_count_internal.hpp states the source
+    // chain.  A non-fundamental D keeps FLINT's listing.
+    const ulong abs_discriminant =
+            static_cast<ulong>(-flint::fmpz_get_si(discriminant));
+    if (imaginary_quadratic_discriminant_is_fundamental(abs_discriminant)) {
+        ulong count = 0;
+        if (!imaginary_quadratic_fundamental_reduced_form_count(
+                    count, abs_discriminant) ||
+            count == 0) {
+            return false;
+        }
+        flint::fmpz_set_ui(out, count);
+        return true;
     }
 
     struct ReducedForms {

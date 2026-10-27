@@ -7254,8 +7254,8 @@ int test_grh_relation_search_size_limit_reason() {
 // residue, src/zeta/zeta.cpp), so w enters only the analytic side, where
 // the class number formula puts it.  The exact imaginary-quadratic route
 // divides h_cand by h(D), the number of reduced primitive forms of the
-// fundamental discriminant D (FLINT qfb_reduced_forms counts primitive
-// forms only), which is the class number of the maximal order.  On proven
+// fundamental discriminant D (every form of a fundamental discriminant is
+// primitive), which is the class number of the maximal order.  On proven
 // pairs with w = 4, w = 6, h = 3, a real quadratic and a mixed-signature
 // cubic field, the candidate product lies in the zeta value, the exact route
 // gives index one, the analytic accessor gives its conservative bound 2, and

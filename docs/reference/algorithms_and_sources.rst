@@ -2124,11 +2124,43 @@ precision where Silex fails.
 The exact imaginary-quadratic ``proven`` route uses the same index argument
 with the exact class number ``h = h(D)`` in place of ``ell``-local tests.
 Here ``D`` is the fundamental discriminant of the maximal order (the route
-applies to maximal orders only).  For ``|D| < 2^44`` ``h(D)`` is counted from
-the reduced forms returned by FLINT ``qfb_reduced_forms``; every form of
-discriminant ``D`` is primitive, so the count of reduced forms is the class
-number of the order.  The listing takes time and memory growing like
-``sqrt(|D|)`` (about 1.4 GB at ``|D| = 1e14``), so for ``|D| >= 2^44``
+applies to maximal orders only).  For ``|D| < 2^44`` ``h(D)`` is the number
+of reduced forms of discriminant ``D`` (Cohen, GTM 138, Proposition 5.3.3);
+every form of a fundamental discriminant is primitive (Cohen, pp. 225 and
+232), so no primitivity test is needed.  Silex counts the reduced forms
+without building them, in ``src/class_group/reduced_form_count.cpp``:
+
+- every reduced form ``(a, b, c)`` has ``a <= sqrt(|D| / 3)`` (Cohen,
+  Lemma 5.3.4(1)), and its ``b`` is a root of ``b^2 = D mod 4a``, with
+  ``c = (b^2 - D) / (4a)``;
+- ``b`` is defined modulo ``2a`` (Cohen, p. 253, the text of Lemma 5.5.1), and
+  ``b`` and ``b + 2a`` are both roots modulo ``4a``, so the window
+  ``-a < b <= a`` holds exactly half of the ``R(4a)`` roots, where ``R(m)`` is
+  the number of roots of ``x^2 = D mod m``;
+- when ``4a^2 < |D|``, every such ``b`` gives a reduced form with ``c > a``
+  (Cohen, Lemma 5.3.4(2)), so the boundary cases ``a = c`` and ``b = -a`` do
+  not occur and ``a`` contributes ``R(4a) / 2``;
+- ``R(4a)`` is the product of ``R(p^e)`` over the prime powers ``p^e``
+  exactly dividing ``4a`` (the Chinese remainder theorem, Cohen, Theorem 1.3.9
+  and Corollary 1.3.10), computed by a sieve over the primes up to
+  ``sqrt(|D| / 3)``, with each ``R(p^e)`` the root count of FLINT
+  ``n_sqrtmod_primepow``, called once per pair ``(p, e)``;
+- when ``4a^2 >= |D|``, the roots ``b`` modulo ``4a`` are listed by FLINT
+  ``n_sqrtmodn`` and a root is counted when ``(a, b, c)`` is reduced:
+  ``|b| <= a <= c``, and ``b >= 0`` when ``|b| = a`` or ``a = c`` (Cohen,
+  Definition 5.3.2).  The count fails closed if ``n_sqrtmodn`` lists a
+  different number of roots than the product ``R(4a)``.
+
+FLINT is called only as a library; no FLINT code is ported.  FLINT 3.6.0
+``qfb_reduced_forms`` (``qfb/reduced_forms.c``), which lists the forms, is
+the test oracle: the count equals its number of forms on every fundamental
+``|D| <= 2e5`` and on fixed rows up to ``|D| = 2^44 - 1``.  The sum also
+counts imprimitive forms when ``D`` is not fundamental, so the count is
+gated on ``D`` being fundamental (``D = 1 mod 4`` with ``|D|`` squarefree, or
+``D = 4m`` with ``m = 2, 3 mod 4`` squarefree); any other ``D`` keeps the
+listing of ``qfb_reduced_forms``, which returns the primitive forms.  The
+count needs about 5 bytes per ``a <= sqrt(|D| / 3)`` and time growing like
+``sqrt(|D|)``.  For ``|D| >= 2^44``
 ``h(D)`` comes instead from Dirichlet's class number formula
 ``h(D) = w sqrt(|D|) L(1, chi_D) / (2 pi)``, with ``w = 2`` for ``D < -4``
 (Davenport, *Multiplicative Number Theory*, 3rd ed., Chapter 6), evaluated
@@ -2535,11 +2567,11 @@ it, with generation verified up to the Minkowski-type bound, gives
 base covers only the GRH bound has no unconditional generation, so that
 promotion fails for it.  For an
 imaginary quadratic field with ``|D| < 2^34`` the ``grh`` route uses an exact
-class number, counted from the reduced forms returned by FLINT
-``qfb_reduced_forms``, instead of an analytic value.  Its GRH dependence is in
+class number, counted from the reduced forms as on the ``proven`` route
+above, instead of an analytic value.  Its GRH dependence is in
 factor-base generation, which is checked only up to the GRH bound, and it
-records no analytic check.  Listing the reduced forms takes time and memory
-growing like ``sqrt(|D|)`` (about 1.4 GB at ``|D| = 1e14``), so from
+records no analytic check.  Counting the reduced forms takes time growing
+like ``sqrt(|D|)``, so from
 ``|D| >= 2^34`` an imaginary-quadratic ``grh`` request takes ``h`` from the
 GRH relation lattice and the analytic index-one test, like every other degree;
 there the test uses a Belabas--Friedman ``hR``.  The cutoff ``2^34`` was
@@ -3506,8 +3538,9 @@ when that was the request.
 For negative fundamental discriminants of absolute value at most 12, PARI
 2.17.3 ``src/basemath/quad.c:classno`` and ``classno2`` return exact class
 number one before their general algorithms.  Silex's discriminant ``-3``
-route independently enumerates reduced forms through FLINT
-``qfb_reduced_forms``, requires exact class order one, reconstructs and
+route independently counts the reduced forms of discriminant ``-3`` (the
+count of the exact imaginary-quadratic route above), requires exact class
+order one, reconstructs and
 verifies a principal generator for every factor-base ideal, and only then
 publishes the identity relation lattice.  The exceptional route does not
 change the generic restart policy, certification labels, or failure-atomic
