@@ -1881,7 +1881,10 @@ bool t2_enumeration_data_is_basis_gram(
 // x^5 - 3x + 1 has signature (3, 1), so the Minkowski rows mix real and
 // complex places.  The quadratic form of each T2 enumeration context must be
 // the full symmetric Gram matrix of its reduced basis, from both the
-// relation-search and the proof start precisions.
+// relation-search and the proof start precisions.  Its Gram-Schmidt pivots
+// must multiply to |disc| N(I)^2, the exact determinant that the setup's LLL
+// bound test uses: with complex places this holds only because the weighted
+// Minkowski rows carry the sqrt(2) factors of the T2 form.
 int test_t2_enumeration_quadratic_form_is_basis_gram(slong initial_precision) {
     constexpr std::array<slong, 6> coefficients = {1, -3, 0, 0, 0, 1};
 
@@ -1920,6 +1923,8 @@ int test_t2_enumeration_quadratic_form_is_basis_gram(slong initial_precision) {
                                            kMaxFactorAttempts,
                                    initial_precision));
             assert(t2_enumeration_data_is_basis_gram(order, data));
+            assert(t2_enumeration_data_is_reduced_ideal_basis(prime_ideal,
+                                                              order, data));
             ++checked;
         }
     }

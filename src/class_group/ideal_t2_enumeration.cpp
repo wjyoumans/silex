@@ -424,32 +424,28 @@ static bool quadratic_form_data_from_arb_gram(std::vector<double>& out,
 //   prod_i |b_i|^2 <= 2^(n (n - 1) / 2) d,
 // and otherwise redoes the reduction at a higher precision (see "Class groups
 // and order units" in docs/reference/algorithms_and_sources.rst).
-// Here |b_i|^2 is the Gram diagonal and d is the product of the squared
-// Cholesky pivots.  When an input cannot be read as a positive double the
-// test is not decided and the basis is accepted as before.
+// Here |b_i|^2 is the Gram diagonal and log2_determinant is log2 d, taken
+// from the exact |disc| N(I)^2 as the source does
+// (ideal_t2_lattice_log2_determinant).  When an input cannot be read as a
+// finite (positive) double the test is not decided and the basis is accepted
+// as before.
 static bool finite_enumeration_basis_within_lll_bounds(
         const flint::ArbMat& gram,
-        const flint::ArbMat& cholesky) noexcept {
+        double log2_determinant) noexcept {
     const slong dimension = flint::arb_mat_nrows_value(gram);
     if (dimension <= 0 || dimension != flint::arb_mat_ncols_value(gram) ||
-        flint::arb_mat_nrows_value(cholesky) != dimension ||
-        flint::arb_mat_ncols_value(cholesky) != dimension) {
+        !std::isfinite(log2_determinant)) {
         return true;
     }
 
-    double log2_determinant = 0.0;
     double log2_diagonal_product = 0.0;
     double log2_first_diagonal = 0.0;
     for (slong i = 0; i < dimension; ++i) {
-        const double pivot = arb_midpoint_double(
-                flint::arb_mat_entry_ref(cholesky, i, i));
         const double diagonal = arb_midpoint_double(
                 flint::arb_mat_entry_ref(gram, i, i));
-        if (!std::isfinite(pivot) || pivot <= 0.0 ||
-            !std::isfinite(diagonal) || diagonal <= 0.0) {
+        if (!std::isfinite(diagonal) || diagonal <= 0.0) {
             return true;
         }
-        log2_determinant += 2.0 * std::log2(pivot);
         log2_diagonal_product += std::log2(diagonal);
         if (i == 0) {
             log2_first_diagonal = std::log2(diagonal);
@@ -467,6 +463,34 @@ static bool finite_enumeration_basis_within_lll_bounds(
     }
     return log2_first_diagonal <= first_bound &&
            log2_diagonal_product <= product_bound;
+}
+
+// log2 of d = det(Gram) for the T2 Gram matrix of any basis of the ideal
+// lattice.  The weighted Minkowski rows are the T2 form, so for the HNF basis
+// det(Gram) = |disc(O)| det(HNF)^2 = |disc(O)| N(I)^2, and a unimodular LLL
+// transform keeps it.  The source takes this exact value in its ideal LLL
+// acceptance test (see "Class groups and order units" in
+// docs/reference/algorithms_and_sources.rst).  NaN when the discriminant or
+// the norm cannot be read or is zero, so the bound test is not decided.
+static double ideal_t2_lattice_log2_determinant(const Ideal& ideal,
+                                                const Order& order) noexcept {
+    flint::Fmpz discriminant;
+    flint::Fmpz norm;
+    if (!order.discriminant(flint::FmpzRef(discriminant)) ||
+        !ideal.norm(flint::FmpzRef(norm)) ||
+        flint::fmpz_is_zero(flint::FmpzConstRef(discriminant)) ||
+        flint::fmpz_is_zero(flint::FmpzConstRef(norm))) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    // |x| = |m| 2^e with |m| in [1/2, 1), so log2 |x| = log2 |m| + e without
+    // overflowing a double.
+    const auto log2_abs = [](flint::FmpzConstRef value) noexcept {
+        slong exponent = 0;
+        const double mantissa = flint::fmpz_get_d_2exp(exponent, value);
+        return std::log2(std::fabs(mantissa)) + static_cast<double>(exponent);
+    };
+    return log2_abs(flint::FmpzConstRef(discriminant)) +
+           2.0 * log2_abs(flint::FmpzConstRef(norm));
 }
 
 static bool round_scaled_midpoint_to_integer(flint::FmpzRef out,
@@ -664,8 +688,7 @@ static bool finite_quadratic_form_volume_bound(
 // dot product of the input balls, so G stays a rigorous enclosure.  Its
 // midpoint comes from FLINT's dot-product accumulation rather than a sum of
 // rounded products, so an entry can differ from the arb_mul/arb_add sum by
-// rounding noise.  The readers of G use the lower triangle (arb_mat_cho), the
-// diagonal, and the entry midpoints.
+// rounding noise.  The readers of G use the diagonal and the entry midpoints.
 static bool build_embedding_gram(flint::ArbMat& out,
                           const flint::ArbMat& embedding_rows,
                           slong precision) noexcept {
@@ -693,8 +716,11 @@ static bool build_embedding_gram(flint::ArbMat& out,
 }
 
 // Reduces the ideal basis from the first full-rank rounding at or above
-// min_rounding_scale and builds the Gram matrix of the reduced rows and its
-// Cholesky factor.  The reduced basis is the LLL transform times the ideal
+// min_rounding_scale and builds the Gram matrix of the reduced rows.  The
+// LLL bound test takes d from the exact |disc| N(I)^2 and positive
+// definiteness is read from the double Gram-Schmidt of the Gram midpoints
+// (quadratic_form_data_from_arb_gram), so no Arb Cholesky factor is formed.
+// The reduced basis is the LLL transform times the ideal
 // HNF, so it spans the same lattice at every scale.
 static bool reduce_finite_enumeration_basis_from_scale(
         flint::FmpzMat& basis,
@@ -702,7 +728,6 @@ static bool reduce_finite_enumeration_basis_from_scale(
         slong& rounding_scale,
         flint::ArbMat& embedding_rows,
         flint::ArbMat& gram,
-        flint::ArbMat& cholesky,
         const flint::FmpzMat& original_basis,
         const flint::ArbMat& original_embedding_rows,
         slong precision,
@@ -743,15 +768,6 @@ static bool reduce_finite_enumeration_basis_from_scale(
             return false;
         }
     }
-    {
-        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
-                            "class_group.finite_enumeration_setup.cholesky");
-        if (flint::arb_mat_cho(cholesky, gram, precision) == 0) {
-            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
-                      LogLevel::detail, "T2 context Cholesky failed");
-            return false;
-        }
-    }
     return true;
 }
 
@@ -769,9 +785,9 @@ static T2BasisSelection select_finite_enumeration_basis(
         flint::FmpzMat& transform,
         flint::ArbMat& embedding_rows,
         flint::ArbMat& gram,
-        flint::ArbMat& cholesky,
         const flint::FmpzMat& original_basis,
         const flint::ArbMat& original_embedding_rows,
+        double log2_determinant,
         slong precision,
         slong embedding_precision,
         slong start_rounding_scale,
@@ -785,7 +801,7 @@ static T2BasisSelection select_finite_enumeration_basis(
         slong rounding_scale = 0;
         if (!reduce_finite_enumeration_basis_from_scale(
                     basis, transform, rounding_scale, embedding_rows, gram,
-                    cholesky, original_basis, original_embedding_rows,
+                    original_basis, original_embedding_rows,
                     precision, embedding_precision, min_rounding_scale,
                     diagnostics)) {
             if (!have_fallback) {
@@ -801,7 +817,8 @@ static T2BasisSelection select_finite_enumeration_basis(
                     diagnostics, DiagnosticsModule::class_group,
                     "class_group.finite_enumeration_setup.quadratic_form_data");
             const bool within_lll_bounds =
-                    finite_enumeration_basis_within_lll_bounds(gram, cholesky);
+                    finite_enumeration_basis_within_lll_bounds(gram,
+                                                               log2_determinant);
             have_quadratic_form =
                     quadratic_form_data_from_arb_gram(quadratic_form_data,
                                                       gram);
@@ -864,7 +881,6 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
     flint::ArbMat original_embedding_rows(degree, degree);
     flint::ArbMat embedding_rows(degree, degree);
     flint::ArbMat gram(degree, degree);
-    flint::ArbMat cholesky(degree, degree);
     std::vector<double> quadratic_form_data;
 
     {
@@ -921,11 +937,13 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
         embedding_cache->t2_rounding_scale_hint > start_rounding_scale) {
         start_rounding_scale = embedding_cache->t2_rounding_scale_hint;
     }
+    const double log2_determinant =
+            ideal_t2_lattice_log2_determinant(ideal, *order);
     slong accepted_rounding_scale = 0;
     T2BasisSelection selection = select_finite_enumeration_basis(
             basis, quadratic_form_data, accepted_rounding_scale, transform,
-            embedding_rows, gram, cholesky, original_basis,
-            original_embedding_rows, precision, embedding_precision,
+            embedding_rows, gram, original_basis, original_embedding_rows,
+            log2_determinant, precision, embedding_precision,
             start_rounding_scale, diagnostics);
     if (selection != T2BasisSelection::accepted &&
         start_rounding_scale != kT2EnumerationInitialRoundingScale) {
@@ -934,9 +952,10 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
                   "T2 context rounding scale hint not accepted; full loop");
         selection = select_finite_enumeration_basis(
                 basis, quadratic_form_data, accepted_rounding_scale,
-                transform, embedding_rows, gram, cholesky, original_basis,
-                original_embedding_rows, precision, embedding_precision,
-                kT2EnumerationInitialRoundingScale, diagnostics);
+                transform, embedding_rows, gram, original_basis,
+                original_embedding_rows, log2_determinant, precision,
+                embedding_precision, kT2EnumerationInitialRoundingScale,
+                diagnostics);
     }
     if (selection == T2BasisSelection::failed) {
         return false;

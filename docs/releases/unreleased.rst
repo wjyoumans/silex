@@ -133,6 +133,17 @@ Added
 Changed
 -------
 
+- The finite-ideal T2 enumeration setup (``proven`` factor-base honesty
+  witnesses and ``grh`` relation search) no longer forms an Arb Cholesky
+  factor of each reduced basis's Gram matrix.  Its LLL bound test takes the
+  determinant from the exact ``|disc(O)| N(I)^2``, as Hecke's ideal LLL
+  does, and positive definiteness comes from the double-precision
+  Gram-Schmidt test the enumeration already ran.  Only the choice of reduced
+  basis can be affected; every enumerated element is still verified exactly.
+  Callgrind Ir of the ``proven`` instance (busy machine) drops by 2.23% on
+  ``random_d9_h4_s8``, 2.30% on ``random_d10_h2_s21`` and 3.18% on
+  ``pure_x12_plus_7``, with identical outputs.
+
 - The T2 witness search of the ``proven`` factor-base honesty check starts
   its per-ideal basis setup (LLL, Gram matrix and Cholesky factor) at 100
   bits instead of 200, the start precision of Hecke's unconditional

@@ -1293,6 +1293,13 @@ misses Hecke's ideal-LLL acceptance bounds (``LLL.jl:_lll``: the bound on
 ``|b_1|^2`` and the bound on the product of the ``|b_i|^2``, with ``d`` the
 determinant of the Gram matrix), Silex reduces the same lattice again from
 the next finer full-rank scale (4, 8, ... up to the working precision).
+As in Hecke (``LLL.jl:164``, the same line in v0.38.6 and v0.39.19), ``d`` is
+the exact ``|disc(O)| N(I)^2``: the weighted Minkowski rows are the T2 form,
+so this is the determinant of the T2 Gram matrix of every basis of ``I``.
+Silex forms no Arb Cholesky factor of the Gram matrix; positive definiteness
+is read from the double-precision Gram-Schmidt test, which the enumeration
+needs anyway.  The bound test and that test only select the reduced basis:
+every enumerated element is verified exactly.
 The loop for an ideal starts at a per-order hint, the smallest scale accepted
 for an earlier ideal of the same order, instead of at 4; the hint lowers only
 when a rerun from 4 accepts a coarser scale.  If the hinted loop ends in
@@ -1319,7 +1326,7 @@ basis, its quadratic-form data and the bound are unchanged.
 The working precision of this setup (the embedding rows carry 64 further
 guard bits) starts where Hecke v0.38.6 starts the matching route and, when
 the setup at that precision fails (no reduced basis with quadratic-form
-data, or the LLL, Gram, Cholesky or bound step fails), retries at
+data, or the LLL, Gram or bound step fails), retries at
 ``ceil(1.2 * prec)`` up to 1000 bits, as
 ``src/NumFieldOrd/NfOrd/Clgp/Rel_enum.jl:class_group_small_real_elements_relation_start``
 does on ``LowPrecisionLLL`` and ``LowPrecisionCholesky``.  A basis with
