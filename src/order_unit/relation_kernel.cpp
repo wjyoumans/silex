@@ -1079,13 +1079,19 @@ KernelRowRootResult kernel_row_root(
                             "unit_group.kernel_row_root_compact_error");
         return KernelRowRootResult::error;
     }
-    if (compact_result == detail::CompactPowerRootResult::undecided) {
+    const bool forced_fallback_error =
+            KernelRowRootTestSeams::fallback_error();
+    if (forced_fallback_error ||
+        compact_result == detail::CompactPowerRootResult::undecided) {
         SILEX_PROFILE_EVENT(group.diagnostics(), DiagnosticsModule::unit_group,
                             "unit_group.kernel_row_root_compact_unavailable");
         const detail::FactoredPowerResult fallback_result =
-                detail::factored_element_is_power_si(
-                        is_power, candidate, product, exponent,
-                        FactoredRootStrategy::reduced, group.diagnostics());
+                forced_fallback_error
+                        ? detail::FactoredPowerResult::error
+                        : detail::factored_element_is_power_si(
+                                  is_power, candidate, product, exponent,
+                                  FactoredRootStrategy::reduced,
+                                  group.diagnostics());
         if (fallback_result == detail::FactoredPowerResult::error) {
             // Rejected arguments, not an undecided root: a rescan would
             // pass the same ones, so fail closed at once, as on a compact

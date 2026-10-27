@@ -729,6 +729,24 @@ enum class KernelRowRootMode : unsigned char {
     attempt,
     defer_undecidable,
 };
+class TestHookAccess;
+
+// Switch that only detail::TestHookAccess (test/test_hook_access.hpp) can
+// set.  Off by default and never set by production code; one relaxed atomic
+// load per kernel_row_root call that reaches the compact routine.
+class KernelRowRootTestSeams {
+public:
+    // True while armed: kernel_row_root treats the compact result as
+    // undecided and the factored fallback as rejecting its arguments, which
+    // valid input never does (the compact routine accepted the same ones).
+    static bool fallback_error() noexcept {
+        return fallback_error_.load(std::memory_order_relaxed);
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<bool> fallback_error_{false};
+};
 KernelRowRootResult kernel_row_root(
         bool& is_power,
         FactoredElement& root,

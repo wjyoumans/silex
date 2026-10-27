@@ -12282,6 +12282,22 @@ int test_kernel_row_root_three_way_result() {
                    is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
                    sflint::FmpzConstRef(ell)) ==
            silex::detail::KernelRowRootResult::undecided);
+
+    // An argument error from the factored fallback (unreachable from valid
+    // input, forced by the seam) is an error, not an undecided row.
+    silex::detail::TestHookAccess::set_kernel_row_root_fallback_error(true);
+    const silex::detail::KernelRowRootResult forced =
+            silex::detail::kernel_row_root(
+                    is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                    sflint::FmpzConstRef(ell));
+    silex::detail::TestHookAccess::set_kernel_row_root_fallback_error(false);
+    assert(forced == silex::detail::KernelRowRootResult::error);
+    // Seam off again: same call as before the seam, undecided with the lift
+    // still off.
+    assert(silex::detail::kernel_row_root(
+                   is_power, root, group, sflint::FmpzMatConstRef(rows), 0,
+                   sflint::FmpzConstRef(ell)) ==
+           silex::detail::KernelRowRootResult::undecided);
     return 0;
 }
 

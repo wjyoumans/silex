@@ -53,6 +53,15 @@ public:
                 armed, std::memory_order_relaxed);
     }
 
+    // Arms or disarms the kernel_row_root fallback-error seam: while armed
+    // the compact result counts as undecided and the factored fallback as an
+    // argument error.  Skips the invariant that the fallback accepts the
+    // arguments the compact routine accepted.
+    static void set_kernel_row_root_fallback_error(bool armed) noexcept {
+        KernelRowRootTestSeams::fallback_error_.store(
+                armed, std::memory_order_relaxed);
+    }
+
     // How many ideal builds the armed seam has failed since the process
     // started.
     static slong prime_ideal_build_failures_taken() noexcept {
