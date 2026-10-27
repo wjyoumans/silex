@@ -549,9 +549,12 @@ struct ClassGroupContextStorage {
     CyclotomicGaloisImages cyclotomic_galois_images;
     // Galois-image relations stored in the relation matrix of this context
     // (relation_candidate.cpp, the Galois-image step), and those of them
-    // stored without raising the modular rank (kernel images).  Images are
+    // stored without raising the modular rank (kernel images).  On the
+    // routes that use capped_relation_count and the kernel-image count
+    // (the LLL route, the goal checks of relation_search.cpp), images are
     // left out of the relation cap max_relations, and kernel images out of
-    // the kernel-unit target.  A factor-base rebuild starts a fresh
+    // the kernel-unit target; other readers of the plain counts include
+    // them.  Images stored on the admission-cache path are counted too.  A factor-base rebuild starts a fresh
     // context, so the counts always refer to the stored relations.
     slong galois_image_relations = 0;
     slong galois_image_kernel_relations = 0;

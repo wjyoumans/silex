@@ -372,6 +372,9 @@ int test_admission_cache_images() {
     assert(accepted_relations == 4);
     assert(cache.missing == 1);
     assert(cache.relation_surplus == 1);
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    assert(Access::galois_image_kernel_relations(setup.context) == 2);
+    assert(Access::capped_relation_count(setup.context) == 4);
     return 0;
 }
 

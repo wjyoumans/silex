@@ -183,7 +183,8 @@ Changed
   timing on a busy machine (median of 9) gives 0.51x, 0.28x, 0.47x and
   0.16x.  On these fields the relation sequence changes, so the relations
   found, the class-group generators, and record fields such as
-  ``class_group.relation_count`` and ``unit_group.regulator_radius`` can
+  ``class_group.relation_count``, ``class_group.zeta_bf_proof_record`` and
+  ``unit_group.regulator_radius`` can
   differ from earlier versions.
 
 - Ideal membership for a triangular (Hermite) basis and the coordinate

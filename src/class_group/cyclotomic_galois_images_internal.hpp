@@ -42,7 +42,16 @@ namespace silex::detail {
 // batch: they run no presentation publication of their
 // own, they are left out of the relation cap max_relations, and images
 // stored without raising the rank are left out of the kernel-unit target
-// (ClassGroupContextStorage::galois_image_kernel_relations).  On a grh
+// (ClassGroupContextStorage::galois_image_kernel_relations).  The
+// exclusion holds only where the caps and targets use
+// ClassGroupRelationSearchAccess::capped_relation_count and the kernel
+// counts that subtract the image counters (the LLL route and the goal
+// checks of relation_search.cpp); other readers of relation_count() and
+// relation_kernel_unit_count() (the relation-cap stops of the search
+// driver, the completion scheduler, relation_kernel_target_open) still
+// include images.  Images stored on the admission-cache path are counted
+// in the same counters, so they too are left out of that later cap and
+// target.  On a grh
 // class/unit request for a field defined by Phi_n the cyclotomic units are
 // seeded into the unit context before relation search (source
 // add_cyclotomic_units, buch2.c:3626-3636; src/order_unit/compute.cpp)

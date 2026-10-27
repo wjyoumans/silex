@@ -965,9 +965,11 @@ Theorem 2.5), and each image is kept by the rule of ``add_rel_i`` with
 full rank whenever it is not already known (line 2294).  Silex forms each
 image element exactly and factors it like a searched candidate, rather than
 permuting exponent vectors.  The bookkeeping is Silex's own: the images of a
-relation are stored as one batch with a single presentation update, they do
+relation are stored as one batch with a single presentation update, on the
+routes that subtract them (the LLL route and the goal checks) they do
 not count toward ``max_relations``, and images that do not raise the rank do
-not count toward the kernel-unit target.  The degree-30 crossover is also
+not count toward the kernel-unit target; images stored on the admission-cache
+path are counted the same way.  The degree-30 crossover is also
 Silex's own (PARI adds images at every degree): it is the crossover of the
 one-random-ideal-per-pass rule of the pivot relation search, and on the
 cyclotomic corpus images cut the relation work of every row of degree 30 or

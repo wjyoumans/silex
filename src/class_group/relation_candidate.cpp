@@ -1531,10 +1531,14 @@ bool relation_gets_galois_images(const ModularRankState& before,
 // cap max_relations.  Every stored image is counted in
 // ClassGroupContextStorage::galois_image_relations, and an image stored
 // without raising the rank also in galois_image_kernel_relations, which the
-// relation-search goals leave out of the kernel-unit target.  The admission
-// cache path (the port of the reference relation cache) keeps the
-// reference behaviour: each image counts toward the cache's relation target
-// and the loop stops when that target is met.
+// relation-search goals leave out of the kernel-unit target (only on the
+// routes that read these counters; other readers of the plain counts
+// include images).  The admission cache path (the port of the reference
+// relation cache) keeps the reference behaviour: each image counts toward
+// the cache's relation target and the loop stops when that target is met.
+// Its images are also counted in galois_image_relations and
+// galois_image_kernel_relations, so the later cap and kernel-unit target
+// leave them out as well.
 //
 // Does nothing unless the field is exactly Phi_n (degree at least 4) and
 // every rational-prime block of the factor base is complete, which makes
