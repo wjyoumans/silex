@@ -988,8 +988,8 @@ input: the seeds may have index above one in the unit group, and the
 published class group and regulator pass the same analytic validation.
 
 On ``grh`` requests on a field given by exactly ``Phi_m`` or ``psi_n``, for
-fields of degree 30 or more (below 30, only on ``Phi_m`` fields admitted by
-the gate and under the cap described below), when every rational prime of the factor base has all of its prime ideals in the base
+fields of degree 30 or more (below 30, only on fields admitted by the gate and
+under the cap described below), when every rational prime of the factor base has all of its prime ideals in the base
 (so the base is stable under the Galois group), the relation search also
 tries the Galois images of its
 relations, as PARI 2.17.3 ``buch2.c`` ``add_rel`` (lines 2380-2410) does:
@@ -1021,9 +1021,15 @@ they save.
 Below degree 30 the images run under two further rules of Silex's own, both
 set by measurement on the corpus ``Phi_m`` rows below degree 30 and neither
 taken from PARI or Hecke.  The gate: only a field given by exactly ``Phi_m``
-(not ``psi_n``) of degree at most 20, or with a factor-base bound of at least
-300, gets images; on the degree 22 and 24 fields with a smaller bound the
-image setup and image factoring cost more than the search they save.  The
+of degree at most 20, or a field given by exactly ``psi_n`` of degree at most
+18, or any such field with a factor-base bound of at least 300, gets images;
+on the degree 22 and 24 ``Phi_m`` fields with a smaller bound the image setup
+and image factoring cost more than the search they save.  For ``psi_n`` the
+degree limit was set on 65 fields (``n`` not 2 mod 4, degree 4 to 29): the
+images save work on every field of degree at most 18 and on every field with
+a bound of at least 300, but cost more on ``psi_41`` and ``psi_132``, two of
+the six degree 20 fields with a smaller bound.  A field outside the gate
+builds no automorphism data.  The
 cap: within one relation round of the LLL route (the order small-LLL phase,
 and each pass of the outer loop), images stored at full modular rank stop
 once the round's relation target plus ``|G| - 1`` of them are stored, and

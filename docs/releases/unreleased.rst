@@ -307,7 +307,8 @@ Changed
   ``psi_n``: the images are ``sigma_k(x) = D_k(x)``, the Dickson
   polynomials, for ``1 < k < n / 2`` prime to ``n``, each checked exactly
   to be a root of ``psi_n`` with an integral image matrix.  ``psi_n``
-  fields of degree below 30 get no images.  Class groups, regulators, unit
+  fields of degree below 30 get images only under the gate and cap of the
+  items below.  Class groups, regulators, unit
   ranks and certification labels are unchanged on all 46 cyclotomic corpus
   rows that finish.  Callgrind Ir of the ``grh`` timed region (as above) on
   ``cyclotomic_real_136_deg32``, the one such row of degree 30 or more that
@@ -350,8 +351,9 @@ Changed
   modular rank stop once the round's relation target plus ``|G| - 1`` of
   them are stored, and these images count toward the kernel-unit target
   (from degree 30 on they still do not).  Stored images count toward the
-  round's relation target, as they already do from degree 30 on.  ``psi_n`` fields below degree 30,
-  other fields and ``proven`` requests are unchanged.  Class groups,
+  round's relation target, as they already do from degree 30 on.  ``psi_n`` fields below degree 30
+  are covered by the next item; other fields and ``proven`` requests are
+  unchanged.  Class groups,
   regulators, unit ranks and certification labels are unchanged on all 46
   cyclotomic corpus rows that finish (``cyclotomic_real_163_deg81`` times
   out on both builds); the relations found, the class-group generators and
@@ -364,6 +366,32 @@ Changed
   Two rows are slower: ``cyclotomic_7_phi6`` by 34.7% (128M to 172M Ir;
   the unit validation needs 7 passes instead of 3) and
   ``cyclotomic_60_phi16`` by 12.1% (276M to 309M Ir).
+
+- Below degree 30, ``grh`` class group and unit computations on fields
+  given by the exact polynomial ``psi_n`` (the minimal polynomial of
+  ``2 cos(2 pi / n)``) now also try the Galois images of their relations
+  (the Dickson images ``sigma_k(x) = D_k(x)``), under the same cap as the
+  ``Phi_m`` item above and a gate of Silex's own, set by measurement: only
+  fields of degree at most 18, or with a factor-base bound of at least 300,
+  get images; a ``psi_n`` field outside the gate builds no automorphism
+  data.  The gate leaves out ``psi_41`` and ``psi_132`` (degree 20, smaller
+  bound), where the images cost 27-28% more Ir.  Over 65 ``psi_n`` fields
+  (``n`` not 2 mod 4, degree 4 to 29) the images cut Ir on every field of
+  degree at most 18 (12% to 80%) and every field with a bound of at least
+  300 (17% to 83%).  Class groups, regulators, unit ranks and certification
+  labels are identical on all of them and on all corpus rows that finish.
+  The record fields ``class_group.relation_count``,
+  ``class_group.skipped_dependent_relation_count``,
+  ``unit_group.relation_kernel_unit_count`` and
+  ``class_group.relation_sources`` change on ``cyclotomic_real_23_deg11``,
+  ``_29_deg14``, ``_31_deg15``, ``_37_deg18`` and ``_64_deg16``, and the
+  zeta BF record can change on other ``psi_n`` fields (``psi_120``).
+  Callgrind Ir of the ``grh`` timed region (``compute_class_unit_transaction``,
+  ``profile-release``) drops by 56.6% on ``cyclotomic_real_23_deg11``,
+  34.1% on ``_29_deg14``, 22.9% on ``_31_deg15``, 53.8% on ``_37_deg18`` and
+  62.2% on ``_64_deg16``; ``cyclotomic_real_41_deg20`` (gated out),
+  ``cyclotomic_real_q10_c11_deg10`` and ``cyclotomic_real_136_deg32`` are
+  unchanged.
 
 - Ideal membership for a triangular (Hermite) basis and the coordinate
   divisibility valuation of prime ideals now run word-size screens first:
