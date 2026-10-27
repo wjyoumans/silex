@@ -1878,6 +1878,14 @@ int test_recursive_split_matches_enumeration_unramified() {
     // Q(sqrt(-7), sqrt(17)), p = 2: four primes with e = f = 1.
     assert(check_recursive_split_matches_enumeration({36, 0, -5, 0, 1}, 2,
                                                      4) == 0);
+    // Q(sqrt(-23), sqrt(-31), sqrt(-47)) (corpus row
+    // multiquadratic_m23_m31_m47), p = 2: eight primes with e = f = 1, so
+    // the enumeration meets all 255 nonzero idempotents and keeps the eight
+    // primitive ones.
+    assert(check_recursive_split_matches_enumeration(
+                   {38188288, 1822160, -1462612, -62792, 24143, 602, -220, -2,
+                    1},
+                   2, 8) == 0);
     // Q(sqrt(-2), sqrt(7)), p = 3: four primes with e = f = 1.
     return check_recursive_split_matches_enumeration({9, 0, 8, 0, 1}, 3, 4);
 }

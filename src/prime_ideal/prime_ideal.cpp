@@ -1772,6 +1772,7 @@ bool components_from_fixed_idempotents(
         std::vector<FiniteAlgebraComponent>& out,
         const flint::FmpzModMat& kernel,
         slong nullity,
+        const flint::FmpzVec& one,
         const ModMulTable& multiplication_table,
         flint::FmpzConstRef p,
         const flint::FmpzModCtx& ctx) noexcept {
@@ -1779,7 +1780,7 @@ bool components_from_fixed_idempotents(
     // a finite etale algebra through idempotents.  A single separating
     // element cannot split more components than the base field has elements;
     // for small fixed spaces, enumerate fixed idempotents directly and keep
-    // the primitive ones.
+    // the primitive ones, in the order of their combination index.
     if (!fmpz_fits_si(p.raw()) || nullity <= 1) {
         return false;
     }
@@ -1797,7 +1798,10 @@ bool components_from_fixed_idempotents(
     }
 
     const slong n = fmpz_mod_mat_nrows(kernel.raw(), ctx.raw());
-    std::vector<FiniteAlgebraComponent> idempotents;
+    if (one.length() != n) {
+        return false;
+    }
+    std::vector<flint::FmpzVec> idempotents;
     flint::FmpzVec candidate(n);
     flint::FmpzVec square(n);
 
@@ -1816,33 +1820,76 @@ bool components_from_fixed_idempotents(
         }
 
         idempotents.emplace_back(n);
-        FiniteAlgebraComponent& component = idempotents.back();
-        fmpz_vec_set(component.idempotent, candidate);
-        if (!component_basis_from_idempotent(
-                    component.basis, component.dimension,
-                    component.idempotent, multiplication_table, ctx)) {
-            return false;
-        }
+        fmpz_vec_set(idempotents.back(), candidate);
     }
 
     if (idempotents.empty()) {
         return false;
     }
 
-    std::vector<FiniteAlgebraComponent> primitive;
+    // The primitive idempotents are found by refinement, so that a component
+    // basis is built only for them.  Every idempotent e of the algebra A is
+    // Frobenius-fixed (e^p = e) and the kernel columns are a basis of the
+    // fixed space, so the list above holds every nonzero idempotent of A,
+    // each once.  The list is the Boolean algebra of idempotents without 0,
+    // and its minimal elements are the primitive idempotents.  (For distinct
+    // idempotents with e_j e_i = e_j, e_i A = e_j A + (e_i - e_j) A with
+    // e_i - e_j a nonzero idempotent, so dim e_j A < dim e_i A: the minimal
+    // elements are the idempotents of A that have no smaller idempotent below
+    // them, by dimension or otherwise.)
+    //
+    // Start from the single block 1 and split each block b by each listed
+    // idempotent f into b f and b - b f when both are nonzero.  The blocks
+    // stay pairwise orthogonal nonzero idempotents with sum 1, so each is the
+    // sum of the primitive idempotents a with a b = a.  The primitive
+    // idempotents are orthogonal, hence linearly independent, and fixed, so
+    // there are at most `nullity` of them.  Once there are `nullity` blocks,
+    // each block holds exactly one primitive idempotent and is that
+    // idempotent.  Over the whole list the blocks reach the primitive
+    // idempotents, since splitting by every idempotent separates any two.
+    // For an etale algebra there are `nullity` of them (one F_p per field
+    // factor in the fixed space), so the count below is always reached.
+    std::vector<flint::FmpzVec> blocks;
+    blocks.reserve(static_cast<std::size_t>(nullity));
+    blocks.emplace_back(n);
+    fmpz_vec_set_mod(blocks.back(), one, ctx);
     flint::FmpzVec product(n);
-    for (std::size_t i = 0; i < idempotents.size(); ++i) {
-        bool is_primitive = true;
-        for (std::size_t j = 0; j < idempotents.size(); ++j) {
-            if (i == j ||
-                idempotents[j].dimension >= idempotents[i].dimension) {
+    for (std::size_t f = 0;
+         f < idempotents.size() &&
+         static_cast<slong>(blocks.size()) < nullity;
+         ++f) {
+        const std::size_t current = blocks.size();
+        for (std::size_t b = 0; b < current; ++b) {
+            order_coords_mul_mod(product, blocks[b], idempotents[f],
+                                 multiplication_table, ctx);
+            if (fmpz_vec_is_zero(product) ||
+                fmpz_vec_equal(product, blocks[b])) {
                 continue;
             }
-            order_coords_mul_mod(product, idempotents[j].idempotent,
-                                 idempotents[i].idempotent,
-                                 multiplication_table, ctx);
-            if (fmpz_vec_equal(product, idempotents[j].idempotent)) {
-                is_primitive = false;
+            blocks.emplace_back(n);
+            flint::FmpzVec& rest = blocks.back();
+            for (slong i = 0; i < n; ++i) {
+                fmpz_sub(rest.data() + i, blocks[b].data() + i,
+                         product.data() + i);
+                fmpz_mod_set_fmpz(rest.data() + i, rest.data() + i,
+                                  ctx.raw());
+            }
+            fmpz_vec_set(blocks[b], product);
+        }
+    }
+    if (static_cast<slong>(blocks.size()) != nullity) {
+        return false;
+    }
+
+    // The primitive idempotents in the order of their combination index,
+    // each with its component basis.
+    std::vector<FiniteAlgebraComponent> primitive;
+    primitive.reserve(blocks.size());
+    for (const flint::FmpzVec& idempotent : idempotents) {
+        bool is_primitive = false;
+        for (const flint::FmpzVec& block : blocks) {
+            if (fmpz_vec_equal(idempotent, block)) {
+                is_primitive = true;
                 break;
             }
         }
@@ -1852,16 +1899,15 @@ bool components_from_fixed_idempotents(
 
         primitive.emplace_back(n);
         FiniteAlgebraComponent& component = primitive.back();
-        fmpz_vec_set(component.idempotent, idempotents[i].idempotent);
-        component.dimension = idempotents[i].dimension;
-        component.basis = flint::FmpzMat(component.dimension, n);
-        for (slong row = 0; row < component.dimension; ++row) {
-            for (slong col = 0; col < n; ++col) {
-                fmpz_set(fmpz_mat_entry(component.basis.raw(), row, col),
-                         fmpz_mat_entry(idempotents[i].basis.raw(), row,
-                                        col));
-            }
+        fmpz_vec_set(component.idempotent, idempotent);
+        if (!component_basis_from_idempotent(
+                    component.basis, component.dimension,
+                    component.idempotent, multiplication_table, ctx)) {
+            return false;
         }
+    }
+    if (primitive.size() != blocks.size()) {
+        return false;
     }
 
     slong dimension_sum = 0;
@@ -2150,8 +2196,8 @@ bool components_from_fixed_subspace(
         if (split == FixedSplit::bounded ||
             split == FixedSplit::enumeration_only) {
             return components_from_fixed_idempotents(out, kernel, nullity,
-                                                     multiplication_table, p,
-                                                     ctx);
+                                                     one, multiplication_table,
+                                                     p, ctx);
         }
         return components_from_recursive_split(out, kernel, nullity, one,
                                                multiplication_table, ctx);

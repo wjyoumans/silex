@@ -133,6 +133,21 @@ Added
 Changed
 -------
 
+- When ``decompose_prime`` splits a prime ``p`` dividing the index by
+  enumerating the idempotents of the Frobenius-fixed subalgebra of ``O/pO``
+  (or of ``O/(p, I_p)``), it now builds a component basis only for the
+  primitive idempotents instead of for every idempotent it meets.  The
+  primitive idempotents are found by splitting ``1`` by the enumerated
+  idempotents until the number of pieces equals the dimension of the fixed
+  space, and are returned in the enumeration order as before.  Prime
+  decompositions, their order and ``grh`` outputs are unchanged (identical
+  on the eight multiquadratic corpus rows, ``cyclotomic_real_q10_c11_deg10``
+  and ten other corpus rows that reach this route).  On
+  ``multiquadratic_m23_m31_m47``, where ``p = 2`` splits into eight primes
+  and 255 idempotents are enumerated, callgrind Ir of ``grh`` (busy machine)
+  drops by 5.58% in the class and unit computation and by 2.38% for the
+  whole process.
+
 - ``IdealFactorization::factor`` no longer multiplies the prime powers back
   together and compares the product with the input in release builds.  It
   now checks norm accounting instead: for every rational prime ``p`` dividing
