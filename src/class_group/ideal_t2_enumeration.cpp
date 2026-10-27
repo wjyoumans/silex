@@ -429,26 +429,24 @@ static bool quadratic_form_data_from_arb_gram(std::vector<double>& out,
 // (ideal_t2_lattice_log2_determinant).  When an input cannot be read as a
 // finite (positive) double the test is not decided and the basis is accepted
 // as before.
-static bool finite_enumeration_basis_within_lll_bounds(
-        const flint::ArbMat& gram,
+static bool finite_enumeration_diagonal_within_lll_bounds(
+        const std::vector<double>& diagonal,
         double log2_determinant) noexcept {
-    const slong dimension = flint::arb_mat_nrows_value(gram);
-    if (dimension <= 0 || dimension != flint::arb_mat_ncols_value(gram) ||
-        !std::isfinite(log2_determinant)) {
+    const slong dimension = static_cast<slong>(diagonal.size());
+    if (dimension <= 0 || !std::isfinite(log2_determinant)) {
         return true;
     }
 
     double log2_diagonal_product = 0.0;
     double log2_first_diagonal = 0.0;
     for (slong i = 0; i < dimension; ++i) {
-        const double diagonal = arb_midpoint_double(
-                flint::arb_mat_entry_ref(gram, i, i));
-        if (!std::isfinite(diagonal) || diagonal <= 0.0) {
+        const double entry = diagonal[static_cast<std::size_t>(i)];
+        if (!std::isfinite(entry) || entry <= 0.0) {
             return true;
         }
-        log2_diagonal_product += std::log2(diagonal);
+        log2_diagonal_product += std::log2(entry);
         if (i == 0) {
-            log2_first_diagonal = std::log2(diagonal);
+            log2_first_diagonal = std::log2(entry);
         }
     }
 
@@ -463,6 +461,22 @@ static bool finite_enumeration_basis_within_lll_bounds(
     }
     return log2_first_diagonal <= first_bound &&
            log2_diagonal_product <= product_bound;
+}
+
+static bool finite_enumeration_basis_within_lll_bounds(
+        const flint::ArbMat& gram,
+        double log2_determinant) noexcept {
+    const slong dimension = flint::arb_mat_nrows_value(gram);
+    if (dimension <= 0 || dimension != flint::arb_mat_ncols_value(gram)) {
+        return true;
+    }
+    std::vector<double> diagonal(static_cast<std::size_t>(dimension));
+    for (slong i = 0; i < dimension; ++i) {
+        diagonal[static_cast<std::size_t>(i)] = arb_midpoint_double(
+                flint::arb_mat_entry_ref(gram, i, i));
+    }
+    return finite_enumeration_diagonal_within_lll_bounds(diagonal,
+                                                         log2_determinant);
 }
 
 // log2 of d = det(Gram) for the T2 Gram matrix of any basis of the ideal
@@ -618,6 +632,74 @@ static bool finite_enumeration_basis_lll_reduce(flint::FmpzMat& reduced_basis,
     return true;
 }
 
+// The LLL reductions of one T2 setup at one precision, by the minimum
+// rounding scale they started from.  finite_enumeration_basis_lll_reduce is
+// a deterministic function of that scale once the ideal basis, its embedding
+// rows and the precision are fixed, so when the double_rows route falls back
+// to the Arb route (T2EnumerationGram) the Arb scale loop reuses the
+// reductions the double_rows loop already made instead of repeating them;
+// its result is the one it would compute.
+struct T2LllReduction {
+    slong min_rounding_scale = 0;
+    bool reduced = false;
+    slong rounding_scale = 0;
+    flint::FmpzMat basis{0, 0};
+    flint::FmpzMat transform{0, 0};
+};
+using T2LllReductions = std::vector<T2LllReduction>;
+
+static bool finite_enumeration_basis_lll_reduce_reusing(
+        flint::FmpzMat& reduced_basis,
+        flint::FmpzMat& transform,
+        slong& used_rounding_scale,
+        const flint::FmpzMat& basis,
+        const flint::ArbMat& embedding_rows,
+        slong precision,
+        slong min_rounding_scale,
+        T2LllReductions* reductions,
+        const DiagnosticsContext* diagnostics) noexcept {
+    if (reductions != nullptr) {
+        for (const T2LllReduction& reduction : *reductions) {
+            if (reduction.min_rounding_scale != min_rounding_scale) {
+                continue;
+            }
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_setup.lll_reduction_reused");
+            if (!reduction.reduced) {
+                return false;
+            }
+            flint::fmpz_mat_set(flint::FmpzMatRef(reduced_basis),
+                                flint::FmpzMatConstRef(reduction.basis));
+            flint::fmpz_mat_set(flint::FmpzMatRef(transform),
+                                flint::FmpzMatConstRef(reduction.transform));
+            used_rounding_scale = reduction.rounding_scale;
+            return true;
+        }
+    }
+    const bool reduced = finite_enumeration_basis_lll_reduce(
+            reduced_basis, transform, used_rounding_scale, basis,
+            embedding_rows, precision, min_rounding_scale, diagnostics);
+    if (reductions != nullptr) {
+        T2LllReduction reduction;
+        reduction.min_rounding_scale = min_rounding_scale;
+        reduction.reduced = reduced;
+        if (reduced) {
+            reduction.rounding_scale = used_rounding_scale;
+            reduction.basis = flint::FmpzMat(flint::fmpz_mat_nrows(reduced_basis),
+                                             flint::fmpz_mat_ncols(reduced_basis));
+            reduction.transform = flint::FmpzMat(flint::fmpz_mat_nrows(transform),
+                                                 flint::fmpz_mat_ncols(transform));
+            flint::fmpz_mat_set(flint::FmpzMatRef(reduction.basis),
+                                flint::FmpzMatConstRef(reduced_basis));
+            flint::fmpz_mat_set(flint::FmpzMatRef(reduction.transform),
+                                flint::FmpzMatConstRef(transform));
+        }
+        reductions->push_back(std::move(reduction));
+    }
+    return reduced;
+}
+
 static double euclidean_ball_volume(slong dimension) noexcept {
     if (dimension <= 0) {
         return std::numeric_limits<double>::quiet_NaN();
@@ -715,6 +797,93 @@ static bool build_embedding_gram(flint::ArbMat& out,
     return true;
 }
 
+bool arb_mat_midpoints_double(std::vector<double>& out,
+                              const flint::ArbMat& rows) noexcept {
+    const slong row_count = flint::arb_mat_nrows_value(rows);
+    const slong col_count = flint::arb_mat_ncols_value(rows);
+    out.assign(static_cast<std::size_t>(row_count * col_count), 0.0);
+    for (slong i = 0; i < row_count; ++i) {
+        for (slong j = 0; j < col_count; ++j) {
+            const double value =
+                    arb_midpoint_double(flint::arb_mat_entry_ref(rows, i, j));
+            if (!std::isfinite(value)) {
+                return false;
+            }
+            out[static_cast<std::size_t>(i * col_count + j)] = value;
+        }
+    }
+    return true;
+}
+
+// The double rows are the exact reduced basis (order coordinates) times the
+// order's Minkowski rows, so the cancellation in a row is bounded by the
+// conditioning of the order basis rather than by the size of the LLL
+// transform.  Each basis entry is read exactly (|b| <= 2^53).  G is
+// symmetric: the lower triangle is computed and copied, as in
+// build_embedding_gram.
+bool reduced_basis_t2_gram_double(std::vector<double>& gram,
+                                  flint::FmpzMatConstRef reduced_basis,
+                                  const std::vector<double>& order_rows) noexcept {
+    const slong degree = flint::fmpz_mat_nrows(reduced_basis);
+    if (degree <= 0 || flint::fmpz_mat_ncols(reduced_basis) != degree ||
+        order_rows.size() != static_cast<std::size_t>(degree * degree)) {
+        return false;
+    }
+    const auto index = [degree](slong i, slong j) noexcept {
+        return static_cast<std::size_t>(i * degree + j);
+    };
+
+    std::vector<double> basis(static_cast<std::size_t>(degree * degree));
+    for (slong i = 0; i < degree; ++i) {
+        for (slong j = 0; j < degree; ++j) {
+            const flint::FmpzConstRef entry =
+                    flint::fmpz_mat_entry(reduced_basis, i, j);
+            if (::fmpz_bits(entry.raw()) > 53) {
+                return false;
+            }
+            basis[index(i, j)] = flint::fmpz_get_d(entry);
+        }
+    }
+
+    std::vector<double> rows(static_cast<std::size_t>(degree * degree), 0.0);
+    for (slong i = 0; i < degree; ++i) {
+        for (slong k = 0; k < degree; ++k) {
+            const double coefficient = basis[index(i, k)];
+            if (coefficient == 0.0) {
+                continue;
+            }
+            for (slong j = 0; j < degree; ++j) {
+                rows[index(i, j)] += coefficient * order_rows[index(k, j)];
+            }
+        }
+    }
+    if (T2DoubleRowsTestSeams::mode() ==
+        T2DoubleRowsTestSeams::Mode::nonfinite_rows) {
+        rows[0] = std::numeric_limits<double>::quiet_NaN();
+    }
+    for (const double value : rows) {
+        if (!std::isfinite(value)) {
+            return false;
+        }
+    }
+
+    gram.assign(static_cast<std::size_t>(degree * degree), 0.0);
+    for (slong i = 0; i < degree; ++i) {
+        for (slong j = 0; j <= i; ++j) {
+            double sum = 0.0;
+            for (slong k = 0; k < degree; ++k) {
+                sum += rows[index(i, k)] * rows[index(j, k)];
+            }
+            if (!std::isfinite(sum)) {
+                return false;
+            }
+            gram[index(i, j)] = sum;
+            gram[index(j, i)] = sum;
+        }
+    }
+    return true;
+}
+
 // Reduces the ideal basis from the first full-rank rounding at or above
 // min_rounding_scale and builds the Gram matrix of the reduced rows.  The
 // LLL bound test takes d from the exact |disc| N(I)^2 and positive
@@ -733,14 +902,15 @@ static bool reduce_finite_enumeration_basis_from_scale(
         slong precision,
         slong embedding_precision,
         slong min_rounding_scale,
+        T2LllReductions* reductions,
         const DiagnosticsContext* diagnostics) noexcept {
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.finite_enumeration_setup.lll_reduce");
-        if (!finite_enumeration_basis_lll_reduce(
+        if (!finite_enumeration_basis_lll_reduce_reusing(
                     basis, transform, rounding_scale, original_basis,
                     original_embedding_rows, precision, min_rounding_scale,
-                    diagnostics)) {
+                    reductions, diagnostics)) {
             SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                       LogLevel::detail, "T2 context LLL reduction failed");
             return false;
@@ -791,6 +961,7 @@ static T2BasisSelection select_finite_enumeration_basis(
         slong precision,
         slong embedding_precision,
         slong start_rounding_scale,
+        T2LllReductions* reductions,
         const DiagnosticsContext* diagnostics) noexcept {
     const slong degree = flint::fmpz_mat_nrows(original_basis);
     flint::FmpzMat fallback_basis(degree, degree);
@@ -803,7 +974,7 @@ static T2BasisSelection select_finite_enumeration_basis(
                     basis, transform, rounding_scale, embedding_rows, gram,
                     original_basis, original_embedding_rows,
                     precision, embedding_precision, min_rounding_scale,
-                    diagnostics)) {
+                    reductions, diagnostics)) {
             if (!have_fallback) {
                 return T2BasisSelection::failed;
             }
@@ -853,14 +1024,93 @@ static T2BasisSelection select_finite_enumeration_basis(
     }
 }
 
+// The rounding-scale loop of select_finite_enumeration_basis with the
+// reduced rows and Gram formed in double (T2EnumerationGram::double_rows).
+// The rounding and the LLL are those of the Arb loop, so a scale gives the
+// same transform and reduced basis.  Returns true with the basis accepted at
+// accepted_rounding_scale.  Returns false, for the caller to run the Arb
+// loop, when the LLL step fails, the double rows or Gram are not available
+// (reduced_basis_t2_gram_double), the double Gram-Schmidt pivot test fails,
+// or no scale from start_rounding_scale on passes the LLL-bound test.
+static bool select_finite_enumeration_basis_double_rows(
+        flint::FmpzMat& basis,
+        std::vector<double>& quadratic_form_data,
+        slong& accepted_rounding_scale,
+        flint::FmpzMat& transform,
+        const flint::FmpzMat& original_basis,
+        const flint::ArbMat& original_embedding_rows,
+        const std::vector<double>& order_rows,
+        double log2_determinant,
+        slong precision,
+        slong start_rounding_scale,
+        T2LllReductions& reductions,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const slong degree = flint::fmpz_mat_nrows(original_basis);
+    std::vector<double> gram;
+    std::vector<double> diagonal(static_cast<std::size_t>(degree));
+    slong min_rounding_scale = start_rounding_scale;
+    for (;;) {
+        slong rounding_scale = 0;
+        {
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                                "class_group.finite_enumeration_setup.lll_reduce");
+            if (!finite_enumeration_basis_lll_reduce_reusing(
+                        basis, transform, rounding_scale, original_basis,
+                        original_embedding_rows, precision, min_rounding_scale,
+                        &reductions, diagnostics)) {
+                return false;
+            }
+        }
+        {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_setup.double_rows_gram");
+            if (!reduced_basis_t2_gram_double(gram,
+                                              flint::FmpzMatConstRef(basis),
+                                              order_rows)) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.finite_enumeration_setup.double_rows_unavailable");
+                return false;
+            }
+            if (!quadratic_form_data_from_double_gram(quadratic_form_data,
+                                                      gram, degree)) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics, DiagnosticsModule::class_group,
+                        "class_group.finite_enumeration_setup.double_rows_pivot_failed");
+                return false;
+            }
+        }
+        for (slong i = 0; i < degree; ++i) {
+            diagonal[static_cast<std::size_t>(i)] =
+                    gram[static_cast<std::size_t>(i * degree + i)];
+        }
+        if (finite_enumeration_diagonal_within_lll_bounds(diagonal,
+                                                          log2_determinant)) {
+            accepted_rounding_scale = rounding_scale;
+            return true;
+        }
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.finite_enumeration_setup.double_rows_outside_lll_bounds");
+        if (rounding_scale > precision / 2) {
+            return false;
+        }
+        min_rounding_scale = 2 * rounding_scale;
+    }
+}
+
 static bool build_finite_ideal_t2_enumeration_data_at_precision(
         FiniteIdealT2EnumerationData& out,
         const Ideal& ideal,
         slong precision,
         const DiagnosticsContext* diagnostics,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
-        slong target_factor_attempts)
+        slong target_factor_attempts,
+        bool double_rows,
+        bool& used_double_rows)
         noexcept {
+    used_double_rows = false;
     const Order* order = ideal.parent();
     if (order == nullptr || !ideal.has_hnf() || precision <= 0) {
         SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
@@ -940,12 +1190,75 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
     const double log2_determinant =
             ideal_t2_lattice_log2_determinant(ideal, *order);
     slong accepted_rounding_scale = 0;
-    T2BasisSelection selection = select_finite_enumeration_basis(
-            basis, quadratic_form_data, accepted_rounding_scale, transform,
-            embedding_rows, gram, original_basis, original_embedding_rows,
-            log2_determinant, precision, embedding_precision,
-            start_rounding_scale, diagnostics);
-    if (selection != T2BasisSelection::accepted &&
+    double initial_enumeration_bound = 0.0;
+    T2LllReductions reductions;
+    if (double_rows) {
+        // The double_rows route (T2EnumerationGram) runs the same two scale
+        // loops as the Arb route below, from the hint and then from the first
+        // scale.  When neither accepts a basis it falls back to the whole Arb
+        // route, so it never fails where the Arb route would not.
+        std::vector<double> order_rows;
+        bool have_order_rows = false;
+        if (embedding_cache != nullptr &&
+            embedding_cache->has_order_embedding_rows &&
+            embedding_cache->has_order &&
+            embedding_cache->order.has_same_data(*order) &&
+            embedding_cache->embedding_precision == embedding_precision) {
+            have_order_rows = arb_mat_midpoints_double(
+                    order_rows, embedding_cache->order_embedding_rows);
+        } else {
+            flint::FmpzMat identity(degree, degree);
+            flint::fmpz_mat_one(flint::FmpzMatRef(identity));
+            have_order_rows =
+                    detail::build_ideal_minkowski_embedding_rows(
+                            embedding_rows, flint::FmpzMatConstRef(identity),
+                            *order, embedding_precision, nullptr,
+                            diagnostics) &&
+                    arb_mat_midpoints_double(order_rows, embedding_rows);
+        }
+        if (have_order_rows) {
+            used_double_rows = select_finite_enumeration_basis_double_rows(
+                    basis, quadratic_form_data, accepted_rounding_scale,
+                    transform, original_basis, original_embedding_rows,
+                    order_rows, log2_determinant, precision,
+                    start_rounding_scale, reductions, diagnostics);
+            if (!used_double_rows &&
+                start_rounding_scale != kT2EnumerationInitialRoundingScale) {
+                used_double_rows = select_finite_enumeration_basis_double_rows(
+                        basis, quadratic_form_data, accepted_rounding_scale,
+                        transform, original_basis, original_embedding_rows,
+                        order_rows, log2_determinant, precision,
+                        kT2EnumerationInitialRoundingScale, reductions,
+                        diagnostics);
+            }
+        }
+        if (used_double_rows) {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_setup.initial_bound");
+            used_double_rows = initial_bound_from_quadratic_form(
+                    initial_enumeration_bound, quadratic_form_data, degree,
+                    target_factor_attempts);
+        }
+        if (!used_double_rows) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_setup.double_rows_arb_fallback");
+            SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
+                      LogLevel::detail,
+                      "T2 context double rows not accepted; Arb route");
+        }
+    }
+    T2BasisSelection selection = T2BasisSelection::accepted;
+    if (!used_double_rows) {
+        selection = select_finite_enumeration_basis(
+                basis, quadratic_form_data, accepted_rounding_scale,
+                transform, embedding_rows, gram, original_basis,
+                original_embedding_rows, log2_determinant, precision,
+                embedding_precision, start_rounding_scale,
+                double_rows ? &reductions : nullptr, diagnostics);
+    }
+    if (!used_double_rows && selection != T2BasisSelection::accepted &&
         start_rounding_scale != kT2EnumerationInitialRoundingScale) {
         SILEX_LOG(diagnostics, DiagnosticsModule::class_group,
                   LogLevel::detail,
@@ -955,7 +1268,7 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
                 transform, embedding_rows, gram, original_basis,
                 original_embedding_rows, log2_determinant, precision,
                 embedding_precision, kT2EnumerationInitialRoundingScale,
-                diagnostics);
+                double_rows ? &reductions : nullptr, diagnostics);
     }
     if (selection == T2BasisSelection::failed) {
         return false;
@@ -971,8 +1284,7 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
         embedding_cache->t2_rounding_scale_hint = accepted_rounding_scale;
     }
 
-    double initial_enumeration_bound = 0.0;
-    {
+    if (!used_double_rows) {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
                             "class_group.finite_enumeration_setup.initial_bound");
         if (!initial_bound_from_quadratic_form(initial_enumeration_bound,
@@ -998,7 +1310,8 @@ bool build_finite_ideal_t2_enumeration_data_with_retry(
         const DiagnosticsContext* diagnostics,
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         slong target_factor_attempts,
-        slong initial_precision)
+        slong initial_precision,
+        T2EnumerationGram gram)
         noexcept {
     if (initial_precision <= 0 ||
         initial_precision > kT2EnumerationMaxPrecision) {
@@ -1008,9 +1321,16 @@ bool build_finite_ideal_t2_enumeration_data_with_retry(
     }
     for (slong precision = initial_precision;
          precision <= kT2EnumerationMaxPrecision;) {
+        // The double_rows route runs at the start precision only; the
+        // precision retries take the Arb route.
+        bool used_double_rows = false;
         if (build_finite_ideal_t2_enumeration_data_at_precision(
                     out, ideal, precision, diagnostics, embedding_cache,
-                    target_factor_attempts)) {
+                    target_factor_attempts,
+                    gram == T2EnumerationGram::double_rows &&
+                            precision == initial_precision,
+                    used_double_rows)) {
+            out.double_rows = used_double_rows;
             return true;
         }
         if (precision == kT2EnumerationMaxPrecision) {

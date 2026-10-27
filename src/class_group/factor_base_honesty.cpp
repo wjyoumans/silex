@@ -481,42 +481,21 @@ bool t2_prefilter_reject_agrees_with_direct(
 }
 #endif
 
-RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
+// Enumerates the candidates of one ideal from its T2 setup.  Counts into
+// `exhaustion` and the prefilter's rejected_count; the caller decides which
+// enumeration's counts stand.
+RequiredPrimeWitnessSearchResult enumerate_required_prime_witness_candidates(
         const FactorBase& base,
         const PrimeIdeal& required_prime,
-        const Ideal& ideal,
         const Element& back_multiplier,
+        const FiniteIdealT2EnumerationData& t2_context,
         const FactorBaseWitnessSearchEffort& effort,
         RequiredPrimeWitnessExhaustion& exhaustion,
-        detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         FactorBaseWitnessPredicate predicate,
         RequiredPrimeWitnessPrefilter* prefilter,
         const DiagnosticsContext* diagnostics) noexcept {
-    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
-                        "class_group.honesty_enumerate_witness");
     const Order* order = base.parent();
-    const NumberField* field = order == nullptr ? nullptr : order->parent();
-    if (field == nullptr || !same_order_parent(required_prime.parent(), order) ||
-        !same_order_parent(ideal.parent(), order) || !ideal.has_hnf() ||
-        !back_multiplier.has_parent(*field) || base.contains(required_prime)) {
-        return RequiredPrimeWitnessSearchResult::failed;
-    }
-
-    FiniteIdealT2EnumerationData t2_context;
-    {
-        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
-                            "class_group.honesty_t2_enumeration_data");
-        // The proof route starts at the source's class-group proof
-        // precision (kT2EnumerationProofInitialPrecision); relation search
-        // keeps its own start.
-        if (!build_finite_ideal_t2_enumeration_data_with_retry(
-                    t2_context, ideal, diagnostics, embedding_cache,
-                    effort.factor_attempts,
-                    kT2EnumerationProofInitialPrecision)) {
-            return RequiredPrimeWitnessSearchResult::failed;
-        }
-    }
-
+    const NumberField* field = order->parent();
     FiniteQuadraticFormEnumerationContext enumeration;
     bool skip_first_scalar = false;
     if (!enumeration.reset(t2_context.quadratic_form_data, order->degree()) ||
@@ -624,15 +603,122 @@ RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
         // failed classification is no witness, not a failed search.
         if (factor_base_principal_witness(base, required_prime, order_element,
                                           predicate, diagnostics)) {
+            // The reference classification of every accepted witness,
+            // whichever T2 setup ordered the candidates.
+            SILEX_DEBUG_CHECK(
+                    diagnostics, DiagnosticsModule::class_group,
+                    DebugLevel::expensive,
+                    "T2 honesty witness passes the full-factorization test",
+                    factor_base_principal_witness(
+                            base, required_prime, order_element,
+                            FactorBaseWitnessPredicate::full_factorization,
+                            nullptr));
             return RequiredPrimeWitnessSearchResult::found;
         }
     }
 
     if (enumeration.element_step_limit_reached()) {
         ++exhaustion.element_step_cap_hits;
-        FactorBaseHonestyStepCapSeams::record_hit();
     }
     return RequiredPrimeWitnessSearchResult::exhausted;
+}
+
+RequiredPrimeWitnessSearchResult enumerate_required_prime_witness(
+        const FactorBase& base,
+        const PrimeIdeal& required_prime,
+        const Ideal& ideal,
+        const Element& back_multiplier,
+        const FactorBaseWitnessSearchEffort& effort,
+        RequiredPrimeWitnessExhaustion& exhaustion,
+        detail::OrderMinkowskiEmbeddingCache* embedding_cache,
+        FactorBaseWitnessPredicate predicate,
+        RequiredPrimeWitnessPrefilter* prefilter,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                        "class_group.honesty_enumerate_witness");
+    const Order* order = base.parent();
+    const NumberField* field = order == nullptr ? nullptr : order->parent();
+    if (field == nullptr || !same_order_parent(required_prime.parent(), order) ||
+        !same_order_parent(ideal.parent(), order) || !ideal.has_hnf() ||
+        !back_multiplier.has_parent(*field) || base.contains(required_prime)) {
+        return RequiredPrimeWitnessSearchResult::failed;
+    }
+
+    // The setup forms the reduced rows and Gram in double
+    // (T2EnumerationGram::double_rows), with its own fallback to the Arb
+    // setup.  When the enumeration of double-row data finds no witness, the
+    // ideal is enumerated again from the Arb setup, so every ideal for which
+    // the Arb setup gives a witness still gives one.  The counts, the
+    // rounding-scale hint and the step-cap seam then record the Arb
+    // enumeration only, as if the double-row one had not run.  Exhaustion is
+    // never a claim: every witness is verified exactly.
+    const bool arb_only = T2DoubleRowsTestSeams::mode() ==
+                          T2DoubleRowsTestSeams::Mode::arb_only;
+    const bool hint_order_cached =
+            embedding_cache != nullptr && embedding_cache->has_order &&
+            embedding_cache->order.has_same_data(*order);
+    const slong hint_before =
+            embedding_cache != nullptr ? embedding_cache->t2_rounding_scale_hint
+                                       : 0;
+    const RequiredPrimeWitnessExhaustion exhaustion_before = exhaustion;
+    const slong rejected_before =
+            prefilter != nullptr ? prefilter->rejected_count : 0;
+
+    FiniteIdealT2EnumerationData t2_context;
+    {
+        SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                            "class_group.honesty_t2_enumeration_data");
+        // The proof route starts at the source's class-group proof
+        // precision (kT2EnumerationProofInitialPrecision); relation search
+        // keeps its own start.
+        if (!build_finite_ideal_t2_enumeration_data_with_retry(
+                    t2_context, ideal, diagnostics, embedding_cache,
+                    effort.factor_attempts,
+                    kT2EnumerationProofInitialPrecision,
+                    arb_only ? T2EnumerationGram::arb
+                             : T2EnumerationGram::double_rows)) {
+            return RequiredPrimeWitnessSearchResult::failed;
+        }
+    }
+    RequiredPrimeWitnessSearchResult result =
+            enumerate_required_prime_witness_candidates(
+                    base, required_prime, back_multiplier, t2_context, effort,
+                    exhaustion, predicate, prefilter, diagnostics);
+    if (t2_context.double_rows &&
+        (result != RequiredPrimeWitnessSearchResult::found ||
+         T2DoubleRowsTestSeams::mode() ==
+                 T2DoubleRowsTestSeams::Mode::exhausted)) {
+        SILEX_PROFILE_EVENT(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.honesty_enumerate_witness.double_rows_arb_retry");
+        exhaustion = exhaustion_before;
+        if (prefilter != nullptr) {
+            prefilter->rejected_count = rejected_before;
+        }
+        if (embedding_cache != nullptr) {
+            embedding_cache->t2_rounding_scale_hint =
+                    hint_order_cached ? hint_before : 0;
+        }
+        {
+            SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::class_group,
+                                "class_group.honesty_t2_enumeration_data");
+            if (!build_finite_ideal_t2_enumeration_data_with_retry(
+                        t2_context, ideal, diagnostics, embedding_cache,
+                        effort.factor_attempts,
+                        kT2EnumerationProofInitialPrecision,
+                        T2EnumerationGram::arb)) {
+                return RequiredPrimeWitnessSearchResult::failed;
+            }
+        }
+        result = enumerate_required_prime_witness_candidates(
+                base, required_prime, back_multiplier, t2_context, effort,
+                exhaustion, predicate, prefilter, diagnostics);
+    }
+    if (exhaustion.element_step_cap_hits >
+        exhaustion_before.element_step_cap_hits) {
+        FactorBaseHonestyStepCapSeams::record_hit();
+    }
+    return result;
 }
 
 RequiredPrimeWitnessSearchResult find_required_prime_witness(

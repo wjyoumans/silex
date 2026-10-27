@@ -1,6 +1,8 @@
 #include "class_group/class_group_internal.hpp"
 #include "class_group/factor_base_honesty_internal.hpp"
 #include "class_group/factor_base_proof_targets_internal.hpp"
+#include "class_group/ideal_minkowski_embedding_internal.hpp"
+#include "class_group/ideal_t2_enumeration_internal.hpp"
 #include "class_group/relation_candidate_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
 #include "factor_base/factor_base_internal.hpp"
@@ -17,6 +19,8 @@
 #include <silex/diagnostics.hpp>
 #include <silex/element.hpp>
 #include <silex/factor_base.hpp>
+#include <silex/flint/arb.hpp>
+#include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_mat.hpp>
@@ -33,6 +37,7 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <sstream>
@@ -3851,6 +3856,402 @@ int test_element_step_cap_hits_observed() {
     return hits[0] == 0 && hits[1] > 0 ? 0 : 4;
 }
 
+// The T2 double-row setup (T2EnumerationGram::double_rows) against the Arb
+// setup on one ideal, both without an embedding cache so both start at the
+// first rounding scale.  When the double route keeps its data, its basis is
+// the Arb route's (the same LLL at the same accepted scale) and its Gram is
+// within n 2^-50 |r_i| |r_j| of a 300-bit Arb Gram of the same reduced rows.
+// When it falls back, the data is the Arb route's.
+struct T2DoubleRowsCounts {
+    slong accepted = 0;
+    slong fallback = 0;
+};
+
+int check_t2_double_rows_ideal(const silex::Ideal& ideal,
+                               T2DoubleRowsCounts& counts) {
+    const silex::Order& order = *ideal.parent();
+    const slong n = order.degree();
+    search::FiniteIdealT2EnumerationData arb_data;
+    search::FiniteIdealT2EnumerationData double_data;
+    if (!search::build_finite_ideal_t2_enumeration_data_with_retry(
+                arb_data, ideal, nullptr, nullptr, search::kMaxFactorAttempts,
+                search::kT2EnumerationProofInitialPrecision,
+                search::T2EnumerationGram::arb) ||
+        arb_data.double_rows ||
+        !search::build_finite_ideal_t2_enumeration_data_with_retry(
+                double_data, ideal, nullptr, nullptr,
+                search::kMaxFactorAttempts,
+                search::kT2EnumerationProofInitialPrecision,
+                search::T2EnumerationGram::double_rows)) {
+        return 1;
+    }
+    const bool same_basis =
+            sflint::fmpz_mat_equal(
+                    sflint::FmpzMatConstRef(double_data.basis),
+                    sflint::FmpzMatConstRef(arb_data.basis)) &&
+            double_data.rounding_scale == arb_data.rounding_scale;
+    if (!double_data.double_rows) {
+        ++counts.fallback;
+        return same_basis &&
+                               double_data.quadratic_form_data ==
+                                       arb_data.quadratic_form_data &&
+                               double_data.initial_bound_value ==
+                                       arb_data.initial_bound_value
+                       ? 0
+                       : 2;
+    }
+    ++counts.accepted;
+    if (!same_basis) {
+        return 3;
+    }
+
+    // The order rows as the setup reads them: midpoints of the rows at its
+    // embedding precision (start precision plus 64 guard bits).
+    sflint::FmpzMat identity(n, n);
+    sflint::fmpz_mat_one(sflint::FmpzMatRef(identity));
+    sflint::ArbMat order_rows(n, n);
+    std::vector<double> order_rows_double;
+    std::vector<double> gram;
+    if (!silex::detail::build_ideal_minkowski_embedding_rows(
+                order_rows, sflint::FmpzMatConstRef(identity), order,
+                search::kT2EnumerationProofInitialPrecision + 64) ||
+        !search::arb_mat_midpoints_double(order_rows_double, order_rows) ||
+        !search::reduced_basis_t2_gram_double(
+                gram, sflint::FmpzMatConstRef(double_data.basis),
+                order_rows_double)) {
+        return 4;
+    }
+    constexpr slong kReferencePrecision = 300;
+    sflint::ArbMat rows(n, n);
+    if (!silex::detail::build_ideal_minkowski_embedding_rows(
+                rows, sflint::FmpzMatConstRef(double_data.basis), order,
+                kReferencePrecision)) {
+        return 5;
+    }
+    std::vector<double> reference(static_cast<std::size_t>(n * n));
+    sflint::Arb entry;
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            ::arb_dot(entry.raw(), nullptr, 0,
+                      sflint::arb_mat_entry_ref(rows, i, 0).raw(), 1,
+                      sflint::arb_mat_entry_ref(rows, j, 0).raw(), 1, n,
+                      kReferencePrecision);
+            reference[static_cast<std::size_t>(i * n + j)] =
+                    search::arb_midpoint_double(sflint::ArbConstRef(entry));
+        }
+    }
+    const double scale = static_cast<double>(n) * std::ldexp(1.0, -50);
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            const std::size_t ij = static_cast<std::size_t>(i * n + j);
+            const double tolerance =
+                    scale *
+                    std::sqrt(reference[static_cast<std::size_t>(i * n + i)]) *
+                    std::sqrt(reference[static_cast<std::size_t>(j * n + j)]);
+            if (!(std::fabs(gram[ij] - reference[ij]) <= tolerance)) {
+                return 6;
+            }
+        }
+    }
+    return 0;
+}
+
+// Every prime ideal above each rational prime up to 71, and each twisted by
+// Q^20 for the first prime Q above 2 (reduced as the honesty search reduces
+// its twisted ideals), as the honesty witness search enumerates them.
+int check_t2_double_rows_field(const FieldSetup& setup,
+                               T2DoubleRowsCounts& counts) {
+    const silex::Order& order = setup.maximal_order;
+    silex::PrimeIdeal twist_prime(order);
+    silex::Ideal twist(order);
+    if (!order.is_defined() || !first_prime_above(twist_prime, order, 2) ||
+        !twist_prime.get_ideal(twist)) {
+        return 1;
+    }
+    for (const slong p : {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43,
+                          47, 53, 59, 61, 67, 71}) {
+        sflint::Fmpz rational_prime;
+        sflint::fmpz_set_si(sflint::FmpzRef(rational_prime), p);
+        silex::PrimeIdealList primes;
+        if (!silex::decompose_prime(primes, order,
+                                    sflint::FmpzConstRef(rational_prime))) {
+            return 1;
+        }
+        for (slong k = 0; k < primes.size(); ++k) {
+            const silex::PrimeIdeal* prime = primes.at(k);
+            silex::Ideal prime_ideal(order);
+            silex::Ideal product(order);
+            silex::Element back(*order.parent());
+            if (prime == nullptr || !prime->get_ideal(prime_ideal) ||
+                !product.set(prime_ideal) || !back.one()) {
+                return 1;
+            }
+            for (slong e = 0; e < 20; ++e) {
+                silex::Ideal next(order);
+                if (!next.multiply(product, twist)) {
+                    return 1;
+                }
+                product.swap(next);
+            }
+            if (!search::factor_base_honesty_primitive_part(product, back) ||
+                !search::factor_base_honesty_reduce_large_ideal(product, back,
+                                                                128, nullptr)) {
+                return 1;
+            }
+            const int prime_status =
+                    check_t2_double_rows_ideal(prime_ideal, counts);
+            if (prime_status != 0) {
+                return 10 + prime_status;
+            }
+            const int twisted_status = check_t2_double_rows_ideal(product, counts);
+            if (twisted_status != 0) {
+                return 20 + twisted_status;
+            }
+        }
+    }
+    return 0;
+}
+
+// Corpus fields random_d9_h4_s8, cyclotomic_real_q10_c11_deg10 and
+// lmfdb_8_8_73116160000_2.  The double route keeps its data on the first and
+// last; on the second, whose maximal-order basis gives reduced bases with
+// coordinates above 2^53 and ill-conditioned double rows, it may fall back,
+// and then its data is the Arb route's.
+int test_t2_double_rows_gram_matches_arb() {
+    T2DoubleRowsCounts d9;
+    T2DoubleRowsCounts q10;
+    T2DoubleRowsCounts l8;
+    if (check_t2_double_rows_field(
+                maximal_order_setup({2, -2, -3, -2, 4, -2, -4, 1, 2, 1}),
+                d9) != 0) {
+        return 1;
+    }
+    if (check_t2_double_rows_field(
+                maximal_order_setup({238831, -228566, -128567, 146666, -15113,
+                                     -13352, 2746, 334, -97, -2, 1}),
+                q10) != 0) {
+        return 2;
+    }
+    if (check_t2_double_rows_field(
+                maximal_order_setup({-1, 68, 60, -232, 57, 68, -18, -4, 1}),
+                l8) != 0) {
+        return 3;
+    }
+    return d9.accepted > 0 && l8.accepted > 0 ? 0 : 4;
+}
+
+// Counts the T2 setup and fallback profile events of the double-row route.
+struct T2DoubleRowsEvents {
+    slong setups = 0;
+    slong setup_fallbacks = 0;
+    slong enumeration_retries = 0;
+};
+
+void t2_double_rows_profile_callback(void* user,
+                                     silex::DiagnosticsModule,
+                                     silex::ProfileEvent event,
+                                     const char*,
+                                     const char* label) noexcept {
+    auto* events = static_cast<T2DoubleRowsEvents*>(user);
+    if (label == nullptr) {
+        return;
+    }
+    if (event == silex::ProfileEvent::begin_scope &&
+        std::strcmp(label, "class_group.honesty_t2_enumeration_data") == 0) {
+        ++events->setups;
+    } else if (event == silex::ProfileEvent::event &&
+               std::strcmp(label,
+                           "class_group.finite_enumeration_setup."
+                           "double_rows_arb_fallback") == 0) {
+        ++events->setup_fallbacks;
+    } else if (event == silex::ProfileEvent::event &&
+               std::strcmp(label,
+                           "class_group.honesty_enumerate_witness."
+                           "double_rows_arb_retry") == 0) {
+        ++events->enumeration_retries;
+    }
+}
+
+struct T2DoubleRowsScan {
+    bool ok = false;
+    bool honest = false;
+    search::FactorBaseHonestyScanAudit audit;
+    HonestyLogCapture capture;
+    slong step_cap_hits = 0;
+    slong debug_failures = 0;
+    T2DoubleRowsEvents events;
+};
+
+// One T2-route honesty scan of `setup` (active and required norm bounds)
+// under a T2 double-row seam mode.  With `twists` the sub-factor base is
+// the whole base; otherwise there are no twists.  Debug checks run at the
+// expensive level, so in a debug-check build every witness the scan accepts
+// is also classified by the full factorization.
+void run_t2_double_rows_scan(T2DoubleRowsScan& scan,
+                             const FieldSetup& setup,
+                             ulong active,
+                             ulong required,
+                             bool twists,
+                             search::FactorBaseWitnessEscalation escalation,
+                             search::T2DoubleRowsTestSeams::Mode mode) {
+    using Hook = silex::detail::TestHookAccess;
+    sflint::Fmpz active_bound;
+    sflint::Fmpz required_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(active_bound), active);
+    sflint::fmpz_set_ui(sflint::FmpzRef(required_bound), required);
+    silex::FactorBase base(setup.maximal_order);
+    if (!setup.maximal_order.is_defined() || !base.is_defined() ||
+        (active > 1 && !base.build_relation_completion_base(
+                               sflint::FmpzConstRef(active_bound)))) {
+        return;
+    }
+    silex::detail::SubfactorBaseSchedule schedule;
+    for (slong i = 0; i < base.length(); ++i) {
+        schedule.subfactor_base.push_back(i);
+    }
+    schedule.excluded_indices.assign(static_cast<std::size_t>(base.length()),
+                                     0);
+    silex::DiagnosticsContext diagnostics;
+    enable_honesty_log(diagnostics, scan.capture);
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            t2_double_rows_profile_callback, &scan.events);
+    diagnostics.debug_level = silex::DebugLevel::expensive;
+    diagnostics.debug_modules = silex::diagnostics_all_modules;
+    diagnostics.debug_failure_user = &scan.debug_failures;
+    diagnostics.debug_failure_callback = [](
+            void* user, silex::DiagnosticsModule, silex::DebugLevel,
+            const char*, const char*, int, const char*, const char*) noexcept {
+        ++*static_cast<slong*>(user);
+    };
+    Hook::set_t2_double_rows_mode(mode);
+    Hook::factor_base_honesty_element_step_cap_hits_reset();
+    scan.honest = false;
+    scan.ok = search::factor_base_honesty_check(
+            scan.honest, base, sflint::FmpzConstRef(active_bound),
+            sflint::FmpzConstRef(required_bound),
+            twists && base.length() > 0 ? &schedule : nullptr, UWORD(42),
+            true, 128, escalation, &diagnostics, &scan.audit);
+    scan.step_cap_hits = Hook::factor_base_honesty_element_step_cap_hits();
+    Hook::set_t2_double_rows_mode(search::T2DoubleRowsTestSeams::Mode::off);
+}
+
+bool same_t2_double_rows_scan(const T2DoubleRowsScan& left,
+                              const T2DoubleRowsScan& right) {
+    const search::FactorBaseHonestyScanAudit& a = left.audit;
+    const search::FactorBaseHonestyScanAudit& b = right.audit;
+    return left.ok == right.ok && left.honest == right.honest &&
+           a.rational_prime_checks == b.rational_prime_checks &&
+           a.checks_at_or_below_active_bound ==
+                   b.checks_at_or_below_active_bound &&
+           a.witness_targets == b.witness_targets &&
+           a.witnessed_targets == b.witnessed_targets &&
+           a.escalated_witnessed_targets == b.escalated_witnessed_targets &&
+           a.max_search_stage == b.max_search_stage &&
+           a.final_random_state == b.final_random_state &&
+           a.t2_norm_prefilter_rejections == b.t2_norm_prefilter_rejections &&
+           a.unwitnessed.recorded == b.unwitnessed.recorded &&
+           sflint::fmpz_equal(a.unwitnessed.p, b.unwitnessed.p) &&
+           a.unwitnessed.stage == b.unwitnessed.stage &&
+           a.unwitnessed.factor_attempts == b.unwitnessed.factor_attempts &&
+           a.unwitnessed.element_steps == b.unwitnessed.element_steps &&
+           left.capture.exhausted_messages ==
+                   right.capture.exhausted_messages &&
+           left.capture.last_detail == right.capture.last_detail &&
+           left.step_cap_hits == right.step_cap_hits;
+}
+
+// Seam tests of the double-row fallbacks on whole T2-route honesty scans.
+// When every double-row setup sees non-finite rows (fallback to the Arb
+// setup) or every enumeration of double-row data is treated as exhausted
+// (re-enumeration from the Arb setup), the verdict, audit, random-state
+// stream, exhaustion log and step-cap count are those of the Arb-only scan.
+// The production scan (double rows kept) reaches the same verdict, and every
+// witness it accepts passes the full-factorization classification (checked
+// in a debug-check build).  The x^3 - 15 row has an unwitnessable prime (its
+// prime above 2 is not principal and the base is empty), so its ideals are
+// exhausted at the caps.
+int test_t2_double_rows_fallbacks_match_arb_scan() {
+    using Mode = search::T2DoubleRowsTestSeams::Mode;
+    struct Row {
+        std::vector<slong> coefficients;
+        ulong active;
+        ulong required;
+        bool twists;
+        search::FactorBaseWitnessEscalation escalation;
+    };
+    const auto none = search::FactorBaseWitnessEscalation::none;
+    const std::vector<Row> rows = {
+            {{-250000000002, -1, 1}, 293, 700, true, none},
+            {{-6236, 0, 1}, 3, 60, true, none},
+            {{-15, 0, 0, 1}, 2, 30, true, none},
+            {{-2, 0, 0, 1}, 7, 40, true, none},
+            {{1, 0, -10, 0, 1}, 7, 30, true, none},
+            {{-15, 0, 0, 1}, 1, 30, false, none},
+    };
+    slong double_setups = 0;
+    slong retries = 0;
+    for (const Row& row : rows) {
+        const FieldSetup setup = maximal_order_setup(row.coefficients);
+        T2DoubleRowsScan expected;
+        run_t2_double_rows_scan(expected, setup, row.active, row.required,
+                                row.twists, row.escalation, Mode::arb_only);
+        if (!expected.ok || expected.debug_failures != 0 ||
+            expected.events.setup_fallbacks != 0 ||
+            expected.events.enumeration_retries != 0) {
+            return 1;
+        }
+        for (const Mode mode : {Mode::nonfinite_rows, Mode::exhausted}) {
+            T2DoubleRowsScan scan;
+            run_t2_double_rows_scan(scan, setup, row.active, row.required,
+                                    row.twists, row.escalation, mode);
+            if (!same_t2_double_rows_scan(scan, expected) ||
+                scan.debug_failures != 0) {
+                return 2;
+            }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+            if (mode == Mode::nonfinite_rows &&
+                (scan.events.setup_fallbacks != scan.events.setups ||
+                 scan.events.enumeration_retries != 0)) {
+                return 3;
+            }
+            // Each setup that kept double rows is set up again on the Arb
+            // route after its enumeration.
+            if (mode == Mode::exhausted &&
+                scan.events.setups != 2 * scan.events.enumeration_retries +
+                                              scan.events.setup_fallbacks) {
+                return 4;
+            }
+#endif
+        }
+        T2DoubleRowsScan production;
+        run_t2_double_rows_scan(production, setup, row.active, row.required,
+                                row.twists, row.escalation, Mode::off);
+        if (!production.ok || production.honest != expected.honest ||
+            production.debug_failures != 0 ||
+            (production.honest && production.audit.witnessed_targets !=
+                                          production.audit.witness_targets)) {
+            return 5;
+        }
+        double_setups +=
+                production.events.setups - production.events.setup_fallbacks;
+        retries += production.events.enumeration_retries;
+    }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    // The production scans keep double-row data, and the x^3 - 15 rows
+    // re-enumerate their exhausted ideals from the Arb setup.
+    if (double_setups == 0 || retries == 0) {
+        return 6;
+    }
+#else
+    (void) double_setups;
+    (void) retries;
+#endif
+    return 0;
+}
+
 int main() {
     assert(test_quadratic_backend_runs_honesty_route() == 0);
     assert(test_element_step_cap_hits_observed() == 0);
@@ -3861,6 +4262,8 @@ int main() {
     assert(test_witness_partial_rational_prime_blocks() == 0);
     assert(test_legacy_scan_predicate_equivalence() == 0);
     assert(test_witness_through_lacking_conjugate() == 0);
+    assert(test_t2_double_rows_gram_matches_arb() == 0);
+    assert(test_t2_double_rows_fallbacks_match_arb_scan() == 0);
     return test_proof_targets_require_complete_decomposition() != 0 ||
                    test_required_prime_predicates_match_full_factorization() !=
                            0 ||

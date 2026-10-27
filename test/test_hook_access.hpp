@@ -23,6 +23,7 @@
 #include "class_group/class_group_storage_internal.hpp"
 #include "class_group/maximal_imaginary_quadratic_row_hnf_internal.hpp"
 #include "class_group/factor_base_honesty_internal.hpp"
+#include "class_group/ideal_t2_enumeration_internal.hpp"
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
 #include "element/element_internal.hpp"
@@ -675,6 +676,14 @@ public:
     static slong factor_base_honesty_element_step_cap_hits() noexcept {
         return relation_search::FactorBaseHonestyStepCapSeams::hits_.load(
                 std::memory_order_relaxed);
+    }
+
+    // Test-only mode of the T2 double-row setup (see
+    // relation_search::T2DoubleRowsTestSeams); `off` restores production.
+    static void set_t2_double_rows_mode(
+            relation_search::T2DoubleRowsTestSeams::Mode mode) noexcept {
+        relation_search::T2DoubleRowsTestSeams::mode_.store(
+                static_cast<int>(mode), std::memory_order_relaxed);
     }
 
     // Counts of analytic-bound searches that stopped at the cap (see

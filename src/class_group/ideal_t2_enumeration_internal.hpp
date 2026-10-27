@@ -3,11 +3,13 @@
 #include <silex/class_group.hpp>
 #include <silex/flint/arb_mat.hpp>
 
+#include <atomic>
 #include <vector>
 
 namespace silex::detail {
 
 struct OrderMinkowskiEmbeddingCache;
+class TestHookAccess;
 
 }  // namespace silex::detail
 
@@ -32,6 +34,21 @@ inline constexpr slong kT2EnumerationRelationSearchInitialPrecision = 200;
 inline constexpr slong kT2EnumerationProofInitialPrecision = 100;
 inline constexpr slong kT2EnumerationMaxPrecision = 1000;
 
+// How the T2 setup forms the reduced rows and their Gram matrix.  `arb`
+// forms both in Arb (the relation-search route).  `double_rows` forms them in
+// double from the exact reduced basis (order coordinates) and the order's
+// Minkowski rows, and falls back to the whole `arb` setup at the same
+// precision when the double data is not finite, a basis entry does not fit
+// a double exactly, the double Gram-Schmidt pivot test fails, or no rounding
+// scale passes the LLL-bound test.  It is taken at the start precision only;
+// precision retries use `arb`.  The factor-base honesty witness search uses
+// it: only Gram midpoints in double are read downstream and every witness is
+// verified exactly, so the route only orders the candidates.
+enum class T2EnumerationGram {
+    arb,
+    double_rows,
+};
+
 struct FiniteIdealT2EnumerationData {
     flint::FmpzMat basis{0, 0};
     std::vector<double> quadratic_form_data;
@@ -39,6 +56,33 @@ struct FiniteIdealT2EnumerationData {
     // Rounding scale of the accepted reduced basis; 0 when the basis is the
     // first one with quadratic-form data (no scale was accepted).
     slong rounding_scale = 0;
+    // Whether the double_rows route built this data (false after its
+    // fallback to the Arb setup).
+    bool double_rows = false;
+};
+
+// Test-only seam for the T2 double-row setup and its fallbacks.  `arb_only`
+// makes the honesty witness search request the Arb setup; `nonfinite_rows`
+// makes every double-row setup see a non-finite reduced row, so it falls
+// back to the Arb setup; `exhausted` makes the honesty witness search treat
+// every enumeration of double-row data as exhausted, so it re-enumerates the
+// ideal from the Arb setup.  Only detail::TestHookAccess sets it; production
+// code reads it with a relaxed atomic load.
+class T2DoubleRowsTestSeams {
+public:
+    enum class Mode : int {
+        off = 0,
+        arb_only = 1,
+        nonfinite_rows = 2,
+        exhausted = 3,
+    };
+    static Mode mode() noexcept {
+        return static_cast<Mode>(mode_.load(std::memory_order_relaxed));
+    }
+
+private:
+    friend class detail::TestHookAccess;
+    inline static std::atomic<int> mode_{0};
 };
 
 class FiniteQuadraticFormEnumerationContext {
@@ -82,8 +126,23 @@ bool build_finite_ideal_t2_enumeration_data_with_retry(
         detail::OrderMinkowskiEmbeddingCache* embedding_cache,
         slong target_factor_attempts = kMaxFactorAttempts,
         slong initial_precision =
-                kT2EnumerationRelationSearchInitialPrecision) noexcept;
+                kT2EnumerationRelationSearchInitialPrecision,
+        T2EnumerationGram gram = T2EnumerationGram::arb) noexcept;
 
 double arb_midpoint_double(flint::ArbConstRef value) noexcept;
+
+// The midpoints of `rows` as doubles, row-major; false when one is not
+// finite.
+bool arb_mat_midpoints_double(std::vector<double>& out,
+                              const flint::ArbMat& rows) noexcept;
+
+// The T2 Gram matrix, row-major, of the rows reduced_basis * order_rows,
+// formed in double: reduced_basis is the exact degree x degree basis in order
+// coordinates and order_rows the row-major double Minkowski rows of the order
+// basis.  False when a basis entry exceeds 2^53 in absolute value (so it is
+// not exactly a double) or a row or Gram value is not finite.
+bool reduced_basis_t2_gram_double(std::vector<double>& gram,
+                                  flint::FmpzMatConstRef reduced_basis,
+                                  const std::vector<double>& order_rows) noexcept;
 
 }  // namespace silex::detail::relation_search
