@@ -780,8 +780,8 @@ decomposition) are taken without that split when an order basis element
 ``w_i``, ``i = 0`` or ``1``, has characteristic polynomial ``chi`` with
 ``p`` not dividing ``disc(chi)``.  Then ``chi`` is squarefree modulo ``p``,
 hence it is the minimal polynomial of ``w_i``; ``disc(chi) = [O : Z[w_i]]^2
-disc(O)`` (Cohen, GTM 138, Section 4.4.1), so ``p`` does not divide the
-index of ``Z[w_i]``, and by the Dedekind--Kummer theorem (Cohen, GTM 138,
+disc(O)`` (Cohen, GTM 138, Proposition 4.4.4, ``O`` being maximal here), so
+``p`` does not divide the index of ``Z[w_i]``, and by the Dedekind--Kummer theorem (Cohen, GTM 138,
 Theorem 4.8.13) the degrees are those of the irreducible factors of ``chi``
 modulo ``p`` (FLINT ``nmod_poly_factor_distinct_deg``).  The theorem does
 not give the order of the primes above, so the degrees are used only when

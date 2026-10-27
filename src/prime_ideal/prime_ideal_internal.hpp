@@ -203,7 +203,8 @@ enum class IndexDivisorMiss : unsigned char {
 // of the degrees) can differ from decompose_prime's only where building an
 // ideal of the split fails, since decompose_prime then moves on to its next
 // route, or where the split itself would fail on an allocation and the
-// basis-element route above already gave the degrees.  That build (ideal_from_mod_rows, or pO for an inert p) fails only
+// basis-element route above already gave the degrees.  Building an ideal of
+// the split (ideal_from_mod_rows, or pO for an inert p) fails only
 // when an allocation fails: the rows pO plus the kept components always span
 // a full-rank ideal of the order (see ideal_from_mod_rows).
 bool decompose_prime_residue_degrees(

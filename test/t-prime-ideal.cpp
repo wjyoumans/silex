@@ -1991,6 +1991,47 @@ int test_residue_degrees_basis_element_route() {
             {-3375, -225, 0, 1}, 100, {{3, R::used}, {5, R::mixed}}, 2);
 }
 
+// The per-order cache of basis-element characteristic polynomials: filled by
+// the route, shared by a copy-constructed Order, and empty after Order::set.
+int test_basis_element_charpoly_cache() {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial,
+                           {238831, -228566, -128567, 146666, -15113, -13352,
+                            2746, 334, -97, -2, 1});
+    silex::NumberField field;
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    sflint::Fmpz p;
+    fmpz_set_ui(p.raw(), 43);
+    const sflint::FmpzConstRef p_ref(p);
+    const auto stored_for = [](const silex::Order& o) {
+        return silex::detail::OrderAccess::basis_element_charpoly(o, 0) !=
+                       nullptr ||
+               silex::detail::OrderAccess::basis_element_charpoly(o, 1) !=
+                       nullptr;
+    };
+    const auto run = [&](const silex::Order& o) {
+        std::vector<slong> degrees;
+        assert(silex::detail::decompose_prime_residue_degrees(
+                degrees, o, p_ref,
+                silex::detail::IndexDivisorMiss::degrees_only, nullptr));
+        return degrees;
+    };
+    assert(!stored_for(order));
+    const std::vector<slong> first = run(order);
+    assert(stored_for(order));
+    silex::Order shared(order);
+    assert(stored_for(shared));
+    silex::Order rebuilt(field);
+    assert(rebuilt.set(order));
+    assert(!stored_for(rebuilt));
+    assert(run(rebuilt) == first);
+    assert(stored_for(rebuilt));
+    assert(run(shared) == first);
+    return 0;
+}
+
 // Bounded enumeration (2 and 3 in Q(sqrt(-23), sqrt(-31), sqrt(-47))), the
 // recursive split or the monogenic branch (11 in Q(sqrt(-3), sqrt(-5),
 // sqrt(-7))), the monogenic branch with an unramified and a ramified 17, and
@@ -6397,6 +6438,7 @@ int main(int argc, char** argv) {
     assert(test_residue_degrees_cyclotomic_real_q10_c11() == 0);
     assert(test_monogenic_generator_failure_memo() == 0);
     assert(test_residue_degrees_basis_element_route() == 0);
+    assert(test_basis_element_charpoly_cache() == 0);
     assert(test_ideal_build_failure_seam() == 0);
     assert(test_residue_degrees_index_divisor_routes() == 0);
     assert(test_decompose_prime_route() == 0);

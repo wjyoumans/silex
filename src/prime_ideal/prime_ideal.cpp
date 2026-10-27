@@ -5741,8 +5741,8 @@ const BasisElementCharpoly* basis_element_charpoly(const Order& order,
 // kBasisElementDegreeCandidates basis elements, and the first with p not
 // dividing disc(chi) is used.  Then chi is squarefree modulo p, hence
 // squarefree, so it is the minimal polynomial of beta and beta generates the
-// field; disc(chi) = [O : Z[beta]]^2 disc(O) (Cohen, GTM 138, Section
-// 4.4.1), so p does not divide [O : Z[beta]], and by the Dedekind-Kummer
+// field; disc(chi) = [O : Z[beta]]^2 disc(O) (Cohen, GTM 138, Proposition
+// 4.4.4, for O maximal, as it is here), so p does not divide [O : Z[beta]], and by the Dedekind-Kummer
 // theorem (Cohen, GTM 138, Theorem 4.8.13) the primes above p are
 // unramified with residue degrees the degrees of the irreducible factors of
 // chi modulo p, given by FLINT nmod_poly_factor_distinct_deg.  The theorem
@@ -5873,7 +5873,7 @@ bool decompose_prime_residue_degrees(std::vector<slong>& out,
     // IndexDivisorMiss::degrees_only they read the degrees off that split
     // without building ideals and store nothing; the degrees, in order, are
     // those the ideal-building pass would publish (see the header for the
-    // one case where they can differ).
+    // cases where they can differ).
     const bool degrees_only = miss == IndexDivisorMiss::degrees_only;
     std::vector<IndexPrimeData> index_primes;
     const auto split_pass = [&](FixedSplit split,
