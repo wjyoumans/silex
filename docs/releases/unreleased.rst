@@ -2639,6 +2639,30 @@ Changed
   ``cyclotomic_27_phi18``, which is not a binomial; the binomial check is
   made once per prime and shared by both closed forms.  No timing has been
   measured.
+- On the ``nmod_poly_roots`` route of the root scan, a degree-two factor
+  ``x^2 + b x + c`` of ``gcd(h -+ 1, g)`` now gives its two roots in closed
+  form, ``(-b +- s) / 2`` with ``s^2 = b^2 - 4c`` from FLINT's
+  ``n_sqrtmod``, instead of going to ``nmod_poly_roots``.  The roots are
+  listed in the order ``nmod_poly_roots`` gives them: below 10 ascending;
+  otherwise it splits by ``gcd((x + delta)^((q-1)/2) - 1, f)``, first with
+  ``delta = 0`` and then with the values of ``n_randint`` from a fresh
+  ``flint_rand_init`` state, until one root ``r`` has ``r + delta`` a
+  nonzero square and the other does not, and lists the other root first.
+  That rule is evaluated with quadratic characters, without polynomial
+  arithmetic.  A test compares the two roots and their order with
+  ``nmod_poly_roots`` for every quadratic modulo the primes below 60 and for
+  random quadratics modulo random primes up to the largest below ``2^64``,
+  so a FLINT change to that order fails the test instead of changing
+  columns.  Factors of degree three or more, a failed square root and more
+  than 128 draws keep ``nmod_poly_roots``.  The roots, their order, the
+  columns and the published results are unchanged: published ``proven``
+  outputs and proof-record dumps are identical on ``random_d9_h4_s8``,
+  ``random_d10_h2_s21``, ``pure_x12_plus_7`` and the other 174 ``proven``
+  corpus rows that finish on both builds in 90 seconds (8 rows do not).
+  Under callgrind (``proven``, Release) the instruction count fell 3.99%
+  for ``random_d9_h4_s8`` and 3.18% for ``random_d10_h2_s21``; it is
+  unchanged for ``pure_x12_plus_7`` (binomial roots in closed form) and
+  ``cyclotomic_27_phi18`` (+0.001%).  No timing has been measured.
 
 - The ``proven`` relation-saturation proof builds the relation-kernel vectors
   its beta rows are size-reduced against from a subset of the relations when

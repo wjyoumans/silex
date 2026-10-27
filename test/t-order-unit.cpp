@@ -11395,6 +11395,185 @@ int test_binomial_roots_mod_prime_matches_flint() {
     return 0;
 }
 
+// The closed-form roots of a monic quadratic x^2 + b x + c
+// (detail::split_quadratic_roots_mod_prime) against FLINT's nmod_poly_roots,
+// in order: for every (b, c) modulo the primes q below 60, and for random
+// pairs and pairs built from chosen roots r0, r1 (r0 = r1, r0 = 0 and
+// r0 != r1 nonzero) modulo random primes of 4 to 64 bits and the three
+// largest below 2^64.  It returns the roots exactly when FLINT finds two
+// distinct nonzero roots, in FLINT's order, both when the two roots have
+// different quadratic characters (FLINT's first split, delta = 0) and when
+// they have the same one (its random splits); it declines q = 2, a repeated
+// root, a zero root, no root and unreduced coefficients.
+int test_split_quadratic_roots_mod_prime_matches_flint() {
+    flint_rand_t state;
+    flint_rand_init(state);
+    slong split = 0;
+    slong same_character = 0;
+    slong declined = 0;
+    auto compare = [&](ulong b, ulong c, ulong q) {
+        sflint::NmodPoly f(q);
+        nmod_poly_set_coeff_ui(f.raw(), 2, 1);
+        nmod_poly_set_coeff_ui(f.raw(), 1, b);
+        nmod_poly_set_coeff_ui(f.raw(), 0, c);
+        sflint::NmodPolyFactor factorization;
+        nmod_poly_roots(factorization.raw(), f.raw(), 0);
+        std::vector<ulong> expected;
+        for (slong i = 0; i < factorization.raw()->num; ++i) {
+            assert(nmod_poly_degree(factorization.raw()->p + i) == 1);
+            expected.push_back(n_negmod(
+                    nmod_poly_get_coeff_ui(factorization.raw()->p + i, 0), q));
+        }
+        const bool distinct_nonzero = expected.size() == 2 &&
+                                      expected[0] != 0 && expected[1] != 0;
+        std::array<ulong, 2> roots = {UWORD(5), UWORD(5)};
+        const bool found =
+                silex::detail::split_quadratic_roots_mod_prime(roots, b, c, q);
+        assert(found == distinct_nonzero);
+        if (!found) {
+            assert(roots[0] == 0 && roots[1] == 0);
+            ++declined;
+            return;
+        }
+        assert(roots[0] == expected[0] && roots[1] == expected[1]);
+        ++split;
+        if (q > 10 && n_jacobi_unsigned(roots[0], q) ==
+                              n_jacobi_unsigned(roots[1], q)) {
+            ++same_character;
+        }
+    };
+
+    for (ulong q = 2; q < 60; q = n_nextprime(q, 1)) {
+        for (ulong b = 0; b < q; ++b) {
+            for (ulong c = 0; c < q; ++c) {
+                compare(b, c, q);
+            }
+        }
+    }
+    std::vector<ulong> primes;
+    for (int bits = 4; bits <= 64; ++bits) {
+        for (int k = 0; k < 4; ++k) {
+            primes.push_back(n_randprime(state, static_cast<ulong>(bits), 1));
+        }
+    }
+    ulong below = UWORD_MAX;
+    for (int k = 0; k < 3; ++k) {
+        below = previous_prime(below);
+        primes.push_back(below);
+    }
+    for (ulong q : primes) {
+        nmod_t mod;
+        nmod_init(&mod, q);
+        for (int k = 0; k < 40; ++k) {
+            compare(n_randint(state, q), n_randint(state, q), q);
+            const ulong r0 = n_randint(state, q);
+            const ulong r1 = n_randint(state, q);
+            for (ulong first : {r0, r1, UWORD(0)}) {
+                compare(nmod_neg(nmod_add(first, r1, mod), mod),
+                        nmod_mul(first, r1, mod), q);
+            }
+        }
+    }
+
+    // q = 2 and unreduced coefficients.
+    std::array<ulong, 2> roots = {UWORD(1), UWORD(1)};
+    assert(!silex::detail::split_quadratic_roots_mod_prime(roots, 1, 1, 2));
+    assert(!silex::detail::split_quadratic_roots_mod_prime(roots, 0, 0, 2));
+    assert(!silex::detail::split_quadratic_roots_mod_prime(roots, 13, 1, 11));
+    assert(!silex::detail::split_quadratic_roots_mod_prime(roots, 1, 11, 11));
+    assert(roots[0] == 0 && roots[1] == 0);
+
+    assert(split > 0 && same_character > 0 && same_character < split);
+    assert(declined > 0);
+    flint_rand_clear(state);
+    return 0;
+}
+
+// The stable scan's root finder (degree_one_roots_mod_q_for_test), whose
+// degree-two parts of gcd(x^((q - 1) / 2) -+ 1, g) take the closed form
+// (detail::split_quadratic_roots_mod_prime), against the distinct roots of
+// nmod_poly_roots on the reduction, for the equation orders of
+// x^4 - 10 x^2 + 1, x^3 - x - 15 and two random-looking polynomials of
+// degrees 9 and 10, at every prime q below 3000.  These include q = 2 and
+// the primes dividing disc(f), where the reduction has repeated factors:
+// x^4 + 1 = (x + 1)^4 mod 2, (x^2 + 1)^2 mod 3 without roots, and
+// x^3 - x - 15 with a double root mod 13 and mod 467.  The closed form is
+// taken (asserted through its profile event where profiling is built).
+int test_degree_one_roots_mod_q_quadratic_parts() {
+    const std::vector<std::vector<slong>> cases = {
+            {1, 0, -10, 0, 1},
+            {-15, -1, 0, 1},
+            {2, -2, -3, -2, 4, -2, -4, 1, 2, 1},
+            {2, 1, 0, 2, -2, 2, -1, 1, -2, 0, 1},
+    };
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label =
+            "unit_group.stable_scan.degree_one_roots_nmod_quadratic_roots";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    slong repeated_with_roots = 0;
+    slong repeated_without_roots = 0;
+    for (const std::vector<slong>& coefficients : cases) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           coefficients[i]);
+        }
+        silex::NumberField field = silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(polynomial));
+        silex::Order equation = silex::test::equation_order(field);
+        for (ulong q = 2; q < 3000; q = n_nextprime(q, 1)) {
+            sflint::NmodPoly reduced(q);
+            for (std::size_t i = 0; i < coefficients.size(); ++i) {
+                const slong c = coefficients[i];
+                const ulong c_mod = c < 0
+                        ? n_negmod(static_cast<ulong>(-c) % q, q)
+                        : static_cast<ulong>(c) % q;
+                nmod_poly_set_coeff_ui(reduced.raw(), static_cast<slong>(i),
+                                       c_mod);
+            }
+            sflint::NmodPolyFactor factorization;
+            nmod_poly_roots(factorization.raw(), reduced.raw(), 0);
+            std::vector<ulong> expected;
+            for (slong i = 0; i < factorization.raw()->num; ++i) {
+                expected.push_back(n_negmod(
+                        nmod_poly_get_coeff_ui(factorization.raw()->p + i, 0),
+                        q));
+            }
+            std::sort(expected.begin(), expected.end());
+            if (nmod_poly_is_squarefree(reduced.raw()) == 0) {
+                ++(expected.empty() ? repeated_without_roots
+                                    : repeated_with_roots);
+            }
+
+            sflint::Fmpz q_value;
+            fmpz_set_ui(q_value.raw(), q);
+            std::vector<sflint::Fmpz> roots;
+            assert(silex::detail::degree_one_roots_mod_q_for_test(
+                    roots, equation, sflint::FmpzConstRef(q_value),
+                    &diagnostics));
+            std::vector<ulong> got;
+            for (const sflint::Fmpz& root : roots) {
+                assert(fmpz_sgn(root.raw()) >= 0);
+                assert(fmpz_cmp_ui(root.raw(), q) < 0);
+                got.push_back(fmpz_get_ui(root.raw()));
+            }
+            std::sort(got.begin(), got.end());
+            assert(got == expected);
+        }
+    }
+    assert(repeated_with_roots >= 3);
+    assert(repeated_without_roots >= 1);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count > 100);
+#endif
+    return 0;
+}
+
 // For an odd prime ell, as set_cyclotomic13_u2_power17_group, but the first
 // `powered` generators u_a (a = 2, ..., powered + 1) are replaced by
 // -u_a^ell = (-u_a)^ell, stored as the factors u_a^ell and (-1)^1: a
@@ -15789,6 +15968,8 @@ int main() {
     test_word_x_power_mod_matches_flint();
     test_binomial_x_power_mod_matches_flint();
     test_binomial_roots_mod_prime_matches_flint();
+    test_split_quadratic_roots_mod_prime_matches_flint();
+    test_degree_one_roots_mod_q_quadratic_parts();
     test_stable_proof_scan_stops_building_columns_at_full_rank();
     test_kernel_row_root_three_way_result();
     test_compact_unit_power_root_three_way_result();

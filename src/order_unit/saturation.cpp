@@ -291,7 +291,10 @@ bool push_binomial_roots(std::vector<flint::Fmpz>& roots,
 // roots r of g have r^((q - 1) / 2) = 1 or -1, so they are the roots of
 // gcd(h - 1, g) and of gcd(h + 1, g), each a squarefree product of linear
 // factors (it divides x^((q - 1) / 2) -+ 1); a factor of degree one gives
-// its root directly and a larger one goes to nmod_poly_roots.  For a
+// its root directly, a factor of degree two gives its roots in closed form
+// in the order nmod_poly_roots would list them
+// (detail::split_quadratic_roots_mod_prime), and a larger one goes to
+// nmod_poly_roots.  For a
 // binomial g = x^n + c that the closed form declines (q | n, or a failed
 // step), h is the single term (-c)^k x^j with
 // (q - 1) / 2 = k n + j, 0 <= j < n, since x^n = -c mod g
@@ -431,6 +434,22 @@ bool degree_one_roots_mod_q_nmod(std::vector<flint::Fmpz>& roots,
                         roots.push_back(std::move(root));
                     }
                 } else if (degree > 1) {
+                    std::array<ulong, 2> quadratic_roots = {0, 0};
+                    if (degree == 2 && part->raw()->coeffs[2] == 1 &&
+                        detail::split_quadratic_roots_mod_prime(
+                                quadratic_roots, part->raw()->coeffs[1],
+                                part->raw()->coeffs[0], q)) {
+                        SILEX_PROFILE_EVENT(
+                                diagnostics, DiagnosticsModule::unit_group,
+                                "unit_group.stable_scan."
+                                "degree_one_roots_nmod_quadratic_roots");
+                        for (ulong root : quadratic_roots) {
+                            roots.emplace_back();
+                            flint::fmpz_set_ui(flint::FmpzRef(roots.back()),
+                                               root);
+                        }
+                        continue;
+                    }
                     SILEX_PROFILE_SCOPE(
                             diagnostics, DiagnosticsModule::unit_group,
                             "unit_group.stable_scan."
@@ -1842,6 +1861,80 @@ bool binomial_roots_mod_prime(std::vector<ulong>& roots,
         root = nmod_mul(root, zeta, mod);
     }
     return true;
+}
+
+bool split_quadratic_roots_mod_prime(std::array<ulong, 2>& roots,
+                                     ulong linear,
+                                     ulong constant,
+                                     ulong q) noexcept {
+    roots = {0, 0};
+    if (q < 3 || q % 2 == 0 || linear >= q || constant >= q ||
+        constant == 0) {
+        return false;
+    }
+    // The roots (-b +- s) / 2 for s^2 = D = b^2 - 4c, which are distinct
+    // and nonzero exactly when D is a nonzero square and c != 0 (Cohen,
+    // GTM 138, Proposition 5.1.4); the square root is FLINT's n_sqrtmod
+    // (Tonelli-Shanks, Algorithm 1.5.1), checked by squaring, as in
+    // monic_quadratic_factor_word (prime_ideal.cpp).
+    nmod_t mod;
+    nmod_init(&mod, q);
+    const ulong discriminant =
+            nmod_sub(nmod_mul(linear, linear, mod),
+                     nmod_mul(UWORD(4) % q, constant, mod), mod);
+    if (discriminant == 0 || n_jacobi_unsigned(discriminant, q) != 1) {
+        return false;
+    }
+    const ulong s = n_sqrtmod(discriminant, q);
+    if (s == 0 || nmod_mul(s, s, mod) != discriminant) {
+        return false;
+    }
+    // q is an odd prime below 2^64 - 1, so q + 1 does not overflow.
+    const ulong half = (q + 1) / 2;
+    const ulong minus_b = nmod_neg(linear, mod);
+    const ulong r0 = nmod_mul(nmod_add(minus_b, s, mod), half, mod);
+    const ulong r1 = nmod_mul(nmod_sub(minus_b, s, mod), half, mod);
+
+    // The order of nmod_poly_roots (nmod_poly_factor/roots.c,
+    // _nmod_poly_push_roots, and _nmod_poly_split_rabin in
+    // nmod_poly/find_distinct_nonzero_roots.c).  Below 10 it tries every
+    // residue in increasing order.  Otherwise it splits f by
+    // a = gcd((x + delta)^((q - 1) / 2) - 1, f), first with delta = 0 and
+    // then with delta = n_randint(state, q) for a state fresh from
+    // flint_rand_init, until a has degree one; a holds the root r with
+    // r + delta a nonzero square, the cofactor f / a the other, and it lists
+    // the cofactor's root first.  Each delta separates two distinct roots
+    // with probability about 1/2; past kMaxDraws draws the caller takes
+    // nmod_poly_roots, which then gives the same roots.
+    if (q < 10) {
+        roots = {std::min(r0, r1), std::max(r0, r1)};
+        return true;
+    }
+    auto square = [&](ulong r, ulong delta) {
+        return n_jacobi_unsigned(nmod_add(r, delta, mod), q) == 1;
+    };
+    constexpr int kMaxDraws = 128;
+    flint_rand_t state;
+    flint_rand_init(state);
+    ulong delta = 0;
+    bool found = false;
+    for (int draw = 0; draw <= kMaxDraws; ++draw) {
+        if (draw > 0) {
+            delta = n_randint(state, q);
+        }
+        const bool square0 = square(r0, delta);
+        if (square0 != square(r1, delta)) {
+            roots = square0 ? std::array<ulong, 2>{r1, r0}
+                            : std::array<ulong, 2>{r0, r1};
+            found = true;
+            break;
+        }
+    }
+    flint_rand_clear(state);
+    if (!found) {
+        roots = {0, 0};
+    }
+    return found;
 }
 
 bool degree_one_roots_mod_q_for_test(std::vector<flint::Fmpz>& roots,

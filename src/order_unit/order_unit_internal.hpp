@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <memory>
 #include <atomic>
 #include <vector>
@@ -573,6 +574,20 @@ bool binomial_roots_mod_prime(std::vector<ulong>& roots,
                               const ulong* f,
                               slong degree,
                               ulong q) noexcept;
+// The two roots in F_q of the monic quadratic f = x^2 + linear x + constant
+// (coefficients reduced modulo q) when they are distinct and nonzero, in
+// closed form from the square root of b^2 - 4c, listed in the order FLINT's
+// nmod_poly_roots gives for f (its Rabin splits with its fixed random seed,
+// replayed through quadratic characters; ascending below 10).  Returns
+// false, with `roots` zero, for q = 2 or even, unreduced coefficients,
+// constant = 0, or a reduction with a repeated root or no root; the caller
+// guarantees that q is prime.  The stable proof scan's root finder takes
+// the roots of a degree-two part this way, so it uses the same proof
+// columns as with nmod_poly_roots.
+bool split_quadratic_roots_mod_prime(std::array<ulong, 2>& roots,
+                                     ulong linear,
+                                     ulong constant,
+                                     ulong q) noexcept;
 // The roots r modulo the rational prime q of the defining polynomial of the
 // order's field, one for each degree-one prime (q, theta - r), as the stable
 // residue-character proof scan of prove_index_bound (saturation.cpp) takes
