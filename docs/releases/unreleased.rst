@@ -133,6 +133,20 @@ Added
 Changed
 -------
 
+- The saturation proof scans (the stable scan and the proof-prime
+  selectors) update the ``ell``-character kernel when a column is appended,
+  intersecting the previous kernel with the new character as Hecke
+  ``compute_candidates_for_saturate`` does, instead of recomputing
+  ``fmpz_mod_mat_nullspace`` on the whole proof matrix.  The update keeps the
+  basis FLINT's nullspace publishes, row for row (the unique kernel basis
+  that is the identity on the non-pivot columns of the reduced row echelon
+  form), and a multiword ``ell`` still takes the full recomputation.
+  Kernels, certification and stability counts are unchanged: ``proven``
+  outputs (the full instance JSON without timings) and every profiling
+  counter are identical on 13 corpus rows of degree 3 to 12.  Callgrind Ir
+  of the ``proven`` class-unit computation (busy machine) drops by 6.06% on
+  ``random_d9_h4_s8`` and 4.75% on ``random_d10_h2_s21``.
+
 - The exact class number ``h(D)`` of an imaginary quadratic maximal order
   with ``|D| < 2^44`` (the ``proven`` route, and the ``grh`` route below
   ``2^34``) counts the reduced forms of the fundamental discriminant ``D``

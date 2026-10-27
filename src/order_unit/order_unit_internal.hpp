@@ -889,6 +889,12 @@ bool saturation_proof_prime_column_at_degree_one_root(
 bool dlog_kernel_from_matrix(flint::FmpzMat& out,
                              const flint::FmpzMat& matrix,
                              flint::FmpzConstRef ell) noexcept;
+// dlog_kernel_from_matrix(kernel, matrix, ell), computed from `kernel`
+// holding dlog_kernel_from_matrix of `matrix` without its last column (any
+// value when `matrix` has one column).  The published basis is the same.
+bool dlog_kernel_after_append(flint::FmpzMat& kernel,
+                              const flint::FmpzMat& matrix,
+                              flint::FmpzConstRef ell) noexcept;
 bool saturation_prime_usable(const OrderUnitGroup& group,
                              const PrimeIdeal& prime,
                              flint::FmpzConstRef ell) noexcept;

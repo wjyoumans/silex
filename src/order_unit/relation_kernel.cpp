@@ -2119,6 +2119,125 @@ bool dlog_kernel_from_matrix(flint::FmpzMat& out,
     return true;
 }
 
+// Updates `kernel` from the dlog kernel of `matrix` without its last
+// column to the dlog kernel of `matrix`, as reference
+// compute_candidates_for_saturate (Saturate.jl lines 175-180, see
+// docs/reference/algorithms_and_sources.rst) intersects the current kernel
+// with the kernel of the new character at each prime (`z = kernel(z*A)`,
+// `A = A*z`).  The new kernel is
+// {x in K : x.c = 0} for the old kernel K and the new column c.
+//
+// The basis stays the one dlog_kernel_from_matrix publishes, row for row.
+// FLINT gr_mat_nullspace_from_rref (src/gr_mat/nullspace.c) builds one
+// vector per non-pivot column f of rref(M^T), in increasing f, with 1 at f,
+// 0 at the other non-pivot columns and the negated rref entries at the pivot
+// columns; that basis is the only one of the kernel that is the identity on
+// the non-pivot columns.  A vector of the old basis b_f is supported on f and
+// the pivot columns before f, so a kernel vector sum a_f b_f has a_f = 0 for
+// every f after its last nonzero coordinate.  With s_f = b_f.c and t the
+// first f with s_f != 0, column t is the one that becomes a pivot: a new
+// kernel vector whose last nonzero coordinate is t would have
+// a_t s_t = 0, while for f > t the vector b_f - (s_f / s_t) b_t is in the
+// new kernel.  Those vectors and the b_f for f < t are the identity on the
+// remaining non-pivot columns, hence the canonical basis of the new kernel.
+// If every s_f is 0, c is orthogonal to K and the kernel is unchanged.
+bool dlog_kernel_after_append(flint::FmpzMat& kernel,
+                              const flint::FmpzMat& matrix,
+                              flint::FmpzConstRef ell) noexcept {
+    const slong rank = flint::fmpz_mat_nrows(matrix);
+    const slong len = flint::fmpz_mat_ncols(matrix);
+    // A multiword ell, or a kernel without the width of the matrix rows
+    // (no previous kernel), takes the full recomputation.
+    if (len == 0 || flint::fmpz_sgn(ell) <= 0 ||
+        !flint::fmpz_abs_fits_ui(ell) ||
+        (len > 1 && flint::fmpz_mat_ncols(kernel) != rank)) {
+        return dlog_kernel_from_matrix(kernel, matrix, ell);
+    }
+    if (!flint::fmpz_is_prime(ell)) {
+        return false;
+    }
+
+    if (len == 1) {
+        // The kernel of the matrix without columns, as
+        // gr_mat_nullspace_from_rref returns it for rank 0.
+        flint::FmpzMat identity(rank, rank);
+        for (slong i = 0; i < rank; ++i) {
+            flint::fmpz_one(flint::fmpz_mat_entry(identity, i, i));
+        }
+        kernel = std::move(identity);
+    }
+
+    const slong nullity = flint::fmpz_mat_nrows(kernel);
+    if (nullity == 0) {
+        return true;
+    }
+
+    nmod_t mod;
+    nmod_init(&mod, flint::fmpz_get_ui(ell));
+    std::vector<ulong> column(static_cast<std::size_t>(rank));
+    for (slong i = 0; i < rank; ++i) {
+        column[static_cast<std::size_t>(i)] = flint::fmpz_fdiv_ui(
+                flint::fmpz_mat_entry(matrix, i, len - 1), mod.n);
+    }
+    // Kernel entries are reduced residues, as dlog_kernel_from_matrix
+    // publishes them.
+    auto entry = [&](slong row, slong col) noexcept -> ulong {
+        return ::fmpz_get_ui(::fmpz_mat_entry(kernel.raw(), row, col));
+    };
+    auto pairing = [&](slong row) noexcept -> ulong {
+        ulong sum = 0;
+        for (slong i = 0; i < rank; ++i) {
+            const ulong c = column[static_cast<std::size_t>(i)];
+            if (c != 0) {
+                sum = nmod_add(sum, nmod_mul(entry(row, i), c, mod), mod);
+            }
+        }
+        return sum;
+    };
+
+    slong pivot_row = 0;
+    ulong pivot_pairing = 0;
+    for (; pivot_row < nullity; ++pivot_row) {
+        pivot_pairing = pairing(pivot_row);
+        if (pivot_pairing != 0) {
+            break;
+        }
+    }
+    if (pivot_row == nullity) {
+        return true;
+    }
+
+    const ulong pivot_inverse = n_invmod(pivot_pairing, mod.n);
+    flint::FmpzMat candidate(nullity - 1, rank);
+    for (slong j = 0; j < pivot_row; ++j) {
+        for (slong i = 0; i < rank; ++i) {
+            ::fmpz_swap(::fmpz_mat_entry(candidate.raw(), j, i),
+                        ::fmpz_mat_entry(kernel.raw(), j, i));
+        }
+    }
+    for (slong j = pivot_row + 1; j < nullity; ++j) {
+        const ulong s = pairing(j);
+        if (s == 0) {
+            for (slong i = 0; i < rank; ++i) {
+                ::fmpz_swap(::fmpz_mat_entry(candidate.raw(), j - 1, i),
+                            ::fmpz_mat_entry(kernel.raw(), j, i));
+            }
+            continue;
+        }
+        const ulong factor = nmod_mul(s, pivot_inverse, mod);
+        for (slong i = 0; i < rank; ++i) {
+            const ulong value = nmod_sub(
+                    entry(j, i), nmod_mul(factor, entry(pivot_row, i), mod),
+                    mod);
+            flint::fmpz_set_ui(flint::fmpz_mat_entry(candidate, j - 1, i),
+                               value);
+        }
+    }
+
+    kernel = std::move(candidate);
+    return true;
+}
+
 bool residue_dlog_character_column(flint::FmpzMat& out,
                                    const OrderUnitGroup& group,
                                    const PrimeIdeal& prime,

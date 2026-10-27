@@ -1061,8 +1061,8 @@ bool select_stable_proof_primes(
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.proof_dlog_kernel_nullspace");
-            if (!detail::dlog_kernel_from_matrix(current_kernel, proof_matrix,
-                                                 ell)) {
+            if (!detail::dlog_kernel_after_append(current_kernel, proof_matrix,
+                                                  ell)) {
                 result = ProofPrimeScanResult::failed;
                 return false;
             }
@@ -2092,8 +2092,8 @@ bool select_saturation_proof_kernel_direct_degree_one(
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.proof_dlog_kernel_nullspace");
-            if (!detail::dlog_kernel_from_matrix(current_kernel, proof_matrix,
-                                                 ell)) {
+            if (!detail::dlog_kernel_after_append(current_kernel, proof_matrix,
+                                                  ell)) {
                 return false;
             }
             have_kernel = true;
@@ -2445,8 +2445,8 @@ bool OrderUnitGroup::select_saturation_proof_primes(
             SILEX_PROFILE_EVENT(
                     diagnostics_, DiagnosticsModule::unit_group,
                     "unit_group.proof_dlog_kernel_nullspace");
-            if (!detail::dlog_kernel_from_matrix(current_kernel, proof_matrix,
-                                                 ell)) {
+            if (!detail::dlog_kernel_after_append(current_kernel, proof_matrix,
+                                                  ell)) {
                 return ProofPrimeScanResult::failed;
             }
             have_kernel = true;
@@ -2616,8 +2616,8 @@ bool OrderUnitGroup::select_saturation_proof_primes(
                 SILEX_PROFILE_EVENT(
                         diagnostics_, DiagnosticsModule::unit_group,
                         "unit_group.proof_dlog_kernel_nullspace");
-                if (!detail::dlog_kernel_from_matrix(current_kernel,
-                                                     proof_matrix, ell)) {
+                if (!detail::dlog_kernel_after_append(current_kernel,
+                                                      proof_matrix, ell)) {
                     return false;
                 }
                 have_kernel = true;

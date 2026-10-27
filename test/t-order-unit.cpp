@@ -10396,6 +10396,132 @@ sflint::FmpzMat append_proof_column_for_test(const sflint::FmpzMat& matrix,
     return out;
 }
 
+// dlog_kernel_after_append, applied after each appended column, gives the
+// kernel of dlog_kernel_from_matrix on the whole matrix, entry for entry, at
+// word-size primes (the incremental route) and at a multiword prime (the full
+// recomputation).  The columns mix random entries of both signs beyond ell,
+// zero columns, multiples of ell, unit vectors and combinations of earlier
+// columns, so appends that shrink the kernel and appends that leave it
+// unchanged both occur, at every position of the new pivot.
+int test_dlog_kernel_after_append_matches_full_recomputation() {
+    sflint::Fmpz multiword_prime;
+    fmpz_one(multiword_prime.raw());
+    fmpz_mul_2exp(multiword_prime.raw(), multiword_prime.raw(), 64);
+    fmpz_nextprime(multiword_prime.raw(), multiword_prime.raw(), 1);
+    std::vector<sflint::Fmpz> ells;
+    for (const ulong value : {2UL, 3UL, 5UL, 7UL, 13UL, 1000003UL,
+                              2305843009213693951UL}) {
+        ells.emplace_back();
+        fmpz_set_ui(ells.back().raw(), value);
+    }
+    ells.emplace_back();
+    fmpz_set(ells.back().raw(), multiword_prime.raw());
+
+    flint_rand_t state;
+    flint_rand_init(state);
+    slong shrinking_appends = 0;
+    slong unchanged_appends = 0;
+    for (const sflint::Fmpz& ell : ells) {
+        for (const slong rank : {0L, 1L, 2L, 3L, 5L, 8L}) {
+            for (slong trial = 0; trial < 12; ++trial) {
+                sflint::FmpzMat matrix(rank, 0);
+                sflint::FmpzMat kernel(0, rank);
+                slong previous_nullity = rank;
+                const slong appends = 2 * rank + 4;
+                for (slong step = 0; step < appends; ++step) {
+                    sflint::FmpzMat column(rank, 1);
+                    const ulong kind = n_randint(state, 5);
+                    const slong cols = sflint::fmpz_mat_ncols(matrix);
+                    for (slong i = 0; i < rank; ++i) {
+                        fmpz* entry = fmpz_mat_entry(column.raw(), i, 0);
+                        if (kind == 0) {
+                            // Random in (-3 ell, 3 ell).
+                            sflint::Fmpz bound;
+                            fmpz_mul_ui(bound.raw(), ell.raw(), 6);
+                            fmpz_randm(entry, state, bound.raw());
+                            fmpz_submul_ui(entry, ell.raw(), 3);
+                        } else if (kind == 1) {
+                            fmpz_mul_si(entry, ell.raw(),
+                                        static_cast<slong>(
+                                                n_randint(state, 5)) - 2);
+                        } else if (kind == 2) {
+                            if (static_cast<ulong>(i) ==
+                                n_randint(state,
+                                          static_cast<ulong>(rank))) {
+                                fmpz_set_si(entry, -1);
+                            }
+                        } else if (kind == 3 && cols > 0) {
+                            // A combination of earlier columns: never
+                            // shrinks the kernel.
+                            for (slong j = 0; j < cols; ++j) {
+                                fmpz_addmul_si(
+                                        entry,
+                                        fmpz_mat_entry(matrix.raw(), i, j),
+                                        static_cast<slong>(
+                                                n_randint(state, 7)) - 3);
+                            }
+                        }
+                        // kind 4 (and kind 3 with no earlier column): zero.
+                    }
+                    matrix = append_proof_column_for_test(matrix, column);
+
+                    sflint::FmpzMat full(0, 0);
+                    assert(silex::detail::dlog_kernel_from_matrix(
+                            full, matrix, sflint::FmpzConstRef(ell)));
+                    assert(silex::detail::dlog_kernel_after_append(
+                            kernel, matrix, sflint::FmpzConstRef(ell)));
+                    assert(fmpz_mat_nrows(kernel.raw()) ==
+                           fmpz_mat_nrows(full.raw()));
+                    assert(fmpz_mat_ncols(kernel.raw()) ==
+                           fmpz_mat_ncols(full.raw()));
+                    assert(fmpz_mat_equal(kernel.raw(), full.raw()) != 0);
+
+                    const slong nullity = fmpz_mat_nrows(kernel.raw());
+                    if (nullity < previous_nullity) {
+                        ++shrinking_appends;
+                    } else if (nullity > 0) {
+                        ++unchanged_appends;
+                    }
+                    previous_nullity = nullity;
+                }
+            }
+        }
+    }
+    flint_rand_clear(state);
+    assert(shrinking_appends > 100);
+    assert(unchanged_appends > 100);
+
+    // A kernel of another width (no previous kernel) is recomputed in full.
+    sflint::Fmpz five;
+    fmpz_set_ui(five.raw(), 5);
+    sflint::FmpzMat matrix(3, 2);
+    fmpz_set_si(fmpz_mat_entry(matrix.raw(), 0, 0), 1);
+    fmpz_set_si(fmpz_mat_entry(matrix.raw(), 1, 1), 7);
+    sflint::FmpzMat stale(1, 1);
+    sflint::FmpzMat full(0, 0);
+    assert(silex::detail::dlog_kernel_from_matrix(
+            full, matrix, sflint::FmpzConstRef(five)));
+    assert(silex::detail::dlog_kernel_after_append(
+            stale, matrix, sflint::FmpzConstRef(five)));
+    assert(fmpz_mat_equal(stale.raw(), full.raw()) != 0);
+
+    // A composite ell fails, as dlog_kernel_from_matrix does, with one
+    // column and with more.
+    sflint::Fmpz composite;
+    fmpz_set_ui(composite.raw(), 15);
+    sflint::FmpzMat one_column(3, 1);
+    sflint::FmpzMat kernel(0, 3);
+    assert(!silex::detail::dlog_kernel_from_matrix(
+            kernel, one_column, sflint::FmpzConstRef(composite)));
+    assert(!silex::detail::dlog_kernel_after_append(
+            kernel, one_column, sflint::FmpzConstRef(composite)));
+    sflint::FmpzMat identity(3, 3);
+    fmpz_mat_one(identity.raw());
+    assert(!silex::detail::dlog_kernel_after_append(
+            identity, matrix, sflint::FmpzConstRef(composite)));
+    return 0;
+}
+
 // For each column of `columns`, the index of a distinct entry of `directs`
 // equal to it, taken from the entries with available[i] set.  Asserts that
 // every column has one and that every available entry is used: the columns
@@ -16396,6 +16522,7 @@ int main() {
     test_dependent_relation_y_root_uses_torsion_check();
     test_add_dependent_unit_precision_cap();
     test_saturate_row_rank_zero_and_failures();
+    test_dlog_kernel_after_append_matches_full_recomputation();
     test_residue_dlog_kernel_real_quadratic();
     test_residue_dlog_proof_kernel_torsion();
     test_residue_dlog_proof_kernel_nonpower_basis_order();
