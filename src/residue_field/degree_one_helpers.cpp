@@ -7,6 +7,8 @@
 #include <utility>
 
 #include <flint/fmpq_poly.h>
+#include <flint/fmpz.h>
+#include <flint/fmpz_vec.h>
 #include <flint/fmpz_factor.h>
 #include <flint/nf.h>
 #include <flint/nf_elem.h>
@@ -592,20 +594,128 @@ bool factored_value_at_degree_one_root_nmod(ulong& out,
                                       denominator_product, p, mod);
 }
 
-void FactoredElementNmodReduction::reduce(const FactoredElement& element,
-                                          ulong p) noexcept {
-    element_ = &element;
-    p_ = p;
-    defined_ = false;
-    factors_.clear();
-    coefficients_.clear();
-    if (!element.is_defined() || p < 2) {
-        return;
+namespace {
+
+// A word that equal integers share, read in place for word-size values.
+ulong fmpz_hash_word(const fmpz* value) noexcept {
+    if (!COEFF_IS_MPZ(*value)) {
+        return static_cast<ulong>(*value);
     }
-    const NumberField* parent = element.parent();
-    const nf_struct* field =
-            parent == nullptr ? nullptr : parent->raw_flint_field();
-    if (field == nullptr) {
+    // Any function of the value will do; this one is cheap for the rare
+    // multiword coefficient.
+    return ::fmpz_fdiv_ui(value, UWORD(0x1fffffffffffffff)) ^
+           (::fmpz_sgn(value) < 0 ? UWORD(1) : UWORD(0));
+}
+
+ulong mix_hash(ulong hash, ulong word) noexcept {
+    hash ^= word;
+    hash *= UWORD(0x9e3779b97f4a7c15);
+    return hash ^ (hash >> 29);
+}
+
+// Hash of a stored form, so that equal stored forms hash alike.
+ulong stored_form_hash(const StoredForm& form) noexcept {
+    ulong hash = mix_hash(0, static_cast<ulong>(form.length));
+    hash = mix_hash(hash, fmpz_hash_word(form.denominator));
+    for (slong i = 0; i < form.length; ++i) {
+        hash = mix_hash(hash, fmpz_hash_word(form.coefficients + i));
+    }
+    return hash;
+}
+
+bool stored_forms_equal(const StoredForm& a, const StoredForm& b) noexcept {
+    return a.length == b.length &&
+           ::fmpz_equal(a.denominator, b.denominator) != 0 &&
+           (a.length == 0 ||
+            ::_fmpz_vec_equal(a.coefficients, b.coefficients, a.length) != 0);
+}
+
+}  // namespace
+
+void FactoredElementsNmodReduction::index(
+        std::span<const FactoredElement> elements) noexcept {
+    element_count_ = elements.size();
+    indexed_ = false;
+    reduced_ = false;
+    factors_.clear();
+    entries_.clear();
+    entry_starts_.clear();
+    coefficients_.clear();
+
+    // Open addressing on stored_form_hash; each slot holds a factors_ index
+    // plus one, or zero when empty.  The table has at least twice as many
+    // slots as there are factors.
+    std::size_t total = 0;
+    for (const FactoredElement& element : elements) {
+        if (!element.is_defined()) {
+            return;
+        }
+        const NumberField* parent = element.parent();
+        if (parent == nullptr || parent->raw_flint_field() == nullptr) {
+            return;
+        }
+        total += element.factors().size();
+    }
+    std::size_t slots = 16;
+    while (slots < 2 * total) {
+        slots *= 2;
+    }
+    std::vector<std::size_t> table(slots, 0);
+    std::vector<ulong> hashes;
+    hashes.reserve(total);
+    entries_.reserve(total);
+    entry_starts_.reserve(elements.size() + 1);
+
+    for (const FactoredElement& element : elements) {
+        entry_starts_.push_back(entries_.size());
+        const nf_struct* field = element.parent()->raw_flint_field();
+        for (const auto& entry : element.factors()) {
+            if (entry.exponent == 0) {
+                continue;
+            }
+            const StoredForm form =
+                    stored_form(entry.factor.raw_flint_element(), field);
+            const ulong hash = stored_form_hash(form);
+            std::size_t slot = static_cast<std::size_t>(hash) & (slots - 1);
+            std::size_t found = factors_.size();
+            while (table[slot] != 0) {
+                const std::size_t candidate = table[slot] - 1;
+                const Factor& known = factors_[candidate];
+                if (hashes[candidate] == hash && known.field == field &&
+                    stored_forms_equal(
+                            stored_form(known.factor->raw_flint_element(),
+                                        field),
+                            form)) {
+                    found = candidate;
+                    break;
+                }
+                slot = (slot + 1) & (slots - 1);
+            }
+            if (found == factors_.size()) {
+                Factor distinct;
+                distinct.factor = &entry.factor;
+                distinct.field = field;
+                factors_.push_back(distinct);
+                hashes.push_back(hash);
+                table[slot] = factors_.size();
+            }
+            Entry reduced;
+            reduced.exponent = entry.exponent;
+            reduced.factor = found;
+            entries_.push_back(reduced);
+        }
+    }
+    entry_starts_.push_back(entries_.size());
+    numerators_.assign(factors_.size(), 0);
+    denominators_.assign(factors_.size(), 0);
+    indexed_ = true;
+}
+
+void FactoredElementsNmodReduction::reduce(ulong p) noexcept {
+    reduced_ = false;
+    coefficients_.clear();
+    p_ = p;
+    if (!indexed_ || p < 2) {
         return;
     }
 
@@ -615,76 +725,78 @@ void FactoredElementNmodReduction::reduce(const FactoredElement& element,
     // unless it is zero (the fallback route then evaluates the factor at
     // each root), every coefficient of num(x) mod p.  The first pass sizes
     // coefficients_ for the second, which writes the residues.
-    const FactorSpan<Element> factors = element.factors();
-    factors_.reserve(factors.size());
     std::size_t total_length = 0;
-    for (std::size_t k = 0; k < factors.size(); ++k) {
-        const auto& entry = factors[k];
-        if (entry.exponent == 0) {
-            continue;
-        }
+    for (Factor& factor : factors_) {
         const StoredForm form =
-                stored_form(entry.factor.raw_flint_element(), field);
-        Factor reduced;
-        reduced.exponent = entry.exponent;
-        reduced.index = k;
-        reduced.denominator = ::fmpz_get_nmod(form.denominator, mod_);
-        reduced.offset = total_length;
-        reduced.length = reduced.denominator == 0
-                                 ? 0
-                                 : static_cast<std::size_t>(form.length);
-        total_length += reduced.length;
-        factors_.push_back(reduced);
+                stored_form(factor.factor->raw_flint_element(), factor.field);
+        factor.denominator = ::fmpz_get_nmod(form.denominator, mod_);
+        factor.offset = total_length;
+        factor.length = factor.denominator == 0
+                                ? 0
+                                : static_cast<std::size_t>(form.length);
+        total_length += factor.length;
     }
     coefficients_.resize(total_length);
     ulong* coefficients = coefficients_.data();
-    for (const Factor& reduced : factors_) {
-        const StoredForm form = stored_form(
-                factors[reduced.index].factor.raw_flint_element(), field);
-        for (std::size_t i = 0; i < reduced.length; ++i) {
-            coefficients[reduced.offset + i] =
+    for (const Factor& factor : factors_) {
+        const StoredForm form =
+                stored_form(factor.factor->raw_flint_element(), factor.field);
+        for (std::size_t i = 0; i < factor.length; ++i) {
+            coefficients[factor.offset + i] =
                     ::fmpz_get_nmod(form.coefficients + i, mod_);
         }
     }
-    defined_ = true;
+    reduced_ = true;
 }
 
-bool FactoredElementNmodReduction::value_at_degree_one_root(
-        ulong& out,
-        ulong root) const noexcept {
-    if (!defined_ || element_ == nullptr) {
+bool FactoredElementsNmodReduction::values_at_degree_one_root(
+        std::span<ulong> out,
+        ulong root) noexcept {
+    if (!indexed_ || !reduced_ || out.size() != element_count_) {
         return false;
     }
 
-    // The steps of factored_value_at_degree_one_root_nmod, factor by factor,
-    // with the reductions mod p read from reduce().
+    // The steps of factored_value_at_degree_one_root_nmod: each distinct
+    // factor's value at the root, from the reductions mod p read from
+    // reduce(), then, for each element, the product of its factor powers.
     const ulong reduced_root = root % p_;
-    const FactorSpan<Element> factors = element_->factors();
-    ulong numerator_product = 1;
-    ulong denominator_product = 1;
-    for (const Factor& factor : factors_) {
+    for (std::size_t d = 0; d < factors_.size(); ++d) {
+        const Factor& factor = factors_[d];
         ulong numerator = 0;
         ulong denominator = factor.denominator;
         if (denominator != 0) {
             numerator = reduced_coefficients_value(
                     coefficients_.data() + factor.offset, factor.length,
                     reduced_root, mod_);
-        } else if (!fmpq_poly_value_at_root_nmod(
-                           numerator, denominator,
-                           factors[factor.index].factor, p_, reduced_root,
-                           mod_)) {
+        } else if (!fmpq_poly_value_at_root_nmod(numerator, denominator,
+                                                 *factor.factor, p_,
+                                                 reduced_root, mod_)) {
             return false;
         }
-        if (!multiply_factor_power_nmod(numerator_product,
-                                        denominator_product, numerator,
-                                        denominator, factor.exponent, p_,
-                                        p_inverse_, mod_)) {
+        numerators_[d] = numerator;
+        denominators_[d] = denominator;
+    }
+
+    for (std::size_t i = 0; i < element_count_; ++i) {
+        ulong numerator_product = 1;
+        ulong denominator_product = 1;
+        for (std::size_t k = entry_starts_[i]; k < entry_starts_[i + 1];
+             ++k) {
+            const Entry& entry = entries_[k];
+            if (!multiply_factor_power_nmod(
+                        numerator_product, denominator_product,
+                        numerators_[entry.factor],
+                        denominators_[entry.factor], entry.exponent, p_,
+                        p_inverse_, mod_)) {
+                return false;
+            }
+        }
+        if (!finish_factored_value_nmod(out[i], numerator_product,
+                                        denominator_product, p_, mod_)) {
             return false;
         }
     }
-
-    return finish_factored_value_nmod(out, numerator_product,
-                                      denominator_product, p_, mod_);
+    return true;
 }
 
 bool element_value_at_degree_one_root(flint::Fmpz& out,

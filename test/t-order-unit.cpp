@@ -10277,8 +10277,10 @@ int test_stable_proof_prime_columns_match_residue_field_route() {
 // call for one group: the roots run over all of [0, q) (most are not roots of the
 // defining polynomial, and the evaluation fails where a factor vanishes),
 // upwards and then downwards, plus q + 3, outside the word route's reduced
-// range; q and ell change between runs, so the state is rebuilt, and each
-// group has its own state.
+// range.  Between runs q changes with ell fixed (the state keeps the
+// generators and their distinct factors and redoes the parts that depend
+// on q), q returns to an earlier value, and ell changes (the state is
+// rebuilt); each group has its own state.
 // Q(zeta_13) has torsion order 26, so ell = 2 and 13 add the torsion row.
 int test_degree_one_root_column_state_matches_stateless() {
     silex::NumberField field = cyclotomic13_field();
@@ -10286,7 +10288,8 @@ int test_degree_one_root_column_state_matches_stateless() {
     silex::Order maximal = silex::test::verified_maximal_order(
             silex::test::equation_order(field));
     const silex::Order* orders[] = {&equation, &maximal};
-    const slong cases[][2] = {{2, 53}, {3, 79}, {13, 79}, {5, 131}};
+    const slong cases[][2] = {{2, 53},  {3, 79},  {3, 97},  {3, 79},
+                              {13, 79}, {13, 53}, {5, 131}, {5, 11}};
     slong available = 0;
     slong declined = 0;
     for (const silex::Order* order : orders) {

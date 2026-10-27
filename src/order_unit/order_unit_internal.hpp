@@ -749,14 +749,17 @@ bool saturation_proof_prime_column_at_degree_one_root(
         flint::FmpzConstRef root,
         flint::FmpzConstRef ell) noexcept;
 // The parts of saturation_proof_prime_column_at_degree_one_root that do not
-// depend on the root, kept for its calls at several roots modulo the same p
-// (the degree-one primes over one rational prime): the proof rank, the
-// quotient-log setup (cofactor and order-ell generator), and, for the word
-// route, the free generators with their factors reduced mod p and the
-// torsion generator.  The overload taking a state builds them at its first
-// call and rebuilds them when a call names another p or ell or a group at another
-// address (the group is identified by its address only, so a different group
-// built at a reused address is not noticed), so every column, and every
+// depend on the root, kept for its calls at several roots and several
+// primes p: the proof rank, which depends on the group and ell; the
+// quotient-log setup (cofactor and order-ell generator), which depends on p
+// and ell; and, for the word route, the free generators with their distinct
+// factors indexed (equal factors shared by several generators are reduced
+// and evaluated once), those factors reduced mod p, and the torsion
+// generator.  The overload taking a state builds them at its first call,
+// rebuilds everything when a call names another ell or a group at another
+// address (the group is identified by its address only, so a different
+// group built at a reused address is not noticed), and redoes the parts
+// that depend on p when a call names another p, so every column, and every
 // failure, is that of the overload without a state.  The group must not
 // change, and must not be replaced by another at the same address, while a
 // state built from it is in use; use a new state for a new group.

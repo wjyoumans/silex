@@ -570,11 +570,16 @@ bool stable_scan_degree_one_roots(std::vector<flint::Fmpz>& roots,
 // otherwise returns true, also when `visit_column` stopped the walk.  No
 // column that is built can make the walk give up on q: a column that is
 // unavailable is left out and the walk moves to the next prime over q.
+// The direct columns go through `column_state`, which a caller may share
+// across the values of q of one scan over `group` and `ell`; the columns
+// are those of a new state either way.
 template <typename VisitColumn>
-bool visit_stable_proof_prime_columns(const OrderUnitGroup& group,
-                                      flint::FmpzConstRef q,
-                                      flint::FmpzConstRef ell,
-                                      VisitColumn& visit_column) noexcept {
+bool visit_stable_proof_prime_columns(
+        const OrderUnitGroup& group,
+        flint::FmpzConstRef q,
+        flint::FmpzConstRef ell,
+        detail::DegreeOneRootColumnState& column_state,
+        VisitColumn& visit_column) noexcept {
     const Order* order = group.parent();
     slong proof_rank = 0;
     if (!group.is_set() || order == nullptr ||
@@ -596,13 +601,11 @@ bool visit_stable_proof_prime_columns(const OrderUnitGroup& group,
                 group.diagnostics(), DiagnosticsModule::unit_group,
                 "unit_group.stable_scan.degree_one_decomposition");
         bool decomposed = false;
-        // The roots share q, so with two or more roots the columns share
-        // the work that does not depend on the root (the quotient-log setup
-        // and the generators' factors reduced mod q) through one state.  A
-        // single root takes the overload without a state, which reduces the
-        // factors in place instead of storing the reductions.  Both
-        // overloads give the same column and the same failures.
-        detail::DegreeOneRootColumnState column_state;
+        // The columns share the work that does not depend on the root (the
+        // quotient-log setup and the generators' factors reduced mod q) and
+        // the work that depends on neither the root nor q (the generators
+        // and their distinct factors) through `column_state`.  It gives the
+        // column and the failures of the overload without a state.
         for (const flint::Fmpz& root : roots) {
             SILEX_PROFILE_EVENT(
                     group.diagnostics(), DiagnosticsModule::unit_group,
@@ -612,14 +615,9 @@ bool visit_stable_proof_prime_columns(const OrderUnitGroup& group,
                     "unit_group.stable_scan.dlog_column_test");
             flint::FmpzMat proof_column(proof_rank, 1);
             const bool available =
-                    roots.size() >= 2
-                            ? detail::saturation_proof_prime_column_at_degree_one_root(
-                                      proof_column, group, q,
-                                      flint::FmpzConstRef(root), ell,
-                                      column_state)
-                            : detail::saturation_proof_prime_column_at_degree_one_root(
-                                      proof_column, group, q,
-                                      flint::FmpzConstRef(root), ell);
+                    detail::saturation_proof_prime_column_at_degree_one_root(
+                            proof_column, group, q, flint::FmpzConstRef(root),
+                            ell, column_state);
             if (available) {
                 SILEX_PROFILE_EVENT(
                         group.diagnostics(), DiagnosticsModule::unit_group,
@@ -1024,6 +1022,10 @@ bool select_stable_proof_primes(
                                          ? max_aux_primes_override
                                          : kStableProofMaxAuxPrimes;
     slong examined_primes = 0;
+    // One column state for the whole scan: `group` and `ell` are fixed, so
+    // the generators and their distinct factors are found once and only
+    // the parts that depend on q are redone at each q.
+    detail::DegreeOneRootColumnState column_state;
     // The proof columns at the degree-one primes over q, in the order of
     // detail::stable_proof_prime_columns, each appended to the
     // proof matrix as soon as it is built.  The walk over the primes above q
@@ -1098,7 +1100,8 @@ bool select_stable_proof_primes(
             }
             return true;
         };
-        if (!visit_stable_proof_prime_columns(group, q, ell, process_column)) {
+        if (!visit_stable_proof_prime_columns(group, q, ell, column_state,
+                                              process_column)) {
             return ProofPrimeScanResult::keep_scanning;
         }
         return result;
@@ -1697,7 +1700,9 @@ bool stable_proof_prime_columns(std::vector<flint::FmpzMat>& columns,
         columns.push_back(std::move(column));
         return true;
     };
-    return visit_stable_proof_prime_columns(group, q, ell, collect);
+    detail::DegreeOneRootColumnState column_state;
+    return visit_stable_proof_prime_columns(group, q, ell, column_state,
+                                            collect);
 }
 
 bool binomial_x_power_mod(ulong* power,

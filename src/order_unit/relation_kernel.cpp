@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -1871,23 +1872,33 @@ bool saturation_proof_prime_column_at_degree_one_root(
 }
 
 struct DegreeOneRootColumnState::Data {
-    // The arguments the state was built for.
+    // The group and ell the state was built for.
     const OrderUnitGroup* group = nullptr;
-    flint::Fmpz p;
     flint::Fmpz ell;
 
-    // The checks and quotient-log setup that open every column.
-    bool setup = false;
+    // The checks that open every column and depend on the group and ell
+    // only, and the proof rank they give.
+    bool checked = false;
     slong proof_rank = 0;
+
+    // The p of the quotient-log setup, and that setup.
+    bool have_p = false;
+    flint::Fmpz p;
+    bool setup = false;
     flint::Fmpz cofactor;
     flint::Fmpz quotient_generator;
 
     // The word-route entries, built at the first word-route column:
-    // `word_entries` is false when one cannot be formed at any root.
+    // `word_entries` is false when one cannot be formed at any p or root.
+    // The free generators and their distinct factors depend on the group
+    // only; `reductions` holds them reduced mod `reduced_p` once
+    // `reduced` is set.
     bool word_built = false;
     bool word_entries = false;
     std::vector<FactoredElement> generators;
-    std::vector<FactoredElementNmodReduction> reductions;
+    FactoredElementsNmodReduction reductions;
+    bool reduced = false;
+    ulong reduced_p = 0;
     Element torsion_value;
 };
 
@@ -1896,14 +1907,13 @@ DegreeOneRootColumnState::~DegreeOneRootColumnState() noexcept = default;
 
 namespace {
 
-// The root-independent part of degree_one_root_column_word: the free
-// generators, each with its factors reduced mod p, and the value of the
+// The root- and p-independent part of degree_one_root_column_word: the free
+// generators, with their distinct factors indexed, and the value of the
 // torsion generator when the column has a torsion row.  Returns false where
-// degree_one_root_column_word fails for a root-independent reason.
+// degree_one_root_column_word fails for a reason that depends on neither.
 bool build_degree_one_root_word_entries(DegreeOneRootColumnState::Data& state,
                                         const OrderUnitGroup& group,
-                                        slong rows,
-                                        ulong p) noexcept {
+                                        slong rows) noexcept {
     const Order* order = group.parent();
     const NumberField* field = order == nullptr ? nullptr : order->parent();
     const slong rank = group.free_rank();
@@ -1911,8 +1921,8 @@ bool build_degree_one_root_word_entries(DegreeOneRootColumnState::Data& state,
         return false;
     }
 
-    // The reductions borrow the generators, so `generators` is filled before
-    // any reduction and never reallocated afterwards.
+    // The index borrows the generators, so `generators` is filled before
+    // the index is made and never reallocated afterwards.
     state.generators.reserve(static_cast<std::size_t>(rank));
     for (slong i = 0; i < rank; ++i) {
         state.generators.emplace_back(*field);
@@ -1920,10 +1930,8 @@ bool build_degree_one_root_word_entries(DegreeOneRootColumnState::Data& state,
             return false;
         }
     }
-    state.reductions.resize(state.generators.size());
-    for (std::size_t i = 0; i < state.generators.size(); ++i) {
-        state.reductions[i].reduce(state.generators[i], p);
-    }
+    state.reductions.index(std::span<const FactoredElement>(
+            state.generators.data(), state.generators.size()));
     if (rows > rank) {
         OrderElement torsion(*order);
         Element torsion_value(*field);
@@ -1937,8 +1945,10 @@ bool build_degree_one_root_word_entries(DegreeOneRootColumnState::Data& state,
 }
 
 // degree_one_root_column_word with the root-independent entries read from
-// `state`: the free generator values come from their reductions mod p,
-// which give the residues factored_value_at_degree_one_root_nmod gives.
+// `state`: the free generator values come from their factors reduced mod p,
+// each distinct factor evaluated once, which give the residues
+// factored_value_at_degree_one_root_nmod gives, and fail exactly where one
+// of those calls fails.
 bool degree_one_root_column_word(flint::FmpzMat& candidate,
                                  const OrderUnitGroup& group,
                                  flint::FmpzConstRef p,
@@ -1959,21 +1969,23 @@ bool degree_one_root_column_word(flint::FmpzMat& candidate,
     if (!state.word_built) {
         state.word_built = true;
         state.word_entries =
-                build_degree_one_root_word_entries(state, group, rows, word.p);
+                build_degree_one_root_word_entries(state, group, rows);
     }
     if (!state.word_entries) {
         return false;
     }
+    if (!state.reduced || state.reduced_p != word.p) {
+        state.reductions.reduce(word.p);
+        state.reduced = true;
+        state.reduced_p = word.p;
+    }
 
     std::vector<ulong> values;
     values.reserve(static_cast<std::size_t>(rows));
-    for (slong i = 0; i < rank; ++i) {
-        ulong value = 0;
-        if (!state.reductions[static_cast<std::size_t>(i)]
-                     .value_at_degree_one_root(value, word.root)) {
-            return false;
-        }
-        values.push_back(value);
+    values.resize(static_cast<std::size_t>(rank), 0);
+    if (!state.reductions.values_at_degree_one_root(
+                std::span<ulong>(values.data(), values.size()), word.root)) {
+        return false;
     }
     if (rows > rank) {
         flint::Fmpz value;
@@ -2001,29 +2013,35 @@ bool saturation_proof_prime_column_at_degree_one_root(
                         "unit_group.proof_degree_one_root_column");
     DegreeOneRootColumnState::Data* data = state.data.get();
     if (data == nullptr || data->group != &group ||
-        !flint::fmpz_equal(flint::FmpzConstRef(data->p), p) ||
         !flint::fmpz_equal(flint::FmpzConstRef(data->ell), ell)) {
-        // The checks and setup of the overload without a state, which depend
-        // on the group, p and ell only.
+        // The checks of the overload without a state that depend on the
+        // group and ell only.
         std::unique_ptr<DegreeOneRootColumnState::Data> built(
                 new (std::nothrow) DegreeOneRootColumnState::Data());
         if (built == nullptr) {
             return false;
         }
         built->group = &group;
-        flint::fmpz_set(flint::FmpzRef(built->p), p);
         flint::fmpz_set(flint::FmpzRef(built->ell), ell);
         const Order* order = group.parent();
         const NumberField* field =
                 order == nullptr ? nullptr : order->parent();
-        built->setup =
-                group.is_set() && field != nullptr &&
-                dlog_proof_rank(built->proof_rank, group, ell) &&
-                quotient_log_mod_prime_setup(built->cofactor,
-                                             built->quotient_generator, p,
-                                             ell);
+        built->checked = group.is_set() && field != nullptr &&
+                         dlog_proof_rank(built->proof_rank, group, ell);
         state.data = std::move(built);
         data = state.data.get();
+    }
+    if (!data->checked) {
+        return false;
+    }
+    if (!data->have_p ||
+        !flint::fmpz_equal(flint::FmpzConstRef(data->p), p)) {
+        // The quotient-log setup of the overload without a state, which
+        // depends on p and ell only.
+        data->have_p = true;
+        flint::fmpz_set(flint::FmpzRef(data->p), p);
+        data->setup = quotient_log_mod_prime_setup(
+                data->cofactor, data->quotient_generator, p, ell);
     }
     if (!data->setup) {
         return false;

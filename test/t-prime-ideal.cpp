@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cstring>
 #include <utility>
+#include <span>
 #include <vector>
 
 namespace {
@@ -3996,11 +3997,14 @@ int test_factored_value_nmod_matches_fmpz_route() {
                         // The same evaluation from the factors reduced
                         // mod p once, reused for every root, and from a
                         // reduction made for this root alone.
-                        silex::detail::FactoredElementNmodReduction fresh;
-                        fresh.reduce(element, p);
+                        silex::detail::FactoredElementsNmodReduction fresh;
+                        fresh.index(std::span<const silex::FactoredElement>(
+                                &element, 1));
+                        fresh.reduce(p);
                         ulong fresh_value = 0;
-                        assert(fresh.value_at_degree_one_root(fresh_value,
-                                                              root) == ok);
+                        assert(fresh.values_at_degree_one_root(
+                                       std::span<ulong>(&fresh_value, 1),
+                                       root) == ok);
                         for (ulong other = 0; other < p; ++other) {
                             ulong other_expected = 0;
                             ulong other_value = 0;
@@ -4008,8 +4012,9 @@ int test_factored_value_nmod_matches_fmpz_route() {
                                     factored_value_at_degree_one_root_nmod(
                                             other_expected, element, p,
                                             other);
-                            assert(fresh.value_at_degree_one_root(
-                                           other_value, other) == other_ok);
+                            assert(fresh.values_at_degree_one_root(
+                                           std::span<ulong>(&other_value, 1),
+                                           other) == other_ok);
                             if (other_ok) {
                                 assert(other_value == other_expected);
                             }
@@ -4027,28 +4032,150 @@ int test_factored_value_nmod_matches_fmpz_route() {
     return 0;
 }
 
-// A reduction of an undefined FactoredElement, of an element mod p < 2, or
-// never made fails at every root, as factored_value_at_degree_one_root_nmod
-// does for those inputs.
+// FactoredElementsNmodReduction over several elements that share factors
+// evaluates each distinct factor once: equal factors held by different
+// Element objects (here copies made from the same polynomial) count once,
+// and a factor whose only exponent is zero is not counted.  At every root
+// modulo every p, one index reduced mod each p in turn gives each
+// element's value factored_value_at_degree_one_root_nmod, and succeeds
+// exactly when every element's evaluation succeeds, on the linear,
+// quadratic and generic FLINT representations.
+int test_factored_values_nmod_shared_factors() {
+    std::vector<silex::NumberField> fields;
+    {
+        sflint::FmpqPoly linear;
+        sflint::fmpq_poly_set_coeff_si(linear, 1, 1);
+        sflint::fmpq_poly_set_coeff_si(linear, 0, -4);
+        fields.push_back(silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(linear)));
+    }
+    fields.push_back(silex::test::quadratic_field(-7));
+    {
+        sflint::FmpqPoly cubic;
+        poly_x3_minus(cubic, 2);
+        fields.push_back(silex::test::field_by_polynomial(
+                sflint::FmpqPolyConstRef(cubic)));
+    }
+
+    // Factor coefficients (numerator, denominator), low to high, padded to
+    // the field degree by dropping higher terms.  The last factor appears
+    // with exponent zero only.
+    const std::array<std::array<std::array<slong, 2>, 3>, 5> factor_data = {{
+            {{{7, 6}, {-5, 6}, {3, 6}}},
+            {{{1, 1}, {1, 1}, {0, 1}}},
+            {{{2, 5}, {1, 3}, {-1, 7}}},
+            {{{-9, 4}, {0, 1}, {11, 10}}},
+            {{{1, 15}, {0, 1}, {0, 1}}},
+    }};
+    // Each element: (factor, exponent) pairs; factor k + 5 is a separate
+    // copy of factor k.
+    const std::array<std::array<std::array<slong, 2>, 3>, 5> element_data = {{
+            {{{0, 1}, {1, -2}, {9, 0}}},
+            {{{5, 3}, {2, 1}, {0, -1}}},
+            {{{6, 1}, {7, 2}, {3, -3}}},
+            {{{8, -1}, {3, 1}, {2, 0}}},
+            {{{1, 4}, {6, -1}, {9, 0}}},
+    }};
+
+    slong checked = 0;
+    slong failures = 0;
+    for (const silex::NumberField& field : fields) {
+        const slong degree = field.degree();
+        std::vector<silex::Element> factors;
+        for (int copy = 0; copy < 2; ++copy) {
+            for (const auto& data : factor_data) {
+                sflint::FmpqPoly polynomial;
+                for (slong i = 0; i < degree && i < 3; ++i) {
+                    sflint::Fmpq coefficient;
+                    fmpq_set_si(coefficient.raw(), data[i][0],
+                                static_cast<ulong>(data[i][1]));
+                    ::fmpq_poly_set_coeff_fmpq(polynomial.raw(), i,
+                                               coefficient.raw());
+                }
+                silex::Element element(field);
+                assert(element.set_fmpq_poly(
+                        sflint::FmpqPolyConstRef(polynomial)));
+                factors.push_back(std::move(element));
+            }
+        }
+        std::vector<silex::FactoredElement> elements;
+        for (const auto& data : element_data) {
+            silex::FactoredElement element(field);
+            for (const auto& entry : data) {
+                assert(element.push(
+                        factors[static_cast<std::size_t>(entry[0])],
+                        entry[1]));
+            }
+            elements.push_back(std::move(element));
+        }
+
+        silex::detail::FactoredElementsNmodReduction reduction;
+        reduction.index(std::span<const silex::FactoredElement>(
+                elements.data(), elements.size()));
+        // Factors 0 to 3, each used through both copies; factor 4 has
+        // exponent zero only.  The five factors are distinct in every field.
+        assert(reduction.distinct_factor_count() == 4);
+
+        for (const ulong p : {2UL, 3UL, 5UL, 7UL, 11UL, 13UL, 13UL, 3UL}) {
+            reduction.reduce(p);
+            for (ulong root = 0; root < p + 2; ++root) {
+                std::vector<ulong> values(elements.size(), 0);
+                const bool ok = reduction.values_at_degree_one_root(
+                        std::span<ulong>(values.data(), values.size()), root);
+                bool expected_ok = true;
+                for (std::size_t i = 0; i < elements.size(); ++i) {
+                    ulong expected = 0;
+                    const bool element_ok = silex::detail::
+                            factored_value_at_degree_one_root_nmod(
+                                    expected, elements[i], p, root);
+                    expected_ok = expected_ok && element_ok;
+                    if (ok) {
+                        assert(element_ok && values[i] == expected);
+                    }
+                }
+                assert(ok == expected_ok);
+                if (!ok) {
+                    ++failures;
+                }
+                ++checked;
+            }
+        }
+    }
+    // Both outcomes are exercised.
+    assert(failures > 0 && failures < checked);
+    return 0;
+}
+
+// A reduction of an undefined FactoredElement, of an element mod p < 2,
+// never indexed or never reduced fails at every root, as
+// factored_value_at_degree_one_root_nmod does for those inputs, and so does
+// a call with an output of the wrong length.
 int test_factored_value_nmod_reduction_undefined() {
     silex::FactoredElement undefined;
-    silex::detail::FactoredElementNmodReduction reduction;
+    silex::detail::FactoredElementsNmodReduction reduction;
     ulong value = 0;
-    assert(!reduction.value_at_degree_one_root(value, 0));
-    reduction.reduce(undefined, 7);
+    const std::span<ulong> out(&value, 1);
+    assert(!reduction.values_at_degree_one_root(out, 0));
+    reduction.reduce(7);
+    assert(!reduction.values_at_degree_one_root(out, 0));
+    reduction.index(std::span<const silex::FactoredElement>(&undefined, 1));
+    reduction.reduce(7);
     assert(!silex::detail::factored_value_at_degree_one_root_nmod(
             value, undefined, 7, 1));
-    assert(!reduction.value_at_degree_one_root(value, 1));
+    assert(!reduction.values_at_degree_one_root(out, 1));
 
     silex::NumberField field = silex::test::quadratic_field(-7);
     silex::FactoredElement one(field);
     assert(one.one());
-    reduction.reduce(one, 7);
-    assert(reduction.value_at_degree_one_root(value, 3) && value == 1);
-    reduction.reduce(one, 1);
+    reduction.index(std::span<const silex::FactoredElement>(&one, 1));
+    assert(!reduction.values_at_degree_one_root(out, 3));
+    reduction.reduce(7);
+    assert(reduction.values_at_degree_one_root(out, 3) && value == 1);
+    assert(!reduction.values_at_degree_one_root(std::span<ulong>(), 3));
+    reduction.reduce(1);
     assert(!silex::detail::factored_value_at_degree_one_root_nmod(value, one,
                                                                   1, 0));
-    assert(!reduction.value_at_degree_one_root(value, 0));
+    assert(!reduction.values_at_degree_one_root(out, 0));
     return 0;
 }
 
@@ -4095,7 +4222,7 @@ int test_factored_value_nmod_matches_fmpz_route_large() {
     const slong exponent_data[3][3] = {{1, 1, 1}, {2, -1, 3}, {-3, 2, -1}};
     silex::FactoredElement factored_other(field);
     assert(factored_other.push(factors[1], 4));
-    silex::detail::FactoredElementNmodReduction reused;
+    silex::detail::FactoredElementsNmodReduction reused;
     slong checked = 0;
     for (const ulong root : roots) {
         sflint::Fmpz root_fmpz;
@@ -4121,10 +4248,15 @@ int test_factored_value_nmod_matches_fmpz_route_large() {
             // The factors reduced mod p once give the same, also when the
             // reduction object is reused after reducing another element
             // mod another prime.
-            reused.reduce(factored_other, 13);
-            reused.reduce(element, p);
+            reused.index(std::span<const silex::FactoredElement>(
+                    &factored_other, 1));
+            reused.reduce(13);
+            reused.index(std::span<const silex::FactoredElement>(&element,
+                                                                 1));
+            reused.reduce(p);
             ulong reduced_value = 0;
-            assert(reused.value_at_degree_one_root(reduced_value, root) == ok);
+            assert(reused.values_at_degree_one_root(
+                           std::span<ulong>(&reduced_value, 1), root) == ok);
             if (ok) {
                 assert(reduced_value == value);
             }
@@ -5429,6 +5561,7 @@ int main() {
     assert(test_degree_one_root_follows_recorded_convention() == 0);
     assert(test_factored_value_nmod_matches_fmpz_route() == 0);
     assert(test_factored_value_nmod_matches_fmpz_route_large() == 0);
+    assert(test_factored_values_nmod_shared_factors() == 0);
     assert(test_factored_value_nmod_reduction_undefined() == 0);
     assert(test_alpha_convention_kept_after_marking_maximal() == 0);
     assert(test_prime_ideal_inverse_matches_invert() == 0);

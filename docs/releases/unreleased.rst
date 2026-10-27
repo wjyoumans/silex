@@ -2600,6 +2600,23 @@ Changed
   on neither build).  Under callgrind (``proven``) the instruction count fell
   4.99% for ``random_d9_h4_s8``, 3.98% for ``random_d10_h2_s21`` and 4.24%
   for ``pure_x12_plus_7``.  No timing has been measured.
+- The stable scan's columns now evaluate each distinct unit factor once per
+  root instead of once for every free generator that contains it.  Equal
+  factors (the same stored numerator polynomial and denominator) are found
+  once per scan, since they do not depend on ``q``, and the scan keeps them,
+  with the free generators, for every ``q`` it examines, also when ``q`` has
+  a single degree-one root.  At each ``q`` the distinct factors are reduced
+  modulo ``q``; at each root their values are computed once and each
+  generator multiplies its own factor powers in its own factor order.  Each
+  generator value, each column and each failure are unchanged (a test
+  compares the shared evaluation with the evaluation of each element alone
+  on every residue modulo small primes).  Published ``proven`` outputs and
+  proof records are identical on ``random_d9_h4_s8``, ``random_d10_h2_s21``,
+  ``pure_x12_plus_7`` and the other 175 ``proven`` corpus rows that finish
+  (7 rows finish in 90 seconds on neither build).  Under callgrind
+  (``proven``) the instruction count fell 11.44% for ``random_d9_h4_s8``,
+  9.04% for ``random_d10_h2_s21`` and 4.90% for ``pure_x12_plus_7``.  No
+  timing has been measured.
 
 - For such a binomial and ``q`` not dividing ``n``, the root scan now finds
   the roots themselves in closed form instead of splitting with
