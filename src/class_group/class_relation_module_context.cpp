@@ -662,14 +662,19 @@ bool ClassRelationModuleContext::lend_checkpoint_context(
     if (reclaimed) {
         restore_checkpoint_context(holder);
     }
+    const DiagnosticsContext* holder_diagnostics = holder.diagnostics();
     if (!rebuild_checkpoint()) {
+        // rebuild_checkpoint writes checkpoint_ only on success, so this
+        // hands the holder back the contents it lent.  Not covered by a
+        // test: the rebuild has no cheap failure through the public API.
         if (reclaimed) {
             checkpoint_.swap(holder);
+            holder.set_diagnostics(holder_diagnostics);
+            checkpoint_.set_diagnostics(diagnostics_);
             checkpoint_lent_ = true;
         }
         return false;
     }
-    const DiagnosticsContext* holder_diagnostics = holder.diagnostics();
     holder.swap(checkpoint_);
     holder.set_diagnostics(holder_diagnostics);
     checkpoint_.set_diagnostics(diagnostics_);
