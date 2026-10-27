@@ -26,6 +26,7 @@
 #include "class_group/relation_saturation_internal.hpp"
 #include "class_group/relation_search_driver_internal.hpp"
 #include "element/element_internal.hpp"
+#include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "lat/certified_lll_internal.hpp"
 #include "class_group/relation_factor_base_plan_internal.hpp"
 #include "order_unit/compute_internal.hpp"
@@ -33,7 +34,6 @@
 #include "order_unit/precision_cap_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
 #include "relation/relation_internal.hpp"
-#include "ideal_factorization/ideal_factorization_internal.hpp"
 #include "sunit/sunit_internal.hpp"
 #include "zeta/zeta_internal.hpp"
 #include <silex/factor_base.hpp>

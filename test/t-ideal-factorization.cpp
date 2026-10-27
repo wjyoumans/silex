@@ -1275,8 +1275,6 @@ int test_keeps_parent_order_alive() {
     return 0;
 }
 
-}  // namespace
-
 int test_factor_rejects_norm_accounting_mismatch() {
     silex::NumberField field = quadratic_field(2);
     silex::Order order = silex::test::equation_order(field);
@@ -1305,6 +1303,8 @@ int test_factor_rejects_norm_accounting_mismatch() {
     assert(factorization.length() == 1);
     return 0;
 }
+
+}  // namespace
 
 int main() {
     assert(test_degree_one_factorization() == 0);

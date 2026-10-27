@@ -20,7 +20,7 @@ class TestHookAccess;
 
 // Fault-injection switch that only detail::TestHookAccess
 // (test/test_hook_access.hpp) can arm.  Off (0) by default and never set by
-// production code; one relaxed atomic exchange per rational prime in
+// production code; one relaxed atomic load per prime ideal in
 // IdealFactorization::factor.
 class IdealFactorizationTestSeams {
 public:
@@ -28,6 +28,9 @@ public:
     // it to the first computed valuation v_P, so the accounted sum of f_P v_P
     // over the primes above that p differs from v_p(N(I)).
     static slong take_valuation_perturbation() noexcept {
+        if (valuation_perturbation_.load(std::memory_order_relaxed) == 0) {
+            return 0;
+        }
         return valuation_perturbation_.exchange(0, std::memory_order_relaxed);
     }
 
