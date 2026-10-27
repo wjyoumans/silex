@@ -456,10 +456,12 @@ bool valuation_kernel_units(std::vector<Element>& out,
     return true;
 }
 
-// Keeps, in order, the candidates proved independent of those already kept,
-// until `rank` are kept, by the test of units_independent: the Gram
-// determinant of the product-mode logarithmic embeddings of the kept units
-// is a positive ball.  The embeddings of all candidates are computed once.
+// Keeps `rank` candidates proved independent by the test of
+// units_independent: the Gram determinant of the product-mode logarithmic
+// embeddings of the kept units is a positive ball.  When there are more
+// candidates than `rank`, a floating-point proposal picks them and the ball
+// test decides; the in-order per-row test is the fallback.  The embeddings
+// of all candidates are computed once.
 bool select_independent_units(std::vector<Element>& out,
                               const std::vector<Element>& candidates,
                               EmbeddingContext& embeddings, slong rank,

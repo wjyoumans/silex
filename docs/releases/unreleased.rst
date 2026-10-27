@@ -202,8 +202,8 @@ Changed
 - A ``grh`` class group and unit computation on a field given by the exact
   cyclotomic polynomial ``Phi_m`` now seeds the cyclotomic units into the
   unit context before relation search, as PARI 2.17.3 ``buch2.c``
-  (``add_cyclotomic_units``) does; every seed is checked to have norm
-  ``+-1``.  Class groups, regulators, and certification labels are unchanged
+  (``add_cyclotomic_units``) does; every seed is checked exactly to be
+  integral with norm ``+-1``.  Class groups, regulators, and certification labels are unchanged
   on all 46 cyclotomic corpus rows.  Whole-process callgrind Ir of ``grh``
   drops by 11.3% on ``cyclotomic_37_phi36``, 11.2% on ``cyclotomic_41_phi40``,
   12.3% on ``cyclotomic_64_phi32``, 17.5% on ``cyclotomic_27_phi18``, and
@@ -211,6 +211,28 @@ Changed
   ``cyclotomic_7_phi6``, 0.71% more Ir (140,219,379 to 141,210,090).
   ``proven`` requests and
   other presentations are unchanged.
+
+- The same ``grh`` requests on a field given by ``psi_n``, the minimal
+  polynomial of ``2 cos(2 pi / n)`` (a maximal real cyclotomic field), now
+  seed ``deg - 1`` independent real cyclotomic units before relation search.
+  PARI seeds nothing on these fields; for ``n`` prime or a prime power the
+  units are those of Hecke (after Schoof and Washington), and for other
+  ``n`` products of the ``1 - zeta_n^a`` with exponents from an integer
+  kernel.  Every seed is checked exactly to be integral with norm ``+-1``,
+  independence is decided by a positive Gram-determinant ball, and a
+  construction that fails a check seeds nothing.  The seeds are not proof
+  input: the class group and regulator pass the same analytic validation.
+  Class groups, regulators, unit ranks and certification labels are
+  unchanged on all 46 cyclotomic corpus rows that finish
+  (``cyclotomic_real_163_deg81`` timed out on both builds).  Whole-process
+  callgrind Ir of ``grh`` (busy machine) drops by 18.3% on
+  ``cyclotomic_real_136_deg32``, 21.4% on ``cyclotomic_real_23_deg11``,
+  39.5% on ``cyclotomic_real_29_deg14``, 56.8% on
+  ``cyclotomic_real_31_deg15``, 28.8% on ``cyclotomic_real_37_deg18``,
+  53.8% on ``cyclotomic_real_41_deg20`` and 21.3% on
+  ``cyclotomic_real_64_deg16``; ``cyclotomic_real_q10_c11_deg10``, which is
+  not a ``psi_n`` presentation, is unchanged.  See "Class groups and order
+  units" in :doc:`../reference/algorithms_and_sources`.
 
 - On ``grh`` class group and unit computations for fields of degree 30 or
   more given by the exact cyclotomic polynomial ``Phi_m``, the relation
