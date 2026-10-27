@@ -2748,14 +2748,49 @@ Changed
 - The logarithmic embedding of a factored element now sums each place with
   one ``arb_dot`` of the factor logs and the merged exponents, in place of a
   term-by-term ``arb_addmul_fmpz`` loop, and keeps the storage for the factor
-  logs on the thread for its next call.  Like every Arb operation,
+  logs on the thread for its next call when it holds at most 4096 of them
+  (a longer call frees its storage on return).  Like every Arb operation,
   ``arb_dot`` returns a ball that contains the exact sum, so the result is
   still a rigorous enclosure, but its midpoint and radius can differ in the
   last bits.  This change was decided without a separate review question,
   under the rule that a regulator enclosure may change if it stays rigorous.
   On 171 class/unit corpus rows in ``grh`` mode (timing fields stripped;
   ``cyclotomic_real_163_deg81`` was not run), every published output is
-  identical except ``regulator_radius`` on 63 rows, with ratios 0.91 to 1.80.
+  identical except ``regulator_radius`` on 63 rows, with ratios (new radius
+  over old) 0.91 to 1.80.  The radius is wider on 60 rows.  The 15 rows
+  widened by 1.05 or more are ``sextic_x6_minus_x_minus_1_proven`` 1.80,
+  ``quartic_x4_minus_x_minus_1_proven`` 1.66, ``pure_x4_minus_5`` 1.54,
+  ``simplest_cubic_a0`` 1.17, ``septic_x7_minus_x_minus_1_proven`` 1.15,
+  ``octic_x8_minus_x_minus_1_proven`` 1.15,
+  ``quintic_x5_minus_x_minus_1_proven`` 1.15, ``simplest_cubic_a12`` 1.10,
+  ``cyclotomic_real_23_deg11`` 1.08, ``nonic_x9_minus_x_minus_1_proven`` 1.08,
+  ``cyclotomic_real_136_deg32`` 1.08, ``quartic_disc70640_proven`` 1.08,
+  ``simplest_quartic_t4`` 1.07, ``decic_x10_minus_x_minus_1_proven`` 1.07,
+  ``cyclotomic_real_64_deg16`` 1.06.  The 45 rows widened by less than 1.05
+  are ``cyclotomic_32_phi16``, ``cyclotomic_40_phi16``,
+  ``cyclotomic_45_phi24``, ``cyclotomic_48_phi16``, ``cyclotomic_56_phi24``,
+  ``cyclotomic_60_phi16``, ``cyclotomic_64_phi32``, ``cyclotomic_72_phi24``,
+  ``cyclotomic_84_phi24``, ``cyclotomic_real_31_deg15``,
+  ``cyclotomic_real_q10_c11_deg10``, ``duodecic_x12_minus_x_minus_1_proven``,
+  ``hexadecic_x16_minus_x_minus_1_proven``, ``lmfdb_6_6_46411625_1``,
+  ``lmfdb_6_6_49744125_1``, ``lmfdb_8_8_73116160000_2``,
+  ``lmfdb_8_8_82944000000_1``, ``multiquadratic_m3_m5_m7``,
+  ``nonadecic_x19_minus_x_minus_1_proven``,
+  ``octodecic_x18_minus_x_plus_1_proven``, ``pure_x6_minus_2``,
+  ``pure_x8_minus_2``, ``pure_x8_minus_3``, ``quartic_disc1856_proven``,
+  ``quindecic_x15_minus_x_minus_1_proven``, ``random_d10_h2_s21_proven``,
+  ``random_d10_h4_s27_proven``, ``random_d12_h2_s11_proven``,
+  ``random_d6_h4_s11_proven``, ``random_d6_h8_s60_proven``,
+  ``random_d6_h8_s64_proven``, ``random_d7_h4_s52_proven``,
+  ``random_d7_h4_s55_proven``, ``random_d8_h2_s48_proven``,
+  ``random_d9_h2_s8_proven``, ``random_d9_h4_s8_proven``,
+  ``septendecic_x17_minus_x_minus_1_proven``, ``simplest_cubic_a6``,
+  ``simplest_quartic_t10``, ``simplest_quartic_t12``, ``simplest_quartic_t6``,
+  ``simplest_quartic_t8``, ``tetradecic_x14_minus_x_minus_1_proven``,
+  ``tridecic_x13_minus_x_minus_1_proven``,
+  ``undecic_x11_minus_x_minus_1_proven``.  The radius is narrower on 3 rows:
+  ``random_d12_h2_s16_proven`` 0.9996, ``cyclotomic_real_37_deg18`` 0.94 and
+  ``pure_x8_minus_5`` 0.91.
   Each new regulator enclosure contains the old midpoint, and each old one
   contains the new midpoint.  Callgrind instruction counts for the whole
   ``silex-class-unit-instance`` process, ``grh`` mode:
