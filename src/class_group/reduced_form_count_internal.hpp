@@ -6,7 +6,7 @@ namespace silex::detail {
 
 // True when D = -abs_discriminant is a fundamental discriminant: either
 // D = 1 mod 4 and |D| is squarefree, or D = 4m with m = 2 or 3 mod 4 and m
-// squarefree (Cohen, GTM 138, Section 5.1).
+// squarefree (Cohen, GTM 138, Definition 5.1.2).
 bool imaginary_quadratic_discriminant_is_fundamental(
         ulong abs_discriminant) noexcept;
 

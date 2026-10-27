@@ -2157,8 +2157,8 @@ the test oracle: the count equals its number of forms on every fundamental
 ``|D| <= 2e5`` and on fixed rows up to ``|D| = 2^44 - 1``.  The sum also
 counts imprimitive forms when ``D`` is not fundamental, so the count is
 gated on ``D`` being fundamental (``D = 1 mod 4`` with ``|D|`` squarefree, or
-``D = 4m`` with ``m = 2, 3 mod 4`` squarefree); any other ``D`` keeps the
-listing of ``qfb_reduced_forms``, which returns the primitive forms.  The
+``D = 4m`` with ``m = 2, 3 mod 4`` squarefree; Cohen, GTM 138, Definition 5.1.2); any other ``D`` keeps
+the listing of ``qfb_reduced_forms``, which returns the primitive forms.  The
 count needs about 5 bytes per ``a <= sqrt(|D| / 3)`` and time growing like
 ``sqrt(|D|)``.  For ``|D| >= 2^44``
 ``h(D)`` comes instead from Dirichlet's class number formula
