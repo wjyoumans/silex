@@ -1024,6 +1024,55 @@ static T2BasisSelection select_finite_enumeration_basis(
     }
 }
 
+// Whether the Gram-Schmidt pivots of double quadratic-form data reproduce
+// d = det(Gram) = |disc(O)| N(I)^2, the exact value the LLL-bound test takes
+// (ideal_t2_lattice_log2_determinant): the pivots are the squared
+// Gram-Schmidt norms, whose product is det(Gram) for any basis of the
+// lattice.  The double rows of reduced_basis_t2_gram_double are sums of
+// products |b_ik| |o_kj|, and when those terms are many orders larger than
+// the reduced row they cancel to, rounding leaves errors comparable to the
+// row itself: the Gram is then still positive definite and can pass the
+// pivot and LLL-bound tests, but it is not the T2 form of the lattice (on
+// multiquadratic_m23_m31_m47 the pivot product was 2^17 times d and varied
+// with the rounding scale).  The product of the pivots is a consequence of
+// every Gram entry, so this compares the computed data with an invariant
+// known exactly and falls back to the Arb setup on a mismatch.
+//
+// Tolerance: 2^-20 in log2 d (a relative determinant error of about 7e-7).
+// With rounding errors only, the discrepancy is a small multiple of
+// n 2^-53 times the conditioning of the reduced basis; on the proven corpus
+// rows measured it stayed below 3e-8 (cyclotomic_real_41_deg20, degree 20)
+// and below 1e-12 on most rows, so data with no cancellation does not fall
+// back.  On multiquadratic_m23_m31_m47 no setup was below 1e-6 and most were
+// above one bit, so they all take the Arb route.  An accepted discrepancy
+// changes the volume-based initial enumeration bound
+// (finite_quadratic_form_volume_bound) by a factor of at most 2^(2^-20 / n)
+// when that bound uses all n pivots.
+// When d is not available (NaN) the data cannot be checked and is not used.
+constexpr double kT2DoubleRowsLog2DeterminantTolerance = 0x1p-20;
+
+static bool double_gram_schmidt_reproduces_determinant(
+        const std::vector<double>& quadratic_form_data,
+        slong degree,
+        double log2_determinant) noexcept {
+    if (degree <= 0 || !std::isfinite(log2_determinant) ||
+        quadratic_form_data.size() !=
+                static_cast<std::size_t>(degree * degree)) {
+        return false;
+    }
+    double log2_pivot_product = 0.0;
+    for (slong i = 0; i < degree; ++i) {
+        const double pivot =
+                quadratic_form_data[static_cast<std::size_t>(i * degree + i)];
+        if (!std::isfinite(pivot) || pivot <= 0.0) {
+            return false;
+        }
+        log2_pivot_product += std::log2(pivot);
+    }
+    return std::fabs(log2_pivot_product - log2_determinant) <=
+           kT2DoubleRowsLog2DeterminantTolerance;
+}
+
 // The rounding-scale loop of select_finite_enumeration_basis with the
 // reduced rows and Gram formed in double (T2EnumerationGram::double_rows).
 // The rounding and the LLL are those of the Arb loop, so a scale gives the
@@ -1031,7 +1080,9 @@ static T2BasisSelection select_finite_enumeration_basis(
 // accepted_rounding_scale.  Returns false, for the caller to run the Arb
 // loop, when the LLL step fails, the double rows or Gram are not available
 // (reduced_basis_t2_gram_double), the double Gram-Schmidt pivot test fails,
-// or no scale from start_rounding_scale on passes the LLL-bound test.
+// the pivots do not reproduce d (double_gram_schmidt_reproduces_determinant;
+// determinant_mismatch is then set and the caller goes straight to the Arb
+// route), or no scale from start_rounding_scale on passes the LLL-bound test.
 static bool select_finite_enumeration_basis_double_rows(
         flint::FmpzMat& basis,
         std::vector<double>& quadratic_form_data,
@@ -1044,7 +1095,9 @@ static bool select_finite_enumeration_basis_double_rows(
         slong precision,
         slong start_rounding_scale,
         T2LllReductions& reductions,
+        bool& determinant_mismatch,
         const DiagnosticsContext* diagnostics) noexcept {
+    determinant_mismatch = false;
     const slong degree = flint::fmpz_mat_nrows(original_basis);
     std::vector<double> gram;
     std::vector<double> diagonal(static_cast<std::size_t>(degree));
@@ -1080,6 +1133,14 @@ static bool select_finite_enumeration_basis_double_rows(
                         "class_group.finite_enumeration_setup.double_rows_pivot_failed");
                 return false;
             }
+        }
+        if (!double_gram_schmidt_reproduces_determinant(
+                    quadratic_form_data, degree, log2_determinant)) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics, DiagnosticsModule::class_group,
+                    "class_group.finite_enumeration_setup.double_rows_determinant_mismatch");
+            determinant_mismatch = true;
+            return false;
         }
         for (slong i = 0; i < degree; ++i) {
             diagonal[static_cast<std::size_t>(i)] =
@@ -1217,19 +1278,21 @@ static bool build_finite_ideal_t2_enumeration_data_at_precision(
                     arb_mat_midpoints_double(order_rows, embedding_rows);
         }
         if (have_order_rows) {
+            bool determinant_mismatch = false;
             used_double_rows = select_finite_enumeration_basis_double_rows(
                     basis, quadratic_form_data, accepted_rounding_scale,
                     transform, original_basis, original_embedding_rows,
                     order_rows, log2_determinant, precision,
-                    start_rounding_scale, reductions, diagnostics);
-            if (!used_double_rows &&
+                    start_rounding_scale, reductions, determinant_mismatch,
+                    diagnostics);
+            if (!used_double_rows && !determinant_mismatch &&
                 start_rounding_scale != kT2EnumerationInitialRoundingScale) {
                 used_double_rows = select_finite_enumeration_basis_double_rows(
                         basis, quadratic_form_data, accepted_rounding_scale,
                         transform, original_basis, original_embedding_rows,
                         order_rows, log2_determinant, precision,
                         kT2EnumerationInitialRoundingScale, reductions,
-                        diagnostics);
+                        determinant_mismatch, diagnostics);
             }
         }
         if (used_double_rows) {

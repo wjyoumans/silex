@@ -4018,6 +4018,26 @@ int test_t2_double_rows_gram_matches_arb() {
     return d9.accepted > 0 && l8.accepted > 0 ? 0 : 4;
 }
 
+// Corpus field multiquadratic_m23_m31_m47, Q(sqrt(-23), sqrt(-31),
+// sqrt(-47)) from a defining polynomial with large coefficients.  Its order
+// rows are large (up to about 5e7 on the honesty search's ideals) and the
+// reduced bases have large coordinates (up to about 1.5e11), so the double
+// rows cancel to entries many orders smaller than their terms and keep
+// rounding errors comparable to those entries.  Such a Gram can pass the
+// pivot and LLL-bound tests; the check of the pivot product against the
+// exact d = |disc| N(I)^2 must send every setup here to the Arb route, and
+// the data is then the Arb route's.
+int test_t2_double_rows_cancellation_takes_arb_route() {
+    T2DoubleRowsCounts counts;
+    if (check_t2_double_rows_field(
+                maximal_order_setup({38188288, 1822160, -1462612, -62792,
+                                     24143, 602, -220, -2, 1}),
+                counts) != 0) {
+        return 1;
+    }
+    return counts.fallback > 0 && counts.accepted == 0 ? 0 : 2;
+}
+
 // Counts the T2 setup and fallback profile events of the double-row route.
 struct T2DoubleRowsEvents {
     slong setups = 0;
@@ -4241,6 +4261,7 @@ int main() {
     assert(test_legacy_scan_predicate_equivalence() == 0);
     assert(test_witness_through_lacking_conjugate() == 0);
     assert(test_t2_double_rows_gram_matches_arb() == 0);
+    assert(test_t2_double_rows_cancellation_takes_arb_route() == 0);
     assert(test_t2_double_rows_fallbacks_match_arb_scan() == 0);
     return test_proof_targets_require_complete_decomposition() != 0 ||
                    test_required_prime_predicates_match_full_factorization() !=

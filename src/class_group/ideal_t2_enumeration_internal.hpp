@@ -39,7 +39,9 @@ inline constexpr slong kT2EnumerationMaxPrecision = 1000;
 // double from the exact reduced basis (order coordinates) and the order's
 // Minkowski rows, and falls back to the whole `arb` setup at the same
 // precision when the double data is not finite, a basis entry does not fit
-// a double exactly, the double Gram-Schmidt pivot test fails, or no rounding
+// a double exactly, the double Gram-Schmidt pivot test fails, the product of
+// the double Gram-Schmidt pivots differs from the exact d = |disc| N(I)^2 by
+// more than 2^-20 in log2 (cancellation in the double rows), or no rounding
 // scale passes the LLL-bound test.  It is taken at the start precision only;
 // precision retries use `arb`.  The factor-base honesty witness search uses
 // it: only Gram midpoints in double are read downstream and every witness is
