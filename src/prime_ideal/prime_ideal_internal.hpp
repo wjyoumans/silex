@@ -166,7 +166,9 @@ enum class IndexDivisorMiss : unsigned char {
 // decomposition decompose_prime would store.  Every other case calls
 // decompose_prime.  Leaves `out` unchanged on failure.  For callers that need
 // only the decomposition type, such as the Bach-Friedman Euler factors in
-// zeta.cpp.
+// zeta.cpp.  `diagnostics` receives the profile events of the monogenic
+// generator search this function runs on that miss (not those of a call it
+// delegates to decompose_prime).
 //
 // With IndexDivisorMiss::degrees_only the result (its success, or the order
 // of the degrees) can differ from decompose_prime's only where building an
@@ -178,7 +180,8 @@ bool decompose_prime_residue_degrees(
         std::vector<slong>& out,
         const Order& order,
         flint::FmpzConstRef p,
-        IndexDivisorMiss miss = IndexDivisorMiss::store_decomposition) noexcept;
+        IndexDivisorMiss miss = IndexDivisorMiss::store_decomposition,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept;
 
 // Noninstalled prime-ideal hooks: constructors that take caller-supplied
 // data, and read-only access to recorded residue-map state.

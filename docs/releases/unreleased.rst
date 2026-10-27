@@ -145,10 +145,11 @@ Changed
   search, whose primes the sums revisit, still stores them.  Prime
   decompositions, their order and ``grh`` outputs are unchanged (identical
   on the 36 corpus rows of index above 1 whose ``grh`` sums decompose
-  primes, among them ``cyclotomic_real_q10_c11_deg10``, the eight
-  multiquadratic rows, ``lmfdb_6_6_46411625_1``, ``lmfdb_8_0_64000000_3``,
-  ``lmfdb_8_8_73116160000_2``, ``lmfdb_8_8_82944000000_1`` and
-  ``pure_x6_minus_5``).  On ``cyclotomic_real_q10_c11_deg10`` callgrind Ir of
+  primes, among them the rows that reach the changed code:
+  ``cyclotomic_real_q10_c11_deg10``, ``multiquadratic_m3_m5_m7``,
+  ``multiquadratic_p5_m7_m11``, ``multiquadratic_m23_m31_m47``,
+  ``lmfdb_6_6_46411625_1``, ``lmfdb_8_8_73116160000_2`` and
+  ``lmfdb_8_8_82944000000_1``).  On ``cyclotomic_real_q10_c11_deg10`` callgrind Ir of
   ``grh`` (busy machine) drops by 3.23% in the class and unit computation
   and by 2.52% for the whole process; on ``multiquadratic_m23_m31_m47`` the
   class and unit computation drops by 2.91%.

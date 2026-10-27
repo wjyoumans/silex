@@ -2947,7 +2947,8 @@ MonogenicCandidate monogenic_candidate(
 
 bool find_monogenic_generator(flint::FmpzPoly& chi,
                               Element& beta,
-                              const Order& order) noexcept {
+                              const Order& order,
+                              const DiagnosticsContext* diagnostics) noexcept {
     const slong n = order.degree();
     if (n <= 1 || order.parent() == nullptr ||
         !beta.has_parent(*order.parent())) {
@@ -2961,6 +2962,9 @@ bool find_monogenic_generator(flint::FmpzPoly& chi,
     // complete failure is recorded; a search cut short by a failed step, or
     // one that succeeds, runs again next time.
     if (detail::OrderAccess::monogenic_generator_absent(order)) {
+        SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                diagnostics,
+                "prime_ideal.find_monogenic_generator.recorded_absent");
         return false;
     }
 
@@ -5426,7 +5430,8 @@ bool decompose_prime(PrimeIdealList& out,
             if (!beta.is_defined()) {
                 return false;
             }
-            monogenic = find_monogenic_generator(chi, beta, order);
+            monogenic = find_monogenic_generator(chi, beta, order,
+                                                 diagnostics);
         }
         if (!monogenic) {
             // The recursive split has no bound on p, but it runs only after
@@ -5587,7 +5592,9 @@ bool store_index_primes_and_get_degrees(
 bool decompose_prime_residue_degrees(std::vector<slong>& out,
                                      const Order& order,
                                      flint::FmpzConstRef p,
-                                     IndexDivisorMiss miss) noexcept {
+                                     IndexDivisorMiss miss,
+                                     const DiagnosticsContext* diagnostics)
+        noexcept {
     // Only the index-divisor route of decompose_prime (maximal,
     // non-equation order, p dividing the index) is handled here, chosen by
     // the classifier decompose_prime routes by; every other case is
@@ -5677,7 +5684,7 @@ bool decompose_prime_residue_degrees(std::vector<slong>& out,
     if (!beta.is_defined()) {
         return false;
     }
-    if (find_monogenic_generator(chi, beta, order)) {
+    if (find_monogenic_generator(chi, beta, order, diagnostics)) {
         return residue_degrees_from_decompose_prime(out, order, p);
     }
     return split_pass(separator_absent ? FixedSplit::recursive_only

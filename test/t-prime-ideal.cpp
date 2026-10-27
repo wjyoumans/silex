@@ -1534,7 +1534,28 @@ int test_residue_degrees_cyclotomic_real_q10_c11() {
 // decompose_prime's degrees, in order.  With degrees_only the split primes
 // leave the index-divisor cache empty, while the failure record stays.  A
 // search that finds a generator (the cubic below, where decompose_prime of
-// 17 takes the monogenic branch) records nothing.
+// 17 takes the monogenic branch) records nothing.  Under profiling, each
+// call after 43 returns at the record (a recorded_absent event) instead of
+// searching again.
+struct MonogenicRecordCounter {
+    slong count = 0;
+};
+
+void monogenic_record_callback(void* user,
+                               silex::DiagnosticsModule,
+                               silex::ProfileEvent event,
+                               const char*,
+                               const char* label) noexcept {
+    MonogenicRecordCounter* counter =
+            static_cast<MonogenicRecordCounter*>(user);
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label,
+                    "prime_ideal.find_monogenic_generator."
+                    "recorded_absent") == 0) {
+        ++counter->count;
+    }
+}
+
 int test_monogenic_generator_failure_memo() {
     sflint::FmpqPoly polynomial;
     poly_from_coefficients(polynomial,
@@ -1560,13 +1581,21 @@ int test_monogenic_generator_failure_memo() {
         silex::Order order(field);
         assert(order.maximal_order(equation));
         assert(!silex::detail::OrderAccess::monogenic_generator_absent(order));
+        silex::DiagnosticsContext diagnostics;
+        silex::diagnostics_context_init(diagnostics);
+        MonogenicRecordCounter record_counter;
+        silex::diagnostics_set_profiling(
+                diagnostics, true,
+                silex::diagnostics_module_bit(
+                        silex::DiagnosticsModule::prime_ideal),
+                monogenic_record_callback, &record_counter);
         for (const slong rational_prime : {43, 67, 1319}) {
             sflint::Fmpz p;
             assert(set_fmpz_si(p, rational_prime));
             const sflint::FmpzConstRef p_ref(p);
             std::vector<slong> degrees;
             assert(silex::detail::decompose_prime_residue_degrees(
-                    degrees, order, p_ref, miss));
+                    degrees, order, p_ref, miss, &diagnostics));
             assert(degrees == expected_degrees(rational_prime));
             assert(silex::detail::OrderAccess::monogenic_generator_absent(
                     order));
@@ -1582,8 +1611,13 @@ int test_monogenic_generator_failure_memo() {
         sflint::Fmpz p;
         assert(set_fmpz_si(p, 9791));
         silex::PrimeIdealList primes;
-        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p),
+                                      0, &diagnostics));
         assert(published_residue_degrees(primes) == expected_degrees(9791));
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+        // 67, 1319 and 9791 each returned at the record.
+        assert(record_counter.count == 3);
+#endif
     }
 
     sflint::FmpqPoly cubic;
