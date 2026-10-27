@@ -11499,6 +11499,11 @@ int test_split_quadratic_roots_mod_prime_matches_flint() {
 // x^4 + 1 = (x + 1)^4 mod 2, (x^2 + 1)^2 mod 3 without roots, and
 // x^3 - x - 15 with a double root mod 13 and mod 467.  The closed form is
 // taken (asserted through its profile event where profiling is built).
+// Both root lists are sorted before comparing, so this checks the root set
+// through the scan, not the order; the order is covered at the helper level,
+// which receives the same polynomial nmod_poly_roots would.  The fallback to
+// nmod_poly_roots after 128 failed draws cannot be reached deterministically
+// and is not tested.
 int test_degree_one_roots_mod_q_quadratic_parts() {
     const std::vector<std::vector<slong>> cases = {
             {1, 0, -10, 0, 1},
