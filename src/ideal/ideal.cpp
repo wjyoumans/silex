@@ -1752,19 +1752,137 @@ bool IdealAccess::set_known_two_generator(
     return true;
 }
 
-// Trust boundary of the four silex::detail ideal shortcuts
-// (set_known_two_generator_ideal above, this routine,
-// multiply_integral_ideal_by_element below, and set_integral_ideal_known_hnf
-// near FractionalIdeal::set_integral_den).  "Known" means that they skip the
+namespace {
+
+// Debug cross-check of the closed form below: `hnf` equals the HNF that
+// set_known_two_generator stores for a O + (theta - r) O.
+[[maybe_unused]] bool linear_hnf_matches_modular(const Order& order,
+                                                 flint::FmpzConstRef scalar,
+                                                 flint::FmpzConstRef root,
+                                                 flint::FmpzMatConstRef hnf) noexcept {
+    // theta - r in the basis 1, theta, ..., theta^(n-1); for n = 1, theta is
+    // the integer -F_0 of the monic F = x + F_0.
+    const slong n = order.degree();
+    flint::FmpzMat coordinates(1, n), expected(n, n);
+    fmpz* constant = fmpz_mat_entry(coordinates.raw(), 0, 0);
+    if (n >= 2) {
+        fmpz_one(fmpz_mat_entry(coordinates.raw(), 0, 1));
+    } else {
+        fmpz_neg(constant, fmpq_poly_numref(order.parent()->raw_flint_field()->pol));
+    }
+    fmpz_sub(constant, constant, root.raw());
+    OrderElement beta(order);
+    Ideal reference(order);
+    return beta.set_coordinates(flint::FmpzMatConstRef(coordinates)) &&
+           IdealAccess::set_known_two_generator(reference, scalar, beta) &&
+           reference.get_hnf(flint::FmpzMatRef(expected)) &&
+           fmpz_mat_equal(expected.raw(), hnf.raw()) != 0;
+}
+
+}  // namespace
+
+bool IdealAccess::set_known_linear_two_generator(
+        Ideal& out,
+        flint::FmpzConstRef scalar_generator,
+        flint::FmpzConstRef root) noexcept {
+    if (!out.is_defined() || !out.parent_.is_equation_order() ||
+        out.parent_.parent() == nullptr ||
+        flint::fmpz_sgn(scalar_generator) <= 0) {
+        return false;
+    }
+    const fmpq_poly_struct* polynomial =
+            out.parent_.parent()->raw_flint_field()->pol;
+    const slong n = out.parent_.degree();
+    // FLINT stores an fmpq_poly as a numerator vector over one common
+    // denominator, so F is monic integral iff both are one at degree n.
+    if (n < 1 || fmpq_poly_degree(polynomial) != n ||
+        !fmpz_is_one(fmpq_poly_denref(polynomial)) ||
+        !fmpz_is_one(fmpq_poly_numref(polynomial) + n)) {
+        return false;
+    }
+
+    // Source trace: reference v0.39.19
+    // `src/NumFieldOrd/NfOrd/Ideal/Ideal.jl:basis_mat_prime_deg_1` (lines
+    // 459-477) writes the basis matrix of a degree-one prime P directly: in
+    // its lower-left convention row i is e_i - (w_i mod P) e_1, with the
+    // minimum p in the corner, because O / P = F_p.  This routine is the same
+    // construction in Silex's upper-right FLINT convention, for the basis
+    // w_i = theta^i of the equation order Z[theta] = Z[x] / (F).
+    //
+    // When F(r) = 0 mod a, f(theta) -> f(r) mod a is a well-defined surjective
+    // ring map Z[theta] -> Z / a.  Its kernel is a O + (theta - r) O, since
+    // f(theta) = f(r) + (theta - r) q(theta) for f(x) = f(r) + (x - r) q(x).
+    // In coordinates the ideal is the index-a lattice of c in Z^n with
+    // sum_i c_i r^i = 0 mod a.  Its upper triangular HNF (pivots positive,
+    // entries above a pivot reduced into [0, pivot)) is
+    //   - r = 0 mod a: diag(a, 1, ..., 1) (the rows a e_0, e_1, ..., e_(n-1));
+    //   - r a unit mod a, s = r^-1 mod a: the rows e_j + c_j e_(n-1) for
+    //     j < n - 1 with c_j = -r^j s^(n-1) = -s^(n-1-j) mod a, and a e_(n-1).
+    // Each row lies in the lattice and the rows have determinant a, its index,
+    // so they are a basis, and the matrix is in HNF, hence it is the unique
+    // HNF that set_known_two_generator computes for a and theta - r.  Any
+    // other r (a nonzero zero divisor modulo a composite a) returns false.
+    flint::Fmpz r, value, unit, power;
+    fmpz_mod(r.raw(), root.raw(), scalar_generator.raw());
+    const fmpz* coefficients = fmpq_poly_numref(polynomial);
+    for (slong i = n; i >= 0; --i) {
+        fmpz_mul(value.raw(), value.raw(), r.raw());
+        fmpz_add(value.raw(), value.raw(), coefficients + i);
+        fmpz_mod(value.raw(), value.raw(), scalar_generator.raw());
+    }
+    if (!fmpz_is_zero(value.raw())) {
+        return false;
+    }
+
+    flint::FmpzMat hnf(n, n);
+    for (slong i = 0; i < n; ++i) {
+        fmpz_one(fmpz_mat_entry(hnf.raw(), i, i));
+    }
+    if (fmpz_is_zero(r.raw())) {
+        fmpz_set(fmpz_mat_entry(hnf.raw(), 0, 0), scalar_generator.raw());
+    } else {
+        if (fmpz_invmod(unit.raw(), r.raw(), scalar_generator.raw()) == 0) {
+            return false;
+        }
+        fmpz_one(power.raw());
+        for (slong j = n - 2; j >= 0; --j) {
+            fmpz_mul(power.raw(), power.raw(), unit.raw());
+            fmpz_mod(power.raw(), power.raw(), scalar_generator.raw());
+            fmpz_sub(fmpz_mat_entry(hnf.raw(), j, n - 1),
+                     scalar_generator.raw(), power.raw());
+        }
+        fmpz_set(fmpz_mat_entry(hnf.raw(), n - 1, n - 1),
+                 scalar_generator.raw());
+    }
+    // Builds with assertions compare the matrix with the general route,
+    // which also shows that its row span is the ideal.
+    assert(linear_hnf_matches_modular(out.parent_, scalar_generator,
+                                      flint::FmpzConstRef(r),
+                                      flint::FmpzMatConstRef(hnf)));
+    Ideal candidate(out.parent_);
+    if (!candidate.set_hnf_direct(flint::FmpzMatConstRef(hnf))) {
+        return false;
+    }
+    out.swap(candidate);
+    return true;
+}
+
+// Trust boundary of the five silex::detail ideal shortcuts
+// (set_known_two_generator_ideal and set_known_linear_two_generator_ideal
+// above, this routine, multiply_integral_ideal_by_element below, and
+// set_integral_ideal_known_hnf near FractionalIdeal::set_integral_den).  "Known" means that they skip the
 // hnf_is_ideal closure test of Ideal::set_hnf, not that they store a claim
 // the caller makes.  For every input that passes their checks they store
 // only the HNF of a lattice that is an ideal by construction.  The first
-// three also store no norm and no principal generator; the fourth does not
+// four also store no norm and no principal generator; the fifth does not
 // make that claim (see its bullet):
 //   - set_known_two_generator_ideal(a, beta): rows a I_n and M_beta span
 //     a Z^n + beta O = a O + beta O, an ideal for every a > 0 and beta in O,
 //     and every elementary divisor divides a, so the modular-HNF contract
 //     holds whatever beta is.
+//   - set_known_linear_two_generator_ideal(a, r): it checks F(r) = 0 mod a
+//     itself, so its closed form is the HNF of a O + (theta - r) O, the
+//     ideal set_known_two_generator_ideal(a, theta - r) stores.
 //   - multiply_integral_ideal_by_two_generator(I, a, beta): rows a H and
 //     H M_beta span a I + beta I = I (a O + beta O), an ideal whenever I is.
 //   - multiply_integral_ideal_by_element(I, x): the rows are x times the
@@ -1778,7 +1896,7 @@ bool IdealAccess::set_known_two_generator(
 // IdealAccess::set_hnf_direct).  So a "false" generator, one that does not
 // generate the ideal the caller intends, gives a true description of the
 // ideal it does generate, the same ideal Ideal::set_hnf, Ideal::add of
-// principal ideals, or Ideal::multiply would produce.  None of the four
+// principal ideals, or Ideal::multiply would produce.  None of the five
 // reads or writes a ClassGroupContext, OrderUnitGroup or PrimeIdeal, or any
 // certification state: they are friends of Ideal and FractionalIdeal only.
 // Their results can reach labelled computations, for example

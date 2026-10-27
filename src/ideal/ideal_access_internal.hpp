@@ -47,6 +47,11 @@ public:
             const OrderElement& element_generator) noexcept;
     static bool set_integral_known_hnf(FractionalIdeal& out,
                                        const Ideal& numerator) noexcept;
+    // Implementation of detail::set_known_linear_two_generator_ideal, defined
+    // in ideal.cpp.
+    static bool set_known_linear_two_generator(
+            Ideal& out, flint::FmpzConstRef scalar_generator,
+            flint::FmpzConstRef root) noexcept;
 
     // Implementations of detail::multiply_integral_ideal_by_two_generator
     // and detail::multiply_integral_ideal_by_element, defined in ideal.cpp.
@@ -82,6 +87,20 @@ inline bool set_known_two_generator_ideal(
         const OrderElement& element_generator) noexcept {
     return IdealAccess::set_known_two_generator(out, scalar_generator,
                                                 element_generator);
+}
+
+// Trust helper, noninstalled.  The closed form of
+// set_known_two_generator_ideal(out, a, theta - r) on an equation order
+// Z[theta] whose defining polynomial F is monic integral: stores the same HNF
+// of a O + (theta - r) O without a modular HNF.  It applies only when
+// F(r) = 0 mod a and r is zero or a unit modulo a; otherwise, or on undefined
+// input, a non-equation order or a <= 0, it returns false and leaves `out`
+// unchanged, and the caller takes the general routine.
+inline bool set_known_linear_two_generator_ideal(
+        Ideal& out, flint::FmpzConstRef scalar_generator,
+        flint::FmpzConstRef root) noexcept {
+    return IdealAccess::set_known_linear_two_generator(out, scalar_generator,
+                                                       root);
 }
 
 // Trust helper, noninstalled.  Sets `out` to the principal ideal

@@ -1,5 +1,13 @@
+#include <flint/fmpz_mod_poly.h>
+#include <flint/fmpz_mod_poly_factor.h>
+#include <flint/fmpz_poly.h>
+#include <flint/ulong_extras.h>
+
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_mod_ctx.hpp>
+#include <silex/flint/fmpz_mod_poly.hpp>
+#include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/ideal.hpp>
 
 #include "test_support.hpp"
@@ -10,6 +18,7 @@
 #include "../src/order/order_internal.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string_view>
@@ -2283,6 +2292,192 @@ int test_known_two_generator_hnf_matches_generic() {
     return 0;
 }
 
+// set_known_linear_two_generator_ideal writes the HNF of a O + (theta - r) O
+// on an equation order in closed form.  Compare it, over many (field, a, r),
+// with fmpz_mat_hnf_modular_eldiv of the rows a I_n and the coordinates of
+// (theta - r) w_i, the route of set_known_two_generator_ideal: every root of
+// F modulo primes up to 113 and one multiword prime, including r = 0 and
+// ramified roots (F'(r) = 0 mod p), and every residue r modulo composite a.
+// Non-roots, nonzero zero divisors r and non-equation orders are refused
+// with `out` unchanged, so the caller takes the general routine.
+void linear_two_generator_modular_hnf(silex::Order& order,
+                                      sflint::FmpzConstRef scalar,
+                                      sflint::FmpzConstRef root,
+                                      sflint::FmpzMat& expected) noexcept {
+    const slong n = order.degree();
+    sflint::FmpzMat coordinates(1, n), unit(1, n), row(1, n), rows(2 * n, n);
+    fmpz_one(fmpz_mat_entry(coordinates.raw(), 0, 1));
+    fmpz_neg(fmpz_mat_entry(coordinates.raw(), 0, 0), root.raw());
+    silex::OrderElement beta(order), basis_element(order), product(order);
+    assert(beta.set_coordinates(sflint::FmpzMatConstRef(coordinates)));
+    for (slong i = 0; i < n; ++i) {
+        fmpz_set(fmpz_mat_entry(rows.raw(), i, i), scalar.raw());
+        fmpz_mat_zero(unit.raw());
+        fmpz_one(fmpz_mat_entry(unit.raw(), 0, i));
+        assert(basis_element.set_coordinates(sflint::FmpzMatConstRef(unit)));
+        assert(product.multiply(beta, basis_element));
+        assert(product.get_coordinates(sflint::FmpzMatRef(row)));
+        for (slong j = 0; j < n; ++j) {
+            fmpz_set(fmpz_mat_entry(rows.raw(), n + i, j),
+                     fmpz_mat_entry(row.raw(), 0, j));
+        }
+    }
+    if (fmpz_is_one(scalar.raw())) {
+        fmpz_mat_one(expected.raw());
+    } else {
+        fmpz_mat_hnf_modular_eldiv(rows.raw(), scalar.raw());
+        sflint::FmpzMatConstWindow top(rows, 0, 0, n, n);
+        fmpz_mat_set(expected.raw(), top.raw());
+    }
+    silex::Ideal general(order);
+    sflint::FmpzMat stored(n, n);
+    assert(silex::detail::set_known_two_generator_ideal(general, scalar, beta));
+    assert(general.get_hnf(sflint::FmpzMatRef(stored)));
+    assert(fmpz_mat_equal(stored.raw(), expected.raw()));
+}
+
+struct LinearHnfCounts {
+    slong fast = 0;
+    slong zero_root = 0;
+    slong ramified = 0;
+    slong refused = 0;
+};
+
+void check_linear_two_generator(silex::Order& order, const sflint::Fmpz& scalar,
+                                const sflint::Fmpz& root,
+                                LinearHnfCounts& counts) noexcept {
+    const slong n = order.degree();
+    sflint::FmpzPoly f, derivative;
+    fmpq_poly_get_numerator(f.raw(), order.parent()->raw_flint_field()->pol);
+    fmpz_poly_derivative(derivative.raw(), f.raw());
+    sflint::Fmpz value, slope, common;
+    fmpz_poly_evaluate_fmpz(value.raw(), f.raw(), root.raw());
+    fmpz_mod(value.raw(), value.raw(), scalar.raw());
+    fmpz_poly_evaluate_fmpz(slope.raw(), derivative.raw(), root.raw());
+    fmpz_mod(slope.raw(), slope.raw(), scalar.raw());
+    fmpz_gcd(common.raw(), root.raw(), scalar.raw());
+    const bool zero = fmpz_divisible(root.raw(), scalar.raw()) != 0;
+    const bool covered = fmpz_is_zero(value.raw()) &&
+                         (zero || fmpz_is_one(common.raw()));
+
+    // A sentinel ideal shows that a refusal leaves `out` unchanged.
+    silex::Ideal ideal(order);
+    sflint::FmpzMat actual(n, n), sentinel(n, n);
+    assert(set_rational_principal(ideal, 7));
+    assert(ideal.get_hnf(sflint::FmpzMatRef(sentinel)));
+    const bool stored = silex::detail::set_known_linear_two_generator_ideal(
+            ideal, sflint::FmpzConstRef(scalar), sflint::FmpzConstRef(root));
+    assert(stored == covered);
+    assert(ideal.get_hnf(sflint::FmpzMatRef(actual)));
+    if (!stored) {
+        assert(fmpz_mat_equal(actual.raw(), sentinel.raw()));
+        ++counts.refused;
+        return;
+    }
+    sflint::FmpzMat expected(n, n);
+    linear_two_generator_modular_hnf(order, sflint::FmpzConstRef(scalar),
+                                     sflint::FmpzConstRef(root), expected);
+    assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+    ++counts.fast;
+    if (zero) ++counts.zero_root;
+    if (fmpz_is_zero(slope.raw()) && fmpz_is_prime(scalar.raw()) != 0) {
+        ++counts.ramified;
+    }
+}
+
+int test_known_linear_two_generator_matches_modular_hnf() {
+    // Monic integral irreducible F, constant term first: x^2 + 5 (2 and 5
+    // ramify, 5 with r = 0), x^3 - 2 (2 with r = 0, 3 totally ramified),
+    // x^5 - x - 1, x^6 + x + 1, Phi_15 and x^19 - x - 1.
+    const std::vector<std::vector<slong>> polynomials = {
+            {5, 0, 1},
+            {-2, 0, 0, 1},
+            {-1, -1, 0, 0, 0, 1},
+            {1, 1, 0, 0, 0, 0, 1},
+            {1, -1, 0, 1, -1, 1, 0, -1, 1},
+            {-1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}};
+    LinearHnfCounts counts;
+    sflint::FmpqPoly polynomial;
+    for (const std::vector<slong>& coefficients : polynomials) {
+        sflint::fmpq_poly_zero(polynomial);
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           coefficients[i]);
+        }
+        silex::Order order =
+                silex::test::equation_order(field_by_polynomial(polynomial));
+        assert(order.is_equation_order());
+        sflint::FmpzPoly f;
+        fmpq_poly_get_numerator(f.raw(), order.parent()->raw_flint_field()->pol);
+
+        std::vector<sflint::Fmpz> primes;
+        for (ulong p = 2; p < 114; p = n_nextprime(p, 1)) {
+            primes.emplace_back();
+            fmpz_set_ui(primes.back().raw(), p);
+        }
+        primes.emplace_back();
+        fmpz_one(primes.back().raw());
+        fmpz_mul_2exp(primes.back().raw(), primes.back().raw(), 64);
+        fmpz_nextprime(primes.back().raw(), primes.back().raw(), 1);
+        for (const sflint::Fmpz& p : primes) {
+            sflint::FmpzModCtx ctx(p.raw());
+            sflint::FmpzModPoly reduced(ctx);
+            sflint::FmpzModPolyFactor roots(ctx);
+            fmpz_mod_poly_set_fmpz_poly(reduced.raw(), f.raw(), ctx.raw());
+            fmpz_mod_poly_roots(roots.raw(), reduced.raw(), 0, ctx.raw());
+            sflint::Fmpz root;
+            for (slong i = 0; i < roots.raw()->num; ++i) {
+                fmpz_mod_poly_get_coeff_fmpz(root.raw(), roots.raw()->poly + i,
+                                             0, ctx.raw());
+                fmpz_neg(root.raw(), root.raw());
+                fmpz_mod(root.raw(), root.raw(), p.raw());
+                check_linear_two_generator(order, p, root, counts);
+                // Unreduced representatives give the same ideal.
+                fmpz_sub(root.raw(), root.raw(), p.raw());
+                check_linear_two_generator(order, p, root, counts);
+            }
+            // A non-root is refused: x - 0 or x - 1 is not a factor for
+            // every p, so try both.
+            for (slong r = 0; r < 2; ++r) {
+                fmpz_set_si(root.raw(), r);
+                check_linear_two_generator(order, p, root, counts);
+            }
+        }
+        // Composite and unit scalars: every residue r, covering roots that
+        // are zero or units modulo a and refused nonzero zero divisors.
+        for (ulong a : {1UL, 4UL, 6UL, 8UL, 12UL, 25UL, 30UL, 35UL, 49UL, 105UL}) {
+            sflint::Fmpz scalar, root;
+            fmpz_set_ui(scalar.raw(), a);
+            for (ulong r = 0; r < a; ++r) {
+                fmpz_set_ui(root.raw(), r);
+                check_linear_two_generator(order, scalar, root, counts);
+            }
+        }
+    }
+    assert(counts.fast > 100 && counts.zero_root > 0 && counts.ramified > 0 &&
+           counts.refused > 100);
+
+    // Not an equation order: x^3 - 10 has index 3, 10 = 1 mod 9.  F(1) = 0
+    // mod 3, but the closed form needs the power basis.
+    poly_x3_minus(polynomial, 10);
+    silex::Order equation =
+            silex::test::equation_order(field_by_polynomial(polynomial));
+    silex::Order maximal(*equation.parent());
+    assert(maximal.maximal_order(equation) && !maximal.is_equation_order());
+    silex::Ideal ideal(maximal);
+    sflint::Fmpz three, one;
+    fmpz_set_ui(three.raw(), 3);
+    fmpz_one(one.raw());
+    assert(!silex::detail::set_known_linear_two_generator_ideal(
+            ideal, sflint::FmpzConstRef(three), sflint::FmpzConstRef(one)));
+    // The scalar must be positive.
+    silex::Ideal equation_ideal(equation);
+    fmpz_neg(three.raw(), three.raw());
+    assert(!silex::detail::set_known_linear_two_generator_ideal(
+            equation_ideal, sflint::FmpzConstRef(three), sflint::FmpzConstRef(one)));
+    return 0;
+}
+
 // The generic branch of try_ideal_product_hnf takes the HNF of the rows
 // [mk H; H M_beta] modulo mh mk (fmpz_mat_hnf_modular_eldiv).  Compare it with
 // the plain fmpz_mat_hnf of all n^2 basis products, over maximal orders with
@@ -3804,6 +3999,7 @@ int main(int argc, char** argv) {
     assert(test_general_product_contents_and_fallback() == 0);
     assert(test_nonprincipal_product_and_associativity() == 0);
     assert(test_known_two_generator_hnf_matches_generic() == 0);
+    assert(test_known_linear_two_generator_matches_modular_hnf() == 0);
     assert(test_general_product_hnf_matches_plain_hnf() == 0);
     assert(test_two_generator_search_matches_plain_hnf() == 0);
     assert(test_ideal_minimum_forward_substitution_matches_solve() == 0);

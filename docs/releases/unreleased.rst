@@ -222,6 +222,24 @@ Changed
   drops by 5.58% in the class and unit computation and by 2.38% for the
   whole process.
 
+- When ``decompose_prime`` builds a prime ``(p, theta - r)`` from a
+  degree-one factor ``x - r`` of the defining polynomial modulo ``p`` on an
+  equation order, it now writes the ideal's Hermite normal form directly
+  instead of reducing the ``2n x n`` two-generator matrix modulo ``p``: the
+  rows ``e_j + c_j e_(n-1)`` with ``c_j = -r^(j-n+1) mod p`` and
+  ``p e_(n-1)``, or ``diag(p, 1, ..., 1)`` when ``r = 0``, which is the
+  reference ``basis_mat_prime_deg_1`` construction in Silex's upper
+  triangular convention.  It applies for every ramification index (for
+  example ``e = 2``, ``f = 1``); factors of degree above one, other orders
+  and any root the closed form cannot confirm take the previous route.  The stored
+  matrix is the same, so prime ideals and ``grh`` outputs are unchanged (all
+  non-timing output fields identical on the 171 ``grh`` corpus rows that
+  finish; ``cyclotomic_real_163_deg81`` times out on both).  Callgrind Ir
+  of the whole ``grh`` process (busy machine) drops by 2.71% on
+  ``nonadecic_x19_minus_x_minus_1_proven``, 1.47% on
+  ``hexadecic_x16_minus_x_minus_1_proven`` and 3.58% on
+  ``cyclotomic_32_phi16``.
+
 - ``IdealFactorization::factor`` no longer multiplies the prime powers back
   together and compares the product with the input in release builds.  It
   now checks norm accounting instead: for every rational prime ``p`` dividing

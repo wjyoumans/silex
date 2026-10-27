@@ -4821,7 +4821,27 @@ bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
                             "prime_ideal.decompose_prime.two_generator_ideal");
-        if (!set_known_two_generator_ideal(candidate_ideal, p, generator)) {
+        // A degree-one factor c_1 x + c_0 of F mod p on the equation order
+        // gives p O + (theta - r) O with r = -c_0 / c_1 mod p, whatever the
+        // ramification index; set_known_linear_two_generator_ideal writes its
+        // HNF in closed form, the same matrix as the modular HNF below (see
+        // its source trace in ideal.cpp).  Residue degree > 1, other orders
+        // and any input the closed form refuses take the general routine.
+        bool stored = false;
+        if (residue_degree == 1 && order.is_equation_order()) {
+            flint::Fmpz lead, root;
+            fmpz_mod_poly_get_coeff_fmpz(lead.raw(), factor, 1, ctx.raw());
+            fmpz_mod_poly_get_coeff_fmpz(root.raw(), factor, 0, ctx.raw());
+            if (fmpz_invmod(lead.raw(), lead.raw(), p.raw()) != 0) {
+                fmpz_mul(root.raw(), root.raw(), lead.raw());
+                fmpz_neg(root.raw(), root.raw());
+                fmpz_mod(root.raw(), root.raw(), p.raw());
+                stored = set_known_linear_two_generator_ideal(
+                        candidate_ideal, p, flint::FmpzConstRef(root));
+            }
+        }
+        if (!stored &&
+            !set_known_two_generator_ideal(candidate_ideal, p, generator)) {
             return false;
         }
     }

@@ -15,6 +15,7 @@
 #include <silex/prime_ideal.hpp>
 #include <silex/residue_ring.hpp>
 
+#include "ideal/ideal_access_internal.hpp"
 #include "ideal/prime_inverse_internal.hpp"
 #include "order/order_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
@@ -24,6 +25,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstring>
 #include <utility>
 #include <span>
@@ -482,6 +484,93 @@ int test_alpha_reduction_refuses_index_prime() {
     sflint::Fmpz denominator;
     assert(!silex::detail::residue_variable_numerator(numerator, denominator,
                                                       prime, alpha));
+    return 0;
+}
+
+// set_defining_polynomial_factor_prime stores p O + (theta - r) O for a
+// degree-one factor on an equation order in closed form, and takes
+// set_known_two_generator_ideal(p, g(theta)) otherwise.  For every factor g
+// of F modulo small primes, the stored ideal must equal the general route's
+// HNF: degree-one factors (r = 0, e = 1, 2 and 3), factors of degree > 1 and
+// a maximal order that is not the equation order all agree.
+int test_defining_polynomial_factor_prime_matches_general_hnf() {
+    sflint::FmpqPoly polynomial;
+    std::vector<silex::Order> orders;
+    for (const std::vector<slong>& coefficients :
+         std::vector<std::vector<slong>>{{5, 0, 1},
+                                         {-2, 0, 0, 1},
+                                         {1, 1, 0, 0, 0, 0, 1},
+                                         {-1, -1, 0, 0, 0, 0, 0, 0, 1}}) {
+        sflint::fmpq_poly_zero(polynomial);
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial, static_cast<slong>(i),
+                                           coefficients[i]);
+        }
+        orders.push_back(silex::test::equation_order(field_by_polynomial(polynomial)));
+    }
+    // x^3 - 10: the maximal order has index 3 over Z[theta]; p = 3 is skipped.
+    poly_x3_minus(polynomial, 10);
+    {
+        silex::Order equation =
+                silex::test::equation_order(field_by_polynomial(polynomial));
+        silex::Order maximal(*equation.parent());
+        assert(maximal.maximal_order(equation) && !maximal.is_equation_order());
+        orders.push_back(std::move(maximal));
+    }
+
+    slong linear = 0, linear_ramified = 0, zero_root = 0, higher = 0, other_order = 0;
+    for (silex::Order& order : orders) {
+        const slong n = order.degree();
+        sflint::FmpzPoly f;
+        fmpq_poly_get_numerator(f.raw(), order.parent()->raw_flint_field()->pol);
+        for (ulong prime = 2; prime < 60; prime = n_nextprime(prime, 1)) {
+            if (!order.is_equation_order() && prime == 3) continue;
+            sflint::Fmpz p;
+            fmpz_set_ui(p.raw(), prime);
+            sflint::FmpzModCtx ctx(p.raw());
+            sflint::FmpzModPoly reduced(ctx);
+            sflint::FmpzModPolyFactor factors(ctx);
+            fmpz_mod_poly_set_fmpz_poly(reduced.raw(), f.raw(), ctx.raw());
+            fmpz_mod_poly_factor(factors.raw(), reduced.raw(), ctx.raw());
+            for (slong i = 0; i < factors.raw()->num; ++i) {
+                const fmpz_mod_poly_struct* factor = factors.raw()->poly + i;
+                silex::PrimeIdeal prime_ideal(order);
+                assert(PrimeIdealAccess::set_defining_polynomial_factor_prime(
+                        prime_ideal, order, sflint::FmpzConstRef(p), factor,
+                        factors.raw()->exp[i], ctx, nullptr));
+                silex::Ideal stored(order), general(order);
+                sflint::FmpzMat actual(n, n), expected(n, n);
+                assert(prime_ideal.get_ideal(stored) &&
+                       stored.get_hnf(sflint::FmpzMatRef(actual)));
+
+                sflint::FmpzPoly lifted;
+                sflint::FmpqPoly lifted_rational;
+                fmpz_mod_poly_get_fmpz_poly(lifted.raw(), factor, ctx.raw());
+                fmpq_poly_set_fmpz_poly(lifted_rational.raw(), lifted.raw());
+                silex::Element element(*order.parent());
+                silex::OrderElement generator(order);
+                assert(element.set_fmpq_poly(sflint::FmpqPolyConstRef(lifted_rational)) &&
+                       generator.set_element(element) &&
+                       silex::detail::set_known_two_generator_ideal(
+                               general, sflint::FmpzConstRef(p), generator) &&
+                       general.get_hnf(sflint::FmpzMatRef(expected)));
+                assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+
+                const slong degree = fmpz_mod_poly_degree(factor, ctx.raw());
+                if (!order.is_equation_order()) {
+                    ++other_order;
+                } else if (degree > 1) {
+                    ++higher;
+                } else {
+                    ++linear;
+                    if (factors.raw()->exp[i] > 1) ++linear_ramified;
+                    if (fmpz_mod_poly_is_gen(factor, ctx.raw()) != 0) ++zero_root;
+                }
+            }
+        }
+    }
+    assert(linear > 20 && linear_ramified >= 3 && zero_root >= 2 && higher > 10 &&
+           other_order > 10);
     return 0;
 }
 
@@ -5827,6 +5916,7 @@ int main(int argc, char** argv) {
     assert(test_primitive_root_word_size_matches_fmpz() == 0);
     assert(test_primitive_root_word_size_matches_powmod_search() == 0);
     assert(test_degree_one_prime_from_root_matches_decomposition() == 0);
+    assert(test_defining_polynomial_factor_prime_matches_general_hnf() == 0);
     assert(test_degree_one_prime_from_root_rejects_non_roots() == 0);
     assert(test_degree_one_prime_from_root_rejects_index_prime() == 0);
     assert(test_alpha_reduction_refuses_index_prime() == 0);
