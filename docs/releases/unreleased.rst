@@ -2745,6 +2745,23 @@ Changed
   ``q10_c11_deg10`` 1.0% fewer (1.871e9 to 1.852e9),
   ``cyclotomic_23_phi22`` 7.7% fewer, ``cyclotomic_41_phi40`` 3.5% fewer.  No
   timing has been measured.
+- The logarithmic embedding of a factored element now sums each place with
+  one ``arb_dot`` of the factor logs and the merged exponents, in place of a
+  term-by-term ``arb_addmul_fmpz`` loop, and keeps the storage for the factor
+  logs on the thread for its next call.  Like every Arb operation,
+  ``arb_dot`` returns a ball that contains the exact sum, so the result is
+  still a rigorous enclosure, but its midpoint and radius can differ in the
+  last bits.  This change was decided without a separate review question,
+  under the rule that a regulator enclosure may change if it stays rigorous.
+  On 171 class/unit corpus rows in ``grh`` mode (timing fields stripped;
+  ``cyclotomic_real_163_deg81`` was not run), every published output is
+  identical except ``regulator_radius`` on 63 rows, with ratios 0.91 to 1.80.
+  Each new regulator enclosure contains the old midpoint, and each old one
+  contains the new midpoint.  Callgrind instruction counts for the whole
+  ``silex-class-unit-instance`` process, ``grh`` mode:
+  ``cyclotomic_real_41_deg20`` 3.9% fewer (1.245e9 to 1.197e9) and
+  ``cyclotomic_real_31_deg15`` 2.5% fewer (6.531e8 to 6.369e8).  No timing
+  has been measured.
 
 Fixed
 -----

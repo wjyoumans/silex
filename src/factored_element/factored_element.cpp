@@ -166,6 +166,44 @@ bool arb_has_radius_at_most_2exp(const arb_struct* value,
            mag_cmp_2exp_si(arb_radref(value), exponent) <= 0;
 }
 
+// Row storage for the factored log sum, which needs every factor log at once
+// to take one arb_dot per place.  The arbs of a fresh vector allocate their
+// limbs on first use, so the storage is kept for the thread's next call: the
+// object takes the thread's stored vector on construction (growing it to
+// `length` when shorter) and puts it back on destruction.  A call reached
+// while the vector is taken finds none stored and works in its own, and the
+// longer of the two is kept, so no call shares rows with another.  The
+// thread keeps one vector, as long as its longest call needed, until it
+// exits.
+class FactoredLogRowScratch {
+public:
+    explicit FactoredLogRowScratch(slong length) noexcept {
+        rows_.swap(stored());
+        if (rows_.length() < length) {
+            flint::ArbVec grown(length);
+            rows_.swap(grown);
+        }
+    }
+    ~FactoredLogRowScratch() noexcept {
+        flint::ArbVec& kept = stored();
+        if (rows_.length() > kept.length()) {
+            kept.swap(rows_);
+        }
+    }
+    FactoredLogRowScratch(const FactoredLogRowScratch&) = delete;
+    FactoredLogRowScratch& operator=(const FactoredLogRowScratch&) = delete;
+
+    arb_ptr data() noexcept { return rows_.data(); }
+
+private:
+    static flint::ArbVec& stored() noexcept {
+        thread_local flint::ArbVec value(0);
+        return value;
+    }
+
+    flint::ArbVec rows_{0};
+};
+
 // Ports `expand!` (reference Misc/acb_root_ctx.jl:278): the final
 // rounding that widens a ball to a requested radius bound.
 void expand_arb_to_radius(arb_struct* value, slong max_radius_2exp) noexcept {
@@ -1473,11 +1511,34 @@ bool FactoredElementAccess::logarithmic_embedding(
         _arb_vec_zero(sum.data(), places);
         return out.set_from(flint::ArbVecConstRef(sum));
     }
-    flint::ArbVec row(places);
+    const slong term_count = static_cast<slong>(terms.size());
+    if (term_count > std::numeric_limits<slong>::max() / places) {
+        return false;
+    }
+    // The merged exponents as exact balls (radius 0), the y side of each
+    // place's arb_dot; arb_set_fmpz is exact.
+    flint::ArbVec exponent_balls(term_count);
+    for (slong t = 0; t < term_count; ++t) {
+        arb_set_fmpz(exponent_balls.data() + t,
+                     merged.data() + terms[static_cast<std::size_t>(t)]);
+    }
+    // Term t's factor log is row t: places entries from t * places on.
+    FactoredLogRowScratch rows(term_count * places);
 
     // Source trace: reference NfOrd/FacElem.jl:116-120 and :149-205 bucket factor
     // logs, add exponent and factor-count guard bits, and double working
     // precision until every partial sum meets the requested absolute error.
+    // Each place's sum is one arb_dot of the factor logs with the exact
+    // merged exponents.  Like every Arb operation, arb_dot returns a ball
+    // that contains the exact sum for every choice of points in the input
+    // balls, so the sum stays a rigorous enclosure; its midpoint comes from
+    // one accumulation with a final rounding, so it can differ in the last
+    // bits from a sum of rounded arb_addmul_fmpz steps.  Ball sums only
+    // widen, so the reference's test on every partial sum is the test on
+    // the final sum.  An enclosing radius is at least the spread of the
+    // exact sums, so at least |e| * rad(log) for each single term; a term
+    // whose contribution already exceeds the target fails the pass before
+    // the remaining factor logs are computed.
     slong work_precision = 0;
     if (!factored_log_work_precision(
                 work_precision, precision, merged_exponent_bits,
@@ -1494,43 +1555,47 @@ bool FactoredElementAccess::logarithmic_embedding(
                                            work_precision)) {
             return false;
         }
-        _arb_vec_zero(sum.data(), places);
-        bool first = true;
         bool precision_too_low = false;
-        for (const std::size_t d : terms) {
+        for (slong t = 0; t < term_count && !precision_too_low; ++t) {
+            const std::size_t d = terms[static_cast<std::size_t>(t)];
             const auto& entry = entries[distinct_first[d]];
-            const fmpz* exponent = merged.data() + d;
+            arb_ptr row = rows.data() + t * places;
             {
                 SILEX_PROFILE_SCOPE(
                         diagnostics, DiagnosticsModule::element,
                         "element.factored.logarithmic_embedding_factor");
                 if (!silex::logarithmic_embedding(
-                            flint::ArbVecRef(row), embeddings,
+                            flint::ArbVecRef(row, places), embeddings,
                             entry.factor, mode, factor_precision,
                             diagnostics)) {
                     precision_too_low = true;
                     break;
                 }
             }
-
+            // |e| >= 2^low_bits, so rad(row_j) > 2^(target - low_bits)
+            // puts the term's own contribution above the target radius.
+            const slong low_bits =
+                    static_cast<slong>(::fmpz_bits(
+                            merged.data() + d)) - 1;
             for (slong j = 0; j < places; ++j) {
-                if (first) {
-                    arb_mul_fmpz(sum.data() + j, row.data() + j, exponent,
-                                 factor_precision);
-                } else {
-                    arb_addmul_fmpz(sum.data() + j, row.data() + j,
-                                    exponent, factor_precision);
+                if (!arb_has_radius_at_most_2exp(
+                            row + j, target_radius_2exp - low_bits)) {
+                    precision_too_low = true;
+                    break;
                 }
+            }
+        }
+        if (!precision_too_low) {
+            for (slong j = 0; j < places; ++j) {
+                ::arb_dot(sum.data() + j, nullptr, 0, rows.data() + j,
+                          places, exponent_balls.data(), 1, term_count,
+                          factor_precision);
                 if (!arb_has_radius_at_most_2exp(
                             sum.data() + j, target_radius_2exp)) {
                     precision_too_low = true;
                     break;
                 }
             }
-            if (precision_too_low) {
-                break;
-            }
-            first = false;
         }
 
         if (!precision_too_low) {
