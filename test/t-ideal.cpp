@@ -2789,6 +2789,15 @@ int test_basis_product_hnf_matches_generic_product() {
         ideals.emplace_back(order);
         assert(ideals.back().set_hnf(sflint::FmpzMatConstRef(h)));
     }
+    {
+        // 3 O: the primitive part is O, so the pairs with it reach the
+        // mh mk = 1 branch of basis_product_hnf (one side, and both sides).
+        sflint::FmpzMat h(n, n);
+        fmpz_mat_one(h.raw());
+        fmpz_mat_scalar_mul_si(h.raw(), h.raw(), 3);
+        ideals.emplace_back(order);
+        assert(ideals.back().set_hnf(sflint::FmpzMatConstRef(h)));
+    }
 
     sflint::FmpzMat expected(n, n), actual(n, n), snapshot(n, n);
     std::vector<sflint::FmpzMat> generic;
@@ -2810,7 +2819,7 @@ int test_basis_product_hnf_matches_generic_product() {
             }
         }
     }
-    // The search fails on most of these products (219 of 289 when written),
+    // The search fails on most of these products (most of them when written),
     // so Ideal::multiply took the route.
     assert(failed_search >= 100);
 

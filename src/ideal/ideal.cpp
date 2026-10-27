@@ -1039,8 +1039,10 @@ bool Ideal::multiply(const Ideal& left, const Ideal& right) noexcept {
     }
     // The generic two-generator search can fail (for example, small-norm
     // ideals above a prime that splits completely).  On a maximal order, take
-    // the HNF of the basis products modulo the product of the minima instead
-    // of the exact HNF that multiply_generic computes; the HNF is the same.
+    // the HNF of the basis products modulo the product of the minima of the
+    // primitive parts (contents restored by scaling; the reference mul_gen
+    // uses the minima of the ideals themselves) instead of the exact HNF that
+    // multiply_generic computes; the HNF is the same.
     if (parent_.is_maximal() &&
         detail::basis_product_hnf(flint::FmpzMatRef(fast_hnf), left, right)) {
         Ideal candidate(parent_);
