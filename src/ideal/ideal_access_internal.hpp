@@ -1,6 +1,7 @@
 #pragma once
 
 #include <silex/flint/fmpz_mat.hpp>
+#include <silex/flint/fmpz_poly.hpp>
 #include <silex/ideal.hpp>
 
 namespace silex::detail {
@@ -52,6 +53,11 @@ public:
     static bool set_known_linear_two_generator(
             Ideal& out, flint::FmpzConstRef scalar_generator,
             flint::FmpzConstRef root) noexcept;
+    // Implementation of detail::set_known_factor_two_generator_ideal,
+    // defined in ideal.cpp.
+    static bool set_known_factor_two_generator(
+            Ideal& out, flint::FmpzConstRef scalar_generator,
+            flint::FmpzPolyConstRef factor) noexcept;
 
     // Implementations of detail::multiply_integral_ideal_by_two_generator
     // and detail::multiply_integral_ideal_by_element, defined in ideal.cpp.
@@ -101,6 +107,21 @@ inline bool set_known_linear_two_generator_ideal(
         flint::FmpzConstRef root) noexcept {
     return IdealAccess::set_known_linear_two_generator(out, scalar_generator,
                                                        root);
+}
+
+// Trust helper, noninstalled.  The closed form of
+// set_known_two_generator_ideal(out, a, g(theta)) on an equation order
+// Z[theta] whose defining polynomial F is monic integral, for a monic integer
+// polynomial g of degree 1 <= f <= n: stores the same HNF of
+// a O + g(theta) O without a modular HNF.  It applies only when g divides F
+// modulo a and g(0) is a unit modulo a; otherwise, or on undefined input, a
+// non-equation order, a non-monic g or a <= 0, it returns false and leaves
+// `out` unchanged, and the caller takes the general routine.
+inline bool set_known_factor_two_generator_ideal(
+        Ideal& out, flint::FmpzConstRef scalar_generator,
+        flint::FmpzPolyConstRef factor) noexcept {
+    return IdealAccess::set_known_factor_two_generator(out, scalar_generator,
+                                                       factor);
 }
 
 // Trust helper, noninstalled.  Sets `out` to the principal ideal

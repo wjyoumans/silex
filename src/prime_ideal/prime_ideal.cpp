@@ -4825,8 +4825,11 @@ bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
         // gives p O + (theta - r) O with r = -c_0 / c_1 mod p, whatever the
         // ramification index; set_known_linear_two_generator_ideal writes its
         // HNF in closed form, the same matrix as the modular HNF below (see
-        // its source trace in ideal.cpp).  Residue degree > 1, other orders
-        // and any input the closed form refuses take the general routine.
+        // its source trace in ideal.cpp).  A factor of degree f > 1 gives
+        // p O + g(theta) O for the monic g = factor / lead;
+        // set_known_factor_two_generator_ideal writes that HNF in closed
+        // form as well (same source trace).  Other orders and any input the
+        // closed forms refuse take the general routine.
         bool stored = false;
         if (residue_degree == 1 && order.is_equation_order()) {
             flint::Fmpz lead, root;
@@ -4839,6 +4842,13 @@ bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
                 stored = set_known_linear_two_generator_ideal(
                         candidate_ideal, p, flint::FmpzConstRef(root));
             }
+        } else if (residue_degree > 1 && order.is_equation_order()) {
+            flint::FmpzModPoly monic(ctx);
+            flint::FmpzPoly lifted;
+            fmpz_mod_poly_make_monic(monic.raw(), factor, ctx.raw());
+            fmpz_mod_poly_get_fmpz_poly(lifted.raw(), monic.raw(), ctx.raw());
+            stored = set_known_factor_two_generator_ideal(
+                    candidate_ideal, p, flint::FmpzPolyConstRef(lifted));
         }
         if (!stored &&
             !set_known_two_generator_ideal(candidate_ideal, p, generator)) {
