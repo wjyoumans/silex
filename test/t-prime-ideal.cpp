@@ -1533,8 +1533,8 @@ int test_residue_degrees_cyclotomic_real_q10_c11() {
 // fails; the seam forces that.  decompose_prime_residue_degrees with
 // IndexDivisorMiss::degrees_only builds no ideal and so still gives
 // decompose_prime's degrees; with store_decomposition the failing build ends
-// the split passes, so it returns false, leaves `out` unchanged and stores
-// nothing (the route is atomic).  The two orders are fresh, so no cache entry
+// the bounded pass.  When no monogenic generator follows, the call returns
+// false, leaves `out` unchanged and stores nothing (the route is atomic).  The two orders are fresh, so no cache entry
 // or monogenic record hides the build.
 int check_ideal_build_failure_seam(const std::vector<slong>& low_to_high,
                                    slong rational_prime,
@@ -1586,9 +1586,10 @@ int check_ideal_build_failure_seam(const std::vector<slong>& low_to_high,
     assert(silex::detail::TestHookAccess::prime_ideal_build_failures_taken() >
            taken_before);
     if (route_continues_to_monogenic) {
-        // The failed build ends the split passes, but the monogenic search
-        // between them succeeds and decompose_prime's own route gives the
-        // degrees.
+        // The failed build ends only the bounded pass; the monogenic search
+        // then succeeds and decompose_prime's own route gives the degrees.
+        // The cache state afterwards (stored_cache) is not part of the
+        // contract on this route, so either state is accepted.
         assert(stored_ok);
         assert(degrees == expected);
     } else {
