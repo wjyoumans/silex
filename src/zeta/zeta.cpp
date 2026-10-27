@@ -411,7 +411,8 @@ void quadratic_afe_tail_bound_lower(mag_struct* res,
 
 // The largest index m found with F(m) >= abs_tol certified by
 // `quadratic_afe_tail_bound_lower` (0 when none is found), searched from
-// the estimate `n_end` of the stop index.  F is decreasing in n, so
+// the estimate `n_end` of the stop index.  `evaluations`, when given, counts
+// the lower-bound evaluations of the search (audit only).  F is decreasing in n, so
 // F(n) >= abs_tol for every n <= m.  Only the certificate at the returned
 // index matters, not the search, which needs no monotonicity of the rounded
 // bounds.
@@ -419,9 +420,13 @@ ulong quadratic_afe_tail_skip(slong sprime,
                               ulong q,
                               int parity,
                               const mag_struct* abs_tol,
-                              double n_end) noexcept {
+                              double n_end,
+                              ulong* evaluations) noexcept {
     MagValue f;
     const auto certified = [&](ulong m) noexcept {
+        if (evaluations != nullptr) {
+            ++*evaluations;
+        }
         quadratic_afe_tail_bound_lower(f.raw(), sprime, m, q, parity);
         return mag_cmp(f.raw(), abs_tol) >= 0;
     };
@@ -1198,8 +1203,13 @@ void quadratic_afe_sum(flint::Arb& res,
     const ulong skip_through =
             audit != nullptr && !audit->tail_skip
                     ? 0
-                    : quadratic_afe_tail_skip(sprime, q, parity, abs_tol,
-                                              n_end);
+                    : quadratic_afe_tail_skip(
+                              sprime, q, parity, abs_tol, n_end,
+                              audit != nullptr ? &audit->skip_evals[shift]
+                                               : nullptr);
+    if (audit != nullptr) {
+        audit->skip_index[shift] = skip_through;
+    }
 
     ::arb_zero(res.raw());
 

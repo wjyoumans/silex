@@ -471,6 +471,10 @@ struct QuadraticAfeStepAudit {
     // below the tolerance), and the number of tail bounds it evaluated.
     ulong stop_index[3] = {0, 0, 0};
     ulong tail_bounds[3] = {0, 0, 0};
+    // The largest index the tail-bound skip passed over, and the number of
+    // lower-bound evaluations its search made (both 0 with tail_skip false).
+    ulong skip_index[3] = {0, 0, 0};
+    ulong skip_evals[3] = {0, 0, 0};
 };
 
 // L(1, chi_D) for a fundamental discriminant D with |D| >= 3 fitting a
