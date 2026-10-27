@@ -1037,6 +1037,18 @@ bool Ideal::multiply(const Ideal& left, const Ideal& right) noexcept {
             return true;
         }
     }
+    // The generic two-generator search can fail (for example, small-norm
+    // ideals above a prime that splits completely).  On a maximal order, take
+    // the HNF of the basis products modulo the product of the minima instead
+    // of the exact HNF that multiply_generic computes; the HNF is the same.
+    if (parent_.is_maximal() &&
+        detail::basis_product_hnf(flint::FmpzMatRef(fast_hnf), left, right)) {
+        Ideal candidate(parent_);
+        if (candidate.set_hnf_direct(flint::FmpzMatConstRef(fast_hnf))) {
+            swap(candidate);
+            return true;
+        }
+    }
     return multiply_generic(left, right);
 }
 
@@ -1683,6 +1695,63 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out, const Ideal& left,
         fmpz_mat_scalar_mul_fmpz(result.raw(), top.raw(), ch.raw());
     }
     fmpz_mat_set(out.raw(), result.raw());
+    return true;
+}
+
+bool basis_product_hnf(flint::FmpzMatRef out, const Ideal& left,
+                       const Ideal& right) noexcept {
+    const Order* parent = left.parent();
+    if (parent == nullptr || right.parent() == nullptr ||
+        !parent->has_same_data(*right.parent()) || !left.has_hnf() || !right.has_hnf() ||
+        !fmpz_mat_shape(out, parent->degree(), parent->degree())) return false;
+    const slong n = parent->degree();
+    Order order(*parent);
+    // A view of the order's cached table; `order` is not reassigned below.
+    const flint::FmpzMat* table = detail::OrderAccess::multiplication_table(order);
+    flint::FmpzMat h(n, n), k(n, n), one_coordinates(1, n), row(1, n), matrix(n, n),
+            rows(n * n, n), result(n, n);
+    flint::Fmpz ch, ck, mh, mk, modulus;
+    OrderElement one(order);
+    if (table == nullptr || !left.get_hnf(flint::FmpzMatRef(h)) ||
+        !right.get_hnf(flint::FmpzMatRef(k))) return false;
+    primitive_hnf(h, ch);
+    primitive_hnf(k, ck);
+    if (!one.one() || !one.get_coordinates(flint::FmpzMatRef(one_coordinates)) ||
+        !ideal_minimum(mh, flint::FmpzMatConstRef(one_coordinates), flint::FmpzMatConstRef(h)) ||
+        !ideal_minimum(mk, flint::FmpzMatConstRef(one_coordinates), flint::FmpzMatConstRef(k))) return false;
+    // Rows j n .. j n + n - 1 are H M_{k_j}: row i is the coordinate vector of
+    // h_i k_j, since row b of M_{k_j} (multiplication_from_coordinates) is
+    // e_b k_j.  Together they are the n^2 basis products that span h k.
+    for (slong j = 0; j < n; ++j) {
+        copy_row(flint::FmpzMatRef(row), 0, flint::FmpzMatConstRef(k), j);
+        multiplication_from_coordinates(flint::FmpzMatRef(matrix),
+                flint::FmpzMatConstRef(row), flint::FmpzMatConstRef(*table));
+        flint::FmpzMatWindow block(rows, j * n, 0, j * n + n, n);
+        zero_skipping_mul(flint::FmpzMatRef(block.raw()), flint::FmpzMatConstRef(h),
+                          flint::FmpzMatConstRef(matrix));
+    }
+    // Source trace: reference `NumFieldOrd/NfOrd/Ideal/Arithmetic.jl:mul_gen`
+    // takes hnf_modular_eldiv of the basis products modulo
+    // l = minimum(x) minimum(y), on any order.  The modulus is valid because
+    // mh is in h and mk is in k, so mh mk lies in the ideal h k; then
+    // mh mk Z^n is inside the row lattice, which has rank n, and its largest
+    // elementary divisor divides mh mk.  That is the contract of FLINT
+    // fmpz_mat_hnf_modular_eldiv with D = mh mk (an m x n matrix with
+    // m >= n), whose result is the unique HNF that fmpz_mat_hnf (and the
+    // exact Lat::hnf route of multiply_generic) returns.  The argument uses
+    // only that h and k are ideals of the order, not maximality.
+    fmpz_mul(modulus.raw(), mh.raw(), mk.raw());
+    if (fmpz_is_one(modulus.raw())) {
+        // Both primitive parts contain 1, so both are O and so is h k.
+        fmpz_mat_one(result.raw());
+    } else {
+        fmpz_mat_hnf_modular_eldiv(rows.raw(), modulus.raw());
+        // The window is taken after the HNF, which may permute row storage.
+        flint::FmpzMatConstWindow top(rows, 0, 0, n, n);
+        fmpz_mat_set(result.raw(), top.raw());
+    }
+    fmpz_mul(ch.raw(), ch.raw(), ck.raw());
+    fmpz_mat_scalar_mul_fmpz(out.raw(), result.raw(), ch.raw());
     return true;
 }
 

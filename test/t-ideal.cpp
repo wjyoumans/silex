@@ -9,6 +9,7 @@
 #include <silex/flint/fmpz_mod_poly.hpp>
 #include <silex/flint/fmpz_mod_poly_factor.hpp>
 #include <silex/ideal.hpp>
+#include <silex/prime_ideal.hpp>
 
 #include "test_support.hpp"
 #include "ideal_product_fixtures.hpp"
@@ -2731,6 +2732,103 @@ void plain_product_hnf(sflint::FmpzMat& out, const silex::Ideal& left,
     fmpz_mat_set(out.raw(), top.raw());
 }
 
+// When the two-generator search fails, Ideal::multiply on a maximal order
+// takes basis_product_hnf: the n^2 basis products from the cached
+// multiplication table, reduced by fmpz_mat_hnf_modular_eldiv modulo the
+// product of the minima.  In Q(sqrt(-23), sqrt(-31), sqrt(-47)) the prime 2
+// splits completely (each radicand is 7 mod 8), so O/2O is F_2^8 and the
+// search fails on small-norm ideals above 2.  Compare the route with the
+// independent plain HNF of the n^2 products and with the generic product that
+// Ideal::multiply takes when the order is not flagged maximal.
+int test_basis_product_hnf_matches_generic_product() {
+    sflint::FmpqPoly polynomial;
+    const slong coefficients[] = {38188288, 1822160, -1462612, -62792, 24143,
+                                  602, -220, -2, 1};
+    for (slong e = 0; e < 9; ++e) {
+        sflint::fmpq_poly_set_coeff_si(polynomial, e, coefficients[e]);
+    }
+    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation) && order.is_maximal());
+    const slong n = order.degree();
+    assert(n == 8);
+
+    // The eight primes above 2, products of two and three distinct ones,
+    // squares, a prime above 3 and a scalar multiple (content 3).
+    std::vector<silex::Ideal> primes;
+    for (slong p : {2, 3}) {
+        sflint::Fmpz prime;
+        fmpz_set_si(prime.raw(), p);
+        silex::PrimeIdealList decomposition;
+        assert(silex::decompose_prime(decomposition, order, sflint::FmpzConstRef(prime)));
+        if (p == 2) assert(decomposition.size() == 8);
+        for (slong i = 0; i < decomposition.size(); ++i) {
+            primes.emplace_back(order);
+            assert(decomposition.at(i)->get_ideal(primes.back()));
+            if (p == 3) break;
+        }
+    }
+    std::vector<silex::Ideal> ideals;
+    for (const silex::Ideal& prime : primes) {
+        ideals.emplace_back(order);
+        assert(ideals.back().set(prime));
+    }
+    for (std::size_t i : {0U, 1U, 2U}) {
+        ideals.emplace_back(order);
+        assert(ideals.back().multiply(primes[i], primes[i + 1]));
+        ideals.emplace_back(order);
+        assert(ideals.back().multiply(primes[i], primes[i]));
+    }
+    ideals.emplace_back(order);
+    assert(ideals.back().multiply(ideals[8 + 1], primes[5]));
+    {
+        sflint::FmpzMat h(n, n);
+        assert(primes[4].get_hnf(sflint::FmpzMatRef(h)));
+        fmpz_mat_scalar_mul_si(h.raw(), h.raw(), 3);
+        ideals.emplace_back(order);
+        assert(ideals.back().set_hnf(sflint::FmpzMatConstRef(h)));
+    }
+
+    sflint::FmpzMat expected(n, n), actual(n, n), snapshot(n, n);
+    std::vector<sflint::FmpzMat> generic;
+    slong failed_search = 0;
+    for (const silex::Ideal& left : ideals) {
+        for (const silex::Ideal& right : ideals) {
+            plain_product_hnf(expected, left, right);
+            assert(silex::detail::basis_product_hnf(sflint::FmpzMatRef(actual), left, right));
+            assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+            silex::Ideal product(order);
+            assert(product.multiply(left, right) &&
+                   product.get_hnf(sflint::FmpzMatRef(actual)));
+            assert(fmpz_mat_equal(actual.raw(), expected.raw()));
+            generic.emplace_back(n, n);
+            fmpz_mat_set(generic.back().raw(), expected.raw());
+            fmpz_mat_one(snapshot.raw());
+            if (!silex::detail::try_ideal_product_hnf(sflint::FmpzMatRef(snapshot), left, right)) {
+                ++failed_search;
+            }
+        }
+    }
+    // The search fails on most of these products (219 of 289 when written),
+    // so Ideal::multiply took the route.
+    assert(failed_search >= 100);
+
+    // The generic product of the unflagged order is the reference route.
+    silex::detail::OrderAccess::set_maximality_unchecked(order, false);
+    std::size_t index = 0;
+    for (const silex::Ideal& left : ideals) {
+        for (const silex::Ideal& right : ideals) {
+            silex::Ideal product(order);
+            assert(product.multiply(left, right) &&
+                   product.get_hnf(sflint::FmpzMatRef(actual)));
+            assert(fmpz_mat_equal(actual.raw(), generic[index++].raw()));
+        }
+    }
+    silex::detail::OrderAccess::set_maximality_unchecked(order, true);
+    return 0;
+}
+
 int test_general_product_hnf_matches_plain_hnf() {
     sflint::FmpqPoly polynomial;
     slong generic = 0, multiword = 0;
@@ -4219,6 +4317,7 @@ int main(int argc, char** argv) {
     assert(test_known_linear_two_generator_matches_modular_hnf() == 0);
     assert(test_known_factor_two_generator_matches_modular_hnf() == 0);
     assert(test_general_product_hnf_matches_plain_hnf() == 0);
+    assert(test_basis_product_hnf_matches_generic_product() == 0);
     assert(test_two_generator_search_matches_plain_hnf() == 0);
     assert(test_ideal_minimum_forward_substitution_matches_solve() == 0);
     assert(test_zero_skipping_mul_matches_fmpz_mat_mul() == 0);

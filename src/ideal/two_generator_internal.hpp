@@ -50,4 +50,13 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out,
                            const TwoGeneratorSearchOptions& options = {},
                            TwoGeneratorSearchReport* report = nullptr) noexcept;
 
+// The HNF of the product of two ideals of one order, from the n^2 basis
+// products formed with the order's cached multiplication table and reduced by
+// fmpz_mat_hnf_modular_eldiv modulo the product of the minima of the primitive
+// parts (reference `Arithmetic.jl:mul_gen`).  Equals the exact HNF of those
+// products; validity does not depend on maximality.  Leaves out unchanged on
+// failure.
+bool basis_product_hnf(flint::FmpzMatRef out, const Ideal& left,
+                       const Ideal& right) noexcept;
+
 }  // namespace silex::detail
