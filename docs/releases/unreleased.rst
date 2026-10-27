@@ -1529,6 +1529,15 @@ Changed
   published outputs are unchanged.  See "Local algebra and relations" in
   :doc:`../reference/algorithms_and_sources`.
 
+- Two such deferred partial relations above the same ``q`` are now compared
+  by a root key, the root modulo ``q`` of the degree-one gcd of the defining
+  polynomial and the generator's polynomial, without building either prime
+  ideal.  Equal keys mean the same prime ideal, so the store, match and drop
+  decisions and published outputs are unchanged.  Pairs without a key are
+  built and compared as before.  On ``cyclotomic_real_q10_c11_deg10`` in
+  ``grh`` mode, callgrind instruction counts fall 4.5%.  See "Local algebra
+  and relations" in :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` analytic finish no longer computes the HNF transform of
   the relation matrix at every check.  It checks the relation rank with
   ``fmpz_mat_rank`` and computes the transform only when the LLL kernel

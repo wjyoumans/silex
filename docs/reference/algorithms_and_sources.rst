@@ -880,9 +880,21 @@ residue screen below; PARI ``buch2.c:divide_p_elt``) make that remainder the sum
 base, so a remainder of 1 means exactly one such prime, of residue degree 1
 and valuation 1, with norm ``q``.  The bound check needs only ``q``.  The
 partial relation is stored with ``q`` and its generator's coordinates, and
-both large primes are built, by the step above, only when a stored partial
-lies above the same ``q``; partials above different rational primes never
-pair.  Any other remainder is decided by building the primes, as before.
+a large prime is built, by the step above, only when a comparison with
+another partial above the same ``q`` needs it; partials above different
+rational primes never pair.  Any other remainder is decided by building the primes, as before.
+Two deferred large primes above the same ``q`` are compared without building
+either when, on the Dedekind--Kummer route above, ``gcd(f, A)`` modulo ``q``
+has degree 1 for both generators: ``gcd(f, A) = c (x - r)`` with ``r`` in
+``[0, q)``.  Then ``x - r`` is the only factor ``g_i`` dividing ``A``, so
+the one prime containing ``alpha`` is ``(q, theta - r)``, the prime the
+deferred build returns.  Roots ``r`` and ``s`` give the same prime exactly
+when ``r = s``: if one prime ``P`` contained ``theta - r`` and
+``theta - s``, it would contain ``r - s``, and ``P`` meets ``Z`` in
+``qZ``.  The direct partial-relation route on maximal equation orders keys
+its partials by the same degree-one gcd.  So comparing roots decides what
+comparing the two built primes as ideals decides.  Any other pair is built
+and compared as ideals.
 The store, match and drop decisions, and so the published outputs, are
 those of building every large prime at once.
 
