@@ -10410,7 +10410,8 @@ int test_dlog_kernel_after_append_matches_full_recomputation() {
     fmpz_nextprime(multiword_prime.raw(), multiword_prime.raw(), 1);
     std::vector<sflint::Fmpz> ells;
     for (const ulong value : {2UL, 3UL, 5UL, 7UL, 13UL, 1000003UL,
-                              2305843009213693951UL}) {
+                              2305843009213693951UL,
+                              18446744073709551557UL}) {
         ells.emplace_back();
         fmpz_set_ui(ells.back().raw(), value);
     }
