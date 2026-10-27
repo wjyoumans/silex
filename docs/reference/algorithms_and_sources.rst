@@ -1419,6 +1419,19 @@ candidate without doubling, whereas the incremental loop retries at ``2p``,
 where the embedding's own cap is larger, and may decide.  Both cases need
 about ``2^20`` bits of precision.
 
+The compact regulator of a candidate unit group must reach a ball radius below
+``2^-64``.  Its precision loop starts at 128 bits.  When a pass at precision
+``p`` of at least 128 misses with a finite ball, Silex measures the shortfall
+between that radius and the target, and runs the next pass at ``p`` plus the
+shortfall plus 24 bits when this is below ``2p`` and within the precision cap,
+in place of the doubling it skips; if that pass also misses, it returns to
+plain doubling, so it visits the doubling sequence plus at most one extra
+pass.  This is a Silex scheduling choice with no source.  The model behind it,
+that the radius shrinks by about one bit per bit of working precision (about
+``2^-(p-71)`` on ``cyclotomic_real_37_deg18`` in the T-802 gate), is empirical
+and is used only to pick a precision; acceptance still tests the radius of the
+ball computed at that pass's own precision.
+
 When the incremental ball for a candidate ``u`` is undecided, Silex first tries
 to decide it dependent from a rational relation.  The coordinates
 ``w = G^{-1} L v`` already computed for the block inverse are balls; the

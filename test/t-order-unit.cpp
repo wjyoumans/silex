@@ -1795,6 +1795,8 @@ int test_compact_regulator_precision_schedule() {
     // The loop itself, from 128 bits, on theta, theta - 1 and theta + 2 in
     // x^4 - x^3 - 4x^2 + 4x + 1: every result meets its target and overlaps
     // the result from 32 bits, and a 128-bit cap still stops a 2^-200 target.
+    // These loop cases do not check that an extrapolated pass ran; that path
+    // is covered by the synthetic-ball cases above.
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
     sflint::fmpq_poly_set_coeff_si(polynomial, 4, 1);
@@ -1830,6 +1832,23 @@ int test_compact_regulator_precision_schedule() {
         assert(mag_cmp_2exp_si(arb_radref(from_32.raw()), -tolerance) < 0);
         assert(arb_overlaps(from_128.raw(), from_32.raw()));
         assert(arb_is_positive(from_128.raw()));
+        // Independent value: the regulator of the three units is the
+        // absolute value of a 3 x 3 minor of the log matrix.  gp at 60
+        // digits (/usr/bin/gp):
+        //   f = x^4 - x^3 - 4*x^2 + 4*x + 1; r = polroots(f);
+        //   U = [x, x - 1, x + 2];
+        //   M = matrix(3, 3, i, j, log(abs(subst(U[j], x, r[i]))));
+        //   abs(matdet(M))
+        // The decimal below is that output with its last-digit rounding as an
+        // error term; the computed regulator ball must overlap it.
+        sflint::Arb expected;
+        assert(arb_set_str(expected.raw(),
+                           "2.33091038864834219188043449564940646454404666031566018620524",
+                           320) == 0);
+        // gp printed 60 digits: allow for the rounding of the last one.
+        arb_add_error_2exp_si(expected.raw(), -195);
+        assert(arb_overlaps(from_128.raw(), expected.raw()));
+        assert(arb_overlaps(from_32.raw(), expected.raw()));
     }
     {
         PrecisionCapOverride cap(128);
