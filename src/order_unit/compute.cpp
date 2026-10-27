@@ -40,13 +40,6 @@ namespace silex {
 
 namespace detail {
 
-// compact_independent's lower bound (1/r)^r ((21/128) log(n) / n^2)^(2r) on a
-// nonzero Gram determinant, defined in order_unit.cpp.
-bool compact_independence_lower_bound(flint::Arb& out,
-                                      slong degree,
-                                      slong rank,
-                                      slong precision) noexcept;
-
 // Defined below.  torsion_log_bound encloses the torsion-test bound
 // log(1 + log(n) / (6 n^2)) for a unit of a degree-n field;
 // torsion_status_from_logs is the per-place test of

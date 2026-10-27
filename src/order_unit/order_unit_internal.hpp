@@ -119,6 +119,13 @@ bool ordinary_unit_coordinates(
         slong start_precision,
         slong max_precision) noexcept;
 
+// compact_independent's lower bound (1/r)^r ((21/128) log(n) / n^2)^(2r) on a
+// nonzero Gram determinant, defined in order_unit.cpp.
+bool compact_independence_lower_bound(flint::Arb& out,
+                                      slong degree,
+                                      slong rank,
+                                      slong precision) noexcept;
+
 bool compute_power(Element& out,
                    const Element& base,
                    slong exponent) noexcept;
