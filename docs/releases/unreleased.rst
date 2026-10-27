@@ -315,11 +315,12 @@ Changed
   measurement rather than taken from PARI or Hecke.  The gate: only fields
   of degree at most 20, or with a factor-base bound of at least 300, get
   images, which leaves out the degree 22 and 24 fields with a smaller
-  bound, where the image setup costs more than it saves.  The cap: within
-  one relation round of the LLL route, images stored at full modular rank
-  stop once the round's relation target plus ``|G| - 1`` of them are
-  stored, and these images count toward the kernel-unit target (from
-  degree 30 on they still do not).  ``psi_n`` fields below degree 30,
+  bound, where the images cost more relation work than they save.  The
+  cap: within one relation round of the LLL route, images stored at full
+  modular rank stop once the round's relation target plus ``|G| - 1`` of
+  them are stored, and these images count toward the kernel-unit target
+  (from degree 30 on they still do not).  Stored images count toward the
+  round's relation target, as they already do from degree 30 on.  ``psi_n`` fields below degree 30,
   other fields and ``proven`` requests are unchanged.  Class groups,
   regulators, unit ranks and certification labels are unchanged on all 46
   cyclotomic corpus rows that finish (``cyclotomic_real_163_deg81`` times

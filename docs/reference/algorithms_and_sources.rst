@@ -1024,7 +1024,8 @@ cap: within one relation round of the LLL route (the order small-LLL phase,
 and each pass of the outer loop), images stored at full modular rank stop
 once the round's relation target plus ``|G| - 1`` of them are stored, and
 these kernel images do count toward the kernel-unit target, unlike the
-degree-30 rule.  PARI's relation cache is not this tight: ``add_rel_i`` stops
+degree-30 rule.  Stored images count toward the round's relation target, as
+they already do from degree 30 on.  PARI's relation cache is not this tight: ``add_rel_i`` stops
 storing only when the cache is full (``buch2.c:2295``), its length starts at
 ``10n + 50`` (``init_rel``, line 3564) and ``pre_allocate`` (lines 351-355)
 only grows it; ``cache.end = last + need`` (line 3899) is a stop target, not
