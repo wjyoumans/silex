@@ -174,11 +174,20 @@ bool arb_has_radius_at_most_2exp(const arb_struct* value,
 // while the vector is taken finds none stored and works in its own, and the
 // longer of the two is kept, so no call shares rows with another.  The
 // thread keeps one vector, as long as its longest call needed, until it
-// exits.
+// exits, but never one longer than kMaxKeptLength: a longer call works in
+// its own vector, freed at the end of the call, and leaves the stored one
+// in place.
 class FactoredLogRowScratch {
 public:
+    // 2^12 arbs: above the longest call on the class/unit corpus (2720, on
+    // cyclotomic_real_136_deg32), and 192 KiB of arb structs before their
+    // limbs.
+    static constexpr slong kMaxKeptLength = slong(1) << 12;
+
     explicit FactoredLogRowScratch(slong length) noexcept {
-        rows_.swap(stored());
+        if (length <= kMaxKeptLength) {
+            rows_.swap(stored());
+        }
         if (rows_.length() < length) {
             flint::ArbVec grown(length);
             rows_.swap(grown);
@@ -186,7 +195,8 @@ public:
     }
     ~FactoredLogRowScratch() noexcept {
         flint::ArbVec& kept = stored();
-        if (rows_.length() > kept.length()) {
+        if (rows_.length() <= kMaxKeptLength &&
+            rows_.length() > kept.length()) {
             kept.swap(rows_);
         }
     }
@@ -1511,10 +1521,9 @@ bool FactoredElementAccess::logarithmic_embedding(
         _arb_vec_zero(sum.data(), places);
         return out.set_from(flint::ArbVecConstRef(sum));
     }
+    // term_count <= distinct_count, so term_count * places does not overflow
+    // (checked with distinct_count above).
     const slong term_count = static_cast<slong>(terms.size());
-    if (term_count > std::numeric_limits<slong>::max() / places) {
-        return false;
-    }
     // The merged exponents as exact balls (radius 0), the y side of each
     // place's arb_dot; arb_set_fmpz is exact.
     flint::ArbVec exponent_balls(term_count);

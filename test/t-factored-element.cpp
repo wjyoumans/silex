@@ -555,12 +555,13 @@ bool merged_factored_log(sflint::ArbVec& out,
 void exact_factored_log(sflint::ArbVec& out,
                         const silex::NumberField& field,
                         const silex::FactoredElement& value,
-                        silex::LogEmbeddingMode mode) noexcept {
+                        silex::LogEmbeddingMode mode,
+                        slong precision = 1200) noexcept {
     silex::Element evaluated(field);
     assert(value.evaluate(evaluated));
     silex::EmbeddingContext embeddings(field);
     assert(silex::logarithmic_embedding(sflint::ArbVecRef(out), embeddings,
-                                        evaluated, mode, 1200));
+                                        evaluated, mode, precision));
 }
 
 // A factored element that repeats equal factors (as separate copies, built
@@ -933,20 +934,25 @@ void check_log_row_storage_reuse() noexcept {
     silex::Element shifted(quadratic);
     assert(other.gen());
     assert(shifted.add_si(other, 3));
+    // The large factor comes first, so its row is the one that fails.
     silex::FactoredElement hard(quadratic);
+    assert(hard.push(power, 2));
     assert(hard.push(other, 2));
     assert(hard.push(shifted, -1));
-    assert(hard.push(power, 2));
     silex::FactoredElement easy(quadratic);
     assert(easy.push(shifted, 5));
 
     check_factored_log_of(cubic, many, 2);
     check_factored_log_of(cubic, one, 2);
-    // The first pass of `hard` misses the target, so it stops before every
-    // row is written; the next call reuses those rows.
+    // The first pass of `hard` fails at its first row: the log of the large
+    // factor fails at that precision, so the pass stops before the later
+    // rows are written, and the next call reuses those rows.  The exact log
+    // needs a higher precision than 1200 for this large element.
     for (const silex::LogEmbeddingMode mode :
          {silex::LogEmbeddingMode::plain,
           silex::LogEmbeddingMode::product}) {
+        sflint::ArbVec exact(2);
+        exact_factored_log(exact, quadratic, hard, mode, 3000);
         silex::EmbeddingContext embeddings(quadratic);
         silex::EmbeddingContext reference_embeddings(quadratic);
         sflint::ArbVec logs(2);
@@ -961,8 +967,19 @@ void check_log_row_storage_reuse() noexcept {
         for (slong j = 0; j < 2; ++j) {
             assert(::arb_equal(logs.data() + j, expected.data() + j) != 0);
             assert(has_radius_at_most_2exp(logs.data() + j, -30));
+            assert(::arb_contains(logs.data() + j, exact.data() + j) != 0);
         }
     }
+    // 2100 merged bases on two places are 4200 rows, more than the thread
+    // keeps: that call works in its own rows, and the calls after it in the
+    // kept ones.
+    silex::FactoredElement wide(quadratic);
+    for (slong k = 1; k <= 2100; ++k) {
+        silex::Element factor(quadratic);
+        assert(factor.add_si(other, k));
+        assert(wide.push(factor, k % 2 == 0 ? 1 : -1));
+    }
+    check_factored_log_of(quadratic, wide, 2);
     check_factored_log_of(quadratic, easy, 2);
     check_factored_log_of(cubic, many, 2);
 }
