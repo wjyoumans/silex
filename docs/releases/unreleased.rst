@@ -144,6 +144,20 @@ Changed
   ``random_d9_h4_s8``, 4.58% on ``random_d10_h2_s21`` and 1.68% on
   ``pure_x12_plus_7``.
 
+- The ``proven`` factor-base honesty witness search forms the reduced basis
+  rows and the Gram matrix of each witness ideal's T2 setup in double
+  precision, and falls back to the Arb setup when a value is not finite, the
+  Gram-Schmidt pivot test fails, no rounding scale passes the LLL bound test,
+  or the enumeration of the double-row data finds no witness (the ideal is then
+  enumerated again from the Arb data).  ``grh`` relation search is unchanged.
+  Every witness is still verified exactly, so the route only orders the
+  candidates; the generators, twist counts and relation or witness bookkeeping
+  counts may differ from earlier builds on some ideals, with equally valid
+  outputs.  Callgrind Ir of the ``proven`` instance (busy machine) drops by
+  8.64% on ``random_d9_h4_s8``, 8.31% on ``random_d10_h2_s21`` and 10.43% on
+  ``pure_x12_plus_7``, with identical certification fields.  No timing has
+  been measured.
+
 - The finite-ideal T2 enumeration setup (``proven`` factor-base honesty
   witnesses and ``grh`` relation search) no longer forms an Arb Cholesky
   factor of each reduced basis's Gram matrix.  Its LLL bound test takes the

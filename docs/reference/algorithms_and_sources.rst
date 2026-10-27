@@ -1367,6 +1367,55 @@ every witness passes the exact norm-accounting check described with the
 honesty scan below, so a lower start cannot accept a false witness.
 Witness and bookkeeping counts can differ from a 200-bit start.
 
+The ``proven`` honesty witness search forms the T2 setup of each witness ideal
+in double precision before it uses Arb (``T2EnumerationGram::double_rows`` in
+``ideal_t2_enumeration.cpp``; the ``grh`` relation search keeps the Arb setup).
+The integer rounding and the LLL are unchanged.  Only the product of the
+reduced basis (order coordinates) with the cached double rows of the order
+basis, and the Gram matrix built from it, are formed in doubles; the basis
+returned is always the exact ``transform * HNF``.  The multiplication uses the
+order's rows rather than the per-ideal rows because the cancellation is then
+bounded by the conditioning of the order basis, not by the size of the
+transform.  No proof input depends on these values.  The Gram matrix is read
+only through Arb midpoints converted to double, and every enumerated vector
+becomes an exact order element accepted only by the exact
+``factor_base_principal_witness`` check.  Exhaustion of the enumeration is
+never read as a claim.  The route is therefore of the same kind as PARI's
+``Fincke_Pohst_ideal``, which runs ``gaussred_from_QR`` in ordinary
+floating-point reals at the field precision.  The design is that of the
+internal proposal for this change; no error threshold is added, because the
+route uses only the checks that already exist.
+
+The setup falls back to the whole Arb route at the same precision when
+
+#. a value is not finite, or a transform entry exceeds ``2^53``;
+#. the double Gram-Schmidt pivot test fails;
+#. the LLL bound test fails at every rounding scale, so no basis is accepted
+   (the scale loops run from the rounding-scale hint and then from the first
+   scale, as the Arb route does); or
+#. the enumeration of the double-row data ends exhausted without a witness.
+   The ideal is then enumerated again from the Arb data, and the counts, the
+   rounding-scale hint and the step-cap seam record only that Arb enumeration.
+
+So every ideal for which the Arb setup gives a witness still gives one, and
+the route returns no ``failed`` outcome of its own.  Precision retries stay on
+the Arb path.  The fallback reuses the LLL reductions the double-row loops
+already made at that precision (the reduction is a deterministic function of
+the minimum rounding scale), so it does not repeat them.  On some fields the
+route falls back always; the corpus field ``cyclotomic_real_q10_c11_deg10`` is
+one, because its maximal-order basis gives reduced bases with coordinates
+above ``2^53`` and ill-conditioned double rows.  The double Gram differs from
+the Arb midpoints at the level of the order basis's cancellation (1.24 times
+``n 2^-50`` on one twisted ideal of ``random_d9_h4_s8``), so the selected
+basis, the order of candidates, ties, the accepted scale and the scale hint can
+differ from the Arb route's on some ideals; this is the same category as the
+start-precision change above.  The diagnostics profile labels of the route are
+``class_group.finite_enumeration_setup.double_rows_gram``,
+``double_rows_unavailable``, ``double_rows_pivot_failed``,
+``double_rows_outside_lll_bounds``, ``double_rows_arb_fallback``,
+``lll_reduction_reused``, and
+``class_group.honesty_enumerate_witness.double_rows_arb_retry``.
+
 Adjoining a dependent unit ``y`` to a full-rank unit group follows Hecke
 v0.38.6 ``src/NumFieldOrd/NfOrd/Unit/UnitGrpCtx.jl:_add_dependent_unit!`` and
 ``Unit/Relation.jl:_find_rational_relation!``.  Silex computes the
