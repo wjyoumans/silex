@@ -26,13 +26,14 @@ namespace silex::detail {
 //
 // Silex adds images without a cap on fields of degree at least
 // kLargeFieldRelationSearchMinDegree (30, class_group_storage_internal.hpp),
-// the crossover of the one-random-ideal-per-pass rule.  Below it, only a
-// field defined by exactly Phi_n (not psi_n) adds images, only when
-// capped_galois_images_selected admits it (degree at most 20, or a
-// factor-base bound of at least 300), and only under a capped rule: within
-// one relation round of the LLL route, kernel images (images stored at full
-// modular rank) stop once the round's relation target plus |G| - 1 of them
-// are stored, and those kernel images count toward the kernel-unit target.
+// the crossover of the one-random-ideal-per-pass rule.  Below it, a field
+// defined by exactly Phi_n or psi_n adds images only when
+// capped_galois_images_selected admits it (a factor-base bound of at least
+// 300, or degree at most 20 for Phi_n and at most 18 for psi_n), and only
+// under a capped rule: within one relation round of the LLL route, kernel
+// images (images stored at full modular rank) stop once the round's
+// relation target plus |G| - 1 of them are stored, and those kernel images
+// count toward the kernel-unit target.
 // The crossover, the gate and the cap are Silex's own rules, set by
 // measurement (the references add images at every degree, and the
 // reference relation cache, buch2.c:2295 with pre_allocate, lines 351-355,

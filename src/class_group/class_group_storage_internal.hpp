@@ -29,26 +29,37 @@ namespace silex::detail {
 // field defined by exactly Phi_n or psi_n adds the Galois images of its
 // relations (relation_candidate.cpp, the Galois-image step).  Below it the
 // search draws one ideal per pivot, and only a field defined by exactly
-// Phi_n that passes capped_galois_images_selected adds images, under the
-// capped rule of that step.  The crossover is measured, not sourced (see
-// docs/reference/algorithms_and_sources.rst).
+// Phi_n or psi_n that passes capped_galois_images_selected adds images,
+// under the capped rule of that step.  The crossover is measured, not
+// sourced (see docs/reference/algorithms_and_sources.rst).
 inline constexpr slong kLargeFieldRelationSearchMinDegree = 30;
 
 // Below kLargeFieldRelationSearchMinDegree, a grh search on a field defined
 // by exactly Phi_n adds capped Galois images only when the field degree is
 // at most kCappedGaloisImageMaxDegree or the factor-base bound is at least
-// kCappedGaloisImageMinFactorBaseBound.  Both limits are Silex's own, set
-// by measurement, not sourced: on the corpus Phi_n rows below degree 30 the
-// images cost more relation work than they save on every degree 22 and 24
-// field with a factor-base bound below 300; two smaller rows that remain
-// slower (Q(zeta_7), Q(zeta_60)) are accepted.
+// kCappedGaloisImageMinFactorBaseBound; on a field defined by exactly psi_n
+// the degree limit is kCappedRealCyclotomicGaloisImageMaxDegree instead.
+// All three limits are Silex's own, set by measurement, not sourced: on the
+// corpus Phi_n rows below degree 30 the images cost more relation work than
+// they save on every degree 22 and 24 field with a factor-base bound below
+// 300; two smaller rows that remain slower (Q(zeta_7), Q(zeta_60)) are
+// accepted.  On the 65 fields psi_n below degree 30 measured (n not 2 mod
+// 4, 4 <= phi(n) / 2 <= 29) the images save work on every field of degree
+// at most 18 and every field with a factor-base bound of at least 300, but
+// cost more on two of the six degree 20 fields with a smaller bound
+// (psi_41, psi_132).
 inline constexpr slong kCappedGaloisImageMaxDegree = 20;
+inline constexpr slong kCappedRealCyclotomicGaloisImageMaxDegree = 18;
 inline constexpr ulong kCappedGaloisImageMinFactorBaseBound = 300;
 
+// `real_subfield`: the field is defined by exactly psi_n rather than Phi_n.
 inline bool capped_galois_images_selected(
         slong degree,
-        flint::FmpzConstRef factor_base_bound) noexcept {
-    return degree <= kCappedGaloisImageMaxDegree ||
+        flint::FmpzConstRef factor_base_bound,
+        bool real_subfield = false) noexcept {
+    return degree <= (real_subfield
+                              ? kCappedRealCyclotomicGaloisImageMaxDegree
+                              : kCappedGaloisImageMaxDegree) ||
            flint::fmpz_cmp_ui(factor_base_bound,
                               kCappedGaloisImageMinFactorBaseBound) >= 0;
 }
@@ -582,9 +593,9 @@ struct ClassGroupContextStorage {
     // refer to the stored relations.
     slong galois_image_relations = 0;
     slong galois_image_kernel_relations = 0;
-    // Kernel images stored under the capped rule of Phi_n fields below
-    // galois_image_min_degree (relation_candidate.cpp, the Galois-image
-    // step).  They count toward the kernel-unit target, so they are not in
+    // Kernel images stored under the capped rule of Phi_n and psi_n fields
+    // below galois_image_min_degree (relation_candidate.cpp, the
+    // Galois-image step).  They count toward the kernel-unit target, so they are not in
     // galois_image_kernel_relations; this count bounds how many are stored.
     slong galois_image_capped_kernel_relations = 0;
     // galois_image_capped_kernel_relations at the start of the running
@@ -1017,9 +1028,9 @@ public:
         }
     }
 
-    // `capped`: the image was stored under the capped rule of Phi_n fields
-    // below galois_image_min_degree, where a kernel image counts toward the
-    // kernel-unit target and is counted in
+    // `capped`: the image was stored under the capped rule of Phi_n and
+    // psi_n fields below galois_image_min_degree, where a kernel image
+    // counts toward the kernel-unit target and is counted in
     // galois_image_capped_kernel_relations instead.
     static void note_galois_image_relation(ClassGroupContext& context,
                                            bool kernel,

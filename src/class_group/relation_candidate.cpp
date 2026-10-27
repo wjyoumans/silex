@@ -1540,19 +1540,24 @@ detail::CyclotomicGaloisImages* prepared_cyclotomic_galois_images(
     return images;
 }
 
-// True when `order` is a field defined by exactly Phi_n (not psi_n) with
-// its automorphism data available, and the field degree and factor-base
-// bound pass detail::capped_galois_images_selected: the fields that get the
-// capped image rule below galois_image_min_degree.  The gate is tested
-// first, so a field it excludes builds no automorphism data.
+// True when `order` is a field defined by exactly Phi_n or psi_n with its
+// automorphism data available, and the field degree and factor-base bound
+// pass detail::capped_galois_images_selected for that field: the fields
+// that get the capped image rule below galois_image_min_degree.  The gate
+// is tested first, so a field it excludes builds no automorphism data.
 bool capped_cyclotomic_image_field(ClassGroupContext& context,
                                    const Order& order) noexcept {
-    if (!detail::capped_galois_images_selected(
-                order.degree(),
-                detail::ClassGroupRelationSearchAccess::
-                        factor_base_build_bound(context))) {
+    const flint::FmpzConstRef bound =
+            detail::ClassGroupRelationSearchAccess::factor_base_build_bound(
+                    context);
+    // The psi_n degree limit is the smaller one, so a field this excludes
+    // is excluded as Phi_n and as psi_n.
+    if (!detail::capped_galois_images_selected(order.degree(), bound)) {
         return false;
     }
+    const bool real_subfield_selected =
+            detail::capped_galois_images_selected(order.degree(), bound,
+                                                  true);
     detail::CyclotomicGaloisImages* images =
             detail::ClassGroupRelationSearchAccess::cyclotomic_galois_images(
                     context);
@@ -1561,12 +1566,20 @@ bool capped_cyclotomic_image_field(ClassGroupContext& context,
     }
     if (!images->initialized ||
         !same_order_parent(&images->order, &order)) {
-        // Below the crossover only Phi_n fields get images, so a field not
-        // defined by exactly Phi_n (psi_n included) is recorded as having
-        // none, without building its automorphism data.
+        // Below the crossover a field not defined by exactly Phi_n or psi_n,
+        // and a psi_n field the gate excludes, is recorded as having no
+        // images, without building its automorphism data.  The record lasts
+        // as long as the factor base: build_factor_base starts a new
+        // context storage.
         ulong n = 0;
-        if (order.parent() == nullptr ||
-            !detail::cyclotomic_field_index(n, *order.parent()) || n == 0) {
+        const NumberField* field = order.parent();
+        const bool admitted = field != nullptr &&
+                detail::cyclotomic_field_index(n, *field) &&
+                (n != 0 ||
+                 (real_subfield_selected &&
+                  detail::real_cyclotomic_defining_polynomial_index(
+                          *field) != 0));
+        if (!admitted) {
             images->clear();
             images->order = order;
             images->initialized = true;
@@ -1574,7 +1587,8 @@ bool capped_cyclotomic_image_field(ClassGroupContext& context,
         }
     }
     images = prepared_cyclotomic_galois_images(context, order);
-    return images != nullptr && images->available && !images->real_subfield;
+    return images != nullptr && images->available &&
+           (!images->real_subfield || real_subfield_selected);
 }
 
 // Tries sigma_k(alpha) for every automorphism sigma_k of a field defined by
@@ -1601,7 +1615,7 @@ bool capped_cyclotomic_image_field(ClassGroupContext& context,
 // these counters; other readers of the plain counts include images).
 //
 // Below galois_image_min_degree the step runs only when `capped` is set: a
-// field defined by exactly Phi_n that passes
+// field defined by exactly Phi_n or psi_n that passes
 // detail::capped_galois_images_selected.  There a kernel image does count
 // toward the kernel-unit target (it is counted in
 // galois_image_capped_kernel_relations instead), and within one relation
@@ -1913,7 +1927,7 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
     bool relation_appended = false;
     // Galois images (the step below) run only on grh requests: from the
     // large-field crossover on, and below it only under the capped rule on
-    // a field defined by exactly Phi_n that passes
+    // a field defined by exactly Phi_n or psi_n that passes
     // detail::capped_galois_images_selected.  Elsewhere a grh candidate
     // costs a degree test, the gate test and, on fields the gate admits, a
     // lookup of the cached automorphism data more than without the step.

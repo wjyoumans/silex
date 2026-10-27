@@ -321,17 +321,21 @@ struct Zeta5RelationSetup {
 };
 
 // Below degree kLargeFieldRelationSearchMinDegree (30) only fields defined
-// by exactly Phi_n of degree at most 20, or with a factor-base bound of at
-// least 300, get images (Silex's own measured gate).
+// by exactly Phi_n of degree at most 20, or exactly psi_n of degree at most
+// 18, or either with a factor-base bound of at least 300, get images
+// (Silex's own measured gate).
 int test_capped_image_gate() {
     static_assert(silex::detail::kLargeFieldRelationSearchMinDegree == 30);
     static_assert(silex::detail::kCappedGaloisImageMaxDegree == 20);
+    static_assert(
+            silex::detail::kCappedRealCyclotomicGaloisImageMaxDegree == 18);
     static_assert(silex::detail::kCappedGaloisImageMinFactorBaseBound == 300);
     sflint::Fmpz bound;
-    const auto selected = [&bound](slong degree, ulong value) {
+    const auto selected = [&bound](slong degree, ulong value,
+                                   bool real_subfield = false) {
         fmpz_set_ui(bound.raw(), value);
         return silex::detail::capped_galois_images_selected(
-                degree, sflint::FmpzConstRef(bound));
+                degree, sflint::FmpzConstRef(bound), real_subfield);
     };
     assert(selected(4, 0));
     assert(selected(20, 80));
@@ -339,6 +343,13 @@ int test_capped_image_gate() {
     assert(!selected(24, 299));
     assert(selected(24, 300));
     assert(selected(24, 636));
+    assert(selected(5, 0, true));
+    assert(selected(18, 154, true));
+    assert(!selected(20, 95, true));
+    assert(!selected(20, 299, true));
+    assert(selected(20, 300, true));
+    assert(!selected(22, 299, true));
+    assert(selected(29, 373, true));
 
     // The gate reads the bound the context's factor base was built from,
     // and zero for a base set directly.
@@ -359,8 +370,9 @@ int test_capped_image_gate() {
 // the gate) gets its images under the capped rule; before full rank the
 // cap does not apply, so a + b and two of its images are stored, as in
 // test_images_before_full_rank.  A proven candidate gets none at any
-// degree, and a field defined by psi_n below the crossover gets none and
-// builds no automorphism data.
+// degree.  A field defined by psi_n below the crossover gets them when the
+// gate admits it (psi_11, degree 5), and otherwise none and no automorphism
+// data (psi_41, degree 20, factor-base bound 30).
 int test_images_below_crossover_or_proven() {
     using Access = silex::detail::ClassGroupRelationSearchAccess;
     Zeta5RelationSetup crossover(true);
@@ -381,7 +393,7 @@ int test_images_below_crossover_or_proven() {
     assert(proven.images().image_candidates == 0);
     assert(proven.context.relation_count() == 1);
 
-    // psi_11, degree 5: every grh candidate checks the field once.
+    // psi_11, degree 5, admitted by the gate.
     silex::NumberField real_field = field_from({1, 3, -3, -4, 1, 1});
     silex::Order real_order = maximal_order_of(real_field);
     silex::ClassGroupContext real_context{real_order};
@@ -392,7 +404,7 @@ int test_images_below_crossover_or_proven() {
     assert(real_context.set_factor_base(base));
     silex::OrderElement candidate;
     assert(candidate.define(real_order));
-    assert(candidate.set_element(element_from(real_field, {2, 1})));
+    assert(candidate.set_element(element_from(real_field, {-2, 1})));
     sflint::FmpzMat coordinates(1, real_order.degree());
     assert(candidate.get_coordinates(sflint::FmpzMatRef(coordinates)));
     slong candidates_tried = 0;
@@ -407,8 +419,47 @@ int test_images_below_crossover_or_proven() {
     const silex::detail::CyclotomicGaloisImages* real_images =
             Access::cyclotomic_galois_images(real_context);
     assert(real_images != nullptr);
-    assert(real_images->initialized && !real_images->available);
-    assert(real_images->image_candidates == 0);
+    assert(real_images->initialized && real_images->available);
+    assert(real_images->real_subfield && real_images->conductor == 11);
+    // x - 2 has norm psi_11(2) = 11 and generates the prime above 11, the
+    // only one, so its relation raises the rank and its four images
+    // D_k(x) - 2 are tried; they give the same row, which does not raise
+    // the rank, so none is stored.
+    assert(real_images->image_candidates == 4);
+    assert(real_images->image_relations == 0);
+    assert(real_context.relation_count() == 1);
+
+    // psi_41, degree 20: the gate excludes it at this bound.
+    silex::NumberField excluded_field = field_from(
+            {1, -10, -55, 165, 495, -792, -1716, 1716, 3003, -2002, -3003,
+             1365, 1820, -560, -680, 136, 153, -18, -19, 1, 1});
+    silex::Order excluded_order = maximal_order_of(excluded_field);
+    silex::ClassGroupContext excluded_context{excluded_order};
+    silex::FactorBase excluded_base(excluded_order);
+    assert(excluded_base.build_prime_ideal_norm_bounded(
+            sflint::FmpzConstRef(bound)));
+    assert(excluded_context.set_factor_base(excluded_base));
+    silex::OrderElement excluded_candidate;
+    assert(excluded_candidate.define(excluded_order));
+    assert(excluded_candidate.set_element(
+            element_from(excluded_field, {2, 1})));
+    sflint::FmpzMat excluded_coordinates(1, excluded_order.degree());
+    assert(excluded_candidate.get_coordinates(
+            sflint::FmpzMatRef(excluded_coordinates)));
+    candidates_tried = 0;
+    accepted_relations = 0;
+    assert(silex::detail::relation_search::try_coordinate_candidate(
+            excluded_context, excluded_order, excluded_coordinates, nullptr,
+            silex::ClassGroupRelationSource::Search, 100, 100, 100,
+            candidates_tried, accepted_relations,
+            silex::CertificationMode::grh, goal_reached,
+            partial_throttle_exit));
+    const silex::detail::CyclotomicGaloisImages* excluded_images =
+            Access::cyclotomic_galois_images(excluded_context);
+    assert(excluded_images != nullptr);
+    assert(excluded_images->initialized && !excluded_images->available);
+    assert(excluded_images->image_matrices.empty());
+    assert(excluded_images->image_candidates == 0);
     return 0;
 }
 
