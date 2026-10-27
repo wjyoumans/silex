@@ -11287,7 +11287,11 @@ bool ClassGroupContext::sync_row_module_checkpoint_() noexcept {
 
     SILEX_PROFILE_SCOPE(diagnostics_, DiagnosticsModule::class_group,
                         "class_group.relation_module_checkpoint");
-    if (!relation_module_.checkpoint_context(row_module_)) {
+    // row_module_ borrows the checkpoint instead of copying it.  The lend
+    // first takes back a checkpoint row_module_ still holds from an earlier
+    // sync; every other replacement of row_module_ returns the checkpoint
+    // first (restore_checkpoint_context).
+    if (!relation_module_.lend_checkpoint_context(row_module_)) {
         return false;
     }
     row_module_.set_diagnostics(diagnostics_);
@@ -11797,6 +11801,7 @@ bool ClassGroupContext::append_relation_with_outcome_(
             // The rejected row did not change the exact relation lattice, but
             // the decision warmed the HNF/index checkpoint.  Keep that cache.
             if (!exact_remainder_checked) {
+                relation_module_.restore_checkpoint_context(row_module_);
                 row_module_.swap(exact_module_candidate);
                 row_module_.set_diagnostics(diagnostics_);
             }
@@ -11871,6 +11876,7 @@ bool ClassGroupContext::append_relation_with_outcome_(
         row_module_synced_ = false;
     }
     if (exact_module_updated) {
+        relation_module_.restore_checkpoint_context(row_module_);
         row_module_.swap(exact_module_candidate);
         row_module_.set_diagnostics(diagnostics_);
         relation_rank_ = row_module_.rank();

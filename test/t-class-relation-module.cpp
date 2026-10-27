@@ -529,6 +529,126 @@ int test_rollback_after_each_add_of_a_row_stream() {
     return independent_rollbacks >= 3 ? 0 : 1;
 }
 
+// The holder of a lent checkpoint sees what checkpoint_context would have
+// copied, and the reads it makes (as ClassGroupContext makes them) leave the
+// checkpoint so that the next lend, after adds made while it was lent,
+// rebuilds the same checkpoint as a module that only ever copied it.  While
+// lent, operations that read the checkpoint fail; restore hands it back.
+bool lent_checkpoint_matches(silex::fmpz_smat::HnfContext& holder,
+                             silex::detail::ClassRelationModuleContext& reference,
+                             const sflint::FmpzMat& rows,
+                             slong row_count) noexcept {
+    silex::fmpz_smat::HnfContext expected;
+    if (!reference.checkpoint_context(expected) ||
+        holder.rank() != expected.rank() ||
+        holder.ambient_dim() != expected.ambient_dim()) {
+        return false;
+    }
+    sflint::FmpzMat holder_hnf(holder.rank(), holder.ambient_dim());
+    sflint::FmpzMat expected_hnf(expected.rank(), expected.ambient_dim());
+    if (!holder.get_hnf_rows(holder_hnf) ||
+        !expected.get_hnf_rows(expected_hnf) ||
+        !sflint::fmpz_mat_equal(holder_hnf, expected_hnf)) {
+        return false;
+    }
+    if (holder.rank() == holder.ambient_dim() && holder.rank() > 0) {
+        sflint::Fmpz holder_index;
+        sflint::Fmpz expected_index;
+        if (!holder.full_rank_index(holder_index) ||
+            !expected.full_rank_index(expected_index) ||
+            !sflint::fmpz_equal(holder_index, expected_index)) {
+            return false;
+        }
+    }
+    for (slong i = 0; i < row_count; ++i) {
+        bool holder_zero = false;
+        bool expected_zero = false;
+        if (!holder.fmpz_mat_row_reduces_to_zero(holder_zero, rows, i) ||
+            !expected.fmpz_mat_row_reduces_to_zero(expected_zero, rows, i) ||
+            holder_zero != expected_zero) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool lent_checkpoint_is_unreadable(
+        silex::detail::ClassRelationModuleContext& context) noexcept {
+    silex::fmpz_smat::HnfContext out;
+    silex::detail::ClassRelationModuleContext copy;
+    sflint::FmpzMat hnf(context.rank(), context.ambient_dim());
+    return context.checkpoint_lent() && !context.checkpoint_context(out) &&
+           !context.take_checkpoint_context(out) &&
+           !context.checkpoint_hnf_rows(hnf) && !copy.set(context);
+}
+
+int test_lent_checkpoint_round_trip() {
+    silex::detail::ClassRelationModuleContext context;
+    silex::detail::ClassRelationModuleContext reference;
+    silex::detail::ClassRelationModuleAddResult result;
+    silex::fmpz_smat::HnfContext holder;
+    sflint::FmpzMat rows(10, 2);
+    const slong entries[10][2] = {{2, 0}, {0, 3}, {4, 3}, {2, 6}, {-6, 9},
+                                  {2, 3}, {4, 1}, {0, 7}, {1, 0}, {3, 5}};
+    for (slong i = 0; i < 10; ++i) {
+        set_entry(rows, i, 0, entries[i][0]);
+        set_entry(rows, i, 1, entries[i][1]);
+    }
+    if (!context.reset(2, 5) || !reference.reset(2, 5) ||
+        context.checkpoint_lent()) {
+        return 1;
+    }
+    // The empty checkpoint, then batches inside the lattice (the rebuild
+    // keeps the reclaimed checkpoint) and outside it (the rebuild replaces
+    // it), each added while the previous checkpoint is lent.
+    const slong batch_end[] = {0, 1, 2, 3, 5, 7, 8, 10};
+    slong added = 0;
+    for (const slong end : batch_end) {
+        for (; added < end; ++added) {
+            if (!context.add_fmpz_mat_row(result, rows, added, added) ||
+                !reference.add_fmpz_mat_row(result, rows, added, added)) {
+                return 1;
+            }
+        }
+        if (!context.lend_checkpoint_context(holder) ||
+            !lent_checkpoint_is_unreadable(context) ||
+            !lent_checkpoint_matches(holder, reference, rows, 10) ||
+            !context.lend_checkpoint_context(holder) ||
+            !lent_checkpoint_matches(holder, reference, rows, 10)) {
+            return 1;
+        }
+    }
+
+    // A swap carries the loan with the checkpoint's bookkeeping.
+    silex::detail::ClassRelationModuleContext other;
+    context.swap(other);
+    if (context.checkpoint_lent() || !other.checkpoint_lent()) {
+        return 1;
+    }
+    other.swap(context);
+
+    // Returning the checkpoint before replacing the holder, as the exact
+    // append path does, leaves the module as if it had never lent it.
+    silex::fmpz_smat::HnfContext replacement;
+    context.restore_checkpoint_context(holder);
+    holder.swap(replacement);
+    context.restore_checkpoint_context(holder);
+    if (context.checkpoint_lent() || !context.same_state_as(reference) ||
+        !full_rank_checkpoint_is(context, 1) ||
+        !checkpoint_is_canonical_hnf_of_all_rows(context)) {
+        return 1;
+    }
+
+    // clear and reset end a loan.
+    if (!context.lend_checkpoint_context(holder) ||
+        !context.reset(2, 5) || context.checkpoint_lent() ||
+        !context.lend_checkpoint_context(holder) || holder.rank() != 0) {
+        return 1;
+    }
+    context.clear();
+    return context.checkpoint_lent() ? 1 : 0;
+}
+
 }  // namespace
 
 int main() {
@@ -546,7 +666,8 @@ int main() {
                    test_rollback_restores_state_before_add() != 0 ||
                    test_rollback_after_each_add_of_a_row_stream() != 0 ||
                    test_rollback_after_take_checkpoint_keeps_checkpoint_invalid() !=
-                           0
+                           0 ||
+                   test_lent_checkpoint_round_trip() != 0
             ? 1
             : 0;
 }

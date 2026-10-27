@@ -269,6 +269,7 @@ bool ClassRelationModuleContext::reset(slong ambient_dim,
     prime_ = prime;
     is_set_ = true;
     checkpoint_valid_ = true;
+    checkpoint_lent_ = false;
     return true;
 }
 
@@ -285,6 +286,7 @@ void ClassRelationModuleContext::clear() noexcept {
     prime_ = 0;
     is_set_ = false;
     checkpoint_valid_ = false;
+    checkpoint_lent_ = false;
     checkpoint_.set_diagnostics(diagnostics_);
 }
 
@@ -300,6 +302,7 @@ bool ClassRelationModuleContext::set(
                     static_cast<std::size_t>(other.bas_gens_.nrows()) ||
             other.rel_relation_indices_.size() !=
                     static_cast<std::size_t>(other.rel_gens_.nrows()) ||
+            other.checkpoint_lent_ ||
             other.checkpoint_basis_count_ < 0 ||
             other.checkpoint_basis_count_ > other.basis_count() ||
             other.checkpoint_extra_count_ < 0 ||
@@ -345,6 +348,7 @@ void ClassRelationModuleContext::swap(
     std::swap(prime_, other.prime_);
     std::swap(is_set_, other.is_set_);
     std::swap(checkpoint_valid_, other.checkpoint_valid_);
+    std::swap(checkpoint_lent_, other.checkpoint_lent_);
 }
 
 void ClassRelationModuleContext::set_diagnostics(
@@ -437,6 +441,7 @@ bool ClassRelationModuleContext::same_state_as(
         checkpoint_basis_count_ != other.checkpoint_basis_count_ ||
         checkpoint_extra_count_ != other.checkpoint_extra_count_ ||
         checkpoint_valid_ != other.checkpoint_valid_ ||
+        checkpoint_lent_ != other.checkpoint_lent_ ||
         bas_relation_indices_ != other.bas_relation_indices_ ||
         rel_relation_indices_ != other.rel_relation_indices_ ||
         bas_gens_.nrows() != other.bas_gens_.nrows() ||
@@ -642,6 +647,48 @@ bool ClassRelationModuleContext::take_checkpoint_context(
     return true;
 }
 
+bool ClassRelationModuleContext::lend_checkpoint_context(
+        fmpz_smat::HnfContext& holder) noexcept {
+    if (!is_set_) {
+        return false;
+    }
+    // The holder's reads leave the lent checkpoint as lent: for a state
+    // reset_precomputed_hnf built (valid HNF, every row processed, no
+    // pending rows) HnfContext::refresh returns at once, and for the empty
+    // reset state it only marks the empty HNF valid; rebuild_checkpoint
+    // reads only rank() there.  So the reclaimed object is the one
+    // rebuild_checkpoint would see had a copy been handed out instead.
+    const bool reclaimed = checkpoint_lent_;
+    if (reclaimed) {
+        restore_checkpoint_context(holder);
+    }
+    if (!rebuild_checkpoint()) {
+        if (reclaimed) {
+            checkpoint_.swap(holder);
+            checkpoint_lent_ = true;
+        }
+        return false;
+    }
+    const DiagnosticsContext* holder_diagnostics = holder.diagnostics();
+    holder.swap(checkpoint_);
+    holder.set_diagnostics(holder_diagnostics);
+    checkpoint_.set_diagnostics(diagnostics_);
+    checkpoint_lent_ = true;
+    return true;
+}
+
+void ClassRelationModuleContext::restore_checkpoint_context(
+        fmpz_smat::HnfContext& holder) noexcept {
+    if (!checkpoint_lent_) {
+        return;
+    }
+    const DiagnosticsContext* holder_diagnostics = holder.diagnostics();
+    checkpoint_.swap(holder);
+    holder.set_diagnostics(holder_diagnostics);
+    checkpoint_.set_diagnostics(diagnostics_);
+    checkpoint_lent_ = false;
+}
+
 bool ClassRelationModuleContext::checkpoint_hnf_rows(
         flint::FmpzMatRef out) noexcept {
     if (!is_set_ || !rebuild_checkpoint() ||
@@ -690,7 +737,7 @@ bool ClassRelationModuleContext::contains_sparse_row(
 }
 
 bool ClassRelationModuleContext::rebuild_checkpoint() noexcept {
-    if (!is_set_) {
+    if (!is_set_ || checkpoint_lent_) {
         return false;
     }
     if (checkpoint_valid_) {

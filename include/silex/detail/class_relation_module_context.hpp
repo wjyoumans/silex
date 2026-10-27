@@ -105,6 +105,21 @@ public:
 
     bool checkpoint_context(fmpz_smat::HnfContext& out) noexcept;
     bool take_checkpoint_context(fmpz_smat::HnfContext& out) noexcept;
+    // Hands the up-to-date checkpoint to `holder` by exchange instead of
+    // copying it (checkpoint_context).  A checkpoint lent earlier is first
+    // taken back from `holder`, which must still hold it as lent; the
+    // caller may only read it (rank, get_hnf_rows, full_rank_index,
+    // fmpz_mat_row_reduces_to_zero, or as the source of a copy), which
+    // leaves a checkpoint's state unchanged.  While the checkpoint is lent,
+    // every operation that reads it (the checkpoint accessors, set as a
+    // source) fails; adds and rollbacks never read it.  On failure a
+    // reclaimed checkpoint is lent back, so `holder` keeps its contents.
+    bool lend_checkpoint_context(fmpz_smat::HnfContext& holder) noexcept;
+    // Takes a lent checkpoint back from `holder`, which must still hold it
+    // as lent, and gives `holder` the object it held before the lend.  Does
+    // nothing when no checkpoint is lent.
+    void restore_checkpoint_context(fmpz_smat::HnfContext& holder) noexcept;
+    bool checkpoint_lent() const noexcept { return checkpoint_lent_; }
     bool checkpoint_hnf_rows(flint::FmpzMatRef out) noexcept;
     bool checkpoint_hnf_transform(flint::FmpzMatRef out) noexcept;
     bool checkpoint_index(flint::FmpzRef out) noexcept;
@@ -135,6 +150,9 @@ private:
     ulong prime_ = 0;
     bool is_set_ = false;
     bool checkpoint_valid_ = false;
+    // checkpoint_ is out on loan (lend_checkpoint_context); the object in
+    // checkpoint_ is the holder's former contents until it comes back.
+    bool checkpoint_lent_ = false;
 };
 
 }  // namespace detail
