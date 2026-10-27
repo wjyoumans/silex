@@ -224,15 +224,23 @@ Changed
   input: the class group and regulator pass the same analytic validation.
   Class groups, regulators, unit ranks and certification labels are
   unchanged on all 46 cyclotomic corpus rows that finish
-  (``cyclotomic_real_163_deg81`` timed out on both builds).  Whole-process
-  callgrind Ir of ``grh`` (busy machine) drops by 18.3% on
-  ``cyclotomic_real_136_deg32``, 21.4% on ``cyclotomic_real_23_deg11``,
-  39.5% on ``cyclotomic_real_29_deg14``, 56.8% on
-  ``cyclotomic_real_31_deg15``, 28.8% on ``cyclotomic_real_37_deg18``,
-  53.8% on ``cyclotomic_real_41_deg20`` and 21.3% on
-  ``cyclotomic_real_64_deg16``; ``cyclotomic_real_q10_c11_deg10``, which is
-  not a ``psi_n`` presentation, is unchanged.  See "Class groups and order
-  units" in :doc:`../reference/algorithms_and_sources`.
+  (``cyclotomic_real_163_deg81`` timed out on both builds).  Record fields
+  change on ``cyclotomic_real_31_deg15``, ``cyclotomic_real_37_deg18``,
+  ``cyclotomic_real_41_deg20`` and ``cyclotomic_real_136_deg32``: the
+  analytic-check audit record (``zeta_bf_proof_record``, e.g. cutoff 20007
+  to 1971 and work precision 192 to 64 on ``cyclotomic_real_31_deg15``,
+  where the coarse index-one evaluation is now accepted), ``relation_count``,
+  ``relation_kernel_unit_count``, ``relation_sources`` and
+  ``skipped_dependent_relation_count``; ``regulator_radius`` also changes
+  on the other ``psi_n`` rows.  Callgrind Ir of the ``grh`` timed region
+  (``compute_class_unit_transaction``, ``profile-release``, busy machine)
+  drops by 18.5% on ``cyclotomic_real_136_deg32``, 22.2% on
+  ``cyclotomic_real_23_deg11``, 41.5% on ``cyclotomic_real_29_deg14``,
+  58.8% on ``cyclotomic_real_31_deg15``, 29.6% on
+  ``cyclotomic_real_37_deg18``, 55.8% on ``cyclotomic_real_41_deg20`` and
+  21.9% on ``cyclotomic_real_64_deg16``; ``cyclotomic_real_q10_c11_deg10``,
+  which is not a ``psi_n`` presentation, is unchanged.  See "Class groups
+  and order units" in :doc:`../reference/algorithms_and_sources`.
 
 - The Galois-image step of the ``grh`` relation search (fields of degree 30
   or more with a Galois-stable factor base) now also runs on fields given by
@@ -241,9 +249,9 @@ Changed
   to be a root of ``psi_n`` with an integral image matrix.  Fields of
   degree below 30 run exactly as before.  Class groups, regulators, unit
   ranks and certification labels are unchanged on all 46 cyclotomic corpus
-  rows that finish.  Whole-process callgrind Ir of ``grh`` (busy machine) on
+  rows that finish.  Callgrind Ir of the ``grh`` timed region (as above) on
   ``cyclotomic_real_136_deg32``, the one such row of degree 30 or more that
-  finishes, drops by a further 71.9% (77.0% with the unit seeding).  On
+  finishes, drops by a further 72.2% (77.4% with the unit seeding).  On
   that field the relation sequence changes, so the relations found and
   record fields such as ``relation_count`` (101 to 711) and
   ``regulator_radius`` change.

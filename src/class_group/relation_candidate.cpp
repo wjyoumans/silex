@@ -1513,9 +1513,9 @@ bool relation_gets_galois_images(const ModularRankState& before,
 }
 
 // Tries sigma_k(alpha) for every automorphism sigma_k of a field defined by
-// exactly Phi_n, where alpha (order coordinates `coordinates` / den) has just
-// given a relation for which reference add_rel_i returned k > 0 (see
-// relation_gets_galois_images).  Each image goes through
+// exactly Phi_n or psi_n, where alpha (order coordinates `coordinates` /
+// den) has just given a relation for which reference add_rel_i returned
+// k > 0 (see relation_gets_galois_images).  Each image goes through
 // try_coordinate_candidate_den, so it is factored and admitted exactly like
 // a searched candidate; it uses its own candidate counter and no
 // factor-attempt budget, so images do not consume the search budget.  Each
@@ -1540,9 +1540,9 @@ bool relation_gets_galois_images(const ModularRankState& before,
 // galois_image_kernel_relations, so the later cap and kernel-unit target
 // leave them out as well.
 //
-// Does nothing unless the field is exactly Phi_n (degree at least 4) and
-// every rational-prime block of the factor base is complete, which makes
-// the base Galois-stable.
+// Does nothing unless the field is exactly Phi_n or psi_n (degree at least
+// 4) and every rational-prime block of the factor base is complete, which
+// makes the base Galois-stable.
 bool add_cyclotomic_galois_image_relations(
         ClassGroupContext& context,
         const Order& order,
@@ -1991,8 +1991,8 @@ bool try_coordinate_candidate_den(ClassGroupContext& context,
     // reference tests typ(m) != t_INT; scalar candidates never reach here).
     // Reference Rel_add.jl:97-131 (v0.38.6) adds images only before full
     // rank; the reference relation cache is followed here instead.  Images
-    // are added only for fields defined by exactly Phi_n with a factor base
-    // stable under Gal(K/Q), and only for grh requests: a grh relation
+    // are added only for fields defined by exactly Phi_n or psi_n with a
+    // factor base stable under Gal(K/Q), and only for grh requests: a grh relation
     // request, or the relation search of a grh class/unit transaction.
     // That search runs with an unknown requested certification on a base
     // that carries the GRH generation record, which only a grh class/unit

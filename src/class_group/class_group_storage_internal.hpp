@@ -26,10 +26,10 @@ namespace silex::detail {
 // Smallest field degree at which the relation search uses its large-field
 // rules: one random-walk ideal serves every pivot of a pass
 // (lll_relation_search.cpp, collect_pivot_lll_ideal), and a grh search on a
-// field defined by exactly Phi_n adds the Galois images of its relations
-// (relation_candidate.cpp, the Galois-image step).  Below it the search
-// draws one ideal per pivot and adds no images.  The crossover is measured,
-// not sourced (see docs/reference/algorithms_and_sources.rst).
+// field defined by exactly Phi_n or psi_n adds the Galois images of its
+// relations (relation_candidate.cpp, the Galois-image step).  Below it the
+// search draws one ideal per pivot and adds no images.  The crossover is
+// measured, not sourced (see docs/reference/algorithms_and_sources.rst).
 inline constexpr slong kLargeFieldRelationSearchMinDegree = 30;
 
 struct FactorBaseHonestyFailure;

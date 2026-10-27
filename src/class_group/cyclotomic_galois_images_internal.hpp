@@ -56,7 +56,9 @@ namespace silex::detail {
 // seeded into the unit context before relation search (source
 // add_cyclotomic_units, buch2.c:3626-3636; src/order_unit/compute.cpp)
 // and count toward the kernel-unit need there, as the source counts them
-// in zc (buch2.c:4060).
+// in zc (buch2.c:4060).  On a field defined by psi_n the real cyclotomic
+// units (src/unit/cyclotomic_units.cpp) are seeded there in the same way;
+// the source seeds nothing on such fields.
 //
 // FB_aut_perm (buch2.c lines 197-249) maps every factor-base prime to a
 // factor-base prime above the same rational prime with the same residue

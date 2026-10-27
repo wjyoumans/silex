@@ -303,7 +303,7 @@ bool prime_power_conductor_units(std::vector<Element>& out,
 // Silex's own, from the identities below.
 // For n = 4 m: D_j(y) = |1 - z^(2(m - j))| for 0 <= j < m, and
 // D_((a-1)/2)(y) - D_((a+1)/2)(y) = |1 - z| |1 - z^a| for odd a < 2 m.  For
-// n odd: S_(b-1)(y) = |1 - z^(2b)| / |1 - z^2| for 2 <= b < (n - 1) / 2, and
+// n odd: S_(b-1)(y) = |1 - z^(2b)| / |1 - z^2| for 2 <= b <= (n - 1) / 2, and
 // 2 - D_2(y) = |1 - z^2|^2.
 bool composite_conductor_generators(std::vector<Element>& out,
                                     const Element& y, ulong n) noexcept {
