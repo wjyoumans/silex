@@ -140,19 +140,45 @@ enum class DecomposePrimeRoute {
     equation_factor,
 };
 
+// What decompose_prime_residue_degrees does on an index-divisor cache miss
+// for a p not dividing the discriminant, when the bounded or recursive split
+// of O/pO gives the decomposition.
+enum class IndexDivisorMiss : unsigned char {
+    // Build each prime's ideal and store the decomposition in the order's
+    // index-divisor cache, as decompose_prime does, so a later
+    // decompose_prime or decompose_prime_residue_degrees of p reads it back.
+    store_decomposition,
+    // Read only the residue degrees off the split, in the same order: no
+    // ideal is built and nothing is stored.  For a caller that keeps the
+    // degrees of p itself and does not expect decompose_prime of p to
+    // follow; a later decompose_prime of p computes the same decomposition
+    // from scratch.
+    degrees_only,
+};
+
 // Residue degrees of the primes above p in `order`, in the order
 // decompose_prime(primes, order, p) publishes them, with the same success.
 // For an index divisor of a maximal non-equation order it reads them from the
 // order's index-divisor decomposition cache (OrderAccess::
 // index_divisor_decomposition) without rebuilding the stored ideals, and on a
-// miss for an unramified p stores the decomposition decompose_prime would
-// store, computing the quotient O/pO once for the bounded and recursive
-// splits.  Every other case calls decompose_prime.  Leaves `out` unchanged on
-// failure.  For callers that need only the decomposition type, such as the
-// Bach-Friedman Euler factors in zeta.cpp.
-bool decompose_prime_residue_degrees(std::vector<slong>& out,
-                                     const Order& order,
-                                     flint::FmpzConstRef p) noexcept;
+// miss for an unramified p computes the quotient O/pO once for the bounded
+// and recursive splits; `miss` says whether it then builds and stores the
+// decomposition decompose_prime would store.  Every other case calls
+// decompose_prime.  Leaves `out` unchanged on failure.  For callers that need
+// only the decomposition type, such as the Bach-Friedman Euler factors in
+// zeta.cpp.
+//
+// With IndexDivisorMiss::degrees_only the result (its success, or the order
+// of the degrees) can differ from decompose_prime's only where building an
+// ideal of the split fails, since decompose_prime then moves on to its next
+// route.  That build (ideal_from_mod_rows, or pO for an inert p) fails only
+// when an allocation fails: the rows pO plus the kept components always span
+// a full-rank ideal of the order (see ideal_from_mod_rows).
+bool decompose_prime_residue_degrees(
+        std::vector<slong>& out,
+        const Order& order,
+        flint::FmpzConstRef p,
+        IndexDivisorMiss miss = IndexDivisorMiss::store_decomposition) noexcept;
 
 // Noninstalled prime-ideal hooks: constructors that take caller-supplied
 // data, and read-only access to recorded residue-map state.

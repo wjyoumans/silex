@@ -133,6 +133,26 @@ Added
 Changed
 -------
 
+- ``decompose_prime`` records on the order when its search for a monogenic
+  generator (an element whose powers form a basis of the order) has tested
+  every candidate and found none, and skips the search for later primes of
+  that order.  The search depends only on the order's basis, so it would fail
+  again; a search that finds a generator is not recorded.  The analytic
+  Belabas-Friedman sums of a ``grh`` computation also read the residue
+  degrees of an index-divisor prime directly off the split of ``O/pO``
+  without building the prime ideals or storing the decomposition in the
+  order, when they keep those degrees themselves; the factor-base bound
+  search, whose primes the sums revisit, still stores them.  Prime
+  decompositions, their order and ``grh`` outputs are unchanged (identical
+  on the 36 corpus rows of index above 1 whose ``grh`` sums decompose
+  primes, among them ``cyclotomic_real_q10_c11_deg10``, the eight
+  multiquadratic rows, ``lmfdb_6_6_46411625_1``, ``lmfdb_8_0_64000000_3``,
+  ``lmfdb_8_8_73116160000_2``, ``lmfdb_8_8_82944000000_1`` and
+  ``pure_x6_minus_5``).  On ``cyclotomic_real_q10_c11_deg10`` callgrind Ir of
+  ``grh`` (busy machine) drops by 3.23% in the class and unit computation
+  and by 2.52% for the whole process; on ``multiquadratic_m23_m31_m47`` the
+  class and unit computation drops by 2.91%.
+
 - When ``decompose_prime`` splits a prime ``p`` dividing the index by
   enumerating the idempotents of the Frobenius-fixed subalgebra of ``O/pO``
   (or of ``O/(p, I_p)``), it now builds a component basis only for the

@@ -1476,6 +1476,42 @@ int check_residue_degrees_match_decompose_prime(
                                                               reference,
                                                               p_ref));
         assert(degrees == expected);
+        degrees.clear();
+        assert(silex::detail::decompose_prime_residue_degrees(
+                degrees, reference, p_ref,
+                silex::detail::IndexDivisorMiss::degrees_only));
+        assert(degrees == expected);
+
+        // degrees_only on a fresh order: the same degrees in the same order.
+        // Where it reads them off the split it builds no ideal and stores
+        // nothing; where it delegates (the monogenic branch, or another
+        // route) decompose_prime stores what it stores on a fresh order.  A
+        // later decompose_prime publishes the same primes either way, and
+        // then fills the cache.
+        silex::Order degrees_only(field);
+        assert(degrees_only.maximal_order(equation));
+        degrees.clear();
+        assert(silex::detail::decompose_prime_residue_degrees(
+                degrees, degrees_only, p_ref,
+                silex::detail::IndexDivisorMiss::degrees_only));
+        assert(degrees == expected);
+        stored = silex::detail::OrderAccess::index_divisor_decomposition(
+                degrees_only, p_ref);
+        if (stored != nullptr) {
+            assert(reference_records != nullptr &&
+                   same_index_divisor_records(*stored, *reference_records));
+        }
+        silex::PrimeIdealList after_degrees_only;
+        assert(silex::decompose_prime(after_degrees_only, degrees_only,
+                                      p_ref));
+        assert(same_decomposition(after_degrees_only, degrees_only,
+                                  expected_primes, reference));
+        stored = silex::detail::OrderAccess::index_divisor_decomposition(
+                degrees_only, p_ref);
+        assert((stored == nullptr) == (reference_records == nullptr));
+        if (stored != nullptr) {
+            assert(same_index_divisor_records(*stored, *reference_records));
+        }
     }
     return 0;
 }
@@ -1489,6 +1525,81 @@ int test_residue_degrees_cyclotomic_real_q10_c11() {
             {238831, -228566, -128567, 146666, -15113, -13352, 2746, 334,
              -97, -2, 1},
             {43, 67, 1319, 2, 5, 11}, {43, 67, 1319});
+}
+
+// The same field has no monogenic generator among the candidates
+// find_monogenic_generator tests, so decompose_prime_residue_degrees runs
+// that search for 43, finds nothing, and records the failure on the order;
+// later primes of that order skip the search and still give
+// decompose_prime's degrees, in order.  With degrees_only the split primes
+// leave the index-divisor cache empty, while the failure record stays.  A
+// search that finds a generator (the cubic below, where decompose_prime of
+// 17 takes the monogenic branch) records nothing.
+int test_monogenic_generator_failure_memo() {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial,
+                           {238831, -228566, -128567, 146666, -15113, -13352,
+                            2746, 334, -97, -2, 1});
+    silex::NumberField field;
+    silex::Order equation = order_by_polynomial(field, polynomial);
+
+    const auto expected_degrees = [&](slong rational_prime) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, rational_prime));
+        silex::Order reference(field);
+        assert(reference.maximal_order(equation));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, reference,
+                                      sflint::FmpzConstRef(p)));
+        return published_residue_degrees(primes);
+    };
+
+    for (const silex::detail::IndexDivisorMiss miss :
+         {silex::detail::IndexDivisorMiss::store_decomposition,
+          silex::detail::IndexDivisorMiss::degrees_only}) {
+        silex::Order order(field);
+        assert(order.maximal_order(equation));
+        assert(!silex::detail::OrderAccess::monogenic_generator_absent(order));
+        for (const slong rational_prime : {43, 67, 1319}) {
+            sflint::Fmpz p;
+            assert(set_fmpz_si(p, rational_prime));
+            const sflint::FmpzConstRef p_ref(p);
+            std::vector<slong> degrees;
+            assert(silex::detail::decompose_prime_residue_degrees(
+                    degrees, order, p_ref, miss));
+            assert(degrees == expected_degrees(rational_prime));
+            assert(silex::detail::OrderAccess::monogenic_generator_absent(
+                    order));
+            const bool stored =
+                    silex::detail::OrderAccess::index_divisor_decomposition(
+                            order, p_ref) != nullptr;
+            assert(stored ==
+                   (miss == silex::detail::IndexDivisorMiss::
+                                    store_decomposition));
+        }
+        // decompose_prime on the same order also reads the record, and
+        // still publishes the reference decomposition.
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, 9791));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, order, sflint::FmpzConstRef(p)));
+        assert(published_residue_degrees(primes) == expected_degrees(9791));
+    }
+
+    sflint::FmpqPoly cubic;
+    poly_from_coefficients(cubic, {54043, 3179, -102, 1});
+    silex::NumberField cubic_field;
+    silex::Order cubic_equation = order_by_polynomial(cubic_field, cubic);
+    silex::Order cubic_order(cubic_field);
+    assert(cubic_order.maximal_order(cubic_equation));
+    sflint::Fmpz seventeen;
+    assert(set_fmpz_si(seventeen, 17));
+    silex::PrimeIdealList primes;
+    assert(silex::decompose_prime(primes, cubic_order,
+                                  sflint::FmpzConstRef(seventeen)));
+    assert(!silex::detail::OrderAccess::monogenic_generator_absent(
+            cubic_order));
+    return 0;
 }
 
 // Bounded enumeration (2 and 3 in Q(sqrt(-23), sqrt(-31), sqrt(-47))), the
@@ -5530,6 +5641,7 @@ int main() {
     assert(test_index_divisor_cache_monogenic() == 0);
     assert(test_index_divisor_cache_inert_principal() == 0);
     assert(test_residue_degrees_cyclotomic_real_q10_c11() == 0);
+    assert(test_monogenic_generator_failure_memo() == 0);
     assert(test_residue_degrees_index_divisor_routes() == 0);
     assert(test_decompose_prime_route() == 0);
     assert(test_decompose_prime_containing() == 0);

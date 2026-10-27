@@ -2524,6 +2524,34 @@ bool bf_residue_degrees_from_complete_factor_base(
     return false;
 }
 
+// How bf_prime_residue_degrees_ui treats an index divisor that only
+// decompose_prime_residue_degrees can type: `keep_ideals` builds and stores
+// its decomposition in the order (detail::IndexDivisorMiss::
+// store_decomposition), `degrees_only` reads only its residue degrees.
+enum class BfIndexDivisorPrimes : unsigned char {
+    keep_ideals,
+    degrees_only,
+};
+
+// The mode for the Belabas-Friedman sums run after the factor-base bound
+// search (log_inverse_residue, bf_add_prime_terms, bf_theorem7_add_prime).
+// With a residue-degree cache, which keeps the degrees of every prime they
+// type, a later call for p reads that cache before reaching
+// decompose_prime_residue_degrees, so the order's index-divisor
+// decomposition would serve only a decompose_prime of p, which then
+// recomputes the same decomposition instead.  Without a cache each revisit
+// of p reaches decompose_prime_residue_degrees again, and the stored
+// decomposition makes those revisits cheap.  The factor-base bound search
+// keeps the ideals: its cache lives only for the search, and these sums
+// revisit its primes.  Either mode gives the same degrees in the same
+// order.
+BfIndexDivisorPrimes bf_index_divisor_primes(
+        const detail::ZetaBfResidueDegreeCache* residue_degree_cache) noexcept {
+    return residue_degree_cache != nullptr
+                   ? BfIndexDivisorPrimes::degrees_only
+                   : BfIndexDivisorPrimes::keep_ideals;
+}
+
 bool bf_prime_residue_degrees_ui(std::vector<slong>& out,
                                  const BfResidueDegreeContext& context,
                                  const Order& order,
@@ -2531,7 +2559,8 @@ bool bf_prime_residue_degrees_ui(std::vector<slong>& out,
                                  ulong p,
                                  const DiagnosticsContext* diagnostics,
                                  detail::ZetaBfResidueDegreeCache*
-                                         residue_degree_cache = nullptr)
+                                         residue_degree_cache,
+                                 BfIndexDivisorPrimes index_divisor_primes)
         noexcept {
     if (p < 2) {
         return false;
@@ -2558,7 +2587,12 @@ bool bf_prime_residue_degrees_ui(std::vector<slong>& out,
             // cached decomposition without rebuilding its ideals.
             std::vector<slong> degrees;
             if (!detail::decompose_prime_residue_degrees(
-                        degrees, order, flint::FmpzConstRef(p_value))) {
+                        degrees, order, flint::FmpzConstRef(p_value),
+                        index_divisor_primes ==
+                                        BfIndexDivisorPrimes::degrees_only
+                                ? detail::IndexDivisorMiss::degrees_only
+                                : detail::IndexDivisorMiss::
+                                          store_decomposition)) {
                 return false;
             }
             for (const slong degree : degrees) {
@@ -2623,7 +2657,8 @@ bool factor_base_bound_bdf_right_side(
                     "residue_degrees");
             degrees_found = bf_prime_residue_degrees_ui(
                     residue_degrees, residue_context, order, degree_scratch,
-                    p, diagnostics, &residue_degree_cache);
+                    p, diagnostics, &residue_degree_cache,
+                    BfIndexDivisorPrimes::keep_ideals);
         }
         if (!degrees_found) {
             return false;
@@ -3136,7 +3171,8 @@ bool log_inverse_residue(double& out,
                 if (!bf_prime_residue_degrees_ui(
                             residue_degrees, residue_context, order,
                             degree_scratch, p, diagnostics,
-                            residue_degree_cache)) {
+                            residue_degree_cache,
+                            bf_index_divisor_primes(residue_degree_cache))) {
                     return false;
                 }
             }
@@ -3415,7 +3451,8 @@ bool bf_add_prime_terms(flint::Arb& sum,
             if (!bf_prime_residue_degrees_ui(
                         residue_degrees, residue_context, order,
                         degree_scratch, rational_prime, diagnostics,
-                        residue_degree_cache)) {
+                        residue_degree_cache,
+                        bf_index_divisor_primes(residue_degree_cache))) {
                 return false;
             }
             have_complete_residue_degrees = true;
@@ -4230,9 +4267,10 @@ bool bf_theorem7_add_prime(flint::Arb& prime_sum,
         }
     }
     if (!have_complete_residue_degrees &&
-        !bf_prime_residue_degrees_ui(residue_degrees, residue_context, order,
-                                     degree_scratch, p, diagnostics,
-                                     residue_degree_cache)) {
+        !bf_prime_residue_degrees_ui(
+                residue_degrees, residue_context, order, degree_scratch, p,
+                diagnostics, residue_degree_cache,
+                bf_index_divisor_primes(residue_degree_cache))) {
         return false;
     }
 

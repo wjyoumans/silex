@@ -148,6 +148,22 @@ public:
             const Order& order,
             flint::FmpzConstRef p,
             std::vector<IndexDivisorPrimeRecord>&& primes) noexcept;
+
+    // Whether decompose_prime's search for a monogenic generator (an element
+    // whose powers 1, b, ..., b^(n-1) form a basis of `order`) has already
+    // run to completion on this order data and found none.  The search reads
+    // only the basis and its multiplication table, which never change for
+    // one order data, so its failure is a property of the order: a later
+    // search would test the same candidates and fail again.  Only failure is
+    // recorded; a found generator is recomputed each time.  Kept in the
+    // order's shared data in the same unsynchronized way as the equation
+    // order index; Order::set, set_basis and the factories start with
+    // nothing recorded.  False when `order` has no basis.
+    static bool monogenic_generator_absent(const Order& order) noexcept;
+
+    // Records that the search above ran to completion on `order` and found
+    // no generator.  Silent when `order` has no basis.
+    static void set_monogenic_generator_absent(const Order& order) noexcept;
 };
 
 }  // namespace silex::detail

@@ -2723,6 +2723,39 @@ bool unramified_prime_data_from_kernel(std::vector<IndexPrimeData>& out,
     return true;
 }
 
+// The residue degrees of the primes unramified_prime_data_from_kernel gives,
+// in its order, read off the same split without building their ideals.
+bool unramified_residue_degrees_from_kernel(std::vector<slong>& out,
+                                            const Order& order,
+                                            flint::FmpzConstRef p,
+                                            const UnramifiedFixedKernel& fixed,
+                                            FixedSplit split,
+                                            bool* separator_absent) noexcept {
+    if (separator_absent != nullptr) {
+        *separator_absent = false;
+    }
+    if (fixed.nullity == 1) {
+        out.assign(1, order.degree());
+        return true;
+    }
+
+    std::vector<FiniteAlgebraComponent> components;
+    if (!components_from_fixed_subspace(components, fixed.kernel,
+                                        fixed.nullity, fixed.one_mod,
+                                        fixed.multiplication_table, p,
+                                        fixed.ctx, split, separator_absent)) {
+        return false;
+    }
+
+    std::vector<slong> degrees;
+    degrees.reserve(components.size());
+    for (const FiniteAlgebraComponent& component : components) {
+        degrees.push_back(component.dimension);
+    }
+    out.swap(degrees);
+    return true;
+}
+
 bool unramified_maximal_index_divisor_prime_data(
         std::vector<IndexPrimeData>& out,
         const Order& order,
@@ -2858,11 +2891,22 @@ bool ramified_maximal_index_divisor_prime_data(
     return true;
 }
 
-bool monogenic_candidate(flint::FmpzPoly& chi,
-                         Element& beta,
-                         const Order& order,
-                         const flint::FmpzVec& candidate,
-                         const flint::FmpzMat& multiplication_table) noexcept {
+// What monogenic_candidate found for one candidate.
+enum class MonogenicCandidate : unsigned char {
+    // The candidate generates the order; chi and beta are set.
+    generator,
+    // The powers of the candidate do not form a basis of the order.
+    not_generator,
+    // A step failed before the candidate could be classified.
+    failed,
+};
+
+MonogenicCandidate monogenic_candidate(
+        flint::FmpzPoly& chi,
+        Element& beta,
+        const Order& order,
+        const flint::FmpzVec& candidate,
+        const flint::FmpzMat& multiplication_table) noexcept {
     const slong n = order.degree();
     flint::FmpzMat powers(n, n);
     flint::FmpzMat multiplication_by_beta(n, n);
@@ -2873,7 +2917,7 @@ bool monogenic_candidate(flint::FmpzPoly& chi,
     flint::Fmpz det;
 
     if (!order_one_coords(power, order)) {
-        return false;
+        return MonogenicCandidate::failed;
     }
 
     fmpz_mat_set_row(powers, 0, power);
@@ -2886,7 +2930,7 @@ bool monogenic_candidate(flint::FmpzPoly& chi,
     fmpz_mat_det(det.raw(), powers.raw());
     fmpz_abs(det.raw(), det.raw());
     if (fmpz_is_one(det.raw()) == 0) {
-        return false;
+        return MonogenicCandidate::not_generator;
     }
 
     for (slong i = 0; i < n; ++i) {
@@ -2896,7 +2940,9 @@ bool monogenic_candidate(flint::FmpzPoly& chi,
     }
 
     fmpz_mat_charpoly(chi.raw(), multiplication_by_beta.raw());
-    return element_from_order_coords(beta, order, candidate);
+    return element_from_order_coords(beta, order, candidate)
+                   ? MonogenicCandidate::generator
+                   : MonogenicCandidate::failed;
 }
 
 bool find_monogenic_generator(flint::FmpzPoly& chi,
@@ -2908,37 +2954,56 @@ bool find_monogenic_generator(flint::FmpzPoly& chi,
         return false;
     }
 
+    // The search below depends only on the order's basis (through
+    // build_multiplication_table and the candidates), so once it has tested
+    // every candidate and found no generator, later calls on the same order
+    // data would test the same candidates and fail the same way.  Only that
+    // complete failure is recorded; a search cut short by a failed step, or
+    // one that succeeds, runs again next time.
+    if (detail::OrderAccess::monogenic_generator_absent(order)) {
+        return false;
+    }
+
     flint::FmpzMat multiplication_table(n * n, n);
     flint::FmpzVec candidate(n);
     if (!build_multiplication_table(multiplication_table, order)) {
         return false;
     }
 
+    bool complete = true;
+    const auto try_candidate = [&]() noexcept {
+        const MonogenicCandidate result = monogenic_candidate(
+                chi, beta, order, candidate, multiplication_table);
+        if (result == MonogenicCandidate::failed) {
+            complete = false;
+        }
+        return result == MonogenicCandidate::generator;
+    };
+
     for (slong i = 0; i < n; ++i) {
         set_identity_coords(candidate, i);
-        if (monogenic_candidate(chi, beta, order, candidate,
-                                multiplication_table)) {
+        if (try_candidate()) {
             return true;
         }
     }
 
-    if (n > 7) {
-        return false;
-    }
+    if (n <= 7) {
+        slong total = 1;
+        for (slong i = 0; i < n; ++i) {
+            total *= 3;
+        }
 
-    slong total = 1;
-    for (slong i = 0; i < n; ++i) {
-        total *= 3;
-    }
-
-    for (slong t = 1; t < total; ++t) {
-        set_small_trinary_coords(candidate, t);
-        if (monogenic_candidate(chi, beta, order, candidate,
-                                multiplication_table)) {
-            return true;
+        for (slong t = 1; t < total; ++t) {
+            set_small_trinary_coords(candidate, t);
+            if (try_candidate()) {
+                return true;
+            }
         }
     }
 
+    if (complete) {
+        detail::OrderAccess::set_monogenic_generator_absent(order);
+    }
     return false;
 }
 
@@ -5521,7 +5586,8 @@ bool store_index_primes_and_get_degrees(
 
 bool decompose_prime_residue_degrees(std::vector<slong>& out,
                                      const Order& order,
-                                     flint::FmpzConstRef p) noexcept {
+                                     flint::FmpzConstRef p,
+                                     IndexDivisorMiss miss) noexcept {
     // Only the index-divisor route of decompose_prime (maximal,
     // non-equation order, p dividing the index) is handled here, chosen by
     // the classifier decompose_prime routes by; every other case is
@@ -5566,13 +5632,44 @@ bool decompose_prime_residue_degrees(std::vector<slong>& out,
     if (!unramified_fixed_kernel(fixed, order, p)) {
         return residue_degrees_from_decompose_prime(out, order, p);
     }
+    // The two passes below differ only in the split they ask for.  With
+    // IndexDivisorMiss::degrees_only they read the degrees off that split
+    // without building ideals and store nothing; the degrees, in order, are
+    // those the ideal-building pass would publish (see the header for the
+    // one case where they can differ).
+    const bool degrees_only = miss == IndexDivisorMiss::degrees_only;
     std::vector<IndexPrimeData> index_primes;
-    bool separator_absent = false;
-    if (unramified_prime_data_from_kernel(index_primes, order, p, fixed,
-                                          FixedSplit::bounded,
-                                          &separator_absent)) {
+    const auto split_pass = [&](FixedSplit split,
+                                bool* separator_absent) noexcept -> int {
+        if (degrees_only) {
+            std::vector<slong> degrees;
+            if (!unramified_residue_degrees_from_kernel(
+                        degrees, order, p, fixed, split, separator_absent)) {
+                return 0;
+            }
+            for (const slong degree : degrees) {
+                if (degree <= 0) {
+                    return -1;
+                }
+            }
+            out.swap(degrees);
+            return 1;
+        }
+        if (!unramified_prime_data_from_kernel(index_primes, order, p, fixed,
+                                               split, separator_absent)) {
+            return 0;
+        }
         return store_index_primes_and_get_degrees(out, order, p,
-                                                  index_primes);
+                                                  index_primes)
+                       ? 1
+                       : -1;
+    };
+
+    bool separator_absent = false;
+    if (const int bounded = split_pass(FixedSplit::bounded,
+                                       &separator_absent);
+        bounded != 0) {
+        return bounded > 0;
     }
 
     Element beta(*order.parent());
@@ -5583,15 +5680,9 @@ bool decompose_prime_residue_degrees(std::vector<slong>& out,
     if (find_monogenic_generator(chi, beta, order)) {
         return residue_degrees_from_decompose_prime(out, order, p);
     }
-    if (unramified_prime_data_from_kernel(
-                index_primes, order, p, fixed,
-                separator_absent ? FixedSplit::recursive_only
-                                 : FixedSplit::recursive,
-                nullptr)) {
-        return store_index_primes_and_get_degrees(out, order, p,
-                                                  index_primes);
-    }
-    return false;
+    return split_pass(separator_absent ? FixedSplit::recursive_only
+                                       : FixedSplit::recursive,
+                      nullptr) > 0;
 }
 
 }  // namespace detail

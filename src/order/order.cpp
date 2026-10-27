@@ -77,6 +77,10 @@ struct OrderData {
     };
     mutable std::vector<std::unique_ptr<IndexDivisorDecomposition>>
             index_divisor_decompositions_;
+    // Set by OrderAccess::set_monogenic_generator_absent once the monogenic
+    // generator search has failed on this basis (it depends only on the
+    // basis, like the index above).
+    mutable bool monogenic_generator_absent_ = false;
     bool maximality_is_known_ = false;
     bool maximal_ = false;
     OrderSpecialization specialization_;
@@ -1636,6 +1640,16 @@ void OrderAccess::store_index_divisor_decomposition(
     fmpz_set(entry->p.raw(), p.raw());
     entry->primes = std::move(primes);
     order.data_->index_divisor_decompositions_.push_back(std::move(entry));
+}
+
+bool OrderAccess::monogenic_generator_absent(const Order& order) noexcept {
+    return order.has_basis() && order.data_->monogenic_generator_absent_;
+}
+
+void OrderAccess::set_monogenic_generator_absent(const Order& order) noexcept {
+    if (order.has_basis()) {
+        order.data_->monogenic_generator_absent_ = true;
+    }
 }
 
 }  // namespace detail
