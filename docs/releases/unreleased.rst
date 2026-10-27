@@ -378,14 +378,22 @@ Changed
   bound), where the images cost 27-28% more Ir.  Over 65 ``psi_n`` fields
   (``n`` not 2 mod 4, degree 4 to 29) the images cut Ir on every field of
   degree at most 18 (12% to 80%) and every field with a bound of at least
-  300 (17% to 83%).  Class groups, regulators, unit ranks and certification
-  labels are identical on all of them and on all corpus rows that finish.
+  300 (17% to 83%).  Class groups, unit ranks, statuses and certification
+  labels are identical on all of them and on all corpus rows that finish;
+  regulators are identical except for the enclosure radius noted below.
   The record fields ``class_group.relation_count``,
   ``class_group.skipped_dependent_relation_count``,
-  ``unit_group.relation_kernel_unit_count`` and
+  ``class_group.relation_kernel_unit_count`` and
   ``class_group.relation_sources`` change on ``cyclotomic_real_23_deg11``,
   ``_29_deg14``, ``_31_deg15``, ``_37_deg18`` and ``_64_deg16``, and the
-  zeta BF record can change on other ``psi_n`` fields (``psi_120``).
+  zeta BF proof record (``cutoff``, ``work_precision``, ``error_bound``)
+  changes on 9 of the 65 ``psi_n`` fields (among them ``psi_11``, ``psi_13``,
+  ``psi_15``, ``psi_16``, ``psi_21``, ``psi_28``, ``psi_116`` and
+  ``psi_120``): the cutoff falls on most (``psi_11``: 18432 to 288, work
+  precision 192 to 64) and rises on ``psi_120`` (1971 to 20007), and every
+  error bound stays at or below the 0.249 already accepted.
+  ``unit_group.regulator_radius`` changes on 4 fields (``psi_39``,
+  ``psi_84``, ``psi_105``, ``psi_120``); only the radius changes.
   Callgrind Ir of the ``grh`` timed region (``compute_class_unit_transaction``,
   ``profile-release``) drops by 56.6% on ``cyclotomic_real_23_deg11``,
   34.1% on ``_29_deg14``, 22.9% on ``_31_deg15``, 53.8% on ``_37_deg18`` and

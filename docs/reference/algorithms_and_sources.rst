@@ -1019,8 +1019,10 @@ row of degree 30 or more but add up to 92% more on some rows of degree 12 to
 they save.
 
 Below degree 30 the images run under two further rules of Silex's own, both
-set by measurement on the corpus ``Phi_m`` rows below degree 30 and neither
-taken from PARI or Hecke.  The gate: only a field given by exactly ``Phi_m``
+measured: the ``Phi_m`` gate and cap were set by measurement on the
+corpus ``Phi_m`` rows below degree 30, the ``psi_n`` gate on the 65-field
+``psi_n`` sweep below, and the ``psi_n`` cap reuses the ``Phi_m``
+measurement without being re-measured; neither is taken from PARI or Hecke.  The gate: only a field given by exactly ``Phi_m``
 of degree at most 20, or a field given by exactly ``psi_n`` of degree at most
 18, or any such field with a factor-base bound of at least 300, gets images;
 on the degree 22 and 24 ``Phi_m`` fields with a smaller bound the image setup
