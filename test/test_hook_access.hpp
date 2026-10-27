@@ -44,6 +44,22 @@ namespace silex::detail {
 
 class TestHookAccess {
 public:
+    // Arms or disarms the ideal-build failure of the unramified
+    // index-divisor split (ideal_from_mod_rows, or pO for an inert p): while
+    // armed every such build fails as an allocation failure would.  Skips
+    // the invariant that the build only fails when an allocation fails.
+    static void set_prime_ideal_build_failure(bool armed) noexcept {
+        PrimeIdealTestSeams::ideal_build_failure_.store(
+                armed, std::memory_order_relaxed);
+    }
+
+    // How many ideal builds the armed seam has failed since the process
+    // started.
+    static slong prime_ideal_build_failures_taken() noexcept {
+        return PrimeIdealTestSeams::ideal_build_failures_taken_.load(
+                std::memory_order_relaxed);
+    }
+
     // Arms (delta != 0) or disarms (0) a one-shot perturbation: the next
     // IdealFactorization::factor adds delta to the first valuation v_P it
     // computes, so the norm accounting sum f_P v_P differs from v_p(N(I)).

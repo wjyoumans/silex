@@ -2686,7 +2686,8 @@ bool unramified_prime_data_from_kernel(std::vector<IndexPrimeData>& out,
         data.emplace_back(order);
         IndexPrimeData& prime = data.back();
         OrderElement p_element(order);
-        if (!prime.ideal.is_defined() || !p_element.is_defined() ||
+        if (detail::PrimeIdealTestSeams::ideal_build_fails() ||
+            !prime.ideal.is_defined() || !p_element.is_defined() ||
             !order_element_set_fmpz(p_element, order, p) ||
             !prime.ideal.set_principal(p_element)) {
             return false;
@@ -2712,7 +2713,8 @@ bool unramified_prime_data_from_kernel(std::vector<IndexPrimeData>& out,
                 components[static_cast<std::size_t>(i)];
         data.emplace_back(order);
         IndexPrimeData& prime = data.back();
-        if (!prime.ideal.is_defined() ||
+        if (detail::PrimeIdealTestSeams::ideal_build_fails() ||
+            !prime.ideal.is_defined() ||
             !ideal_from_mod_rows(prime.ideal, order, p, components, i)) {
             return false;
         }

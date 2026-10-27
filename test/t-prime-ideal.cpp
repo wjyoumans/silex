@@ -1528,6 +1528,100 @@ int test_residue_degrees_cyclotomic_real_q10_c11() {
             {43, 67, 1319, 2, 5, 11}, {43, 67, 1319});
 }
 
+// The ideal build of the unramified index-divisor split (ideal_from_mod_rows
+// for a split prime, pO for an inert one) fails only when an allocation
+// fails; the seam forces that.  decompose_prime_residue_degrees with
+// IndexDivisorMiss::degrees_only builds no ideal and so still gives
+// decompose_prime's degrees; with store_decomposition the failing build ends
+// the split passes, so it returns false, leaves `out` unchanged and stores
+// nothing (the route is atomic).  The two orders are fresh, so no cache entry
+// or monogenic record hides the build.
+int check_ideal_build_failure_seam(const std::vector<slong>& low_to_high,
+                                   slong rational_prime,
+                                   bool route_continues_to_monogenic) {
+    sflint::FmpqPoly polynomial;
+    poly_from_coefficients(polynomial, low_to_high);
+    silex::NumberField field;
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    sflint::Fmpz p;
+    assert(set_fmpz_si(p, rational_prime));
+    const sflint::FmpzConstRef p_ref(p);
+
+    silex::Order reference(field);
+    assert(reference.maximal_order(equation));
+    silex::PrimeIdealList expected_primes;
+    assert(silex::decompose_prime(expected_primes, reference, p_ref));
+    const std::vector<slong> expected =
+            published_residue_degrees(expected_primes);
+    assert(silex::detail::OrderAccess::index_divisor_decomposition(
+                   reference, p_ref) != nullptr);
+
+    silex::Order stored_order(field);
+    silex::Order degrees_order(field);
+    assert(stored_order.maximal_order(equation));
+    assert(degrees_order.maximal_order(equation));
+
+    const slong taken_before =
+            silex::detail::TestHookAccess::prime_ideal_build_failures_taken();
+    silex::detail::TestHookAccess::set_prime_ideal_build_failure(true);
+    const std::vector<slong> sentinel = {-7, -7};
+    std::vector<slong> degrees = sentinel;
+    const bool stored_ok = silex::detail::decompose_prime_residue_degrees(
+            degrees, stored_order, p_ref,
+            silex::detail::IndexDivisorMiss::store_decomposition);
+    const bool stored_unchanged = degrees == sentinel;
+    const bool stored_cache =
+            silex::detail::OrderAccess::index_divisor_decomposition(
+                    stored_order, p_ref) != nullptr;
+
+    std::vector<slong> only_degrees;
+    const bool only_ok = silex::detail::decompose_prime_residue_degrees(
+            only_degrees, degrees_order, p_ref,
+            silex::detail::IndexDivisorMiss::degrees_only);
+    const bool only_cache =
+            silex::detail::OrderAccess::index_divisor_decomposition(
+                    degrees_order, p_ref) != nullptr;
+    silex::detail::TestHookAccess::set_prime_ideal_build_failure(false);
+
+    assert(silex::detail::TestHookAccess::prime_ideal_build_failures_taken() >
+           taken_before);
+    if (route_continues_to_monogenic) {
+        // The failed build ends the split passes, but the monogenic search
+        // between them succeeds and decompose_prime's own route gives the
+        // degrees.
+        assert(stored_ok);
+        assert(degrees == expected);
+    } else {
+        assert(!stored_ok);
+        assert(stored_unchanged);
+        assert(!stored_cache);
+    }
+    assert(only_ok);
+    assert(only_degrees == expected);
+    assert(!only_cache);
+
+    // Disarmed, the same order builds and stores the decomposition.
+    degrees.clear();
+    assert(silex::detail::decompose_prime_residue_degrees(
+            degrees, stored_order, p_ref));
+    assert(degrees == expected);
+    assert(silex::detail::OrderAccess::index_divisor_decomposition(
+                   stored_order, p_ref) != nullptr);
+    return 0;
+}
+
+// 43 splits into ten degree-one primes, with no monogenic generator, so the
+// failed build fails the whole call.  2 is inert in x^3 + 4x + 8 (pO built
+// by set_principal), where the bounded pass fails and the monogenic search
+// then succeeds.
+int test_ideal_build_failure_seam() {
+    assert(check_ideal_build_failure_seam(
+                   {238831, -228566, -128567, 146666, -15113, -13352, 2746,
+                    334, -97, -2, 1},
+                   43, false) == 0);
+    return check_ideal_build_failure_seam({8, 4, 0, 1}, 2, true);
+}
+
 // The same field has no monogenic generator among the candidates
 // find_monogenic_generator tests, so decompose_prime_residue_degrees runs
 // that search for 43, finds nothing, and records the failure on the order;
@@ -5757,6 +5851,7 @@ int main(int argc, char** argv) {
     assert(test_index_divisor_cache_inert_principal() == 0);
     assert(test_residue_degrees_cyclotomic_real_q10_c11() == 0);
     assert(test_monogenic_generator_failure_memo() == 0);
+    assert(test_ideal_build_failure_seam() == 0);
     assert(test_residue_degrees_index_divisor_routes() == 0);
     assert(test_decompose_prime_route() == 0);
     assert(test_decompose_prime_containing() == 0);

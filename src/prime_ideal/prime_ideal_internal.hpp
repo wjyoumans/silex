@@ -7,9 +7,34 @@
 #include <silex/flint/fmpz_poly.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <atomic>
 #include <vector>
 
 namespace silex::detail {
+
+class TestHookAccess;
+
+// Switch that only detail::TestHookAccess (test/test_hook_access.hpp) can
+// set.  Off by default and never set by production code; one relaxed atomic
+// load per ideal build of unramified_prime_data_from_kernel.
+class PrimeIdealTestSeams {
+public:
+    // True while armed: the next ideal builds of an unramified index-divisor
+    // split (ideal_from_mod_rows for a split prime, or pO for an inert p)
+    // fail as an allocation failure would.
+    static bool ideal_build_fails() noexcept {
+        if (!ideal_build_failure_.load(std::memory_order_relaxed)) {
+            return false;
+        }
+        ideal_build_failures_taken_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+private:
+    friend class TestHookAccess;
+    inline static std::atomic<bool> ideal_build_failure_{false};
+    inline static std::atomic<slong> ideal_build_failures_taken_{0};
+};
 
 enum class RetainedQuadraticPrimeKind {
     inert,
