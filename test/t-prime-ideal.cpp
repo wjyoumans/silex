@@ -27,6 +27,7 @@
 #include <cstring>
 #include <utility>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -5540,6 +5541,80 @@ int test_same_prime_ideal_compares_ideals() {
     return 0;
 }
 
+// The previous word-size search, kept as the reference: every candidate from
+// 2 upwards is tested by c^((p - 1) / q) != 1 for each prime q dividing p - 1.
+ulong reference_primitive_root_powmod_search(ulong p) noexcept {
+    if (p < 2) {
+        return 0;
+    }
+    if (p == 2) {
+        return 1;
+    }
+    const ulong group_order = p - 1;
+    n_factor_t factors;
+    n_factor_init(&factors);
+    n_factor(&factors, group_order, 1);
+    const ulong p_inverse = n_preinvert_limb(p);
+    for (ulong candidate = 2; candidate < p; ++candidate) {
+        bool generates = true;
+        for (int i = 0; i < factors.num; ++i) {
+            if (n_powmod2_ui_preinv(candidate, group_order / factors.p[i], p,
+                                    p_inverse) == 1) {
+                generates = false;
+                break;
+            }
+        }
+        if (generates) {
+            return candidate;
+        }
+    }
+    return 0;
+}
+
+// primitive_root_mod_prime_ui (Legendre symbol for the prime 2) returns the
+// root of the powmod search on every prime below 2^22, on the primes next to
+// 2^32 and 2^63 and on the largest primes below 2^64, and returns 0 for
+// p < 2.
+int test_primitive_root_word_size_matches_powmod_search() {
+    assert(silex::detail::primitive_root_mod_prime_ui(0) == 0);
+    assert(silex::detail::primitive_root_mod_prime_ui(1) == 0);
+    ulong checked = 0;
+    for (ulong p = 2; p < (UWORD(1) << 22); p = n_nextprime(p, 1)) {
+        assert(silex::detail::primitive_root_mod_prime_ui(p) ==
+               reference_primitive_root_powmod_search(p));
+        ++checked;
+    }
+    // 295947 primes below 2^22.
+    assert(checked == 295947);
+
+    std::vector<ulong> primes;
+    for (const ulong centre : {UWORD(1) << 32, UWORD(1) << 63}) {
+        ulong below = centre;
+        ulong above = centre;
+        for (int k = 0; k < 32; ++k) {
+            do {
+                --below;
+            } while (n_is_prime(below) == 0);
+            above = n_nextprime(above, 1);
+            primes.push_back(below);
+            primes.push_back(above);
+        }
+    }
+    ulong top = UWORD_MAX;
+    for (int k = 0; k < 32; ++k) {
+        do {
+            --top;
+        } while (n_is_prime(top) == 0);
+        primes.push_back(top);
+    }
+    for (const ulong p : primes) {
+        const ulong root = silex::detail::primitive_root_mod_prime_ui(p);
+        assert(root != 0);
+        assert(root == reference_primitive_root_powmod_search(p));
+    }
+    return 0;
+}
+
 // The word-size primitive-root search returns the smallest primitive root
 // found by the fmpz search, and quotient_log_mod_prime_setup (word route for
 // p below 2^64) gives the cofactor and quotient generator built from it.
@@ -5646,10 +5721,16 @@ int test_primitive_root_word_size_matches_fmpz() {
     return 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 &&
+        std::string_view(argv[1]) == "--primitive-root-agreement") {
+        return test_primitive_root_word_size_matches_powmod_search();
+    }
+    assert(argc == 1);
     assert(test_degree_one() == 0);
     assert(test_same_prime_ideal_compares_ideals() == 0);
     assert(test_primitive_root_word_size_matches_fmpz() == 0);
+    assert(test_primitive_root_word_size_matches_powmod_search() == 0);
     assert(test_degree_one_prime_from_root_matches_decomposition() == 0);
     assert(test_degree_one_prime_from_root_rejects_non_roots() == 0);
     assert(test_degree_one_prime_from_root_rejects_index_prime() == 0);

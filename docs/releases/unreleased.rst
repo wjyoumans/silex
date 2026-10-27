@@ -154,6 +154,19 @@ Changed
   and by 2.52% for the whole process; on ``multiquadratic_m23_m31_m47`` the
   class and unit computation drops by 2.91%.
 
+- The word-size primitive-root search used by the proven saturation columns
+  and the binomial root path tests a candidate ``c`` against the prime ``2``
+  with the Legendre symbol ``(c / p)`` (FLINT ``n_jacobi_unsigned``) instead
+  of computing ``c^((p-1)/2) mod p``.  By Euler's criterion the two tests
+  agree for every odd prime ``p`` and every ``c`` prime to ``p``, so the root
+  is the same smallest primitive root as before (a test compares the new
+  search with the previous one on every prime below ``2^22`` and on primes
+  next to ``2^32``, ``2^63`` and ``2^64``).  Published ``proven`` outputs and
+  proof records are identical on ``random_d9_h4_s8``, ``random_d10_h2_s21``
+  and ``pure_x12_plus_7``.  Under callgrind (``proven``, profile-release)
+  the instruction count of the class and unit computation fell 1.71% for
+  ``random_d9_h4_s8``, 1.31% for ``random_d10_h2_s21`` and 0.69% for
+  ``pure_x12_plus_7``.  No timing has been measured.
 - When ``decompose_prime`` splits a prime ``p`` dividing the index by
   enumerating the idempotents of the Frobenius-fixed subalgebra of ``O/pO``
   (or of ``O/(p, I_p)``), it now builds a component basis only for the

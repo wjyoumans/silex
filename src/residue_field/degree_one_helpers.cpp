@@ -250,6 +250,12 @@ ulong primitive_root_mod_prime_ui(ulong p) noexcept {
     // candidate (the test of FLINT ulong_extras/primitive_root_prime.c,
     // n_primitive_root_prime_prefactor, run from the smallest candidate).
     // For p = 2 the group is trivial and the answer is 1.
+    //
+    // The test for the prime 2 is the Legendre symbol, which keeps the same
+    // smallest root: for odd prime p and c prime to p, Euler's criterion
+    // gives c^((p - 1) / 2) = (c / p) mod p, so c^((p - 1) / 2) = 1 exactly
+    // when (c / p) = 1 (FLINT n_jacobi_unsigned, which for prime p is the
+    // Legendre symbol).  The prime 2 always divides p - 1 here.
     if (p < 2) {
         return 0;
     }
@@ -263,8 +269,14 @@ ulong primitive_root_mod_prime_ui(ulong p) noexcept {
     n_factor(&factors, group_order, 1);
     const ulong p_inverse = n_preinvert_limb(p);
     for (ulong candidate = 2; candidate < p; ++candidate) {
+        if (n_jacobi_unsigned(candidate, p) == 1) {
+            continue;
+        }
         bool generates = true;
         for (int i = 0; i < factors.num; ++i) {
+            if (factors.p[i] == 2) {
+                continue;
+            }
             if (n_powmod2_ui_preinv(candidate, group_order / factors.p[i], p,
                                     p_inverse) == 1) {
                 generates = false;
