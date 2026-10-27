@@ -3501,13 +3501,11 @@ index in every round, the first included, whenever the index is between 1
 and 20 (without ``use_aut``).  Silex does not follow either rule exactly:
 it defers the bounded pass while the index bound is above one and the
 extension slice has not yet run, for every index, which departs from
-Hecke's finishing loop at small indices; and its stall test is an
-adaptation, the pass running once an extension slice, with its unit
-refresh, has run since the deferral without lowering the index bound below
-the bound at the deferral, not Hecke's per-round unit-search measure.  If the
-extension fails or appends no relation while a pass is deferred, Silex runs
-the deferred pass and continues if it appended relations, and otherwise
-fails as before.  When validation reaches index one on the same relations
+Hecke's finishing loop at small indices; and it has no per-round
+unit-search measure like Hecke's: the deferred pass stays pending while
+extension slices append relations, and runs only when an extension slice
+fails or appends no relation (it then continues if the pass appended
+relations, and otherwise fails as before), or before acceptance.  When validation reaches index one on the same relations
 as a deferred pass (no relation appended since, for example after unit
 refinement alone), the deferred pass runs before acceptance, as it ran there
 before the deferral, so ``relation_saturation_status()`` and the per-ell

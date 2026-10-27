@@ -2420,12 +2420,12 @@ Changed
   which saturates at 2 only when the unit search of a round did not lower
   the index (its first round has no such measure).  Unlike Hecke's finishing
   loop (lines 267-281), which saturates at small primes for indices below
-  20 in every round, Silex defers the pass for every index, and its stall
-  test is the index bound not dropping across an extension slice rather than
-  Hecke's per-round unit-search measure.  The
-  bounded pass still runs if the extension stalls, fails or appends nothing,
-  and a failed extension with a deferred pass now runs that pass and
-  continues when it appended relations.  Class groups, unit groups,
+  20 in every round, Silex defers the pass for every index and has no
+  per-round unit-search measure.  The deferred pass stays pending while
+  extension slices append relations; it runs only when an extension slice
+  fails or appends nothing, or before acceptance, and a failed extension
+  with a deferred pass runs that pass and continues when it appended
+  relations.  Class groups, unit groups,
   regulators and proof labels are unchanged on the class/unit benchmark
   corpus; on the benchmark rows compared, the
   relation and generator lists are identical except for
@@ -2438,6 +2438,13 @@ Changed
   On ``simplest_cubic_a0`` the extension relation reaches index one before
   the pass runs, and the status is ``not_checked`` instead of ``verified``.
   ``proven`` requests are unchanged.
+
+- A ``grh`` class/unit computation keeps the deferred bounded ``ell = 2``
+  class-relation saturation pending while relation-extension slices append
+  relations, instead of running it after the first slice that left the index
+  bound unchanged.  Outputs, statuses and proof labels are identical on all
+  172 ``grh`` rows of the class/unit benchmark corpus; instruction counts
+  fall by 25.6% on ``lmfdb_8_8_73116160000_2``.
 
 - Unit-basis reduction of the stored units no longer lets their factored
   form grow without bound.  When a transform would give the stored units more
