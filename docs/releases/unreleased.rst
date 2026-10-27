@@ -145,7 +145,7 @@ Changed
   ``pure_x12_plus_7``, with identical outputs.
 
 - The T2 witness search of the ``proven`` factor-base honesty check starts
-  its per-ideal basis setup (LLL, Gram matrix and Cholesky factor) at 100
+  its per-ideal basis setup (LLL, Gram matrix and its Gram-Schmidt data) at 100
   bits instead of 200, the start precision of Hecke's unconditional
   class-group proof; it keeps the retry at 1.2 times the precision up to
   1000 bits.  ``grh`` relation search keeps its 200-bit start.  Every witness
@@ -1345,8 +1345,8 @@ Changed
 
 - The finite-ideal T2 enumeration setup computes the Arb Gram matrix of a
   reduced ideal basis once per unordered pair of rows instead of for both
-  triangles: the lower triangle is copied into the upper one, and the
-  Cholesky factorization reads only the lower triangle.  On an idle
+  triangles: the lower triangle is copied into the upper one (the
+  Cholesky step that read only the lower triangle was later removed).  On an idle
   machine (2026-10-16, paired interleaved runs, medians) the ``proven``
   class/unit computation of the field defined by ``x^12 + 7`` took 1198 ms
   before and 1138 ms after (ratio 0.950), and the per-ideal setup of the
