@@ -129,7 +129,10 @@ roots of unity) first; only the transaction is timed. `warm_repeat` records
 `first_class_unit_ms` (the cold first call, also in `component_timing_ms`),
 `repeat_count`, `repeat_total_ms`, `repeat_mean_class_unit_ms`,
 `repeat_mean_preparation_ms` and `repeat_all_succeeded`. It cannot be combined
-with `--marked-protocol` or `--compute-sunit`; the existing timing fields
+with `--marked-protocol` or `--compute-sunit`. A failing repeat stops the loop
+after it is counted, so `repeat_total_ms` and `repeat_mean_class_unit_ms`
+include the failed iteration and `repeat_all_succeeded` is false; it is also
+false when the first call fails and no repeat runs. The existing timing fields
 still describe the first call only.
 
 Only compact, source-neutral correctness and certification fixtures belong in

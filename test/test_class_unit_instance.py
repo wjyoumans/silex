@@ -543,6 +543,15 @@ def assert_warm_repeat_flag(exe: Path, root: Path) -> None:
     assert warm["repeat_mean_class_unit_ms"] > 0.0
     assert warm["repeat_total_ms"] >= 5.0
     assert warm["repeat_mean_preparation_ms"] > 0.0
+    # A failing first call skips the loop: no repeat ran, so success is not
+    # vacuously claimed.
+    failed = run_json(
+        base + ["--max-relations", "1", "--repeat-until-ms", "5"], root
+    )
+    assert failed["success"] is False
+    assert failed["warm_repeat"]["repeat_count"] == 0
+    assert failed["warm_repeat"]["repeat_mean_class_unit_ms"] is None
+    assert failed["warm_repeat"]["repeat_all_succeeded"] is False
     for bad in ("0", "-1", "x", ""):
         assert_rejected(base + ["--repeat-until-ms", bad], root)
     assert_rejected(base + ["--repeat-until-ms", "5", "--compute-sunit"], root)

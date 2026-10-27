@@ -1861,7 +1861,8 @@ int main(int argc, char** argv) {
         }
         std::cout << ",\n";
         std::cout << "    \"repeat_all_succeeded\": "
-                  << json_bool(repeat_all_succeeded) << "\n";
+                  << json_bool(repeat_count > 0 && repeat_all_succeeded)
+                  << "\n";
         std::cout << "  },\n";
     }
     std::cout << "  \"mode\": ";
