@@ -165,8 +165,7 @@ Changed
   proof records are identical on ``random_d9_h4_s8``, ``random_d10_h2_s21``
   and ``pure_x12_plus_7``.  Under callgrind (``proven``, profile-release)
   the instruction count of the class and unit computation fell 1.71% for
-  ``random_d9_h4_s8``, 1.31% for ``random_d10_h2_s21`` and 0.69% for
-  ``pure_x12_plus_7``.  No timing has been measured.
+  ``random_d9_h4_s8`` and 1.31% for ``random_d10_h2_s21``.  No timing has been measured.
 - When ``decompose_prime`` splits a prime ``p`` dividing the index by
   enumerating the idempotents of the Frobenius-fixed subalgebra of ``O/pO``
   (or of ``O/(p, I_p)``), it now builds a component basis only for the
