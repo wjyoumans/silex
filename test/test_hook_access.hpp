@@ -483,17 +483,19 @@ public:
                                                                     nullptr);
     }
 
-    // The batched and per-prime linear factor counts of the zeta
+    // The batched, per-prime and nmod linear factor counts of the zeta
     // Belabas-Friedman prime loop (see ZetaBfTestEntry).
     static bool zeta_bf_linear_factor_counts(
             std::vector<ulong>& primes,
             std::vector<slong>& batch_counts,
             std::vector<slong>& per_prime_counts,
+            std::vector<slong>& nmod_counts,
             const Order& order,
             ulong first,
             ulong end) noexcept {
         return ZetaBfTestEntry::linear_factor_counts(
-                primes, batch_counts, per_prime_counts, order, first, end);
+                primes, batch_counts, per_prime_counts, nmod_counts, order,
+                first, end);
     }
 
     // The cyclotomic closed forms of those counts against the word kernel

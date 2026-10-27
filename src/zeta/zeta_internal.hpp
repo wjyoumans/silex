@@ -181,17 +181,20 @@ class TestHookAccess;
 // prime loop; only detail::TestHookAccess (test/test_hook_access.hpp) can
 // call it.  For each prime p in [first, end), in increasing order,
 // `primes` receives p, `batch_counts` the number of linear factors of the
-// defining polynomial of `order` modulo p from the batched word pass, and
-// `per_prime_counts` the same number from the per-prime nmod path; each is
-// -1 where that path does not apply to p.  Both paths run with the cyclotomic
-// closed form turned off, so a cyclotomic defining polynomial still exercises
-// the word kernel and the nmod path.  Returns false when `order` is not a
-// maximal order with a basis.
+// defining polynomial of `order` modulo p from the batched word pass,
+// `per_prime_counts` the same number from the per-prime path (the word
+// kernel above degree 6 where it applies, then the nmod path), and
+// `nmod_counts` from the per-prime nmod path alone; each is -1 where that
+// path does not apply to p.  All three run with the cyclotomic closed form
+// turned off, so a cyclotomic defining polynomial still exercises the word
+// kernel and the nmod path.  Returns false when `order` is not a maximal
+// order with a basis.
 class ZetaBfTestEntry {
     friend class TestHookAccess;
     static bool linear_factor_counts(std::vector<ulong>& primes,
                                      std::vector<slong>& batch_counts,
                                      std::vector<slong>& per_prime_counts,
+                                     std::vector<slong>& nmod_counts,
                                      const Order& order,
                                      ulong first,
                                      ulong end) noexcept;
@@ -206,7 +209,8 @@ class ZetaBfTestEntry {
     // For each prime p in [first, end), in increasing order, `primes`
     // receives p, `counts` the count of the loop's path (batch, then
     // per-prime), `word_counts` the word kernel's batched count and
-    // `nmod_counts` the per-prime nmod count, each -1 where that path does
+    // `nmod_counts` the per-prime nmod count without the word kernel, each
+    // -1 where that path does
     // not apply to p.  Returns false when `order` is not a maximal order
     // with a basis.
     static bool cyclotomic_linear_factor_counts(

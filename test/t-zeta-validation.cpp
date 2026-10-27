@@ -1107,8 +1107,10 @@ bool check_word_kernel_squarings() noexcept {
 // per-prime nmod path on every prime of [first, end), cover every prime
 // that path covers below the word kernel's prime limit for the degree, cover
 // none at or above it, and skip the primes the per-prime path skips (index
-// divisors, discriminant divisors, a non-monic defining polynomial).
-// `covered` counts the batched primes.
+// divisors, discriminant divisors, a non-monic defining polynomial).  The
+// per-prime path, which takes the word kernel above degree 6 within its
+// range, agrees with the nmod path alone on every prime, including the
+// primes where neither applies.  `covered` counts the batched primes.
 bool check_linear_factor_batch_range(const silex::Order& order,
                                      ulong first,
                                      ulong end,
@@ -1116,24 +1118,30 @@ bool check_linear_factor_batch_range(const silex::Order& order,
     std::vector<ulong> primes;
     std::vector<slong> batch_counts;
     std::vector<slong> per_prime_counts;
+    std::vector<slong> nmod_counts;
     if (!silex::detail::TestHookAccess::zeta_bf_linear_factor_counts(
-                primes, batch_counts, per_prime_counts, order, first, end) ||
+                primes, batch_counts, per_prime_counts, nmod_counts, order,
+                first, end) ||
         primes.empty() || primes.size() != batch_counts.size() ||
-        primes.size() != per_prime_counts.size()) {
+        primes.size() != per_prime_counts.size() ||
+        primes.size() != nmod_counts.size()) {
         return false;
     }
     const ulong limit = word_linear_factor_prime_limit(order.degree());
     for (std::size_t i = 0; i < primes.size(); ++i) {
         const slong batch = batch_counts[i];
-        const slong per_prime = per_prime_counts[i];
+        const slong nmod = nmod_counts[i];
+        if (per_prime_counts[i] != nmod) {
+            return false;
+        }
         if (batch >= 0) {
-            if (batch != per_prime || primes[i] >= limit) {
+            if (batch != nmod || primes[i] >= limit) {
                 return false;
             }
             ++covered;
             continue;
         }
-        if (per_prime >= 0 && primes[i] < limit) {
+        if (nmod >= 0 && primes[i] < limit) {
             return false;
         }
     }
@@ -1214,11 +1222,12 @@ bool check_linear_factor_batches() noexcept {
     std::vector<ulong> primes;
     std::vector<slong> batch_counts;
     std::vector<slong> per_prime_counts;
+    std::vector<slong> nmod_counts;
     if (!silex::detail::TestHookAccess::zeta_bf_linear_factor_counts(
-                primes, batch_counts, per_prime_counts,
+                primes, batch_counts, per_prime_counts, nmod_counts,
                 dedekind_setup.maximal_order, 2, 3) ||
         primes.size() != 1 || batch_counts[0] != -1 ||
-        per_prime_counts[0] != -1) {
+        per_prime_counts[0] != -1 || nmod_counts[0] != -1) {
         return false;
     }
 

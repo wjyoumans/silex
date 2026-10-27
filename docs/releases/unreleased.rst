@@ -946,6 +946,22 @@ Changed
   counts run before the kernel's batch and go through FLINT;
   ``cyclotomic_real_q10_c11_deg10``, a dense polynomial, 0.03% more.
 
+- The per-prime root count of the zeta Belabas-Friedman prime loop, used by
+  the index-one cutoff search (Theorem 7 prime sum) and for primes the
+  batched pass does not cover, uses the same word-size kernel instead of
+  FLINT's ``nmod_poly_powmod_x_ui_preinv`` and ``nmod_poly_gcd`` for
+  defining polynomials of degree 7 to 20 and primes below the kernel's
+  limit.  Both compute ``deg gcd(f, x^p - x)``, so the counts, the zeta
+  intervals and published results are unchanged: the ``grh`` corpus
+  outputs, including the zeta Belabas-Friedman proof records, are identical
+  on every row that finishes (171 of 172 rows;
+  ``cyclotomic_real_163_deg81`` timed out at 60 s on both builds).
+  Callgrind instruction counts, ``grh`` mode:
+  ``hexadecic_x16_minus_x_minus_1_proven`` 3.7% fewer,
+  ``septendecic_x17_minus_x_minus_1_proven`` 4.1% fewer,
+  ``nonadecic_x19_minus_x_minus_1_proven`` 2.7% fewer,
+  ``cyclotomic_real_q10_c11_deg10``, a dense polynomial, 0.9% fewer.
+
 - Once the relation module's HNF checkpoint has full rank, refreshing it
   first reduces each relation added since modulo the checkpoint HNF and keeps
   the checkpoint when every one reduces to zero, instead of recomputing the

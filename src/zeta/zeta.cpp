@@ -2280,6 +2280,57 @@ struct BfLinearFactorCountBatch {
     std::size_t hint = 0;
 };
 
+// The per-prime kernel choice of
+// bf_linear_residue_degree_count_from_defining_polynomial_ui.
+enum class BfLinearFactorKernel { word_then_nmod, nmod };
+
+// The number of roots modulo `p` of the defining polynomial by the word
+// kernel, when its degree is above kBfArrayLinearFactorMaxDegree (lower
+// degrees keep FLINT's fixed-scratch path) and within the word kernel's
+// range, for bf_linear_residue_degree_count_from_defining_polynomial_ui.
+// The context's defining polynomial is monic and integral
+// (bf_init_residue_degree_context), as the word kernel requires; the
+// leading coefficient is checked anyway.  `p` does not divide the order
+// discriminant, so the reduction is squarefree, as for the nmod path.
+// Returns false, and leaves `out` alone, when the kernel does not apply.
+bool bf_word_linear_factor_count_ui(slong& out,
+                                    const BfResidueDegreeContext& context,
+                                    ulong p,
+                                    const DiagnosticsContext* diagnostics)
+        noexcept {
+    const slong degree = context.defining_degree;
+    if (degree <= kBfArrayLinearFactorMaxDegree ||
+        degree > kWordFrobeniusMaxDegree ||
+        p >= word_frobenius_prime_limit(degree) ||
+        context.defining_coefficients.size() !=
+                static_cast<std::size_t>(degree + 1)) {
+        return false;
+    }
+
+    SILEX_PROFILE_SCOPE(
+            diagnostics, DiagnosticsModule::unit_group,
+            "unit_group.zeta_bf.term.prime_decomposition_type.word");
+    std::array<ulong, static_cast<std::size_t>(
+                              kWordFrobeniusMaxDegree + 1)>
+            reduced{};
+    for (slong i = 0; i <= degree; ++i) {
+        reduced[static_cast<std::size_t>(i)] = fmpz_fdiv_ui(
+                context.defining_coefficients[static_cast<std::size_t>(i)]
+                        .raw(),
+                p);
+    }
+    if (reduced[static_cast<std::size_t>(degree)] != 1) {
+        return false;
+    }
+    const slong count =
+            bf_word_linear_factor_count_dispatch(reduced.data(), degree, p);
+    if (count < 0 || count > degree) {
+        return false;
+    }
+    out = count;
+    return true;
+}
+
 bool bf_linear_factor_count_batch_lookup(slong& out,
                                          BfLinearFactorCountBatch* batch,
                                          ulong p) noexcept {
@@ -2335,13 +2386,26 @@ bool bf_linear_factor_count_batch_lookup(slong& out,
 // derivation is the one SplitPrimeResultant::add_next_split_prime uses
 // for its split-prime closed form.  Primes dividing n keep the nmod path,
 // as for Phi_n.  The cache is read and written as for any other count.
+//
+// Otherwise the count is deg gcd(f, x^p - x) for the defining polynomial f
+// reduced modulo p.  With `kernel` word_then_nmod, a degree above
+// kBfArrayLinearFactorMaxDegree within the word kernel's range (degree at
+// most kWordFrobeniusMaxDegree, p below word_frobenius_prime_limit) takes
+// bf_word_linear_factor_count_dispatch, the kernel of the batched pass
+// bf_fill_linear_factor_count_batch, in place of FLINT's
+// nmod_poly_powmod_x_ui_preinv and nmod_poly_gcd.  Both compute the degree
+// of the same gcd, which is unique, so the count is the same; the tests
+// compare them.  `kernel` nmod keeps the FLINT path for every prime, as a
+// test reference.
 bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
         slong& out,
         const BfResidueDegreeContext& context,
         ulong p,
         const DiagnosticsContext* diagnostics,
         detail::ZetaBfResidueDegreeCache* cache,
-        BfLinearFactorCountBatch* batch = nullptr) noexcept {
+        BfLinearFactorCountBatch* batch = nullptr,
+        BfLinearFactorKernel kernel =
+                BfLinearFactorKernel::word_then_nmod) noexcept {
     if (!bf_residue_degree_context_uses_defining_polynomial(context, p)) {
         return false;
     }
@@ -2364,6 +2428,11 @@ bool bf_linear_residue_degree_count_from_defining_polynomial_ui(
         out = residue == 1 || residue == real_cyclotomic - 1
                       ? context.defining_degree
                       : 0;
+        bf_linear_factor_count_cache_store(cache, p, out);
+        return true;
+    }
+    if (kernel == BfLinearFactorKernel::word_then_nmod &&
+        bf_word_linear_factor_count_ui(out, context, p, diagnostics)) {
         bf_linear_factor_count_cache_store(cache, p, out);
         return true;
     }
@@ -5064,12 +5133,14 @@ bool ZetaBfTestEntry::linear_factor_counts(
         std::vector<ulong>& primes,
         std::vector<slong>& batch_counts,
         std::vector<slong>& per_prime_counts,
+        std::vector<slong>& nmod_counts,
         const Order& order,
         ulong first,
         ulong end) noexcept {
     primes.clear();
     batch_counts.clear();
     per_prime_counts.clear();
+    nmod_counts.clear();
     if (!order.has_basis() || !order.is_maximal()) {
         return false;
     }
@@ -5093,9 +5164,16 @@ bool ZetaBfTestEntry::linear_factor_counts(
                     per_prime_count, context, p, nullptr, nullptr)) {
             per_prime_count = -1;
         }
+        slong nmod_count = -1;
+        if (!bf_linear_residue_degree_count_from_defining_polynomial_ui(
+                    nmod_count, context, p, nullptr, nullptr, nullptr,
+                    BfLinearFactorKernel::nmod)) {
+            nmod_count = -1;
+        }
         primes.push_back(p);
         batch_counts.push_back(batch_count);
         per_prime_counts.push_back(per_prime_count);
+        nmod_counts.push_back(nmod_count);
     }
     return true;
 }
@@ -5155,7 +5233,8 @@ bool ZetaBfTestEntry::cyclotomic_linear_factor_counts(
         }
         slong nmod_count = -1;
         if (!bf_linear_residue_degree_count_from_defining_polynomial_ui(
-                    nmod_count, reference, p, nullptr, nullptr)) {
+                    nmod_count, reference, p, nullptr, nullptr, nullptr,
+                    BfLinearFactorKernel::nmod)) {
             nmod_count = -1;
         }
         primes.push_back(p);
