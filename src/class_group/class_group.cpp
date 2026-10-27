@@ -169,7 +169,9 @@ namespace detail {
 // do, with the same h(D); after the first step, a failed or non-positive
 // L(1, chi_D) enclosure fails closed, and so does a ball still holding more
 // than one integer after the third step.  The time grows like
-// sqrt(|D| prec) and the memory is constant.
+// sqrt(|D| prec) and the memory is bounded: the character table of the
+// sums holds at most about 16 MiB (QuadraticCharacterTable), plus a transient
+// previous buffer while it grows and one segment of scratch.
 bool imaginary_quadratic_class_number_analytic(
         flint::FmpzRef out,
         flint::FmpzConstRef discriminant,
