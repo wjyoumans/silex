@@ -1297,9 +1297,14 @@ basis, its quadratic-form data and the bound are unchanged.
 
 The working precision of this setup (the embedding rows carry 64 further
 guard bits) starts where Hecke v0.38.6 starts the matching route and, when
-no basis is accepted, retries at ``ceil(1.2 * prec)`` up to 1000 bits, as
+the setup at that precision fails (no reduced basis with quadratic-form
+data, or the LLL, Gram, Cholesky or bound step fails), retries at
+``ceil(1.2 * prec)`` up to 1000 bits, as
 ``src/NumFieldOrd/NfOrd/Clgp/Rel_enum.jl:class_group_small_real_elements_relation_start``
-does on ``LowPrecisionLLL`` and ``LowPrecisionCholesky``.  Relation search
+does on ``LowPrecisionLLL`` and ``LowPrecisionCholesky``.  A basis with
+quadratic-form data that misses the LLL bounds is kept as the fallback and
+does not trigger a retry.  Silex clamps the last step to 1000; Hecke stops at
+its last value not above 1000.  Relation search
 starts at that function's default of 200 bits.  The factor-base honesty
 witness search starts at 100 bits, the value Hecke's unconditional proof
 passes in (``Clgp/Proof.jl:class_group_proof`` and
