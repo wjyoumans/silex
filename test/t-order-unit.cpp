@@ -8942,6 +8942,69 @@ int test_grh_cyclotomic_seed_units() {
     return 0;
 }
 
+// A grh class/unit computation on a field given by psi_23, the minimal
+// polynomial of 2 cos(2 pi / 23), seeds the 10 real cyclotomic units
+// (detail::real_cyclotomic_field_units), which reach the unit rank before
+// any relation-kernel unit.  It publishes h = 1, the regulator of
+// Q(zeta_23)^+ (gp 2.17.3 bnfinit: 1014.3133050591502967...) and grh labels
+// through the unchanged analytic index test.
+int test_grh_real_cyclotomic_seed_units() {
+    sflint::FmpzPoly psi;
+    fmpz_poly_cos_minpoly(psi.raw(), 23);
+    sflint::FmpqPoly polynomial;
+    fmpq_poly_set_fmpz_poly(polynomial.raw(), psi.raw());
+    silex::Order order = silex::test::verified_maximal_order(
+            silex::test::equation_order(silex::test::field_by_polynomial(
+                    sflint::FmpqPolyConstRef(polynomial))));
+    assert(order.is_maximal());
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 1000;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::grh;
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "unit_group.set_class_relation_units.seed_units_full_rank";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    class_group.set_diagnostics(&diagnostics);
+    units.set_diagnostics(&diagnostics);
+    options.diagnostics = &diagnostics;
+    assert(units.compute_with_class_group(class_group, order,
+                                          sflint::FmpzConstRef(bound),
+                                          options, 128));
+    class_group.set_diagnostics(nullptr);
+    units.set_diagnostics(nullptr);
+    assert(class_group.certification_status() ==
+           silex::CertificationMode::grh);
+    assert(units.certification_status() == silex::CertificationMode::grh);
+    sflint::Fmpz h;
+    assert(class_group.order(sflint::FmpzRef(h)));
+    assert(sflint::fmpz_equal_si(h, 1));
+    assert(units.free_rank() == 10);
+    sflint::Arb regulator;
+    assert(units.regulator(sflint::ArbRef(regulator)));
+    sflint::Arb expected;
+    assert(arb_set_str(expected.raw(), "1014.3133050591502967 +/- 1e-15",
+                       128) == 0);
+    assert(arb_overlaps(regulator.raw(), expected.raw()) != 0);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count == 1);
+#else
+    assert(counter.count == 0);
+#endif
+    return 0;
+}
+
 // The exact imaginary-quadratic index route may report index one under a
 // proven request only after it has published the pair proven.  With torsion
 // that Silex did not compute (Z[i] with an under-claimed w = 2), the route
@@ -16062,6 +16125,7 @@ int main() {
     test_cached_torsion_never_reaches_proven();
     test_rank_zero_quadratic_index_one_requires_computed_torsion();
     test_grh_cyclotomic_seed_units();
+    test_grh_real_cyclotomic_seed_units();
     test_unit_proofs_require_computed_torsion();
     test_unit_proofs_require_computed_torsion_positive_rank();
     test_cached_torsion_is_valid();
